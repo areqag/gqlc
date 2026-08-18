@@ -1166,10 +1166,12 @@ Closes #617")" "some/branch" \
 # --- a closing claim with no bead to hold it (bd gqlc-mk7v) ------------------
 # The exit that used to be sys.exit(0) with nothing printed. A PR whose body
 # has no declaration and whose branch is named descriptively resolved no bead,
-# and every closing line it carried went unread: measured on PR #946
-# ("Closes #902") and PR #963 ("Closes #780"), both green. What is refused is
-# the claim, not the silence — a body that closes nothing has made none, and
-# demanding a declaration from it would buy this gate nothing to check.
+# and every closing line it carried went unread. Measured against master's own
+# copy of this checker at c4081ee4, over the live bodies of the PRs open then:
+# #946 and #963 each carried one closing line naming an issue with a bead
+# behind it, and each passed in silence. #946 has since merged that way. What
+# is refused is the claim, not the silence — a body that closes nothing has
+# made none, and demanding a declaration from it would buy nothing to check.
 
 expect_red "a closing keyword with no bead to resolve it is refused" \
     "$EXPORT" "$(body 'Closes #902')" "chore/tidy-the-workflow" \
