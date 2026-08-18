@@ -8,11 +8,13 @@
 #      here rather than in a git hook.
 #
 # The target is resolved by analysis, not raw pattern-matching:
-#   - a heredoc body is removed before the text is tokenized, so a `git commit`
-#     written as prose in one is data rather than a command (what a
-#     substitution INSIDE the body does is the next sentence, and it does reach
-#     the tokenizer, one recursion down). The two delimiter forms then
-#     part company, because the shell treats them differently: a QUOTED
+#   - a heredoc body whose delimiter HEREDOC_RE recognises is removed before
+#     the text is tokenized (the forms it does not recognise are named in the
+#     biases below), so a `git commit` written as prose in one is data rather
+#     than a command. What a substitution INSIDE the body does is the next
+#     sentence, and it does reach the tokenizer, one recursion down. The two
+#     delimiter forms part company here, because the shell treats them
+#     differently: a QUOTED
 #     delimiter (<<'EOF', <<"EOF") expands nothing, so that body is dropped
 #     whole; an UNQUOTED one (<<EOF) expands $(...) and `...` in its body and
 #     those really run, so the unquoted body's substitutions are extracted and
@@ -39,9 +41,10 @@
 #   - cd/pushd with flags (cd -P x) or no argument lose tracking -> allow
 #   - nested interpreters (bash -c '...') are not recursed into
 #   - --git-dir / --work-tree redirection is not resolved -> allow
-#   - inside an UNQUOTED heredoc body the substitution extractors are the only
-#     thing looking, because the prose around them has to stay data. A command
-#     neither extractor matches is therefore not seen there at all: SUBST_RE
+#   - inside an unquoted heredoc body this hook has actually stripped, the
+#     substitution extractors are the only thing looking, because the prose
+#     around them has to stay data. A command neither extractor matches is
+#     therefore not seen there at all: SUBST_RE
 #     does not nest, so $(git commit -m "(x)") is missed, and bash 5.3's
 #     ${ cmd; } funsub is matched by neither. Both of those DENY when written
 #     bare — outside a heredoc the tokenizer is the backstop — and both are
