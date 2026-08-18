@@ -637,13 +637,13 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
+				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, resolvedTypeName(col.Type))
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, p.Type.String())
+				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, resolvedTypeName(p.Type))
 			}
 			if _, ok := tm.Property(prop.Type); !ok {
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
@@ -661,6 +661,102 @@ const listElemSite = "list element"
 
 func columnSite(queryName string, pos int, columnName string) string {
 	return fmt.Sprintf("query %q column %d %q", queryName, pos, columnName)
+}
+
+// resolvedTypeName renders t for the refusals that name a type no arm
+// matched. Five calls render through it, three reachable and two not:
+// Phase A's column switch, Phase A's parameter type assertion and
+// buildListElemPlan's element switch, plus the two sites behind Phase
+// A's shadow that §3 of docs/specs/codegen-sentinel-taxonomy.md carries
+// as param-type-invariant and column-type-invariant. The shadowed pair
+// renders the same way so all five answer alike if an edit ever removes
+// the shadow. What they hold is by construction a value this package has
+// no case for. The count is re-derivable, and the paren is escaped so
+// this line is not one of the hits it reports:
+// `grep -cE 'resolvedTypeName\(' internal/codegen/prepare.go` = 6, being
+// those five calls and this declaration.
+//
+// t.String() there is a call into code this package does not own.
+// resolver.ResolvedType's unexported marker seals which types may
+// DECLARE it, not which may satisfy it: every variant gives both the
+// marker and String a value receiver, so each of the eight pointer forms
+// carries them, and Go promotes an embedded type's methods — the marker
+// included, and from an embedded interface as readily as from an
+// embedded variant — so a struct embedding either can satisfy the
+// interface from any package in the module (AGENTS.md, "Closed sum
+// types"; internal/resolver's TestResolvedTypeSumIsNotClosed). Can,
+// not does: a struct embedding two variants at equal depth promotes
+// neither's methods, so struct{resolver.ResolvedNode;
+// resolver.ResolvedEdge} satisfies the interface in neither its value
+// nor its pointer form and reaches no fail-site here.
+//
+// Four shapes in that set are witnessed to fault on the call rather than
+// answer it: the nil interface, which has no method to reach; any of the
+// eight typed-nil pointer forms, because Go emits a nil check before a
+// value method reached through a pointer, so even the zero-sized
+// (*resolver.ResolvedUnknown)(nil) faults where its body dereferences
+// nothing; a struct whose embedded pointer to a variant is nil; and a
+// struct embedding resolver.ResolvedType itself, which carries no
+// variant at all. The last two are neither a nil interface nor a nil
+// pointer to look at, which is why neither a t == nil test nor a
+// reflect nil-pointer check would do instead.
+//
+// Four is what is witnessed, not what the set holds. Whether a value
+// faults here is a fact about the String() it ends up dispatching, and
+// the interface is satisfiable by types this package never sees, so no
+// enumeration written here closes the set. Promotion composes, and
+// composing it reaches faulting shapes none of the four covers: a nil
+// pointer to a struct that embeds a variant by value and declares no
+// String() of its own faults, because the promoted value method must
+// dereference the pointer to reach its receiver, and that struct is not
+// one of the eight variants. Composing
+// is not itself what faults, though — the same struct held by value
+// answers, which is the value-embedder case in
+// TestUnmatchedResolvedTypeKeepsTheWireTagWhereThereIsOne. Nothing below
+// depends on the set being closed: the render enumerates no shape and no
+// variant.
+//
+// A refusal that faults is not a refusal, so the tag is asked for under
+// a recover and the dynamic type name answers when asking fails. The tag
+// is preferred rather than skipped because §2 of
+// docs/specs/codegen-sentinel-taxonomy.md pins these messages as
+// contract and the conformance suite asserts them: an implementation
+// that can name itself is still named by its own answer.
+//
+// The recover is not how the refusal travels. AGENTS.md's Errors
+// convention asks for package-level sentinels matched with errors.Is,
+// and names one channel it rules panic/recover out of: syntax errors,
+// which come from a custom antlr.ErrorListener instead. This is not that
+// channel. The sentinel still leaves through fmt.Errorf and still
+// answers errors.Is; what is caught here is a fault in a call this
+// package makes to render a value, on the one path where that call is
+// into code it does not own.
+//
+// What this bounds is the panic. A String() that blocks, or that calls
+// runtime.Goexit, or that trips a fault the runtime declines to make
+// recoverable, still takes the caller with it — an unbounded set of
+// implementations admits an unbounded set of ways to misbehave, and this
+// addresses the one the sum's own inhabitants exhibit.
+func resolvedTypeName(t resolver.ResolvedType) (name string) {
+	answered := false
+	defer func() {
+		// recover() is called for its effect and not its value: it stops
+		// the panic either way, but under GODEBUG=panicnil=1 a panic(nil)
+		// makes it return nil, so a `recover() != nil` test would read a
+		// faulted call as an answered one and this helper would hand its
+		// callers an empty type name. answered is set only where String()
+		// returned, so it is what decides the fallback.
+		recover() //nolint:errcheck // called for its effect; the value is deliberately unread, per the comment above.
+		if !answered {
+			// %T reads the dynamic type through reflection and never
+			// dispatches a method, so it answers for the values whose
+			// String() just did not. A nil interface renders "<nil>".
+			name = fmt.Sprintf("%T", t)
+		}
+	}()
+	name = t.String()
+	answered = true
+	return name
 }
 
 // admitEdgeUnionCandidates gates one resolved edge-union candidate set,
@@ -722,7 +818,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
 				//gqlc:unreachable param-type-invariant
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, param.Type.String())
+				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, resolvedTypeName(param.Type))
 			}
 			ty, _ := tm.Property(prop.Type)
 			p.ParamFields = append(p.ParamFields, Param{
@@ -896,7 +992,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 				})
 			default:
 				//gqlc:unreachable column-type-invariant
-				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
+				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, resolvedTypeName(col.Type))
 			}
 		}
 
@@ -1107,5 +1203,5 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 		}
 		return &ListElem{Kind: ColumnList, GoType: "[]" + nested.GoType, Nested: nested}, nil
 	}
-	return nil, fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, t.String())
+	return nil, fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, resolvedTypeName(t))
 }
