@@ -462,7 +462,9 @@ func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 // same bytes: the recipe names, and for each name the dependencies just runs
 // before the body. Those two are what unsweptModscopeCallers walks to decide
 // whether a caller reaches the sweep. Which recipes are callers at all it
-// decides from bodies, and bodies are not compared here — see below.
+// decides from bodies, and what this test sets against each other is not the
+// two body texts but the one thing that decision reads out of a body: whether
+// it names modscopePkg — see below.
 //
 // Every row in TestParseJustfileReadsWhatJustReads is a shape somebody here
 // thought of, and a reader held only to those rows is as good as that list and
@@ -482,10 +484,17 @@ func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 //
 // WHAT THIS DOES NOT REACH:
 //
-//   - Bodies. just's dump spells a body as parsed fragments and this reader
-//     keeps raw text, so they are not compared. A body this reader truncates
-//     could hold a `go run ./internal/tools/modscope` line it never sees, and
-//     nothing here would say so.
+//   - Body text. just's dump spells a body as parsed fragments and this reader
+//     keeps raw text, so this file sets no body text against another:
+//     declaredBodies reaches one expression in justfileDisagreements, the
+//     mention clause, and that clause asks each side whether its body names
+//     modscopePkg. A body difference that changes that answer on one side is
+//     reported, from either side. So the truncation case is the caught one
+//     rather than the missed one: capping this reader's body at ten lines
+//     reddens this test on vuln, whose `go run ./internal/tools/modscope` line
+//     sits below the cap. Out of reach is a body difference that leaves the two
+//     answers alike — measured, appending a marker line to every body this
+//     reader builds changes each of those texts and this test stays green.
 //   - Shapes this justfile does not contain. It reports on these bytes, and
 //     says nothing about a header spelling no file here has yet.
 //   - A divergence both readings share. just is the reference, so a recipe just
