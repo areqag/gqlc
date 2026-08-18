@@ -147,17 +147,57 @@ scalar kinds is a decode helper, which is a different fix — below.
 - The declared Go surface is backend-invariant and the runtime types behind it
   need not be. This ADR recorded one instance — a `map[string]any` column
   decoding an integer member as `float64` on AGE against `int64` on neo4j — and
-  the AGE half of it does not hold against the helper this package emits.
+  it is not one. The neo4j half of it holds; the AGE half does not.
   `agtypeMap` does not unmarshal the object as JSON: `agtypeObject` splits it by
   scanning bytes, and each member is read by `agtypeValue`, which tries the
   integer parse before the float one. Run against the `schema_any_property`
   golden, `agtypeMap` over `{"n": 3, "f": 1.5, "s": "x", "b": true, "z": null}`
   yields `int64` for `n`, `float64` for `f`, `string` for `s`, `bool` for `b` and
-  `nil` for `z`. Whether any runtime-type divergence between the backends
-  survives that is open, and `gqlc-l6c2` carries it: the neo4j half wants the
-  driver rather than a source read. What does not depend on the answer is that
-  `TestBackendInvariantSurface` compares declarations, so it would not see a
-  divergence of this shape either way.
+  `nil` for `z`. Both neo4j drivers answer that object with those same types:
+  `amap` reads each member with `value`, which answers a packed integer with
+  `Int() int64`, a float with `Float() float64`, a string with `String() string`,
+  `PackedNil` with a nil `any`, and `PackedTrue`/`PackedFalse` with `bool` —
+  identically on `neo4j-go-driver` v5.28.4 and v6.2.0, the two versions
+  `test/data/codegen/go.mod` pins. A list member arrives as `[]any` and a
+  nested-map member as `map[string]any` on all three, with the integer and the
+  float inside them landing as the rows above say. So no runtime-type
+  divergence between the backends survives for the member kinds in those two
+  objects: integer, float, string, boolean, null, list and nested map.
+
+  How that was measured, and what it does not witness. Each driver's own
+  hydrator was executed over a `RECORD` packed with that driver's own
+  `packstream.Packer`, which is how its `hydrator_test.go` builds a case —
+  "same was as server would" — and `neo4j.Record` is an alias for the
+  `db.Record` that hydrator fills, so the members measured are the ones a
+  caller reads off a record. That is the driver's mapping from packed marker to
+  Go type, not a live session: it does not witness which marker a server picks
+  for a given Cypher value. Nor was a live run an alternative. The fixture whose
+  golden returns a `map[string]any` is `scalar_map` (`RETURN {a: 1} AS m`,
+  emitted for `neo4j-go-v5`), and no scenario in the live battery drives it, so
+  a green `live-smoke` witnesses nothing about a map member either.
+
+  Only the AGE half of this is gated. `TestAgtypeValue`, in the corpus the
+  emitted helpers are run against, reads
+  `{"a": 1, "b": [true, null, "z"], "c": {"d": 1.5}}` back through the helpers
+  `Generate` produced and requires `int64` for the integer member, a `[]any`
+  holding `true`, `nil` and `"z"` for the list member, and a `map[string]any`
+  holding `1.5` for the nested one. Emitting the float parse ahead of the
+  integer one reddens it, as does coercing a decoded member to `float64`. The
+  neo4j half is a driver's behaviour rather than this repository's, and nothing
+  here gates it.
+
+  Two bounds this does not cross. An integer member outside `int64` range
+  decodes as `float64` on AGE, where `agtypeInt64` fails and `agtypeValue` falls
+  through to the float parse; the driver reads every packed integer marker
+  through `Int() int64`, so that is a value the neo4j path does not carry rather
+  than one the two decode differently. And a member holding a temporal, a point,
+  a byte array, or a v6 vector or UUID was not measured.
+
+  What never depended on the answer is that `TestBackendInvariantSurface`
+  compares declarations — it nils each method body and passes over the
+  receiver-less decode helpers, which is where this behaviour lives — so it
+  would not see a divergence of this shape either way. It also skips a fixture
+  enrolled in fewer than two targets, and `scalar_map` is enrolled in one.
 
 - Only the AGE generator wraps `ErrUnrepresentableTemporal` (and
   `ErrUnrepresentableWidth`) with its own name. Neither neo4j backend does, so a
