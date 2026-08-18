@@ -41,6 +41,7 @@ type ciSteps []struct {
 	Name            string            `yaml:"name"`
 	Run             string            `yaml:"run"`
 	Shell           string            `yaml:"shell"`
+	If              string            `yaml:"if"`
 	ContinueOnError bool              `yaml:"continue-on-error"`
 	Env             map[string]string `yaml:"env"`
 }
@@ -53,24 +54,35 @@ type ciDefaults struct {
 
 type ciJob struct {
 	Permissions     map[string]string `yaml:"permissions"`
+	If              string            `yaml:"if"`
 	ContinueOnError bool              `yaml:"continue-on-error"`
 	Defaults        ciDefaults        `yaml:"defaults"`
 	Steps           ciSteps           `yaml:"steps"`
 }
 
-// docOf parses a workflow into its top-level mapping node.
+// The `if:` the gate step is allowed to carry, and the only one. ci.yml's own
+// header explains why a job-level `if:` is a bypass — a skipped job still
+// emits a check run, its conclusion is `skipped`, branch protection reads
+// that as a pass, and the newest run for a context wins — but nothing
+// asserted it, so `if: false` on a required job passed every check here.
+// Written out rather than matched loosely: narrowing the condition is how
+// this would be disabled without deleting anything, and a narrowing is a
+// different string.
+const gateStepIf = "github.event_name == 'pull_request'"
+
+// ciDoc parses ci.yml into its top-level mapping node.
 //
 // A node walk rather than a map[string]any decode, because the top-level key
 // is literally `on`, and which YAML schema a parser applies to that token has
 // changed under this repo before. Node.Value is the source token, so the
 // lookup does not depend on the answer.
-func docOf(t *testing.T, rel string) *yaml.Node {
+func ciDoc(t *testing.T) *yaml.Node {
 	t.Helper()
-	src, err := os.ReadFile(filepath.Join(repoRoot, rel))
-	require.NoError(t, err, "read %s", rel)
+	src, err := os.ReadFile(filepath.Join(repoRoot, ciWorkflow))
+	require.NoError(t, err, "read %s", ciWorkflow)
 	var root yaml.Node
-	require.NoError(t, yaml.Unmarshal(src, &root), "parse %s", rel)
-	require.NotEmpty(t, root.Content, "%s parsed to an empty document", rel)
+	require.NoError(t, yaml.Unmarshal(src, &root), "parse %s", ciWorkflow)
+	require.NotEmpty(t, root.Content, "%s parsed to an empty document", ciWorkflow)
 	return root.Content[0]
 }
 
@@ -96,7 +108,7 @@ func childByKey(m *yaml.Node, key string) *yaml.Node {
 // list replaces the default set rather than extending it: adding `edited`
 // while dropping `synchronize` would silence CI on every push.
 func TestCIRunsOnPullRequestBodyEdits(t *testing.T) {
-	on := childByKey(docOf(t, ciWorkflow), "on")
+	on := childByKey(ciDoc(t), "on")
 	require.NotNil(t, on, "%s has no `on:` block", ciWorkflow)
 
 	pr := childByKey(on, "pull_request")
@@ -121,7 +133,7 @@ func TestCIRunsOnPullRequestBodyEdits(t *testing.T) {
 // gateStep locates the PR-body check inside the required job.
 func gateStep(t *testing.T) (ciJob, int) {
 	t.Helper()
-	jobs := childByKey(docOf(t, ciWorkflow), "jobs")
+	jobs := childByKey(ciDoc(t), "jobs")
 	require.NotNil(t, jobs, "%s has no jobs", ciWorkflow)
 
 	node := childByKey(jobs, gateJob)
@@ -196,7 +208,7 @@ func TestPRBodyGateDoesNotReadTheFrozenPayloadBody(t *testing.T) {
 // `defaults: run: shell: bash` anywhere above the step would spell that
 // difference in a file the step does not mention.
 func TestPRBodyGateFailsTheJobItRunsIn(t *testing.T) {
-	doc := docOf(t, ciWorkflow)
+	doc := ciDoc(t)
 	job, i := gateStep(t)
 	step := job.Steps[i]
 
@@ -206,6 +218,16 @@ func TestPRBodyGateFailsTheJobItRunsIn(t *testing.T) {
 		gateJob)
 	require.False(t, job.ContinueOnError,
 		"job %q sets continue-on-error, so no step in it can fail the merge", gateJob)
+
+	require.Emptyf(t, job.If,
+		"job %q carries a job-level `if:` (%q). A job that does not run still emits a "+
+			"check run, with conclusion `skipped`, which branch protection reads as a "+
+			"pass — so an `if:` here retires the gate without deleting a line of it.",
+		gateJob, job.If)
+	require.Equalf(t, gateStepIf, step.If,
+		"the PR-body gate step's `if:` is %q, not %q. The step is skipped on anything "+
+			"that condition excludes and the job still passes, so narrowing it is how "+
+			"this gate gets turned off quietly.", step.If, gateStepIf)
 
 	require.Empty(t, step.Shell,
 		"the PR-body gate overrides its shell to %q. The runner's default is "+
