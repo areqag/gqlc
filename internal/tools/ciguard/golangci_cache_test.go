@@ -99,7 +99,12 @@ func spell(n yaml.Node) string {
 // The same move retires a recipe rather than a pin, and both spellings were
 // measured on this branch: with the scans reading raw text, `# just test` in
 // the ci.yml test step and `test: check-hooks # test-hooks` in the justfile
-// each left this package green while taking the hook suites out of CI.
+// each left the scan reading it reporting a recipe that nothing ran, while
+// taking the hook suites out of CI. The justfile spelling leaves the whole
+// package green even now (`just --dump` exits 0 with no error line there, so
+// that is a real parse and not a broken one); the ci.yml spelling no longer
+// does, because TestCITestJobRunsTheTestRecipe arrived from master and pins
+// that step's shape without scanning for a recipe name at all.
 //
 // A `#` inside a quoted string is not a comment to bash, and this truncates
 // there too, so the strip can drop text bash would have run. What that costs
@@ -550,7 +555,8 @@ func linterRecipes(t *testing.T) map[string]bool {
 // Read through uncommented, so a commented-out invocation reads as absent
 // rather than as present: `run: |` with `# just test` above `echo skipped`
 // takes the hook suites out of CI, and this scan reported the step healthy
-// (measured — ci.yml md5 83c139ca to f8a82f6e, actionlint rc 0, package green).
+// (measured — ci.yml md5 83c139ca to f8a82f6e, actionlint rc 0,
+// TestTestHooksIsReachedByARecipeCIRuns green).
 // The strip is here rather than at the two call sites so that a third caller
 // does not inherit the raw scan; that is how this became the third site in the
 // package with the same defect.
@@ -561,20 +567,26 @@ func linterRecipes(t *testing.T) map[string]bool {
 // line the `just` above it fused with the next line's first word.
 // `command -v just  # retired` over `test -n x` came back as `just test`, and
 // this scan reported the CI test job running `just test` while it ran no recipe
-// at all (ci.yml md5 83c139ca to 1e4fbc40: package green under `\s+`, red
+// at all (ci.yml md5 83c139ca to 1e4fbc40: that test green under `\s+`, red
 // here). Dropping text added a recipe name rather than losing one.
 //
 // Space and tab are what bash splits words on inside a line. A newline ends the
 // command instead of separating its arguments, and a carriage return or a form
 // feed separates nothing at all — `[^\S\n]` accepts both of those and reads
 // `command -v just` with a CR or an FF before `test` as `just test` (md5
-// bca84c62 and 764788b7: package green under `[^\S\n]`, red here).
+// bca84c62 and 764788b7: that test green under `[^\S\n]`, red here).
 //
 // What this does not do is decide which word is the command. `command -v just
-// test` on one line reads here as an invocation of `test` (md5 96f4eeaa,
-// package green), so a job that runs no recipe can still satisfy the
-// reachability check. That limit is the scan's rather than the strip's: the
-// same line matches before the strip too.
+// test` on one line reads here as an invocation of `test` (md5 96f4eeaa, that
+// test green), so a job that runs no recipe can still satisfy the reachability
+// check. That limit is the scan's rather than the strip's: the same line
+// matches before the strip too.
+//
+// Every ci.yml md5 named above is a rewrite of the `test` job's step, and
+// TestCITestJobRunsTheTestRecipe reddens on each of them — it pins that step's
+// shape rather than scanning for a recipe name, so it holds where this scan
+// does not. It holds for that one job. This scan is what covers the others,
+// which is why the greens above are named per test and not per package.
 func justInvocations(run string) []string {
 	var out []string
 	re := regexp.MustCompile(`\bjust[ \t]+([a-zA-Z0-9_-]+)`)

@@ -65,10 +65,17 @@ const (
 //
 // Dot-files are skipped in both directories — dot-directories are not, per the
 // ordering above — which is a hole and a deliberate one: `.foo-test.sh` in
-// .githooks/tests/ and `.hooks.bats` beside the hooks are skipped rather than
-// refused (both measured, package green). It is here because an editor swap
-// file would otherwise redden the build for whoever has a suite open, and a
-// swap file is a file. Nothing in the tree spells a suite that way today.
+// .githooks/tests/ and `.hooks.bats` beside the hooks are skipped here rather
+// than refused. It is here because an editor swap file would otherwise redden
+// the build for whoever has a suite open, and a swap file is a file. Nothing in
+// the tree spells a suite that way today.
+//
+// Only one of those two is a hole in the package.
+// TestEveryHookSuiteRunsInTestHooks globs .githooks/tests/ with filepath.Glob,
+// whose `*` matches a leading dot where a shell's does not, so `.foo-test.sh`
+// reddens there while this walk skips it; `.hooks.bats` is caught by nothing
+// (both measured — the first reddens that test, the second leaves the package
+// green).
 func hookSuites(t *testing.T) []string {
 	t.Helper()
 
