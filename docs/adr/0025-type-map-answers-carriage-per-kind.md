@@ -161,9 +161,8 @@ scalar kinds is a decode helper, which is a different fix — below.
   `test/data/codegen/go.mod` pins. A list member arrives as `[]any` and a
   nested-map member as `map[string]any` on all three, with the integer and the
   float inside them landing as the rows above say. So no runtime-type
-  divergence between the backends survives
-  for the member kinds in those two objects: integer, float, string, boolean,
-  null, list and nested map.
+  divergence between the backends survives for the member kinds in those two
+  objects: integer, float, string, boolean, null, list and nested map.
 
   How that was measured, and what it does not witness. Each driver's own
   hydrator was executed over a `RECORD` packed with that driver's own
