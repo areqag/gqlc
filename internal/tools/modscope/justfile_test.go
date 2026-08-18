@@ -69,9 +69,15 @@ type justRecipe struct {
 
 // parseJustfile reads the recipes out of justfile source.
 //
-// A recipe header is an unindented line whose first character can start a name
-// and whose first ':' is not the ':=' of an assignment; the body is the run of
-// lines after it that are indented or empty. Empty lines are included because
+// A recipe header is an unindented line — taken together with the lines a
+// trailing backslash continues it onto — whose separating colon is the first
+// one lying outside a parameter default's string literal and does not open
+// ':=', and whose first word, less any leading '@', is spelled the way a recipe
+// name is. The ':=' clause is about that separating colon and not about the
+// first colon on the line: `vuln x="a:=b": sweep` opens ':=' at its first colon
+// and is read here as the recipe vuln depending on sweep, which is what just
+// runs it as. The body is the run of lines after the header that are indented
+// or empty. Empty lines are included because
 // that is just's own rule — several recipes here separate blocks with one, and
 // a reader that stopped at the first blank line would read the sweep recipe as
 // four lines long and see none of what it does.
@@ -693,16 +699,21 @@ func TestUnsweptModscopeCallersFindsEachBrokenWiring(t *testing.T) {
 // same argument one level down — the double-quote family escapes and the raw
 // families do not, so a single rule applied to both mis-reads one of them.
 //
-// WHAT THIS STILL DOES NOT REACH. Three header shapes are known to be read
-// differently by just 1.57.0 and by this reader, and the useful thing about
-// them is which way each one fails:
+// WHAT THIS STILL DOES NOT REACH. These header shapes are known to be read
+// differently by just and by this reader, and the useful thing about them is
+// which way each one fails. The list is what somebody has looked for and found,
+// not a boundary anybody has proved:
+// TestParseJustfileAgreesWithJustOnThisJustfile is the check that does not
+// depend on it, and a backslash-continued header was missing from this list
+// until a review found it.
 //
 //   - A header whose parameter default opens a literal it does not close on
 //     the same line. just accepts one, because a triple-quoted default may
-//     span lines, and this reader is line-based, so it drops the recipe. This
-//     is the only one of the three that fails open — a caller lost this way is
-//     not reported and nothing else here notices — which is why the last row
-//     below pins the drop, so that it stays a choice.
+//     span lines, and this reader is line-based, so it drops the recipe. It
+//     fails open: a caller lost this way is reported by nothing that reads the
+//     header set alone. Written into this repo's own justfile it would be named
+//     by TestParseJustfileAgreesWithJustOnThisJustfile, and the last row below
+//     pins the drop itself, so that it stays a choice.
 //   - A trailing `# …` comment on a header, which just ignores and this reader
 //     takes for dependency names. Fails closed: the invented names resolve to
 //     no recipe, so the dangling-dependency complaint fires.
@@ -973,9 +984,16 @@ func TestHeaderColonTakesTheFirstSeparatingColon(t *testing.T) {
 }
 
 // TestParseJustfileRefusesADependencyShapeItCannotRead is separate from the
-// rows above because it is the one shape the reader answers with a complaint
-// rather than a reading. just accepts `recipe: (dep arg)`; this reader would
-// take `(dep` for a name, so it says so instead.
+// rows above because the reader answers this shape with a complaint instead of
+// a reading. just accepts `recipe: (dep arg)`; this reader would take `(dep`
+// for a name, so it says so instead.
+//
+// The complaint is raised by a bracket anywhere after the separating colon, so
+// it is not confined to the shape named here. `vuln: sweep # note (see docs)`
+// takes the same path — measured: one parenthesised-dependency complaint and no
+// recipe read — where just runs vuln with the sweep and ignores the comment. So
+// this test pins the answer for a dependency the reader cannot read, not the
+// full set of lines that reach the answer.
 func TestParseJustfileRefusesADependencyShapeItCannotRead(t *testing.T) {
 	got, complaints := parseJustfile("vuln: (sweep \"arg\")\n    echo hi\n")
 	if len(got) != 0 {
@@ -986,12 +1004,18 @@ func TestParseJustfileRefusesADependencyShapeItCannotRead(t *testing.T) {
 	}
 }
 
-// TestParseJustfileMisreadsATrailingCommentLoudly pins the one shape this
-// reader is known to read differently from just and does not refuse. just takes
-// a `# …` after a dependency list as a comment and ignores it — measured, `just
-// --dump` on `vuln: sweep-discovery-probes # note` is rc=0 with vuln depending
-// on the sweep alone — where this reader takes the words after the '#' for
-// dependency names.
+// TestParseJustfileMisreadsATrailingCommentLoudly pins how this reader answers
+// a trailing comment on a header. just takes a `# …` after a dependency list as
+// a comment and ignores it — measured, `just --dump` on
+// `vuln: sweep-discovery-probes # note` is rc=0 with vuln depending on the
+// sweep alone — where this reader takes the words after the '#' for dependency
+// names.
+//
+// It pins this shape, not a claim about how many shapes read differently. Other
+// shapes do, they are listed on TestParseJustfileReadsWhatJustReads above, and
+// they do not all answer the same way: a header whose default opens a literal
+// it does not close is dropped in silence, and a comment carrying a bracket is
+// refused outright. What is pinned here is a reading, loudly wrong.
 //
 // Nothing wants that reading. It is pinned because the direction is what makes
 // it survivable: names invented from a comment resolve to no recipe, so the
