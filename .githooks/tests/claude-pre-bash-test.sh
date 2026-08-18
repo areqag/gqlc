@@ -5,7 +5,15 @@
 # shape Claude Code sends on stdin, asserting allow/deny per case. The hook
 # must resolve the branch at the command's EFFECTIVE target directory
 # (leading `cd` chains, `git -C <path>`), not the hook's own pwd, and must
-# not match `git commit` inside quoted literals or heredoc bodies.
+# not match `git commit` inside quoted literals or in the plain prose of a
+# heredoc body — while
+# still matching the `$(...)` and `` `...` `` forms SUBST_RE and BACKTICK_RE
+# recognise inside an UNQUOTED heredoc body (bd gqlc-wa8c). Those two regexes
+# are textual, so the set they match is not the set the shell would run, and it
+# misses on both sides: an escaped `\$(...)` is matched and denied although the
+# shell leaves it inert, while a spelling neither regex reaches runs unseen.
+# Both directions are disclosed in the hook's header and pinned by the contrast
+# rows below.
 #
 # Run via: just test-hooks
 set -u
@@ -55,6 +63,35 @@ run_case() { # $1=name $2=expected(deny|allow) $3=cwd-for-hook $4=command-string
   decision=allow
   if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then decision=deny; fi
   record "$1" "$2" "$decision"
+}
+
+# run_case reports a bare `deny`, which cannot say WHICH guard refused — a row
+# that began denying for a neighbouring reason would still read as a pass.
+# classify names the guard by its own sentence: deny-master is the master
+# guard's refusal, deny-hooks the core.hooksPath one, and a deny carrying
+# neither is deny-other rather than being folded into either. Matching the
+# master sentence positively (not "not the hooks one") is what makes a third
+# message fail here instead of passing as deny-master.
+classify() { # $1=hook stdout -> deny-master|deny-hooks|deny-other|warn|silent|unrecognized(...)
+  if printf '%s' "$1" | grep -q '"permissionDecision": *"deny"'; then
+    if printf '%s' "$1" | grep -q 'Direct commits to .* are blocked'; then
+      printf 'deny-master'
+    elif printf '%s' "$1" | grep -q 'core\.hooksPath'; then
+      printf 'deny-hooks'
+    else
+      printf 'deny-other'
+    fi
+  elif printf '%s' "$1" | grep -q '"systemMessage"'; then
+    printf 'warn'
+  elif [ -z "$1" ]; then
+    printf 'silent'
+  else
+    printf 'unrecognized(%s)' "$1"
+  fi
+}
+
+run_guard_case() { # $1=name $2=expected(classify verdict) $3=cwd $4=command
+  record "$1" "$2" "$(classify "$(run_hook "$3" "$4")")"
 }
 
 # --- baseline behavior that must be preserved -------------------------------
@@ -116,6 +153,113 @@ run_case "heredoc body with prose+apostrophe"  allow "$MASTER_REPO"  "$(printf '
 # errs closed; widening the row above to cover it would be the fail-open half.
 run_case "word-by-word quoting still denies"   deny  "$MASTER_REPO"  'echo "git" "commit" -m x'
 
+# --- bd gqlc-wa8c: an unquoted heredoc EXPANDS its body ---------------------
+# The delimiter's quoting decides whether the body is inert. Measured with a
+# touch-marker fixture rather than reasoned: `$(touch MARK)` under <<EOF
+# created the file, the identical line under <<'EOF' and <<"EOF" did not.
+# In THIS block a deny row is normally a command that really runs and a silent
+# row normally text that really does not; the silent rows further down, under
+# "limits this leaves open", are a different thing — commands that really run
+# and are missed anyway, which is what makes them limits. Where a row breaks
+# that reading it says so above the row: the feature-cwd row really runs and is
+# silent because of the branch rather than the spelling, and of the escaped
+# rows at the end the two inert ones deny text the shell does not expand, while
+# the third really runs like the rows above it.
+# Rows assert deny-master, not a bare deny: the refusal has to be the master
+# guard's, or a fixture failing for a neighbouring reason reads as a pass for
+# the wrong cause.
+# shellcheck disable=SC2016 # the substitution is the hook's input, not this file's code
+run_guard_case "unquoted heredoc expands \$( )"  deny-master "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n$(git commit -m x)\nEOF\n')"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "unquoted heredoc expands backticks" deny-master "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n`git commit -m x`\nEOF\n')"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "unquoted heredoc, <<- tab-strip" deny-master "$MASTER_REPO" "$(printf 'cat <<-EOF > /dev/null\n\t$(git commit -m x)\n\tEOF\n')"
+# The branch, not the shape, is what decides: same spelling on a feature cwd.
+# shellcheck disable=SC2016 # ditto
+run_guard_case "unquoted heredoc on feature cwd" silent "$FEATURE_REPO" "$(printf 'cat <<EOF > /dev/null\n$(git commit -m x)\nEOF\n')"
+# ...and the effective-target resolution still reaches through the body.
+# shellcheck disable=SC2016 # ditto
+run_guard_case "-C to master from inside a heredoc" deny-master "$FEATURE_REPO" "$(printf 'cat <<EOF > /dev/null\n$(git -C %s commit -m x)\nEOF\n' "$MASTER_REPO")"
+# A quoted delimiter expands nothing, so the same body is data both ways.
+# shellcheck disable=SC2016 # ditto
+run_guard_case "quoted heredoc \$( ) is prose"   silent "$MASTER_REPO" "$(printf 'cat <<%s > /dev/null\n$(git commit -m x)\nEOF\n' "'EOF'")"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "dquoted heredoc \$( ) is prose"  silent "$MASTER_REPO" "$(printf 'cat <<"EOF" > /dev/null\n$(git commit -m x)\nEOF\n')"
+# The half that rules out "strip only quoted heredocs": an unquoted delimiter
+# expands substitutions but does not execute bare words, so prose in one stays
+# an allow. Leaving the unquoted body in the token stream would deny this.
+run_guard_case "unquoted heredoc bare prose"     silent "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\ndo not run git commit here\nEOF\n')"
+# The escaped rows, which is where the deny/really-runs reading above stops
+# holding. A backslash in front of the $ or the backtick suppresses the
+# expansion, so the first two rows are PROSE and the hook denies them anyway:
+# SUBST_RE and BACKTICK_RE key on the literal `$(` and `` ` `` and never look
+# at what precedes them. Measured on bash 5.3.15 with a positive-content
+# witness rather than an absent marker — the heredoc's target file still held
+# the literal `$(touch MARK)` text and no marker appeared.
+# The third row is why the fix is not "skip a $( with a backslash before it":
+# `\\` is itself an escape yielding a literal backslash, so the substitution
+# after it is LIVE and its deny is correct. Across 0 to 4 backslashes measured,
+# an odd count suppressed the expansion and an even count did not. Mutating the
+# extraction toward either candidate reddens rows in this block, and this third
+# row is what separates them: it goes red when the skip keys on a backslash
+# being present, and stays green when it keys on the run being odd, its own run
+# being even. Which other rows move depends on whether the skip is wired into
+# the `$(` extractor alone or into the backtick one too, since SUBST_RE cannot
+# reach the backtick row — so what this block pins is that separation, not a
+# redden-set. Measured by building both extractions out of tree and running
+# this suite under each.
+# shellcheck disable=SC2016 # ditto
+run_guard_case "escaped \$( ) denies, inert"     deny-master "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n\\$(git commit -m x)\nEOF\n')"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "escaped backtick denies, inert"  deny-master "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n\\`git commit -m x\\`\nEOF\n')"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "escaped backslash, \$( ) is live" deny-master "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n\\\\$(git commit -m x)\nEOF\n')"
+
+# --- limits this leaves open: measured, disclosed, not fixed ----------------
+# Inside an unquoted body the substitution extractors are the only thing
+# looking, because the surrounding prose must stay data. So a real command
+# neither extractor matches is not seen at all — while the SAME spelling
+# written bare still denies, because outside a heredoc the tokenizer is the
+# backstop. Each extractor-limit pair below pins that contrast: the silent row
+# is the limit and its deny partner shows the limit is the heredoc, not the
+# spelling. The <<EOF.txt pair at the end is about the DELIMITER instead, so
+# its partner shows the opposite — the same delimiter word, quoted, arms
+# nothing and therefore denies.
+# shellcheck disable=SC2016 # ditto
+run_guard_case "SUBST_RE does not nest: heredoc" silent "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n$(git commit -m "(x)")\nEOF\n')"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "SUBST_RE does not nest: bare"    deny-master "$MASTER_REPO" 'echo $(git commit -m "(x)")'
+# bash 5.3 funsub. Both rows assert what the HOOK decides about the text, so
+# neither depends on the shell running this file; the claim that the heredoc
+# form executes was measured separately on bash 5.3.15.
+# shellcheck disable=SC2016 # ditto
+run_guard_case "funsub \${ ; } in heredoc"       silent "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n${ git commit -m x; }\nEOF\n')"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "funsub \${ ; } bare"             deny-master "$MASTER_REPO" 'echo ${ git commit -m x; }'
+# A limit with a different mechanism: the command shape is ordinary, but a
+# backslash-newline splits the `$(` token itself. The shell rejoins the line
+# and runs the substitution — measured by letting it commit for real rather
+# than by reading a marker, and the fixture's HEAD moved — while SUBST_RE needs
+# a literal `$(` and finds none, so the heredoc row is silent.
+# shellcheck disable=SC2016 # ditto
+run_guard_case "cont-split \$( in heredoc"       silent "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n$\\\n(git commit -m x)\nEOF\n')"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "cont-split \$( bare"             deny-master "$MASTER_REPO" "$(printf 'echo $\\\n(git commit -m x)')"
+# HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt arms on the prefix `EOF`; no
+# line ever equals that, the body swallows the rest of the command, and the
+# real commit after it is not seen. The quoted spelling of the same delimiter
+# does not match the regex at all, so nothing is stripped and it denies.
+run_guard_case "<<EOF.txt swallows what follows" silent "$MASTER_REPO" "$(printf 'cat <<EOF.txt > /dev/null\ndata\nEOF.txt\ngit commit -m x\n')"
+run_guard_case "<<'EOF.txt' strips nothing"      deny-master "$MASTER_REPO" "$(printf 'cat <<%s > /dev/null\ndata\nEOF.txt\ngit commit -m x\n' "'EOF.txt'")"
+# Which way <<EOF.txt fails depends on the body, not just the delimiter: put a
+# bare `EOF` line in it and the swallow ends there, so the rest is tokenized
+# and denies. Measured PROSE — the commit is still inside the real heredoc —
+# so this row is a false deny, and it is pinned because it errs closed.
+run_guard_case "<<EOF.txt, bare EOF ends swallow" deny-master "$MASTER_REPO" "$(printf 'cat <<EOF.txt > /dev/null\ndata\nEOF\ngit commit -m x\nEOF.txt\n')"
+# The same bound the other way: <<\EOF is a QUOTED form the regex cannot see,
+# so its body is tokenized and prose there denies though it expands nothing.
+run_guard_case "<<\\EOF prose denies, fail-closed" deny-master "$MASTER_REPO" "$(printf 'cat <<\\EOF > /dev/null\ngit commit -m x\nEOF\n')"
+
 # --- core.hooksPath drift (bd gqlc-nzwa) ------------------------------------
 # Four config states, per bd gqlc-5fm. The fourth — a path that exists and is
 # full of executable *.sample files — is the one that actually occurred twice,
@@ -126,21 +270,11 @@ run_case "word-by-word quoting still denies"   deny  "$MASTER_REPO"  'echo "git"
 # the documented root cause of drift occurrence #1 (bd gqlc-r41), so a test
 # for this defect that could write the real repo's config would be the defect.
 #
-# Drift fixtures sit on a feature branch so a deny can only come from the
-# hooks guard, never from the master guard — which is why run_drift_case
-# separates deny-hooks from deny-master rather than reporting a bare "deny".
-classify() { # $1=hook stdout -> deny-hooks|deny-master|warn|silent|unrecognized(...)
-  if printf '%s' "$1" | grep -q '"permissionDecision": *"deny"'; then
-    if printf '%s' "$1" | grep -q 'core\.hooksPath'; then printf 'deny-hooks'; else printf 'deny-master'; fi
-  elif printf '%s' "$1" | grep -q '"systemMessage"'; then
-    printf 'warn'
-  elif [ -z "$1" ]; then
-    printf 'silent'
-  else
-    printf 'unrecognized(%s)' "$1"
-  fi
-}
-
+# The drift fixtures defined in this block sit on a feature branch so a deny
+# cannot come from the master guard — the MASTER_DRIFT fixture further down is
+# on master on purpose, to pin which guard wins, and its row says so. That is
+# why these rows assert the classify() verdict (defined next to run_case,
+# above) rather than a bare "deny".
 run_drift_case() { # $1=name $2=expected(deny-hooks|deny-master|warn|silent) $3=cwd $4=command
   record "$1" "$2" "$(classify "$(run_hook "$3" "$4")")"
 }
@@ -316,7 +450,7 @@ run_raw_case "internal error warns, not silent"   warn   "$OK_REPO" 'not json at
 # What this total catches is the one thing that battery cannot see: rows
 # silently disappearing. Without it, deleting every run_drift_case invocation
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
-EXPECTED_ROWS=68
+EXPECTED_ROWS=89
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
