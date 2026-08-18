@@ -1,0 +1,58 @@
+-- The valid-corpus copy of the inline-subtype schema. The harness resolves
+-- schemas per fixture subdir (loadSchema(subdir, name)), so valid/ and invalid/
+-- each hold their own; the invalid/ copy carries the rationale for the refusals
+-- it pins. This header describes what the copy in THIS directory is for.
+--
+-- `(:Person)` is satisfied by Person and Employee&Person; `(:Company)` by
+-- Company and Company&Large, and the two WORKS_AT declarations pair them off.
+-- HAS_DESK is declared from the BARE Company only, so a MANDATORY hop through
+-- it is evidence that every returned row's company is the bare Company — and
+-- the only WORKS_AT into that type comes from the bare Person.
+--
+-- That is what the one fixture here needs:
+--   MATCH (p)-[w:WORKS_AT]->(c:Company) MATCH (c)-[h:HAS_DESK]->(d:Desk)
+-- `p` carries no label, and on the far end's full satisfying set both person
+-- types reach a company, so Phase B alone cannot pin it. The HAS_DESK hop pins
+-- `c`, and `p` is Person through it (gqlc-h6h7).
+--
+-- The one-token twin with OPTIONAL on the HAS_DESK hop is refused, and that
+-- refusal is pinned from the invalid/ copy: an outer join returns the
+-- Employee&Person -[WORKS_AT]-> Company&Large row with h/d null, so the hop
+-- proves nothing about which company type a returned row carries.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesInlineSubtype AS {
+
+    (:Person {
+        id         :: INT NOT NULL,
+        name       :: STRING NOT NULL,
+        personOnly :: STRING NOT NULL
+    }),
+
+    (:Person&Employee {
+        id         :: INT NOT NULL,
+        name       :: STRING NOT NULL,
+        employeeId :: INT NOT NULL
+    }),
+
+    (:Company {
+        id        :: INT NOT NULL,
+        name      :: STRING NOT NULL,
+        smallOnly :: STRING NOT NULL
+    }),
+
+    (:Company&Large {
+        id      :: INT NOT NULL,
+        name    :: STRING NOT NULL,
+        largeId :: INT NOT NULL
+    }),
+
+    (:Desk {
+        id :: INT NOT NULL
+    }),
+
+    (:Person)          -[:WORKS_AT { since :: INT NOT NULL }]-> (:Company),
+    (:Person&Employee) -[:WORKS_AT { since :: INT NOT NULL }]-> (:Company&Large),
+
+    (:Company)         -[:HAS_DESK { n :: INT NOT NULL }]-> (:Desk)
+
+}

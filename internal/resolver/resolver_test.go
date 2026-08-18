@@ -459,6 +459,27 @@ var invalidFixtures = map[string]error{
 	// witness on each side" indistinguishable from "the only witness on each
 	// side" — the choice is unobservable until a second pair exists to lose to.
 	"ambiguous_edge_orientation_two_swapped_pairs.cypher": ErrAmbiguousEdgeOrientation,
+	// h6h7's second direction. The one-token twin of
+	// valid/unlabelled_narrowed_by_pinned_far_end.cypher: OPTIONAL on the
+	// HAS_DESK hop, so the hop is an outer join and every row that matched
+	// without it still comes back. `p` is bare, its only edge is WORKS_AT, and
+	// both declared WORKS_AT edges reach a type satisfying `(:Company)` — so the
+	// edges prove nothing about which person type `p` is and it must stay WIDE.
+	// invalidFixtureContains below requires BOTH person types in the message:
+	// the sentinel says the resolver declined to pick, the message says which
+	// set it declined over, and it is the second that distinguishes staying wide
+	// from narrowing to whichever type happened to be seen first.
+	"unlabelled_optional_far_end_stays_wide.cypher": ErrAmbiguousBinding,
+	// Two edges out of the same bare `p` whose narrowed far ends pin it to
+	// different author types, so the narrowed intersection is empty while the
+	// unnarrowed one still holds both. candidateTypes returns the unnarrowed
+	// answer there, which is master's, and this sentinel is what that decision
+	// is worth: returning the empty narrowed set instead lands on
+	// commitUnlabelledRound's case 0, ErrUnknownLabel — "no edge in the pattern
+	// reaches a compatible schema node type" — which is false, since both edges
+	// reach one. See TestNarrowedEndsThatDisagreeKeepTheWideAnswer for the two
+	// halves, each of which narrows `p` on its own and to a different type.
+	"unlabelled_narrowed_ends_disagree.cypher": ErrAmbiguousBinding,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -519,6 +540,15 @@ var invalidFixtureContains = map[string]string{
 	// constant's own; the phrase is spelled here in full so a change to it has
 	// to be a change someone made on purpose.
 	"union_column_type_mismatch.cypher": `column "x" projects `,
+	// h6h7's stays-wide direction. ErrAmbiguousBinding says only that Phase B
+	// declined to pick; this says it declined over BOTH person types, i.e. that
+	// the OPTIONAL hop narrowed nothing. A narrowing that fired here would list
+	// one type, and the substring would fail.
+	"unlabelled_optional_far_end_stays_wide.cypher": `candidate types: Employee&Person, Person`,
+	// The empty narrowed set would have been reported as ErrUnknownLabel; this
+	// says the message is the wide lane's, over both author types, and not one
+	// of the two singletons the halves reach.
+	"unlabelled_narrowed_ends_disagree.cypher": `candidate types: Author, Author&Editor`,
 }
 
 type ResolverSuite struct {
@@ -1281,6 +1311,129 @@ func (s *ResolverSuite) TestNarrowingLearnsOnlyFromASingleHopEdge() {
 			got, err := resolve(tt.twin)
 			s.Require().NoError(err, "the twin removes only the quantifier, so the closure really is the pattern and must still commit")
 			s.Require().Equal(tt.want, got)
+		})
+	}
+}
+
+// TestNarrowedEndsThatDisagreeKeepTheWideAnswer pins candidateTypes' fallback
+// from the empty narrowed accumulator to the unnarrowed one.
+//
+// The sentinel on unlabelled_narrowed_ends_disagree.cypher already flips
+// without the fallback (ErrAmbiguousBinding becomes ErrUnknownLabel), but the
+// sentinel alone does not say the narrowing RAN — a lane that never fired would
+// give the same ErrAmbiguousBinding for the ordinary reason. The two halves are
+// what say it fired: each is a proper prefix of the fixture's own text, each
+// narrows `p` on its own, and they narrow it to DIFFERENT types. That is the
+// disagreement, and it is why the intersection over both is empty.
+//
+// The halves are sliced out of the fixture rather than spelled here so the
+// three queries cannot drift apart; the line count is asserted so a fixture
+// edit fails loudly instead of slicing the wrong clauses.
+func (s *ResolverSuite) TestNarrowedEndsThatDisagreeKeepTheWideAnswer() {
+	sch := s.loadSchema("invalid", "narrowed_ends_disagree.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	src, err := os.ReadFile(filepath.Join(fixtureDir, "invalid", "unlabelled_narrowed_ends_disagree.cypher"))
+	s.Require().NoError(err)
+	lines := strings.Split(strings.TrimRight(string(src), "\n"), "\n")
+	s.Require().Len(lines, 5, "the halves are sliced by line: two MATCH clauses each, then RETURN p")
+
+	_, err = resolve(string(src))
+	s.Require().ErrorIs(err, ErrAmbiguousBinding)
+	s.Require().Contains(err.Error(), "candidate types: Author, Author&Editor")
+
+	// authorOnly is declared on Author and not on Author&Editor; editorId the
+	// other way round. Each half therefore accepts only if `p` narrowed, and
+	// only if it narrowed to that half's type.
+	wrote := strings.Join(lines[0:2], "\n") + "\nRETURN p.authorOnly"
+	got, err := resolve(wrote)
+	s.Require().NoError(err, "the WROTE half alone pins b to Book and p to Author")
+	s.Require().Equal([]Column{{Name: "p.authorOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
+
+	spoke := strings.Join(lines[2:4], "\n") + "\nRETURN p.editorId"
+	got, err = resolve(spoke)
+	s.Require().NoError(err, "the SPOKE_AT half alone pins v to Venue and p to Author&Editor")
+	s.Require().Equal([]Column{{Name: "p.editorId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}}, got)
+
+	// The two halves' projections are each refused on the OTHER half, which is
+	// what makes "different types" a fact about the schema and not about which
+	// property name was chosen.
+	_, err = resolve(strings.Join(lines[0:2], "\n") + "\nRETURN p.editorId")
+	s.Require().ErrorIs(err, ErrUnknownProperty)
+	_, err = resolve(strings.Join(lines[2:4], "\n") + "\nRETURN p.authorOnly")
+	s.Require().ErrorIs(err, ErrUnknownProperty)
+}
+
+// TestAnUnnarrowedFarEndKeepsItsKeys pins narrowedEndpointKeys' two
+// leave-it-alone arms: a far end that is not a variable, and a variable
+// endpointNarrowing gave no entry.
+//
+// Both are the same claim — an end nothing narrowed contributes its whole
+// satisfying set, not the empty set — and getting either wrong empties the
+// narrowed intersection. That mistake is SILENT, because candidateTypes then
+// falls back to the wide answer and the query refuses for ambiguity exactly as
+// it did before the lane existed: no sentinel moves, no message changes, and
+// the whole suite stays green. Both arms SURVIVED mutation until this test.
+//
+// The shape needed is a bare binding touching a narrowed plural far end AND an
+// unnarrowed end at once; nothing else in the corpus has it. MEMBER_OF supplies
+// the unnarrowed end — declared from both author types to the one Guild type,
+// so it narrows nothing itself, and Guild is singular so `g` never enters the
+// plural-candidate table.
+func (s *ResolverSuite) TestAnUnnarrowedFarEndKeepsItsKeys() {
+	sch := s.loadSchema("invalid", "narrowed_ends_disagree.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+	const wroteHalf = "MATCH (p)-[w:WROTE]->(b:Book)\nMATCH (b)-[s:SHELVED_IN]->(sh:Shelf)\n"
+
+	tests := []struct {
+		name string
+		// alone must refuse: the MEMBER_OF hop narrows nothing by itself, which
+		// is what makes each pair a test of the intersection rather than the
+		// WROTE half over again.
+		alone string
+		// pair is alone prefixed by the WROTE half, whose narrowed reading is
+		// {Author}. Intersected with MEMBER_OF's unchanged {Author,
+		// Author&Editor} that is {Author}; read as empty it becomes {}, and the
+		// fallback turns it back into `alone`'s refusal.
+		pair string
+	}{
+		{
+			name:  "a variable far end with no narrowing entry",
+			alone: "MATCH (p)-[m:MEMBER_OF]->(g:Guild)\nRETURN p.authorOnly",
+			pair:  wroteHalf + "MATCH (p)-[m:MEMBER_OF]->(g:Guild)\nRETURN p.authorOnly",
+		},
+		{
+			// Not a VarEndpoint at all, so it never reaches the narrowing map.
+			// The two arms are separate returns and a fix applied to one leaves
+			// the other; a fully anonymous `()` cannot stand in, because
+			// endpointLabels cannot read it either — `alone` is then refused by
+			// Phase B's OWN case 0 ("no edge in the pattern reaches a compatible
+			// schema node type"), and `pair` by CloseEdges' deferred close AFTER
+			// Phase B ("cannot infer type of target endpoint"). Neither shape
+			// reaches the arm under test.
+			name:  "an inline far end that is not a variable",
+			alone: "MATCH (p)-[m:MEMBER_OF]->(:Guild)\nRETURN p.authorOnly",
+			pair:  wroteHalf + "MATCH (p)-[m:MEMBER_OF]->(:Guild)\nRETURN p.authorOnly",
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			_, err := resolve(tt.alone)
+			s.Require().ErrorIs(err, ErrAmbiguousBinding, "the MEMBER_OF hop must narrow nothing on its own")
+
+			got, err := resolve(tt.pair)
+			s.Require().NoError(err, "an unnarrowed far end must not empty the narrowed intersection")
+			s.Require().Equal([]Column{{Name: "p.authorOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
 		})
 	}
 }
