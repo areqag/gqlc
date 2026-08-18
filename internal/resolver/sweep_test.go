@@ -555,15 +555,23 @@ func sweepCategoryDetail(label string, lines []string) string {
 // not one axis recorded twice.
 //
 // What both cases add is the extent. TestResolverSuite resolves the pairs
-// schema.mapping.json names, one schema per query — 310 of these 11780 cells
-// at this commit — and 288 of that 299 are among the other 11470. Within this
-// file the extent is not what the manifest adds: TestSweepReachesEverySentinel
-// and TestSweepIsIndependentOfCellOrder resolve all 11780 too, but the first
-// only counts sentinels per name and the second only compares a run against a
-// re-parse of itself, so neither holds any cell to a committed value. The
-// count is what the sweep this replaces could not state: verdicts alone put
-// the same change at 0 differences. Cell counts here are of this commit; the
-// manifest header restates the live ones.
+// schema.mapping.json names, one schema per query — 313 of these 12520 cells
+// at this commit — leaving 12207 no other test holds to a committed value.
+// Within this file the extent is not what the manifest adds:
+// TestSweepReachesEverySentinel and TestSweepIsIndependentOfCellOrder resolve
+// all 12520 too, but the first only counts sentinels per name and the second
+// only compares a run against a re-parse of itself, so neither holds any cell
+// to a committed value. The count is what the sweep this replaces could not
+// state: verdicts alone put the same change at 0 differences.
+//
+// The two mutation figures above — 299 cells moved, of which 288 fell outside
+// TestResolverSuite's pairs — were measured on the 11780-cell corpus as it
+// stood before gqlc-h6h7 added three queries and two schemas, and have NOT
+// been re-run against 12520. What they witness does not depend on the total:
+// that mutation rewrites no refusal text and flips no verdict by
+// construction, so DETAIL and VERDICT are 0 at any corpus size and the
+// sentinel column is the only axis left to move. The live corpus shape is in
+// the manifest header, which is regenerated with the file.
 func TestCorpusSweepManifest(t *testing.T) {
 	queries, schemas := sweepCorpus(t)
 	cells, order, msgs := runSweep(t, queries, schemas)
