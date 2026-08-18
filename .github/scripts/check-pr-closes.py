@@ -303,12 +303,18 @@ def prose_only(pr_body):
     every ``` and ~~~ line. A fence closes only on a run of the same
     character, at least as long as the one that opened it, with nothing but
     whitespace after it; a backtick fence whose info string carries a
-    backtick opens nothing. Put the toggle back in place of this function
-    and the suite fails 35 rows -- 33 bodies whose marker it honours though
-    GitHub renders it inside <pre><code> or not at all, and 2 it blanks that
-    GitHub renders as prose. Counted at this commit, over the suite as it
-    stands; a row added to its visibility section can move it either way.
-    Among the 33 is the ordinary idiom
+    backtick opens nothing. Put the toggle back in place of this function --
+    4446b7fc's outside_fences and the FENCE it read, both verbatim -- and
+    the suite goes red in three directions: bodies whose marker it honours
+    though GitHub renders it inside <pre><code> or not at all, bodies it
+    blanks that GitHub renders as prose, and, because main()'s no-bead check
+    reads this function too, a closing keyword inside an HTML comment
+    refused as a claim. How many rows that is stays out of this docstring:
+    it moved on this branch, and the row that moved it was added to the
+    no-bead section rather than to the visibility one, so the number tracks
+    the suite's size and not this function's behaviour. Naming the stand-in
+    is what makes it re-countable instead.
+    Among the first of the three is the ordinary idiom
     for showing a fence, which is to nest it in a longer one; showing this
     marker is what this file is about, so that is the realistic body rather
     than the exotic one. An unclosed fence, comment or HTML block swallows
