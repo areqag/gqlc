@@ -884,10 +884,16 @@ func TestEntityColumnsDecodeWholeEntities(t *testing.T) {
 		t.Errorf("EntityColumns()[0].L.Ranks = %#v, want %#v", row.L.Ranks, want)
 	}
 
-	// The node and the edge carriers are not interchangeable, and this
-	// is what says the emission committed one per column rather than
-	// asserting to whichever the value happened to be: the same three
-	// values under two of the same keys, swapped, are refused.
+	// The same three values under two of the same keys, swapped, are
+	// refused rather than decoded into a row. This case does not say
+	// which stage refused them: drop the column's error gate from the
+	// emitter and it still passes, because the zero carrier that comes
+	// back with the dropped error fails the decode helper instead.
+	// TestEntityColumnRefusalsCarryTheDriversError below hands in the
+	// same swap and reads the message, which is what tells those two
+	// apart. The carrier is settled before either stage runs: emit the
+	// edge column's read as dbtype.Node and the nested module stops
+	// compiling, so this case never runs.
 	if _, err := queriesOver([]string{"s", "e", "l"}, []any{
 		relationship(edgyProps()), node(scalarProps()), node(listyProps()),
 	}).EntityColumns(t.Context()); err == nil {
