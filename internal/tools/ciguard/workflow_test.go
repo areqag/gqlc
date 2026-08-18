@@ -49,13 +49,13 @@ const payloadBody = "github.event.pull_request.body"
 // every written form arrives with a non-zero Kind. present and spell read it.
 //
 // If is a Node for a different reason, and the reason is bd gqlc-ff66. A string
-// field is told nothing about whether the key was written: `if:` written with
-// no value decodes to the same "" an absent `if:` does, so `require.Empty` over
-// a string passes the written form. Kind is what parts them. Both `if:` fields
-// here carry the Node so that the distinction stays available to whatever
-// asserts on them next — the step's is compared to a condition below, where
-// absence and an empty value are refused alike, and the job's is refused on
-// having been written at all.
+// field carries what the key was written as, which is not the same question as
+// whether it was written: `if:` written with no value decodes to the same "" an
+// absent `if:` does, so `require.Empty` over a string passes the written form.
+// Kind is what parts those two. Both `if:` fields here carry the Node so that
+// the distinction stays available to whatever asserts on them next — the step's
+// is compared to a condition below, where absence and an empty value are
+// refused alike, and the job's is refused on having been written at all.
 type ciSteps []struct {
 	Name            string            `yaml:"name"`
 	Run             string            `yaml:"run"`
@@ -322,17 +322,17 @@ func jobIfRefusal(t *testing.T, job ciJob) string {
 	return strings.Join(rec.msgs, "\n")
 }
 
-// The refusal has to reach an `if:` written with no value, and that is the
-// thing a string field cannot be asked. Decoded into a string, a written-empty
-// `if:` and an absent one are both "", so `require.Empty` over one passes the
-// written form — which is what this test did until bd gqlc-ff66. Kind is what
-// parts them, and `value` below is what a string field would have seen: the
-// rows that share a value and differ in `refused` are that conflation.
+// The refusal has to reach an `if:` written with no value, and that is the case
+// a string field cannot answer. Decoded into a string, a written-empty `if:`
+// and an absent one are both "", so `require.Empty` over one passes the written
+// form — which is what this test did until bd gqlc-ff66. Kind is what parts
+// them, and `value` below is what a string field would have seen: the rows that
+// share a value and differ in `refused` are that conflation.
 //
-// This also holds present() to the distinction it is named for. Every key
-// present() is asked about elsewhere in this package is absent in the tree
-// today, so a present() rewritten to read Value answers those the same way and
-// says nothing; here it would answer differently.
+// This also holds present() to the distinction it is named for. Rewriting it as
+// `n.Value != ""` was put to this package and reddened this test's rows and no
+// others, so nothing else here is asking present() a question that parts a
+// written-empty key from an absent one.
 //
 // The rows are documents taken, not a survey of YAML. There are forms that
 // decode to an empty value which are not written below, and nothing here claims
