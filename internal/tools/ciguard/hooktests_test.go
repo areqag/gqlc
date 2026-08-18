@@ -357,7 +357,7 @@ func TestTestHooksStopsAtTheFirstFailingSuite(t *testing.T) {
 // ciJustInvocations is the recipe names each ci.yml job runs through `just`.
 func ciJustInvocations(t *testing.T) map[string][]string {
 	t.Helper()
-	jobs := childByKey(docOf(t), "jobs")
+	jobs := childByKey(ciDoc(t), "jobs")
 	require.NotNilf(t, jobs, "%s has no jobs", ciWorkflow)
 
 	found := map[string][]string{}
