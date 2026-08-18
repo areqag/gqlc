@@ -41,6 +41,14 @@ import (
 // TestParseJustfileAgreesWithJustOnThisJustfile puts the reader's reading of
 // the real justfile beside just's own and reports where they part, which is a
 // question the list does not have to have anticipated.
+//
+// What that comparison does not answer is where the two readings go quiet in
+// the same place: readings that are both silent do not part. A `mod` submodule
+// is such a place — just puts its recipes under `modules` rather than
+// `recipes`, and this reader never leaves the file it was handed — so the
+// comparison has nothing to set against anything. That shape is refused at
+// TestEveryRecipeRunningModscopeSweepsProbesFirst instead, off just's own
+// answer rather than off a reading of the directive (bd gqlc-98ii).
 
 const (
 	// repoRoot reaches the justfile from this package's directory.
@@ -440,6 +448,14 @@ func reaches(byName map[string]justRecipe, name, want string) bool {
 
 // TestEveryRecipeRunningModscopeSweepsProbesFirst is the live assertion, over
 // the justfile CI runs.
+//
+// The reading it makes that answer from is parseJustfile over one file's bytes,
+// and a recipe just runs from somewhere else is not in it. So the run also asks
+// just where it read recipes from, and refuses a justfile that answers with a
+// submodule — see submoduleRefusals. The refusal is here rather than beside the
+// comparison in TestParseJustfileAgreesWithJustOnThisJustfile because it is
+// this assertion's guarantee that a submodule suspends: a caller under one is
+// asked for nothing, and neither reading says so (bd gqlc-98ii).
 func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join(repoRoot, justfilePath))
 	if err != nil {
@@ -455,6 +471,9 @@ func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 			"discovery probe a killed run left under test/data stops it on goDirs' "+
 			"empty-walk refusal — add %s to its dependency list (bd gqlc-c7o7)",
 			name, modscopePkg, probeSweep, probeSweep)
+	}
+	for _, r := range submoduleRefusals("", dumpJustfile(t, repoRoot, justfilePath)) {
+		t.Errorf("%s", r)
 	}
 }
 
@@ -501,8 +520,22 @@ func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 //     is not out of reach of the file: that same marker reddens
 //     TestParseJustfileReadsWhatJustReads, whose rows do pin body text against
 //     a literal.
-//   - Shapes this justfile does not contain. It reports on these bytes, and
-//     says nothing about a header spelling no file here has yet.
+//   - A recipe just reports outside the top-level `recipes` key. Adding the
+//     shape to these bytes is not enough to be reported on: what is reported is
+//     a difference, and there is none where both readings are quiet. A `mod`
+//     submodule is that case — just files its recipes under `modules` and this
+//     reader stays inside the file it was handed — so the submodule's names
+//     never enter either side of the comparison. Measured on this repo's
+//     justfile with a submodule whose recipe body runs modscope and which
+//     depends on nothing: just 1.55.1 and 1.57.0 both left the top-level recipe
+//     set as it was, listed the submodule under `modules`, and this test passed
+//     with that caller live. `import` is the opposite case and not this one: it
+//     lands in `recipes`, this reader does not follow it, and the same probe
+//     under `import` is reported here by name. The `mod` shape is refused at
+//     TestEveryRecipeRunningModscopeSweepsProbesFirst rather than compared here
+//     (bd gqlc-98ii).
+//   - A header spelling no file here carries. The comparison is over what this
+//     justfile says today, so such a shape is unexercised rather than covered.
 //   - A divergence both readings share. just is the reference, so a recipe just
 //     itself reads differently from the way it runs it is outside this.
 //
@@ -617,6 +650,85 @@ type justDump struct {
 		// "version"]]]. recipeBodies keeps the strings and drops the rest.
 		Body [][]any `json:"body"`
 	} `json:"recipes"`
+
+	// Modules holds what a `mod` directive brought in, keyed by the name just
+	// addresses the submodule under. Its value has the shape of a dump in its
+	// own right — a submodule carries its own recipes and its own modules —
+	// which is why the field's type is this type. A submodule's recipes are
+	// under here and not in Recipes above, so every reduction in this file
+	// reads past them.
+	Modules map[string]justDump `json:"modules"`
+}
+
+// submoduleRefusals returns a line for each submodule just reports under
+// dumped, at whatever depth, naming the submodule and the recipes it declares.
+// path is what the caller addresses dumped by and is empty for a whole file.
+// Nothing returned means just read every recipe out of the one file.
+//
+// WHY A REFUSAL RATHER THAN A READING. The alternative is to walk these
+// recipes and hold them to the sweep requirement like any other. Three
+// measurements against just 1.55.1 and 1.57.0 say what that would buy:
+//
+//   - A submodule recipe writing `sweep-discovery-probes` as a dependency is
+//     rejected by just at rc=1, "unknown dependency". So the advice the unswept
+//     message gives is advice just refuses to run, and every submodule caller
+//     would be reported unswept with no edit that answers it. The qualified
+//     spellings looked for — `::name`, `super::name`, `parent::name`,
+//     `..::name` — were rejected as well, two as unknown dependencies and two
+//     as parse errors.
+//   - What just does accept is a submodule declaring a sweep recipe of its own.
+//     That is a second recipe under the same bare name, and unsweptModscopeCallers
+//     keys recipes by bare name — so reading these in would need a scope model
+//     this file does not have, and without one a submodule recipe silently
+//     stands in for the top-level recipe it shares a name with.
+//   - Whether a caller is swept is answered from a dependency closure, and the
+//     closure this file walks comes from parseJustfile over one file's bytes.
+//     Reading submodule recipes off the dump alone would answer it from a
+//     different source than the one the rest of this file compares against.
+//
+// So the shape is declined, loudly, rather than gated on a model of it that is
+// not here. This repo's justfile brings in no submodule today, and the refusal
+// is what a change to that has to argue with (bd gqlc-98ii).
+//
+// The question is put to just rather than to the justfile's text. `mod` is the
+// spelling that was found by trying it, and a text reader would be held to a
+// list of directive spellings somebody wrote down: `mod?` is a second one, and
+// this reduction covers it without being told it exists, because just answers
+// with where it read recipes from rather than with what was written. Measured:
+// `mod? name 'file.just'` with the file present lists the submodule here, and
+// with the file absent lists nothing — which is also nothing to hide a caller
+// in. A submodule nested under a submodule puts its parent in the top-level
+// list, so the refusal fires from that list at any depth; the walk below is
+// what names the deeper one.
+func submoduleRefusals(path string, dumped justDump) []string {
+	names := make([]string, 0, len(dumped.Modules))
+	for name := range dumped.Modules {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	var out []string
+	for _, name := range names {
+		sub := dumped.Modules[name]
+		qualified := name
+		if path != "" {
+			qualified = path + "::" + name
+		}
+		recipes := make([]string, 0, len(sub.Recipes))
+		for recipe := range sub.Recipes {
+			recipes = append(recipes, recipe)
+		}
+		slices.Sort(recipes)
+		out = append(out, fmt.Sprintf(
+			"just reads the submodule %s out of this justfile and declares %v under it, and "+
+				"this file reads the recipes of the one file it was handed. A recipe there is "+
+				"asked for no %s dependency and is reported by nothing, so the submodule is "+
+				"refused rather than gated on a shape this file does not model — take the `mod` "+
+				"directive back out, or teach this file to scope recipes by module first "+
+				"(bd gqlc-98ii)", qualified, recipes, probeSweep))
+		out = append(out, submoduleRefusals(qualified, sub)...)
+	}
+	return out
 }
 
 // priorDependencies reduces a dump to the dependencies just runs before each
