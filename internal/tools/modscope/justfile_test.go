@@ -546,52 +546,186 @@ func TestParseJustfileAgreesWithJustOnThisJustfile(t *testing.T) {
 		t.Errorf("%s", c)
 	}
 
-	if len(dumped.Recipes) == 0 {
-		t.Fatalf("just read no recipe out of the %s, so agreeing with it says nothing", justfilePath)
+	declared := make(map[string][]string, len(dumped.Recipes))
+	for name, r := range dumped.Recipes {
+		if r.Priors > len(r.Dependencies) {
+			t.Fatalf("just reports recipe %s with %d dependencies running before its body "+
+				"out of %d it lists, which this test cannot read", name, r.Priors, len(r.Dependencies))
+		}
+		deps := make([]string, 0, r.Priors)
+		for _, d := range r.Dependencies[:r.Priors] {
+			deps = append(deps, d.Recipe)
+		}
+		declared[name] = deps
+	}
+
+	for _, d := range justfileDisagreements(declared, read) {
+		t.Errorf("%s", d)
+	}
+}
+
+// justfileDisagreements compares the recipes just declares with the recipes
+// parseJustfile read out of the same source and returns a line for each way the
+// two answers differ. Nothing returned is agreement.
+//
+// declared maps a recipe name to the dependencies just runs before its body.
+// The comparison is split out from the test above so that
+// TestJustfileDisagreementsFindsEachWayTheTwoReadingsPart can cut each way of
+// disagreeing on its own: over the justfile in this repo the two readings agree,
+// so every clause here is one the live run never exercises, and a clause nothing
+// exercises is a clause nothing would notice the removal of.
+//
+// Either side reading nothing is itself a disagreement rather than agreement,
+// and it is reported instead of the comparison rather than alongside it. Two
+// empty readings match each other, so a comparison that called that agreement
+// would pass over any justfile at all — the shape unsweptModscopeCallers refuses
+// one level down — and with one side empty every name on the other is reported
+// as unmatched, which buries the one fact that matters.
+func justfileDisagreements(declared map[string][]string, read []justRecipe) []string {
+	var out []string
+	if len(declared) == 0 {
+		out = append(out, "just declares no recipe in this justfile, so agreeing with it says nothing")
 	}
 	if len(read) == 0 {
-		t.Fatalf("this reader read no recipe out of the %s, so agreeing with just says nothing", justfilePath)
+		out = append(out, "this reader read no recipe out of this justfile, so agreeing with just says nothing")
+	}
+	if len(out) > 0 {
+		return out
 	}
 
 	byReader := make(map[string][]string, len(read))
 	for _, r := range read {
 		byReader[r.name] = r.deps
 	}
-	for name, r := range dumped.Recipes {
-		priors := r.Priors
-		if priors > len(r.Dependencies) {
-			t.Fatalf("just reports recipe %s with %d dependencies running first out of %d, "+
-				"which this test cannot read", name, priors, len(r.Dependencies))
-		}
-		var want []string
-		for _, d := range r.Dependencies[:priors] {
-			want = append(want, d.Recipe)
-		}
-		got, found := byReader[name]
-		if !found {
-			t.Errorf("just declares recipe %s in the %s and this reader does not find it, so "+
-				"a body of %s is outside every answer this file gives — including the sweep "+
-				"requirement, which is asked only of recipes it read (bd gqlc-6n9y)",
-				name, justfilePath, name)
-			continue
-		}
-		if !slices.Equal(got, want) {
-			t.Errorf("recipe %s runs %v before its body and this reader reads %v, so the "+
-				"closure this file walks is not the one just runs", name, want, got)
-		}
-	}
 
-	names := make([]string, 0, len(byReader))
-	for name := range byReader {
+	names := make([]string, 0, len(declared))
+	for name := range declared {
 		names = append(names, name)
 	}
 	slices.Sort(names)
 	for _, name := range names {
-		if _, found := dumped.Recipes[name]; !found {
-			t.Errorf("this reader reads a recipe %s out of the %s and just declares no such "+
-				"recipe, so it can be reported as an unswept caller that does not exist",
-				name, justfilePath)
+		got, found := byReader[name]
+		if !found {
+			out = append(out, fmt.Sprintf(
+				"just declares recipe %s and this reader does not find it, so the body of %s "+
+					"is outside every answer this file gives — including the sweep requirement, "+
+					"which is asked only of recipes it read (bd gqlc-6n9y)", name, name))
+			continue
 		}
+		if !slices.Equal(got, declared[name]) {
+			out = append(out, fmt.Sprintf(
+				"just runs %v before recipe %s's body and this reader reads %v, so the closure "+
+					"this file walks is not the one just runs", declared[name], name, got))
+		}
+	}
+
+	invented := make([]string, 0, len(byReader))
+	for name := range byReader {
+		invented = append(invented, name)
+	}
+	slices.Sort(invented)
+	for _, name := range invented {
+		if _, found := declared[name]; !found {
+			out = append(out, fmt.Sprintf(
+				"this reader reads a recipe %s that just does not declare, so it can be "+
+					"reported as an unswept caller that does not exist", name))
+		}
+	}
+	return out
+}
+
+// TestJustfileDisagreementsFindsEachWayTheTwoReadingsPart cuts the comparison
+// one way at a time, because the live run above cannot: the two readings agree
+// over this repo's justfile, so on this tree every clause returns nothing and a
+// deleted clause would still return nothing. These rows are what stands between
+// that and a comparison that has quietly stopped comparing.
+func TestJustfileDisagreementsFindsEachWayTheTwoReadingsPart(t *testing.T) {
+	sweep := justRecipe{name: probeSweep}
+	caller := justRecipe{name: "vuln", deps: []string{probeSweep}}
+
+	cases := []struct {
+		name     string
+		declared map[string][]string
+		read     []justRecipe
+		want     []string
+	}{
+		{
+			name:     "the two readings agree",
+			declared: map[string][]string{probeSweep: {}, "vuln": {probeSweep}},
+			read:     []justRecipe{sweep, caller},
+		},
+		{
+			name:     "a recipe just declares that this reader did not find",
+			declared: map[string][]string{probeSweep: {}, "vuln": {probeSweep}},
+			read:     []justRecipe{sweep},
+			want:     []string{"just declares recipe vuln and this reader does not find it"},
+		},
+		{
+			name:     "a recipe this reader read that just does not declare",
+			declared: map[string][]string{probeSweep: {}},
+			read:     []justRecipe{sweep, caller},
+			want:     []string{"this reader reads a recipe vuln that just does not declare"},
+		},
+		{
+			name:     "a dependency edge this reader did not read",
+			declared: map[string][]string{probeSweep: {}, "vuln": {probeSweep}},
+			read:     []justRecipe{sweep, {name: "vuln"}},
+			want:     []string{"just runs [" + probeSweep + "] before recipe vuln's body and this reader reads []"},
+		},
+		{
+			name:     "a dependency edge this reader invented",
+			declared: map[string][]string{probeSweep: {}, "vuln": {}},
+			read:     []justRecipe{sweep, caller},
+			want:     []string{"just runs [] before recipe vuln's body and this reader reads [" + probeSweep + "]"},
+		},
+		{
+			// The edge is there on both sides and the order is not, which just
+			// runs differently. Reported, because a comparison that sorted first
+			// would agree here.
+			name:     "the same edges in a different order",
+			declared: map[string][]string{"vuln": {probeSweep, "lint"}},
+			read:     []justRecipe{{name: "vuln", deps: []string{"lint", probeSweep}}},
+			want:     []string{"before recipe vuln's body and this reader reads"},
+		},
+		{
+			// Not agreement. Every name on the other side would otherwise be
+			// reported unmatched, which buries this.
+			name:     "just declared nothing",
+			declared: map[string][]string{},
+			read:     []justRecipe{sweep, caller},
+			want:     []string{"just declares no recipe in this justfile"},
+		},
+		{
+			name:     "this reader read nothing",
+			declared: map[string][]string{probeSweep: {}},
+			read:     nil,
+			want:     []string{"this reader read no recipe out of this justfile"},
+		},
+		{
+			// Two empty readings match, and this is the row that says matching
+			// is not the question.
+			name:     "neither side read anything",
+			declared: map[string][]string{},
+			read:     nil,
+			want: []string{
+				"just declares no recipe in this justfile",
+				"this reader read no recipe out of this justfile",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := justfileDisagreements(tc.declared, tc.read)
+			if len(got) != len(tc.want) {
+				t.Fatalf("disagreements = %v, want %d matching %v", got, len(tc.want), tc.want)
+			}
+			for i, want := range tc.want {
+				if !strings.Contains(got[i], want) {
+					t.Errorf("disagreement %d = %q, want it to contain %q", i, got[i], want)
+				}
+			}
+		})
 	}
 }
 
