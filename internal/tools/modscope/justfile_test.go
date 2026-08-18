@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -500,42 +501,7 @@ func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 // agree, and an agreement reached that way would pass over any justfile at all
 // — the shape unsweptModscopeCallers refuses one level down.
 func TestParseJustfileAgreesWithJustOnThisJustfile(t *testing.T) {
-	justBin, err := exec.LookPath("just")
-	if err != nil {
-		t.Fatalf("`just` is not on PATH, and this test asks just what the %s declares "+
-			"rather than assuming it. CI installs just immediately before running these "+
-			"tests through it, so this is a broken environment and not a case to skip "+
-			"past: %v", justfilePath, err)
-	}
-
-	// just documents the JSON dump as unstable, so the flag is passed. Measured
-	// on the version CI pins and on the newer one this was written against:
-	// both accept the flag, and each reports the same recipes with it as
-	// without, so passing it is not what decides the answer.
-	cmd := exec.Command(justBin, "--justfile", justfilePath, "--unstable", "--dump", "--dump-format", "json")
-	cmd.Dir = repoRoot
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("`just --dump` on the %s: %v\n%s", justfilePath, err, stderr.String())
-	}
-
-	var dumped struct {
-		Recipes map[string]struct {
-			// Priors counts the dependencies just runs before the body. The
-			// rest are the ones written after `&&`, which parseJustfile drops
-			// on purpose: a sweep in that position runs after the walk it is
-			// there to protect.
-			Priors       int `json:"priors"`
-			Dependencies []struct {
-				Recipe string `json:"recipe"`
-			} `json:"dependencies"`
-		} `json:"recipes"`
-	}
-	if err := json.Unmarshal(out, &dumped); err != nil {
-		t.Fatalf("read `just --dump --dump-format json`: %v", err)
-	}
+	dumped := dumpJustfile(t, repoRoot, justfilePath)
 
 	src, err := os.ReadFile(filepath.Join(repoRoot, justfilePath))
 	if err != nil {
@@ -546,11 +512,82 @@ func TestParseJustfileAgreesWithJustOnThisJustfile(t *testing.T) {
 		t.Errorf("%s", c)
 	}
 
+	declared, err := priorDependencies(dumped)
+	if err != nil {
+		t.Fatalf("read the dependencies out of `just --dump`: %v", err)
+	}
+
+	for _, d := range justfileDisagreements(declared, read) {
+		t.Errorf("%s", d)
+	}
+}
+
+// dumpJustfile asks just what a justfile declares. dir is the directory just
+// runs in and path is the justfile relative to it.
+//
+// An absent just fails rather than skips: every caller here asks just what a
+// justfile declares rather than assuming it, so with just missing there is no
+// reduced question left to answer. CI installs just immediately before running
+// these tests through it.
+func dumpJustfile(t *testing.T, dir, path string) justDump {
+	t.Helper()
+	justBin, err := exec.LookPath("just")
+	if err != nil {
+		t.Fatalf("`just` is not on PATH, and this test asks just what the %s declares "+
+			"rather than assuming it, so this is a broken environment and not a case to "+
+			"skip past: %v", path, err)
+	}
+
+	// just documents the JSON dump as unstable, so the flag is passed. Measured
+	// on the version CI pins and on the newer one this was written against:
+	// both accept the flag, and each reports the same recipes with it as
+	// without, so passing it is not what decides the answer.
+	cmd := exec.Command(justBin, "--justfile", path, "--unstable", "--dump", "--dump-format", "json")
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("`just --dump` on the %s: %v\n%s", path, err, stderr.String())
+	}
+
+	var dumped justDump
+	if err := json.Unmarshal(out, &dumped); err != nil {
+		t.Fatalf("read `just --dump --dump-format json`: %v", err)
+	}
+	return dumped
+}
+
+// justDump is the part of `just --dump --dump-format json` this file reads.
+type justDump struct {
+	Recipes map[string]struct {
+		// Priors counts the dependencies just runs before the body. The rest
+		// are the ones written after `&&`, which parseJustfile drops on
+		// purpose: a sweep in that position runs after the walk it is there to
+		// protect. TestJustDumpCountsPriorsSeparatelyFromLaterDependencies
+		// asks just itself whether that is what the field means.
+		Priors       int `json:"priors"`
+		Dependencies []struct {
+			Recipe string `json:"recipe"`
+		} `json:"dependencies"`
+	} `json:"recipes"`
+}
+
+// priorDependencies reduces a dump to the dependencies just runs before each
+// recipe's body, which is the reading parseJustfile is compared against.
+//
+// It is a function rather than a few lines in the test above because the
+// truncation at Priors is what makes the two readings agree about `&&`, and the
+// justfile in this repo does not exercise it: measured on the 29 recipes at this
+// commit, every one has Priors equal to its whole dependency list, so a run that
+// ignored Priors would read the same answer.
+func priorDependencies(dumped justDump) (map[string][]string, error) {
 	declared := make(map[string][]string, len(dumped.Recipes))
 	for name, r := range dumped.Recipes {
-		if r.Priors > len(r.Dependencies) {
-			t.Fatalf("just reports recipe %s with %d dependencies running before its body "+
-				"out of %d it lists, which this test cannot read", name, r.Priors, len(r.Dependencies))
+		if r.Priors > len(r.Dependencies) || r.Priors < 0 {
+			return nil, fmt.Errorf(
+				"just reports recipe %s with %d dependencies running before its body out of "+
+					"%d it lists, which this reading cannot make sense of", name, r.Priors, len(r.Dependencies))
 		}
 		deps := make([]string, 0, r.Priors)
 		for _, d := range r.Dependencies[:r.Priors] {
@@ -558,9 +595,140 @@ func TestParseJustfileAgreesWithJustOnThisJustfile(t *testing.T) {
 		}
 		declared[name] = deps
 	}
+	return declared, nil
+}
 
-	for _, d := range justfileDisagreements(declared, read) {
-		t.Errorf("%s", d)
+// TestJustDumpCountsPriorsSeparatelyFromLaterDependencies asks just, rather than
+// this file's reading of its documentation, what `priors` counts. Everything
+// priorDependencies does rests on the answer, and the justfile in this repo
+// cannot supply it: no recipe here writes a dependency after `&&`, so on real
+// data Priors and the dependency list are the same length and the two readings
+// of the field are indistinguishable. This one writes a justfile that tells them
+// apart.
+func TestJustDumpCountsPriorsSeparatelyFromLaterDependencies(t *testing.T) {
+	dir := t.TempDir()
+	src := "before:\n    @true\n\nafter:\n    @true\n\nvuln: before && after\n    @true\n"
+	if err := os.WriteFile(filepath.Join(dir, "justfile"), []byte(src), 0o644); err != nil {
+		t.Fatalf("write the fixture justfile: %v", err)
+	}
+
+	dumped := dumpJustfile(t, dir, "justfile")
+	vuln, found := dumped.Recipes["vuln"]
+	if !found {
+		t.Fatalf("just read no recipe vuln out of %q", src)
+	}
+	if len(vuln.Dependencies) != 2 {
+		t.Fatalf("just lists %d dependencies for vuln, want both of them", len(vuln.Dependencies))
+	}
+	if vuln.Priors != 1 {
+		t.Fatalf("just reports priors=%d for `vuln: before && after`, and this file reads "+
+			"that field as the count of dependencies running before the body, which is 1 "+
+			"here. parseJustfile drops what runs after, so a different meaning makes the "+
+			"comparison against it wrong in the fail-open direction", vuln.Priors)
+	}
+	if got := vuln.Dependencies[0].Recipe; got != "before" {
+		t.Fatalf("just lists %s first among vuln's dependencies, and this file takes the "+
+			"first Priors entries as the ones that run first, so the order is not "+
+			"incidental", got)
+	}
+
+	declared, err := priorDependencies(dumped)
+	if err != nil {
+		t.Fatalf("priorDependencies over the fixture: %v", err)
+	}
+	if want := []string{"before"}; !slices.Equal(declared["vuln"], want) {
+		t.Errorf("priorDependencies read %v for vuln, want %v", declared["vuln"], want)
+	}
+	read, complaints := parseJustfile(src)
+	if len(complaints) != 0 {
+		t.Fatalf("complaints = %v, want none", complaints)
+	}
+	if d := justfileDisagreements(declared, read); len(d) != 0 {
+		t.Errorf("the two readings part over `vuln: before && after`: %v", d)
+	}
+}
+
+// TestPriorDependenciesReadsTheDumpJustWrites cuts the reduction one way at a
+// time. The live dump above reaches only the shape this repo's justfile has, so
+// the truncation, the field names and the refusal below are each unexercised
+// there.
+func TestPriorDependenciesReadsTheDumpJustWrites(t *testing.T) {
+	cases := []struct {
+		name    string
+		json    string
+		want    map[string][]string
+		wantErr string
+	}{
+		{
+			name: "only the dependencies running before the body are taken",
+			json: `{"recipes":{"vuln":{"priors":1,"dependencies":[{"recipe":"before"},{"recipe":"after"}]}}}`,
+			want: map[string][]string{"vuln": {"before"}},
+		},
+		{
+			// The shape this repo's justfile has, and the only one the live run
+			// reaches.
+			name: "every dependency runs before the body",
+			json: `{"recipes":{"vuln":{"priors":2,"dependencies":[{"recipe":"a"},{"recipe":"b"}]}}}`,
+			want: map[string][]string{"vuln": {"a", "b"}},
+		},
+		{
+			name: "a recipe with no dependencies reads as an empty list, not a missing one",
+			json: `{"recipes":{"vuln":{"priors":0,"dependencies":[]}}}`,
+			want: map[string][]string{"vuln": {}},
+		},
+		{
+			// Order is the answer, not the set: just runs them in the order it
+			// lists and justfileDisagreements compares the sequences.
+			name: "the listed order is kept",
+			json: `{"recipes":{"vuln":{"priors":2,"dependencies":[{"recipe":"b"},{"recipe":"a"}]}}}`,
+			want: map[string][]string{"vuln": {"b", "a"}},
+		},
+		{
+			// Not a shape just is known to emit. Refused rather than clamped,
+			// because clamping would silently shorten the closure this file
+			// walks, which is the fail-open direction.
+			name:    "more priors than dependencies is refused rather than clamped",
+			json:    `{"recipes":{"vuln":{"priors":3,"dependencies":[{"recipe":"a"}]}}}`,
+			wantErr: "3 dependencies running before its body out of 1",
+		},
+		{
+			name:    "a negative prior count is refused",
+			json:    `{"recipes":{"vuln":{"priors":-1,"dependencies":[{"recipe":"a"}]}}}`,
+			wantErr: "-1 dependencies running before its body",
+		},
+		{
+			// A dump with none of the field names this file reads unmarshals
+			// without error and yields zero values, so the field names are part
+			// of what these rows pin.
+			name: "a recipe just names but says nothing else about",
+			json: `{"recipes":{"vuln":{}}}`,
+			want: map[string][]string{"vuln": {}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var dumped justDump
+			if err := json.Unmarshal([]byte(tc.json), &dumped); err != nil {
+				t.Fatalf("unmarshal the fixture dump: %v", err)
+			}
+			got, err := priorDependencies(dumped)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("priorDependencies = %v, want an error mentioning %q", got, tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error = %q, want it to contain %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("priorDependencies: %v", err)
+			}
+			if !maps.EqualFunc(got, tc.want, slices.Equal) {
+				t.Errorf("priorDependencies = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
