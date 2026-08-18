@@ -8,12 +8,30 @@ set -euo pipefail
 
 just test
 
-# ensure-golangci self-heals the pinned binary in .bin/; it only fails when a
-# needed download is impossible (e.g. offline) — degrade to a warning then.
+# ensure-golangci self-heals the pinned binary in .bin/; a provisioning failure
+# BLOCKS the push. Until bd gqlc-l45j this arm warned and continued, justified
+# by the claim that a download only becomes impossible when you are offline.
+# Falsified on 2026-08-17: GitHub returned HTTP 429 on the golangci-lint
+# download under this repo's own CI concurrency, on a healthy network, and the
+# lint was skipped silently. Causes seen or reachable: no network; HTTP 429 or
+# another rate limit from raw.githubusercontent.com or the release CDN; a proxy
+# or firewall blocking either host; a pinned version whose release is not
+# published; a corrupt or unwritable .bin/. The list is open, which is why an
+# unrecognised cause blocks instead of passing.
+#
+# GQLC_ALLOW_MISSING_LINTER=1 skips the lint and says so — narrower than
+# `git push --no-verify`, which drops the test run above with it. The download
+# is only reached on a fresh worktree or after a version bump, so an offline
+# developer with a warm .bin/ never reaches this arm.
 if just ensure-golangci >/dev/null 2>&1; then
   just lint-new
+elif [ "${GQLC_ALLOW_MISSING_LINTER:-}" = "1" ]; then
+  echo "WARN: golangci-lint unavailable; lint SKIPPED by GQLC_ALLOW_MISSING_LINTER=1" >&2
 else
-  echo "WARN: could not provision golangci-lint (offline?); skipping lint" >&2
+  echo "ERROR: could not provision golangci-lint, so lint-new did not run." >&2
+  echo "       Diagnose with: just ensure-golangci" >&2
+  echo "       Push anyway (skips the lint): GQLC_ALLOW_MISSING_LINTER=1 git push ..." >&2
+  exit 1
 fi
 
 # GH↔bd sync: push locally-created beads to GH.
