@@ -40,8 +40,10 @@ have, and on those two states it reports nothing. The Bash hook has silent
 states of its own: a cwd outside any repo; a repo that ships no `.githooks/` at
 all, per the definition above, even with `core.hooksPath` unset; and a
 *non-gated* command aimed at a drifted repo from a healthy directory
-(`git -C <drifted> status`), because the warn half never leaves the hook's own
-directory. Each is a pinned row in `.githooks/tests/claude-pre-bash-test.sh`.
+(`git -C <drifted> status`), because the warn half keys on the hook's own
+directory — resolved up to that directory's repo root, so a subdirectory warns
+too — and never follows the command's target. Each is a pinned row in
+`.githooks/tests/claude-pre-bash-test.sh`.
 
 ## Development
 

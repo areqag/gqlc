@@ -221,9 +221,9 @@ run_drift_case "unset: cherry-pick only warns"       warn       "$UNSET_REPO"  '
 run_drift_case "unset: rebase only warns"            warn       "$UNSET_REPO"  'git rebase origin/master'
 run_drift_case "unset: am only warns"                warn       "$UNSET_REPO"  'git am /tmp/x.patch'
 # stash, tag and fetch were measured firing none of the four as well, so they
-# warn like any other command. These rows exist because without them, adding
-# all three to HOOK_GATED turned no row red: membership is pinned only for the
-# subcommands some row names.
+# take the non-gated path, which warns here because the cwd is drifted. These
+# rows exist because without them, adding all three to HOOK_GATED turned no row
+# red: membership is pinned only for the subcommands some row names.
 run_drift_case "unset: stash only warns"             warn       "$UNSET_REPO"  'git stash push -u'
 run_drift_case "unset: tag only warns"               warn       "$UNSET_REPO"  'git tag -a v1 -m x'
 run_drift_case "unset: fetch only warns"             warn       "$UNSET_REPO"  'git fetch'
