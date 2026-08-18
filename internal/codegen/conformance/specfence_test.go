@@ -622,7 +622,27 @@ func requireCensus(t fenceT, written []string, observed map[string]bool, census,
 	}
 }
 
-// fenceT is the part of *testing.T the two helpers above use, narrowed so
+// requireSwept refuses a run that read nothing, ahead of any comparison
+// quantified over what it read. requireCensus covers the case where one
+// side is a written literal; this one covers the case where both sides are
+// built at runtime, or where the written side is a literal the same edit
+// can empty.
+//
+// The argument is the count rather than the collection because the callers
+// hold three shapes — a []entityDecoder, a []string and a map[error]bool —
+// and the length is what they have in common.
+func requireSwept(t fenceT, read int, subject, why string) {
+	t.Helper()
+
+	if read == 0 {
+		require.Fail(t, subject+" read nothing",
+			"a comparison quantified over what a run read is answered by an empty list on both sides, so\n"+
+				"emptying what the run reads and what the comparison expects in a single edit reconciles\n"+
+				"clean without this arm:\n\n"+why)
+	}
+}
+
+// fenceT is the part of *testing.T the three helpers above use, narrowed so
 // a witness can stand in for it (ADR 0029 decision 7). The witnesses are
 // TestSpecFailuresAreWired, TestSpecCensusReconcilesBothDirections,
 // TestSpecSweepsCarryUnreadableSites and
@@ -723,6 +743,14 @@ func TestSpecFailuresAreWired(t *testing.T) {
 		},
 		wantFail: true,
 		wantMsg:  []string{"census names the same entry twice"},
+	}, {
+		name: "requireSwept passes over a run that read something",
+		call: func(ft fenceT) { requireSwept(ft, 1, "the sweep", "why") },
+	}, {
+		name:     "requireSwept fails on a run that read nothing",
+		call:     func(ft fenceT) { requireSwept(ft, 0, "the sweep", "why") },
+		wantFail: true,
+		wantMsg:  []string{"the sweep read nothing", "why"},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := captureFence(tc.call)
