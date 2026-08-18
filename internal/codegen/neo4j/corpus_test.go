@@ -83,19 +83,23 @@ const stubModule = "module " + driverModule + "\n\ngo 1.26.2\n"
 // either check: the vet pass `go test` runs over the child module
 // refuses to build it, "malformed name".
 //
-// A fixture emptied to its package clause was caught too, by a
-// require.NotEmpty over the census that this list replaces. That case is
-// worth keeping in view because the child run reports it as a success:
-// `go test` prints `[no tests to run]` and exits 0 over a _test.go
-// declaring no tests, so the child's exit status says nothing about it.
-// A non-empty list cannot match the empty pass set such a run produces,
-// which is how requiring this exact set covers it now.
+// A fixture emptied to its package clause is a child run that reports
+// success: `go test` prints `[no tests to run]` and exits 0 over a
+// _test.go declaring no tests, so the child's exit status says nothing
+// about it. Requiring this exact set catches such a run, because the
+// pass set it produces is empty and this list is not.
 //
-// This list is a declaration, not a gate. Removing a test from the
-// fixture and removing its name from here is a two-line change in one
-// commit, and nothing here prevents it. What it costs the remover is
-// having to write the removal down in a file the child module is never
-// handed.
+// "This list is not" is a condition, not a property of the list.
+// Emptying the fixture and this literal together leaves both sides of
+// the comparison empty, and two empty sets match. The census this list
+// replaces carried a require.NotEmpty against that silence; the test
+// below requires this list non-empty before it compares.
+//
+// This list is a declaration, not a gate. Down to the last name,
+// removing a test from the fixture and removing its name from here is a
+// two-line change in one commit that nothing here prevents. What it
+// costs the remover is having to write the removal down in a file the
+// child module is never handed.
 var corpusTests = []string{
 	"TestBinCarriesNullElements",
 	"TestBinNullabilityAndShape",
@@ -187,6 +191,8 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 
 	passed, log, err := runCorpus(t, dir)
 	require.NoError(t, err, "the emitted decoders do not satisfy the driver-value corpus:\n%s", log)
+	require.NotEmpty(t, corpusTests,
+		"corpusTests names no test, so the set comparison below is satisfied by a child run that ran none")
 	require.ElementsMatch(t, corpusTests, passed,
 		"the corpus module's passing tests are not the set corpusTests names: a name here that did "+
 			"not come back as a pass, or a pass whose name is not here:\n%s", log)

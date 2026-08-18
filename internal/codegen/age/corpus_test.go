@@ -81,16 +81,23 @@ func (d *recordingDB) Exec(ctx context.Context, sql string, args ...any) (int, e
 // comparison green. Held against this list both fail, because this list
 // does not move when the fixture does.
 //
-// It also covers the require.NotEmpty over that census which it
-// replaces. `go test` prints `[no tests to run]` and exits 0 over a
-// _test.go declaring no tests, so an emptied fixture is a child run that
-// reports success, and a non-empty list cannot match the empty pass set
-// such a run produces.
+// A fixture emptied to its package clause is a child run that reports
+// success: `go test` prints `[no tests to run]` and exits 0 over a
+// _test.go declaring no tests, so the child's exit status says nothing
+// about it. Requiring this exact set catches such a run, because the
+// pass set it produces is empty and this list is not.
 //
-// The list is a declaration, not a gate. Removing a test from the fixture
-// and removing its name from here is a two-line change in one commit, and
-// nothing here prevents it. What it costs the remover is having to write
-// the removal down in a file the child module is never handed.
+// "This list is not" is a condition, not a property of the list.
+// Emptying the fixture and this literal together leaves both sides of
+// the comparison empty, and two empty sets match. The census this list
+// replaces carried a require.NotEmpty against that silence; the test
+// below requires this list non-empty before it compares.
+//
+// The list is a declaration, not a gate. Down to the last name, removing
+// a test from the fixture and removing its name from here is a two-line
+// change in one commit that nothing here prevents. What it costs the
+// remover is having to write the removal down in a file the child module
+// is never handed.
 var corpusTests = []string{
 	"TestAgtypeString",
 	"TestAgtypeBool",
@@ -164,6 +171,8 @@ func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 
 	passed, log, err := s.runCorpus(dir)
 	s.Require().NoError(err, "the emitted helpers do not satisfy the captured corpus:\n%s", log)
+	s.Require().NotEmpty(corpusTests,
+		"corpusTests names no test, so the set comparison below is satisfied by a child run that ran none")
 	s.Require().ElementsMatch(corpusTests, passed,
 		"the corpus module's passing tests are not the set corpusTests names: a name here that did "+
 			"not come back as a pass, or a pass whose name is not here:\n%s", log)
