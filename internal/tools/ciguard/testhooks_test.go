@@ -27,11 +27,13 @@
 // # test-hooks` is a `test` recipe that does not depend on `test-hooks`, and an
 // indented `# bash .githooks/tests/foo-test.sh` is a suite the recipe does not
 // run; matched against raw bytes, as this file did, both read as the link being
-// there (bd gqlc-sgot). Neither passed the package: TestTestHooksIsReachedByARecipeCIRuns
-// and TestEveryHookTestSuiteIsNamedByTestHooks read their justfile through a
-// comment strip already and reddened on them. What was wrong was narrower and
-// is what is fixed — a pin that cannot fail on the link it names reports on
-// nothing, and two of the three below could not.
+// there (bd gqlc-sgot). Neither passed the package, though, and not through one
+// test: the commented-out dependency reddened TestTestHooksIsReachedByARecipeCIRuns,
+// the commented-out suite line reddened TestEveryHookTestSuiteIsNamedByTestHooks,
+// and neither of those two reddened on the other's input. Both read their
+// justfile through a comment strip already. So what was wrong here was narrower
+// than a hole in CI and is still worth fixing: a pin that cannot fail on the
+// link it names reports on nothing, and neither justfile pin below could.
 //
 // Asserted here rather than inside the suites because a suite that has been
 // unwired does not run, so it cannot be the thing that notices.
