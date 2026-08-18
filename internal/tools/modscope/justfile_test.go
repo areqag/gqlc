@@ -486,17 +486,27 @@ func TestUnsweptModscopeCallersFindsEachBrokenWiring(t *testing.T) {
 // same argument one level down — the double-quote family escapes and the raw
 // families do not, so a single rule applied to both mis-reads one of them.
 //
-// WHAT THIS STILL DOES NOT REACH, in the order the reader meets them:
+// WHAT THIS STILL DOES NOT REACH. A sweep of 29 header shapes through both
+// just 1.57.0 and this reader leaves three they answer differently, and they
+// are worth telling apart by which way each one fails:
 //
 //   - A header whose parameter default opens a literal it does not close on
 //     the same line. just accepts one, because a triple-quoted default may
-//     span lines, and this reader is line-based. The last row pins the drop so
-//     it stays a choice; it is the fail-open direction, since a caller lost
-//     that way is not reported and nothing else here notices.
+//     span lines, and this reader is line-based, so it drops the recipe. This
+//     is the only one of the three that fails open — a caller lost this way is
+//     not reported and nothing else here notices — which is why the last row
+//     below pins the drop, so that it stays a choice.
 //   - A trailing `# …` comment on a header, which just ignores and this reader
-//     takes for dependencies. That one fails closed rather than open, and
-//     TestParseJustfileMisreadsATrailingCommentLoudly below is what holds it
-//     to the loud half.
+//     takes for dependency names. Fails closed: the invented names resolve to
+//     no recipe, so the dangling-dependency complaint fires.
+//     TestParseJustfileMisreadsATrailingCommentLoudly below holds it there.
+//   - A line inside a multi-line string assignment that is spelled like a
+//     header, which this reader reads as a recipe just does not have. It adds
+//     rather than hides: a phantom sharing a real recipe's name raises the
+//     read-twice complaint instead of shadowing it, and one that does not
+//     share a name is a recipe nothing depends on and no caller. No assignment
+//     in this repo's justfile is triple-quoted today, so this is prospective;
+//     the row below is what would notice it changing.
 func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 	cases := []struct {
 		name string
@@ -611,7 +621,18 @@ func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
 		},
 		{
-			// THE LIMIT THIS READER STILL HAS. just accepts a triple-quoted
+			// A LIMIT THIS READER STILL HAS, and the one it answers by
+			// inventing rather than dropping: the assignment's value is a
+			// multi-line string, so just reads no recipe here at all.
+			name: "a header spelled inside a string assignment is read anyway",
+			src:  "x := \"\"\"\nhello: world\n\"\"\"\nvuln: sweep\n    echo hi\n",
+			want: []justRecipe{
+				{name: "hello", deps: []string{"world"}},
+				{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"},
+			},
+		},
+		{
+			// A LIMIT THIS READER STILL HAS. just accepts a triple-quoted
 			// default spanning lines, and this reader is line-based: neither
 			// physical line carries a separating colon outside a literal, so
 			// the recipe is dropped rather than mis-read. Dropped is the
