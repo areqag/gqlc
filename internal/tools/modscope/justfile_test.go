@@ -638,10 +638,16 @@ func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 			// the recipe is dropped rather than mis-read. Dropped is the
 			// fail-open direction — a caller lost this way is not reported —
 			// and this row is here so that the drop stays a choice. Measured:
-			// a justfile whose header is `vuln x="""a` / `b:=c""": sweep` is
-			// accepted by just 1.57.0 at rc=0.
+			// just 1.57.0 reads this source at rc=0 as vuln depending on sweep.
+			//
+			// The default carries a colon on its first physical line on
+			// purpose. That is what separates dropping the line from resuming
+			// after an unclosed delimiter: a reader that stepped over the
+			// opening quote instead would re-pair the remaining quotes, find
+			// the colon in `a:b`, and read a recipe named vuln that depends on
+			// something called b.
 			name: "a default spanning two lines leaves the header unread",
-			src:  "vuln x=\"\"\"a\nb:=c\"\"\": sweep\n    echo ./" + modscopePkg + "\n",
+			src:  "vuln x=\"\"\"a:b\nc:=d\"\"\": sweep\n    echo ./" + modscopePkg + "\n",
 			want: nil,
 		},
 	}
