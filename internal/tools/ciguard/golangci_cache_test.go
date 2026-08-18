@@ -522,7 +522,8 @@ func linterRecipes(t *testing.T) map[string]bool {
 	return reaches
 }
 
-// justInvocations returns the recipe names a step's shell runs through `just`.
+// justInvocations returns the words a step's shell block spells directly after
+// `just`, which both callers read as recipe names.
 //
 // Read through uncommented, so a commented-out invocation reads as absent
 // rather than as present: `run: |` with `# just test` above `echo skipped`
@@ -531,9 +532,30 @@ func linterRecipes(t *testing.T) map[string]bool {
 // The strip is here rather than at the two call sites so that a third caller
 // does not inherit the raw scan; that is how this became the third site in the
 // package with the same defect.
+//
+// The separator is space or tab, not `\s`, and there is no `(?m)`: with no `^`
+// or `$` in the pattern that flag was inert, and reading it as line-scoping is
+// what let `\s` stand. `\s` matches `\n`, so once the strip dropped a comment
+// line the `just` above it fused with the next line's first word.
+// `command -v just  # retired` over `test -n x` came back as `just test`, and
+// this scan reported the CI test job running `just test` while it ran no recipe
+// at all (ci.yml md5 83c139ca to 1e4fbc40: package green under `\s+`, red
+// here). Dropping text added a recipe name rather than losing one.
+//
+// Space and tab are what bash splits words on inside a line. A newline ends the
+// command instead of separating its arguments, and a carriage return or a form
+// feed separates nothing at all — `[^\S\n]` accepts both of those and reads
+// `command -v just` with a CR or an FF before `test` as `just test` (md5
+// bca84c62 and 764788b7: package green under `[^\S\n]`, red here).
+//
+// What this does not do is decide which word is the command. `command -v just
+// test` on one line reads here as an invocation of `test` (md5 96f4eeaa,
+// package green), so a job that runs no recipe can still satisfy the
+// reachability check. That limit is the scan's rather than the strip's: the
+// same line matches before the strip too.
 func justInvocations(run string) []string {
 	var out []string
-	re := regexp.MustCompile(`(?m)\bjust\s+([a-zA-Z0-9_-]+)`)
+	re := regexp.MustCompile(`\bjust[ \t]+([a-zA-Z0-9_-]+)`)
 	for _, m := range re.FindAllStringSubmatch(uncommented(run), -1) {
 		out = append(out, m[1])
 	}
