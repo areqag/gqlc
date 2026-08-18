@@ -558,6 +558,61 @@ func sealedInterfaces(t *testing.T) map[string][]string {
 	return got
 }
 
+// variantsDeclaringAField returns, sorted, the subset of names whose type
+// declaration in the package query sources of this directory is a struct
+// declaring at least one field. Embedded fields count: the parser lists them
+// as fields with no name. The result is a subset rather than a per-name count
+// because ast.StructType groups `a, b int` into one entry, so a count read
+// here would not be a count of fields.
+//
+// A name the directory declares as something other than a struct, and a name
+// it does not declare at all, fail here. Reporting either as "declares no
+// field" would put a shape this walk cannot read on the no-parameter side of
+// the caller's comparison.
+//
+// Reads the same sources through the same parseQueryPackage helper that
+// declaredMarkers and sealedInterfaces read, and walks the AST for the reason
+// that helper states: a commented-out field satisfies a grep.
+func variantsDeclaringAField(t *testing.T, names []string) []string {
+	t.Helper()
+	fset, files := parseQueryPackage(t)
+
+	wanted := map[string]bool{}
+	for _, name := range names {
+		wanted[name] = true
+	}
+
+	seen := map[string]bool{}
+	var got []string
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok || !wanted[ts.Name.Name] {
+					continue
+				}
+				st, isStruct := ts.Type.(*ast.StructType)
+				require.Truef(t, isStruct,
+					"%s: %s is declared as %T rather than a struct, which this walk cannot read for fields", fset.Position(ts.Pos()), ts.Name.Name, ts.Type)
+				seen[ts.Name.Name] = true
+				if st.Fields != nil && len(st.Fields.List) > 0 {
+					got = append(got, ts.Name.Name)
+				}
+			}
+		}
+	}
+	for _, name := range names {
+		require.Truef(t, seen[name],
+			"%s declares a marker in this directory but no type declaration for it was found here, so whether it carries a field went unread", name)
+	}
+	sort.Strings(got)
+	return got
+}
+
 // interfaceDoc returns the doc comment on the named interface declaration.
 // Requiring exactly one declaration keeps a rename or a move from emptying the
 // text the rows below read, which would satisfy those rows rather than fail
@@ -741,4 +796,35 @@ func TestQuerySumsAreNotClosed(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestTypeListIsTheOnlyVariantDeclaringAField holds the premise
+// internal/query/cypher's commonType rests on. That function compares two
+// Types by String rather than by concrete Go type, and cites TypeList as the
+// variant that carries a parameter: TypeList renders its element into String,
+// so the parameter reaches that comparison. A second variant carrying a
+// parameter whose String did not render it would compare equal there across
+// values this package had built as distinct.
+//
+// "Carries a parameter" is read here as "declares a struct field", which is
+// what an AST walk can see. The two part company for a variant that reaches
+// state some other way — through a method over package-level state, say —
+// which this reading would report as carrying none.
+//
+// The domain is declaredMarkers' own output rather than a list written here,
+// so a variant landing in the sum is read by this test without an edit.
+// TestQuerySumsAreNotClosed/Type/declared_variants is what holds that domain
+// to the sealedSums table; this test does not check the census and would pass
+// against a gutted one. It cannot pass against an empty one: the expected set
+// below is non-empty, so an empty domain fails here rather than agreeing.
+func TestTypeListIsTheOnlyVariantDeclaringAField(t *testing.T) {
+	var names []string
+	for _, entry := range declaredMarkers(t, "isType") {
+		// A marker on a pointer receiver is reported with a leading "*"; the
+		// field declaration it points at is on the named type either way.
+		names = append(names, strings.TrimPrefix(entry, "*"))
+	}
+
+	require.Equal(t, []string{"TypeList"}, variantsDeclaringAField(t, names),
+		`the Type variants declaring a struct field are no longer TypeList alone. What this walk read is a struct field declaration, which is where one value of a struct differs from another; internal/query/cypher's commonType compares Types by String, so it tells two values apart only where what differs between them is rendered into String, as TypeList's element is ("list<list<int>>"). For a name added here the question is whether two of its values can differ in that field: if they can, render it into that variant's String or change commonType to stop comparing by String; if they cannot — a zero-size field has one value — nothing but this expectation needs the edit. For TypeList's absence the question is what two TypeLists built from different elements render at the same time: a String can render an element with no field to hold it, one call at a time, over package-level state. commonType's comment names TypeList's element and this expectation names the field; amend whichever the answer moves`)
 }
