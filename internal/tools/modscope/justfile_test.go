@@ -519,11 +519,17 @@ func TestParseJustfileAgreesWithJustOnThisJustfile(t *testing.T) {
 
 	bodies := recipeBodies(dumped)
 
-	// Asserted of just's reading specifically. unsweptModscopeCallers already
-	// refuses a run in which no body IT read names modscopePkg, but that is the
-	// other side: were the dump to stop carrying bodies, every body here would
-	// be empty and the mention clause below would have nothing to disagree
-	// about on this side, which is not the same as agreeing.
+	// Asserted of just's reading specifically, and as a second witness rather
+	// than the only one. Measured: make recipeBodies keep no text at all and
+	// the mention clause below already reports it, because the recipes this
+	// reader reads as naming modscopePkg then have no counterpart on just's
+	// side — that mutation stays RED with this guard removed. What the guard
+	// adds is that the catch does not rest on the clause below keeping both
+	// of its directions; drop both and this line is what still fires.
+	//
+	// unsweptModscopeCallers refuses a run in which no body IT read names
+	// modscopePkg. That is the other source, and one source going quiet is
+	// not the other one agreeing.
 	naming := 0
 	for _, body := range bodies {
 		if strings.Contains(body, modscopePkg) {
@@ -631,6 +637,12 @@ func priorDependencies(dumped justDump) (map[string][]string, error) {
 // using a variable. What the comparison asks of a body is whether it spells
 // modscopePkg, and an interpolated path is a limit already recorded at
 // modscopePkg (bd gqlc-wkio) rather than one this reduction introduces.
+//
+// The newline join reconstructs the body rather than a run-together of it, and
+// on this repo's justfile the mention does not rest on it: every recipe whose
+// body names modscopePkg names it inside a single body line, and no adjacent
+// pair of lines runs together into a new one, so joining with "" selects the
+// same four recipes. That is a fact about this justfile, not about the join.
 //
 // Two other differences measured on this repo's justfile at just 1.57.0 say the
 // same thing about whole-text equality: the dump drops each body line's leading
