@@ -96,10 +96,10 @@ const stubModule = "module " + driverModule + "\n\ngo 1.26.2\n"
 // below requires this list non-empty before it compares.
 //
 // This list is a declaration, not a gate. Down to the last name,
-// removing a test from the fixture and removing its name from here is a
-// two-line change in one commit that nothing here prevents. What it
-// costs the remover is having to write the removal down in a file the
-// child module is never handed.
+// removing a test from the fixture and removing its name from here is
+// one commit's edit that nothing here prevents. What it costs the
+// remover is having to write the removal down in a file the child
+// module is never handed.
 var corpusTests = []string{
 	"TestBinCarriesNullElements",
 	"TestBinNullabilityAndShape",
