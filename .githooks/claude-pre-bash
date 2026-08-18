@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
-# Claude Code PreToolUse hook for the Bash tool.
-# Denies `git commit` when the command's EFFECTIVE target repo is on
-# master/main. The target is resolved by analysis, not raw pattern-matching:
-#   - heredoc bodies are stripped (prose there never executes)
+# Claude Code PreToolUse hook for the Bash tool. Two jobs:
+#
+#   1. Denies `git commit` when the command's EFFECTIVE target repo is on
+#      master/main.
+#   2. Reports core.hooksPath drift, and refuses the git subcommands the dead
+#      hooks would have gated. See hooks_drift() for why this detector lives
+#      here rather than in a git hook.
+#
+# The target is resolved by analysis, not raw pattern-matching:
+#   - heredoc bodies are stripped, so a `git commit` written there is data
+#     rather than a command. That holds for a QUOTED delimiter (<<'EOF'). An
+#     unquoted one still expands $(...) in its body, and stripping runs before
+#     substitutions are extracted, so that case is missed -> allow (bd
+#     gqlc-wa8c; measured, with a non-heredoc positive control that denies)
 #   - $(...) and `...` substitution bodies are analyzed recursively (they
 #     execute for real, even inside double quotes)
-#   - the rest is shlex-tokenized; quoted prose becomes single tokens and
-#     can never look like a `git commit` invocation
+#   - the rest is shlex-tokenized, so a multi-word quoted run collapses to one
+#     token and stops matching: `echo "git commit -m x"` is silent (measured).
+#     Word-by-word quoting does not collapse, so `echo "git" "commit" -m x`
+#     still denies (measured, control `echo git commit` denies too). The error
+#     is fail-closed, so it is left as is rather than widened into a parser
 #   - `cd` chains and `git -C` options fold into an effective directory,
 #     whose branch is read via git rev-parse / symbolic-ref (the latter
 #     covers unborn HEADs)
@@ -26,9 +39,27 @@
 # If shlex cannot tokenize at all, falls back to the old whole-text regex
 # checked at the hook's own cwd.
 #
+# What the hooksPath half does NOT catch, all fail-open for the same reason
+# (this runs before every Bash call in every concurrent session, so a false
+# positive costs more than a missed detection):
+#   - a repo whose .githooks/ directory is gone entirely: nothing then
+#     distinguishes it from an unrelated repo that never had hooks, so the
+#     check stays silent rather than firing in every repo on the machine
+#   - the shlex fallback regex covers `git commit` only, so a command that
+#     fails to tokenize and then merges, pulls or pushes is warned about but
+#     not refused
+#   - the config value is compared literally, not resolved: an absolute path
+#     naming the very same directory still reads as drift (see HOOKS_DIRNAME)
+#   - an internal error in this hook warns and allows rather than denying (see
+#     __main__): a bug here must not be able to block its own repair. It is no
+#     longer *silent*, which is the part that mattered — a detector that exits
+#     0 on its own bug is the failure this hook exists to catch.
+#
 # Hook contract: JSON on stdin { "tool_name": "Bash",
 #   "tool_input": { "command": "..." } }. Deny = exit 0 + JSON with
-# permissionDecision "deny"; allow = exit 0, no output.
+# permissionDecision "deny"; warn = exit 0 + JSON with systemMessage and
+# additionalContext but NO permissionDecision (an explicit "allow" would
+# waive the user's permission prompt); allow = exit 0, no output.
 #
 # Tests: .githooks/tests/claude-pre-bash-test.sh (run via `just test-hooks`).
 
@@ -40,6 +71,41 @@ import subprocess
 import sys
 
 PROTECTED = ("master", "main")
+# The value `just init` writes and `just check-hooks` requires. Relative on
+# purpose: git resolves it against each working tree's root, so one shared
+# .git/config activates the hooks OF the branch each linked worktree has
+# checked out. Measured with a two-worktree fixture, the same commit in the
+# linked worktree ran the linked worktree's pre-commit under `.githooks` and
+# the MAIN worktree's under `/abs/path/to/main/.githooks` — so an absolute
+# path is drift even when it names a directory full of live hooks.
+HOOKS_DIRNAME = ".githooks"
+# git subcommands refused while the hooks are dead, picked by measuring which
+# ones run a hook this repo ships rather than by reasoning about it. Measured on
+# git 2.55.0 against .githooks/{pre-commit,commit-msg,pre-push,post-merge}, each
+# armed to log and exit 0 so the chain continues: `commit` and `commit --amend`
+# fire pre-commit and commit-msg; a non-fast-forward `merge` or `pull` fires
+# commit-msg and post-merge (not pre-commit); `push` fires pre-push. In the
+# same fixture `revert`, `cherry-pick` (with and without -e), `rebase` and `am`
+# fired none of the four. merge/pull are refused rather than warned about
+# because post-merge runs bd-gh-sync, NOT because of AI attribution: commit-msg
+# does fire on a merge, but .githooks/commit-msg:15-17 exits 0 whenever
+# MERGE_HEAD is set, ahead of both the identity checks and the Co-Authored-By
+# scan, so a merge commit carrying a Claude trailer is accepted rc=0 with the
+# hooks HEALTHY (measured, against a plain-commit control rejected rc=1 in the
+# same repo). What a drifted merge or pull loses is therefore at most
+# post-merge — the stale bd mirror. Pre-existing and out of scope here: bd
+# gqlc-7y7e.
+# What a merge or pull fires varies by shape, and the subcommand this hook keys
+# on does not determine the shape. Measured in the same fixture: a fast-forward
+# `merge` or `pull` writes no commit but still fires post-merge, the bd-gh-sync
+# mirror; `merge --squash` writes no commit either and also fires post-merge;
+# `pull --rebase` fires post-merge while the branch is still fast-forwardable
+# and nothing once it has diverged; plain `rebase` and a 3-way
+# `merge --no-commit` fire nothing. `pull` alone therefore spans shapes firing
+# two of the four, one, and none. Gating the subcommand refuses that last group
+# too — the conservative side of a distinction this hook cannot make before the
+# fact.
+HOOK_GATED = ("commit", "merge", "pull", "push")
 HEREDOC_RE = re.compile(r"(?<!<)<<(-?)\s*([\"']?)(\w+)\2")
 SUBST_RE = re.compile(r"\$\(([^()]*)\)")
 BACKTICK_RE = re.compile(r"`([^`]*)`")
@@ -117,7 +183,7 @@ def resolve(base, path):
     return os.path.join(base, path) if base else None
 
 
-def scan_tokens(tokens, cwd):
+def scan_tokens(tokens, cwd, wanted):
     targets = []
     i, n = 0, len(tokens)
     while i < n:
@@ -151,21 +217,22 @@ def scan_tokens(tokens, cwd):
                 else:
                     sub = opt
                     break
-            if sub == "commit" and target is not None:
-                targets.append(target)
+            if sub in wanted and target is not None:
+                targets.append((sub, target))
             i = j + 1
             continue
         i += 1
     return targets
 
 
-def commit_targets(text, cwd, depth=0):
+def git_targets(text, cwd, wanted, depth=0):
+    # -> [(subcommand, effective directory)], need_fallback
     if depth > 3:
         return [], False
     text = strip_heredocs(text)
     targets, need_fallback = [], False
     for body in substitution_bodies(text):
-        sub_targets, sub_fallback = commit_targets(body, cwd, depth + 1)
+        sub_targets, sub_fallback = git_targets(body, cwd, wanted, depth + 1)
         targets.extend(sub_targets)
         need_fallback = need_fallback or sub_fallback
     try:
@@ -174,7 +241,7 @@ def commit_targets(text, cwd, depth=0):
         tokens = list(lex)
     except ValueError:
         return targets, True
-    targets.extend(scan_tokens(tokens, cwd))
+    targets.extend(scan_tokens(tokens, cwd, wanted))
     return targets, need_fallback
 
 
@@ -201,40 +268,207 @@ def branch_of(directory):
     return ""
 
 
+def repo_root(directory):
+    # git's own discovery rule: the first ancestor holding a .git entry — a
+    # directory in a normal clone, a file in a linked worktree. Pure stat, no
+    # subprocess, because this runs before every Bash call in every session.
+    cur = os.path.realpath(directory)
+    while True:
+        if os.path.exists(os.path.join(cur, ".git")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
+def has_live_hook(directory):
+    # git runs a hook only when it is an executable file, and it ships its
+    # templates suffixed .sample so it will skip them. Restating that rule is
+    # what makes this "points at hooks that will run" rather than "points
+    # somewhere": an existence or non-emptiness test is satisfied by a
+    # directory of executable *.sample files, which is what a default
+    # .git/hooks holds and what both recorded drifts pointed at (bd gqlc-5fm,
+    # gqlc-hd68). Those two are caught one step earlier, by the value
+    # comparison; this covers the residue the value cannot see — hooksPath
+    # correct, .githooks/ present, and nothing in it that git would execute.
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.name.endswith(".sample"):
+                    continue
+                if entry.is_file() and os.access(entry.path, os.X_OK):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+_DRIFT_CACHE = {}
+
+
+def hooks_drift(directory):
+    """Reason string when .githooks/ is not what git will run, else None.
+
+    Lives here rather than in a git hook because a deactivated git hook does
+    not run and so cannot report its own deactivation, and the drift
+    deactivates all of .githooks/ at once, repo-wide — linked worktrees share
+    one .git/config. This file is wired through .claude/settings.json, so
+    core.hooksPath does not govern whether it runs. What that buys is latency,
+    and in two states coverage as well. Latency: `just check-hooks` runs when
+    someone runs it, in practice as a dependency of `just test` / `just
+    doctor`, and the window between the drifting write and the next such run
+    is what went unobserved for 30+ minutes across five sessions (bd
+    gqlc-nzwa). Coverage: check-hooks compares the configured value and
+    nothing else, so on the two states has_live_hook() below adds — value
+    correct, .githooks/ present, holding only *.sample files or a hook left
+    non-executable — check-hooks exits 0 and `just doctor` prints "ok" while
+    this refuses (measured; both states are fixtures in the test suite,
+    DEAD_REPO and NOEXEC_REPO). The latency half applies only to Bash tool
+    calls inside a Claude Code session; nothing here runs for a plain
+    terminal, an editor's git integration or a non-Bash tool, and
+    `just check-hooks` is what those have.
+
+    Silent — never a reason — for a cwd outside any repo and for repos that
+    ship no .githooks/. This runs ahead of every Bash call in every session,
+    including the ones needed to repair the drift, so anything it cannot
+    positively identify as this repo's broken state has to fail open.
+    """
+    root = repo_root(directory)
+    if root is None:
+        return None
+    if root in _DRIFT_CACHE:
+        return _DRIFT_CACHE[root]
+    reason = None
+    hooks = os.path.join(root, HOOKS_DIRNAME)
+    if os.path.isdir(hooks):
+        # Repo-discovery env would redirect -C at whichever repo set it.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        try:
+            proc = subprocess.run(
+                ("git", "-C", root, "config", "--get", "core.hooksPath"),
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=env,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            proc = None
+        if proc is not None:
+            # rc 1 is "not set", which is drift: git then runs $GIT_DIR/hooks.
+            value = proc.stdout.strip() if proc.returncode == 0 else ""
+            if value != HOOKS_DIRNAME:
+                reason = (
+                    "local git hooks are inactive: core.hooksPath in %s is %s, "
+                    "expected '%s' (commit-msg, pre-commit, pre-push and post-merge "
+                    "are all dead). Repair: just init"
+                    % (root, "'%s'" % value if value else "<unset>", HOOKS_DIRNAME)
+                )
+            elif not has_live_hook(hooks):
+                reason = (
+                    "local git hooks are inactive: core.hooksPath in %s is '%s', but "
+                    "%s holds no executable hook (git ignores *.sample). "
+                    "Repair: restore the hook scripts, then just init"
+                    % (root, HOOKS_DIRNAME, hooks)
+                )
+    _DRIFT_CACHE[root] = reason
+    return reason
+
+
+_EMITTED = False
+
+
+def emit(payload):
+    global _EMITTED
+    _EMITTED = True
+    print(json.dumps(payload))
+
+
+def deny(reason):
+    print("ERROR: %s" % reason, file=sys.stderr)
+    emit(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+    )
+
+
+def warn(reason):
+    # Non-blocking on purpose, and deliberately NOT permissionDecision:"allow"
+    # — that would waive the permission prompt for every command it touched.
+    # systemMessage reaches the user, additionalContext reaches the model.
+    print("WARN: %s" % reason, file=sys.stderr)
+    emit(
+        {
+            "systemMessage": reason,
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "additionalContext": reason,
+            },
+        }
+    )
+
+
 def main():
     data = json.load(sys.stdin)
     command = (data.get("tool_input") or {}).get("command")
     if not isinstance(command, str) or not command.strip():
         return
     cwd = os.getcwd()
-    targets, need_fallback = commit_targets(command, cwd)
+    targets, need_fallback = git_targets(command, cwd, HOOK_GATED)
     if need_fallback and FALLBACK_RE.search(command):
-        targets.append(cwd)
-    for directory in targets:
+        targets.append(("commit", cwd))
+    for sub, directory in targets:
+        if sub != "commit":
+            continue
         branch = branch_of(directory)
         if branch in PROTECTED:
-            reason = (
+            deny(
                 "Direct commits to %s are blocked (target: %s). "
                 "Create a feature branch with: git switch -c <branch>" % (branch, directory)
             )
-            print("ERROR: %s" % reason, file=sys.stderr)
-            print(
-                json.dumps(
-                    {
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "deny",
-                            "permissionDecisionReason": reason,
-                        }
-                    }
-                )
-            )
             return
+
+    # A dead hook tree is repo state, not a property of this command, so the
+    # refusal is scoped to the commands the dead hooks would have gated. Every
+    # other command — `just init` included — still runs, which is what keeps a
+    # broken repo config from wedging the session that has to repair it.
+    for sub, directory in targets:
+        reason = hooks_drift(directory)
+        if reason is not None:
+            deny("git %s refused — %s" % (sub, reason))
+            return
+    # Nothing gated in this command: still say so, on the first Bash call after
+    # the drift rather than on the next `just test`.
+    reason = hooks_drift(cwd)
+    if reason is not None:
+        warn(reason)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
-        pass
+    except Exception as exc:
+        # An internal error must not read as "nothing to report". This hook
+        # exists to refuse when the git hooks are dead, so exiting silently on
+        # its own bug is the failure it was written to catch. Warn rather than
+        # deny: it runs ahead of every Bash call in every concurrent session,
+        # so a bug that denied would wedge the session that has to repair it,
+        # including `just init`. Suppressed once a decision has been emitted —
+        # a second JSON object on stdout would not parse, and the decision
+        # already reached the caller.
+        if not _EMITTED:
+            try:
+                warn(
+                    "claude-pre-bash failed internally (%s: %s) — the "
+                    "master-branch and core.hooksPath checks did NOT run for "
+                    "this command. Verify the hooks with: just check-hooks"
+                    % (type(exc).__name__, exc)
+                )
+            except Exception:
+                pass
     sys.exit(0)
