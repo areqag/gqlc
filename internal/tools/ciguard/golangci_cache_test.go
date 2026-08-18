@@ -576,6 +576,13 @@ func linterRecipes(t *testing.T) map[string]bool {
 // `command -v just` with a CR or an FF before `test` as `just test` (md5
 // bca84c62 and 764788b7: that test green under `[^\S\n]`, red here).
 //
+// Those two rows are the whole difference between the classes rather than a
+// sample of it. Enumerated out of tree over 0..0x10FFFF: Go's `\s` is the five
+// runes {09, 0a, 0c, 0d, 20}, so `[^\S\n]` is {09, 0c, 0d, 20} and `[ \t]` is
+// {09, 20}, and they part company on the form feed and the carriage return and
+// nothing else. A vertical tab is in neither — Go's `\s` does not carry it, and
+// bash does not split on it either, so both classes refuse it (md5 f822b0a5).
+//
 // What this does not do is decide which word is the command. `command -v just
 // test` on one line reads here as an invocation of `test` (md5 96f4eeaa, that
 // test green), so a job that runs no recipe can still satisfy the reachability
