@@ -83,12 +83,20 @@ expect_red() {
 }
 
 # $1=case name, $2=export, $3=body file, $4=branch.
+# Status 0 and some output. A pass that prints nothing is one no reader can
+# tell from this gate not having run, which is what bd gqlc-mk7v and bd
+# gqlc-63ao were each filed over after a live PR took one; requiring output
+# from every green row holds that as a property of the checker rather than
+# leaving it to whoever reads the next diff. A row that needs particular
+# words uses expect_green_saying instead.
 expect_green() {
     run_check "$2" "$3" "$4"
-    if [ "$RC" -eq 0 ]; then
-        ok "$1"
-    else
+    if [ "$RC" -ne 0 ]; then
         bad "$1" "exited $RC: $OUT"
+    elif [ -z "$OUT" ]; then
+        bad "$1" "passed in silence, which is what a gate that never ran does"
+    else
+        ok "$1"
     fi
 }
 
@@ -196,9 +204,14 @@ expect_green "an epic is never closed by a child PR" \
 # The export trails the ledger by whole sessions here — beads are exported in
 # their own chore commits after the PR that opened them merges — so a
 # well-formed id the export has never heard of is the normal state of a PR
-# about a bead created today, not a typo.
-expect_green "a bead the export does not carry does not block the PR" \
-    "$EXPORT" "$(body 'Bead: gqlc-notinexport')" "some/branch"
+# about a bead created today, not a typo. This is the deviation recorded on
+# GH #883, and the two rows below pin its wording as well as its colour: it
+# is a pass that says which bead it did not check, so an edit that turned it
+# back into a silent one — the shape bd gqlc-mk7v and bd gqlc-63ao were filed
+# over — would redden here rather than pass unread.
+expect_green_saying "a bead the export does not carry does not block the PR" \
+    "$EXPORT" "$(body 'Bead: gqlc-notinexport')" "some/branch" \
+    "bead 'gqlc-notinexport' not in export - skipping"
 
 # How wide that pass is, pinned rather than left to be discovered: the id need
 # not name a real bead, so one line overrides a branch that does name a
@@ -206,8 +219,9 @@ expect_green "a bead the export does not carry does not block the PR" \
 # the export trails the ledger, so an absent id is the normal state of a PR
 # about a bead created today — and filed as bd gqlc-oh30 for the day that
 # trade stops being worth it.
-expect_green "an absent id on a Bead line overrides a mirrored branch" \
-    "$EXPORT" "$(body 'Bead: gqlc-notinexport')" "fix/gqlc-mirrored-thing"
+expect_green_saying "an absent id on a Bead line overrides a mirrored branch" \
+    "$EXPORT" "$(body 'Bead: gqlc-notinexport')" "fix/gqlc-mirrored-thing" \
+    "bead 'gqlc-notinexport' not in export - skipping"
 
 # --- shapes the body is allowed to take -------------------------------------
 
@@ -321,13 +335,21 @@ expect_green_saying "an opt-out works on a record with no status field" \
 
 # Two exits used to read a marker, hold its number against nothing, and print
 # nothing: rc=0 with no output, which is also what this gate looks like when
-# it has not run. The pass is right in both -- there is no issue to leave
-# open -- so what these rows hold is that it is legible. This is the
-# complaint the section above makes about the four other silent passes,
-# applied to the two on the marker's own path.
-expect_green_saying "an opt-out on a bead with no mirror says so" \
+# it has not run. What these rows hold is that the marker's path says so.
+# Their 'Bead:' twins are at the foot of this file, which is where the half
+# left silent here is rowed (bd gqlc-63ao); the wording is shared with them
+# and says what the export established rather than what it was once read as
+# establishing.
+expect_green_saying "an opt-out on a bead with no external_ref says so" \
     "$EXPORT" "$(body 'Refs: gqlc-local #99999')" "some/branch" \
-    "gqlc-local has no GitHub mirror"
+    "the export's record for gqlc-local carries no external_ref value"
+
+# The marker's own number comes back in that line, which is what the 'Bead:'
+# path cannot do and why it needed a second phrasing rather than this one
+# moved out from under its guard.
+expect_green_saying "an opt-out with no external_ref names the line that held nothing" \
+    "$EXPORT" "$(body 'Refs: gqlc-local #99999')" "some/branch" \
+    "the 'Refs: gqlc-local #99999' line holds nothing"
 
 expect_green_saying "an opt-out on a mirror with no issue number says so" \
     "$EXPORT" "$(body 'Refs: gqlc-oddref #99999')" "some/branch" \
@@ -1140,6 +1162,140 @@ Refs: ${BT}gqlc-sub.12${BT} #712
 
 Closes #617")" "some/branch" \
     "'Refs:' declaration reads '${BT}gqlc-sub.12${BT}'"
+
+# --- a closing claim with no bead to hold it (bd gqlc-mk7v) ------------------
+# The exit that used to be sys.exit(0) with nothing printed. A PR whose body
+# has no declaration and whose branch is named descriptively resolved no bead,
+# and every closing line it carried went unread. Measured against master's own
+# copy of this checker at c4081ee4, over the live bodies of the PRs open then:
+# #946 and #963 each carried one closing line naming an issue with a bead
+# behind it, and each passed in silence. #946 has since merged that way. What
+# is refused is the claim, not the silence — a body that closes nothing has
+# made none, and demanding a declaration from it would buy nothing to check.
+
+expect_red "a closing keyword with no bead to resolve it is refused" \
+    "$EXPORT" "$(body 'Closes #902')" "chore/tidy-the-workflow" \
+    "the PR body closes #902, but no bead resolves for this PR"
+
+# Every number, so an author reading the refusal knows which lines it is
+# about rather than only the first. Deduplicated, so a number written twice
+# is named once.
+expect_red "the refusal names every number the body closes, once each" \
+    "$EXPORT" "$(body 'Closes #902
+Fixes #904
+Closes #902')" "chore/tidy-the-workflow" \
+    "closes #902, #904, but no bead resolves"
+
+# Both ways out, because a refusal that does not spell them sends the author
+# to the workflow source — the state this gate's own first bead was filed
+# over.
+expect_red "the refusal spells the Bead: line that would resolve it" \
+    "$EXPORT" "$(body 'Closes #902')" "chore/tidy-the-workflow" \
+    "Add a line reading 'Bead: <bead-id>'"
+
+expect_red "the no-bead refusal says an edit alone re-runs the check" \
+    "$EXPORT" "$(body 'Closes #902')" "chore/tidy-the-workflow" \
+    "Editing the body re-runs this check on its own"
+
+# The wide matcher, and why it is the one this call site reads. What is being
+# asked is "would GitHub act on this at merge", so every spelling GitHub
+# documents is a claim — the narrow CLOSES this gate demands elsewhere knows
+# three keywords and the bare '#N' form, and each spelling below is one it
+# would let through as no claim at all.
+for ref in 'Fixed #902' 'Resolved #902' 'Closes: #902' \
+    'Closes areqag/gqlc#902' 'Closes GH-902' \
+    'Closes https://github.com/areqag/gqlc/issues/902'; do
+    expect_red "'$ref' with no bead is a claim too" \
+        "$EXPORT" "$(body "$ref")" "chore/tidy-the-workflow" \
+        "but no bead resolves for this PR"
+done
+
+# The pass, and it is audible: this whole section exists because a silent one
+# reads like a gate that never ran.
+expect_green_saying "a body that closes nothing and names no bead passes, saying so" \
+    "$EXPORT" "$(body 'chore: retitle three recipes')" "chore/tidy-the-workflow" \
+    "no bead named by the body or the branch"
+
+# Read over prose_only()'s body rather than the raw one, which is where this
+# call site parts company with the opt-out's check 4. There a fenced keyword
+# costs a refusal an author resolves by moving one line; here it would cost a
+# PR that merely quotes the spelling a 'Bead:' line it has no bead for, and a
+# body on this file is where such a quote turns up: PR #901's carries three
+# closing-keyword matches inside carriers prose_only() blanks. Both carriers
+# below are rowed because either alone would leave the other live.
+expect_green_saying "a closing keyword quoted in a fence is not a claim" \
+    "$EXPORT" "$(body "Nothing to close here. The gate wants:
+
+${FENCE3}
+Closes #902
+${FENCE3}")" "chore/tidy-the-workflow" \
+    "no closing keyword in the body's prose"
+
+expect_green_saying "a closing keyword inside an HTML comment is not a claim" \
+    "$EXPORT" "$(body 'Nothing to close here.
+
+<!--
+Closes #902
+-->')" "chore/tidy-the-workflow" \
+    "no closing keyword in the body's prose"
+
+# The scope of the new refusal, from the other side: it fires only where no
+# bead resolves. A branch that carries an id resolves one, so the body is
+# held against that bead's own number exactly as before.
+expect_green_saying "a closing line on a bead-bearing branch is checked, not refused" \
+    "$EXPORT" "$(body 'Closes #617')" "fix/gqlc-mirrored-thing" \
+    "gqlc-mirrored -> Closes #617 (ok)"
+
+# --- a pass the export cannot verify (bd gqlc-63ao) --------------------------
+# The 'Bead:' twin of the two rows in the opt-out section above. PR #901 made
+# those legible under `if refs is not None`, which left this form taking the
+# same exit with the print skipped: rc=0 and no output. Measured on PR #951,
+# whose body's first line is 'Bead: gqlc-l45j' and whose third is
+# 'Closes #933'.
+#
+# The pass is kept, and what changed is what it claims. It used to be
+# justified as "there is no issue to leave open"; measured over master's
+# export at c4081ee4, 2 of its 459 records carry no external_ref and the live
+# ledger mirrors both (gqlc-l45j on #933, gqlc-8inj on #934), so on that
+# export the two propositions coincided nowhere. Refusing instead is a demand
+# no author can meet — the export is a committed file written in its own
+# chore commit after the PR merges, and a 'Refs:' line reaches this same exit
+# — so the line says what the export established and no more.
+
+expect_green_saying "a Bead line on a record with no external_ref says which record" \
+    "$EXPORT" "$(body 'Bead: gqlc-local')" "some/branch" \
+    "the export's record for gqlc-local carries no external_ref value"
+
+expect_green_saying "that pass says it demanded and checked nothing" \
+    "$EXPORT" "$(body 'Bead: gqlc-local')" "some/branch" \
+    "no 'Closes' line was demanded and none was checked"
+
+# PR #951's shape against the fixture: a body that does close an issue, over
+# a bead whose exported record carries no mirror to hold the number against.
+# The claim goes unchecked either way; the row holds that the log says so
+# rather than reporting a green tick over nothing.
+expect_green_saying "a Closes line over a record with no external_ref is passed unchecked" \
+    "$EXPORT" "$(body 'Bead: gqlc-local
+
+Closes #933')" "some/branch" \
+    "no 'Closes' line was demanded and none was checked"
+
+# The same twin one exit further down: the record carries a mirror, and the
+# mirror names no issue number. gqlc-oddref is the fixture's.
+expect_green_saying "a Bead line on a mirror with no issue number says so" \
+    "$EXPORT" "$(body 'Bead: gqlc-oddref')" "some/branch" \
+    "which names no issue number"
+
+expect_green_saying "that pass says it demanded and checked nothing too" \
+    "$EXPORT" "$(body 'Bead: gqlc-oddref')" "some/branch" \
+    "no 'Closes' line was demanded and none was checked"
+
+# The 'Refs:' half of the same exit, pinned so the second phrasing cannot be
+# made to serve both: this one names the marker's own number, which the
+# 'Bead:' path has none of.
+expect_green_saying "an opt-out on a mirror with no issue number names its line" \
+    "$EXPORT" "$(body 'Refs: gqlc-oddref #99999')" "some/branch" \
+    "the 'Refs: gqlc-oddref #99999' line holds nothing"
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
