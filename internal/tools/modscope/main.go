@@ -305,7 +305,12 @@ func moduleGoDirs(ctx context.Context, root, module string) ([]string, error) {
 // recipe which runs this program some other way: a binary built here once and
 // invoked under its own name, or a path interpolated from a justfile variable,
 // is outside what that file reads (bd gqlc-wkio), as is a recipe behind a
-// header its justfile reader does not recognise (bd gqlc-6n9y).
+// header shape its justfile reader reads differently from just — the shapes
+// that file knows it reads differently are listed on
+// TestParseJustfileReadsWhatJustReads there. Knowing is the bound on that list
+// as well, which is why TestParseJustfileAgreesWithJustOnThisJustfile compares
+// that reader's reading of the real justfile against just's own rather than
+// against the list.
 func goDirs(module, moduleRoot string, nested []string) ([]string, error) {
 	prune := make(map[string]struct{}, len(nested))
 	for _, n := range nested {
