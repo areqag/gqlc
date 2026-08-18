@@ -165,6 +165,12 @@ jobs:
       - run: just test-codegen-fence
 
   actionlint:
+    # DISPOSABLE CI-SEMANTICS PROBE for bd gqlc-xdd0 — NOT FOR MASTER.
+    # Forces the `actionlint` required context to conclude `skipped`, and with
+    # it lint/test/codegen-fence via their `needs:`. Everything else on this PR
+    # stays green, so the PR's mergeStateStatus answers whether branch
+    # protection treats a skipped required check run as satisfied.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
