@@ -542,7 +542,8 @@ func dumpJustfile(t *testing.T, dir, path string) justDump {
 	// on the version CI pins and on the newer one this was written against:
 	// both accept the flag, and each reports the same recipes with it as
 	// without, so passing it is not what decides the answer.
-	cmd := exec.Command(justBin, "--justfile", path, "--unstable", "--dump", "--dump-format", "json")
+	cmd := exec.CommandContext(t.Context(), justBin,
+		"--justfile", path, "--unstable", "--dump", "--dump-format", "json")
 	cmd.Dir = dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
