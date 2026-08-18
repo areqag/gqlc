@@ -191,7 +191,9 @@ run_guard_case "SUBST_RE does not nest: bare"    deny-master "$MASTER_REPO" 'ech
 # bash 5.3 funsub. Both rows assert what the HOOK decides about the text, so
 # neither depends on the shell running this file; the claim that the heredoc
 # form executes was measured separately on bash 5.3.15.
+# shellcheck disable=SC2016 # ditto
 run_guard_case "funsub \${ ; } in heredoc"       silent "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n${ git commit -m x; }\nEOF\n')"
+# shellcheck disable=SC2016 # ditto
 run_guard_case "funsub \${ ; } bare"             deny-master "$MASTER_REPO" 'echo ${ git commit -m x; }'
 # HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt arms on the prefix `EOF`; no
 # line ever equals that, the body swallows the rest of the command, and the
