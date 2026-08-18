@@ -517,7 +517,25 @@ func TestParseJustfileAgreesWithJustOnThisJustfile(t *testing.T) {
 		t.Fatalf("read the dependencies out of `just --dump`: %v", err)
 	}
 
-	for _, d := range justfileDisagreements(declared, read) {
+	bodies := recipeBodies(dumped)
+
+	// Asserted of just's reading specifically. unsweptModscopeCallers already
+	// refuses a run in which no body IT read names modscopePkg, but that is the
+	// other side: were the dump to stop carrying bodies, every body here would
+	// be empty and the mention clause below would have nothing to disagree
+	// about on this side, which is not the same as agreeing.
+	naming := 0
+	for _, body := range bodies {
+		if strings.Contains(body, modscopePkg) {
+			naming++
+		}
+	}
+	if naming == 0 {
+		t.Errorf("no body in `just --dump` names %s, so comparing which bodies name it "+
+			"compares nothing on just's side of this reading", modscopePkg)
+	}
+
+	for _, d := range justfileDisagreements(declared, bodies, read) {
 		t.Errorf("%s", d)
 	}
 }
@@ -571,6 +589,12 @@ type justDump struct {
 		Dependencies []struct {
 			Recipe string `json:"recipe"`
 		} `json:"dependencies"`
+
+		// Body is one entry per body line, each a list of fragments. A
+		// fragment is a string, or a nested list for an interpolation —
+		// `go run …@{{version}}` dumps as ["go run …@", [["variable",
+		// "version"]]]. recipeBodies keeps the strings and drops the rest.
+		Body [][]any `json:"body"`
 	} `json:"recipes"`
 }
 
@@ -597,6 +621,39 @@ func priorDependencies(dumped justDump) (map[string][]string, error) {
 		declared[name] = deps
 	}
 	return declared, nil
+}
+
+// recipeBodies reduces a dump to the literal text of each recipe's body.
+//
+// It is the literal text and not the whole body: an interpolation dumps as a
+// nested expression rather than as the `{{…}}` the file spells, and this reader
+// keeps that spelling, so comparing the two whole would report every recipe
+// using a variable. What the comparison asks of a body is whether it spells
+// modscopePkg, and an interpolated path is a limit already recorded at
+// modscopePkg (bd gqlc-wkio) rather than one this reduction introduces.
+//
+// Two other differences measured on this repo's justfile at just 1.57.0 say the
+// same thing about whole-text equality: the dump drops each body line's leading
+// indentation, which this reader keeps, and it keeps the 469 body lines that
+// open with '#' and the '#!' of the 11 shebang recipes, which this reader also
+// keeps. Only the second of those is a spelling either side could hide a
+// modscopePkg mention in, and both sides keep it.
+func recipeBodies(dumped justDump) map[string]string {
+	out := make(map[string]string, len(dumped.Recipes))
+	for name, r := range dumped.Recipes {
+		lines := make([]string, 0, len(r.Body))
+		for _, line := range r.Body {
+			var b strings.Builder
+			for _, frag := range line {
+				if s, ok := frag.(string); ok {
+					b.WriteString(s)
+				}
+			}
+			lines = append(lines, b.String())
+		}
+		out[name] = strings.Join(lines, "\n")
+	}
+	return out
 }
 
 // TestJustDumpCountsPriorsSeparatelyFromLaterDependencies asks just, rather than
@@ -644,7 +701,7 @@ func TestJustDumpCountsPriorsSeparatelyFromLaterDependencies(t *testing.T) {
 	if len(complaints) != 0 {
 		t.Fatalf("complaints = %v, want none", complaints)
 	}
-	if d := justfileDisagreements(declared, read); len(d) != 0 {
+	if d := justfileDisagreements(declared, recipeBodies(dumped), read); len(d) != 0 {
 		t.Errorf("the two readings part over `vuln: before && after`: %v", d)
 	}
 }
@@ -737,7 +794,15 @@ func TestPriorDependenciesReadsTheDumpJustWrites(t *testing.T) {
 // parseJustfile read out of the same source and returns a line for each way the
 // two answers differ. Nothing returned is agreement.
 //
-// declared maps a recipe name to the dependencies just runs before its body.
+// declared maps a recipe name to the dependencies just runs before its body,
+// and declaredBodies maps it to the literal text of that body. Both readings
+// are compared because the file asks two separate things of a recipe: which
+// dependencies it reaches, and whether its body names modscopePkg. Comparing
+// only the first leaves the second reading unchecked, and the second is the one
+// unsweptModscopeCallers selects callers with — a reader that reads a header
+// correctly and then reads a short body drops a caller, and a comparison of
+// names and edges alone agrees with it.
+//
 // The comparison is split out from the test above so that
 // TestJustfileDisagreementsFindsEachWayTheTwoReadingsPart can cut each way of
 // disagreeing on its own: over the justfile in this repo the two readings agree,
@@ -750,7 +815,9 @@ func TestPriorDependenciesReadsTheDumpJustWrites(t *testing.T) {
 // would pass over any justfile at all — the shape unsweptModscopeCallers refuses
 // one level down — and with one side empty every name on the other is reported
 // as unmatched, which buries the one fact that matters.
-func justfileDisagreements(declared map[string][]string, read []justRecipe) []string {
+func justfileDisagreements(
+	declared map[string][]string, declaredBodies map[string]string, read []justRecipe,
+) []string {
 	var out []string
 	if len(declared) == 0 {
 		out = append(out, "just declares no recipe in this justfile, so agreeing with it says nothing")
@@ -762,9 +829,9 @@ func justfileDisagreements(declared map[string][]string, read []justRecipe) []st
 		return out
 	}
 
-	byReader := make(map[string][]string, len(read))
+	byReader := make(map[string]justRecipe, len(read))
 	for _, r := range read {
-		byReader[r.name] = r.deps
+		byReader[r.name] = r
 	}
 
 	names := make([]string, 0, len(declared))
@@ -781,10 +848,28 @@ func justfileDisagreements(declared map[string][]string, read []justRecipe) []st
 					"which is asked only of recipes it read (bd gqlc-6n9y)", name, name))
 			continue
 		}
-		if !slices.Equal(got, declared[name]) {
+		if !slices.Equal(got.deps, declared[name]) {
 			out = append(out, fmt.Sprintf(
 				"just runs %v before recipe %s's body and this reader reads %v, so the closure "+
-					"this file walks is not the one just runs", declared[name], name, got))
+					"this file walks is not the one just runs", declared[name], name, got.deps))
+		}
+
+		// The mention, not the text: modscopePkg in a body is the whole of what
+		// unsweptModscopeCallers reads a body for, and the two sides spell the
+		// same body differently in ways recipeBodies records above.
+		justNames := strings.Contains(declaredBodies[name], modscopePkg)
+		readerNames := strings.Contains(got.body, modscopePkg)
+		switch {
+		case justNames && !readerNames:
+			out = append(out, fmt.Sprintf(
+				"just reads a body for recipe %s that names %s and this reader reads one that "+
+					"does not, so %s is a caller this file does not count and the sweep "+
+					"dependency is not asked of it (bd gqlc-6n9y)", name, modscopePkg, name))
+		case readerNames && !justNames:
+			out = append(out, fmt.Sprintf(
+				"this reader reads a body for recipe %s that names %s and just reads one that "+
+					"does not, so %s can be reported unswept over text just does not run",
+				name, modscopePkg, name))
 		}
 	}
 
@@ -812,9 +897,15 @@ func TestJustfileDisagreementsFindsEachWayTheTwoReadingsPart(t *testing.T) {
 	sweep := justRecipe{name: probeSweep}
 	caller := justRecipe{name: "vuln", deps: []string{probeSweep}}
 
+	// The same body as the two sides spell it: `just --dump` drops the leading
+	// indentation this reader keeps. Both spellings name modscopePkg.
+	const justCallerBody = "go run ./" + modscopePkg + " modules"
+	const readCallerBody = "    go run ./" + modscopePkg + " modules\n"
+
 	cases := []struct {
 		name     string
 		declared map[string][]string
+		bodies   map[string]string
 		read     []justRecipe
 		want     []string
 	}{
@@ -857,6 +948,53 @@ func TestJustfileDisagreementsFindsEachWayTheTwoReadingsPart(t *testing.T) {
 			want:     []string{"before recipe vuln's body and this reader reads"},
 		},
 		{
+			// The fail-open this clause is here for. The header is read, the
+			// name matches, the edges match — every other clause is silent —
+			// and the body that selects vuln as a caller was read short.
+			name:     "a body just reads as naming the path and this reader reads short",
+			declared: map[string][]string{probeSweep: {}, "vuln": {probeSweep}},
+			bodies:   map[string]string{probeSweep: "", "vuln": justCallerBody},
+			read:     []justRecipe{sweep, caller},
+			want: []string{
+				"just reads a body for recipe vuln that names " + modscopePkg +
+					" and this reader reads one that does not",
+			},
+		},
+		{
+			// The other direction, which reports a caller unswept over text
+			// just does not run.
+			name:     "a body this reader reads as naming the path and just does not",
+			declared: map[string][]string{probeSweep: {}, "vuln": {probeSweep}},
+			bodies:   map[string]string{probeSweep: "", "vuln": "echo nothing here"},
+			read: []justRecipe{
+				sweep, {name: "vuln", deps: []string{probeSweep}, body: readCallerBody},
+			},
+			want: []string{
+				"this reader reads a body for recipe vuln that names " + modscopePkg +
+					" and just reads one that does not",
+			},
+		},
+		{
+			// Both name it, spelled differently. The clause compares the
+			// mention and not the text, so this is agreement — comparing the
+			// text would report every recipe in the repo's justfile.
+			name:     "both bodies name the path, spelled differently",
+			declared: map[string][]string{probeSweep: {}, "vuln": {probeSweep}},
+			bodies:   map[string]string{probeSweep: "", "vuln": justCallerBody},
+			read: []justRecipe{
+				sweep, {name: "vuln", deps: []string{probeSweep}, body: readCallerBody},
+			},
+		},
+		{
+			// Bodies that differ and neither names the path. Nothing this file
+			// asks of a body tells these apart, so a report here would be a
+			// disagreement over something no answer rests on.
+			name:     "bodies differ in text and neither names the path",
+			declared: map[string][]string{"vuln": {}},
+			bodies:   map[string]string{"vuln": "echo one"},
+			read:     []justRecipe{{name: "vuln", body: "    echo two\n"}},
+		},
+		{
 			// Not agreement. Every name on the other side would otherwise be
 			// reported unmatched, which buries this.
 			name:     "just declared nothing",
@@ -885,7 +1023,7 @@ func TestJustfileDisagreementsFindsEachWayTheTwoReadingsPart(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := justfileDisagreements(tc.declared, tc.read)
+			got := justfileDisagreements(tc.declared, tc.bodies, tc.read)
 			if len(got) != len(tc.want) {
 				t.Fatalf("disagreements = %v, want %d matching %v", got, len(tc.want), tc.want)
 			}
