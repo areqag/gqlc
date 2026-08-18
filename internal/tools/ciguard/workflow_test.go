@@ -37,12 +37,21 @@ const gateScript = ".github/scripts/check-pr-closes.py"
 // or GitHub sees at merge time (bd gqlc-w4al).
 const payloadBody = "github.event.pull_request.body"
 
+// ContinueOnError is a yaml.Node rather than a bool, the same modelling as
+// actionStep in golangci_cache_test.go and for the same reason: the key takes
+// values this decoder cannot give one Go type. `continue-on-error: true` is a
+// bool and `continue-on-error: ${{ github.event_name == 'push' }}` is a string,
+// so against a bool field the expression form is an unmarshal error — it does
+// redden, but as "decode job", naming the decoder rather than the bypass.
+// Measured out of tree over absent/true/false/expression/quoted: into a bool
+// the expression and quoted forms error and leave the field false; into a Node
+// every written form arrives with a non-zero Kind. present and spell read it.
 type ciSteps []struct {
 	Name            string            `yaml:"name"`
 	Run             string            `yaml:"run"`
 	Shell           string            `yaml:"shell"`
 	If              string            `yaml:"if"`
-	ContinueOnError bool              `yaml:"continue-on-error"`
+	ContinueOnError yaml.Node         `yaml:"continue-on-error"`
 	Env             map[string]string `yaml:"env"`
 }
 
@@ -55,7 +64,7 @@ type ciDefaults struct {
 type ciJob struct {
 	Permissions     map[string]string `yaml:"permissions"`
 	If              string            `yaml:"if"`
-	ContinueOnError bool              `yaml:"continue-on-error"`
+	ContinueOnError yaml.Node         `yaml:"continue-on-error"`
 	Defaults        ciDefaults        `yaml:"defaults"`
 	Steps           ciSteps           `yaml:"steps"`
 }
@@ -215,12 +224,17 @@ func TestPRBodyGateFailsTheJobItRunsIn(t *testing.T) {
 	job, i := gateStep(t)
 	step := job.Steps[i]
 
-	require.False(t, step.ContinueOnError,
-		"the PR-body gate sets continue-on-error, so a refusal no longer fails %q "+
+	// Refused written, not refused true. A test cannot evaluate `${{ … }}`, so
+	// "is the value truthy" is not a question this can answer at all; "is the
+	// key there" is. It costs a harmless `continue-on-error: false` its place
+	// and buys a rule with no undecidable case in it.
+	require.Falsef(t, present(step.ContinueOnError),
+		"the PR-body gate sets `continue-on-error: %s`, so a refusal no longer fails %q "+
 			"and the check that reddens the merge is reporting into a log nobody reads",
-		gateJob)
-	require.False(t, job.ContinueOnError,
-		"job %q sets continue-on-error, so no step in it can fail the merge", gateJob)
+		spell(step.ContinueOnError), gateJob)
+	require.Falsef(t, present(job.ContinueOnError),
+		"job %q sets `continue-on-error: %s`, so no step in it can fail the merge",
+		gateJob, spell(job.ContinueOnError))
 
 	require.Emptyf(t, job.If,
 		"job %q carries a job-level `if:` (%q). A job that does not run still emits a "+
