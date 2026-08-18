@@ -870,7 +870,7 @@ func justfileDisagreements(
 		// unsweptModscopeCallers reads a body for, and the two sides spell the
 		// same body differently in ways recipeBodies records above.
 		//
-		// The witness that the 25 pinned bodies in
+		// The witness that the 24 pinned bodies in
 		// TestParseJustfileReadsWhatJustReads do not already cover this: cap
 		// the reader's body at 10 lines and every one of those rows stays
 		// green, because the longest body they pin is 3 lines. vuln's body in
