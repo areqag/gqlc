@@ -164,7 +164,17 @@ CLOSES = re.compile(r"(?i)(?:closes|fixes|resolves)\s+#(\d+)")
 # honoured, so the refusal buys nothing against a body that only quotes the
 # spelling, and a body on this file is where such a quote turns up: PR #901's
 # carries three closing-keyword matches inside carriers prose_only() blanks,
-# measured at this commit against its live body. Both sites refuse on a
+# measured at this commit against its live body. An inline code span is not
+# one of those carriers, and that is where the mitigation stops: a body
+# writing 'Closes #123' between backticks is refused at this site, while
+# GitHub renders it as literal text inside a <code> and autolinks nothing.
+# That refusal is a false positive, and PR #901 shows both kinds at once --
+# among the matches prose_only() leaves standing are inline spans naming
+# #617, which its closingIssuesReferences does not list, beside the ordinary
+# lines for #862 and #883, which it does. Left as it is because the
+# direction is a refusal the author clears by rewording the line rather
+# than a pass, and because the fenced spelling of the same quote is
+# blanked. Both sites refuse on a
 # hit and fall through to a pass on a miss, so a spelling added to this
 # pattern can turn a pass into a refusal at either and never the reverse;
 # that is the asymmetry, and it is the pattern's, not one call site's.
