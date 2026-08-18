@@ -934,9 +934,9 @@ func TestEntityColumnsDecodeWholeEntities(t *testing.T) {
 // carries it before the entity's decode helper is handed a value the
 // driver has already rejected.
 //
-// TestEntityColumnsDecodeWholeEntities above reads two of the same swapped
-// columns, but asks only whether some error came back — and both a gate
-// that reports the driver's refusal and a gate that drops it return one.
+// TestEntityColumnsDecodeWholeEntities above hands the row the same swapped
+// values, but asks only whether some error came back — and both a gate that
+// reports the driver's refusal and a gate that drops it return one.
 // Dropping it passes on the zero carrier, whose empty Props map the decode
 // helper then refuses on the first property it looks for, so the caller is
 // told a property is missing from a graph value that never arrived. That
@@ -969,10 +969,13 @@ func TestEntityColumnRefusalsCarryTheDriversError(t *testing.T) {
 	check("EntityColumns(s: relationship)", `"s"`,
 		driverRefusal[dbtype.Node](t, keys, sIsRel, "s"), "decode Scalar.", err)
 
-	// A node under an edge column: the same mismatch from the other side,
-	// because the two carriers are separate instantiations of the gate and
-	// one of them being pinned says nothing about the other. The node
-	// column ahead of it decodes, so what refuses here is reached.
+	// A node under an edge column. What this adds to the case above is the
+	// position rather than the carrier: which carrier each column commits
+	// to is already held by the nested module's own compile, since a column
+	// decoded to the wrong one does not typecheck against its decode
+	// helper. This one is the gate reached at a column that is not the
+	// first, after the column ahead of it decoded — the case above returns
+	// at `s` and never gets here.
 	eIsNode := []any{node(scalarProps()), node(scalarProps()), node(listyProps())}
 	_, err = queriesOver(keys, eIsNode).EntityColumns(t.Context())
 	check("EntityColumns(e: node)", `"e"`,
