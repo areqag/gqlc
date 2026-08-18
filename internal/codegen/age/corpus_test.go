@@ -72,7 +72,7 @@ func (d *recordingDB) Exec(ctx context.Context, sql string, args ...any) (int, e
 // pass.
 //
 // It is written down here rather than censused out of
-// testdata/corpus_test.go.txt, because that fixture is the artifact under
+// testdata/corpus_test.go.txt, because that fixture is the artefact under
 // check and an expectation read off it moves whenever it moves. Measured
 // against a census of the fixture's top-level `func Test…` declarations,
 // commenting a test out and deleting it each took the row out of the

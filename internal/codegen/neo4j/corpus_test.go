@@ -65,7 +65,7 @@ const stubModule = "module " + driverModule + "\n\ngo 1.26.2\n"
 // pass.
 //
 // It is written down here, in the parent, rather than censused out of
-// testdata/corpus_test.go.txt, because the fixture is the artifact under
+// testdata/corpus_test.go.txt, because the fixture is the artefact under
 // check: an expectation read off it moves whenever it moves. Measured
 // against a census of the fixture's top-level `func Test…` declarations,
 // three ways of taking a test out of the corpus left the census and the
