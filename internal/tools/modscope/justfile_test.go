@@ -89,7 +89,13 @@ func parseJustfile(src string) ([]justRecipe, []string) {
 		complaints []string
 	)
 	lines := strings.Split(src, "\n")
-	for i, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line, end := joinContinuedHeader(lines, i)
+		// The physical lines a header was spelled across are one line to just,
+		// so none of them is examined again as a header of its own. Examining
+		// them would read `vuln \` over `lint: sweep` as two recipes where just
+		// has one recipe vuln taking a parameter named lint.
+		i = end
 		name, rest, ok := justHeader(line)
 		if !ok {
 			continue
@@ -106,7 +112,7 @@ func parseJustfile(src string) ([]justRecipe, []string) {
 		}
 		pre, _, _ := strings.Cut(rest, "&&")
 		var body []string
-		for _, next := range lines[i+1:] {
+		for _, next := range lines[end+1:] {
 			if next != "" && !strings.HasPrefix(next, " ") && !strings.HasPrefix(next, "\t") {
 				break
 			}
@@ -148,10 +154,69 @@ func justHeader(line string) (name, rest string, ok bool) {
 	return name, line[colon+1:], true
 }
 
+// joinContinuedHeader returns the one line just reads a header as, together
+// with the index of the last physical line that went into it. A line ending in
+// a lone backslash is continued on the next one, so a header can be spelled
+// across several lines and none of them carries the whole thing.
+//
+// Reading only the physical line loses the recipe without saying anything: no
+// literal is left open, so headerColon simply finds no colon and returns -1,
+// and the continuation is indented so it is no header either. Measured on this
+// repo's own justfile, rewriting `vuln: sweep-discovery-probes
+// vuln-root-residual` to `vuln x="a" \` over `  : vuln-root-residual` leaves
+// just reading 29 recipes with vuln's sweep edge gone, this reader reading 28
+// with vuln absent, and every test here passing — the same silent outcome as the
+// `x="a:=b"` header that headerColon was written for. The idiom is live: this
+// justfile spells 16 continuations today, all of them in bodies.
+//
+// The join puts a space where the backslash was, because that is what just does
+// with it. `vu\` over `ln: sweep` is a recipe named vu taking a parameter ln,
+// not a recipe named vuln, and `vuln: swe\` over `  ep` asks for a dependency
+// swe rather than sweep — measured on just 1.55.1, the version CI pins, and on
+// 1.57.0.
+//
+// A comment is not continued. `# note \` above `vuln: sweep` leaves vuln a
+// recipe just runs at rc=0, so joining a line that opens with '#' would swallow
+// the header under it and drop that recipe silently — the fail-open direction
+// this whole file exists to close, introduced by the repair for another one.
+//
+// Two spellings are left to just to reject rather than handled here, both
+// measured at rc=1 on 1.55.1 and 1.57.0: a backslash followed by a space, and a
+// line ending in two backslashes. just calls each an invalid escape sequence, so
+// a justfile carrying one runs nothing at all.
+func joinContinuedHeader(lines []string, i int) (string, int) {
+	line := lines[i]
+	if line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '#' {
+		return line, i
+	}
+	end := i
+	for strings.HasSuffix(line, `\`) && end+1 < len(lines) {
+		end++
+		head := strings.TrimSuffix(line, `\`)
+		next := strings.TrimLeft(lines[end], " \t")
+		// A line holding nothing but the backslash contributes no text, and
+		// joining it would put a space in front of what follows and so move it
+		// out of header position. just reads the header under such a line.
+		if strings.TrimSpace(head) == "" {
+			line = next
+			continue
+		}
+		line = head + " " + next
+	}
+	return line, end
+}
+
 // headerColon returns the index of the colon separating a recipe header from
 // its dependencies: the first colon that is not inside a parameter default's
 // string literal. It returns -1 when there is no such colon on the line, which
 // includes a line that opens a literal and does not close it.
+//
+// Which colon is taken decides whether the recipe is read at all, not just where
+// it is split. A header can carry a second colon after the separator — in a
+// trailing comment, most often a URL — and taking the last one instead puts the
+// separator inside the name half, where `vuln:` is not a name a recipe can have
+// and the whole recipe is dropped without a word.
+// TestHeaderColonTakesTheFirstSeparatingColon pins that.
 //
 // Taking the first colon in the line instead reads
 // `vuln x="a:=b": vuln-root-residual` as an assignment and so does not read the
