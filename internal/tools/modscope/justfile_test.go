@@ -502,11 +502,15 @@ func TestUnsweptModscopeCallersFindsEachBrokenWiring(t *testing.T) {
 //     TestParseJustfileMisreadsATrailingCommentLoudly below holds it there.
 //   - A line inside a multi-line string assignment that is spelled like a
 //     header, which this reader reads as a recipe just does not have. It adds
-//     rather than hides: a phantom sharing a real recipe's name raises the
-//     read-twice complaint instead of shadowing it, and one that does not
-//     share a name is a recipe nothing depends on and no caller. No assignment
-//     in this repo's justfile is triple-quoted today, so this is prospective;
-//     the row below is what would notice it changing.
+//     rather than hides — nothing it invents conceals a caller the reader
+//     would otherwise find — but what it adds is not harmless. A phantom
+//     sharing a real recipe's name raises the read-twice complaint, an
+//     invented dependency raises the dangling-dependency one, and a phantom
+//     whose indented lines spell the package path is reported as an unswept
+//     caller that does not exist. Measured on a fixture just reads as two
+//     recipes and this reader as three, where the third is reported by name.
+//     Neither triple-quote form appears in this repo's justfile today, so this
+//     is prospective; the row below is what would notice it changing.
 func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 	cases := []struct {
 		name string
