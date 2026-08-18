@@ -193,9 +193,13 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 	require.NoError(t, err, "the emitted decoders do not satisfy the driver-value corpus:\n%s", log)
 	require.NotEmpty(t, corpusTests,
 		"corpusTests names no test, so the set comparison below is satisfied by a child run that ran none")
+	// The comparison is by multiset, so a name written twice differs from
+	// the same name passing once. Which way the two differ is in the lists
+	// testify prints above this message, so naming the ways here would only
+	// be a shorter list than the one already on screen.
 	require.ElementsMatch(t, corpusTests, passed,
-		"the corpus module's passing tests are not the set corpusTests names: a name here that did "+
-			"not come back as a pass, or a pass whose name is not here:\n%s", log)
+		"the corpus module's passing tests are not what corpusTests names, entry for entry and "+
+			"counting repeats:\n%s", log)
 }
 
 // driverAgnostic collapses an emission's two driver-major-specific
