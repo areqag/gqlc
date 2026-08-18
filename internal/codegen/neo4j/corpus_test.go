@@ -40,9 +40,9 @@ const (
 	// decode is a second emission of the same narrowing rule, reached
 	// through the driver's record rather than through the Props map, so
 	// nothing the entity decoders prove carries over to it. Naming the
-	// record rather than neo4j.GetRecordValue is deliberate: an edge-union
-	// column reads record.Get, no overload of GetRecordValue accepting a
-	// relationship-or-nil result being available to it.
+	// record rather than neo4j.GetRecordValue is deliberate: an ANY VALUE
+	// column and an edge-union column both read record.Get, so
+	// GetRecordValue does not name every column read here.
 	corpusQueries = "corpus_queries.cypher"
 	// driverModule is the module path the v5 emission imports, and so the
 	// path the stub has to claim.

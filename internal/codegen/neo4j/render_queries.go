@@ -812,15 +812,22 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 
 // writeEdgeUnionColumnDecodeIndent emits the edgeUnion-column arm of
 // the row assembly (spec §5.5, C5). The column is decoded via
-// record.Get returning (any, bool) — no neo4j.GetRecordValue[T]
-// overload exists for a dbtype.Relationship-or-nil result — then
-// type-asserted to dbtype.Relationship, then dispatched through a
-// type-switch on rel.Type in resolver-canonical EdgeKeys order. Each
-// case calls the entity's decode<Name> helper and either returns the
-// entity (single-column :one), appends to out (single-column :many),
-// or assigns to the Row field (multi-column). Nullable columns skip
-// the raw==nil non-null gate and let the nil interface propagate as
-// the natural absence value (§3.3, ADR 0010 D3 Resolved lines 343–345).
+// record.Get returning (any, bool), then type-asserted to
+// dbtype.Relationship, then dispatched through a type-switch on
+// rel.Type in resolver-canonical EdgeKeys order. Each case calls the
+// entity's decode<Name> helper and either returns the entity
+// (single-column :one), appends to out (single-column :many), or
+// assigns to the Row field (multi-column). Nullable columns skip the
+// raw==nil non-null gate and let the nil interface propagate as the
+// natural absence value (§3.3, ADR 0010 D3 Resolved lines 343–345).
+//
+// Get is not forced here: neo4j.RecordValue admits Relationship, so
+// neo4j.GetRecordValue[dbtype.Relationship] instantiates — it is what
+// writeEntityColumnDecodeIndent below binds for an edge column. Taking
+// the untyped any instead is what keeps a missing key and a wrong
+// dynamic type as this arm's own refusals rather than as wrapped
+// driver errors, and it is the same honest-any carrier
+// writeAnyColumnDecodeIndent takes.
 func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
 	// Distinct per-column locals for the raw / rel bindings so
 	// multi-column Row-assembly bodies never shadow. Single-column

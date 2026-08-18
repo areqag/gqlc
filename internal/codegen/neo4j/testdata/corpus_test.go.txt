@@ -919,11 +919,12 @@ func TestEdgeUnionColumnDispatchesOnTheWireLabel(t *testing.T) {
 		}
 	}
 
-	// This column is read through record.Get rather than through
-	// neo4j.GetRecordValue — no overload of it accepts a relationship-or-
-	// nil result — so the three things Get cannot check are checked here
-	// instead: a value that is not a relationship, a held null under a
-	// non-nullable column, and a key the record does not carry.
+	// This column is read through record.Get, which hands back a bare
+	// (any, bool): the bool reports key absence, and both a held null
+	// and a value of the wrong dynamic type arrive as an untyped any.
+	// So each refusal below is worded by the emission itself — the
+	// non-relationship off its own type assertion, the held null off
+	// its own nil check, the missing key off Get's bool.
 	_, err = queriesOver([]string{"e"}, []any{node(scalarProps())}).EdgeUnionColumn(t.Context())
 	if err == nil {
 		t.Fatalf("EdgeUnionColumn(e: node) = no error, want a refusal")
