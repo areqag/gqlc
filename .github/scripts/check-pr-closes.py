@@ -298,9 +298,9 @@ def prose_only(pr_body):
     three spaces -- which is
     markdown's own bound on where an HTML block may start, four spaces being
     an indented code block instead. Both ends of it are rows. Not everything
-    GitHub declines to render as prose -- what was measured to diverge, in
-    either direction, is the paragraphs from 'Not a markdown parser' down,
-    and each shape they name is a row.
+    GitHub declines to render as prose -- what was measured to diverge from
+    it on the marker, in either direction, is the paragraphs from 'Not a
+    markdown parser' down, and each shape they name is a row.
 
     Fences follow the rule GitHub's renderer follows rather than a toggle on
     every ``` and ~~~ line. A fence closes only on a run of the same
@@ -315,8 +315,8 @@ def prose_only(pr_body):
     claim. The first of those says where the two functions differ and
     nothing about what a reader sees: some of its rows are markers the
     renderer puts in a code element or drops from the output, and some are
-    the divergences the paragraphs below row, where the renderer shows the
-    marker and the toggle is the one agreeing with it.
+    divergences the 'Not a markdown parser' paragraph rows, where the
+    renderer shows the marker and the toggle is the one agreeing with it.
     How many rows that is stays out of this docstring:
     it moved on this branch, and the row that moved it was added to the
     no-bead section rather than to the visibility one, so the number tracks
@@ -346,8 +346,8 @@ def prose_only(pr_body):
     it, and no PR body in this repository carried the shape to measure it
     on when this was written. The two errors are not equal either. The
     refusal names both ways out and says an edit alone re-runs the check;
-    a claim this stops reading is a number nothing is held against. Both
-    spellings are rows in the suite's no-bead section.
+    a claim this stops reading is a number this gate never holds against a
+    bead. Both spellings are rows in the suite's no-bead section.
 
     Not a markdown parser. Five measured divergences blank rather than
     keep: a fence and a <pre> each indented one to three spaces into a list
