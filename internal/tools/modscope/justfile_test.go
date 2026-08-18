@@ -446,34 +446,45 @@ func reaches(byName map[string]justRecipe, name, want string) bool {
 	return false
 }
 
+// sweepGate returns everything this file has to say against the justfile at
+// dir/path: what the reader could not read, the callers that do not reach the
+// sweep, and the submodules whose recipes the reader was never handed. Nothing
+// returned is the passing answer.
+//
+// The refusal is part of this rather than part of the comparison in
+// TestParseJustfileAgreesWithJustOnThisJustfile because it is this gate's
+// guarantee that a submodule suspends: a caller under one is asked for nothing,
+// and neither reading says so (bd gqlc-98ii).
+//
+// It is a function taking a directory so that the wiring is reachable from a
+// fixture. The live run below is over a justfile with no submodule in it, so
+// dropping the submoduleRefusals call there would change nothing about this
+// tree — TestASubmoduleCallerPassesBothReadingsAndIsRefused runs this same
+// function over a justfile that has one.
+func sweepGate(t *testing.T, dir, path string) []string {
+	t.Helper()
+	src, err := os.ReadFile(filepath.Join(dir, path))
+	if err != nil {
+		t.Fatalf("read the %s: %v", path, err)
+	}
+	recipes, out := parseJustfile(string(src))
+	unswept, complaints := unsweptModscopeCallers(recipes)
+	out = append(out, complaints...)
+	for _, name := range unswept {
+		out = append(out, fmt.Sprintf(
+			"recipe %s runs %s and does not reach %s through its dependencies, so a "+
+				"discovery probe a killed run left under test/data stops it on goDirs' "+
+				"empty-walk refusal — add %s to its dependency list (bd gqlc-c7o7)",
+			name, modscopePkg, probeSweep, probeSweep))
+	}
+	return append(out, submoduleRefusals("", dumpJustfile(t, dir, path))...)
+}
+
 // TestEveryRecipeRunningModscopeSweepsProbesFirst is the live assertion, over
 // the justfile CI runs.
-//
-// The reading it makes that answer from is parseJustfile over one file's bytes,
-// and a recipe just runs from somewhere else is not in it. So the run also asks
-// just where it read recipes from, and refuses a justfile that answers with a
-// submodule — see submoduleRefusals. The refusal is here rather than beside the
-// comparison in TestParseJustfileAgreesWithJustOnThisJustfile because it is
-// this assertion's guarantee that a submodule suspends: a caller under one is
-// asked for nothing, and neither reading says so (bd gqlc-98ii).
 func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join(repoRoot, justfilePath))
-	if err != nil {
-		t.Fatalf("read the justfile: %v", err)
-	}
-	recipes, readComplaints := parseJustfile(string(src))
-	unswept, complaints := unsweptModscopeCallers(recipes)
-	for _, c := range append(readComplaints, complaints...) {
+	for _, c := range sweepGate(t, repoRoot, justfilePath) {
 		t.Errorf("%s", c)
-	}
-	for _, name := range unswept {
-		t.Errorf("recipe %s runs %s and does not reach %s through its dependencies, so a "+
-			"discovery probe a killed run left under test/data stops it on goDirs' "+
-			"empty-walk refusal — add %s to its dependency list (bd gqlc-c7o7)",
-			name, modscopePkg, probeSweep, probeSweep)
-	}
-	for _, r := range submoduleRefusals("", dumpJustfile(t, repoRoot, justfilePath)) {
-		t.Errorf("%s", r)
 	}
 }
 
@@ -920,13 +931,16 @@ func TestASubmoduleCallerPassesBothReadingsAndIsRefused(t *testing.T) {
 			"because they agree, each having read past probe-caller", d)
 	}
 
-	refusals := submoduleRefusals("", dumped)
-	if len(refusals) != 1 {
-		t.Fatalf("submoduleRefusals = %v, want the one submodule this fixture brings in", refusals)
+	// Through sweepGate rather than through submoduleRefusals directly: the
+	// refusal reaching this fixture's answer is what the live assertion rests
+	// on, and a refusal nothing calls says as little as no refusal at all.
+	got := sweepGate(t, dir, "justfile")
+	if len(got) != 1 {
+		t.Fatalf("sweepGate = %v, want the one submodule this fixture brings in", got)
 	}
 	for _, want := range []string{"submodule probe", "probe-caller", probeSweep} {
-		if !strings.Contains(refusals[0], want) {
-			t.Errorf("refusal = %q, want it to name %q", refusals[0], want)
+		if !strings.Contains(got[0], want) {
+			t.Errorf("refusal = %q, want it to name %q", got[0], want)
 		}
 	}
 }
@@ -984,12 +998,15 @@ func TestSubmoduleRefusalsReadWhatJustAnswersWith(t *testing.T) {
 			// being mentioned.
 			name: "a submodule under a submodule is named by its path",
 			files: map[string]string{
-				"justfile":   "mod outer 'outer.just'\n",
-				"outer.just": "mod inner 'inner.just'\nouter-thing:\n    @true\n",
+				"justfile": "mod outer 'outer.just'\n",
+				// Two recipes under outer, spelled in the order the sorted list
+				// does not keep, so that the names in a refusal are sorted rather
+				// than in the order a map walk happened to take.
+				"outer.just": "mod inner 'inner.just'\nouter-thing:\n    @true\n\nanother:\n    @true\n",
 				"inner.just": "deep-caller:\n    go run ./" + modscopePkg + " modules\n",
 			},
 			want: []string{
-				"submodule outer out of this justfile and declares [outer-thing]",
+				"submodule outer out of this justfile and declares [another outer-thing]",
 				"submodule outer::inner out of this justfile and declares [deep-caller]",
 			},
 		},
