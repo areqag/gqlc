@@ -564,11 +564,11 @@ func sweepCategoryDetail(label string, lines []string) string {
 // to a committed value. The count is what the sweep this replaces could not
 // state: verdicts alone put the same change at 0 differences.
 //
-// The two mutation figures above — 299 cells moved, of which 288 fell outside
-// TestResolverSuite's pairs — were measured on the 11780-cell corpus as it
-// stood before gqlc-h6h7 added three queries and two schemas, and have NOT
-// been re-run against 12520. What they witness does not depend on the total:
-// that mutation rewrites no refusal text and flips no verdict by
+// The sentinel-WIDENING mutation's two figures — 299 cells moved, of which 288
+// fell outside TestResolverSuite's pairs — were measured on the 11780-cell
+// corpus as it stood before gqlc-h6h7 added three queries and two schemas, and
+// have NOT been re-run against 12520. What they witness does not depend on the
+// total: that mutation rewrites no refusal text and flips no verdict by
 // construction, so DETAIL and VERDICT are 0 at any corpus size and the
 // sentinel column is the only axis left to move. The live corpus shape is in
 // the manifest header, which is regenerated with the file.
