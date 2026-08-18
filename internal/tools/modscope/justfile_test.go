@@ -644,12 +644,15 @@ func priorDependencies(dumped justDump) (map[string][]string, error) {
 // pair of lines runs together into a new one, so joining with "" selects the
 // same four recipes. That is a fact about this justfile, not about the join.
 //
-// Two other differences measured on this repo's justfile at just 1.57.0 say the
-// same thing about whole-text equality: the dump drops each body line's leading
-// indentation, which this reader keeps, and it keeps the 469 body lines that
-// open with '#' and the '#!' of the 11 shebang recipes, which this reader also
-// keeps. Only the second of those is a spelling either side could hide a
-// modscopePkg mention in, and both sides keep it.
+// Two more measurements on this repo's justfile at just 1.57.0, which bear on a
+// body comparison in opposite ways. The first is a further difference: the dump
+// drops each body line's leading indentation, which this reader keeps, and that
+// alone makes the text of all 29 recipes here differ, none of them having an
+// empty body. The second is a sameness worth stating because a comment is a
+// place a mention could hide — a commented-out `go run ./internal/tools/modscope`
+// is a mention — and both sides keep those lines: the dump carries the 469 body
+// lines opening with '#' and the '#!' of the 11 shebang recipes, as does this
+// reader.
 func recipeBodies(dumped justDump) map[string]string {
 	out := make(map[string]string, len(dumped.Recipes))
 	for name, r := range dumped.Recipes {
