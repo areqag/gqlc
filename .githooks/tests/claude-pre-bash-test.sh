@@ -270,10 +270,11 @@ run_guard_case "<<\\EOF prose denies, fail-closed" deny-master "$MASTER_REPO" "$
 # the documented root cause of drift occurrence #1 (bd gqlc-r41), so a test
 # for this defect that could write the real repo's config would be the defect.
 #
-# Drift fixtures sit on a feature branch so a deny can only come from the
-# hooks guard, never from the master guard — which is why these rows assert
-# the classify() verdict (defined next to run_case, above) rather than a bare
-# "deny".
+# The drift fixtures defined in this block sit on a feature branch so a deny
+# cannot come from the master guard — the MASTER_DRIFT fixture further down is
+# on master on purpose, to pin which guard wins, and its row says so. That is
+# why these rows assert the classify() verdict (defined next to run_case,
+# above) rather than a bare "deny".
 run_drift_case() { # $1=name $2=expected(deny-hooks|deny-master|warn|silent) $3=cwd $4=command
   record "$1" "$2" "$(classify "$(run_hook "$3" "$4")")"
 }
