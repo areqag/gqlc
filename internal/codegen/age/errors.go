@@ -228,8 +228,36 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 // rather than off the reason string, because a reason is prose and
 // matching prose would make the gate order turn on the wording.
 // edgeUnionReason returns "" wherever it stands aside, so a non-empty
-// reason from a ResolvedEdgeUnion column can only be its own. The
-// parameter arm answers false without asking: a parameter is a schema
+// reason from a ResolvedEdgeUnion column can only be its own.
+//
+// The assertion names the VALUE form only, and that is the answer this
+// flag's contract wants rather than a form it forgets. What earns the rank
+// is edgeUnionReason's text, which names the candidates the schema
+// declares; unservedColumn reaches it from `case
+// resolver.ResolvedEdgeUnion:`, which matches the value form and nothing
+// else, so the assertion recognises exactly the arm that calls
+// edgeUnionReason and no reason that function did not write.
+//
+// A pointer or embedded edge union satisfies resolver.ResolvedType without
+// matching any arm, so it is refused at unservedColumn's fall-through
+// instead. A pointer to the variant, and a struct embedding it and
+// declaring no String, both leave the variant's own String shallowest in
+// the method set, so their reason reads "projects edgeUnion": no candidate
+// named, less than the alternation the text gate quotes back, so yielding
+// to the text costs the author nothing the exception below is there to
+// protect. Both forms are held to that exact reason by
+// TestEdgeUnionRankingFlagNamesTheValueFormOnly, whose two rows redden if
+// the assertion is widened to match them.
+//
+// A shallower String shadows the promoted one, and the fall-through then
+// returns that method's text — an embedder can answer with the candidate
+// names themselves and reach this function with the flag false and
+// edgeUnionReason never called. So the reason's wording is not evidence of
+// where it came from, and taking the rank off the column's type is what
+// confines it to answers edgeUnionReason actually gave. The same test pins
+// that shape.
+//
+// The parameter arm answers false without asking: a parameter is a schema
 // property or it is nothing this backend encodes, and neither is an edge
 // union, so a reason from that arm is always one the text outranks.
 //
@@ -425,10 +453,68 @@ func unservedColumn(t resolver.ResolvedType) string {
 	case resolver.ResolvedList, resolver.ResolvedUnknown:
 		return "projects " + ct.String()
 	}
-	// ResolvedType is a sealed interface, so the switch above is its
-	// whole membership; a variant added to the resolver lands here and is
-	// dropped rather than emitted through an arm chosen for some other
-	// shape.
+	// Reached without a ninth variant. resolver.ResolvedType's unexported
+	// marker stops another package DECLARING an implementation from
+	// scratch, which is narrower than a closed sum, because the marker is
+	// PROMOTED as well as declared. A pointer to a variant carries it:
+	// every marker and String on the variants takes a value receiver
+	// (internal/resolver/validated.go), and a pointer's method set contains
+	// its value methods, so *resolver.ResolvedEdgeUnion satisfies the
+	// interface while `case resolver.ResolvedEdgeUnion:` does not match it.
+	// A struct embedding something that already satisfies the interface
+	// carries it too — Go promotes an embedded type's unexported methods,
+	// so `struct{ resolver.ResolvedNode }` declared anywhere satisfies the
+	// interface without naming the marker, and so does
+	// `struct{ resolver.ResolvedType }`, which embeds the interface itself
+	// and no variant at all. These compose with each other, so this line is
+	// reached by shapes the arms do not enumerate. Callers reach them:
+	// codegen.Input, codegen.NamedQuery, resolver.ValidatedQuery and
+	// resolver.Column are exported types a package outside the resolver
+	// composes directly, so what the resolver builds does not bound what a
+	// caller hands over (internal/codegen/errors.go, gqlc-h4ug).
+	//
+	// So the arms are not the interface's membership, and this line is not
+	// a default for a ninth variant. What refusing here buys is the
+	// diagnostic, not the prevention of a wrong emission: with this line
+	// returning "" instead, *resolver.ResolvedNode and
+	// `struct{ resolver.ResolvedNode }` both came back from
+	// age.New().Generate as `out of C6 scope: query "Actions" column 0 "r"
+	// resolved as node` — no file emitted, and this backend not named in
+	// it. That answer is codegen.Prepare's: phaseAAdmit's column switch
+	// names the same variants these arms do, so a shape matching no arm
+	// here matches none there and takes phaseAAdmit's default
+	// (internal/codegen/prepare.go). phaseBDerive's switch names them too,
+	// but its default is labelled for a Phase A miss and Prepare returns on
+	// Phase A first, so it is a second net rather than the answering one.
+	// How a reason returned from here reaches the author
+	// instead, yield to the text gate included, is rejectUnservedQueries'
+	// business.
+	//
+	// `t.String()` dispatches to the shallowest String in the arriving
+	// type's method set. For a pointer to a variant, or a struct embedding
+	// a variant and declaring no String, that is the variant's own
+	// diagnostic Stringer — which for ResolvedProperty, ResolvedScalar and
+	// ResolvedTemporal composes the family into the tag rather than being
+	// the wire tag (internal/resolver/validated.go). A String declared
+	// shallower shadows it, and the text after "projects " is then the
+	// caller's, candidate names included: shadowEdgeUnion in
+	// sealedsum_test.go puts "AUTHORED and LIKES" there with
+	// edgeUnionReason never called. So nothing downstream may read this
+	// string for where it came from — the ranking in unservedReason turns
+	// on the column's TYPE for exactly that reason.
+	//
+	// A resolver.Column whose Type is nil, and a
+	// `struct{ resolver.ResolvedType }{}` holding a nil interface, both
+	// reach String from this line and panic; both were measured through
+	// age.New().Generate. origin/master's unservedColumn ends in this same
+	// expression, so that is the behaviour before this comment as well as
+	// after. Recorded here because it happens, not to argue that it cannot;
+	// guarding it changes behaviour and wants its own test and its own
+	// bead, which this bead is not. That bead is gqlc-aefe (GH #961).
+	//
+	// TestUnservedColumnFallThroughIsNotANinthVariant is the witness, for
+	// the pointer and the embedded form of every variant the arms name and
+	// for shadowing embedders.
 	return "projects " + t.String()
 }
 
