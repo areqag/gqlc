@@ -8,8 +8,10 @@
 #      here rather than in a git hook.
 #
 # The target is resolved by analysis, not raw pattern-matching:
-#   - heredoc bodies never reach the tokenizer, so a `git commit` written as
-#     prose in one is data rather than a command. The two delimiter forms then
+#   - a heredoc body is removed before the text is tokenized, so a `git commit`
+#     written as prose in one is data rather than a command (what a
+#     substitution INSIDE the body does is the next sentence, and it does reach
+#     the tokenizer, one recursion down). The two delimiter forms then
 #     part company, because the shell treats them differently: a QUOTED
 #     delimiter (<<'EOF', <<"EOF") expands nothing, so that body is dropped
 #     whole; an UNQUOTED one (<<EOF) expands $(...) and `...` in its body and
@@ -45,20 +47,25 @@
 #     bare — outside a heredoc the tokenizer is the backstop — and both are
 #     silent inside one (measured, bash 5.3.15) -> allow
 #   - HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt and <<EOF-1 arm on the
-#     prefix `EOF`. No following line ever equals that, so the body swallows
-#     the rest of the command and a real `git commit` written after the
-#     heredoc is not seen (measured) -> allow. Disclosed rather than widened:
-#     re-deriving the shell's delimiter-word grammar is the parser this file
-#     declines to become, and each widening moves rows nobody has measured
+#     prefix `EOF`. The real terminator line does not equal that, so the body
+#     goes on swallowing until some line is exactly `EOF` — and when none is,
+#     a real `git commit` written after the heredoc is never seen (measured)
+#     -> allow. When one IS (a bare `EOF` inside the body), the swallow ends
+#     early and the rest is tokenized, which denies (also measured), so the
+#     failure direction here depends on the body's contents rather than on the
+#     delimiter alone. Disclosed rather than widened: re-deriving the shell's
+#     delimiter-word grammar is the parser this file declines to become, and
+#     each widening moves rows nobody has measured
 # Deliberate conservative biases:
 #   - substitution extraction is textual, so $(...) inside single quotes
 #     (which would not execute) is still analyzed
 #   - the token scan is position-agnostic, so UNQUOTED prose like
 #     `echo git commit` still denies (quote it and it will not)
 #   - the same \w+ bound cuts the other way for delimiter forms the regex
-#     cannot match at all — <<\EOF, <<"EO F", <<'EOF.txt' — whose bodies are
-#     never stripped and so reach the tokenizer: prose there denies, though
-#     none of the three expands anything (measured)
+#     cannot match at all — <<\EOF, <<"EO F", <<'EOF.txt' — which arm nothing,
+#     so their bodies are not stripped and do reach the tokenizer: prose there
+#     denies, though all three are quoted forms that expand nothing (measured
+#     for each of the three)
 # If shlex cannot tokenize at all, falls back to the old whole-text regex
 # checked at the hook's own cwd.
 #
@@ -175,7 +182,9 @@ def strip_heredocs(text):
     # expands nothing, so its body is inert and the second return drops it; an
     # unquoted one (<<EOF) expands $(...) and `...`, so those substitutions
     # really run and the caller has to analyze them. Group 2 of HEREDOC_RE is
-    # the quote character, empty exactly when the delimiter is unquoted.
+    # the quote character, empty when the matched delimiter carries none. The
+    # forms the regex matches nothing for at all (<<\EOF and friends) arm no
+    # heredoc here and are disclosed in the header instead.
     kept, pending, expanded = [], [], []
     qstate = None
     for line in text.split("\n"):
