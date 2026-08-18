@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -439,6 +442,145 @@ func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 			"discovery probe a killed run left under test/data stops it on goDirs' "+
 			"empty-walk refusal — add %s to its dependency list (bd gqlc-c7o7)",
 			name, modscopePkg, probeSweep, probeSweep)
+	}
+}
+
+// TestParseJustfileAgreesWithJustOnThisJustfile asks just what this repo's
+// justfile declares and compares that with what the reader above finds in the
+// same bytes: the recipe names, and for each name the dependencies just runs
+// before the body. Those two are what unsweptModscopeCallers walks to decide
+// whether a caller reaches the sweep. Which recipes are callers at all it
+// decides from bodies, and bodies are not compared here — see below.
+//
+// Every row in TestParseJustfileReadsWhatJustReads is a shape somebody here
+// thought of, and a reader held only to those rows is as good as that list and
+// no better. This test is not keyed to the list: it compares the two readings
+// of whatever the file says today, so a header spelling no row here covers is
+// still compared, and one that costs a recipe or a dependency edge is named.
+//
+// That is not a hypothetical benefit. Measured on the commit before
+// joinContinuedHeader existed, with a backslash-continued header written into
+// this justfile in place of vuln's: the reader lost vuln, this comparison named
+// vuln, and every other test in the package passed. The shape had been live in
+// the reader for as long as the reader had existed, and it was found by
+// inventing a case rather than by working through just's grammar. The count of
+// shapes this file records itself getting wrong was three until the review that
+// found that fourth one, which is the argument for not treating the list as
+// finished.
+//
+// WHAT THIS DOES NOT REACH:
+//
+//   - Bodies. just's dump spells a body as parsed fragments and this reader
+//     keeps raw text, so they are not compared. A body this reader truncates
+//     could hold a `go run ./internal/tools/modscope` line it never sees, and
+//     nothing here would say so.
+//   - Shapes this justfile does not contain. It reports on these bytes, and
+//     says nothing about a header spelling no file here has yet.
+//   - A divergence both readings share. just is the reference, so a recipe just
+//     itself reads differently from the way it runs it is outside this.
+//
+// `just` is required rather than skipped over, for the reason
+// internal/tools/ciguard/hooktests_test.go gives for the same choice: the CI
+// test job installs it immediately before running the tests through it, so an
+// absent just is a broken environment, and a skip here would be the fail-open
+// this file exists to close.
+//
+// Both readings are asserted non-empty before they are compared. Two empty sets
+// agree, and an agreement reached that way would pass over any justfile at all
+// — the shape unsweptModscopeCallers refuses one level down.
+func TestParseJustfileAgreesWithJustOnThisJustfile(t *testing.T) {
+	justBin, err := exec.LookPath("just")
+	if err != nil {
+		t.Fatalf("`just` is not on PATH, and this test asks just what the %s declares "+
+			"rather than assuming it. CI installs just immediately before running these "+
+			"tests through it, so this is a broken environment and not a case to skip "+
+			"past: %v", justfilePath, err)
+	}
+
+	// just documents the JSON dump as unstable, so the flag is passed. Measured
+	// on the version CI pins and on the newer one this was written against:
+	// both accept the flag, and each reports the same recipes with it as
+	// without, so passing it is not what decides the answer.
+	cmd := exec.Command(justBin, "--justfile", justfilePath, "--unstable", "--dump", "--dump-format", "json")
+	cmd.Dir = repoRoot
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("`just --dump` on the %s: %v\n%s", justfilePath, err, stderr.String())
+	}
+
+	var dumped struct {
+		Recipes map[string]struct {
+			// Priors counts the dependencies just runs before the body. The
+			// rest are the ones written after `&&`, which parseJustfile drops
+			// on purpose: a sweep in that position runs after the walk it is
+			// there to protect.
+			Priors       int `json:"priors"`
+			Dependencies []struct {
+				Recipe string `json:"recipe"`
+			} `json:"dependencies"`
+		} `json:"recipes"`
+	}
+	if err := json.Unmarshal(out, &dumped); err != nil {
+		t.Fatalf("read `just --dump --dump-format json`: %v", err)
+	}
+
+	src, err := os.ReadFile(filepath.Join(repoRoot, justfilePath))
+	if err != nil {
+		t.Fatalf("read the %s: %v", justfilePath, err)
+	}
+	read, readComplaints := parseJustfile(string(src))
+	for _, c := range readComplaints {
+		t.Errorf("%s", c)
+	}
+
+	if len(dumped.Recipes) == 0 {
+		t.Fatalf("just read no recipe out of the %s, so agreeing with it says nothing", justfilePath)
+	}
+	if len(read) == 0 {
+		t.Fatalf("this reader read no recipe out of the %s, so agreeing with just says nothing", justfilePath)
+	}
+
+	byReader := make(map[string][]string, len(read))
+	for _, r := range read {
+		byReader[r.name] = r.deps
+	}
+	for name, r := range dumped.Recipes {
+		priors := r.Priors
+		if priors > len(r.Dependencies) {
+			t.Fatalf("just reports recipe %s with %d dependencies running first out of %d, "+
+				"which this test cannot read", name, priors, len(r.Dependencies))
+		}
+		var want []string
+		for _, d := range r.Dependencies[:priors] {
+			want = append(want, d.Recipe)
+		}
+		got, found := byReader[name]
+		if !found {
+			t.Errorf("just declares recipe %s in the %s and this reader does not find it, so "+
+				"a body of %s is outside every answer this file gives — including the sweep "+
+				"requirement, which is asked only of recipes it read (bd gqlc-6n9y)",
+				name, justfilePath, name)
+			continue
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("recipe %s runs %v before its body and this reader reads %v, so the "+
+				"closure this file walks is not the one just runs", name, want, got)
+		}
+	}
+
+	names := make([]string, 0, len(byReader))
+	for name := range byReader {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		if _, found := dumped.Recipes[name]; !found {
+			t.Errorf("this reader reads a recipe %s out of the %s and just declares no such "+
+				"recipe, so it can be reported as an unswept caller that does not exist",
+				name, justfilePath)
+		}
 	}
 }
 
