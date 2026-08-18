@@ -857,6 +857,16 @@ func justfileDisagreements(
 		// The mention, not the text: modscopePkg in a body is the whole of what
 		// unsweptModscopeCallers reads a body for, and the two sides spell the
 		// same body differently in ways recipeBodies records above.
+		//
+		// The witness that the 25 pinned bodies in
+		// TestParseJustfileReadsWhatJustReads do not already cover this: cap
+		// the reader's body at 10 lines and every one of those rows stays
+		// green, because the longest body they pin is 3 lines. vuln's body in
+		// this repo's justfile runs 632 lines and names modscopePkg at line
+		// 12, so the cap drops vuln from the caller set — while the three
+		// other recipes naming it do so at line 2, which keeps
+		// unsweptModscopeCallers' "no recipe body names" complaint quiet.
+		// With that cap and without this clause the suite reports ok.
 		justNames := strings.Contains(declaredBodies[name], modscopePkg)
 		readerNames := strings.Contains(got.body, modscopePkg)
 		switch {
