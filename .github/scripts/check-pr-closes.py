@@ -23,9 +23,9 @@ number against. A body that closes nothing passes, because a PR making no
 claim has none to check.
 
 Every exit prints. A pass that says nothing is one no reader can tell from
-this gate not having run, and each of the ones that used to be silent had a
-PR behind it (bd gqlc-mk7v, bd gqlc-63ao). The suite holds that as a
-property rather than a habit: its green helper requires output.
+this gate not having run (bd gqlc-mk7v, bd gqlc-63ao). The suite holds that
+as a property rather than as a habit: its green helper requires output as
+well as a zero status.
 
 A PR that touches a bead without resolving it declares that with a
 'Refs: <bead-id> #<issue>' line (bd gqlc-1ekq), starting at the line's
@@ -162,7 +162,9 @@ CLOSES = re.compile(r"(?i)(?:closes|fixes|resolves)\s+#(\d+)")
 # it. Same direction as the rest of this pattern, and rowed as such. main()'s
 # no-bead check reads prose_only()'s instead -- there no opt-out is being
 # honoured, so the refusal buys nothing against a body that only quotes the
-# spelling, and the PR bodies on this file quote it. Both sites refuse on a
+# spelling, and a body on this file is where such a quote turns up: PR #901's
+# carries three closing-keyword matches inside carriers prose_only() blanks,
+# measured at this commit against its live body. Both sites refuse on a
 # hit and fall through to a pass on a miss, so a spelling added to this
 # pattern can turn a pass into a refusal at either and never the reverse;
 # that is the asymmetry, and it is the pattern's, not one call site's.
@@ -613,7 +615,7 @@ def main():
         # can meet: the export is a committed file that lands in its own
         # chore commit after the PR merges, so the bead a PR is about can be
         # missing its mirror in the copy CI reads and nothing the author
-        # writes in the body or the branch changes that. A 'Refs:' line
+        # writes in the body or the branch name changes that. A 'Refs:' line
         # reaches this same exit, so it is not an escape either. What changes
         # is that the pass now says it verified nothing, on both declaration
         # forms rather than on 'Refs:' alone (bd gqlc-63ao).

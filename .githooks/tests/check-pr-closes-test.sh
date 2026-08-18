@@ -1169,7 +1169,7 @@ Closes #617")" "some/branch" \
 # and every closing line it carried went unread: measured on PR #946
 # ("Closes #902") and PR #963 ("Closes #780"), both green. What is refused is
 # the claim, not the silence — a body that closes nothing has made none, and
-# the chore and docs PRs that legitimately carry no bead are that shape.
+# demanding a declaration from it would buy this gate nothing to check.
 
 expect_red "a closing keyword with no bead to resolve it is refused" \
     "$EXPORT" "$(body 'Closes #902')" "chore/tidy-the-workflow" \
@@ -1217,9 +1217,10 @@ expect_green_saying "a body that closes nothing and names no bead passes, saying
 # Read over prose_only()'s body rather than the raw one, which is where this
 # call site parts company with the opt-out's check 4. There a fenced keyword
 # costs a refusal an author resolves by moving one line; here it would cost a
-# PR that merely quotes the spelling a 'Bead:' line it has no bead for, and
-# the PR bodies on this file quote it. Both carriers below are rowed because
-# either alone would leave the other live.
+# PR that merely quotes the spelling a 'Bead:' line it has no bead for, and a
+# body on this file is where such a quote turns up: PR #901's carries three
+# closing-keyword matches inside carriers prose_only() blanks. Both carriers
+# below are rowed because either alone would leave the other live.
 expect_green_saying "a closing keyword quoted in a fence is not a claim" \
     "$EXPORT" "$(body "Nothing to close here. The gate wants:
 
