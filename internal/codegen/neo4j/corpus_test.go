@@ -65,29 +65,35 @@ const stubModule = "module " + driverModule + "\n\ngo 1.26.2\n"
 // pass.
 //
 // It is written down here, in the parent, rather than censused out of
-// testdata/corpus_test.go.txt, because the fixture is the artefact under
-// check: an expectation read off it moves whenever it moves. Measured
-// against a census of the fixture's top-level `func Test…` declarations,
-// three ways of taking a test out of the corpus left the census and the
-// child run together and the comparison stayed green — commenting the
-// function out, deleting it, and renaming it to something that is not a
-// test name at all. Held against this list each of the three fails,
-// because this list does not move when the fixture does.
+// testdata/corpus_test.go.txt, because that fixture is the artefact
+// under check: a name the fixture stops declaring is a name a census of
+// it stops naming, so both sides of the comparison lose it at once.
+// Measured against such a census — the fixture's top-level `func Test…`
+// declarations — these three edits each took a test out of the census
+// and out of the child run together and left the comparison green:
+// commenting the function out, deleting it, and renaming it to something
+// that is not a test name at all. Held against this list each of the
+// three fails, because this list does not move when the fixture does.
 //
-// Not every removal was invisible to that census, and this does not
-// claim otherwise. A t.Skip in a test's body and a TestMain that never
-// calls m.Run() both leave the declaration standing while taking the
-// test out of the run, so a census names them and the old comparison
-// went red on both. Renaming TestFoo to Testfoo is refused earlier
-// still, by the vet check `go test` runs over the child module. So was a
-// fixture emptied to its package clause, and that case is the one worth
-// keeping in view: `go test` exits 0 over a _test.go declaring no tests,
-// so the child's exit status alone reports success on an emptied
-// template. Requiring this exact set is what covers it now.
+// Not every way of silencing a test was invisible to that census, and
+// nothing here claims it was. A t.Skip in a test's body and a TestMain
+// that never calls m.Run() leave the declaration standing while taking
+// the test out of the run, so the census still named it and the old
+// comparison went red on both. Renaming TestFoo to Testfoo never reaches
+// either check: the vet pass `go test` runs over the child module
+// refuses to build it, "malformed name".
+//
+// A fixture emptied to its package clause was caught too, by a
+// require.NotEmpty over the census that this list replaces. That case is
+// worth keeping in view because the child run reports it as a success:
+// `go test` prints `[no tests to run]` and exits 0 over a _test.go
+// declaring no tests, so the child's exit status says nothing about it.
+// A non-empty list cannot match the empty pass set such a run produces,
+// which is how requiring this exact set covers it now.
 //
 // This list is a declaration, not a gate. Removing a test from the
-// fixture and removing its name from here is one edit by one hand in one
-// commit, and nothing here prevents that. What it costs the remover is
+// fixture and removing its name from here is a two-line change in one
+// commit, and nothing here prevents it. What it costs the remover is
 // having to write the removal down in a file the child module is never
 // handed.
 var corpusTests = []string{
@@ -182,9 +188,8 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 	passed, log, err := runCorpus(t, dir)
 	require.NoError(t, err, "the emitted decoders do not satisfy the driver-value corpus:\n%s", log)
 	require.ElementsMatch(t, corpusTests, passed,
-		"the tests the corpus module passed are not the set corpusTests names — a test left "+
-			"testdata/corpus_test.go.txt without leaving corpusTests, or joined it without being "+
-			"named there:\n%s", log)
+		"the corpus module's passing tests are not the set corpusTests names: a name here that did "+
+			"not come back as a pass, or a pass whose name is not here:\n%s", log)
 }
 
 // driverAgnostic collapses an emission's two driver-major-specific

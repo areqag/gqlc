@@ -72,23 +72,25 @@ func (d *recordingDB) Exec(ctx context.Context, sql string, args ...any) (int, e
 // pass.
 //
 // It is written down here rather than censused out of
-// testdata/corpus_test.go.txt, because that fixture is the artefact under
-// check and an expectation read off it moves whenever it moves. Measured
-// against a census of the fixture's top-level `func Test…` declarations,
-// commenting a test out and deleting it each took the row out of the
-// census and out of the child run at the same time, and the comparison
-// stayed green. Held against this list both fail, because this list does
-// not move when the fixture does.
+// testdata/corpus_test.go.txt, because that fixture is the artefact
+// under check: a name the fixture stops declaring is a name a census of
+// it stops naming, so both sides of the comparison lose it at once.
+// Measured against such a census — the fixture's top-level `func Test…`
+// declarations — commenting a test out and deleting it each took it out
+// of the census and out of the child run together and left the
+// comparison green. Held against this list both fail, because this list
+// does not move when the fixture does.
 //
-// It also covers the emptiness backstop it replaced: `go test` exits 0
-// over a _test.go declaring no tests, so an emptied fixture is a child
-// run that reports success, and a non-empty list cannot match the empty
-// pass set that run produces.
+// It also covers the require.NotEmpty over that census which it
+// replaces. `go test` prints `[no tests to run]` and exits 0 over a
+// _test.go declaring no tests, so an emptied fixture is a child run that
+// reports success, and a non-empty list cannot match the empty pass set
+// such a run produces.
 //
 // The list is a declaration, not a gate. Removing a test from the fixture
-// and removing its name from here is one edit by one hand in one commit,
-// and nothing here prevents that. What it costs the remover is having to
-// write the removal down in a file the child module is never handed.
+// and removing its name from here is a two-line change in one commit, and
+// nothing here prevents it. What it costs the remover is having to write
+// the removal down in a file the child module is never handed.
 var corpusTests = []string{
 	"TestAgtypeString",
 	"TestAgtypeBool",
@@ -163,9 +165,8 @@ func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 	passed, log, err := s.runCorpus(dir)
 	s.Require().NoError(err, "the emitted helpers do not satisfy the captured corpus:\n%s", log)
 	s.Require().ElementsMatch(corpusTests, passed,
-		"the tests the corpus module passed are not the set corpusTests names — a test left "+
-			"testdata/corpus_test.go.txt without leaving corpusTests, or joined it without being "+
-			"named there:\n%s", log)
+		"the corpus module's passing tests are not the set corpusTests names: a name here that did "+
+			"not come back as a pass, or a pass whose name is not here:\n%s", log)
 }
 
 // runCorpus runs the assembled corpus module's own tests, reporting the
