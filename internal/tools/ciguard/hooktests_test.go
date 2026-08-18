@@ -44,14 +44,18 @@ const (
 // that is not spelled hookSuiteSuffix is refused rather than skipped. That is
 // the fail-closed half. A guard may only assume a convention it also enforces.
 //
-// The walk over .githooks/ itself is the other half: it refuses a file parked
-// beside the hooks it tests whose name carries `test` or ends in `.bats` —
-// between them the four spellings above — and it pins the tree's one
-// subdirectory by name, so a suite cannot hide in a directory this walk does
-// not enter. That is a rule over names, not a decision procedure: a suite
-// spelled outside both, `hooks-spec.sh`, is accepted there, the same hole the
-// dotfile skip below has. `.bats` is in the rule because `hooks.bats` carries
-// no `test` and the substring alone let it through.
+// The walk over .githooks/ itself is the other half: it refuses a non-dotfile
+// parked beside the hooks it tests whose name carries `test` or ends in
+// `.bats` — between them the four spellings above — and it refuses every
+// subdirectory but the one suites live in, so a suite cannot hide in a
+// directory this walk does not enter. The directory check runs ahead of the
+// dotfile skip in both loops, which is what makes that hold for `.hidden` as
+// well as for `hidden`; put the skip back in front and
+// `.githooks/.hidden/pre-commit-test.sh` goes unseen again (measured, package
+// green). That is a rule over names, not a decision procedure: a suite spelled
+// outside both, `hooks-spec.sh`, is accepted there, the same hole the dotfile
+// skip below has. `.bats` is in the rule because `hooks.bats` carries no
+// `test` and the substring alone let it through.
 //
 // The limit, stated rather than left to be found: a hook test suite is a file
 // in .githooks/tests/, and that is a definition this walk enforces, not a fact
@@ -59,24 +63,28 @@ const (
 // directory is outside this test's reach. The justfile's comment on the recipe
 // says where suites go, which is the only thing holding that case.
 //
-// Dotfiles are skipped in both directories, which is a hole and a deliberate
-// one: `.foo-test.sh` would be skipped rather than refused. It is here because
-// an editor swap file would otherwise redden the build for whoever has a suite
-// open. Nothing in the tree spells a suite that way today.
+// Dot-files are skipped in both directories — dot-directories are not, per the
+// ordering above — which is a hole and a deliberate one: `.foo-test.sh` in
+// .githooks/tests/ and `.hooks.bats` beside the hooks are skipped rather than
+// refused (both measured, package green). It is here because an editor swap
+// file would otherwise redden the build for whoever has a suite open, and a
+// swap file is a file. Nothing in the tree spells a suite that way today.
 func hookSuites(t *testing.T) []string {
 	t.Helper()
 
 	hooks, err := os.ReadDir(filepath.Join(repoRoot, hooksDir))
 	require.NoErrorf(t, err, "read %s", hooksDir)
 	for _, e := range hooks {
-		if strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
+		// Before the dotfile skip, not after: the skip is there for an editor's
+		// swap file, and a dot-directory is a whole suite tree.
 		if e.IsDir() {
 			require.Equalf(t, filepath.Base(hookTestsDir), e.Name(),
 				"%s/%s/ is a directory this walk does not enter, so a hook test suite "+
 					"inside it would be neither wired into %q nor reported by this test. "+
 					"Suites live in %s.", hooksDir, e.Name(), hookTestsRecipe, hookTestsDir)
+			continue
+		}
+		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		lower := strings.ToLower(e.Name())
@@ -91,11 +99,13 @@ func hookSuites(t *testing.T) []string {
 	require.NoErrorf(t, err, "read %s", hookTestsDir)
 	var suites []string
 	for _, e := range entries {
+		// Same ordering, for the same reason: `.githooks/tests/.sub/` would
+		// otherwise hold suites this loop never lists.
+		require.Falsef(t, e.IsDir(), "%s%s is a directory, and %q runs files",
+			hookTestsDir, e.Name(), hookTestsRecipe)
 		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		require.Falsef(t, e.IsDir(), "%s%s is a directory, and %q runs files",
-			hookTestsDir, e.Name(), hookTestsRecipe)
 		require.Truef(t, strings.HasSuffix(e.Name(), hookSuiteSuffix),
 			"%s%s does not end in %q. Rename it: the wiring check below reads this "+
 				"directory, and a suite it cannot recognise is one it would skip rather "+
@@ -166,7 +176,7 @@ func TestEveryHookTestSuiteIsNamedByTestHooks(t *testing.T) {
 		require.Lenf(t, fields, 2, "%s runs %q, which is not a bare `bash <suite>`. "+
 			"The rule is the shape, not a reading of the extra fields: just's `-` "+
 			"prefix discards the line's exit status, a `|| true` replaces it, and a "+
-			"redirection sends what the suite reported somewhere nobody looks. "+
+			"redirection can send what the suite reported somewhere nobody looks. "+
 			"Refusing the shape costs a harmless third field its place here and is "+
 			"cheaper than telling one from the rest.", hookTestsRecipe, line)
 		require.Equalf(t, "bash", fields[0], "%s runs %q. `%s` is not `bash`; just's `-` "+
@@ -370,9 +380,10 @@ func ciJustInvocations(t *testing.T) map[string][]string {
 // retires every suite the recipe names at once — from the CI test job and from
 // .githooks/pre-push, which both run `just test` — while leaving every
 // assertion above green: they are about what the recipe contains, not about
-// whether anyone calls it. Nothing turns red to say so — what CI loses is the
-// suites' own output, which is a signal only to someone counting `ok` lines —
-// and their `# Run via: just test-hooks` headers would still say they are run.
+// whether anyone calls it. Nothing above turns red to say so, which is why this
+// one is here. What CI would lose is the suites' own output, a signal only to
+// someone counting `ok` lines, and their `# Run via: just test-hooks` headers
+// would still say they are run.
 //
 // Derived through the dependency graph rather than asserting `test: ... test-hooks`
 // directly, because the property is that the recipe is reachable from a required
