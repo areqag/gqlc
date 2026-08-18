@@ -162,8 +162,9 @@ run_case "word-by-word quoting still denies"   deny  "$MASTER_REPO"  'echo "git"
 # "limits this leaves open", are a different thing — commands that really run
 # and are missed anyway, which is what makes them limits. Where a row breaks
 # that reading it says so above the row: the feature-cwd row really runs and is
-# silent because of the branch rather than the spelling, and the escaped rows
-# at the end deny text the shell never expands.
+# silent because of the branch rather than the spelling, and of the escaped
+# rows at the end the two inert ones deny text the shell does not expand, while
+# the third really runs like the rows above it.
 # Rows assert deny-master, not a bare deny: the refusal has to be the master
 # guard's, or a fixture failing for a neighbouring reason reads as a pass for
 # the wrong cause.
@@ -198,8 +199,10 @@ run_guard_case "unquoted heredoc bare prose"     silent "$MASTER_REPO" "$(printf
 # The third row is why the fix is not "skip a $( with a backslash before it":
 # `\\` is itself an escape yielding a literal backslash, so the substitution
 # after it is LIVE and its deny is correct. Across 0 to 4 backslashes measured,
-# an odd count suppressed the expansion and an even count did not. Keeping all
-# three pinned means a future change in either direction breaks a row.
+# an odd count suppressed the expansion and an even count did not. Mutating the
+# extraction toward either fix reddens rows here, which is what the third row
+# buys: skipping any `$(` with a backslash before it reddens all three, while
+# skipping only an odd run reddens the two inert ones and leaves this one green.
 # shellcheck disable=SC2016 # ditto
 run_guard_case "escaped \$( ) denies, inert"     deny-master "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n\\$(git commit -m x)\nEOF\n')"
 # shellcheck disable=SC2016 # ditto
