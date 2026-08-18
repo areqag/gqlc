@@ -637,13 +637,13 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, resolvedTypeName(col.Type))
+				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, ResolvedTypeName(col.Type))
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, resolvedTypeName(p.Type))
+				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, ResolvedTypeName(p.Type))
 			}
 			if _, ok := tm.Property(prop.Type); !ok {
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
@@ -663,18 +663,33 @@ func columnSite(queryName string, pos int, columnName string) string {
 	return fmt.Sprintf("query %q column %d %q", queryName, pos, columnName)
 }
 
-// resolvedTypeName renders t for the refusals that name a type no arm
-// matched. Five calls render through it, three reachable and two not:
-// Phase A's column switch, Phase A's parameter type assertion and
-// buildListElemPlan's element switch, plus the two sites behind Phase
-// A's shadow that §3 of docs/specs/codegen-sentinel-taxonomy.md carries
-// as param-type-invariant and column-type-invariant. The shadowed pair
+// ResolvedTypeName renders t for the refusals that name a type no arm
+// matched. Five calls in THIS FILE render through it, three reachable
+// and two not: Phase A's column switch, Phase A's parameter type
+// assertion and buildListElemPlan's element switch, plus the two sites
+// behind Phase A's shadow that §3 of
+// docs/specs/codegen-sentinel-taxonomy.md carries as
+// param-type-invariant and column-type-invariant. The shadowed pair
 // renders the same way so all five answer alike if an edit ever removes
 // the shadow. What they hold is by construction a value this package has
-// no case for. The count is re-derivable, and the paren is escaped so
+// no case for. That count is re-derivable, and the paren is escaped so
 // this line is not one of the hits it reports:
-// `grep -cE 'resolvedTypeName\(' internal/codegen/prepare.go` = 6, being
+// `grep -cE 'ResolvedTypeName\(' internal/codegen/prepare.go` = 6, being
 // those five calls and this declaration.
+//
+// The count is scoped to this file because callers are no longer only
+// here. internal/codegen/age's unserved-query gate renders the same kind
+// of refusal on the same kind of value, from rejectUnservedQueries,
+// which its generate() runs AHEAD of Prepare rather than inside it. So
+// nothing on this side stood in front of those renders, and they faulted
+// on shapes the five below had stopped faulting on (gqlc-aefe). They
+// call this rather than spell a second answer for the same value. Being
+// in another file, they are outside that grep, and a count written
+// across files would move on every caller added anywhere.
+//
+// Exporting costs no public surface: a path under internal/ is
+// importable only from inside this module, so the name is reachable by
+// the callers that need it and by nothing outside.
 //
 // t.String() there is a call into code this package does not own.
 // resolver.ResolvedType's unexported marker seals which types may
@@ -737,7 +752,7 @@ func columnSite(queryName string, pos int, columnName string) string {
 // recoverable, still takes the caller with it — an unbounded set of
 // implementations admits an unbounded set of ways to misbehave, and this
 // addresses the one the sum's own inhabitants exhibit.
-func resolvedTypeName(t resolver.ResolvedType) (name string) {
+func ResolvedTypeName(t resolver.ResolvedType) (name string) {
 	answered := false
 	defer func() {
 		// recover() is called for its effect and not its value: it stops
@@ -818,7 +833,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
 				//gqlc:unreachable param-type-invariant
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, resolvedTypeName(param.Type))
+				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, ResolvedTypeName(param.Type))
 			}
 			ty, _ := tm.Property(prop.Type)
 			p.ParamFields = append(p.ParamFields, Param{
@@ -992,7 +1007,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 				})
 			default:
 				//gqlc:unreachable column-type-invariant
-				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, resolvedTypeName(col.Type))
+				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, ResolvedTypeName(col.Type))
 			}
 		}
 
@@ -1203,5 +1218,5 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 		}
 		return &ListElem{Kind: ColumnList, GoType: "[]" + nested.GoType, Nested: nested}, nil
 	}
-	return nil, fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, resolvedTypeName(t))
+	return nil, fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, ResolvedTypeName(t))
 }
