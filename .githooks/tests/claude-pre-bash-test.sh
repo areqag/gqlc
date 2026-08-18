@@ -236,6 +236,10 @@ run_drift_case "sample-only dir: push refused"       deny-hooks "$SAMPLE_REPO" '
 run_drift_case "sample-only dir: innocuous warns"    warn       "$SAMPLE_REPO" 'ls -la'
 run_drift_case "value ok but no runnable hook"       deny-hooks "$DEAD_REPO"   'git commit -m x'
 run_drift_case "value ok but hook not executable"    deny-hooks "$NOEXEC_REPO" 'git commit -m x'
+# BARE_REPO is a plain `git init`, so its core.hooksPath is UNSET — drift by the
+# value rule the rows above use — and it is still silent, because hooks_drift()
+# reads the config only for repos that ship .githooks/. So "drifted" means both
+# conditions, which is why CONTRIBUTING.md defines the word before using it.
 run_drift_case "no .githooks/ in repo: silent"       silent     "$BARE_REPO"   'git commit -m x'
 run_drift_case "non-repo cwd never fires"            silent     "$TMP"         'git commit -m x'
 
