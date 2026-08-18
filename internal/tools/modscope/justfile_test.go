@@ -486,9 +486,9 @@ func TestUnsweptModscopeCallersFindsEachBrokenWiring(t *testing.T) {
 // same argument one level down — the double-quote family escapes and the raw
 // families do not, so a single rule applied to both mis-reads one of them.
 //
-// WHAT THIS STILL DOES NOT REACH. A sweep of 29 header shapes through both
-// just 1.57.0 and this reader leaves three they answer differently, and they
-// are worth telling apart by which way each one fails:
+// WHAT THIS STILL DOES NOT REACH. Three header shapes are known to be read
+// differently by just 1.57.0 and by this reader, and the useful thing about
+// them is which way each one fails:
 //
 //   - A header whose parameter default opens a literal it does not close on
 //     the same line. just accepts one, because a triple-quoted default may
