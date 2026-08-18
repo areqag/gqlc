@@ -16,6 +16,17 @@ unreadable body file and an unreadable export both fail. Silence here would
 be indistinguishable from 'no Closes needed', which is the whole defect
 class the gate exists to close.
 
+A body that carries one of GitHub's closing keywords and names no bead this
+checker can resolve fails for the same reason (bd gqlc-mk7v): the claim is
+made, GitHub acts on it at merge, and there is nothing left here to hold the
+number against. A body that closes nothing passes, because a PR making no
+claim has none to check.
+
+Every exit prints. A pass that says nothing is one no reader can tell from
+this gate not having run, and each of the ones that used to be silent had a
+PR behind it (bd gqlc-mk7v, bd gqlc-63ao). The suite holds that as a
+property rather than a habit: its green helper requires output.
+
 A PR that touches a bead without resolving it declares that with a
 'Refs: <bead-id> #<issue>' line (bd gqlc-1ekq), starting at the line's
 first character and read over what prose_only leaves of the body --
@@ -143,10 +154,18 @@ CLOSES = re.compile(r"(?i)(?:closes|fixes|resolves)\s+#(\d+)")
 # spellings are matched without checking which repository they name: a
 # spelling matched here that GitHub would ignore costs a refusal the author
 # can resolve, and one missed costs this gate affirming that an issue stays
-# open when it does not. Read over the raw body, not prose_only's, which is
-# the marker's rule inverted: a 'Closes #N' quoted inside a fence refuses an
-# opt-out although GitHub will not act on it. Same direction as the rest of
-# this pattern, and rowed as such.
+# open when it does not.
+#
+# Two call sites read it, and they read different bodies. check_opt_out()
+# reads the raw one, which is the marker's rule inverted: a 'Closes #N'
+# quoted inside a fence refuses an opt-out although GitHub will not act on
+# it. Same direction as the rest of this pattern, and rowed as such. main()'s
+# no-bead check reads prose_only()'s instead -- there no opt-out is being
+# honoured, so the refusal buys nothing against a body that only quotes the
+# spelling, and the PR bodies on this file quote it. Both sites refuse on a
+# hit and fall through to a pass on a miss, so a spelling added to this
+# pattern can turn a pass into a refusal at either and never the reverse;
+# that is the asymmetry, and it is the pattern's, not one call site's.
 GH_CLOSES = re.compile(
     r"(?i)\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\b:?\s*"
     r"(?:https?://github\.com/[\w.-]+/[\w.-]+/issues/"
@@ -461,6 +480,21 @@ def opt_out_number(refs, bead_id):
     return hit.group(1)
 
 
+def unverified_tail(refs, bead_id, marker_n):
+    """How a pass that checked nothing ends, in the words of the declaration
+    the PR made.
+
+    A 'Refs:' line names the number the marker held, so the wording can name
+    it back. A 'Bead:' line carries no number of its own and main() leaves
+    marker_n at None on that path, so the same sentence there would read
+    "#None" -- which is why PR #901 fixed one of the two forms and left the
+    other silent rather than moving one line (bd gqlc-63ao).
+    """
+    if refs is not None:
+        return f"the 'Refs: {bead_id} #{marker_n}' line holds nothing"
+    return "no 'Closes' line was demanded and none was checked"
+
+
 def check_opt_out(pr_body, bead, bead_id, marker_n, expected_n):
     """Everything an opt-out has to survive before it is honoured."""
     if marker_n != expected_n:
@@ -502,7 +536,42 @@ def main():
 
     bead_id, refs = declared_bead(pr_body, branch)
     if not bead_id:
-        sys.exit(0)  # No bead on this PR -> pass
+        # Nothing resolved: no 'Bead:' or 'Refs:' line naming a bead id, and
+        # no id in the branch name. This exit used to be sys.exit(0) with no
+        # output, so a body with any number of closing lines on a
+        # descriptively named branch was passed without one of them being
+        # read (bd gqlc-mk7v; measured silent on PRs #946 and #963).
+        #
+        # A closing keyword is GitHub's to act on at merge, so a body that
+        # carries one is asserting that an issue closes. That assertion is
+        # what this gate exists to hold against a bead, and with no bead
+        # there is nothing to hold it against, so it is refused. A body that
+        # closes nothing asserts nothing, and a chore or docs PR is entitled
+        # to that, so it passes -- audibly, because the whole complaint here
+        # is that a silent pass reads like a gate that never ran.
+        claimed = list(dict.fromkeys(GH_CLOSES.findall(prose_only(pr_body))))
+        if claimed:
+            refuse(
+                f"the PR body closes #{', #'.join(claimed)}, but no bead "
+                "resolves for this PR.",
+                "A closing keyword is GitHub's to act on at merge, so the "
+                "body",
+                "asserts that an issue closes while leaving this check "
+                "nothing to",
+                "hold the number against: no 'Bead:' or 'Refs:' line names a "
+                "bead",
+                "id, and the branch name carries none either.",
+                "Add a line reading 'Bead: <bead-id>' for the bead this PR "
+                "resolves,",
+                "or drop the closing keyword if it resolves none.",
+                "Editing the body re-runs this check on its own; you do",
+                "not need to push a commit or reopen the PR.",
+            )
+        print(
+            "[check-pr-closes] no bead named by the body or the branch, and "
+            "no closing keyword in the body's prose - nothing to check"
+        )
+        sys.exit(0)
 
     # Only meaningful when refs is not None, and only read under that same
     # guard; bound here anyway so the two guards do not have to be correlated
@@ -530,18 +599,30 @@ def main():
 
     ext = bead.get("external_ref") or ""
     if not ext:
-        if refs is not None:
-            # A marker on a bead with no mirror was the one exit that read a
-            # declaration, held its number against nothing, and said so
-            # nowhere: rc=0 and no output at all, which is what a gate that
-            # never ran also looks like. The pass is right -- there is no
-            # issue to leave open -- so what changes is only that it is
-            # legible.
-            print(
-                f"[check-pr-closes] {bead_id} has no GitHub mirror, so the "
-                f"'Refs: {bead_id} #{marker_n}' line holds nothing"
-            )
-        sys.exit(0)  # No GH mirror -> pass
+        # What the export establishes here is that its record for this bead
+        # carries no external_ref value. That is not the same proposition as
+        # "the bead has no GitHub mirror", and this comment used to say it
+        # was ("the pass is right -- there is no issue to leave open").
+        # Measured over master's export at c4081ee4: 2 of its 459 records
+        # carry no external_ref, and the live ledger mirrors both of them
+        # (gqlc-l45j on #933, gqlc-8inj on #934). So on that export the two
+        # propositions coincided nowhere, and the exit passed PR #951 -- body
+        # line 'Closes #933' -- on the ground that #933 did not exist.
+        #
+        # It stays a pass anyway, because refusing here is a demand no author
+        # can meet: the export is a committed file that lands in its own
+        # chore commit after the PR merges, so the bead a PR is about can be
+        # missing its mirror in the copy CI reads and nothing the author
+        # writes in the body or the branch changes that. A 'Refs:' line
+        # reaches this same exit, so it is not an escape either. What changes
+        # is that the pass now says it verified nothing, on both declaration
+        # forms rather than on 'Refs:' alone (bd gqlc-63ao).
+        print(
+            f"[check-pr-closes] the export's record for {bead_id} carries no "
+            "external_ref value, so "
+            + unverified_tail(refs, bead_id, marker_n)
+        )
+        sys.exit(0)
 
     if bead.get("issue_type") == "epic":
         print(
@@ -552,13 +633,16 @@ def main():
 
     m = ISSUE_N.search(ext)
     if not m:
-        if refs is not None:
-            print(
-                f"[check-pr-closes] {bead_id} mirrors {ext!r}, which names no "
-                f"issue number, so the 'Refs: {bead_id} #{marker_n}' line "
-                "holds nothing"
-            )
-        sys.exit(0)  # Can't parse -> pass
+        # The twin of the exit above, and silent on the same declaration
+        # form for the same reason: a mirror this cannot parse leaves no
+        # number to demand, which is a pass, and the pass has to say so
+        # whichever line declared the bead.
+        print(
+            f"[check-pr-closes] {bead_id} mirrors {ext!r}, which names no "
+            "issue number, so "
+            + unverified_tail(refs, bead_id, marker_n)
+        )
+        sys.exit(0)
     expected_n = m.group(1)
 
     if refs is not None:
