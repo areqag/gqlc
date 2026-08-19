@@ -873,6 +873,26 @@ func writeJustfiles(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+// probeCallerRecipe runs this program and depends on nothing, which is the
+// shape the sweep requirement exists for. The fixtures here put it inside a
+// submodule, where neither reading this file already had can see it.
+const probeCallerRecipe = "probe-caller:\n    go run ./" + modscopePkg + " modules\n"
+
+// nameOrderFixture brings in three submodules under names that sort into an
+// order they are not declared in, so a refusal over it is either in name order
+// or in the order a map walk took, and those are two different answers. Three
+// names rather than two, and read more than once: see orderRuns.
+//
+// Shared by the row that asserts the refusal order and by the control on
+// orderRuns below, which have to be looking at the same map for either to say
+// anything about the other.
+var nameOrderFixture = map[string]string{
+	"justfile":   "mod zulu 'zulu.just'\nmod alpha 'alpha.just'\nmod mike 'mike.just'\n",
+	"alpha.just": probeCallerRecipe,
+	"mike.just":  probeCallerRecipe,
+	"zulu.just":  probeCallerRecipe,
+}
+
 // submoduleFixture is the shape the refusal exists for: a top-level justfile
 // whose own recipes are in order, and a submodule holding a recipe that runs
 // this program and depends on nothing.
@@ -880,7 +900,7 @@ var submoduleFixture = map[string]string{
 	"justfile": probeSweep + ":\n    @true\n\n" +
 		"vuln: " + probeSweep + "\n    go run ./" + modscopePkg + " modules\n\n" +
 		"mod probe 'probe.just'\n",
-	"probe.just": "probe-caller:\n    go run ./" + modscopePkg + " modules\n",
+	"probe.just": probeCallerRecipe,
 }
 
 // TestASubmoduleCallerPassesBothReadingsAndIsRefused is the fixture the refusal
@@ -945,6 +965,26 @@ func TestASubmoduleCallerPassesBothReadingsAndIsRefused(t *testing.T) {
 	}
 }
 
+// orderRuns is how many times each row below reduces its one dump before the
+// order of the refusals is believed. Not a retry: every reduction has to answer
+// the same bytes as the first, and the first has to be the sorted one.
+//
+// One reduction cannot tell a sorted answer from a map walk that came out
+// sorted, and here it mostly does come out sorted, because both ends line up:
+// `just --dump` writes its module and recipe keys already in name order, so the
+// maps they decode into are built in name order, and a Go walk of a map this
+// small begins somewhere inside it and wraps — which returns the insertion
+// order whenever it begins at the front. Measured when this was written, one
+// slices.Sort at a time taken out of submoduleRefusals and the row it belongs
+// to run 40 times: a single reduction caught the missing name sort on 7 of
+// those runs and the missing recipe sort on 9, and orderRuns reductions caught
+// each on all 40. The two-name row this replaced managed 3 of 40. It is the
+// count of reductions that carries the claim, then, and not the width of the
+// fixture: widening a row does shorten the odds that a walk starts anywhere but
+// the front, but where a walk starts is Go's map implementation answering, not
+// anything a test is entitled to hold it to.
+const orderRuns = 64
+
 // TestSubmoduleRefusalsReadWhatJustAnswersWith cuts the reduction one spelling
 // at a time. The live justfile brings in no submodule, so on this tree the
 // refusal returns nothing whatever it is asked, and these rows are the
@@ -954,7 +994,6 @@ func TestASubmoduleCallerPassesBothReadingsAndIsRefused(t *testing.T) {
 // everything: a gate that fires on the justfile CI runs would be reverted
 // rather than obeyed.
 func TestSubmoduleRefusalsReadWhatJustAnswersWith(t *testing.T) {
-	caller := "probe-caller:\n    go run ./" + modscopePkg + " modules\n"
 	cases := []struct {
 		name  string
 		files map[string]string
@@ -969,7 +1008,9 @@ func TestSubmoduleRefusalsReadWhatJustAnswersWith(t *testing.T) {
 		{
 			name:  "a submodule is refused under the name just addresses it by",
 			files: submoduleFixture,
-			want:  []string{"submodule probe out of this justfile and declares [probe-caller]"},
+			want: []string{
+				"just reads the submodule probe out of this justfile and declares [probe-caller] under it,",
+			},
 		},
 		{
 			// A second spelling of the directive, and the reason the question is
@@ -978,9 +1019,11 @@ func TestSubmoduleRefusalsReadWhatJustAnswersWith(t *testing.T) {
 			name: "an optional submodule whose file is there is refused the same way",
 			files: map[string]string{
 				"justfile":   "mod? probe 'probe.just'\n",
-				"probe.just": caller,
+				"probe.just": probeCallerRecipe,
 			},
-			want: []string{"submodule probe out of this justfile and declares [probe-caller]"},
+			want: []string{
+				"just reads the submodule probe out of this justfile and declares [probe-caller] under it,",
+			},
 		},
 		{
 			// just reads no submodule at all here, so there is no file for a
@@ -999,47 +1042,104 @@ func TestSubmoduleRefusalsReadWhatJustAnswersWith(t *testing.T) {
 			name: "a submodule under a submodule is named by its path",
 			files: map[string]string{
 				"justfile": "mod outer 'outer.just'\n",
-				// Two recipes under outer, spelled in the order the sorted list
-				// does not keep, so that the names in a refusal are sorted rather
-				// than in the order a map walk happened to take.
-				"outer.just": "mod inner 'inner.just'\nouter-thing:\n    @true\n\nanother:\n    @true\n",
+				// Three recipes under outer, spelled in an order the sorted list
+				// does not keep, so the list a refusal prints is in name order
+				// rather than in the order a map walk happened to take. Three
+				// because with two the only wrong answer is the pair swapped, and
+				// the walk returns them in name order most of the time anyway —
+				// what tells the difference is orderRuns, not this row's length.
+				"outer.just": "mod inner 'inner.just'\n" +
+					"outer-thing:\n    @true\n\nanother:\n    @true\n\nmiddle:\n    @true\n",
 				"inner.just": "deep-caller:\n    go run ./" + modscopePkg + " modules\n",
 			},
 			want: []string{
-				"submodule outer out of this justfile and declares [another outer-thing]",
-				"submodule outer::inner out of this justfile and declares [deep-caller]",
+				"just reads the submodule outer out of this justfile and declares " +
+					"[another middle outer-thing] under it,",
+				"just reads the submodule outer::inner out of this justfile and declares " +
+					"[deep-caller] under it,",
 			},
 		},
 		{
 			// Sorted rather than in map order, so a failure names the same
-			// submodule every run.
-			name: "two submodules are refused in name order",
-			files: map[string]string{
-				"justfile":   "mod zulu 'zulu.just'\nmod alpha 'alpha.just'\n",
-				"alpha.just": caller,
-				"zulu.just":  caller,
-			},
+			// submodule every run. That is a claim about every run, so the runner
+			// below asks orderRuns times rather than once.
+			name:  "submodules are refused in name order",
+			files: nameOrderFixture,
 			want: []string{
-				"submodule alpha out of this justfile",
-				"submodule zulu out of this justfile",
+				"just reads the submodule alpha out of this justfile and declares [probe-caller] under it,",
+				"just reads the submodule mike out of this justfile and declares [probe-caller] under it,",
+				"just reads the submodule zulu out of this justfile and declares [probe-caller] under it,",
 			},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := submoduleRefusals("", dumpJustfile(t, writeJustfiles(t, tc.files), "justfile"))
+			dumped := dumpJustfile(t, writeJustfiles(t, tc.files), "justfile")
+			got := submoduleRefusals("", dumped)
 			if len(got) != len(tc.want) {
 				t.Fatalf("submoduleRefusals returned %d lines %v, want %d %v",
 					len(got), got, len(tc.want), tc.want)
 			}
 			for i, want := range tc.want {
-				if !strings.Contains(got[i], want) {
-					t.Errorf("refusal %d = %q, want it to contain %q", i, got[i], want)
+				// A prefix rather than a substring: both sorted lists are decided
+				// at the head of the line — which submodule this line is about, and
+				// the recipes it declares — so a want that matched them anywhere in
+				// the line would not be reading the position they were put in.
+				if !strings.HasPrefix(got[i], want) {
+					t.Errorf("refusal %d = %q, want it to begin %q", i, got[i], want)
+				}
+			}
+			for run := 1; run < orderRuns; run++ {
+				again := submoduleRefusals("", dumped)
+				if !slices.Equal(again, got) {
+					t.Fatalf("reduction %d of the same dump answered\n\t%v\nand reduction 1 "+
+						"answered\n\t%v\n— the refusals are coming out in the order a map walk "+
+						"took, so which submodule a failure names, and the order of the recipes "+
+						"it lists under one, are whatever that run's walk started at",
+						run+1, again, got)
 				}
 			}
 		})
 	}
+}
+
+// TestOrderRunsSeesAMapWalkTakeADifferentRoute is the control on orderRuns. The
+// rows above assert a sorted refusal order over that many reductions because
+// one reduction cannot tell a sorted answer from a walk that came out sorted;
+// if orderRuns were small enough that every reduction walked the fixture the
+// same way, those rows would be back to reporting whatever order iteration
+// handed them, and passing with the sort deleted. This asks the same map the
+// same question orderRuns times and requires the answer to move at least once.
+//
+// It is what keeps orderRuns from being a number nobody has to stand behind. At
+// 1 it fails outright, on all 40 runs it was measured over, and 1 is the setting
+// that puts the rows above back where the review found them. Short of that the
+// constant degrades rather than breaks: measured at 8, with the name sort
+// deleted, the row above still caught it on 35 of 40 runs, and this control
+// caught the weakening itself on 2 of 40 — which is why the constant is 64 and
+// not a number chosen to be exactly enough.
+//
+// It is also the one test in this file whose passing is a probability rather
+// than a certainty — it goes red if orderRuns walks of a three-key map all take
+// the same route, which is Go's to decide and not this file's.
+//
+// WHAT THIS DOES NOT REACH: deleting the repeated reduction in the rows above
+// outright. Nothing in the suite goes red for that, because a guard is only
+// visible through the defect it guards — the same limit sweepGate records for
+// its own repoRoot case (bd gqlc-98ii).
+func TestOrderRunsSeesAMapWalkTakeADifferentRoute(t *testing.T) {
+	dumped := dumpJustfile(t, writeJustfiles(t, nameOrderFixture), "justfile")
+	first := slices.Collect(maps.Keys(dumped.Modules))
+	for run := 1; run < orderRuns; run++ {
+		if !slices.Equal(slices.Collect(maps.Keys(dumped.Modules)), first) {
+			return
+		}
+	}
+	t.Fatalf("orderRuns is %d, and that many walks of the %d submodules just read out of this "+
+		"fixture all came out %v — so the rows that assert a sorted refusal order over that "+
+		"many reductions are handed one order every time, and would pass with the sort taken "+
+		"out of submoduleRefusals (bd gqlc-98ii)", orderRuns, len(dumped.Modules), first)
 }
 
 // TestJustRefusesASubmoduleRecipeDependingOnTheTopLevelSweep asks just what the
