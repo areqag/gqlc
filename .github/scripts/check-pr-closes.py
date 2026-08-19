@@ -57,9 +57,11 @@ past its '-->' (both bd gqlc-xz16) -- and they are what this branch found
 and rowed rather than a census of what exists.
 prose_only's docstring enumerates the shapes and each is a row. It states
 the size of that set there too, in more than one sentence and again inside
-an aggregate over its three paragraphs, and nothing in this repository
-checks the two docstrings against each other -- so changing the set means
-finding every sentence here and there whose number depends on it. The
+an aggregate over its three paragraphs, and the suite's visibility section
+counts the same three again, as the green ones among its exception rows.
+Nothing in this repository checks the two docstrings and that section
+against each other -- so changing the set means finding every sentence in
+the three of them whose number depends on it. The
 declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
 export has to not already show the bead closed, and the body has to carry
@@ -348,8 +350,14 @@ def prose_only(pr_body):
     it, and no PR body in this repository carried the shape to measure it
     on when this was written. The two errors are not equal either. The
     refusal names both ways out and says an edit alone re-runs the check;
-    a claim this stops reading is a number this gate never holds against a
-    bead. Both spellings are rows in the suite's no-bead section.
+    the pass loses the claim, and loses it on this path and not on the
+    other two, because here there is no bead to hold a number against. Of
+    the three sites reading a closing keyword out of the body this is the
+    one reading what this function leaves, while check_opt_out() and
+    main()'s demand for 'Closes #N' read the raw one -- so where a bead
+    does resolve, the same keyword inside a comment opened and closed on
+    separate lines still refuses an opt-out and still satisfies the
+    demand. Both spellings are rows in the suite's no-bead section.
 
     Not a markdown parser. Five measured divergences blank rather than
     keep: a fence and a <pre> each indented one to three spaces into a list
