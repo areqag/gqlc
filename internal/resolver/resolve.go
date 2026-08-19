@@ -651,21 +651,23 @@ type nodeTable struct {
 	//     the labels the query spelled;
 	//   - the narrowing's own collapse of a plural binding, which only ever
 	//     drops types no matching row can have;
-	//   - Phase B's inferUnlabelled, but ONLY when candidateTypes reports its
-	//     inference covering — every folded edge had an enumerated far end and
-	//     was evidence about every returned row. That conditional is the whole
-	//     point of the lane: it is what lets a covering inference be learned
-	//     from without letting an uncovered one launder a strict subset into a
-	//     VarEndpoint the narrowing trusts.
+	//   - Phase B's inferUnlabelled, but ONLY when the set it commits from is
+	//     covering — either candidateTypes reported its inference covering, or
+	//     the commitment was made from the `attainable` set, every edge of which
+	//     had an enumerated far end and was evidence about every returned row.
+	//     That conditional is the whole point of the lane: it is what lets a
+	//     covering inference be learned from without letting an uncovered one
+	//     launder a strict subset into a VarEndpoint the narrowing trusts.
 	//
 	// It is deliberately a positive lane, so anything the resolver did not
 	// itself derive that way defaults to uncovered: an uncovered Phase B
 	// inference (which may be a strict subset of the attainable types), and a
 	// carried entry (whose provenance this Part cannot see).
 	//
-	// `cands` needs no such lane. Its only writers are BindNodeCands, the carry
-	// seed, and the narrowing's shrink, so a cands entry is a satisfying set by
-	// construction; inferUnlabelled never writes it.
+	// `cands` needs no such lane. Its writers are BindNodeCands, the carry seed,
+	// the narrowing's shrink, and Phase B's plural commitment, and each writes a
+	// set that covers: the first three by construction, the fourth because it
+	// writes only the `attainable` set — see unlabelledInference.
 	resolvedCovers map[string]struct{}
 }
 
@@ -1124,7 +1126,13 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 			}
 			if committed == 0 {
 				n := next[0]
-				cands, _ := candidateTypes(n, edges, s, t, written, narrowing)
+				// commit() and the raw `inferred` field are the same set at
+				// this line and no test separates them: a binding reaches
+				// `next` only when commit() reported !widened, and that is the
+				// return that leaves `inferred` alone. The call is spelled the
+				// way the round spells it so the message and the decision read
+				// one function.
+				cands, _, _ := candidateTypes(n, edges, s, t, written, narrowing).commit()
 				return fmt.Errorf("%w: cannot uniquely infer type of unlabelled binding %q — candidate types: %s", ErrAmbiguousBinding, n.Variable(), joinCandidates(cands))
 			}
 		}
@@ -1146,7 +1154,7 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 	var next []query.NodeBinding
 	committed := 0
 	for _, n := range pending {
-		cands, covered := candidateTypes(n, edges, s, t, written, narrowing)
+		cands, covered, widened := candidateTypes(n, edges, s, t, written, narrowing).commit()
 		switch len(cands) {
 		case 0:
 			return nil, 0, fmt.Errorf("%w: cannot infer type of unlabelled binding %q — no edge in the pattern reaches a compatible schema node type", ErrUnknownLabel, n.Variable())
@@ -1195,26 +1203,172 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 			}
 			committed++
 		default:
-			next = append(next, n)
+			if !widened {
+				next = append(next, n)
+				continue
+			}
+			// The attainable set holds two or more types, so there is no one
+			// type to put in `resolved`. It goes into the plural lane, which is
+			// where the resolver already keeps "the types a row can have" — and
+			// the projection path reads that lane through unionNodeProperty,
+			// which resolves a property every candidate declares and names the
+			// candidate that lacks one otherwise.
+			//
+			// Deferring instead would reach ErrAmbiguousBinding, and that is a
+			// refusal on `RETURN c.name` as much as on `RETURN c.smallOnly` —
+			// see the two fixtures named at commit().
+			//
+			// Same CALL YIELD collision as the singular arm above; the shape
+			// posture is about re-binding the name, not about how many types
+			// the re-binding names.
+			if _, seenCall := callTypes[n.Variable()]; seenCall {
+				return nil, 0, fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, n.Variable(), joinCandidates(cands))
+			}
+			t.cands[n.Variable()] = nodeTypesForKeys(cands, s)
+			committed++
 		}
 	}
 	return next, committed, nil
 }
 
+// nodeTypesForKeys resolves a key set into the candidate slice nodeCands holds,
+// in the ascending key order BindNodeCands' slice arrives in (satisfyingNodeTypes
+// sorts). Order is observable: formatNodeTypeKeys renders it into
+// ErrAmbiguousLabel, and unionNodeProperty reports the first candidate as the
+// type a later one disagrees with.
+func nodeTypesForKeys(keys map[graph.LabelSetKey]struct{}, s schema.Schema) []schema.NodeType {
+	ordered := make([]graph.LabelSetKey, 0, len(keys))
+	for k := range keys {
+		ordered = append(ordered, k)
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+	out := make([]schema.NodeType, len(ordered))
+	for i, k := range ordered {
+		out[i] = s.Nodes[k]
+	}
+	return out
+}
+
+// candidateAcc is one intersection under construction, in the two readings
+// candidateTypes keeps side by side. `wide` reads each far end's whole key set;
+// `narrowed` reads it through endpointNarrowing's answer and stays empty when
+// the caller passed no narrowing.
+type candidateAcc struct {
+	wide     map[graph.LabelSetKey]struct{}
+	narrowed map[graph.LabelSetKey]struct{}
+}
+
+func (a *candidateAcc) fold(e query.EdgeBinding, side string, other query.Endpoint, keys []graph.LabelSetKey, s schema.Schema, narrowing map[string]map[graph.LabelSetKey]struct{}) {
+	a.wide = foldEdgeContribution(a.wide, e, side, keys, s)
+	if narrowing != nil {
+		a.narrowed = foldEdgeContribution(a.narrowed, e, side, narrowedEndpointKeys(other, keys, narrowing), s)
+	}
+}
+
+// result is the narrowed reading when it is non-empty and the wide one
+// otherwise — see candidateTypes for why an empty narrowed reading falls back
+// rather than refusing. An accumulator no edge folded into yields the empty set,
+// which is commitUnlabelledRound's case 0.
+func (a candidateAcc) result() map[graph.LabelSetKey]struct{} {
+	if len(a.narrowed) > 0 {
+		return a.narrowed
+	}
+	if a.wide == nil {
+		return map[graph.LabelSetKey]struct{}{}
+	}
+	return a.wide
+}
+
+// unlabelledInference is what candidateTypes knows about one pending unlabelled
+// binding. It carries two intersections rather than one because they answer two
+// different questions, and gqlc-sxzj is what conflating them cost:
+//
+//   - inferred is THE TYPE: the intersection over every touching edge whose ends
+//     endpointLabels can read. It is master's answer and it can be a strict
+//     subset of the types a returned row really carries.
+//   - attainable is THE TYPES A ROW CAN HAVE: the intersection over only the
+//     edges that passed BOTH conjuncts below. attested says at least one edge
+//     did; with none, the field is the empty set and means nothing.
+//
+// attainable ⊇ inferred is what keeps commit()'s substitution off case 0: it
+// fires on a singleton `inferred`, and an `attainable` that were not a superset
+// could be empty, which is ErrUnknownLabel on a query the singleton would have
+// resolved.
+//
+// Whenever both accumulators are returned under the SAME reading the property
+// is immediate — attainable folds a subset of the same edges, and intersecting
+// fewer edges only widens. That argument does not cover the mixed case:
+// candidateAcc.result() picks the narrowed reading over the wide one per
+// accumulator, so one can come back narrowed and the other wide, and then the
+// two sets were not built from comparable contributions. Neither a mixed
+// reading nor a violation appeared anywhere in this package's test run, corpus
+// sweep included — measured with a panic on each, each inverted first to show
+// it fires. The mixed case is unobserved, not impossible.
+type unlabelledInference struct {
+	inferred   map[graph.LabelSetKey]struct{}
+	covered    bool
+	attainable map[graph.LabelSetKey]struct{}
+	attested   bool
+}
+
+// commit is the set one Phase B round commits from, whether that set covers,
+// and whether a set of two or more is a COMMITMENT rather than a deferral.
+//
+// The substitution fires only on `len(inferred) == 1` — the shape where master
+// writes a singular type into `resolved` off an intersection it has just
+// admitted is incomplete. The other two lengths keep master's answer verbatim,
+// and each would be a different verdict under a wider set:
+//
+//   - 0: the touching edges agree on nothing, and master refuses with
+//     ErrUnknownLabel. attainable can be non-empty there (the dropped edge is
+//     what emptied the intersection), so substituting would ACCEPT a query
+//     master refuses — a widening with no soundness case behind it, and the
+//     opposite of this change's direction.
+//     Pinned by invalid/unlabelled_optional_hop_empty_intersection.cypher.
+//   - 2 or more: master defers to the next round and eventually refuses with
+//     ErrAmbiguousBinding over the wide set. Committing the wider set instead
+//     would turn every such refusal into a plural binding, which is a change to
+//     Phase B's ambiguity posture and not to its soundness.
+//     Pinned by invalid/ambiguous_unlabelled_binding.cypher and by
+//     TestInlineEndpointCommitsOnTheTypesSatisfyingIt.
+//
+// There is no separate guard on i.covered. When every touching edge passed both
+// conjuncts, attainable and inferred folded the identical edge sequence — an
+// edge that folds into one folds into the other, and the edges candidateTypes
+// skips fold into neither — so the substitution returns the set it replaces.
+// Relaxing the length gate is what makes the covered case observable, which is
+// why the fixtures above pin the length gate rather than this.
+//
+// The substituted set covers by construction: every edge it folded witnesses its
+// endpoints and had a far end that covered, which is endpointKeys.covering()'s
+// contract on both halves.
+//
+// A substituted set of two or more is committed, not deferred, because deferring
+// reaches ErrAmbiguousBinding and that refuses the queries whose answer does not
+// depend on which of the types the row carries —
+// valid/unlabelled_optional_hop_shared_property.cypher is one, and
+// invalid/unlabelled_optional_hop_type_only_property.cypher is the twin that
+// must still refuse.
+func (i unlabelledInference) commit() (keys map[graph.LabelSetKey]struct{}, covered, widened bool) {
+	if !i.attested || len(i.inferred) != 1 {
+		return i.inferred, i.covered, false
+	}
+	return i.attainable, true, true
+}
+
 // candidateTypes is the per-edge intersection Phase B infers an unlabelled
-// binding's type from, and whether that answer COVERS every type a matching row
-// can put at the binding.
+// binding's type from, together with the intersection over only the edges that
+// are evidence about every returned row. See unlabelledInference for what the
+// two are for and commit() for which one a round acts on.
 //
 // It reads each far end's keys whether or not that end covers, and infers from
 // them: refusing an uncovered far end here would turn queries origin/master
 // resolves into ErrUnknownLabel, and the wrong type it infers from one is
-// gqlc-3uof — pre-existing on master and deliberately left alone. What the
-// second return adds is the admission, so the wrong answer stops here instead
-// of being read downstream as a complete statement about a pattern's ends.
+// gqlc-3uof — pre-existing on master and deliberately left alone.
 //
-// The rule for the second return is a CONJUNCTION over the edges that
-// contributed, and each conjunct is a different way the intersection can drop a
-// type the returned rows really have:
+// The rule for `covered` is a CONJUNCTION over the edges that contributed, and
+// each conjunct is a different way the intersection can drop a type the returned
+// rows really have:
 //
 //   - the far end covered — otherwise the keys probed against are a strict
 //     subset of the ones a matching row can put there, and the declarations
@@ -1225,30 +1379,33 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 //     is the demonstrated case: it is an outer join, so the rows that lack it
 //     come back anyway and this binding is whatever those rows put here.
 //
-// The second conjunct does not skip the edge, only un-covers the answer. The
-// inferred type is left exactly as master infers it — skipping would widen acc
-// and turn a unique inference into ErrAmbiguousBinding, a refusal master does
-// not make. An edge skipped above (an endpoint endpointLabels cannot read yet)
-// contributes no constraint at all, which only widens acc, so skipping cannot
-// break the superset property either.
+// The same conjunction decides which accumulator an edge folds into. Failing it
+// does not skip the edge for `inferred`, only for `attainable`: `inferred` is
+// left exactly as master computes it, so nothing reads a set master would not
+// have produced.
+//
+// An edge skipped above (an endpoint endpointLabels cannot read yet) contributes
+// to neither accumulator, which only widens both, so skipping cannot break the
+// superset property of either.
 //
 // `narrowing` is endpointNarrowing's answer, or nil. Non-nil makes each far end
 // contribute through the types the edges that pin IT leave it, rather than
 // through its whole satisfying set — the difference between a bare binding
 // reading the union of everything its edges could reach and reading what they
 // prove (gqlc-h6h7). The narrowed answer is returned only when it is non-empty;
-// an empty one falls back to the unnarrowed acc, so this function never refuses
-// where the nil lane would not, and never turns that lane's
+// an empty one falls back to the unnarrowed reading, so this function never
+// refuses where the nil lane would not, and never turns that lane's
 // ErrAmbiguousBinding into case 0's ErrUnknownLabel.
 //
 // `covered` is computed off the unnarrowed reading and the narrowing does not
 // touch it. endpointNarrowing only ever drops types that no matching row can
 // put at that end — it folds in an edge only when the edge witnesses its
 // endpoints and both of its ends cover — which is the same argument
-// NarrowPluralEndpoints makes when it keeps resolvedCovers on a collapse.
-func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}) (map[graph.LabelSetKey]struct{}, bool) {
-	var acc, narrowedAcc map[graph.LabelSetKey]struct{}
-	covered := true
+// NarrowPluralEndpoints makes when it keeps resolvedCovers on a collapse, and
+// the same one that lets `attainable` be read as covering.
+func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}) unlabelledInference {
+	var all, attainable candidateAcc
+	inf := unlabelledInference{covered: true}
 	for _, e := range edges {
 		side, touches := touchingSide(e, n.Variable())
 		if !touches {
@@ -1263,28 +1420,22 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 			continue
 		}
 		otherKeys, otherCovers := otherEnd.covering()
-		if !otherCovers {
-			covered = false
+		// witnessesItsEndpoints is the same question NarrowPluralEndpoints asks
+		// of the edge it narrows from, asked here of every edge folded in — a
+		// commitment derived from an edge some returned row does not have is not
+		// a statement about that row's type, however well enumerated the edge's
+		// far end was.
+		if otherCovers && witnessesItsEndpoints(e, written) {
+			attainable.fold(e, side, other, otherKeys, s, narrowing)
+			inf.attested = true
+		} else {
+			inf.covered = false
 		}
-		// The same question NarrowPluralEndpoints asks of the edge it narrows
-		// from, asked here of every edge folded in — a commitment derived from
-		// an edge some returned row does not have is not a statement about that
-		// row's type, however well enumerated the edge's far end was.
-		if !witnessesItsEndpoints(e, written) {
-			covered = false
-		}
-		acc = foldEdgeContribution(acc, e, side, otherKeys, s)
-		if narrowing != nil {
-			narrowedAcc = foldEdgeContribution(narrowedAcc, e, side, narrowedEndpointKeys(other, otherKeys, narrowing), s)
-		}
+		all.fold(e, side, other, otherKeys, s, narrowing)
 	}
-	if len(narrowedAcc) > 0 {
-		return narrowedAcc, covered
-	}
-	if acc == nil {
-		return map[graph.LabelSetKey]struct{}{}, covered
-	}
-	return acc, covered
+	inf.inferred = all.result()
+	inf.attainable = attainable.result()
+	return inf
 }
 
 // narrowedEndpointKeys filters a far end's keys through what endpointNarrowing
