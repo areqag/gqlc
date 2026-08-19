@@ -60,8 +60,9 @@ const payloadBody = "github.event.pull_request.body"
 // Both types are decoded in testhooks_test.go as well, which asserts on the
 // `test` job's `if:` and on its `just test` step's. Promoting the field changed
 // what those two assertions ask, so bd gqlc-ff66 moved them onto present() with
-// the ones here.
-type ciSteps []struct {
+// the ones here. Both of those passed a written-empty `if:` on the string field;
+// TestTestJobIfIsRefusedOnBeingWritten holds them to the new read.
+type ciStep struct {
 	Name            string            `yaml:"name"`
 	Run             string            `yaml:"run"`
 	Shell           string            `yaml:"shell"`
@@ -81,7 +82,7 @@ type ciJob struct {
 	If              yaml.Node         `yaml:"if"`
 	ContinueOnError yaml.Node         `yaml:"continue-on-error"`
 	Defaults        ciDefaults        `yaml:"defaults"`
-	Steps           ciSteps           `yaml:"steps"`
+	Steps           []ciStep          `yaml:"steps"`
 }
 
 // The `if:` the gate step is allowed to carry, and the only one. ci.yml's own
@@ -252,10 +253,7 @@ func TestPRBodyGateFailsTheJobItRunsIn(t *testing.T) {
 		gateJob, spell(job.ContinueOnError))
 
 	requireNoJobIf(t, job)
-	require.Equalf(t, gateStepIf, step.If.Value,
-		"the PR-body gate step's `if:` is %q, not %q. The step is skipped on anything "+
-			"that condition excludes and the job still passes, so narrowing it is how "+
-			"this gate gets turned off quietly.", spell(step.If), gateStepIf)
+	requireGateStepIf(t, step)
 
 	require.Empty(t, step.Shell,
 		"the PR-body gate overrides its shell to %q. The runner's default is "+
@@ -273,6 +271,25 @@ func TestPRBodyGateFailsTheJobItRunsIn(t *testing.T) {
 				"PR-body gate's shell from a block that does not mention it",
 			ciWorkflow, wf.Run.Shell)
 	}
+}
+
+// requireGateStepIf holds the gate step's `if:` to the one condition it is
+// allowed to carry.
+//
+// An equality, not a presence check, and the difference is the narrowing: the
+// condition with `&& false` appended is a step skipped on every event, a job
+// that still passes, and a key that is still there. Absence and a written-empty
+// `if:` fall out of the equality too, neither being the condition, but they are
+// not what it is for — a presence check would catch those and miss the
+// narrowing, which is the shape that turns the gate off quietly.
+//
+// require.TestingT for the same reason requireNoJobIf takes it, and the rows in
+// TestGateStepIfIsHeldToItsExactCondition are what reach the refusing side.
+func requireGateStepIf(t require.TestingT, step ciStep) {
+	require.Equalf(t, gateStepIf, step.If.Value,
+		"the PR-body gate step's `if:` is %q, not %q. The step is skipped on anything "+
+			"that condition excludes and the job still passes, so narrowing it is how "+
+			"this gate gets turned off quietly.", spell(step.If), gateStepIf)
 }
 
 // requireNoJobIf refuses a job-level `if:` on the gate job.
@@ -310,9 +327,13 @@ func (r *recordingT) FailNow() { panic(failedNow{}) }
 
 func (r *recordingT) Helper() {}
 
-// jobIfRefusal is what requireNoJobIf reported about job, and "" when it
-// accepted it.
-func jobIfRefusal(t *testing.T, job ciJob) string {
+// refusalOf is what assert reported, and "" when it accepted its input.
+//
+// Parameterised over the assertion because the `if:` rules it is used on sit in
+// two files: requireNoJobIf here, and the `test` job's two in testhooks_test.go.
+// Collection stops at the first refusal, since require's FailNow is what unwinds
+// the closure.
+func refusalOf(t *testing.T, assert func(require.TestingT)) string {
 	t.Helper()
 	rec := &recordingT{}
 	func() {
@@ -322,7 +343,7 @@ func jobIfRefusal(t *testing.T, job ciJob) string {
 				panic(r)
 			}
 		}()
-		requireNoJobIf(rec, job)
+		assert(rec)
 	}()
 	return strings.Join(rec.msgs, "\n")
 }
@@ -364,7 +385,7 @@ func TestGateJobIfIsRefusedOnBeingWrittenNotOnItsValue(t *testing.T) {
 				"this row's premise is that a string `If` would have read %q from %q",
 				row.value, row.src)
 
-			refusal := jobIfRefusal(t, job)
+			refusal := refusalOf(t, func(rt require.TestingT) { requireNoJobIf(rt, job) })
 			if !row.refused {
 				require.Emptyf(t, refusal, "%q writes no `if:` and was refused anyway", row.src)
 				return
@@ -374,6 +395,53 @@ func TestGateJobIfIsRefusedOnBeingWrittenNotOnItsValue(t *testing.T) {
 					"retired by a key this test reads as absent", row.src, gateJob)
 			require.Containsf(t, refusal, gateJob,
 				"the refusal does not name the job it is about: %s", refusal)
+		})
+	}
+}
+
+// What the equality above buys over a presence check, which is the whole of why
+// the gate step's `if:` is read for its value where the job's is read for having
+// been written.
+//
+// Rewriting requireGateStepIf as `require.Truef(t, present(step.If), …)` was put
+// to this package and left ci.yml green, because ci.yml carries the right
+// condition and a presence check is satisfied by any condition at all (bd
+// gqlc-ff66, mutation M8). The narrowed row is what parts the two reads: `&&
+// false` appended is a key that is present, a step that never runs and a job
+// that passes.
+//
+// The rows are documents taken, not a survey of YAML. Conditions that are
+// equivalent to the allowed one and spelled differently are refused here, and
+// that is the intended cost of an equality — a narrowing is a different string,
+// and so is a rewording.
+func TestGateStepIfIsHeldToItsExactCondition(t *testing.T) {
+	for _, row := range []struct {
+		name    string
+		src     string
+		refused bool
+	}{
+		{"the condition it is allowed to carry", "if: " + gateStepIf + "\n", false},
+		{"no if: key at all", "run: echo\n", true},
+		{"if: with nothing after it", "if:\n", true},
+		{"if: with an empty string", "if: \"\"\n", true},
+		{"the condition narrowed with && false", "if: " + gateStepIf + " && false\n", true},
+		{"a different condition", "if: github.event_name == 'push'\n", true},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			var step ciStep
+			require.NoErrorf(t, yaml.Unmarshal([]byte(row.src), &step), "decode %q", row.src)
+
+			refusal := refusalOf(t, func(rt require.TestingT) { requireGateStepIf(rt, step) })
+			if !row.refused {
+				require.Emptyf(t, refusal,
+					"%q is the `if:` the gate step is allowed to carry and it was refused: %s",
+					row.src, refusal)
+				return
+			}
+			require.NotEmptyf(t, refusal,
+				"%q was accepted as the gate step's `if:`, so the PR-body gate can be "+
+					"narrowed to a condition that never fires while every check here "+
+					"stays green", row.src)
 		})
 	}
 }
