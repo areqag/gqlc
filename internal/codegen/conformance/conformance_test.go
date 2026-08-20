@@ -491,6 +491,13 @@ func (s *ConformanceSuite) TestDoubleRun() {
 // mapped codegen sentinel is in codegenSentinels. Queryfile sentinels
 // have their own sweep in internal/queryfile — this one is codegen-
 // only, matching the two-disjoint-sets discipline (spec §9.3).
+//
+// Both directions are quantified over a set, so neither has an entry to
+// report when the corpus and codegenSentinels are empty together: the
+// glob below reads a directory that a rename or a redirected
+// childRootEnv can silently make empty. The requireSwept on covered is
+// what refuses that reading; without it, emptying codegenSentinels and
+// pointing childRootEnv at an empty corpus passes.
 func TestSentinelReachability(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join(fixtureRoot(), "invalid", "*"))
 	require.NoError(t, err)
@@ -512,6 +519,12 @@ func TestSentinelReachability(t *testing.T) {
 		}
 		covered[sentinel] = true
 	}
+	requireSwept(t, len(covered), "the invalid corpus",
+		"no invalid fixture named a codegen sentinel, so nothing below is reconciled against a fixture this "+
+			"run read. What happens without this refusal depends on codegenSentinels: populated, the loop "+
+			"below reds on its first member and reads as one fixture missing from a corpus that was read; "+
+			"emptied alongside the corpus, both loops range over nothing and reconcile clean")
+
 	canonical := make(map[error]bool, len(codegenSentinels))
 	for _, sentinel := range codegenSentinels {
 		canonical[sentinel] = true
