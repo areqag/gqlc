@@ -1238,12 +1238,17 @@ vuln: sweep-discovery-probes vuln-root-residual
     # the tree internal/tools/vulnguard builds, where the fixture is second of
     # three listed directories: `go list ./... | grep -qxF "${fixture}"` returns
     # 141 while `grep -qxF "${fixture}" <<<"${listed}"` over that same listing
-    # returns 0 (bd gqlc-e53u). Every `grep -q` and `grep -m1` in this recipe
-    # therefore reads a herestring rather than a pipe, which also gives the
+    # returns 0 (bd gqlc-e53u). No `grep -q` or `grep -m1` in this recipe reads a
+    # pipe: each takes a herestring or a file argument, which also gives the
     # producer's own status somewhere to be checked — rule (2) again.
-    # In this checkout the piped form passed only because the matches happen to
-    # sort last and `go list` fits its whole output in the pipe buffer, and
-    # neither of those is this recipe's to control.
+    # In this checkout the piped form passed for ONE reason, not two: `go list`
+    # fits its whole output in the pipe buffer, so it never writes again after
+    # the match and never takes the signal. Sort order is not the second guard
+    # it looks like. This site issues the TAGGED listing — 29 lines with the
+    # fixture at 28 — and the fixture is last only in the untagged listing,
+    # which this site never runs. selftest_tagblind is not protected by sorting
+    # either: on a healthy tree its fixture is absent. Buffer size is not this
+    # recipe's to control, so do not read "is my match last?" as an all-clear.
     scope() { go run ./internal/tools/modscope "$@"; }
 
     # Every directory of a module that holds a Go file, absolute, read off disk.
