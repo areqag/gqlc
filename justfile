@@ -431,8 +431,15 @@ tmp-report root=scratch_root:
 # anything a live process has as its cwd or holds an fd on, anything written to
 # inside the age threshold, anything holding a git repository this repo does not
 # track, and anything belonging to the machine. Under `apply` every text artifact
-# it is about to destroy is tarred to a file outside the scan root first — 690 MiB
-# of agent logs came to 43 MiB in the manual remediation this replaces.
+# under -archive-max-file that it is about to destroy is tarred to a file outside
+# the scan root first — 690 MiB of agent logs came to 43 MiB in the manual
+# remediation this replaces — and everything it could NOT archive is named on
+# stdout as unrecoverable, because those files are deleted all the same.
+#
+# The root is positional, so `apply ~` is one typo away from the home directory.
+# `apply` is refused over any root this host does not designate for temporary
+# files, and over anything on the same path chain as $HOME. A dry run, which is
+# read-only, stays available over any directory.
 #
 # The mode is refused rather than defaulted when it is neither of the two: a typo
 # that silently dry-runs is a reap somebody thinks they performed.
