@@ -1252,8 +1252,10 @@ vuln: sweep-discovery-probes vuln-root-residual
     # 40 of 40). A `grep` that exits without reading at all — invalid regex,
     # unreadable -f file — breaks that premise but loses no match. Nothing in
     # this recipe's TEXT settles the property for the producers this recipe has —
-    # `go list`, `scope`, `sort` — whose write counts follow libc buffering
-    # rather than any line readable here. Three cheap substitutes for settling it
+    # `go list`, `scope`, `sort` — whose write counts follow buffering inside
+    # the producer rather than any line readable here. (Not libc: `go list` and
+    # `scope` are static Go binaries and buffer through bufio; only `sort` links
+    # libc.) Three cheap substitutes for settling it
     # are measured false. Sort order:
     # this site issues the TAGGED listing — 29 lines, fixture at 28 — and the
     # fixture is last only in the UNTAGGED listing, which this site never runs;
