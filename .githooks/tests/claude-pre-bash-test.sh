@@ -571,6 +571,12 @@ run_case    "reason built by the shell"        deny  "$BD_REPO" 'bd close gqlc-x
 run_case    "reason read from stdin"           deny  "$BD_REPO" 'bd close gqlc-x --reason-file -'
 # shellcheck disable=SC2016 # ditto
 run_verdict "reason built by the shell (verdict)" deny-unreadable-reason "$BD_REPO" 'bd close gqlc-x -r "$(cat /tmp/r)"'
+# The other half of UNEXPANDED_RE. A backtick is command substitution too, and
+# it is the half with the reach: of the 7 corpus close reasons this arm refuses,
+# 4 carry a backtick and no `$`. Deleting that clause left the suite green while
+# a backtick reason fell to allow-no-sha — read as prose, and never checked.
+# shellcheck disable=SC2016 # the backtick is the hook's input, not this file's code
+run_verdict "backtick reason is unreadable"    deny-unreadable-reason "$BD_REPO" 'bd close gqlc-x -r "see `notes.md` for the sha"'
 run_case    "empty reason string"              allow "$BD_REPO" 'bd close gqlc-x -r ""'
 run_verdict "empty reason string (verdict)"    allow-no-sha "$BD_REPO" 'bd close gqlc-x -r ""'
 
@@ -640,6 +646,12 @@ run_verdict "commit <sha> anchors an absent sha" deny-absent-object "$BD_REPO" \
   "bd close gqlc-x -r \"Headline commit $ABSENT_SHA landed.\""
 run_verdict "commit <sha> anchors an orphan sha" deny-unpushed-sha "$BD_REPO" \
   "bd close gqlc-x -r \"Headline commit $ORPHAN_SHA landed.\""
+# `@<sha>` is the third anchor spelling, and the one no row reached: deleting it
+# from CITED_SHA_RE left the whole suite green while `@<absent sha>` fell from
+# deny-absent-object to allow-no-sha, because unanchored it is a loose token git
+# cannot resolve. It is the sole match for 2 of the 309 corpus close reasons.
+run_verdict "@<sha> anchors an absent sha"       deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"landed @$ABSENT_SHA, review followed.\""
 
 # --- the effective repo is resolved, like the master guard's --------------
 #
@@ -669,6 +681,16 @@ run_verdict "--reason-file citing a pushed sha"    allow-reachable "$BD_REPO" \
   "bd close gqlc-x --reason-file $TMP/reason-ok.txt"
 run_case    "--reason-file with a literal path"    deny "$BD_REPO" \
   "bd close gqlc-x --reason-file $TMP/reason.txt"
+
+# --- the joined spelling of a flag, `--reason=VALUE` -------------------------
+# Every row above passes the reason as two tokens. `bd close --help` (v1.0.4)
+# documents `-r, --reason string`, so the joined form is real usage, and
+# scan_bd's `"=" in opt` splitter is what reads it. Deleting that splitter makes
+# the token an unrecognised flag, skipped whole: the close is then seen with NO
+# reason flag and verdicts allow-no-reason — it disappears from this guard
+# rather than merely mis-verdicting, with the suite green.
+run_verdict "--reason=VALUE citing an orphan sha"  deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x --reason=\"Closed at $ORPHAN_SHA.\""
 
 # --- object_types' own guards, driven with a stubbed subprocess -------------
 # `git cat-file --batch-check` emits one line per input line and the mapping is
@@ -805,7 +827,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=142
+EXPECTED_ROWS=145
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
