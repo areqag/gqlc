@@ -1216,7 +1216,7 @@ vuln: sweep-discovery-probes vuln-root-residual
     # difference. The walk is the measurement, the comparison is only as good as
     # it, and an unmeasured module used to read exactly like a covered one.
     #
-    # TWO HOUSE RULES for the helpers below, and neither is stylistic.
+    # THREE HOUSE RULES for the helpers below, and none is stylistic.
     #
     # (1) Never call one inside `<(...)`. A process substitution's exit status is
     # read by nobody, so `comm -13 <(...) <(scope dirs X)` hands comm an empty
@@ -1230,6 +1230,20 @@ vuln: sweep-discovery-probes vuln-root-residual
     # therefore returns its own status explicitly and every caller checks it,
     # which is why `|| return` and `|| exit` appear below on assignments that
     # `set -e` looks like it already covers. It does not.
+    #
+    # (3) Never pipe a listing into a consumer that exits on its first match.
+    # `grep -q` closes the pipe the moment it matches, the producer takes
+    # SIGPIPE on its next write and reports 141, and `pipefail` makes 141 the
+    # pipeline's status — so a MATCH arrives as a failed pipeline. Measured on
+    # the tree internal/tools/vulnguard builds, where the fixture is second of
+    # three listed directories: `go list ./... | grep -qxF "${fixture}"` returns
+    # 141 while `grep -qxF "${fixture}" <<<"${listed}"` over that same listing
+    # returns 0 (bd gqlc-e53u). Every `grep -q` and `grep -m1` in this recipe
+    # therefore reads a herestring rather than a pipe, which also gives the
+    # producer's own status somewhere to be checked — rule (2) again.
+    # In this checkout the piped form passed only because the matches happen to
+    # sort last and `go list` fits its whole output in the pipe buffer, and
+    # neither of those is this recipe's to control.
     scope() { go run ./internal/tools/modscope "$@"; }
 
     # Every directory of a module that holds a Go file, absolute, read off disk.
@@ -1350,7 +1364,7 @@ vuln: sweep-discovery-probes vuln-root-residual
     # unconstrained file added beside it) would take both guards out of service
     # with nothing failing. The three clauses are the three ways that happens.
     selftest_tagblind() {
-        local want="tagblind" fixture root_dirs root_tags
+        local want="tagblind" fixture root_dirs root_tags untagged
         fixture="$(go list -m -f '{{{{.Dir}}')/test/data/${want}"
         root_dirs="$(module_dirs .)" || exit 1
         root_tags="$(module_tags .)" || exit 1
@@ -1360,7 +1374,8 @@ vuln: sweep-discovery-probes vuln-root-residual
             echo "       coverage assertion below (bd gqlc-pig9). Restore it." >&2
             exit 1
         fi
-        if go list -e -f '{{{{.Dir}}' ./... | grep -qxF "${fixture}"; then
+        untagged="$(go list -e -f '{{{{.Dir}}' ./...)" || exit 1
+        if grep -qxF "${fixture}" <<<"${untagged}"; then
             echo "error: the tag-derivation fixture ${fixture}" >&2
             echo "       is now matched by an untagged 'go list ./...', so it no longer has the" >&2
             echo "       shape it exists to reproduce — a directory whose every Go file is build-" >&2
@@ -1416,7 +1431,7 @@ vuln: sweep-discovery-probes vuln-root-residual
     # platform fixture that can live here is the negated one, and the negated one
     # is over-determined.
     selftest_platformtag() {
-        local fixture root_dirs root_tags src
+        local fixture root_dirs root_tags src listed
         fixture="$(go list -m -f '{{{{.Dir}}')/test/data/platformtag"
         src="${fixture}/platformtag.go"
         root_dirs="$(module_dirs .)" || exit 1
@@ -1459,8 +1474,8 @@ vuln: sweep-discovery-probes vuln-root-residual
         # elsewhere in the tree is the shape this whole branch is about.
         local tagflag=()
         [ -z "${root_tags}" ] || tagflag=(-tags "${root_tags}")
-        if ! go list -e "${tagflag[@]}" -f '{{{{.Dir}}' ./... \
-            | grep -qxF "${fixture}"; then
+        listed="$(go list -e "${tagflag[@]}" -f '{{{{.Dir}}' ./...)" || exit 1
+        if ! grep -qxF "${fixture}" <<<"${listed}"; then
             echo "error: ${fixture} is not in the set 'go list ./...'" >&2
             echo "       matched under the derived tags [${root_tags:-none}], so the scan below" >&2
             echo "       would not compile a file that builds fine on this platform. The" >&2

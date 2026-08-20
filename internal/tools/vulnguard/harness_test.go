@@ -81,9 +81,14 @@ func recipeSpan(t *testing.T, lines []string, name string) (int, int) {
 //
 // The dependencies are stubbed because they read the real tree — a discovery
 // sweep over test/data and a residual measured against a checked-in baseline —
-// and neither is what this package is asking about. `vuln`'s own header is
-// left alone so the dependency edge stays where modscope's justfile_test.go
-// reads it.
+// and neither is what this package is asking about.
+//
+// The stub targets are derived from `vuln`'s own header, so what this harness
+// notices about that header is exactly one thing: measured, dropping ALL of
+// `vuln`'s dependencies reddens 8 of the 8 tests here, and dropping only the
+// sweep edge reddens 0 of 8. That edge is guarded by modscope's
+// TestEveryRecipeRunningModscopeSweepsProbesFirst, which reads the repository's
+// justfile and never sees the copy written below.
 func justfileFor(t *testing.T, src string, edits []edit) string {
 	t.Helper()
 	lines := strings.Split(src, "\n")
