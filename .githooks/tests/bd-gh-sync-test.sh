@@ -54,6 +54,15 @@ cat >"$BIN/bd" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "bd $*" >>"$CALLS"
 if [ "$#" -gt 0 ]; then printf '  ARG=[%s]\n' "$@" >>"$CALLS"; fi
+if [ -n "${FAKE_FD_PROBE:-}" ]; then
+    # Whether this child was handed the push lock's fd. A child that keeps it
+    # and outlives the script holds a lock the script believes it released.
+    if [ -e /proc/self/fd/9 ]; then
+        printf 'INHERITED bd %s\n' "$*" >>"$FAKE_FD_PROBE"
+    else
+        printf 'CLOSED bd %s\n' "$*" >>"$FAKE_FD_PROBE"
+    fi
+fi
 if [ "$1 ${2:-}" = "github sync" ] && [ "${FAKE_SYNC_RC:-0}" != 0 ]; then
     echo "bd: error: connection refused" >&2
     exit "$FAKE_SYNC_RC"
@@ -61,6 +70,20 @@ fi
 if [ "$1 ${2:-}" = "github push" ] && [ "${FAKE_PUSH_RC:-0}" != 0 ]; then
     echo "bd: error: connection refused" >&2
     exit "$FAKE_PUSH_RC"
+fi
+if [ "$1 ${2:-}" = "github push" ] && [ -n "${FAKE_MINT_LOG:-}" ]; then
+    # The concurrency fixture. $CALLS is per-run, and what the gqlc-mmej
+    # assertion counts is issues minted across both runs together, so the ids
+    # go to a shared append-only file besides: one line per issue this stub was
+    # asked to open.
+    shift 2
+    [ "$#" -gt 0 ] && printf '%s\n' "$@" >>"$FAKE_MINT_LOG"
+    : >"$FAKE_PUSH_STARTED"
+    sleep "${FAKE_PUSH_DELAY:-0}"
+    # `bd github push` is what assigns external_ref. The ledger the other run
+    # reads has to move when it does, or nothing here models the write half of
+    # the read-modify-write the lock exists to close.
+    cat "$FAKE_BEADS_MINTED" >"$FAKE_BEADS"
 fi
 if [ "$1" = "list" ]; then
     # Keyed by call ordinal, because the pull path calls `bd list` twice and
@@ -101,6 +124,13 @@ cat >"$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "gh $*" >>"$CALLS"
 if [ "$#" -gt 0 ]; then printf '  ARG=[%s]\n' "$@" >>"$CALLS"; fi
+if [ -n "${FAKE_FD_PROBE:-}" ]; then
+    if [ -e /proc/self/fd/9 ]; then
+        printf 'INHERITED gh %s\n' "$*" >>"$FAKE_FD_PROBE"
+    else
+        printf 'CLOSED gh %s\n' "$*" >>"$FAKE_FD_PROBE"
+    fi
+fi
 case "$1 ${2:-}" in
     "auth token") echo faketoken ;;
     "issue list")
@@ -157,6 +187,13 @@ STUB
 REAL_PYTHON3="$(command -v python3)"
 cat >"$BIN/python3" <<'STUB'
 #!/usr/bin/env bash
+if [ -n "${FAKE_FD_PROBE:-}" ]; then
+    if [ -e /proc/self/fd/9 ]; then
+        printf 'INHERITED python3\n' >>"$FAKE_FD_PROBE"
+    else
+        printf 'CLOSED python3\n' >>"$FAKE_FD_PROBE"
+    fi
+fi
 n=0
 [ -f "$STUBTMP/py_count" ] && n=$(cat "$STUBTMP/py_count")
 n=$((n + 1))
@@ -172,7 +209,33 @@ fi
 exec "$REAL_PYTHON3" "$@"
 STUB
 
-chmod +x "$BIN/bd" "$BIN/gh" "$BIN/mktemp" "$BIN/python3"
+# The push lock is the one mutual-exclusion primitive the script has, and the
+# branch that turns on its failure is unreachable while it can only succeed —
+# waiting the real timeout out would cost the suite two minutes. Resolved before
+# $BIN joins PATH, or the stub execs itself. The exec passes fd 9 through, which
+# is where the script's lock lives.
+REAL_FLOCK="$(command -v flock)"
+cat >"$BIN/flock" <<'STUB'
+#!/usr/bin/env bash
+if [ "${FAKE_FLOCK_RC:-0}" != 0 ]; then
+    exit "$FAKE_FLOCK_RC"
+fi
+exec "$REAL_FLOCK" "$@"
+STUB
+
+chmod +x "$BIN/bd" "$BIN/gh" "$BIN/mktemp" "$BIN/python3" "$BIN/flock"
+
+# Every push below takes an exclusive lock in the git common directory of
+# whatever repository it runs in, so the runs happen inside a throwaway one: a
+# suite that locked this checkout's .git would serialise against a developer's
+# own `git push` and leave a file behind in it.
+REPO="$TMP/repo"
+git init -q "$REPO" >/dev/null 2>&1 || { echo "cannot git init $REPO" >&2; exit 1; }
+# ...and a directory that is in no repository at all, for the arm where the lock
+# has nowhere to live. Asserted rather than assumed below, since $TMPDIR sitting
+# inside a repository would make that arm vacuous.
+NONREPO="$TMP/nonrepo"
+mkdir -p "$NONREPO"
 
 pass=0
 fail=0
@@ -216,15 +279,21 @@ run_sync() {
         printf '%s' "$5" >"$TMP/beads_after.json"
         after="$TMP/beads_after.json"
     fi
-    PATH="$BIN:$PATH" CALLS="$TMP/calls" STUBTMP="$TMP" \
+    # cd, because the push path looks for its lock in the git common directory
+    # of the repository it is run from. In a subshell, so the suite's own cwd is
+    # what it was.
+    ( cd "${SYNC_CWD:-$REPO}" || exit 1
+      PATH="$BIN:$PATH" CALLS="$TMP/calls" STUBTMP="$TMP" \
         FAKE_BEADS="$TMP/beads.json" FAKE_GH="$TMP/gh.json" \
         FAKE_GH_OPEN="$TMP/gh_open.json" FAKE_BEADS_AFTER="$after" \
         FAKE_SYNC_RC="${SYNC_RC:-0}" FAKE_PUSH_RC="${PUSH_RC:-0}" \
         FAKE_CLOSE_RC="${CLOSE_RC:-0}" FAKE_MKTEMP_RC="${MKTEMP_RC:-0}" \
         FAKE_MKTEMP_BLOCK="${MKTEMP_BLOCK:-}" \
-        FAKE_GH_LIST_RC="${GH_LIST_RC:-0}" \
+        FAKE_GH_LIST_RC="${GH_LIST_RC:-0}" FAKE_FLOCK_RC="${FLOCK_RC:-0}" \
+        FAKE_FD_PROBE="${FD_PROBE:-}" \
         REAL_MKTEMP="$REAL_MKTEMP" REAL_PYTHON3="$REAL_PYTHON3" \
-        "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err"
+        REAL_FLOCK="$REAL_FLOCK" \
+        "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err" )
     RC=$?
     rm -f "$TMP"/bd_list_rc_* "$TMP"/bd_list_out_* "$TMP"/py_rc_*
 }
@@ -237,6 +306,10 @@ CLOSE_RC=0
 MKTEMP_RC=0
 MKTEMP_BLOCK=
 GH_LIST_RC=0
+FLOCK_RC=0
+FD_PROBE=
+# Where run_sync runs the script from; only the gqlc-mmej lock arms move it.
+SYNC_CWD="$REPO"
 
 scoped_ids() { grep -o -- '--issues [^ ]*' "$TMP/calls" | cut -d' ' -f2 | tr ',' '\n'; }
 pull_ran()   { grep -q -- 'bd github sync' "$TMP/calls"; }
@@ -2371,6 +2444,207 @@ else
     bad "the mktemp stub is transparent when its knob is unset" "got: $(last_line)"
 fi
 
+# --- gqlc-mmej: two pushes at once must mint one GH issue, not two -----------
+# `bd github push` is what assigns external_ref, and which beads still lack one
+# is read off `bd list` above it. Unserialised, two runs both read before either
+# wrote and both minted an issue for the same bead; the bead kept whichever
+# external_ref was written last, and the close pass keys on external_ref, so
+# nothing could ever reach the other number. 18 such issues were counted on this
+# repository on 2026-08-18.
+#
+# The interleaving is forced rather than raced. The `bd github push` stub marks
+# that it has started, holds for FAKE_PUSH_DELAY seconds, and only then writes
+# the mirrored ledger back; the second run is launched once that mark appears,
+# so its `bd list` falls inside the first run's push window — the window the
+# defect lives in. Under a lock the second run cannot read at all until the
+# first has released, and by then the ledger it reads is the written one, which
+# is why the passing direction does not depend on the delay being long enough.
+CONC="$TMP/conc"
+mkdir -p "$CONC/a" "$CONC/b"
+printf '%s' '[{"id":"b-conc","status":"open","external_ref":""}]' >"$CONC/beads.json"
+printf '%s' "[{\"id\":\"b-conc\",\"status\":\"open\",\"external_ref\":\"$ISSUE/700\"}]" \
+    >"$CONC/minted.json"
+printf '%s' '[]' >"$CONC/gh.json"
+# Non-empty, so the close pass is not blind on a run that minted an issue
+# (gqlc-mbe0), and so both runs end on an ordinary summary line.
+printf '%s' '[{"number":700}]' >"$CONC/gh_open.json"
+: >"$CONC/mints.txt"
+
+# $1 = per-run scratch directory. Separate STUBTMP and CALLS per run, shared
+# ledger and shared mint log: the ledger is the contended resource and the mint
+# log is the measurement.
+conc_run() {
+    ( cd "$REPO" || exit 1
+      PATH="$BIN:$PATH" CALLS="$1/calls" STUBTMP="$1" \
+        FAKE_BEADS="$CONC/beads.json" FAKE_GH="$CONC/gh.json" \
+        FAKE_GH_OPEN="$CONC/gh_open.json" \
+        FAKE_MINT_LOG="$CONC/mints.txt" FAKE_PUSH_STARTED="$CONC/started" \
+        FAKE_BEADS_MINTED="$CONC/minted.json" FAKE_PUSH_DELAY="$CONC_DELAY" \
+        REAL_MKTEMP="$REAL_MKTEMP" REAL_PYTHON3="$REAL_PYTHON3" \
+        REAL_FLOCK="$REAL_FLOCK" \
+        "$SYNC" push >"$1/out" 2>"$1/err" )
+}
+CONC_DELAY=1
+
+conc_run "$CONC/a" &
+_conc_a=$!
+# Bounded, so a first run that never reaches its push ends the wait rather than
+# hanging the suite — and the arm below says so instead of passing.
+_conc_waited=0
+while [ ! -f "$CONC/started" ] && [ "$_conc_waited" -lt 200 ]; do
+    sleep 0.05
+    _conc_waited=$((_conc_waited + 1))
+done
+conc_run "$CONC/b" &
+_conc_b=$!
+wait "$_conc_a"
+_conc_rc_a=$?
+wait "$_conc_b"
+_conc_rc_b=$?
+_conc_mints=$(grep -c '^b-conc$' "$CONC/mints.txt")
+
+if [ ! -f "$CONC/started" ]; then
+    bad "two concurrent pushes mint one GH issue, not two" \
+        "the first run never reached 'bd github push', so nothing was contended"
+elif [ "$_conc_mints" -ne 1 ]; then
+    bad "two concurrent pushes mint one GH issue, not two" \
+        "'bd github push b-conc' ran ${_conc_mints} time(s)"
+else
+    ok "two concurrent pushes mint one GH issue, not two"
+fi
+
+# Minting once is also what a second run that gave up on the lock would produce,
+# and that run leaves its own new beads unmirrored. This separates the two: the
+# second run has to come back having read the written ledger and found nothing
+# left to do.
+_conc_last_b=$(tail -n 1 "$CONC/b/err")
+if [ "$_conc_rc_b" -ne 0 ]; then
+    bad "the second push waits for the lock rather than giving up" \
+        "it exited ${_conc_rc_b}: ${_conc_last_b}"
+elif [ "$_conc_last_b" != "bd-gh-sync: pushed 0 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    bad "the second push waits for the lock rather than giving up" \
+        "got: ${_conc_last_b}"
+else
+    ok "the second push waits for the lock rather than giving up"
+fi
+
+# ...and the run that held the lock did the work, so "one issue" is one issue
+# minted rather than none.
+_conc_last_a=$(tail -n 1 "$CONC/a/err")
+if [ "$_conc_rc_a" -ne 0 ]; then
+    bad "the first push mirrors the bead and exits 0" \
+        "it exited ${_conc_rc_a}: ${_conc_last_a}"
+elif [ "$_conc_last_a" != "bd-gh-sync: pushed 1 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    bad "the first push mirrors the bead and exits 0" "got: ${_conc_last_a}"
+else
+    ok "the first push mirrors the bead and exits 0"
+fi
+
+# A lock that cannot be taken must stop the run before it reads anything, not
+# fall through to the unserialised push this section exists to remove. Driven
+# through the stub because the real wait is two minutes long.
+FLOCK_RC=1
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[{"number":1}]'
+FLOCK_RC=0
+if grep -q 'bd github push' "$TMP/calls"; then
+    bad "a push that cannot take the lock mirrors nothing and says so" \
+        "a bead was pushed without the lock"
+elif [ "$RC" -eq 0 ]; then
+    bad "a push that cannot take the lock mirrors nothing and says so" "exited 0"
+elif [ "$(last_line)" != "bd-gh-sync: PUSH FAILED — could not take the push lock." ]; then
+    # Whole line, not a substring: the three ways this path refuses each name
+    # what went wrong, and a test that accepts any of them lets one be reported
+    # under another's name.
+    bad "a push that cannot take the lock mirrors nothing and says so" \
+        "got: $(last_line)"
+else
+    ok "a push that cannot take the lock mirrors nothing and says so"
+fi
+
+# ...and the control: the two assertions above are worth nothing against a stub
+# that always failed, so a run with the knob unset has to take the real lock and
+# push. Every other push in this file rides on the same fact.
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[{"number":1}]'
+if [ "$(last_line)" = "bd-gh-sync: pushed 1 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    ok "the flock stub is transparent when its knob is unset"
+else
+    bad "the flock stub is transparent when its knob is unset" "got: $(last_line)"
+fi
+
+# No repository, nowhere to put the lock. The refusal has to be the same shape:
+# nothing pushed, non-zero, verdict on the line a caller keeps.
+if git -C "$NONREPO" rev-parse --git-common-dir >/dev/null 2>&1; then
+    bad "a push with nowhere to put the lock mirrors nothing and says so" \
+        "$NONREPO is inside a git repository, so this proves nothing"
+else
+    SYNC_CWD="$NONREPO"
+    run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[{"number":1}]'
+    SYNC_CWD="$REPO"
+    if grep -q 'bd github push' "$TMP/calls"; then
+        bad "a push with nowhere to put the lock mirrors nothing and says so" \
+            "a bead was pushed without the lock"
+    elif [ "$RC" -eq 0 ]; then
+        bad "a push with nowhere to put the lock mirrors nothing and says so" "exited 0"
+    elif [ "$(last_line)" != "bd-gh-sync: PUSH FAILED — no git directory to hold the push lock." ]; then
+        bad "a push with nowhere to put the lock mirrors nothing and says so" \
+            "got: $(last_line)"
+    else
+        ok "a push with nowhere to put the lock mirrors nothing and says so"
+    fi
+fi
+
+# The lock rides on fd 9, and every child inherits an fd unless it is closed for
+# that command. A child that keeps fd 9 and outlives this script goes on holding
+# a lock the script believes it dropped, which is the one failure mode worse
+# than the double-mint: no later push can take it. Probed from inside the
+# children rather than by timing, so the answer is a fact rather than a race.
+if [ ! -e /proc/self/fd ]; then
+    bad "no child of the push path inherits the lock fd" \
+        "/proc/self/fd is not readable here, so nothing was looked at"
+else
+    # The path is held apart from the knob: clearing the knob after the run and
+    # then reading "$FD_PROBE" hands grep an empty filename, whose error leaves
+    # both counts empty, and `[ "" -ne 0 ]` fails its way to the ok arm. That
+    # draft passed against all six ways of dropping a `9>&-`.
+    _fd_log="$TMP/fdprobe.txt"
+    : >"$_fd_log"
+    FD_PROBE="$_fd_log"
+    run_sync push \
+        '[{"id":"b-fd","status":"closed","close_reason":"done","external_ref":""}]' \
+        '[]' '[{"number":702}]' \
+        "[{\"id\":\"b-fd\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/702\"}]"
+    FD_PROBE=
+    _fd_inherited=$(grep -c '^INHERITED ' "$_fd_log")
+    _fd_closed=$(grep -c '^CLOSED ' "$_fd_log")
+    if [ "$_fd_inherited" -ne 0 ]; then
+        bad "no child of the push path inherits the lock fd" \
+            "$(grep -m1 '^INHERITED ' "$_fd_log")"
+    elif [ "$_fd_closed" -eq 0 ]; then
+        # The probe writes a line per child either way, so an empty file is a
+        # run that spawned none — and a check over no children is not a check.
+        bad "no child of the push path inherits the lock fd" \
+            "no child was probed at all, so nothing was established"
+    else
+        ok "no child of the push path inherits the lock fd"
+    fi
+fi
+
+# The pull path is not serialised, and the reason is that it mints nothing:
+# `bd github sync --pull-only` writes to bd, not to GitHub. Its own repository,
+# because every push above left a lock file in $REPO and an existence test there
+# would answer about those instead.
+PULLREPO="$TMP/repo_pull"
+git init -q "$PULLREPO" >/dev/null 2>&1 || { echo "cannot git init $PULLREPO" >&2; exit 1; }
+SYNC_CWD="$PULLREPO"
+run_sync pull "[{\"id\":\"b-p\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"same\"}]" \
+    '[{"number":1,"state":"OPEN","body":"same"}]'
+SYNC_CWD="$REPO"
+if [ -e "$PULLREPO/.git/bd-gh-sync-push.lock" ]; then
+    bad "a pull takes no push lock" "the lock file exists after a pull-only run"
+else
+    ok "a pull takes no push lock"
+fi
+
 # --- the assertion census ----------------------------------------------------
 # The one property this file cannot get from `set -u`, from shellcheck or from
 # its own exit status: that it still makes every assertion it made yesterday.
@@ -2574,6 +2848,14 @@ a bead whose external_ref names another repository is held, not refused
 a temp directory that cannot be made is reported (pull)
 a temp directory that cannot be made is reported (push)
 the mktemp stub is transparent when its knob is unset
+two concurrent pushes mint one GH issue, not two
+the second push waits for the lock rather than giving up
+the first push mirrors the bead and exits 0
+a push that cannot take the lock mirrors nothing and says so
+the flock stub is transparent when its knob is unset
+a push with nowhere to put the lock mirrors nothing and says so
+no child of the push path inherits the lock fd
+a pull takes no push lock
 the assertion census matches the assertions that ran
 CENSUS
 
