@@ -327,6 +327,28 @@ func TestPlanRefusesInputsItCannotStandOn(t *testing.T) {
 			wantMsg: "negative window",
 		},
 		{
+			// The ceiling, one nanosecond over it. `good` is a pair the window
+			// does not separate at any legal value, so what fails here is the
+			// window and not the pair.
+			name:    "window one nanosecond above the ceiling",
+			issues:  good,
+			beads:   goodBeads,
+			window:  defaultWindow + time.Nanosecond,
+			wantMsg: fmt.Sprintf("above the %s ceiling", defaultWindow),
+		},
+		{
+			// The one-liner bd gqlc-mb8v's round-1 review composed out of the
+			// two findings: `just gh-orphans -close -window 8760h`, through a
+			// recipe whose `just --list` line said it mutated nothing. Its
+			// first half is refused in the justfile (see justfile_test.go) and
+			// its second half here.
+			name:    "a one-year window",
+			issues:  good,
+			beads:   goodBeads,
+			window:  8760 * time.Hour,
+			wantMsg: "can turn a refusal into a close",
+		},
+		{
 			name:    "duplicate issue number",
 			issues:  append(append([]issue{}, good...), openIssue(814, titleA, bodyA, at(0))),
 			beads:   goodBeads,
@@ -362,6 +384,42 @@ func TestPlanRefusesInputsItCannotStandOn(t *testing.T) {
 				t.Errorf("error = %q, want it to contain %q", err, tc.wantMsg)
 			}
 		})
+	}
+}
+
+// TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose is a disclosure rather
+// than a guard. plan() now refuses a window above the default, and the obvious
+// next sentence — "so no -window value can turn a refusal into a close" — is
+// false in the direction the ceiling leaves open. An ambiguity refusal says the
+// tool will not pick between two mirrors; narrowing the window until only one
+// of them is adjacent picks for it.
+//
+// It is pinned here so the paragraph in the package comment that says so is
+// checkable against a row instead of believed, and so that removing the
+// ceiling's counterpart claim without removing this behaviour is noisy.
+func TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose(t *testing.T) {
+	issues := []issue{
+		openIssue(814, titleA, bodyA, at(0)),
+		openIssue(816, titleA, bodyA, at(time.Second)),
+		openIssue(818, titleA, bodyA, at(30*time.Second)),
+		fillerIssue,
+	}
+	beads := []bead{boundTo("gqlc-u91z", 816), boundTo("gqlc-f1yf", 818), fillerBead}
+
+	wide := planOrFatal(t, issues, beads)
+	if len(wide) != 1 || wide[0].Verdict != verdictRefuse {
+		t.Fatalf("at the default window: findings = %+v, want one REFUSE", wide)
+	}
+	if !strings.Contains(wide[0].Reason, "nothing here says which mirror is canonical") {
+		t.Fatalf("at the default window: reason = %q, want the ambiguity refusal", wide[0].Reason)
+	}
+
+	narrow, err := plan(issues, beads, 5*time.Second)
+	if err != nil {
+		t.Fatalf("at a 5s window: plan: %v", err)
+	}
+	if len(narrow) != 1 || narrow[0].Verdict != verdictClose || narrow[0].Canonical != 816 {
+		t.Fatalf("at a 5s window: findings = %+v, want CLOSE 814->816", narrow)
 	}
 }
 
@@ -825,6 +883,45 @@ func TestDryRunOverTheRealCorpusMutatesNothingAndSaysWhatItWould(t *testing.T) {
 	if n := strings.Count(out.String(), "\nCLOSE  #"); n != 15 {
 		// 16 CLOSE lines, the first of which has no preceding newline.
 		t.Errorf("report holds %d non-leading CLOSE line(s), want 15", n)
+	}
+}
+
+// TestTheDryRunSummaryMakesNoClaimAboutWhatAFlagCanDo holds the summary line to
+// saying what happened and not what could have. It carried "(a refusal needs a
+// human, not a wider flag)" until bd gqlc-mb8v's round-1 review, which is a
+// claim about the flag surface printed underneath a report the flags had
+// already shaped — and false in both directions, per plan()'s ceiling comment
+// and TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose.
+//
+// The word is what is looked for, not the sentence: a rephrasing of the same
+// claim is what this is here to catch. It looks at the summary line alone, not
+// the whole report — the CLOSE lines carry bead ids and a four-character bd
+// suffix can spell anything, so searching them for a word would be a test that
+// fails on a bead name.
+func TestTheDryRunSummaryMakesNoClaimAboutWhatAFlagCanDo(t *testing.T) {
+	issues, beads := loadCorpus(t)
+	closer := newCloser(t)
+	closer.failIfCalled = true
+
+	var out strings.Builder
+	if err := run(context.Background(), &out, config{act: false, window: defaultWindow, limit: defaultLimit}, fixedSource(issues, beads, closer)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var summary string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.HasPrefix(line, "ghorphan: DRY RUN") {
+			summary = line
+		}
+	}
+	if summary == "" {
+		t.Fatalf("no summary line in the report; this test would pass on silence:\n%s", out.String())
+	}
+	if strings.Contains(summary, "flag") {
+		t.Errorf("the dry-run summary %q talks about a flag. The operator reads this "+
+			"line while deciding what to run next, so a sentence here about what a "+
+			"flag can or cannot do has to hold for both -window directions and for "+
+			"-limit; say nothing instead.", summary)
 	}
 }
 

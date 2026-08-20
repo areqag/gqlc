@@ -32,8 +32,30 @@
 //     writes external_ref LAST wins the bead, and that is not necessarily the
 //     run that created its issue second. An asymmetric rule would refuse a
 //     genuine race orphan. The default window is an order of magnitude above
-//     the 6s maximum measured across those 18 pairs; widening it is an argument
-//     the operator makes explicitly with -window.
+//     the 6s maximum measured across those 18 pairs, and it is also the
+//     ceiling: -window takes a smaller value and refuses a larger one.
+//
+// WHAT -window CAN DO TO A VERDICT. Both directions can turn a REFUSE into a
+// CLOSE, which is why the ceiling is a refusal rather than a warning and why
+// nothing printed by this tool tells an operator that a refusal is beyond the
+// reach of a flag (bd gqlc-mb8v, review round 1 — the earlier wording claimed
+// exactly that and this package's own rows falsify it):
+//
+//   - Wider loosens adjacency, so a pair that missed it starts matching. 814
+//     and 816 sit 61s apart: REFUSE at 60s, CLOSE at 120s. This direction is
+//     refused outright in plan(). It buys nothing measurable — a one-year
+//     window over the reconstructed 2026-08-18 board yields the same 16 closes
+//     and 2 refusals — and a candidate's evidence line already carries its Δt
+//     and which side of the window it fell on, so "how far apart were they" is
+//     answered without moving the flag. The Δt there is rounded to the second
+//     and the side is not, so a 60.4s gap prints as "1m0s apart (outside the
+//     window)": read the parenthetical, not the number.
+//   - Narrower tightens adjacency, which is the safe direction for a single
+//     candidate and not for two: a refusal that reads "2 bound issues match" is
+//     the tool declining to pick a canonical, and dropping one of the two out
+//     of the window makes the pick for it. Still available, because the
+//     operator asking for a stricter run is asking a coherent question, and
+//     pinned as a behaviour rather than left to be discovered.
 //
 // and exactly one bound issue satisfies all three. Two would mean the tool
 // cannot say which mirror is canonical, so it refuses rather than picking.
@@ -76,6 +98,11 @@ const (
 	// 18 known pairs (bd gqlc-mmej). Tight by intent: every second of slack is
 	// slack in the only part of the predicate that distinguishes "minted by one
 	// race" from "filed twice on purpose".
+	//
+	// -window's ceiling as well as its default: plan() refuses a larger value.
+	// That bounds the adjacency clause; it does not make the flag verdict-safe,
+	// and the package comment says which verdicts a narrower window still
+	// moves.
 	defaultWindow = 60 * time.Second
 	// `gh issue list`'s cap. The repository held 223 open and ~1000 total
 	// issues when this was written; the cap has to exceed the true count or the
@@ -127,7 +154,7 @@ type finding struct {
 
 func main() {
 	act := flag.Bool("close", false, "actually close the orphans on GitHub; without it nothing is mutated")
-	window := flag.Duration("window", defaultWindow, "maximum creation-time separation between an orphan and its canonical")
+	window := flag.Duration("window", defaultWindow, "maximum creation-time separation between an orphan and its canonical; a value above the default is refused, so this narrows the predicate or leaves it alone")
 	limit := flag.Int("limit", defaultLimit, "--limit handed to `gh issue list`; a listing that reaches it is refused as a page rather than read as a set")
 	flag.Parse()
 
@@ -201,7 +228,13 @@ func run(ctx context.Context, out io.Writer, cfg config, src source) error {
 	refusals := len(findings) - closes
 
 	if !cfg.act {
-		rep.printf("ghorphan: DRY RUN — nothing was mutated. %d issue(s) would be closed, %d refused (a refusal needs a human, not a wider flag). Re-run with -close to act.\n", closes, refusals)
+		// The parenthetical here used to read "a refusal needs a human, not a
+		// wider flag". It was false when printed and it was printed at the
+		// moment the operator decides what to do next: -window moves refusals
+		// in both directions (see the package comment). Nothing replaced it —
+		// the counts are the report, and the per-candidate evidence above them
+		// is what a refusal is decided on.
+		rep.printf("ghorphan: DRY RUN — nothing was mutated. %d issue(s) would be closed, %d refused. Re-run with -close to act.\n", closes, refusals)
 		return rep.err
 	}
 	closed, applyErr := apply(ctx, rep, findings, boundIssues(beads), src.closeIssue)
@@ -229,6 +262,14 @@ func run(ctx context.Context, out io.Writer, cfg config, src source) error {
 func plan(issues []issue, beads []bead, window time.Duration) ([]finding, error) {
 	if window < 0 {
 		return nil, fmt.Errorf("ghorphan: -window is %s; a negative window makes every pair non-adjacent, which is a silent no-op rather than a stricter rule", window)
+	}
+	// The ceiling. Adjacency is one of the two clauses a REFUSE rests on, so a
+	// window above the default rewrites refusals into closes: 814 and 816 sit
+	// 61s apart and go REFUSE at 60s, CLOSE at 120s. Refused rather than warned
+	// about, because the operator reading the warning would be reading it in
+	// the report of the run that had already decided.
+	if window > defaultWindow {
+		return nil, fmt.Errorf("ghorphan: -window is %s, above the %s ceiling; a wider window loosens the adjacency clause and can turn a refusal into a close, which is an irreversible write. Every candidate's Δt is already in the report, so read that instead", window, defaultWindow)
 	}
 	if len(issues) == 0 {
 		return nil, errors.New("ghorphan: the GitHub issue listing came back empty; refusing, because that is indistinguishable from a repository with nothing to reconcile")
