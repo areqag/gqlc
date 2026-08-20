@@ -1239,21 +1239,24 @@ vuln: sweep-discovery-probes vuln-root-residual
     # three listed directories: `go list ./... | grep -qxF "${fixture}"` returns
     # 141 while `grep -qxF "${fixture}" <<<"${listed}"` over that same listing
     # returns 0 (bd gqlc-e53u). No `grep -q` or `grep -m1` in this recipe reads a
-    # pipe: seven take a herestring, whose `$(...)` assignment gives the producer
-    # a status of its own to be checked — rule (2) again — and one takes a file
-    # argument, which has no producer to lose.
-    # Two ways of certifying a piped site as "safe here" are measured false; do
-    # not reach for either. Sort order: this site issues the TAGGED listing — 29
-    # lines, fixture at 28 — and the fixture is last only in the UNTAGGED
-    # listing, which this site never runs. selftest_tagblind is not sorted into
-    # safety either: on a healthy tree its fixture is absent. Output size: a
-    # 1262-byte listing, 52x inside a 65536-byte pipe buffer, still returns 141
-    # in 20 of 20 runs when emitted a line at a time. What separates the two is
-    # the producer's write pattern, not the total it writes — the real `go list`
-    # delivers its whole listing before `grep -q` exits, while a producer that
-    # trickles takes the signal no matter how little it has to say. The
-    # three-directory harness cited above is the standing counterexample: it
-    # fits any buffer and returns 141.
+    # pipe: seven take a herestring — six of whose sources are `$(...)`
+    # assignments and the seventh a parameter of one, so the producer has a
+    # status of its own to be checked in every case, rule (2) again — and one
+    # takes a file argument, which has no producer to lose.
+    # What decides a piped site is a race: whether the producer still has a write
+    # to make when `grep` exits. No local reading of the code settles that, and
+    # three cheap substitutes for settling it are measured false. Sort order:
+    # this site issues the TAGGED listing — 29 lines, fixture at 28 — and the
+    # fixture is last only in the UNTAGGED listing, which this site never runs;
+    # selftest_tagblind is not sorted into safety either, since on a healthy tree
+    # its fixture is absent. Output size: a 1262-byte listing, 52x inside a
+    # 65536-byte pipe buffer, returned 141 in 20 of 20 runs when emitted a line
+    # at a time with a 20ms pause between lines. Emission shape: that same
+    # producer without the pause returned 0 in 200 of 200, so it is not
+    # line-at-a-time that loses the race but slowness relative to grep's startup,
+    # which nothing here bounds. The real `go list` won the race in 100 of 100
+    # runs in this checkout; nothing makes that a guarantee, which is why the
+    # rule bans the shape instead of offering a test to apply to it.
     scope() { go run ./internal/tools/modscope "$@"; }
 
     # Every directory of a module that holds a Go file, absolute, read off disk.
