@@ -742,6 +742,28 @@ bd-export-monotonic base:
 bd-export-monotonic-local:
     just bd-export-monotonic $(git merge-base HEAD origin/master)
 
+# An orphan is an open GH issue no bead names, byte-identical in title AND body
+# to an issue a bead does name, created seconds from it: .githooks/bd-gh-sync's
+# push pass minted both for one bead and the ledger kept only one, so the close
+# pass — which keys on external_ref — can never reach the other (bd gqlc-mmej,
+# gqlc-mb8v). Deliberately not wired into `just test` or into any hook: it
+# reaches the network, and the only reason to run it is that someone is about to
+# read the answer. The arm that acts is a separate recipe rather than a flag on
+# this one, so no muscle-memory invocation of this name can close an issue.
+#
+# reports duplicate GH issues the bd↔GH sync minted twice; mutates nothing
+gh-orphans *args:
+    go run ./internal/tools/ghorphan {{args}}
+
+# Irreversible enough to be worth typing out: closing an issue is visible to
+# everyone watching the repository, and a wrong close is undone by hand. Run
+# `just gh-orphans` first and read every line, including the refusals — a
+# refusal is a pair this tool will not decide, and no flag widens it.
+#
+# CLOSES the duplicates `just gh-orphans` reports, each pointing at its canonical
+gh-orphans-close *args:
+    just gh-orphans -close {{args}}
+
 # The quality fence over every module in this tree that the root gates do not
 # already cover: compile (go build), vet, module tidiness (go mod tidy -diff),
 # and golangci-lint against the root config. Generated code must uphold the same
