@@ -37,6 +37,21 @@ fence_probe := "fenceprobe"
 xtest_probe := "xtestprobe"
 discovery_probes := vuln_probe + " " + fence_probe + " " + xtest_probe
 
+# The scratch filesystem every agent working on this repo shares, and where the
+# Go toolchain is told to put its work directories while it reports on it.
+#
+# `go run` writes its work directory under os.TempDir(), so the tool that
+# diagnoses a full /tmp could not be built at the one moment anyone wants it —
+# and neither could `go build`, which is what "build failed with no error text
+# on a different package set each run" actually was (bd gqlc-osuz). Pointing
+# GOTMPDIR at .bin/ (already gitignored, and not on the tmpfs) makes the
+# diagnostic survive the condition it diagnoses. Set per recipe rather than
+# exported here: the go command refuses a GOTMPDIR that does not exist, and a
+# global export would break every recipe in a fresh clone until something
+# created it.
+scratch_root := "/tmp"
+gotmpdir := justfile_directory() + "/.bin/gotmp"
+
 # Configures local git settings required after a fresh clone.
 # Idempotent: safe to run multiple times.
 #
@@ -344,9 +359,94 @@ check-shared-config dir=".":
     done
     exit "$rc"
 
+# The single entry point to internal/tools/tmpreap, so GOTMPDIR and the raw-df
+# fallback below are spelled once rather than once per caller.
+#
+# The fallback is the point. Every way this tool can fail — a full scratch
+# filesystem the Go toolchain cannot build in, a permission wall, a bug in the
+# tool — ends with the two `df` invocations that answer the question anyway, and
+# with `-i` beside `-h` because inodes are the currency that ran out and `df -h`
+# is green while they do (bd gqlc-osuz).
+[private]
+tmpreap root *args:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mkdir -p {{quote(gotmpdir)}}
+    rc=0
+    GOTMPDIR={{quote(gotmpdir)}} go run ./internal/tools/tmpreap \
+        -root {{quote(root)}} -repo {{quote(justfile_directory())}} {{args}} || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo >&2
+        echo "tmpreap exited $rc over {{root}}. The raw numbers, in case it was the scratch" >&2
+        echo "filesystem that stopped it — a full one takes the Go toolchain down with it:" >&2
+        df -h {{quote(root)}} >&2 || true
+        df -i {{quote(root)}} >&2 || true
+        exit "$rc"
+    fi
+
+# refuses to run the suite over a scratch filesystem that is about to make it
+# lie. Wired into `test` and `doctor`; ~50ms warm.
+#
+# It is a GATE and not a warning because of what the failure looks like from the
+# other side: `just test` reporting a build failure with no error text, on a
+# DIFFERENT package set each run, because the build harness could not write its
+# work directory. One author read that as a real test failure, and two others
+# read `git worktree add` failing "No space left on device" with gigabytes free
+# as a broken tree (bd gqlc-osuz). A run that stops here with the real cause
+# named costs less than any of those.
+#
+# Skipped under CI: a hosted runner's /tmp is the root disk of a preinstalled
+# image, routinely past these thresholds and reset for every job, so the local
+# multi-agent exhaustion this guards against cannot happen there and the
+# thresholds would only fail honest runs. GQLC_SKIP_TMP_CHECK is the local
+# escape hatch, for the developer who has decided the pressure is fine.
+[private]
+check-tmp root=scratch_root:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [ -n "${CI:-}" ] || [ -n "${GQLC_SKIP_TMP_CHECK:-}" ]; then
+        exit 0
+    fi
+    just tmpreap {{quote(root)}} -check
+
 # health check for local dev environment; extend as new drift modes emerge
-doctor: check-hooks check-worktree-upstream check-shared-config
+doctor: check-hooks check-worktree-upstream check-shared-config check-tmp
     @echo "ok"
+
+# what is holding the shared scratch filesystem, in bytes AND inodes, with the
+# decision this tool would take over every top-level entry and the reason for it.
+#
+# Read-only by construction: it cannot be handed -apply. The reporting half is
+# the half that pays, because the recurring cost of this failure is that it gets
+# MISDIAGNOSED — three agents, three different wrong diagnoses, before anyone
+# looked at `df -i` (bd gqlc-osuz).
+tmp-report root=scratch_root:
+    @just tmpreap {{quote(root)}}
+
+# reclaims the entries `just tmp-report` proved abandoned. Dry run by default;
+# `just tmp-reap apply` is what deletes.
+#
+# What it will not touch, each for its own reason: a worktree with uncommitted or
+# untracked changes, a worktree whose content is not already equal on origin/master,
+# anything a live process has as its cwd or holds an fd on, anything written to
+# inside the age threshold, anything holding a git repository this repo does not
+# track, and anything belonging to the machine. Under `apply` every text artifact
+# it is about to destroy is tarred to a file outside the scan root first — 690 MiB
+# of agent logs came to 43 MiB in the manual remediation this replaces.
+#
+# The mode is refused rather than defaulted when it is neither of the two: a typo
+# that silently dry-runs is a reap somebody thinks they performed.
+tmp-reap mode="dry-run" root=scratch_root:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    case "{{mode}}" in
+        dry-run) just tmpreap {{quote(root)}} ;;
+        apply)   just tmpreap {{quote(root)}} -apply ;;
+        *)
+            echo "error: unknown mode '{{mode}}' — expected 'dry-run' or 'apply'." >&2
+            exit 1
+            ;;
+    esac
 
 # provisions the pinned golangci-lint into the gitignored .bin/ when missing
 # or version-mismatched (~3s; official release binary — golangci-lint does not
@@ -996,7 +1096,7 @@ test-hooks:
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # -shuffle catches inter-test coupling; go build link-checks package main,
 # which has no tests and is otherwise only compile-checked by lint.
-test: check-hooks check-worktree-upstream check-shared-config test-hooks
+test: check-hooks check-worktree-upstream check-shared-config check-tmp test-hooks
     go build ./...
     go test -shuffle=on ./...
 
