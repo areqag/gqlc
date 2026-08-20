@@ -512,13 +512,21 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # inside a <pre>.
 #
 # Put the toggle back in place of prose_only (commit 4446b7fc's
-# outside_fences, verbatim) and 35 rows fail — 33 red ones that pass,
-# honouring a marker no reader can see, and 2 green ones that lose their
-# annotation. Every number in this paragraph was measured at this commit
-# rather than derived from a rule, so a row added below can move any of
-# them. Nesting a fence in a longer one is not an exotic spelling: it is the
-# ordinary way to show a fence, and showing this marker is what the beads
-# queued against this file are for.
+# outside_fences, verbatim) and 35 of this section's rows fail — 33 red ones
+# that pass and 2 green ones that lose their annotation. The run's own total
+# is higher, because main()'s no-bead check reads prose_only too and the
+# no-bead section below has a row that moves with it. What the 33 share is a
+# marker the toggle honours and prose_only blanks, which is where the two
+# functions part rather than what a reader sees: put those bodies back
+# through the renderer that coloured the rows above and it shows the marker
+# in some of them, and there it is the toggle that agrees with GitHub. The
+# same is said of that direction in prose_only's docstring — one
+# counterfactual carried in two files, and correcting it in one of them
+# alone is how this paragraph came to say otherwise. Every number in this
+# paragraph was measured at this commit rather than derived from a rule, so
+# a row added below can move any of them. Nesting a fence in a longer one is
+# not an exotic spelling: it is the ordinary way to show a fence, and
+# showing this marker is what the beads queued against this file are for.
 expect_red "a fence nested in a longer one does not close it" \
     "$EXPORT" "$(body "${FENCE4}
 ${FENCE3}
@@ -1238,6 +1246,21 @@ expect_green_saying "a closing keyword inside an HTML comment is not a claim" \
 Closes #902
 -->')" "chore/tidy-the-workflow" \
     "no closing keyword in the body's prose"
+
+# The same keyword in the one-line spelling of the same carrier, which is the
+# pair rather than a second copy: prose_only() blanks the span from a '<!--'
+# its line does not close to the '-->' that does, and a comment complete on
+# one line opens no such span, so the keyword is read and the body refused.
+# Deliberate, and the two rows are what holds it that way -- blank one-line
+# comments too and this one reddens while the row above stays green, which is
+# the whole of the change. Kept because levelling them turns a refusal into a
+# pass on a premise this tree cannot establish: whether GitHub acts on a
+# closing keyword inside a comment at merge is measured nowhere in it.
+expect_red "a closing keyword in a one-line HTML comment is a claim" \
+    "$EXPORT" "$(body 'Nothing to close here.
+
+<!-- Closes #902 -->')" "chore/tidy-the-workflow" \
+    "the PR body closes #902, but no bead resolves for this PR"
 
 # The scope of the new refusal, from the other side: it fires only where no
 # bead resolves. A branch that carries an id resolves one, so the body is
