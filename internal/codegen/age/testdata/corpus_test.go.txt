@@ -35,15 +35,20 @@ func TestAgtypeString(t *testing.T) {
 		`"a$$, $1) AS (v)"`:  "a$$, $1) AS (v)",
 		`"é"`:           "é",
 	}
+	// Subtests rather than a plain loop: corpusSubtests, in the parent
+	// module that assembles this one, pins how many of these report a pass,
+	// so a case added or dropped here has to be counted there too.
 	for raw, want := range accepts {
-		got, err := agtypeString([]byte(raw))
-		if err != nil {
-			t.Errorf("agtypeString(%s) = error %v, want %q", raw, err, want)
-			continue
-		}
-		if got != want {
-			t.Errorf("agtypeString(%s) = %q, want %q", raw, got, want)
-		}
+		t.Run(raw, func(t *testing.T) {
+			got, err := agtypeString([]byte(raw))
+			if err != nil {
+				t.Errorf("agtypeString(%s) = error %v, want %q", raw, err, want)
+				return
+			}
+			if got != want {
+				t.Errorf("agtypeString(%s) = %q, want %q", raw, got, want)
+			}
+		})
 	}
 
 	// Every other agtype shape. A projection that resolved to a string
