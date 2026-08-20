@@ -1128,6 +1128,20 @@ func emittedEntityDecoders(
 	return out
 }
 
+// whyDecoderListEmpties is what every whole-decoder comparison in this file
+// is held up by. Each states the classified list against a written literal,
+// and both sides go empty on one emission.
+//
+// The shape map is part of that edit rather than a separate one: left as
+// written, the reconciliation at the end of emittedEntityDecoders reds on
+// the entity the emptied emission no longer decodes, so the comparison is
+// reached with two empty sides only when the emission, the shape map and
+// the expected list are emptied together. That configuration is what this
+// refuses; the one where the shape map survives is already refused there.
+const whyDecoderListEmpties = "the comparison below states the whole classified list against a written one, " +
+	"so it is answered by an empty list on both sides. Emptying this emission, its shape map and that " +
+	"written list in a single edit is the run this refuses"
+
 // TestSweepGradesTheNamedFunctionSpellingsAlike holds the two ways Go spells
 // a package-level, receiver-less function *under a name* to one rule: they
 // must be classified and graded identically, not merely both somehow
@@ -1519,6 +1533,7 @@ func decodePerson(raw []byte) (Person, error) {
 			require.Empty(t, msgs,
 				"the sweep refused an emission that decodes each prepared entity exactly once: %s",
 				strings.Join(msgs, "\n"))
+			requireSwept(t, len(decoders), "the sweep of this emission", whyDecoderListEmpties)
 			require.Equal(t, []entityDecoder{
 				{
 					fn: "decodePerson", file: "models.go", entity: "Person",
@@ -1593,6 +1608,7 @@ var boot = func() {
 	require.Empty(t, msgs,
 		"the sweep refused an emission whose one decoder is written in the body of a package-level literal: %s",
 		strings.Join(msgs, "\n"))
+	requireSwept(t, len(decoders), "the sweep of this emission", whyDecoderListEmpties)
 	require.Equal(t, []entityDecoder{{
 		fn: "decodePerson", file: "models.go", entity: "Person",
 		shape: codegen.EntityNode, guards: []string{"Person"},
@@ -1656,6 +1672,11 @@ var unpaired, alsoUnpaired = func() {}
 	for _, fn := range packageLevelFuncs(fset, file) {
 		yielded = append(yielded, fmt.Sprintf("%s literal=%t", fn.name, fn.literal))
 	}
+
+	requireSwept(t, len(yielded), "the yield of this emission",
+		"the comparison below states the whole yielded list against a written one, so it is answered by "+
+			"an empty list on both sides. No shape map is consulted here and no reconciliation runs, so "+
+			"emptying this emission and that written list is the whole of the edit this refuses")
 
 	require.Equal(t, []string{
 		"decodePerson literal=false",
@@ -2298,6 +2319,7 @@ func decodeNode(raw []byte) (Node, error) {
 			require.Empty(t, msgs,
 				"the sweep read %s as decoding the emission's own Node, so a helper that cannot fill an entity "+
 					"struct is graded as though it did: %s", tc.name, strings.Join(msgs, "\n"))
+			requireSwept(t, len(decoders), "the sweep of this emission", whyDecoderListEmpties)
 			require.Equal(t, []entityDecoder{{
 				fn: "decodeNode", file: "models.go", entity: "Node",
 				shape: codegen.EntityNode, guards: []string{"Node"},
@@ -2409,6 +2431,7 @@ func decodePerson(raw []byte) (Person, error) {
 
 			decoders := emittedEntityDecoders(require.New(t), "probe-backend", files, shapes)
 
+			requireSwept(t, len(decoders), "the sweep of this emission", whyDecoderListEmpties)
 			require.Equal(t, []entityDecoder{{
 				fn: "decodePerson", file: "models.go", entity: "Person",
 				shape: codegen.EntityNode, guards: []string{"Wanted"},
