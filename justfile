@@ -1244,15 +1244,17 @@ vuln: sweep-discovery-probes vuln-root-residual
     # status of its own to be checked in every case, rule (2) again — and one
     # takes a file argument, which has no producer to lose.
     # What decides a piped site is a race: whether the producer still has a write
-    # to make when `grep` exits. Exactly one shape settles it — a producer making
-    # a single write() of at most the pipe capacity cannot lose, since a match
-    # needs data, so that write lands with the reader alive and no second write
-    # remains to take the signal (measured: match on line 1, 50ms linger, rc 0 in
-    # 200 of 200; the same bytes split in two writes fail 40 of 40). Nothing in
-    # this recipe's TEXT settles it for the producers this recipe has — `go list`,
-    # `scope`, `sort` — whose write counts follow libc buffering rather than any
-    # line readable here. Three cheap substitutes for settling it are measured
-    # false. Sort order:
+    # to make when `grep` exits. What settles it is the producer having none left
+    # once `grep` can first match. The readable instance is a single write() of
+    # at most the pipe capacity: a match needs data, so that write lands with the
+    # reader alive and nothing remains to take the signal (measured: match on
+    # line 1, 50ms linger, rc 0 in 200 of 200; the same bytes in two writes fail
+    # 40 of 40). A `grep` that exits without reading at all — invalid regex,
+    # unreadable -f file — breaks that premise but loses no match. Nothing in
+    # this recipe's TEXT settles the property for the producers this recipe has —
+    # `go list`, `scope`, `sort` — whose write counts follow libc buffering
+    # rather than any line readable here. Three cheap substitutes for settling it
+    # are measured false. Sort order:
     # this site issues the TAGGED listing — 29 lines, fixture at 28 — and the
     # fixture is last only in the UNTAGGED listing, which this site never runs;
     # selftest_tagblind is not sorted into safety either, since on a healthy tree
