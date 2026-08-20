@@ -90,6 +90,10 @@
 #            passed, a batch that exited non-zero, an input that would not
 #            load — is reported and makes the run non-zero, because otherwise
 #            it is byte-for-byte a steady-state run with nothing to do.
+#            The whole action runs under an exclusive lock taken before the
+#            bead list is read, because step 1 is a read-modify-write and two
+#            unserialised runs minted two issues for one bead. See the lock
+#            below for the measurement.
 #
 # Payloads reach python through temp files, never argv or the environment. The
 # bead listing alone is ~1MB, and execve caps any single argument or
@@ -697,15 +701,78 @@ _batches=0
 _failed=0
 _unusable=0
 
+# `bd github push` is what assigns external_ref, and which beads still lack one
+# is read off the `bd list` below it. Unserialised, two runs both read before
+# either wrote and both minted an issue for the same bead: the bead keeps
+# whichever external_ref was written last, and no bead then points at the other
+# number, so the close pass further down — which keys on external_ref — has no
+# way to reach it and it stays open however the work ends. Counted on this
+# repository 2026-08-18: 18 open issues with no bead pointing at them, 16 of
+# them byte-identical to the issue their bead does point at, 17 created 1-6
+# seconds before it (gqlc-mmej). The lock is taken above the read, so the run
+# that waits chooses what to push from a ledger the run ahead of it has already
+# written to.
+#
+# The git common directory holds the lock because it is one per clone, which is
+# the granularity of what is being protected: a linked worktree's .beads/
+# redirects to the main checkout's database (.beads/.gitignore names that
+# redirect file), so sibling worktrees push one ledger to one GitHub repository,
+# and that is the pair of sessions the measurement above came from. A lock
+# keyed to the worktree gives each of them one of its own. It also lives under
+# .git, which git neither tracks nor reports, so it is not a file anyone has to
+# ignore.
+#
+# fd 9 carries the lock for the rest of this process; closing that fd is what
+# releases the lock, and the kernel closes it however the process ends. bash
+# cannot mark an fd close-on-exec, so every `bd`, `gh` and `python3` below is
+# given `9>&-`: a child that inherited fd 9 and outlived this script would hold
+# the lock for as long as it ran, after this script had reported itself
+# finished. Those three are the ones that reach the network or the bd database
+# and so the ones that can outlive it; they are also the three the regression
+# test probes for an open fd 9.
+_lock_wait=120
+_lock_dir=$(git rev-parse --git-common-dir 2>/dev/null) || _lock_dir=""
+if [ -z "$_lock_dir" ] || [ ! -d "$_lock_dir" ]; then
+  # Detail first, verdict last, as at every other refusal here.
+  echo "bd-gh-sync: 'git rev-parse --git-common-dir' named no directory, so there is" >&2
+  echo "bd-gh-sync: nowhere to take the lock that keeps two pushes from minting two" >&2
+  echo "bd-gh-sync: GitHub issues for one bead. Nothing was read from bd or GitHub," >&2
+  echo "bd-gh-sync: so no bead was mirrored and no GH mirror closed." >&2
+  echo "bd-gh-sync: PUSH FAILED — no git directory to hold the push lock." >&2
+  exit 1
+fi
+_lock="$_lock_dir/bd-gh-sync-push.lock"
+if ! exec 9>"$_lock"; then
+  echo "bd-gh-sync: ${_lock} could not be opened for writing, so the lock that keeps" >&2
+  echo "bd-gh-sync: two pushes from minting two GitHub issues for one bead cannot be" >&2
+  echo "bd-gh-sync: taken. Nothing was read from bd or GitHub, so no bead was mirrored" >&2
+  echo "bd-gh-sync: and no GH mirror closed." >&2
+  echo "bd-gh-sync: PUSH FAILED — the push lock file could not be opened." >&2
+  exit 1
+fi
+flock -w "$_lock_wait" 9
+_flock_rc=$?
+if [ "$_flock_rc" -ne 0 ]; then
+  # The status separates the two shapes: 127 is the shell not finding flock at
+  # all, and the remedy for that is not "push again".
+  echo "bd-gh-sync: 'flock -w ${_lock_wait}' exited ${_flock_rc} on ${_lock}, so this run" >&2
+  echo "bd-gh-sync: never took the push lock and stopped before reading anything from bd" >&2
+  echo "bd-gh-sync: or GitHub: no bead was mirrored and no GH mirror closed. A wait that" >&2
+  echo "bd-gh-sync: ran out is a push still in flight — push again once it finishes. 127" >&2
+  echo "bd-gh-sync: is flock not being runnable here at all." >&2
+  echo "bd-gh-sync: PUSH FAILED — could not take the push lock." >&2
+  exit 1
+fi
+
 _list_rc=0
-bd list --status all --limit 0 --json >"$_tmp/beads.json" 2>/dev/null \
+bd list --status all --limit 0 --json >"$_tmp/beads.json" 9>&- 2>/dev/null \
   || { _list_rc=$?; : >"$_tmp/beads.json"; }
 
 # The DONE sentinel serves the same purpose it serves on the pull side: a bead
 # list that would not load used to become an empty selection, and an empty
 # selection is byte-for-byte the steady state. "Nothing needs a mirror" and
 # "which beads need a mirror is unknowable" are different runs.
-python3 - "$_tmp/beads.json" >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF'
+python3 - "$_tmp/beads.json" >"$_tmp/plan.txt" 9>&- 2>"$_tmp/plan.err" <<'PYEOF'
 import json, sys
 
 # Escaped for the reason the pull selection escapes: the records below are
@@ -755,7 +822,7 @@ _push_batch() {
   _batches=$((_batches + 1))
   # shellcheck disable=SC2086 # deliberate split: one bead id per argument, and
   # every id in $1 has cleared the gate below
-  if GITHUB_TOKEN="$_token" bd github push $1; then
+  if GITHUB_TOKEN="$_token" bd github push $1 9>&-; then
     _pushed=$((_pushed + $2))
   else
     _failed=$((_failed + 1))
@@ -794,7 +861,7 @@ fi
 # snapshot skips exactly the beads that were closed before their first push,
 # leaving the mirror it just minted open forever.
 _post_rc=0
-bd list --status all --limit 0 --json >"$_tmp/beads_after.json" 2>/dev/null \
+bd list --status all --limit 0 --json >"$_tmp/beads_after.json" 9>&- 2>/dev/null \
   || { _post_rc=$?; : >"$_tmp/beads_after.json"; }
 
 # Close GH mirrors for beads that are closed locally but still open on GH.
@@ -802,7 +869,7 @@ bd list --status all --limit 0 --json >"$_tmp/beads_after.json" 2>/dev/null \
 # closing an already-closed GH issue is a no-op.
 _gh_rc=0
 GITHUB_TOKEN="$_token" gh issue list --state open --limit "$_gh_limit_open" \
-  --json number >"$_tmp/open_gh.json" 2>/dev/null \
+  --json number >"$_tmp/open_gh.json" 9>&- 2>/dev/null \
   || { _gh_rc=$?; : >"$_tmp/open_gh.json"; }
 
 # Either input failing yields an empty set, which reads as "nothing is stale"
@@ -816,7 +883,7 @@ GITHUB_TOKEN="$_token" gh issue list --state open --limit "$_gh_limit_open" \
 # pass did not get far enough to have a verdict.
 GITHUB_TOKEN="$_token" python3 - "$_tmp/beads.json" "$_tmp/beads_after.json" \
   "$_tmp/open_gh.json" "$_tmp/close_status.txt" "$_gh_limit_open" "$_pushed" \
-  >/dev/null <<'PYEOF' || true
+  9>&- >/dev/null <<'PYEOF' || true
 import json, re, subprocess, sys
 
 def load(path):
