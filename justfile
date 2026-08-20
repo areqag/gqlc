@@ -1248,8 +1248,11 @@ vuln: sweep-discovery-probes vuln-root-residual
     # once `grep` can first match. The readable instance is a single write() of
     # at most the pipe capacity: a match needs data, so that write lands with the
     # reader alive and nothing remains to take the signal (measured: match on
-    # line 1, 50ms linger, rc 0 in 200 of 200; the same bytes in two writes fail
-    # 40 of 40). A `grep` that exits without reading at all — invalid regex,
+    # line 1, 50ms linger, rc 0 in 200 of 200; the same bytes in two writes with
+    # the match in the FIRST fail 40 of 40 — the position matters, since two
+    # writes with the match confined to the last pass 200 of 200, so single-write
+    # is the readable safe case and not the only one). A `grep` that exits
+    # without reading at all — invalid regex,
     # unreadable -f file — breaks that premise but loses no match. Nothing in
     # this recipe's TEXT settles the property for the producers this recipe has —
     # `go list`, `scope`, `sort` — whose write counts follow buffering inside
@@ -1260,9 +1263,12 @@ vuln: sweep-discovery-probes vuln-root-residual
     # this site issues the TAGGED listing — 29 lines, fixture at 28 — and the
     # fixture is last only in the UNTAGGED listing, which this site never runs;
     # selftest_tagblind is not sorted into safety either, since on a healthy tree
-    # its fixture is absent. Output size: a 1262-byte listing, 52x inside a
-    # 65536-byte pipe buffer, returned 141 in 20 of 20 runs when emitted a line
-    # at a time with a 20ms pause between lines. Emission shape: that same
+    # its fixture is absent. Output size: fitting the buffer is neither
+    # sufficient nor necessary. A 1262-byte listing, 52x INSIDE a 65536-byte
+    # pipe buffer, returned 141 in 20 of 20 runs when emitted a line at a time
+    # with a 20ms pause between lines; a 189019-byte payload, 2.9x OVER the
+    # capacity, returned 0 in 60 of 60 when the match was on the last line.
+    # Emission shape: that same
     # producer without the pause returned 0 in 200 of 200, so it is not
     # line-at-a-time that loses the race but slowness relative to grep's startup,
     # which nothing here bounds. The real `go list` won the race in 100 of 100
