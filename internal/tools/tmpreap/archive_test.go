@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -136,6 +137,66 @@ func TestArchiveEntries_OversizeFileSkippedNotTruncating(t *testing.T) {
 	}
 	if got := archiveNames(t, dest); !slices.Equal(got, []string{"mixed/small.log"}) {
 		t.Errorf("archive holds %v, want just the small file", got)
+	}
+}
+
+// The two oversize cases are different losses: a build artefact nobody wanted a
+// copy of, and the agent log this archive exists for. Counting them together
+// would report the 24 MiB text file on the live /tmp as one of 47 oversize
+// files, 46 of which are binaries nobody would look for.
+func TestArchiveEntries_OversizeBinaryIsNotCountedAsLostText(t *testing.T) {
+	root := t.TempDir()
+	scratch := filepath.Join(root, "mixed")
+	writeFile(t, filepath.Join(scratch, "agent.log"), strings.Repeat("log line\n", 512))
+	if err := os.WriteFile(filepath.Join(scratch, "cache.o"),
+		append([]byte{0x7f, 'E', 'L', 'F', 0x00}, make([]byte, 4096)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "reap.tar.gz")
+
+	stats, err := archiveEntries(dest, root, []entry{{path: scratch, kind: kindPlain}},
+		archiveLimits{maxFileBytes: 64, maxTotalBytes: 1 << 20})
+	if err != nil {
+		t.Fatalf("archiveEntries: %v", err)
+	}
+	if stats.large != 1 {
+		t.Errorf("large = %d, want 1: only the oversize TEXT file is a recoverable artefact lost", stats.large)
+	}
+	if stats.binary != 1 {
+		t.Errorf("binary = %d, want 1: the oversize binary is still a file deleted without a copy", stats.binary)
+	}
+	if want := int64(512 * len("log line\n")); stats.largeBytes != want {
+		t.Errorf("largeBytes = %d, want %d", stats.largeBytes, want)
+	}
+	if stats.binaryBytes != 4101 {
+		t.Errorf("binaryBytes = %d, want 4101", stats.binaryBytes)
+	}
+	if got := stats.largePaths; len(got) != 1 || !strings.HasSuffix(got[0], "agent.log") {
+		t.Errorf("largePaths = %v, want the oversize text file named", got)
+	}
+}
+
+// A count says a log was lost; a path says which. The list is capped, and the
+// cap has to be visible to the caller or it reports "5" for any number above 5.
+func TestArchiveEntries_NamesTheFirstOversizeFilesAndCountsTheRest(t *testing.T) {
+	root := t.TempDir()
+	scratch := filepath.Join(root, "logs")
+	const n = largePathsListed + 3
+	for i := range n {
+		writeFile(t, filepath.Join(scratch, fmt.Sprintf("run%d.log", i)), strings.Repeat("x\n", 64))
+	}
+	dest := filepath.Join(t.TempDir(), "reap.tar.gz")
+
+	stats, err := archiveEntries(dest, root, []entry{{path: scratch, kind: kindPlain}},
+		archiveLimits{maxFileBytes: 16, maxTotalBytes: 1 << 20})
+	if err != nil {
+		t.Fatalf("archiveEntries: %v", err)
+	}
+	if stats.large != n {
+		t.Errorf("large = %d, want %d: the count is of all of them, not of the named ones", stats.large, n)
+	}
+	if len(stats.largePaths) != largePathsListed {
+		t.Errorf("largePaths holds %d paths, want the list capped at %d", len(stats.largePaths), largePathsListed)
 	}
 }
 

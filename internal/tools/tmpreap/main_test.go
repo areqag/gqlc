@@ -18,6 +18,15 @@ func scratchWorld(t *testing.T) (root, repo, archive string) {
 	t.Helper()
 	isolateGit(t)
 	base := t.TempDir()
+	// -apply is refused outside a designated temporary directory and inside the
+	// home directory (refuseNonScratchRoot), and t.TempDir() answers neither
+	// question the same way twice: `just test` sets GOTMPDIR to .bin/gotmp
+	// inside the repository, which puts every fixture under $HOME and under no
+	// TMPDIR, while a bare `go test` puts it under /tmp. Declaring both here
+	// makes the apply fixtures deterministic under either, and stops these tests
+	// depending on the developer's real home directory.
+	t.Setenv("TMPDIR", base)
+	t.Setenv("HOME", mkdir(t, filepath.Join(base, "home")))
 	repo = newRepo(t, filepath.Join(base, "repo"))
 	root = mkdir(t, filepath.Join(base, "scratch"))
 	archive = filepath.Join(base, "reaped.tar.gz")
@@ -108,6 +117,12 @@ func TestRun_ApplyReclaimsOnlyTheProvablyAbandoned(t *testing.T) {
 	if !strings.Contains(out, "inodes") {
 		t.Error("the report never mentions inodes, which is the currency that ran out")
 	}
+	// Everything here is small text, so the unrecoverable disclosure must stay
+	// quiet: a warning printed on every run is one nobody reads on the run that
+	// matters.
+	if strings.Contains(out, "unrecoverable") {
+		t.Errorf("a reap that archived everything still warned about unrecoverable files:\n%s", out)
+	}
 }
 
 func TestRun_DryRunDeletesNothing(t *testing.T) {
@@ -173,6 +188,28 @@ func TestParseOptions_WarnAboveFailRefused(t *testing.T) {
 	}
 }
 
+// The per-file limit decides what survives a reap, so its default is a safety
+// decision and not a tuning knob. 8 MiB, which this shipped with, is below the
+// largest text file on the filesystem it was written for (24.2 MiB) and only
+// 26% above the largest agent .output log there (6.6 MiB, mid-session). The
+// assertion is a floor rather than the exact number: what has to hold is that
+// an agent log fits.
+func TestParseOptions_ArchiveMaxFileFitsAnAgentLog(t *testing.T) {
+	var errOut bytes.Buffer
+	o, err := parseOptions(nil, &errOut)
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if o.archiveL.maxFileBytes < 32<<20 {
+		t.Errorf("-archive-max-file defaults to %s; an agent log above it is deleted with no copy",
+			humanBytes(o.archiveL.maxFileBytes))
+	}
+	if o.archiveL.maxFileBytes > o.archiveL.maxTotalBytes {
+		t.Errorf("-archive-max-file (%s) is above -archive-max-total (%s), so the per-file limit can never bind",
+			humanBytes(o.archiveL.maxFileBytes), humanBytes(o.archiveL.maxTotalBytes))
+	}
+}
+
 func TestRun_UnknownRootIsAnError(t *testing.T) {
 	if _, err := runTool(t, "-root", filepath.Join(t.TempDir(), "nope")); err == nil {
 		t.Fatal("a root that does not exist produced a report")
@@ -187,6 +224,92 @@ func TestDefaultArchivePath_IsOutsideTheScanRoot(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "20260819T230405Z.tar.gz") {
 		t.Errorf("archive path = %q, want it stamped with the run time", got)
+	}
+}
+
+// The archive drops two classes of file — text over -archive-max-file, and
+// anything binary — and deletes both regardless. Round 1 counted them into
+// archiveStats and printed neither, so a 12 MiB plain-text agent log left
+// "archived 1 text file(s)" and 750 B behind it (bd gqlc-osuz). A count only
+// the tests read is silence.
+func TestRun_ApplyNamesWhatItCouldNotArchive(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+	oversize := filepath.Join(root, "factory", "logs", "agent.log")
+	writeFile(t, oversize, strings.Repeat("an agent log line\n", 4096))
+	if err := os.WriteFile(filepath.Join(root, "factory", "cache.o"), []byte{0x7f, 'E', 'L', 'F', 0x00, 0x01}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ageTree(t, filepath.Join(root, "factory"), time.Now().Add(-72*time.Hour))
+
+	out, err := runTool(t,
+		"-root", root, "-repo", repo, "-base", "master", "-age", "12h",
+		"-archive", archive, "-archive-max-file", "1024", "-apply")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(out, "unrecoverable") {
+		t.Errorf("the run deleted files it did not archive without calling them unrecoverable:\n%s", out)
+	}
+	if !strings.Contains(out, oversize) {
+		t.Errorf("the oversize TEXT file %s is not named, so nobody can tell which log was lost:\n%s", oversize, out)
+	}
+	if !strings.Contains(out, "1 text file(s)") || !strings.Contains(out, "over -archive-max-file") {
+		t.Errorf("the oversize text file is not counted as one:\n%s", out)
+	}
+	if !strings.Contains(out, "1 binary file(s)") {
+		t.Errorf("the binary file that was deleted without a copy is not counted:\n%s", out)
+	}
+	// The premise: it really was deleted, and really is not in the tarball.
+	if _, statErr := os.Stat(oversize); !os.IsNotExist(statErr) {
+		t.Errorf("the fixture never exercised the case — %s survived (err=%v)", oversize, statErr)
+	}
+	if names := archiveNames(t, archive); slices.ContainsFunc(names, func(n string) bool {
+		return strings.HasSuffix(n, "agent.log") || strings.HasSuffix(n, "cache.o")
+	}) {
+		t.Errorf("the fixture never exercised the case — the archive holds %v", names)
+	}
+}
+
+// -apply is the mode that deletes, and `just tmp-reap apply <root>` takes the
+// root positionally, so the guard has to be in the tool and not in the recipe.
+func TestRun_ApplyInsideTheUsersHomeRefused(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+	// root is <base>/scratch, so this puts the scan root inside the home
+	// directory exactly the way `just tmp-reap apply ~` would.
+	t.Setenv("HOME", filepath.Dir(root))
+
+	out, err := runTool(t,
+		"-root", root, "-repo", repo, "-base", "master", "-age", "12h",
+		"-archive", archive, "-apply")
+	if err == nil {
+		t.Fatal("-apply ran over a root inside the home directory")
+	}
+	if !strings.Contains(err.Error(), "home directory") {
+		t.Errorf("the refusal does not say the root was inside the home directory: %v", err)
+	}
+	for _, name := range []string{"factory", "probe937r3", "gqlc-landed"} {
+		if _, statErr := os.Stat(filepath.Join(root, name)); statErr != nil {
+			t.Errorf("%s was deleted despite the refusal: %v", name, statErr)
+		}
+	}
+	if strings.Contains(out, "reclaimed") {
+		t.Error("the report claims it reclaimed space after refusing to run")
+	}
+}
+
+// The refusal is scoped to -apply. `just tmp-report` and the `check-tmp` gate
+// are pointed at arbitrary directories on purpose — including $HOME, and
+// including a hosted runner's root disk — and they are read-only. A guard that
+// also refused those would retire the half of this tool that pays.
+func TestRun_DryRunIsNotConstrainedByTheApplyGuard(t *testing.T) {
+	root, repo, _ := scratchWorld(t)
+	t.Setenv("HOME", filepath.Dir(root))
+
+	if err := refuseNonScratchRoot(root); err == nil {
+		t.Fatal("the fixture never exercised the case — -apply would have been allowed over this root")
+	}
+	if _, err := runTool(t, "-root", root, "-repo", repo, "-base", "master", "-age", "12h"); err != nil {
+		t.Fatalf("a read-only report was refused by the -apply guard: %v", err)
 	}
 }
 

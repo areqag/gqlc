@@ -20,8 +20,15 @@
 //	tmpreap [-root DIR] [-repo DIR]     # pressure, composition, and the reap plan
 //	tmpreap [-root DIR] [-repo DIR] -apply
 //
-// Nothing is deleted without -apply, and -apply archives every text artefact it
-// is about to destroy to a tarball outside the scan root first.
+// Nothing is deleted without -apply. -apply archives every text artefact under
+// -archive-max-file to a tarball outside the scan root first, and names on
+// stdout everything it could not archive — those files are unrecoverable once
+// the deletion runs, so a run that does not say so is a run that lied.
+//
+// -apply additionally refuses any -root that is not a directory this host
+// designates for temporary files, and any root on the same path chain as the
+// user's home directory. -root is a positional argument of `just tmp-reap`, and
+// the decision table happily REAPs Downloads and Pictures.
 package main
 
 import (
@@ -60,6 +67,26 @@ type options struct {
 	archiveL archiveLimits
 }
 
+// defaultArchiveMaxFile bounds one file's contribution to the archive, and so
+// bounds this process's peak memory: takeFile reads a whole file before it
+// writes it, one at a time.
+//
+// It is 64 MiB and not the 8 MiB this shipped with because 8 MiB sits inside
+// the working size of the artefact the archive exists for. Measured read-only
+// on the live /tmp (bd gqlc-osuz round 2, 2026-08-19): the largest agent
+// .output logs there are 6.6 MiB, 79% of the old cap, mid-session and still
+// being written; 291 text files sit between 1 and 8 MiB; 47 files exceed 8 MiB
+// of which 46 are binary; and the single text file above it is 24.2 MiB, three
+// times the cap. Nothing on that filesystem is text above 64 MiB.
+//
+// The 24.2 MiB file is in an entry the decision table RETAINs today, for an
+// unrelated reason (it holds a nested .git), so this is a measurement of file
+// sizes on the filesystem and not of losses already incurred.
+//
+// The aggregate -archive-max-total, which IS refusal-worthy, is unchanged and
+// remains the real ceiling on the tarball.
+const defaultArchiveMaxFile = 64 << 20
+
 func parseOptions(args []string, errOut io.Writer) (options, error) {
 	var o options
 	fs := flag.NewFlagSet("tmpreap", flag.ContinueOnError)
@@ -74,7 +101,7 @@ func parseOptions(args []string, errOut io.Writer) (options, error) {
 	fs.IntVar(&o.top, "top", 15, "how many entries to list per section")
 	fs.Float64Var(&o.warnPct, "warn", 85, "usage percentage, of bytes or inodes, at which -check warns")
 	fs.Float64Var(&o.failPct, "fail", 95, "usage percentage, of bytes or inodes, at which -check fails")
-	fs.Int64Var(&o.archiveL.maxFileBytes, "archive-max-file", 8<<20, "largest single file the archive will take")
+	fs.Int64Var(&o.archiveL.maxFileBytes, "archive-max-file", defaultArchiveMaxFile, "largest single file the archive will take; a text file above it is reported as unrecoverable and deleted anyway")
 	fs.Int64Var(&o.archiveL.maxTotalBytes, "archive-max-total", 2<<30, "largest total input the archive will take")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
@@ -101,6 +128,16 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	root, err := filepath.EvalSymlinks(o.root)
 	if err != nil {
 		return fmt.Errorf("resolve -root %s: %w", o.root, err)
+	}
+	// Only the deleting mode is constrained, and it is constrained here rather
+	// than beside the delete loop so a mistyped root costs milliseconds instead
+	// of a full walk. Reporting stays available over any directory: that is what
+	// `just tmp-report` and the `check-tmp` gate are, and narrowing them would
+	// retire the half of this tool that pays.
+	if o.apply {
+		if err := refuseNonScratchRoot(root); err != nil {
+			return err
+		}
 	}
 
 	p, err := readPressure(root)
@@ -253,6 +290,7 @@ func apply(ctx context.Context, o options, root string, entries []entry, pr *pri
 		return fmt.Errorf("archive: %w", err)
 	}
 	pr.printf("\narchived %d text file(s), %s of input, to %s\n", stats.files, humanBytes(stats.bytes), dest)
+	reportUnarchived(pr, stats, o.archiveL)
 	if stats.truncated {
 		return fmt.Errorf("archive stopped at the -archive-max-total limit of %s with entries left to read, so it is "+
 			"not a complete record of what would be deleted; raise the limit or narrow -root, and nothing was deleted",
@@ -274,6 +312,36 @@ func apply(ctx context.Context, o options, root string, entries []entry, pr *pri
 		return fmt.Errorf("%d entries could not be removed:\n  %s", len(failures), strings.Join(failures, "\n  "))
 	}
 	return nil
+}
+
+// reportUnarchived names what the archive did not take, immediately after the
+// line saying what it did. Those files are deleted moments later with no copy
+// anywhere, and an archive that is silently partial is worse than no archive:
+// it is the one a reader believes.
+//
+// Disclosure and not refusal, unlike the aggregate truncation above. One stray
+// oversize log would otherwise block every reclamation, and the moment anyone
+// runs this is the moment the filesystem is already full — a gate that fires
+// exactly then is a gate that gets bypassed with -archive-max-file 1e18.
+func reportUnarchived(pr *printer, stats archiveStats, lim archiveLimits) {
+	if stats.large+stats.binary == 0 {
+		return
+	}
+	pr.printf("NOT archived, and therefore unrecoverable once deleted:\n")
+	if stats.large > 0 {
+		pr.printf("  %d text file(s), %s, over -archive-max-file (%s) — raise it and re-run to keep these\n",
+			stats.large, humanBytes(stats.largeBytes), humanBytes(lim.maxFileBytes))
+		for _, p := range stats.largePaths {
+			pr.printf("      %s\n", p)
+		}
+		if more := stats.large - len(stats.largePaths); more > 0 {
+			pr.printf("      ... and %d more\n", more)
+		}
+	}
+	if stats.binary > 0 {
+		pr.printf("  %d binary file(s), %s — this archive takes text only, by design\n",
+			stats.binary, humanBytes(stats.binaryBytes))
+	}
 }
 
 // remove takes a registered worktree out through git, which refuses on a

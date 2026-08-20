@@ -21,15 +21,36 @@ type archiveLimits struct {
 	maxTotalBytes int64
 }
 
+// archiveStats is what one archive pass took and, more importantly, what it did
+// not. Every field except files/bytes counts an artefact that is about to be
+// deleted with no copy anywhere, so the caller PRINTS them: large and binary
+// were computed and read only by this package's tests for the whole of round 1,
+// which is indistinguishable from not computing them (bd gqlc-osuz).
 type archiveStats struct {
-	files  int
-	bytes  int64
-	binary int
-	large  int
+	files int
+	bytes int64
+	// binary counts what the archive would not take at any size. Build caches
+	// and object files are the bulk of a scratch filesystem's bytes and none of
+	// its value, so this is a deliberate loss — but a disclosed one.
+	binary      int
+	binaryBytes int64
+	// large counts TEXT files dropped only for exceeding maxFileBytes. This is
+	// the accidental loss, and the one the operator can do something about by
+	// raising the limit and re-running.
+	large      int
+	largeBytes int64
+	// largePaths names the first largePathsListed of them: a count says a log
+	// was lost, a path says which.
+	largePaths []string
 	// truncated is set when a limit was reached with entries still unread, so
 	// the caller can refuse to delete over an incomplete record.
 	truncated bool
 }
+
+// largePathsListed bounds the named oversize files. The report is read by a
+// human deciding whether to raise -archive-max-file and re-run; a thousand
+// paths is the same as none.
+const largePathsListed = 5
 
 // archiveEntries writes every text artefact under the given entries to a
 // gzipped tar at dest.
@@ -90,9 +111,14 @@ func writeArchive(w io.Writer, root string, entries []entry, lim archiveLimits) 
 			case takeOK:
 			case takeLarge:
 				stats.large++
+				stats.largeBytes += info.Size()
+				if len(stats.largePaths) < largePathsListed {
+					stats.largePaths = append(stats.largePaths, p)
+				}
 				return nil
 			case takeBinary:
 				stats.binary++
+				stats.binaryBytes += info.Size()
 				return nil
 			default:
 				return nil
@@ -146,7 +172,16 @@ func takeFile(path string, d fs.DirEntry, maxFileBytes int64) ([]byte, fs.FileIn
 		return nil, nil, takeUnreadable
 	}
 	if info.Size() > maxFileBytes {
-		return nil, info, takeLarge
+		// The head is read even though the file is not going in the archive,
+		// because the two oversize cases are different losses and reporting
+		// them as one number reads as neither: an oversize binary is a build
+		// artefact nobody wanted a copy of, an oversize text file is the agent
+		// log this archive exists for. 8 KiB, not the whole file — the size
+		// limit is here to bound memory and the check must not undo it.
+		if headIsText(path) {
+			return nil, info, takeLarge
+		}
+		return nil, info, takeBinary
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -156,6 +191,23 @@ func takeFile(path string, d fs.DirEntry, maxFileBytes int64) ([]byte, fs.FileIn
 		return nil, info, takeBinary
 	}
 	return data, info, takeOK
+}
+
+// headIsText applies isText to the head of a file too large to read whole. An
+// unreadable head reports binary, so a file this cannot classify is not claimed
+// as recoverable text.
+func headIsText(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close() //nolint:errcheck // read-only, and the verdict is already decided.
+	var head [textHeadBytes]byte
+	n, err := io.ReadFull(f, head[:])
+	if n == 0 && err != nil {
+		return false
+	}
+	return isText(head[:n])
 }
 
 // destOutsideRoot refuses an archive written into the tree it is insurance
@@ -178,13 +230,16 @@ func destOutsideRoot(dest, root string) error {
 	return nil
 }
 
+// textHeadBytes is how much of a file the text heuristic looks at.
+const textHeadBytes = 8 << 10
+
 // isText is the classic NUL heuristic over the head of a file. Agent scratch is
 // logs, diffs and notes; the binaries beside them are build caches and object
 // files, which are the bulk of the bytes and none of the value.
 func isText(data []byte) bool {
 	head := data
-	if len(head) > 8<<10 {
-		head = head[:8<<10]
+	if len(head) > textHeadBytes {
+		head = head[:textHeadBytes]
 	}
 	return bytes.IndexByte(head, 0) < 0
 }
