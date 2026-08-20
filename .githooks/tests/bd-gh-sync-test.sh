@@ -78,12 +78,18 @@ if [ "$1 ${2:-}" = "github push" ] && [ -n "${FAKE_MINT_LOG:-}" ]; then
     # asked to open.
     shift 2
     [ "$#" -gt 0 ] && printf '%s\n' "$@" >>"$FAKE_MINT_LOG"
+    # The two ends of the push window, timed by the side that opens it: the
+    # delay is what puts the other run's read inside it, and a delay that is
+    # zero, fractional or never passed leaves a window nothing can be inside.
+    # Per-run, so the two ends are this push's rather than one from each run.
+    date +%s%N >>"$FAKE_PUSH_WINDOW"
     : >"$FAKE_PUSH_STARTED"
     sleep "${FAKE_PUSH_DELAY:-0}"
     # `bd github push` is what assigns external_ref. The ledger the other run
     # reads has to move when it does, or nothing here models the write half of
     # the read-modify-write the lock exists to close.
     cat "$FAKE_BEADS_MINTED" >"$FAKE_BEADS"
+    date +%s%N >>"$FAKE_PUSH_WINDOW"
 fi
 if [ "$1" = "list" ]; then
     # Keyed by call ordinal, because the pull path calls `bd list` twice and
@@ -2460,55 +2466,110 @@ fi
 # first has released, and by then the ledger it reads is the written one, which
 # is why the passing direction does not depend on the delay being long enough.
 CONC="$TMP/conc"
-mkdir -p "$CONC/a" "$CONC/b"
-printf '%s' '[{"id":"b-conc","status":"open","external_ref":""}]' >"$CONC/beads.json"
-printf '%s' "[{\"id\":\"b-conc\",\"status\":\"open\",\"external_ref\":\"$ISSUE/700\"}]" \
-    >"$CONC/minted.json"
-printf '%s' '[]' >"$CONC/gh.json"
-# Non-empty, so the close pass is not blind on a run that minted an issue
-# (gqlc-mbe0), and so both runs end on an ordinary summary line.
-printf '%s' '[{"number":700}]' >"$CONC/gh_open.json"
-: >"$CONC/mints.txt"
 
-# $1 = per-run scratch directory. Separate STUBTMP and CALLS per run, shared
-# ledger and shared mint log: the ledger is the contended resource and the mint
-# log is the measurement.
+# $1 = the fixture directory: the contended ledger, the mirrored ledger the push
+# stub writes back in its place, and the append-only mint log the assertions
+# count. Written by conc_pair before each pair, so one pair's minting cannot be
+# read as the next pair's.
+conc_fixture() {
+    mkdir -p "$1/a" "$1/b"
+    : >"$1/a/window"
+    : >"$1/b/window"
+    printf '%s' '[{"id":"b-conc","status":"open","external_ref":""}]' >"$1/beads.json"
+    printf '%s' "[{\"id\":\"b-conc\",\"status\":\"open\",\"external_ref\":\"$ISSUE/700\"}]" \
+        >"$1/minted.json"
+    printf '%s' '[]' >"$1/gh.json"
+    # Non-empty, so the close pass is not blind on a run that minted an issue
+    # (gqlc-mbe0), and so both runs end on an ordinary summary line.
+    printf '%s' '[{"number":700}]' >"$1/gh_open.json"
+    : >"$1/mints.txt"
+    rm -f "$1/started"
+}
+
+# $1 = per-run scratch directory, $2 = the directory the run runs from, $3 = the
+# fixture directory. Separate STUBTMP and CALLS per run, shared ledger and
+# shared mint log: the ledger is the contended resource and the mint log is the
+# measurement. The directory is a parameter because which lock a run takes is
+# decided by the repository it runs in, which is the whole of what the worktree
+# pair below measures.
 conc_run() {
-    ( cd "$REPO" || exit 1
+    ( cd "$2" || exit 1
+      # Where this run actually ran, recorded by the run rather than by its
+      # caller: the worktree pair's whole claim is that its two halves ran in
+      # two different worktrees, and a pair handed the same directory twice
+      # behaves identically to the one above it.
+      pwd >"$1/cwd"
       PATH="$BIN:$PATH" CALLS="$1/calls" STUBTMP="$1" \
-        FAKE_BEADS="$CONC/beads.json" FAKE_GH="$CONC/gh.json" \
-        FAKE_GH_OPEN="$CONC/gh_open.json" \
-        FAKE_MINT_LOG="$CONC/mints.txt" FAKE_PUSH_STARTED="$CONC/started" \
-        FAKE_BEADS_MINTED="$CONC/minted.json" FAKE_PUSH_DELAY="$CONC_DELAY" \
+        FAKE_BEADS="$3/beads.json" FAKE_GH="$3/gh.json" \
+        FAKE_GH_OPEN="$3/gh_open.json" \
+        FAKE_MINT_LOG="$3/mints.txt" FAKE_PUSH_STARTED="$3/started" \
+        FAKE_PUSH_WINDOW="$1/window" \
+        FAKE_BEADS_MINTED="$3/minted.json" FAKE_PUSH_DELAY="$CONC_DELAY" \
         REAL_MKTEMP="$REAL_MKTEMP" REAL_PYTHON3="$REAL_PYTHON3" \
         REAL_FLOCK="$REAL_FLOCK" \
         "$SYNC" push >"$1/out" 2>"$1/err" )
 }
 CONC_DELAY=1
 
-conc_run "$CONC/a" &
-_conc_a=$!
-# Bounded, so a first run that never reaches its push ends the wait rather than
-# hanging the suite — and the arm below says so instead of passing.
-_conc_waited=0
-while [ ! -f "$CONC/started" ] && [ "$_conc_waited" -lt 200 ]; do
-    sleep 0.05
-    _conc_waited=$((_conc_waited + 1))
-done
-conc_run "$CONC/b" &
-_conc_b=$!
-wait "$_conc_a"
-_conc_rc_a=$?
-wait "$_conc_b"
-_conc_rc_b=$?
-_conc_mints=$(grep -c '^b-conc$' "$CONC/mints.txt")
+# Runs the interleaved pair. $1 = fixture directory, $2 = where the first run
+# runs, $3 = where the second does. Leaves the mint count in $CONC_MINTS and the
+# two exit statuses in $CONC_RC_A / $CONC_RC_B; each run's stderr stays in
+# $1/a/err and $1/b/err. $CONC_WINDOW_MS and $CONC_OVERLAP_MS carry how long the
+# first run's push window ran and how much of it was still to run when the
+# second was launched — the two numbers the assertion below reads to decide
+# whether this pair interleaved at all.
+conc_pair() {
+    conc_fixture "$1"
+    conc_run "$1/a" "$2" "$1" &
+    local _a=$!
+    # Bounded, so a first run that never reaches its push ends the wait rather
+    # than hanging the suite — and the arms below say so instead of passing.
+    local _waited=0
+    while [ ! -f "$1/started" ] && [ "$_waited" -lt 200 ]; do
+        sleep 0.05
+        _waited=$((_waited + 1))
+    done
+    local _launch
+    _launch=$(date +%s%N)
+    conc_run "$1/b" "$3" "$1" &
+    local _b=$!
+    wait "$_a"
+    CONC_RC_A=$?
+    wait "$_b"
+    CONC_RC_B=$?
+    CONC_MINTS=$(grep -c '^b-conc$' "$1/mints.txt")
+    # Withheld rather than defaulted: a window file that is not two timestamps
+    # is a measurement that did not happen, and 0 would read as one that did and
+    # came out degenerate. The arm below distinguishes them.
+    CONC_WINDOW_MS=unmeasured
+    CONC_OVERLAP_MS=unmeasured
+    local _w0 _w1
+    _w0=$(sed -n 1p "$1/a/window" 2>/dev/null)
+    _w1=$(sed -n 2p "$1/a/window" 2>/dev/null)
+    case "${_w0}/${_w1}" in
+        *[!0-9/]*|/*|*/) ;;
+        *) CONC_WINDOW_MS=$(( (_w1 - _w0) / 1000000 ))
+           CONC_OVERLAP_MS=$(( (_w1 - _launch) / 1000000 )) ;;
+    esac
+}
+CONC_RC_A=0
+CONC_RC_B=0
+CONC_MINTS=0
+CONC_WINDOW_MS=unmeasured
+CONC_OVERLAP_MS=unmeasured
+
+conc_pair "$CONC" "$REPO" "$REPO"
+# Kept, because the worktree pair below overwrites them and the interleaving of
+# both pairs is asserted on together at the end of this section.
+_conc_window_ms=$CONC_WINDOW_MS
+_conc_overlap_ms=$CONC_OVERLAP_MS
 
 if [ ! -f "$CONC/started" ]; then
     bad "two concurrent pushes mint one GH issue, not two" \
         "the first run never reached 'bd github push', so nothing was contended"
-elif [ "$_conc_mints" -ne 1 ]; then
+elif [ "$CONC_MINTS" -ne 1 ]; then
     bad "two concurrent pushes mint one GH issue, not two" \
-        "'bd github push b-conc' ran ${_conc_mints} time(s)"
+        "'bd github push b-conc' ran ${CONC_MINTS} time(s)"
 else
     ok "two concurrent pushes mint one GH issue, not two"
 fi
@@ -2518,9 +2579,9 @@ fi
 # second run has to come back having read the written ledger and found nothing
 # left to do.
 _conc_last_b=$(tail -n 1 "$CONC/b/err")
-if [ "$_conc_rc_b" -ne 0 ]; then
+if [ "$CONC_RC_B" -ne 0 ]; then
     bad "the second push waits for the lock rather than giving up" \
-        "it exited ${_conc_rc_b}: ${_conc_last_b}"
+        "it exited ${CONC_RC_B}: ${_conc_last_b}"
 elif [ "$_conc_last_b" != "bd-gh-sync: pushed 0 new bead(s), closed 0 stale GH mirror(s)." ]; then
     bad "the second push waits for the lock rather than giving up" \
         "got: ${_conc_last_b}"
@@ -2531,13 +2592,149 @@ fi
 # ...and the run that held the lock did the work, so "one issue" is one issue
 # minted rather than none.
 _conc_last_a=$(tail -n 1 "$CONC/a/err")
-if [ "$_conc_rc_a" -ne 0 ]; then
+if [ "$CONC_RC_A" -ne 0 ]; then
     bad "the first push mirrors the bead and exits 0" \
-        "it exited ${_conc_rc_a}: ${_conc_last_a}"
+        "it exited ${CONC_RC_A}: ${_conc_last_a}"
 elif [ "$_conc_last_a" != "bd-gh-sync: pushed 1 new bead(s), closed 0 stale GH mirror(s)." ]; then
     bad "the first push mirrors the bead and exits 0" "got: ${_conc_last_a}"
 else
     ok "the first push mirrors the bead and exits 0"
+fi
+
+# --- gqlc-mmej: ...and the same pair from two worktrees of one clone ---------
+# The pair above runs both halves from one directory, where `git rev-parse
+# --git-dir` and `--git-common-dir` name the same path, so it cannot tell a lock
+# keyed to the clone from one keyed to the worktree. That difference is the
+# incident: CLAUDE.md gives every modification session its own sibling worktree,
+# a linked worktree's .beads/ redirects to the main checkout's database, and so
+# two sessions push one ledger to one GitHub repository from two directories.
+# Keyed to the worktree, each takes a lock of its own, neither ever waits, and
+# both mint — measured as 18 unreachable issues on this repository.
+#
+# Its own clone, because $REPO already holds the lock file every push above
+# left there and a worktree of it would inherit that history.
+WTMAIN="$TMP/repo_wt"
+WTLINK="$TMP/repo_wt_b"
+git init -q "$WTMAIN" >/dev/null 2>&1 || { echo "cannot git init $WTMAIN" >&2; exit 1; }
+# `git worktree add` needs a commit to check out. The hooks path is pointed at
+# an empty directory and signing is turned off for this one commit: the
+# repository is a fixture, and whatever the machine's global configuration asks
+# of a real commit is a way for the suite to go red for a reason that is not
+# about bd-gh-sync. A commit that fails anyway is caught by the fixture arm
+# below rather than passing quietly.
+mkdir -p "$TMP/nohooks"
+git -C "$WTMAIN" -c core.hooksPath="$TMP/nohooks" -c commit.gpgsign=false \
+    -c user.name=fixture -c user.email=fixture@example.invalid \
+    commit -q --allow-empty -m fixture >/dev/null 2>&1
+git -C "$WTMAIN" worktree add -q "$WTLINK" >/dev/null 2>&1
+
+# `git rev-parse` answers relatively in a main worktree (.git) and absolutely in
+# a linked one, so each answer is resolved to a directory before any two of them
+# are compared.
+git_dir_abs() {
+    ( cd "$1" 2>/dev/null || exit 0
+      _d=$(git rev-parse "$2" 2>/dev/null) || exit 0
+      cd "$_d" 2>/dev/null || exit 0
+      pwd )
+}
+_wt_gd_main=$(git_dir_abs "$WTMAIN" --git-dir)
+_wt_gd_link=$(git_dir_abs "$WTLINK" --git-dir)
+_wt_cd_main=$(git_dir_abs "$WTMAIN" --git-common-dir)
+_wt_cd_link=$(git_dir_abs "$WTLINK" --git-common-dir)
+
+_wt="two pushes from sibling worktrees of one clone mint one GH issue, not two"
+_wt_window_ms="the worktree pair did not run"
+_wt_overlap_ms="the worktree pair did not run"
+if [ -z "$_wt_cd_main" ] || [ "$_wt_cd_main" != "$_wt_cd_link" ] \
+   || [ "$_wt_gd_main" = "$_wt_gd_link" ]; then
+    # Vacuity before behaviour: a `git worktree add` that failed leaves two
+    # directories a contention test would find nothing to contend over and pass.
+    # One clone is the two common directories being equal; two worktrees of it
+    # is the two git directories being different. Neither is asserted about
+    # bd-gh-sync — they are what makes the arms below about worktrees at all.
+    bad "$_wt" \
+        "not two worktrees of one clone: git dirs [${_wt_gd_main}] [${_wt_gd_link}], common dirs [${_wt_cd_main}] [${_wt_cd_link}]"
+else
+    CONCWT="$TMP/conc_wt"
+    conc_pair "$CONCWT" "$WTMAIN" "$WTLINK"
+    _wt_window_ms=$CONC_WINDOW_MS
+    _wt_overlap_ms=$CONC_OVERLAP_MS
+    _wt_last_b=$(tail -n 1 "$CONCWT/b/err")
+    _wt_cwd_a=$(cat "$CONCWT/a/cwd" 2>/dev/null)
+    _wt_cwd_b=$(cat "$CONCWT/b/cwd" 2>/dev/null)
+    if [ "$_wt_cwd_a" != "$WTMAIN" ] || [ "$_wt_cwd_b" != "$WTLINK" ]; then
+        # The second half of the vacuity guard: the directories being two
+        # worktrees is worth nothing unless the pair ran one push in each of
+        # them. A pair handed one directory twice is the assertion above this
+        # one wearing this one's name.
+        bad "$_wt" \
+            "the pair did not run one push in each worktree: ran in [${_wt_cwd_a}] and [${_wt_cwd_b}], wanted [${WTMAIN}] and [${WTLINK}]"
+    elif [ ! -f "$CONCWT/started" ]; then
+        bad "$_wt" \
+            "the run in the main worktree never reached 'bd github push', so nothing was contended"
+    elif [ "$CONC_MINTS" -ne 1 ]; then
+        bad "$_wt" "'bd github push b-conc' ran ${CONC_MINTS} time(s)"
+    elif [ "$_wt_last_b" != "bd-gh-sync: pushed 0 new bead(s), closed 0 stale GH mirror(s)." ]; then
+        # One mint is also what a second run that never read the ledger at all
+        # would leave behind. The run in the linked worktree has to come back
+        # having waited, read the written ledger and found nothing to mirror.
+        bad "$_wt" "the run in the linked worktree did not wait and re-read: ${_wt_last_b}"
+    elif [ -e "$_wt_gd_link/bd-gh-sync-push.lock" ]; then
+        # The same defect stated as a path rather than as a count: a lock in the
+        # linked worktree's own git directory is a lock no other worktree of
+        # this clone ever waits on.
+        bad "$_wt" \
+            "a lock was taken in the linked worktree's git directory: ${_wt_gd_link}/bd-gh-sync-push.lock"
+    else
+        ok "$_wt"
+    fi
+fi
+
+# --- gqlc-mmej: ...and the fixture's own window has to be a window ----------
+# Every arm above is also satisfied by a script with no lock in it, if the
+# second run's read never falls inside the first run's push window: with no
+# window there is no interleaving, each run reads a ledger the other has already
+# written, one mints, and both pairs pass. The delay is what makes the failing
+# direction deterministic rather than lucky — measured against the unserialised
+# script, CONC_DELAY=0 catches it 0 runs in 10 and CONC_DELAY=1 catches it 10 in
+# 10 — so an edit that zeroes the delay, or that stops handing it to the stub,
+# turns both pins off and leaves the suite green. That is the shape of the
+# defect this whole section exists to close: a guard that reports healthy while
+# it is dead. It is loud here instead.
+#
+# The window is timed by the push stub around its own sleep, so it does not
+# depend on how promptly this file is scheduled: a loaded machine oversleeps,
+# which lengthens it. The floor is written out rather than derived from
+# CONC_DELAY, because a floor computed from the number under test is no floor —
+# CONC_DELAY=0 would move it to 0 and pass. Half of a one-second delay.
+_win_floor=500
+_win="the concurrency fixture opens a real push window and launches the second run inside it"
+_win_bad=
+# $1 = which pair, $2 = the length of its push window in ms, $3 = how much of
+# that window was still to run when the second run was launched.
+win_check() {
+    case "$2" in
+        ''|*[!0-9]*)
+            _win_bad="${_win_bad}the $1 pair's window was not measured ($2). "
+            return ;;
+    esac
+    case "$3" in
+        ''|*[!0-9-]*)
+            _win_bad="${_win_bad}the $1 pair's overlap was not measured ($3). "
+            return ;;
+    esac
+    if [ "$2" -lt "$_win_floor" ]; then
+        _win_bad="${_win_bad}the $1 pair's push window was ${2}ms, under the ${_win_floor}ms floor. "
+    elif [ "$3" -le 0 ]; then
+        _win_bad="${_win_bad}the $1 pair's second run was launched $((0 - $3))ms after its window closed. "
+    fi
+}
+win_check "same-directory" "$_conc_window_ms" "$_conc_overlap_ms"
+win_check "sibling-worktree" "$_wt_window_ms" "$_wt_overlap_ms"
+if [ -n "$_win_bad" ]; then
+    bad "$_win" "$_win_bad"
+else
+    ok "$_win"
 fi
 
 # A lock that cannot be taken must stop the run before it reads anything, not
@@ -2851,6 +3048,8 @@ the mktemp stub is transparent when its knob is unset
 two concurrent pushes mint one GH issue, not two
 the second push waits for the lock rather than giving up
 the first push mirrors the bead and exits 0
+two pushes from sibling worktrees of one clone mint one GH issue, not two
+the concurrency fixture opens a real push window and launches the second run inside it
 a push that cannot take the lock mirrors nothing and says so
 the flock stub is transparent when its knob is unset
 a push with nowhere to put the lock mirrors nothing and says so
