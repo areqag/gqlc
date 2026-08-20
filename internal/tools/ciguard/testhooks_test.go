@@ -60,6 +60,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/areqag/gqlc/internal/liverecipes"
 )
@@ -195,11 +196,7 @@ func TestCITestJobRunsTheTestRecipe(t *testing.T) {
 	var job ciJob
 	require.NoError(t, node.Decode(&job), "decode job %q", testJob)
 
-	require.Emptyf(t, job.If,
-		"job %q carries a job-level `if:` (%q). A skipped job still emits a check run "+
-			"with conclusion `skipped`, and branch protection reads that as a pass, so "+
-			"an `if:` here retires the shell suites without deleting a line of them.",
-		testJob, job.If)
+	requireNoTestJobIf(t, job)
 
 	// The other half of "the job can still fail", and it is not the step-level
 	// key spelled one level up. GitHub documents the job-level form against the
@@ -229,23 +226,139 @@ func TestCITestJobRunsTheTestRecipe(t *testing.T) {
 			"context is not where to find out.",
 		testJob, spell(job.ContinueOnError), testRecipe, testJob)
 
+	s, ok := testRecipeStep(job)
+	require.Truef(t, ok, "no step in job %q of %s runs `just %s`, so the go tests and "+
+		"the shell suites it depends on are not reached by a required context",
+		testJob, ciWorkflow, testRecipe)
+
+	requireNoTestStepIf(t, s)
+	require.Falsef(t, present(s.ContinueOnError),
+		"the `just %s` step in job %q sets `continue-on-error: %s`, so the "+
+			"step's failure is not the job's. The suites run, the recipe "+
+			"returns non-zero, and %q reports SUCCESS with the verdict "+
+			"discarded.",
+		testRecipe, testJob, spell(s.ContinueOnError), testJob)
+}
+
+// testRecipeStep is the step in job that runs `just test`, and ok is false when
+// no step does.
+func testRecipeStep(job ciJob) (step ciStep, ok bool) {
 	for _, s := range job.Steps {
 		if runsTestRecipe.MatchString(s.Run) {
-			require.Emptyf(t, s.If,
-				"the `just %s` step in job %q carries an `if:` (%q). A skipped step "+
-					"leaves the job green, so the context reports SUCCESS with the "+
-					"suites never run — worse than a skipped job, which at least "+
-					"reports `skipped`.", testRecipe, testJob, s.If)
-			require.Falsef(t, present(s.ContinueOnError),
-				"the `just %s` step in job %q sets `continue-on-error: %s`, so the "+
-					"step's failure is not the job's. The suites run, the recipe "+
-					"returns non-zero, and %q reports SUCCESS with the verdict "+
-					"discarded.",
-				testRecipe, testJob, spell(s.ContinueOnError), testJob)
-			return
+			return s, true
 		}
 	}
-	t.Fatalf("no step in job %q of %s runs `just %s`, so the go tests and the "+
-		"shell suites it depends on are not reached by a required context",
-		testJob, ciWorkflow, testRecipe)
+	return ciStep{}, false
+}
+
+// requireNoTestJobIf refuses a job-level `if:` on the `test` job, and
+// requireNoTestStepIf refuses one on the step that runs `just test`.
+//
+// Read for presence rather than for value, as ContinueOnError above is: If is a
+// yaml.Node (bd gqlc-ff66), so Kind is what parts an `if:` written with no value
+// from an absent one. Both sites read a string field with require.Empty until
+// that change, which passed the written-empty form; over a Node require.Empty
+// asks a different question — equality with the zero struct — and renders it
+// through %q, which has no verb for the *Node field inside it.
+//
+// Both take require.TestingT so that they can be run against a job that carries
+// an `if:`. ci.yml carries neither key, so calling them over the file exercises
+// only the side that passes; TestTestJobIfIsRefusedOnBeingWritten drives the
+// other side.
+func requireNoTestJobIf(t require.TestingT, job ciJob) {
+	require.Falsef(t, present(job.If),
+		"job %q carries a job-level `if:`, written as %s. A skipped job still emits a "+
+			"check run with conclusion `skipped`, and branch protection reads that as a "+
+			"pass, so an `if:` here retires the shell suites without deleting a line of "+
+			"them.",
+		testJob, spell(job.If))
+}
+
+func requireNoTestStepIf(t require.TestingT, s ciStep) {
+	require.Falsef(t, present(s.If),
+		"the `just %s` step in job %q carries an `if:`, written as %s. A "+
+			"skipped step leaves the job green, so the context reports "+
+			"SUCCESS with the suites never run — worse than a skipped job, "+
+			"which at least reports `skipped`.",
+		testRecipe, testJob, spell(s.If))
+}
+
+// The two refusals above have to reach an `if:` written with no value, and that
+// is the case a string field cannot answer. This is the gqlc-ff66 hole in a
+// second required context: both sites read If with require.Empty over a string
+// until the field was promoted to a yaml.Node, so `if:` on the `test` job or on
+// its `just test` step retired the shell suites and passed here.
+//
+// `value` is what a string field would have seen. The rows that share a value
+// and differ in `refused` are that conflation, and they are the rows that go
+// green again if If goes back to a string.
+//
+// `stepKey` says which of the two refusals a row is about: the key is written on
+// the job when it is false and on the `just test` step when it is true. Every
+// source below carries the step that runs the recipe, so a step row reaches the
+// same lookup TestCITestJobRunsTheTestRecipe does.
+//
+// The rows are documents taken, not a survey of YAML. There are forms that
+// decode to an empty value which are not written below, and nothing here claims
+// a verdict for them: what is asserted is the verdict beside each source.
+func TestTestJobIfIsRefusedOnBeingWritten(t *testing.T) {
+	const runsIt = "steps:\n  - run: just " + testRecipe + "\n"
+	const cond = "github.event_name == 'push'"
+
+	for _, row := range []struct {
+		name    string
+		src     string
+		stepKey bool
+		refused bool
+		value   string
+	}{
+		{"job: no if: key at all", runsIt, false, false, ""},
+		{"job: if: with nothing after it", "if:\n" + runsIt, false, true, ""},
+		{"job: if: with an empty string", "if: \"\"\n" + runsIt, false, true, ""},
+		{"job: if: carrying a condition", "if: " + cond + "\n" + runsIt, false, true, cond},
+		{"step: no if: key at all", runsIt, true, false, ""},
+		{"step: if: with nothing after it", runsIt + "    if:\n", true, true, ""},
+		{"step: if: with an empty string", runsIt + "    if: \"\"\n", true, true, ""},
+		{"step: if: carrying a condition", runsIt + "    if: " + cond + "\n", true, true, cond},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			var job ciJob
+			require.NoErrorf(t, yaml.Unmarshal([]byte(row.src), &job), "decode %q", row.src)
+
+			s, ok := testRecipeStep(job)
+			require.Truef(t, ok, "%q writes no `just %s` step, so this row reaches "+
+				"neither refusal", row.src, testRecipe)
+
+			read, assert := job.If, func(rt require.TestingT) { requireNoTestJobIf(rt, job) }
+			if row.stepKey {
+				read, assert = s.If, func(rt require.TestingT) { requireNoTestStepIf(rt, s) }
+			}
+			require.Equalf(t, row.value, read.Value,
+				"this row's premise is that a string `If` would have read %q from %q",
+				row.value, row.src)
+
+			refusal := refusalOf(t, assert)
+			if !row.refused {
+				require.Emptyf(t, refusal, "%q writes no `if:` on the key under test and "+
+					"was refused anyway", row.src)
+				return
+			}
+			require.NotEmptyf(t, refusal,
+				"%q writes an `if:` reaching job %q and it was accepted, so a required "+
+					"context can be retired by a key this test reads as absent",
+				row.src, testJob)
+
+			// Which level, not which job: testJob and testRecipe are both "test",
+			// so a Contains over the job name is satisfied by the `just test` in
+			// the step refusal whatever it says. The two markers below appear in
+			// one message each. A refusal that names the wrong level sends a
+			// maintainer to a key that is not set.
+			marker := "carries a job-level `if:`"
+			if row.stepKey {
+				marker = "step in job"
+			}
+			require.Containsf(t, refusal, marker,
+				"the refusal does not say which key is set: %s", refusal)
+		})
+	}
 }
