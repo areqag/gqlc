@@ -1239,16 +1239,21 @@ vuln: sweep-discovery-probes vuln-root-residual
     # three listed directories: `go list ./... | grep -qxF "${fixture}"` returns
     # 141 while `grep -qxF "${fixture}" <<<"${listed}"` over that same listing
     # returns 0 (bd gqlc-e53u). No `grep -q` or `grep -m1` in this recipe reads a
-    # pipe: each takes a herestring or a file argument, which also gives the
-    # producer's own status somewhere to be checked — rule (2) again.
-    # In this checkout the piped form passed for ONE reason, not two: `go list`
-    # fits its whole output in the pipe buffer, so it never writes again after
-    # the match and never takes the signal. Sort order is not the second guard
-    # it looks like. This site issues the TAGGED listing — 29 lines with the
-    # fixture at 28 — and the fixture is last only in the untagged listing,
-    # which this site never runs. selftest_tagblind is not protected by sorting
-    # either: on a healthy tree its fixture is absent. Buffer size is not this
-    # recipe's to control, so do not read "is my match last?" as an all-clear.
+    # pipe: seven take a herestring, whose `$(...)` assignment gives the producer
+    # a status of its own to be checked — rule (2) again — and one takes a file
+    # argument, which has no producer to lose.
+    # Two ways of certifying a piped site as "safe here" are measured false; do
+    # not reach for either. Sort order: this site issues the TAGGED listing — 29
+    # lines, fixture at 28 — and the fixture is last only in the UNTAGGED
+    # listing, which this site never runs. selftest_tagblind is not sorted into
+    # safety either: on a healthy tree its fixture is absent. Output size: a
+    # 1262-byte listing, 52x inside a 65536-byte pipe buffer, still returns 141
+    # in 20 of 20 runs when emitted a line at a time. What separates the two is
+    # the producer's write pattern, not the total it writes — the real `go list`
+    # delivers its whole listing before `grep -q` exits, while a producer that
+    # trickles takes the signal no matter how little it has to say. The
+    # three-directory harness cited above is the standing counterexample: it
+    # fits any buffer and returns 141.
     scope() { go run ./internal/tools/modscope "$@"; }
 
     # Every directory of a module that holds a Go file, absolute, read off disk.
