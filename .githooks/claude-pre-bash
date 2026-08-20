@@ -71,8 +71,17 @@
 #     which was the missing half — the unquoted body used to be stripped
 #     before substitutions were extracted, so a $(git commit) there was
 #     silently allowed)
-#   - $(...) and `...` substitution bodies are analyzed recursively (they
-#     execute for real, even inside double quotes)
+#   - $(...) and `...` substitution bodies are analyzed one recursion down,
+#     including inside double quotes, where shlex hands back one opaque token
+#     and the extractor is the only reader. The $( ) scan counts paren depth,
+#     so a body holding a balanced pair is read: `-r "at <sha> (12 commits,
+#     not yet pushed)"` is the witnessed incident's own reason text and the
+#     majority spelling here — 192 of the 309 close reasons in
+#     .beads/issues.jsonl at 15091c86 carry a paren, 106 of those a sha too.
+#     Quoting is not tracked inside the scan, so a paren the shell would read
+#     as a literal is counted; where that leaves a body's parens unbalanced,
+#     nothing closes the span and it goes unread -> allow (one of those 192 is
+#     in that state, pinned by "unbalanced paren in the body is unread")
 #   - the rest is shlex-tokenized, so a multi-word quoted run collapses to one
 #     token and stops matching: `echo "git commit -m x"` is silent (measured).
 #     Word-by-word quoting does not collapse, so `echo "git" "commit" -m x`
@@ -90,17 +99,20 @@
 #   - nested interpreters (bash -c '...') are not recursed into
 #   - --git-dir / --work-tree redirection is not resolved -> allow
 #   - inside an unquoted heredoc body this hook has actually stripped, the
-#     substitution extractors are the only thing looking, because the prose
-#     around them has to stay data. A command neither extractor matches is
-#     therefore not seen there at all. The instances measured on bash 5.3.15,
-#     which is what has been looked for rather than a proof that nothing else
-#     qualifies: SUBST_RE does not nest, so $(git commit -m "(x)") is missed;
-#     bash 5.3's ${ cmd; } funsub is matched by neither; and a backslash
-#     newline splitting the $( token itself leaves SUBST_RE nothing to match
-#     while the shell rejoins the line and runs it — that one wrote a real
-#     commit onto master in the fixture. Each DENYs when written bare, because
-#     outside a heredoc the tokenizer is the backstop, and each is silent
-#     inside one -> allow
+#     substitution extractor is the only thing looking, because the prose
+#     around it has to stay data. A command it does not match is therefore not
+#     seen there at all. The instances measured on bash 5.3.15, which is what
+#     has been looked for rather than a proof that nothing else qualifies:
+#     bash 5.3's ${ cmd; } funsub, which the extractor does not match; and a
+#     backslash newline splitting the $( token itself, which leaves it nothing
+#     to match while the shell rejoins the line and runs it — that one wrote a
+#     real commit onto master in the fixture. Both DENY when written bare, the
+#     tokenizer having split them into words there; both are silent inside a
+#     stripped heredoc body -> allow. Both are silent inside DOUBLE QUOTES at
+#     top level with no heredoc anywhere as well (rows `funsub ${ ; }
+#     double-quoted` and `cont-split $( double-quoted`), shlex collapsing the
+#     whole run to one token — so what saves the bare spelling is the absence
+#     of quoting rather than the absence of a heredoc
 #   - HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt and <<EOF-1 arm on the
 #     prefix `EOF`. The real terminator line does not equal that, so the body
 #     goes on swallowing until some line is exactly `EOF` — and when none is,
@@ -118,7 +130,7 @@
 #     $( or `, and the shell does. Inside an unquoted heredoc body the count is
 #     what decides: across 0 to 4 measured, an odd count suppressed the
 #     expansion and an even count did not, so \$(git commit) is inert while
-#     \\$(git commit) runs. Neither parity is visible to SUBST_RE, so both are
+#     \\$(git commit) runs. Neither parity is visible to the scan, so both are
 #     extracted and both deny — including the escaped spelling, which is the
 #     one you would write to DOCUMENT this guard in a README heredoc. Measured
 #     with a positive-content witness rather than an absent marker: on the odd
@@ -158,7 +170,12 @@
 #
 # The `bd close` arm reads the reason as it is written on the command line, or
 # out of a literal `--reason-file` path. Reaches, and does not reach:
-#   - `-r`/`--reason`/`--reason-file` with a literal value -> READ.
+#   - `-r`/`--reason`/`--reason-file` with a literal value -> READ. The
+#     spellings pinned are two tokens, `--reason=VALUE`, `-rVALUE`, `-fr VALUE`
+#     and `-qr=VALUE`; the cluster ones are ordinary usage here because `-f` is
+#     how a pinned bead is force-closed, and each of them verdicted
+#     `allow-no-reason` before scan_bd walked the cluster — a false positive
+#     rather than a miss, since that verdict asserts the close records no sha.
 #   - a reason token holding a `$` or a BACKTICK -> NOT readable, and DENIED
 #     rather than skipped: the hook cannot tell such a reason cites nothing
 #     from cites-something. Quoting is already resolved by the time the token
@@ -234,8 +251,6 @@ HOOKS_DIRNAME = ".githooks"
 # fact.
 HOOK_GATED = ("commit", "merge", "pull", "push")
 HEREDOC_RE = re.compile(r"(?<!<)<<(-?)\s*([\"']?)(\w+)\2")
-SUBST_RE = re.compile(r"\$\(([^()]*)\)")
-BACKTICK_RE = re.compile(r"`([^`]*)`")
 FALLBACK_RE = re.compile(r"(?:^|[^A-Za-z-])git\s+commit(?:$|\s)")
 OPERATOR_CHARS = set("();<>|&")
 GIT_OPTS_WITH_ARG = ("-c", "--namespace", "--exec-path", "--super-prefix")
@@ -249,6 +264,14 @@ BD_OPTS_WITH_ARG = (
     "-C", "--directory", "--db", "--actor", "--dolt-auto-commit",
     "--session", "-r", "--reason", "--reason-file",
 )
+# bd is cobra/pflag, which lets a shorthand carry its value attached (-rTEXT)
+# and lets shorthands cluster (-fr TEXT, -qr=TEXT), and this repo force-closes
+# pinned beads with -f. Measured against bd v1.0.4: `-rZZZ` and `-fr ZZZ` both
+# parse, `-fr` with nothing after it answers "flag needs an argument: 'r'", and
+# `-Z` answers "unknown shorthand flag". Only these two shorthands take a value
+# in `bd close --help`; -f, -q, -v and -h are boolean, so a cluster is walked
+# until a value-taking letter is reached.
+BD_SHORTHANDS_WITH_ARG = {"r": "--reason", "C": "--directory"}
 # Two tiers, because a sha is recognised by two different kinds of evidence.
 #
 # CITED_SHA_RE is the `at <sha>` / `@ <sha>` / `commit <sha>` idiom. A match is
@@ -340,15 +363,75 @@ def strip_heredocs(text):
     return "\n".join(kept), "\n".join(expanded)
 
 
+def matching_paren(text, opening):
+    """Index of the `)` closing text[opening], or None when nothing closes it.
+
+    Parens are counted rather than excluded, which is what lets a substitution
+    body hold one: `bd close x -r "at 1234567 (12 commits, not yet pushed)"` is
+    the majority spelling of this repo's close reasons — 192 of the 309 in
+    .beads/issues.jsonl at 15091c86 carry a paren and 106 of those carry a sha
+    as well — and it is the witnessed incident's own reason text. Quoting is
+    not tracked, so a paren the shell would read as a literal is counted here
+    too; the effect is on reasons whose parens do not balance, of which that
+    corpus holds one, and there the span goes unread (fail-open, pinned by
+    "unbalanced paren in the body is unread").
+    """
+    depth = 0
+    for j in range(opening, len(text)):
+        if text[j] == "(":
+            depth += 1
+        elif text[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+    return None
+
+
+def split_substitutions(text):
+    """(text with each closed $( ) and ` ` span blanked, [those spans' bodies]).
+
+    A span whose delimiter never closes is left in the text and contributes no
+    body, so `a $( b` comes back unchanged with nothing extracted (pinned by
+    "unbalanced paren in the body is unread"). Blanking a closed span rather
+    than leaving it in place is what stops a nested body being analyzed twice,
+    once on its own and once inside its parent.
+    """
+    kept, bodies = [], []
+    i, n = 0, len(text)
+    while i < n:
+        end = None
+        if text[i] == "$" and i + 1 < n and text[i + 1] == "(":
+            end = matching_paren(text, i + 1)
+            if end is not None:
+                bodies.append(text[i + 2 : end])
+        elif text[i] == "`":
+            close = text.find("`", i + 1)
+            if close != -1:
+                bodies.append(text[i + 1 : close])
+                end = close
+        if end is None:
+            kept.append(text[i])
+            i += 1
+            continue
+        kept.append(" ")
+        i = end + 1
+    return "".join(kept), bodies
+
+
 def substitution_bodies(text):
-    bodies = []
-    while True:
-        m = SUBST_RE.search(text)
-        if m is None:
-            break
-        bodies.append(m.group(1))
-        text = text[: m.start()] + " " + text[m.end() :]
-    bodies.extend(m.group(1) for m in BACKTICK_RE.finditer(text))
+    """The closed substitution bodies in text, with nesting flattened.
+
+    A body comes back with its own nested substitutions blanked out and listed
+    as further entries, so the caller hands each span to the analyzer exactly
+    once and a nested one lands at the same recursion depth as one written
+    bare. Terminates because a body is shorter than the text it came out of by
+    at least its two delimiters, so the queue's total length strictly falls.
+    """
+    bodies, queue = [], list(split_substitutions(text)[1])
+    while queue:
+        stripped, inner = split_substitutions(queue.pop(0))
+        bodies.append(stripped)
+        queue.extend(inner)
     return bodies
 
 
@@ -358,6 +441,31 @@ def resolve(base, path):
     if os.path.isabs(path):
         return path
     return os.path.join(base, path) if base else None
+
+
+def shorthand_arg(opt, tokens, j):
+    """(long flag name, value, tokens consumed) for a pflag shorthand cluster.
+
+    (None, None, 1) when the token is a long flag, or when no letter in it is
+    one of the value-taking shorthands. pflag walks a cluster left to right and
+    the first letter that takes a value swallows the rest of the token — after
+    one optional `=` — or the next token when the rest is empty. So `-rTEXT`,
+    `-fr TEXT` and `-qr=TEXT` all reach `--reason`, and each of those three
+    spellings verdicted allow-no-reason here before this existed.
+    """
+    if opt.startswith("--"):
+        return None, None, 1
+    for k in range(1, len(opt)):
+        name = BD_SHORTHANDS_WITH_ARG.get(opt[k])
+        if name is None:
+            continue
+        rest = opt[k + 1 :]
+        if rest.startswith("="):
+            return name, rest[1:], 1
+        if rest:
+            return name, rest, 1
+        return name, (tokens[j + 1] if j + 1 < len(tokens) else None), 2
+    return None, None, 1
 
 
 def scan_bd(tokens, i, cwd):
@@ -391,6 +499,14 @@ def scan_bd(tokens, i, cwd):
                 saw_reason, reason_file = True, val
             continue
         if opt.startswith("-"):
+            name, val, step = shorthand_arg(opt, tokens, j)
+            if name is not None:
+                j += step
+                if name == "--directory":
+                    target = resolve(target, val)
+                else:
+                    saw_reason, reason = True, val
+                continue
             j += 1
             continue
         if opt in BD_CLOSE_SUBCOMMANDS:
@@ -454,15 +570,17 @@ def git_targets(text, cwd, wanted, depth=0, closes=None):
     text, expanded = strip_heredocs(text)
     targets, need_fallback = [], False
     # The unquoted heredoc body contributes its substitutions and nothing else:
-    # what SUBST_RE and BACKTICK_RE match there is analyzed, the prose around
-    # them is not, and the body text itself is never handed to the shlex call
-    # below — what the extractors pulled out of it is, one recursion down.
+    # what substitution_bodies() extracts there is analyzed, the prose around
+    # it is not, and the body text itself is never handed to the shlex call
+    # below — what the extractor pulled out of it is, one recursion down.
     # Whether a matched substitution would in fact have run is not asked here —
     # an escaped one would not, and is analyzed anyway (header, under biases).
     # Same recursion level as a substitution written bare,
     # so the depth cap above sees no extra hop (measured: an unquoted heredoc
     # holding $(git commit) is found at depth 1, exactly where a bare
-    # $(git commit) is found).
+    # $(git commit) is found). substitution_bodies() flattens nesting for the
+    # same reason, so the cap counts heredoc and substitution hops rather than
+    # how deeply the writer nested their parens.
     bodies = substitution_bodies(text)
     bodies.extend(substitution_bodies(expanded))
     for body in bodies:
