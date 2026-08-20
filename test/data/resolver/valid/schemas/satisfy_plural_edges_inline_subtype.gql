@@ -9,16 +9,22 @@
 -- it is evidence that every returned row's company is the bare Company — and
 -- the only WORKS_AT into that type comes from the bare Person.
 --
--- That is what the one fixture here needs:
+-- That is what the mandatory-hop fixtures here need:
 --   MATCH (p)-[w:WORKS_AT]->(c:Company) MATCH (c)-[h:HAS_DESK]->(d:Desk)
 -- `p` carries no label, and on the far end's full satisfying set both person
 -- types reach a company, so Phase B alone cannot pin it. The HAS_DESK hop pins
 -- `c`, and `p` is Person through it (gqlc-h6h7).
+-- unlabelled_mandatory_hop_pins_the_next_hop.cypher asks the same of a `c` that
+-- carries no label either, one hop further out.
 --
--- The one-token twin with OPTIONAL on the HAS_DESK hop is refused, and that
--- refusal is pinned from the invalid/ copy: an outer join returns the
--- Employee&Person -[WORKS_AT]-> Company&Large row with h/d null, so the hop
--- proves nothing about which company type a returned row carries.
+-- The one-token twin with OPTIONAL on the HAS_DESK hop does not pin `c`: an
+-- outer join returns the Employee&Person -[WORKS_AT]-> Company&Large row with
+-- h/d null, so the hop proves nothing about which company type a returned row
+-- carries. What that costs depends on the projection, which is why the OPTIONAL
+-- spelling appears in BOTH directories. A column both attainable company types
+-- agree on survives it — unlabelled_optional_hop_shared_property.cypher here
+-- returns c.name — while one that tells them apart is refused from the invalid/
+-- copy.
 
 CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesInlineSubtype AS {
 

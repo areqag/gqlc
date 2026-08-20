@@ -181,5 +181,9 @@
     "plural_endpoint_mixed_symmetry_undirected_edge_union.cypher": "satisfy_plural_edges_mixed_symmetry.gql",
     "plural_endpoint_mixed_symmetry_directed_closes_singular.cypher": "satisfy_plural_edges_mixed_symmetry.gql",
     "plural_endpoint_anonymous_edge_closes_singular.cypher": "satisfy_plural_edges.gql",
-    "unlabelled_narrowed_by_pinned_far_end.cypher": "satisfy_plural_edges_inline_subtype.gql"
+    "unlabelled_narrowed_by_pinned_far_end.cypher": "satisfy_plural_edges_inline_subtype.gql",
+    "unlabelled_mandatory_hop_pins_the_next_hop.cypher": "satisfy_plural_edges_inline_subtype.gql",
+    "unlabelled_optional_hop_shared_property.cypher": "satisfy_plural_edges_inline_subtype.gql",
+    "attainable_commitment_covers_the_next_hop.cypher": "satisfy_plural_edges_inline_subtype.gql",
+    "attainable_commitment_covers_two_hops_out.cypher": "satisfy_plural_edges_inline_subtype.gql"
 }

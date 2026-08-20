@@ -3,7 +3,7 @@
 # schema under test/data/resolver/{valid,invalid}/schemas/*.gql. Generated
 # file: edit internal/resolver/sweep_test.go, not this.
 #
-# corpus: 313 queries, 40 schemas. 12520 cells: 3848 accept, 8672 refuse.
+# corpus: 322 queries, 40 schemas. 12880 cells: 3856 accept, 9024 refuse.
 #
 # cell rows: query, schema, verdict, sentinel, detail. A refusing cell's
 # detail digests the error text and is expanded by the strconv.Quote'd msg
@@ -47,6 +47,7 @@ msg	1ad32bd26904	"unknown edge: Contractor&Person-[AUTHORED]->Post, Post-[AUTHOR
 msg	1c867a6623eb	"unknown label: Person is not declared on any node type"
 msg	1c8db2c225f5	"ambiguous label: p is satisfied by more than one declared node type: Employee&Person, Person"
 msg	1c96aae0534a	"unknown label: SET n:Draft: label \"Draft\" not declared on any node type"
+msg	1d910b647a82	"unknown property: c.smallOnly missing on plural-satisfying type Company&Large"
 msg	1e369783c1a7	"ambiguous label: p is satisfied by more than one declared node type: Contractor&Person, Employee&Person, Person"
 msg	1eeeffbb6657	"unknown edge: Person-[AUTHORED]->Tag"
 msg	1ef48088a866	"unknown property: property r.weight type differs across union members: property:INT vs property:INT"
@@ -64,6 +65,7 @@ msg	2effa1326783	"unknown property: a.notAProp missing on plural-satisfying type
 msg	33664e09e49c	"unknown property: p.name missing on plural-satisfying type Employee&Person"
 msg	361e2b5adcc5	"part binding type conflict: variable \"label\" carried as CALL YIELD scalar, re-bound as plural node"
 msg	365a812a52c6	"unknown property: a.age missing on plural-satisfying type Engineer&Person&Staff"
+msg	39d15e0d200a	"ambiguous binding: cannot uniquely infer type of unlabelled binding \"x\" — candidate types: Employee&Person, Person"
 msg	3dd9ebd833e4	"ambiguous binding: cannot uniquely infer type of unlabelled binding \"a\" — candidate types: Author, Publisher"
 msg	3f90fc3269c7	"unknown edge: Employee&Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Person, Person-[REVIEWED]->Employee&Person"
 msg	40a941ffddb3	"unknown property: r.views"
@@ -119,6 +121,7 @@ msg	6eea6a6d1601	"unknown property: q.nickname missing on plural-satisfying type
 msg	6f457e5bb08a	"unknown edge: Employee&Person-[KNOWS]->Employee&Person, Employee&Person-[KNOWS]->Person, Person-[KNOWS]->Employee&Person, Person-[KNOWS]->Person"
 msg	7044d8facbe2	"unknown edge: Employee&Person-[FOUNDED]->Company, Employee&Person-[FOUNDED]->Company&Large, Person-[FOUNDED]->Company, Person-[FOUNDED]->Company&Large"
 msg	71930e48751a	"invalid effect target: SET labels on projection alias \"c\""
+msg	753371fcc14f	"ambiguous label: c is satisfied by more than one declared node type: Company, Company&Large"
 msg	7584d110577b	"unknown label: Node, A is not declared on any node type"
 msg	75c0eb48cea9	"unknown edge: Engineer&Person&Staff-[KNOWS]->Engineer&Person&Staff, Engineer&Person&Staff-[KNOWS]->Manager&Person&Staff, Manager&Person&Staff-[KNOWS]->Engineer&Person&Staff, Engineer&Person&Staff-[KNOWS]->Person, Person-[KNOWS]->Engineer&Person&Staff, Manager&Person&Staff-[KNOWS]->Manager&Person&Staff, Manager&Person&Staff-[KNOWS]->Person, Person-[KNOWS]->Manager&Person&Staff, Person-[KNOWS]->Person"
 msg	764fc93e1f14	"unknown edge: Post-[AUTHORED]->Person"
@@ -176,7 +179,6 @@ msg	a93c38ae1de1	"ambiguous label: a is satisfied by more than one declared node
 msg	ac99706661a2	"unknown property: property r.views missing on union member Person-[LIKES]->Post"
 msg	acbf57bdf842	"unknown edge: Employee&Person-[WORKS_AT]->Company, Company-[WORKS_AT]->Employee&Person, Employee&Person-[WORKS_AT]->Company&Startup, Company&Startup-[WORKS_AT]->Employee&Person, Person-[WORKS_AT]->Company, Company-[WORKS_AT]->Person, Person-[WORKS_AT]->Company&Startup, Company&Startup-[WORKS_AT]->Person"
 msg	ad27a8cd001f	"unknown label: Book is not declared on any node type"
-msg	aeb56fe013eb	"unknown property: p2.personOnly missing on plural-satisfying type Employee&Person"
 msg	af8e771c032f	"unknown edge: Person-[REVIEWED]->Company, Company-[REVIEWED]->Person"
 msg	b16590b8e102	"unknown property: a.notAProp"
 msg	b24151cb50e7	"unknown property: p.bOnly missing on plural-satisfying type A&Node"
@@ -189,6 +191,7 @@ msg	b5603db7f062	"unknown property: e.views"
 msg	b8654ceef33a	"unknown property: r.likedAt"
 msg	b868d96fda82	"unknown property: r.notAProp"
 msg	b9dc2794de51	"parameter type conflict: parameter \"x\": property:STRING vs property:INT"
+msg	bae55af34462	"unknown property: p2.employeeId missing on plural-satisfying type Contractor&Person"
 msg	bb01d69d59a0	"invalid effect target: REMOVE labels on projection alias \"c\""
 msg	bb283f4c6ded	"unknown property: a.nickname missing on plural-satisfying type Engineer&Person&Staff"
 msg	bb834c44c145	"unknown property: p.personOnly missing on plural-satisfying type Employee&Person"
@@ -254,6 +257,7 @@ msg	ef1a5c08f8db	"ambiguous edge orientation: edge \"r\" matches Person-[AUTHORE
 msg	efb435da7d39	"query construct not supported at resolver stage R0: list-of-nodes projection"
 msg	f00b3a3220ea	"unknown edge: Employee&Person-[FOUNDED]->Company, Employee&Person-[FOUNDED]->Company&Startup, Person-[FOUNDED]->Company, Person-[FOUNDED]->Company&Startup"
 msg	f04cadef9ae6	"unknown property: a.age missing on plural-satisfying type Contractor&Person"
+msg	f094208f6613	"unknown property: p2.employeeId missing on plural-satisfying type Person"
 msg	f0d209a342e3	"unknown edge: Author-[REVIEWED]->Book, Author-[REVIEWED]->Book&Rare, Author&Editor-[REVIEWED]->Book, Author&Editor-[REVIEWED]->Book&Rare"
 msg	f15cf68ae5c7	"unknown label: REMOVE n:Draft: label \"Draft\" not declared on any node type"
 msg	f2de20717a50	"union column mismatch: column \"r\" projects edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null) in branch 1 but edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null) in branch 0"
@@ -913,6 +917,46 @@ cell	invalid/call_yield_property_lookup.cypher	valid/schemas/social_r5.gql	refus
 cell	invalid/call_yield_property_lookup.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownProperty	cba429255648
 cell	invalid/call_yield_property_lookup.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownProperty	cba429255648
 cell	invalid/call_yield_property_lookup.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownProperty	cba429255648
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	663a9130ecf6
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	f094208f6613
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	663a9130ecf6
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownProperty	f094208f6613
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownProperty	bae55af34462
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	663a9130ecf6
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	663a9130ecf6
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownProperty	f094208f6613
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	f094208f6613
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	663a9130ecf6
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	663a9130ecf6
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	d46372fb7542
 cell	invalid/create_unknown_edge.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownEdge	beef77e5ff05
 cell	invalid/create_unknown_edge.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/create_unknown_edge.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4da3cbf622c1
@@ -2637,7 +2681,7 @@ cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	invalid/sc
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	aeb56fe013eb
+cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrAmbiguousLabel	753371fcc14f
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
@@ -2657,7 +2701,7 @@ cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	invalid/sc
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4246b27b8fb2
-cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	aeb56fe013eb
+cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrAmbiguousLabel	753371fcc14f
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_carried_hop_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4246b27b8fb2
@@ -5273,6 +5317,46 @@ cell	invalid/unlabelled_binding_no_edge.cypher	valid/schemas/social_r5.gql	refus
 cell	invalid/unlabelled_binding_no_edge.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	15d1ddf150b5
 cell	invalid/unlabelled_binding_no_edge.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	15d1ddf150b5
 cell	invalid/unlabelled_binding_no_edge.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	15d1ddf150b5
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	1d910b647a82
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	1d910b647a82
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_hop_to_carried_far_end_stays_wide.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	invalid/unlabelled_narrowed_ends_disagree.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	ad27a8cd001f
 cell	invalid/unlabelled_narrowed_ends_disagree.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrAmbiguousBinding	a3dac0754a20
 cell	invalid/unlabelled_narrowed_ends_disagree.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	ad27a8cd001f
@@ -5353,6 +5437,126 @@ cell	invalid/unlabelled_optional_far_end_stays_wide.cypher	valid/schemas/social_
 cell	invalid/unlabelled_optional_far_end_stays_wide.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	invalid/unlabelled_optional_far_end_stays_wide.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	invalid/unlabelled_optional_far_end_stays_wide.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	663a9130ecf6
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	663a9130ecf6
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_empty_intersection.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	d46372fb7542
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrAmbiguousBinding	39d15e0d200a
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrAmbiguousBinding	39d15e0d200a
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_next_hop_stays_wide.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	1d910b647a82
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	1d910b647a82
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	invalid/unlabelled_optional_hop_type_only_property.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	invalid/untyped_edge.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrOutOfR0Scope	80a2bdb9df0c
 cell	invalid/untyped_edge.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/untyped_edge.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrOutOfR0Scope	80a2bdb9df0c
@@ -5833,6 +6037,86 @@ cell	valid/aggregate_with_literal_grouping_key.cypher	valid/schemas/social_r5.gq
 cell	valid/aggregate_with_literal_grouping_key.cypher	valid/schemas/social_r6.gql	accept	-	32523780aa6d
 cell	valid/aggregate_with_literal_grouping_key.cypher	valid/schemas/social_r7.gql	accept	-	32523780aa6d
 cell	valid/aggregate_with_literal_grouping_key.cypher	valid/schemas/social_selfloop.gql	accept	-	32523780aa6d
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	accept	-	f7b0bad0ec76
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	accept	-	f7b0bad0ec76
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_the_next_hop.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	accept	-	02c10e895fb8
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	accept	-	02c10e895fb8
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/attainable_commitment_covers_two_hops_out.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	valid/call_arg_float_at_float.cypher	invalid/schemas/edge_union_keys.gql	accept	-	f5e24b9aae63
 cell	valid/call_arg_float_at_float.cypher	invalid/schemas/narrowed_ends_disagree.gql	accept	-	f5e24b9aae63
 cell	valid/call_arg_float_at_float.cypher	invalid/schemas/satisfy_ambiguous.gql	accept	-	f5e24b9aae63
@@ -12273,6 +12557,46 @@ cell	valid/unlabelled_binding_target_inferred.cypher	valid/schemas/social_r5.gql
 cell	valid/unlabelled_binding_target_inferred.cypher	valid/schemas/social_r6.gql	accept	-	54c8f62f95d5
 cell	valid/unlabelled_binding_target_inferred.cypher	valid/schemas/social_r7.gql	accept	-	54c8f62f95d5
 cell	valid/unlabelled_binding_target_inferred.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	f67a03092570
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	accept	-	f7b0bad0ec76
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	accept	-	f7b0bad0ec76
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_mandatory_hop_pins_the_next_hop.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	valid/unlabelled_narrowed_by_pinned_far_end.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	valid/unlabelled_narrowed_by_pinned_far_end.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	valid/unlabelled_narrowed_by_pinned_far_end.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	225d6affd495
@@ -12313,6 +12637,46 @@ cell	valid/unlabelled_narrowed_by_pinned_far_end.cypher	valid/schemas/social_r5.
 cell	valid/unlabelled_narrowed_by_pinned_far_end.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	valid/unlabelled_narrowed_by_pinned_far_end.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	valid/unlabelled_narrowed_by_pinned_far_end.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	accept	-	73ffab54f9a2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	accept	-	73ffab54f9a2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	4246b27b8fb2
+cell	valid/unlabelled_optional_hop_shared_property.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4246b27b8fb2
 cell	valid/unlabelled_via_edge_intersection.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	db7c9007df4c
 cell	valid/unlabelled_via_edge_intersection.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/unlabelled_via_edge_intersection.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	db7c9007df4c

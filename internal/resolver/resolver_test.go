@@ -402,13 +402,31 @@ var invalidFixtures = map[string]error{
 	// `p` the resolver got as far as typing.
 	"plural_endpoint_unlabelled_hop_stays_plural.cypher":          ErrAmbiguousBinding,
 	"plural_endpoint_unlabelled_hop_property_stays_plural.cypher": ErrAmbiguousBinding,
-	// A singular commitment that is NOT a satisfying set, reached across a Part
-	// boundary: Part 1 infers `c` through an OPTIONAL hop, so it is Company and
-	// uncovered, WITH carries it, and Part 2's narrowing sees a singular node type
-	// with no provenance. branchState carries the type and not how Part 1 arrived
-	// at it, so newScope leaves a carried entry out of resolvedCovers and this is
-	// the fixture that pins the omission.
-	"plural_endpoint_carried_hop_property_stays_plural.cypher": ErrUnknownProperty,
+	// Part 1 infers `c` through an OPTIONAL hop and `WITH c` carries it into
+	// Part 2. sxzj moved which Part refuses and with which sentinel: Phase B
+	// used to commit `c` to Company alone, so Part 1 accepted, WITH carried a
+	// singular type with no provenance, and the refusal fell to Part 2's
+	// projection of `p2`. Phase B now leaves `c` over both company types, and
+	// `WITH c` projects the whole entity — which is ErrAmbiguousLabel on any
+	// plural node binding, exactly as `MATCH (c:Company) WITH c ...` is on this
+	// same schema. Those are the only two cells of the corpus sweep this change
+	// moves without being a fixture written for it — this query against each of
+	// the two copies of the schema, and nothing else.
+	//
+	// The carry lane it used to pin (newScope leaving a carried entry out of
+	// resolvedCovers) is still live; this fixture no longer reaches it, because
+	// Part 1 stops before the carry. carried_uncovered_endpoint_stays_plural
+	// below reaches it instead.
+	"plural_endpoint_carried_hop_property_stays_plural.cypher": ErrAmbiguousLabel,
+	// The carry lane, reached by the route sxzj left open: `p` is singular from
+	// its label, the ONE WORKS_AT out of Person&Employee lands on Company&Large,
+	// and no edge touching `c` is trustworthy — the hop is OPTIONAL — so Phase B
+	// commits that singleton with no covering mark rather than widening it. `WITH
+	// c` then carries a singular type whose provenance did not survive the scope
+	// boundary. If newScope seeded resolvedCovers from the carry, Phase C would
+	// narrow `p2` through Company&Large to Person&Employee alone and this would
+	// ACCEPT; it stays plural, so the projection is refused on the Person branch.
+	"carried_uncovered_endpoint_stays_plural.cypher": ErrUnknownProperty,
 	// Three candidates of which only the first and third disagree about which
 	// of the pattern's endpoints is the source; the second is a plural-endpoint
 	// duplicate of the first's side and carries no orientation signal.
@@ -480,6 +498,56 @@ var invalidFixtures = map[string]error{
 	// reach one. See TestNarrowedEndsThatDisagreeKeepTheWideAnswer for the two
 	// halves, each of which narrows `p` on its own and to a different type.
 	"unlabelled_narrowed_ends_disagree.cypher": ErrAmbiguousBinding,
+	// sxzj. The three fixtures below share one shape — a bare `(c)` reached by
+	// a mandatory WORKS_AT and an OPTIONAL HAS_DESK — and differ in what is
+	// asked of it. The OPTIONAL hop is the only thing pinning `c` to the bare
+	// Company, and it is an outer join, so the Employee&Person -[WORKS_AT]->
+	// Company&Large row comes back with h/d null and `c` is Company&Large on it.
+	//
+	// The next hop: `x` reads `c`, and a `c` committed to Company alone makes
+	// `x` the bare Person, whose personOnly the OTHER person type lacks. With
+	// `c` left over both company types, both WORKS_AT declarations reach it and
+	// Phase B declines to pick `x` at all. invalidFixtureContains requires both
+	// person types in the message, for the reason
+	// unlabelled_optional_far_end_stays_wide gives.
+	"unlabelled_optional_hop_next_hop_stays_wide.cypher": ErrAmbiguousBinding,
+	// The same `c`, projected directly. smallOnly is declared on the bare
+	// Company and not on Company&Large, so this is the column the OPTIONAL hop
+	// buys and the rows it is null on. The plural lane's per-type message is
+	// pinned below: it is what says `c` is plural rather than pinned to the
+	// type that happens to carry the property.
+	"unlabelled_optional_hop_type_only_property.cypher": ErrUnknownProperty,
+	// The control for the widening's gate. `(p:Employee)` pins the mandatory
+	// hop's far end to Person&Employee, whose WORKS_AT reaches Company&Large
+	// only, and the OPTIONAL hop reaches the bare Company only — so the
+	// intersection over ALL touching edges is empty and Phase B's case 0 fires.
+	// The set the OPTIONAL hop is dropped from is NOT empty (it is
+	// {Company&Large}), so a widening that fired on an empty intersection would
+	// accept this and offer largeId. The sentinel is what says it does not.
+	"unlabelled_optional_hop_empty_intersection.cypher": ErrUnknownLabel,
+	// The OTHER conjunct of the same gate, and the only fixture that separates
+	// it. Every touching edge here witnesses its endpoints — both hops are
+	// mandatory single hops — so witnessesItsEndpoints holds throughout and the
+	// far-end covering question alone decides which edges reach `attainable`.
+	// `MATCH (dd:Desk) WITH dd` is what makes HAS_DESK's far end uncovered: a
+	// carried entry lands in `resolved` and never in resolvedCovers, because
+	// branchState carries the type and not how the previous Part arrived at it.
+	//
+	// So `inferred` is {Company} (HAS_DESK is declared out of the bare Company
+	// only) and `attainable` is {Company, Company&Large} (WORKS_AT alone), and
+	// the widening refuses smallOnly. Drop `otherCovers` from the gate and
+	// HAS_DESK folds into `attainable` too, making it the same singleton as
+	// `inferred`, and this query ACCEPTS c.smallOnly as NOT NULL — which is
+	// origin/master's answer, since master's covering flag gated only what OTHER
+	// bindings learned from `c`.
+	//
+	// The refusal is the carry lane's conservatism and not a claim about the
+	// rows: HAS_DESK is mandatory here, so `c` really is the bare Company on
+	// every returned row and master's acceptance was sound. Seeding
+	// resolvedCovers from the carry would make this accept again — the same
+	// alternative newScope names, and the one
+	// carried_uncovered_endpoint_stays_plural is written against.
+	"unlabelled_hop_to_carried_far_end_stays_wide.cypher": ErrUnknownProperty,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -549,6 +617,37 @@ var invalidFixtureContains = map[string]string{
 	// says the message is the wide lane's, over both author types, and not one
 	// of the two singletons the halves reach.
 	"unlabelled_narrowed_ends_disagree.cypher": `candidate types: Author, Author&Editor`,
+	// sxzj. Same discrimination as the stays-wide entry above, one hop further
+	// out: the sentinel says Phase B declined to pick `x`, and this says it
+	// declined over both person types — which it can only do if `c` was left
+	// over both company types. A `c` pinned to the bare Company makes `x` the
+	// bare Person and the query resolve.
+	"unlabelled_optional_hop_next_hop_stays_wide.cypher": `candidate types: Employee&Person, Person`,
+	// Names the type the property is MISSING on, not the one that carries it.
+	// ErrUnknownProperty is also what a `c` pinned to Company&Large would give,
+	// with the same variable and property in the message; the "plural-satisfying
+	// type" phrase is unionNodeProperty's and is reachable only from the plural
+	// lane.
+	"unlabelled_optional_hop_type_only_property.cypher": `c.smallOnly missing on plural-satisfying type Company&Large`,
+	// Case 0's message, distinguishing it from the deferred-then-ambiguous arm:
+	// both are refusals about a bare binding, and only this one says no edge
+	// reaches a compatible type.
+	"unlabelled_optional_hop_empty_intersection.cypher": `no edge in the pattern reaches a compatible schema node type`,
+	// The widened lane's own rendering, and the only fixture that shows one: `c`
+	// reaches ErrAmbiguousLabel out of t.cands, so this is nodeTypesForKeys' key
+	// order verbatim. Ascending is what satisfyingNodeTypes produces for a
+	// LABELLED plural binding, and the two lanes feed the same formatter, so a
+	// widened `c` that rendered descending would spell the same set two ways.
+	"plural_endpoint_carried_hop_property_stays_plural.cypher": `node type: Company, Company&Large`,
+	// Names `p2` and the Person branch: the refusal has to come from the plural
+	// lane on the binding AFTER the carry, not from `c` itself. `c` is singular
+	// here (Person&Employee has one WORKS_AT), so a message about `c` would mean
+	// the carry, not the covering mark, was what Phase C could not use.
+	"carried_uncovered_endpoint_stays_plural.cypher": `p2.employeeId missing on plural-satisfying type Person`,
+	// Says `c` went to the PLURAL lane. Without it the sentinel alone would be
+	// satisfied by a `c` pinned to Company&Large — same variable, same property,
+	// same ErrUnknownProperty — which is the opposite reading of the same gate.
+	"unlabelled_hop_to_carried_far_end_stays_wide.cypher": `c.smallOnly missing on plural-satisfying type Company&Large`,
 }
 
 type ResolverSuite struct {
@@ -1791,10 +1890,15 @@ func (s *ResolverSuite) TestInlineEndpointCommitsOnTheTypesSatisfyingIt() {
 // inline arm reports covering on both its returns, and the var arm reports what
 // resolvedCovers holds. Four sites write the resolved node lane and two of them
 // leave resolvedCovers alone — inferUnlabelled when candidateTypes did not
-// report covering, and newScope's carry seed. The refusing row below chains the
-// first into a second inference: `c` is inferred through an OPTIONAL hop, so it
-// is Company and uncovered; `x` is inferred from `c`; and `y` is narrowed from
-// `x`. Trusting `c` there costs `y` the Company&Large its rows really carry.
+// report covering, and newScope's carry seed. Since sxzj the first of those is
+// narrower than it reads: when the intersection is a singleton and some edge
+// touching the binding IS trustworthy, Phase B commits the ATTAINABLE set to
+// the plural lane instead, so the uncovered singleton survives only where no
+// touching edge witnesses its endpoints at all. The first row below now lands
+// on that widening rather than on the laundering it was written for — it chains
+// an inferred `c` into a second inference `x`, and a plural `c` leaves `x`
+// undetermined. carried_uncovered_endpoint_stays_plural.cypher in the corpus
+// pins the carry-seed site, which the widening does not touch.
 //
 // The accepting rows are what stop the fix being "an inferred binding is never
 // trusted". `MATCH (p:Person)-[r:WORKS_AT]->(c)` reads a plural var far end
@@ -1824,7 +1928,15 @@ func (s *ResolverSuite) TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnu
 				"MATCH (x)-[w2:WORKS_AT]->(y:Company) RETURN y.smallOnly",
 			// Employee&Person -[WORKS_AT]-> Company&Large is a matching row with
 			// h/d null, and on it y is Company&Large, which has no smallOnly.
-			wantErr: ErrUnknownProperty,
+			//
+			// sxzj moved WHERE the chain breaks, not whether. Phase B no longer
+			// commits `c` to Company alone: WORKS_AT is trustworthy and enumerates
+			// both company types, so `c` goes plural and the singleton this row
+			// was written to catch is never written. `x` then reads a plural `c`
+			// and Phase B declines it by name, one binding earlier and without
+			// having to reach `y`. Both the old verdict and this one are refusals;
+			// this one names the binding whose type the query never determined.
+			wantErr: ErrAmbiguousBinding,
 		},
 		{
 			name:   "the same chain on a far end every returned row has",
@@ -1949,6 +2061,87 @@ func (s *ResolverSuite) TestPhaseBAsksTheWholeWitnessPredicateNotOneArmOfIt() {
 			s.Require().Equal([]Column{{Name: "p.personOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
 		})
 	}
+}
+
+// TestACommitmentFromTheAttainableSetIsLEARNEDFrom pins the second return value
+// of commit(): a commitment made from `attainable` is marked COVERING, whatever
+// the per-edge conjunction said. That mark is the difference between the two
+// accepts below and origin/master, which refuses both — so this is the one place
+// that states sxzj widens what the resolver accepts as well as narrowing it.
+//
+// The shape: HAS_DESK is mandatory and reaches an inline `(d:Desk)`, so it
+// witnesses its endpoints and its far end covers; it alone pins `c` to the bare
+// Company, and every returned row really has it. The OPTIONAL WORKS_AT is the
+// edge that fails the gate, so `inf.covered` is false and master leaves `c` in
+// `resolved` without a resolvedCovers entry — an inference the narrowing is not
+// allowed to read. On this branch `inferred` is the singleton {Company},
+// `attainable` is the same set reached over the mandatory edges alone, and the
+// commitment carries the covering mark that set earns. NarrowPluralEndpoints
+// then reads `c` and pins the person side.
+//
+// Substituting `i.covered` for the `true` in commit() turns both rows into
+// refusals, which is what makes them a pin rather than two more green fixtures:
+// the goldens under valid/ redden on it too (TestValid requires NoError before
+// it reaches a golden, so `-update` cannot bless the refusal), and these rows
+// additionally hold the COLUMN and its nullability, which `-update` would
+// rewrite.
+//
+// The refusing row is the control. One token — HAS_DESK made OPTIONAL — leaves
+// no edge that both witnesses its endpoints and pins `c`, so `attainable` is
+// the plural set and the widening commits it to the plural lane instead. Both
+// accepts therefore rest on the mandatory hop being evidence, not on Phase B
+// having stopped discriminating.
+func (s *ResolverSuite) TestACommitmentFromTheAttainableSetIsLEARNEDFrom() {
+	tests := []struct {
+		name  string
+		query string
+		want  []Column
+	}{
+		{
+			name: "the next hop out",
+			query: "MATCH (c)-[h:HAS_DESK]->(d:Desk) " +
+				"OPTIONAL MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MATCH (c)<-[w:WORKS_AT]-(x:Person) RETURN x.personOnly",
+			// `c` is the bare Company on every row, the only WORKS_AT into it is
+			// declared out of the bare Person, so `x` is Person and personOnly is a
+			// column every row has.
+			want: []Column{{Name: "x.personOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			name: "two hops out",
+			query: "MATCH (c)-[h:HAS_DESK]->(d:Desk) " +
+				"OPTIONAL MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MATCH (c)<-[w:WORKS_AT]-(x) " +
+				"MATCH (x)-[w2:WORKS_AT]->(y:Company) RETURN y.smallOnly",
+			// The same chain one link longer: `x` is inferred rather than labelled,
+			// and `y` is narrowed from it. This is the shape
+			// TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated
+			// refuses when the pinning hop is the OPTIONAL one.
+			want: []Column{{Name: "y.smallOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+	}
+	const control = "OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) " +
+		"OPTIONAL MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+		"MATCH (c)<-[w:WORKS_AT]-(x:Person) RETURN x.personOnly"
+	sch := s.loadSchema("valid", "satisfy_plural_edges_inline_subtype.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			got, err := resolve(tt.query)
+			s.Require().NoError(err, tt.query)
+			s.Require().Equal(tt.want, got)
+		})
+	}
+	s.Run("the control with no witnessing hop", func() {
+		_, err := resolve(control)
+		s.Require().ErrorIs(err, ErrUnknownProperty,
+			"with HAS_DESK optional no edge both witnesses its endpoints and pins `c`, so the widening commits the plural set and `x` stays over both person types")
+	})
 }
 
 // TestAnonymousEdgeNarrowsToTheTypeItCloses pins the TYPE that
