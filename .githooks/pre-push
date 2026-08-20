@@ -6,6 +6,13 @@
 # (run `just init` after cloning)
 set -euo pipefail
 
+# FIRST, ahead of everything slow, and it consumes the hook's stdin (nothing
+# below reads it): a push that would land on master has to be refused before
+# ~30s of tests run, and the refusal has to be the last thing on the terminal
+# rather than buried under test output. bd gqlc-tfh1 — see the header of
+# guard-push-destination for what routes a feature branch onto master.
+"$(dirname "$0")/guard-push-destination" "$@"
+
 just test
 
 # ensure-golangci self-heals the pinned binary in .bin/; a provisioning failure
