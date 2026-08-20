@@ -692,6 +692,21 @@ run_case    "--reason-file with a literal path"    deny "$BD_REPO" \
 run_verdict "--reason=VALUE citing an orphan sha"  deny-unpushed-sha "$BD_REPO" \
   "bd close gqlc-x --reason=\"Closed at $ORPHAN_SHA.\""
 
+# --- a close written inside a command substitution --------------------------
+# git_targets threads `closes` into its own $( ) / backtick recursion, and this
+# row is what pins that argument. The spelling is load-bearing: shlex(posix,
+# punctuation_chars) splits a BARE $(...) into separate tokens, so `bd` reaches
+# the outer token pass too and the same close is found TWICE — measured, a bare
+# row verdicts deny-unpushed-sha,deny-unpushed-sha here — which leaves it denied
+# with the recursion's argument dropped. Quoted, backticked or heredoc'd, shlex
+# hands back one opaque token and the recursion is the only finder: drop the
+# argument and this row's close verdicts no-close-seen. It disappears from the
+# guard rather than mis-verdicting, and the rest of the suite stays green. The
+# extractors themselves are already pinned by the master-guard rows above; what
+# was unpinned is the threading, which only the close arm reaches.
+run_verdict "close inside a quoted substitution"   deny-unpushed-sha "$BD_REPO" \
+  "echo \"\$(bd close gqlc-x -r 'Closed at $ORPHAN_SHA.')\""
+
 # --- object_types' own guards, driven with a stubbed subprocess -------------
 # `git cat-file --batch-check` emits one line per input line and the mapping is
 # positional, so a short or long reply must not be zipped anyway: a mis-paired
@@ -827,7 +842,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=145
+EXPECTED_ROWS=146
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
