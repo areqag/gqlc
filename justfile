@@ -1216,7 +1216,7 @@ vuln: sweep-discovery-probes vuln-root-residual
     # difference. The walk is the measurement, the comparison is only as good as
     # it, and an unmeasured module used to read exactly like a covered one.
     #
-    # TWO HOUSE RULES for the helpers below, and neither is stylistic.
+    # THREE HOUSE RULES for the helpers below, and none is stylistic.
     #
     # (1) Never call one inside `<(...)`. A process substitution's exit status is
     # read by nobody, so `comm -13 <(...) <(scope dirs X)` hands comm an empty
@@ -1230,6 +1230,50 @@ vuln: sweep-discovery-probes vuln-root-residual
     # therefore returns its own status explicitly and every caller checks it,
     # which is why `|| return` and `|| exit` appear below on assignments that
     # `set -e` looks like it already covers. It does not.
+    #
+    # (3) Never pipe a listing into a consumer that exits on its first match.
+    # `grep -q` closes the pipe the moment it matches, the producer takes
+    # SIGPIPE on its next write and reports 141, and `pipefail` makes 141 the
+    # pipeline's status — so a MATCH arrives as a failed pipeline. Measured on
+    # the tree internal/tools/vulnguard builds, where the fixture is second of
+    # three listed directories: `go list ./... | grep -qxF "${fixture}"` returns
+    # 141 while `grep -qxF "${fixture}" <<<"${listed}"` over that same listing
+    # returns 0 (bd gqlc-e53u). No `grep -q` or `grep -m1` in this recipe reads a
+    # pipe: seven take a herestring — six of whose sources are `$(...)`
+    # assignments and the seventh a parameter of one, so the producer has a
+    # status of its own to be checked in every case, rule (2) again — and one
+    # takes a file argument, which has no producer to lose.
+    # What decides a piped site is a race: whether the producer still has a write
+    # to make when `grep` exits. What settles it is the producer having none left
+    # once `grep` can first match. The readable instance is a single write() of
+    # at most the pipe capacity: a match needs data, so that write lands with the
+    # reader alive and nothing remains to take the signal (measured: match on
+    # line 1, 50ms linger, rc 0 in 200 of 200; the same bytes in two writes with
+    # the match in the FIRST fail 40 of 40 — the position matters, since two
+    # writes with the match confined to the last pass 200 of 200, so single-write
+    # is the readable safe case and not the only one). A `grep` that exits
+    # without reading at all — invalid regex,
+    # unreadable -f file — breaks that premise but loses no match. Nothing in
+    # this recipe's TEXT settles the property for the producers this recipe has —
+    # `go list`, `scope`, `sort` — whose write counts follow buffering inside
+    # the producer rather than any line readable here. (Not libc: `go list` and
+    # `scope` are static Go binaries and buffer through bufio; only `sort` links
+    # libc.) Three cheap substitutes for settling it
+    # are measured false. Sort order:
+    # this site issues the TAGGED listing — 29 lines, fixture at 28 — and the
+    # fixture is last only in the UNTAGGED listing, which this site never runs;
+    # selftest_tagblind is not sorted into safety either, since on a healthy tree
+    # its fixture is absent. Output size: fitting the buffer is neither
+    # sufficient nor necessary. A 1262-byte listing, 52x INSIDE a 65536-byte
+    # pipe buffer, returned 141 in 20 of 20 runs when emitted a line at a time
+    # with a 20ms pause between lines; a 189019-byte payload, 2.9x OVER the
+    # capacity, returned 0 in 60 of 60 when the match was on the last line.
+    # Emission shape: that same
+    # producer without the pause returned 0 in 200 of 200, so it is not
+    # line-at-a-time that loses the race but slowness relative to grep's startup,
+    # which nothing here bounds. The real `go list` won the race in 100 of 100
+    # runs in this checkout; nothing makes that a guarantee, which is why the
+    # rule bans the shape instead of offering a test to apply to it.
     scope() { go run ./internal/tools/modscope "$@"; }
 
     # Every directory of a module that holds a Go file, absolute, read off disk.
@@ -1350,7 +1394,7 @@ vuln: sweep-discovery-probes vuln-root-residual
     # unconstrained file added beside it) would take both guards out of service
     # with nothing failing. The three clauses are the three ways that happens.
     selftest_tagblind() {
-        local want="tagblind" fixture root_dirs root_tags
+        local want="tagblind" fixture root_dirs root_tags untagged
         fixture="$(go list -m -f '{{{{.Dir}}')/test/data/${want}"
         root_dirs="$(module_dirs .)" || exit 1
         root_tags="$(module_tags .)" || exit 1
@@ -1360,7 +1404,8 @@ vuln: sweep-discovery-probes vuln-root-residual
             echo "       coverage assertion below (bd gqlc-pig9). Restore it." >&2
             exit 1
         fi
-        if go list -e -f '{{{{.Dir}}' ./... | grep -qxF "${fixture}"; then
+        untagged="$(go list -e -f '{{{{.Dir}}' ./...)" || exit 1
+        if grep -qxF "${fixture}" <<<"${untagged}"; then
             echo "error: the tag-derivation fixture ${fixture}" >&2
             echo "       is now matched by an untagged 'go list ./...', so it no longer has the" >&2
             echo "       shape it exists to reproduce — a directory whose every Go file is build-" >&2
@@ -1416,7 +1461,7 @@ vuln: sweep-discovery-probes vuln-root-residual
     # platform fixture that can live here is the negated one, and the negated one
     # is over-determined.
     selftest_platformtag() {
-        local fixture root_dirs root_tags src
+        local fixture root_dirs root_tags src listed
         fixture="$(go list -m -f '{{{{.Dir}}')/test/data/platformtag"
         src="${fixture}/platformtag.go"
         root_dirs="$(module_dirs .)" || exit 1
@@ -1459,8 +1504,8 @@ vuln: sweep-discovery-probes vuln-root-residual
         # elsewhere in the tree is the shape this whole branch is about.
         local tagflag=()
         [ -z "${root_tags}" ] || tagflag=(-tags "${root_tags}")
-        if ! go list -e "${tagflag[@]}" -f '{{{{.Dir}}' ./... \
-            | grep -qxF "${fixture}"; then
+        listed="$(go list -e "${tagflag[@]}" -f '{{{{.Dir}}' ./...)" || exit 1
+        if ! grep -qxF "${fixture}" <<<"${listed}"; then
             echo "error: ${fixture} is not in the set 'go list ./...'" >&2
             echo "       matched under the derived tags [${root_tags:-none}], so the scan below" >&2
             echo "       would not compile a file that builds fine on this platform. The" >&2
