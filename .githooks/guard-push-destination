@@ -9,9 +9,11 @@
 #     git worktree add ../<repo>-<slug> -b <branch> origin/master
 # which sets the NEW branch's upstream to origin/master, so a bare `git push`
 # in that worktree resolves to master. Measured 2026-08-19 in ../gqlc-agt0: on
-# branch fix/vuln-unplaced-stdlib-assertions-covered, `@{u}` was origin/master;
-# 4 of the 21 sibling worktrees alive that day were in that state. The push was
-# refused, but only by push.default=simple's name-mismatch rule, and git's own
+# branch fix/vuln-unplaced-stdlib-assertions-covered, `@{u}` was origin/master.
+# A sweep of all 21 sibling worktrees later the same day found 4 in that state;
+# agt0 was by then not one of them, a successful `git push -u` having moved its
+# upstream to its own branch. The push was refused, but only by
+# push.default=simple's name-mismatch rule, and git's own
 # refusal text offers `git push origin HEAD:master` as the first remedy — which
 # puts the branch on master. The recipe is fixed, but a recipe only reaches the
 # worktrees someone creates after reading it, and `push.default` is not

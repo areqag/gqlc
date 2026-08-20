@@ -8,9 +8,10 @@ set -euo pipefail
 
 # FIRST, ahead of everything slow, and it consumes the hook's stdin (nothing
 # below reads it): a push that would land on master has to be refused before
-# ~30s of tests run, and the refusal has to be the last thing on the terminal
-# rather than buried under test output. bd gqlc-tfh1 — see the header of
-# guard-push-destination for what routes a feature branch onto master.
+# the suite runs, and the refusal has to be the last line on the terminal
+# rather than a page above the tail of the test output. bd gqlc-tfh1 — see the
+# header of guard-push-destination for what routes a feature branch onto
+# master.
 "$(dirname "$0")/guard-push-destination" "$@"
 
 just test
