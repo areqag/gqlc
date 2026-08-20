@@ -103,6 +103,18 @@ install_as_all() {
     done
 }
 
+# Installs file $3 under the single hook name $2 in repo $1, leaving the other
+# four as make_repo left them. This is what lets a row see which names an array
+# holds: under install_as_all every name carries the shape, so any one of them
+# trips the check and answers for the rest.
+install_as_one() {
+    local repo="$1" name="$2" file="$3" dir
+    dir="$(hooks_dir "$repo")"
+    mkdir -p "$dir"
+    cp "$file" "$dir/$name"
+    chmod +x "$dir/$name"
+}
+
 # How many of the five names carry the tripwire marker in repo $1.
 count_marked() {
     local repo="$1" dir name n=0
@@ -279,6 +291,42 @@ fi
 check "drifted: the reword did not smuggle an AI-attribution trailer onto HEAD" 0 \
     "$(git -C "$REPO" log -1 --format=%B | grep -ci claude || true)"
 
+# --- a merge commit reaches a different name ---------------------------------
+# git runs pre-merge-commit for a merge commit, not pre-commit, and
+# pre-merge-commit is not one of the five names installed here. Of the five, the
+# ones git reaches on this path are commit-msg, before the commit, and post-merge
+# after it — and post-merge exits 0 by design. So commit-msg is what refuses a
+# merge under drift, on its own rather than as a second vote behind pre-commit.
+# Measured: with every name real the merge is refused; with commit-msg alone
+# disarmed the merge LANDS carrying a git-parsed
+# `Co-Authored-By: Claude <noreply@anthropic.com>` trailer; with pre-commit alone
+# disarmed it is still refused.
+
+REPO="$TMP/drift-merge"
+make_repo "$REPO"
+git -C "$REPO" checkout -q -b side
+echo side >"$REPO/side.txt"
+git -C "$REPO" add -A
+git -C "$REPO" -c core.hooksPath=.githooks commit -q -m side
+git -C "$REPO" checkout -q master
+echo main >"$REPO/main.txt"
+git -C "$REPO" add -A
+git -C "$REPO" -c core.hooksPath=.githooks commit -q -m main2
+git -C "$REPO" config --unset core.hooksPath
+
+printf 'merge side\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n' >"$TMP/merge-msg"
+before="$(git -C "$REPO" rev-parse HEAD)"
+git -C "$REPO" merge --no-ff -F "$TMP/merge-msg" side >/dev/null 2>&1
+after="$(git -C "$REPO" rev-parse HEAD)"
+git -C "$REPO" merge --abort >/dev/null 2>&1
+if [ "$before" = "$after" ]; then
+    check "drifted: a merge commit is REFUSED (commit-msg is the name git reaches)" blocked blocked
+else
+    check "drifted: a merge commit is REFUSED (commit-msg is the name git reaches)" blocked landed
+fi
+check "drifted: the merge did not smuggle an AI-attribution trailer onto HEAD" 0 \
+    "$(git -C "$REPO" log -1 --format=%B | grep -ci claude || true)"
+
 # --- `just check-hooks` must certify the guard FIRES, not that a file is there -
 # The marker grep certifies PRESENCE. Measured against the first cut of this
 # branch: a three-line file carrying the shebang, the marker and `exit 0`,
@@ -325,19 +373,67 @@ make_repo "$REPO"
 install_as_all "$REPO" "$TRUNC"
 run_check_hooks "$REPO"
 check "check-hooks: a truncated copy of the tripwire is REFUSED" refused "$(verdict $?)"
+# verdict() reads an exit status and nothing else, so a row expecting `refused`
+# goes green on any non-zero exit whatever produced it. Demonstrated: with
+# `exit 1` planted at the top of the recipe body, this row and three others
+# stayed green. The message is what says WHICH check bit.
+case "$CH_OUT" in
+    *"exits 0 when run"*) check "check-hooks: the truncation is refused for exiting 0" yes yes ;;
+    *) check "check-hooks: the truncation is refused for exiting 0" yes no ;;
+esac
 
-# The other direction: a copy that BLOCKS on post-checkout. Its exit status
-# becomes git checkout's and git switch's, so it would break every branch switch
-# in every drifted worktree.
+# --- WHICH names are checked, not merely that some name is -------------------
+# Every row above installs its shape under all five names, which hides what
+# `blocking` and `warning` contain: drop one name from either array and the
+# remaining four trip the check on the same fixture with the same verdict, so
+# every row stays green. Measured for each of the five. Dropping `commit-msg`
+# is the one that costs something — the merge rows above show that name refusing
+# a drifted merge commit on its own, so a disarmed copy there that check-hooks
+# no longer looks at is bd gqlc-b1kt's hole with `just doctor` printing ok.
+#
+# So one fixture per name, disarmed ALONE with the other four left real. The
+# five names are spelled out here rather than read from the justfile, because a
+# test that sources its expectation from the artifact under test asserts nothing
+# about it.
+#
+# Each pair asserts the exit status AND that the refusal names that hook's own
+# path, so a row cannot go green on a different name's refusal — the failure
+# mode this whole section exists to close.
+
 BLOCKER="$TMP/marker-blocker"
 printf '#!/usr/bin/env bash\n# gqlc-hooks-drift-tripwire\nexit 1\n' >"$BLOCKER"
 chmod +x "$BLOCKER"
-REPO="$TMP/ch-blocking-warn-arm"
-make_repo "$REPO"
-cp "$BLOCKER" "$(hooks_dir "$REPO")/post-checkout"
-chmod +x "$(hooks_dir "$REPO")/post-checkout"
-run_check_hooks "$REPO"
-check "check-hooks: a post-checkout copy that BLOCKS is REFUSED" refused "$(verdict $?)"
+
+# The blocking arms: a marker-bearing no-op at one name, the rest real.
+for name in pre-commit commit-msg pre-push; do
+    REPO="$TMP/ch-only-$name"
+    make_repo "$REPO"
+    install_as_one "$REPO" "$name" "$NOOP"
+    run_check_hooks "$REPO"
+    check "check-hooks: a no-op at $name ALONE is REFUSED" refused "$(verdict $?)"
+    case "$CH_OUT" in
+        *"/$name carries the drift tripwire marker"*)
+            check "check-hooks: the refusal names $name" yes yes ;;
+        *) check "check-hooks: the refusal names $name" yes no ;;
+    esac
+done
+
+# The warn arms, in the other direction: a copy that BLOCKS. post-checkout's
+# exit status becomes git checkout's and git switch's, so a blocking copy there
+# breaks every branch switch in every drifted worktree; post-merge's status is
+# ignored by git, so a non-zero code there is a copy that is not this tripwire.
+for name in post-checkout post-merge; do
+    REPO="$TMP/ch-blocking-$name"
+    make_repo "$REPO"
+    install_as_one "$REPO" "$name" "$BLOCKER"
+    run_check_hooks "$REPO"
+    check "check-hooks: a copy that BLOCKS at $name ALONE is REFUSED" refused "$(verdict $?)"
+    case "$CH_OUT" in
+        *"/$name exits non-zero when run"*)
+            check "check-hooks: the refusal names $name" yes yes ;;
+        *) check "check-hooks: the refusal names $name" yes no ;;
+    esac
+done
 
 # --- check-hooks SELF-HEALS a missing install, and refuses a drifted config ---
 # `just test` is what .githooks/pre-push runs, so refusing here over an absent
@@ -392,6 +488,11 @@ make_repo "$REPO"
 git -C "$REPO" config core.hooksPath "$(hooks_dir "$REPO")"
 run_check_hooks "$REPO"
 check "check-hooks: a drifted core.hooksPath is REFUSED, not healed" refused "$(verdict $?)"
+case "$CH_OUT" in
+    *"core.hooksPath is '$(hooks_dir "$REPO")'"*)
+        check "check-hooks: the refusal quotes the drifted value" yes yes ;;
+    *) check "check-hooks: the refusal quotes the drifted value" yes no ;;
+esac
 check "check-hooks: it did not rewrite core.hooksPath" "$(hooks_dir "$REPO")" \
     "$(git -C "$REPO" config --get core.hooksPath)"
 
@@ -404,6 +505,11 @@ printf '#!/usr/bin/env bash\n# somebody else wrote this\nexit 0\n' >"$(hooks_dir
 chmod +x "$(hooks_dir "$REPO")/post-merge"
 run_check_hooks "$REPO"
 check "check-hooks: a foreign hook squatting a name is REFUSED" refused "$(verdict $?)"
+case "$CH_OUT" in
+    *"not the drift tripwire:"*"/post-merge"*)
+        check "check-hooks: the refusal names the squatted path" yes yes ;;
+    *) check "check-hooks: the refusal names the squatted path" yes no ;;
+esac
 check "check-hooks: the foreign hook was not clobbered" yes \
     "$(grep -q 'somebody else wrote this' "$(hooks_dir "$REPO")/post-merge" && echo yes || echo no)"
 # The refusal used to abort mid-loop, so a foreign post-merge (last in loop
@@ -444,6 +550,22 @@ check "install: no temp file is left behind" 0 \
     "$(find "$(hooks_dir "$REPO")" -name '*.tmp.*' | wc -l)"
 check "install: the installed copy still refuses" 1 \
     "$("$(hooks_dir "$REPO")/pre-commit" >/dev/null 2>&1; echo $?)"
+
+# The installed copy has to be executable whatever mode the source carries. `cp`
+# gives a newly created file the source's mode, so a 644 source installs a 644
+# hook unless the installer sets the bit — and git SKIPS a non-executable hook
+# without a word, which is a tripwire that installs, reports success and gates
+# nothing. Driven through `check-hooks` so the installer under test is the
+# fixture's own copy, whose source this row can chmod.
+REPO="$TMP/install-mode"
+make_repo "$REPO"
+chmod 644 "$REPO/.githooks/hooks-drift-tripwire"
+rm -f "$(hooks_dir "$REPO")"/{pre-commit,commit-msg,pre-push,post-checkout,post-merge}
+check "install-mode fixture: the source is not executable" no \
+    "$([ -x "$REPO/.githooks/hooks-drift-tripwire" ] && echo yes || echo no)"
+run_check_hooks "$REPO"
+check "install: a non-executable source still installs an executable hook" yes \
+    "$([ -x "$(hooks_dir "$REPO")/pre-commit" ] && echo yes || echo no)"
 
 # --- summary -----------------------------------------------------------------
 

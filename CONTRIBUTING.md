@@ -37,11 +37,13 @@ on.
 Nobody has to remember to run `just init` for it. `just check-hooks` — which
 `just test` depends on, and `just test` is what `.githooks/pre-push` runs —
 **installs the tripwire itself when it is absent**, and says so on stderr, in the
-same spirit as the pinned linter being provisioned rather than demanded. It
-refuses only when a hook this repo did not write is squatting one of the five
-names, which is the one case where the repair is ambiguous. What it will *not*
-repair is `core.hooksPath` itself: healing that would silently rewrite the drift
-the check exists to report, in the config every worktree shares.
+same spirit as the pinned linter being provisioned rather than demanded. Absence
+is what it repairs, since an absent file is unambiguous. Two other states it
+reports and leaves alone: a hook this repo did not write squatting one of the
+five names, and a marker-bearing copy that fails the behavioural check below.
+Installing over either would be overwriting somebody's file on a guess. And it
+will *not* repair `core.hooksPath` itself: healing that would silently rewrite
+the drift the check exists to report, in the config every worktree shares.
 
 `check-hooks` holds the installed copy to its behaviour rather than to its bytes:
 it runs the five and requires the three blocking arms to refuse and the two
@@ -51,13 +53,18 @@ test here because the install is shared while each worktree's copy of the source
 sits at its own parked commit — an older copy that still refuses is a working
 copy, and reinstalling over it on every push is what byte-equality would demand.
 
-Two limits, stated rather than left to be found. A drift to some *third*
+Three limits, stated rather than left to be found. A drift to some *third*
 directory is not caught, because git then runs that directory's hooks and never
 reaches the tripwire; `just check-hooks` compares the configured value and so
 catches any spelling, but only when someone runs it, and the two are layered
-deliberately. And the tripwire refuses rather than repairing: `git commit
+deliberately. The tripwire refuses rather than repairing: `git commit
 --no-verify` skips it exactly as it skips the real hooks, so it is a report, not
-a lock.
+a lock. And `check-hooks` runs the five with no arguments and without the
+variables git sets for a hook, so an installed copy can tell the check apart from
+a real commit: one keying on `GIT_INDEX_FILE` refuses when the check runs it,
+permits when git does, and leaves `just doctor` printing `ok` (measured).
+Executing the hooks removes the accidental shapes — a stub, a `cp` truncation —
+and raises the price of a deliberate one.
 
 Those recipes only run when someone runs them, so `.githooks/claude-pre-bash`
 runs a stricter version of the check on every Bash tool call. Drifted here means

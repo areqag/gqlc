@@ -52,11 +52,14 @@ discovery_probes := vuln_probe + " " + fence_probe + " " + xtest_probe
 # would dangle. A copy under the git common dir is branch-independent, which is
 # the whole point of it.
 #
-# The install itself lives in .githooks/install-hooks-drift-tripwire, shared with
-# check-hooks' self-heal arm so the two cannot disagree about where the install
-# goes or what counts as a hook this repo wrote. It refuses to overwrite a hook it
-# did not write, classifies all five names before writing any, and writes through
-# a temp name and a rename rather than over the live path.
+# The install itself lives in .githooks/install-hooks-drift-tripwire, called both
+# from here and from check-hooks' self-heal arm, so the two agree about the
+# CONTENT of what lands. They still spell the destination and the marker
+# separately — check-hooks recomputes both — and what holds those in step is the
+# suite, which drives the real recipe against a fixture: moving either literal in
+# one place alone reddens a named row (measured). The installer refuses to
+# overwrite a hook it did not write, classifies all five names before writing any,
+# and writes through a temp name and a rename rather than over the live path.
 init:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -107,8 +110,17 @@ init:
 # installed as all five names, made `just doctor` print "ok" while a drifted
 # commit LANDED. So did any `cp`-truncated prefix between 48 and ~2900 bytes — the
 # marker sits on line 2 and everything after it up to the case statement is
-# comment, so a prefix parses and exits 0. A check that a disarmed guard passes is
-# the defect class this whole file exists to close.
+# comment, so a prefix parses and exits 0.
+#
+# What executing the installed hooks buys is those two shapes and the family they
+# belong to: a stub or a truncated prefix exits 0 whatever it is handed, so one
+# run exposes it. It does not reach a disarm written against this check. The
+# hooks are run here with no arguments and without the variables git sets for a
+# hook, so a copy branching on GIT_INDEX_FILE — which git sets and this recipe
+# does not — refuses when this recipe runs it and permits when git does. Measured
+# on this branch: five lines, check-hooks silent at rc=0, `just doctor` printing
+# ok, drifted commit landed. Whoever can write that directory can write that
+# file; this raises the price of a deliberate disarm, it does not remove it.
 #
 # So after the marker grep, the installed hooks are EXECUTED and held to their
 # exit codes: the three blocking arms must refuse, the two warn arms must not.
