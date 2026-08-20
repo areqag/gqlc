@@ -39,9 +39,31 @@ discovery_probes := vuln_probe + " " + fence_probe + " " + xtest_probe
 
 # Configures local git settings required after a fresh clone.
 # Idempotent: safe to run multiple times.
+#
+# Two halves. The first wires core.hooksPath at .githooks — that is what makes
+# this repo's hooks run. The second installs .githooks/hooks-drift-tripwire into
+# the DEFAULT hooks directory, which is where git falls back when the first half
+# is undone; that copy is what refuses a commit or a push while the drift stands.
+# The tripwire's own header argues why it has to live there.
+#
+# The tripwire is copied, not symlinked. A symlink would point back into the
+# working tree — the carrier that goes stale with the parked branch, which is why
+# bd gqlc-pyk2's detector was inert — and at a commit predating that file it
+# would dangle. A copy under the git common dir is branch-independent, which is
+# the whole point of it.
+#
+# The install itself lives in .githooks/install-hooks-drift-tripwire, shared with
+# check-hooks' self-heal arm so the two cannot disagree about where the install
+# goes or what counts as a hook this repo wrote. It refuses to overwrite a hook it
+# did not write, classifies all five names before writing any, and writes through
+# a temp name and a rename rather than over the live path.
 init:
+    #!/usr/bin/env bash
+    set -euo pipefail
     git config core.hooksPath .githooks
-    @echo "git hooks activated (core.hooksPath = .githooks)"
+    echo "git hooks activated (core.hooksPath = .githooks)"
+    .githooks/install-hooks-drift-tripwire
+    echo "hooksPath drift tripwire installed in $(git rev-parse --git-common-dir)/hooks (shared by every linked worktree)"
 
 # fails when core.hooksPath drifts from .githooks, which silently kills every
 # local pre-commit/pre-push gate at once (CI cannot see local git config).
@@ -64,6 +86,54 @@ init:
 # that actually occurred (bd gqlc-5fm) pointed at .git/hooks, which exists but
 # holds only .sample files that git ignores, so an existence test passes while
 # every hook is dead.
+#
+# The second arm installs the drift tripwire into the default hooks directory
+# when it is absent, and holds it to its behaviour when it is not. Without it the
+# value check above is the only thing standing between a drift and an ungated
+# commit, and it only speaks when invoked — which is how the window in bd
+# gqlc-4thl stayed open. The two arms cover different halves and
+# neither subsumes the other: this one catches ANY spelling of the drifted value
+# but only on demand, while the tripwire catches only the default-directory
+# spelling and does it at commit and push time without being asked.
+#
+# NOT checked by comparing bytes with .githooks/hooks-drift-tripwire. The install
+# is shared by every linked worktree while each worktree's copy of the source is
+# at its own parked commit, so byte-equality would have two worktrees on
+# different branches each declaring the other's install wrong and reinstalling
+# over it on every `just init`.
+#
+# A marker line alone certifies PRESENCE, and presence is not what is owed. Measured:
+# a three-line file carrying `#!/usr/bin/env bash`, the marker, and `exit 0`,
+# installed as all five names, made `just doctor` print "ok" while a drifted
+# commit LANDED. So did any `cp`-truncated prefix between 48 and ~2900 bytes — the
+# marker sits on line 2 and everything after it up to the case statement is
+# comment, so a prefix parses and exits 0. A check that a disarmed guard passes is
+# the defect class this whole file exists to close.
+#
+# So after the marker grep, the installed hooks are EXECUTED and held to their
+# exit codes: the three blocking arms must refuse, the two warn arms must not.
+# That is still behaviour rather than bytes, so the parked-branch property
+# survives intact — an older copy that still refuses still passes. Executed only
+# after the marker grep, so this never runs a file it does not recognise, and with
+# stderr discarded, because the real tripwire prints its whole ERROR block when it
+# is reached and `just test` would be unreadable.
+#
+# The missing-install arm SELF-HEALS rather than refusing, following
+# ensure-golangci above (which reinstalls the pinned linter rather than failing
+# the push over it). This recipe is a dependency of `test`, which is what
+# .githooks/pre-push runs, so refusing here would have made `just init` a
+# precondition for every push in all ~70 registered worktrees on the day this
+# landed — and the obvious answer to a push refused for a reason unrelated to the
+# commits is `git push --no-verify`, which skips .githooks/pre-push WHOLESALE and
+# takes `just test` and `just lint-new` with it. Trading a hypothetical future
+# ungated commit for an actual present untested, unlinted push is a bad trade. An
+# absent hook file is unambiguous and the repair is one file copy, so it is
+# repaired. A marker-bearing copy that FAILS the behavioural check below is not:
+# that is tamper or corruption rather than absence, and it refuses.
+#
+# The first arm above stays a hard refusal: self-healing core.hooksPath would
+# rewrite the very drift this recipe exists to report, and the shared config is
+# where the damage lives.
 [private]
 check-hooks:
     #!/usr/bin/env bash
@@ -74,6 +144,52 @@ check-hooks:
         echo "       Run 'just init' to fix." >&2
         exit 1
     fi
+    dest_dir="$(git rev-parse --git-common-dir)/hooks"
+    blocking=(pre-commit commit-msg pre-push)
+    warning=(post-checkout post-merge)
+
+    absent=()
+    for name in "${blocking[@]}" "${warning[@]}"; do
+        target="$dest_dir/$name"
+        if [ ! -x "$target" ] || ! grep -q 'gqlc-hooks-drift-tripwire' "$target" 2>/dev/null; then
+            absent+=("$name")
+        fi
+    done
+    if [ "${#absent[@]}" -ne 0 ]; then
+        # A foreign hook squatting one of the names is the one ambiguous case, and
+        # the installer refuses it rather than clobbering — for the whole set, not
+        # just that name.
+        if ! .githooks/install-hooks-drift-tripwire --missing-only; then
+            echo "error: the core.hooksPath drift tripwire could not be installed into $dest_dir." >&2
+            echo "       core.hooksPath is correct right now, so hooks run — but if it drifts" >&2
+            echo "       to the default directory nothing will refuse the ungated commits." >&2
+            exit 1
+        fi
+        echo "check-hooks: self-healed the hooksPath drift tripwire (${absent[*]})." >&2
+        echo "             It lives under the git common dir, so this armed every linked" >&2
+        echo "             worktree at once; no per-worktree install is needed." >&2
+    fi
+
+    for name in "${blocking[@]}"; do
+        if "$dest_dir/$name" >/dev/null 2>&1; then
+            echo "error: $dest_dir/$name carries the drift tripwire marker but exits 0 when run." >&2
+            echo "       It would certify itself as installed and then let every commit and" >&2
+            echo "       push through while core.hooksPath is drifted — a truncated copy or a" >&2
+            echo "       disarmed one. Delete it and run 'just init' to reinstall." >&2
+            exit 1
+        fi
+    done
+    for name in "${warning[@]}"; do
+        if ! "$dest_dir/$name" >/dev/null 2>&1; then
+            echo "error: $dest_dir/$name exits non-zero when run, and the post-* arms must not." >&2
+            echo "       post-checkout's exit status BECOMES the exit status of git checkout" >&2
+            echo "       and git switch, so a blocking copy there fails every branch switch in" >&2
+            echo "       every drifted worktree; post-merge's status is ignored by git, so a" >&2
+            echo "       non-zero code there is a copy that is not this tripwire at all." >&2
+            echo "       Delete it and run 'just init' to reinstall." >&2
+            exit 1
+        fi
+    done
 
 # fails when this worktree's branch tracks master, which is the state
 # `git worktree add -b <branch> origin/master` leaves behind (bd gqlc-tfh1).
@@ -770,6 +886,7 @@ test-hooks:
     bash .githooks/tests/tool-gate-test.sh
     bash .githooks/tests/km-test.sh
     bash .githooks/tests/worktree-upstream-test.sh
+    bash .githooks/tests/hooks-drift-tripwire-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
