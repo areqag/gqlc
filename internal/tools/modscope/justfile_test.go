@@ -41,6 +41,14 @@ import (
 // TestParseJustfileAgreesWithJustOnThisJustfile puts the reader's reading of
 // the real justfile beside just's own and reports where they part, which is a
 // question the list does not have to have anticipated.
+//
+// What that comparison does not answer is where the two readings go quiet in
+// the same place: readings that are both silent do not part. A `mod` submodule
+// is such a place — just puts its recipes under `modules` rather than
+// `recipes`, and this reader never leaves the file it was handed — so the
+// comparison has nothing to set against anything. That shape is refused at
+// TestEveryRecipeRunningModscopeSweepsProbesFirst instead, off just's own
+// answer rather than off a reading of the directive (bd gqlc-98ii).
 
 const (
 	// repoRoot reaches the justfile from this package's directory.
@@ -438,23 +446,45 @@ func reaches(byName map[string]justRecipe, name, want string) bool {
 	return false
 }
 
+// sweepGate returns everything this file has to say against the justfile at
+// dir/path: what the reader could not read, the callers that do not reach the
+// sweep, and the submodules whose recipes the reader was never handed. Nothing
+// returned is the passing answer.
+//
+// The refusal is part of this rather than part of the comparison in
+// TestParseJustfileAgreesWithJustOnThisJustfile because it is this gate's
+// guarantee that a submodule suspends: a caller under one is asked for nothing,
+// and neither reading says so (bd gqlc-98ii).
+//
+// It is a function taking a directory so that the wiring is reachable from a
+// fixture. The live run below is over a justfile with no submodule in it, so
+// dropping the submoduleRefusals call there would change nothing about this
+// tree — TestASubmoduleCallerPassesBothReadingsAndIsRefused runs this same
+// function over a justfile that has one.
+func sweepGate(t *testing.T, dir, path string) []string {
+	t.Helper()
+	src, err := os.ReadFile(filepath.Join(dir, path))
+	if err != nil {
+		t.Fatalf("read the %s: %v", path, err)
+	}
+	recipes, out := parseJustfile(string(src))
+	unswept, complaints := unsweptModscopeCallers(recipes)
+	out = append(out, complaints...)
+	for _, name := range unswept {
+		out = append(out, fmt.Sprintf(
+			"recipe %s runs %s and does not reach %s through its dependencies, so a "+
+				"discovery probe a killed run left under test/data stops it on goDirs' "+
+				"empty-walk refusal — add %s to its dependency list (bd gqlc-c7o7)",
+			name, modscopePkg, probeSweep, probeSweep))
+	}
+	return append(out, submoduleRefusals("", dumpJustfile(t, dir, path))...)
+}
+
 // TestEveryRecipeRunningModscopeSweepsProbesFirst is the live assertion, over
 // the justfile CI runs.
 func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join(repoRoot, justfilePath))
-	if err != nil {
-		t.Fatalf("read the justfile: %v", err)
-	}
-	recipes, readComplaints := parseJustfile(string(src))
-	unswept, complaints := unsweptModscopeCallers(recipes)
-	for _, c := range append(readComplaints, complaints...) {
+	for _, c := range sweepGate(t, repoRoot, justfilePath) {
 		t.Errorf("%s", c)
-	}
-	for _, name := range unswept {
-		t.Errorf("recipe %s runs %s and does not reach %s through its dependencies, so a "+
-			"discovery probe a killed run left under test/data stops it on goDirs' "+
-			"empty-walk refusal — add %s to its dependency list (bd gqlc-c7o7)",
-			name, modscopePkg, probeSweep, probeSweep)
 	}
 }
 
@@ -501,8 +531,22 @@ func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 //     is not out of reach of the file: that same marker reddens
 //     TestParseJustfileReadsWhatJustReads, whose rows do pin body text against
 //     a literal.
-//   - Shapes this justfile does not contain. It reports on these bytes, and
-//     says nothing about a header spelling no file here has yet.
+//   - A recipe just reports outside the top-level `recipes` key. Adding the
+//     shape to these bytes is not enough to be reported on: what is reported is
+//     a difference, and there is none where both readings are quiet. A `mod`
+//     submodule is that case — just files its recipes under `modules` and this
+//     reader stays inside the file it was handed — so the submodule's names
+//     never enter either side of the comparison. Measured on this repo's
+//     justfile with a submodule whose recipe body runs modscope and which
+//     depends on nothing: just 1.55.1 and 1.57.0 both left the top-level recipe
+//     set as it was, listed the submodule under `modules`, and this test passed
+//     with that caller live. `import` is the opposite case and not this one: it
+//     lands in `recipes`, this reader does not follow it, and the same probe
+//     under `import` is reported here by name. The `mod` shape is refused at
+//     TestEveryRecipeRunningModscopeSweepsProbesFirst rather than compared here
+//     (bd gqlc-98ii).
+//   - A header spelling no file here carries. The comparison is over what this
+//     justfile says today, so such a shape is unexercised rather than covered.
 //   - A divergence both readings share. just is the reference, so a recipe just
 //     itself reads differently from the way it runs it is outside this.
 //
@@ -617,6 +661,85 @@ type justDump struct {
 		// "version"]]]. recipeBodies keeps the strings and drops the rest.
 		Body [][]any `json:"body"`
 	} `json:"recipes"`
+
+	// Modules holds what a `mod` directive brought in, keyed by the name just
+	// addresses the submodule under. Its value has the shape of a dump in its
+	// own right — a submodule carries its own recipes and its own modules —
+	// which is why the field's type is this type. A submodule's recipes are
+	// under here and not in Recipes above, so every reduction in this file
+	// reads past them.
+	Modules map[string]justDump `json:"modules"`
+}
+
+// submoduleRefusals returns a line for each submodule just reports under
+// dumped, at whatever depth, naming the submodule and the recipes it declares.
+// path is what the caller addresses dumped by and is empty for a whole file.
+// Nothing returned means just read every recipe out of the one file.
+//
+// WHY A REFUSAL RATHER THAN A READING. The alternative is to walk these
+// recipes and hold them to the sweep requirement like any other. Three
+// measurements against just 1.55.1 and 1.57.0 say what that would buy:
+//
+//   - A submodule recipe writing `sweep-discovery-probes` as a dependency is
+//     rejected by just at rc=1, "unknown dependency". So the advice the unswept
+//     message gives is advice just refuses to run, and every submodule caller
+//     would be reported unswept with no edit that answers it. The qualified
+//     spellings looked for — `::name`, `super::name`, `parent::name`,
+//     `..::name` — were rejected as well, two as unknown dependencies and two
+//     as parse errors.
+//   - What just does accept is a submodule declaring a sweep recipe of its own.
+//     That is a second recipe under the same bare name, and unsweptModscopeCallers
+//     keys recipes by bare name — so reading these in would need a scope model
+//     this file does not have, and without one a submodule recipe silently
+//     stands in for the top-level recipe it shares a name with.
+//   - Whether a caller is swept is answered from a dependency closure, and the
+//     closure this file walks comes from parseJustfile over one file's bytes.
+//     Reading submodule recipes off the dump alone would answer it from a
+//     different source than the one the rest of this file compares against.
+//
+// So the shape is declined, loudly, rather than gated on a model of it that is
+// not here. This repo's justfile brings in no submodule today, and the refusal
+// is what a change to that has to argue with (bd gqlc-98ii).
+//
+// The question is put to just rather than to the justfile's text. `mod` is the
+// spelling that was found by trying it, and a text reader would be held to a
+// list of directive spellings somebody wrote down: `mod?` is a second one, and
+// this reduction covers it without being told it exists, because just answers
+// with where it read recipes from rather than with what was written. Measured:
+// `mod? name 'file.just'` with the file present lists the submodule here, and
+// with the file absent lists nothing — which is also nothing to hide a caller
+// in. A submodule nested under a submodule puts its parent in the top-level
+// list, so the refusal fires from that list at any depth; the walk below is
+// what names the deeper one.
+func submoduleRefusals(path string, dumped justDump) []string {
+	names := make([]string, 0, len(dumped.Modules))
+	for name := range dumped.Modules {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	var out []string
+	for _, name := range names {
+		sub := dumped.Modules[name]
+		qualified := name
+		if path != "" {
+			qualified = path + "::" + name
+		}
+		recipes := make([]string, 0, len(sub.Recipes))
+		for recipe := range sub.Recipes {
+			recipes = append(recipes, recipe)
+		}
+		slices.Sort(recipes)
+		out = append(out, fmt.Sprintf(
+			"just reads the submodule %s out of this justfile and declares %v under it, and "+
+				"this file reads the recipes of the one file it was handed. A recipe there is "+
+				"asked for no %s dependency and is reported by nothing, so the submodule is "+
+				"refused rather than gated on a shape this file does not model — take the `mod` "+
+				"directive back out, or teach this file to scope recipes by module first "+
+				"(bd gqlc-98ii)", qualified, recipes, probeSweep))
+		out = append(out, submoduleRefusals(qualified, sub)...)
+	}
+	return out
 }
 
 // priorDependencies reduces a dump to the dependencies just runs before each
@@ -733,6 +856,326 @@ func TestJustDumpCountsPriorsSeparatelyFromLaterDependencies(t *testing.T) {
 	}
 	if d := justfileDisagreements(declared, recipeBodies(dumped), read); len(d) != 0 {
 		t.Errorf("the two readings part over `vuln: before && after`: %v", d)
+	}
+}
+
+// writeJustfiles puts each named file into a fresh directory and returns it.
+// The submodule fixtures below are more than one file, which is the point of
+// the directive under test.
+func writeJustfiles(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, src := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatalf("write the fixture file %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+// probeCallerRecipe runs this program and depends on nothing, which is the
+// shape the sweep requirement exists for. The fixtures here put it inside a
+// submodule, where neither reading this file already had can see it.
+const probeCallerRecipe = "probe-caller:\n    go run ./" + modscopePkg + " modules\n"
+
+// nameOrderFixture brings in three submodules under names that sort into an
+// order they are not declared in, so a refusal over it is either in name order
+// or in the order a map walk took, and those are two different answers. Three
+// names rather than two, and read more than once: see orderRuns.
+//
+// Shared by the row that asserts the refusal order and by the control on
+// orderRuns below, which have to be looking at the same map for either to say
+// anything about the other.
+var nameOrderFixture = map[string]string{
+	"justfile":   "mod zulu 'zulu.just'\nmod alpha 'alpha.just'\nmod mike 'mike.just'\n",
+	"alpha.just": probeCallerRecipe,
+	"mike.just":  probeCallerRecipe,
+	"zulu.just":  probeCallerRecipe,
+}
+
+// submoduleFixture is the shape the refusal exists for: a top-level justfile
+// whose own recipes are in order, and a submodule holding a recipe that runs
+// this program and depends on nothing.
+var submoduleFixture = map[string]string{
+	"justfile": probeSweep + ":\n    @true\n\n" +
+		"vuln: " + probeSweep + "\n    go run ./" + modscopePkg + " modules\n\n" +
+		"mod probe 'probe.just'\n",
+	"probe.just": probeCallerRecipe,
+}
+
+// TestASubmoduleCallerPassesBothReadingsAndIsRefused is the fixture the refusal
+// was written from, asserted in the order the defect was found: the two
+// readings this file already had, then the one that answers.
+//
+// The reason this is a test rather than a note is that the failure it stands
+// for produced no output anywhere. A caller under a submodule is not in the
+// dependency closure unsweptModscopeCallers walks, and it is not a disagreement
+// justfileDisagreements can find either — both readings are quiet about it in
+// the same way, and quiet matches quiet. Delete submoduleRefusals and the rows
+// above this one still pass; that is what the last row is here to stop
+// (bd gqlc-98ii).
+func TestASubmoduleCallerPassesBothReadingsAndIsRefused(t *testing.T) {
+	dir := writeJustfiles(t, submoduleFixture)
+	dumped := dumpJustfile(t, dir, "justfile")
+
+	if _, found := dumped.Recipes["probe-caller"]; found {
+		t.Fatalf("just lists probe-caller among the top-level recipes %v, and this fixture "+
+			"exists because it does not — the refusal below is answering a question that has "+
+			"stopped being the one asked", slices.Sorted(maps.Keys(dumped.Recipes)))
+	}
+
+	read, readComplaints := parseJustfile(submoduleFixture["justfile"])
+	if len(readComplaints) != 0 {
+		t.Fatalf("read complaints = %v, want none", readComplaints)
+	}
+	for _, r := range read {
+		if r.name == "probe-caller" {
+			t.Errorf("this reader read probe-caller out of the top-level justfile, which does "+
+				"not spell it: %v", read)
+		}
+	}
+
+	unswept, complaints := unsweptModscopeCallers(read)
+	if len(unswept) != 0 || len(complaints) != 0 {
+		t.Errorf("unswept = %v and complaints = %v over a fixture whose unswept caller is in "+
+			"the submodule, want the sweep reading to have nothing to say about it",
+			unswept, complaints)
+	}
+
+	declared, err := priorDependencies(dumped)
+	if err != nil {
+		t.Fatalf("priorDependencies over the fixture: %v", err)
+	}
+	if d := justfileDisagreements(declared, recipeBodies(dumped), read); len(d) != 0 {
+		t.Errorf("the two readings part over the submodule fixture: %v — this fixture is here "+
+			"because they agree, each having read past probe-caller", d)
+	}
+
+	// Through sweepGate rather than through submoduleRefusals directly: the
+	// refusal reaching this fixture's answer is what the live assertion rests
+	// on, and a refusal nothing calls says as little as no refusal at all.
+	got := sweepGate(t, dir, "justfile")
+	if len(got) != 1 {
+		t.Fatalf("sweepGate = %v, want the one submodule this fixture brings in", got)
+	}
+	for _, want := range []string{"submodule probe", "probe-caller", probeSweep} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("refusal = %q, want it to name %q", got[0], want)
+		}
+	}
+}
+
+// orderRuns is how many times each row below reduces its one dump before the
+// order of the refusals is believed. Not a retry: every reduction has to answer
+// the same bytes as the first, and the first has to be the sorted one.
+//
+// One reduction cannot tell a sorted answer from a map walk that came out
+// sorted, and here it mostly does come out sorted, because both ends line up:
+// `just --dump` writes its module and recipe keys already in name order, so the
+// maps they decode into are built in name order, and a Go walk of a map this
+// small begins somewhere inside it and wraps — which returns the insertion
+// order whenever it begins at the front. Measured when this was written, one
+// slices.Sort at a time taken out of submoduleRefusals and the row it belongs
+// to run 40 times: a single reduction caught the missing name sort on 7 of
+// those runs and the missing recipe sort on 9, and orderRuns reductions caught
+// each on all 40. The two-name row this replaced managed 3 of 40. It is the
+// count of reductions that carries the claim, then, and not the width of the
+// fixture: widening a row does shorten the odds that a walk starts anywhere but
+// the front, but where a walk starts is Go's map implementation answering, not
+// anything a test is entitled to hold it to.
+const orderRuns = 64
+
+// TestSubmoduleRefusalsReadWhatJustAnswersWith cuts the reduction one spelling
+// at a time. The live justfile brings in no submodule, so on this tree the
+// refusal returns nothing whatever it is asked, and these rows are the
+// difference between that and a reduction that has quietly stopped looking.
+//
+// The first row is the one that keeps the refusal from being a refusal of
+// everything: a gate that fires on the justfile CI runs would be reverted
+// rather than obeyed.
+func TestSubmoduleRefusalsReadWhatJustAnswersWith(t *testing.T) {
+	cases := []struct {
+		name  string
+		files map[string]string
+		want  []string
+	}{
+		{
+			name: "a justfile bringing in no submodule is not refused",
+			files: map[string]string{
+				"justfile": "vuln:\n    go run ./" + modscopePkg + " modules\n",
+			},
+		},
+		{
+			name:  "a submodule is refused under the name just addresses it by",
+			files: submoduleFixture,
+			want: []string{
+				"just reads the submodule probe out of this justfile and declares [probe-caller] under it,",
+			},
+		},
+		{
+			// A second spelling of the directive, and the reason the question is
+			// put to just rather than to the text: nothing here was taught that
+			// `mod?` exists.
+			name: "an optional submodule whose file is there is refused the same way",
+			files: map[string]string{
+				"justfile":   "mod? probe 'probe.just'\n",
+				"probe.just": probeCallerRecipe,
+			},
+			want: []string{
+				"just reads the submodule probe out of this justfile and declares [probe-caller] under it,",
+			},
+		},
+		{
+			// just reads no submodule at all here, so there is no file for a
+			// caller to be in. Refusing this would be refusing the absence of the
+			// shape.
+			name: "an optional submodule whose file is absent is not refused",
+			files: map[string]string{
+				"justfile": "mod? probe 'probe.just'\nvuln:\n    @true\n",
+			},
+		},
+		{
+			// The refusal fires off the top-level list, which a submodule at any
+			// depth puts its own parent into. What the walk adds is the name of
+			// the deeper one: without it the inner caller is refused without ever
+			// being mentioned.
+			name: "a submodule under a submodule is named by its path",
+			files: map[string]string{
+				"justfile": "mod outer 'outer.just'\n",
+				// Three recipes under outer, spelled in an order the sorted list
+				// does not keep, so the list a refusal prints is in name order
+				// rather than in the order a map walk happened to take. Three
+				// because with two the only wrong answer is the pair swapped, and
+				// the walk returns them in name order most of the time anyway —
+				// what tells the difference is orderRuns, not this row's length.
+				"outer.just": "mod inner 'inner.just'\n" +
+					"outer-thing:\n    @true\n\nanother:\n    @true\n\nmiddle:\n    @true\n",
+				"inner.just": "deep-caller:\n    go run ./" + modscopePkg + " modules\n",
+			},
+			want: []string{
+				"just reads the submodule outer out of this justfile and declares " +
+					"[another middle outer-thing] under it,",
+				"just reads the submodule outer::inner out of this justfile and declares " +
+					"[deep-caller] under it,",
+			},
+		},
+		{
+			// Sorted rather than in map order, so a failure names the same
+			// submodule every run. That is a claim about every run, so the runner
+			// below asks orderRuns times rather than once.
+			name:  "submodules are refused in name order",
+			files: nameOrderFixture,
+			want: []string{
+				"just reads the submodule alpha out of this justfile and declares [probe-caller] under it,",
+				"just reads the submodule mike out of this justfile and declares [probe-caller] under it,",
+				"just reads the submodule zulu out of this justfile and declares [probe-caller] under it,",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dumped := dumpJustfile(t, writeJustfiles(t, tc.files), "justfile")
+			got := submoduleRefusals("", dumped)
+			if len(got) != len(tc.want) {
+				t.Fatalf("submoduleRefusals returned %d lines %v, want %d %v",
+					len(got), got, len(tc.want), tc.want)
+			}
+			for i, want := range tc.want {
+				// A prefix rather than a substring: both sorted lists are decided
+				// at the head of the line — which submodule this line is about, and
+				// the recipes it declares — so a want that matched them anywhere in
+				// the line would not be reading the position they were put in.
+				if !strings.HasPrefix(got[i], want) {
+					t.Errorf("refusal %d = %q, want it to begin %q", i, got[i], want)
+				}
+			}
+			for run := 1; run < orderRuns; run++ {
+				again := submoduleRefusals("", dumped)
+				if !slices.Equal(again, got) {
+					t.Fatalf("reduction %d of the same dump answered\n\t%v\nand reduction 1 "+
+						"answered\n\t%v\n— the refusals are coming out in the order a map walk "+
+						"took, so which submodule a failure names, and the order of the recipes "+
+						"it lists under one, are whatever that run's walk started at",
+						run+1, again, got)
+				}
+			}
+		})
+	}
+}
+
+// TestOrderRunsSeesAMapWalkTakeADifferentRoute is the control on orderRuns. The
+// rows above assert a sorted refusal order over that many reductions because
+// one reduction cannot tell a sorted answer from a walk that came out sorted;
+// if orderRuns were small enough that every reduction walked the fixture the
+// same way, those rows would be back to reporting whatever order iteration
+// handed them, and passing with the sort deleted. This asks the same map the
+// same question orderRuns times and requires the answer to move at least once.
+//
+// It is what keeps orderRuns from being a number nobody has to stand behind. At
+// 1 it fails outright, on all 40 runs it was measured over, and 1 is the setting
+// that puts the rows above back where the review found them. Short of that the
+// constant degrades rather than breaks: measured at 8, with the name sort
+// deleted, the row above still caught it on 35 of 40 runs, and this control
+// caught the weakening itself on 2 of 40 — which is why the constant is 64 and
+// not a number chosen to be exactly enough.
+//
+// It is also the one test in this file whose passing is a probability rather
+// than a certainty — it goes red if orderRuns walks of a three-key map all take
+// the same route, which is Go's to decide and not this file's.
+//
+// WHAT THIS DOES NOT REACH: deleting the repeated reduction in the rows above
+// outright. Nothing in the suite goes red for that, because a guard is only
+// visible through the defect it guards — the same limit sweepGate records for
+// its own repoRoot case (bd gqlc-98ii).
+func TestOrderRunsSeesAMapWalkTakeADifferentRoute(t *testing.T) {
+	dumped := dumpJustfile(t, writeJustfiles(t, nameOrderFixture), "justfile")
+	first := slices.Collect(maps.Keys(dumped.Modules))
+	for run := 1; run < orderRuns; run++ {
+		if !slices.Equal(slices.Collect(maps.Keys(dumped.Modules)), first) {
+			return
+		}
+	}
+	t.Fatalf("orderRuns is %d, and that many walks of the %d submodules just read out of this "+
+		"fixture all came out %v — so the rows that assert a sorted refusal order over that "+
+		"many reductions are handed one order every time, and would pass with the sort taken "+
+		"out of submoduleRefusals (bd gqlc-98ii)", orderRuns, len(dumped.Modules), first)
+}
+
+// TestJustRefusesASubmoduleRecipeDependingOnTheTopLevelSweep asks just what the
+// unswept message's own advice does inside a submodule, because that answer is
+// what decided the refusal above over reading the submodule's recipes in.
+//
+// It is asserted here rather than written into a comment so that it stays a
+// measurement. If a later just resolves the dependency, this test fails, and
+// the choice submoduleRefusals makes is worth reopening at that point rather
+// than being carried forward on a rejection nobody re-ran.
+func TestJustRefusesASubmoduleRecipeDependingOnTheTopLevelSweep(t *testing.T) {
+	dir := writeJustfiles(t, map[string]string{
+		"justfile": probeSweep + ":\n    @true\n\nmod probe 'probe.just'\n",
+		"probe.just": "probe-caller: " + probeSweep + "\n" +
+			"    go run ./" + modscopePkg + " modules\n",
+	})
+
+	justBin, err := exec.LookPath("just")
+	if err != nil {
+		t.Fatalf("`just` is not on PATH: %v", err)
+	}
+	cmd := exec.CommandContext(t.Context(), justBin,
+		"--justfile", "justfile", "--unstable", "--dump", "--dump-format", "json")
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err == nil {
+		t.Fatalf("just accepted a submodule recipe depending on the top-level %s and dumped "+
+			"%s — the refusal in submoduleRefusals rests on it not doing that, so the choice "+
+			"between refusing this shape and gating it is open again (bd gqlc-98ii)",
+			probeSweep, out)
+	}
+	if !strings.Contains(stderr.String(), "unknown dependency") {
+		t.Errorf("just refused the fixture with %q, want the refusal to be about the "+
+			"dependency not resolving", stderr.String())
 	}
 }
 
