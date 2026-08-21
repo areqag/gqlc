@@ -2,7 +2,7 @@
 # recipe self-heals: it verifies the pinned version in .bin/ and reinstalls on
 # mismatch, so a version bump here is a one-line change and nobody ever
 # installs or upgrades the linter by hand.
-golangci_version := "v2.12.2"
+golangci_version := "v2.13.1"
 golangci := justfile_directory() + "/.bin/golangci-lint"
 # Per-worktree cache. golangci-lint caches analyzer facts and per-package issue
 # records keyed on module path + relative file path + content hash — the absolute

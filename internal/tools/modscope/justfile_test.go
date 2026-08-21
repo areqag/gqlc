@@ -166,10 +166,10 @@ func parseJustfile(src string) ([]justRecipe, []string) {
 // TestParseJustfileRefusesADependencyShapeItCannotRead pins each refusal.
 func dependencyNames(rest string) (deps []string, problem string) {
 	for i := 0; i < len(rest); {
-		switch {
-		case rest[i] == ' ' || rest[i] == '\t':
+		switch rest[i] {
+		case ' ', '\t':
 			i++
-		case rest[i] == '(':
+		case '(':
 			name, end := parenDependency(rest, i)
 			if end < 0 {
 				return nil, "a parenthesised dependency that never closes, which this reader refuses to guess past"
