@@ -106,7 +106,7 @@ type justRecipe struct {
 // Dependencies written after `&&` are excluded: just runs those AFTER the body,
 // so a sweep in that position would run after the walk it protects. What this
 // reader will not read at all it refuses rather than guesses at — see the
-// parenthesised-dependency complaint below.
+// refusals in dependencyNames below.
 func parseJustfile(src string) ([]justRecipe, []string) {
 	var (
 		out        []justRecipe
@@ -124,17 +124,13 @@ func parseJustfile(src string) ([]justRecipe, []string) {
 		if !ok {
 			continue
 		}
-		// A parenthesised dependency carries arguments, and this reader takes
-		// the whole whitespace-separated token as a name. Refused rather than
-		// mis-read: a dependency parsed as `(foo` matches no recipe, and the
-		// closure it feeds would be short without saying so.
-		if strings.ContainsAny(rest, "()") {
+		deps, problem := dependencyNames(rest)
+		if problem != "" {
 			complaints = append(complaints, fmt.Sprintf(
-				"recipe %s has a parenthesised dependency, which this reader does not read, "+
-					"so the dependency closure below is not the one just runs", name))
+				"recipe %s has %s, so the dependency closure below is not the one just runs",
+				name, problem))
 			continue
 		}
-		pre, _, _ := strings.Cut(rest, "&&")
 		var body []string
 		for _, next := range lines[end+1:] {
 			if next != "" && !strings.HasPrefix(next, " ") && !strings.HasPrefix(next, "\t") {
@@ -144,11 +140,105 @@ func parseJustfile(src string) ([]justRecipe, []string) {
 		}
 		out = append(out, justRecipe{
 			name: name,
-			deps: strings.Fields(pre),
+			deps: deps,
 			body: strings.Join(body, "\n"),
 		})
 	}
 	return out, complaints
+}
+
+// dependencyNames reads the text after a header's separating colon as the
+// dependencies just runs before the body. A plain token names a recipe. A
+// parenthesised group carries arguments — just runs the recipe the group's
+// first token names, so that token is the dependency and the arguments are
+// dropped; the dump reads it the same way, listing `(lint-hooks "kingdom/bin")`
+// under Dependencies as Recipe "lint-hooks". Reading stops at a top-level
+// `&&`: what follows runs after the body. A `&&` inside a group's arguments
+// is the group's business, not a stop — under the old whole-line cut it would
+// have been one, but that cut only ran on lines the bracket refusal had
+// already let through, so no group ever reached it.
+//
+// What it cannot read it refuses rather than guesses at, answering with the
+// complaint's middle clause: a group that never closes, a group opening on
+// anything but a recipe name, and a bracket glued inside a bare token each
+// have no reading that is not a guess — `(foo` taken for a name matches no
+// recipe, and the closure it feeds would be short without saying so.
+// TestParseJustfileRefusesADependencyShapeItCannotRead pins each refusal.
+func dependencyNames(rest string) (deps []string, problem string) {
+	for i := 0; i < len(rest); {
+		switch {
+		case rest[i] == ' ' || rest[i] == '\t':
+			i++
+		case rest[i] == '(':
+			name, end := parenDependency(rest, i)
+			if end < 0 {
+				return nil, "a parenthesised dependency that never closes, which this reader refuses to guess past"
+			}
+			if !isJustName(name) {
+				return nil, fmt.Sprintf(
+					"a parenthesised dependency opening on %q where a recipe name goes, "+
+						"which this reader does not read", name)
+			}
+			deps = append(deps, name)
+			i = end
+		default:
+			start := i
+			for i < len(rest) && rest[i] != ' ' && rest[i] != '\t' {
+				i++
+			}
+			tok := rest[start:i]
+			before, _, cut := strings.Cut(tok, "&&")
+			if strings.ContainsAny(before, "()") {
+				return nil, fmt.Sprintf(
+					"a bracket inside the dependency %q, which this reader does not read", tok)
+			}
+			if before != "" {
+				deps = append(deps, before)
+			}
+			if cut {
+				return deps, ""
+			}
+		}
+	}
+	return deps, ""
+}
+
+// parenDependency reads the group opening at rest[i], answering its first
+// token — the recipe just runs — and the index one past the matching close
+// bracket. end is -1 when nothing on the line closes the group. A string
+// literal inside the group is skipped whole, so a bracket inside quoted
+// arguments does not close it, and nesting is counted, so a bracket inside a
+// nested expression does not either; an unclosed literal leaves the group
+// unclosed. The name comes back raw — `((a) b)` answers `(a` — because
+// whether it spells a recipe is the caller's question, not this one's.
+func parenDependency(rest string, i int) (name string, end int) {
+	depth := 0
+	for j := i; j < len(rest); {
+		switch rest[j] {
+		case '(':
+			depth++
+			j++
+		case ')':
+			depth--
+			j++
+			if depth == 0 {
+				fields := strings.Fields(rest[i+1 : j-1])
+				if len(fields) == 0 {
+					return "", j
+				}
+				return fields[0], j
+			}
+		case '"', '\'', '`':
+			next := skipJustString(rest, j)
+			if next < 0 {
+				return "", -1
+			}
+			j = next
+		default:
+			j++
+		}
+	}
+	return "", -1
 }
 
 // justHeader splits a recipe header into its name and everything after the
@@ -1699,6 +1789,28 @@ func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
 		},
 		{
+			// The shape this repo's justfile spells at `lint`: the group's
+			// first token is the recipe just runs, the argument is not a
+			// dependency, and the plain tokens around it keep their places —
+			// order matters to the closure comparison, which is ordered.
+			name: "a parenthesised dependency is named by its first token",
+			src:  "lint: ensure (lint-hooks \"kingdom/bin\") check\n    echo hi\n",
+			want: []justRecipe{{name: "lint", deps: []string{"ensure", "lint-hooks", "check"}, body: "    echo hi\n"}},
+		},
+		{
+			// The close bracket inside the quoted argument is an argument
+			// byte, not the group's end: a scanner that took it for the end
+			// would read `b")` as a dependency just does not run.
+			name: "a bracket inside a group's quoted argument does not close it",
+			src:  "vuln: (sweep \"a)b\")\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			name: "a parenthesised dependency before && still runs first",
+			src:  "vuln: (sweep \"x\") && report\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
 			name: "a comment in a body is part of it",
 			src:  "vuln:\n    # go run ./" + modscopePkg + "\n",
 			want: []justRecipe{{name: "vuln", body: "    # go run ./" + modscopePkg + "\n"}},
@@ -1761,8 +1873,8 @@ func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 			// A colon that is not part of := was read as the separator before,
 			// which made the rest of the default into dependencies naming no
 			// recipe. The parens are the same shape one step on: they sit in
-			// the name half of the line, so they are not the parenthesised
-			// dependency the reader refuses.
+			// the name half of the line, where the dependency scanner never
+			// reads, so they are not a dependency group.
 			name: "a plain colon and parens in a default are not dependencies",
 			src:  "vuln x=(\"a\" + \":b\"): sweep\n    echo hi\n",
 			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
@@ -1914,23 +2026,63 @@ func TestHeaderColonTakesTheFirstSeparatingColon(t *testing.T) {
 }
 
 // TestParseJustfileRefusesADependencyShapeItCannotRead is separate from the
-// rows above because the reader answers this shape with a complaint instead of
-// a reading. just accepts `recipe: (dep arg)`; this reader would take `(dep`
-// for a name, so it says so instead.
+// rows above because the reader answers these shapes with a complaint instead
+// of a reading. A well-formed parenthesised dependency is read — the rows
+// above pin that — but each shape here has no reading that is not a guess, so
+// the recipe is dropped and the complaint says which shape stopped it.
+// Refusal is the fail-closed direction: the dropped recipe takes its callers
+// out of the closure, and the complaint is what keeps that from being quiet.
 //
-// The complaint is raised by a bracket anywhere after the separating colon, so
-// it is not confined to the shape named here. `vuln: sweep # note (see docs)`
-// takes the same path — measured: one parenthesised-dependency complaint and no
-// recipe read — where just runs vuln with the sweep and ignores the comment. So
-// this test pins the answer for a dependency the reader cannot read, not the
-// full set of lines that reach the answer.
+// A refusal covers the whole header, not the one dependency: the unclosed-
+// group row would read sweep before reaching the bracket, and answers no
+// recipe at all instead, because a partial dependency list fed to the closure
+// walk is exactly the short-without-saying-so answer the refusal exists to
+// prevent.
 func TestParseJustfileRefusesADependencyShapeItCannotRead(t *testing.T) {
-	got, complaints := parseJustfile("vuln: (sweep \"arg\")\n    echo hi\n")
-	if len(got) != 0 {
-		t.Errorf("read %v, want the recipe left unread", got)
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "a group that never closes",
+			src:  "vuln: sweep (lint-hooks \"arg\"\n    echo hi\n",
+			want: "parenthesised dependency that never closes",
+		},
+		{
+			// The unclosed literal swallows the close bracket, so this is the
+			// unclosed group one layer down: nothing on the line closes it.
+			name: "a group whose argument literal never closes",
+			src:  "vuln: (sweep \"arg)\n    echo hi\n",
+			want: "parenthesised dependency that never closes",
+		},
+		{
+			name: "a group naming no recipe",
+			src:  "vuln: ()\n    echo hi\n",
+			want: "where a recipe name goes",
+		},
+		{
+			name: "a group opening on a nested group",
+			src:  "vuln: ((sweep) \"arg\")\n    echo hi\n",
+			want: "where a recipe name goes",
+		},
+		{
+			name: "a bracket glued inside a bare token",
+			src:  "vuln: sweep(\"arg\")\n    echo hi\n",
+			want: "a bracket inside the dependency",
+		},
 	}
-	if len(complaints) != 1 || !strings.Contains(complaints[0], "parenthesised dependency") {
-		t.Fatalf("complaints = %v, want one naming a parenthesised dependency", complaints)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, complaints := parseJustfile(tc.src)
+			if len(got) != 0 {
+				t.Errorf("read %v, want the recipe left unread", got)
+			}
+			if len(complaints) != 1 || !strings.Contains(complaints[0], tc.want) {
+				t.Fatalf("complaints = %v, want one containing %q", complaints, tc.want)
+			}
+		})
 	}
 }
 
@@ -1944,8 +2096,11 @@ func TestParseJustfileRefusesADependencyShapeItCannotRead(t *testing.T) {
 // It pins this shape, not a claim about how many shapes read differently. Other
 // shapes do, they are listed on TestParseJustfileReadsWhatJustReads above, and
 // they do not all answer the same way: a header whose default opens a literal
-// it does not close is dropped in silence, and a comment carrying a bracket is
-// refused outright. What is pinned here is a reading, loudly wrong.
+// it does not close is dropped in silence, and a comment carrying an unclosed
+// bracket is refused outright. A comment carrying a balanced group — `# note
+// (see docs)` — lands here too: the group reads as a dependency named see,
+// which resolves to no recipe and fails as loudly as the bare words do. What
+// is pinned here is a reading, loudly wrong.
 //
 // Nothing wants that reading. It is pinned because the direction is what makes
 // it survivable: names invented from a comment resolve to no recipe, so the
