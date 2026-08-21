@@ -1,0 +1,11 @@
+# Rendered by `km install-units`: @TOKENS@ come from kingdom.toml + git.
+[Unit]
+Description=Kingdom guard cadence
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=@GUARD_MIN@min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

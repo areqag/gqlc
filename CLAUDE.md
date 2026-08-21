@@ -89,6 +89,26 @@ Do not add AI-authorship attribution to commits or PR bodies:
 
 The commit-trailer half is enforced at commit time by `.githooks/commit-msg`, which rejects any `Co-Authored-By` value mentioning `claude` or an `@anthropic.com` email. The PR-body footer half cannot be hook-enforced (PR bodies bypass local git); follow the rule.
 
+## The Թագաւորութիւն (agent society)
+
+This repo is also worked by an autonomous agent society — seats with souls,
+file-based mail, a beads-routed dispatcher, and a constitution. Charter and
+machinery live in `kingdom/` (start with `kingdom/README.md`). If you are a
+seat (`KINGDOM_SEAT` is set), your procedure is
+`kingdom/brain/playbooks/citizen-protocol.md`; all Armenian prose in this
+repo is Western Armenian, classical orthography. `just kingdom` shows the
+town at a glance.
+
+**This model supersedes the earlier ephemeral-team pattern.** Previously,
+work was executed by spawning per-bead agent teams (implementer +
+adversarial reviewer, the "Carmack + Linus" shape). Under the kingdom,
+work is taken by the persistent seats instead: Ռազմիկներ execute
+test-driven (`/tdd`), Ճարտարապետներ design and review, Միհր the Դատաւոր
+delivers the adversarial quality pass (`/thermo-nuclear-code-quality-review`).
+The disciplines carry over — tests first, adversarial review, merge on
+PASS — the ephemeral instances do not. Humans do not block: citizens
+decide, merge, and amend their own constitution.
+
 ## Build & Test
 
 _Add your build and test commands here_
