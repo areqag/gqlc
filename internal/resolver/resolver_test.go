@@ -1876,6 +1876,119 @@ func (s *ResolverSuite) TestInlineEndpointCommitsOnTheTypesSatisfyingIt() {
 	}
 }
 
+// TestUnlabelledBindingRefusedWhenNoEdgeIsEvidence pins gqlc-6aed: a binding
+// whose touching edges are ALL non-witnessing is unconstrained on the returned
+// rows, so no type may be inferred for it.
+//
+// candidateTypes folds an edge into `inferred` whether or not the edge is
+// evidence about every returned row — that set is left exactly as master
+// computes it. `attested` records that some edge passed BOTH conjuncts, and
+// commit() consulted it only to gate the WIDENING. Nothing consulted the
+// witnessing conjunct on its own, so when it failed on EVERY touching edge the
+// fallback still returned `inferred` and a singleton committed.
+//
+// The two rows that separate the defect from correct behaviour differ in one
+// token, OPTIONAL, and before this test both returned `c.smallOnly STRING NOT
+// NULL`:
+//
+//   - the mandatory hop is an inner join. It filters out every row whose `c`
+//     is not a HAS_DESK source, so `c` really is the bare Company on all of
+//     them and NOT NULL is sound.
+//   - the OPTIONAL hop is an outer join and filters nothing. `MATCH (c)` binds
+//     every node in the graph, so a returned row's `c` is a Person, a Desk or a
+//     Company&Large just as readily, and none of those declares smallOnly.
+//
+// WHY THE VERDICT IS REFUSAL AND NOT A NULLABLE COLUMN. Nullability cannot
+// express this defect. The `RETURN c` row is the witness: the resolver answers
+// ResolvedNode{Labels: "Company"} for a binding that can hold a Person node, and
+// a nullable Company is still not a Person. The unsoundness is in the TYPE, and
+// only refusing to infer one repairs it. That also lands the shape where the
+// resolver already was for a binding with no touching edge at all — the last row
+// — which is the same evidentiary position reached by a different route.
+//
+// The message is asserted rather than the sentinel alone because two arms now
+// return ErrUnknownLabel from the same `case 0`, and they are true of different
+// queries: `no edge in the pattern reaches a compatible schema node type` is
+// false of these queries, whose OPTIONAL hop reaches Company perfectly well.
+func (s *ResolverSuite) TestUnlabelledBindingRefusedWhenNoEdgeIsEvidence() {
+	const sch = "satisfy_plural_edges_inline_subtype.gql"
+	tests := []struct {
+		name    string
+		query   string
+		want    []Column
+		wantErr error
+		wantMsg string
+	}{
+		{
+			name:    "an OPTIONAL hop is the only edge, property projected",
+			query:   "MATCH (c) OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) RETURN c.smallOnly",
+			wantErr: ErrUnknownLabel,
+			wantMsg: `unknown label: cannot infer type of unlabelled binding "c" — ` +
+				`every edge reaching it is an OPTIONAL match, which drops no row, ` +
+				`so its type is unconstrained`,
+		},
+		{
+			name:    "an OPTIONAL hop is the only edge, binding projected",
+			query:   "MATCH (c) OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) RETURN c",
+			wantErr: ErrUnknownLabel,
+			wantMsg: `unknown label: cannot infer type of unlabelled binding "c" — ` +
+				`every edge reaching it is an OPTIONAL match, which drops no row, ` +
+				`so its type is unconstrained`,
+		},
+		{
+			name:  "the same hop made mandatory still commits",
+			query: "MATCH (c) MATCH (c)-[h:HAS_DESK]->(d:Desk) RETURN c.smallOnly",
+			want:  []Column{{Name: "c.smallOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			// A minimum-1 variable-length hop is still an inner join: it drops
+			// every row whose `c` sources no HAS_DESK. The guard is spelled
+			// !e.Nullable() and not witnessesItsEndpoints for exactly this row —
+			// the stricter predicate is false here, and reusing it would refuse a
+			// query master answers soundly.
+			name:  "a variable-length hop filters rows, so it still commits",
+			query: "MATCH (c) MATCH (c)-[h:HAS_DESK*1..2]->(d:Desk) RETURN c.smallOnly",
+			want:  []Column{{Name: "c.smallOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			// The binding the OPTIONAL hop INTRODUCES is the one shape an outer
+			// join does constrain: `d` is null on the rows the join missed and a
+			// Desk on the rest, so the TYPE is sound and nullability already
+			// carries the miss. Refusing here would regress master.
+			name:  "a binding introduced by the OPTIONAL hop is nullable, not refused",
+			query: "MATCH (c:Company) OPTIONAL MATCH (c)-[h:HAS_DESK]->(d) RETURN d.id",
+			want:  []Column{{Name: "d.id", Type: ResolvedProperty{Type: graph.PropertyType("INT"), Nullable: true}}},
+		},
+		{
+			name:  "one witnessing edge is enough, the OPTIONAL one alongside it is not needed",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) RETURN c.name",
+			want:  []Column{{Name: "c.name", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			name:    "no touching edge at all, the arm that already refused",
+			query:   "MATCH (c) RETURN c.smallOnly",
+			wantErr: ErrUnknownLabel,
+			wantMsg: `unknown label: cannot infer type of unlabelled binding "c" — ` +
+				`no edge in the pattern reaches a compatible schema node type`,
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			schema := s.loadSchema("invalid", sch)
+			q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(tt.query)))
+			s.Require().NoError(err)
+			vq, err := New(schema, WithRegistry(regR7)).Resolve(q)
+			if tt.wantErr != nil {
+				s.Require().ErrorIs(err, tt.wantErr, tt.query)
+				s.Require().EqualError(err, tt.wantMsg, tt.query)
+				return
+			}
+			s.Require().NoError(err, tt.query)
+			s.Require().Equal(tt.want, vq.Columns, tt.query)
+		})
+	}
+}
+
 // TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated closes the
 // second half of the precondition TestNarrowingSkipsAnEndpointItCannotEnumerate
 // opened. That test guards the endpoint the narrowing reads DIRECTLY. This one
