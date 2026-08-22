@@ -1131,6 +1131,41 @@ cmd_guard_sweep() {
     cmd_wake raffi --reason "time for a round of the town (see your soul: rounds)"
 }
 
+# ---------- unit health ----------
+
+# systemd answers Result=success for a unit that has never fired AND for one
+# that is not installed at all — measured 2026-08-22: LoadState=not-found came
+# back with Result=success — so health cannot be read off Result alone.
+unit_health() { # <unit> -> "ok …" | "FAILED …" | "NEVER RUN …" | "NOT INSTALLED …" | "UNKNOWN …"
+    local props line load="" last="" result="" code=""
+    if ! props=$(systemctl --user show "$1" \
+        -p LoadState -p InactiveEnterTimestamp -p Result -p ExecMainStatus 2>/dev/null); then
+        echo "UNKNOWN — systemctl could not answer (is there a user bus?)"
+        return 0
+    fi
+    # By key, never by position: systemd returns the properties in its own
+    # order, not the order they were asked for.
+    while IFS= read -r line; do
+        case "$line" in
+            LoadState=*) load=${line#*=} ;;
+            InactiveEnterTimestamp=*) last=${line#*=} ;;
+            Result=*) result=${line#*=} ;;
+            ExecMainStatus=*) code=${line#*=} ;;
+        esac
+    done <<<"$props"
+    if [ "$load" != loaded ]; then
+        echo "NOT INSTALLED — $1 is ${load:-absent} (km install-units)"
+    elif [ -z "$last" ]; then
+        echo "NEVER RUN — $1 exists but its timer has never fired it"
+    elif [ "$result" != success ]; then
+        echo "FAILED — last run $last ($result, exit ${code:-?}): journalctl --user -u $1"
+    else
+        echo "ok (last run $last)"
+    fi
+}
+
+unit_ran_ok() { case "$(unit_health "$1")" in ok*) return 0 ;; *) return 1 ;; esac; }
+
 # ---------- status ----------
 
 cmd_status() {
@@ -1165,6 +1200,10 @@ cmd_status() {
         beads=$(echo "$inprog" | awk -v s="$s" '$1 == s { printf "%s ", $2 }')
         printf '%-10s %-10s %-8s %-6s %-6s %s  (%s)\n' "$s" "$class" "$st" "$ctx" "$unread" "${beads:-—}" "$disp"
     done
+
+    echo
+    printf 'dispatch: %s\n' "$(unit_health kingdom-dispatch.service)"
+    printf 'guard:    %s\n' "$(unit_health kingdom-guard.service)"
 
     echo
     local ready
@@ -1227,6 +1266,12 @@ cmd_doctor() {
     check soft "bd mail.delegate points at km" sh -c "bd config get mail.delegate | grep -q 'km mail'"
     check soft "dispatch timer enabled" systemctl --user is-enabled kingdom-dispatch.timer
     check soft "guard timer enabled" systemctl --user is-enabled kingdom-guard.timer
+    # An enabled timer says the machinery is armed, not that it works: the
+    # dispatcher routed nothing for its whole life with both timers green
+    # (gqlc-z1qw), and now that it dies on a bad query, the death lands only in
+    # the journal unless something asks the unit how its last run went.
+    check soft "dispatch last run succeeded" unit_ran_ok kingdom-dispatch.service
+    check soft "guard last run succeeded" unit_ran_ok kingdom-guard.service
     check soft "town is up" tmux has-session -t "=$SESSION"
     return "$ok"
 }
