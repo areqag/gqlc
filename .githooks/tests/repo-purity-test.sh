@@ -169,8 +169,11 @@ check "unknown key added: guard names it" yes \
 
 T="$TMP/quiet"; mkdir -p "$T"; make_town "$T"
 rc="$(run_guard "$T" sh -c "mkdir -p '$T/scratch' && ( unset \"\${!GIT_@}\"; git init -q '$T/scratch/r' ) 2>/dev/null; true")"
+# On failure the guard's own report is the useful diagnostic, so it is carried
+# into the comparison rather than a bare exit status.
+if [ "$rc" = 0 ]; then quiet_got=0; else quiet_got="rc=$rc: $(cat "$T/out")"; fi
 check "writes confined to a fixture path: guard does not fail on its own account" \
-    "$([ "$rc" = 0 ] && echo 0 || cat "$T/out")" "$([ "$rc" = 0 ] && echo 0 || echo "$rc")"
+    0 "$quiet_got"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

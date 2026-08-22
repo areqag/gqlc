@@ -37,15 +37,12 @@ snapshot() {
     git symbolic-ref -q HEAD 2>/dev/null >"$into/ref"
 }
 
-report_pair() {
-    local label="$1" before="$2" after="$3"
-    printf 'repo-purity: %s changed: %s -> %s\n' \
-        "$label" "${before:-<none>}" "${after:-<none>}" >&2
-}
-
 INNER_RC=0
 VERIFIED=0
 
+# shellcheck disable=SC2317  # every line below is reached only through the EXIT
+# trap, which shellcheck does not follow. Running here rather than inline is the
+# whole design: a run that damages the repo AND fails must still report both.
 verify() {
     [ "$VERIFIED" = 1 ] && return
     VERIFIED=1
@@ -65,11 +62,13 @@ verify() {
 
     if [ "$h_before" != "$h_after" ]; then
         damaged=1
-        report_pair "HEAD" "$h_before" "$h_after"
+        printf 'repo-purity: HEAD changed: %s -> %s\n' \
+            "${h_before:-<none>}" "${h_after:-<none>}" >&2
     fi
     if [ "$r_before" != "$r_after" ]; then
         damaged=1
-        report_pair "the checked-out branch (HEAD symbolic-ref)" "$r_before" "$r_after"
+        printf 'repo-purity: the checked-out branch changed: %s -> %s\n' \
+            "${r_before:-<none>}" "${r_after:-<none>}" >&2
     fi
 
     rm -rf "$SNAP"
