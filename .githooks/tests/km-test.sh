@@ -1079,6 +1079,78 @@ else
     ok "an in-progress query that fails refuses before the fresh pass, so no seat is routed work another seat is holding"
 fi
 
+# --- the halt stops the guard sweep too (gqlc-6dzi) --------------------------
+# `km halt` promises the town will wake nobody until it is lowered, and the
+# dispatcher honours that. The guard sweep is a SECOND timer-driven wake path
+# and read no flag at all, so a halted town went on launching a real claude
+# session once per guard cadence — spending tokens under a halt, invisibly to
+# whoever raised it. Article VI.4 reserves lowering a halt to Սեդրակ or
+# Անդրանիկ, so a halt that does not actually stop the town is a halt in name
+# only and the person who raised it has no way to find that out.
+#
+# These rows live down here rather than beside the halt rows above because they
+# need the tmux stub: with the town DOWN, guard-sweep parks on its first line
+# and never reaches a halt check, so a row run up there would pass without
+# witnessing anything. That vacuity is the whole reason this shipped.
+run_guard() { OUT="$(PATH="$BIN:$PATH" "$KM" guard-sweep 2>&1)"; RC=$?; }
+
+# The control, and it has to come first: a sweep that wakes nobody is the
+# result under test below, so this row is what distinguishes the halt working
+# from the sweep being broken outright.
+dispatch_case '[]' '[]'
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "an unhalted guard sweep wakes Րաֆֆի" "rc=$RC out=$OUT"
+elif ! wake_of raffi | grep -q 'round'; then
+    bad "an unhalted guard sweep wakes Րաֆֆի" "the sweep woke nobody with no halt raised (woken: $(woken_seats)) out=$OUT"
+else
+    ok "with no halt raised the guard sweep wakes Րաֆֆի for his round, so a silent sweep below means the flag and not a broken sweep"
+fi
+
+dispatch_case '[]' '[]'
+run halt guard cadence must stop too
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "a halted guard sweep wakes nobody" "rc=$RC out=$OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "a halted guard sweep wakes nobody" "it woke: $(woken_seats) out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'halted'; then
+    bad "a halted guard sweep wakes nobody" "the sweep was silent but does not say the halt held it: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'guard cadence must stop too'; then
+    bad "a halted guard sweep wakes nobody" "it does not quote the reason the halt was raised for: $OUT"
+else
+    ok "a halted guard sweep wakes nobody and says the halt held it, quoting the reason, as the dispatcher already did"
+fi
+
+# The over-correction this must not become. The halt is aimed at the TIMERS —
+# the two paths that wake seats with nobody watching. A human at a terminal is
+# the one who lowers the halt, and taking his manual wake away with it would
+# leave a halted town with no way to be worked on at all.
+dispatch_case '[]' '[]'
+run halt manual paths stay open
+OUT="$(PATH="$BIN:$PATH" "$KM" wake raffi --reason "by hand during a halt" 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "a halt does not disarm a wake typed by hand" "rc=$RC out=$OUT"
+elif ! wake_of raffi | grep -q 'by hand during a halt'; then
+    bad "a halt does not disarm a wake typed by hand" "the manual wake was swallowed by the halt (woken: $(woken_seats)) out=$OUT"
+else
+    ok "a halt stops the timers and not the operator: km wake still reaches a seat while the flag is up"
+fi
+
+# The message is part of the defect, not just the code. `km halt` named ONE of
+# the two timers it stops, so an operator reading the line had no reason to
+# suspect the other was still running — and the line was the only report he got.
+dispatch_case '[]' '[]'
+run halt what does it claim
+if [ "$RC" -ne 0 ]; then
+    bad "the halt message names every wake path it stops" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -qi 'guard'; then
+    bad "the halt message names every wake path it stops" "it promises a quiet town without mentioning the guard sweep: $OUT"
+else
+    ok "raising a halt names the guard sweep alongside the dispatcher, so the promise covers both timers it makes"
+fi
+
 # --- the silent result cap (gqlc-mlca) ---------------------------------------
 # bd's JSON renderers truncate and say nothing: `ready` at 100, `list` at 50.
 # The plain renderers do disclose it ("Showing 100 of 234 ready issues"), so the
