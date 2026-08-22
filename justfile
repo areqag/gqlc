@@ -351,12 +351,14 @@ tmp-report root=scratch_root:
 # untracked changes, a worktree whose content is not already equal on origin/master,
 # anything a live process has as its cwd or holds an fd on, anything written to
 # inside the age threshold, anything holding a git repository this repo does not
-# track, and anything belonging to the machine. Under `apply` every text artifact
-# under -archive-max-file that it is about to destroy is tarred to a file outside
-# the scan root first — 690 MiB of agent logs came to 43 MiB in the manual
-# remediation this replaces — and what it could NOT archive is reported on stdout
-# as unrecoverable, because those files are deleted all the same: every one of
-# them counted under a reason, and the first few of each reason named.
+# track, and anything belonging to the machine. Under `apply` the text artifacts
+# under -archive-max-file that it is about to destroy are tarred to a file outside
+# the scan root first, up to a total of -archive-max-total — 690 MiB of agent logs
+# came to 43 MiB in the manual remediation this replaces — and what it could NOT
+# archive is reported on stdout as unrecoverable, because those files are deleted
+# all the same: every one of them counted under a reason, and the first few of
+# each reason named. Hitting the total instead refuses the deletion outright,
+# since the record it would delete over is incomplete.
 #
 # The root is positional, so `apply ~` is one typo away from the home directory.
 # `apply` is refused over any root outside /tmp and /var/tmp — $TMPDIR is not
