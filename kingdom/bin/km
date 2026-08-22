@@ -978,15 +978,22 @@ cmd_seat_refresh() {
     target=$(git -C "$mr" rev-parse --verify --quiet origin/master) ||
         die "seat-refresh: no origin/master to refresh $seat against"
 
-    local head branch dirty behind
+    local head branch dirty behind ahead
     head=$(git -C "$wt" rev-parse HEAD)
     branch=$(git -C "$wt" symbolic-ref --quiet --short HEAD || true)
     dirty=$(git -C "$wt" status --porcelain)
     # Counted before any move, and restricted to the paths that ARE the gates.
     behind=$(git -C "$wt" log --oneline "HEAD..$target" -- .githooks .claude | wc -l)
+    # Detached and clean is not the same as parked. A citizen who committed
+    # without first cutting a branch leaves both of those signals empty, and
+    # moving that worktree takes the commit off every ref. A genuinely parked
+    # seat is an ancestor of target, so this is 0 for it and holds nobody
+    # who is not carrying something.
+    ahead=$(git -C "$wt" rev-list --count "$target..HEAD")
 
-    if [ -n "$dirty" ] || [ -n "$branch" ]; then
-        local why="branch ${branch:-<detached>} in flight"
+    if [ -n "$dirty" ] || [ -n "$branch" ] || [ "$ahead" -gt 0 ]; then
+        local why="$ahead commit(s) of its own, on no branch"
+        [ -n "$branch" ] && why="branch $branch in flight"
         [ -n "$dirty" ] && why="uncommitted work in the tree"
         if [ "$behind" -eq 0 ]; then
             echo "seat-refresh $seat: held ($why); its hooks are current$stale_note"

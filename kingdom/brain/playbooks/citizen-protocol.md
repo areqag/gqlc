@@ -12,7 +12,8 @@ sweep, or a nudge). Then:
 
 Your worktree is brought up to master before the session starts, so the gates
 in `.githooks/` are master's — but only if you were parked. If you were holding
-work (a branch, or an uncommitted tree) nothing is moved for you, and if your
+work (a branch, an uncommitted tree, or a commit you never put on a branch)
+nothing is moved for you, and if your
 gates are also behind, the first lines of your message say so. That banner
 means the hooks running here are the ones your branch was cut from, the
 push-to-master guard among them: rebase onto `origin/master`, or check your

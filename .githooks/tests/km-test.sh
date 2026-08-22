@@ -1737,7 +1737,7 @@ fixture_ok=1
 c1=$(gitf -C "$hk/town" rev-parse HEAD 2>/dev/null || true)
 
 # Park four seats at C1, exactly as `km up` does.
-for s in raffi mihr vahagn artur; do
+for s in raffi mihr vahagn artur hayk; do
     gitf -C "$hk/town" worktree add --detach --quiet "$hk/town-seat-$s" master \
         >>"$hk/setup.log" 2>&1 || fixture_ok=0
 done
@@ -1870,6 +1870,35 @@ else
     else
         ok "seat-refresh does not warn about a seat whose in-flight branch already carries every merged hook"
     fi
+
+    # WORK IN FLIGHT, half three — the shape neither half above covers. A seat
+    # can be DETACHED with a CLEAN tree and still be carrying work: a citizen
+    # who committed without first cutting a branch. Nothing is dirty and there
+    # is no branch, so "parked" reads TRUE, and the move drops that commit off
+    # every ref while reporting success — measured on gqlc-gx2y as rc=0 with
+    # "0 hook/settings change(s) picked up", the seat's own commit findable
+    # afterwards only through the worktree reflog.
+    ahead_row="seat-refresh holds a detached seat that has committed, instead of orphaning the commit"
+    (cd "$hk/town-seat-hayk" \
+        && gitf -c user.email=s@example.invalid -c user.name=s \
+            commit --quiet --allow-empty -m "committed without cutting a branch") \
+        >>"$hk/setup.log" 2>&1
+    hayk_head=$(seat_head hayk)
+    refresh hayk
+    if [ "$hayk_head" = "$c1" ]; then
+        bad "$ahead_row" "the fixture did not commit in hayk's worktree; see $hk/setup.log"
+    elif [ "$(seat_head hayk)" != "$hayk_head" ]; then
+        bad "$ahead_row" "it moved to $(seat_head hayk); $hayk_head is now reachable from no ref"
+    elif [ "$RC" -ne 3 ]; then
+        bad "$ahead_row" "rc=$RC out=$OUT"
+    elif ! printf '%s' "$OUT" | grep -q 'commit(s) of its own'; then
+        # The REASON, not merely the hold. Widening the dirty or branch test to
+        # catch everything holds this seat too, for a cause that is not true of
+        # it, and a row reading only rc=3 calls that a pass.
+        bad "$ahead_row" "held, but not for the commits it carries: $OUT"
+    else
+        ok "$ahead_row"
+    fi
 fi
 
 # A refresh judges a seat against origin/master, so with no origin/master there
@@ -1992,6 +2021,40 @@ EOF
         bad "$quiet_row" "a seat carrying every merged hook was warned anyway"
     else
         ok "$quiet_row"
+    fi
+
+    # THE DEGRADATION ARM. seat-refresh fails for causes that are not the
+    # seat's doing — the lone town has no origin/master to judge against, and
+    # a dead network fetch is the same shape — and a wake that died there
+    # would cost a citizen the whole day over a warning. km-seat's `*)` arm
+    # exists to keep the session and name the failure; it was unwitnessed.
+    # Found by mutation on gqlc-gx2y: replacing the arm with an exit survived
+    # 65/65, because the argv fixture used to walk through it by accident and
+    # the (correct) fixture fix took that away.
+    degrade_row="a refresh that FAILS still wakes the seat, and names the failure on stderr"
+    mkdir -p "$hk/seatstate/seats/astghik"
+    echo "resume your in-progress work: gqlc-fixture" >"$hk/seatstate/seats/astghik/wake"
+    rm -f "$hk/first-message.txt"
+    (
+        unset "${!GIT_@}"
+        cd "$hk/lone" || exit 1
+        PATH="$shim:$PATH" KM_STATE_DIR="$hk/seatstate" \
+            timeout 20 "$REPO/kingdom/bin/km-seat" astghik
+    ) >"$hk/kmseat-lone.log" 2>&1 || true
+
+    if [ ! -f "$hk/first-message.txt" ]; then
+        bad "$degrade_row" "the failed refresh stopped the wake: $(tail -3 "$hk/kmseat-lone.log")"
+    elif ! grep -q 'gqlc-fixture' "$hk/first-message.txt"; then
+        bad "$degrade_row" "the seat woke, but its wake reason did not survive the failure"
+    elif ! grep -q 'could not refresh' "$hk/kmseat-lone.log"; then
+        bad "$degrade_row" "the failure was swallowed — nothing on stderr reports it"
+    elif ! grep -q 'no origin/master' "$hk/kmseat-lone.log"; then
+        # The cause, not just the fact. An arm that printed a fixed sentence
+        # and discarded seat-refresh's own words passes a fact-only row while
+        # telling the reader nothing they can act on.
+        bad "$degrade_row" "stderr reports a failure but not seat-refresh's reason for it"
+    else
+        ok "$degrade_row"
     fi
 fi
 
