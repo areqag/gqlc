@@ -36,10 +36,12 @@ permission_mode = "bypassPermissions"
 #
 # The mechanism, stated at what is actually measured (Միհր, 2026-08-22,
 # verdict-6muh-r1): `/effort` changes the level mid-session in the interactive
-# mode km-seat:66 launches, offering exactly the five levels below. It is
-# unavailable under headless `claude -p`. What is NOT yet measured is whether a
-# seat can put text into its OWN prompt — so a citizen's own hand on the level,
-# unaided, is a right the machinery does not demonstrably serve yet (gqlc-w6tl).
+# mode km-seat:83 launches, offering exactly the five levels below. It is
+# unavailable under headless `claude -p`. It is also a client-side TUI command
+# parsed from USER input and never sent to the model, so a citizen — which emits
+# assistant turns — cannot invoke it by writing it. V.6.2's right therefore needs
+# a deliverer, and which one is still open (gqlc-jmwh, not gqlc-w6tl: that bead
+# is the launch flag, and closes with it).
 # Levels: low | medium | high | xhigh | max.
 #
 # Provisional, adopted 2026-08-22 with the numbers explicitly open: the town
