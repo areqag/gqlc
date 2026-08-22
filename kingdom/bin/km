@@ -463,7 +463,10 @@ cmd_dispatch() {
           | select($cls != null)
           | {id, priority, cls: $cls}
         ] | sort_by(.priority) | .[] | "\(.id) \(.cls)"'); then
-        die "dispatch: the ready-queue query failed; nothing routed this run"
+        # Not "nothing routed": the resume pass above may already have queued
+        # wakes, and they stand. An operator reading this during an incident has
+        # to be able to trust it.
+        die "dispatch: the ready-queue query failed; no fresh bead routed (any resume wakes above stand)"
     fi
     while IFS=' ' read -r id cls; do
         [ -n "$id" ] || continue

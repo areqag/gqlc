@@ -391,6 +391,23 @@ else
     ok "a ready query that fails makes the dispatcher refuse loudly and wake nobody, not report an idle run"
 fi
 
+# The refusal above claims the resume wakes still stand. That claim is only
+# worth printing if it is true, so it is pinned: resume succeeds, the fresh
+# query then fails, and the seat that was handed its own work keeps it.
+dispatch_case 'not json at all' '[
+  {"id":"gqlc-r2","assignee":"vahagn","labels":["class:warrior"]}
+]'
+run_dispatch
+if [ "$RC" -eq 0 ]; then
+    bad "a resume wake survives a later fresh-query failure" "exited 0: $OUT"
+elif ! wake_of vahagn | grep -q 'gqlc-r2'; then
+    bad "a resume wake survives a later fresh-query failure" "the resume wake was lost: $(woken_seats)"
+elif ! printf '%s' "$OUT" | grep -q 'resume wakes above stand'; then
+    bad "a resume wake survives a later fresh-query failure" "the refusal does not say the resume wakes stand: $OUT"
+else
+    ok "when the fresh query fails after the resume pass, the resume wakes stand and the refusal says so"
+fi
+
 dispatch_case '[]' '[]'
 printf '1' >"$KM_FAKE_INPROG.rc"
 run_dispatch
