@@ -67,7 +67,8 @@ Nothing to do: the execution bead becomes ready on its own and the
 dispatcher routes it to a free Ռազմիկ. The architect who designed it stays
 available by mail for questions, and takes their next design bead — they do
 not execute this one, and per Constitution Article V.2 they do not review the
-resulting PR either. The Ռազմիկ files a `class:judge` bead and Միհր reviews.
+resulting PR either. The Ռազմիկ files a `class:judge` bead and a Դատաւոր
+reviews — and not one who shaped this design (Constitution V.2.2).
 The design itself is not reviewed by anyone; closing the bead is the
 architect's own assertion that it is executable.
 

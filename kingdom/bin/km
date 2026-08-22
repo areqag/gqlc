@@ -387,15 +387,15 @@ worker_seats() {
     done
 }
 
-# The seats that spend a slot of concurrency.max_active. The judge is exempt
-# alongside the mayor and the guard: he is the town's sole merge gate, so a cap
-# that can close him is a merge freeze rather than a throttle, and he competes
-# with the very seats producing his queue (gqlc-dz85). He is still a worker
-# seat above — dropping him there would leave free_worker_of_class unable to
-# find him and route him nothing at all.
+# The seats that spend a slot of concurrency.max_active. Judges are exempt
+# alongside the mayor and the guard: the bench is the town's merge gate, so a
+# cap that can close it is a merge freeze rather than a throttle, and it
+# competes with the very seats producing its queue (gqlc-dz85). Judges are
+# still worker seats above — dropping them there would leave
+# free_worker_of_class unable to find them and route them nothing at all.
 #
 # The exemption lets the awake count exceed max_active by the number of judge
-# seats the roster holds, which is one today.
+# seats the roster holds.
 capped_seats() {
     local s c
     for s in $(worker_seats); do
