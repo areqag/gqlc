@@ -303,6 +303,12 @@ make_inboxes() {
 wake_of()     { cat "$KM_STATE_DIR/seats/$1/wake" 2>/dev/null; }
 woken_seats() { find "$KM_STATE_DIR/seats" -mindepth 2 -maxdepth 2 -name wake 2>/dev/null | sed 's|.*/seats/||; s|/wake$||' | sort | tr '\n' ' '; }
 
+# The cap counts seats whose status file reads `awake`, which is what a running
+# session leaves behind. A queued `wake` file (as the priority row above uses)
+# is a different state and does NOT count, so the two cannot stand in for each
+# other.
+fill_cap() { local s; for s in "$@"; do mkdir -p "$KM_STATE_DIR/seats/$s"; echo awake >"$KM_STATE_DIR/seats/$s/status"; done; }
+
 # The fresh pass: a bead of each class reaches a free seat of that class, and
 # the unlabelled one reaches nobody. This row is also the liveness control for
 # every row below it — it is the only one that proves the stubs, the tmux seam
@@ -414,6 +420,160 @@ elif ! wake_of hayk | grep -q 'bead:gqlc-hi'; then
     bad "the last free seat goes to the higher-priority bead" "it took the lower-priority bead: $(wake_of hayk)"
 else
     ok "with one free seat and two ready beads, the higher-priority bead is the one routed"
+fi
+
+# --- the concurrency cap, and the judge's exemption from it (gqlc-dz85) ------
+# Միհր is the town's sole merge gate. Counting him against max_active schedules
+# him 1-in-12 against the eight warriors generating the very PRs he must clear,
+# so work enters faster than it can leave and the backlog can only grow. Worse,
+# the cap check is an early return that fires BEFORE the queue is sorted, so at
+# a full cap a P0 judge bead is not outranked — it is never considered at all.
+#
+# The cap itself had no test of any kind before this section, so the rows below
+# pin both halves: that a full cap does stop capped work, and that it does not
+# stop the gate.
+
+# The warrior bead is P0 and the judge bead P1, so the judge sorts SECOND: the
+# row fails if the fix merely reaches the queue at a full cap and takes its
+# head. The unrouted warrior bead is also the control proving the cap really is
+# full — without it, a woken judge could just mean the cap never engaged.
+dispatch_case '[
+  {"id":"gqlc-wcap","priority":0,"assignee":null,"labels":["class:warrior"]},
+  {"id":"gqlc-jcap","priority":1,"assignee":null,"labels":["class:judge"]}
+]' '[]'
+fill_cap aramazd vahagn astghik ar nvard
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a full cap does not close the merge gate" "rc=$RC out=$OUT"
+elif grep -rq 'gqlc-wcap' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "a full cap does not close the merge gate" "the cap never engaged — the warrior bead routed, so this row proves nothing: $(woken_seats)"
+elif ! wake_of mihr | grep -q 'bead:gqlc-jcap'; then
+    bad "a full cap does not close the merge gate" "the judge was not woken for ready judge work at a full cap (woken: $(woken_seats)) out=$OUT"
+else
+    ok "with every capped slot held, a ready judge bead still wakes the judge while a higher-priority warrior bead is correctly held back"
+fi
+
+# The over-correction this must not become: exempting the judge from the cap is
+# not licence to wake somebody on every full-cap run.
+dispatch_case '[
+  {"id":"gqlc-wonly","priority":0,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+fill_cap aramazd vahagn astghik ar nvard
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a full cap with no judge work wakes nobody" "rc=$RC out=$OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "a full cap with no judge work wakes nobody" "it woke: $(woken_seats) out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'no free slot'; then
+    bad "a full cap with no judge work wakes nobody" "the run does not say the cap held it: $OUT"
+else
+    ok "a full cap with no ready judge bead wakes nobody, so the exemption is for judge work and not for every run"
+fi
+
+# The second half of the exemption: a judge who IS awake must not consume one
+# of the five slots the warriors and architects share. Four warriors plus the
+# judge reads as five awake seats to the defect and four to the fix, and the
+# difference is a warrior bead that either routes or does not.
+dispatch_case '[
+  {"id":"gqlc-wfree","priority":0,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+fill_cap aramazd vahagn astghik ar mihr
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "an awake judge does not spend a capped slot" "rc=$RC out=$OUT"
+elif ! wake_of nvard | grep -q 'bead:gqlc-wfree'; then
+    bad "an awake judge does not spend a capped slot" "the free warrior slot went unused (woken: $(woken_seats)) out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'no free slot'; then
+    bad "an awake judge does not spend a capped slot" "the run counted the judge and declared itself full: $OUT"
+else
+    ok "an awake judge is not counted against max_active, so the fifth slot is still spent on warrior work"
+fi
+
+# The same exemption as the operator reads it. Six seats are awake here and the
+# line must say five, because the number is what a human sizes the town by —
+# and gqlc-z1qw, gqlc-bn5r and gqlc-ed2u were each a healthy-looking indicator
+# vouching for machinery that was not doing what the number implied.
+dispatch_case '[]' '[]'
+fill_cap aramazd vahagn astghik ar nvard mihr
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the printed cap count excludes the judge" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q '5/5'; then
+    bad "the printed cap count excludes the judge" "six awake seats, one of them the judge, did not print as 5/5: $OUT"
+else
+    ok "with the judge awake alongside a full bench, the cap line counts the five capped seats and not the six awake ones"
+fi
+
+# Exemption means the judge's wake costs the town nothing, not merely that he
+# is reached. With one slot free and the judge bead sorting first, a judge wake
+# that decrements `slots` would spend the warriors' last slot on a seat that
+# was never counted for one — invisible at a full cap, where the counter is
+# already floored, and a stolen slot everywhere else.
+dispatch_case '[
+  {"id":"gqlc-jslot","priority":0,"assignee":null,"labels":["class:judge"]},
+  {"id":"gqlc-wslot","priority":1,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+fill_cap aramazd vahagn astghik ar
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a judge wake does not spend the last free slot" "rc=$RC out=$OUT"
+elif ! wake_of mihr | grep -q 'bead:gqlc-jslot'; then
+    bad "a judge wake does not spend the last free slot" "the judge was not woken at all (woken: $(woken_seats)) out=$OUT"
+elif ! wake_of nvard | grep -q 'bead:gqlc-wslot'; then
+    bad "a judge wake does not spend the last free slot" "the judge's wake consumed the one free warrior slot (woken: $(woken_seats)) out=$OUT"
+else
+    ok "with one slot free, routing a judge bead ahead of a warrior bead still leaves that slot for the warrior"
+fi
+
+# The same property on the other pass: resuming the judge must not spend a slot
+# either.
+dispatch_case '[
+  {"id":"gqlc-wslot2","priority":1,"assignee":null,"labels":["class:warrior"]}
+]' '[
+  {"id":"gqlc-jslot2","assignee":"mihr","labels":["class:judge"]}
+]'
+fill_cap aramazd vahagn astghik ar
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a judge resume does not spend the last free slot" "rc=$RC out=$OUT"
+elif ! wake_of mihr | grep -q 'gqlc-jslot2'; then
+    bad "a judge resume does not spend the last free slot" "the judge was not resumed at all (woken: $(woken_seats)) out=$OUT"
+elif ! wake_of nvard | grep -q 'bead:gqlc-wslot2'; then
+    bad "a judge resume does not spend the last free slot" "the judge's resume consumed the one free warrior slot (woken: $(woken_seats)) out=$OUT"
+else
+    ok "resuming the judge's own in-progress bead leaves the free slot for warrior work"
+fi
+
+# A review half-done is the same gate as a review not started: if the resume
+# pass is behind the cap check, a judge who claimed a bead and slept never gets
+# it back while the town is busy.
+dispatch_case '[]' '[
+  {"id":"gqlc-jres","assignee":"mihr","labels":["class:judge"]}
+]'
+fill_cap aramazd vahagn astghik ar nvard
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a full cap does not strand a half-done review" "rc=$RC out=$OUT"
+elif ! wake_of mihr | grep -q 'resume your in-progress work: gqlc-jres'; then
+    bad "a full cap does not strand a half-done review" "the judge was not handed his own bead back (woken: $(woken_seats)) out=$OUT"
+else
+    ok "a judge holding an in-progress bead is resumed at a full cap, not stranded behind it"
+fi
+
+# Exempt from the cap is not exempt from being busy. Waking a judge who is
+# already mid-review would interrupt him and, with more than one judge seat,
+# would be the thing that actually uncaps the town.
+dispatch_case '[
+  {"id":"gqlc-jbusy","priority":0,"assignee":null,"labels":["class:judge"]}
+]' '[]'
+fill_cap aramazd vahagn astghik ar nvard mihr
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "an awake judge is not woken again" "rc=$RC out=$OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "an awake judge is not woken again" "it woke: $(woken_seats) out=$OUT"
+else
+    ok "a judge who is already awake is not woken again for ready judge work"
 fi
 
 # Fail-closed, the half that made this invisible for the kingdom's whole life:
