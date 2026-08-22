@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+# Claude Code PreToolUse hook for the interactive-input tools. It refuses them
+# when the session is an unattended seat, and does nothing otherwise.
+#
+# A seat is a claude session started by km-seat with no human at the terminal
+# (KINGDOM_SEAT is exported there, so every hook subprocess inherits it). A
+# tool that waits for a human answer therefore waits forever, holding a worker
+# slot, while the statusline heartbeat goes on refreshing — the turn is live,
+# so heartbeat staleness cannot see it. 13+ minutes were measured that way
+# (bd gqlc-n97e). The town already owns the non-blocking affordance for "I
+# need someone else's judgment"; the denial text names it.
+#
+# Hook contract, identical to claude-pre-bash: JSON on stdin, deny = exit 0 +
+# JSON carrying permissionDecision "deny", allow = exit 0 with no output.
+#
+# FAIL CLOSED, which is the opposite of claude-pre-bash's choice on its own
+# internal error, deliberately: that hook gates Bash, so a bug that denied
+# would wedge the session that has to repair it. This one gates two tools no
+# repair needs, so the costs are asymmetric — a wrongly denied prompt costs a
+# mail, a wrongly allowed one costs a wedged slot until someone kills it.
+#
+# The seat check runs BEFORE stdin is read, so an attended session cannot be
+# denied by a malformed payload; stdin only decorates the message with a name.
+#
+# EnterPlanMode is gated and ExitPlanMode is NOT: plan-mode approval is the
+# other synchronous human prompt, and denying entry means never reaching it,
+# while denying the exit would strand a session inside plan mode — a new wedge
+# of the shape this file exists to remove. Seats are launched with
+# permission_mode bypassPermissions (km cfg claude permission_mode), so none
+# of them starts inside plan mode with the exit as its only way out.
+#
+# Tests: .githooks/tests/claude-pre-ask-test.sh (run via `just test-hooks`).
+
+import json
+import os
+import sys
+
+REASON = (
+    "Unattended seat: no human is at this terminal, so an interactive prompt "
+    "blocks forever while the heartbeat stays green (bd gqlc-n97e). Take the "
+    "non-blocking path instead: write the question and its options into the "
+    "bead (bd update <id> --append-notes), mail whoever's judgment you need "
+    "(bd mail send <seat> — unread mail wakes sedrak; other seats read at "
+    "their next wake), then km sleep or continue other work. The answer will "
+    "be waiting at your next wake. Deciding late on stale premises is "
+    "deciding wrong; sleeping is not."
+)
+
+
+def requested_tool():
+    return str(json.load(sys.stdin).get("tool_name") or "") or None
+
+
+def deny(tool):
+    subject = "%s is refused in an unattended seat. " % tool if tool else ""
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": subject + REASON,
+                }
+            }
+        )
+    )
+
+
+def main():
+    if not os.environ.get("KINGDOM_SEAT", "").strip():
+        return
+    deny(requested_tool())
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        # The only error path, so the malformed-payload cases in the suite
+        # exercise it rather than a second handler nearer the parse. An
+        # unreadable payload does not make the session attended.
+        deny(None)
+    sys.exit(0)

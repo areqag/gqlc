@@ -24,6 +24,15 @@
           }
         ],
         "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": ".githooks/claude-pre-ask",
+            "type": "command"
+          }
+        ],
+        "matcher": "AskUserQuestion|EnterPlanMode"
       }
     ],
     "SessionStart": [
