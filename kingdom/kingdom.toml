@@ -51,10 +51,21 @@ permission_mode = "bypassPermissions"
 # (V.6.6 — NOT V.6.5, which records escalations only: a tuner reading just the
 # escalations sees only the moves that went deeper, and the defaults ratchet
 # upward by construction), not from impatience.
+#
+# judge xhigh -> high, 2026-08-22 (Սեդրակ, at Անդրանիկ's direction). The honest
+# basis, since the paragraph above forbids impatience and impatience is part of
+# it: 22 of 25 open PRs were CLEAN with green CI and waiting only on a verdict,
+# on a bench of two. The defensible half is that the deep evidence-gathering has
+# moved OFF the judge — ephemeral adversarial agents now mutate the guards and
+# run the batteries in parallel, and the judge audits that work instead of
+# building it. Depth moved; it did not vanish. The undefensible half is that we
+# were also in a hurry. Not measured, and V.6.2 leaves every judge free to go
+# deeper without asking — if a judge finds `high` too shallow to sign honestly,
+# the number is wrong and not the judge.
 mayor     = "medium"
 architect = "high"
 warrior   = "medium"
-judge     = "xhigh"
+judge     = "high"
 guard     = "low"
 
 [seats]

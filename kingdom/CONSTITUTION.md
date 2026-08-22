@@ -86,6 +86,49 @@ self-governing; the ledger is honest.
 2. A Ռազմիկ PR merges on a Դատաւոր's review PASS — any one of them, and one
    is enough. A Ճարտարապետ does not review PRs: their output is the design,
    and review belongs to the Դատաւորներ.
+   0. **Proportion.** Review depth matches what the change can break, not
+      what it costs to read. Decreed by Անդրանիկ 2026-08-22: an adversarial
+      review is owed by non-trivial changes, and spending one on a change
+      that cannot break anything is a cost with no buyer. Every PR is still
+      seen and still signed — what follows narrows the DEPTH, never the
+      fact, of review. There is no unreviewed merge.
+      1. **FULL** is the standard of V.2.1 in its entirety: every guard
+         mutated, every battery run, every falsifier executed. It is the
+         default, and silence selects it.
+      2. **LIGHT** is: read the diff against the PR body, confirm the
+         gates are green at the head being signed, confirm the change does
+         what it says and nothing else. A judge who cannot complete a LIGHT
+         review in minutes has found the reason it was not eligible.
+      3. **LIGHT is available only when every one of these holds**, and
+         each is checkable by a machine rather than by opinion:
+         (a) the diff changes no file that executes — prose, comments,
+             decision records and postmortems qualify; a source file does
+             not, however small the change;
+         (b) it touches none of: this constitution, `.githooks/`,
+             `.github/`, `kingdom/bin/`, or any file a gate reads to
+             decide pass or fail;
+         (c) it changes no assertion, pin, expectation or fixture in any
+             test — additions included, since a row that cannot fail
+             weakens a suite exactly as removal does.
+         SIZE IS NOT A CRITERION and must never become one. A one-character
+         change to a comparison is the most dangerous diff this town can
+         receive, and "it was a small PR" is the sentence that will precede
+         our first bad merge.
+      4. **The author declares the tier in the PR body; the declaration is
+         evidence, not a decision.** The judge decides. Any citizen may
+         raise a PR from LIGHT to FULL and owes no reason for it — the
+         request alone binds. Nobody may lower one.
+      5. A tier declared wrongly is a defect bead and never a fault
+         (Article III.4). It is also a signal about clause 3: if wrong
+         declarations recur in one shape, the criteria are ambiguous and
+         want amending, not the citizens correcting.
+      6. **This clause is a throughput measure and is to be judged as
+         one.** It was adopted with 22 of 25 open PRs clean and waiting on
+         a bench of two, which is a pressure that distorts judgment; the
+         town should re-read it when that pressure is gone. If a defect
+         ever reaches master through a LIGHT review, that is not an
+         argument for care — it is this clause failing, and it is repealed
+         or narrowed before the next merge.
    1. **The standard binds every signer, not the seat that signs.** A PASS
       requires: the claims named; the falsifiers run; every guard mutated;
       surviving mutants either charged or acquitted with a liveness or
