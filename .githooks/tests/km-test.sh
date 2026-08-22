@@ -2000,6 +2000,29 @@ else
     ok "deploy advances its own root under an exported GIT_DIR and leaves that repo where it stood"
 fi
 
+# The scrub is an allowlist, so it needs a witness on the KEEP side too. Every
+# row above proves something was dropped; drop everything and they all still
+# pass, while deploy quietly loses the transport it fetches over. Origin is
+# rewritten to ssh so the fetch must invoke GIT_SSH_COMMAND. The fetch is
+# EXPECTED to fail — there is no server — and what is asserted is that the
+# transport was reached at all, which is the only part the scrub decides.
+deploy_case deploy-ssh-env
+gitf -C "$TMP/deploy-ssh-env" remote set-url origin ssh://git@km-test.invalid/town.git
+cat >"$TMP/fake-ssh" <<SSH
+#!/usr/bin/env bash
+printf 'reached\n' >>"$TMP/ssh-marker"
+exit 255
+SSH
+chmod +x "$TMP/fake-ssh"
+rm -f "$TMP/ssh-marker"
+GIT_DIR="$DECOY_GITDIR" GIT_SSH_COMMAND="$TMP/fake-ssh" "$KM" deploy >/dev/null 2>&1 || true
+if [ ! -s "$TMP/ssh-marker" ]; then
+    bad "the scrub keeps the ssh transport deploy fetches over" \
+        "GIT_SSH_COMMAND did not survive git_at, so the fetch never reached it"
+else
+    ok "the scrub drops GIT_DIR and keeps GIT_SSH_COMMAND, so deploy can still reach an ssh origin"
+fi
+
 export KM_DEPLOY_ROOT="$TMP/deployed"
 
 # This suite builds git repositories, so it must be able to prove it built them
