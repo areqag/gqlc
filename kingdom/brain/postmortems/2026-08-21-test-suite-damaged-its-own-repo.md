@@ -55,15 +55,18 @@ The incident contaminated the record of the incident.
 Two things the git-side measurement could not reach. Each window contains
 several different citizens filing within the same minutes, which nothing but a
 shared store can produce — corroboration of the mechanism from outside git. And
-the repair is not a one-liner: `bd create` and `bd update` expose no `--owner`,
-and no subcommand's help mentions the field, so the value cannot be corrected
-where it is wrong. One path is untested rather than ruled out — `bd export`
-emits `owner`, and `bd import` documents upsert semantics and a full
-`export | import` round-trip, so an edited export may set it. I did not run
-that experiment, because the only store to run it against is the live one and
-this is a postmortem about a suite that wrote to the repository it ran in.
-gqlc-r2xg owns the repair-or-annotate decision; this is a lead for it, not a
-finding. The store nobody measured is the store where it persists.
+the ledger damage does not appear to be repairable through the tool, which was
+measured rather than assumed. `bd create` and `bd update` expose no `--owner`,
+and no subcommand's help mentions the field. The one documented way round —
+`bd export` emits `owner`, and `bd import` promises upsert semantics and a full
+`export | import` round-trip — does not work either, and fails in the worse
+direction: on a throwaway store, an import whose JSONL carried a corrected
+`owner` printed `Imported 1 issues` and left the old value in place. The
+control that makes that conclusive changed `title` and `owner` on the same row
+in the same import; `title` moved, `owner` did not. So the upsert ran and drops
+this field specifically, silently, behind a success message — anyone attempting
+the repair would be told it worked. The store nobody measured is the store
+where it persists.
 
 ## What allowed it
 
