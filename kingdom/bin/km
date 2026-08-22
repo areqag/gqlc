@@ -430,8 +430,14 @@ cmd_dispatch() {
     # nothing in it: swallowing the status with `|| x=""` is what let a total
     # routing failure print "done (0 wake(s) this run)" and exit 0 for the whole
     # life of the kingdom, with no seat ever woken and nothing to see (gqlc-z1qw).
+    # `-n 0` is unlimited and is load-bearing on every bd query here. The JSON
+    # renderers cap silently — `ready` at 100, `list` at 50 — while the plain
+    # renderers disclose it ("Showing 100 of 234 ready issues"), so the caller
+    # that cannot read prose is the only one not told. A bead past the window
+    # is not a bead nobody claimed, it is a bead nobody was shown, and the two
+    # are indistinguishable from the board (gqlc-mlca).
     local inprog
-    if ! inprog=$(bd list --status in_progress --json 2>/dev/null |
+    if ! inprog=$(bd list --status in_progress -n 0 --json 2>/dev/null |
         jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"' | sort); then
         die "dispatch: the in-progress query failed; nothing routed this run"
     fi
@@ -454,7 +460,7 @@ cmd_dispatch() {
     # `map(...)` the pipe in `($b.labels // []) | index(...)` rebinds `.` to the
     # labels array, so a bare `"class:" + .` is string + array — a type error that
     # aborts the whole program on any unassigned bead, labelled or not.
-    if ! routed=$(bd ready --json 2>/dev/null | jq -r '
+    if ! routed=$(bd ready -n 0 --json 2>/dev/null | jq -r '
         [ .[]
           | select(.assignee == null)
           | . as $b
@@ -499,7 +505,7 @@ cmd_status() {
     echo
 
     local inprog
-    inprog=$(bd list --status in_progress --json 2>/dev/null |
+    inprog=$(bd list --status in_progress -n 0 --json 2>/dev/null |
         jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"') || inprog=""
 
     printf '%-10s %-10s %-8s %-6s %-6s %s\n' SEAT CLASS STATE CTX MAIL BEADS
@@ -520,7 +526,10 @@ cmd_status() {
 
     echo
     local ready
-    ready=$(bd ready --json 2>/dev/null) || ready="[]"
+    # `-n 0`: without it these counters are silently FLOORS, not counts — and a
+    # precise-looking wrong number is worse than none, because the mayor sizes
+    # his standing labelling chore off this line (gqlc-mlca).
+    ready=$(bd ready -n 0 --json 2>/dev/null) || ready="[]"
     echo "ready queue: $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:architect"))] | length') architect, $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:warrior"))] | length') warrior, $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:judge"))] | length') judge, $(echo "$ready" | jq '[.[] | select([((.labels // []) | index("class:architect")), ((.labels // []) | index("class:warrior")), ((.labels // []) | index("class:judge"))] | all(. == null))] | length') unlabelled (Սեդրակ's chore)"
     echo "the king's inbox (andranik): $(unread_count andranik) unread"
 }
