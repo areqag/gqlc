@@ -1312,6 +1312,107 @@ else
     ok "residue whose parent status is neither open nor closed is held rather than cleared — the gate reads 'not closed', so a state this code has not met yet cannot release work"
 fi
 
+# --- class:judge is exempt from the PR arms (gqlc-n4oe) ----------------------
+# A review bead's premise IS an open PR touching that path, so the three arms
+# that ask "might an open PR be touching this?" are inverted for it: they hold
+# the review for exactly as long as anyone wants it, and release it the moment
+# the PR merges. Measured before the fix: of 21 open class:judge beads, exactly
+# 2 carried a subject: label and exactly those 2 were held — one for nine hours,
+# looking from the board like ordinary queue depth.
+#
+# Every row pairs a judge candidate with a warrior candidate differing ONLY in
+# the class label, in ONE invocation. That is what stops the exemption passing
+# by routing everything: the warrior beside it must still hold, and on the same
+# reason it held on before.
+
+# Arm (3) — a definite match in an open PR's file list.
+gh_prs '[{"number":1057,"files":[{"path":"justfile"}]}]'
+hv '[{"id":"gqlc-jrev","labels":["class:judge","subject:justfile"]},
+     {"id":"gqlc-wrev","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a judge bead routes though an open PR touches its subject" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-jrev'; then
+    bad "a judge bead routes though an open PR touches its subject" \
+        "the review of PR #1057 was held by the very PR it reviews: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-wrev — open PR #1057 touches justfile$'; then
+    bad "a judge bead routes though an open PR touches its subject" \
+        "the exemption leaked to the warrior beside it, on the same input: $OUT"
+else
+    ok "a class:judge bead whose subject an open PR modifies is routed — that PR is its premise — while a class:warrior bead on the identical subject still holds on the identical reason"
+fi
+
+# Arm (2) — gh unreachable. "Cannot rule out an open PR" is not a reason to hold
+# a bead whose whole premise is an open PR, so an outage must not idle the
+# review queue on top of everything else it idles.
+GH_RC=1
+hv '[{"id":"gqlc-jrev","labels":["class:judge","subject:justfile"]},
+     {"id":"gqlc-wrev","labels":["class:warrior","subject:justfile"]}]'
+GH_RC=""
+if [ "$RC" -ne 0 ]; then
+    bad "a gh outage does not hold a judge bead" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-jrev'; then
+    bad "a gh outage does not hold a judge bead" \
+        "an outage cannot rule out the PR the review is OF, which is not a reason to hold it: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-wrev .*gh unavailable'; then
+    bad "a gh outage does not hold a judge bead" \
+        "the warrior beside it stopped holding, so this row proves nothing about the outage arm: $OUT"
+else
+    ok "a gh outage routes the class:judge bead and still holds the class:warrior bead beside it — the outage arm is scoped away from reviews, not deleted"
+fi
+
+# Arm (4) — the truncation hold, which is the same "cannot rule out" shape one
+# level down and would otherwise survive the exemption of arm (3) untouched.
+gh_prs "$(jq -cn '[{number: 742, changedFiles: 5, files: [range(3) | {path: "pad/f\(.).go"}]}]')"
+hv '[{"id":"gqlc-jrev","labels":["class:judge","subject:justfile"]},
+     {"id":"gqlc-wrev","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a truncated PR list does not hold a judge bead" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-jrev'; then
+    bad "a truncated PR list does not hold a judge bead" \
+        "an unreadable file list cannot rule out the PR under review, which is not a reason to hold the review: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-wrev .*cannot rule out justfile'; then
+    bad "a truncated PR list does not hold a judge bead" \
+        "the warrior beside it stopped holding, so the truncation arm is untested here: $OUT"
+else
+    ok "a PR list truncated per-PR routes the class:judge bead and still holds the class:warrior bead — the exemption reaches arm (4), not only the definite-match arm above it"
+fi
+
+# Arm (1) STAYS. A review naming a path that exists on no branch and in no PR is
+# a typo, and holding it is right. Asserted on the REASON, not on the verdict:
+# with two arms able to answer HOLD for one candidate, a verdict-only assertion
+# stays green when the wrong one fires (see the assert-the-reason finding).
+gh_prs '[{"number":1057,"files":[{"path":"justfile"}]}]'
+hv '[{"id":"gqlc-jgone","labels":["class:judge","subject:no/such/path/km-hold-test"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a judge bead with an absent subject is still held" "rc=$RC out=$OUT err=$ERR"
+elif [ "$OUT" != "HOLD gqlc-jgone — premise absent from origin/master: no/such/path/km-hold-test" ]; then
+    bad "a judge bead with an absent subject is still held" \
+        "the class exemption must not blanket the premise-absent arm, and the hold must be ON that arm: $OUT"
+else
+    ok "a class:judge bead whose subject path is on no branch and in no PR is still held as premise-absent — the exemption is per-arm, not a blanket pass for the class"
+fi
+
+# The residue arm. This is the sharp one: the machinery's printed remedy for the
+# arm above — "needs a subject: label" — is the thing that causes THIS hold,
+# because a review bead's parent cannot close until the PR merges, which needs
+# the review. Two doors, one deadlock; closing the first opens the second.
+gh_prs '[]'
+hv '[{"id":"gqlc-jres","labels":["class:judge"],
+      "deps":[{"depends_on_id":"gqlc-par","type":"discovered-from","status":"open"}]},
+     {"id":"gqlc-wres","labels":["class:warrior"],
+      "deps":[{"depends_on_id":"gqlc-par","type":"discovered-from","status":"open"}]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "unlabelled judge residue of an open parent routes" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-jres'; then
+    bad "unlabelled judge residue of an open parent routes" \
+        "the parent stays open until the PR merges, which needs this review, so this hold never releases: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-wres .*gqlc-par'; then
+    bad "unlabelled judge residue of an open parent routes" \
+        "the residue arm stopped holding warriors, which is the case it was written for: $OUT"
+else
+    ok "an unlabelled class:judge bead discovered from a still-open parent is routed, while the identical class:warrior bead is still held — the label the first hold demands is what triggers the second"
+fi
+
 # Input order is the contract cmd_dispatch relies on to keep priority order.
 gh_prs '[]'
 hv '[{"id":"gqlc-o1","labels":["class:warrior"]},
