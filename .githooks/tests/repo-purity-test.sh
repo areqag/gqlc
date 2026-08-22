@@ -9,11 +9,22 @@
 # this guard exists to refuse (bd gqlc-2zet, gqlc-z1qw).
 #
 # THE SANDBOX SHAPE IS PART OF THE CLAIM. Every fixture here is a repo PLUS A
-# LINKED WORKTREE, with GIT_DIR exported to the worktree's gitdir, because the
-# damage under test cannot occur in any other shape: git decides bareness from
-# the gitdir's NAME, and only a linked worktree's gitdir
-# (`.git/worktrees/<seat>`) fails to end in `.git`. Rebuilt on a plain repo,
-# every dangerous row below goes green while testing nothing (bd gqlc-tl78).
+# LINKED WORKTREE, with GIT_DIR exported to the worktree's gitdir, because git
+# decides bareness from the gitdir's NAME and a linked worktree's gitdir
+# (`.git/worktrees/<seat>`) does not end in `.git` (bd gqlc-tl78).
+#
+# Change that shape and the damage stops happening, so the guard has nothing to
+# catch. This suite refuses the wrong sandbox rather than passing vacuously.
+# Falsify that by mutating the harness, not the guard: rebuild make_town's
+# `worktree add` as a plain `git init`, or drop run_guard's GIT_DIR export. Both
+# must turn rows red. What holds it there are the "vector fires" rows, which
+# assert the damage OCCURRED — no mutation of the guard can kill them, so they
+# read as dead weight and are not.
+#
+# The paired shape of the damage rows is load-bearing for the same reason. Under
+# the plain-repo mutation "core.bare damage: guard FAILS the run" stays GREEN
+# while its partner "guard names the key" goes red: the guard did fail, for a
+# different reason. A verdict row alone would have certified the wrong cause.
 #
 # Run via: just test-hooks
 set -u
