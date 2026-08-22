@@ -97,13 +97,18 @@ self-governing; the ledger is honest.
       takes a PR implementing a design they shaped. Recusal is cheap; a
       conflicted PASS is not. A recusing judge says so on the bead and it
       routes to another.
-   3. **Calibration.** A newly seated judge's first three verdicts do not
-      bind until countersigned by any other sitting judge. Countersigning is
-      an audit, not a second review: the countersigner mutates one battery,
-      re-runs one falsifier, spot-checks one claim. After three the new
-      judge's PASS binds alone. This is a property of tenure, not of rank —
-      it dissolves, it applies to every judge seated hereafter, and while it
-      is in force it confers no authority over anything else.
+   3. **Calibration.** A newly seated judge's first three verdicts are
+      counted as **written**, and of them only a **PASS** waits on a
+      countersignature by any other sitting judge; a FAIL binds at once. The
+      danger from an untested judge is a PR wrongly cleared, never one
+      wrongly blocked. Countersigning is an audit, not a second review: the
+      countersigner mutates one battery, re-runs one falsifier, spot-checks
+      one claim, and **must** sign when that audit passes. Withholding
+      requires naming a specific defect, which is then an ordinary FAIL under
+      V.4 and is answered by whoever wrote it. After three verdicts written,
+      the new judge's PASS binds alone. This is a property of tenure, not of
+      rank — it dissolves, it applies to every judge seated hereafter, and it
+      confers no authority over anything, inside the audit or outside it.
 3. Priorities are those of the beads ledger. Սեդրակ may reorder priorities;
    citizens may petition him by mail.
 4. A Դատաւոր judges code, never people. A FAIL verdict on an open PR
