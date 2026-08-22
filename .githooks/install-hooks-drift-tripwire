@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Installs .githooks/hooks-drift-tripwire into the hooks directory that a
+# core.hooksPath drift redirects execution to — `$(git rev-parse
+# --git-common-dir)/hooks`. The tripwire's own header argues why it has to live
+# there rather than in the working tree.
+#
+# One implementation, two callers, because they must agree byte for byte about
+# WHERE the install lives and WHAT counts as a hook this repo wrote:
+#   just init         — refreshes all five names from the working-tree source.
+#   just check-hooks  — `--missing-only`, the self-heal arm.
+# A second copy of this loop is a second place for the destination or the marker
+# to drift out of step with the check that asserts them.
+#
+# usage: install-hooks-drift-tripwire [--missing-only]
+#
+#   --missing-only   install only the names that are absent or non-executable,
+#                    and leave an existing marker-bearing copy alone. That is
+#                    what the self-heal arm needs: the install is shared by every
+#                    linked worktree while each worktree's copy of the SOURCE is
+#                    at its own parked commit, so a refresh on every push would
+#                    have two worktrees on different branches rewriting each
+#                    other's copy on every push. `just init` takes the refresh.
+set -euo pipefail
+
+mode=all
+case "${1-}" in
+    "") ;;
+    --missing-only) mode=missing ;;
+    *)
+        echo "usage: $(basename -- "$0") [--missing-only]" >&2
+        exit 2
+        ;;
+esac
+
+src="$(cd -- "$(dirname -- "$0")" && pwd)/hooks-drift-tripwire"
+if [ ! -r "$src" ]; then
+    echo "error: $src is missing, so there is nothing to install." >&2
+    exit 1
+fi
+
+dest_dir="$(git rev-parse --git-common-dir)/hooks"
+mkdir -p "$dest_dir"
+
+names=(pre-commit commit-msg pre-push post-checkout post-merge)
+
+# Every name is classified BEFORE any of them is written. The refusal used to
+# abort mid-loop, which left the set half-armed and the half depending on loop
+# order: a foreign `post-merge` (last) left 4 of 5 installed, a foreign
+# `pre-commit` (first) left 0 of 5. The state was fail-closed and visible, but
+# "install all five or none" is a property worth having rather than inferring.
+foreign=()
+todo=()
+for name in "${names[@]}"; do
+    target="$dest_dir/$name"
+    if [ -e "$target" ] && ! grep -q 'gqlc-hooks-drift-tripwire' "$target" 2>/dev/null; then
+        foreign+=("$target")
+        continue
+    fi
+    if [ "$mode" = all ] || [ ! -x "$target" ]; then
+        todo+=("$name")
+    fi
+done
+
+if [ "${#foreign[@]}" -ne 0 ]; then
+    echo "error: these hooks exist and are not the drift tripwire:" >&2
+    printf '         %s\n' "${foreign[@]}" >&2
+    echo "       Refusing to overwrite a hook this repo did not write. Nothing was" >&2
+    echo "       installed — the five names go in as a set or not at all." >&2
+    echo "       Move them aside and re-run, or delete them if they are stale." >&2
+    exit 1
+fi
+
+# Written to a sibling temp name and renamed rather than copied over the live
+# path. `cp` truncates before it writes, so a reader arriving mid-copy sees a
+# prefix of the file — and a prefix of this particular file still carries the
+# marker (line 2) and still parses and exits 0, which is a hook that certifies
+# itself as installed while gating nothing. `mv` within one directory is an
+# atomic rename, so a reader sees either the old file or the whole new one.
+# Concurrent installs are the designed steady state now that check-hooks
+# self-heals from inside a running pre-push.
+tmp=""
+cleanup() {
+    if [ -n "$tmp" ]; then
+        rm -f -- "$tmp"
+    fi
+    return 0
+}
+trap cleanup EXIT
+
+for name in ${todo[@]+"${todo[@]}"}; do
+    target="$dest_dir/$name"
+    tmp="$target.tmp.$$"
+    cp -- "$src" "$tmp"
+    chmod +x "$tmp"
+    mv -f -- "$tmp" "$target"
+    tmp=""
+done
+
+# Printed on stderr so the caller can stay silent when there was nothing to do,
+# and so a self-heal during a push is visible in the push's own output.
+if [ "${#todo[@]}" -ne 0 ]; then
+    echo "installed the hooksPath drift tripwire into $dest_dir: ${todo[*]}" >&2
+fi

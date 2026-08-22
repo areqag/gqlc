@@ -2,7 +2,7 @@
 # recipe self-heals: it verifies the pinned version in .bin/ and reinstalls on
 # mismatch, so a version bump here is a one-line change and nobody ever
 # installs or upgrades the linter by hand.
-golangci_version := "v2.12.2"
+golangci_version := "v2.13.1"
 golangci := justfile_directory() + "/.bin/golangci-lint"
 # Per-worktree cache. golangci-lint caches analyzer facts and per-package issue
 # records keyed on module path + relative file path + content hash — the absolute
@@ -39,9 +39,34 @@ discovery_probes := vuln_probe + " " + fence_probe + " " + xtest_probe
 
 # Configures local git settings required after a fresh clone.
 # Idempotent: safe to run multiple times.
+#
+# Two halves. The first wires core.hooksPath at .githooks — that is what makes
+# this repo's hooks run. The second installs .githooks/hooks-drift-tripwire into
+# the DEFAULT hooks directory, which is where git falls back when the first half
+# is undone; that copy is what refuses a commit or a push while the drift stands.
+# The tripwire's own header argues why it has to live there.
+#
+# The tripwire is copied, not symlinked. A symlink would point back into the
+# working tree — the carrier that goes stale with the parked branch, which is why
+# bd gqlc-pyk2's detector was inert — and at a commit predating that file it
+# would dangle. A copy under the git common dir is branch-independent, which is
+# the whole point of it.
+#
+# The install itself lives in .githooks/install-hooks-drift-tripwire, called both
+# from here and from check-hooks' self-heal arm, so the two agree about the
+# CONTENT of what lands. They still spell the destination and the marker
+# separately — check-hooks recomputes both — and what holds those in step is the
+# suite, which drives the real recipe against a fixture: moving either literal in
+# one place alone reddens a named row (measured). The installer refuses to
+# overwrite a hook it did not write, classifies all five names before writing any,
+# and writes through a temp name and a rename rather than over the live path.
 init:
+    #!/usr/bin/env bash
+    set -euo pipefail
     git config core.hooksPath .githooks
-    @echo "git hooks activated (core.hooksPath = .githooks)"
+    echo "git hooks activated (core.hooksPath = .githooks)"
+    .githooks/install-hooks-drift-tripwire
+    echo "hooksPath drift tripwire installed in $(git rev-parse --git-common-dir)/hooks (shared by every linked worktree)"
 
 # fails when core.hooksPath drifts from .githooks, which silently kills every
 # local pre-commit/pre-push gate at once (CI cannot see local git config).
@@ -64,6 +89,71 @@ init:
 # that actually occurred (bd gqlc-5fm) pointed at .git/hooks, which exists but
 # holds only .sample files that git ignores, so an existence test passes while
 # every hook is dead.
+#
+# The second arm installs the drift tripwire into the default hooks directory
+# when it is absent, and holds it to its behaviour when it is not. Without it the
+# value check above is the only thing standing between a drift and an ungated
+# commit, and it only speaks when invoked — which is how the window in bd
+# gqlc-4thl stayed open. The two arms cover different halves and
+# neither subsumes the other: this one catches ANY spelling of the drifted value
+# but only on demand, while the tripwire catches only the default-directory
+# spelling and does it at commit and push time without being asked.
+#
+# NOT checked by comparing bytes with .githooks/hooks-drift-tripwire. The install
+# is shared by every linked worktree while each worktree's copy of the source is
+# at its own parked commit, so byte-equality would have two worktrees on
+# different branches each declaring the other's install wrong and reinstalling
+# over it on every `just init`.
+#
+# A marker line alone certifies PRESENCE, and presence is not what is owed. Measured:
+# a three-line file carrying `#!/usr/bin/env bash`, the marker, and `exit 0`,
+# installed as all five names, made `just doctor` print "ok" while a drifted
+# commit LANDED. So did any `cp`-truncated prefix between 47 and 2707 bytes — the
+# marker sits on line 2 and everything after it up to the case statement is
+# comment, so a prefix parses and exits 0. Both bounds bisected: at 47 the marker
+# first completes, and 2708 is the first prefix that stops exiting 0.
+#
+# What executing the installed hooks buys is those two shapes and the family they
+# belong to: a stub or a truncated prefix exits 0 whatever it is handed, so one
+# run exposes it. It does not reach a disarm written against this check. The
+# hooks are run here with no arguments and without GIT_INDEX_FILE, so a copy
+# branching on that variable refuses when this recipe runs it and permits when
+# git runs it as pre-commit or commit-msg. Measured on this branch: five lines,
+# check-hooks silent at rc=0, `just doctor` printing ok, drifted commit landed.
+#
+# NOT "without the variables git sets for a hook", which was measured false:
+# GIT_EXEC_PATH and GIT_PREFIX are set for all five names and reach this recipe
+# when it runs from .githooks/pre-push, and GIT_INDEX_FILE is one git sets for
+# pre-commit and commit-msg but not for pre-push, post-checkout or post-merge.
+# The suite unsets `${!GIT_@}` for exactly that reason. So GIT_INDEX_FILE is one
+# usable key among several rather than the only door — $#, stdin, GIT_EDITOR and
+# GIT_AUTHOR_* are equally usable. Whoever can write that directory can write
+# that file; this raises the price of a deliberate disarm, it does not remove it.
+#
+# So after the marker grep, the installed hooks are EXECUTED and held to their
+# exit codes: the three blocking arms must refuse, the two warn arms must not.
+# That is still behaviour rather than bytes, so the parked-branch property
+# survives intact — an older copy that still refuses still passes. Executed only
+# after the marker grep, so this never runs a file it does not recognise, and with
+# stderr discarded, because the real tripwire prints its whole ERROR block when it
+# is reached and `just test` would be unreadable.
+#
+# The missing-install arm SELF-HEALS rather than refusing, following
+# ensure-golangci above (which reinstalls the pinned linter rather than failing
+# the push over it). This recipe is a dependency of `test`, which is what
+# .githooks/pre-push runs, so refusing here would have made `just init` a
+# precondition for every push in every registered worktree on the day this
+# landed — and the obvious answer to a push refused for a reason unrelated to the
+# commits is `git push --no-verify`, which skips .githooks/pre-push WHOLESALE and
+# takes `just test` and `just lint-new` with it. Trading a hypothetical future
+# ungated commit for an actual present untested, unlinted push is a bad trade. An
+# absent hook file is unambiguous and the repair is one file copy, so it is
+# repaired. A marker-bearing copy that FAILS the behavioural check below is not:
+# that is tamper or corruption rather than absence, and it refuses.
+#
+# The first arm above stays a hard refusal: self-healing core.hooksPath would
+# rewrite the very drift this recipe exists to report, and the shared config is
+# where the damage lives.
 [private]
 check-hooks:
     #!/usr/bin/env bash
@@ -74,9 +164,109 @@ check-hooks:
         echo "       Run 'just init' to fix." >&2
         exit 1
     fi
+    dest_dir="$(git rev-parse --git-common-dir)/hooks"
+    blocking=(pre-commit commit-msg pre-push)
+    warning=(post-checkout post-merge)
+
+    absent=()
+    for name in "${blocking[@]}" "${warning[@]}"; do
+        target="$dest_dir/$name"
+        if [ ! -x "$target" ] || ! grep -q 'gqlc-hooks-drift-tripwire' "$target" 2>/dev/null; then
+            absent+=("$name")
+        fi
+    done
+    if [ "${#absent[@]}" -ne 0 ]; then
+        # A foreign hook squatting one of the names is the one ambiguous case, and
+        # the installer refuses it rather than clobbering — for the whole set, not
+        # just that name.
+        if ! .githooks/install-hooks-drift-tripwire --missing-only; then
+            echo "error: the core.hooksPath drift tripwire could not be installed into $dest_dir." >&2
+            echo "       core.hooksPath is correct right now, so hooks run — but if it drifts" >&2
+            echo "       to the default directory nothing will refuse the ungated commits." >&2
+            exit 1
+        fi
+        echo "check-hooks: self-healed the hooksPath drift tripwire (${absent[*]})." >&2
+        echo "             It lives under the git common dir, so this armed every linked" >&2
+        echo "             worktree at once; no per-worktree install is needed." >&2
+    fi
+
+    for name in "${blocking[@]}"; do
+        if "$dest_dir/$name" >/dev/null 2>&1; then
+            echo "error: $dest_dir/$name carries the drift tripwire marker but exits 0 when run." >&2
+            echo "       It would certify itself as installed and then let every commit and" >&2
+            echo "       push through while core.hooksPath is drifted — a truncated copy or a" >&2
+            echo "       disarmed one. Delete it and run 'just init' to reinstall." >&2
+            exit 1
+        fi
+    done
+    for name in "${warning[@]}"; do
+        if ! "$dest_dir/$name" >/dev/null 2>&1; then
+            echo "error: $dest_dir/$name exits non-zero when run, and the post-* arms must not." >&2
+            echo "       post-checkout's exit status BECOMES the exit status of git checkout" >&2
+            echo "       and git switch, so a blocking copy there fails every branch switch in" >&2
+            echo "       every drifted worktree; post-merge's status is ignored by git, so a" >&2
+            echo "       non-zero code there is a copy that is not this tripwire at all." >&2
+            echo "       Delete it and run 'just init' to reinstall." >&2
+            exit 1
+        fi
+    done
+
+# fails when this worktree's branch tracks master, which is the state
+# `git worktree add -b <branch> origin/master` leaves behind (bd gqlc-tfh1).
+# In it, a bare `git push` resolves to master and `git pull` merges master into
+# the branch — neither says so, and `git status` reports ahead/behind against
+# master as if that were the branch's home.
+#
+# Distinct from the .githooks/guard-push-destination backstop, which sees a
+# push and nothing else: this names the misconfiguration while it is still
+# latent, and it is the arm that reaches the worktrees that already exist —
+# 4 of the 21 alive on 2026-08-19 tracked origin/master. Wired into `test` for
+# the same reason check-hooks is: a check nobody invokes is not a check.
+#
+# The directory is an argument so the recipe can be exercised over a throwaway
+# tree (.githooks/tests/worktree-upstream-test.sh); developers and CI take the
+# default.
+#
+# Not skipped under CI, unlike check-hooks. actions/checkout leaves a
+# pull_request run on a detached HEAD (no upstream, nothing to say) and a
+# master push on master itself (allowed below), so there is no state CI is
+# expected to be in that this would fail — and skipping would mean the only
+# thing that ever runs it is a developer's machine.
+[private]
+check-worktree-upstream dir=".":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="{{ dir }}"
+    branch="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    # Detached HEAD — how a reviewer checks out a SHA — prints the literal
+    # "HEAD" and has no upstream.
+    if [ -z "$branch" ] || [ "$branch" = "HEAD" ] || [ "$branch" = "master" ] || [ "$branch" = "main" ]; then
+        exit 0
+    fi
+    upstream="$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+    if [ -z "$upstream" ]; then
+        exit 0
+    fi
+    # Compared against the branch's own remote rather than pattern-matched on
+    # */master: a remote-tracking ref named origin/topic/master is not this bug.
+    remote="$(git -C "$dir" config "branch.$branch.remote" || true)"
+    case "$remote" in
+        "")  exit 0 ;;
+        ".") prefix="" ;;
+        *)   prefix="$remote/" ;;
+    esac
+    if [ "$upstream" != "${prefix}master" ] && [ "$upstream" != "${prefix}main" ]; then
+        exit 0
+    fi
+    echo "error: branch '$branch' tracks '$upstream', so a bare 'git push' here targets" >&2
+    echo "       ${upstream#"$prefix"} and 'git pull' merges it in (bd gqlc-tfh1)." >&2
+    echo "       Drop the tracking, and set it from the first push instead:" >&2
+    echo "         git -C '$dir' branch --unset-upstream" >&2
+    echo "         git -C '$dir' push -u origin HEAD" >&2
+    exit 1
 
 # health check for local dev environment; extend as new drift modes emerge
-doctor: check-hooks
+doctor: check-hooks check-worktree-upstream
     @echo "ok"
 
 # provisions the pinned golangci-lint into the gitignored .bin/ when missing
@@ -667,8 +857,8 @@ sweep-discovery-probes:
     done
 
 # full static analysis: golangci-lint over the Go tree (.golangci.yml) and
-# shellcheck over the hooks tree, as linters + formatter diffs as issues
-lint: ensure-golangci lint-hooks check-golangci-build-tags
+# shellcheck over the hooks + kingdom trees, as linters + formatter diffs as issues
+lint: ensure-golangci lint-hooks (lint-hooks "kingdom/bin") check-golangci-build-tags
     {{golangci}} run
 
 # Guard: the golangci-lint analysis cache must be non-empty after lint.
@@ -714,12 +904,15 @@ test-hooks:
     bash .githooks/tests/lint-hooks-test.sh
     bash .githooks/tests/check-pr-closes-test.sh
     bash .githooks/tests/tool-gate-test.sh
+    bash .githooks/tests/km-test.sh
+    bash .githooks/tests/worktree-upstream-test.sh
+    bash .githooks/tests/hooks-drift-tripwire-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # -shuffle catches inter-test coupling; go build link-checks package main,
 # which has no tests and is otherwise only compile-checked by lint.
-test: check-hooks test-hooks
+test: check-hooks check-worktree-upstream test-hooks
     go build ./...
     go test -shuffle=on ./...
 
@@ -741,6 +934,47 @@ bd-export-monotonic base:
 # Requires full history; assumes the dev worktree has it.
 bd-export-monotonic-local:
     just bd-export-monotonic $(git merge-base HEAD origin/master)
+
+# An orphan is an open GH issue no bead names, byte-identical in title AND body
+# to an issue a bead does name, created seconds from it: .githooks/bd-gh-sync's
+# push pass minted both for one bead and the ledger kept only one, so the close
+# pass — which keys on external_ref — can never reach the other (bd gqlc-mmej,
+# gqlc-mb8v). Deliberately not wired into `just test` or into any hook: it
+# reaches the network, and the only reason to run it is that someone is about to
+# read the answer.
+#
+# This recipe takes no parameters ON PURPOSE, and that is the whole of what
+# keeps the reporting name off the write path. `-close` is a flag on the tool,
+# so a recipe with a `*args` tail forwards it: this one carried one until bd
+# gqlc-mb8v's review measured `just -n gh-orphans -close` rendering `go run
+# ./internal/tools/ghorphan -close` while the `just --list` line beside it said
+# "mutates nothing". With no parameter to take it, just reads a trailing
+# `-close` as a second recipe name and stops at rc=1 before running anything.
+# Pinned by TestTheReportingRecipeCannotBeHandedTheCloseFlag, which asks just
+# rather than reading these lines.
+#
+# The cost is real and is paid on purpose: -window and -limit are now reachable
+# through the acting recipe below or a direct `go run`, and not from this name.
+# What each of them does to a verdict is written where they are read, in the
+# tool's package comment — this line does not summarise it, because summarising
+# it is how the claim this recipe used to carry got written.
+#
+# reports duplicate GH issues the bd↔GH sync minted twice; mutates nothing
+gh-orphans:
+    go run ./internal/tools/ghorphan
+
+# Irreversible enough to be worth typing out: closing an issue is visible to
+# everyone watching the repository, and a wrong close is undone by hand. Run
+# `just gh-orphans` first and read every line, including the refusals — a
+# refusal is a pair this tool will not decide.
+#
+# The body runs the tool directly. Spelling it `just gh-orphans -close` is what
+# made the reporting name a write path, and it would need that recipe to take
+# the parameter again.
+#
+# CLOSES the duplicates `just gh-orphans` reports, each pointing at its canonical
+gh-orphans-close *args:
+    go run ./internal/tools/ghorphan -close {{args}}
 
 # The quality fence over every module in this tree that the root gates do not
 # already cover: compile (go build), vet, module tidiness (go mod tidy -diff),
@@ -2128,3 +2362,41 @@ iso-drift-check:
         echo "ok: both artefacts match their pinned checksums"
     fi
     exit "$fail"
+
+# ---------- Թագաւորութիւն — the software factory (kingdom/README.md) ----------
+
+# status of the Թագաւորութիւն: seats, beads, mail, cap
+kingdom:
+    kingdom/bin/km status
+
+# Հեռաձայն to Սեդրակ: wake him if needed and attach to his window
+herratsayn:
+    kingdom/bin/km herratsayn
+
+# attach to any seat's window
+kingdom-attach seat:
+    kingdom/bin/km attach {{seat}}
+
+# create state dir, seat worktrees, tmux session, and runners (all asleep)
+kingdom-up:
+    kingdom/bin/km up
+
+# graceful stop: notice by mail, then kill the tmux session
+kingdom-down:
+    kingdom/bin/km down
+
+# check deps, install+enable the systemd user timers, point bd mail at km
+kingdom-install:
+    kingdom/bin/km doctor
+    kingdom/bin/km install-units
+
+# raise the halt flag: the dispatcher wakes nobody until kingdom-resume
+kingdom-halt reason="":
+    kingdom/bin/km halt {{reason}}
+
+kingdom-resume:
+    kingdom/bin/km resume
+
+# health checks for the kingdom machinery
+kingdom-doctor:
+    kingdom/bin/km doctor

@@ -17,7 +17,7 @@ import (
 var (
 	_ ageskeleton.DBTX = (*pgxpool.Pool)(nil)
 	_ ageskeleton.DBTX = (*pgx.Conn)(nil)
-	_ ageskeleton.DBTX = (pgx.Tx)(nil)
+	_ ageskeleton.DBTX = pgx.Tx(nil)
 
 	_ = pgxpool.Config{AfterConnect: ageskeleton.SessionInit}
 )

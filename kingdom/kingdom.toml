@@ -1,0 +1,73 @@
+# Configuration of the Թագաւորութիւն. Parsed by kingdom/bin/km with a
+# line-oriented reader: quoted scalar values under [section] headers only —
+# no inline tables, arrays, or multi-line strings. Teach km's parser before
+# using any of those here.
+
+[kingdom]
+tmux_session = "kingdom"
+# Runtime state dir name, created beside the main checkout's parent directory
+# (shared by all seat worktrees, never committed).
+state_dirname = "kingdom-state"
+
+[concurrency]
+# Global and work-conserving: any free slot goes to whichever class has ready
+# labelled beads, priority first. Mayor and guard do not count against it.
+max_active = 5
+
+[cadence]
+dispatch_minutes = 2
+guard_minutes = 15
+
+[welfare]
+# Context fill (percent) at which the guard starts gently checking in.
+# For Րաֆֆի's eyes only — never quoted at a citizen.
+handoff_threshold_pct = 75
+
+[claude]
+# The factory runs unattended; the constitution, git hooks, and
+# claude-pre-bash remain the guardrails. Set to "acceptEdits" to supervise.
+permission_mode = "bypassPermissions"
+
+[effort]
+# Starting depth per class (Constitution V.6). These are STARTING levels — a
+# bound in neither direction, deeper or shallower, needing nobody's permission
+# (V.6.2). Tuning these is a config edit, never an amendment (V.6.1) — so argue
+# about the numbers here, not in the constitution.
+#
+# The mechanism, stated at what is actually measured (Միհր, 2026-08-22,
+# verdict-6muh-r1): `/effort` changes the level mid-session in the interactive
+# mode km-seat:66 launches, offering exactly the five levels below. It is
+# unavailable under headless `claude -p`. What is NOT yet measured is whether a
+# seat can put text into its OWN prompt — so a citizen's own hand on the level,
+# unaided, is a right the machinery does not demonstrably serve yet (gqlc-w6tl).
+# Levels: low | medium | high | xhigh | max.
+#
+# Provisional, adopted 2026-08-22 with the numbers explicitly open: the town
+# had spent its entire life at xhigh, inherited from an operator settings file
+# nobody chose, so any number here is better evidence than what it replaces —
+# but none of them is measured yet. Re-tune from the depths recorded on beads
+# (V.6.6 — NOT V.6.5, which records escalations only: a tuner reading just the
+# escalations sees only the moves that went deeper, and the defaults ratchet
+# upward by construction), not from impatience.
+mayor     = "medium"
+architect = "high"
+warrior   = "medium"
+judge     = "xhigh"
+guard     = "low"
+
+[seats]
+# name = "class:model:display"
+sedrak   = "mayor:claude-opus-5:Սեդրակ"
+artur    = "architect:claude-fable-5:Արթուր"
+arpine   = "architect:claude-fable-5:Արփինէ"
+aregak   = "architect:claude-fable-5:Արեգակ"
+aramazd  = "warrior:claude-opus-5:Արամազդ"
+vahagn   = "warrior:claude-opus-5:Վահագն"
+astghik  = "warrior:claude-opus-5:Աստղիկ"
+ar       = "warrior:claude-opus-5:Ար"
+nvard    = "warrior:claude-opus-5:Նուարդ"
+ayg      = "warrior:claude-opus-5:Այգ"
+tsovinar = "warrior:claude-opus-5:Ծովինար"
+hayk     = "warrior:claude-opus-5:Հայկ"
+mihr     = "judge:claude-fable-5:Միհր"
+raffi    = "guard:claude-sonnet-5:Րաֆֆի"
