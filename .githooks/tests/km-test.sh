@@ -779,5 +779,178 @@ else
     ok "sleep outside a seat session explains itself and exits 0"
 fi
 
+# --- per-seat effort level ---------------------------------------------------
+# gqlc-w6tl. Every seat used to inherit "effortLevel": "xhigh" from the
+# operator's personal ~/.claude/settings.json, because km-seat passed no
+# --effort at all. The level is now per class in [effort].
+#
+# Two hermetic seams carry this block. KM_STATE_DIR is the suite's own, above.
+# KM_CONFIG is the second: the rows below must run against a kingdom.toml with
+# the [effort] section REMOVED, and the only alternative to an override is
+# mutating the real town's config while the dispatcher reads it.
+
+alt_config() { # alt_config <path> [effort-section-lines...] -> a throwaway toml
+    local dest=$1
+    shift
+    {
+        printf '[kingdom]\ntmux_session = "kingdom-test"\nstate_dirname = "kingdom-state"\n\n'
+        printf '[claude]\npermission_mode = "acceptEdits"\n\n'
+        printf '[seats]\nhayk = "warrior:claude-opus-5:Հայկ"\n'
+        # One key per line: km's reader is line-oriented, so "$*" would fold a
+        # whole section into a single unparseable line.
+        [ "$#" -eq 0 ] || { printf '\n[effort]\n'; printf '%s\n' "$@"; }
+    } >"$dest"
+}
+
+alt_config "$TMP/noeffort.toml"
+OUT=$(KM_CONFIG="$TMP/noeffort.toml" "$KM" cfg kingdom tmux_session 2>&1)
+RC=$?
+# The real config says "kingdom"; reading "kingdom-test" back proves km took
+# the override rather than its own default, so the rows below mean something.
+if [ "$RC" -ne 0 ] || [ "$OUT" != kingdom-test ]; then
+    bad "KM_CONFIG overrides the config path" "rc=$RC out=$OUT"
+else
+    ok "KM_CONFIG overrides which config km reads"
+fi
+
+# Per class, never an aggregate: a row that asserted "some class resolved"
+# stays green while four of five silently return empty.
+#
+# Deliberately NOT the town's own numbers, which belong to whoever tunes
+# kingdom.toml, not to this suite. Every level here differs from the one that
+# class really carries, so a resolver that ignored KM_CONFIG would fail rather
+# than pass on the live file; and all five differ from each other, so a
+# resolver that returned some other class's level fails too.
+alt_config "$TMP/fiveclass.toml" \
+    'mayor     = "low"' \
+    'architect = "xhigh"' \
+    'warrior   = "max"' \
+    'judge     = "medium"' \
+    'guard     = "high"'
+while read -r class want; do
+    OUT=$(KM_CONFIG="$TMP/fiveclass.toml" "$KM" cfg effort "$class" 2>&1)
+    RC=$?
+    if [ "$RC" -ne 0 ] || [ "$OUT" != "$want" ]; then
+        bad "cfg effort $class" "rc=$RC out=$OUT want=$want"
+    else
+        ok "cfg effort $class is $want"
+    fi
+done <<'CLASSES'
+mayor low
+architect xhigh
+warrior max
+judge medium
+guard high
+CLASSES
+
+OUT=$(KM_CONFIG="$TMP/noeffort.toml" "$KM" cfg effort warrior 2>&1)
+RC=$?
+if [ "$RC" -ne 0 ] || [ -n "$OUT" ]; then
+    bad "an absent [effort] section resolves to nothing, quietly" "rc=$RC out=$OUT"
+else
+    ok "an absent [effort] section resolves to empty and exits 0"
+fi
+
+# Against the POPULATED section, so this proves the lookup missed rather than
+# that the section was empty all along.
+OUT=$(KM_CONFIG="$TMP/fiveclass.toml" "$KM" cfg effort dragonslayer 2>&1)
+RC=$?
+if [ "$RC" -ne 0 ] || [ -n "$OUT" ]; then
+    bad "an unknown class resolves to nothing, quietly" "rc=$RC out=$OUT"
+else
+    ok "an unknown class resolves to empty and exits 0"
+fi
+
+# --- the composed command line -----------------------------------------------
+# The bead's own warning: the only witness is a seat that actually launches,
+# and this town has shipped "correct" changes that routed nothing. So these
+# rows read the argv km-seat REALLY composed, via a claude stub on PATH, and
+# assert on the presence and absence of the flag rather than on a seat that
+# merely starts.
+
+KM_SEAT="$REPO/kingdom/bin/km-seat"
+stubdir="$TMP/stub"
+mkdir -p "$stubdir"
+cat >"$stubdir/claude" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >"$KM_TEST_ARGV"
+STUB
+chmod +x "$stubdir/claude"
+
+ARGV=""
+STDERR=""
+compose_argv() { # compose_argv <config> -> ARGV (one arg per line), STDERR
+    local cfgfile=$1 sdir pid waited=0
+    ARGV="$TMP/argv.$RANDOM"
+    STDERR="$TMP/stderr.$RANDOM"
+    sdir="$TMP/seatstate.$RANDOM"
+    mkdir -p "$sdir/seats/hayk"
+    echo "a test wake" >"$sdir/seats/hayk/wake"
+    # km resolves the town from `git rev-parse` against the CALLER's cwd
+    # (km:78-82), so without this the four rows below pass or fail according to
+    # where the suite was invoked from, and report it as an argv defect.
+    (cd "$REPO" && PATH="$stubdir:$PATH" KM_CONFIG="$cfgfile" KM_STATE_DIR="$sdir" \
+        KM_TEST_ARGV="$ARGV" "$KM_SEAT" hayk) >"$STDERR" 2>&1 &
+    pid=$!
+    # km-seat parks again after the stub exits, so it never runs away; we stop
+    # waiting as soon as the argv lands, or give up and report what we have.
+    while [ ! -s "$ARGV" ] && [ "$waited" -lt 100 ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+}
+
+alt_config "$TMP/warrior-high.toml" 'warrior = "high"'
+compose_argv "$TMP/warrior-high.toml"
+if [ ! -s "$ARGV" ]; then
+    bad "km-seat launches claude at all" "no argv recorded; log: $(cat "$STDERR" 2>/dev/null)"
+elif ! grep -qx -- '--effort' "$ARGV"; then
+    bad "km-seat passes --effort" "argv: $(tr '\n' ' ' <"$ARGV")"
+elif [ "$(grep -A1 -x -- '--effort' "$ARGV" | tail -1)" != high ]; then
+    bad "km-seat passes the class's level" "argv: $(tr '\n' ' ' <"$ARGV")"
+else
+    ok "km-seat passes --effort high for a warrior seat when [effort] says high"
+fi
+
+# The level must come from the seat's CLASS, not from a fixed string: flip the
+# config and the same seat must launch differently.
+alt_config "$TMP/warrior-low.toml" 'warrior = "low"'
+compose_argv "$TMP/warrior-low.toml"
+if [ "$(grep -A1 -x -- '--effort' "$ARGV" 2>/dev/null | tail -1)" != low ]; then
+    bad "the level tracks the config, not a hard-coded default" "argv: $(tr '\n' ' ' <"$ARGV" 2>/dev/null)"
+else
+    ok "the level tracks the config, not a hard-coded default"
+fi
+
+# Absence, asserted as absence. Today's behaviour is to inherit the global
+# default, and a config that has lost its [effort] section must not change how
+# a seat launches -- still less fail to launch it.
+compose_argv "$TMP/noeffort.toml"
+if [ ! -s "$ARGV" ]; then
+    bad "a seat with no [effort] section still launches" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
+elif grep -qx -- '--effort' "$ARGV"; then
+    bad "no [effort] section must omit the flag entirely" "argv: $(tr '\n' ' ' <"$ARGV")"
+else
+    ok "no [effort] section omits --effort and the seat launches anyway"
+fi
+
+# A typo in the config must not take the town down. This is the shape the bead
+# warns about, aimed where the typo actually happens: a misspelled LEVEL takes
+# out every seat of that class, and `claude --effort mediun` would refuse to
+# start. Omit the flag, say so on stderr, and let the seat work.
+alt_config "$TMP/badlevel.toml" 'warrior = "mediun"'
+compose_argv "$TMP/badlevel.toml"
+if [ ! -s "$ARGV" ]; then
+    bad "a misspelled level still launches the seat" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
+elif grep -qx -- '--effort' "$ARGV"; then
+    bad "a misspelled level must not reach claude" "argv: $(tr '\n' ' ' <"$ARGV")"
+elif ! grep -q 'mediun' "$STDERR"; then
+    bad "a misspelled level must be named on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "a misspelled level is refused, named on stderr, and the seat still launches"
+fi
+
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

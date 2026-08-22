@@ -16,13 +16,25 @@ KM="$SCRIPT_DIR/km"
 seat=${1:-}
 [ -n "$seat" ] || { echo "km-seat: which seat?" >&2; exit 1; }
 
-read -r _ model display <<<"$("$KM" seat-info "$seat")"
+read -r class model display <<<"$("$KM" seat-info "$seat")"
 sd=$("$KM" state-dir)
 home="$sd/seats/$seat"
 wt=$("$KM" seat-worktree "$seat")
 soul="$KINGDOM_DIR/seats/$seat/soul.md"
 pm=$("$KM" cfg claude permission_mode)
 : "${pm:=bypassPermissions}"
+
+# Thinking depth for this class, from [effort]. A seat must launch whatever the
+# config says, so anything we would not recognise is dropped rather than passed
+# on: claude refuses an unknown --effort, and a typo here would otherwise take
+# out every seat of that class at once.
+effort_args=()
+effort=$("$KM" cfg effort "$class")
+case "$effort" in
+    low | medium | high | xhigh | max) effort_args=(--effort "$effort") ;;
+    "") ;;
+    *) echo "km-seat: [effort] $class = '$effort' is not a level claude takes; launching $seat without --effort" >&2 ;;
+esac
 
 [ -f "$soul" ] || { echo "km-seat: no soul at $soul" >&2; exit 1; }
 [ -d "$wt" ] || { echo "km-seat: no worktree at $wt (km up creates it)" >&2; exit 1; }
@@ -64,6 +76,7 @@ while :; do
         cd "$wt"
         KINGDOM_SEAT=$seat BEADS_ACTOR=$seat KM_STATE_DIR=$sd \
             claude --model "$model" \
+            "${effort_args[@]}" \
             --permission-mode "$pm" \
             -n "$display" \
             --append-system-prompt "$(cat "$soul")" \

@@ -10,7 +10,9 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 KINGDOM_DIR=$(dirname "$SCRIPT_DIR")
-CONFIG="$KINGDOM_DIR/kingdom.toml"
+# KM_CONFIG exists so the test suite can read a throwaway roster; the town
+# itself never sets it.
+CONFIG="${KM_CONFIG:-$KINGDOM_DIR/kingdom.toml}"
 
 die() { echo "km: $*" >&2; exit 1; }
 
