@@ -264,17 +264,25 @@ assert_err_lacks "pre-push: an IN-REPO typecheck error is a finding, not a toolc
     "could not form an opinion"
 
 # --- the SECOND presentation of the same cause (bd gqlc-m9ca) ----------------
-# The same command that produced TOOLCHAIN_LINT_OUT produced this instead,
-# minutes later in the same worktree, differing only in build-cache state:
-# golangci-lint panicked outright, exit code 2, and emitted no typecheck
-# diagnostic at all. Measured, both first-party. A classification that knew only
-# the typecheck shape went silent on this one — which is the original defect,
-# unfixed, for half the occurrences.
+# The same cause, same pin, presenting as an outright panic on exit code 2 with
+# NO typecheck diagnostic at all — so a classification that knew only the
+# typecheck shape stayed silent on it, which is the original defect surviving for
+# half the occurrences.
 #
-# `--issues-exit-code` defaults to 1 (`golangci-lint run --help`, v2.12.2) and
-# nothing in this repo overrides it, so exit 2 is on its own proof that the run
-# is not a findings verdict.
-PANIC_LINT_OUT='panic: load: 1 errors occurred:\n\tcould not load export data\n\ngoroutine 1358 [running]:\ngithub.com/golangci/golangci-lint/v2/pkg/goanalysis.(*loadingPackage).loadWithFacts(0x0)\n\tpkg/goanalysis/runner_loadingpackage.go:315 +0x128\n'
+# The text is Նուարդ's capture, quoted from bd gqlc-35sw where she measured it in
+# two trees at PR #1043's head; I hit the same shape and exit code but did not
+# keep the stack, and a fixture is worth having only if it is real output rather
+# than a remembered paraphrase of one.
+#
+# Note the stack frame's ABSOLUTE path. It is in the fixture on purpose: a panic
+# quotes toolchain paths while being nothing to do with the typecheck tell, and
+# the assertion below that this shape is not given the typecheck account is only
+# worth something over output that contains such a path.
+#
+# `--issues-exit-code` defaults to 1 — read from `run --help` on v2.12.2 and
+# again on the current v2.13.1 — and nothing in this repo overrides it, so a
+# code of 2 is on its own proof that the run was not a findings verdict.
+PANIC_LINT_OUT='panic: file requires newer Go version go1.27 (application built with go1.26)\n\ngoroutine 1358 [running]:\ngo/types.(*Checker).handleBailout(0xc0021c5a08, 0xc002d0fd18)\n\t/usr/lib/go/src/go/types/check.go:406 +0x88\n'
 
 run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=2 STUB_LINT_OUT="$PANIC_LINT_OUT"
 assert_rc_nonzero "pre-push: a linter that panicked still BLOCKS"
@@ -292,7 +300,7 @@ assert_err_has "pre-push: the panic branch still names the remedy" "GOTOOLCHAIN=
 assert_err_lacks "pre-push: the panic branch does not claim a typecheck diagnostic" \
     "typecheck error against a file OUTSIDE"
 assert_out_has "pre-push: the panic's own stack survives the classification" \
-    "goroutine 1358 [running]"
+    "handleBailout"
 # The exit-code branch may not PRESCRIBE the toolchain: it has read no evidence
 # for it, and the row below is a cause with the same branch and a different fix.
 assert_err_lacks "pre-push: the exit-code branch does not prescribe the toolchain fix" \
