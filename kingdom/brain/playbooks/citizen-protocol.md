@@ -24,9 +24,13 @@ sweep, or a nudge). Then:
 
 ## Working a bead
 
-1. Sync your worktree first: `git fetch origin && git checkout -b <type>/<slug> origin/master`.
-   One branch per bead, created in YOUR seat worktree. Never touch another
-   seat's worktree or the shared main checkout.
+1. Sync your worktree first: `git fetch origin && git checkout --no-track -b <type>/<slug> origin/master`,
+   then publish with `git push -u origin HEAD`. One branch per bead, created in
+   YOUR seat worktree. Never touch another seat's worktree or the shared main
+   checkout. `--no-track` is load-bearing: without it the new branch's upstream
+   is `origin/master`, so a bare `git push` here resolves to master (bd
+   gqlc-tfh1). `git branch --unset-upstream` repairs a branch already in that
+   state.
 2. Keep the bead current: notes for material state changes, `--append-notes`
    (never bare `--notes`, which replaces).
 3. Tests first. Ռազմիկներ write code test-driven — the `/tdd` skill walks
