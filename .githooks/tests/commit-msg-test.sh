@@ -170,6 +170,28 @@ run_identity_case "author with empty address"       reject ""
 run_identity_case "uppercased fixture address"      reject "FIXTURE@EXAMPLE.INVALID"
 run_identity_case "subdomain of a reserved name"    reject "ci@mail.example.invalid"
 
+# The FQDN root dot. `example.invalid.` and `example.invalid` are the SAME
+# domain — the trailing dot only says the name is already absolute — but as
+# text they are not equal and neither is a suffix of the other, so an
+# unnormalised rule misses both of its arms and the shape check below waves the
+# address through (it has an @, and its domain has a dot). Found by Միհր on
+# PR #1195; it committed.
+run_identity_case "fixture address, root dot"       reject "fixture@example.invalid."
+# More than one trailing dot is not a legal name, but nothing validates that
+# before this hook: stripping exactly ONE dot leaves `example.invalid.`, which
+# is the bypass again. The rule strips them all, so this row is what stops the
+# fix from being one character short of the defect it repairs.
+run_identity_case "fixture address, two root dots"  reject "fixture@example.invalid.."
+# Both normalisations at once, so neither can be removed while the other hides
+# it: case-folding alone leaves the dot, dot-stripping alone leaves the case.
+run_identity_case "uppercased address, root dot"    reject "FIXTURE@EXAMPLE.INVALID."
+# A BARE reserved TLD reaches the reserved loop only once the dot is stripped.
+# Without stripping, `invalid.` has a dot, so the shape check accepts it and
+# the loop never matches — the one spelling where the trailing dot turns a
+# refusal into an acceptance rather than merely evading one (cf. gqlc-76gk,
+# which is about the dotless spelling being caught by the shape rule instead).
+run_identity_case "bare reserved TLD, root dot"     reject "ci@invalid."
+
 # The committer is checked separately from the author, and a rebase or an
 # --amend is exactly how a fixture identity ends up on one and not the other.
 run_identity_case "plausible author, fixture committer" reject "jane@doe.dev" "fixture@example.invalid"
@@ -181,6 +203,11 @@ run_identity_case "citizen address"                 accept "jane@doe.dev"
 run_identity_case "address on proton.me"            accept "antranig.yeretzian@proton.me"
 run_identity_case "domain containing 'invalid'"     accept "ops@invalid-arguments.io"
 run_identity_case "domain containing 'example'"     accept "ops@example-corp.io"
+# The falsifier for the dot-stripping specifically: a real address written as
+# an absolute name is still a real address, so normalising the dot must not
+# make the rule refuse anyone. Without this row, "strip trailing dots" and
+# "refuse anything ending in a dot" both pass the reject rows above.
+run_identity_case "citizen address, root dot"       accept "jane@doe.dev."
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -28,6 +28,11 @@ fi
 # and reached two citizens' commits (gqlc-7iea). RFC 2606 and RFC 6761 reserve
 # these names so that nothing under them can ever be delivered to a person, so
 # an address in one is a fixture's or a placeholder's by construction.
+# NOT in this list, though both are special-use names too: `.local` (RFC 6762)
+# and `.onion` (RFC 7686). The rule here is deliverability, not specialness —
+# an address is refused because nothing sent there can reach a person. A
+# .local address resolves on the local link and a .onion one over Tor, so both
+# can reach somebody, and refusing them would refuse a real identity.
 RESERVED_DOMAINS=(invalid test example localhost example.com example.net example.org)
 
 _check_identity() {
@@ -40,6 +45,13 @@ _check_identity() {
     # Domains are case-insensitive; FIXTURE@EXAMPLE.INVALID is the same address.
     local domain="${email##*@}"
     domain="${domain,,}"
+    # A trailing dot is the FQDN root: `example.invalid.` IS `example.invalid`.
+    # As text it is neither equal to a reserved name nor a suffix ending in one,
+    # so both arms below miss it — and the shape check cannot catch what they
+    # miss, because the dot it demands is exactly the dot doing the evading.
+    # ALL of them, not one: strip a single dot from `example.invalid..` and the
+    # bypass is still there.
+    while [ "$domain" != "${domain%.}" ]; do domain="${domain%.}"; done
 
     local reserved
     for reserved in "${RESERVED_DOMAINS[@]}"; do

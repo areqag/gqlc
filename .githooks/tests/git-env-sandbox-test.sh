@@ -17,10 +17,17 @@
 #      untouched. The first row is what stops this suite from certifying a
 #      detector that cannot see anything.
 #
-#   B. Every suite in this directory, run under the same poison with a `git`
-#      that records the environment it was handed and refuses to run. What is
-#      asserted is that no git invocation the suite reaches inherits a poisoned
-#      value.
+#   B. Every suite in this directory — THIS FILE INCLUDED — run under the same
+#      poison with a `git` that records the environment it was handed and
+#      refuses to run. What is asserted is that no git invocation the suite
+#      reaches inherits a poisoned value.
+#
+#      Including itself is not symmetry for its own sake. While this file was
+#      exempt, deleting its own `source` line left it green at 13/13: the gate
+#      could not gate its author. Its self-row is shallower than the others by
+#      construction — the child stops after one git command rather than
+#      recursing into part B — and that one command is the whole of what part B
+#      reads from any suite anyway.
 #
 # What B does NOT witness, stated rather than left to be found: the recording
 # git refuses to run, so a suite aborts at its first git command and the calls
@@ -38,6 +45,26 @@ HOOKS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # `just lint-hooks` runs shellcheck without -x, so the path is not followed.
 # shellcheck source=../git-env-sandbox.sh disable=SC1091
 source "$HOOKS_DIR/git-env-sandbox.sh"
+
+# Part B runs every suite in this directory under a poisoned environment, and
+# that includes this one. A child launched that way is told so by ARGUMENT: it
+# makes exactly one git command — which is all part B reads — and stops before
+# it would recurse into part B itself.
+#
+# An argument rather than an environment variable on purpose. A marker read
+# from the environment could arrive from outside, and its effect here is to
+# skip the entire suite; that failure would be silent and in the fail-open
+# direction. Nothing invokes this file with `--self-test` except the loop below.
+#
+# This exists because the gate did not gate itself. With this file exempt from
+# its own part B, deleting the `source` line above left the suite green at 13/13
+# (Միհր's MG4 on PR #1195). Sanitisation is a top-of-file property, so ONE git
+# command after the source is exactly the evidence that matters — the same
+# reason part B's header already says a suite's later calls are not witnessed.
+if [ "${1:-}" = "--self-test" ]; then
+    git --version >/dev/null 2>&1 || true
+    exit 0
+fi
 
 ROOT="$(cd "$HOOKS_DIR/.." && pwd)"
 TESTS_DIR="$HOOKS_DIR/tests"
@@ -174,18 +201,51 @@ exit 111
 SHIM
 chmod +x "$SHIM_DIR/git"
 
+# RED control for part B. Every row below is read out of that log, so a shim
+# that quietly stopped recording GIT_ variables would turn the whole of part B
+# into passes — measured: blinding the `env | grep '^GIT_'` line above leaves
+# the suite green (Միհր's MG2 on PR #1195). Part A has had a red control since
+# it was written; this is the same idea for the half that had none.
+#
+# The control is a suite-shaped script that deliberately does NOT sandbox
+# itself, run through the identical pipeline. If the leak is not seen here, the
+# instrument is blind and nothing below means anything.
+CONTROL="$TMP/leaky-suite.sh"
+cat >"$CONTROL" <<'LEAKY'
+#!/usr/bin/env bash
+# Deliberately omits `source .githooks/git-env-sandbox.sh` — that omission is
+# the whole point of this file.
+git --version >/dev/null 2>&1 || true
+LEAKY
+
+control_log="$TMP/env.control.log"
+: >"$control_log"
+( cd "$ROOT" \
+  && env "${poison[@]}" \
+         "GQLC_GIT_ENV_LOG=$control_log" \
+         "PATH=$SHIM_DIR:$PATH" \
+         timeout 120 bash "$CONTROL" ) >/dev/null 2>&1 || true
+
+if grep -qF "$MARK" "$control_log"; then
+    ok "RED control: part B sees a suite that inherits the environment"
+else
+    bad "RED control: part B sees a suite that inherits the environment" \
+        "the recording git logged no poisoned value for a script that never sandboxed itself, so every row below would pass whatever the suites do"
+fi
+
 # The directory is the classifier, as it is for ciguard's hookSuites: a glob
 # for `*-test.sh` would silently skip a suite spelled some other way, and a
 # skipped suite is the case this whole file exists to catch.
 suites=()
 while IFS= read -r entry; do
-    [ "$(basename "$entry")" = "$SELF" ] && continue
     suites+=("$entry")
 done < <(find "$TESTS_DIR" -mindepth 1 -maxdepth 1 -type f | sort)
 
-if [ "${#suites[@]}" -eq 0 ]; then
-    bad "the suite list is not empty" \
-        "no file in $TESTS_DIR besides this one, so part B asserts nothing"
+# This file is always one of them, so an empty list is impossible and a list of
+# ONE means there is nothing here but us.
+if [ "${#suites[@]}" -le 1 ]; then
+    bad "the suite list holds more than this file" \
+        "$TESTS_DIR holds only $SELF, so part B witnesses nothing about any other suite"
 fi
 
 for suite in "${suites[@]}"; do
@@ -193,12 +253,16 @@ for suite in "${suites[@]}"; do
     log="$TMP/env.$name.log"
     : >"$log"
 
+    # Only ourselves, and only via argv — see the guard at the top of this file.
+    self_arg=()
+    [ "$name" = "$SELF" ] && self_arg=(--self-test)
+
     rc=0
     ( cd "$ROOT" \
       && env "${poison[@]}" \
              "GQLC_GIT_ENV_LOG=$log" \
              "PATH=$SHIM_DIR:$PATH" \
-             timeout 120 bash "$suite" ) >/dev/null 2>&1 || rc=$?
+             timeout 120 bash "$suite" ${self_arg[@]+"${self_arg[@]}"} ) >/dev/null 2>&1 || rc=$?
 
     leaked="$(grep -F "$MARK" "$log" | sort -u | tr '\n' ' ')"
     if [ -n "$leaked" ]; then
