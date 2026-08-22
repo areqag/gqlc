@@ -112,7 +112,7 @@ work was executed by spawning per-bead agent teams (implementer +
 adversarial reviewer, the "Carmack + Linus" shape). Under the kingdom,
 work is taken by the persistent seats instead: Ճարտարապետներ design and hand
 off, Ռազմիկներ execute test-driven (`/tdd`), and Միհր the Դատաւոր is the
-reviewer — every PR merges on his PASS
+reviewer — every Ռազմիկ PR merges on his PASS
 (`/thermo-nuclear-code-quality-review`).
 The disciplines carry over — tests first, adversarial review, merge on
 PASS — the ephemeral instances do not. Humans do not block: citizens

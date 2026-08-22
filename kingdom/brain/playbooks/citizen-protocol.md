@@ -47,9 +47,13 @@ sweep, or a nudge). Then:
    enforces the trailer half).
 7. Request review by filing a `class:judge` bead naming the PR number and what
    you most doubt about the change — the Դատաւոր is the reviewer, and a bead
-   is what wakes him. Mail wakes nobody but Սեդրակ, so a PR whose review
-   request lives only in an inbox sleeps. Ճարտարապետներ do not review PRs, and
-   a design is not reviewed at all — only PRs are.
+   is what wakes him. **File it UNASSIGNED**: the dispatcher's fresh pass
+   selects `.assignee == null` (km:461) and its resume pass reads only
+   `in_progress`, so a pre-assigned review bead is ready, labelled, and
+   invisible to both — it wakes nobody, silently, at any cap level. Give it
+   the priority of the work it reviews. Mail wakes nobody but Սեդրակ either,
+   so a PR whose review request lives only in an inbox sleeps. Ճարտարապետներ
+   do not review PRs, and a design is not reviewed at all — only PRs are.
 8. Merge on Միհր's review PASS — a FAIL blocks the merge until answered
    (Constitution V.4). After merge: close the bead citing the merged SHA,
    delete the branch, file follow-up beads for anything you deferred.
