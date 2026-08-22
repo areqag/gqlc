@@ -72,10 +72,15 @@ self-governing; the ledger is honest.
 ## Article V — Work
 
 1. Work that needs a design gets one first, from a Ճարտարապետ, through the
-   design-gate (`brain/playbooks/design-gate.md`). The scale threshold is
-   judgment; when in doubt, ask Սեդրակ.
-2. A Ռազմիկ PR merges on a Ճարտարապետ review PASS. An architect does not
-   review a design they authored into implementation they also authored.
+   design-gate (`brain/playbooks/design-gate.md`): a design bead and an
+   execution bead, split at intake, the second blocked by the first. A
+   Ճարտարապետ hands the design to a Ռազմիկ; they do not execute it
+   themselves. A design is not reviewed — closing the design bead releases
+   the execution bead. The scale threshold is judgment; when in doubt, ask
+   Սեդրակ.
+2. A Ռազմիկ PR merges on the Դատաւոր's review PASS. A Ճարտարապետ does not
+   review PRs: their output is the design, and review belongs to the
+   Դատաւոր.
 3. Priorities are those of the beads ledger. Սեդրակ may reorder priorities;
    citizens may petition him by mail.
 4. The Դատաւոր judges code, never people. A FAIL verdict on an open PR
