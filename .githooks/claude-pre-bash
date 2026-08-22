@@ -181,6 +181,12 @@
 #     The `bd close` arm is the exception: an exception raised INSIDE it is
 #     caught there and turned into a refusal, because that arm's whole point is
 #     that a close it could not check must not proceed (see main()).
+#   - core.hooksPath disabled INLINE by the command under inspection, as in
+#     `git -c core.hooksPath=/dev/null commit`: the env filter in hooks_drift()
+#     reads what this process INHERITED, and an inline -c is not set anywhere
+#     until git itself parses it. Measured allowed, 2026-08-22. This is the
+#     same class as `git commit --no-verify`, which is also allowed here and
+#     which the Constitution governs by rule rather than by hook (bd gqlc-0tsh).
 #
 # The `bd close` arm reads the reason as it is written on the command line, or
 # out of a literal `--reason-file` path. Reaches, and does not reach:
@@ -754,8 +760,31 @@ def hooks_drift(directory):
     reason = None
     hooks = os.path.join(root, HOOKS_DIRNAME)
     if os.path.isdir(hooks):
-        # Repo-discovery env would redirect -C at whichever repo set it.
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        # Two kinds of GIT_* env, and they need opposite treatment. DISCOVERY
+        # vars (GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE, ...)
+        # would redirect -C at whichever repo set them, so they go. VALUE vars
+        # — GIT_CONFIG_PARAMETERS and the GIT_CONFIG_COUNT/KEY_n/VALUE_n triple,
+        # which are how `git -c core.hooksPath=X ...` reaches its descendants —
+        # are what git itself will read when it decides whether to run a hook,
+        # so stripping them makes this report a value git will not use.
+        #
+        # Dropping every GIT_* did exactly that. Measured (bd gqlc-o13d,
+        # 2026-08-22): with .git/config saying '.githooks' and
+        # GIT_CONFIG_PARAMETERS="'core.hooksPath=/dev/null'" exported, a real
+        # `git commit` ran NO hook and landed, while this detector stayed
+        # SILENT. That is the fail-open direction on the one state it exists to
+        # catch, and it needs no writer — which is why no writer was ever found
+        # for the /dev/null sightings this bead was filed on.
+        #
+        # GIT_CONFIG (no trailing underscore, deprecated) is deliberately NOT
+        # kept: git honours it for `git config` and not for the config it reads
+        # elsewhere, so honouring it here would report a file the hook runner
+        # never consults.
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("GIT_") or k.startswith("GIT_CONFIG_")
+        }
         try:
             proc = subprocess.run(
                 ("git", "-C", root, "config", "--get", "core.hooksPath"),
