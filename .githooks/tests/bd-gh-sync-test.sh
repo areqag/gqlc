@@ -1716,6 +1716,92 @@ case "$(last_line)" in
         bad "a failed sync is visible to a tail -1 caller" "got: $(last_line)" ;;
 esac
 
+# --- gqlc-gudu: a pulled closure is a destroyed status, and must be named -----
+# GitHub is authoritative here by design, so a mirror closed on GitHub closes the
+# bead — that is the ordinary end of every merge and must not be held. What was
+# missing is that the summary could not tell the two apart: `pulled N bead(s)`
+# reads identically whether the run carried a body edit or closed a bead a
+# citizen was working. gqlc-kibh (a P0 review bead) was closed that way while its
+# PR was open and unreviewed; the count moved by one and named nothing, and the
+# post-pull detector cannot help, because it opens by skipping every bead the run
+# pulled. So the transition is reported on the one line a `tail -1` caller keeps.
+#
+# Byte-equal bodies, so the edit-time gate is never reached and the only thing
+# between these fixtures and a plain in-sync drop is the state.
+
+CLOSER="{\"id\":\"b-shut\",\"status\":\"open\",\"external_ref\":\"$ISSUE/20\",\"description\":\"same\"}"
+GH_SHUT='[{"number":20,"state":"CLOSED","body":"same"}]'
+
+run_sync pull "[$CLOSER]" "$GH_SHUT"
+if [ "$(sync_batches)" -ne 1 ]; then
+    bad "a GH closure of an open bead is pulled, not held" \
+        "$(sync_batches) batch(es); last line: $(last_line)"
+else
+    ok "a GH closure of an open bead is pulled, not held"
+fi
+# The id alone would be satisfied by any line mentioning the bead, and the count
+# alone by a line about something else entirely, so both are read here.
+case "$(last_line)" in
+    *"1 of them had been closed on GitHub while open here (b-shut)"*)
+        ok "the summary line names a bead the pull closed" ;;
+    *) bad "the summary line names a bead the pull closed" "got: $(last_line)" ;;
+esac
+
+# The remedy travels with the report. Repairing the bead alone succeeds, reports
+# success, and is reverted by the next pull — the trap that cost Նուարդ a
+# morning — so the line that announces a closure is the one place a citizen is
+# certain to be standing when they need the ordering.
+case "$(last_line)" in
+    *"re-open the GH issue FIRST and the bead second"*)
+        ok "the closure report carries the repair ordering" ;;
+    *) bad "the closure report carries the repair ordering" "got: $(last_line)" ;;
+esac
+
+# More closures than the line will name. The count is over all of them and the
+# names are capped, so a run that shuts a dozen beads still fits on one line and
+# still says how many it shut. Without the overflow arm the reader takes three
+# as the whole set.
+MANY=""; MANY_GH=""
+for i in 30 31 32 33; do
+    MANY="${MANY:+$MANY,}{\"id\":\"b-s$i\",\"status\":\"open\",\"external_ref\":\"$ISSUE/$i\",\"description\":\"same\"}"
+    MANY_GH="${MANY_GH:+$MANY_GH,}{\"number\":$i,\"state\":\"CLOSED\",\"body\":\"same\"}"
+done
+run_sync pull "[$MANY]" "[$MANY_GH]"
+case "$(last_line)" in
+    *"4 of them had been closed on GitHub while open here (b-s30, b-s31, b-s32, +1 more)"*)
+        ok "the closure count covers more beads than the line names" ;;
+    *) bad "the closure count covers more beads than the line names" "got: $(last_line)" ;;
+esac
+
+# The arm is worth nothing if it fires on every pull: a reader who sees it on the
+# ordinary body-edit case learns that a closure and an amendment look the same,
+# which is the state this replaces. b-ok's mirror is OPEN and its body extends
+# the description — a pull, and not a closure.
+run_sync pull "[$ELIGIBLE]" \
+    "[{\"number\":8,\"state\":\"OPEN\",\"body\":\"same\nadded on GH\"$GH_LATE}]"
+case "$(last_line)" in
+    *closed*|*b-ok*)
+        bad "an ordinary pull is not reported as a closure" "got: $(last_line)" ;;
+    *"pulled 1 bead(s)"*)
+        ok "an ordinary pull is not reported as a closure" ;;
+    *)
+        bad "an ordinary pull is not reported as a closure" "got: $(last_line)" ;;
+esac
+
+# Outcome, not intent — the rule the rest of this summary already follows. A
+# batch that exited non-zero closed nothing, so a run that reports the closure
+# anyway sends its reader to re-open a bead that was never shut, and worse, lets
+# the next run's silence read as agreement.
+SYNC_RC=1
+run_sync pull "[$CLOSER]" "$GH_SHUT"
+SYNC_RC=0
+case "$(last_line)" in
+    *b-shut*) bad "a failed batch closed nothing and claims nothing" \
+        "named a bead no batch pulled: $(last_line)" ;;
+    *FAILED*) ok "a failed batch closed nothing and claims nothing" ;;
+    *) bad "a failed batch closed nothing and claims nothing" "got: $(last_line)" ;;
+esac
+
 # The count on that line is a claim about what `bd github sync` was handed, and
 # the allowlist length is not evidence for it. A bead id that cannot survive the
 # trip to argv — empty, or carrying a quote that splits it — used to be counted
@@ -3018,6 +3104,12 @@ a bead id carrying a newline is refused by name, escaped
 a bead id that cannot be passed is a failed pull, not a success
 a split id does not blind the held-bead check for the id it collides with
 a bead id that splits its record reaches no batch and is counted as unpulled
+a GH closure of an open bead is pulled, not held
+the summary line names a bead the pull closed
+the closure report carries the repair ordering
+the closure count covers more beads than the line names
+an ordinary pull is not reported as a closure
+a failed batch closed nothing and claims nothing
 a failed batch, a hold, an orphan and a moved bead share one summary line
 the push blind notice names the 'gh issue list' exit status it saw
 the 'gh issue list' stub is transparent when its knob is unset
