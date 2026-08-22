@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Refuses a push whose RESOLVED destination is master (or main) unless the ref
+# being pushed IS that branch. Invoked from .githooks/pre-push with the hook's
+# own arguments and stdin; runnable standalone, which is how
+# .githooks/tests/worktree-upstream-test.sh exercises it.
+#
+# Why this exists (bd gqlc-tfh1 / GH #1042). CLAUDE.md's sibling-worktree
+# recipe used to be
+#     git worktree add ../<repo>-<slug> -b <branch> origin/master
+# which sets the NEW branch's upstream to origin/master, so a bare `git push`
+# in that worktree resolves to master. Measured 2026-08-19 in ../gqlc-agt0: on
+# branch fix/vuln-unplaced-stdlib-assertions-covered, `@{u}` was origin/master.
+# A sweep of all 21 sibling worktrees later the same day found 4 in that state;
+# agt0 was by then not one of them, a successful `git push -u` having moved its
+# upstream to its own branch. The push was refused, but only by
+# push.default=simple's name-mismatch rule, and git's own
+# refusal text offers `git push origin HEAD:master` as the first remedy — which
+# puts the branch on master. The recipe is fixed, but a recipe only reaches the
+# worktrees someone creates after reading it, and `push.default` is not
+# settable per-repo without writing the shared .git/config. This is the arm
+# that survives both.
+#
+# Why the RESOLVED destination and not the branch name: stdin is git's pre-push
+# protocol, one line per ref, AFTER refspec resolution:
+#     <local-ref> <local-sha> <remote-ref> <remote-sha>
+# One rule over that catches an explicit HEAD:master, a branch:master refspec,
+# and a `--all` that sweeps master up, where a rule over
+# `git rev-parse --abbrev-ref HEAD` catches none of them. It covers the bare
+# push a bad upstream routes to master only where git resolves that refspec at
+# all: measured 2026-08-20, push.default=upstream and its synonym tracking.
+# Under this repo's effective `simple` — push.default is unset — git fatals on
+# the name mismatch before any hook runs; under `current` and `matching` a bare
+# push does not name master.
+#
+# Limits, stated because they are the difference between this and a complete
+# fix: `git push --no-verify` skips it, and so does any worktree whose
+# core.hooksPath has drifted off .githooks (bd gqlc-5fm / gqlc-nzwa). It is a
+# backstop, not a wall.
+#
+# It also cannot see whether a push is forced. A `+` refspec and `--force` reach
+# neither this hook's argv (remote name, remote URL) nor its stdin: git hands
+# over the same four fields for a rewrite as for a fast-forward, measured
+# 2026-08-20 over all three spellings. So `+master:master` is allowed here for
+# the same reason `master:master` is, and two rows in
+# .githooks/tests/worktree-upstream-test.sh record that as a decision. What
+# refuses a rewrite of master is the remote: repository ruleset `protect-master`
+# (active, ~DEFAULT_BRANCH, bypass_actors empty) carries `non_fast_forward`,
+# `deletion` and `pull_request` rules, and classic branch protection has
+# allow_force_pushes and allow_deletions both false with enforce_admins on, read
+# 2026-08-20. The only local substitute would be an ancestry test, and a poor
+# one: it needs the remote sha present locally, and a `--force` that happens to
+# fast-forward passes it.
+set -euo pipefail
+
+remote_name="${1:-<unnamed remote>}"
+remote_url="${2:-}"
+
+# A literal list, not `git symbolic-ref refs/remotes/$remote/HEAD`: that lookup
+# needs a remote round trip or a cached ref that may be absent or stale, and a
+# guard that answers "I could not tell" is a guard that stops guarding.
+is_protected_ref() {
+    case "$1" in
+    refs/heads/master | refs/heads/main) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
+violations=()
+lineno=0
+
+while IFS= read -r line; do
+    lineno=$((lineno + 1))
+    # git emits no blank lines, but a whitespace-only one names no ref, so
+    # there is nothing to decide about it and it must not trip the shape check
+    # below.
+    if [ -z "${line//[[:space:]]/}" ]; then
+        continue
+    fi
+
+    # Five names for four fields on purpose. `read a b c d` folds every extra
+    # token into d, so a line this script does not understand would still be
+    # decided on. A line whose shape is unknown is a line whose destination is
+    # unknown, and the whole point here is that nothing lands on master
+    # unchecked — so an unparseable line blocks.
+    local_ref='' local_sha='' remote_ref='' remote_sha='' extra=''
+    read -r local_ref local_sha remote_ref remote_sha extra <<<"$line" || true
+    if [ -z "$local_ref" ] || [ -z "$local_sha" ] || [ -z "$remote_ref" ] ||
+        [ -z "$remote_sha" ] || [ -n "$extra" ]; then
+        echo "ERROR: pre-push stdin line $lineno is not" >&2
+        echo "       '<local-ref> <local-sha> <remote-ref> <remote-sha>':" >&2
+        echo "         $line" >&2
+        echo "       Refusing the push: this guard cannot say where that ref lands." >&2
+        exit 1
+    fi
+
+    if ! is_protected_ref "$remote_ref"; then
+        continue
+    fi
+    # The allow test is identity, not "is a branch". `git push origin
+    # HEAD:master` reports the local ref as the literal string HEAD (measured
+    # 2026-08-19), and HEAD never equals refs/heads/master — so the phrasing
+    # git suggests is refused, while a bare push from master, which reports
+    # refs/heads/master, is not. A delete reports `(delete)` and is refused
+    # here too: erasing master is not a milder version of overwriting it.
+    if [ "$local_ref" = "$remote_ref" ]; then
+        continue
+    fi
+    violations+=("$local_ref  ->  $remote_ref")
+done
+
+if [ "${#violations[@]}" -eq 0 ]; then
+    exit 0
+fi
+
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+
+{
+    echo "ERROR: refusing a push that would land on the shared master branch."
+    echo "       (bd gqlc-tfh1 — master is advanced by merging a PR. What this guard"
+    echo "        refuses is landing some OTHER ref on it; see the last line.)"
+    echo
+    echo "  remote: $remote_name${remote_url:+ ($remote_url)}"
+    printf '  %s\n' "${violations[@]}"
+    echo
+    if [ -n "$upstream" ]; then
+        echo "  branch '$branch' currently tracks '$upstream'"
+    fi
+    echo "  Publish the branch under its own name instead:"
+    echo "    git branch --unset-upstream"
+    echo "    git push -u origin HEAD"
+    echo
+    echo "  To push master itself, name it on both sides: git push origin master:master"
+} >&2
+
+exit 1

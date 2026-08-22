@@ -57,9 +57,17 @@ bd close <id>         # Complete work
 At bead-claim time, before any modification:
 
 ```bash
-git worktree add ../<repo>-<bead-slug> -b <branch-name> origin/master
+git worktree add --no-track -b <branch-name> ../<repo>-<bead-slug> origin/master
 cd ../<repo>-<bead-slug>
 ```
+
+The first push publishes the branch and sets its upstream:
+
+```bash
+git push -u origin HEAD
+```
+
+**`--no-track` is load-bearing.** Without it, `git worktree add -b <branch> origin/master` sets the new branch's upstream to `origin/master`, so a bare `git push` there resolves to **master**, not to the branch. Measured 2026-08-19 in `../gqlc-agt0`: on `fix/vuln-unplaced-stdlib-assertions-covered`, `git rev-parse --abbrev-ref --symbolic-full-name '@{u}'` returned `origin/master`. A sweep of all 21 sibling worktrees later the same day found 4 in that state — agt0 by then not among them, a successful `git push -u` having moved its upstream to its own branch. What stopped the push was `push.default=simple` refusing a name mismatch — and its message does not mention master; it offers `git push origin HEAD:master` as the first remedy, which is the accident. `git branch --unset-upstream` repairs a worktree already in that state. bd `gqlc-tfh1`.
 
 After the PR merges and beads are closed:
 

@@ -75,8 +75,62 @@ check-hooks:
         exit 1
     fi
 
+# fails when this worktree's branch tracks master, which is the state
+# `git worktree add -b <branch> origin/master` leaves behind (bd gqlc-tfh1).
+# In it, a bare `git push` resolves to master and `git pull` merges master into
+# the branch — neither says so, and `git status` reports ahead/behind against
+# master as if that were the branch's home.
+#
+# Distinct from the .githooks/guard-push-destination backstop, which sees a
+# push and nothing else: this names the misconfiguration while it is still
+# latent, and it is the arm that reaches the worktrees that already exist —
+# 4 of the 21 alive on 2026-08-19 tracked origin/master. Wired into `test` for
+# the same reason check-hooks is: a check nobody invokes is not a check.
+#
+# The directory is an argument so the recipe can be exercised over a throwaway
+# tree (.githooks/tests/worktree-upstream-test.sh); developers and CI take the
+# default.
+#
+# Not skipped under CI, unlike check-hooks. actions/checkout leaves a
+# pull_request run on a detached HEAD (no upstream, nothing to say) and a
+# master push on master itself (allowed below), so there is no state CI is
+# expected to be in that this would fail — and skipping would mean the only
+# thing that ever runs it is a developer's machine.
+[private]
+check-worktree-upstream dir=".":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="{{ dir }}"
+    branch="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    # Detached HEAD — how a reviewer checks out a SHA — prints the literal
+    # "HEAD" and has no upstream.
+    if [ -z "$branch" ] || [ "$branch" = "HEAD" ] || [ "$branch" = "master" ] || [ "$branch" = "main" ]; then
+        exit 0
+    fi
+    upstream="$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+    if [ -z "$upstream" ]; then
+        exit 0
+    fi
+    # Compared against the branch's own remote rather than pattern-matched on
+    # */master: a remote-tracking ref named origin/topic/master is not this bug.
+    remote="$(git -C "$dir" config "branch.$branch.remote" || true)"
+    case "$remote" in
+        "")  exit 0 ;;
+        ".") prefix="" ;;
+        *)   prefix="$remote/" ;;
+    esac
+    if [ "$upstream" != "${prefix}master" ] && [ "$upstream" != "${prefix}main" ]; then
+        exit 0
+    fi
+    echo "error: branch '$branch' tracks '$upstream', so a bare 'git push' here targets" >&2
+    echo "       ${upstream#"$prefix"} and 'git pull' merges it in (bd gqlc-tfh1)." >&2
+    echo "       Drop the tracking, and set it from the first push instead:" >&2
+    echo "         git -C '$dir' branch --unset-upstream" >&2
+    echo "         git -C '$dir' push -u origin HEAD" >&2
+    exit 1
+
 # health check for local dev environment; extend as new drift modes emerge
-doctor: check-hooks
+doctor: check-hooks check-worktree-upstream
     @echo "ok"
 
 # provisions the pinned golangci-lint into the gitignored .bin/ when missing
@@ -715,12 +769,13 @@ test-hooks:
     bash .githooks/tests/check-pr-closes-test.sh
     bash .githooks/tests/tool-gate-test.sh
     bash .githooks/tests/km-test.sh
+    bash .githooks/tests/worktree-upstream-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # -shuffle catches inter-test coupling; go build link-checks package main,
 # which has no tests and is otherwise only compile-checked by lint.
-test: check-hooks test-hooks
+test: check-hooks check-worktree-upstream test-hooks
     go build ./...
     go test -shuffle=on ./...
 

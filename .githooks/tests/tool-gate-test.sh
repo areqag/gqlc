@@ -74,8 +74,8 @@ assert_curl_calls() {
 }
 
 # --- hook sandbox -----------------------------------------------------------
-# The hooks are copied rather than run in place because pre-push resolves
-# bd-gh-sync through `dirname "$0"`; a copy is what puts a stub there. The copy
+# The hooks are copied rather than run in place because pre-push resolves its
+# siblings through `dirname "$0"`; a copy is what puts a stub there. The copy
 # is taken from the tree on every run, so it cannot go stale, and a copy that
 # failed shows up as every accept case turning into a reject.
 SANDBOX="$TMP/sandbox"
@@ -84,7 +84,13 @@ STUB_JUST_DIR="$TMP/bin-just"
 mkdir -p "$SANDBOX" "$HOOKS" "$STUB_JUST_DIR"
 cp "$HOOKS_DIR/pre-commit" "$HOOKS/pre-commit"
 cp "$HOOKS_DIR/pre-push" "$HOOKS/pre-push"
-chmod +x "$HOOKS/pre-commit" "$HOOKS/pre-push"
+# The real guard, not a stub: it makes no network call and touches no state, so
+# a stub would only be an opportunity for the sandbox to disagree with the
+# tree. run_hook feeds it an empty ref list, which is the "nothing to push"
+# case it accepts — these tests are about the provisioning arms below it.
+# .githooks/tests/worktree-upstream-test.sh is where it is decided on.
+cp "$HOOKS_DIR/guard-push-destination" "$HOOKS/guard-push-destination"
+chmod +x "$HOOKS/pre-commit" "$HOOKS/pre-push" "$HOOKS/guard-push-destination"
 
 cat >"$HOOKS/bd-gh-sync" <<'STUB'
 #!/usr/bin/env bash
@@ -114,7 +120,10 @@ run_hook() {
         cd "$SANDBOX" \
             && env PATH="$STUB_JUST_DIR:$PATH" JUST_LOG="$JUST_LOG" \
                 BRANCH_OVERRIDE=feature/tool-gate-test "$@" "$HOOKS/$hook"
-    ) >"$OUT" 2>"$ERR"
+        # git always hands pre-push a ref list on stdin; nothing does when the
+        # hook is run by hand, and without this the guard at the top of it
+        # reads the terminal and the suite hangs.
+    ) </dev/null >"$OUT" 2>"$ERR"
     last_rc=$?
 }
 
