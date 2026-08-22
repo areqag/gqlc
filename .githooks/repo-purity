@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Runs a command and FAILS the run if it changed the repository it ran in.
+#
+# On 2026-08-22 the km suite, invoked from pre-push, flipped core.bare on the
+# SHARED config, force-moved a seat's branch, and left a fixture identity in
+# user.email where it sat for days (bd gqlc-ed2u). Every one of those was found
+# by hand, afterwards, by a citizen who noticed their own branch had moved.
+# This is the boundary detector: no suite has to remember to be careful for it
+# to fire.
+#
+# WHY THE WHOLE CONFIG AND NOT A KEY LIST. `just check-shared-config` names the
+# keys already known to brick a worktree; that is prevention against a known
+# set. This is the other half, so it must catch a key nobody taught it the name
+# of — the enumeration complaint of gqlc-n8n0 and gqlc-kl2d. The snapshot is
+# therefore every line of `git config --list --local`, diffed.
+#
+# VERIFICATION RUNS IN AN EXIT TRAP, deliberately. The worst run is the one that
+# breaks the repo AND fails: verifying only on the success path would report the
+# test failure and hide the damage.
+#
+# Read from a linked worktree, `--local` resolves to the SHARED config, which is
+# the damaged surface. That is why this can run from a seat and still see it.
+set -uo pipefail
+
+if [ "$#" -eq 0 ]; then
+    echo "usage: repo-purity <cmd> [args...]" >&2
+    exit 2
+fi
+
+SNAP="$(mktemp -d)"
+mkdir -p "$SNAP/before" "$SNAP/after"
+
+snapshot() {
+    local into="$1"
+    git config --list --local 2>/dev/null | sort >"$into/config"
+    git rev-parse HEAD 2>/dev/null >"$into/head"
+    git symbolic-ref -q HEAD 2>/dev/null >"$into/ref"
+}
+
+report_pair() {
+    local label="$1" before="$2" after="$3"
+    printf 'repo-purity: %s changed: %s -> %s\n' \
+        "$label" "${before:-<none>}" "${after:-<none>}" >&2
+}
+
+INNER_RC=0
+VERIFIED=0
+
+verify() {
+    [ "$VERIFIED" = 1 ] && return
+    VERIFIED=1
+
+    snapshot "$SNAP/after"
+    local damaged=0
+
+    if ! cmp -s "$SNAP/before/config" "$SNAP/after/config"; then
+        damaged=1
+        echo "repo-purity: the run changed the repository's local git config:" >&2
+        diff "$SNAP/before/config" "$SNAP/after/config" | grep -E '^[<>]' >&2
+    fi
+
+    local h_before h_after r_before r_after
+    h_before="$(cat "$SNAP/before/head")"; h_after="$(cat "$SNAP/after/head")"
+    r_before="$(cat "$SNAP/before/ref")";  r_after="$(cat "$SNAP/after/ref")"
+
+    if [ "$h_before" != "$h_after" ]; then
+        damaged=1
+        report_pair "HEAD" "$h_before" "$h_after"
+    fi
+    if [ "$r_before" != "$r_after" ]; then
+        damaged=1
+        report_pair "the checked-out branch (HEAD symbolic-ref)" "$r_before" "$r_after"
+    fi
+
+    rm -rf "$SNAP"
+
+    if [ "$damaged" -ne 0 ]; then
+        printf 'repo-purity: FAILED — the command changed the repository it ran in (the command itself exited %d).\n' \
+            "$INNER_RC" >&2
+        echo "repo-purity: a test run must leave its own repository untouched; see bd gqlc-2zet." >&2
+        exit 1
+    fi
+
+    exit "$INNER_RC"
+}
+
+trap verify EXIT
+
+snapshot "$SNAP/before"
+"$@" || INNER_RC=$?
+exit "$INNER_RC"
