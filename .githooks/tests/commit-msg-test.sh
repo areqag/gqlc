@@ -172,6 +172,21 @@ run_ident_case "a host under .test"                  denylist:author runner@ci.t
 run_ident_case "a host under .example"               denylist:author runner@ci.example
 run_ident_case "root@localhost"                      denylist:author root@localhost
 run_ident_case "any user at localhost"               denylist:author build@localhost
+# The empty-email row below reaches the `""` denylist arm only if git hands an
+# empty GIT_AUTHOR_EMAIL to `git var` rather than treating it as unset and
+# falling back to config. Measured true on git 2.55; NOT promised by git's
+# docs. Were it to change, the row would quietly exercise whatever real
+# address the machine is configured with, still print `ok`, and leave the
+# `""` arm unwitnessed — the same read-the-machine defect this section exists
+# to remove. So assert the precondition by name instead of assuming it.
+ident_email="$(cd "$REPO" && env GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL= \
+    git var GIT_AUTHOR_IDENT 2>/dev/null | sed 's/.*<\(.*\)>.*/\1/')"
+if [ -z "$ident_email" ]; then
+    pass=$((pass + 1)); printf 'ok   - precondition: git passes an empty author email through\n'
+else
+    fail=$((fail + 1)); printf 'FAIL - precondition: git passes an empty author email through (git var gave <%s>, so the empty-email row below tests that address and not the "" arm)\n' "$ident_email"
+fi
+
 run_ident_case "an empty email"                      denylist:author ""
 
 # The shape check is the second guard and the only one covering addresses no
