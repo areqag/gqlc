@@ -173,6 +173,12 @@ run_identity_case "author at a subdomain of example.com"                    reje
 # is not.
 run_identity_case "author under .INVALID in capitals"                       reject "FIXTURE@EXAMPLE.INVALID"  "$GOOD"
 
+# A trailing dot is the DNS root: the same name, spelled as an FQDN. Both of
+# these were ACCEPTED before the strip — a one-character walk around a rule
+# whose entire claim is that respelling cannot get past it.
+run_identity_case "author under .invalid spelled as an FQDN"                reject "dev@example.invalid."     "$GOOD" "RFC 2606"
+run_identity_case "author at localhost spelled as an FQDN"                  reject "dev@localhost."           "$GOOD" "RFC 2606"
+
 # The committer is checked as well as the author, and independently of it.
 run_identity_case "committer under .invalid while the author is good"       reject "$GOOD" "fixture@example.invalid"
 

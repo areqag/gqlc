@@ -33,6 +33,11 @@ _check_identity() {
     # FIXTURE@EXAMPLE.INVALID through a rule that stops the lowercase spelling.
     local host
     host="$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]')"
+    # A single trailing dot is the DNS root and makes an FQDN, so `example.
+    # invalid.` and `example.invalid` name the same place. Measured: without
+    # this strip the trailing-dot spelling was accepted — a one-character walk
+    # around a rule whose whole purpose is that it cannot be walked around.
+    host="${host%.}"
 
     # RFC 2606 reserves these names so that no real address can ever fall under
     # them, which is what makes them safe to refuse wholesale. Match the
