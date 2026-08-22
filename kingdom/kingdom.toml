@@ -29,10 +29,15 @@ handoff_threshold_pct = 75
 permission_mode = "bypassPermissions"
 
 [effort]
-# Starting depth per class (Constitution V.6). These are STARTING levels, not
-# ceilings: a citizen raises their own with `/effort <level>` mid-session,
-# needing nobody's permission (V.6.2). Tuning these is a config edit, never an
-# amendment (V.6.1) — so argue about the numbers here, not in the constitution.
+# Starting depth per class (Constitution V.6). These are STARTING levels — a
+# bound in neither direction: a citizen moves their own either way with
+# `/effort <level>` mid-session, needing nobody's permission (V.6.2). Tuning
+# these is a config edit, never an amendment (V.6.1) — so argue about the
+# numbers here, not in the constitution.
+#
+# `/effort` is measured to work in the interactive mode km-seat launches
+# (Միհր, 2026-08-22, verdict-6muh-r1); it is NOT available under headless
+# `claude -p`.
 # Levels: low | medium | high | xhigh | max.
 #
 # Provisional, adopted 2026-08-22 with the numbers explicitly open: the town

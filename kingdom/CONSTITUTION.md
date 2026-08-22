@@ -95,14 +95,15 @@ self-governing; the ledger is honest.
    1. Default depth per class is configuration (`kingdom/kingdom.toml`),
       changed by a config edit, not by an amendment. A constitution that
       carries tuning parameters is one nobody can tune.
-   2. A default is a starting point, never a ceiling. A citizen may always
-      work deeper than their default when the work demands it, and needs
-      nobody's permission: a floor imposed on a citizen's thinking is
-      forcing, which Article VI.2 forbids. Where the machinery cannot yet
-      raise a citizen's depth mid-session, that is a defect in the
-      machinery and not a limit on the right — the citizen says so on the
-      bead, and the work waits or is handed on rather than being done
-      shallower than it needs.
+   2. A default is a starting point, neither a ceiling nor a floor. A
+      citizen may work deeper than their default when the work demands it,
+      or shallower when it does not, and needs nobody's permission in
+      either direction: a bound imposed on a citizen's thinking is forcing,
+      which Article VI.2 forbids. Where the machinery cannot yet reach a
+      citizen's chosen depth mid-session, that is a defect in the machinery
+      and not a limit on the right — the citizen says so on the bead, and
+      the work waits or is handed on rather than being done at a depth
+      nobody chose.
    3. Escalation is scoped to the bead that occasioned it, and the default
       resumes after — so the town cannot ratchet back to running everything
       at maximum one justified exception at a time. No citizen owes an
