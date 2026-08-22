@@ -63,6 +63,12 @@ assert_err_has() {
 assert_err_lacks() {
     if grep -qF -- "$2" "$ERR"; then bad "$1 (stderr carries '$2')"; else ok "$1"; fi
 }
+# lint-new's own findings stay on stdout, where the recipe puts them today; the
+# hook's diagnoses are on stderr. The two are asserted separately so a change
+# that routed the findings into the diagnosis stream would be visible here.
+assert_out_has() {
+    if grep -qF -- "$2" "$OUT"; then ok "$1"; else bad "$1 (stdout lacks '$2')"; fi
+}
 assert_just_called() {
     if grep -qxF -- "$2" "$JUST_LOG"; then ok "$1"; else bad "$1 (just was never run with '$2')"; fi
 }
@@ -98,13 +104,21 @@ exit 0
 STUB
 chmod +x "$HOOKS/bd-gh-sync"
 
+# git runs a hook from the top of the worktree, so the sandbox needs the one
+# file pre-push reads from there: the go directive names the toolchain its
+# no-opinion diagnosis tells the developer to re-run under. The version here is
+# deliberately NOT the one this repo pins: a hook that spelled its own go.mod's
+# version into the message would pass an assertion written against 1.26.6, and
+# would fail the one below.
+printf 'module sandbox\n\ngo 1.21.9\n' >"$SANDBOX/go.mod"
+
 cat >"$STUB_JUST_DIR/just" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$1" >>"$JUST_LOG"
 case "$1" in
     ensure-golangci) exit "${STUB_ENSURE_RC:-0}" ;;
     fmt-check)       exit "${STUB_FMT_RC:-0}" ;;
-    lint-new)        exit "${STUB_LINT_RC:-0}" ;;
+    lint-new)        printf '%b' "${STUB_LINT_OUT:-}"; exit "${STUB_LINT_RC:-0}" ;;
     test)            exit "${STUB_TEST_RC:-0}" ;;
     *)               exit 0 ;;
 esac
@@ -167,6 +181,175 @@ assert_rc_nonzero "pre-push: a lint-new finding blocks the push"
 run_hook pre-push STUB_ENSURE_RC=0 STUB_TEST_RC=1
 assert_rc_nonzero "pre-push: a failing test suite blocks the push"
 assert_just_not_called "pre-push: a failing test suite does not reach lint-new" lint-new
+
+# --- pre-push: the linter ran and could not form an opinion (bd gqlc-m9ca) ---
+# The third state the provisioning arms below never considered: the binary
+# provisions perfectly and then reports on a standard library it cannot read,
+# because the machine's default toolchain is one golangci-lint was not built
+# against. Measured 2026-08-22 in this repo: go.mod names go 1.26.6, the machine
+# default was go1.27.0-X:nodwarf5 (a custom build), and `golangci-lint run
+# --new-from-rev origin/master` under the then-pinned v2.12.2 produced the
+# fixture below. That pin has since moved to v2.13.1 (#1071), built against
+# go1.27.0, and lint-new is green under the same default toolchain today — so
+# this fixture is a RECORDING, not a live reproducer, and the two rows further
+# down (a panic, and a config that will not load) are the ones still reachable
+# at the current pin.
+#
+# EXIT CODE 1 -- the same code as a real finding, which is why the classification
+# reads the OUTPUT and not the status. Anything keyed on the exit code would have
+# to treat every real lint finding the same way.
+TOOLCHAIN_LINT_OUT='../../../../../usr/lib/go/src/crypto/internal/randutil/randutil.go:11:2: could not import math/rand/v2 (/usr/lib/go/src/math/rand/v2/rand.go:213:17: method must have no type parameters) (typecheck)\n\t"math/rand/v2"\n\t^\n2 issues:\n* typecheck: 2\n'
+# A real finding, for the contrast rows. Repo-relative path, a named linter that
+# is not typecheck: everything the classification must NOT fire on.
+# shellcheck disable=SC2016 # the backticks are errcheck's own message, quoted
+# verbatim; expanding them would make the fixture stop matching real output
+REAL_LINT_OUT='internal/parser/walk.go:412:6: Error return value of `w.Close` is not checked (errcheck)\n\tdefer w.Close()\n\t     ^\n1 issues:\n* errcheck: 1\n'
+# The fixture that separates the two halves of the tell. This tree does not
+# compile, so golangci-lint reports typecheck — the SAME linter name and the
+# same `* typecheck:` summary line as the toolchain failure — about a file
+# INSIDE the repo. It must read as a finding: the developer's own code is
+# broken and no toolchain change will help.
+#
+# Written because the classification survived a mutation without it. Dropping
+# the outside-repo half of the pattern and keeping `(typecheck)` alone passed
+# all 50 rows, so the hook's comment claiming the summary line is unusable on
+# its own was true and unpinned.
+INREPO_TYPECHECK_OUT='internal/parser/walk.go:88:14: undefined: notAFunction (typecheck)\n\treturn notAFunction(x)\n\t       ^\n1 issues:\n* typecheck: 1\n'
+
+run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=1 STUB_LINT_OUT="$TOOLCHAIN_LINT_OUT"
+assert_rc_nonzero "pre-push: a linter that cannot form an opinion still BLOCKS"
+assert_err_has "pre-push: the no-opinion block says the lint did not report on this repo" \
+    "could not form an opinion"
+assert_err_has "pre-push: the no-opinion block names the remedy that makes the gate RUN" \
+    "GOTOOLCHAIN="
+# The remedy has to carry the version, not just the variable name: `GOTOOLCHAIN=`
+# alone is not something a seat can paste, and the whole complaint on gqlc-m9ca
+# is that the seat is left without a next move. Asserted against the SANDBOX's
+# go directive (1.21.9), which this repo does not use, so a version written into
+# the hook by hand reddens this row instead of passing it.
+assert_err_has "pre-push: the remedy names the version go.mod asks for" "GOTOOLCHAIN=go1.21.9"
+# The escape hatch is for a MISSING linter and this linter is present. Widening
+# it here would open it on exit code 1, which is every real finding in the repo.
+assert_err_lacks "pre-push: the no-opinion block does not offer the missing-linter hatch" \
+    "GQLC_ALLOW_MISSING_LINTER=1 git push"
+# Both presentations share the "could not form an opinion" headline, so the rows
+# above pass on either account being printed. These two pin WHICH account this
+# shape gets. The exit code here IS 1, so the exit-code sentence would be
+# self-contradictory prose — it would tell the seat that 1 is not a findings
+# verdict, when 1 is the only code that is one.
+assert_err_has "pre-push: the typecheck shape is diagnosed as an unreadable stdlib" \
+    "typecheck error against a file OUTSIDE"
+assert_err_lacks "pre-push: the typecheck shape does not borrow the exit-code account" \
+    "the linter failed rather than graded"
+
+# THE ROW THAT PINS THE DECISION rather than the diagnosis: the hatch does not
+# apply to a linter that is present. Without this, widening it later would pass
+# every other row in this file.
+run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=1 STUB_LINT_OUT="$TOOLCHAIN_LINT_OUT" \
+    GQLC_ALLOW_MISSING_LINTER=1
+assert_rc_nonzero "pre-push: GQLC_ALLOW_MISSING_LINTER does not open on a present linter"
+
+# CONTRAST, and it is the half that discriminates: the row above asserts a block,
+# and a hook that blocked on every lint failure would pass it without owning a
+# classifier at all. These two say the classifier can also stay QUIET.
+run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=1 STUB_LINT_OUT="$REAL_LINT_OUT"
+assert_rc_nonzero "pre-push: a real finding blocks the push"
+assert_err_lacks "pre-push: a real finding is not diagnosed as a toolchain failure" \
+    "could not form an opinion"
+assert_err_lacks "pre-push: a real finding is not answered with GOTOOLCHAIN" "GOTOOLCHAIN="
+
+run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=1 STUB_LINT_OUT="$INREPO_TYPECHECK_OUT"
+assert_rc_nonzero "pre-push: a tree that does not compile blocks the push"
+assert_err_lacks "pre-push: an IN-REPO typecheck error is a finding, not a toolchain failure" \
+    "could not form an opinion"
+
+# --- the SECOND presentation of the same cause (bd gqlc-m9ca) ----------------
+# The same cause, same pin, presenting as an outright panic on exit code 2 with
+# NO typecheck diagnostic at all — so a classification that knew only the
+# typecheck shape stayed silent on it, which is the original defect surviving for
+# half the occurrences.
+#
+# The text is Նուարդ's capture, quoted from bd gqlc-35sw where she measured it in
+# two trees at PR #1043's head; I hit the same shape and exit code but did not
+# keep the stack, and a fixture is worth having only if it is real output rather
+# than a remembered paraphrase of one.
+#
+# Note the stack frame's ABSOLUTE path. It is in the fixture on purpose: a panic
+# quotes toolchain paths while being nothing to do with the typecheck tell, and
+# the assertion below that this shape is not given the typecheck account is only
+# worth something over output that contains such a path.
+#
+# `--issues-exit-code` defaults to 1 — read from `run --help` on v2.12.2 and
+# again on the current v2.13.1 — and nothing in this repo overrides it, so a
+# code of 2 is on its own proof that the run was not a findings verdict.
+PANIC_LINT_OUT='panic: file requires newer Go version go1.27 (application built with go1.26)\n\ngoroutine 1358 [running]:\ngo/types.(*Checker).handleBailout(0xc0021c5a08, 0xc002d0fd18)\n\t/usr/lib/go/src/go/types/check.go:406 +0x88\n'
+
+run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=2 STUB_LINT_OUT="$PANIC_LINT_OUT"
+assert_rc_nonzero "pre-push: a linter that panicked still BLOCKS"
+assert_err_has "pre-push: a panicked linter is named as forming no opinion" \
+    "could not form an opinion"
+assert_err_has "pre-push: the panic branch cites the exit-code contract it read" \
+    "--issues-exit-code is 1"
+assert_err_has "pre-push: the panic branch says the linter failed rather than graded" \
+    "the linter failed rather than graded"
+assert_err_has "pre-push: the panic branch reports the code it actually saw" "It exited 2"
+assert_err_has "pre-push: the panic branch still names the remedy" "GOTOOLCHAIN=go1.21.9"
+# The two presentations must not borrow each other's account. This output holds
+# no typecheck diagnostic, so claiming one would be a false explanation of a
+# real failure — the exact defect class PR #1029 spent eight rounds on.
+assert_err_lacks "pre-push: the panic branch does not claim a typecheck diagnostic" \
+    "typecheck error against a file OUTSIDE"
+assert_out_has "pre-push: the panic's own stack survives the classification" \
+    "handleBailout"
+# The exit-code branch may not PRESCRIBE the toolchain: it has read no evidence
+# for it, and the row below is a cause with the same branch and a different fix.
+assert_err_lacks "pre-push: the exit-code branch does not prescribe the toolchain fix" \
+    "Re-run the push under the toolchain go.mod names"
+
+# A THIRD cause reaching the same branch, and the reason the branch may not
+# assert the toolchain. `golangci-lint run --config /dev/null` exits 3 on the
+# pinned v2.13.1 — measured first-party 2026-08-22 — because the config will not
+# load. It is a present, healthy linter failing for a reason no GOTOOLCHAIN
+# touches. This row exists so a later edit that hardens the conditional framing
+# back into a diagnosis reddens here.
+BADCONFIG_LINT_OUT='Error: can.t load config: unsupported version of the configuration: ""\nThe command is terminated due to an error.\n'
+
+run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=3 STUB_LINT_OUT="$BADCONFIG_LINT_OUT"
+assert_rc_nonzero "pre-push: a linter that would not load its config still BLOCKS"
+assert_err_has "pre-push: a config failure is named as forming no opinion" \
+    "could not form an opinion"
+assert_err_has "pre-push: a config failure reports the code it actually saw" "It exited 3"
+assert_err_has "pre-push: a config failure is told the code does not say why" \
+    "the exit code does not say"
+assert_err_has "pre-push: a config failure is told GOTOOLCHAIN may not be its fix" \
+    "GOTOOLCHAIN will not move it"
+assert_err_lacks "pre-push: a config failure is not diagnosed as an unreadable stdlib" \
+    "typecheck error against a file OUTSIDE"
+
+# The remedy's fallback when there is no go directive to read. Without this row,
+# a broken extraction prints the literal `GOTOOLCHAIN=go ` — a pasteable command
+# that sets the variable to nothing — and every other row still passes.
+mv "$SANDBOX/go.mod" "$SANDBOX/go.mod.hidden"
+run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=1 STUB_LINT_OUT="$TOOLCHAIN_LINT_OUT"
+mv "$SANDBOX/go.mod.hidden" "$SANDBOX/go.mod"
+assert_err_has "pre-push: with no go.mod the remedy still names GOTOOLCHAIN" "GOTOOLCHAIN="
+assert_err_lacks "pre-push: with no go.mod the remedy is not an empty version" "GOTOOLCHAIN=go "
+
+# Whichever class it is, what the linter said reaches the developer. A hook that
+# captured the output to classify it and then dropped it would satisfy every
+# assertion above while hiding the finding the push is being blocked for.
+#
+# Each of these two re-runs the hook immediately above its own assertion rather
+# than leaning on the last run in the file. That is not ceremony: an earlier
+# draft asserted against a run three rows up, and inserting a case between them
+# made the assertion read the wrong stdout and redden for a reason that had
+# nothing to do with what it tests.
+run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=1 STUB_LINT_OUT="$REAL_LINT_OUT"
+assert_out_has "pre-push: a real finding's own text survives the classification" \
+    "Error return value of \`w.Close\` is not checked"
+run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=1 STUB_LINT_OUT="$TOOLCHAIN_LINT_OUT"
+assert_out_has "pre-push: the no-opinion output survives the classification too" \
+    "could not import math/rand/v2"
 
 # --- pre-push: provisioning failed ------------------------------------------
 run_hook pre-push STUB_ENSURE_RC=1
