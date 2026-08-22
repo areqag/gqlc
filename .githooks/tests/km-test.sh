@@ -1461,6 +1461,36 @@ else
     ok "with the PR closed, the same subject-labelled bead routes — the hold is released by the merge, not by anyone remembering"
 fi
 
+# The owned pass is upstream of the verdict, so no hold can reach it. This is
+# the pair for the FIRST row of this section, not the falsifier above: same open
+# PR, same subject, same held condition — the only difference is that this bead
+# names a seat. Both answers are defensible and the split this branch adds is
+# what forces the choice, so the choice gets a row rather than being left as an
+# artifact of a diff. It goes this way because the hold's premise is that a
+# fresh routing sends a stranger to branch from origin/master and find nothing;
+# an assignee already holds the context the hold exists to protect, and
+# withholding here would make a bead unroutable for as long as any PR touched
+# its file, which is most of the time on kingdom/ paths.
+gh_prs '[{"number":1057,"files":[{"path":"justfile"}]}]'
+dispatch_case '[
+  {"id":"gqlc-owned","priority":0,"assignee":"vahagn","labels":["class:warrior","subject:justfile"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a hold does not withhold a bead that names a seat" "rc=$RC out=$OUT"
+elif ! wake_of vahagn | grep -q 'gqlc-owned'; then
+    bad "a hold does not withhold a bead that names a seat" \
+        "its assignee was not woken under the same condition that holds an unassigned bead (woken: '$(woken_seats)') out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'hold gqlc-owned'; then
+    bad "a hold does not withhold a bead that names a seat" \
+        "it was reported held as well as routed, so the journal contradicts the wake: $OUT"
+elif ! printf '%s' "$OUT" | grep -qF 'this run, 0 held'; then
+    bad "a hold does not withhold a bead that names a seat" \
+        "the run counts a hold it did not act on: $OUT"
+else
+    ok "a ready bead assigned to a seat reaches that seat even when an open PR touches its subject — the condition that holds the identical unassigned bead — and the run reports no hold"
+fi
+
 # The dep arm reaches dispatch only through two further bd queries, whose shapes
 # the design measured and which this pins: `dep list` multi-id rows carry
 # issue_id, and parent status arrives from a separate `show`.
