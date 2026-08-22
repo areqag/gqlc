@@ -573,6 +573,49 @@ else
     ok "a ready bead assigned to one warrior wakes only that warrior, and is not offered to the other free warriors as fresh work"
 fi
 
+# The seat that is in BOTH lists, which is a state this branch creates: before
+# it, one pass flowed through route_owners; now two do, in one run. The guard is
+# the wake-file skip, and until this row its behaviour lived in a comment — the
+# exact shape this branch exists to end. Delete the skip and the suite stays
+# green — 63/63 where Անահիտ found it (#1237 round 1, head 5e6c3f34), 118/0
+# where I reproduced it after the rebase (e7872b4b).
+#
+# Both halves of the guard are asserted, because they fail differently. WITHIN a
+# run, dropping the skip wakes Հայկ twice and spends two capped slots for one
+# seat. ACROSS runs it compounds: cmd_wake APPENDS, and a seat that has been
+# woken but has not yet risen is still `asleep`, so every tick re-wakes it and
+# re-charges a slot — silent under-routing, which is the defect class of this
+# whole branch. The second run therefore resets nothing on purpose.
+dispatch_case '[
+  {"id":"gqlc-both-open","priority":0,"assignee":"hayk","labels":null}
+]' '[
+  {"id":"gqlc-both-ip","assignee":"hayk","labels":null}
+]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a seat in both lists is woken once, for the in-progress half" "rc=$RC out=$OUT"
+elif [ "$(wake_of hayk | wc -l)" -ne 1 ]; then
+    bad "a seat in both lists is woken once, for the in-progress half" \
+        "$(wake_of hayk | wc -l) wake line(s), so both passes reached him in one run: $(wake_of hayk)"
+elif ! wake_of hayk | grep -q 'resume your in-progress work.*gqlc-both-ip'; then
+    bad "a seat in both lists is woken once, for the in-progress half" \
+        "the single wake is not the resume one, so the passes ran in the wrong order: $(wake_of hayk)"
+elif wake_of hayk | grep -q 'gqlc-both-open'; then
+    bad "a seat in both lists is woken once, for the in-progress half" \
+        "the owned half was announced too, which is the double wake this guard exists to prevent: $(wake_of hayk)"
+else
+    # Deliberately NOT reset: a queued wake outlives the run that made it, and
+    # the seat is still asleep, so this is what the next timer tick actually
+    # meets.
+    run_dispatch
+    if [ "$(wake_of hayk | wc -l)" -ne 1 ]; then
+        bad "a queued wake is not re-queued on the next tick" \
+            "the wake file grew to $(wake_of hayk | wc -l) lines across two runs, so each tick re-wakes and re-charges a slot: $(wake_of hayk)"
+    else
+        ok "a seat holding in-progress work and assigned an unclaimed bead is woken once, for the in-progress half, and a second dispatch over the same unreset state neither appends a second wake nor spends a second slot"
+    fi
+fi
+
 # A ready bead assigned to a human is nobody's to route — the same rule the
 # in-progress row above pins, on the status the fresh pass sees. The one live
 # instance of this shape on the board today is exactly this: gqlc-do1, open and
