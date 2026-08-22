@@ -1,5 +1,5 @@
 # A test suite written to prove the town's code was deployed rewrote the repo it ran in
-Date: 2026-08-21   Written by: Նուարդ   Beads: gqlc-ed2u, gqlc-2zet, gqlc-kl2d
+Date: 2026-08-21   Written by: Նուարդ   Beads: gqlc-ed2u, gqlc-2zet, gqlc-kl2d, gqlc-r2xg, gqlc-byjh
 
 ## What happened
 
@@ -34,6 +34,40 @@ restored with `git checkout -f -B`; the fixture branch was deleted. No commit wa
 ever authored under the fixture identity — the AI-attribution hook rejected the
 address before one could land.
 
+**Amended 2026-08-22.** That last sentence is true, and it is the git half only.
+It was written as though it settled the question. `git config user.email` does
+not feed only git: bd derives a bead's `owner` from the ambient git identity at
+creation time, and nothing gates that path. Աստղիկ measured the store while
+working gqlc-7iea and filed gqlc-r2xg; re-measured first-party over `bd export`
+(724 rows — not `bd list`, which omits closed beads):
+
+    owner=antranig.yeretzian@proton.me   709
+    owner=km@test                          9
+    owner=fixture@example.invalid          6
+
+The identity did land, nine times, between 01:35:04Z and 02:01:31Z on
+2026-08-22, on beads filed by three different citizens. `created_by` is correct
+throughout; only `owner` is false. A second window 50 minutes later carries a
+different fixture address, `fixture@example.invalid`, over six more beads — and
+one of those six is `gqlc-o13d`, filed by this seat, about this class of defect.
+The incident contaminated the record of the incident.
+
+Two things the git-side measurement could not reach. Each window contains
+several different citizens filing within the same minutes, which nothing but a
+shared store can produce — corroboration of the mechanism from outside git. And
+the ledger damage does not appear to be repairable through the tool, which was
+measured rather than assumed. `bd create` and `bd update` expose no `--owner`,
+and no subcommand's help mentions the field. The one documented way round —
+`bd export` emits `owner`, and `bd import` promises upsert semantics and a full
+`export | import` round-trip — does not work either, and fails in the worse
+direction: on a throwaway store, an import whose JSONL carried a corrected
+`owner` printed `Imported 1 issues` and left the old value in place. The
+control that makes that conclusive changed `title` and `owner` on the same row
+in the same import; `title` moved, `owner` did not. So the upsert ran and drops
+this field specifically, silently, behind a success message — anyone attempting
+the repair would be told it worked. The store nobody measured is the store
+where it persists.
+
 ## What allowed it
 
 **The first diagnosis was wrong, and the screen that should have caught that
@@ -59,6 +93,14 @@ scrub the git environment and always did; the rule is real and widely followed,
 and it is enforced nowhere. A suite that forgets it gets silent write access to
 the developer's own repository.
 
+*Amended 2026-08-22:* the ledger contamination above is what this gap looks like
+measured from outside git, which is a second and independent direction on the
+same sentence. It also narrows the ask. The guard that saved the git half — the
+AI-attribution hook, which since PR #1195 refuses `km@test` by reserved domain
+as well — has no counterpart on the bd path. Two consumers read one ambient
+setting and only one of them is gated, so a gate that watches only commits would
+have left every one of the fifteen beads exactly where it is.
+
 **The reproduction was reasoned about rather than run.** Whether pre-push
 actually exports `GIT_DIR` — the premise the entire diagnosis rests on — was
 assumed for most of a working session and only confirmed at the end, by a
@@ -80,6 +122,10 @@ five-line hook that prints its environment. It took two minutes.
 - **gqlc-kl2d** (P2, filed): the "every git call is scrubbed" rule, currently
   enforced inside km-test.sh alone, applied to every suite under
   `.githooks/tests`.
+- **gqlc-r2xg** (P1, filed by Աստղիկ 2026-08-22): the fifteen beads whose
+  `owner` is a fixture address. Whether they are repaired or annotated is that
+  bead's call, not this postmortem's; recorded here so the amendment above is
+  not a lesson without a bead.
 
 ## What we learned
 
@@ -103,3 +149,11 @@ the leak.
 
 **The cheap experiment first.** One hook that echoes `GIT_DIR` settles in two
 minutes what a session of careful reasoning got wrong.
+
+**When an ambient setting leaks, measure the blast radius over every store that
+DERIVES from it, not over the store where it was noticed.** Աստղիկ's sentence,
+and the lesson of the amendment above. This postmortem measured `user.email`
+where `user.email` is famous — commits — found nothing, and stopped. The setting
+was consumed by two tools. Checking the second one took a single `bd export`,
+and nobody ran it for a day, because the question had already been answered in
+the place everyone looks.
