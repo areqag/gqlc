@@ -22,6 +22,34 @@ export KM_STATE_DIR="$TMP/state"
 # The suite may itself run inside a seat one day; identity must not leak in.
 unset KINGDOM_SEAT
 
+# A hermetic git fixture, because km resolves the repo from its CWD and the hold
+# rows ask real questions of `origin/master`. Run against the checkout the suite
+# happens to sit in, those rows answer differently per environment: a GitHub
+# Actions checkout has NO origin/master ref, so every path reads absent and each
+# "present path" row passes for the wrong reason — green locally, ten red rows in
+# CI (measured on PR #1128). The remote here is a real bare repo on disk, so the
+# fetch path is exercised for what it is rather than stubbed out, and no row
+# touches the network.
+FIXTURE_ORIGIN="$TMP/origin.git"
+FIXTURE="$TMP/work"
+git init -q --bare -b master "$FIXTURE_ORIGIN"
+git init -q -b master "$FIXTURE"
+git -C "$FIXTURE" config user.email fixture@example.invalid
+git -C "$FIXTURE" config user.name fixture
+git -C "$FIXTURE" config commit.gpgsign false
+# The operator's global config may point core.hooksPath at this very repo; the
+# fixture's own commits must not run the hooks under test.
+git -C "$FIXTURE" config core.hooksPath /dev/null
+mkdir -p "$FIXTURE/kingdom/bin"
+printf 'fixture\n' >"$FIXTURE/justfile"
+printf 'fixture\n' >"$FIXTURE/kingdom/bin/km"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" commit -qm 'fixture: paths the hold rows ask about'
+git -C "$FIXTURE" remote add origin "$FIXTURE_ORIGIN"
+git -C "$FIXTURE" push -q origin master
+git -C "$FIXTURE" fetch -q origin master
+git -C "$FIXTURE" update-ref refs/remotes/origin/master FETCH_HEAD
+
 pass=0
 fail=0
 ok()  { pass=$((pass + 1)); printf 'ok   - %s\n' "$1"; }
@@ -301,7 +329,7 @@ dispatch_case() { # $1=ready, $2=in-progress, $3=dep edges, $4=parent statuses
 }
 
 run_dispatch() {
-    OUT="$(PATH="$BIN:$PATH" "$KM" dispatch 2>&1)"
+    OUT="$(cd "$FIXTURE" && PATH="$BIN:$PATH" "$KM" dispatch 2>&1)"
     RC=$?
 }
 
@@ -800,8 +828,8 @@ GH_RC=""
 ERR=""
 gh_prs() { printf '%s' "$1" >"$HVGH"; }
 hv() { # $1 = candidate docs on stdin
-    printf '%s' "$1" | PATH="$BIN:$PATH" KM_HOLD_SKIP_FETCH=1 \
-        KM_FAKE_GH="$HVGH" KM_FAKE_GH_RC="$GH_RC" "$KM" hold-verdict \
+    printf '%s' "$1" | ( cd "$FIXTURE" && PATH="$BIN:$PATH" KM_HOLD_SKIP_FETCH=1 \
+        KM_FAKE_GH="$HVGH" KM_FAKE_GH_RC="$GH_RC" "$KM" hold-verdict ) \
         >"$TMP/hv.out" 2>"$TMP/hv.err"
     RC=$?
     OUT="$(cat "$TMP/hv.out")"
@@ -999,6 +1027,35 @@ else
     ok "a PR whose changedFiles agrees with its file list is trusted, so a complete list does not hold everything"
 fi
 
+# The measured shape itself, and the reason text. Արփինէ's ruling asks the
+# journal line to carry its own evidence, so the indefinite hold prints both
+# counts: a reader of the log can see WHY the answer is unknown without going
+# back to gh, and by then the PR may have merged and the numbers moved.
+gh_prs "$(jq -cn '[{number: 742, changedFiles: 102, files: [range(100) | {path: "pad/f\(.).go"}]}]')"
+hv '[{"id":"gqlc-cap","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "an indefinite hold prints the counts it rests on" "rc=$RC out=$OUT err=$ERR"
+elif [ "$OUT" != "HOLD gqlc-cap — open PR #742 lists 100 of 102 files — cannot rule out justfile" ]; then
+    bad "an indefinite hold prints the counts it rests on" \
+        "the reason must name both counts, or the log cannot be audited after the PR merges: $OUT"
+else
+    ok "the indefinite hold names the PR and both counts, so the journal line carries the evidence for its own verdict"
+fi
+
+# Ordering: a match in the VISIBLE list of a truncated PR is still definite, and
+# must not be downgraded to "cannot rule out". Asserted on the reason TEXT —
+# both arms return HOLD, so a verdict-only assertion witnesses nothing here.
+gh_prs "$(jq -cn '[{number: 742, changedFiles: 102, files: [range(99) | {path: "pad/f\(.).go"}] + [{path: "justfile"}]}]')"
+hv '[{"id":"gqlc-cap","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a visible match in a truncated PR holds for the definite reason" "rc=$RC out=$OUT err=$ERR"
+elif [ "$OUT" != "HOLD gqlc-cap — open PR #742 touches justfile" ]; then
+    bad "a visible match in a truncated PR holds for the definite reason" \
+        "the subject is right there in the visible list; reporting it as unrulable understates the evidence: $OUT"
+else
+    ok "a subject found in the visible files of a truncated PR is reported as a definite match, not downgraded to the indefinite cannot-rule-out reason"
+fi
+
 # The over-holding half. A threshold guard reads any 100-file PR as suspect; the
 # real cap is only a cap when something was actually withheld, and a PR that
 # changed exactly 100 files withheld nothing.
@@ -1022,6 +1079,41 @@ elif [ "$(printf '%s\n' "$OUT" | awk '{print $2}' | tr '\n' ' ')" != "gqlc-o1 gq
     bad "verdicts come back in input order" "order lost: $OUT"
 else
     ok "one line per candidate, in input order, so the caller can keep its priority ordering"
+fi
+
+# The fetch, which every row above skips. Without it the whole guard reads a
+# frozen origin/master, so a path merged an hour ago stays "absent" and its bead
+# is held forever — the failure mode is a permanent hold that looks exactly like
+# a correct one. A second clone lands a path in the bare origin behind this
+# working clone's back, leaving its tracking ref genuinely stale; the row then
+# asks for that path with the fetch ENABLED. Its falsifier is the staleness
+# itself: drop the fetch and the answer is HOLD.
+FIXTURE_LATE="$TMP/late"
+git clone -q "$FIXTURE_ORIGIN" "$FIXTURE_LATE"
+git -C "$FIXTURE_LATE" config user.email fixture@example.invalid
+git -C "$FIXTURE_LATE" config user.name fixture
+git -C "$FIXTURE_LATE" config commit.gpgsign false
+git -C "$FIXTURE_LATE" config core.hooksPath /dev/null
+printf 'fixture\n' >"$FIXTURE_LATE/late-arrival"
+git -C "$FIXTURE_LATE" add late-arrival
+git -C "$FIXTURE_LATE" commit -qm 'lands after the working clone last looked'
+git -C "$FIXTURE_LATE" push -q origin master
+
+gh_prs '[]'
+if [ "$(git -C "$FIXTURE" cat-file -e origin/master:late-arrival 2>&1; echo $?)" = "0" ]; then
+    bad "the fetch is what makes a newly-merged path visible" \
+        "the tracking ref is not stale, so this row cannot witness the fetch"
+else
+    printf '%s' '[{"id":"gqlc-late","labels":["class:warrior","subject:late-arrival"]}]' \
+        | ( cd "$FIXTURE" && PATH="$BIN:$PATH" KM_FAKE_GH="$HVGH" "$KM" hold-verdict ) \
+        >"$TMP/hv.out" 2>"$TMP/hv.err"
+    RC=$?; OUT="$(cat "$TMP/hv.out")"; ERR="$(cat "$TMP/hv.err")"
+    if [ "$RC" -ne 0 ] || [ "$OUT" != "ROUTE gqlc-late" ]; then
+        bad "the fetch is what makes a newly-merged path visible" \
+            "origin/master was stale and stayed stale: rc=$RC out=$OUT err=$ERR"
+    else
+        ok "hold-verdict fetches before it judges, so a path merged since the last run is seen and its bead is released instead of held against a frozen origin/master"
+    fi
 fi
 
 # --- cmd_dispatch honours the verdict (gqlc-pj4r) ----------------------------

@@ -623,6 +623,8 @@ hold_open_pr_files() { # -> [{number, files:[path], truncated}]; rc 1 if gh cann
     printf '%s' "$raw" | jq -c '[ .[] | {
         number,
         files: [ .files[]?.path ],
+        listed: (.files | length),
+        changed: .changedFiles,
         truncated: (.changedFiles > (.files | length))
     } ]' 2>/dev/null || return 1
 }
@@ -692,9 +694,13 @@ cmd_hold_verdict() {
             elif ($prKnown | not) then
                 "gh unavailable — cannot rule out an open PR touching \($s)"
             elif (touching($s) | length) > 0 then
+                # Before the truncation arm on purpose: a match in the VISIBLE
+                # list of a truncated PR is still a definite match, and the
+                # reason printed must be as strong as the evidence held.
                 "open PR #\(touching($s)[0].number) touches \($s)"
             elif ([ $prs[] | select(.truncated) ] | length) > 0 then
-                "open PR #\([ $prs[] | select(.truncated) ][0].number) file list is truncated — cannot rule out \($s)"
+                ([ $prs[] | select(.truncated) ][0]) as $t
+                | "open PR #\($t.number) lists \($t.listed) of \($t.changed) files — cannot rule out \($s)"
             else null end;
 
         .[]
