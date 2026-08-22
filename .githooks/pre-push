@@ -31,8 +31,101 @@ just test
 # `git push --no-verify`, which drops the test run above with it. The download
 # is only reached on a fresh worktree or after a version bump, so an offline
 # developer with a warm .bin/ never reaches this arm.
+#
+# Every cause listed above is a PROVISIONING cause, and for a long time that
+# reading was the whole of this arm: the linter was either there or it was not.
+# It has a third state (bd gqlc-m9ca): provisioned perfectly — same pinned
+# version, same checksum, ensure-golangci exits 0 — and then failing having
+# graded nothing. The hatch below is unreachable there, because the hatch is
+# guarded by provisioning having FAILED, so a seat that hits it has no move
+# left that is not `git push --no-verify`.
+#
+# The instance that surfaced it is CLOSED and is not what keeps this arm here.
+# v2.12.2 was built against go1.26 and could not read the stdlib of this
+# machine's default go1.27.0-X, so it emitted typecheck diagnostics about
+# /usr/lib/go/src and exited 1; #1071 bumped the pin to v2.13.1, built against
+# go1.27.0, and `just lint-new` at master is green under that default again —
+# measured 2026-08-22. What recurs is the shape, and it reaches this arm from
+# more than the toolchain: `--config` on a file it will not load exits 3, also
+# measured 2026-08-22 on v2.13.1.
+#
+# The hatch is not widened to cover any of it, deliberately. golangci-lint
+# exits 1 both for "I found issues" and for those typecheck diagnostics, so a
+# hatch opening on that failure would open on every real finding in the repo.
+# What is missing is not a way past the gate but a way to make the gate RUN.
+#
+# So the classification below decides only WHAT IS PRINTED. Every branch exits
+# non-zero. A misread failure costs a wrong sentence and cannot cost a skipped
+# gate, which is the property that made this shape preferable to routing one
+# class to the hatch.
 if just ensure-golangci >/dev/null 2>&1; then
-  just lint-new
+  lint_log="$(mktemp)"
+  trap 'rm -f "${lint_log}"' EXIT
+  # tee, not capture-then-echo: lint-new streams, and a developer watching a
+  # slow lint should not be given a blank terminal so that this hook can grep
+  # the output afterwards. `set -o pipefail` at the top is what makes the `if`
+  # read lint-new's status rather than tee's.
+  lint_rc=0
+  just lint-new 2>&1 | tee "${lint_log}" || lint_rc=$?
+  if [ "${lint_rc}" -ne 0 ]; then
+    # TWO TELLS, because the same cause has two presentations. Both were
+    # produced on this repo on 2026-08-22 by the same command, minutes apart,
+    # differing only in build-cache state — so a hook that knew one of them
+    # would go quiet exactly half the time.
+    #
+    # 1. EXIT CODE. `golangci-lint run --help` gives `--issues-exit-code int
+    #    (default 1)`, and neither the justfile nor .golangci.yml overrides it.
+    #    So 1 is the ONLY code that means "I graded the code and found issues";
+    #    every other non-zero code is the linter failing. The panic shape exits
+    #    2, which is why the code alone settles that presentation.
+    # 2. OUT-OF-REPO TYPECHECK DIAGNOSTICS, for the presentation that exits 1
+    #    and so is indistinguishable by code from a real finding. golangci-lint
+    #    prints repo-relative paths for its own findings, so a leading `/` or
+    #    `../` means it is complaining about the toolchain's sources rather than
+    #    about the push. The `* typecheck: N` summary line is NOT usable on its
+    #    own: a tree that genuinely does not compile reports typecheck too,
+    #    in-repo, and that one must keep reading as a finding.
+    if [ "${lint_rc}" -ne 1 ] \
+      || grep -qE '^(/|\.\./)[^:]*:[0-9]+:[0-9]+:.*\(typecheck\)$' "${lint_log}"; then
+      want_go="$(awk '$1 == "go" { print $2; exit }' go.mod 2>/dev/null || true)"
+      if [ -n "${want_go}" ]; then
+        remedy="GOTOOLCHAIN=go${want_go} git push ..."
+      else
+        remedy="GOTOOLCHAIN=<a released toolchain> git push ..."
+      fi
+      echo "ERROR: golangci-lint ran but could not form an opinion on this repo." >&2
+      echo "       Nothing here graded your changes, so the push is refused unverified." >&2
+      # The two branches differ in what they are ENTITLED to claim, which is why
+      # the remedy is printed inside them rather than once below. The typecheck
+      # branch has read the diagnostics and knows the toolchain is the cause, so
+      # it prescribes. The exit-code branch knows only that the run was not a
+      # verdict: the code says nothing about why, and the causes do not share a
+      # fix. A config the linter will not load exits 3 — measured on the pinned
+      # v2.13.1, 2026-08-22 — and no GOTOOLCHAIN moves it. So this branch offers
+      # the toolchain remedy conditioned on what the output above shows instead
+      # of asserting it, because a confident wrong diagnosis of a real failure
+      # costs more than an unhelpful one.
+      if [ "${lint_rc}" -ne 1 ]; then
+        echo "       It exited ${lint_rc}; its --issues-exit-code is 1, so this is not a" >&2
+        echo "       findings verdict — the linter failed rather than graded." >&2
+        echo "       WHY it failed is in its own output above; the exit code does not say." >&2
+        echo "       If that output shows it could not read the Go toolchain, this makes" >&2
+        echo "       the gate run for real:  ${remedy}" >&2
+        echo "       If it shows something else, GOTOOLCHAIN will not move it." >&2
+      else
+        echo "       Every diagnostic above is a typecheck error against a file OUTSIDE" >&2
+        echo "       this repository: the linter could not read the standard library of" >&2
+        echo "       the Go toolchain it was handed." >&2
+        echo "       Re-run the push under the toolchain go.mod names, which makes the" >&2
+        echo "       gate actually run:  ${remedy}" >&2
+      fi
+      echo "       This machine's default toolchain: $(go env GOVERSION 2>/dev/null || echo unknown)" >&2
+      echo "       GQLC_ALLOW_MISSING_LINTER does not apply: the linter is present, and" >&2
+      echo "       one of these two presentations shares its exit code with a real" >&2
+      echo "       finding (bd gqlc-m9ca)." >&2
+    fi
+    exit "${lint_rc}"
+  fi
 elif [ "${GQLC_ALLOW_MISSING_LINTER:-}" = "1" ]; then
   echo "WARN: golangci-lint unavailable; lint SKIPPED by GQLC_ALLOW_MISSING_LINTER=1" >&2
 else
