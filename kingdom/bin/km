@@ -30,6 +30,8 @@ km — the machinery of the Թագաւորութիւն
   km mail inbox [--seat NAME] | read <id> | sent
   km dispatch                    route ready beads to free seats (timer)
   km hold-verdict                ROUTE/HOLD per candidate bead, docs on stdin
+  km reconcile                   match seat status to the sessions that exist
+  km seat-live <seat>            exit 0 if a session actually exists there
   km guard-sweep                 wake Րաֆֆի for a round (timer)
   km halt [reason] | resume      raise / lower the town halt
   km install-units | uninstall-units
@@ -209,11 +211,51 @@ seat_status() {
 
 # ---------- tmux ----------
 
-SESSION=$(cfg kingdom tmux_session)
+SESSION="${KM_TMUX_SESSION:-$(cfg kingdom tmux_session)}"
 
 have_tmux()  { command -v tmux >/dev/null 2>&1; }
 session_up() { have_tmux && tmux has-session -t "=$SESSION" 2>/dev/null; }
 window_up()  { session_up && tmux list-windows -t "=$SESSION" -F '#W' | grep -qx "$1"; }
+
+# Does a session actually EXIST for this seat? The status file cannot answer
+# that: it holds a claim written either side of a session by something that is
+# not the session, and when the two disagree the town spends slots on nothing
+# (gqlc-s16s). The pane's tty can answer it, because km-seat runs claude as the
+# pane's own child.
+#
+# Deliberately no heartbeat here. heartbeat.json is written by the statusLine
+# hook, which fires at TURN BOUNDARIES: measured in-seat, a 53s tool call left
+# it untouched for the whole 53s and the age simply tracked the call. So it
+# separates mid-turn from between-turns, not working from abandoned, and any
+# threshold over it would reap a seat for being busy.
+#
+# window_up first, and it is not redundant with the pane lookup. tmux resolves a
+# bare window target by PREFIX when nothing matches exactly, so `-t "=$SESSION:ar"`
+# returns artur's pane (measured, tmux 3.7c) — and this roster has `ar` in it.
+# pgrep wants the tty without its /dev/ prefix; the real-tmux row in the suite is
+# what keeps that transform honest end to end.
+seat_session_live() {
+    local tty
+    window_up "$1" || return 1
+    tty=$(tmux list-panes -t "=$SESSION:$1" -F '#{pane_tty}' 2>/dev/null | head -1)
+    [ -n "$tty" ] || return 1
+    pgrep -t "${tty#/dev/}" -x claude >/dev/null 2>&1
+}
+
+# Text and its Enter as SEPARATE invocations. Bundled, tmux hands both to the
+# pane in one read() burst and a TUI that reads a burst as a paste takes the CR
+# as literal text — the keystroke is typed and never submitted (measured, tmux
+# 3.7c, raw-tty reader). C-u first clears whatever a previous stranded attempt
+# left in the box, which is what makes a re-send idempotent.
+#
+# This is necessary and NOT sufficient: if the reader is not in read() between
+# the two writes the tty buffer re-coalesces them regardless of any delay, so
+# no caller may treat a return from here as proof of delivery. Confirm instead.
+send_line() { # <target> <text>
+    tmux send-keys -t "$1" C-u
+    tmux send-keys -t "$1" "$2"
+    tmux send-keys -t "$1" Enter
+}
 
 # ---------- mail ----------
 
@@ -368,7 +410,7 @@ cmd_wake() {
     [ -n "$reason" ] || reason="a new day"
     mkdir -p "$(seat_home "$seat")"
     if [ "$(seat_status "$seat")" = awake ] && window_up "$seat"; then
-        tmux send-keys -t "=$SESSION:$seat" "[km] $reason — check bd mail inbox when convenient" Enter
+        send_line "=$SESSION:$seat" "[km] $reason — check bd mail inbox when convenient"
         echo "wake: $seat is already awake; nudged instead"
     else
         printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
@@ -390,9 +432,15 @@ cmd_sleep() {
     fi
     is_seat "$seat" || die "sleep: unknown seat $seat"
     mkdir -p "$(seat_home "$seat")"
+    # asleep-pending is a request, not a departure, and it stays one until the
+    # session actually ends — km-seat writes `asleep` itself when claude exits.
+    # `km sleep` cannot confirm its own exit: it runs as a child of the very
+    # claude it is asking to leave, so the /exit is not acted on until this
+    # command has already returned. Confirmation therefore belongs to
+    # `km reconcile`, which is what makes an undelivered request recoverable.
     echo asleep-pending >"$(seat_home "$seat")/status"
     if window_up "$seat"; then
-        tmux send-keys -t "=$SESSION:$seat" C-u "/exit" Enter
+        send_line "=$SESSION:$seat" "/exit"
         echo "sleep: good night, $(seat_display "$seat") — the session ends when this turn does"
     else
         echo "sleep: no tmux window for $seat; end the session normally"
@@ -492,21 +540,90 @@ worker_seats() {
     done
 }
 
-# The seats that spend a slot of concurrency.max_active. Judges are exempt
-# alongside the mayor and the guard: the bench is the town's merge gate, so a
-# cap that can close it is a merge freeze rather than a throttle, and it
-# competes with the very seats producing its queue (gqlc-dz85). Judges are
-# still worker seats above — dropping them there would leave
-# free_worker_of_class unable to find them and route them nothing at all.
+# Judges are exempt from concurrency.max_active alongside the mayor and the
+# guard: the bench is the town's merge gate, so a cap that can close it is a
+# merge freeze rather than a throttle, and it competes with the very seats
+# producing its queue (gqlc-dz85). Judges are still worker seats above —
+# dropping them there would leave free_worker_of_class unable to find them and
+# route them nothing at all.
 #
-# The exemption lets the awake count exceed max_active by the number of judge
-# seats the roster holds.
+# Named, because it used to exist only as the difference between two case
+# statements twelve lines apart: worker_seats listing three classes and
+# capped_seats listing two. A reader had to diff them to find the exemption,
+# and a fourth class added to one and not the other would have been silently
+# capped or silently exempt (gqlc-a4tu, Ծովինար).
+cap_exempt_class() { [ "$1" = judge ]; }
+
+# The seats that spend a slot. The exemption lets the awake count exceed
+# max_active by the number of judge seats the roster holds.
 capped_seats() {
-    local s c
+    local s
     for s in $(worker_seats); do
-        c=$(seat_class "$s")
-        case "$c" in architect | warrior) echo "$s" ;; esac
+        cap_exempt_class "$(seat_class "$s")" || echo "$s"
     done
+}
+
+# Bring the ledger back into agreement with the world before anything reads it.
+#
+# Two repairs, and the difference between them is consent. A seat marked awake
+# or asleep-pending with NO session left is simply a stale record: correcting it
+# frees the slot and, because free_worker_of_class only ever picks an `asleep`
+# seat, hands the seat back to the town. A seat marked asleep-pending whose
+# claude is still ALIVE is the other half — the citizen asked to leave and the
+# /exit never landed — so the request is re-delivered. That needs no asking:
+# `km sleep` was the asking.
+#
+# What is NOT here: a seat marked awake, alive, and idle at its prompt. From
+# outside it is indistinguishable from one thinking, and ending it would be
+# ending a session against a citizen's will (Constitution VI.2). It needs to be
+# ASKED, and that is gqlc-971s rather than something smuggled in here.
+cmd_reconcile() {
+    session_up || { echo "reconcile: the town is down; nothing to reconcile"; return 0; }
+    local s st suspect repaired=0 redelivered=0 suspected=0
+    for s in $(seats_all); do
+        st=$(seat_status "$s")
+        suspect="$(seat_home "$s")/suspect"
+        case "$st" in awake | asleep-pending) ;; *) rm -f "$suspect"; continue ;; esac
+        if seat_session_live "$s"; then
+            rm -f "$suspect"
+            if [ "$st" = asleep-pending ]; then
+                send_line "=$SESSION:$s" "/exit"
+                echo "reconcile: $s asked to leave and is still here; /exit re-sent"
+                redelivered=$((redelivered + 1))
+            fi
+            continue
+        fi
+        # Confirmed over elapsed time, not over a count of passes. km-seat
+        # writes `awake` BEFORE it execs claude, so there is a brief moment when
+        # a seat that is starting up is indistinguishable from one that has died
+        # — and rewriting the ledger there would hand a running seat's name back
+        # to the dispatcher, against a session that is by then alive. Nothing
+        # repairs that: `asleep` is not a state this function revisits.
+        #
+        # A sighting COUNT does not close the gap, because nothing separates two
+        # passes: reconcile is a public subcommand, and a manual `km dispatch`
+        # landing seconds before a cron tick makes a pair with no time in it.
+        # The marker's age is the signal instead. 60s clears any exec window and
+        # sits well under the 120s cadence, so a genuinely dead seat is still
+        # freed on the next tick. The cap stopped counting it on the first pass
+        # either way, so the throughput that matters is already recovered.
+        if [ ! -f "$suspect" ]; then
+            : >"$suspect"
+            echo "reconcile: $s is recorded $st with no session; confirming next pass"
+            suspected=$((suspected + 1))
+            continue
+        fi
+        if [ "$(($(date +%s) - $(stat -c %Y "$suspect")))" -lt 60 ]; then
+            echo "reconcile: $s is recorded $st with no session, but that sighting is too recent to tell a dead seat from a starting one; still confirming"
+            suspected=$((suspected + 1))
+            continue
+        fi
+        echo asleep >"$(seat_home "$s")/status"
+        rm -f "$suspect" "$(seat_home "$s")/heartbeat.json"
+        echo "reconcile: $s was recorded $st with no session for a full cycle; freed"
+        repaired=$((repaired + 1))
+    done
+    echo "reconcile: done ($repaired freed, $suspected suspected, $redelivered re-sent)"
 }
 
 free_worker_of_class() { # asleep, no queued wake
@@ -531,6 +648,11 @@ cmd_dispatch() {
         return 0
     fi
 
+    # Before anything is counted or chosen. Every decision below reads the
+    # status files, and a stale one both spends a slot and hides the seat from
+    # free_worker_of_class, so the same record costs the town twice.
+    cmd_reconcile | sed 's/^reconcile: /dispatch: reconcile: /'
+
     local wakes=0
 
     # Սեդրակ answers his mail regardless of the cap.
@@ -546,10 +668,14 @@ cmd_dispatch() {
     # the town's only merge gate could be held shut by its own throughput
     # (gqlc-dz85). Zeroing the slots instead lets both passes below run and
     # decline capped work on their own, which is what leaves the judge reachable.
+    # A slot is spent by a session that EXISTS, not by a file that says one
+    # does. Reading the status string here is what let a finished session hold
+    # a slot forever, and what let a live one under asleep-pending hold none at
+    # all so the cap could overcommit (gqlc-s16s, gqlc-0gjt).
     local max active=0 s slots
     max=$(cfg concurrency max_active)
     for s in $(capped_seats); do
-        [ "$(seat_status "$s")" = awake ] && active=$((active + 1))
+        seat_session_live "$s" && active=$((active + 1))
     done
     slots=$((max - active))
     if [ "$slots" -le 0 ]; then
@@ -987,6 +1113,8 @@ case "$cmd" in
     mail)            cmd_mail "$@" ;;
     dispatch)        cmd_dispatch "$@" ;;
     hold-verdict)    cmd_hold_verdict "$@" ;;
+    reconcile)       cmd_reconcile "$@" ;;
+    seat-live)       seat_session_live "$1" ;;
     guard-sweep)     cmd_guard_sweep "$@" ;;
     halt)            cmd_halt "$@" ;;
     resume)          cmd_resume "$@" ;;
