@@ -28,6 +28,24 @@ handoff_threshold_pct = 75
 # claude-pre-bash remain the guardrails. Set to "acceptEdits" to supervise.
 permission_mode = "bypassPermissions"
 
+[effort]
+# Starting depth per class (Constitution V.6). These are STARTING levels, not
+# ceilings: a citizen raises their own with `/effort <level>` mid-session,
+# needing nobody's permission (V.6.2). Tuning these is a config edit, never an
+# amendment (V.6.1) — so argue about the numbers here, not in the constitution.
+# Levels: low | medium | high | xhigh | max.
+#
+# Provisional, adopted 2026-08-22 with the numbers explicitly open: the town
+# had spent its entire life at xhigh, inherited from an operator settings file
+# nobody chose, so any number here is better evidence than what it replaces —
+# but none of them is measured yet. Re-tune from the depths recorded on beads
+# (V.6.5), not from impatience.
+mayor     = "medium"
+architect = "high"
+warrior   = "medium"
+judge     = "xhigh"
+guard     = "low"
+
 [seats]
 # name = "class:model:display"
 sedrak   = "mayor:claude-opus-5:Սեդրակ"
