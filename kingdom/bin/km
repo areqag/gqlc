@@ -1,0 +1,612 @@
+#!/usr/bin/env bash
+# km — the machinery of the Թագաւորութիւն (kingdom/README.md).
+#
+# Path resolution: this script's own location names the kingdom/ tree it
+# serves; the runtime state dir is derived from the git COMMON dir so every
+# seat worktree resolves the same shared state (KM_STATE_DIR overrides, for
+# tests). tmux may be absent (CI): every tmux-touching path degrades to a
+# message or a state file, never a crash.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+KINGDOM_DIR=$(dirname "$SCRIPT_DIR")
+CONFIG="$KINGDOM_DIR/kingdom.toml"
+
+die() { echo "km: $*" >&2; exit 1; }
+
+usage() {
+    cat <<'EOF'
+km — the machinery of the Թագաւորութիւն
+
+  km status                      the town at a glance
+  km up | down                   start / stop the tmux town
+  km attach <seat>               attach to a seat's window
+  km herratsayn                  Հեռաձայն: wake Սեդրակ if asleep, attach
+  km wake <seat> [--bead ID] [--reason TEXT]
+  km sleep [--seat NAME]         end the current seat's workday
+  km mail send <to> -s SUBJ [-m BODY]   (body on stdin if no -m)
+  km mail inbox [--seat NAME] | read <id> | sent
+  km dispatch                    route ready beads to free seats (timer)
+  km guard-sweep                 wake Րաֆֆի for a round (timer)
+  km halt [reason] | resume      raise / lower the town halt
+  km install-units | uninstall-units
+  km doctor                      health checks
+  km state-dir | seat-info <s> | seat-worktree <s>
+EOF
+}
+
+# ---------- config ----------
+
+cfg() { # cfg <section> <key> -> value with quotes and inline comment stripped
+    awk -F' *= *' -v sec="[$1]" -v key="$2" '
+        /^\[/ { insec = ($0 == sec); next }
+        insec && $1 == key {
+            v = $2
+            sub(/[ \t]+#.*$/, "", v)
+            gsub(/^"|"$/, "", v)
+            print v
+            exit
+        }
+    ' "$CONFIG"
+}
+
+seats_all() {
+    awk -F' *= *' '
+        /^\[seats\]/ { s = 1; next }
+        /^\[/        { s = 0 }
+        s && NF >= 2 && $1 !~ /^#/ { print $1 }
+    ' "$CONFIG"
+}
+
+seat_raw() {
+    local raw
+    raw=$(cfg seats "$1")
+    [ -n "$raw" ] || die "unknown seat: $1"
+    echo "$raw"
+}
+
+seat_class()   { seat_raw "$1" | cut -d: -f1; }
+seat_model()   { seat_raw "$1" | cut -d: -f2; }
+seat_display() { seat_raw "$1" | cut -d: -f3; }
+
+is_seat() { seats_all | grep -qx "$1"; }
+
+# ---------- paths ----------
+
+main_root() {
+    local common
+    common=$(git rev-parse --path-format=absolute --git-common-dir)
+    dirname "$common"
+}
+
+state_dir() {
+    if [ -n "${KM_STATE_DIR:-}" ]; then
+        echo "$KM_STATE_DIR"
+    else
+        echo "$(dirname "$(main_root)")/$(cfg kingdom state_dirname)"
+    fi
+}
+
+seat_worktree() {
+    local mr
+    mr=$(main_root)
+    echo "$(dirname "$mr")/$(basename "$mr")-seat-$1"
+}
+
+seat_home()   { echo "$(state_dir)/seats/$1"; }
+seat_status() {
+    local f
+    f="$(seat_home "$1")/status"
+    if [ -f "$f" ]; then cat "$f"; else echo asleep; fi
+}
+
+# ---------- tmux ----------
+
+SESSION=$(cfg kingdom tmux_session)
+
+have_tmux()  { command -v tmux >/dev/null 2>&1; }
+session_up() { have_tmux && tmux has-session -t "=$SESSION" 2>/dev/null; }
+window_up()  { session_up && tmux list-windows -t "=$SESSION" -F '#W' | grep -qx "$1"; }
+
+# ---------- mail ----------
+
+unread_count() {
+    find "$(state_dir)/mail/$1/inbox" -type f -name '*.md' 2>/dev/null | wc -l
+}
+
+mail_deliver() { # write one message file into a recipient's box dir
+    local dir=$1 fname=$2 content=$3 tmp
+    mkdir -p "$dir"
+    tmp=$(mktemp "$dir/.tmp.XXXXXX")
+    printf '%s' "$content" >"$tmp"
+    if [ -e "$dir/$fname" ]; then
+        fname="${fname%.md}-$RANDOM.md"
+    fi
+    mv "$tmp" "$dir/$fname"
+}
+
+mail_send() {
+    local to="" subj="" body="" from="${KINGDOM_SEAT:-andranik}"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -s) subj=$2; shift 2 ;;
+            -m) body=$2; shift 2 ;;
+            --from) from=$2; shift 2 ;;
+            -*) die "mail send: unknown flag $1" ;;
+            *) [ -z "$to" ] || die "mail send: one recipient per message (use 'town' to broadcast)"
+               to=${1%/}; shift ;;
+        esac
+    done
+    [ -n "$to" ] || die "mail send: no recipient"
+    [ -n "$subj" ] || die "mail send: -s SUBJECT is required"
+    case "$from" in andranik) ;; *) is_seat "$from" || die "mail send: unknown sender $from" ;; esac
+    case "$to" in town | andranik) ;; *) is_seat "$to" || die "mail send: unknown recipient $to" ;; esac
+    if [ -z "$body" ]; then
+        [ ! -t 0 ] || die "mail send: body via -m or stdin"
+        body=$(cat)
+    fi
+
+    local ts slug fname content sd
+    ts=$(date -u +%Y%m%dT%H%M%SZ)
+    slug=$(printf '%s' "$subj" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')
+    slug=$(printf '%s' "$slug" | sed 's/^-*//; s/-*$//' | cut -c1-40)
+    [ -n "$slug" ] || slug=msg
+    fname="$ts--$from--$slug.md"
+    content=$(printf -- '---\nfrom: %s\nto: %s\ndate: %s\nsubject: %s\n---\n%s\n' \
+        "$from" "$to" "$(date -u -Iseconds)" "$subj" "$body")
+    sd=$(state_dir)
+
+    local delivered=0 r
+    if [ "$to" = town ]; then
+        for r in $(seats_all) andranik; do
+            [ "$r" = "$from" ] && continue
+            mail_deliver "$sd/mail/$r/inbox" "$fname" "$content"
+            delivered=$((delivered + 1))
+        done
+    else
+        mail_deliver "$sd/mail/$to/inbox" "$fname" "$content"
+        delivered=1
+    fi
+    mail_deliver "$sd/mail/$from/sent" "$fname" "$content"
+    echo "mail: $from → $to ($delivered box(es)): $subj"
+}
+
+mail_box_owner() { # --seat override, else caller identity
+    local seat="${KINGDOM_SEAT:-andranik}"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --seat) seat=$2; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    echo "$seat"
+}
+
+mail_inbox() {
+    local seat sd n f
+    seat=$(mail_box_owner "$@")
+    sd=$(state_dir)
+    n=$(unread_count "$seat")
+    echo "inbox of $seat — $n unread"
+    [ "$n" -gt 0 ] || return 0
+    for f in "$sd/mail/$seat/inbox/"*.md; do
+        printf '  %s\n    %s\n' "$(basename "$f")" "$(grep -m1 '^subject:' "$f" || true)"
+    done
+}
+
+mail_read() {
+    local id="" seat="${KINGDOM_SEAT:-andranik}" sd inbox readdir matches
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --seat) seat=$2; shift 2 ;;
+            *) id=$1; shift ;;
+        esac
+    done
+    [ -n "$id" ] || die "mail read: which message? (filename or unique prefix)"
+    sd=$(state_dir)
+    inbox="$sd/mail/$seat/inbox"
+    readdir="$sd/mail/$seat/read"
+    matches=$(find "$inbox" -maxdepth 1 -type f -name "$id*" 2>/dev/null | sort)
+    if [ -z "$matches" ]; then
+        matches=$(find "$readdir" -maxdepth 1 -type f -name "$id*" 2>/dev/null | sort)
+        [ -n "$matches" ] || die "mail read: no message matching '$id' for $seat"
+        [ "$(echo "$matches" | wc -l)" -eq 1 ] || die "mail read: ambiguous prefix '$id'"
+        echo "(already read)"
+        cat "$matches"
+        return 0
+    fi
+    [ "$(echo "$matches" | wc -l)" -eq 1 ] || die "mail read: ambiguous prefix '$id'"
+    cat "$matches"
+    mkdir -p "$readdir"
+    mv "$matches" "$readdir/"
+}
+
+mail_sent() {
+    local seat sd f
+    seat=$(mail_box_owner "$@")
+    sd=$(state_dir)
+    echo "sent by $seat:"
+    for f in "$sd/mail/$seat/sent/"*.md; do
+        [ -e "$f" ] || { echo "  (none)"; break; }
+        printf '  %s\n' "$(basename "$f")"
+    done
+}
+
+cmd_mail() {
+    local sub=${1:-}
+    shift || true
+    case "$sub" in
+        send)  mail_send "$@" ;;
+        inbox) mail_inbox "$@" ;;
+        read)  mail_read "$@" ;;
+        sent)  mail_sent "$@" ;;
+        *) die "mail: send|inbox|read|sent" ;;
+    esac
+}
+
+# ---------- wake / sleep ----------
+
+cmd_wake() {
+    local seat=${1:-}
+    shift || true
+    is_seat "$seat" || die "wake: unknown seat ${seat:-<none>}"
+    local reason=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --bead) reason="bead:$2 $reason"; shift 2 ;;
+            --reason) reason="$reason$2"; shift 2 ;;
+            *) die "wake: unknown flag $1" ;;
+        esac
+    done
+    [ -n "$reason" ] || reason="a new day"
+    mkdir -p "$(seat_home "$seat")"
+    if [ "$(seat_status "$seat")" = awake ] && window_up "$seat"; then
+        tmux send-keys -t "=$SESSION:$seat" "[km] $reason — check bd mail inbox when convenient" Enter
+        echo "wake: $seat is already awake; nudged instead"
+    else
+        printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
+        echo "wake: queued for $seat — $reason"
+    fi
+}
+
+cmd_sleep() {
+    local seat="${KINGDOM_SEAT:-}"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --seat) seat=$2; shift 2 ;;
+            *) die "sleep: unknown flag $1" ;;
+        esac
+    done
+    if [ -z "$seat" ]; then
+        echo "sleep: not a seat session (KINGDOM_SEAT unset) — end your session normally"
+        return 0
+    fi
+    is_seat "$seat" || die "sleep: unknown seat $seat"
+    mkdir -p "$(seat_home "$seat")"
+    echo asleep-pending >"$(seat_home "$seat")/status"
+    if window_up "$seat"; then
+        tmux send-keys -t "=$SESSION:$seat" C-u "/exit" Enter
+        echo "sleep: good night, $(seat_display "$seat") — the session ends when this turn does"
+    else
+        echo "sleep: no tmux window for $seat; end the session normally"
+    fi
+}
+
+# ---------- town lifecycle ----------
+
+ensure_state_tree() {
+    local sd s
+    sd=$(state_dir)
+    for s in $(seats_all) andranik; do
+        mkdir -p "$sd/mail/$s/inbox" "$sd/mail/$s/read" "$sd/mail/$s/sent"
+    done
+    for s in $(seats_all); do
+        mkdir -p "$sd/seats/$s/handoff/archive"
+    done
+    mkdir -p "$sd/seats/andranik/handoff/archive"
+}
+
+cmd_up() {
+    have_tmux || die "tmux is not installed (sudo pacman -S tmux), so there is no town to raise"
+    ensure_state_tree
+    local mr s wt placeholder=0
+    mr=$(main_root)
+    for s in $(seats_all); do
+        wt=$(seat_worktree "$s")
+        if [ ! -d "$wt" ]; then
+            git -C "$mr" worktree add --detach "$wt" origin/master
+        fi
+    done
+    if ! session_up; then
+        tmux new-session -d -s "$SESSION" -n _km 'sleep 5'
+        placeholder=1
+    fi
+    for s in $(seats_all); do
+        window_up "$s" || tmux new-window -d -t "=$SESSION" -n "$s" "$SCRIPT_DIR/km-seat $s"
+    done
+    [ "$placeholder" -eq 1 ] && tmux kill-window -t "=$SESSION:_km" 2>/dev/null
+    echo "the town is up: $(seats_all | wc -l) seats, all asleep until woken."
+    echo "  just kingdom       — status"
+    echo "  just herratsayn    — call Սեդրակ"
+}
+
+cmd_down() {
+    session_up || { echo "the town is already down"; return 0; }
+    mail_send town -s "town going down" -m "The tmux session is being stopped. Sessions end; seats, mail, and handoffs persist." || true
+    tmux kill-session -t "=$SESSION"
+    echo "the town is down. State, mail, and handoffs persist in $(state_dir)"
+}
+
+cmd_attach() {
+    local seat=${1:-}
+    is_seat "$seat" || die "attach: unknown seat ${seat:-<none>}"
+    window_up "$seat" || die "attach: no window for $seat — is the town up? (just kingdom-up)"
+    if [ -n "${TMUX:-}" ]; then
+        tmux switch-client -t "=$SESSION"
+        tmux select-window -t "=$SESSION:$seat"
+    else
+        tmux select-window -t "=$SESSION:$seat"
+        exec tmux attach-session -t "=$SESSION"
+    fi
+}
+
+cmd_herratsayn() {
+    if [ "$(seat_status sedrak)" != awake ]; then
+        cmd_wake sedrak --reason "Հեռաձայն from Անդրանիկ — he is calling you now"
+    fi
+    cmd_attach sedrak
+}
+
+# ---------- halt ----------
+
+cmd_halt() {
+    ensure_state_tree
+    printf 'raised by %s at %s: %s\n' "${KINGDOM_SEAT:-andranik}" "$(date -u -Iseconds)" "${*:-no reason given}" \
+        >"$(state_dir)/halt"
+    echo "halt raised: the dispatcher will wake nobody until it is lowered (km resume)"
+}
+
+cmd_resume() {
+    if [ -f "$(state_dir)/halt" ]; then
+        rm -f "$(state_dir)/halt"
+        echo "halt lowered by ${KINGDOM_SEAT:-andranik}: the dispatcher may wake seats again"
+    else
+        echo "no halt was raised"
+    fi
+}
+
+# ---------- dispatcher ----------
+
+worker_seats() {
+    local s c
+    for s in $(seats_all); do
+        c=$(seat_class "$s")
+        case "$c" in architect | warrior | judge) echo "$s" ;; esac
+    done
+}
+
+free_worker_of_class() { # asleep, no queued wake
+    local class=$1 s
+    for s in $(worker_seats); do
+        [ "$(seat_class "$s")" = "$class" ] || continue
+        [ "$(seat_status "$s")" = asleep ] || continue
+        [ ! -f "$(seat_home "$s")/wake" ] || continue
+        echo "$s"
+        return 0
+    done
+    return 1
+}
+
+cmd_dispatch() {
+    session_up || { echo "dispatch: the town is down; nothing to do"; return 0; }
+    local sd
+    sd=$(state_dir)
+    if [ -f "$sd/halt" ]; then
+        echo "dispatch: halted — $(head -1 "$sd/halt")"
+        return 0
+    fi
+
+    # Սեդրակ answers his mail regardless of the cap.
+    if [ "$(seat_status sedrak)" != awake ] && [ ! -f "$(seat_home sedrak)/wake" ] \
+        && [ "$(unread_count sedrak)" -gt 0 ]; then
+        cmd_wake sedrak --reason "you have unread mail"
+    fi
+
+    local max active=0 s slots
+    max=$(cfg concurrency max_active)
+    for s in $(worker_seats); do
+        [ "$(seat_status "$s")" = awake ] && active=$((active + 1))
+    done
+    slots=$((max - active))
+    if [ "$slots" -le 0 ]; then
+        echo "dispatch: $active/$max worker seats awake; no free slot"
+        return 0
+    fi
+
+    # Resume pass: a seat with in-progress beads gets its own work back first
+    # (Constitution III.3) before any fresh bead is routed anywhere.
+    #
+    # Both queries below are fail-closed. A query that FAILS is not a queue with
+    # nothing in it: swallowing the status with `|| x=""` is what let a total
+    # routing failure print "done (0 wake(s) this run)" and exit 0 for the whole
+    # life of the kingdom, with no seat ever woken and nothing to see (gqlc-z1qw).
+    local inprog
+    if ! inprog=$(bd list --status in_progress --json 2>/dev/null |
+        jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"' | sort); then
+        die "dispatch: the in-progress query failed; nothing routed this run"
+    fi
+    for s in $(worker_seats); do
+        [ "$slots" -gt 0 ] || break
+        [ "$(seat_status "$s")" = asleep ] || continue
+        [ ! -f "$(seat_home "$s")/wake" ] || continue
+        local mine
+        mine=$(echo "$inprog" | awk -v s="$s" '$1 == s { print $2 }')
+        if [ -n "$mine" ]; then
+            cmd_wake "$s" --reason "resume your in-progress work: $(echo "$mine" | tr '\n' ' ')"
+            slots=$((slots - 1))
+        fi
+    done
+
+    # Fresh pass: ready, unassigned, class-labelled beads, priority first.
+    [ "$slots" -gt 0 ] || return 0
+    local routed id cls seat
+    # `. as $c` binds the class name before the pipe, and must stay bound: inside
+    # `map(...)` the pipe in `($b.labels // []) | index(...)` rebinds `.` to the
+    # labels array, so a bare `"class:" + .` is string + array — a type error that
+    # aborts the whole program on any unassigned bead, labelled or not.
+    if ! routed=$(bd ready --json 2>/dev/null | jq -r '
+        [ .[]
+          | select(.assignee == null)
+          | . as $b
+          | (["architect", "warrior", "judge"]
+             | map(. as $c | select(($b.labels // []) | index("class:" + $c))))[0] as $cls
+          | select($cls != null)
+          | {id, priority, cls: $cls}
+        ] | sort_by(.priority) | .[] | "\(.id) \(.cls)"'); then
+        # Not "nothing routed": the resume pass above may already have queued
+        # wakes, and they stand. An operator reading this during an incident has
+        # to be able to trust it.
+        die "dispatch: the ready-queue query failed; no fresh bead routed (any resume wakes above stand)"
+    fi
+    while IFS=' ' read -r id cls; do
+        [ -n "$id" ] || continue
+        [ "$slots" -gt 0 ] || break
+        if seat=$(free_worker_of_class "$cls"); then
+            cmd_wake "$seat" --bead "$id" --reason "ready ${cls} work — claim it before you begin"
+            slots=$((slots - 1))
+        fi
+    done <<<"$routed"
+    echo "dispatch: done ($((max - active - slots)) wake(s) this run)"
+}
+
+cmd_guard_sweep() {
+    session_up || { echo "guard-sweep: the town is down"; return 0; }
+    if [ "$(seat_status raffi)" = awake ]; then
+        echo "guard-sweep: Րաֆֆի is already on his rounds"
+        return 0
+    fi
+    cmd_wake raffi --reason "time for a round of the town (see your soul: rounds)"
+}
+
+# ---------- status ----------
+
+cmd_status() {
+    local sd s disp class st ctx hb beads unread
+    sd=$(state_dir)
+    echo "Թագաւորութիւն — $(date -u -Iseconds)"
+    if session_up; then echo "town: UP (tmux session '$SESSION')"; else echo "town: DOWN"; fi
+    if [ -f "$sd/halt" ]; then echo "HALT: $(head -1 "$sd/halt")"; fi
+    echo
+
+    local inprog
+    inprog=$(bd list --status in_progress --json 2>/dev/null |
+        jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"') || inprog=""
+
+    printf '%-10s %-10s %-8s %-6s %-6s %s\n' SEAT CLASS STATE CTX MAIL BEADS
+    for s in $(seats_all); do
+        disp=$(seat_display "$s")
+        class=$(seat_class "$s")
+        st=$(seat_status "$s")
+        if [ "$st" = awake ] && ! window_up "$s"; then st="awake?"; fi
+        ctx="-"
+        hb="$sd/seats/$s/heartbeat.json"
+        if [ "$st" = awake ] && [ -f "$hb" ]; then
+            ctx=$(jq -r 'if .context_pct == null then "-" else "\(.context_pct | floor)%" end' "$hb" 2>/dev/null || echo "-")
+        fi
+        unread=$(unread_count "$s")
+        beads=$(echo "$inprog" | awk -v s="$s" '$1 == s { printf "%s ", $2 }')
+        printf '%-10s %-10s %-8s %-6s %-6s %s  (%s)\n' "$s" "$class" "$st" "$ctx" "$unread" "${beads:-—}" "$disp"
+    done
+
+    echo
+    local ready
+    ready=$(bd ready --json 2>/dev/null) || ready="[]"
+    echo "ready queue: $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:architect"))] | length') architect, $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:warrior"))] | length') warrior, $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:judge"))] | length') judge, $(echo "$ready" | jq '[.[] | select([((.labels // []) | index("class:architect")), ((.labels // []) | index("class:warrior")), ((.labels // []) | index("class:judge"))] | all(. == null))] | length') unlabelled (Սեդրակ's chore)"
+    echo "the king's inbox (andranik): $(unread_count andranik) unread"
+}
+
+# ---------- doctor / install ----------
+
+cmd_doctor() {
+    local ok=0
+    check() { # check <hard|soft> <label> <cmd...>
+        local kind=$1 label=$2
+        shift 2
+        if "$@" >/dev/null 2>&1; then
+            echo "ok:   $label"
+        elif [ "$kind" = hard ]; then
+            echo "FAIL: $label"
+            ok=1
+        else
+            echo "warn: $label"
+        fi
+    }
+    check hard "tmux installed" command -v tmux
+    check hard "claude installed" command -v claude
+    check hard "bd installed" command -v bd
+    check hard "jq installed" command -v jq
+    check hard "python3 installed" command -v python3
+    check hard "state dir writable" mkdir -p "$(state_dir)"
+    check soft "bd mail.delegate points at km" sh -c "bd config get mail.delegate | grep -q 'km mail'"
+    check soft "dispatch timer enabled" systemctl --user is-enabled kingdom-dispatch.timer
+    check soft "guard timer enabled" systemctl --user is-enabled kingdom-guard.timer
+    check soft "town is up" tmux has-session -t "=$SESSION"
+    return "$ok"
+}
+
+render_unit() { # <src> <dst>
+    sed -e "s|@REPO@|$(main_root)|g" \
+        -e "s|@DISPATCH_MIN@|$(cfg cadence dispatch_minutes)|g" \
+        -e "s|@GUARD_MIN@|$(cfg cadence guard_minutes)|g" \
+        "$1" >"$2"
+}
+
+cmd_install_units() {
+    local unitdir="$HOME/.config/systemd/user" u
+    mkdir -p "$unitdir"
+    for u in kingdom-dispatch.service kingdom-dispatch.timer kingdom-guard.service kingdom-guard.timer; do
+        render_unit "$KINGDOM_DIR/systemd/$u" "$unitdir/$u"
+    done
+    systemctl --user daemon-reload
+    systemctl --user enable --now kingdom-dispatch.timer kingdom-guard.timer
+    bd config set mail.delegate "$(main_root)/kingdom/bin/km mail"
+    ensure_state_tree
+    echo "installed: dispatch every $(cfg cadence dispatch_minutes)m, guard every $(cfg cadence guard_minutes)m; bd mail now delegates to km"
+}
+
+cmd_uninstall_units() {
+    systemctl --user disable --now kingdom-dispatch.timer kingdom-guard.timer 2>/dev/null || true
+    rm -f "$HOME/.config/systemd/user"/kingdom-{dispatch,guard}.{service,timer}
+    systemctl --user daemon-reload
+    echo "units removed; state, mail, and worktrees untouched"
+}
+
+# ---------- main ----------
+
+cmd=${1:-}
+shift || true
+case "$cmd" in
+    status)          cmd_status "$@" ;;
+    up)              cmd_up "$@" ;;
+    down)            cmd_down "$@" ;;
+    attach)          cmd_attach "$@" ;;
+    herratsayn)      cmd_herratsayn "$@" ;;
+    wake)            cmd_wake "$@" ;;
+    sleep)           cmd_sleep "$@" ;;
+    mail)            cmd_mail "$@" ;;
+    dispatch)        cmd_dispatch "$@" ;;
+    guard-sweep)     cmd_guard_sweep "$@" ;;
+    halt)            cmd_halt "$@" ;;
+    resume)          cmd_resume "$@" ;;
+    doctor)          cmd_doctor "$@" ;;
+    install-units)   cmd_install_units "$@" ;;
+    uninstall-units) cmd_uninstall_units "$@" ;;
+    state-dir)       state_dir ;;
+    cfg)             cfg "${1:?km cfg <section> <key>}" "${2:?km cfg <section> <key>}" ;;
+    seat-info)       is_seat "${1:-}" || die "seat-info: unknown seat ${1:-<none>}"
+                     echo "$(seat_class "$1") $(seat_model "$1") $(seat_display "$1")" ;;
+    seat-worktree)   is_seat "${1:-}" || die "seat-worktree: unknown seat ${1:-<none>}"
+                     seat_worktree "$1" ;;
+    -h | --help | help | "") usage ;;
+    *) die "unknown command: $cmd (km --help)" ;;
+esac
