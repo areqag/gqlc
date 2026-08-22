@@ -385,6 +385,23 @@ worker_seats() {
     done
 }
 
+# The seats that spend a slot of concurrency.max_active. The judge is exempt
+# alongside the mayor and the guard: he is the town's sole merge gate, so a cap
+# that can close him is a merge freeze rather than a throttle, and he competes
+# with the very seats producing his queue (gqlc-dz85). He is still a worker
+# seat above — dropping him there would leave free_worker_of_class unable to
+# find him and route him nothing at all.
+#
+# The exemption lets the awake count exceed max_active by the number of judge
+# seats the roster holds, which is one today.
+capped_seats() {
+    local s c
+    for s in $(worker_seats); do
+        c=$(seat_class "$s")
+        case "$c" in architect | warrior) echo "$s" ;; esac
+    done
+}
+
 free_worker_of_class() { # asleep, no queued wake
     local class=$1 s
     for s in $(worker_seats); do
@@ -406,21 +423,30 @@ cmd_dispatch() {
         return 0
     fi
 
+    local wakes=0
+
     # Սեդրակ answers his mail regardless of the cap.
     if [ "$(seat_status sedrak)" != awake ] && [ ! -f "$(seat_home sedrak)/wake" ] \
         && [ "$(unread_count sedrak)" -gt 0 ]; then
         cmd_wake sedrak --reason "you have unread mail"
+        wakes=$((wakes + 1))
     fi
 
+    # A full cap no longer returns early. It used to, which put the whole
+    # routing decision behind the cap check: at 5/5 nothing was considered at
+    # all, at any priority, so a P0 judge bead did not outrank a running P3 and
+    # the town's only merge gate could be held shut by its own throughput
+    # (gqlc-dz85). Zeroing the slots instead lets both passes below run and
+    # decline capped work on their own, which is what leaves the judge reachable.
     local max active=0 s slots
     max=$(cfg concurrency max_active)
-    for s in $(worker_seats); do
+    for s in $(capped_seats); do
         [ "$(seat_status "$s")" = awake ] && active=$((active + 1))
     done
     slots=$((max - active))
     if [ "$slots" -le 0 ]; then
-        echo "dispatch: $active/$max worker seats awake; no free slot"
-        return 0
+        slots=0
+        echo "dispatch: $active/$max capped seats awake; no free slot"
     fi
 
     # Resume pass: a seat with in-progress beads gets its own work back first
@@ -441,20 +467,22 @@ cmd_dispatch() {
         jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"' | sort); then
         die "dispatch: the in-progress query failed; nothing routed this run"
     fi
+    local mine capped
     for s in $(worker_seats); do
-        [ "$slots" -gt 0 ] || break
         [ "$(seat_status "$s")" = asleep ] || continue
         [ ! -f "$(seat_home "$s")/wake" ] || continue
-        local mine
+        capped=1
+        if [ "$(seat_class "$s")" = judge ]; then capped=0; fi
+        [ "$capped" -eq 0 ] || [ "$slots" -gt 0 ] || continue
         mine=$(echo "$inprog" | awk -v s="$s" '$1 == s { print $2 }')
-        if [ -n "$mine" ]; then
-            cmd_wake "$s" --reason "resume your in-progress work: $(echo "$mine" | tr '\n' ' ')"
-            slots=$((slots - 1))
-        fi
+        [ -n "$mine" ] || continue
+        cmd_wake "$s" --reason "resume your in-progress work: $(echo "$mine" | tr '\n' ' ')"
+        wakes=$((wakes + 1))
+        if [ "$capped" -eq 1 ]; then slots=$((slots - 1)); fi
     done
 
-    # Fresh pass: ready, unassigned, class-labelled beads, priority first.
-    [ "$slots" -gt 0 ] || return 0
+    # Fresh pass: ready, unassigned, class-labelled beads, priority first. It
+    # runs with no slots left too, because judge work does not need one.
     local routed id cls seat
     # `. as $c` binds the class name before the pipe, and must stay bound: inside
     # `map(...)` the pipe in `($b.labels // []) | index(...)` rebinds `.` to the
@@ -476,13 +504,19 @@ cmd_dispatch() {
     fi
     while IFS=' ' read -r id cls; do
         [ -n "$id" ] || continue
-        [ "$slots" -gt 0 ] || break
+        # `continue`, not `break`: the queue is sorted by priority, not by class,
+        # so exhausted slots must skip past capped beads to reach judge work
+        # sitting behind them rather than abandoning the rest of the queue.
+        if [ "$cls" != judge ]; then
+            [ "$slots" -gt 0 ] || continue
+        fi
         if seat=$(free_worker_of_class "$cls"); then
             cmd_wake "$seat" --bead "$id" --reason "ready ${cls} work — claim it before you begin"
-            slots=$((slots - 1))
+            wakes=$((wakes + 1))
+            if [ "$cls" != judge ]; then slots=$((slots - 1)); fi
         fi
     done <<<"$routed"
-    echo "dispatch: done ($((max - active - slots)) wake(s) this run)"
+    echo "dispatch: done ($wakes wake(s) this run)"
 }
 
 cmd_guard_sweep() {
