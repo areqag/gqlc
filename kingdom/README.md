@@ -13,9 +13,9 @@ act"), beads carries the work, and mail carries the conversation.
 |---|---|---|---|
 | Թագաւոր (king) | Անդրանիկ | human | Settles what citizens cannot. Otherwise hands-free. |
 | Քաղաքապետ (mayor) | Սեդրակ | claude-opus-5 | Liaison between king and town. Intake, arbitration, priorities. |
-| Ճարտարապետ (architect) | Արթուր, Արփինէ, Արեգակ | claude-fable-5 | Designs. Turns intent into implementation-ready beads. Reviews warriors' PRs. |
+| Ճարտարապետ (architect) | Արթուր, Արփինէ, Արեգակ | claude-fable-5 | Designs only. Turns intent into implementation-ready beads a Ռազմիկ executes. Does not review PRs. |
 | Ռազմիկ (warrior) | Արամազդ, Վահագն, Աստղիկ, Ար, Նուարդ, Այգ, Ծովինար, Հայկ | claude-opus-5 | Executes beads. Ships PRs. Tests first (`/tdd`), red before green. |
-| Դատաւոր (judge) | Միհր | claude-fable-5 | Adversarial code-quality review (`/thermo-nuclear-code-quality-review`). Judges code, never people. |
+| Դատաւոր (judge) | Միհր | claude-fable-5 | The reviewer. Every Ռազմիկ PR merges on his PASS (`/thermo-nuclear-code-quality-review`). Judges code, never people. |
 | Պահակ (guard) | Րաֆֆի | claude-sonnet-5 | Sweeps the town on a timer: liveness, stuck seats, context fill, handoffs. |
 
 Every citizen's identity lives in `seats/<name>/soul.md` and is loaded as an
@@ -47,22 +47,27 @@ seat worktree.
 1. Work arrives as beads (from Անդրանիկ, from Սեդրակ's intake, from citizens
    filing follow-ups). Routing rides labels: `class:architect` for design work,
    `class:warrior` for execution, `class:judge` for adversarial review.
-2. Work that needs a design first follows the design-gate
+2. Anything not already implementation-ready is **split at intake** into a
+   design bead and an execution bead, per the design-gate
    (`brain/playbooks/design-gate.md`): the execution bead is created
    blocked-by the design bead, so `bd ready` hides it until an architect
-   closes the design.
+   closes the design. Splitting is Սեդրակ's job, and it is the whole of it —
+   a `class:architect` bead that carries its own implementation is a triage
+   error, because it leaves the architect no Ռազմիկ to hand off to.
 3. The dispatcher (`km dispatch`, systemd timer) wakes a free seat of the right
    class for each ready labelled bead, priority first, up to the global
    `max_active` cap. The cap is work-conserving: slots are not reserved per
    class, so an idle class donates its slots.
-4. A warrior's PR needs a Ճարտարապետ review PASS to merge; the review request
-   travels by mail. Disputes go to Սեդրակ; what Սեդրակ cannot settle goes to
-   Անդրանիկ.
-5. Միհր, the Դատաւոր, adds a second, adversarial line of defence: review
-   beads (`class:judge`) route the riskiest changes to him, and he patrols
-   merged work on his own judgment. His FAIL on an open PR blocks the merge;
-   his findings on merged code become defect beads — and postmortems when
-   something broke, blame-free always (`brain/postmortems/`).
+4. A Ռազմիկ PR merges on Միհր's PASS. Ճարտարապետներ do not review PRs: an
+   architect's output is the design, and the Դատաւոր is the reviewer. The
+   request travels as a `class:judge` bead naming the PR — not as mail,
+   because the dispatcher wakes nobody on mail but Սեդրակ, so a mailed
+   request leaves the PR asleep. Disputes go to Սեդրակ; what Սեդրակ cannot
+   settle goes to Անդրանիկ.
+5. Միհր also patrols merged work on his own judgment. His FAIL on an open PR
+   blocks the merge until answered; his findings on merged code become defect
+   beads — and postmortems when something broke, blame-free always
+   (`brain/postmortems/`).
 
 ## Runtime
 

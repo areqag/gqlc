@@ -45,12 +45,14 @@ sweep, or a nudge). Then:
    NOT closed by child PRs. Verify presence AND number at merge time.
 6. No AI attribution in commits or PR bodies (CLAUDE.md; commit-msg hook
    enforces the trailer half).
-7. Request review by mail to an architect (warriors) or to Սեդրակ
-   (architects), with the PR number and what you most doubt about the change.
-8. Merge on review PASS — unless Միհր has delivered a FAIL on the PR, which
-   blocks until answered (Constitution V.4). After merge: close the bead
-   citing the merged SHA, delete the branch, file follow-up beads for
-   anything you deferred.
+7. Request review by filing a `class:judge` bead naming the PR number and what
+   you most doubt about the change — the Դատաւոր is the reviewer, and a bead
+   is what wakes him. Mail wakes nobody but Սեդրակ, so a PR whose review
+   request lives only in an inbox sleeps. Ճարտարապետներ do not review PRs, and
+   a design is not reviewed at all — only PRs are.
+8. Merge on Միհր's review PASS — a FAIL blocks the merge until answered
+   (Constitution V.4). After merge: close the bead citing the merged SHA,
+   delete the branch, file follow-up beads for anything you deferred.
 
 ## Mail
 
