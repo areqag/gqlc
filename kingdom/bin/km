@@ -144,13 +144,24 @@ deploy_root() { echo "${KM_DEPLOY_ROOT:-$(main_root)}"; }
 # stall the dispatcher — every seat worktree shares one ref store, so the ref is
 # as fresh as the last fetch by anyone in the town.
 kingdom_drift() {
-    local root
+    local root out rc=0
     root=$(deploy_root)
     if ! git_at "$root" rev-parse --verify -q origin/master >/dev/null 2>&1; then
         echo "origin/master is unknown in $root"
         return 0
     fi
-    git_at "$root" diff --name-only origin/master -- kingdom/
+    # A diff that could not run is not a clean tree. On a root git cannot use as
+    # a checkout at all, `git diff` exits non-zero with EMPTY stdout — and empty
+    # is this function's word for "no drift", so the gate would open widest
+    # where it knows least. Measured shape: core.bare=true in the config, which
+    # clears the rev-parse guard above and then fails here (bd gqlc-ed2u).
+    # Carry the failure as drift, like the missing ref above.
+    out=$(git_at "$root" diff --name-only origin/master -- kingdom/ 2>&1) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "cannot measure drift in $root (git exited $rc): ${out//$'\n'/ }"
+        return 0
+    fi
+    echo "$out"
 }
 
 deployed_ok() { [ -z "$(kingdom_drift)" ]; }
@@ -914,7 +925,19 @@ cmd_doctor() {
     check hard "jq installed" command -v jq
     check hard "python3 installed" command -v python3
     check hard "state dir writable" mkdir -p "$(state_dir)"
-    check hard "deployed kingdom/ matches origin/master" deployed_ok
+    # Not a `check` row: this one must NAME what it found. A boolean row labelled
+    # "matches origin/master" reports a measured mismatch, so on a root that
+    # could not be measured at all it sends the reader to `km deploy` for a
+    # difference that was never observed.
+    local drift
+    drift=$(kingdom_drift)
+    if [ -z "$drift" ]; then
+        echo "ok:   deployed kingdom/ matches origin/master"
+    else
+        echo "FAIL: deployed kingdom/ is not certified against origin/master:"
+        echo "      ${drift//$'\n'/$'\n      '}"
+        ok=1
+    fi
     check soft "bd mail.delegate points at km" sh -c "bd config get mail.delegate | grep -q 'km mail'"
     check soft "dispatch timer enabled" systemctl --user is-enabled kingdom-dispatch.timer
     check soft "guard timer enabled" systemctl --user is-enabled kingdom-guard.timer

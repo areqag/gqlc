@@ -1888,6 +1888,37 @@ else
     ok "km status announces DRIFT, so a refusing dispatcher is not journal-only"
 fi
 
+# Unmeasurable is not clean either, and this is the arm the no-ref rows cannot
+# reach: origin/master IS present, so the guard above clears, and the failure
+# happens in the diff — which exits non-zero with empty stdout, the same output
+# a matching tree produces. core.bare=true is the shape that put it here: a
+# stray `git init` under an exported GIT_DIR writes it into the shared config
+# (see the decoy note above), after which every checkout on that repo has no
+# work tree and every diff against it fails.
+deploy_case doctor-unmeasurable
+gitf -C "$TMP/doctor-unmeasurable" config core.bare true
+run_stubbed doctor
+if [ "$RC" -eq 0 ]; then
+    bad "a deploy root git cannot read is drift, not clean" "doctor exited 0: $OUT"
+elif ! doctor_line | grep -q '^FAIL:'; then
+    bad "a deploy root git cannot read is drift, not clean" "the deployed-tree row is not a FAIL: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'cannot measure drift'; then
+    bad "the refusal says it could not measure" "it reports drift without saying the measurement failed: $OUT"
+else
+    ok "doctor FAILS on a deploy root whose diff cannot run, and says it could not measure"
+fi
+
+run_stubbed dispatch
+if [ "$RC" -eq 0 ]; then
+    bad "an unmeasurable dispatcher refuses" "exited 0: $OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "an unmeasurable dispatcher refuses" "it routed work it could not certify: $(woken_seats)"
+elif ! printf '%s' "$OUT" | grep -q 'cannot measure drift'; then
+    bad "an unmeasurable dispatcher refuses" "the refusal does not name the unmeasured root: $OUT"
+else
+    ok "dispatch refuses when it cannot measure its own tree, naming the root it could not read"
+fi
+
 deploy_case status-clean
 run_stubbed status
 if printf '%s' "$OUT" | grep -q 'DRIFT'; then
