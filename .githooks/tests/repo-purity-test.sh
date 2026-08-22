@@ -116,6 +116,24 @@ check "moved HEAD: guard FAILS the run" nonzero \
 check "moved HEAD: guard says HEAD" yes \
     "$(grep -qi 'HEAD' "$T/out" && echo yes || echo no)"
 
+# --- a repointed checkout is caught even though the sha never moves ----------
+# The other half of what happened on 2026-08-22: the seat worktree was left
+# parked on a fixture branch. Switching branches at the same commit changes
+# HEAD's symbolic-ref while `rev-parse HEAD` is byte-identical, so the sha
+# check above cannot see it. Added because the symbolic-ref check SURVIVED the
+# mutation screen without it — the incident justified the check, but nothing
+# witnessed it.
+
+T="$TMP/ref"; mkdir -p "$T"; make_town "$T"
+sha_before="$(git -C "$T/seat" rev-parse HEAD)"
+rc="$(run_guard "$T" git checkout -q -b fixturebranch)"
+check "repointed checkout: the sha did NOT move" same \
+    "$([ "$sha_before" = "$(git -C "$T/seat" rev-parse HEAD)" ] && echo same || echo moved)"
+check "repointed checkout: guard FAILS the run" nonzero \
+    "$([ "$rc" != 0 ] && echo nonzero || echo zero)"
+check "repointed checkout: guard names the branch" yes \
+    "$(grep -q 'fixturebranch' "$T/out" && echo yes || echo no)"
+
 # --- damage is reported even when the inner command ALSO fails ---------------
 # The trap case. A guard that only verified on the success path would let the
 # worst run — one that broke the repo AND failed — report only the failure, and
@@ -140,11 +158,17 @@ check "unknown key added: guard names it" yes \
     "$(grep -q 'some\.inventedkey' "$T/out" && echo yes || echo no)"
 
 # --- the guard does not invent damage ----------------------------------------
-# A gate that cries wolf gets switched off. A run that writes only inside its
-# own TMP must pass.
+# A gate that cries wolf gets switched off, so the negative control is a suite
+# that DID scrub: same `git init` as the vector row above, wrapped in the unset
+# that every correctly-written fixture builder uses. Measured 2026-08-22 in a
+# repo+linked-worktree sandbox, the two forms diverge completely — unscrubbed,
+# core.bare goes false->true and the target directory is never created;
+# scrubbed, core.bare stays unset and the target is a real repo. Both exit 0.
+# The row therefore also pins WHICH of the two shapes the guard is reacting to:
+# if it fired here it would be reacting to `git init` at all, not to the damage.
 
 T="$TMP/quiet"; mkdir -p "$T"; make_town "$T"
-rc="$(run_guard "$T" sh -c "mkdir -p '$T/scratch' && git init -q '$T/scratch/r' 2>/dev/null; true")"
+rc="$(run_guard "$T" sh -c "mkdir -p '$T/scratch' && ( unset \"\${!GIT_@}\"; git init -q '$T/scratch/r' ) 2>/dev/null; true")"
 check "writes confined to a fixture path: guard does not fail on its own account" \
     "$([ "$rc" = 0 ] && echo 0 || cat "$T/out")" "$([ "$rc" = 0 ] && echo 0 || echo "$rc")"
 
