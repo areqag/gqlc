@@ -297,12 +297,27 @@ expect "pr with a non-numeric argument is refused by the argument guard" 2 "is n
 # Everything above believes the stub. This row asks the actual gh binary what
 # --json accepts, so that a rename of `files` or `number` upstream reddens the
 # suite instead of leaving the stub agreeing with a tool that has moved.
-# `gh pr list --json <bogus>` prints the valid field list and fails locally: no
-# network, no auth, no repo.
+#
+# gh's check order is: credential present -> parse --json field names -> resolve
+# a repo -> network. Only the first two are reached here. That the network is
+# never reached is measured, not reasoned: this probe returns the field list
+# unchanged under `unshare -rn`, with no network interface to use, while
+# `gh api rate_limit` under the same conditions fails to connect.
+#
+# The credential check comes FIRST, and it is satisfied by any non-empty value —
+# gh rejects the bogus field name long before it would try to authenticate with
+# it. An earlier version of this row omitted the token and passed on my machine
+# for the wrong reason: my own `gh auth` credential satisfied step one, so I
+# recorded "no auth needed" as measured. On a GitHub Actions runner, which has
+# no credential unless the job is given one, gh stopped at step one and all four
+# assertions failed. So the token is supplied here rather than inherited, and
+# GH_CONFIG_DIR is redirected at a scratch path, which makes the row read the
+# same on a runner as on a seat: it can neither use a developer's real
+# credential nor reach the network with one.
 if command -v gh >/dev/null 2>&1; then
-    # Run outside the repo: gh validates --json field names before it needs a
-    # repo, a remote or a token, so this row costs no network and cannot flake.
-    FIELDS="$(cd "$TMP" || exit 1; gh pr list --json __km_overlap_bogus__ 2>&1)"
+    FIELDS="$(cd "$TMP" || exit 1
+        GH_TOKEN=x GITHUB_TOKEN=x GH_CONFIG_DIR="$TMP/gh-config" \
+            gh pr list --json __km_overlap_bogus__ 2>&1)"
     for want in number files state changedFiles; do
         case "$FIELDS" in
             *"$want"*) ok "real gh still offers the '$want' field the stub is written against" ;;
