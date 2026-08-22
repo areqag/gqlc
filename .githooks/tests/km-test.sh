@@ -226,12 +226,30 @@ cat >"$BIN/bd" <<'STUB'
 # environment. A fixture may hold non-JSON, so a jq abort is expressible; a
 # sidecar <fixture>.rc makes bd itself fail, so either half of the pipeline
 # can be reddened on its own.
-case "$*" in
-    "ready --json")                     f="${KM_FAKE_READY:-}" ;;
-    "list --status in_progress --json") f="${KM_FAKE_INPROG:-}" ;;
+#
+# The stub MODELS bd's result cap, because the cap is itself a defect under
+# test (gqlc-mlca): `bd ready --json` returns at most 100 and `bd list --json`
+# at most 50, neither saying so, while `-n 0` means unlimited. A stub that
+# always handed back the whole fixture would make a truncated query look
+# exactly like a complete one, which is the property that hid this.
+_all="$*"
+case "$1" in
+    ready) f="${KM_FAKE_READY:-}"; limit=100 ;;
+    list)  f="${KM_FAKE_INPROG:-}"; limit=50
+           case "$_all" in
+               *"--status in_progress"*) ;;
+               *) echo "bd stub: unexpected list query: $_all" >&2; exit 1 ;;
+           esac ;;
     *) exit 0 ;;
 esac
-[ -n "$f" ] || { echo "bd stub: no fixture named for: $*" >&2; exit 1; }
+shift
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -n|--limit) limit="${2:-}"; shift ;;
+    esac
+    shift
+done
+[ -n "$f" ] || { echo "bd stub: no fixture named for: $_all" >&2; exit 1; }
 if [ -f "$f.rc" ]; then
     # Defaulted, not inlined: `exit ""` is not fatal in bash, so an empty knob
     # would leave the stub succeeding while looking as though it had failed.
@@ -239,7 +257,15 @@ if [ -f "$f.rc" ]; then
     echo "bd: error: database is locked by another process" >&2
     exit "${_rc:-1}"
 fi
-cat "$f"
+# 0 is unlimited. Any other limit truncates SILENTLY — no notice, no marker —
+# which is exactly how the real renderer behaves and why km must ask for 0.
+# The jq failure arm keeps malformed fixtures flowing through untouched, so
+# the rows that redden the pipeline by feeding it non-JSON still can.
+if [ "$limit" = 0 ] || ! jq -e . "$f" >/dev/null 2>&1; then
+    cat "$f"
+else
+    jq -c ".[0:$limit]" "$f"
+fi
 STUB
 chmod +x "$BIN/tmux" "$BIN/bd"
 
@@ -257,6 +283,19 @@ dispatch_case() { # $1=ready payload, $2=in-progress payload; fresh state each t
 run_dispatch() {
     OUT="$(PATH="$BIN:$PATH" "$KM" dispatch 2>&1)"
     RC=$?
+}
+
+# cmd_status cannot reach its seat table or its counter line in a fresh state
+# dir without these: unread_count's `find` exits 1 on a missing directory and
+# pipefail turns that into an abort mid-table (gqlc-6wqw, filed not fixed — a
+# different defect that merely stands in front of the one under test here).
+make_inboxes() {
+    awk -F' *= *' '
+        /^\[seats\]/ { s = 1; next } /^\[/ { s = 0 }
+        s && NF >= 2 && $1 !~ /^#/ { print $1 }' "$REPO/kingdom/kingdom.toml" |
+        while read -r s; do
+            mkdir -p "$KM_STATE_DIR/mail/$s/inbox"
+        done
 }
 
 wake_of()     { cat "$KM_STATE_DIR/seats/$1/wake" 2>/dev/null; }
@@ -419,6 +458,77 @@ elif ! printf '%s' "$OUT" | grep -q 'in-progress'; then
     bad "a failed in-progress query refuses too" "the refusal does not name the in-progress query: $OUT"
 else
     ok "an in-progress query that fails refuses before the fresh pass, so no seat is routed work another seat is holding"
+fi
+
+# --- the silent result cap (gqlc-mlca) ---------------------------------------
+# bd's JSON renderers truncate and say nothing: `ready` at 100, `list` at 50.
+# The plain renderers do disclose it ("Showing 100 of 234 ready issues"), so the
+# divergence is invisible to exactly the caller that cannot read prose. A bead
+# past the window is not a bead nobody claimed — it is a bead nobody was shown,
+# and the two are indistinguishable from the board.
+
+# Padding is unlabelled and unassigned, so it routes to nobody and occupies no
+# seat: the only bead that CAN route is the far one, which makes a silent
+# "0 wake(s)" the whole signal.
+dispatch_case "$(jq -cn '[range(100) | {id: "gqlc-pad\(.)", priority: 1, assignee: null, labels: ["area:pad"]}]
+                       + [{id: "gqlc-far", priority: 2, assignee: null, labels: ["class:warrior"]}]')" '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the fresh pass sees a routable bead past the default window" "rc=$RC out=$OUT"
+elif ! grep -rq 'gqlc-far' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the fresh pass sees a routable bead past the default window" \
+        "the bead at position 101 reached no seat (woken: '$(woken_seats)') out=$OUT"
+else
+    ok "a routable bead sorting past position 100 is still routed, instead of vanishing behind bd ready's silent cap"
+fi
+
+# The same cap on the dispatcher's other query, one window earlier. A seat whose
+# own in-progress bead sorts past 50 is handed nothing and reads as idle — and
+# the fresh pass may then route it work while it already holds some.
+dispatch_case '[]' "$(jq -cn '[range(50) | {id: "gqlc-ip\(.)", assignee: "nobody\(.)", labels: []}]
+                            + [{id: "gqlc-rfar", assignee: "vahagn", labels: ["class:warrior"]}]')"
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the resume pass sees an in-progress bead past the default window" "rc=$RC out=$OUT"
+elif ! wake_of vahagn | grep -q 'gqlc-rfar'; then
+    bad "the resume pass sees an in-progress bead past the default window" \
+        "vahagn was not handed his own bead back (woken: '$(woken_seats)') out=$OUT"
+else
+    ok "a seat's in-progress bead sorting past position 50 is still resumed, instead of vanishing behind bd list's silent cap"
+fi
+
+# The board reads the same truncated queue, so every class counter is silently a
+# floor. Սեդրակ sizes his standing labelling chore off this line, which is what
+# makes a precise-looking wrong number worse here than no number at all.
+dispatch_case "$(jq -cn '[range(100) | {id: "gqlc-spad\(.)", priority: 1, assignee: null, labels: ["area:pad"]}]
+                       + [range(5) | {id: "gqlc-sw\(.)", priority: 2, assignee: null, labels: ["class:warrior"]}]')" '[]'
+make_inboxes
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "the board counts the whole ready queue" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q '5 warrior'; then
+    bad "the board counts the whole ready queue" \
+        "the counter missed the 5 warrior beads past the window: $(printf '%s' "$OUT" | grep 'ready queue:')"
+else
+    ok "km status counts the whole ready queue, so its class counters are not silent floors"
+fi
+
+# The board's fourth query, and the one with no other row over it: the BEADS
+# column reads the same capped `bd list`. A seat shown holding nothing while it
+# holds a bead is how a stalled seat gets read as an idle one.
+dispatch_case '[]' "$(jq -cn '[range(50) | {id: "gqlc-sip\(.)", assignee: "nobody\(.)", labels: []}]
+                            + [{id: "gqlc-sfar", assignee: "vahagn", labels: ["class:warrior"]}]')"
+make_inboxes
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "the board shows a seat's in-progress bead past the default window" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -E '^vahagn' | grep -q 'gqlc-sfar'; then
+    bad "the board shows a seat's in-progress bead past the default window" \
+        "vahagn's row does not name the bead he holds: $(printf '%s' "$OUT" | grep -E '^vahagn')"
+else
+    ok "km status shows a seat's in-progress bead even when it sorts past bd list's silent cap"
 fi
 
 export KM_STATE_DIR="$TMP/state"
