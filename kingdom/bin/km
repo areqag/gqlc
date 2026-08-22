@@ -365,7 +365,12 @@ cmd_halt() {
     ensure_state_tree
     printf 'raised by %s at %s: %s\n' "${KINGDOM_SEAT:-andranik}" "$(date -u -Iseconds)" "${*:-no reason given}" \
         >"$(state_dir)/halt"
-    echo "halt raised: the dispatcher will wake nobody until it is lowered (km resume)"
+    # Names both timers, and says which paths it does NOT bind. The line used to
+    # promise a quiet town while naming only the dispatcher, so an operator had
+    # no reason to suspect the guard sweep was still launching sessions behind
+    # the flag — and this line is the whole report he gets (gqlc-6dzi).
+    echo "halt raised: the dispatcher and the guard sweep will wake nobody until it is lowered (km resume)"
+    echo "  km wake and km herratsayn still reach a seat, so the town stays workable by hand."
 }
 
 cmd_resume() {
@@ -523,6 +528,19 @@ cmd_dispatch() {
 
 cmd_guard_sweep() {
     session_up || { echo "guard-sweep: the town is down"; return 0; }
+    # The halt binds every TIMER-driven wake, not just the dispatcher's. This is
+    # the second one, and each wake here starts a real claude session, so a halt
+    # that missed it went on spending tokens once per guard cadence — and since
+    # Article VI.4 reserves lowering a halt to Սեդրակ or Անդրանիկ, whoever
+    # raised it had no way to find that out (gqlc-6dzi). `km wake` and
+    # `km herratsayn` are deliberately NOT bound: a halted town still has to be
+    # workable by the operator who is going to lower the halt.
+    local sd
+    sd=$(state_dir)
+    if [ -f "$sd/halt" ]; then
+        echo "guard-sweep: halted — $(head -1 "$sd/halt")"
+        return 0
+    fi
     if [ "$(seat_status raffi)" = awake ]; then
         echo "guard-sweep: Րաֆֆի is already on his rounds"
         return 0
