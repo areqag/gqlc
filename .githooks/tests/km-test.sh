@@ -76,6 +76,44 @@ run() {
     RC=$?
 }
 
+# --- the deploy seam ---------------------------------------------------------
+# The town executes kingdom/ out of the main checkout, and km refuses to act on
+# the town when that tree differs from origin/master. The real main checkout is
+# routinely drifted — that is the bug this seam exists for (bd gqlc-ed2u) — so
+# the whole suite stands on a throwaway origin+clone pair, exactly as it stands
+# on a throwaway KM_STATE_DIR.
+
+mk_origin() { # <bare> : a bare repo whose master carries a kingdom/ tree
+    git init -q --bare "$1"
+    git init -q "$1.seed"
+    git -C "$1.seed" config user.email km@test
+    git -C "$1.seed" config user.name km-test
+    mkdir -p "$1.seed/kingdom/bin" "$1.seed/.beads"
+    printf 'deployed\n' >"$1.seed/kingdom/bin/km"
+    printf 'export-v1\n' >"$1.seed/.beads/issues.jsonl"
+    printf 'inter-v1\n' >"$1.seed/.beads/interactions.jsonl"
+    git -C "$1.seed" add -A
+    git -C "$1.seed" commit -qm "the deployed tree"
+    git -C "$1.seed" push -q "$1" HEAD:master
+}
+
+advance_origin() { # <bare> <path> <content> : one more commit on master
+    printf '%s\n' "$3" >"$1.seed/$2"
+    git -C "$1.seed" add -A
+    git -C "$1.seed" commit -qm "advance $2"
+    git -C "$1.seed" push -q "$1" HEAD:master
+}
+
+mk_clone() { # <bare> <dir>
+    git clone -q "$1" "$2"
+    git -C "$2" config user.email km@test
+    git -C "$2" config user.name km-test
+}
+
+mk_origin "$TMP/town.git"
+mk_clone "$TMP/town.git" "$TMP/deployed"
+export KM_DEPLOY_ROOT="$TMP/deployed"
+
 # --- the hermetic seam: everything below stands on this one ------------------
 
 run state-dir
@@ -1600,6 +1638,205 @@ elif ! grep -q 'mediun' "$STDERR"; then
 else
     ok "a misspelled level is refused, named on stderr, and the seat still launches"
 fi
+
+# --- deploy: the town must run the code that merged --------------------------
+# PR #1081 merged the P0 dispatcher fix and the town was told it was fixed. The
+# systemd units execute kingdom/bin/km out of the main checkout, which nothing
+# advances, so the defect kept running for hours behind a healthy indicator
+# (bd gqlc-ed2u). Two halves are pinned here: a detector that FAILS rather than
+# warns, and a deploy that moves the tree without touching what bd exported
+# into it.
+
+cat >"$BIN/claude" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+chmod +x "$BIN/claude"
+
+deploy_case() { # <name> : a fresh origin + clone, and KM_DEPLOY_ROOT pointing at it
+    mk_origin "$TMP/$1.git"
+    mk_clone "$TMP/$1.git" "$TMP/$1"
+    export KM_DEPLOY_ROOT="$TMP/$1"
+}
+run_stubbed() { OUT="$(PATH="$BIN:$PATH" "$KM" "$@" 2>&1)"; RC=$?; }
+doctor_line() { printf '%s' "$OUT" | grep -i 'kingdom.*origin/master\|origin/master.*kingdom' | head -1; }
+
+# The two doctor rows are one differential: same stubs, same PATH, same state
+# dir, and the ONLY difference is whether the deploy root matches origin/master.
+# That is what makes the non-zero exit attributable to the drift rather than to
+# a missing tmux — "does it FAIL?", not "is there a check?" (bd gqlc-z1qw).
+
+deploy_case doctor-clean
+run_stubbed doctor
+if [ "$RC" -ne 0 ]; then
+    bad "doctor passes a deploy root that matches origin/master" "rc=$RC out=$OUT"
+elif ! doctor_line | grep -q '^ok:'; then
+    bad "doctor passes a deploy root that matches origin/master" "no ok: row names the deployed tree: $OUT"
+else
+    ok "doctor passes when the deployed kingdom/ matches origin/master"
+fi
+
+deploy_case doctor-behind
+advance_origin "$TMP/doctor-behind.git" kingdom/bin/km "fixed"
+git -C "$TMP/doctor-behind" fetch -q origin
+run_stubbed doctor
+if [ "$RC" -eq 0 ]; then
+    bad "doctor FAILS on a stale deploy root" "exited 0 — a warning is not a gate: $OUT"
+elif ! doctor_line | grep -q '^FAIL:'; then
+    bad "doctor FAILS on a stale deploy root" "the deployed-tree row is not a FAIL: $OUT"
+else
+    ok "doctor FAILS, not warns, when the deployed kingdom/ is behind origin/master"
+fi
+
+# Drift is a property of the tree that executes, not of HEAD. An implementation
+# that compared revisions would pass this row while the town ran edited code.
+deploy_case doctor-edited
+printf 'hand-edited\n' >"$TMP/doctor-edited/kingdom/bin/km"
+run_stubbed doctor
+if [ "$RC" -eq 0 ] || ! doctor_line | grep -q '^FAIL:'; then
+    bad "an edited deployed file is drift even at the right commit" "rc=$RC out=$OUT"
+else
+    ok "doctor FAILS on a deployed file edited in place, though HEAD is origin/master"
+fi
+
+# The refusals. A detector nobody runs every two minutes is still a detector you
+# must remember, so the timer-driven commands check their own freshness.
+
+# Unknowable is not clean. If the ref the check reads is missing the answer must
+# be drift, or the gate opens exactly where it has the least information.
+deploy_case doctor-no-ref
+git -C "$TMP/doctor-no-ref" update-ref -d refs/remotes/origin/master
+run_stubbed doctor
+if [ "$RC" -eq 0 ] || ! doctor_line | grep -q '^FAIL:'; then
+    bad "no origin/master ref is drift, not clean" "rc=$RC out=$OUT"
+else
+    ok "a deploy root with no origin/master ref FAILS rather than reading as deployed"
+fi
+
+deploy_case dispatch-stale
+advance_origin "$TMP/dispatch-stale.git" kingdom/bin/km "fixed"
+git -C "$TMP/dispatch-stale" fetch -q origin
+export KM_STATE_DIR="$TMP/dispatch-stale-state"
+mkdir -p "$KM_STATE_DIR"
+export KM_FAKE_READY="$KM_STATE_DIR/ready.json"
+export KM_FAKE_INPROG="$KM_STATE_DIR/inprog.json"
+printf '[{"id":"gqlc-w9","priority":0,"assignee":null,"labels":["class:warrior"]}]' >"$KM_FAKE_READY"
+printf '[]' >"$KM_FAKE_INPROG"
+run_stubbed dispatch
+if [ "$RC" -eq 0 ]; then
+    bad "a stale dispatcher refuses" "exited 0: $OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "a stale dispatcher refuses" "it routed work from stale code: $(woken_seats)"
+elif ! printf '%s' "$OUT" | grep -q 'km deploy'; then
+    bad "a stale dispatcher refuses" "the refusal does not name the remedy: $OUT"
+else
+    ok "a dispatcher whose own tree is behind origin/master refuses and names 'km deploy'"
+fi
+
+run_stubbed guard-sweep
+if [ "$RC" -eq 0 ]; then
+    bad "a stale guard sweep refuses" "exited 0: $OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "a stale guard sweep refuses" "it woke: $(woken_seats)"
+else
+    ok "the guard sweep refuses from a stale tree too, so Րաֆֆի is not run by dead code"
+fi
+
+# A refusal visible only in the journal is gqlc-vzpn again, so the glance says it.
+run_stubbed status
+if ! printf '%s' "$OUT" | grep -q 'DRIFT'; then
+    bad "status shows the drift" "the town's glance is silent about stale machinery: $OUT"
+else
+    ok "km status announces DRIFT, so a refusing dispatcher is not journal-only"
+fi
+
+deploy_case status-clean
+run_stubbed status
+if printf '%s' "$OUT" | grep -q 'DRIFT'; then
+    bad "status is quiet when deployed" "it cried DRIFT on a matching tree: $OUT"
+else
+    ok "km status says nothing about drift when the deployed tree matches"
+fi
+
+export KM_STATE_DIR="$TMP/state"
+
+# Deploy proper. The live main checkout carries a STAGED .beads/issues.jsonl and
+# an UNSTAGED .beads/interactions.jsonl — bd's export — and clobbering those
+# reverts ledger state. These rows fix which of the two shapes moves the tree.
+
+deploy_case deploy-ff
+advance_origin "$TMP/deploy-ff.git" kingdom/bin/km "fixed"
+git -C "$TMP/deploy-ff" fetch -q origin
+printf 'local-export\n' >"$TMP/deploy-ff/.beads/issues.jsonl"
+git -C "$TMP/deploy-ff" add .beads/issues.jsonl
+printf 'local-inter\n' >"$TMP/deploy-ff/.beads/interactions.jsonl"
+run_stubbed deploy
+if [ "$RC" -ne 0 ]; then
+    bad "deploy fast-forwards past unrelated local dirt" "rc=$RC out=$OUT"
+elif [ "$(cat "$TMP/deploy-ff/kingdom/bin/km")" != fixed ]; then
+    bad "deploy fast-forwards past unrelated local dirt" "the tree did not move: $(cat "$TMP/deploy-ff/kingdom/bin/km")"
+elif [ "$(cat "$TMP/deploy-ff/.beads/issues.jsonl")" != local-export ] ||
+    [ "$(cat "$TMP/deploy-ff/.beads/interactions.jsonl")" != local-inter ]; then
+    bad "deploy fast-forwards past unrelated local dirt" "it clobbered bd's export"
+elif [ -z "$(git -C "$TMP/deploy-ff" diff --cached --name-only)" ]; then
+    bad "deploy fast-forwards past unrelated local dirt" "the staged export was unstaged under it"
+else
+    ok "deploy advances the tree while a staged and an unstaged bd export survive byte-intact"
+fi
+
+deploy_case deploy-conflict
+advance_origin "$TMP/deploy-conflict.git" .beads/issues.jsonl "export-v2"
+git -C "$TMP/deploy-conflict" fetch -q origin
+printf 'local-export\n' >"$TMP/deploy-conflict/.beads/issues.jsonl"
+git -C "$TMP/deploy-conflict" add .beads/issues.jsonl
+before="$(git -C "$TMP/deploy-conflict" rev-parse HEAD)"
+run_stubbed deploy
+if [ "$RC" -eq 0 ]; then
+    bad "deploy refuses when the incoming commit is under local dirt" "exited 0: $OUT"
+elif [ "$(cat "$TMP/deploy-conflict/.beads/issues.jsonl")" != local-export ]; then
+    bad "deploy refuses when the incoming commit is under local dirt" "the local export was overwritten anyway"
+elif [ "$(git -C "$TMP/deploy-conflict" rev-parse HEAD)" != "$before" ]; then
+    bad "deploy refuses when the incoming commit is under local dirt" "HEAD moved under a refusal"
+elif ! printf '%s' "$OUT" | grep -q '\.beads/issues\.jsonl'; then
+    bad "deploy refuses when the incoming commit is under local dirt" "the refusal does not name the file in the way: $OUT"
+else
+    ok "deploy refuses rather than clobber a dirty file the incoming commit touches"
+fi
+
+deploy_case deploy-off-master
+git -C "$TMP/deploy-off-master" switch -qc parked
+advance_origin "$TMP/deploy-off-master.git" kingdom/bin/km "fixed"
+git -C "$TMP/deploy-off-master" fetch -q origin
+run_stubbed deploy
+if [ "$RC" -eq 0 ]; then
+    bad "deploy refuses a deploy root parked off master" "exited 0: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'parked'; then
+    bad "deploy refuses a deploy root parked off master" "the refusal does not name the branch: $OUT"
+else
+    ok "deploy refuses when the deploy root is parked on a branch that is not master"
+fi
+
+deploy_case deploy-current
+run_stubbed deploy
+if [ "$RC" -ne 0 ]; then
+    bad "deploy on a current root is a no-op that says so" "rc=$RC out=$OUT"
+else
+    ok "deploy on an already-current root exits 0 instead of inventing work"
+fi
+
+# A merge cannot undo a hand edit, so deploy must not report success after one.
+deploy_case deploy-edited
+printf 'hand-edited\n' >"$TMP/deploy-edited/kingdom/bin/km"
+run_stubbed deploy
+if [ "$RC" -eq 0 ]; then
+    bad "deploy does not vouch for a hand-edited tree" "exited 0 with kingdom/ still differing: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'kingdom/bin/km'; then
+    bad "deploy does not vouch for a hand-edited tree" "the refusal does not name what still differs: $OUT"
+else
+    ok "deploy refuses to certify a deploy root whose kingdom/ was edited in place"
+fi
+
+export KM_DEPLOY_ROOT="$TMP/deployed"
 
 # This suite builds git repositories, so it must be able to prove it built them
 # somewhere else. On PR #1128 it could not: a leaked GIT_DIR sent the fixture's

@@ -33,6 +33,7 @@ km — the machinery of the Թագաւորութիւն
   km guard-sweep                 wake Րաֆֆի for a round (timer)
   km halt [reason] | resume      raise / lower the town halt
   km install-units | uninstall-units
+  km deploy                      fast-forward the checkout the timers run from
   km doctor                      health checks
   km state-dir | seat-info <s> | seat-worktree <s>
 EOF
@@ -94,6 +95,66 @@ seat_worktree() {
     local mr
     mr=$(main_root)
     echo "$(dirname "$mr")/$(basename "$mr")-seat-$1"
+}
+
+# ---------- deploy ----------
+
+# The systemd units execute kingdom/ out of the main checkout, never out of the
+# seat worktree a fix was written in, and nothing advances that checkout — so a
+# merged fix ran for hours while the town believed it was live (bd gqlc-ed2u).
+# KM_DEPLOY_ROOT overrides, for tests, as KM_STATE_DIR does for state.
+deploy_root() { echo "${KM_DEPLOY_ROOT:-$(main_root)}"; }
+
+# Names the kingdom/ paths where the deployed tree differs from origin/master;
+# silence means no drift. It diffs the WORKING TREE, not HEAD, because that is
+# what the units execute: a file edited or staged in place is drift at the right
+# commit. Reads the remote-tracking ref rather than the network, so it cannot
+# stall the dispatcher — every seat worktree shares one ref store, so the ref is
+# as fresh as the last fetch by anyone in the town.
+kingdom_drift() {
+    local root
+    root=$(deploy_root)
+    if ! git -C "$root" rev-parse --verify -q origin/master >/dev/null 2>&1; then
+        echo "origin/master is unknown in $root"
+        return 0
+    fi
+    git -C "$root" diff --name-only origin/master -- kingdom/
+}
+
+deployed_ok() { [ -z "$(kingdom_drift)" ]; }
+
+# Fail-closed: an unexpected failure inside leaves the caller refusing.
+assert_deployed() { # <command name for the message>
+    local drift
+    drift=$(kingdom_drift)
+    if [ -z "$drift" ]; then return 0; fi
+    {
+        echo "$1: DRIFT — $(deploy_root) is not origin/master, so the town would run stale code:"
+        echo "  ${drift//$'\n'/$'\n  '}"
+        echo "$1: run 'km deploy' (just kingdom-deploy) first"
+    } >&2
+    return 1
+}
+
+cmd_deploy() {
+    local root branch drift
+    root=$(deploy_root)
+    branch=$(git -C "$root" symbolic-ref --quiet --short HEAD || true)
+    [ "$branch" = master ] || die "deploy: $root is parked on '${branch:-a detached HEAD}', not master"
+    git -C "$root" fetch --quiet origin master || die "deploy: cannot reach origin from $root"
+    # --ff-only is the whole safety argument: git itself refuses to overwrite a
+    # dirty file the incoming commits touch, and refuses a divergence, so bd's
+    # exports in that tree are never clobbered by a stash-and-reset dance.
+    git -C "$root" merge --ff-only origin/master || die "deploy: refused to move $root; resolve the above by hand"
+    drift=$(kingdom_drift)
+    if [ -n "$drift" ]; then
+        {
+            echo "deploy: incomplete — kingdom/ still differs from origin/master:"
+            echo "  ${drift//$'\n'/$'\n  '}"
+        } >&2
+        return 1
+    fi
+    echo "deployed: $root at $(git -C "$root" rev-parse --short HEAD)"
 }
 
 seat_home()   { echo "$(state_dir)/seats/$1"; }
@@ -418,6 +479,7 @@ free_worker_of_class() { # asleep, no queued wake
 }
 
 cmd_dispatch() {
+    assert_deployed dispatch || return 1
     session_up || { echo "dispatch: the town is down; nothing to do"; return 0; }
     local sd
     sd=$(state_dir)
@@ -744,6 +806,7 @@ cmd_hold_verdict() {
 }
 
 cmd_guard_sweep() {
+    assert_deployed guard-sweep || return 1
     session_up || { echo "guard-sweep: the town is down"; return 0; }
     if [ "$(seat_status raffi)" = awake ]; then
         echo "guard-sweep: Րաֆֆի is already on his rounds"
@@ -760,6 +823,11 @@ cmd_status() {
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
     if session_up; then echo "town: UP (tmux session '$SESSION')"; else echo "town: DOWN"; fi
     if [ -f "$sd/halt" ]; then echo "HALT: $(head -1 "$sd/halt")"; fi
+    # A dispatcher refusing on drift is otherwise visible only in the journal
+    # (bd gqlc-vzpn), so the town's one glance carries it.
+    if ! deployed_ok; then
+        echo "DRIFT: $(deploy_root) is not origin/master — the timers refuse until 'km deploy'"
+    fi
     echo
 
     local inprog
@@ -814,6 +882,7 @@ cmd_doctor() {
     check hard "jq installed" command -v jq
     check hard "python3 installed" command -v python3
     check hard "state dir writable" mkdir -p "$(state_dir)"
+    check hard "deployed kingdom/ matches origin/master" deployed_ok
     check soft "bd mail.delegate points at km" sh -c "bd config get mail.delegate | grep -q 'km mail'"
     check soft "dispatch timer enabled" systemctl --user is-enabled kingdom-dispatch.timer
     check soft "guard timer enabled" systemctl --user is-enabled kingdom-guard.timer
@@ -867,6 +936,7 @@ case "$cmd" in
     halt)            cmd_halt "$@" ;;
     resume)          cmd_resume "$@" ;;
     doctor)          cmd_doctor "$@" ;;
+    deploy)          cmd_deploy "$@" ;;
     install-units)   cmd_install_units "$@" ;;
     uninstall-units) cmd_uninstall_units "$@" ;;
     state-dir)       state_dir ;;
