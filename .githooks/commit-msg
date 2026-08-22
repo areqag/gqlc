@@ -33,11 +33,15 @@ _check_identity() {
     # FIXTURE@EXAMPLE.INVALID through a rule that stops the lowercase spelling.
     local host
     host="$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]')"
-    # A single trailing dot is the DNS root and makes an FQDN, so `example.
-    # invalid.` and `example.invalid` name the same place. Measured: without
-    # this strip the trailing-dot spelling was accepted — a one-character walk
-    # around a rule whose whole purpose is that it cannot be walked around.
-    host="${host%.}"
+    # A trailing dot is the DNS root and makes an FQDN, so `example.invalid.`
+    # and `example.invalid` name the same place. Measured: without this strip
+    # the trailing-dot spelling was accepted — a one-character walk around a
+    # rule whose whole purpose is that it cannot be walked around. Strip the
+    # whole run, not one: `example.invalid..` walks around a single strip the
+    # same way, and it was accepted when this loop was `host="${host%.}"`.
+    while [ "${host%.}" != "$host" ]; do
+        host="${host%.}"
+    done
 
     # RFC 2606 reserves these names so that no real address can ever fall under
     # them, which is what makes them safe to refuse wholesale. Match the
@@ -52,7 +56,7 @@ _check_identity() {
     case "$host" in
         *.invalid | *.test | *.example | *.localhost | localhost | \
         example.com | example.net | example.org | \
-        *.example.com | *.example.net | *.example.org | "")
+        *.example.com | *.example.net | *.example.org)
             cat >&2 <<ERRMSG
 ERROR: Bogus $label identity: <$email>
        <$host> is reserved by RFC 2606 and can never be a real address,
@@ -63,8 +67,13 @@ ERRMSG
             ;;
     esac
 
-    # Shape: must contain @ and the domain part must contain a dot
-    if [[ "$email" != *@* ]] || [[ "$domain" != *.* ]]; then
+    # Shape: must contain @ and the domain must contain a dot. Tested on the
+    # normalised host, not the raw domain, so that a domain which is nothing
+    # but dots (`dev@...`) is refused here — it satisfies "contains a dot"
+    # while naming no host at all. That is also why the case above carries no
+    # empty-string pattern: an empty host is an implausible address, not a
+    # name RFC 2606 reserved, and the message should say so.
+    if [[ "$email" != *@* ]] || [[ "$host" != *.* ]]; then
         cat >&2 <<ERRMSG
 ERROR: Implausible $label email: <$email>
        Expected format: user@host.tld

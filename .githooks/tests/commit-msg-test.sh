@@ -163,11 +163,21 @@ run_identity_case "author at bare localhost"                                reje
 # The shape check, which had no row either. It is the reason the bare-localhost
 # row above has to name RFC 2606: without that, both refusals look alike.
 run_identity_case "author at a dotless domain"                              reject "dev@nodots"               "$GOOD" "Implausible"
+# An empty domain, and a domain that is nothing but dots. Both name no host,
+# so both are the shape check's business rather than RFC 2606's — asserting
+# the reason is what holds that split in place.
+run_identity_case "author with an empty domain"                             reject "dev@"                     "$GOOD" "Implausible"
+run_identity_case "author at a domain of nothing but dots"                  reject "dev@..."                  "$GOOD" "Implausible"
+# The domain is what follows the LAST @, so a second @ cannot smuggle a
+# reserved name past as part of the local part.
+run_identity_case "author whose address carries a second @"                 reject "x@y@localhost"            "$GOOD" "RFC 2606"
 
 # RFC 2606 s.3 reserved second-level names. example.net was absent from the old
 # denylist entirely, and subdomains of all three were reachable.
 run_identity_case "author at example.net, absent from the old denylist"     reject "someone@example.net"      "$GOOD"
 run_identity_case "author at a subdomain of example.com"                    reject "someone@mail.example.com" "$GOOD"
+run_identity_case "author at a subdomain of example.net"                    reject "someone@mail.example.net" "$GOOD"
+run_identity_case "author at a subdomain of example.org"                    reject "someone@mail.example.org" "$GOOD"
 
 # Domains are case-insensitive; the guard must not be case-sensitive where DNS
 # is not.
@@ -178,6 +188,13 @@ run_identity_case "author under .INVALID in capitals"                       reje
 # whose entire claim is that respelling cannot get past it.
 run_identity_case "author under .invalid spelled as an FQDN"                reject "dev@example.invalid."     "$GOOD" "RFC 2606"
 run_identity_case "author at localhost spelled as an FQDN"                  reject "dev@localhost."           "$GOOD" "RFC 2606"
+
+# Stripping ONE dot is walked around by writing two, which is why the strip is
+# a loop. Measured accepted while it was a single `${host%.}`.
+run_identity_case "author under .invalid with a run of trailing dots"       reject "dev@example.invalid.."    "$GOOD" "RFC 2606"
+# The strip must not change the answer for a real domain carrying the root
+# dot: an FQDN is a legal spelling for a contributor too.
+run_identity_case "a real domain spelled as an FQDN"                        accept "dev@notinvalid.com."      "$GOOD"
 
 # The committer is checked as well as the author, and independently of it.
 run_identity_case "committer under .invalid while the author is good"       reject "$GOOD" "fixture@example.invalid"
