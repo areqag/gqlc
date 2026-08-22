@@ -22,15 +22,16 @@ export KM_STATE_DIR="$TMP/state"
 # The suite may itself run inside a seat one day; identity must not leak in.
 unset KINGDOM_SEAT
 # Nor may the invoking git's environment. `git push` runs this suite from a hook
-# with GIT_DIR set to the real repo, and `git rev-parse` — which is how km finds
-# its repo — honours GIT_DIR over the CWD. The fixture below would be built and
-# then silently bypassed, every row answering about the real checkout instead.
-# Most rows would still pass, because the paths they ask about exist there too;
-# only the fetch row caught it. Passing for the wrong reason is the exact defect
-# the fixture exists to end, so the environment is cleared here rather than
-# worked around per row (measured on PR #1128, green direct, red under push).
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
-      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX GIT_NAMESPACE
+# with GIT_DIR set to the real repo, and git honours GIT_DIR over BOTH the CWD
+# and an explicit `-C <dir>` — so the fixture below is built somewhere else and
+# every git call in it, including `config`, lands on the repo under test. Most
+# rows would still pass, because the paths they ask about exist there too; only
+# the fetch row caught it. Passing for the wrong reason is the exact defect the
+# fixture exists to end, so the environment is cleared here rather than worked
+# around per row. The glob form, and not a list: it takes GIT_CONFIG_GLOBAL and
+# whatever git adds next, which a list written today does not. (Measured on
+# PR #1128 — green direct, red under push; postmortem PR #1160, bd gqlc-o13d.)
+unset "${!GIT_@}"
 # Read after the unset, so it is the real repo's HEAD and not a hijacked one.
 # Asserted again at the end of the file; see the note there.
 SUITE_START_HEAD="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
