@@ -2216,7 +2216,7 @@ else
     # and initialises in the cwd when it finds none. The .beads check below
     # guards a case today's bd does not produce, and is kept only because what
     # it would cost is 105 fixture issues in the town's tracker.
-    bd_in_ws() { (unset "${!GIT_@}"; cd "$ws" && bd "$@"); }
+    bd_in_ws() { (cd "$ws" && bd "$@"); }
     if ! bd_in_ws init >"$ws/setup.log" 2>&1; then
         bad "$bd_contract" "no throwaway bd workspace: $(tail -1 "$ws/setup.log")"
     elif [ ! -d "$ws/.beads" ]; then
@@ -2365,8 +2365,22 @@ argv_brief() { [ -s "$1" ] && sed '/^--append-system-prompt$/q' "$1" | tr '\n' '
 TOWN="$TMP/town"
 mkdir -p "$TOWN"
 TOWN=$(cd "$TOWN" && pwd -P) # git reports the physical path; mktemp may hand back a symlink
-gitf init -q "$TOWN"
-mkdir -p "$TOWN-seat-hayk" "$TOWN-seat-mihr"
+gitf init -q -b master "$TOWN"
+gitf -C "$TOWN" config user.email t@t.invalid
+gitf -C "$TOWN" config user.name t
+# A WELL-FORMED town, not merely a git directory. km-seat refreshes a seat's
+# worktree before launching it (bd gqlc-xtre), and refresh judges the seat
+# against origin/master — so a town with no origin makes km-seat report a
+# degraded town on stderr, and the argv rows below assert on stderr being
+# EMPTY. Giving the fixture the origin and the real worktrees a town always has
+# keeps that silence assertion at full strength instead of teaching it to
+# ignore a line (Միհր, verdict-uhqh-r1 N1).
+gitf init -q --bare "$TMP/town-origin.git"
+gitf -C "$TOWN" commit -q --allow-empty -m base
+gitf -C "$TOWN" remote add origin "$TMP/town-origin.git"
+gitf -C "$TOWN" push -q origin master
+gitf -C "$TOWN" worktree add -q --detach "$TOWN-seat-hayk" master
+gitf -C "$TOWN" worktree add -q --detach "$TOWN-seat-mihr" master
 
 ARGV=""
 STDERR=""
@@ -2479,6 +2493,386 @@ elif ! grep -q 'mediun' "$STDERR"; then
     bad "a misspelled level must be named on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
 else
     ok "a misspelled level is refused, named on stderr, and the seat still launches"
+fi
+
+# --- seat-refresh: a merged hook reaches a parked seat (gqlc-xtre) -----------
+# core.hooksPath is RELATIVE, so every seat runs the hooks in its own checkout
+# and acquires a merged one only when it next moves. `km up` parks a seat with
+# `worktree add --detach`, and a parked seat never moves, so merging a gate
+# deploys it to nobody. Measured: 7 of 14 seats had no push guard hours after
+# it merged, and `git config --get core.hooksPath` read '.githooks' in every
+# one of them — the indicator is clean exactly where the gate is absent.
+#
+# So no row here may assert that a file EXISTS. The fixture builds a real
+# upstream whose second commit adds a pre-push that REFUSES, parks a seat at
+# the first commit, and pushes for real: before the refresh the push is
+# allowed, after it the push is refused. What is pinned is the hook RUNNING.
+#
+# Every fixture git call unsets GIT_*. `just test` can itself run from a hook,
+# and git exports GIT_DIR to hooks, which would resolve these commands into the
+# town's own repo (the same trap documented on the bd row above).
+
+hk="$TMP/hk"
+mkdir -p "$hk"
+
+# The gate refuses by DESTINATION, the way guard-push-destination does, rather
+# than refusing everything: the fixture has to push master itself, and a hook
+# that refused that would only be testable by disabling it during setup.
+allow_hook='#!/bin/sh
+cat >/dev/null
+exit 0
+'
+# shellcheck disable=SC2016  # the hook body is data here; it must reach the
+# file unexpanded and be expanded by the shell that later runs it as a hook.
+refuse_hook='#!/bin/sh
+while read -r _ _ remote_ref _; do
+    case "$remote_ref" in
+        *probe*) echo "MERGED-GATE-SPEAKING" >&2; exit 1 ;;
+    esac
+done
+exit 0
+'
+
+fixture_ok=1
+{
+    gitf init --quiet --bare "$hk/upstream.git"
+    gitf clone --quiet "$hk/upstream.git" "$hk/town"
+    gitf -C "$hk/town" config user.email seat@example.invalid
+    gitf -C "$hk/town" config user.name "seat fixture"
+    gitf -C "$hk/town" config core.hooksPath .githooks
+    mkdir -p "$hk/town/.githooks"
+
+    # C1: a pre-push that allows. This is the hook a parked seat keeps running.
+    printf '%s' "$allow_hook" >"$hk/town/.githooks/pre-push"
+    chmod +x "$hk/town/.githooks/pre-push"
+    gitf -C "$hk/town" add -A
+    gitf -C "$hk/town" commit --quiet -m "c1: a pre-push that allows"
+    gitf -C "$hk/town" branch -M master
+    gitf -C "$hk/town" push --quiet -u origin master
+} >"$hk/setup.log" 2>&1 || fixture_ok=0
+
+c1=$(gitf -C "$hk/town" rev-parse HEAD 2>/dev/null || true)
+
+# Park four seats at C1, exactly as `km up` does.
+for s in raffi mihr vahagn artur hayk; do
+    gitf -C "$hk/town" worktree add --detach --quiet "$hk/town-seat-$s" master \
+        >>"$hk/setup.log" 2>&1 || fixture_ok=0
+done
+
+{
+    # C2: the merged gate. Everything above is now stale.
+    printf '%s' "$refuse_hook" >"$hk/town/.githooks/pre-push"
+    gitf -C "$hk/town" add -A
+    gitf -C "$hk/town" commit --quiet -m "c2: a pre-push that refuses"
+    gitf -C "$hk/town" push --quiet origin master
+} >>"$hk/setup.log" 2>&1 || fixture_ok=0
+
+c2=$(gitf -C "$hk/town" rev-parse HEAD 2>/dev/null || true)
+
+# Does a push from this seat worktree run a hook that refuses? Answered by
+# pushing, not by reading a file. Echoes "refused" / "allowed".
+seat_push_verdict() { # <seat> <branch>
+    local out
+    if out=$( (cd "$hk/town-seat-$1" && gitf push origin "HEAD:refs/heads/$2" 2>&1) ); then
+        echo allowed
+    elif printf '%s' "$out" | grep -q MERGED-GATE-SPEAKING; then
+        echo refused
+    else
+        echo "broken: $out"
+    fi
+}
+
+refresh() { # <seat> -> OUT/RC, run from inside the fixture town
+    OUT="$( (cd "$hk/town" && "$KM" seat-refresh "$1") 2>&1 )"
+    RC=$?
+}
+
+seat_head() { gitf -C "$hk/town-seat-$1" rev-parse HEAD 2>/dev/null || echo none; }
+
+if [ "$fixture_ok" -ne 1 ] || [ -z "$c1" ] || [ -z "$c2" ] || [ "$c1" = "$c2" ]; then
+    bad "the seat-refresh fixture builds" "$(tail -3 "$hk/setup.log" 2>&1)"
+else
+    ok "the seat-refresh fixture builds an upstream whose second commit adds a refusing pre-push"
+
+    # THE DEFECT, witnessed. Without this row the refusal row below would pass
+    # against a hook that never refused anything, and the suite would be green
+    # whether or not the refresh did a thing.
+    v=$(seat_push_verdict raffi probe-before)
+    if [ "$v" != allowed ]; then
+        bad "a parked seat does NOT run the merged gate" "expected the stale hook to allow, got: $v"
+    else
+        ok "a seat parked at c1 pushes freely — the gate merged into master does not run there"
+    fi
+
+    # THE FIX, witnessed the same way.
+    refresh raffi
+    if [ "$RC" -ne 0 ]; then
+        bad "seat-refresh moves a parked seat" "rc=$RC out=$OUT"
+    elif [ "$(seat_head raffi)" != "$c2" ]; then
+        bad "seat-refresh moves a parked seat" "head is $(seat_head raffi), wanted $c2"
+    else
+        v=$(seat_push_verdict raffi probe-after)
+        if [ "$v" != refused ]; then
+            bad "a refreshed seat RUNS the merged gate" "expected a refusal, got: $v"
+        else
+            ok "after seat-refresh the same push is refused by the merged gate — the hook runs"
+        fi
+    fi
+
+    # Idempotent: a seat already at master is left alone and says so.
+    refresh raffi
+    if [ "$RC" -ne 0 ] || [ "$(seat_head raffi)" != "$c2" ]; then
+        bad "seat-refresh is idempotent" "rc=$RC head=$(seat_head raffi) out=$OUT"
+    elif ! printf '%s' "$OUT" | grep -q current; then
+        bad "seat-refresh says a current seat is current" "out=$OUT"
+    else
+        ok "seat-refresh on an already-current seat reports current and moves nothing"
+    fi
+
+    # WORK IN FLIGHT, half one: uncommitted changes are never discarded.
+    # A refresh that clobbers a citizen's tree is worse than the hole it closes.
+    echo "half-finished work" >"$hk/town-seat-mihr/scratch.txt"
+    refresh mihr
+    if [ "$(seat_head mihr)" != "$c1" ]; then
+        bad "seat-refresh holds off a dirty seat" "it moved a dirty worktree to $(seat_head mihr)"
+    elif [ ! -f "$hk/town-seat-mihr/scratch.txt" ]; then
+        bad "seat-refresh holds off a dirty seat" "it destroyed uncommitted work"
+    elif [ "$RC" -ne 3 ]; then
+        bad "a held stale seat exits 3" "rc=$RC out=$OUT"
+    else
+        ok "seat-refresh refuses to move a dirty seat, keeps its uncommitted work, and exits 3"
+    fi
+
+    # WORK IN FLIGHT, half two: a seat on a branch. This is the vahagn shape —
+    # on a branch, cut from a STALE master, so it carries the hole through its
+    # whole bead. It must be reported, and it must not be moved off its branch.
+    (cd "$hk/town-seat-vahagn" \
+        && gitf checkout --quiet -b fix/in-flight \
+        && gitf -c user.email=s@example.invalid -c user.name=s commit --quiet --allow-empty -m "own work") \
+        >>"$hk/setup.log" 2>&1
+    vahagn_head=$(seat_head vahagn)
+    refresh vahagn
+    if [ "$(seat_head vahagn)" != "$vahagn_head" ]; then
+        bad "seat-refresh holds off a seat on a branch" "it moved to $(seat_head vahagn)"
+    elif [ "$(gitf -C "$hk/town-seat-vahagn" rev-parse --abbrev-ref HEAD)" != fix/in-flight ]; then
+        bad "seat-refresh holds off a seat on a branch" "it dropped the branch checkout"
+    elif [ "$RC" -ne 3 ]; then
+        bad "a seat on a stale branch is reported" "rc=$RC out=$OUT"
+    elif ! printf '%s' "$OUT" | grep -qi 'behind'; then
+        bad "a seat on a stale branch is reported" "the line does not say it is behind: $OUT"
+    else
+        ok "seat-refresh holds a seat that is on a branch, and says how far behind its hooks are"
+    fi
+
+    # …but it must not cry wolf, and this is the row that decides it. artur
+    # cuts a branch carrying every merged hook, and THEN master moves ahead on
+    # an ordinary non-hook commit. So artur is behind master and current on
+    # gates at the same time, and only a count restricted to the gate paths can
+    # tell those apart. Count every commit instead and the banner fires at every
+    # working seat on every wake, which is how a banner stops being read.
+    (cd "$hk/town-seat-artur" \
+        && gitf checkout --quiet --detach master \
+        && gitf checkout --quiet -b fix/fresh-cut \
+        && gitf -c user.email=s@example.invalid -c user.name=s commit --quiet --allow-empty -m "own work") \
+        >>"$hk/setup.log" 2>&1
+    {
+        echo "ordinary work, no gate in it" >"$hk/town/README.md"
+        gitf -C "$hk/town" add -A
+        gitf -C "$hk/town" commit --quiet -m "c3: a commit that touches no hook"
+        gitf -C "$hk/town" push --quiet origin master
+    } >>"$hk/setup.log" 2>&1 || bad "the fixture can move master past a seat without touching hooks" "see $hk/setup.log"
+    refresh artur
+    if [ "$RC" -ne 0 ]; then
+        bad "a seat in flight on a CURRENT master does not warn" "rc=$RC out=$OUT"
+    else
+        ok "seat-refresh does not warn about a seat whose in-flight branch already carries every merged hook"
+    fi
+
+    # WORK IN FLIGHT, half three — the shape neither half above covers. A seat
+    # can be DETACHED with a CLEAN tree and still be carrying work: a citizen
+    # who committed without first cutting a branch. Nothing is dirty and there
+    # is no branch, so "parked" reads TRUE, and the move drops that commit off
+    # every ref while reporting success — measured on gqlc-gx2y as rc=0 with
+    # "0 hook/settings change(s) picked up", the seat's own commit findable
+    # afterwards only through the worktree reflog.
+    ahead_row="seat-refresh holds a detached seat that has committed, instead of orphaning the commit"
+    (cd "$hk/town-seat-hayk" \
+        && gitf -c user.email=s@example.invalid -c user.name=s \
+            commit --quiet --allow-empty -m "committed without cutting a branch") \
+        >>"$hk/setup.log" 2>&1
+    hayk_head=$(seat_head hayk)
+    refresh hayk
+    if [ "$hayk_head" = "$c1" ]; then
+        bad "$ahead_row" "the fixture did not commit in hayk's worktree; see $hk/setup.log"
+    elif [ "$(seat_head hayk)" != "$hayk_head" ]; then
+        bad "$ahead_row" "it moved to $(seat_head hayk); $hayk_head is now reachable from no ref"
+    elif [ "$RC" -ne 3 ]; then
+        bad "$ahead_row" "rc=$RC out=$OUT"
+    elif ! printf '%s' "$OUT" | grep -q 'commit(s) of its own'; then
+        # The REASON, not merely the hold. Widening the dirty or branch test to
+        # catch everything holds this seat too, for a cause that is not true of
+        # it, and a row reading only rc=3 calls that a pass.
+        bad "$ahead_row" "held, but not for the commits it carries: $OUT"
+    else
+        ok "$ahead_row"
+    fi
+fi
+
+# A refresh judges a seat against origin/master, so with no origin/master there
+# is no question to answer. Found by mutation: strike the refusal and every row
+# above stays green while seat-refresh compares HEAD to an EMPTY ref — which
+# reports a seat current, the one answer it has no evidence for.
+lone_row="seat-refresh refuses to judge a seat with no origin/master, rather than calling it current"
+{
+    gitf init --quiet "$hk/lone"
+    gitf -C "$hk/lone" -c user.email=s@example.invalid -c user.name=s \
+        commit --quiet --allow-empty -m "lone"
+    gitf -C "$hk/lone" worktree add --detach --quiet "$hk/lone-seat-astghik" HEAD
+} >>"$hk/setup.log" 2>&1
+OUT="$( (cd "$hk/lone" && "$KM" seat-refresh astghik) 2>&1 )"
+RC=$?
+if [ "$RC" -eq 0 ]; then
+    bad "$lone_row" "it returned 0 with no origin/master to judge against: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'no origin/master'; then
+    # Deliberately the exact refusal, not just "origin/master" anywhere in the
+    # text: with the guard struck, seat-refresh walks on and dies later trying
+    # to check out the empty ref, and THAT message names origin/master too. A
+    # looser match reads that accident as the refusal working.
+    bad "$lone_row" "it failed for some other reason than the missing ref: $OUT"
+else
+    ok "$lone_row"
+fi
+
+# Pinned on the MESSAGE, not merely on a non-zero rc: `unknown command` exits
+# non-zero too, so an rc-only row stays green against a km that never grew the
+# subcommand at all.
+run seat-refresh no-such-seat
+if [ "$RC" -eq 0 ] || ! printf '%s' "$OUT" | grep -q 'unknown seat'; then
+    bad "seat-refresh refuses an unknown seat" "rc=$RC out=$OUT"
+else
+    ok "seat-refresh refuses a seat that is not in the roster"
+fi
+
+# THE WIRING ROW. The mechanism above is worth nothing if nobody calls it: a
+# refresh that exists and never runs deploys exactly as many hooks as no
+# refresh at all. km-seat must call it, and must call it BEFORE the session
+# starts — refreshing a seat that is already working is both too late and a
+# checkout under a live claude.
+kseat="$REPO/kingdom/bin/km-seat"
+refresh_line=$(grep -n 'seat-refresh' "$kseat" | head -1 | cut -d: -f1)
+claude_line=$(grep -n '^ *claude ' "$kseat" | head -1 | cut -d: -f1)
+if [ -z "$refresh_line" ]; then
+    bad "km-seat refreshes the worktree at wake" "km-seat never calls seat-refresh"
+elif [ -z "$claude_line" ]; then
+    bad "km-seat refreshes the worktree at wake" "cannot find the claude invocation to order against"
+elif [ "$refresh_line" -ge "$claude_line" ]; then
+    bad "km-seat refreshes the worktree at wake" \
+        "seat-refresh is called at line $refresh_line, at or after claude at line $claude_line"
+else
+    ok "km-seat calls seat-refresh before it launches the session"
+fi
+
+# …and the warning has to REACH the citizen. The row above pins only that
+# seat-refresh is called; drop the `3)` arm that captures its output and every
+# row so far stays green while a held seat is told nothing — the exact
+# fail-silent shape this bead exists to close. So run the real km-seat against
+# the fixture with a stand-in `claude` that records the message it was handed,
+# and read the banner out of that message. vahagn is the held-and-behind seat.
+banner_row="a held seat is told, in the first message of its day, that its gates are stale"
+if ! command -v timeout >/dev/null 2>&1; then
+    printf 'skip - %s: no timeout(1) to bound km-seat'"'"'s park loop\n' "$banner_row"
+elif [ "$fixture_ok" -ne 1 ]; then
+    printf 'skip - %s: the fixture did not build\n' "$banner_row"
+else
+    shim="$hk/bin"
+    mkdir -p "$shim"
+    cat >"$shim/claude" <<EOF
+#!/bin/sh
+# Stands in for the session: keeps the composed first message, runs nothing.
+printf '%s' "\${@: -1}" >"$hk/first-message.txt"
+EOF
+    # ${@: -1} is bash; make sure the shim is read by one.
+    sed -i '1s|.*|#!/usr/bin/env bash|' "$shim/claude"
+    chmod +x "$shim/claude"
+
+    mkdir -p "$hk/seatstate/seats/vahagn"
+    echo "resume your in-progress work: gqlc-fixture" >"$hk/seatstate/seats/vahagn/wake"
+    rm -f "$hk/first-message.txt"
+
+    (
+        unset "${!GIT_@}"
+        cd "$hk/town" || exit 1
+        PATH="$shim:$PATH" KM_STATE_DIR="$hk/seatstate" \
+            timeout 20 "$REPO/kingdom/bin/km-seat" vahagn
+    ) >"$hk/kmseat.log" 2>&1 || true
+
+    if [ ! -f "$hk/first-message.txt" ]; then
+        bad "$banner_row" "km-seat never composed a message: $(tail -2 "$hk/kmseat.log")"
+    elif ! grep -q 'BEFORE YOU PUSH' "$hk/first-message.txt"; then
+        bad "$banner_row" "no stale-gates banner in the message km-seat handed the session"
+    elif ! grep -q 'gqlc-xtre' "$hk/first-message.txt"; then
+        bad "$banner_row" "the banner does not cite the bead that explains it"
+    elif ! grep -q 'gqlc-fixture' "$hk/first-message.txt"; then
+        bad "$banner_row" "the banner displaced the wake reason instead of joining it"
+    else
+        ok "$banner_row"
+    fi
+
+    # The mirror image, and the one that decides whether the banner is worth
+    # reading: a seat with nothing stale must be handed a message with no
+    # warning in it. A banner on every wake is a banner nobody reads.
+    quiet_row="a seat whose gates are current gets no warning"
+    mkdir -p "$hk/seatstate/seats/artur"
+    echo "resume your in-progress work: gqlc-fixture" >"$hk/seatstate/seats/artur/wake"
+    rm -f "$hk/first-message.txt"
+    (
+        unset "${!GIT_@}"
+        cd "$hk/town" || exit 1
+        PATH="$shim:$PATH" KM_STATE_DIR="$hk/seatstate" \
+            timeout 20 "$REPO/kingdom/bin/km-seat" artur
+    ) >>"$hk/kmseat.log" 2>&1 || true
+
+    if [ ! -f "$hk/first-message.txt" ]; then
+        bad "$quiet_row" "km-seat never composed a message: $(tail -2 "$hk/kmseat.log")"
+    elif grep -q 'BEFORE YOU PUSH' "$hk/first-message.txt"; then
+        bad "$quiet_row" "a seat carrying every merged hook was warned anyway"
+    else
+        ok "$quiet_row"
+    fi
+
+    # THE DEGRADATION ARM. seat-refresh fails for causes that are not the
+    # seat's doing — the lone town has no origin/master to judge against, and
+    # a dead network fetch is the same shape — and a wake that died there
+    # would cost a citizen the whole day over a warning. km-seat's `*)` arm
+    # exists to keep the session and name the failure; it was unwitnessed.
+    # Found by mutation on gqlc-gx2y: replacing the arm with an exit survived
+    # 65/65, because the argv fixture used to walk through it by accident and
+    # the (correct) fixture fix took that away.
+    degrade_row="a refresh that FAILS still wakes the seat, and names the failure on stderr"
+    mkdir -p "$hk/seatstate/seats/astghik"
+    echo "resume your in-progress work: gqlc-fixture" >"$hk/seatstate/seats/astghik/wake"
+    rm -f "$hk/first-message.txt"
+    (
+        unset "${!GIT_@}"
+        cd "$hk/lone" || exit 1
+        PATH="$shim:$PATH" KM_STATE_DIR="$hk/seatstate" \
+            timeout 20 "$REPO/kingdom/bin/km-seat" astghik
+    ) >"$hk/kmseat-lone.log" 2>&1 || true
+
+    if [ ! -f "$hk/first-message.txt" ]; then
+        bad "$degrade_row" "the failed refresh stopped the wake: $(tail -3 "$hk/kmseat-lone.log")"
+    elif ! grep -q 'gqlc-fixture' "$hk/first-message.txt"; then
+        bad "$degrade_row" "the seat woke, but its wake reason did not survive the failure"
+    elif ! grep -q 'could not refresh' "$hk/kmseat-lone.log"; then
+        bad "$degrade_row" "the failure was swallowed — nothing on stderr reports it"
+    elif ! grep -q 'no origin/master' "$hk/kmseat-lone.log"; then
+        # The cause, not just the fact. An arm that printed a fixed sentence
+        # and discarded seat-refresh's own words passes a fact-only row while
+        # telling the reader nothing they can act on.
+        bad "$degrade_row" "stderr reports a failure but not seat-refresh's reason for it"
+    else
+        ok "$degrade_row"
+    fi
 fi
 
 # --- deploy: the town must run the code that merged --------------------------
