@@ -310,8 +310,32 @@ BD_SHORTHANDS_WITH_ARG = {"r": "--reason", "C": "--directory"}
 # commit is by construction present in the object store of the checkout that
 # just made it — but it IS a gap for a close citing a sha from somewhere else
 # entirely: unanchored and unresolvable, that is allowed through.
-CITED_SHA_RE = re.compile(r"(?:\bat\s+|@\s*|\bcommits?\s+)([0-9a-f]{7,40})(?![0-9A-Za-z])")
-SHA_RE = re.compile(r"(?<![0-9A-Za-z])([0-9a-f]{7,40})(?![0-9A-Za-z])")
+#
+# Both halves are case-insensitive, and each half was measured to matter alone.
+#
+# The hex class: git resolves uppercase hex, so `-r "Closed at 453E5D20."` named
+# a real unpushed commit while `[0-9a-f]` saw no sha at all and the close was
+# allowed. Neither tier reached it — the anchored one because the class did not
+# match, the loose one for the same reason — so uppercase was a total bypass of
+# a guard whose whole subject is the sha.
+#
+# The anchor words: `(?i:)` and not a lowercase list, because a reason opening a
+# sentence with `Commit 4491fb8` is ordinary English and the anchor missed it on
+# the capital alone. That one is not merely cosmetic — it is the documented gap
+# two paragraphs up. Anchored citations are refused even when the object is
+# absent, so a sentence-initial `Commit <foreign sha>` moves from allowed to
+# refused. Measured over .beads/issues.jsonl at eb28226b: of 498 text fields,
+# 4 gain an anchored citation and exactly 1 changes verdict — gqlc-v23, whose
+# `Commits 4491fb8(model)` names no object in this checkout. That is the gap
+# closing on a real instance, not a false positive.
+#
+# No corpus reason gains anything from the hex half; it is preventive. Widening
+# it does put all-hex words in ALL CAPS (`ACCEDED`, `EFFACED`) within reach of
+# the loose tier, which is harmless there — the loose tier promotes a token to a
+# citation only once git resolves it — but within the anchored tier `at EFFACED`
+# would now be refused on the word alone. No corpus reason has that shape.
+CITED_SHA_RE = re.compile(r"(?i:\bat\s+|@\s*|\bcommits?\s+)([0-9a-fA-F]{7,40})(?![0-9A-Za-z])")
+SHA_RE = re.compile(r"(?<![0-9A-Za-z])([0-9a-fA-F]{7,40})(?![0-9A-Za-z])")
 # Anything the shell would expand. `$5` is not in it on purpose: a bare digit is
 # a positional parameter no reason ever means, and prices appear in prose.
 UNEXPANDED_RE = re.compile(r"\$[({A-Za-z_]|`")
