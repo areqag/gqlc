@@ -322,11 +322,229 @@ expect_green "GitHub's other closing keywords count" \
 
 fixes #617')" "some/branch"
 
-expect_green "a second Closes line does not hide the right one" \
+# --- every closing keyword is held, not only the resolving bead's -----------
+# bd gqlc-7i3g. The demand was a membership test — "is the bead's own number
+# among the body's closing keywords" — so once that number was present the
+# rest of the body went unread. A second keyword therefore rode through: at
+# merge GitHub acts on it, and nothing here ever named it. Measured before
+# the fix, two bodies differing only in a trailing 'Closes #999999' produced
+# byte-identical output at rc=0.
+#
+# A row here used to read "a second Closes line does not hide the right one"
+# and expected green. The property in that name is worth keeping — #617 must
+# still be found when another number follows it — and it survives as the row
+# below, because this refusal is reachable ONLY after the bead's own number
+# has been matched. A red naming #900 witnesses both halves at once: the
+# right number was found, and the extra one was not let through.
+
+expect_red "a second closing keyword is refused, naming the number nothing holds" \
     "$EXPORT" "$(body 'Bead: gqlc-mirrored
 
 Closes #617
-Closes #900')" "some/branch"
+Closes #900')" "some/branch" \
+    "also closes #900"
+
+# The refusal has to be clearable without guessing, like every other one here.
+expect_red "that refusal says what to do about the extra number" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900')" "some/branch" \
+    "close it by hand"
+
+# The question asked is "would GitHub act on this at merge", which is
+# GH_CLOSES' question and not CLOSES'. So a spelling the demand does not
+# recognise is still an extra: 'Fixed GH-900' leaves CLOSES seeing only #617,
+# and the body still closes #900.
+expect_red "an extra in a spelling the demand does not match is still refused" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Fixed GH-900')" "some/branch" \
+    "also closes #900"
+
+# Same number twice is one assertion, not an extra. Without this the obvious
+# implementation — comparing the match list against a single expected value —
+# refuses a body that merely repeats itself, which asserts nothing new.
+expect_green "the bead's own number repeated is not an extra" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+
+and again, for the reader: Closes #617')" "some/branch"
+
+# An extra written twice is still one issue. Without the dedup the headline
+# reads "also closes #900, #900", which invites the author to hunt for a
+# second number that is not there. This row is what makes the dedup a guard
+# rather than a decoration.
+expect_red "the refusal names each extra once, however often the body says it" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900
+Closes #900')" "some/branch" \
+    "also closes #900, which"
+
+# The extras are read from prose_only()'s body, the same carrier the no-bead
+# check reads, because a PR *about* this gate quotes closing lines as
+# examples — bd gqlc-7i3g's own description does. A quoted extra is not one
+# GitHub will act on, so refusing it would be a false red on exactly the PRs
+# that touch this file.
+expect_green "an extra quoted inside a fence is not one GitHub acts on" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+
+~~~
+Closes #900
+~~~')" "some/branch"
+
+# The mirror of that row, so the carrier choice cannot be read as a general
+# loosening: blanking a fence hides an extra that is only quoted, and hides
+# nothing about one written in the prose beside it.
+expect_red "a fenced extra beside a real one still refuses on the real one" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #901
+
+~~~
+Closes #900
+~~~')" "some/branch" \
+    "also closes #901"
+
+# The opt-out path had the same hole, and states it more loudly: it prints
+# "no Closes demanded" over a body carrying a keyword GitHub will act on.
+# check_opt_out() tested only whether the bead's OWN number was closed — the
+# self-contradiction — and never looked at any other number.
+expect_red "an opt-out that closes some other issue is refused" \
+    "$EXPORT" "$(body 'Refs: gqlc-mirrored #617
+
+Closes #900')" "some/branch" \
+    "#900"
+
+expect_red "that refusal names the opt-out the extra contradicts" \
+    "$EXPORT" "$(body 'Refs: gqlc-mirrored #617
+
+Closes #900')" "some/branch" \
+    "leaves gqlc-mirrored open"
+
+# --- an extra the author avows ----------------------------------------------
+# A bare refusal above would be wrong on PRs that exist. Asked of GitHub
+# itself on 2026-08-22 via closingIssuesReferences, over all 25 open PRs: 3
+# carry two closing references and 2 of the 3 are deliberate — #1199 closes
+# #1123 and #1157, #1237 closes #1125 and #1218 — with no remedy but
+# splitting the PR. The remedy bd gqlc-7i3g proposed instead, resolving each
+# extra to a bead in the export, is not available: of the 6 numbers those
+# PRs close the export mirrors 0. So the avowal is the only thing that can
+# separate a deliberate extra from an accidental one.
+expect_green "an avowed extra passes" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900
+
+Also-closes: #900')" "some/branch"
+
+expect_green "an avowal is honoured on the opt-out path too" \
+    "$EXPORT" "$(body 'Refs: gqlc-mirrored #617
+
+Closes #900
+
+Also-closes: #900')" "some/branch"
+
+# The avowal buys nothing on its own. It subtracts from the extras, and the
+# demand for the bead's own number is answered before extras are read at
+# all, so a body whose only closing line is avowed still fails that demand.
+# Without this row 'Also-closes:' would be a way past the gate rather than a
+# way of speaking to it.
+expect_red "an avowal alone does not satisfy the demand" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Also-closes: #900')" "some/branch" \
+    "missing 'Closes #617'"
+
+# One avowal does not cover the body. The unavowed number is still refused,
+# and named — so the author reads which of the two they have not spoken for.
+expect_red "avowing one extra leaves the other refused, by number" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900
+Closes #901
+
+Also-closes: #900')" "some/branch" \
+    "also closes #901"
+
+# The avowal is read over prose_only()'s body, on REFS_IN_BODY's terms: a
+# marker GitHub renders as code is not one the author is making. Quoting
+# this file's own documentation must not silence the gate for the PR that
+# edits it.
+expect_red "a fenced avowal does not avow" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900
+
+~~~
+Also-closes: #900
+~~~')" "some/branch" \
+    "also closes #900"
+
+# Leading whitespace is rejected for REFS_IN_BODY's reason: four spaces is
+# markdown's indented-code spelling, and this file's own subject matter is
+# the marker.
+expect_red "an indented avowal does not avow" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900
+
+    Also-closes: #900')" "some/branch" \
+    "also closes #900"
+
+# An avowal is read over visible_prose(), not claimable_prose(), and the two
+# rows above do not separate those: a fence and an indent are blanked by both.
+# This shape does separate them. An unterminated attribute value swallows the
+# lines below it, so GitHub renders this body as '<p>z</p>' and the avowal
+# appears nowhere a reader can find it (the measurement is the marker row
+# below, headed "a marker inside an open HTML attribute is blanked"; this is
+# the same body with the same carrier).
+#
+# The direction is what picks the wrapper. An avowal subtracts a refusal, so
+# honouring an invisible one waves an unheld closing keyword through to merge
+# — the harm this whole check exists for — while blanking one the author can
+# see costs a refusal they clear by moving the line. That is visible_prose()'s
+# trade exactly, and the opposite of the extras scan above it, which reads
+# claimable_prose() because there a missed keyword is the expensive way to be
+# wrong. The two scans in extra_closes() therefore read two different bodies
+# on purpose.
+expect_red "an avowal hidden in an open HTML attribute does not avow" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900
+
+<a href="
+Also-closes: #900
+">z</a>')" "some/branch" \
+    "also closes #900"
+
+# The refusals point at the avowal, or nobody finds it. Both paths.
+expect_red "the demand-path refusal names the avowal" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900')" "some/branch" \
+    "'Also-closes: #<issue>'"
+
+expect_red "the opt-out-path refusal names the avowal" \
+    "$EXPORT" "$(body 'Refs: gqlc-mirrored #617
+
+Closes #900')" "some/branch" \
+    "'Also-closes: #<issue>'"
+
+# --- shapes the body is allowed to take, continued ---------------------------
 
 # One unparseable line ahead of the bead used to abort the whole scan, and an
 # aborted scan is a bead "not in the export", which passes. A malformed
@@ -498,13 +716,38 @@ expect_red "a keyword only check 4 knows does not satisfy the demand" \
 Fixed #617')" "some/branch" \
     "missing 'Closes #617'"
 
-# The number is held, not just the keyword: an opt-out for one issue beside a
-# Closes for a different one is two true statements.
-expect_green_saying "an opt-out beside a Closes for another issue passes" \
+# DELIBERATELY FLIPPED, bd gqlc-7i3g. This row expected green, on the ground
+# that "an opt-out for one issue beside a Closes for a different one is two
+# true statements". Both statements may well be true — but the gate cannot
+# know the second one is, and its whole reason for existing is that it must
+# not have to take a closing keyword's word for it: "the claim is made,
+# GitHub acts on it at merge, and there is nothing left here to hold the
+# number against". That sentence is as true of #999 here as it is of a second
+# Closes line on the demand path, so the two cannot be judged differently
+# without the gate contradicting itself.
+#
+# The property the row was actually protecting is that the self-contradiction
+# check holds the NUMBER and not merely the presence of a keyword. That
+# survives, and is asserted rather than assumed: #617 and #999 are both
+# refused here, and the row below pins that they are refused for DIFFERENT
+# stated reasons. A verdict-only pair would not tell the number-specific
+# check from a blanket "any keyword beside a Refs line" — which is the
+# widening this must not become.
+expect_red "an opt-out beside a Closes for another issue is refused too" \
     "$EXPORT" "$(body 'Refs: gqlc-mirrored #617
 
 Closes #999')" "some/branch" \
-    "issue #617 stays open at merge"
+    "leaves gqlc-mirrored open but closes #999"
+
+# The number-specificity, asserted on the reason and not the colour. The
+# same body shape with the bead's OWN number takes the self-contradiction
+# exit above and says so in different words; if both collapsed onto one
+# message, a blanket keyword check would pass this file unnoticed.
+expect_red "the bead's own number is refused as a contradiction, not as an extra" \
+    "$EXPORT" "$(body 'Refs: gqlc-mirrored #617
+
+Closes #617')" "some/branch" \
+    "also carries a closing keyword for #617"
 
 expect_red "naming one bead on both a Bead and a Refs line is refused" \
     "$EXPORT" "$(body 'Bead: gqlc-mirrored
