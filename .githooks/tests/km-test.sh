@@ -46,7 +46,7 @@ gitf() {
 
 # Read after the unset, so it is the real repo's HEAD and not a hijacked one.
 # Asserted again at the end of the file; see the note there.
-SUITE_START_HEAD="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
+SUITE_START_HEAD="$(gitf -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
 
 # A hermetic git fixture, because km resolves the repo from its CWD and the hold
 # rows ask real questions of `origin/master`. Run against the checkout the suite
@@ -58,23 +58,23 @@ SUITE_START_HEAD="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
 # touches the network.
 FIXTURE_ORIGIN="$TMP/origin.git"
 FIXTURE="$TMP/work"
-git init -q --bare -b master "$FIXTURE_ORIGIN"
-git init -q -b master "$FIXTURE"
-git -C "$FIXTURE" config user.email fixture@example.invalid
-git -C "$FIXTURE" config user.name fixture
-git -C "$FIXTURE" config commit.gpgsign false
+gitf init -q --bare -b master "$FIXTURE_ORIGIN"
+gitf init -q -b master "$FIXTURE"
+gitf -C "$FIXTURE" config user.email fixture@example.invalid
+gitf -C "$FIXTURE" config user.name fixture
+gitf -C "$FIXTURE" config commit.gpgsign false
 # The operator's global config may point core.hooksPath at this very repo; the
 # fixture's own commits must not run the hooks under test.
-git -C "$FIXTURE" config core.hooksPath /dev/null
+gitf -C "$FIXTURE" config core.hooksPath /dev/null
 mkdir -p "$FIXTURE/kingdom/bin"
 printf 'fixture\n' >"$FIXTURE/justfile"
 printf 'fixture\n' >"$FIXTURE/kingdom/bin/km"
-git -C "$FIXTURE" add -A
-git -C "$FIXTURE" commit -qm 'fixture: paths the hold rows ask about'
-git -C "$FIXTURE" remote add origin "$FIXTURE_ORIGIN"
-git -C "$FIXTURE" push -q origin master
-git -C "$FIXTURE" fetch -q origin master
-git -C "$FIXTURE" update-ref refs/remotes/origin/master FETCH_HEAD
+gitf -C "$FIXTURE" add -A
+gitf -C "$FIXTURE" commit -qm 'fixture: paths the hold rows ask about'
+gitf -C "$FIXTURE" remote add origin "$FIXTURE_ORIGIN"
+gitf -C "$FIXTURE" push -q origin master
+gitf -C "$FIXTURE" fetch -q origin master
+gitf -C "$FIXTURE" update-ref refs/remotes/origin/master FETCH_HEAD
 
 
 pass=0
@@ -1236,18 +1236,18 @@ fi
 # asks for that path with the fetch ENABLED. Its falsifier is the staleness
 # itself: drop the fetch and the answer is HOLD.
 FIXTURE_LATE="$TMP/late"
-git clone -q "$FIXTURE_ORIGIN" "$FIXTURE_LATE"
-git -C "$FIXTURE_LATE" config user.email fixture@example.invalid
-git -C "$FIXTURE_LATE" config user.name fixture
-git -C "$FIXTURE_LATE" config commit.gpgsign false
-git -C "$FIXTURE_LATE" config core.hooksPath /dev/null
+gitf clone -q "$FIXTURE_ORIGIN" "$FIXTURE_LATE"
+gitf -C "$FIXTURE_LATE" config user.email fixture@example.invalid
+gitf -C "$FIXTURE_LATE" config user.name fixture
+gitf -C "$FIXTURE_LATE" config commit.gpgsign false
+gitf -C "$FIXTURE_LATE" config core.hooksPath /dev/null
 printf 'fixture\n' >"$FIXTURE_LATE/late-arrival"
-git -C "$FIXTURE_LATE" add late-arrival
-git -C "$FIXTURE_LATE" commit -qm 'lands after the working clone last looked'
-git -C "$FIXTURE_LATE" push -q origin master
+gitf -C "$FIXTURE_LATE" add late-arrival
+gitf -C "$FIXTURE_LATE" commit -qm 'lands after the working clone last looked'
+gitf -C "$FIXTURE_LATE" push -q origin master
 
 gh_prs '[]'
-if [ "$(git -C "$FIXTURE" cat-file -e origin/master:late-arrival 2>&1; echo $?)" = "0" ]; then
+if [ "$(gitf -C "$FIXTURE" cat-file -e origin/master:late-arrival 2>&1; echo $?)" = "0" ]; then
     bad "the fetch is what makes a newly-merged path visible" \
         "the tracking ref is not stale, so this row cannot witness the fetch"
 else
@@ -2063,7 +2063,7 @@ export KM_DEPLOY_ROOT="$TMP/deployed"
 # times, and the third one pushed. The unset at the top of this file is the fix.
 # This is the alarm, kept because that failure is invisible in a green run and
 # its blast radius is shipped history.
-suite_end_head="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
+suite_end_head="$(gitf -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
 if [ "$SUITE_START_HEAD" = none ]; then
     # Both sides would read "none" and the comparison would pass having compared
     # nothing. Say so instead of banking a green row.
