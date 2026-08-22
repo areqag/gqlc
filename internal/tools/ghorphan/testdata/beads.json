@@ -1,0 +1,110 @@
+[
+  {
+    "id": "gqlc-0pb8",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/898",
+    "title": "check-pr-closes: a PR that names no bead anywhere is never checked"
+  },
+  {
+    "id": "gqlc-2xkf",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/894",
+    "title": "resolver: the corpus sweep resolves every cell under regR7, so the registry axis of CALL diagnostics is uncovered"
+  },
+  {
+    "id": "gqlc-4np",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/503",
+    "title": "schema/gql: a repeated property name silently keeps the last declaration and discards the first"
+  },
+  {
+    "id": "gqlc-65sl",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/819",
+    "title": "vuln: every selftest CALL in the vuln recipe is deletable with the gate green"
+  },
+  {
+    "id": "gqlc-dc6k",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/878",
+    "title": "docs: five prose restatements of ResolvedType as a sealed sum survive gqlc-856f"
+  },
+  {
+    "id": "gqlc-drvx",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/930",
+    "title": "bdguard: the git boundary (run, showAtRef, gitRefContaining) has no automated test"
+  },
+  {
+    "id": "gqlc-f1yf",
+    "status": "closed",
+    "external_ref": "https://github.com/areqag/gqlc/issues/818",
+    "title": "ci: govulncheck is red on master — the tree calls 3 stdlib advisories fixed in go1.26.6"
+  },
+  {
+    "id": "gqlc-fer",
+    "status": "closed",
+    "external_ref": "https://github.com/areqag/gqlc/issues/453",
+    "title": "ci: decide whether required_status_checks.strict should be on for master"
+  },
+  {
+    "id": "gqlc-g3g6",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/931",
+    "title": "bdguard: the reachability veto is inert in CI because the checkout is depth-1"
+  },
+  {
+    "id": "gqlc-gyp5",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/896",
+    "title": "resolver: the corpus sweep's accept column digests the marshalled model, so a field no MarshalJSON emits is outside it"
+  },
+  {
+    "id": "gqlc-komy",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/900",
+    "title": "check-pr-closes: a bolded **Bead:** label is not read as a declaration"
+  },
+  {
+    "id": "gqlc-oh30",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/899",
+    "title": "check-pr-closes: a Bead: line naming a mirror-less bead still overrides a branch that names a mirrored one"
+  },
+  {
+    "id": "gqlc-qv80",
+    "status": "closed",
+    "external_ref": "https://github.com/areqag/gqlc/issues/880",
+    "title": "codegen/age: unservedColumn's fall-through comment restates the sealed-sum claim gqlc-856f corrected"
+  },
+  {
+    "id": "gqlc-rxq9",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/821",
+    "title": "resolver: two resolvedCovers writes are unpinned today and become load-bearing the moment the lane is carried"
+  },
+  {
+    "id": "gqlc-t802",
+    "status": "open",
+    "external_ref": "https://github.com/areqag/gqlc/issues/876",
+    "title": "resolver: describeColumnType panics on a nil list element, the in-package twin of edze's prepare.go fault"
+  },
+  {
+    "id": "gqlc-u91z",
+    "status": "closed",
+    "external_ref": "https://github.com/areqag/gqlc/issues/816",
+    "title": "vuln: on a non-release Go toolchain the scan is silently blind to every stdlib advisory"
+  },
+  {
+    "id": "gqlc-uc8f",
+    "status": "closed",
+    "external_ref": "https://github.com/areqag/gqlc/issues/890",
+    "title": "codegen/neo4j: the decoder scope sweep is blind to a whole entity arm going missing"
+  },
+  {
+    "id": "gqlc-w1gc",
+    "status": "closed",
+    "external_ref": "https://github.com/areqag/gqlc/issues/892",
+    "title": "ciguard: pin that every .githooks/tests suite is wired into test-hooks and reached from CI"
+  }
+]
