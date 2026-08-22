@@ -959,8 +959,10 @@ fmt-check: ensure-golangci
     {{golangci}} fmt --diff
 
 # the shell-tested half of this repo's own tooling: the git hooks, the recipe
-# that lints them, and the CI script they share a language with (~1s; throwaway
-# git repos and temp trees, nothing touches the worktree)
+# that lints them, and the CI script they share a language with (~55s measured
+# 2026-08-22, of which the last line is ~17s; throwaway git repos and temp
+# trees, nothing touches the worktree). The comment said ~1s until that was
+# timed — the suites have grown by an order of magnitude since.
 #
 # Suites live in .githooks/tests/ and are named <subject>-test.sh. Both halves
 # are enforced by internal/tools/ciguard, which reads that directory rather than
@@ -987,6 +989,7 @@ test-hooks:
     bash .githooks/tests/worktree-upstream-test.sh
     bash .githooks/tests/hooks-drift-tripwire-test.sh
     bash .githooks/tests/shared-config-drift-test.sh
+    bash .githooks/tests/git-env-sandbox-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
