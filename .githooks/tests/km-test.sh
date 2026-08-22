@@ -877,6 +877,18 @@ printf '%s\n' "$@" >"$KM_TEST_ARGV"
 STUB
 chmod +x "$stubdir/claude"
 
+# km resolves the town from `git rev-parse` against the CALLER's cwd (km:78-82)
+# and km-seat then demands a seat worktree beside it. Run from the real repo,
+# these rows read the author's own `../<repo>-seat-hayk` — which exists on the
+# machine they were written on and on no CI runner, where all four failed with
+# "no worktree at /home/runner/work/gqlc/gqlc-seat-hayk". So the rows get a
+# throwaway town of their own and depend on nothing outside $TMP.
+TOWN="$TMP/town"
+mkdir -p "$TOWN"
+TOWN=$(cd "$TOWN" && pwd -P) # git reports the physical path; mktemp may hand back a symlink
+git init -q "$TOWN"
+mkdir -p "$TOWN-seat-hayk"
+
 ARGV=""
 STDERR=""
 compose_argv() { # compose_argv <config> -> ARGV (one arg per line), STDERR
@@ -886,10 +898,7 @@ compose_argv() { # compose_argv <config> -> ARGV (one arg per line), STDERR
     sdir="$TMP/seatstate.$RANDOM"
     mkdir -p "$sdir/seats/hayk"
     echo "a test wake" >"$sdir/seats/hayk/wake"
-    # km resolves the town from `git rev-parse` against the CALLER's cwd
-    # (km:78-82), so without this the four rows below pass or fail according to
-    # where the suite was invoked from, and report it as an argv defect.
-    (cd "$REPO" && PATH="$stubdir:$PATH" KM_CONFIG="$cfgfile" KM_STATE_DIR="$sdir" \
+    (cd "$TOWN" && PATH="$stubdir:$PATH" KM_CONFIG="$cfgfile" KM_STATE_DIR="$sdir" \
         KM_TEST_ARGV="$ARGV" "$KM_SEAT" hayk) >"$STDERR" 2>&1 &
     pid=$!
     # km-seat parks again after the stub exits, so it never runs away; we stop
