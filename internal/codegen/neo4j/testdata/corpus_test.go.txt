@@ -247,10 +247,15 @@ func TestListyRefusesAMisTypedElement(t *testing.T) {
 	if err == nil {
 		t.Fatalf("decodeListy(ranks: [int, string]) = no error, want a refusal")
 	}
+	// Subtests rather than a plain loop: corpusSubtests, in the parent
+	// module that assembles this one, pins how many of these report a pass,
+	// so a case added or dropped here has to be counted there too.
 	for _, want := range []string{`"ranks"`, "element 1", "expected int64", "got string"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("decodeListy(ranks: [int, string]) = %q, want it to mention %s", err, want)
-		}
+		t.Run(want, func(t *testing.T) {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("decodeListy(ranks: [int, string]) = %q, want it to mention %s", err, want)
+			}
+		})
 	}
 }
 

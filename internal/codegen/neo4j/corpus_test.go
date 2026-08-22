@@ -127,6 +127,31 @@ var corpusTests = []string{
 	"TestEdgeUnionColumnDispatchesOnTheWireLabel",
 }
 
+// corpusSubtests names, per top-level test, how many subtest passes the
+// corpus module's run has to report under it.
+//
+// corpusTests is a census of top-level names, and a top-level test passes
+// and carries its name whether or not anything ran inside it. Measured on
+// this fixture: with TestListyRefusesAMisTypedElement's table emptied to
+// `range []string{}` and nothing else touched, the child run reported 21
+// top-level passes and 0 subtest passes, and the set comparison below
+// stayed green (bd gqlc-mlf4). Held against these counts it goes red.
+//
+// A count is a size, not a membership. Renaming a case, or swapping one
+// case for another, leaves the count where it was; what a count refuses is
+// a tree that shrank or grew.
+//
+// A top-level test with no subtests is absent from this map rather than
+// written down as zero, so the keys carry the distinction the guard needs:
+// a tree that goes silent drops a key this file still holds, and a tree
+// that appears adds one this file does not. Either way the two maps are
+// unequal. Taking a tree out without a red run costs the same edit taking
+// a name out of corpusTests costs — writing it down here, in a file the
+// child module is not given.
+var corpusSubtests = map[string]int{
+	"TestListyRefusesAMisTypedElement": 4,
+}
+
 // TestEmittedDecodersRunOnDriverValues runs the emitted entity decoders
 // and query methods against the Go values a Bolt driver can actually put
 // in a Props map and a Record. None of it can be established by reading
@@ -192,7 +217,7 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))
 	}
 
-	passed, log, err := runCorpus(t, dir)
+	passed, subtests, log, err := runCorpus(t, dir)
 	require.NoError(t, err, "the emitted decoders do not satisfy the driver-value corpus:\n%s", log)
 	require.NotEmpty(t, corpusTests,
 		"corpusTests names no test, so the set comparison below is satisfied by a child run that ran none")
@@ -203,6 +228,12 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 	require.ElementsMatch(t, corpusTests, passed,
 		"the corpus module's passing tests are not what corpusTests names, entry for entry and "+
 			"counting repeats:\n%s", log)
+	// Compared whole rather than per key, because the two disagreements
+	// this has to catch are a key whose count fell and a key only one side
+	// holds, and map equality is both. Testify prints the differing keys.
+	require.Equal(t, corpusSubtests, subtests,
+		"the corpus module's subtest passes are not what corpusSubtests declares, "+
+			"top-level test by top-level test:\n%s", log)
 }
 
 // driverAgnostic collapses an emission's two driver-major-specific
@@ -251,13 +282,16 @@ func corpusNamedQueries(t *testing.T, sch schema.Schema) []codegen.NamedQuery {
 }
 
 // runCorpus runs the assembled corpus module's own tests, reporting the
-// top-level tests that passed alongside the run's output as a reader
-// sees it.
+// top-level tests that passed, how many subtest passes each top-level test
+// carried, and the run's output as a reader sees it.
 //
-// The pass set is read from `go test -json`, whose Test field the testing
+// Both sets are read from `go test -json`, whose Test field the testing
 // framework fills in, rather than from "--- PASS" lines, which a subtest
 // name or anything a test writes to stdout can also spell.
-func runCorpus(t *testing.T, dir string) (passed []string, log string, err error) {
+//
+// A subtest is counted under its top-level test rather than under the
+// parent that ran it, so a tree nested two deep reports as one entry.
+func runCorpus(t *testing.T, dir string) (passed []string, subtests map[string]int, log string, err error) {
 	t.Helper()
 
 	cmd := exec.CommandContext(t.Context(), "go", "test", "-json", "-count=1", ".")
@@ -266,6 +300,7 @@ func runCorpus(t *testing.T, dir string) (passed []string, log string, err error
 	out, err := cmd.CombinedOutput()
 
 	var text strings.Builder
+	subtests = make(map[string]int)
 	for line := range strings.Lines(string(out)) {
 		var event struct {
 			Action string `json:"Action"`
@@ -277,11 +312,16 @@ func runCorpus(t *testing.T, dir string) (passed []string, log string, err error
 			continue
 		}
 		text.WriteString(event.Output)
-		if event.Action == "pass" && event.Test != "" && !strings.Contains(event.Test, "/") {
+		if event.Action != "pass" || event.Test == "" {
+			continue
+		}
+		if parent, _, isSubtest := strings.Cut(event.Test, "/"); isSubtest {
+			subtests[parent]++
+		} else {
 			passed = append(passed, event.Test)
 		}
 	}
-	return passed, text.String(), err
+	return passed, subtests, text.String(), err
 }
 
 // corpusFile reads one of the hand-written sources the corpus module is
