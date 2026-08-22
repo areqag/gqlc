@@ -48,7 +48,7 @@ sweep, or a nudge). Then:
 7. Request review by filing a `class:judge` bead naming the PR number and what
    you most doubt about the change — a Դատաւոր is the reviewer, and a bead
    is what wakes one. **File it UNASSIGNED**: the dispatcher's fresh pass
-   selects `.assignee == null` (km:461) and its resume pass reads only
+   selects `.assignee == null` (`cmd_dispatch` in km) and its resume pass reads only
    `in_progress`, so a pre-assigned review bead is ready, labelled, and
    invisible to both — it wakes nobody, silently, at any cap level. Give it
    the priority of the work it reviews. Mail wakes nobody but Սեդրակ either,
