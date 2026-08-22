@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unit tests for .githooks/claude-pre-bash (master-guard PreToolUse hook).
+# Unit tests for .githooks/claude-pre-bash (master guard + unpushed-close guard).
 #
 # Builds throwaway git repos under mktemp and feeds the hook the same JSON
 # shape Claude Code sends on stdin, asserting allow/deny per case. The hook
@@ -7,13 +7,20 @@
 # (leading `cd` chains, `git -C <path>`), not the hook's own pwd, and must
 # not match `git commit` inside quoted literals or in the plain prose of a
 # heredoc body — while
-# still matching the `$(...)` and `` `...` `` forms SUBST_RE and BACKTICK_RE
-# recognise inside an UNQUOTED heredoc body (bd gqlc-wa8c). Those two regexes
-# are textual, so the set they match is not the set the shell would run, and it
+# still matching the `$(...)` and `` `...` `` forms substitution_bodies()
+# extracts from an UNQUOTED heredoc body (bd gqlc-wa8c). That extraction is
+# textual, so the set it matches is not the set the shell would run, and it
 # misses on both sides: an escaped `\$(...)` is matched and denied although the
-# shell leaves it inert, while a spelling neither regex reaches runs unseen.
+# shell leaves it inert, while a spelling it does not reach runs unseen.
 # Both directions are disclosed in the hook's header and pinned by the contrast
 # rows below.
+#
+# The `bd close` half (bd gqlc-90vt) asserts on the VERDICT NAME as well as on
+# allow/deny, because THREE of its outcomes are allows: allow-no-reason (a close
+# carrying no reason flag), allow-no-sha (a reason citing nothing this repo
+# resolves to a commit) and allow-reachable (a cited sha a remote ref contains).
+# Pinned by allow/deny alone the first two would be indistinguishable from the
+# guard having silently stopped finding shas at all, and the third from either.
 #
 # Run via: just test-hooks
 set -u
@@ -22,6 +29,15 @@ set -u
 # and redirect every git call — repo setup would re-init the parent repo and
 # the hook under test would resolve the wrong branch. Isolate completely.
 unset "${!GIT_@}"
+
+# The bd-close rows import the hook as a module to read its verdict names.
+# SourceFileLoader.exec_module caches bytecode NEXT TO THE SOURCE, i.e. inside
+# .githooks/ — a test writing into the tree it is testing. `just lint-hooks`
+# then fails on the .pyc, because a file with no recognised shebang is fatal
+# there by design (bd gqlc-jhi2), so this test would redden a different gate.
+# Belt and braces: the env var covers the interpreters this script spawns, and
+# each loader sets the flag itself for a caller that does not inherit it.
+export PYTHONDONTWRITEBYTECODE=1
 
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/claude-pre-bash"
 TMP="$(mktemp -d)"
@@ -41,6 +57,10 @@ git -C "$DETACHED_REPO" checkout -q --detach   # at master's tip, but not ON mas
 
 pass=0
 fail=0
+# Every row's name, in run order, for the membership pin at the end of the file.
+ROWS=""
+note_row() { ROWS="$ROWS$1
+"; }
 
 run_hook() { # $1=cwd-for-hook $2=command-string -> hook stdout
   (
@@ -50,6 +70,7 @@ run_hook() { # $1=cwd-for-hook $2=command-string -> hook stdout
 }
 
 record() { # $1=name $2=expected $3=actual
+  note_row "$1"
   if [ "$3" = "$2" ]; then
     pass=$((pass + 1)); printf 'ok   - %s\n' "$1"
   else
@@ -192,7 +213,7 @@ run_guard_case "unquoted heredoc bare prose"     silent "$MASTER_REPO" "$(printf
 # The escaped rows, which is where the deny/really-runs reading above stops
 # holding. A backslash in front of the $ or the backtick suppresses the
 # expansion, so the first two rows are PROSE and the hook denies them anyway:
-# SUBST_RE and BACKTICK_RE key on the literal `$(` and `` ` `` and never look
+# the scan keys on the literal `$(` and `` ` `` and never looks
 # at what precedes them. Measured on bash 5.3.15 with a positive-content
 # witness rather than an absent marker — the heredoc's target file still held
 # the literal `$(touch MARK)` text and no marker appeared.
@@ -204,10 +225,10 @@ run_guard_case "unquoted heredoc bare prose"     silent "$MASTER_REPO" "$(printf
 # row is what separates them: it goes red when the skip keys on a backslash
 # being present, and stays green when it keys on the run being odd, its own run
 # being even. Which other rows move depends on whether the skip is wired into
-# the `$(` extractor alone or into the backtick one too, since SUBST_RE cannot
-# reach the backtick row — so what this block pins is that separation, not a
-# redden-set. Measured by building both extractions out of tree and running
-# this suite under each.
+# the `$(` arm of the scan alone or into its backtick arm too, since the `$(`
+# arm cannot reach the backtick row — so what this block pins is that
+# separation, not a redden-set. Measured by building both extractions out of
+# tree and running this suite under each.
 # shellcheck disable=SC2016 # ditto
 run_guard_case "escaped \$( ) denies, inert"     deny-master "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n\\$(git commit -m x)\nEOF\n')"
 # shellcheck disable=SC2016 # ditto
@@ -215,36 +236,66 @@ run_guard_case "escaped backtick denies, inert"  deny-master "$MASTER_REPO" "$(p
 # shellcheck disable=SC2016 # ditto
 run_guard_case "escaped backslash, \$( ) is live" deny-master "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n\\\\$(git commit -m x)\nEOF\n')"
 
+# --- a substitution body may hold parentheses (bd gqlc-90vt round 6) --------
+# The `$( )` scan counts paren depth instead of excluding parens, so a body
+# holding a balanced pair is read. One row per spelling: bare, where the
+# tokenizer caught the call anyway; in a heredoc body, where nothing did; and
+# inside DOUBLE QUOTES, where nothing did either — shlex collapses a quoted run
+# to one opaque token, so the tokenizer is not a backstop there. That last
+# spelling was witnessed writing a real commit onto master through this guard.
+# shellcheck disable=SC2016 # ditto
+run_guard_case "paren in a bare \$( ) body"      deny-master "$MASTER_REPO" 'echo $(git commit -m "(x)")'
+# shellcheck disable=SC2016 # ditto
+run_guard_case "paren in a heredoc \$( ) body"   deny-master "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n$(git commit -m "(x)")\nEOF\n')"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "paren in a quoted \$( ) body"    deny-master "$MASTER_REPO" 'echo "$(git commit -m "(x)")"'
+
 # --- limits this leaves open: measured, disclosed, not fixed ----------------
-# Inside an unquoted body the substitution extractors are the only thing
-# looking, because the surrounding prose must stay data. So a real command
-# neither extractor matches is not seen at all — while the SAME spelling
-# written bare still denies, because outside a heredoc the tokenizer is the
-# backstop. Each extractor-limit pair below pins that contrast: the silent row
-# is the limit and its deny partner shows the limit is the heredoc, not the
-# spelling. The <<EOF.txt pair at the end is about the DELIMITER instead, so
-# its partner shows the opposite — the same delimiter word, quoted, arms
-# nothing and therefore denies.
-# shellcheck disable=SC2016 # ditto
-run_guard_case "SUBST_RE does not nest: heredoc" silent "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n$(git commit -m "(x)")\nEOF\n')"
-# shellcheck disable=SC2016 # ditto
-run_guard_case "SUBST_RE does not nest: bare"    deny-master "$MASTER_REPO" 'echo $(git commit -m "(x)")'
-# bash 5.3 funsub. Both rows assert what the HOOK decides about the text, so
-# neither depends on the shell running this file; the claim that the heredoc
+# Inside a stripped heredoc body the substitution extractor is the only thing
+# looking, because the surrounding prose must stay data. So a real command it
+# does not match is not seen at all. Each limit gets THREE rows, because the
+# bare spelling denying does not mean the heredoc is what suppresses it: the
+# bare row denies with the tokenizer having split the text into words, and the
+# DOUBLE-QUOTED row at top level, with no heredoc anywhere, is silent again —
+# shlex collapses the whole run to one token there, so the tokenizer is a
+# backstop for unquoted text and nothing else. The <<EOF.txt rows at the end
+# are about the DELIMITER instead, so their partner shows the opposite — the
+# same delimiter word, quoted, arms nothing and therefore denies.
+# bash 5.3 funsub. All three rows assert what the HOOK decides about the text,
+# so none depends on the shell running this file; the claim that the heredoc
 # form executes was measured separately on bash 5.3.15.
 # shellcheck disable=SC2016 # ditto
 run_guard_case "funsub \${ ; } in heredoc"       silent "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n${ git commit -m x; }\nEOF\n')"
 # shellcheck disable=SC2016 # ditto
 run_guard_case "funsub \${ ; } bare"             deny-master "$MASTER_REPO" 'echo ${ git commit -m x; }'
+# shellcheck disable=SC2016 # ditto
+run_guard_case "funsub \${ ; } double-quoted"    silent "$MASTER_REPO" 'echo "${ git commit -m x; }"'
 # A limit with a different mechanism: the command shape is ordinary, but a
 # backslash-newline splits the `$(` token itself. The shell rejoins the line
 # and runs the substitution — measured by letting it commit for real rather
-# than by reading a marker, and the fixture's HEAD moved — while SUBST_RE needs
-# a literal `$(` and finds none, so the heredoc row is silent.
+# than by reading a marker, and the fixture's HEAD moved — while the extractor
+# needs a literal `$(` and finds none, so the heredoc row is silent.
 # shellcheck disable=SC2016 # ditto
 run_guard_case "cont-split \$( in heredoc"       silent "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n$\\\n(git commit -m x)\nEOF\n')"
 # shellcheck disable=SC2016 # ditto
 run_guard_case "cont-split \$( bare"             deny-master "$MASTER_REPO" "$(printf 'echo $\\\n(git commit -m x)')"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "cont-split \$( double-quoted"    silent "$MASTER_REPO" "$(printf 'echo "$\\\n(git commit -m x)"')"
+# A third mechanism, and the only one of the three where the extractor DOES
+# match: a `case` pattern's `)` is an ordinary closing paren to the depth count,
+# so the span ends at the pattern and the body handed on is `case x in a`. The
+# commit is left in the surrounding text, double-quoted, where shlex collapses
+# it — silent. The contrast row is the same line with the case removed, so what
+# the pair pins is the case pattern doing it and not the quoting: parens that
+# balance for the shell do not balance for this scan. The silent row alone
+# cannot be killed — a mutation that breaks the scan makes it silent too, which
+# is what it already asserts — so the contrast is the half that discriminates,
+# and it is the half that reddens (measured: stop counting `)` at all and the
+# contrast row goes silent, in a 150/14 run).
+# shellcheck disable=SC2016 # ditto
+run_guard_case "case pattern ) hides a later commit" silent "$MASTER_REPO" 'echo "$(case x in a) git commit -m y;; esac)"'
+# shellcheck disable=SC2016 # ditto
+run_guard_case "case pattern ) contrast, no case"    deny-master "$MASTER_REPO" 'echo "$(git commit -m y)"'
 # HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt arms on the prefix `EOF`; no
 # line ever equals that, the body swallows the rest of the command, and the
 # real commit after it is not seen. The quoted spelling of the same delimiter
@@ -442,6 +493,556 @@ run_raw_case() { # $1=name $2=expected $3=cwd $4=raw stdin
 run_raw_case "healthy repo, valid stdin: silent"  silent "$OK_REPO" '{"tool_name":"Bash","tool_input":{"command":"ls"}}'
 run_raw_case "internal error warns, not silent"   warn   "$OK_REPO" 'not json at all'
 
+
+# ============================================================================
+# bd close must not record work against a sha no remote ref contains (gqlc-90vt)
+# ============================================================================
+#
+# One repo with a real remote, carrying three shas that a naive check cannot
+# tell apart: one pushed, one on a local branch only, one orphaned by a reset
+# (the shape a rebase leaves behind, and the shape of the witnessed incident).
+BD_REPO="$TMP/bd"
+git init -q --bare "$TMP/bd-origin.git"
+mkrepo "$BD_REPO" master
+git -C "$BD_REPO" remote add origin "$TMP/bd-origin.git"
+git -C "$BD_REPO" push -q -u origin master
+PUSHED_SHA="$(git -C "$BD_REPO" rev-parse --short=8 HEAD)"
+git -C "$BD_REPO" checkout -q -b localonly
+git -C "$BD_REPO" -c user.email=t@t.invalid -c user.name=t commit -q --allow-empty -m local
+LOCAL_SHA="$(git -C "$BD_REPO" rev-parse --short=8 HEAD)"
+git -C "$BD_REPO" checkout -q master
+git -C "$BD_REPO" checkout -q -b doomed
+git -C "$BD_REPO" -c user.email=t@t.invalid -c user.name=t commit -q --allow-empty -m doomed
+ORPHAN_SHA="$(git -C "$BD_REPO" rev-parse --short=8 HEAD)"
+git -C "$BD_REPO" checkout -q master
+git -C "$BD_REPO" branch -q -D doomed
+ABSENT_SHA=deadbeefdeadbeef
+printf 'Closed by branch doomed at %s (not yet pushed).\n' "$ORPHAN_SHA" > "$TMP/reason.txt"
+printf 'Closed by branch master at %s.\n' "$PUSHED_SHA" > "$TMP/reason-ok.txt"
+
+# The fixture only means something if the three shas really are distinguishable
+# only by the ref set. Asserted, not assumed: without this, a fixture that
+# failed to push (or failed to orphan) would make every row below pass for the
+# wrong reason.
+fixture_check() { # $1=label $2=expected $3=actual
+  note_row "fixture: $1"
+  if [ "$2" = "$3" ]; then
+    pass=$((pass + 1)); printf 'ok   - fixture: %s\n' "$1"
+  else
+    fail=$((fail + 1)); printf 'FAIL - fixture: %s (expected %s, got %s)\n' "$1" "$2" "$3"
+  fi
+}
+fixture_check "pushed sha is on a remote ref" \
+  "origin/master" "$(git -C "$BD_REPO" branch -r --contains "$PUSHED_SHA" | tr -d ' \n')"
+fixture_check "local-only sha is on NO remote ref" \
+  "" "$(git -C "$BD_REPO" branch -r --contains "$LOCAL_SHA" | tr -d ' \n')"
+fixture_check "local-only sha IS on a local ref (so -r is what discriminates)" \
+  "localonly" "$(git -C "$BD_REPO" branch --contains "$LOCAL_SHA" --format='%(refname:short)' | tr -d ' \n')"
+fixture_check "orphan sha is on no ref at all" \
+  "" "$(git -C "$BD_REPO" for-each-ref --contains="$ORPHAN_SHA" --format='%(refname)' | tr -d ' \n')"
+fixture_check "orphan sha object still exists locally" \
+  "commit" "$(git -C "$BD_REPO" cat-file -t "$ORPHAN_SHA" 2>&1)"
+fixture_check "absent sha resolves to nothing" \
+  "missing" "$(printf '%s\n' "$ABSENT_SHA" | git -C "$BD_REPO" cat-file --batch-check | awk '{print $2}')"
+
+# run_verdict asserts the NAME close_verdict() returned, by importing the hook
+# as a module. An allow asserted only as "not denied" cannot tell an allow that
+# was decided from one that was reached because sha extraction stopped working.
+run_verdict() { # $1=name $2=expected-verdict $3=cwd $4=command
+  local got
+  got="$(
+    cd "$3" || exit 1
+    python3 - "$HOOK" "$4" <<'PY'
+import importlib.machinery, importlib.util, json, sys
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+closes = []
+mod.git_targets(sys.argv[2], __import__("os").getcwd(), mod.HOOK_GATED, closes=closes)
+print(",".join(mod.close_verdict(c)[0] for c in closes) or "no-close-seen")
+PY
+  )"
+  note_row "$1"
+  if [ "$got" = "$2" ]; then
+    pass=$((pass + 1)); printf 'ok   - %s\n' "$1"
+  else
+    fail=$((fail + 1)); printf 'FAIL - %s (expected verdict %s, got %s)\n' "$1" "$2" "$got"
+  fi
+}
+
+# run_case reads allow/deny and run_verdict reads the NAME close_verdict()
+# returned. Neither reads the deny MESSAGE, and main() reads nothing else — so
+# nulling a message turns a refusal into a silent allow that both of them pass.
+# Measured on this file's parent revision: doing that at each of the three
+# `return "deny-unverifiable-repo"` sites left the suite at 146 passed, 0 failed,
+# while the same mutation on deny-absent-object reddened one row and on
+# deny-unreadable-reason three. close_refusal reads the message, naming each of
+# the three sites by its own sentence so one site's row cannot be satisfied by
+# another site's refusal, and falls through to classify() so a mutant's allow
+# reads as `silent` rather than as some other deny.
+# shellcheck disable=SC2016 # the patterns are the hook's literal message text
+close_refusal() { # $1=hook stdout -> the site's name, else classify()'s verdict
+  if printf '%s' "$1" | grep -q 'could not resolve the repository the command runs in'; then
+    printf 'deny-unresolvable-dir'
+  elif printf '%s' "$1" | grep -q 'could not get an answer from `git cat-file --batch-check`'; then
+    printf 'deny-unanswerable-objects'
+  elif printf '%s' "$1" | grep -q 'gave no answer, so reachability could not be checked'; then
+    printf 'deny-unanswerable-reachability'
+  else
+    classify "$1"
+  fi
+}
+
+run_close_case() { # $1=name $2=expected $3=cwd $4=command
+  record "$1" "$2" "$(close_refusal "$(run_hook "$3" "$4")")"
+}
+
+# The other two sites are the answers of two subprocess probes, and no fixture
+# reaches them: object_types() and remote_refs_containing() catch OSError and
+# TimeoutExpired themselves, and the GIT_* env that could redirect them is unset
+# at the top of this file. So the probe is stubbed to the "could not tell" value
+# its own docstring names, and the hook still runs through its REAL __main__ —
+# same shape as the exception row further down, so main(), the close arm and
+# deny() are all the shipped ones.
+run_unanswerable_case() { # $1=name $2=expected $3=cwd $4=command $5=probe to silence
+  local got
+  got="$(
+    cd "$3" || exit 1
+    python3 - "$HOOK" "$4" "$5" <<'PY' 2>/dev/null
+import io, json, sys
+sys.dont_write_bytecode = True
+
+hook, command, victim = sys.argv[1:4]
+unanswerable = {"object_types": None, "remote_refs_containing": (False, [])}[victim]
+
+
+class Swap(dict):
+    def __setitem__(self, key, value):
+        if key == victim:
+            def silenced(*args, **kwargs):
+                return unanswerable
+
+            value = silenced
+        super().__setitem__(key, value)
+
+
+glb = Swap({"__name__": "__main__", "__file__": hook, "__builtins__": __builtins__})
+sys.stdin = io.StringIO(json.dumps(
+    {"tool_name": "Bash", "tool_input": {"command": command}}))
+out, sys.stdout = sys.stdout, io.StringIO()
+try:
+    exec(compile(open(hook).read(), hook, "exec"), glb)  # noqa: S102 - the artifact under test
+except SystemExit:
+    pass
+captured, sys.stdout = sys.stdout.getvalue(), out
+sys.stdout.write(captured)
+PY
+  )"
+  record "$1" "$2" "$(close_refusal "$got")"
+}
+
+# --- state 1: reachable from a remote ref -> permitted ----------------------
+run_case    "sha on a remote ref"              allow "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b at $PUSHED_SHA (1 commit).\""
+run_verdict "sha on a remote ref (verdict)"    allow-reachable "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b at $PUSHED_SHA (1 commit).\""
+
+# --- state 2: the witnessed incident, replayed verbatim in shape ------------
+run_case    "orphaned sha, 'not yet pushed'"   deny  "$BD_REPO" \
+  "bd close gqlc-rz0l -r \"Closed by branch docs/c1-bare-arg-spec-drift at $ORPHAN_SHA (12 commits, not yet pushed).\""
+run_verdict "orphaned sha (verdict)"           deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-rz0l -r \"Closed by branch docs/c1-bare-arg-spec-drift at $ORPHAN_SHA (12 commits, not yet pushed).\""
+
+# --- state 3: the sha names nothing -> refused, and refused DIFFERENTLY -----
+run_case    "sha that names no object"         deny  "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b at $ABSENT_SHA.\""
+run_verdict "sha that names no object (verdict)" deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b at $ABSENT_SHA.\""
+
+# --- state 4: on a LOCAL branch only. `cat-file -t` says commit and
+#     `branch --contains` (no -r) names a branch, so both naive checks pass it.
+run_case    "sha on a local branch only"       deny  "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch localonly at $LOCAL_SHA.\""
+run_verdict "sha on a local branch only (verdict)" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch localonly at $LOCAL_SHA.\""
+
+# --- state 5: empty / absent sha. `git branch -r --contains` with NO argument
+#     defaults to HEAD and prints the remote refs containing it, so a dropped
+#     argument reads as "reachable". Pinned three ways: the flag with its value
+#     omitted, the shell-built and stdin reasons, and the probe called directly.
+run_case    "reason flag with value omitted"   deny  "$BD_REPO" 'bd close gqlc-x -r'
+run_verdict "reason flag with value omitted (verdict)" deny-unreadable-reason "$BD_REPO" 'bd close gqlc-x -r'
+# shellcheck disable=SC2016 # the expansion is the hook's input, not this file's code
+run_case    "reason built by the shell"        deny  "$BD_REPO" 'bd close gqlc-x -r "closed at $SHA"'
+run_case    "reason read from stdin"           deny  "$BD_REPO" 'bd close gqlc-x --reason-file -'
+# shellcheck disable=SC2016 # ditto
+run_verdict "reason built by the shell (verdict)" deny-unreadable-reason "$BD_REPO" 'bd close gqlc-x -r "$(cat /tmp/r)"'
+# The other half of UNEXPANDED_RE. A backtick is command substitution too, and
+# it is the half with the reach: of the 7 corpus close reasons this arm refuses,
+# 4 carry a backtick and no `$`. Deleting that clause left the suite green while
+# a backtick reason fell to allow-no-sha — read as prose, and never checked.
+# shellcheck disable=SC2016 # the backtick is the hook's input, not this file's code
+run_verdict "backtick reason is unreadable"    deny-unreadable-reason "$BD_REPO" 'bd close gqlc-x -r "see `notes.md` for the sha"'
+run_case    "empty reason string"              allow "$BD_REPO" 'bd close gqlc-x -r ""'
+run_verdict "empty reason string (verdict)"    allow-no-sha "$BD_REPO" 'bd close gqlc-x -r ""'
+
+fixture_check "argument-less probe defaults to HEAD, so a dropped arg reads reachable" \
+  "origin/master" "$(git -C "$BD_REPO" branch -r --contains | tr -d ' \n')"
+EMPTY_REV_PROBE="$(
+  python3 - "$HOOK" "$BD_REPO" <<'PY'
+import importlib.machinery, importlib.util, sys
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print("%s|%s" % (mod.remote_refs_containing(sys.argv[2], ""),
+                 mod.remote_refs_containing(sys.argv[2], "HEAD")))
+PY
+)"
+fixture_check "empty rev answers 'could not tell', where HEAD answers 'reachable'" \
+  "(False, [])|(True, ['origin/master'])" "$EMPTY_REV_PROBE"
+
+# --- closes that must NOT be denied ----------------------------------------
+run_case    "close with no reason flag"        allow "$BD_REPO" 'bd close gqlc-x'
+run_verdict "close with no reason flag (verdict)" allow-no-reason "$BD_REPO" 'bd close gqlc-x'
+run_case    "reason citing no sha"             allow "$BD_REPO" 'bd close gqlc-x -r "landed via PR 42, reviewed"'
+run_verdict "reason citing no sha (verdict)"   allow-no-sha "$BD_REPO" 'bd close gqlc-x -r "landed via PR 42, reviewed"'
+# All-hex English words are why an unresolvable LOOSE token is not a citation.
+run_case    "hex-looking prose, unanchored"    allow "$BD_REPO" 'bd close gqlc-x -r "the docs were defaced then effaced"'
+run_verdict "hex-looking prose, unanchored (verdict)" allow-no-sha "$BD_REPO" 'bd close gqlc-x -r "the docs were defaced then effaced"'
+run_case    "unrelated bd subcommand"          allow "$BD_REPO" "bd show gqlc-x --at $ORPHAN_SHA"
+
+# --- the loose tier PROMOTES, not just declines ------------------------------
+# The rows above are the negative half of the two-tier design: a loose token git
+# cannot resolve stays prose. The positive half is the majority shape — 79 of
+# the corpus's 110 sha-citing close reasons carry no at/@/commit anchor — and
+# without these rows `citations = sorted(anchored)` (i.e. never promoting a
+# loose token) left the whole suite green while three quarters of the corpus
+# silently became allow-no-sha. Both directions, because a promotion that always
+# denied would satisfy the deny row alone.
+run_verdict "unanchored orphan sha is promoted (verdict)" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"$ORPHAN_SHA fixed the doomed thing\""
+run_case    "unanchored orphan sha is promoted"           deny  "$BD_REPO" \
+  "bd close gqlc-x -r \"$ORPHAN_SHA fixed the doomed thing\""
+run_verdict "unanchored pushed sha is promoted, then allowed" allow-reachable "$BD_REPO" \
+  "bd close gqlc-x -r \"$PUSHED_SHA landed on origin\""
+
+# --- the two spellings of the subcommand this arm keys on --------------------
+# `bd` reached by path and `bd done` (bd's documented alias for close, per
+# `bd close --help`: "Aliases: close, done") are both live, and both survived
+# deletion with the suite green before these rows existed.
+run_verdict "bd invoked by path still scanned"  deny-unpushed-sha "$BD_REPO" \
+  "/usr/local/bin/bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "the done alias is a close"         deny-unpushed-sha "$BD_REPO" \
+  "bd done gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+
+# Three closes in one command, asserted as an ORDERED sequence rather than as a
+# set: each `bd` invocation is scanned separately and keeps its own reason, so a
+# scanner that stopped after the first, merged their reasons, or reordered them
+# fails here. Three distinct verdicts, so no pair swap can go unseen.
+run_verdict "three closes keep their own reasons, in order" \
+  "deny-unpushed-sha,allow-reachable,deny-absent-object" "$BD_REPO" \
+  "bd close a -r \"Closed at $ORPHAN_SHA.\" && bd close b -r \"Closed at $PUSHED_SHA.\" && bd close c -r \"Closed at $ABSENT_SHA.\""
+
+# `commit <sha>` is an anchor too — 5 of the corpus's 110 sha-citing close
+# reasons use it and no `at`/`@`. Pinned on the absent sha, which is the only
+# state where being anchored changes the answer.
+run_verdict "commit <sha> anchors an absent sha" deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"Headline commit $ABSENT_SHA landed.\""
+run_verdict "commit <sha> anchors an orphan sha" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"Headline commit $ORPHAN_SHA landed.\""
+# `@<sha>` is the third anchor spelling, and the one no row reached: deleting it
+# from CITED_SHA_RE left the whole suite green while `@<absent sha>` fell from
+# deny-absent-object to allow-no-sha, because unanchored it is a loose token git
+# cannot resolve. It is the sole match for 2 of the 309 corpus close reasons.
+run_verdict "@<sha> anchors an absent sha"       deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"landed @$ABSENT_SHA, review followed.\""
+
+# --- the effective repo is resolved, like the master guard's --------------
+#
+# Asserted by VERDICT, not by deny alone. $TMP is not a git repository, so a
+# hook that ignored `-C`/`cd` would still deny these — as deny-unverifiable-repo
+# rather than deny-unpushed-sha. Pinned as deny they passed while the
+# retargeting was mutated away; the paired allow rows are the other half.
+run_verdict "bd -C retargets to the fixture repo"    deny-unpushed-sha "$TMP" \
+  "bd -C $BD_REPO close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "bd -C retargets, reachable sha allowed" allow-reachable "$TMP" \
+  "bd -C $BD_REPO close gqlc-x -r \"Closed at $PUSHED_SHA.\""
+run_verdict "cd chain retargets to the fixture repo" deny-unpushed-sha "$TMP" \
+  "cd $BD_REPO && bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "cd chain retargets, reachable sha allowed" allow-reachable "$TMP" \
+  "cd $BD_REPO && bd close gqlc-x -r \"Closed at $PUSHED_SHA.\""
+run_case    "bd -C to the fixture repo"        deny  "$TMP" \
+  "bd -C $BD_REPO close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "unresolvable cwd is refused, not skipped" deny-unverifiable-repo "$TMP" \
+  "cd \"\$WT\" && bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+
+# ...and the three rows that make that refusal REACH the caller. The row above
+# reads close_verdict()'s name; main() reads only its message, so the name is
+# not evidence the hook refuses. Each row below names one of the three
+# `return "deny-unverifiable-repo"` sites by the sentence only that site emits;
+# replace any one of those messages with None and its row, and only its row,
+# goes red with `silent`.
+run_close_case "unresolvable cwd refuses end-to-end" deny-unresolvable-dir "$TMP" \
+  "cd \"\$WT\" && bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+run_unanswerable_case "an unanswerable object probe refuses end-to-end" \
+  deny-unanswerable-objects "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\"" object_types
+run_unanswerable_case "an unanswerable reachability probe refuses end-to-end" \
+  deny-unanswerable-reachability "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\"" remote_refs_containing
+
+# --- --reason-file is READ, not merely noticed ------------------------------
+# Both halves, for the same reason as above: a hook that ignored the flag
+# entirely would report deny-unreadable-reason and satisfy a deny-only row.
+run_verdict "--reason-file citing an orphan sha"   deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x --reason-file $TMP/reason.txt"
+run_verdict "--reason-file citing a pushed sha"    allow-reachable "$BD_REPO" \
+  "bd close gqlc-x --reason-file $TMP/reason-ok.txt"
+run_case    "--reason-file with a literal path"    deny "$BD_REPO" \
+  "bd close gqlc-x --reason-file $TMP/reason.txt"
+
+# --- the joined spelling of a flag, `--reason=VALUE` -------------------------
+# Every row above passes the reason as two tokens. `bd close --help` (v1.0.4)
+# documents `-r, --reason string`, so the joined form is real usage, and
+# scan_bd's `"=" in opt` splitter is what reads it. Deleting that splitter makes
+# the token an unrecognised flag, skipped whole: the close is then seen with NO
+# reason flag and verdicts allow-no-reason — it disappears from this guard
+# rather than merely mis-verdicting, with the suite green.
+run_verdict "--reason=VALUE citing an orphan sha"  deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x --reason=\"Closed at $ORPHAN_SHA.\""
+
+# --- the pflag shorthand spellings bd honours (bd gqlc-90vt round 6) ---------
+# bd is cobra/pflag, so a shorthand may carry its value attached and shorthands
+# may cluster. Measured against bd v1.0.4: `-rZZZ` and `-fr ZZZ` both parse,
+# `-fr` with nothing after it answers "flag needs an argument: 'r'", and `-Z`
+# answers "unknown shorthand flag", so the acceptance is real and not a silent
+# swallow. Each spelling below verdicted allow-no-reason before scan_bd walked
+# the cluster — a false positive on the record, saying "this close carries no
+# reason flag" about a close carrying the incident's reason verbatim. `-f` is
+# the ordinary spelling for force-closing a pinned bead, so `-fr` is reachable
+# usage rather than a contrivance.
+run_verdict "-rVALUE attached to the shorthand"    deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r\"Closed at $ORPHAN_SHA.\""
+run_verdict "-fr VALUE, r last in the cluster"     deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -fr \"Closed at $ORPHAN_SHA.\""
+run_verdict "-qr=VALUE, cluster with a joined value" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -qr=\"Closed at $ORPHAN_SHA.\""
+# -C is the other value-taking shorthand, and it retargets rather than reads:
+# without the cluster walk the -C is skipped whole, the effective directory
+# stays $TMP, and the verdict is deny-unverifiable-repo instead.
+run_verdict "-CPATH attached to the shorthand"     deny-unpushed-sha "$TMP" \
+  "bd -C$BD_REPO close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+# The other direction: a cluster of BOOLEAN shorthands takes no value, so it
+# must not swallow the token after it. Treating any cluster as value-taking
+# consumes `close` here and the close disappears from the guard entirely.
+run_verdict "a boolean-only cluster consumes nothing" deny-unpushed-sha "$BD_REPO" \
+  "bd -qv close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+
+# --- a close written inside a command substitution --------------------------
+# git_targets threads `closes` into its own $( ) / backtick recursion, and this
+# row is what pins that argument. The spelling is load-bearing: shlex(posix,
+# punctuation_chars) splits a BARE $(...) into separate tokens, so `bd` reaches
+# the outer token pass too and the same close is found TWICE — measured, a bare
+# row verdicts deny-unpushed-sha,deny-unpushed-sha here — which leaves it denied
+# with the recursion's argument dropped. Quoted, backticked or heredoc'd, shlex
+# hands back one opaque token and the recursion is the only finder: drop the
+# argument and this row's close verdicts no-close-seen. It disappears from the
+# guard rather than mis-verdicting, and the rest of the suite stays green. The
+# extractors themselves are already pinned by the master-guard rows above; what
+# was unpinned is the threading, which only the close arm reaches.
+run_verdict "close inside a quoted substitution"   deny-unpushed-sha "$BD_REPO" \
+  "echo \"\$(bd close gqlc-x -r 'Closed at $ORPHAN_SHA.')\""
+# The same position with the incident's own reason text. A parenthesised close
+# reason is the majority shape here — 192 of the 309 in .beads/issues.jsonl at
+# 15091c86 carry a paren and 106 of those carry a sha as well. Restore a scan
+# whose body excludes parens and this row verdicts no-close-seen — the close
+# vanishing from the guard rather than mis-verdicting.
+run_verdict "quoted substitution, parenthesised reason" deny-unpushed-sha "$BD_REPO" \
+  "echo \"\$(bd close gqlc-rz0l -r 'Closed by branch doomed at $ORPHAN_SHA (12 commits, not yet pushed).')\""
+# ...and a reachable sha in that same position, so `quoted substitution,
+# parenthesised reason` records a decision rather than a scan that now denies
+# whatever is parenthesised.
+run_verdict "quoted substitution, parenthesised reachable reason" allow-reachable "$BD_REPO" \
+  "echo \"\$(bd close gqlc-x -r 'Closed at $PUSHED_SHA (1 commit, pushed).')\""
+# The limit the counting leaves: quoting is not tracked, so a paren the shell
+# would read as a literal is counted too. The two unbalanced directions part
+# company here. A surplus `(` never brings the depth back to zero, so nothing
+# closes the span, it is not extracted at all, and quoted, shlex hands back one
+# token — fail-OPEN, this row.
+run_verdict "a surplus ( leaves the span unclosed and unread" no-close-seen "$BD_REPO" \
+  "echo \"\$(bd close gqlc-x -r 'Closed at $ORPHAN_SHA (12 commits.')\""
+# A surplus `)` brings the depth to zero EARLY, so the span is closed at that
+# paren and the body does come back, truncated there. Written so the truncation
+# falls outside the reason's quote, the shortened body still tokenizes and the
+# close is read and verdicted on the sha it carries. Make paren_matches abandon
+# the map when a `)` finds nothing open instead of dropping it — this row's
+# trailing `)` is such a paren — and this row verdicts no-close-seen, because
+# the span then has nothing closing it. The one unbalanced reason among the 192
+# paren-bearing corpus reasons is this direction, not the row above: gqlc-oxne,
+# 6 `(` to 7 `)`, depth first going negative 857 characters in on a
+# `case " ${a} ${b} " in *" ${x} "*)` pattern, in a reason that is not truncated
+# and runs on for another kilobyte.
+run_verdict "a surplus ) closes the span early" deny-unpushed-sha "$BD_REPO" \
+  "echo \"\$(bd close gqlc-x -r 'Closed at $ORPHAN_SHA.'; esac) tail)\""
+
+# --- what the extractor hands back, for a body that nests -------------------
+# Three decisions inside substitution_bodies() share one end-to-end verdict:
+# that the outer `$( )` is matched by counting depth, that its nested span is
+# blanked out of it, and that the nested body is returned alongside rather than
+# left to a further recursion. Blanking is what stops a nested close being
+# counted twice; returning it alongside is what keeps it at the same depth as
+# one written bare, which is what the depth cap is measured against.
+# Asserted on the extractor's own output because TWO of the three are invisible
+# end to end: mutated on its own, not blanking runs 163/1 and not flattening
+# runs 163/1, this fixture the only red in each. The depth count is NOT in that
+# position — making the first `)` close the outer span runs 160/4, and three of
+# those are verdict rows (`quoted substitution, parenthesised reason`, the
+# `... reachable reason` beside it, and `a surplus ( leaves the span unclosed
+# and unread`). So this fixture is the only guard for two of the decisions and
+# a second witness for the third.
+SUBST_PROBE="$(
+  python3 - "$HOOK" <<'PY'
+import importlib.machinery, importlib.util, sys
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print(mod.substitution_bodies("""echo "$(bd close x -r 'at (12 commits) $(date)')" """))
+PY
+)"
+fixture_check "a nested paren-bearing body: counted, blanked, flattened" \
+  "[\"bd close x -r 'at (12 commits)  '\", 'date']" "$SUBST_PROBE"
+
+# --- object_types' own guards, driven with a stubbed subprocess -------------
+# `git cat-file --batch-check` emits one line per input line and the mapping is
+# positional, so a short or long reply must not be zipped anyway: a mis-paired
+# type can call an orphan a commit or a commit an orphan. No git invocation can
+# produce that, so the boundary is stubbed rather than staged.
+OBJTYPES_PROBE="$(
+  python3 - "$HOOK" "$BD_REPO" <<'PY'
+import importlib.machinery, importlib.util, sys, types as _t
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+
+
+def stub(out, rc=0):
+    return lambda *a, **k: _t.SimpleNamespace(stdout=out, stderr="", returncode=rc)
+
+
+real = mod.subprocess.run
+two = ["aaaaaaa", "bbbbbbb"]
+mod.subprocess.run = stub("aaaaaaa missing\n")            # short reply
+short = mod.object_types(sys.argv[2], two)
+mod.subprocess.run = stub("a missing\nb missing\nc missing\n")  # long reply
+long_ = mod.object_types(sys.argv[2], two)
+mod.subprocess.run = stub("", 1)                          # git failed
+failed = mod.object_types(sys.argv[2], two)
+mod.subprocess.run = real
+print("%s|%s|%s|%s" % (short, long_, failed, mod.object_types(sys.argv[2], [""])))
+PY
+)"
+fixture_check "a short, long, failed or empty-rev batch-check answers 'could not tell'" \
+  "None|None|None|None" "$OBJTYPES_PROBE"
+
+# --- git_env() is what keeps a leaked GIT_DIR from answering for another repo -
+# The `unset "${!GIT_@}"` at the top of this file means no row above can reach
+# git_env() at all — dropping `env=git_env()` from both subprocess calls left the
+# whole suite green. These two put GIT_DIR back for a single call each, and they
+# are aimed at DIFFERENT call sites, because one row cannot separate them:
+#   - bd-origin.git HOLDS the pushed object but has no refs/remotes, so only
+#     remote_refs_containing's answer can change: leaked, it reports the sha as
+#     contained by nothing and a reachable close becomes deny-unpushed-sha.
+#   - the feature repo holds NEITHER object, so object_types' answer changes
+#     first: leaked, the orphan resolves to missing and deny-unpushed-sha
+#     becomes deny-absent-object.
+# Fail direction is closed in both (a false refusal, not a false allow), which
+# is why this is pinned rather than treated as a hole.
+run_gitdir_verdict() { # $1=name $2=expected-verdict $3=cwd $4=command $5=GIT_DIR
+  local got
+  got="$(
+    cd "$3" || exit 1
+    GIT_DIR="$5" python3 - "$HOOK" "$4" <<'PY'
+import importlib.machinery, importlib.util, sys
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+closes = []
+mod.git_targets(sys.argv[2], __import__("os").getcwd(), mod.HOOK_GATED, closes=closes)
+print(",".join(mod.close_verdict(c)[0] for c in closes) or "no-close-seen")
+PY
+  )"
+  record "$1" "$2" "$got"
+}
+fixture_check "the bare origin holds the pushed object but no remote-tracking ref" \
+  "commit|" "$(git --git-dir="$TMP/bd-origin.git" cat-file -t "$PUSHED_SHA")|$(git --git-dir="$TMP/bd-origin.git" branch -r --contains "$PUSHED_SHA" | tr -d ' \n')"
+run_gitdir_verdict "GIT_DIR cannot answer the reachability probe" allow-reachable "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed at $PUSHED_SHA.\"" "$TMP/bd-origin.git"
+run_gitdir_verdict "GIT_DIR cannot answer the object probe" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\"" "$FEATURE_REPO/.git"
+
+# --- an exception inside the close arm must DENY, not escape -----------------
+# The close arm is the one place where "could not check" must not mean "let it
+# through": __main__ catches everything else and WARNS (pinned by "internal
+# error warns, not silent" above), and a warn is an allow — the close would run
+# and the ledger would record work that may never have landed. So the arm's own
+# `except Exception` is load-bearing, and nothing else in this suite can reach
+# it: close_verdict() catches OSError and TimeoutExpired at every boundary it
+# owns, so no fixture makes it raise. Stubbed instead, and stubbed into the REAL
+# file executed through its REAL `__main__` guard: the source is compiled at its
+# own path with a globals mapping that swaps close_verdict as the module binds
+# it, so main(), the arm, deny() and the top-level handler are all the shipped
+# ones. Narrow the arm to a subclass of Exception and this prints warn.
+EXC_PROBE="$(
+  cd "$BD_REPO" && python3 - "$HOOK" <<'PY'
+import io, json, sys
+sys.dont_write_bytecode = True
+
+
+class Swap(dict):
+    def __setitem__(self, key, value):
+        if key == "close_verdict":
+            def raiser(close):
+                raise RuntimeError("stubbed")
+            value = raiser
+        super().__setitem__(key, value)
+
+
+hook = sys.argv[1]
+glb = Swap({"__name__": "__main__", "__file__": hook, "__builtins__": __builtins__})
+sys.stdin = io.StringIO(json.dumps(
+    {"tool_name": "Bash", "tool_input": {"command": 'bd close gqlc-x -r "landed"'}}))
+out, sys.stdout = sys.stdout, io.StringIO()
+try:
+    exec(compile(open(hook).read(), hook, "exec"), glb)  # noqa: S102 - the artifact under test
+except SystemExit:
+    pass
+captured, sys.stdout = sys.stdout.getvalue(), out
+if '"permissionDecision": "deny"' in captured and "could not be checked" in captured:
+    print("deny-uncheckable-close")
+elif '"systemMessage"' in captured:
+    print("warn-escaped-to-top-level")
+else:
+    print("other(%s)" % captured.strip()[:80])
+PY
+)"
+record "an exception in the close arm denies" deny-uncheckable-close "$EXC_PROBE"
+
+# This test writes nothing into the tree it tests. Asserted rather than
+# assumed: the leak it guards against is silent here and fatal in lint-hooks,
+# which is a different recipe on a different run.
+fixture_check "the suite leaves no bytecode in the hooks tree" \
+  "" "$(find "$(dirname "$HOOK")" -name '__pycache__' -o -name '*.pyc' | tr -d '\n')"
+
 # A total pins suite SIZE, not membership — swapping a row for a different one
 # leaves it green, which is why membership is pinned separately by the mutation
 # battery, and only for the subcommands the rows above name: dropping commit,
@@ -450,9 +1051,28 @@ run_raw_case "internal error warns, not silent"   warn   "$OK_REPO" 'not json at
 # What this total catches is the one thing that battery cannot see: rows
 # silently disappearing. Without it, deleting every run_drift_case invocation
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
-EXPECTED_ROWS=89
+# Counted at the END of the file rather than after the master-guard block, so
+# the bd-close rows are inside it too.
+EXPECTED_ROWS=164
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
+  fail=$((fail + 1))
+fi
+
+# The total above still leaves a RENAME or a SWAP invisible: retitle a row, or
+# delete one and add an unrelated one, and the count is unmoved. This digest is
+# over every row NAME in run order, so both move it. Row names are static
+# strings — no path, sha or temp dir reaches one — so the digest is the same on
+# every machine. Update it deliberately when a row is added, renamed or
+# reordered; a drift you did not intend is the finding.
+EXPECTED_ROW_DIGEST=2d4146148eed7cb3
+ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
+  'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
+if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then
+  printf 'FAIL - suite membership drifted: row-name digest %s, expected %s\n' \
+    "$ROW_DIGEST" "$EXPECTED_ROW_DIGEST"
+  printf 'the %d row names that ran, in order:\n' "$((pass + fail))"
+  printf '%s' "$ROWS" | sed 's/^/    /'
   fail=$((fail + 1))
 fi
 

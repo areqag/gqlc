@@ -1,11 +1,54 @@
 #!/usr/bin/env python3
-# Claude Code PreToolUse hook for the Bash tool. Two jobs:
+# Claude Code PreToolUse hook for the Bash tool. Three jobs:
 #
 #   1. Denies `git commit` when the command's EFFECTIVE target repo is on
 #      master/main.
 #   2. Reports core.hooksPath drift, and refuses the git subcommands the dead
 #      hooks would have gated. See hooks_drift() for why this detector lives
 #      here rather than in a git hook.
+#   3. Denies `bd close` when its close reason cites a commit sha that no
+#      remote-tracking ref in the effective repo contains (bd gqlc-90vt).
+#
+# On (3): the actor in the witnessed incident was not a git hook and not a bd
+# feature — it was an agent running `bd close <id> -r "Closed by branch <b> at
+# <sha> (N commits, not yet pushed)"` from this very tool. `.githooks/` carries
+# no `bd close` call and `strings $(which bd)` carries no such template. This
+# PreToolUse hook is the only thing in the repo that sees that command before it
+# runs, which is why the guard lives here rather than in a git hook.
+#
+# The damage it prevents: a sha that exists only in one checkout is exactly what
+# a rebase discards. The close survives the commit, so the ledger records work
+# that never landed, and correcting it afterwards costs a bdguard exemption
+# (bd gqlc-npyp). Refusing beats warning because a close that already happened
+# IS the damage.
+#
+# Remote reachability is a PROXY for "this work exists somewhere other than one
+# developer's index", not proof of it. What it does not establish, measured:
+#   - a remote ref can be deleted later, so a sha reachable at close time can
+#     become unreachable afterwards. gqlc squash-merges and deletes the branch,
+#     so a close citing the BRANCH's own sha is orphaned once the PR lands; a
+#     close citing the squashed commit on master is not. The guard reads the
+#     repo at the moment of the close and says nothing about later — which is
+#     why bdguard treats the same reachability as a veto rather than as
+#     authorisation when it re-reads these closes in CI (bd gqlc-npyp).
+#   - a remote can be a second local path (`git remote add x ../y`); "pushed"
+#     there is not "pushed to origin". Ref set, not remote identity, is checked.
+#   - remote TAGS and other refs/remotes-adjacent namespaces are not consulted:
+#     the ref set is exactly `git branch -r --contains <sha>`, the command the
+#     bead named, and the deny message names it so the reader can re-run it.
+#
+# Reach and refusal rate, replayed over every historical close reason in
+# .beads/issues.jsonl at 15091c86 against this repo — 309 of them, of which the
+# guard REFUSES 64, one close in five:
+#
+#   allow-no-sha            202      deny-unpushed-sha        51
+#   allow-reachable          43      deny-unreadable-reason    7
+#                                    deny-absent-object        6
+#
+# Most of the 51 are the guard working: `git merge-base --is-ancestor` agrees no
+# remote ref holds those commits. The rate is the headline behavioural fact
+# about this hook, and it is a snapshot — the corpus grows, and a sha reachable
+# today can be orphaned by a squash-merge tomorrow.
 #
 # The target is resolved by analysis, not raw pattern-matching:
 #   - a heredoc body whose delimiter HEREDOC_RE recognises is removed before
@@ -28,8 +71,22 @@
 #     which was the missing half — the unquoted body used to be stripped
 #     before substitutions were extracted, so a $(git commit) there was
 #     silently allowed)
-#   - $(...) and `...` substitution bodies are analyzed recursively (they
-#     execute for real, even inside double quotes)
+#   - $(...) and `...` substitution bodies are analyzed one recursion down,
+#     including inside double quotes, where shlex hands back one opaque token
+#     and the extractor is the only reader. The $( ) scan counts paren depth,
+#     so a body holding a balanced pair is read: `-r "at <sha> (12 commits,
+#     not yet pushed)"` is the witnessed incident's own reason text and the
+#     majority spelling here — 192 of the 309 close reasons in
+#     .beads/issues.jsonl at 15091c86 carry a paren, 106 of those a sha too.
+#     Quoting is not tracked inside the scan, so a paren the shell would read
+#     as a literal is counted, and the two unbalanced directions part company.
+#     A surplus `(` never closes, so the span goes unread -> allow (pinned by
+#     "a surplus ( leaves the span unclosed and unread"). A surplus `)` closes
+#     the span early, so the body does come back, truncated there, and is
+#     analyzed (pinned by "a surplus ) closes the span early"). The one
+#     unbalanced reason among those 192 is the second direction, not the
+#     first: gqlc-oxne, 6 `(` to 7 `)`, going negative 857 characters in on a
+#     `case " ${a} ${b} " in *" ${x} "*)` pattern
 #   - the rest is shlex-tokenized, so a multi-word quoted run collapses to one
 #     token and stops matching: `echo "git commit -m x"` is silent (measured).
 #     Word-by-word quoting does not collapse, so `echo "git" "commit" -m x`
@@ -47,17 +104,29 @@
 #   - nested interpreters (bash -c '...') are not recursed into
 #   - --git-dir / --work-tree redirection is not resolved -> allow
 #   - inside an unquoted heredoc body this hook has actually stripped, the
-#     substitution extractors are the only thing looking, because the prose
-#     around them has to stay data. A command neither extractor matches is
-#     therefore not seen there at all. The instances measured on bash 5.3.15,
-#     which is what has been looked for rather than a proof that nothing else
-#     qualifies: SUBST_RE does not nest, so $(git commit -m "(x)") is missed;
-#     bash 5.3's ${ cmd; } funsub is matched by neither; and a backslash
-#     newline splitting the $( token itself leaves SUBST_RE nothing to match
-#     while the shell rejoins the line and runs it — that one wrote a real
-#     commit onto master in the fixture. Each DENYs when written bare, because
-#     outside a heredoc the tokenizer is the backstop, and each is silent
-#     inside one -> allow
+#     substitution extractor is the only thing looking, because the prose
+#     around it has to stay data. A command it does not match is therefore not
+#     seen there at all. The instances measured on bash 5.3.15, which is what
+#     has been looked for rather than a proof that nothing else qualifies:
+#     bash 5.3's ${ cmd; } funsub, which the extractor does not match; and a
+#     backslash newline splitting the $( token itself, which leaves it nothing
+#     to match while the shell rejoins the line and runs it — that one wrote a
+#     real commit onto master in the fixture. Both DENY when written bare, the
+#     tokenizer having split them into words there; both are silent inside a
+#     stripped heredoc body -> allow. Both are silent inside DOUBLE QUOTES at
+#     top level with no heredoc anywhere as well (rows `funsub ${ ; }
+#     double-quoted` and `cont-split $( double-quoted`), shlex collapsing the
+#     whole run to one token — so what saves the bare spelling is the absence
+#     of quoting rather than the absence of a heredoc
+#   - a `case` pattern's `)` inside a `$( )` closes the span early, because the
+#     paren scan does not know shell grammar. What comes back is the body up to
+#     that pattern, and the commands after it are left in the surrounding text —
+#     where, double-quoted, shlex collapses them into one token and stops
+#     matching. So `echo "$(case x in a) git commit -m y;; esac)"` is allowed
+#     (measured, on this hook and on its parent alike), while the same body
+#     without the case is denied. Pinned by `case pattern ) hides a later
+#     commit`. This is the surplus-`)` direction below, reached by a spelling
+#     whose parens balance in the shell's reading but not in this one
 #   - HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt and <<EOF-1 arm on the
 #     prefix `EOF`. The real terminator line does not equal that, so the body
 #     goes on swallowing until some line is exactly `EOF` — and when none is,
@@ -75,7 +144,7 @@
 #     $( or `, and the shell does. Inside an unquoted heredoc body the count is
 #     what decides: across 0 to 4 measured, an odd count suppressed the
 #     expansion and an even count did not, so \$(git commit) is inert while
-#     \\$(git commit) runs. Neither parity is visible to SUBST_RE, so both are
+#     \\$(git commit) runs. Neither parity is visible to the scan, so both are
 #     extracted and both deny — including the escaped spelling, which is the
 #     one you would write to DOCUMENT this guard in a README heredoc. Measured
 #     with a positive-content witness rather than an absent marker: on the odd
@@ -109,6 +178,40 @@
 #     __main__): a bug here must not be able to block its own repair. It is no
 #     longer *silent*, which is the part that mattered — a detector that exits
 #     0 on its own bug is the failure this hook exists to catch.
+#     The `bd close` arm is the exception: an exception raised INSIDE it is
+#     caught there and turned into a refusal, because that arm's whole point is
+#     that a close it could not check must not proceed (see main()).
+#
+# The `bd close` arm reads the reason as it is written on the command line, or
+# out of a literal `--reason-file` path. Reaches, and does not reach:
+#   - `-r`/`--reason`/`--reason-file` with a literal value -> READ. The
+#     spellings pinned are two tokens, `--reason=VALUE`, `-rVALUE`, `-fr VALUE`
+#     and `-qr=VALUE`; the cluster ones are ordinary usage here because `-f` is
+#     how a pinned bead is force-closed, and each of them verdicted
+#     `allow-no-reason` before scan_bd walked the cluster — a false positive
+#     rather than a miss, since that verdict asserts the close records no sha.
+#   - a reason token holding a `$` or a BACKTICK -> NOT readable, and DENIED
+#     rather than skipped: the hook cannot tell such a reason cites nothing
+#     from cites-something. Quoting is already resolved by the time the token
+#     reaches here, so `-r "$SHA"` and `-r 'the $SHA literal'` are the same
+#     token and both are refused; so is any reason carrying a markdown
+#     backtick, which this repo writes routinely. Measured over the 309
+#     historical close reasons: 7 hit this, 4 of them by a backtick alone.
+#     `--reason-file -` is refused for the same reason, one layer up.
+#   - a close with no reason flag at all -> allowed. It records no sha, so it
+#     is outside this defect class. Stated rather than implied: the verdict is
+#     `allow-no-reason`, a named branch, not a fall-through.
+#   - `bd update <id> -s closed` -> NOT reached. `bd update` has no reason flag
+#     (checked against `bd update --help`, v1.0.4), so it cannot cite a sha in
+#     a close reason; a sha in its `--notes` is a different record and a
+#     different defect.
+#   - a close the tokenizer never sees -> NOT reached, fail-open. `sh -c '...'`,
+#     `bash -lc "..."` and `eval "..."` are nested interpreters this hook does
+#     not recurse into, and a command shlex cannot tokenize at all falls back to
+#     FALLBACK_RE, which matches `git commit` and nothing else. A `bd close`
+#     inside any of those runs unchecked. Left as is: the close arm's fallback
+#     would have to re-derive the reason text from raw bytes, which is the
+#     parser this file declines to become.
 #
 # Hook contract: JSON on stdin { "tool_name": "Bash",
 #   "tool_input": { "command": "..." } }. Deny = exit 0 + JSON with
@@ -162,11 +265,56 @@ HOOKS_DIRNAME = ".githooks"
 # fact.
 HOOK_GATED = ("commit", "merge", "pull", "push")
 HEREDOC_RE = re.compile(r"(?<!<)<<(-?)\s*([\"']?)(\w+)\2")
-SUBST_RE = re.compile(r"\$\(([^()]*)\)")
-BACKTICK_RE = re.compile(r"`([^`]*)`")
 FALLBACK_RE = re.compile(r"(?:^|[^A-Za-z-])git\s+commit(?:$|\s)")
 OPERATOR_CHARS = set("();<>|&")
 GIT_OPTS_WITH_ARG = ("-c", "--namespace", "--exec-path", "--super-prefix")
+
+# `bd close` arm. BD_OPTS_WITH_ARG exists so a flag VALUE spelled `close` is not
+# read as the subcommand; a LONG flag outside that list is treated as boolean,
+# which can only over-detect a close, and over-detection is inert (a close with
+# no reason flag is allowed). Absence from the list does not make a shorthand
+# boolean: a cluster is walked letter by letter (shorthand_arg), so unlisted
+# `-fr` still consumes a value, which is what pflag does. The listed shorthands
+# `-r` and `-C` are governed by it, bare and inline both — scan_bd tests the
+# list first and only then falls through to shorthand_arg. `done` is bd's
+# documented alias for `close`.
+BD_CLOSE_SUBCOMMANDS = ("close", "done")
+BD_OPTS_WITH_ARG = (
+    "-C", "--directory", "--db", "--actor", "--dolt-auto-commit",
+    "--session", "-r", "--reason", "--reason-file",
+)
+# bd is cobra/pflag, which lets a shorthand carry its value attached (-rTEXT)
+# and lets shorthands cluster (-fr TEXT, -qr=TEXT), and this repo force-closes
+# pinned beads with -f. Measured against bd v1.0.4: `-rZZZ` and `-fr ZZZ` both
+# parse, `-fr` with nothing after it answers "flag needs an argument: 'r'", and
+# `-Z` answers "unknown shorthand flag". Only these two shorthands take a value
+# in `bd close --help`; -f, -q, -v and -h are boolean, so a cluster is walked
+# until a value-taking letter is reached.
+BD_SHORTHANDS_WITH_ARG = {"r": "--reason", "C": "--directory"}
+# Two tiers, because a sha is recognised by two different kinds of evidence.
+#
+# CITED_SHA_RE is the `at <sha>` / `@ <sha>` / `commit <sha>` idiom. A match is
+# treated as a citation EVEN WHEN THE OBJECT IS ABSENT, which is the only thing
+# that makes an invented or foreign sha refusable. It is not the majority shape:
+# measured over .beads/issues.jsonl at 15091c86, 110 close reasons cite a hex
+# token and this anchor reaches 31 of them (28%). `at|@` alone reached 26;
+# adding `sha <x>` reached no further reason, so it is not here.
+#
+# SHA_RE is every other hex-looking token, and one of those is a citation only
+# once git says it names a commit in this checkout. English words are all-hex
+# often enough (`defaced`, `effaced`) that trusting an unresolvable loose token
+# would refuse real closes.
+#
+# So the 79 unanchored reasons are reached only while their commit still exists
+# locally. That is not a gap for the defect this guard exists for — an unpushed
+# commit is by construction present in the object store of the checkout that
+# just made it — but it IS a gap for a close citing a sha from somewhere else
+# entirely: unanchored and unresolvable, that is allowed through.
+CITED_SHA_RE = re.compile(r"(?:\bat\s+|@\s*|\bcommits?\s+)([0-9a-f]{7,40})(?![0-9A-Za-z])")
+SHA_RE = re.compile(r"(?<![0-9A-Za-z])([0-9a-f]{7,40})(?![0-9A-Za-z])")
+# Anything the shell would expand. `$5` is not in it on purpose: a bare digit is
+# a positional parameter no reason ever means, and prices appear in prose.
+UNEXPANDED_RE = re.compile(r"\$[({A-Za-z_]|`")
 
 
 def is_op(tok):
@@ -234,15 +382,92 @@ def strip_heredocs(text):
     return "\n".join(kept), "\n".join(expanded)
 
 
+def paren_matches(text):
+    """Map from each `(` in text to the `)` that closes it, built in one pass.
+
+    Parens are counted rather than excluded, which is what lets a substitution
+    body hold one: `bd close x -r "at 1234567 (12 commits, not yet pushed)"` is
+    the majority spelling of this repo's close reasons — 192 of the 309 in
+    .beads/issues.jsonl at 15091c86 carry a paren and 106 of those carry a sha
+    as well — and it is the witnessed incident's own reason text.
+
+    One pass, not a depth count restarted at each `$(`: an unclosed `$(` has no
+    closing paren to find, so a per-span count read to end-of-text before
+    giving up, and a text holding many of them cost O(n^2). End-to-end hook
+    wall time on a heredoc of lone `$(` lines, restarted count vs this one:
+    14 KB 447 ms -> 23 ms, 57 KB 7071 ms -> 26 ms, 144 KB >= 30 s (killed at a
+    30 s CPU cap) -> 42 ms. This hook runs before every Bash call. A length cap
+    was rejected instead: text past the cap would go unanalyzed, which turns a
+    slow path into a silent one.
+
+    It does NOT make the scan linear in general. Deep NESTING is still
+    quadratic, because substitution_bodies re-splits each body it pops and each
+    such call maps that body again — `$(` x d then `)` x d measured 21/43/399 ms
+    at d = 200/800/3200 against 23/50/506 ms here, i.e. this map is about a
+    quarter slower on that shape, its cost being a dict build where the
+    restarted count could stop at the first match. Same order, unfixed either
+    way, tracked as bd gqlc-hv81.
+
+    Dropping a `)` that has nothing open is what makes this identical to the
+    restarted count it replaces — verified exhaustively over every string of
+    `(`, `)` and `x` up to length 12, and over 200k random strings of shell
+    metacharacters.
+    """
+    matches, stack = {}, []
+    for j, c in enumerate(text):
+        if c == "(":
+            stack.append(j)
+        elif c == ")" and stack:
+            matches[stack.pop()] = j
+    return matches
+
+
+def split_substitutions(text):
+    """(text with each closed $( ) and ` ` span blanked, [those spans' bodies]).
+
+    A span whose delimiter never closes is left in the text and contributes no
+    body, so `a $( b` comes back unchanged with nothing extracted (pinned by
+    "a surplus ( leaves the span unclosed and unread"). Blanking a closed span
+    rather than leaving it in place is what stops a nested body being analyzed
+    twice, once on its own and once inside its parent.
+    """
+    kept, bodies = [], []
+    closes = paren_matches(text)
+    i, n = 0, len(text)
+    while i < n:
+        end = None
+        if text[i] == "$" and i + 1 < n and text[i + 1] == "(":
+            end = closes.get(i + 1)
+            if end is not None:
+                bodies.append(text[i + 2 : end])
+        elif text[i] == "`":
+            close = text.find("`", i + 1)
+            if close != -1:
+                bodies.append(text[i + 1 : close])
+                end = close
+        if end is None:
+            kept.append(text[i])
+            i += 1
+            continue
+        kept.append(" ")
+        i = end + 1
+    return "".join(kept), bodies
+
+
 def substitution_bodies(text):
-    bodies = []
-    while True:
-        m = SUBST_RE.search(text)
-        if m is None:
-            break
-        bodies.append(m.group(1))
-        text = text[: m.start()] + " " + text[m.end() :]
-    bodies.extend(m.group(1) for m in BACKTICK_RE.finditer(text))
+    """The closed substitution bodies in text, with nesting flattened.
+
+    A body comes back with its own nested substitutions blanked out and listed
+    as further entries, so the caller hands each span to the analyzer exactly
+    once and a nested one lands at the same recursion depth as one written
+    bare. Terminates because a body is shorter than the text it came out of by
+    at least its two delimiters, so the queue's total length strictly falls.
+    """
+    bodies, queue = [], list(split_substitutions(text)[1])
+    while queue:
+        stripped, inner = split_substitutions(queue.pop(0))
+        bodies.append(stripped)
+        queue.extend(inner)
     return bodies
 
 
@@ -254,11 +479,89 @@ def resolve(base, path):
     return os.path.join(base, path) if base else None
 
 
-def scan_tokens(tokens, cwd, wanted):
+def shorthand_arg(opt, tokens, j):
+    """(long flag name, value, tokens consumed) for a pflag shorthand cluster.
+
+    (None, None, 1) when the token is a long flag, or when no letter in it is
+    one of the value-taking shorthands. pflag walks a cluster left to right and
+    the first letter that takes a value swallows the rest of the token — after
+    one optional `=` — or the next token when the rest is empty. So `-rTEXT`,
+    `-fr TEXT` and `-qr=TEXT` all reach `--reason`, and each of those three
+    spellings verdicted allow-no-reason here before this existed.
+    """
+    if opt.startswith("--"):
+        return None, None, 1
+    for k in range(1, len(opt)):
+        name = BD_SHORTHANDS_WITH_ARG.get(opt[k])
+        if name is None:
+            continue
+        rest = opt[k + 1 :]
+        if rest.startswith("="):
+            return name, rest[1:], 1
+        if rest:
+            return name, rest, 1
+        return name, (tokens[j + 1] if j + 1 < len(tokens) else None), 2
+    return None, None, 1
+
+
+def scan_bd(tokens, i, cwd):
+    """Read one `bd ...` invocation starting at tokens[i].
+
+    Returns (next_index, close_or_None) where close is
+    (effective_dir, saw_reason_flag, reason_text, reason_file).
+    """
+    target, n = cwd, len(tokens)
+    saw_reason, reason, reason_file, is_close = False, None, None, False
+    j = i + 1
+    while j < n:
+        opt = tokens[j]
+        if is_op(opt):
+            break
+        name, val, inline = opt, None, False
+        if opt.startswith("-") and "=" in opt:
+            name, val = opt.split("=", 1)
+            inline = True
+        if name in BD_OPTS_WITH_ARG:
+            if inline:
+                j += 1
+            else:
+                val = tokens[j + 1] if j + 1 < n else None
+                j += 2
+            if name in ("-C", "--directory"):
+                target = resolve(target, val)
+            elif name in ("-r", "--reason"):
+                saw_reason, reason = True, val
+            elif name == "--reason-file":
+                saw_reason, reason_file = True, val
+            continue
+        if opt.startswith("-"):
+            name, val, step = shorthand_arg(opt, tokens, j)
+            if name is not None:
+                j += step
+                if name == "--directory":
+                    target = resolve(target, val)
+                else:
+                    saw_reason, reason = True, val
+                continue
+            j += 1
+            continue
+        if opt in BD_CLOSE_SUBCOMMANDS:
+            is_close = True
+        j += 1
+    close = (target, saw_reason, reason, reason_file) if is_close else None
+    return j + 1, close
+
+
+def scan_tokens(tokens, cwd, wanted, closes=None):
     targets = []
     i, n = 0, len(tokens)
     while i < n:
         tok = tokens[i]
+        if tok == "bd" or tok.endswith("/bd"):
+            i, close = scan_bd(tokens, i, cwd)
+            if close is not None and closes is not None:
+                closes.append(close)
+            continue
         if tok in ("cd", "pushd"):
             arg = tokens[i + 1] if i + 1 < n else None
             cwd = None if (arg is None or arg.startswith("-")) else resolve(cwd, arg)
@@ -296,26 +599,28 @@ def scan_tokens(tokens, cwd, wanted):
     return targets
 
 
-def git_targets(text, cwd, wanted, depth=0):
+def git_targets(text, cwd, wanted, depth=0, closes=None):
     # -> [(subcommand, effective directory)], need_fallback
     if depth > 3:
         return [], False
     text, expanded = strip_heredocs(text)
     targets, need_fallback = [], False
     # The unquoted heredoc body contributes its substitutions and nothing else:
-    # what SUBST_RE and BACKTICK_RE match there is analyzed, the prose around
-    # them is not, and the body text itself is never handed to the shlex call
-    # below — what the extractors pulled out of it is, one recursion down.
+    # what substitution_bodies() extracts there is analyzed, the prose around
+    # it is not, and the body text itself is never handed to the shlex call
+    # below — what the extractor pulled out of it is, one recursion down.
     # Whether a matched substitution would in fact have run is not asked here —
     # an escaped one would not, and is analyzed anyway (header, under biases).
     # Same recursion level as a substitution written bare,
     # so the depth cap above sees no extra hop (measured: an unquoted heredoc
     # holding $(git commit) is found at depth 1, exactly where a bare
-    # $(git commit) is found).
+    # $(git commit) is found). substitution_bodies() flattens nesting for the
+    # same reason, so the cap counts heredoc and substitution hops rather than
+    # how deeply the writer nested their parens.
     bodies = substitution_bodies(text)
     bodies.extend(substitution_bodies(expanded))
     for body in bodies:
-        sub_targets, sub_fallback = git_targets(body, cwd, wanted, depth + 1)
+        sub_targets, sub_fallback = git_targets(body, cwd, wanted, depth + 1, closes)
         targets.extend(sub_targets)
         need_fallback = need_fallback or sub_fallback
     try:
@@ -324,7 +629,7 @@ def git_targets(text, cwd, wanted, depth=0):
         tokens = list(lex)
     except ValueError:
         return targets, True
-    targets.extend(scan_tokens(tokens, cwd, wanted))
+    targets.extend(scan_tokens(tokens, cwd, wanted, closes))
     return targets, need_fallback
 
 
@@ -467,6 +772,169 @@ def emit(payload):
     print(json.dumps(payload))
 
 
+def git_env():
+    # Repo-discovery env (set e.g. inside git hooks) would override -C and
+    # resolve the wrong repo; strip it so the target directory is authoritative.
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def object_types(directory, shas):
+    """Map each sha to its git object type, "" when absent.
+
+    Returns None when git could not answer at all — a state kept distinct from
+    "absent" so an unrunnable probe is never read as evidence of anything.
+    `git cat-file --batch-check` emits exactly one line per input line, in
+    order, and exits 0 even when every object is missing; the mapping is
+    therefore positional, because a found object's line carries the FULL oid
+    rather than the abbreviation that was asked for.
+    """
+    if not directory or not os.path.isdir(directory):
+        return None
+    revs = [s for s in shas if s]  # never hand git an empty rev
+    if not revs:
+        return None
+    try:
+        proc = subprocess.run(
+            ("git", "-C", directory, "cat-file", "--batch-check"),
+            input="".join(s + "\n" for s in revs),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=git_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = proc.stdout.splitlines()
+    if proc.returncode != 0 or len(lines) != len(revs):
+        return None
+    types = {}
+    for rev, line in zip(revs, lines):
+        fields = line.split()
+        types[rev] = fields[1] if len(fields) >= 2 and fields[1] != "missing" else ""
+    return types
+
+
+def remote_refs_containing(directory, sha):
+    """(ok, refs) for `git branch -r --contains <sha>`.
+
+    ok is False when the probe could not answer, which is NOT the same value as
+    an empty ref list.
+
+    The `not sha` clause is defence in depth, not a live guard: removing it is
+    behaviour-preserving here, because the argv is a list and git answers an
+    empty rev with `error: malformed object name` and rc 129, which this reads
+    as "could not tell" anyway. It is here because that is only true of a list
+    argv. `git branch -r --contains $SHA` in a shell, with SHA unset, passes NO
+    argument, and git then defaults to HEAD and prints the remote refs
+    containing it — measured — so the same probe rewritten as a shell string
+    would report the unpushed close this hook exists to refuse as reachable.
+    """
+    if not sha or not directory or not os.path.isdir(directory):
+        return False, []
+    try:
+        proc = subprocess.run(
+            ("git", "-C", directory, "branch", "-r", "--contains", sha),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=git_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False, []
+    if proc.returncode != 0:
+        return False, []
+    return True, [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+
+
+def reason_text(close):
+    """(text, unreadable_explanation). Exactly one of the two is None."""
+    _, _, reason, reason_file = close
+    if reason_file is not None:
+        if reason_file == "-" or UNEXPANDED_RE.search(reason_file):
+            return None, "the reason is read from stdin or a path this hook cannot resolve"
+        try:
+            with open(reason_file, encoding="utf-8", errors="replace") as handle:
+                return handle.read(), None
+        except OSError as exc:
+            return None, "--reason-file %s could not be read (%s)" % (reason_file, exc.strerror)
+    if reason is None:
+        return None, "the reason flag carries no value on this command line"
+    if UNEXPANDED_RE.search(reason):
+        return None, "the reason is built by the shell, so its text is not visible here"
+    return reason, None
+
+
+def close_verdict(close):
+    """(verdict_name, deny_message_or_None) for one `bd close` invocation.
+
+    Every outcome is a named verdict — including the three that allow
+    (allow-no-reason, allow-no-sha, allow-reachable) — so a reason that cites
+    nothing is a decision on the record rather than a branch nobody took.
+    """
+    directory, saw_reason, _, _ = close
+    if not saw_reason:
+        return "allow-no-reason", None
+    text, unreadable = reason_text(close)
+    if text is None:
+        return "deny-unreadable-reason", (
+            "`bd close` was given a reason this hook cannot read, so it cannot check "
+            "whether that reason cites an unpushed commit: %s. Pass the reason as a "
+            "literal -r/--reason string, or as a --reason-file with a literal path."
+            % unreadable
+        )
+    anchored = set(CITED_SHA_RE.findall(text))
+    loose = set(SHA_RE.findall(text)) - anchored
+    if not anchored and not loose:
+        return "allow-no-sha", None
+    unverifiable = (
+        "`bd close` cites commit sha(s) %s, and this hook could not %%s, so it cannot "
+        "check whether any remote ref contains them. Run the close from a literal "
+        "directory, or pass `bd -C <literal path>`." % ", ".join(sorted(anchored))
+    )
+    # When the repo cannot be reached, an ANCHORED sha is still a citation and is
+    # refused; a loose hex token is not, because promoting one to a citation is
+    # exactly the question that needed the repo. Denying on loose tokens alone
+    # would refuse `-r "the docs were defaced"` from a directory this hook
+    # cannot resolve, which is prose, not a close against unpushed work.
+    if not directory or not os.path.isdir(directory):
+        if not anchored:
+            return "allow-no-sha", None
+        return "deny-unverifiable-repo", unverifiable % "resolve the repository the command runs in"
+    types = object_types(directory, sorted(anchored | loose))
+    if types is None:
+        if not anchored:
+            return "allow-no-sha", None
+        return "deny-unverifiable-repo", unverifiable % "get an answer from `git cat-file --batch-check`"
+    # A loose token becomes a citation only once git says it names a commit here.
+    citations = sorted(anchored | {s for s in loose if types.get(s) == "commit"})
+    if not citations:
+        return "allow-no-sha", None
+    for sha in citations:
+        if types.get(sha, "") != "commit":
+            return "deny-absent-object", (
+                "`bd close` cites %s, which names no commit in %s (`git cat-file -t %s` "
+                "finds nothing there). A close cannot record work against a commit this "
+                "repository has never seen." % (sha, directory, sha)
+            )
+        ok, refs = remote_refs_containing(directory, sha)
+        if not ok:
+            return "deny-unverifiable-repo", (
+                "`bd close` cites %s and `git branch -r --contains %s` in %s gave no "
+                "answer, so reachability could not be checked." % (sha, sha, directory)
+            )
+        if not refs:
+            return "deny-unpushed-sha", (
+                "`bd close` cites %s, which no remote-tracking ref contains: "
+                "`git branch -r --contains %s` in %s printed nothing (the ref set "
+                "checked is refs/remotes only — local branches and remote tags do not "
+                "count). That commit lives only in this checkout, so a rebase discards "
+                "it while the close stands, recording work that never landed "
+                "(bd gqlc-90vt). Push the branch, then close citing a sha a remote ref "
+                "contains." % (sha, sha, directory)
+            )
+    return "allow-reachable", None
+
+
 def deny(reason):
     print("ERROR: %s" % reason, file=sys.stderr)
     emit(
@@ -502,7 +970,8 @@ def main():
     if not isinstance(command, str) or not command.strip():
         return
     cwd = os.getcwd()
-    targets, need_fallback = git_targets(command, cwd, HOOK_GATED)
+    closes = []
+    targets, need_fallback = git_targets(command, cwd, HOOK_GATED, closes=closes)
     if need_fallback and FALLBACK_RE.search(command):
         targets.append(("commit", cwd))
     for sub, directory in targets:
@@ -514,6 +983,28 @@ def main():
                 "Direct commits to %s are blocked (target: %s). "
                 "Create a feature branch with: git switch -c <branch>" % (branch, directory)
             )
+            return
+
+    for close in closes:
+        # An exception escaping this loop reaches __main__, which WARNS and
+        # allows — deliberate there, so a bug in this hook cannot block its own
+        # repair. For a close that is the defect itself: the command runs, the
+        # ledger records work that may never have landed, and the warning
+        # arrives after the damage. Caught here and turned into a refusal
+        # instead, which is the one arm where "could not check" must not mean
+        # "let it through". An exception thrown EARLIER, while tokenizing,
+        # still fails open: that is the master guard's pre-existing bias and
+        # changing it would change that guard's contract, not this one's.
+        try:
+            _, message = close_verdict(close)
+        except Exception as exc:  # noqa: BLE001 - deliberate: an exception denies
+            message = (
+                "`bd close` could not be checked for an unpushed sha citation (%s: %s), "
+                "so it is refused rather than allowed through unverified (bd gqlc-90vt)."
+                % (type(exc).__name__, exc)
+            )
+        if message is not None:
+            deny(message)
             return
 
     # A dead hook tree is repo state, not a property of this command, so the
