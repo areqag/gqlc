@@ -423,9 +423,10 @@ else
 fi
 
 # --- the concurrency cap, and the judge's exemption from it (gqlc-dz85) ------
-# Միհր is the town's sole merge gate. Counting him against max_active schedules
-# him 1-in-12 against the eight warriors generating the very PRs he must clear,
-# so work enters faster than it can leave and the backlog can only grow. Worse,
+# The bench is the town's merge gate. Counting judges against max_active
+# schedules them against the eight warriors generating the very PRs they must
+# clear, so work enters faster than it can leave and the backlog can only
+# grow — 1-in-12 when the roster held one judge. Worse,
 # the cap check is an early return that fires BEFORE the queue is sorted, so at
 # a full cap a P0 judge bead is not outranked — it is never considered at all.
 #
@@ -581,12 +582,12 @@ else
 fi
 
 # Exempt from the cap is not exempt from being busy. Waking a judge who is
-# already mid-review would interrupt him and, with more than one judge seat,
-# would be the thing that actually uncaps the town.
+# already mid-review would interrupt him, so with every judge seat awake the
+# ready review waits rather than landing on an occupied bench.
 dispatch_case '[
   {"id":"gqlc-jbusy","priority":0,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
-fill_cap aramazd vahagn astghik ar nvard mihr
+fill_cap aramazd vahagn astghik ar nvard mihr anahit
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "an awake judge is not woken again" "rc=$RC out=$OUT"
@@ -594,6 +595,25 @@ elif [ -n "$(woken_seats)" ]; then
     bad "an awake judge is not woken again" "it woke: $(woken_seats) out=$OUT"
 else
     ok "a judge who is already awake is not woken again for ready judge work"
+fi
+
+# The whole point of a second judge: one busy judge no longer stalls the
+# review queue at a full cap. Guards the roster, not just the routing — with
+# `anahit` dropped from [seats] this wakes nobody and the bench serialises
+# again.
+dispatch_case '[
+  {"id":"gqlc-jfree","priority":0,"assignee":null,"labels":["class:judge"]}
+]' '[]'
+fill_cap aramazd vahagn astghik ar nvard mihr
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a busy judge does not stall the review queue" "rc=$RC out=$OUT"
+elif ! wake_of anahit | grep -q 'gqlc-jfree'; then
+    bad "a busy judge does not stall the review queue" "expected anahit, woke: $(woken_seats) out=$OUT"
+elif woken_seats | grep -qw mihr; then
+    bad "a busy judge does not stall the review queue" "it also woke the busy judge: $(woken_seats) out=$OUT"
+else
+    ok "with one judge awake and one free, ready review work routes to the free judge at a full cap"
 fi
 
 # Fail-closed, the half that made this invisible for the kingdom's whole life:
