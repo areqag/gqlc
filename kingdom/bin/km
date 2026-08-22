@@ -425,9 +425,16 @@ cmd_dispatch() {
 
     # Resume pass: a seat with in-progress beads gets its own work back first
     # (Constitution III.3) before any fresh bead is routed anywhere.
+    #
+    # Both queries below are fail-closed. A query that FAILS is not a queue with
+    # nothing in it: swallowing the status with `|| x=""` is what let a total
+    # routing failure print "done (0 wake(s) this run)" and exit 0 for the whole
+    # life of the kingdom, with no seat ever woken and nothing to see (gqlc-z1qw).
     local inprog
-    inprog=$(bd list --status in_progress --json 2>/dev/null |
-        jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"' | sort) || inprog=""
+    if ! inprog=$(bd list --status in_progress --json 2>/dev/null |
+        jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"' | sort); then
+        die "dispatch: the in-progress query failed; nothing routed this run"
+    fi
     for s in $(worker_seats); do
         [ "$slots" -gt 0 ] || break
         [ "$(seat_status "$s")" = asleep ] || continue
@@ -443,15 +450,21 @@ cmd_dispatch() {
     # Fresh pass: ready, unassigned, class-labelled beads, priority first.
     [ "$slots" -gt 0 ] || return 0
     local routed id cls seat
-    routed=$(bd ready --json 2>/dev/null | jq -r '
+    # `. as $c` binds the class name before the pipe, and must stay bound: inside
+    # `map(...)` the pipe in `($b.labels // []) | index(...)` rebinds `.` to the
+    # labels array, so a bare `"class:" + .` is string + array — a type error that
+    # aborts the whole program on any unassigned bead, labelled or not.
+    if ! routed=$(bd ready --json 2>/dev/null | jq -r '
         [ .[]
           | select(.assignee == null)
           | . as $b
           | (["architect", "warrior", "judge"]
-             | map(select(($b.labels // []) | index("class:" + .))))[0] as $cls
+             | map(. as $c | select(($b.labels // []) | index("class:" + $c))))[0] as $cls
           | select($cls != null)
           | {id, priority, cls: $cls}
-        ] | sort_by(.priority) | .[] | "\(.id) \(.cls)"') || routed=""
+        ] | sort_by(.priority) | .[] | "\(.id) \(.cls)"'); then
+        die "dispatch: the ready-queue query failed; nothing routed this run"
+    fi
     while IFS=' ' read -r id cls; do
         [ -n "$id" ] || continue
         [ "$slots" -gt 0 ] || break
