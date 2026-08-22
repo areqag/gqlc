@@ -2,7 +2,7 @@
 # recipe self-heals: it verifies the pinned version in .bin/ and reinstalls on
 # mismatch, so a version bump here is a one-line change and nobody ever
 # installs or upgrades the linter by hand.
-golangci_version := "v2.12.2"
+golangci_version := "v2.13.1"
 golangci := justfile_directory() + "/.bin/golangci-lint"
 # Per-worktree cache. golangci-lint caches analyzer facts and per-package issue
 # records keyed on module path + relative file path + content hash — the absolute
@@ -667,8 +667,8 @@ sweep-discovery-probes:
     done
 
 # full static analysis: golangci-lint over the Go tree (.golangci.yml) and
-# shellcheck over the hooks tree, as linters + formatter diffs as issues
-lint: ensure-golangci lint-hooks check-golangci-build-tags
+# shellcheck over the hooks + kingdom trees, as linters + formatter diffs as issues
+lint: ensure-golangci lint-hooks (lint-hooks "kingdom/bin") check-golangci-build-tags
     {{golangci}} run
 
 # Guard: the golangci-lint analysis cache must be non-empty after lint.
@@ -714,6 +714,7 @@ test-hooks:
     bash .githooks/tests/lint-hooks-test.sh
     bash .githooks/tests/check-pr-closes-test.sh
     bash .githooks/tests/tool-gate-test.sh
+    bash .githooks/tests/km-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
@@ -2128,3 +2129,41 @@ iso-drift-check:
         echo "ok: both artefacts match their pinned checksums"
     fi
     exit "$fail"
+
+# ---------- Թագաւորութիւն — the software factory (kingdom/README.md) ----------
+
+# status of the Թագաւորութիւն: seats, beads, mail, cap
+kingdom:
+    kingdom/bin/km status
+
+# Հեռաձայն to Սեդրակ: wake him if needed and attach to his window
+herratsayn:
+    kingdom/bin/km herratsayn
+
+# attach to any seat's window
+kingdom-attach seat:
+    kingdom/bin/km attach {{seat}}
+
+# create state dir, seat worktrees, tmux session, and runners (all asleep)
+kingdom-up:
+    kingdom/bin/km up
+
+# graceful stop: notice by mail, then kill the tmux session
+kingdom-down:
+    kingdom/bin/km down
+
+# check deps, install+enable the systemd user timers, point bd mail at km
+kingdom-install:
+    kingdom/bin/km doctor
+    kingdom/bin/km install-units
+
+# raise the halt flag: the dispatcher wakes nobody until kingdom-resume
+kingdom-halt reason="":
+    kingdom/bin/km halt {{reason}}
+
+kingdom-resume:
+    kingdom/bin/km resume
+
+# health checks for the kingdom machinery
+kingdom-doctor:
+    kingdom/bin/km doctor

@@ -1,0 +1,11 @@
+# Rendered by `km install-units`: @TOKENS@ come from kingdom.toml + git.
+[Unit]
+Description=Kingdom dispatcher cadence
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=@DISPATCH_MIN@min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

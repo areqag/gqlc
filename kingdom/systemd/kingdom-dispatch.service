@@ -1,0 +1,8 @@
+# Rendered by `km install-units`: @TOKENS@ come from kingdom.toml + git.
+[Unit]
+Description=Kingdom dispatcher — route ready beads to free seats
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+ExecStart=@REPO@/kingdom/bin/km dispatch
