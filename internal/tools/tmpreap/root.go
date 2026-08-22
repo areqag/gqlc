@@ -53,18 +53,31 @@ func refuseNonScratchRoot(root string) error {
 		"files (%s), so it is not scratch; re-run without -apply to see the plan", root, where)
 }
 
-// scratchDirs is where this host puts temporary files. os.TempDir is $TMPDIR
-// when set and /tmp otherwise; /tmp and /var/tmp are listed unconditionally
-// because a TMPDIR pointing elsewhere does not stop /tmp being scratch, and
-// -root defaults to /tmp.
+// scratchCandidates is where this host puts temporary files. It is a package
+// variable so the suite can point the guard at a fixture; nothing reads it from
+// the environment, and that is the point.
 //
-// Every candidate is resolved, because run resolves -root before comparing and
-// an unresolved candidate would never match on a host whose /tmp is a symlink.
-// A candidate that does not resolve is dropped rather than compared literally:
-// the failure direction of this whole function is refusal.
-func scratchDirs() []string {
+// os.TempDir() — i.e. $TMPDIR — used to head this list, and an environment
+// variable on the accept list is an authorisation to delete that any caller can
+// set. TMPDIR="${BASE}/" with BASE unset resolves to "/", an ancestor of every
+// path, and the whole guard evaporated (verdict-osuz-r2, blocking 3). Validating
+// the value instead was the other option offered and it is the weaker one: it
+// closes "/" and leaves TMPDIR=/srv licensing /srv/data. What is lost by
+// dropping it is -apply on a host whose scratch is neither /tmp nor /var/tmp,
+// which is a refusal — the direction this guard fails in everywhere else — and
+// no recipe in this repo passes such a root.
+var scratchCandidates = []string{"/tmp", "/var/tmp"}
+
+func scratchDirs() []string { return resolveScratch(scratchCandidates) }
+
+// resolveScratch resolves and deduplicates the candidates. run resolves -root
+// before comparing, so an unresolved candidate would never match on a host whose
+// /tmp is a symlink. A candidate that does not resolve is dropped rather than
+// compared literally: the failure direction of this function is refusal, and
+// there is now no input to it that fails the other way.
+func resolveScratch(candidates []string) []string {
 	var out []string
-	for _, dir := range []string{os.TempDir(), "/tmp", "/var/tmp"} {
+	for _, dir := range candidates {
 		resolved, err := filepath.EvalSymlinks(dir)
 		if err != nil {
 			continue

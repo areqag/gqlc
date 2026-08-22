@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -16,17 +18,18 @@ const fixtureHome = "/home/fixture-nobody"
 // test proposed for this would have ACCEPTED on the machine it was proposed
 // for: both are their own mounts (dev 64770 and 26 against / at 64769).
 func TestRefuseNonScratchRoot(t *testing.T) {
-	tmp := t.TempDir()
 	t.Setenv("HOME", fixtureHome)
-	t.Setenv("TMPDIR", tmp)
+	// Hostile, and inert: the accept list is two literals and no longer reads
+	// this. Set here so the table would redden if the environment ever regained
+	// a say in it — with TMPDIR on the list, "/" accepted every REFUSE row below
+	// except the home ones.
+	t.Setenv("TMPDIR", "/")
 
 	for _, tc := range []struct {
 		name   string
 		root   string
 		refuse bool
 	}{
-		{"the designated temporary directory", tmp, false},
-		{"below the designated temporary directory", filepath.Join(tmp, "agent", "scratch"), false},
 		{"/tmp, whatever TMPDIR says", "/tmp", false},
 		{"below /tmp", "/tmp/factory", false},
 		{"/var/tmp", "/var/tmp", false},
@@ -47,6 +50,31 @@ func TestRefuseNonScratchRoot(t *testing.T) {
 			}
 			if !tc.refuse && err != nil {
 				t.Errorf("-apply was refused over the scratch directory %s: %v", tc.root, err)
+			}
+		})
+	}
+}
+
+// $TMPDIR is not an authorisation to delete. The guard was built against a
+// one-typo accident (`just tmp-reap apply ~`), and while os.TempDir() was on the
+// accept list a one-unset-variable accident walked through it: TMPDIR="${BASE}/"
+// with BASE unset is "/", which is an ancestor of every path, so every root off
+// the home chain became scratch — including /dev/shm, which row 11 of the table
+// above says must be refused (verdict-osuz-r2, blocking 3).
+//
+// The rows are directories that resolve on any host, because an unresolvable
+// candidate is dropped and would witness nothing.
+func TestRefuseNonScratchRoot_TheEnvironmentCannotWidenTheScratchList(t *testing.T) {
+	t.Setenv("HOME", fixtureHome)
+	for _, tc := range []struct{ tmpdir, root string }{
+		{"/", "/srv/data"},
+		{"/", "/dev/shm"},
+		{"/usr", "/usr/local/lib"},
+	} {
+		t.Run(tc.tmpdir+" -> "+tc.root, func(t *testing.T) {
+			t.Setenv("TMPDIR", tc.tmpdir)
+			if err := refuseNonScratchRoot(tc.root); err == nil {
+				t.Errorf("-apply was allowed over %s because TMPDIR said %s", tc.root, tc.tmpdir)
 			}
 		})
 	}
@@ -86,6 +114,53 @@ func TestRefuseNonScratchRoot_AHomeInsideScratchProtectsTheScratchRoot(t *testin
 	}
 	if !strings.Contains(err.Error(), "home directory") {
 		t.Errorf("the refusal cites the wrong clause: %v", err)
+	}
+}
+
+// The home clause compares a RESOLVED home, and the direction that matters is
+// over-permission: $HOME is very often a symlink (/home/u -> /data/u on this
+// kind of host), and comparing the unresolved spelling against a -root that run
+// has already resolved makes the clause miss its own case. Nothing reddened when
+// the EvalSymlinks was deleted (verdict-osuz-r2, survivor R14).
+func TestRefuseNonScratchRoot_ASymlinkedHomeIsResolvedBeforeComparing(t *testing.T) {
+	base := t.TempDir()
+	useScratchRoot(t, base)
+	target := mkdir(t, filepath.Join(base, "real-home"))
+	link := filepath.Join(base, "link-home")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", link)
+
+	// The scratch clause would accept this root, so the home clause is the only
+	// thing that can refuse it — which is what makes the row a witness.
+	err := refuseNonScratchRoot(filepath.Join(target, "Downloads"))
+	if err == nil {
+		t.Fatal("-apply was allowed inside the home directory reached by its real path")
+	}
+	if !strings.Contains(err.Error(), "home directory") {
+		t.Errorf("the refusal cites the wrong clause: %v", err)
+	}
+}
+
+// A candidate that does not resolve is dropped, not compared literally. The
+// literal would match a -root that run has resolved only by accident, and the
+// accident is in the accepting direction (verdict-osuz-r2, survivor R8).
+func TestResolveScratch_DropsWhatDoesNotResolveAndDeduplicates(t *testing.T) {
+	base := t.TempDir()
+	target := mkdir(t, filepath.Join(base, "real"))
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	absent := filepath.Join(base, "absent")
+
+	got := resolveScratch([]string{absent, link, target})
+	if slices.Contains(got, absent) {
+		t.Errorf("a candidate that does not exist is in the accept list %v, so -apply would compare against a path nothing resolves to", got)
+	}
+	if !slices.Equal(got, []string{target}) {
+		t.Errorf("resolveScratch = %v, want just the resolved directory once", got)
 	}
 }
 

@@ -21,12 +21,17 @@
 //	tmpreap [-root DIR] [-repo DIR] -apply
 //
 // Nothing is deleted without -apply. -apply archives every text artefact under
-// -archive-max-file to a tarball outside the scan root first, and names on
-// stdout everything it could not archive — those files are unrecoverable once
-// the deletion runs, so a run that does not say so is a run that lied.
+// -archive-max-file to a tarball outside the scan root first, then reports what
+// it could not archive: every dropped file is counted, in a category that says
+// why, and the first pathsListed of each category are named with the remainder
+// disclosed as a count. Those files are unrecoverable once the deletion runs, so
+// a run that does not say so is a run that lied. One thing goes unreported, and
+// only because there is nothing left to delete by then: a file that vanished
+// between the walk and the read.
 //
-// -apply additionally refuses any -root that is not a directory this host
-// designates for temporary files, and any root on the same path chain as the
+// -apply additionally refuses any -root that is not one of the two directories
+// compiled in as scratch (/tmp and /var/tmp — the environment does not get a
+// vote, see scratchCandidates), and any root on the same path chain as the
 // user's home directory. -root is a positional argument of `just tmp-reap`, and
 // the decision table happily REAPs Downloads and Pictures.
 package main
@@ -319,28 +324,42 @@ func apply(ctx context.Context, o options, root string, entries []entry, pr *pri
 // anywhere, and an archive that is silently partial is worse than no archive:
 // it is the one a reader believes.
 //
+// Every category prints the same three things — a count of all of them, their
+// total size, and the first pathsListed of them by name followed by how many
+// were not named. The header is printed by the first non-empty category rather
+// than by a test over all of them, so a category cannot be present without it
+// and it cannot appear over nothing: a warning printed on every clean run is one
+// nobody reads on the run that matters.
+//
 // Disclosure and not refusal, unlike the aggregate truncation above. One stray
 // oversize log would otherwise block every reclamation, and the moment anyone
 // runs this is the moment the filesystem is already full — a gate that fires
 // exactly then is a gate that gets bypassed with -archive-max-file 1e18.
 func reportUnarchived(pr *printer, stats archiveStats, lim archiveLimits) {
-	if stats.large+stats.binary == 0 {
-		return
-	}
-	pr.printf("NOT archived, and therefore unrecoverable once deleted:\n")
-	if stats.large > 0 {
-		pr.printf("  %d text file(s), %s, over -archive-max-file (%s) — raise it and re-run to keep these\n",
-			stats.large, humanBytes(stats.largeBytes), humanBytes(lim.maxFileBytes))
-		for _, p := range stats.largePaths {
+	headed := false
+	for _, cat := range []struct {
+		d    drop
+		noun string
+		why  string
+	}{
+		{stats.large, "text file(s)", fmt.Sprintf(", over -archive-max-file (%s) — raise it and re-run to keep these", humanBytes(lim.maxFileBytes))},
+		{stats.binary, "binary file(s)", " — this archive takes text only, by design"},
+		{stats.unreadable, "unreadable file(s)", " — present but unreadable, which is a permission or I/O failure and not a file that vanished; the deletion takes them anyway"},
+	} {
+		if cat.d.files == 0 {
+			continue
+		}
+		if !headed {
+			pr.printf("NOT archived, and therefore unrecoverable once deleted:\n")
+			headed = true
+		}
+		pr.printf("  %d %s, %s%s\n", cat.d.files, cat.noun, humanBytes(cat.d.bytes), cat.why)
+		for _, p := range cat.d.paths {
 			pr.printf("      %s\n", p)
 		}
-		if more := stats.large - len(stats.largePaths); more > 0 {
+		if more := cat.d.files - len(cat.d.paths); more > 0 {
 			pr.printf("      ... and %d more\n", more)
 		}
-	}
-	if stats.binary > 0 {
-		pr.printf("  %d binary file(s), %s — this archive takes text only, by design\n",
-			stats.binary, humanBytes(stats.binaryBytes))
 	}
 }
 

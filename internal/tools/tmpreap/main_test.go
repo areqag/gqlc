@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,11 +22,11 @@ func scratchWorld(t *testing.T) (root, repo, archive string) {
 	// -apply is refused outside a designated temporary directory and inside the
 	// home directory (refuseNonScratchRoot), and t.TempDir() answers neither
 	// question the same way twice: `just test` sets GOTMPDIR to .bin/gotmp
-	// inside the repository, which puts every fixture under $HOME and under no
-	// TMPDIR, while a bare `go test` puts it under /tmp. Declaring both here
-	// makes the apply fixtures deterministic under either, and stops these tests
-	// depending on the developer's real home directory.
-	t.Setenv("TMPDIR", base)
+	// inside the repository, which puts every fixture under $HOME and outside
+	// every scratch directory, while a bare `go test` puts it under /tmp.
+	// Declaring both here makes the apply fixtures deterministic under either,
+	// and stops these tests depending on the developer's real home directory.
+	useScratchRoot(t, base)
 	t.Setenv("HOME", mkdir(t, filepath.Join(base, "home")))
 	repo = newRepo(t, filepath.Join(base, "repo"))
 	root = mkdir(t, filepath.Join(base, "scratch"))
@@ -256,8 +257,17 @@ func TestRun_ApplyNamesWhatItCouldNotArchive(t *testing.T) {
 	if !strings.Contains(out, "1 text file(s)") || !strings.Contains(out, "over -archive-max-file") {
 		t.Errorf("the oversize text file is not counted as one:\n%s", out)
 	}
+	binary := filepath.Join(root, "factory", "cache.o")
 	if !strings.Contains(out, "1 binary file(s)") {
 		t.Errorf("the binary file that was deleted without a copy is not counted:\n%s", out)
+	}
+	// A count says a build artefact went; only a path says whether it was a
+	// build artefact. The head heuristic reads 8 KiB, so a transcript with one
+	// stray NUL in it is reported as binary "by design" — and while binary drops
+	// carried no paths, nobody could tell that from the report (verdict-osuz-r2,
+	// blocking 2).
+	if !strings.Contains(out, binary) {
+		t.Errorf("the binary file %s is counted but not named, so the operator cannot tell what went:\n%s", binary, out)
 	}
 	// The premise: it really was deleted, and really is not in the tarball.
 	if _, statErr := os.Stat(oversize); !os.IsNotExist(statErr) {
@@ -267,6 +277,113 @@ func TestRun_ApplyNamesWhatItCouldNotArchive(t *testing.T) {
 		return strings.HasSuffix(n, "agent.log") || strings.HasSuffix(n, "cache.o")
 	}) {
 		t.Errorf("the fixture never exercised the case — the archive holds %v", names)
+	}
+}
+
+// A file that cannot be READ is deleted all the same: os.RemoveAll needs write
+// permission on the directory, not read permission on the file. Through round 2
+// such a file was archived by nothing, counted by nothing and named by nothing —
+// the third drop category, and the one the branch was REVISEd for in its first
+// two forms (verdict-osuz-r2, blocking 1).
+//
+// EACCES is not the racy case the code's comment claimed it was. Another uid's
+// file inside a directory this uid owns is the ordinary state of a shared /tmp.
+func TestRun_ApplyNamesTheFilesItCouldNotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a 0000 file, so the fixture cannot construct the case")
+	}
+	root, repo, archive := scratchWorld(t)
+	unreadable := filepath.Join(root, "factory", "logs", "handoff.md")
+	writeFile(t, unreadable, "notes nobody will ever see again\n")
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	ageTree(t, filepath.Join(root, "factory"), time.Now().Add(-72*time.Hour))
+
+	out, err := runTool(t,
+		"-root", root, "-repo", repo, "-base", "master", "-age", "12h",
+		"-archive", archive, "-apply")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(out, unreadable) {
+		t.Errorf("%s was deleted with no copy, no count and no name:\n%s", unreadable, out)
+	}
+	if !strings.Contains(out, "unrecoverable") {
+		t.Errorf("the unreadable file is not reported under the unrecoverable heading:\n%s", out)
+	}
+	// The premise: it really was deleted, and really is not in the tarball.
+	if _, statErr := os.Stat(unreadable); !os.IsNotExist(statErr) {
+		t.Errorf("the fixture never exercised the case — %s survived (err=%v)", unreadable, statErr)
+	}
+	if names := archiveNames(t, archive); slices.ContainsFunc(names, func(n string) bool {
+		return strings.HasSuffix(n, "handoff.md")
+	}) {
+		t.Errorf("the fixture never exercised the case — the archive holds %v", names)
+	}
+}
+
+// The mirror of the row above, and the reason the report cannot simply count
+// every failure: a file that vanished between the walk and the read is not a
+// loss, because there is nothing left to delete. Reporting it would put a
+// permanent scary line on a run that lost nothing, and a warning printed on
+// every clean run is one nobody reads on the run that matters.
+func TestRun_ApplyIsSilentAboutAFileThatVanished(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+	ageTree(t, filepath.Join(root, "factory"), time.Now().Add(-72*time.Hour))
+
+	out, err := runTool(t,
+		"-root", root, "-repo", repo, "-base", "master", "-age", "12h",
+		"-archive", archive, "-apply")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if strings.Contains(out, "NOT archived") {
+		t.Errorf("a reap that lost nothing printed the unrecoverable heading anyway:\n%s", out)
+	}
+}
+
+// The report is the whole promise: these files are gone the moment the next
+// loop runs. Three properties, one per surviving mutation of round 2 — the count
+// is of ALL of them and not of the named ones, the cap on the names discloses
+// its own remainder (M10), and a category with nothing in it prints no line and
+// no heading (M8, M9).
+func TestReportUnarchived_CountsInFullNamesToTheCapAndDisclosesTheRest(t *testing.T) {
+	large := drop{files: pathsListed + 3, bytes: 900}
+	for i := range pathsListed {
+		large.paths = append(large.paths, fmt.Sprintf("/tmp/agent/run%d.log", i))
+	}
+	var out bytes.Buffer
+	reportUnarchived(&printer{w: &out},
+		archiveStats{large: large, unreadable: drop{files: 1, bytes: 7, paths: []string{"/tmp/agent/handoff.md"}}},
+		archiveLimits{maxFileBytes: 1024, maxTotalBytes: 1 << 20})
+	got := out.String()
+
+	for _, want := range []string{
+		"NOT archived",
+		fmt.Sprintf("%d text file(s)", pathsListed+3),
+		"/tmp/agent/run0.log",
+		fmt.Sprintf("/tmp/agent/run%d.log", pathsListed-1),
+		"... and 3 more",
+		"1 unreadable file(s)",
+		"/tmp/agent/handoff.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the report does not say %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "binary") {
+		t.Errorf("a category with nothing in it printed a line, so a clean reap carries a warning nobody will read:\n%s", got)
+	}
+}
+
+// The heading belongs to the categories, not to the run. A reap that lost
+// nothing must print neither.
+func TestReportUnarchived_SaysNothingWhenNothingWasDropped(t *testing.T) {
+	var out bytes.Buffer
+	reportUnarchived(&printer{w: &out}, archiveStats{files: 3, bytes: 99}, archiveLimits{maxFileBytes: 1024, maxTotalBytes: 1 << 20})
+	if out.Len() != 0 {
+		t.Errorf("a reap that archived everything still warned about unrecoverable files:\n%s", out.String())
 	}
 }
 

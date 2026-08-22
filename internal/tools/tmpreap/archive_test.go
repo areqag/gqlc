@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -72,8 +73,8 @@ func TestArchiveEntries_TakesTextAndSkipsBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archiveEntries: %v", err)
 	}
-	if stats.binary != 1 {
-		t.Errorf("binary = %d, want 1", stats.binary)
+	if stats.binary.files != 1 {
+		t.Errorf("binary = %d, want 1", stats.binary.files)
 	}
 	got := archiveNames(t, dest)
 	want := []string{"factory/nested/notes.md", "factory/run.log"}
@@ -129,8 +130,8 @@ func TestArchiveEntries_OversizeFileSkippedNotTruncating(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archiveEntries: %v", err)
 	}
-	if stats.large != 1 {
-		t.Errorf("large = %d, want 1", stats.large)
+	if stats.large.files != 1 {
+		t.Errorf("large = %d, want 1", stats.large.files)
 	}
 	if stats.truncated {
 		t.Error("one oversize file truncated the whole archive")
@@ -159,19 +160,19 @@ func TestArchiveEntries_OversizeBinaryIsNotCountedAsLostText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archiveEntries: %v", err)
 	}
-	if stats.large != 1 {
-		t.Errorf("large = %d, want 1: only the oversize TEXT file is a recoverable artefact lost", stats.large)
+	if stats.large.files != 1 {
+		t.Errorf("large = %d, want 1: only the oversize TEXT file is a recoverable artefact lost", stats.large.files)
 	}
-	if stats.binary != 1 {
-		t.Errorf("binary = %d, want 1: the oversize binary is still a file deleted without a copy", stats.binary)
+	if stats.binary.files != 1 {
+		t.Errorf("binary = %d, want 1: the oversize binary is still a file deleted without a copy", stats.binary.files)
 	}
-	if want := int64(512 * len("log line\n")); stats.largeBytes != want {
-		t.Errorf("largeBytes = %d, want %d", stats.largeBytes, want)
+	if want := int64(512 * len("log line\n")); stats.large.bytes != want {
+		t.Errorf("largeBytes = %d, want %d", stats.large.bytes, want)
 	}
-	if stats.binaryBytes != 4101 {
-		t.Errorf("binaryBytes = %d, want 4101", stats.binaryBytes)
+	if stats.binary.bytes != 4101 {
+		t.Errorf("binaryBytes = %d, want 4101", stats.binary.bytes)
 	}
-	if got := stats.largePaths; len(got) != 1 || !strings.HasSuffix(got[0], "agent.log") {
+	if got := stats.large.paths; len(got) != 1 || !strings.HasSuffix(got[0], "agent.log") {
 		t.Errorf("largePaths = %v, want the oversize text file named", got)
 	}
 }
@@ -181,7 +182,7 @@ func TestArchiveEntries_OversizeBinaryIsNotCountedAsLostText(t *testing.T) {
 func TestArchiveEntries_NamesTheFirstOversizeFilesAndCountsTheRest(t *testing.T) {
 	root := t.TempDir()
 	scratch := filepath.Join(root, "logs")
-	const n = largePathsListed + 3
+	const n = pathsListed + 3
 	for i := range n {
 		writeFile(t, filepath.Join(scratch, fmt.Sprintf("run%d.log", i)), strings.Repeat("x\n", 64))
 	}
@@ -192,13 +193,77 @@ func TestArchiveEntries_NamesTheFirstOversizeFilesAndCountsTheRest(t *testing.T)
 	if err != nil {
 		t.Fatalf("archiveEntries: %v", err)
 	}
-	if stats.large != n {
-		t.Errorf("large = %d, want %d: the count is of all of them, not of the named ones", stats.large, n)
+	if stats.large.files != n {
+		t.Errorf("large = %d, want %d: the count is of all of them, not of the named ones", stats.large.files, n)
 	}
-	if len(stats.largePaths) != largePathsListed {
-		t.Errorf("largePaths holds %d paths, want the list capped at %d", len(stats.largePaths), largePathsListed)
+	if len(stats.large.paths) != pathsListed {
+		t.Errorf("largePaths holds %d paths, want the list capped at %d", len(stats.large.paths), pathsListed)
 	}
 }
+
+// The only silent verdict is the one with nothing left to delete. EACCES is not
+// a race — another uid's file inside a directory this uid owns is the ordinary
+// state of a shared /tmp — and through round 2 every read failure was folded
+// into one silent category on the strength of the racy reading alone
+// (verdict-osuz-r2, blocking 1).
+func TestClassifyFailure_OnlyAVanishedFileIsSilent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want takeVerdict
+	}{
+		{"removed between the walk and the read", fs.ErrNotExist, takeVanished},
+		{"another uid's file in a directory this uid owns", fs.ErrPermission, takeUnreadable},
+		{"a read that failed for any other reason", io.ErrUnexpectedEOF, takeUnreadable},
+	} {
+		if got := classifyFailure(tc.err); got != tc.want {
+			t.Errorf("classifyFailure(%s) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A file whose head cannot be read is classified by neither heuristic: claiming
+// it as text would promise a copy that is not in the tarball, and writing it off
+// as binary would file a lost transcript under "by design". Nothing reddened
+// when the open failure returned text (verdict-osuz-r2, survivor A9).
+func TestClassifyHead_AnUnreadableHeadIsNotClaimedEitherWay(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a 0000 file, so the fixture cannot construct the case")
+	}
+	path := filepath.Join(t.TempDir(), "oversize.log")
+	if err := os.WriteFile(path, []byte(strings.Repeat("readable text\n", 1024)), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if got := classifyHead(path); got != takeUnreadable {
+		t.Errorf("classifyHead of a file that cannot be opened = %q, want %q", got, takeUnreadable)
+	}
+}
+
+// The head read is the other way an oversize file goes unclassified, and it is
+// the one no fixture can build out of a real file: the open succeeds and the
+// read fails. A zero-byte head holds no NUL, so the "yielded nothing" arm is
+// the only thing standing between a failed read and the verdict "text, and a
+// copy is in the tarball".
+func TestClassifyReader_AReadThatYieldedNothingIsAFailureNotText(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		r    io.Reader
+		want takeVerdict
+	}{
+		{"a read that failed having produced nothing", failingReader{err: io.ErrUnexpectedEOF}, takeUnreadable},
+		{"a file truncated away under the walk", failingReader{err: fs.ErrNotExist}, takeVanished},
+		{"a short read that produced text", strings.NewReader("half a log line"), takeLarge},
+		{"a short read that produced a NUL", strings.NewReader("MZ\x00\x90"), takeBinary},
+	} {
+		if got := classifyReader(tc.r); got != tc.want {
+			t.Errorf("classifyReader(%s) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
 
 func TestIsText(t *testing.T) {
 	if !isText([]byte("plain log output\n")) {
