@@ -14,6 +14,16 @@
 # Run via: just test-hooks
 set -u
 
+# git hooks export GIT_DIR into everything they shell out to, and this suite
+# runs under pre-push. A seat pushes from a linked worktree, whose gitdir is
+# <shared>/.git/worktrees/<seat> — a name not ending in .git, which git's
+# guess_repository_type reads as BARE. A plain `git init <dir>` inherited into
+# that environment therefore re-initialises the SHARED repo instead of creating
+# <dir>/.git, and writes core.bare=true into it. That disables the shared
+# checkout's main worktree while every linked worktree stays green, so no seat
+# sees the damage (bd gqlc-tl78; it happened, twice).
+unset "${!GIT_@}"
+
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 KM="$REPO/kingdom/bin/km"
 TMP="$(mktemp -d)"
