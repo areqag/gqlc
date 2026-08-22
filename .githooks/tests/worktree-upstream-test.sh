@@ -336,5 +336,20 @@ NEAR_WT="$TMP/state-near-miss"
 "${GIT[@]}" -C "$NEAR_WT" branch --set-upstream-to=origin/topic/master >/dev/null 2>&1
 recipe_case "upstream origin/topic/master is not this bug" accept "$NEAR_WT"
 
+# The DEFAULT argument. Every row above hands the recipe an explicit dir, so
+# `dir="."` — the one `just test`, `just doctor` and CI actually run — was
+# decided by nothing, and a detector that exits 0 is not a gate (round-1 review,
+# survivor S6). --working-directory is what makes "." the tree under test rather
+# than the justfile's own directory.
+DEFAULT_WT="$TMP/state-default"
+"${GIT[@]}" clone -q "$ORIGIN" "$DEFAULT_WT"
+"${GIT[@]}" -C "$DEFAULT_WT" checkout -q -b fix/default-dir origin/master
+if just -f "$ROOT/justfile" --working-directory "$DEFAULT_WT" \
+    check-worktree-upstream >/dev/null 2>&1; then
+    bad "check-worktree-upstream: the default dir='.' accepted a worktree tracking origin/master"
+else
+    ok "check-worktree-upstream: the default dir='.' reads the cwd, not the justfile's directory"
+fi
+
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
