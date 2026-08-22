@@ -163,7 +163,11 @@ run_installer() {
 }
 
 # passed|refused for an exit status, so a row reads as a verdict rather than a
-# number and a row that never ran (99) cannot pass for a 0.
+# number. This protects a row expecting `passed` — the containment bail-out (99)
+# reads as `refused` and reddens it — but NOT one expecting `refused`, which goes
+# green on a 99 that never entered the recipe. Every such row is therefore paired
+# with a CAUSE row asserting what CH_OUT says, and on a 99 CH_OUT holds
+# "fixture escaped $TMP" rather than the product message, so the pair reddens.
 verdict() {
     if [ "$1" -eq 0 ]; then echo passed; else echo refused; fi
 }
