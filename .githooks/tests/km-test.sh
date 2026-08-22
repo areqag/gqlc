@@ -1013,5 +1013,129 @@ else
     ok "a misspelled level is refused, named on stderr, and the seat still launches"
 fi
 
+# --- a nudge to an awake seat must be SUBMITTED, not merely typed ------------
+# `km wake` on a seat that already holds a pane types the nudge in rather than
+# queueing it to a file. It sent the text and the Enter in one send-keys call,
+# and the TUI on the far side reads a single write of 64 characters or more as
+# a paste — so the CR arrived as a literal newline and the nudge sat in the
+# prompt forever. The wrapper is 43 fixed characters, so a reason of 20 crosses
+# the line — which every dispatcher nudge does, naming a bead id and the work.
+# Not every nudge: a bare `km wake <seat>` defaults to "a new day" and lands at
+# 52, under the threshold, which is why the failure looked intermittent rather
+# than total. The nudges that mattered — the ones the dispatcher sends to
+# restart a seat — never arrived, while `km wake` printed "nudged instead" and
+# exited 0. That is the 8-hour stall of 2026-08-22, five warrior slots held by
+# seats nothing could reach (bd gqlc-01ev).
+#
+# What this block must NOT assert is that the text reached the pane. It did,
+# under the broken code too. So the stub keeps `buffer` — what sits unsubmitted
+# in the prompt — apart from `submitted`, what crossed the boundary, and only
+# `submitted` witnesses a nudge that can restart anyone.
+#
+# The stub MODELS that threshold, which no runner can exercise for real: CI has
+# no Claude Code TUI. The model is first-party measurement rather than
+# documentation — against a live pane on 2026-08-22, 62 characters plus the CR
+# submitted and 63 plus the CR did not, in an idle pane and a busy one alike.
+# The first row below drives the OLD one-call shape through the stub and
+# requires that nothing be submitted; without it a stub that submitted
+# unconditionally would hold this block green forever.
+
+NBIN="$TMP/nudgebin"
+mkdir -p "$NBIN"
+export KM_TEST_PANE="$TMP/pane"
+mkdir -p "$KM_TEST_PANE"
+
+cat >"$NBIN/tmux" <<'STUB'
+#!/usr/bin/env bash
+# A pane that models one property: one send-keys call is one write, and a write
+# of 64 characters or more is read as a paste, so a CR riding in it is data
+# rather than a submit.
+case "$1" in
+    has-session)  exit 0 ;;
+    list-windows) printf '%s\n' "$KM_TEST_WINDOW"; exit 0 ;;
+    send-keys)    shift ;;
+    *)            exit 0 ;;
+esac
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -t) shift 2 ;;
+        --) shift; break ;;
+        *)  break ;;
+    esac
+done
+text=""
+enter=0
+for arg in "$@"; do
+    if [ "$arg" = Enter ]; then enter=1; continue; fi
+    text="$text$arg"
+done
+printf '%s' "$text" >>"$KM_TEST_PANE/buffer"
+if [ "$enter" -eq 1 ]; then
+    if [ "${#text}" -ge 63 ]; then
+        printf '\n' >>"$KM_TEST_PANE/buffer"
+    else
+        { cat "$KM_TEST_PANE/buffer"; printf '\n'; } >>"$KM_TEST_PANE/submitted"
+        : >"$KM_TEST_PANE/buffer"
+    fi
+fi
+exit 0
+STUB
+chmod +x "$NBIN/tmux"
+
+pane_reset() { : >"$KM_TEST_PANE/buffer"; : >"$KM_TEST_PANE/submitted"; }
+
+# The stub's own teeth, checked before anything is asked of km: the shape km
+# used until this branch must come out unsubmitted AND present in the prompt.
+# Either half missing and the rows after it prove nothing.
+pane_reset
+PATH="$NBIN:$PATH" KM_TEST_WINDOW=hayk \
+    tmux send-keys -t '=t:hayk' \
+    '[km] bead:gqlc-01ev resume your in-progress work — check bd mail inbox when convenient' Enter
+if [ -s "$KM_TEST_PANE/submitted" ]; then
+    bad "the pane stub tells a paste from a submit" "the one-call shape submitted: $(cat "$KM_TEST_PANE/submitted")"
+elif ! grep -q 'gqlc-01ev' "$KM_TEST_PANE/buffer"; then
+    bad "the pane stub tells a paste from a submit" "the text never reached the prompt either, so the stub drops everything: $(cat "$KM_TEST_PANE/buffer")"
+else
+    ok "the pane stub leaves a one-call nudge unsubmitted in the prompt — the defect it exists to catch"
+fi
+
+export KM_STATE_DIR="$TMP/nudge-state"
+mkdir -p "$KM_STATE_DIR/seats/hayk"
+echo awake >"$KM_STATE_DIR/seats/hayk/status"
+alt_config "$TMP/nudge.toml"
+pane_reset
+OUT=$(PATH="$NBIN:$PATH" KM_TEST_WINDOW=hayk KM_CONFIG="$TMP/nudge.toml" \
+    "$KM" wake hayk --bead gqlc-01ev --reason "resume your in-progress work" 2>&1)
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "a nudge to an awake seat crosses the submit boundary" "rc=$RC out=$OUT"
+elif [ -f "$KM_STATE_DIR/seats/hayk/wake" ]; then
+    bad "a nudge to an awake seat crosses the submit boundary" "it queued to a file, so the pane path never ran and this row is vacuous: $OUT"
+elif ! grep -q 'gqlc-01ev' "$KM_TEST_PANE/submitted"; then
+    bad "a nudge to an awake seat crosses the submit boundary" "nothing crossed it; the prompt still holds: $(cat "$KM_TEST_PANE/buffer")"
+elif [ -s "$KM_TEST_PANE/buffer" ]; then
+    bad "a nudge to an awake seat crosses the submit boundary" "text was left behind in the prompt: $(cat "$KM_TEST_PANE/buffer")"
+else
+    ok "a nudge to an awake seat is submitted, leaving nothing behind in the prompt"
+fi
+
+# The row above is blind to a fix that submits only the LONG nudges: under the
+# threshold the old one-call shape submitted anyway, so `[ ${#msg} -lt 63 ] ||
+# send Enter` leaves every short nudge typed and unsubmitted while the long row
+# stays green. Measured — this row is the only one that reddens for it.
+#
+# It does not catch a fix that splits the calls only when the nudge is long;
+# that one survives both rows, and should, because it submits either way. What
+# is pinned here is the outcome at both lengths, not the number of calls.
+pane_reset
+OUT=$(PATH="$NBIN:$PATH" KM_TEST_WINDOW=hayk KM_CONFIG="$TMP/nudge.toml" \
+    "$KM" wake hayk --reason "hi" 2>&1)
+RC=$?
+if [ "$RC" -ne 0 ] || ! grep -q 'hi' "$KM_TEST_PANE/submitted"; then
+    bad "a short nudge is submitted by the same path" "rc=$RC out=$OUT prompt=$(cat "$KM_TEST_PANE/buffer")"
+else
+    ok "a short nudge crosses the boundary too, by the same two calls"
+fi
+
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

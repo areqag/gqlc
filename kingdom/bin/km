@@ -263,7 +263,19 @@ cmd_wake() {
     [ -n "$reason" ] || reason="a new day"
     mkdir -p "$(seat_home "$seat")"
     if [ "$(seat_status "$seat")" = awake ] && window_up "$seat"; then
-        tmux send-keys -t "=$SESSION:$seat" "[km] $reason — check bd mail inbox when convenient" Enter
+        # The text and the Enter are two calls on purpose. One send-keys call
+        # is one write to the pane, and the TUI on the far side reads a write
+        # of 64 characters or more as a PASTE — the trailing CR becomes a
+        # literal newline, so a nudge past that length sits in the seat's
+        # prompt unsubmitted while km reports success. The 43-character wrapper
+        # plus any dispatcher reason is well past it; a bare `wake` at 52 is
+        # not, which is why this looked intermittent. Measured 2026-08-22:
+        # 62 characters plus the CR submits, 63 plus the CR does not, idle and
+        # busy alike, counting characters rather than bytes (so an Armenian
+        # reason reaches the threshold sooner). `sleep`'s six-character /exit
+        # has always been under it, which is why only wake broke.
+        tmux send-keys -t "=$SESSION:$seat" "[km] $reason — check bd mail inbox when convenient"
+        tmux send-keys -t "=$SESSION:$seat" Enter
         echo "wake: $seat is already awake; nudged instead"
     else
         printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
