@@ -991,6 +991,7 @@ test-hooks:
     bash .githooks/tests/hooks-drift-tripwire-test.sh
     bash .githooks/tests/shared-config-drift-test.sh
     bash .githooks/tests/git-env-sandbox-test.sh
+    bash .githooks/tests/km-overlap-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
@@ -2488,3 +2489,16 @@ kingdom-doctor:
 # fast-forward the checkout the systemd timers execute; merging a km fix does not deploy it
 kingdom-deploy:
     kingdom/bin/km deploy
+
+# who else has an open PR touching a file (bd gqlc-zgka). Bare: the census of
+# every contested path. `path <PATH>` before routing a bead, `pr <N>` for your
+# own branch.
+#
+# Exit 1 means overlap was FOUND, so just prints `error: recipe ... failed` on
+# the ordinary result. That line is the finding, not a fault. The status is
+# passed through rather than swallowed because the third state matters: 2 means
+# the query could not run, and a recipe that flattened all three to 0 would
+# answer "nothing touches this file" for "I never looked" — the fail-open this
+# whole tool exists to refuse.
+kingdom-overlap *args="census":
+    kingdom/bin/km-overlap {{args}}

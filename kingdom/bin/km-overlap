@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# km-overlap — who else has an open PR touching this file?
+#
+# Two entry points over one index, because the town asks this question from two
+# sides. The mayor asks it of a PATH before any branch exists, to decide whether
+# a bead is routable; an author asks it of their own PR once one does. Built for
+# only the second, the routing half stays a query somebody runs by hand.
+#
+# Exit status is a tri-state, and callers depend on the third:
+#
+#     0  looked, found nothing
+#     1  looked, found overlap
+#     2  could not look
+#
+# Every way of learning nothing exits 2. Reporting 0 in those cases would be
+# indistinguishable from a real all-clear, and 0 is the answer a caller acts on.
+#
+# This does NOT predict merge conflicts. Shared-file overlap is the signal; a
+# citizen told that eight other open PRs touch this file will go and look.
+#
+# Tests: .githooks/tests/km-overlap-test.sh (run via `just test-hooks`).
+set -uo pipefail
+
+# The tests inject a fake here; the town never sets it.
+GH="${KM_GH:-gh}"
+
+# gh pr list caps at 30 and says nothing when it truncates, so the limit is
+# always explicit and a result that arrives AT the limit is refused rather than
+# reported short.
+LIMIT=200
+
+die() { printf 'km-overlap: %s\n' "$*" >&2; exit 2; }
+
+usage() {
+    cat >&2 <<'EOF'
+usage: km-overlap <command> [--limit N]
+
+  path <PATH>   which open PRs touch PATH        (ask before routing a bead)
+  pr <NUMBER>   which open PRs share a file with NUMBER
+  census        every path touched by more than one open PR
+
+exit: 0 nothing found, 1 overlap found, 2 could not look
+EOF
+    exit 2
+}
+
+# Echoes the open-PR index as JSON. Any doubt about what came back is fatal.
+fetch() {
+    command -v "$GH" >/dev/null 2>&1 || die "gh is not available as '$GH'; cannot look"
+    command -v jq >/dev/null 2>&1 || die "jq is not available; cannot look"
+
+    local raw rc
+    raw="$("$GH" pr list --state open --json number,title,files -L "$LIMIT" 2>&1)"
+    rc=$?
+    # A body that parses is not evidence the query ran: gh prints usable-looking
+    # text on failure too.
+    [ "$rc" -eq 0 ] || die "gh exited $rc; cannot look ($raw)"
+    [ -n "$raw" ] || die "gh returned nothing; cannot look"
+    printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 \
+        || die "gh did not return a JSON array; cannot look"
+
+    # A record with no files key is not a PR that touches nothing — it is a
+    # query that did not return what was asked for. Counting it as touching
+    # nothing is how a real overlap goes unreported.
+    local missing
+    missing="$(printf '%s' "$raw" | jq -r '[.[] | select(has("files") | not) | .number] | join(" ")')"
+    [ -z "$missing" ] && missing=""
+    if [ -n "$missing" ]; then
+        die "gh returned no files for PR(s) $missing; cannot look"
+    fi
+
+    local n
+    n="$(printf '%s' "$raw" | jq -r 'length')"
+    if [ "$n" -ge "$LIMIT" ]; then
+        die "gh returned $n PRs at the requested limit of $LIMIT, so the list may be truncated; cannot look (raise --limit)"
+    fi
+
+    printf '%s' "$raw"
+}
+
+cmd_path() {
+    local want="$1" index hits
+    [ -n "$want" ] || usage
+    index="$(fetch)" || exit 2
+
+    hits="$(printf '%s' "$index" | jq -r --arg p "$want" '
+        [.[] | select(.files[].path == $p)]
+        | unique_by(.number)
+        | sort_by(.number)
+        | .[] | "  #\(.number)  \(.title)"')"
+
+    if [ -z "$hits" ]; then
+        printf 'km-overlap: no open PR touches %s\n' "$want"
+        return 0
+    fi
+    printf 'km-overlap: %d open PR(s) touch %s\n' "$(printf '%s\n' "$hits" | wc -l)" "$want"
+    printf '%s\n' "$hits"
+    return 1
+}
+
+cmd_pr() {
+    local want="$1" index shared
+    [ -n "$want" ] || usage
+    case "$want" in
+        ''|*[!0-9]*) die "'$want' is not a PR number" ;;
+    esac
+    index="$(fetch)" || exit 2
+
+    # An unknown number cannot be answered. Calling it clean would tell an
+    # author their branch is safe on the strength of a typo.
+    printf '%s' "$index" | jq -e --argjson n "$want" 'any(.[]; .number == $n)' >/dev/null 2>&1 \
+        || die "#$want is not an open PR; cannot look"
+
+    shared="$(printf '%s' "$index" | jq -r --argjson n "$want" '
+        (.[] | select(.number == $n) | .files[].path) as $mine
+        | [.[] | select(.number != $n) | select(.files[].path == $mine) | .number]
+        | unique
+        | select(length > 0)
+        | "  \($mine)  " + (map("#\(.)") | join(" "))' | sort -u)"
+
+    if [ -z "$shared" ]; then
+        printf 'km-overlap: PR #%s shares no file with another open PR\n' "$want"
+        return 0
+    fi
+    printf 'km-overlap: PR #%s shares %d file(s) with other open PRs\n' \
+        "$want" "$(printf '%s\n' "$shared" | wc -l)"
+    printf '%s\n' "$shared"
+    return 1
+}
+
+cmd_census() {
+    local index rows
+    index="$(fetch)" || exit 2
+
+    rows="$(printf '%s' "$index" | jq -r '
+        [.[] | .number as $n | .files[].path | {path: ., number: $n}]
+        | group_by(.path)
+        | map(select(length > 1))
+        | sort_by(-length, .[0].path)
+        | .[]
+        | "  \(length)  \(.[0].path)  " + (map("#\(.number)") | sort | join(" "))')"
+
+    if [ -z "$rows" ]; then
+        printf 'km-overlap: no file is touched by more than one open PR\n'
+        return 0
+    fi
+    printf 'km-overlap: %d file(s) touched by more than one open PR\n' \
+        "$(printf '%s\n' "$rows" | wc -l)"
+    printf '%s\n' "$rows"
+    return 1
+}
+
+main() {
+    local cmd="" arg=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --limit)
+                [ $# -ge 2 ] || usage
+                case "$2" in
+                    ''|*[!0-9]*) die "--limit wants a number, got '$2'" ;;
+                esac
+                LIMIT="$2"
+                shift 2
+                ;;
+            -h|--help) usage ;;
+            *)
+                if [ -z "$cmd" ]; then cmd="$1"
+                elif [ -z "$arg" ]; then arg="$1"
+                else usage
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    case "$cmd" in
+        path)   cmd_path "$arg" ;;
+        pr)     cmd_pr "$arg" ;;
+        census) cmd_census ;;
+        *)      usage ;;
+    esac
+}
+
+main "$@"
