@@ -35,6 +35,7 @@ km — the machinery of the Թագաւորութիւն
   km install-units | uninstall-units
   km deploy                      fast-forward the checkout the timers run from
   km doctor                      health checks
+  km seat-refresh <s>            bring a parked seat's worktree (and its hooks) up to master
   km state-dir | seat-info <s> | seat-worktree <s>
 EOF
 }
@@ -945,6 +946,66 @@ cmd_doctor() {
     return "$ok"
 }
 
+# ---------- seat worktree freshness ----------
+
+# core.hooksPath is RELATIVE, so a seat runs the hooks in its OWN checkout and
+# acquires a merged one only when its worktree next moves. `km up` parks a seat
+# detached and nothing moves it again, so merging a gate deploys it to nobody
+# and the town's drift detectors all read clean — they check the hooksPath
+# VALUE, which stays '.githooks' in a seat whose .githooks/ predates the gate
+# (bd gqlc-xtre: 7 of 14 seats had no push guard hours after it merged).
+#
+# Exit 3 means "still exposed": held for work in flight AND behind on hooks.
+# km-seat turns that into a banner in the citizen's first message.
+cmd_seat_refresh() {
+    local seat=${1:-}
+    [ -n "$seat" ] || die "seat-refresh: which seat?"
+    is_seat "$seat" || die "seat-refresh: unknown seat: $seat"
+
+    local mr wt
+    mr=$(main_root)
+    wt=$(seat_worktree "$seat")
+    [ -d "$wt" ] || die "seat-refresh: no worktree at $wt (km up creates it)"
+
+    # A failed fetch judges the seat against a stale origin/master, which would
+    # report a seat current on evidence that is itself behind. Say so rather
+    # than reporting a clean result from an unanswered question.
+    local stale_note=""
+    git -C "$mr" fetch --quiet origin 2>/dev/null ||
+        stale_note=" [fetch failed: judged against the last known origin/master]"
+
+    local target
+    target=$(git -C "$mr" rev-parse --verify --quiet origin/master) ||
+        die "seat-refresh: no origin/master to refresh $seat against"
+
+    local head branch dirty behind
+    head=$(git -C "$wt" rev-parse HEAD)
+    branch=$(git -C "$wt" symbolic-ref --quiet --short HEAD || true)
+    dirty=$(git -C "$wt" status --porcelain)
+    # Counted before any move, and restricted to the paths that ARE the gates.
+    behind=$(git -C "$wt" log --oneline "HEAD..$target" -- .githooks .claude | wc -l)
+
+    if [ -n "$dirty" ] || [ -n "$branch" ]; then
+        local why="branch ${branch:-<detached>} in flight"
+        [ -n "$dirty" ] && why="uncommitted work in the tree"
+        if [ "$behind" -eq 0 ]; then
+            echo "seat-refresh $seat: held ($why); its hooks are current$stale_note"
+            return 0
+        fi
+        echo "seat-refresh $seat: HELD — $behind hook/settings change(s) behind master and NOT applied ($why)$stale_note"
+        return 3
+    fi
+
+    if [ "$head" = "$target" ]; then
+        echo "seat-refresh $seat: current at $(git -C "$wt" rev-parse --short HEAD)$stale_note"
+        return 0
+    fi
+
+    git -C "$wt" checkout --detach --quiet "$target" ||
+        die "seat-refresh: could not move $seat's parked worktree to origin/master"
+    echo "seat-refresh $seat: refreshed $(git -C "$mr" rev-parse --short "$head") -> $(git -C "$wt" rev-parse --short HEAD) ($behind hook/settings change(s) picked up)$stale_note"
+}
+
 render_unit() { # <src> <dst>
     sed -e "s|@REPO@|$(main_root)|g" \
         -e "s|@DISPATCH_MIN@|$(cfg cadence dispatch_minutes)|g" \
@@ -1000,6 +1061,7 @@ case "$cmd" in
                      echo "$(seat_class "$1") $(seat_model "$1") $(seat_display "$1")" ;;
     seat-worktree)   is_seat "${1:-}" || die "seat-worktree: unknown seat ${1:-<none>}"
                      seat_worktree "$1" ;;
+    seat-refresh)    cmd_seat_refresh "$@" ;;
     -h | --help | help | "") usage ;;
     *) die "unknown command: $cmd (km --help)" ;;
 esac
