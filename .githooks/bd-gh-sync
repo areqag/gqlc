@@ -304,6 +304,15 @@ for b in beads:
     if desc == gh_body and status == gh_state:
         continue
 
+    # A pull that carries a closure destroys a status a citizen may be working,
+    # and the summary counted it as one more bead pulled — the same +1 a body
+    # edit makes. gqlc-kibh went closed that way under an open, unreviewed PR.
+    # The post-pull check cannot cover this: it opens by skipping every bead the
+    # run pulled, because a pull rewriting a bead it pulled is the pull working.
+    # So the transition is named here, where both states are still in hand.
+    # Reported, never held — GitHub closing a mirror is how every merge ends.
+    if status == "open" and gh_state == "closed":
+        out.append(f"CLOSING {bid}")
     out.append(f"ALLOW {bid}")
 
 # An unscoped pull silently minted a bead for any unmirrored issue in its
@@ -633,6 +642,22 @@ PYEOF
     echo "bd-gh-sync: the cap in .githooks/bd-gh-sync if the repository has outgrown it." >&2
   fi
 
+  # Which of the closures the plan saw actually landed: a CLOSING record is what
+  # GitHub showed, and the bead was only shut in fact if a batch that exited 0
+  # carried it — the same evidence the pulled count rests on. Intent is not
+  # outcome, as everywhere else on this line.
+  #
+  # pulled.txt is read by name rather than as the first of two awk operands.
+  # `NR==FNR` means "still in the first file" only while that file is non-empty,
+  # and an empty one is precisely the run that pulled nothing — so the idiom
+  # takes the plan's first line for a pulled id on exactly the runs where no
+  # closure may be claimed. It reached the right verdict there by accident,
+  # which is worse than the wrong one: the guard against it read as green.
+  awk -v pf="$_tmp/pulled.txt" '
+    BEGIN { while ((getline _l < pf) > 0) pulled[_l] }
+    /^CLOSING / { _n = substr($0, 9); if (_n in pulled) print _n }' \
+    "$_tmp/plan.txt" >"$_tmp/closed.txt"
+
   # Last line, and the only line a `tail -1` caller keeps
   # (.claude/settings.json). It therefore has to report what happened rather
   # than what was intended: a failed `bd github sync` writes its own error
@@ -669,6 +694,18 @@ PYEOF
     _orphan_arm="left an unknown number of unmirrored GH issue(s) alone (${_capped})"
   fi
   _summary="${_summary}, ${_held_arm}, ${_orphan_arm}."
+  # Named, not merely counted, and named here rather than in a WARNING above:
+  # `tail -1` keeps this line and drops those. A count that moved by one is what
+  # the reader had before, and it does not distinguish an amended body from a
+  # status somebody was working. The repair ordering rides along because this is
+  # where a citizen meets the closure — repairing the bead alone looks like a fix
+  # and is undone by the next pull, which reads GitHub as authoritative.
+  if [ -s "$_tmp/closed.txt" ]; then
+    _closed=$(wc -l <"$_tmp/closed.txt")
+    _cnames=$(awk 'NR<=3 { printf "%s%s", sep, $0; sep=", " }' "$_tmp/closed.txt")
+    [ "$_closed" -gt 3 ] && _cnames="${_cnames}, +$((_closed - 3)) more"
+    _summary="${_summary} ${_closed} of them had been closed on GitHub while open here (${_cnames}); if that is wrong, re-open the GH issue FIRST and the bead second, or the next pull undoes it."
+  fi
   if [ -s "$_tmp/moved.txt" ]; then
     _moved=$(wc -l <"$_tmp/moved.txt")
     # Deletion is called out on its own rather than folded into the count: the
