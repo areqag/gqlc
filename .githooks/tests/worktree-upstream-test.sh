@@ -5,8 +5,8 @@
 #
 #   A. .githooks/guard-push-destination decides on the RESOLVED destination.
 #   B. .githooks/pre-push runs that guard, and runs it BEFORE the test suite.
-#   C. CLAUDE.md's worktree recipe, run verbatim, leaves no origin/master
-#      upstream behind.
+#   C. The branch recipes in CLAUDE.md and in the citizen protocol, run
+#      verbatim, leave no origin/master upstream behind.
 #   D. `just check-worktree-upstream` names a worktree already in that state.
 #
 # B and C are the ones that stop this from being decoration: A alone passes
@@ -235,6 +235,38 @@ if grep -qF 'git push -u origin HEAD' "$ROOT/CLAUDE.md"; then
     ok "CLAUDE.md: names the first push that sets the upstream"
 else
     bad "CLAUDE.md: no 'git push -u origin HEAD' — the recipe leaves no upstream and no way to set one"
+fi
+
+# The same defect in a second spelling. citizen-protocol.md step 1 branches with
+# `git checkout -b <type>/<slug> origin/master`, which tracks for the reason the
+# worktree recipe did; every citizen runs it at the start of every bead, so it is
+# the more travelled of the two. Fixing one spelling and shipping the other would
+# close this bead on a false premise (Սեդրակ's ruling, 2026-08-21). Extracted and
+# run rather than grepped, for the reason given in section C.
+PROTOCOL="$ROOT/kingdom/brain/playbooks/citizen-protocol.md"
+proto="$(grep -m1 -oE '`git fetch origin && git checkout [^`]*`' "$PROTOCOL" | tr -d '`' || true)"
+if [ -z "$proto" ]; then
+    bad "citizen-protocol.md: no 'git fetch && git checkout' branch recipe found to test"
+else
+    PDOC="$TMP/proto"
+    "${GIT[@]}" clone -q "$ORIGIN" "$PDOC"
+    pcmd="${proto//<type>\/<slug>/feat/proto-probe}"
+    if (cd "$PDOC" && eval "$pcmd") >/dev/null 2>&1; then
+        pup="$("${GIT[@]}" -C "$PDOC" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+        if [ "$pup" = "origin/master" ]; then
+            bad "citizen-protocol.md: the documented branch recipe leaves the branch tracking origin/master"
+        else
+            ok "citizen-protocol.md: the documented branch recipe leaves upstream '${pup:-<none>}', not origin/master"
+        fi
+    else
+        bad "citizen-protocol.md: the documented branch recipe did not run ($pcmd)"
+    fi
+fi
+
+if grep -qF 'git push -u origin HEAD' "$PROTOCOL"; then
+    ok "citizen-protocol.md: names the first push that sets the upstream"
+else
+    bad "citizen-protocol.md: no 'git push -u origin HEAD' — the recipe leaves no upstream and no way to set one"
 fi
 
 # --- D. just check-worktree-upstream ----------------------------------------
