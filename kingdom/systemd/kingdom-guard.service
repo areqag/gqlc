@@ -1,0 +1,8 @@
+# Rendered by `km install-units`: @TOKENS@ come from kingdom.toml + git.
+[Unit]
+Description=Kingdom guard — wake Րաֆֆի for a round of the town
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+ExecStart=@REPO@/kingdom/bin/km guard-sweep

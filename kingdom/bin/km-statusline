@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+# km-statusline — Claude Code statusLine command for this repo.
+#
+# Prints one line for the prompt box. When the session is a kingdom seat
+# (KINGDOM_SEAT set by km-seat), also drops a heartbeat that `km status` and
+# the guard's rounds read: $KM_STATE_DIR/seats/<seat>/heartbeat.json with the
+# context-fill estimate. Estimation reads the transcript's newest usage entry;
+# the statusLine stdin JSON does not carry token counts. Never fails loudly —
+# a crashing statusline takes the prompt box with it.
+import json
+import os
+import sys
+import time
+
+WINDOW = 200_000
+
+
+def transcript_context_tokens(path):
+    # Newest assistant usage entry in the JSONL tail ~= current context size.
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 262_144))
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    for line in reversed(tail.splitlines()):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        usage = (entry.get("message") or {}).get("usage") or {}
+        if "input_tokens" in usage:
+            return (
+                usage.get("input_tokens", 0)
+                + usage.get("cache_read_input_tokens", 0)
+                + usage.get("cache_creation_input_tokens", 0)
+            )
+    return None
+
+
+def write_heartbeat(seat, state, pct, data):
+    seat_dir = os.path.join(state, "seats", seat)
+    beat = {
+        "seat": seat,
+        "context_pct": pct,
+        "session_id": data.get("session_id"),
+        "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    try:
+        os.makedirs(seat_dir, exist_ok=True)
+        tmp = os.path.join(seat_dir, ".heartbeat.tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(beat, fh)
+        os.replace(tmp, os.path.join(seat_dir, "heartbeat.json"))
+    except OSError:
+        pass
+
+
+def main():
+    try:
+        data = json.load(sys.stdin)
+    except ValueError:
+        data = {}
+
+    model = (data.get("model") or {}).get("display_name") or "?"
+    tokens = transcript_context_tokens(data.get("transcript_path"))
+    pct = None if tokens is None else min(100.0, tokens * 100.0 / WINDOW)
+
+    seat = os.environ.get("KINGDOM_SEAT")
+    state = os.environ.get("KM_STATE_DIR")
+    if seat and state:
+        write_heartbeat(seat, state, pct, data)
+
+    who = seat or "andranik"
+    ctx = "ctx –" if pct is None else f"ctx {pct:.0f}%"
+    print(f"{who} · {model} · {ctx}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:  # noqa: BLE001 — see header
+        print("kingdom")

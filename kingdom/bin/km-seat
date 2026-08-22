@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# km-seat <seat> — the runner that IS a seat's tmux window (kingdom/README.md).
+#
+# An endless day/night cycle: park until `km wake` queues a reason, compose
+# the first message (wake reasons, unread mail, pending handoff notes — only
+# what exists, so a cleanly finished day wakes to nothing stale), run ONE
+# interactive claude session in the seat's own worktree with the soul
+# appended, then park again. Same window, same identity, fresh context every
+# wake.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+KINGDOM_DIR=$(dirname "$SCRIPT_DIR")
+KM="$SCRIPT_DIR/km"
+
+seat=${1:-}
+[ -n "$seat" ] || { echo "km-seat: which seat?" >&2; exit 1; }
+
+read -r _ model display <<<"$("$KM" seat-info "$seat")"
+sd=$("$KM" state-dir)
+home="$sd/seats/$seat"
+wt=$("$KM" seat-worktree "$seat")
+soul="$KINGDOM_DIR/seats/$seat/soul.md"
+pm=$("$KM" cfg claude permission_mode)
+: "${pm:=bypassPermissions}"
+
+[ -f "$soul" ] || { echo "km-seat: no soul at $soul" >&2; exit 1; }
+[ -d "$wt" ] || { echo "km-seat: no worktree at $wt (km up creates it)" >&2; exit 1; }
+
+mkdir -p "$home/handoff/archive"
+echo asleep >"$home/status"
+trap 'echo asleep >"$home/status"' EXIT
+trap 'exit 0' INT TERM
+
+compose() { # $1 = wake reasons, one per line
+    printf 'Բարի լոյս, %s։ A new workday begins in your seat (%s).\n\n' "$display" "$seat"
+    printf 'Why you were woken:\n'
+    printf '%s\n' "$1" | sed 's/^/  - /'
+
+    local unread
+    unread=$(find "$sd/mail/$seat/inbox" -type f -name '*.md' 2>/dev/null | wc -l)
+    if [ "$unread" -gt 0 ]; then
+        printf '\nYou have %s unread letter(s): bd mail inbox.\n' "$unread"
+    fi
+
+    local notes
+    notes=$(find "$home/handoff" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
+    if [ -n "$notes" ]; then
+        printf '\nYour pending handoff note(s) — your own past self talking to you, read before anything else:\n'
+        printf '%s\n' "$notes" | sed 's/^/  - /'
+    fi
+
+    printf '\nBegin with the wake ritual: kingdom/brain/playbooks/citizen-protocol.md.\n'
+}
+
+while :; do
+    until [ -s "$home/wake" ]; do sleep 5; done
+    reasons=$(cat "$home/wake")
+    rm -f "$home/wake"
+    msg=$(compose "$reasons")
+
+    echo awake >"$home/status"
+    (
+        cd "$wt"
+        KINGDOM_SEAT=$seat BEADS_ACTOR=$seat KM_STATE_DIR=$sd \
+            claude --model "$model" \
+            --permission-mode "$pm" \
+            -n "$display" \
+            --append-system-prompt "$(cat "$soul")" \
+            "$msg"
+    ) || echo "km-seat: $seat's session ended abnormally; parking" >&2
+    echo asleep >"$home/status"
+    rm -f "$home/heartbeat.json"
+done

@@ -1,0 +1,46 @@
+# Configuration of the Թագաւորութիւն. Parsed by kingdom/bin/km with a
+# line-oriented reader: quoted scalar values under [section] headers only —
+# no inline tables, arrays, or multi-line strings. Teach km's parser before
+# using any of those here.
+
+[kingdom]
+tmux_session = "kingdom"
+# Runtime state dir name, created beside the main checkout's parent directory
+# (shared by all seat worktrees, never committed).
+state_dirname = "kingdom-state"
+
+[concurrency]
+# Global and work-conserving: any free slot goes to whichever class has ready
+# labelled beads, priority first. Mayor and guard do not count against it.
+max_active = 5
+
+[cadence]
+dispatch_minutes = 2
+guard_minutes = 15
+
+[welfare]
+# Context fill (percent) at which the guard starts gently checking in.
+# For Րաֆֆի's eyes only — never quoted at a citizen.
+handoff_threshold_pct = 75
+
+[claude]
+# The factory runs unattended; the constitution, git hooks, and
+# claude-pre-bash remain the guardrails. Set to "acceptEdits" to supervise.
+permission_mode = "bypassPermissions"
+
+[seats]
+# name = "class:model:display"
+sedrak   = "mayor:claude-opus-5:Սեդրակ"
+artur    = "architect:claude-fable-5:Արթուր"
+arpine   = "architect:claude-fable-5:Արփինէ"
+aregak   = "architect:claude-fable-5:Արեգակ"
+aramazd  = "warrior:claude-opus-5:Արամազդ"
+vahagn   = "warrior:claude-opus-5:Վահագն"
+astghik  = "warrior:claude-opus-5:Աստղիկ"
+ar       = "warrior:claude-opus-5:Ար"
+nvard    = "warrior:claude-opus-5:Նուարդ"
+ayg      = "warrior:claude-opus-5:Այգ"
+tsovinar = "warrior:claude-opus-5:Ծովինար"
+hayk     = "warrior:claude-opus-5:Հայկ"
+mihr     = "judge:claude-fable-5:Միհր"
+raffi    = "guard:claude-sonnet-5:Րաֆֆի"
