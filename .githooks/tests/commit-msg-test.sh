@@ -199,5 +199,14 @@ run_ident_case "a real address is accepted"          accept antranig.yeretzian@p
 run_ident_case "a noreply github address"            accept 12345+someone@users.noreply.github.com
 run_ident_case "a plausible corporate address"       accept dev@invalidate.example-host.co.uk
 
+# Over-breadth is the failure mode that stops the town rather than protecting
+# it, and the globs are one stray `*` away from it. Each domain below CONTAINS
+# a reserved label without BEING one — the label is a component inside a real
+# TLD, which is registrable and ordinary. `*@*.invalid` widened to `*@*invalid*`
+# would take all three.
+run_ident_case "a real domain named invalid.com"     accept dev@invalid.com
+run_ident_case "a real domain named test.com"        accept dev@test.com
+run_ident_case "a reserved label mid-domain"         accept dev@localhost.example-corp.io
+
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
