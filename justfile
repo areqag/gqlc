@@ -142,7 +142,7 @@ init:
 # ensure-golangci above (which reinstalls the pinned linter rather than failing
 # the push over it). This recipe is a dependency of `test`, which is what
 # .githooks/pre-push runs, so refusing here would have made `just init` a
-# precondition for every push in all ~70 registered worktrees on the day this
+# precondition for every push in every registered worktree on the day this
 # landed — and the obvious answer to a push refused for a reason unrelated to the
 # commits is `git push --no-verify`, which skips .githooks/pre-push WHOLESALE and
 # takes `just test` and `just lint-new` with it. Trading a hypothetical future
