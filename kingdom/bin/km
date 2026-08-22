@@ -77,9 +77,26 @@ is_seat() { seats_all | grep -qx "$1"; }
 
 # ---------- paths ----------
 
+# git exports GIT_DIR and friends into every hook environment, and with GIT_DIR
+# set `git -C <path>` resolves the repo from GIT_DIR rather than from <path>. km
+# is reachable from a hook (bd delegates mail to it), and a deploy that merged
+# into whichever repo invoked the hook would be the same class of accident the
+# deploy command exists to end — so every git call that names a repo by path
+# scrubs the inheritance first.
+git_at() { # git_at <dir> <args...>
+    local dir=$1
+    shift
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
+        -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_NAMESPACE \
+        -u GIT_QUARANTINE_PATH git -C "$dir" "$@"
+}
+
+# Scrubbed like the rest: an exported GIT_DIR would otherwise name the repo that
+# invoked the hook, and deploy_root() below is the first caller that WRITES to
+# whatever this returns.
 main_root() {
     local common
-    common=$(git rev-parse --path-format=absolute --git-common-dir)
+    common=$(git_at . rev-parse --path-format=absolute --git-common-dir)
     dirname "$common"
 }
 
@@ -114,11 +131,11 @@ deploy_root() { echo "${KM_DEPLOY_ROOT:-$(main_root)}"; }
 kingdom_drift() {
     local root
     root=$(deploy_root)
-    if ! git -C "$root" rev-parse --verify -q origin/master >/dev/null 2>&1; then
+    if ! git_at "$root" rev-parse --verify -q origin/master >/dev/null 2>&1; then
         echo "origin/master is unknown in $root"
         return 0
     fi
-    git -C "$root" diff --name-only origin/master -- kingdom/
+    git_at "$root" diff --name-only origin/master -- kingdom/
 }
 
 deployed_ok() { [ -z "$(kingdom_drift)" ]; }
@@ -139,13 +156,13 @@ assert_deployed() { # <command name for the message>
 cmd_deploy() {
     local root branch drift
     root=$(deploy_root)
-    branch=$(git -C "$root" symbolic-ref --quiet --short HEAD || true)
+    branch=$(git_at "$root" symbolic-ref --quiet --short HEAD || true)
     [ "$branch" = master ] || die "deploy: $root is parked on '${branch:-a detached HEAD}', not master"
-    git -C "$root" fetch --quiet origin master || die "deploy: cannot reach origin from $root"
+    git_at "$root" fetch --quiet origin master || die "deploy: cannot reach origin from $root"
     # --ff-only is the whole safety argument: git itself refuses to overwrite a
     # dirty file the incoming commits touch, and refuses a divergence, so bd's
     # exports in that tree are never clobbered by a stash-and-reset dance.
-    git -C "$root" merge --ff-only origin/master || die "deploy: refused to move $root; resolve the above by hand"
+    git_at "$root" merge --ff-only origin/master || die "deploy: refused to move $root; resolve the above by hand"
     drift=$(kingdom_drift)
     if [ -n "$drift" ]; then
         {
@@ -154,7 +171,7 @@ cmd_deploy() {
         } >&2
         return 1
     fi
-    echo "deployed: $root at $(git -C "$root" rev-parse --short HEAD)"
+    echo "deployed: $root at $(git_at "$root" rev-parse --short HEAD)"
 }
 
 seat_home()   { echo "$(state_dir)/seats/$1"; }
