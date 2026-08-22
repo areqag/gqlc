@@ -23,14 +23,33 @@
 # Why the RESOLVED destination and not the branch name: stdin is git's pre-push
 # protocol, one line per ref, AFTER refspec resolution:
 #     <local-ref> <local-sha> <remote-ref> <remote-sha>
-# One rule over that catches a bare push routed by a bad upstream, an explicit
-# HEAD:master, a branch:master refspec, and a `--all` that sweeps master up,
-# where a rule over `git rev-parse --abbrev-ref HEAD` catches none of them.
+# One rule over that catches an explicit HEAD:master, a branch:master refspec,
+# and a `--all` that sweeps master up, where a rule over
+# `git rev-parse --abbrev-ref HEAD` catches none of them. It covers the bare
+# push a bad upstream routes to master only where git resolves that refspec at
+# all: measured 2026-08-20, push.default=upstream and its synonym tracking.
+# Under this repo's effective `simple` — push.default is unset — git fatals on
+# the name mismatch before any hook runs; under `current` and `matching` a bare
+# push does not name master.
 #
 # Limits, stated because they are the difference between this and a complete
 # fix: `git push --no-verify` skips it, and so does any worktree whose
 # core.hooksPath has drifted off .githooks (bd gqlc-5fm / gqlc-nzwa). It is a
 # backstop, not a wall.
+#
+# It also cannot see whether a push is forced. A `+` refspec and `--force` reach
+# neither this hook's argv (remote name, remote URL) nor its stdin: git hands
+# over the same four fields for a rewrite as for a fast-forward, measured
+# 2026-08-20 over all three spellings. So `+master:master` is allowed here for
+# the same reason `master:master` is, and two rows in
+# .githooks/tests/worktree-upstream-test.sh record that as a decision. What
+# refuses a rewrite of master is the remote: repository ruleset `protect-master`
+# (active, ~DEFAULT_BRANCH, bypass_actors empty) carries `non_fast_forward`,
+# `deletion` and `pull_request` rules, and classic branch protection has
+# allow_force_pushes and allow_deletions both false with enforce_admins on, read
+# 2026-08-20. The only local substitute would be an ancestry test, and a poor
+# one: it needs the remote sha present locally, and a `--force` that happens to
+# fast-forward passes it.
 set -euo pipefail
 
 remote_name="${1:-<unnamed remote>}"

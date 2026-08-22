@@ -81,11 +81,15 @@ guard_case "master line is not the first line (a --all sweep)" \
     reject "refs/heads/fix/x $A refs/heads/fix/x $Z
 refs/heads/other $A refs/heads/master $B
 "
-guard_case "line with three fields is refused, not skipped" \
-    reject "refs/heads/fix/x $A refs/heads/master
+# Destination deliberately not master. With master on the right, the rule above
+# refuses these lines whether or not the shape check exists — which is why the
+# two rows that used to sit here decided nothing: replacing the whole check with
+# `if false` left the suite at 27/27 (round-1 review, 2026-08-20).
+guard_case "three fields, on a line no other rule would have refused" \
+    reject "refs/heads/fix/x $A refs/heads/fix/x
 "
-guard_case "line with five fields is refused, not folded into four" \
-    reject "refs/heads/fix/x $A refs/heads/master $B extra
+guard_case "five fields, on a line no other rule would have refused" \
+    reject "refs/heads/fix/x $A refs/heads/fix/x $B extra
 "
 
 # must accept
@@ -174,6 +178,30 @@ if grep -qF -- "$MARKER" "$e2e_ok_err"; then
     bad "pre-push: the guard blocked a branch pushed to its own name"
 else
     ok "pre-push: the guard let a branch pushed to its own name through"
+fi
+
+# A forced identity push to master, over real git, with master rewritten so the
+# `+` is doing work. It is allowed, and these two rows are here to make that a
+# recorded decision rather than an oversight: a `+` refspec reaches neither this
+# hook's argv nor its stdin, so there is nothing here to tell it from the plain
+# form. See the Limits paragraph in guard-push-destination.
+FORCE_WT="$TMP/state-force-master"
+"${GIT[@]}" clone -q "$ORIGIN" "$FORCE_WT"
+"${GIT[@]}" -C "$FORCE_WT" commit -q --amend --allow-empty -m "master, rewritten"
+: >"$JUST_LOG"
+force_err="$TMP/e2e-force.err"
+env PATH="$STUB_BIN:$PATH" JUST_LOG="$JUST_LOG" \
+    "${GIT[@]}" -C "$FORCE_WT" -c core.hooksPath="$HOOKS_DIR" \
+    push origin '+refs/heads/master:refs/heads/master' >/dev/null 2>"$force_err" || true
+if grep -qxF 'test' "$JUST_LOG"; then
+    ok "pre-push: a forced master:master reads as identity here and reaches 'just test'"
+else
+    bad "pre-push: a forced master:master never reached 'just test'"
+fi
+if grep -qF -- "$MARKER" "$force_err"; then
+    bad "pre-push: the guard refused a forced master:master — it cannot see the '+'"
+else
+    ok "pre-push: the guard treats a forced master:master as it treats a plain one"
 fi
 
 # --- C. the recipe in CLAUDE.md, run verbatim -------------------------------
