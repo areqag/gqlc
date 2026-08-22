@@ -265,8 +265,87 @@ check-worktree-upstream dir=".":
     echo "         git -C '$dir' push -u origin HEAD" >&2
     exit 1
 
+# fails when a key in the shared .git/config holds a value that breaks the MAIN
+# worktree, which is the state observed 2026-08-22 with `core.bare = true`
+# (bd gqlc-qhno): every git command in the shared repo cwd died with "fatal:
+# this operation must be run in a work tree", and that is the directory CLAUDE.md
+# designates for read-only research.
+#
+# WHY NOBODY NOTICED, and why this reads the config rather than asking git what
+# it is. core.bare and core.worktree disable the main worktree ONLY; every
+# linked worktree keeps working. Measured on a throwaway repo with both keys, in
+# turn, set in the shared config:
+#
+#     main worktree     git status -> fatal, rc=128
+#     linked worktree   git status -> rc=0, clean
+#
+# So every seat is green while the shared cwd is bricked. The probe has to be
+# chosen with that in mind: from the linked worktree
+# `git rev-parse --is-bare-repository` answers FALSE while
+# `git config --get core.bare` answers TRUE. A detector built on the former is
+# blind from every worktree except the one that is already broken — and `just
+# test` runs in the seats. The config read is the arm that reaches.
+#
+# The set is named rather than swept. Both keys here are legitimate git
+# configuration in other repositories, so there is no general rule to apply; a
+# sweep would have to enumerate anyway, and enumerating in the open says which
+# keys are claimed. Add to it when a new key is found to have this shape.
+#
+# core.hooksPath has the same blast radius and is NOT in this set: check-hooks
+# above owns it, with behavioural arms this recipe has no equivalent of. That
+# recipe must skip CI, because a CI checkout legitimately has no hooksPath — and
+# that skip is the reason not to fold the keys together. core.bare and
+# core.worktree are wrong in CI too, so this recipe runs there.
+#
+# The directory is an argument so the recipe can be exercised over a throwaway
+# tree (.githooks/tests/shared-config-drift-test.sh).
+[private]
+check-shared-config dir=".":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="{{ dir }}"
+    # key|allowed|allowed... — <unset> is the sentinel for "not present at all".
+    specs=(
+        "core.bare|<unset>|false"
+        "core.worktree|<unset>"
+    )
+    rc=0
+    for spec in "${specs[@]}"; do
+        key="${spec%%|*}"
+        allowed="${spec#*|}"
+        # --get-all, not --get. Measured: on a key set twice git resolves to the
+        # LAST value, and --get reports that one. So `bare=true` followed by
+        # `bare=false` reads clean through --get, and the repository does still
+        # work. It is refused anyway: a drifted value sitting in the shared
+        # config is one write-ordering away from being the live one, and the
+        # writer that put it there has not been identified (bd gqlc-qhno item 2).
+        # Every value present is judged, not the winning one.
+        mapfile -t values < <(git -C "$dir" config --get-all "$key" 2>/dev/null || true)
+        if [ "${#values[@]}" -eq 0 ]; then
+            values=("<unset>")
+        fi
+        for value in "${values[@]}"; do
+            ok=0
+            while IFS= read -r candidate; do
+                [ "$value" = "$candidate" ] && ok=1
+            done < <(printf '%s\n' "$allowed" | tr '|' '\n')
+            [ "$ok" -eq 1 ] && continue
+            rc=1
+            origin="$(git -C "$dir" config --show-origin --get-all "$key" 2>/dev/null \
+                | grep -F "	$value" | head -1 | cut -f1 | sed 's/^file://')"
+            echo "error: $key is '$value' in the shared git config (bd gqlc-qhno)." >&2
+            echo "       Allowed: ${allowed//|/, }." >&2
+            [ -n "$origin" ] && echo "       Set in: $origin" >&2
+            echo "       This disables the MAIN worktree only — every linked worktree, and so" >&2
+            echo "       every seat, keeps working while the shared cwd answers 'fatal: this" >&2
+            echo "       operation must be run in a work tree' to every command." >&2
+            echo "       Repair: git -C '$dir' config --unset-all $key" >&2
+        done
+    done
+    exit "$rc"
+
 # health check for local dev environment; extend as new drift modes emerge
-doctor: check-hooks check-worktree-upstream
+doctor: check-hooks check-worktree-upstream check-shared-config
     @echo "ok"
 
 # provisions the pinned golangci-lint into the gitignored .bin/ when missing
@@ -907,12 +986,13 @@ test-hooks:
     bash .githooks/tests/km-test.sh
     bash .githooks/tests/worktree-upstream-test.sh
     bash .githooks/tests/hooks-drift-tripwire-test.sh
+    bash .githooks/tests/shared-config-drift-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # -shuffle catches inter-test coupling; go build link-checks package main,
 # which has no tests and is otherwise only compile-checked by lint.
-test: check-hooks check-worktree-upstream test-hooks
+test: check-hooks check-worktree-upstream check-shared-config test-hooks
     go build ./...
     go test -shuffle=on ./...
 
