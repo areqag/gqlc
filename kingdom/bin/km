@@ -83,6 +83,10 @@ is_seat() { seats_all | grep -qx "$1"; }
 # into whichever repo invoked the hook would be the same class of accident the
 # deploy command exists to end — so every git call that names a repo by path
 # scrubs the inheritance first.
+#
+# Enumerated, rather than the `unset "${!GIT_@}"` the test suites use: this list
+# is the variables that decide WHICH repo git acts on, and deploy fetches from
+# origin over ssh, so GIT_SSH_COMMAND and GIT_ASKPASS must survive the scrub.
 git_at() { # git_at <dir> <args...>
     local dir=$1
     shift

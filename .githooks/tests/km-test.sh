@@ -32,10 +32,16 @@ unset KINGDOM_SEAT
 # whatever git adds next, which a list written today does not. (Measured on
 # PR #1128 — green direct, red under push; postmortem PR #1160, bd gqlc-o13d.)
 unset "${!GIT_@}"
+
+# The same scrub per call, because the decoy row re-exports GIT_DIR on purpose.
+# Everything here talks to local paths, so it can drop the whole GIT_* namespace
+# rather than a list someone has to keep complete; km's git_at cannot, and says
+# why there.
 gitf() {
-    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
-        -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR -u GIT_NAMESPACE \
-        -u GIT_QUARANTINE_PATH git "$@"
+    local -a scrub=()
+    local v
+    for v in "${!GIT_@}"; do scrub+=(-u "$v"); done
+    env "${scrub[@]}" git "$@"
 }
 
 # Read after the unset, so it is the real repo's HEAD and not a hijacked one.
