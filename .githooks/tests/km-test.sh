@@ -460,6 +460,12 @@ fill_windowless() { local s; for s in "$@"; do seat_state "$s" awake; done; }
 fill_zombie()     { local s; for s in "$@"; do seat_state "$s" awake; seat_window "$s"; done; }
 fill_pending()    { local s; for s in "$@"; do seat_state "$s" asleep-pending; seat_window "$s"; seat_claude "$s"; done; }
 
+# The cron leaves two minutes between a suspicion and the pass that confirms it;
+# a suite running reconcile twice in one second leaves none, and reconcile
+# declines to reap a sighting that young — a seat mid-startup looks the same.
+# Rows that want the CONFIRMED outcome age the marker the way the cadence would.
+age_suspicion() { local s; for s in "$@"; do touch -d '2 minutes ago' "$KM_STATE_DIR/seats/$s/suspect"; done; }
+
 # The fresh pass: a bead of each class reaches a free seat of that class, and
 # the unlabelled one reaches nobody. This row is also the liveness control for
 # every row below it — it is the only one that proves the stubs, the tmux seam
@@ -1448,6 +1454,29 @@ else
     ok "a seat seen dead once is not yet written off — the startup gap looks the same"
 fi
 
+# Two sightings are not two cycles. Nothing puts time between reconcile passes:
+# `km reconcile` is a public subcommand, this suite runs it back to back, and
+# one manual `km dispatch` seconds before a cron tick pairs with it around a
+# seat that is mid-startup. So the pair has to be separated by AGE, or the
+# startup gap the two-pass rule exists to survive is still open.
+young_row="a second sighting with no time between it and the first does not reap"
+if [ ! -f "$KM_STATE_DIR/seats/ayg/suspect" ]; then
+    bad "$young_row" "the first pass recorded no suspicion, so this row ages nothing"
+else
+    run_dispatch
+    if [ "$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)" != awake ]; then
+        bad "$young_row" \
+            "reaped on a sighting seconds old: [$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)]"
+    elif ! printf '%s' "$OUT" | grep -q 'too recent'; then
+        bad "$young_row" "held, but not for the sighting's age: $OUT"
+    else
+        ok "$young_row"
+    fi
+fi
+
+# Now give the suspicion the cycle it is supposed to have had — which is what
+# keeps the row above and this one from being the same measurement.
+age_suspicion ayg
 run_dispatch
 if [ "$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)" != asleep ]; then
     bad "a dead seat confirmed twice is repaired in the ledger" \
@@ -1593,6 +1622,7 @@ fill_windowless ayg
 export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
 : >"$KM_SENDKEYS_LOG"
 PATH="$BIN:$PATH" "$KM" reconcile >/dev/null 2>&1
+age_suspicion ayg
 PATH="$BIN:$PATH" "$KM" reconcile >/dev/null 2>&1
 if [ -s "$KM_SENDKEYS_LOG" ]; then
     bad "a seat with no session is sent nothing" "keys went to a pane that does not exist: $(cat "$KM_SENDKEYS_LOG")"
@@ -1623,6 +1653,7 @@ elif PATH="$BIN:$PATH" "$KM" seat-live ar; then
     bad "$prefix_row" "ar has no window of its own, yet borrowed artur's session by prefix match"
 else
     PATH="$BIN:$PATH" "$KM" reconcile >/dev/null 2>&1
+    age_suspicion ar
     PATH="$BIN:$PATH" "$KM" reconcile >/dev/null 2>&1
     if [ "$(cat "$KM_STATE_DIR/seats/ar/status" 2>/dev/null)" != asleep ]; then
         bad "$prefix_row" "ar was not freed: [$(cat "$KM_STATE_DIR/seats/ar/status" 2>/dev/null)]"

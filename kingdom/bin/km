@@ -489,23 +489,34 @@ cmd_reconcile() {
             fi
             continue
         fi
-        # Confirmed over two passes, not one. km-seat writes `awake` BEFORE it
-        # execs claude, so there is a brief moment when a seat that is starting
-        # up is indistinguishable from one that has died — and rewriting the
-        # ledger there would hand a running seat's name back to the dispatcher.
-        # A second sighting a whole dispatch cycle later cannot fall inside that
-        # gap. This costs a dead slot one extra cycle and buys never reaping a
-        # live one; the cap already stopped counting it on the first pass, so
-        # the throughput that matters is recovered immediately either way.
+        # Confirmed over elapsed time, not over a count of passes. km-seat
+        # writes `awake` BEFORE it execs claude, so there is a brief moment when
+        # a seat that is starting up is indistinguishable from one that has died
+        # — and rewriting the ledger there would hand a running seat's name back
+        # to the dispatcher, against a session that is by then alive. Nothing
+        # repairs that: `asleep` is not a state this function revisits.
+        #
+        # A sighting COUNT does not close the gap, because nothing separates two
+        # passes: reconcile is a public subcommand, and a manual `km dispatch`
+        # landing seconds before a cron tick makes a pair with no time in it.
+        # The marker's age is the signal instead. 60s clears any exec window and
+        # sits well under the 120s cadence, so a genuinely dead seat is still
+        # freed on the next tick. The cap stopped counting it on the first pass
+        # either way, so the throughput that matters is already recovered.
         if [ ! -f "$suspect" ]; then
             : >"$suspect"
             echo "reconcile: $s is recorded $st with no session; confirming next pass"
             suspected=$((suspected + 1))
             continue
         fi
+        if [ "$(($(date +%s) - $(stat -c %Y "$suspect")))" -lt 60 ]; then
+            echo "reconcile: $s is recorded $st with no session, but that sighting is too recent to tell a dead seat from a starting one; still confirming"
+            suspected=$((suspected + 1))
+            continue
+        fi
         echo asleep >"$(seat_home "$s")/status"
         rm -f "$suspect" "$(seat_home "$s")/heartbeat.json"
-        echo "reconcile: $s was recorded $st with no session, twice; freed"
+        echo "reconcile: $s was recorded $st with no session for a full cycle; freed"
         repaired=$((repaired + 1))
     done
     echo "reconcile: done ($repaired freed, $suspected suspected, $redelivered re-sent)"
