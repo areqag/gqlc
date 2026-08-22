@@ -1154,9 +1154,17 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 	var next []query.NodeBinding
 	committed := 0
 	for _, n := range pending {
-		cands, covered, widened := candidateTypes(n, edges, s, t, written, narrowing).commit()
+		inf := candidateTypes(n, edges, s, t, written, narrowing)
+		cands, covered, widened := inf.commit()
 		switch len(cands) {
 		case 0:
+			// Two ways to reach an empty set, true of different queries, so the
+			// reason is pinned and not only the sentinel. An OPTIONAL hop DOES
+			// reach a compatible node type, and telling its author otherwise
+			// sends them looking for a schema gap that is not there.
+			if inf.folded > 0 && inf.unconstrained() {
+				return nil, 0, fmt.Errorf("%w: cannot infer type of unlabelled binding %q — every edge reaching it is an OPTIONAL match, which drops no row, so its type is unconstrained", ErrUnknownLabel, n.Variable())
+			}
 			return nil, 0, fmt.Errorf("%w: cannot infer type of unlabelled binding %q — no edge in the pattern reaches a compatible schema node type", ErrUnknownLabel, n.Variable())
 		case 1:
 			var only graph.LabelSetKey
@@ -1309,6 +1317,33 @@ type unlabelledInference struct {
 	covered    bool
 	attainable map[graph.LabelSetKey]struct{}
 	attested   bool
+	// innerJoined records that some folded edge drops the rows that lack it, so
+	// the types it points at are types the SURVIVING rows have.
+	//
+	// It is spelled !e.Nullable() and NOT witnessesItsEndpoints, which answers a
+	// stricter question for `attainable` and also returns false for a
+	// variable-length hop. A `*1..2` hop still filters: measured on social_r1,
+	// master accepts `MATCH (c)-[a:AUTHORED*1..2]->(x:Post) RETURN c.name` as
+	// STRING NOT NULL and `c` is the source of an AUTHORED edge on every row it
+	// returns, so that answer is sound and reusing the stricter predicate here
+	// would refuse it. What a multi-hop's far end licenses is a separate and
+	// pre-existing question (gqlc-3uof), deliberately not widened here.
+	//
+	// attested cannot stand in for this either: its far-end conjunct decides
+	// WHICH types the evidence points at, not WHETHER there is any.
+	innerJoined bool
+	// folded counts the edges that reached an accumulator, which is what
+	// separates "every touching edge is an outer join" from "no touching edge
+	// at all". Both leave inferred empty and they need different refusals.
+	folded int
+	// bindingNullable is NodeBinding.Nullable(), and it keeps the check off the
+	// shape master already answers correctly. A binding INTRODUCED by the outer
+	// join is null on exactly the rows the join missed and the edge's target
+	// type on the rest — measured: `MATCH (p:Person) OPTIONAL MATCH
+	// (p)-[a:AUTHORED]->(c) RETURN c.title` is STRING nullable on master. A
+	// binding bound elsewhere is a real node on every row, and the outer join
+	// says nothing about which type that node is.
+	bindingNullable bool
 }
 
 // commit is the set one Phase B round commits from, whether that set covers,
@@ -1349,11 +1384,43 @@ type unlabelledInference struct {
 // valid/unlabelled_optional_hop_shared_property.cypher is one, and
 // invalid/unlabelled_optional_hop_type_only_property.cypher is the twin that
 // must still refuse.
+// Ahead of all of that (gqlc-6aed): when a binding that is a real node on every
+// returned row is reached only by OUTER JOINS, `inferred` is not a statement
+// about those rows and the empty set sends the round to case 0. An outer join
+// drops nothing, so the binding still holds whatever the unfiltered rows put
+// there — every node type in the graph — while master committed the
+// intersection anyway and typed columns NOT NULL off it. The reproducer is
+// `MATCH (c) OPTIONAL MATCH (c)-[a:AUTHORED]->(x:Post) RETURN c.name`, accepted
+// on master as STRING NOT NULL for a `c` that is a Post on most rows, and Post
+// declares no `name` at all.
+//
+// This is checked before the length gate rather than inside it because the
+// defect is not about arity: at length 1 master committed a wrong singleton, and
+// at 2 or more it would defer and refuse with ErrAmbiguousBinding, naming
+// candidate types no evidence supports. Both are answers drawn from non-evidence
+// and neither is repaired by picking a different set to return.
 func (i unlabelledInference) commit() (keys map[graph.LabelSetKey]struct{}, covered, widened bool) {
+	if i.unconstrained() {
+		return nil, false, false
+	}
 	if !i.attested || len(i.inferred) != 1 {
 		return i.inferred, i.covered, false
 	}
 	return i.attainable, true, true
+}
+
+// unconstrained reports that nothing in the pattern says which type this
+// binding holds on the rows it is RETURNED on, so any set commit() could offer
+// is drawn from non-evidence.
+//
+// It deliberately does not test folded: with no touching edge at all nothing
+// folded, so `inferred` is empty and the round reaches case 0 either way —
+// adding the conjunct changed no test in this package, including the corpus
+// sweep. commitUnlabelledRound does test it, because there the count picks
+// between two error messages and only one of them is true of a query with no
+// touching edge.
+func (i unlabelledInference) unconstrained() bool {
+	return !i.innerJoined && !i.bindingNullable
 }
 
 // candidateTypes is the per-edge intersection Phase B infers an unlabelled
@@ -1405,7 +1472,7 @@ func (i unlabelledInference) commit() (keys map[graph.LabelSetKey]struct{}, cove
 // the same one that lets `attainable` be read as covering.
 func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}) unlabelledInference {
 	var all, attainable candidateAcc
-	inf := unlabelledInference{covered: true}
+	inf := unlabelledInference{covered: true, bindingNullable: n.Nullable()}
 	for _, e := range edges {
 		side, touches := touchingSide(e, n.Variable())
 		if !touches {
@@ -1431,7 +1498,11 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 		} else {
 			inf.covered = false
 		}
+		if !e.Nullable() {
+			inf.innerJoined = true
+		}
 		all.fold(e, side, other, otherKeys, s, narrowing)
+		inf.folded++
 	}
 	inf.inferred = all.result()
 	inf.attainable = attainable.result()
