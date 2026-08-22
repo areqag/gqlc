@@ -244,7 +244,11 @@ fi
 # close this bead on a false premise (Սեդրակ's ruling, 2026-08-21). Extracted and
 # run rather than grepped, for the reason given in section C.
 PROTOCOL="$ROOT/kingdom/brain/playbooks/citizen-protocol.md"
-proto="$(grep -m1 -oE '`git fetch origin && git checkout [^`]*`' "$PROTOCOL" | tr -d '`' || true)"
+# The recipe is inline markdown code, so the delimiter is a backtick. Built from
+# its octal rather than written literally: a backtick inside single quotes is
+# SC2016 to shellcheck, and .githooks is linted (just lint-hooks).
+BT="$(printf '\140')"
+proto="$(grep -m1 -oE "${BT}git fetch origin && git checkout [^${BT}]*${BT}" "$PROTOCOL" | tr -d "$BT" || true)"
 if [ -z "$proto" ]; then
     bad "citizen-protocol.md: no 'git fetch && git checkout' branch recipe found to test"
 else
