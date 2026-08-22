@@ -428,6 +428,94 @@ run_drift_case "value ok but hook not executable"    deny-hooks "$NOEXEC_REPO" '
 run_drift_case "no .githooks/ in repo: silent"       silent     "$BARE_REPO"   'git commit -m x'
 run_drift_case "non-repo cwd never fires"            silent     "$TMP"         'git commit -m x'
 
+# --- drift carried by ENV rather than by the config file (bd gqlc-o13d) ------
+#
+# `git -c core.hooksPath=X ...` reaches every descendant through GIT_CONFIG_*,
+# so a repo whose .git/config still says '.githooks' can run with hooks dead and
+# leave no writer for anyone to find. Every row below is anchored to what git
+# ACTUALLY did with the hook under that env, measured on git 2.55.0 against a
+# commit-msg that exits 1 — not to what the docs say the variable means.
+#
+#   GIT_CONFIG_PARAMETERS      hook did NOT run, commit landed   -> must fire
+#   GIT_CONFIG_COUNT/KEY/VALUE hook did NOT run, commit landed   -> must fire
+#   GIT_CONFIG (no underscore) hook DID run, commit refused      -> must stay silent
+#
+# That last one is the reason the rule is `keep GIT_CONFIG_*` and not `keep
+# anything with CONFIG in it`: git honours bare GIT_CONFIG for the `git config`
+# command and not for the config it consults when deciding to run a hook, so
+# reading it here would report dead hooks that are alive.
+run_hook_env() { # $1=cwd $2=command $3..=VAR=VAL for the hook process
+  cwd="$1"; cmd="$2"; shift 2
+  (
+    cd "$cwd" || exit 1
+    python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$cmd" \
+      | env "$@" "$HOOK" 2>/dev/null
+  )
+}
+
+run_env_drift_case() { # $1=name $2=expected $3=cwd $4=command $5..=VAR=VAL
+  name="$1"; want="$2"; cwd="$3"; cmd="$4"; shift 4
+  record "$name" "$want" "$(classify "$(run_hook_env "$cwd" "$cmd" "$@")")"
+}
+
+printf '[core]\n\thooksPath = /dev/null\n' > "$TMP/alt-config"
+
+run_env_drift_case "env -c hooksPath: commit refused" deny-hooks "$OK_REPO" 'git commit -m x' \
+  "GIT_CONFIG_PARAMETERS='core.hooksPath=/dev/null'"
+run_env_drift_case "env -c hooksPath: push refused"   deny-hooks "$OK_REPO" 'git push' \
+  "GIT_CONFIG_PARAMETERS='core.hooksPath=/dev/null'"
+run_env_drift_case "env KEY/VALUE triple refused"     deny-hooks "$OK_REPO" 'git commit -m x' \
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null
+run_env_drift_case "bare GIT_CONFIG is not drift"     silent     "$OK_REPO" 'git commit -m x' \
+  "GIT_CONFIG=$TMP/alt-config"
+
+# The discovery half of the same filter is pinned by run_gitdir_case below,
+# which predates these rows and covers the identical case; a second copy here
+# would only be a second thing to keep true.
+
+# --- the message has to name WHERE the value came from ----------------------
+# The rows above prove both drift shapes are refused. They do not distinguish
+# them, and the two need OPPOSITE repairs: a value written into .git/config is
+# what `just init` exists to undo, while a value arriving through
+# GIT_CONFIG_PARAMETERS lives in this process's environment, leaves .git/config
+# already correct, and survives `just init` untouched. Told only the value, a
+# reader runs the repair, watches it report success, and is refused again.
+#
+# So these assert on the reason TEXT rather than classify()'s verdict. That is a
+# deliberate exception to the note above about asserting verdicts: the claim
+# here IS the wording, because the wording is what a human acts on.
+reason_of() { # $1=hook stdout -> permissionDecisionReason, or empty
+  printf '%s' "$1" | python3 -c 'import json,sys
+raw = sys.stdin.read().strip()
+try:
+    d = json.loads(raw)
+except Exception:
+    print("")
+    raise SystemExit
+print((d.get("hookSpecificOutput") or {}).get("permissionDecisionReason") or "")'
+}
+
+run_reason_case() { # $1=name $2=substring the reason must contain $3=cwd $4=cmd $5..=VAR=VAL
+  name="$1"; want="$2"; cwd="$3"; cmd="$4"; shift 4
+  got="$(reason_of "$(run_hook_env "$cwd" "$cmd" "$@")")"
+  case "$got" in
+    *"$want"*) record "$name" "reason names [$want]" "reason names [$want]" ;;
+    *)         record "$name" "reason names [$want]" "ABSENT, reason was: ${got:-<none>}" ;;
+  esac
+}
+
+# env-borne: git reports origin 'command line:' even though nothing is on a
+# command line here — it is the origin git uses for GIT_CONFIG_PARAMETERS too.
+run_reason_case "env drift names the environment" "came from the ENVIRONMENT" \
+  "$OK_REPO" 'git commit -m x' "GIT_CONFIG_PARAMETERS='core.hooksPath=/dev/null'"
+run_reason_case "env drift does not say just init" "will not help" \
+  "$OK_REPO" 'git commit -m x' "GIT_CONFIG_PARAMETERS='core.hooksPath=/dev/null'"
+# file-borne: the recorded gqlc-nzwa shape, where just init IS the repair.
+run_reason_case "file drift names the config file" "from file:" \
+  "$SAMPLE_REPO" 'git commit -m x'
+run_reason_case "file drift still says just init"  "just init" \
+  "$SAMPLE_REPO" 'git commit -m x'
+
 # the repair has to stay runnable, or the guard wedges the session that has to
 # fix it. `just init` and a direct git config write are the two documented forms.
 run_drift_case "just init still runs while drifted"  warn       "$UNSET_REPO"  'just init'
@@ -1167,7 +1255,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=185
+EXPECTED_ROWS=193
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
@@ -1179,7 +1267,7 @@ fi
 # strings — no path, sha or temp dir reaches one — so the digest is the same on
 # every machine. Update it deliberately when a row is added, renamed or
 # reordered; a drift you did not intend is the finding.
-EXPECTED_ROW_DIGEST=5edf7c5560071980
+EXPECTED_ROW_DIGEST=d518dce717d07b86
 ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
   'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
 if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then
