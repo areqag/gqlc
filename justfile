@@ -959,10 +959,10 @@ fmt-check: ensure-golangci
     {{golangci}} fmt --diff
 
 # the shell-tested half of this repo's own tooling: the git hooks, the recipe
-# that lints them, and the CI script they share a language with (~55s measured
-# 2026-08-22, of which the last line is ~17s; throwaway git repos and temp
-# trees, nothing touches the worktree). The comment said ~1s until that was
-# timed — the suites have grown by an order of magnitude since.
+# that lints them, and the CI script they share a language with (~80s measured
+# 2026-08-22, half of it km-test.sh alone; throwaway git repos and temp trees,
+# nothing touches the worktree). The comment said ~1s until that was timed —
+# the suites have grown by an order of magnitude since.
 #
 # Suites live in .githooks/tests/ and are named <subject>-test.sh. Both halves
 # are enforced by internal/tools/ciguard, which reads that directory rather than
