@@ -792,6 +792,8 @@ cmd_hold_verdict() {
             [ .labels[] | select(type == "string" and startswith("subject:"))
               | .[8:] | sub("/+$"; "") | select(length > 0) ];
 
+        def is_judge: any(.labels[]; . == "class:judge");
+
         # Fail closed per candidate, never a silent drop: gqlc-z1qw was a jq
         # abort that read as a healthy zero, and one bad row must cost one line
         # rather than the whole run.
@@ -806,9 +808,18 @@ cmd_hold_verdict() {
         # internal/tools/tmpreap, which are different subsystems.
         def touching($s): [ $prs[] | select(any(.files[]; . == $s or startswith($s + "/"))) ];
 
-        def reason($s):
+        # The premise of a review bead IS an open PR touching its subject, so
+        # the three arms below that ask "might an open PR be touching this?"
+        # are inverted for it: they hold the review for as long as it is wanted
+        # and release it when the PR merges. The premise-absent arm above them
+        # is NOT inverted — a review naming a path no branch has is a typo — so
+        # the exemption is per-arm, never a pass for the class (gqlc-n4oe).
+        #
+        # No apostrophes in this jq program: it is a single-quoted shell string.
+        def reason($s; $judge):
             if ($present[$s] // false) | not then
                 "premise absent from origin/master: \($s)"
+            elif $judge then null
             elif ($prKnown | not) then
                 "gh unavailable — cannot rule out an open PR touching \($s)"
             elif (touching($s) | length) > 0 then
@@ -838,11 +849,16 @@ cmd_hold_verdict() {
                   # empty subset bd returns for an id it cannot find — and that
                   # clearing is the fail-OPEN direction.
                   | select(.status != "closed") ] as $par
-                | if ($par | length) > 0
+                # Exempt for a review: the printed remedy of this arm — add a
+                # subject: label — is what trips the PR arm above, and the
+                # parent cannot close until the PR merges, which needs this
+                # review. Two doors, one deadlock (gqlc-n4oe).
+                | if ($par | length) > 0 and (is_judge | not)
                   then "HOLD \($id) — unlabelled residue of open \($par[0].depends_on_id) — needs a subject: label"
                   else "ROUTE \($id)" end
               else
-                [ $subs[] | reason(.) | select(. != null) ] as $why
+                (is_judge) as $judge
+                | [ $subs[] | reason(.; $judge) | select(. != null) ] as $why
                 | if ($why | length) > 0 then "HOLD \($id) — \($why[0])" else "ROUTE \($id)" end
               end
           end'

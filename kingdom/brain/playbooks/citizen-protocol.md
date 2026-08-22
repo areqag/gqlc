@@ -77,6 +77,17 @@ sweep, or a nudge). Then:
    that hold is the machinery asking you for the label, not a refusal of the
    work.
 
+   A `class:judge` bead is the exception to both holds, because for a review
+   they are inverted: the premise of a review IS an open PR touching that
+   path, so the PR hold would keep it unroutable for exactly as long as the
+   review is wanted and release it the moment the PR merged. Labelling a
+   review bead is therefore safe — `km` exempts the class from the open-PR
+   hold and from the residue hold, and still holds a review whose subject
+   exists on no branch at all, which is a typo rather than a review. Before
+   that exemption, of 21 open review beads the only two carrying a subject
+   label were the only two held, one of them for nine hours, looking from the
+   board exactly like ordinary queue depth (bd gqlc-n4oe).
+
 ## Mail
 
 `bd mail send <seat> -s "subject"` with the body on stdin; `bd mail inbox`;
