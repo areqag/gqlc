@@ -1059,7 +1059,11 @@ fi
 # Ordering: a match in the VISIBLE list of a truncated PR is still definite, and
 # must not be downgraded to "cannot rule out". Asserted on the reason TEXT —
 # both arms return HOLD, so a verdict-only assertion witnesses nothing here.
-gh_prs "$(jq -cn '[{number: 742, changedFiles: 102, files: [range(99) | {path: "pad/f\(.).go"}] + [{path: "justfile"}]}]')"
+# The parentheses around the value are required by jq 1.6, which CI has and which
+# rejects a bare `+` in an object-value position ("May need parentheses around
+# object key expression"). jq 1.8 here accepts it, so the row was green locally and
+# red only in CI.
+gh_prs "$(jq -cn '[{number: 742, changedFiles: 102, files: ([range(99) | {path: "pad/f\(.).go"}] + [{path: "justfile"}])}]')"
 hv '[{"id":"gqlc-cap","labels":["class:warrior","subject:justfile"]}]'
 if [ "$RC" -ne 0 ]; then
     bad "a visible match in a truncated PR holds for the definite reason" "rc=$RC out=$OUT err=$ERR"
