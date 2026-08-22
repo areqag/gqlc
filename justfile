@@ -108,19 +108,27 @@ init:
 # A marker line alone certifies PRESENCE, and presence is not what is owed. Measured:
 # a three-line file carrying `#!/usr/bin/env bash`, the marker, and `exit 0`,
 # installed as all five names, made `just doctor` print "ok" while a drifted
-# commit LANDED. So did any `cp`-truncated prefix between 48 and ~2900 bytes — the
+# commit LANDED. So did any `cp`-truncated prefix between 47 and 2707 bytes — the
 # marker sits on line 2 and everything after it up to the case statement is
-# comment, so a prefix parses and exits 0.
+# comment, so a prefix parses and exits 0. Both bounds bisected: at 47 the marker
+# first completes, and 2708 is the first prefix that stops exiting 0.
 #
 # What executing the installed hooks buys is those two shapes and the family they
 # belong to: a stub or a truncated prefix exits 0 whatever it is handed, so one
 # run exposes it. It does not reach a disarm written against this check. The
-# hooks are run here with no arguments and without the variables git sets for a
-# hook, so a copy branching on GIT_INDEX_FILE — which git sets and this recipe
-# does not — refuses when this recipe runs it and permits when git does. Measured
-# on this branch: five lines, check-hooks silent at rc=0, `just doctor` printing
-# ok, drifted commit landed. Whoever can write that directory can write that
-# file; this raises the price of a deliberate disarm, it does not remove it.
+# hooks are run here with no arguments and without GIT_INDEX_FILE, so a copy
+# branching on that variable refuses when this recipe runs it and permits when
+# git runs it as pre-commit or commit-msg. Measured on this branch: five lines,
+# check-hooks silent at rc=0, `just doctor` printing ok, drifted commit landed.
+#
+# NOT "without the variables git sets for a hook", which was measured false:
+# GIT_EXEC_PATH and GIT_PREFIX are set for all five names and reach this recipe
+# when it runs from .githooks/pre-push, and GIT_INDEX_FILE is one git sets for
+# pre-commit and commit-msg but not for pre-push, post-checkout or post-merge.
+# The suite unsets `${!GIT_@}` for exactly that reason. So GIT_INDEX_FILE is one
+# usable key among several rather than the only door — $#, stdin, GIT_EDITOR and
+# GIT_AUTHOR_* are equally usable. Whoever can write that directory can write
+# that file; this raises the price of a deliberate disarm, it does not remove it.
 #
 # So after the marker grep, the installed hooks are EXECUTED and held to their
 # exit codes: the three blocking arms must refuse, the two warn arms must not.
