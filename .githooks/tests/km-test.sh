@@ -160,11 +160,32 @@ fi
 
 # --- config reader -----------------------------------------------------------
 
-run cfg concurrency max_active
-if [ "$RC" -ne 0 ] || [ "$OUT" != 5 ]; then
-    bad "cfg reads a bare scalar" "rc=$RC out=$OUT"
+# Read against a FIXTURE, not against the town. This row used to assert the
+# live max_active, so raising the town's concurrency reddened the config
+# reader on a one-number edit that touched no code (gqlc-p5s8). The fixture
+# value is one no town would run, so the row cannot pass by coincidence if the
+# KM_CONFIG override stops taking effect.
+cat >"$TMP/reader.toml" <<'TOML'
+[concurrency]
+max_active = 4242
+TOML
+OUT="$(KM_CONFIG="$TMP/reader.toml" "$KM" cfg concurrency max_active 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ] || [ "$OUT" != 4242 ]; then
+    bad "KM_CONFIG overrides the config path and cfg reads a bare scalar" "rc=$RC out=$OUT"
 else
-    ok "cfg reads max_active from [concurrency]"
+    ok "KM_CONFIG overrides the config path, and cfg reads a bare scalar from it"
+fi
+
+# That the live file still PARSES is a separate claim from what its number is.
+# Asserting a shape rather than a value is what stops this row from becoming
+# the pin it just was: any positive integer is a town someone may choose.
+run cfg concurrency max_active
+LIVE_MAX="$OUT"
+if [ "$RC" -ne 0 ] || ! printf '%s' "$OUT" | grep -qE '^[1-9][0-9]*$'; then
+    bad "the live kingdom.toml yields a positive max_active" "rc=$RC out=$OUT"
+else
+    ok "the live kingdom.toml yields a positive max_active, whatever it is tuned to"
 fi
 
 run cfg kingdom tmux_session
@@ -539,6 +560,69 @@ fill_pending()    { local s; for s in "$@"; do seat_state "$s" asleep-pending; s
 # Rows that want the CONFIRMED outcome age the marker the way the cadence would.
 age_suspicion() { local s; for s in "$@"; do touch -d '2 minutes ago' "$KM_STATE_DIR/seats/$s/suspect"; done; }
 
+# The cap rows below run against their OWN config. They used to name five seats
+# by hand and assert the literal 5, so raising the town's concurrency reddened
+# four of them on a config edit that touched no code (gqlc-p5s8). Constitution
+# V.6.1 says these numbers change by a config edit, and that is only true if
+# nothing else pins them.
+#
+# The fixture is the live file with the one line rewritten, so the roster and
+# the classes are still the town's own — what is decoupled is the NUMBER. Both
+# the capped set and each seat's class are asked of km rather than re-derived
+# here, so the suite holds no second copy of either rule to go stale.
+CAP=0
+CAPPED_ARCH=""
+CAPPED_WAR=""
+cap_config() { # $1 = max_active the fixture should carry
+    sed "s/^max_active = .*/max_active = $1/" "$REPO/kingdom/kingdom.toml" >"$TMP/cap.toml"
+    export KM_CONFIG="$TMP/cap.toml"
+    CAP="$("$KM" cfg concurrency max_active)"
+    [ "$CAP" = "$1" ] || bad "the cap fixture takes effect" "asked for max_active=$1, km read '$CAP'"
+    CAPPED_ARCH=""
+    CAPPED_WAR=""
+    local s
+    for s in $("$KM" capped-seats); do
+        case "$("$KM" seat-info "$s" | cut -d' ' -f1)" in
+            architect) CAPPED_ARCH="$CAPPED_ARCH$s " ;;
+            warrior)   CAPPED_WAR="$CAPPED_WAR$s " ;;
+        esac
+    done
+}
+
+# $1 = how many capped slots to leave FREE. Any further arguments are seats to
+# wake that the cap does not count (the judge).
+#
+# Fills through fill_cap, so the seats it leaves behind are the same HONEST
+# shape every other row spends a slot with — status, window, and a claude on the
+# pane. A status file alone spends no slot since gqlc-s16s, so a filler that
+# wrote only the status would leave the cap open and every row below vacuous.
+#
+# Architect seats are filled first on purpose: every row here routes WARRIOR
+# work, so the slots left free must be warrior slots or the row proves nothing.
+# FREE_SEAT names the first warrior left asleep — the seat a free slot would
+# actually route to. Rows assert against it instead of a hardcoded name, so
+# neither a roster change nor a cap change can silently move the target and
+# leave the row passing for the wrong reason.
+FREE_SEAT=""
+fill_cap_leaving() {
+    local free="$1" want woke=" " n=0 s
+    shift
+    want=$((CAP - free))
+    FREE_SEAT=""
+    for s in $CAPPED_ARCH $CAPPED_WAR; do
+        [ "$n" -ge "$want" ] && break
+        fill_cap "$s"
+        woke="$woke$s "
+        n=$((n + 1))
+    done
+    [ "$n" -eq "$want" ] ||
+        bad "fill_cap_leaving fills the cap" "wanted $want capped seats awake, the roster offered only $n"
+    for s in $CAPPED_WAR; do
+        case "$woke" in *" $s "*) ;; *) FREE_SEAT="$s"; break ;; esac
+    done
+    for s in "$@"; do fill_cap "$s"; done
+}
+
 # The fresh pass: a bead of each class reaches a free seat of that class, and
 # the unlabelled one reaches nobody. This row is also the liveness control for
 # every row below it — it is the only one that proves the stubs, the tmux seam
@@ -743,12 +827,17 @@ else
 fi
 
 # The owned pass is capped work like any other. հայկ is the assignee and is
-# asleep; the five capped seats awake around him are what must hold him back,
-# and the printed cap line is the control proving the cap engaged.
+# asleep; the capped seats awake around him are what must hold him back, and the
+# printed cap line is the control proving the cap engaged.
+#
+# These two rows run against the cap fixture for the same reason the section
+# further down does: naming a fixed number of seats by hand asserts the town's
+# live max_active, so tuning it reddens a row about the owned pass (gqlc-p5s8).
+cap_config 7
 dispatch_case '[
   {"id":"gqlc-owncap","priority":0,"assignee":"hayk","labels":["class:warrior"]}
 ]' '[]'
-fill_cap aramazd vahagn astghik ar nvard
+fill_cap_leaving 0
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "an owned bead waits for a slot" "rc=$RC out=$OUT"
@@ -766,7 +855,7 @@ fi
 dispatch_case '[
   {"id":"gqlc-ownjudge","priority":0,"assignee":"mihr","labels":null}
 ]' '[]'
-fill_cap aramazd vahagn astghik ar nvard
+fill_cap_leaving 0
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "an owned judge bead is exempt from the cap" "rc=$RC out=$OUT"
@@ -777,6 +866,7 @@ elif ! wake_of mihr | grep -q 'gqlc-ownjudge'; then
 else
     ok "a ready bead assigned to the judge wakes him at a full cap, as his in-progress beads already do"
 fi
+unset KM_CONFIG
 
 # --- the state no pass can reach, named rather than left to be found ---------
 # Closing the assigned-and-open hole leaves one shape that no pass can wake
@@ -860,6 +950,42 @@ fi
 # The cap itself had no test of any kind before this section, so the rows below
 # pin both halves: that a full cap does stop capped work, and that it does not
 # stop the gate.
+#
+# Everything from here to the end of the section runs against the cap fixture,
+# NOT the town. The number below is the fixture's own and is deliberately not
+# the town's, so if the override ever stops taking effect these rows go red
+# rather than quietly re-pinning the live value. It is also deliberately larger
+# than the architect bench: at a cap of 3 or 4 `fill_cap 1` fills entirely with
+# architects, every warrior is asleep, and "the first free warrior" and "the
+# first warrior" name the same seat — so FREE_SEAT's skip would be dead code
+# that no row could tell from a bug.
+cap_config 7
+
+# The membership rule every row below takes on trust. `cap_config` asks km which
+# seats the cap counts, so a km that dropped a whole class from that rule would
+# move the fixture and the rows together and none of them would redden. The
+# roster in the config is the independent witness: km's rule is checked against
+# the classes the town wrote down, not against itself.
+ROSTER="$(awk '/^\[seats\]/ { s = 1; next } /^\[/ { s = 0 }
+               s && $1 !~ /^#/ && /=/ { print $1 }' "$KM_CONFIG")"
+EXPECT_CAPPED=""
+UNCAPPED=""
+for s in $ROSTER; do
+    case "$("$KM" seat-info "$s" | cut -d' ' -f1)" in
+        architect | warrior) EXPECT_CAPPED="$EXPECT_CAPPED$s " ;;
+        *) UNCAPPED="$UNCAPPED$s " ;;
+    esac
+done
+GOT_CAPPED="$("$KM" capped-seats | tr '\n' ' ')"
+if [ -z "$CAPPED_ARCH" ] || [ -z "$CAPPED_WAR" ]; then
+    bad "the cap counts every architect and warrior, and nobody else" "the fixture roster offers no architect or no warrior, so this row proves nothing"
+elif [ -z "$UNCAPPED" ]; then
+    bad "the cap counts every architect and warrior, and nobody else" "the fixture roster has no exempt seat, so an all-seats rule would pass"
+elif [ "$GOT_CAPPED" != "$EXPECT_CAPPED" ]; then
+    bad "the cap counts every architect and warrior, and nobody else" "km counts '$GOT_CAPPED', the roster's architects and warriors are '$EXPECT_CAPPED'"
+else
+    ok "km's capped-seats is exactly the roster's architects and warriors, with ${UNCAPPED% } exempt"
+fi
 
 # The warrior bead is P0 and the judge bead P1, so the judge sorts SECOND: the
 # row fails if the fix merely reaches the queue at a full cap and takes its
@@ -869,7 +995,7 @@ dispatch_case '[
   {"id":"gqlc-wcap","priority":0,"assignee":null,"labels":["class:warrior"]},
   {"id":"gqlc-jcap","priority":1,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
-fill_cap aramazd vahagn astghik ar nvard
+fill_cap_leaving 0
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "a full cap does not close the merge gate" "rc=$RC out=$OUT"
@@ -886,7 +1012,7 @@ fi
 dispatch_case '[
   {"id":"gqlc-wonly","priority":0,"assignee":null,"labels":["class:warrior"]}
 ]' '[]'
-fill_cap aramazd vahagn astghik ar nvard
+fill_cap_leaving 0
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "a full cap with no judge work wakes nobody" "rc=$RC out=$OUT"
@@ -905,31 +1031,50 @@ fi
 dispatch_case '[
   {"id":"gqlc-wfree","priority":0,"assignee":null,"labels":["class:warrior"]}
 ]' '[]'
-fill_cap aramazd vahagn astghik ar mihr
+fill_cap_leaving 1 mihr
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "an awake judge does not spend a capped slot" "rc=$RC out=$OUT"
-elif ! wake_of nvard | grep -q 'bead:gqlc-wfree'; then
+elif ! wake_of "$FREE_SEAT" | grep -q 'bead:gqlc-wfree'; then
     bad "an awake judge does not spend a capped slot" "the free warrior slot went unused (woken: $(woken_seats)) out=$OUT"
 elif printf '%s' "$OUT" | grep -q 'no free slot'; then
     bad "an awake judge does not spend a capped slot" "the run counted the judge and declared itself full: $OUT"
 else
-    ok "an awake judge is not counted against max_active, so the fifth slot is still spent on warrior work"
+    ok "an awake judge is not counted against max_active, so the last slot is still spent on warrior work"
 fi
 
-# The same exemption as the operator reads it. Six seats are awake here and the
-# line must say five, because the number is what a human sizes the town by —
-# and gqlc-z1qw, gqlc-bn5r and gqlc-ed2u were each a healthy-looking indicator
-# vouching for machinery that was not doing what the number implied.
+# The same exemption as the operator reads it. One more seat is awake here than
+# the cap allows for, and the line must still say CAP/CAP, because the number
+# is what a human sizes the town by — and gqlc-z1qw, gqlc-bn5r and gqlc-ed2u
+# were each a healthy-looking indicator vouching for machinery that was not
+# doing what the number implied.
 dispatch_case '[]' '[]'
-fill_cap aramazd vahagn astghik ar nvard mihr
+fill_cap_leaving 0 mihr
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "the printed cap count excludes the judge" "rc=$RC out=$OUT"
-elif ! printf '%s' "$OUT" | grep -q '5/5'; then
-    bad "the printed cap count excludes the judge" "six awake seats, one of them the judge, did not print as 5/5: $OUT"
+elif ! printf '%s' "$OUT" | grep -q "$CAP/$CAP"; then
+    bad "the printed cap count excludes the judge" "$((CAP + 1)) awake seats, one of them the judge, did not print as $CAP/$CAP: $OUT"
 else
-    ok "with the judge awake alongside a full bench, the cap line counts the five capped seats and not the six awake ones"
+    ok "with the judge awake alongside a full bench, the cap line counts the capped seats and not the judge"
+fi
+
+# The numerator is a count of who is awake, not the cap restated. At exactly the
+# cap the two are the same number, so every row above passes whichever one km
+# prints — the state that tells them apart is an over-full bench, which is what
+# a cap lowered under awake seats or a leaked slot (gqlc-s16s) actually looks
+# like, and precisely when an operator needs the real number.
+dispatch_case '[]' '[]'
+fill_cap_leaving -1
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the cap line counts the awake seats, not the cap" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'no free slot'; then
+    bad "the cap line counts the awake seats, not the cap" "an over-full bench did not report itself full at all: $OUT"
+elif ! printf '%s' "$OUT" | grep -q "$((CAP + 1))/$CAP"; then
+    bad "the cap line counts the awake seats, not the cap" "$((CAP + 1)) capped seats awake did not print as $((CAP + 1))/$CAP: $OUT"
+else
+    ok "with one more capped seat awake than the cap allows, the line reports the seats awake over the cap, not the cap over itself"
 fi
 
 # The other number the operator reads. Deriving the total from slot arithmetic
@@ -940,7 +1085,7 @@ fi
 dispatch_case '[
   {"id":"gqlc-jcount","priority":0,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
-fill_cap aramazd vahagn astghik ar nvard
+fill_cap_leaving 0
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "the wake count counts the judge's wake" "rc=$RC out=$OUT"
@@ -961,13 +1106,13 @@ dispatch_case '[
   {"id":"gqlc-jslot","priority":0,"assignee":null,"labels":["class:judge"]},
   {"id":"gqlc-wslot","priority":1,"assignee":null,"labels":["class:warrior"]}
 ]' '[]'
-fill_cap aramazd vahagn astghik ar
+fill_cap_leaving 1
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "a judge wake does not spend the last free slot" "rc=$RC out=$OUT"
 elif ! wake_of mihr | grep -q 'bead:gqlc-jslot'; then
     bad "a judge wake does not spend the last free slot" "the judge was not woken at all (woken: $(woken_seats)) out=$OUT"
-elif ! wake_of nvard | grep -q 'bead:gqlc-wslot'; then
+elif ! wake_of "$FREE_SEAT" | grep -q 'bead:gqlc-wslot'; then
     bad "a judge wake does not spend the last free slot" "the judge's wake consumed the one free warrior slot (woken: $(woken_seats)) out=$OUT"
 else
     ok "with one slot free, routing a judge bead ahead of a warrior bead still leaves that slot for the warrior"
@@ -980,13 +1125,13 @@ dispatch_case '[
 ]' '[
   {"id":"gqlc-jslot2","assignee":"mihr","labels":["class:judge"]}
 ]'
-fill_cap aramazd vahagn astghik ar
+fill_cap_leaving 1
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "a judge resume does not spend the last free slot" "rc=$RC out=$OUT"
 elif ! wake_of mihr | grep -q 'gqlc-jslot2'; then
     bad "a judge resume does not spend the last free slot" "the judge was not resumed at all (woken: $(woken_seats)) out=$OUT"
-elif ! wake_of nvard | grep -q 'bead:gqlc-wslot2'; then
+elif ! wake_of "$FREE_SEAT" | grep -q 'bead:gqlc-wslot2'; then
     bad "a judge resume does not spend the last free slot" "the judge's resume consumed the one free warrior slot (woken: $(woken_seats)) out=$OUT"
 else
     ok "resuming the judge's own in-progress bead leaves the free slot for warrior work"
@@ -998,7 +1143,7 @@ fi
 dispatch_case '[]' '[
   {"id":"gqlc-jres","assignee":"mihr","labels":["class:judge"]}
 ]'
-fill_cap aramazd vahagn astghik ar nvard
+fill_cap_leaving 0
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "a full cap does not strand a half-done review" "rc=$RC out=$OUT"
@@ -1014,7 +1159,7 @@ fi
 dispatch_case '[
   {"id":"gqlc-jbusy","priority":0,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
-fill_cap aramazd vahagn astghik ar nvard mihr anahit
+fill_cap_leaving 0 mihr anahit
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "an awake judge is not woken again" "rc=$RC out=$OUT"
@@ -1031,7 +1176,7 @@ fi
 dispatch_case '[
   {"id":"gqlc-jfree","priority":0,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
-fill_cap aramazd vahagn astghik ar nvard mihr
+fill_cap_leaving 0 mihr
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "a busy judge does not stall the review queue" "rc=$RC out=$OUT"
@@ -1041,6 +1186,43 @@ elif woken_seats | grep -qw mihr; then
     bad "a busy judge does not stall the review queue" "it also woke the busy judge: $(woken_seats) out=$OUT"
 else
     ok "with one judge awake and one free, ready review work routes to the free judge at a full cap"
+fi
+
+# The property this whole section exists to keep. Four of the rows above once
+# died on a one-line config edit that touched no code (gqlc-p5s8) — the point
+# at which a suite stops guarding a tuning parameter and starts forbidding it.
+# Running the same assertion at two different caps is what makes that visible:
+# a row that has quietly re-acquired a hardcoded number passes at one value and
+# fails at the other, where a single run passes either way.
+for cap_try in 2 7; do
+    cap_config "$cap_try"
+    dispatch_case '[
+      {"id":"gqlc-wtune","priority":0,"assignee":null,"labels":["class:warrior"]},
+      {"id":"gqlc-jtune","priority":1,"assignee":null,"labels":["class:judge"]}
+    ]' '[]'
+    fill_cap_leaving 0
+    run_dispatch
+    if [ "$RC" -ne 0 ]; then
+        bad "the cap rows follow the configured cap (max_active=$cap_try)" "rc=$RC out=$OUT"
+    elif grep -rq 'gqlc-wtune' "$KM_STATE_DIR/seats" 2>/dev/null; then
+        bad "the cap rows follow the configured cap (max_active=$cap_try)" "the cap never engaged, the warrior bead routed: $(woken_seats)"
+    elif ! wake_of mihr | grep -q 'bead:gqlc-jtune'; then
+        bad "the cap rows follow the configured cap (max_active=$cap_try)" "the judge was not reachable (woken: $(woken_seats)) out=$OUT"
+    elif ! printf '%s' "$OUT" | grep -q "$cap_try/$cap_try"; then
+        bad "the cap rows follow the configured cap (max_active=$cap_try)" "the cap line does not read $cap_try/$cap_try: $OUT"
+    else
+        ok "at max_active=$cap_try the cap fills, holds capped work, and still reaches the judge"
+    fi
+done
+
+# Back onto the town's own config. A fixture that leaked would re-point every
+# row below at a file in /tmp, and they would pass for the wrong reason.
+unset KM_CONFIG
+run cfg concurrency max_active
+if [ "$RC" -ne 0 ] || [ "$OUT" != "$LIVE_MAX" ]; then
+    bad "the cap fixture does not leak past its section" "expected the live $LIVE_MAX, got rc=$RC out=$OUT"
+else
+    ok "with KM_CONFIG unset the reader is back on the town's own kingdom.toml"
 fi
 
 # Fail-closed, the half that made this invisible for the kingdom's whole life:
@@ -1991,6 +2173,13 @@ unset KM_HOLD_SKIP_FETCH KM_FAKE_GH
 # behaviour rather than a message, so a row cannot pass on a reworded string.
 one_warrior_bead='[{"id":"gqlc-slot","priority":1,"assignee":null,"labels":["class:warrior"]}]'
 
+# The arithmetic below is written around five capped slots — four live seats
+# plus one broken one is a FULL cap, and that is the whole observable. Read off
+# the town's own max_active that stops being true the moment anyone tunes it, so
+# the section takes its five from a fixture instead (gqlc-p5s8). Five here is the
+# suite's own number and is deliberately not read from the live file.
+cap_config 5
+
 # The control, and it must come first: a seat with a real session still spends
 # its slot. Without this row, "reap everything unconditionally" is green.
 dispatch_case "$one_warrior_bead" '[]'
@@ -2244,6 +2433,10 @@ else
     fi
 fi
 unset KM_SENDKEYS_LOG
+
+# Back onto the town's own config, so a leaked fixture cannot re-point the rows
+# below at a file in /tmp and have them pass for the wrong reason.
+unset KM_CONFIG
 
 # --- the contract with real tmux ---------------------------------------------
 # Every row above stands on a stubbed tmux and a stubbed ps, and a stub encodes
