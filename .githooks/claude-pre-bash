@@ -272,10 +272,12 @@ GIT_OPTS_WITH_ARG = ("-c", "--namespace", "--exec-path", "--super-prefix")
 # `bd close` arm. BD_OPTS_WITH_ARG exists so a flag VALUE spelled `close` is not
 # read as the subcommand; a LONG flag outside that list is treated as boolean,
 # which can only over-detect a close, and over-detection is inert (a close with
-# no reason flag is allowed). The list does not govern shorthands: a cluster is
-# walked letter by letter (shorthand_arg), so a token absent from it — `-fr` —
-# still consumes a value, which is what pflag does. `done` is bd's documented
-# alias for `close`.
+# no reason flag is allowed). Absence from the list does not make a shorthand
+# boolean: a cluster is walked letter by letter (shorthand_arg), so unlisted
+# `-fr` still consumes a value, which is what pflag does. The listed shorthands
+# `-r` and `-C` are governed by it, bare and inline both — scan_bd tests the
+# list first and only then falls through to shorthand_arg. `done` is bd's
+# documented alias for `close`.
 BD_CLOSE_SUBCOMMANDS = ("close", "done")
 BD_OPTS_WITH_ARG = (
     "-C", "--directory", "--db", "--actor", "--dolt-auto-commit",

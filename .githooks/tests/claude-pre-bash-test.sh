@@ -878,12 +878,14 @@ run_verdict "a surplus ( leaves the span unclosed and unread" no-close-seen "$BD
 # A surplus `)` brings the depth to zero EARLY, so the span is closed at that
 # paren and the body does come back, truncated there. Written so the truncation
 # falls outside the reason's quote, the shortened body still tokenizes and the
-# close is read and verdicted on the sha it carries. Make matching_paren treat a
-# negative depth as "nothing closes this" and return None, and this row verdicts
-# no-close-seen. The one unbalanced reason among the 192 paren-bearing corpus
-# reasons is this direction, not the row above: gqlc-oxne, 6 `(` to 7 `)`, depth
-# first going negative 857 characters in on a `case " ${a} ${b} " in *" ${x} "*)`
-# pattern, in a reason that is not truncated and runs on for another kilobyte.
+# close is read and verdicted on the sha it carries. Make paren_matches abandon
+# the map when a `)` finds nothing open instead of dropping it — this row's
+# trailing `)` is such a paren — and this row verdicts no-close-seen, because
+# the span then has nothing closing it. The one unbalanced reason among the 192
+# paren-bearing corpus reasons is this direction, not the row above: gqlc-oxne,
+# 6 `(` to 7 `)`, depth first going negative 857 characters in on a
+# `case " ${a} ${b} " in *" ${x} "*)` pattern, in a reason that is not truncated
+# and runs on for another kilobyte.
 run_verdict "a surplus ) closes the span early" deny-unpushed-sha "$BD_REPO" \
   "echo \"\$(bd close gqlc-x -r 'Closed at $ORPHAN_SHA.'; esac) tail)\""
 
