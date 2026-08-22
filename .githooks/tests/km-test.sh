@@ -560,11 +560,24 @@ else
         _type: "issue", id: "cap-\(.)", title: "cap fixture \(.)",
         status: "open", priority: 3, issue_type: "task"
     }' >"$ws/fixture.jsonl"
-    if ! (cd "$ws" && bd init && bd import fixture.jsonl) >"$ws/setup.log" 2>&1; then
+    # bd resolves its workspace through GIT_DIR/GIT_WORK_TREE, which git exports
+    # to every hook, so under `git push` this row reached the SHARED repo's
+    # workspace and aborted — it failed from a hook and only from a hook. The
+    # unset is what makes it run there. It is not what keeps the fixture out of
+    # the real ledger: measured, bd refuses when it finds an existing workspace
+    # and initialises in the cwd when it finds none. The .beads check below
+    # guards a case today's bd does not produce, and is kept only because what
+    # it would cost is 105 fixture issues in the town's tracker.
+    bd_in_ws() { (unset "${!GIT_@}"; cd "$ws" && bd "$@"); }
+    if ! bd_in_ws init >"$ws/setup.log" 2>&1; then
         bad "$bd_contract" "no throwaway bd workspace: $(tail -1 "$ws/setup.log")"
+    elif [ ! -d "$ws/.beads" ]; then
+        bad "$bd_contract" "bd init resolved outside $ws; refusing to import a fixture into a ledger that may be real"
+    elif ! bd_in_ws import fixture.jsonl >>"$ws/setup.log" 2>&1; then
+        bad "$bd_contract" "the fixture would not import: $(tail -1 "$ws/setup.log")"
     else
-        capped="$(cd "$ws" && bd ready --json 2>/dev/null | jq -r 'length')"
-        whole="$(cd "$ws" && bd ready -n 0 --json 2>/dev/null | jq -r 'length')"
+        capped="$(bd_in_ws ready --json 2>/dev/null | jq -r 'length')"
+        whole="$(bd_in_ws ready -n 0 --json 2>/dev/null | jq -r 'length')"
         if [ "$capped" != 100 ]; then
             bad "$bd_contract" \
                 "the default query returned $capped, so $fixture_n issues no longer straddle bd's cap — re-argue whether -n 0 is still load-bearing"
