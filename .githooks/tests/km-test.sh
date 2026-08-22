@@ -254,14 +254,88 @@ mkdir -p "$BIN"
 
 cat >"$BIN/tmux" <<'STUB'
 #!/usr/bin/env bash
-# The town is up, but no seat holds a window — so a wake queues to a file
-# rather than being typed into a pane, which is the state these cases read.
-# list-windows prints nothing, which is what makes window_up false.
+# The town is up. WHICH seats hold a window is data, not a constant: a seat is
+# listed iff $KM_STATE_DIR/fake-windows names it. A seat with no window is both
+# an ordinary state (a wake queues to a file instead of being typed into a
+# pane) and the shape of a dead slot, so a stub that always answers the same
+# way cannot express the distinction this suite now has to draw.
+#
+# Panes carry a synthetic tty per seat, which is what lets the `ps` stub decide
+# SEPARATELY whether a claude runs on it. Window-exists and session-is-alive are
+# different facts; conflating them is the defect under test (gqlc-s16s).
+_wins="${KM_STATE_DIR:-}/fake-windows"
 case "$1" in
-    has-session)  exit 0 ;;
-    list-windows) exit 0 ;;
+    has-session) exit 0 ;;
+    list-windows)
+        [ -f "$_wins" ] && cat "$_wins"
+        exit 0 ;;
+    list-panes)
+        _seat=""
+        for _a in "$@"; do
+            case "$_a" in *:*) _seat="${_a##*:}" ;; esac
+        done
+        # Real tmux resolves a window target EXACTLY only when the component is
+        # prefixed with '='; bare, it falls back to a PREFIX match. Verified on
+        # tmux 3.7c: with only a window named artur, `-t "=sess:ar"` returns
+        # artur's pane and exits 0. The roster makes that live — `ar` prefixes
+        # artur, arpine, aregak and aramazd — so a stub that always matched
+        # exactly would encode a belief tmux does not hold, and would hide the
+        # one seat whose liveness could be read off another seat's session.
+        case "$_seat" in
+            =*) _exact=1; _seat="${_seat#=}" ;;
+            *)  _exact=0 ;;
+        esac
+        [ -f "$_wins" ] || exit 1
+        if grep -qx "$_seat" "$_wins"; then
+            echo "/dev/fake/$_seat"
+            exit 0
+        fi
+        if [ "$_exact" -eq 0 ]; then
+            _hit=$(grep -m1 "^$_seat" "$_wins" 2>/dev/null) || true
+            if [ -n "${_hit:-}" ]; then
+                echo "/dev/fake/$_hit"
+                exit 0
+            fi
+        fi
+        exit 1 ;;
+    send-keys)
+        # Record argv so a row can assert HOW the keys were sent: one
+        # invocation per line, arguments tab-separated. Bundling the text and
+        # the Enter into a single call is what strands the text (gqlc-s16s).
+        if [ -n "${KM_SENDKEYS_LOG:-}" ]; then
+            shift
+            printf '%s\n' "$(printf '%s\t' "$@")" >>"$KM_SENDKEYS_LOG"
+        fi
+        exit 0 ;;
 esac
 exit 0
+STUB
+
+cat >"$BIN/pgrep" <<'STUB'
+#!/usr/bin/env bash
+# `pgrep -t <tty> -x claude` over the synthetic ttys the tmux stub hands out. A
+# seat's session is alive iff $KM_STATE_DIR/fake-claude-ttys names its tty.
+#
+# km passes the tty with its /dev/ prefix STRIPPED, which is what pgrep wants,
+# so the names recorded here are stripped too. A tty outside fake/ is not ours:
+# defer to the real pgrep, so stubbing this does not quietly create a world in
+# which no process anywhere exists.
+_tty=""
+_prev=""
+for _a in "$@"; do
+    [ "$_prev" = "-t" ] && _tty="$_a"
+    _prev="$_a"
+done
+case "$_tty" in
+    fake/*) ;;
+    *) exec /usr/bin/pgrep "$@" ;;
+esac
+_live="${KM_STATE_DIR:-}/fake-claude-ttys"
+if [ -f "$_live" ] && grep -qx "$_tty" "$_live"; then
+    echo 4242
+    exit 0
+fi
+exit 1
 STUB
 
 cat >"$BIN/bd" <<'STUB'
@@ -323,7 +397,7 @@ else
     jq -c ".[0:$limit]" "$f"
 fi
 STUB
-chmod +x "$BIN/tmux" "$BIN/bd"
+chmod +x "$BIN/tmux" "$BIN/bd" "$BIN/pgrep"
 
 DCASE=0
 dispatch_case() { # $1=ready, $2=in-progress, $3=dep edges, $4=parent statuses
@@ -363,11 +437,28 @@ make_inboxes() {
 wake_of()     { cat "$KM_STATE_DIR/seats/$1/wake" 2>/dev/null; }
 woken_seats() { find "$KM_STATE_DIR/seats" -mindepth 2 -maxdepth 2 -name wake 2>/dev/null | sed 's|.*/seats/||; s|/wake$||' | sort | tr '\n' ' '; }
 
-# The cap counts seats whose status file reads `awake`, which is what a running
-# session leaves behind. A queued `wake` file (as the priority row above uses)
-# is a different state and does NOT count, so the two cannot stand in for each
-# other.
-fill_cap() { local s; for s in "$@"; do mkdir -p "$KM_STATE_DIR/seats/$s"; echo awake >"$KM_STATE_DIR/seats/$s/status"; done; }
+# A seat that spends a slot. `awake` in the status file is only half of it: the
+# other half is a session that actually exists, and the two can disagree, which
+# is the whole of gqlc-s16s. fill_cap builds the HONEST shape — status, window,
+# and a claude on the pane — so a row that wants a slot spent gets one for the
+# right reason. A queued `wake` file (as the priority row above uses) is a
+# different state again and does NOT count, so the three cannot stand in for
+# each other.
+seat_window()  { local s; for s in "$@"; do echo "$s" >>"$KM_STATE_DIR/fake-windows"; done; }
+seat_claude()  { local s; for s in "$@"; do echo "fake/$s" >>"$KM_STATE_DIR/fake-claude-ttys"; done; }
+seat_state()   { mkdir -p "$KM_STATE_DIR/seats/$1"; echo "$2" >"$KM_STATE_DIR/seats/$1/status"; }
+
+fill_cap() { local s; for s in "$@"; do seat_state "$s" awake; seat_window "$s"; seat_claude "$s"; done; }
+
+# The three broken shapes, each a slot the town is spending on nothing.
+#   windowless: status says awake, the tmux window is GONE  (witnessed live on
+#               `ayg`, 2026-08-22T05:35Z, still counted against max_active)
+#   zombie:     window survives, no claude on its tty
+#   pending:    the citizen ran `km sleep`, the /exit never arrived, so the
+#               session is alive under a status that says it left (gqlc-0gjt)
+fill_windowless() { local s; for s in "$@"; do seat_state "$s" awake; done; }
+fill_zombie()     { local s; for s in "$@"; do seat_state "$s" awake; seat_window "$s"; done; }
+fill_pending()    { local s; for s in "$@"; do seat_state "$s" asleep-pending; seat_window "$s"; seat_claude "$s"; done; }
 
 # The fresh pass: a bead of each class reaches a free seat of that class, and
 # the unlabelled one reaches nobody. This row is also the liveness control for
@@ -1301,6 +1392,301 @@ else
 fi
 
 unset KM_HOLD_SKIP_FETCH KM_FAKE_GH
+# --- the cap counts sessions, not claims (gqlc-s16s) -------------------------
+# `awake` in a status file is a CLAIM, written by km-seat before it starts a
+# session and by `km sleep` before it asks for one to end. Nothing reconciled
+# the claim against whether a session existed, so a slot could be spent on
+# nothing at all, permanently, while every indicator read healthy. Measured on
+# the live town 2026-08-22T02:40Z: two of five slots held by finished sessions.
+#
+# The rows below fix the accounting at its source — the status file is repaired
+# against ground truth before anything reads it — so the cap, the board, and
+# free_worker_of_class all become right together rather than one at a time.
+#
+# One warrior bead, and who gets woken, is the observable throughout: it is
+# behaviour rather than a message, so a row cannot pass on a reworded string.
+one_warrior_bead='[{"id":"gqlc-slot","priority":1,"assignee":null,"labels":["class:warrior"]}]'
+
+# The control, and it must come first: a seat with a real session still spends
+# its slot. Without this row, "reap everything unconditionally" is green.
+dispatch_case "$one_warrior_bead" '[]'
+fill_cap artur arpine aregak vahagn astghik
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "five live sessions still fill the cap" "rc=$RC out=$OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "five live sessions still fill the cap" "woke [$(woken_seats)] with no slot free"
+else
+    ok "a seat whose session is genuinely alive still spends its slot"
+fi
+
+# The witnessed shape: status=awake, tmux window GONE. `ayg` was in exactly this
+# state at 05:35Z and was still counted. km:550 already renders it `awake?`, so
+# the town detected the dead slot and spent it anyway.
+dispatch_case "$one_warrior_bead" '[]'
+fill_cap artur arpine aregak vahagn
+fill_windowless ayg
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "an awake seat with no window does not spend a slot" "rc=$RC out=$OUT"
+elif ! wake_of aramazd | grep -q gqlc-slot; then
+    bad "an awake seat with no window does not spend a slot" \
+        "the freed slot routed nothing; woke [$(woken_seats)]"
+else
+    ok "a seat marked awake whose tmux window is gone does not spend a slot"
+fi
+
+# The slot came back on that first pass, but the LEDGER must not be rewritten
+# on one sighting: km-seat writes `awake` before it execs claude, so a seat
+# mid-startup looks exactly like a dead one for that instant, and correcting it
+# there would hand a running seat's name back to the dispatcher. Freeing the
+# slot is reversible arithmetic; renaming the seat's state is not.
+if [ "$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)" != awake ]; then
+    bad "one sighting of a dead seat does not rewrite the ledger" \
+        "status changed on the first pass: [$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)]"
+else
+    ok "a seat seen dead once is not yet written off — the startup gap looks the same"
+fi
+
+run_dispatch
+if [ "$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)" != asleep ]; then
+    bad "a dead seat confirmed twice is repaired in the ledger" \
+        "still reads [$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)]"
+else
+    ok "a dead seat still dead a cycle later is corrected to asleep, not merely discounted"
+fi
+
+# The confirmation has to be able to say no, or it is a delay dressed as a
+# check. A seat that was suspect and is alive again keeps its awake record.
+dispatch_case "$one_warrior_bead" '[]'
+fill_cap artur arpine aregak vahagn
+fill_windowless ayg
+run_dispatch
+seat_window ayg
+seat_claude ayg
+run_dispatch
+if [ "$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)" != awake ]; then
+    bad "a suspected seat that is alive again is not reaped" \
+        "reaped anyway: [$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)]"
+elif [ -f "$KM_STATE_DIR/seats/ayg/suspect" ]; then
+    bad "a suspected seat that is alive again is not reaped" \
+        "the suspicion outlived the evidence; a later pass would reap a live seat"
+else
+    ok "a seat suspected once and alive at the next pass is cleared, not reaped"
+fi
+
+# The window can outlive the session: km-seat's claude exits, the trap writes
+# asleep — but if that write is what was lost, the window remains with no
+# claude on its tty.
+dispatch_case "$one_warrior_bead" '[]'
+fill_cap artur arpine aregak vahagn
+fill_zombie ayg
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "an awake seat with a window but no claude does not spend a slot" "rc=$RC out=$OUT"
+elif ! wake_of aramazd | grep -q gqlc-slot; then
+    bad "an awake seat with a window but no claude does not spend a slot" \
+        "the freed slot routed nothing; woke [$(woken_seats)]"
+else
+    ok "a seat whose window survives its claude does not spend a slot"
+fi
+
+# The other direction, and the one the old accounting got backwards (gqlc-0gjt):
+# `km sleep` writes asleep-pending BEFORE it tries to deliver /exit, and the cap
+# tested for the literal `awake`, so a session whose departure never arrived was
+# alive and UNCOUNTED. The cap could then overcommit. A live claude spends a
+# slot whatever the status file says it intends.
+dispatch_case "$one_warrior_bead" '[]'
+fill_cap artur arpine aregak vahagn
+fill_pending ayg
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a live session spends a slot even while marked asleep-pending" "rc=$RC out=$OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "a live session spends a slot even while marked asleep-pending" \
+        "woke [$(woken_seats)] though five sessions were alive"
+else
+    ok "an asleep-pending seat whose claude is still alive spends its slot"
+fi
+
+# --- Enter must travel alone, and even that is not enough (gqlc-s16s) --------
+# MEASURED with a raw-tty reader behind a real tmux 3.7c pane: `send-keys
+# "text" Enter` delivers both in ONE read() burst, and a TUI that coalesces a
+# burst into a paste takes the trailing CR as literal text instead of a submit.
+# Three separate invocations arrive as three bursts. C-u is not the cause —
+# `send-keys "/exit" Enter` bundles just the same without it.
+#
+# Separation is NECESSARY. It is NOT SUFFICIENT, and no row here can pretend
+# otherwise: with the reader not sitting in read(), the two writes re-coalesce
+# in the tty buffer and the CR is swallowed again, at every inter-call delay I
+# tried. That is why the reconciler below exists — delivery is confirmed after
+# the fact rather than trusted at the point of sending.
+# Asserts the whole shape of a delivery, because each third of it fails
+# differently and silently:
+#   C-u first — the box may already hold a stranded attempt, and this is a
+#     RE-send path, so without the clear a retried /exit lands as /exit/exit and
+#     the retry is what breaks the pane. Dropping this line passes every other
+#     assertion here, which is how it was found.
+#   text alone — bundled with Enter it arrives in one read() burst and a
+#     paste-coalescing TUI takes the CR as literal text (measured).
+#   Enter sent — checking only that nothing is bundled would pass a km that
+#     never submits at all: the same stranded pane by a shorter route.
+# Given no payload line carries Enter, any surviving Enter line is a lone one.
+assert_delivery_shape() { # <label> <log>
+    local label=$1 log=$2 bundled
+    bundled=$(grep -E '(/exit|\[km\])' "$log" 2>/dev/null | grep -c 'Enter' || true)
+    if [ ! -s "$log" ]; then
+        bad "$label" "no send-keys reached the pane at all"
+    elif ! head -1 "$log" | grep -q 'C-u'; then
+        bad "$label" "the first invocation does not clear the line, so a re-send appends to a stranded one: $(head -1 "$log")"
+    elif [ "$bundled" -ne 0 ]; then
+        bad "$label" "$bundled invocation(s) carried the text AND Enter together: $(grep 'Enter' "$log" | head -1)"
+    elif ! grep -q 'Enter' "$log"; then
+        bad "$label" "the text was sent but Enter never was, so nothing submits: $(cat "$log")"
+    else
+        ok "$label"
+    fi
+}
+
+dispatch_case '[]' '[]'
+seat_window ayg
+seat_claude ayg
+export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
+: >"$KM_SENDKEYS_LOG"
+PATH="$BIN:$PATH" "$KM" sleep --seat ayg >/dev/null 2>&1
+assert_delivery_shape "km sleep clears the line, then sends /exit, then Enter — three invocations" "$KM_SENDKEYS_LOG"
+
+# The nudge path has the same shape and the same failure — a wake reason typed
+# at an already-awake seat, stranded in its input box, wakes nobody.
+dispatch_case '[]' '[]'
+fill_cap ayg
+export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
+: >"$KM_SENDKEYS_LOG"
+PATH="$BIN:$PATH" "$KM" wake ayg --reason "a nudge" >/dev/null 2>&1
+assert_delivery_shape "km wake nudges an awake seat with the clear, the text and Enter each on their own" "$KM_SENDKEYS_LOG"
+
+# --- a requested departure that never arrived is re-delivered ----------------
+# The citizen ran `km sleep`; consent is not in question. What failed is the
+# delivery, and nothing ever noticed, so the session sat alive under a status
+# that said it had left. Re-delivering is the confirmation step that arm (4)
+# showed the send itself can never provide.
+dispatch_case '[]' '[]'
+fill_pending ayg
+export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
+: >"$KM_SENDKEYS_LOG"
+OUT="$(PATH="$BIN:$PATH" "$KM" reconcile 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "an undelivered departure is re-delivered" "rc=$RC out=$OUT"
+elif ! grep -q '/exit' "$KM_SENDKEYS_LOG" 2>/dev/null; then
+    bad "an undelivered departure is re-delivered" "no /exit was re-sent: $(cat "$KM_SENDKEYS_LOG" 2>/dev/null)"
+else
+    ok "a seat still alive under asleep-pending has its /exit re-delivered"
+    assert_delivery_shape "the re-delivered /exit keeps the same three-invocation shape" "$KM_SENDKEYS_LOG"
+fi
+
+# The opposite case must stay quiet. A seat with no session is not owed a
+# keystroke, and typing into a dead or absent pane is how a reconciler starts
+# inventing state instead of repairing it.
+dispatch_case '[]' '[]'
+fill_windowless ayg
+export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
+: >"$KM_SENDKEYS_LOG"
+PATH="$BIN:$PATH" "$KM" reconcile >/dev/null 2>&1
+PATH="$BIN:$PATH" "$KM" reconcile >/dev/null 2>&1
+if [ -s "$KM_SENDKEYS_LOG" ]; then
+    bad "a seat with no session is sent nothing" "keys went to a pane that does not exist: $(cat "$KM_SENDKEYS_LOG")"
+elif [ "$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)" != asleep ]; then
+    bad "a seat with no session is sent nothing" "status not repaired: [$(cat "$KM_STATE_DIR/seats/ayg/status" 2>/dev/null)]"
+else
+    ok "a seat with no session is repaired silently, with no keys sent to a pane that is gone"
+fi
+unset KM_SENDKEYS_LOG
+
+# A seat's liveness must not be readable off ANOTHER seat's session. tmux
+# resolves a bare window target by PREFIX when no window matches exactly, and
+# this roster makes that live: `ar` is a prefix of artur, arpine, aregak and
+# aramazd. So `list-panes -t "=kingdom:ar"` happily returns artur's pane, and a
+# predicate that trusted it would report `ar` alive on artur's claude — and
+# `send_line` would type artur's /exit into artur's pane. window_up is what
+# stops it, by asking for an EXACT window name first. Found by mutation: with
+# that one line removed every other row here stayed green.
+dispatch_case '[]' '[]'
+fill_cap artur
+seat_state ar awake
+export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
+: >"$KM_SENDKEYS_LOG"
+prefix_row="a seat is not read as live through a longer seat's window"
+if ! PATH="$BIN:$PATH" "$KM" seat-live artur; then
+    bad "$prefix_row" "artur holds a window and a claude and was not seen as live; the fixture is wrong"
+elif PATH="$BIN:$PATH" "$KM" seat-live ar; then
+    bad "$prefix_row" "ar has no window of its own, yet borrowed artur's session by prefix match"
+else
+    PATH="$BIN:$PATH" "$KM" reconcile >/dev/null 2>&1
+    PATH="$BIN:$PATH" "$KM" reconcile >/dev/null 2>&1
+    if [ "$(cat "$KM_STATE_DIR/seats/ar/status" 2>/dev/null)" != asleep ]; then
+        bad "$prefix_row" "ar was not freed: [$(cat "$KM_STATE_DIR/seats/ar/status" 2>/dev/null)]"
+    elif [ "$(cat "$KM_STATE_DIR/seats/artur/status" 2>/dev/null)" != awake ]; then
+        bad "$prefix_row" "artur was reaped alongside its own prefix: [$(cat "$KM_STATE_DIR/seats/artur/status" 2>/dev/null)]"
+    elif [ -s "$KM_SENDKEYS_LOG" ]; then
+        bad "$prefix_row" "keys were typed while repairing a windowless seat: $(cat "$KM_SENDKEYS_LOG")"
+    else
+        ok "$prefix_row, and repairing it does not touch the seat whose name it prefixes"
+    fi
+fi
+unset KM_SENDKEYS_LOG
+
+# --- the contract with real tmux ---------------------------------------------
+# Every row above stands on a stubbed tmux and a stubbed ps, and a stub encodes
+# what I BELIEVE those tools do. The belief is load-bearing here in a way it was
+# not before: `#{pane_tty}` and `ps -t <tty> -o comm=` are now the town's
+# definition of whether a seat is alive, so if either stopped meaning what it
+# means, every row above would stay green while the cap went back to guessing.
+# This row is the one place the real tools are asked. It runs in a throwaway
+# session of its own — KM_TMUX_SESSION exists so it cannot read the live town.
+real_tmux="seat_session_live agrees with real tmux about whether a session exists"
+if ! command -v tmux >/dev/null 2>&1; then
+    printf 'skip - %s: no tmux on PATH\n' "$real_tmux"
+else
+    export KM_STATE_DIR="$TMP/real-tmux"
+    mkdir -p "$KM_STATE_DIR"
+    realbin="$TMP/realbin"
+    mkdir -p "$realbin"
+    # comm is the basename of the executed binary, so a COPY named claude is
+    # what makes `ps -o comm=` say claude. A shell script would report its
+    # interpreter and prove nothing.
+    cp "$(command -v sleep)" "$realbin/claude"
+    export KM_TMUX_SESSION="km-test-$$"
+    tmux new-session -d -s "$KM_TMUX_SESSION" -n ayg -x 80 -y 24 "$realbin/claude 120" 2>/dev/null
+    # A pane exists before its child has exec'd, so polling here is not slack in
+    # the test — it is the same startup gap that the two-pass confirmation above
+    # exists to survive, showing up as a real property of real tmux.
+    for _ in $(seq 1 50); do
+        "$KM" seat-live ayg && break
+        sleep 0.1
+    done
+    # The window exists either way; what changes underneath is only the process,
+    # so a predicate that merely looked for a window could not tell these apart.
+    if ! "$KM" seat-live ayg; then
+        bad "$real_tmux" "a real pane running a real claude was not seen as live"
+    elif "$KM" seat-live ay; then
+        # The prefix row above states this as a fact about tmux and then checks
+        # it against a stub that I wrote to agree. Here it is asked of tmux
+        # itself: `ay` names no window, and the only reason it could come back
+        # live is real tmux resolving the target onto ayg.
+        bad "$real_tmux" "real tmux resolved a windowless seat onto a longer one's pane and km believed it"
+    else
+        tmux kill-session -t "=$KM_TMUX_SESSION" 2>/dev/null
+        if "$KM" seat-live ayg; then
+            bad "$real_tmux" "a seat was still live after its real session was killed"
+        else
+            ok "$real_tmux"
+        fi
+    fi
+    tmux kill-session -t "=$KM_TMUX_SESSION" 2>/dev/null
+    unset KM_TMUX_SESSION
+fi
+
 export KM_STATE_DIR="$TMP/state"
 
 # --- the contract with the real bd (gqlc-mlca) -------------------------------
