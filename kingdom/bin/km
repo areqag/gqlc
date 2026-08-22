@@ -555,14 +555,14 @@ route_owners() { # <"seat id" lines> <reason prefix>
 # returns beads whose status is open only, so an in_progress bead with no
 # assignee is in no pass and cannot re-enter one. It reads as work underway and
 # no wake will ever come for it. Unassigning a bead a seat had already claimed
-# produces exactly this state, and did (gqlc-mro7), done by someone trying to
-# make the bead more routable.
+# produces exactly this state, and did on gqlc-gwf0 (recorded in gqlc-mro7),
+# done by someone trying to make the bead more routable.
 #
 # NOT counted here, though it is equally unreachable: a bead assigned to a name
 # that is not a seat. People hold beads here legitimately, so failing on that
 # would mean failing whenever a human takes one — but it also means a RETIRED
 # seat's work would hide in that category, indistinguishable from a person's
-# (gqlc-mzbz).
+# (gqlc-t4zx).
 stranded_ids() {
     bd list --status in_progress -n 0 --json 2>/dev/null |
         jq -r '[ .[] | select(.assignee == null) | .id ] | join(" ")'
