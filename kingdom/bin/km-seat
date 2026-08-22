@@ -74,6 +74,11 @@ while :; do
     echo awake >"$home/status"
     (
         cd "$wt"
+        # KM_CONFIG is the suite's seam and must not follow the seat in: a
+        # citizen's own `km` calls have to read the town's real config, not
+        # whichever throwaway launched them. Same shape as the GIT_DIR that
+        # redirected bd into the shared repo this week.
+        unset KM_CONFIG
         KINGDOM_SEAT=$seat BEADS_ACTOR=$seat KM_STATE_DIR=$sd \
             claude --model "$model" \
             "${effort_args[@]}" \

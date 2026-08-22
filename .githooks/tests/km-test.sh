@@ -795,7 +795,11 @@ alt_config() { # alt_config <path> [effort-section-lines...] -> a throwaway toml
     {
         printf '[kingdom]\ntmux_session = "kingdom-test"\nstate_dirname = "kingdom-state"\n\n'
         printf '[claude]\npermission_mode = "acceptEdits"\n\n'
-        printf '[seats]\nhayk = "warrior:claude-opus-5:Հայկ"\n'
+        # Two seats of DIFFERENT classes. With a one-warrior roster every argv
+        # row launches the same class, so `cfg effort "$class"` hard-wired to
+        # `warrior` resolves correctly for the only seat there is and the suite
+        # stays green (Միհր, verdict-uhqh-r1 B3, M5).
+        printf '[seats]\nhayk = "warrior:claude-opus-5:Հայկ"\nmihr = "judge:claude-opus-5:Միհր"\n'
         # One key per line: km's reader is line-oriented, so "$*" would fold a
         # whole section into a single unparseable line.
         [ "$#" -eq 0 ] || { printf '\n[effort]\n'; printf '%s\n' "$@"; }
@@ -874,8 +878,15 @@ mkdir -p "$stubdir"
 cat >"$stubdir/claude" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"$KM_TEST_ARGV"
+# The seat's ENVIRONMENT is part of what km-seat composes, not just its argv.
+printf 'KM_CONFIG=%s\n' "${KM_CONFIG-<unset>}" >"$KM_TEST_ARGV.env"
 STUB
 chmod +x "$stubdir/claude"
+
+# The argv carries the whole soul, so a raw dump buries the flag it is being
+# printed to show. Everything before --append-system-prompt is the part these
+# rows are about.
+argv_brief() { [ -s "$1" ] && sed '/^--append-system-prompt$/q' "$1" | tr '\n' ' '; }
 
 # km resolves the town from `git rev-parse` against the CALLER's cwd (km:78-82)
 # and km-seat then demands a seat worktree beside it. Run from the real repo,
@@ -887,19 +898,19 @@ TOWN="$TMP/town"
 mkdir -p "$TOWN"
 TOWN=$(cd "$TOWN" && pwd -P) # git reports the physical path; mktemp may hand back a symlink
 git init -q "$TOWN"
-mkdir -p "$TOWN-seat-hayk"
+mkdir -p "$TOWN-seat-hayk" "$TOWN-seat-mihr"
 
 ARGV=""
 STDERR=""
-compose_argv() { # compose_argv <config> -> ARGV (one arg per line), STDERR
-    local cfgfile=$1 sdir pid waited=0
+compose_argv() { # compose_argv <config> [seat] -> ARGV (one arg per line), STDERR
+    local cfgfile=$1 seat=${2:-hayk} sdir pid waited=0
     ARGV="$TMP/argv.$RANDOM"
     STDERR="$TMP/stderr.$RANDOM"
     sdir="$TMP/seatstate.$RANDOM"
-    mkdir -p "$sdir/seats/hayk"
-    echo "a test wake" >"$sdir/seats/hayk/wake"
+    mkdir -p "$sdir/seats/$seat"
+    echo "a test wake" >"$sdir/seats/$seat/wake"
     (cd "$TOWN" && PATH="$stubdir:$PATH" KM_CONFIG="$cfgfile" KM_STATE_DIR="$sdir" \
-        KM_TEST_ARGV="$ARGV" "$KM_SEAT" hayk) >"$STDERR" 2>&1 &
+        KM_TEST_ARGV="$ARGV" "$KM_SEAT" "$seat") >"$STDERR" 2>&1 &
     pid=$!
     # km-seat parks again after the stub exits, so it never runs away; we stop
     # waiting as soon as the argv lands, or give up and report what we have.
@@ -916,11 +927,28 @@ compose_argv "$TMP/warrior-high.toml"
 if [ ! -s "$ARGV" ]; then
     bad "km-seat launches claude at all" "no argv recorded; log: $(cat "$STDERR" 2>/dev/null)"
 elif ! grep -qx -- '--effort' "$ARGV"; then
-    bad "km-seat passes --effort" "argv: $(tr '\n' ' ' <"$ARGV")"
+    bad "km-seat passes --effort" "argv: $(argv_brief "$ARGV")"
 elif [ "$(grep -A1 -x -- '--effort' "$ARGV" | tail -1)" != high ]; then
-    bad "km-seat passes the class's level" "argv: $(tr '\n' ' ' <"$ARGV")"
+    bad "km-seat passes the class's level" "argv: $(argv_brief "$ARGV")"
 else
     ok "km-seat passes --effort high for a warrior seat when [effort] says high"
+fi
+
+# A DIFFERENT class through the same path, at a level no other argv row uses.
+# The row above cannot see a resolver hard-wired to `warrior`, because the seat
+# it launches is a warrior; nor a whitelist that has lost `xhigh`, because it
+# never asks for one. Both survived a full battery at 42/42 until this row
+# existed (Միհր, verdict-uhqh-r1 B3). `xhigh` is also the level #1134 assigns
+# the judge, so dropping it silently is a live misconfiguration, not a
+# hypothetical.
+alt_config "$TMP/judge-xhigh.toml" 'warrior   = "low"' 'judge     = "xhigh"'
+compose_argv "$TMP/judge-xhigh.toml" mihr
+if [ ! -s "$ARGV" ]; then
+    bad "a judge seat launches at all" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
+elif [ "$(grep -A1 -x -- '--effort' "$ARGV" | tail -1)" != xhigh ]; then
+    bad "a judge seat launches at the judge's level, not the warrior's" "argv: $(argv_brief "$ARGV")"
+else
+    ok "a judge seat launches at xhigh while the same config puts warriors at low"
 fi
 
 # The level must come from the seat's CLASS, not from a fixed string: flip the
@@ -928,7 +956,10 @@ fi
 alt_config "$TMP/warrior-low.toml" 'warrior = "low"'
 compose_argv "$TMP/warrior-low.toml"
 if [ "$(grep -A1 -x -- '--effort' "$ARGV" 2>/dev/null | tail -1)" != low ]; then
-    bad "the level tracks the config, not a hard-coded default" "argv: $(tr '\n' ' ' <"$ARGV" 2>/dev/null)"
+    # The detail reads a file that does not exist when the launch itself failed,
+    # so without the guard the row's own failure message is buried under a raw
+    # "No such file or directory" from the shell.
+    bad "the level tracks the config, not a hard-coded default" "argv: $(argv_brief "$ARGV")"
 else
     ok "the level tracks the config, not a hard-coded default"
 fi
@@ -940,9 +971,30 @@ compose_argv "$TMP/noeffort.toml"
 if [ ! -s "$ARGV" ]; then
     bad "a seat with no [effort] section still launches" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
 elif grep -qx -- '--effort' "$ARGV"; then
-    bad "no [effort] section must omit the flag entirely" "argv: $(tr '\n' ' ' <"$ARGV")"
+    bad "no [effort] section must omit the flag entirely" "argv: $(argv_brief "$ARGV")"
+# Silence is part of the claim. Absence is the ordinary state of a town that
+# has not tuned [effort], not a misconfiguration, so it must not warn on every
+# launch — and deleting the empty arm from km-seat's case leaves the argv
+# identical while doing exactly that (Միհր, verdict-uhqh-r1 N1).
+elif [ -s "$STDERR" ]; then
+    bad "no [effort] section must launch quietly" "stderr: $(cat "$STDERR")"
 else
-    ok "no [effort] section omits --effort and the seat launches anyway"
+    ok "no [effort] section omits --effort, says nothing, and the seat launches anyway"
+fi
+
+# The seam must not follow the seat in. KM_CONFIG is set for km-seat's benefit,
+# and if it reached the launched claude then every `km` a citizen's tools run
+# would read the suite's throwaway roster instead of the town's — the shape that
+# sent bd into the wrong repo via an inherited GIT_DIR this week. km-seat sets
+# the override HERE, on purpose, so a row asserting the child cannot see it is
+# the only thing standing between that and production.
+compose_argv "$TMP/warrior-high.toml"
+if [ ! -s "$ARGV.env" ]; then
+    bad "the launched claude's environment is observable at all" "no env recorded"
+elif ! grep -qx 'KM_CONFIG=<unset>' "$ARGV.env"; then
+    bad "KM_CONFIG must not reach the launched claude" "$(cat "$ARGV.env")"
+else
+    ok "the seat's claude is launched without KM_CONFIG, whatever km-seat itself read"
 fi
 
 # A typo in the config must not take the town down. This is the shape the bead
@@ -954,7 +1006,7 @@ compose_argv "$TMP/badlevel.toml"
 if [ ! -s "$ARGV" ]; then
     bad "a misspelled level still launches the seat" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
 elif grep -qx -- '--effort' "$ARGV"; then
-    bad "a misspelled level must not reach claude" "argv: $(tr '\n' ' ' <"$ARGV")"
+    bad "a misspelled level must not reach claude" "argv: $(argv_brief "$ARGV")"
 elif ! grep -q 'mediun' "$STDERR"; then
     bad "a misspelled level must be named on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
 else
