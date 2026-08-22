@@ -20,6 +20,21 @@ fi
 # git var GIT_AUTHOR_IDENT / GIT_COMMITTER_IDENT returns:
 #   Name <email> timestamp tz
 # We extract the email (content between the last < and >) and validate it.
+#
+# The rule is the DOMAIN, not a list of addresses. It used to be a list, and
+# it read `test@example.invalid|*@example.com|*@example.org|root@localhost`:
+# `fixture <fixture@example.invalid>` was one character class away from every
+# entry, cleared the shape check below (it has an @, and its domain has a dot),
+# and reached two citizens' commits (gqlc-7iea). RFC 2606 and RFC 6761 reserve
+# these names so that nothing under them can ever be delivered to a person, so
+# an address in one is a fixture's or a placeholder's by construction.
+# NOT in this list, though both are special-use names too: `.local` (RFC 6762)
+# and `.onion` (RFC 7686). The rule here is deliverability, not specialness —
+# an address is refused because nothing sent there can reach a person. A
+# .local address resolves on the local link and a .onion one over Tor, so both
+# can reach somebody, and refusing them would refuse a real identity.
+RESERVED_DOMAINS=(invalid test example localhost example.com example.net example.org)
+
 _check_identity() {
     local label="$1"
     local ident
@@ -27,21 +42,38 @@ _check_identity() {
     # Extract email between < and >
     local email
     email="$(printf '%s' "$ident" | sed 's/.*<\(.*\)>.*/\1/')"
+    # Domains are case-insensitive; FIXTURE@EXAMPLE.INVALID is the same address.
+    local domain="${email##*@}"
+    domain="${domain,,}"
+    # A trailing dot is the FQDN root: `example.invalid.` IS `example.invalid`.
+    # As text it is neither equal to a reserved name nor a suffix ending in one,
+    # so both arms below miss it — and the shape check cannot catch what they
+    # miss, because the dot it demands is exactly the dot doing the evading.
+    # ALL of them, not one: strip a single dot from `example.invalid..` and the
+    # bypass is still there.
+    while [ "$domain" != "${domain%.}" ]; do domain="${domain%.}"; done
 
-    # Denylist: known test-fixture and placeholder addresses
-    case "$email" in
-        test@example.invalid|*@example.com|*@example.org|root@localhost|"")
+    local reserved
+    for reserved in "${RESERVED_DOMAINS[@]}"; do
+        # The domain itself, or any subdomain of it: a@example.invalid and
+        # a@mail.example.invalid are both unreachable.
+        if [ "$domain" = "$reserved" ] || [ "$domain" != "${domain%".$reserved"}" ]; then
             cat >&2 <<ERRMSG
 ERROR: Bogus $label identity: <$email>
-       This address is a known test fixture or placeholder.
-       Fix with: git commit --amend --reset-author
+       Its domain is reserved (RFC 2606 / RFC 6761), so no mail sent there can
+       reach anyone: this is a test fixture's or a placeholder's address, not a
+       person's. A commit carrying it says something that is not true about who
+       wrote it.
+       Where it came from:  git config --show-origin user.email
+       Fix this commit with: git commit --amend --reset-author
 ERRMSG
             return 1
-            ;;
-    esac
+        fi
+    done
 
-    # Shape: must contain @ and the domain part must contain a dot
-    local domain="${email##*@}"
+    # Shape: must contain @ and the domain part must contain a dot. This is
+    # what refuses an empty address, which has no domain for the loop above to
+    # match.
     if [[ "$email" != *@* ]] || [[ "$domain" != *.* ]]; then
         cat >&2 <<ERRMSG
 ERROR: Implausible $label email: <$email>
