@@ -504,6 +504,26 @@ else
     ok "with the judge awake alongside a full bench, the cap line counts the five capped seats and not the six awake ones"
 fi
 
+# The other number the operator reads. Deriving the total from slot arithmetic
+# (`max - active - slots`) held only while every wake spent a slot; the judge's
+# exemption breaks that, and at a full cap the expression floors to zero — so
+# the run that reaches the merge gate is exactly the run that reports having
+# done nothing, and the town reads as idle at the moment it is not.
+dispatch_case '[
+  {"id":"gqlc-jcount","priority":0,"assignee":null,"labels":["class:judge"]}
+]' '[]'
+fill_cap aramazd vahagn astghik ar nvard
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the wake count counts the judge's wake" "rc=$RC out=$OUT"
+elif ! wake_of mihr | grep -q 'bead:gqlc-jcount'; then
+    bad "the wake count counts the judge's wake" "the judge was not woken, so the count pins nothing (woken: $(woken_seats)) out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'done (1 wake(s)'; then
+    bad "the wake count counts the judge's wake" "one seat was woken and the run did not say so: $OUT"
+else
+    ok "a judge woken at a full cap is counted in the run's wake total, which slot arithmetic alone would have reported as zero"
+fi
+
 # Exemption means the judge's wake costs the town nothing, not merely that he
 # is reached. With one slot free and the judge bead sorting first, a judge wake
 # that decrements `slots` would spend the warriors' last slot on a seat that
