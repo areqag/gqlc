@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# km-overlap — who else has an open PR touching this file?
+#
+# Two entry points over one index, because the town asks this question from two
+# sides. The mayor asks it of a PATH before any branch exists, to decide whether
+# a bead is routable; an author asks it of their own PR once one does. Built for
+# only the second, the routing half stays a query somebody runs by hand.
+#
+# Exit status is a tri-state, and callers depend on the third:
+#
+#     0  looked, found nothing
+#     1  looked, found overlap
+#     2  could not look
+#
+# Every way of learning nothing exits 2. Reporting 0 in those cases would be
+# indistinguishable from a real all-clear, and 0 is the answer a caller acts on.
+#
+# This does NOT predict merge conflicts. Shared-file overlap is the signal; a
+# citizen told that eight other open PRs touch this file will go and look.
+#
+# ONE BLIND SPOT, DISCLOSED BECAUSE IT CANNOT BE GUARDED. A renamed file is
+# invisible under its OLD path. gh's `--json files` reports only the NEW path of
+# a rename and counts it once, so changedFiles agrees and the truncation guard
+# cannot fire. Measured 2026-08-22 on this repo's PR #806, which git records as
+# `R100 test/data/resolver/invalid/plural_endpoint_whole_entity_after_edge_closure.cypher
+# -> test/data/resolver/valid/...`: gh returns the valid/ path and the invalid/
+# one appears nowhere. So `path <old-path>` answers "no open PR touches this"
+# while an open PR is renaming that very file away. The gh CLI exposes no
+# changeType or previousFilePath field to fence this with — the REST API's
+# `previous_filename` does carry it, at one request per PR, which is affordable
+# for `pr <N>` and not for `census`. Until that is done, read a clean answer as
+# "no open PR touches this path under this name".
+#
+# Tests: .githooks/tests/km-overlap-test.sh (run via `just test-hooks`).
+set -uo pipefail
+
+# The tests inject a fake here; the town never sets it.
+GH="${KM_GH:-gh}"
+
+# gh pr list caps at 30 and says nothing when it truncates, so the limit is
+# always explicit and a result that arrives AT the limit is refused rather than
+# reported short.
+LIMIT=200
+
+die() { printf 'km-overlap: %s\n' "$*" >&2; exit 2; }
+
+usage() {
+    cat >&2 <<'EOF'
+usage: km-overlap <command> [--limit N]
+
+  path <PATH>   which open PRs touch PATH        (ask before routing a bead)
+  pr <NUMBER>   which open PRs share a file with NUMBER
+  census        every path touched by more than one open PR
+
+exit: 0 nothing found, 1 overlap found, 2 could not look
+EOF
+    exit 2
+}
+
+# Echoes the open-PR index as JSON. Any doubt about what came back is fatal.
+fetch() {
+    command -v "$GH" >/dev/null 2>&1 || die "gh is not available as '$GH'; cannot look"
+    command -v jq >/dev/null 2>&1 || die "jq is not available; cannot look"
+
+    local raw rc
+    raw="$("$GH" pr list --state open --json number,title,files,changedFiles -L "$LIMIT" 2>&1)"
+    rc=$?
+    # A body that parses is not evidence the query ran: gh prints usable-looking
+    # text on failure too.
+    [ "$rc" -eq 0 ] || die "gh exited $rc; cannot look ($raw)"
+    [ -n "$raw" ] || die "gh returned nothing; cannot look"
+    printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 \
+        || die "gh did not return a JSON array; cannot look"
+
+    # A record with no usable file list is not a PR that touches nothing — it is
+    # a query that did not return what was asked for. Counting it as touching
+    # nothing is how a real overlap goes unreported.
+    #
+    # The check is on TYPE, not presence: has() is satisfied by a key whose
+    # value is null, and jq sorts null below every number, so a null count made
+    # the truncation guard below false as well. Such a record walked both guards
+    # and was reported as trusted. One type check refuses the absent key, the
+    # null value and a non-numeric count together.
+    local unusable
+    unusable="$(printf '%s' "$raw" | jq -r '
+        [.[] | select((((.files | type) == "array") and ((.changedFiles | type) == "number")) | not)
+             | .number // "?"] | join(" ")')"
+    if [ -n "$unusable" ]; then
+        die "gh returned no usable file list for PR(s) $unusable; cannot look"
+    fi
+
+    # gh truncates a record's file list at 100 and says nothing. Measured
+    # 2026-08-22 against kubernetes/kubernetes#141360: `--json files` returned
+    # 100 paths for a PR whose changed_files is 322, from both `pr list` and
+    # `pr view`. Unguarded, the 101st file of a large PR is invisible and
+    # `path <that file>` answers "no open PR touches this" — the fail-open this
+    # tool exists to refuse. changedFiles is the true count, so the two
+    # disagreeing detects it exactly and there is no threshold to guess at.
+    local short
+    short="$(printf '%s' "$raw" | jq -r '
+        [.[] | select((.files | length) < .changedFiles)
+             | "#\(.number) (\(.files | length) of \(.changedFiles))"] | join(", ")')"
+    if [ -n "$short" ]; then
+        die "gh returned a truncated file list for $short; cannot look"
+    fi
+
+    local n
+    n="$(printf '%s' "$raw" | jq -r 'length')"
+    if [ "$n" -ge "$LIMIT" ]; then
+        die "gh returned $n PRs at the requested limit of $LIMIT, so the list may be truncated; cannot look (raise --limit)"
+    fi
+
+    printf '%s' "$raw"
+}
+
+cmd_path() {
+    local want="$1" index hits
+    [ -n "$want" ] || usage
+    index="$(fetch)" || exit 2
+
+    # fetch() is a fortress, but the query is a second place to learn nothing.
+    # A jq that DIES returns empty output, and an unchecked empty is read below
+    # as "found no overlap" — the death becomes an all-clear at exit 0, which is
+    # the one answer this tool must never give without having looked. pipefail
+    # is set, so the assignment carries jq's status. The guard is on the CLASS:
+    # any future record shape that kills the query fails closed here, not only
+    # the shapes fetch() knows to refuse.
+    hits="$(printf '%s' "$index" | jq -r --arg p "$want" '
+        [.[] | select(.files[].path == $p)]
+        | unique_by(.number)
+        | sort_by(.number)
+        | .[] | "  #\(.number)  \(.title)"')" \
+        || die "the path query failed on gh's records; cannot look"
+
+    if [ -z "$hits" ]; then
+        printf 'km-overlap: no open PR touches %s\n' "$want"
+        return 0
+    fi
+    printf 'km-overlap: %d open PR(s) touch %s\n' "$(printf '%s\n' "$hits" | wc -l)" "$want"
+    printf '%s\n' "$hits"
+    return 1
+}
+
+cmd_pr() {
+    local want="$1" index shared
+    [ -n "$want" ] || usage
+    case "$want" in
+        ''|*[!0-9]*) die "'$want' is not a PR number" ;;
+    esac
+    index="$(fetch)" || exit 2
+
+    # An unknown number cannot be answered. Calling it clean would tell an
+    # author their branch is safe on the strength of a typo.
+    printf '%s' "$index" | jq -e --argjson n "$want" 'any(.[]; .number == $n)' >/dev/null 2>&1 \
+        || die "#$want is not an open PR; cannot look"
+
+    shared="$(printf '%s' "$index" | jq -r --argjson n "$want" '
+        (.[] | select(.number == $n) | .files[].path) as $mine
+        | [.[] | select(.number != $n) | select(.files[].path == $mine) | .number]
+        | unique
+        | select(length > 0)
+        | "  \($mine)  " + (map("#\(.)") | join(" "))' | sort -u)" \
+        || die "the sibling query failed on gh's records; cannot look"
+
+    if [ -z "$shared" ]; then
+        printf 'km-overlap: PR #%s shares no file with another open PR\n' "$want"
+        return 0
+    fi
+    printf 'km-overlap: PR #%s shares %d file(s) with other open PRs\n' \
+        "$want" "$(printf '%s\n' "$shared" | wc -l)"
+    printf '%s\n' "$shared"
+    return 1
+}
+
+cmd_census() {
+    local index rows
+    index="$(fetch)" || exit 2
+
+    rows="$(printf '%s' "$index" | jq -r '
+        [.[] | .number as $n | .files[].path | {path: ., number: $n}]
+        | group_by(.path)
+        | map(select(length > 1))
+        | sort_by(-length, .[0].path)
+        | .[]
+        | "  \(length)  \(.[0].path)  " + (map("#\(.number)") | sort | join(" "))')" \
+        || die "the census query failed on gh's records; cannot look"
+
+    if [ -z "$rows" ]; then
+        printf 'km-overlap: no file is touched by more than one open PR\n'
+        return 0
+    fi
+    printf 'km-overlap: %d file(s) touched by more than one open PR\n' \
+        "$(printf '%s\n' "$rows" | wc -l)"
+    printf '%s\n' "$rows"
+    return 1
+}
+
+main() {
+    local cmd="" arg=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --limit)
+                [ $# -ge 2 ] || usage
+                case "$2" in
+                    ''|*[!0-9]*) die "--limit wants a number, got '$2'" ;;
+                esac
+                LIMIT="$2"
+                shift 2
+                ;;
+            -h|--help) usage ;;
+            *)
+                if [ -z "$cmd" ]; then cmd="$1"
+                elif [ -z "$arg" ]; then arg="$1"
+                else usage
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    case "$cmd" in
+        path)   cmd_path "$arg" ;;
+        pr)     cmd_pr "$arg" ;;
+        census) cmd_census ;;
+        *)      usage ;;
+    esac
+}
+
+main "$@"
