@@ -32,9 +32,21 @@ unset KINGDOM_SEAT
 # whatever git adds next, which a list written today does not. (Measured on
 # PR #1128 — green direct, red under push; postmortem PR #1160, bd gqlc-o13d.)
 unset "${!GIT_@}"
+
+# The same scrub per call, because the decoy row re-exports GIT_DIR on purpose.
+# Everything here talks to local paths, so it can drop the whole GIT_* namespace
+# rather than a list someone has to keep complete; km's git_at cannot, and says
+# why there.
+gitf() {
+    local -a scrub=()
+    local v
+    for v in "${!GIT_@}"; do scrub+=(-u "$v"); done
+    env "${scrub[@]}" git "$@"
+}
+
 # Read after the unset, so it is the real repo's HEAD and not a hijacked one.
 # Asserted again at the end of the file; see the note there.
-SUITE_START_HEAD="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
+SUITE_START_HEAD="$(gitf -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
 
 # A hermetic git fixture, because km resolves the repo from its CWD and the hold
 # rows ask real questions of `origin/master`. Run against the checkout the suite
@@ -46,23 +58,24 @@ SUITE_START_HEAD="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
 # touches the network.
 FIXTURE_ORIGIN="$TMP/origin.git"
 FIXTURE="$TMP/work"
-git init -q --bare -b master "$FIXTURE_ORIGIN"
-git init -q -b master "$FIXTURE"
-git -C "$FIXTURE" config user.email fixture@example.invalid
-git -C "$FIXTURE" config user.name fixture
-git -C "$FIXTURE" config commit.gpgsign false
+gitf init -q --bare -b master "$FIXTURE_ORIGIN"
+gitf init -q -b master "$FIXTURE"
+gitf -C "$FIXTURE" config user.email fixture@example.invalid
+gitf -C "$FIXTURE" config user.name fixture
+gitf -C "$FIXTURE" config commit.gpgsign false
 # The operator's global config may point core.hooksPath at this very repo; the
 # fixture's own commits must not run the hooks under test.
-git -C "$FIXTURE" config core.hooksPath /dev/null
+gitf -C "$FIXTURE" config core.hooksPath /dev/null
 mkdir -p "$FIXTURE/kingdom/bin"
 printf 'fixture\n' >"$FIXTURE/justfile"
 printf 'fixture\n' >"$FIXTURE/kingdom/bin/km"
-git -C "$FIXTURE" add -A
-git -C "$FIXTURE" commit -qm 'fixture: paths the hold rows ask about'
-git -C "$FIXTURE" remote add origin "$FIXTURE_ORIGIN"
-git -C "$FIXTURE" push -q origin master
-git -C "$FIXTURE" fetch -q origin master
-git -C "$FIXTURE" update-ref refs/remotes/origin/master FETCH_HEAD
+gitf -C "$FIXTURE" add -A
+gitf -C "$FIXTURE" commit -qm 'fixture: paths the hold rows ask about'
+gitf -C "$FIXTURE" remote add origin "$FIXTURE_ORIGIN"
+gitf -C "$FIXTURE" push -q origin master
+gitf -C "$FIXTURE" fetch -q origin master
+gitf -C "$FIXTURE" update-ref refs/remotes/origin/master FETCH_HEAD
+
 
 pass=0
 fail=0
@@ -75,6 +88,56 @@ run() {
     OUT="$("$KM" "$@" 2>&1)"
     RC=$?
 }
+
+# The unset above only scrubs what THIS shell inherited; a `git` added to the
+# file later runs with whatever the caller exported, which is exactly how this
+# suite came to commit into the repo under test. So the rule is that every git
+# invocation here goes through gitf, and the rule gets a check — one without the
+# other is a wish. Comments are stripped first: this file discusses git a lot.
+stray=$(sed 's/#.*//' "$0" | grep -cE '(^|[;&|(])[[:space:]]*git[[:space:]]')
+if [ "$stray" -ne 0 ]; then
+    bad "every git call in this suite is scrubbed" "$stray bare git invocation(s) bypass gitf"
+else
+    ok "every git call in this suite goes through gitf rather than bare git"
+fi
+
+# --- the deploy seam ---------------------------------------------------------
+# The town executes kingdom/ out of the main checkout, and km refuses to act on
+# the town when that tree differs from origin/master. The real main checkout is
+# routinely drifted — that is the bug this seam exists for (bd gqlc-ed2u) — so
+# the whole suite stands on a throwaway origin+clone pair, exactly as it stands
+# on a throwaway KM_STATE_DIR.
+
+mk_origin() { # <bare> : a bare repo whose master carries a kingdom/ tree
+    gitf init -q --bare "$1"
+    gitf init -q "$1.seed"
+    gitf -C "$1.seed" config user.email km@test
+    gitf -C "$1.seed" config user.name km-test
+    mkdir -p "$1.seed/kingdom/bin" "$1.seed/.beads"
+    printf 'deployed\n' >"$1.seed/kingdom/bin/km"
+    printf 'export-v1\n' >"$1.seed/.beads/issues.jsonl"
+    printf 'inter-v1\n' >"$1.seed/.beads/interactions.jsonl"
+    gitf -C "$1.seed" add -A
+    gitf -C "$1.seed" commit -qm "the deployed tree"
+    gitf -C "$1.seed" push -q "$1" HEAD:master
+}
+
+advance_origin() { # <bare> <path> <content> : one more commit on master
+    printf '%s\n' "$3" >"$1.seed/$2"
+    gitf -C "$1.seed" add -A
+    gitf -C "$1.seed" commit -qm "advance $2"
+    gitf -C "$1.seed" push -q "$1" HEAD:master
+}
+
+mk_clone() { # <bare> <dir>
+    gitf clone -q "$1" "$2"
+    gitf -C "$2" config user.email km@test
+    gitf -C "$2" config user.name km-test
+}
+
+mk_origin "$TMP/town.git"
+mk_clone "$TMP/town.git" "$TMP/deployed"
+export KM_DEPLOY_ROOT="$TMP/deployed"
 
 # --- the hermetic seam: everything below stands on this one ------------------
 
@@ -1173,18 +1236,18 @@ fi
 # asks for that path with the fetch ENABLED. Its falsifier is the staleness
 # itself: drop the fetch and the answer is HOLD.
 FIXTURE_LATE="$TMP/late"
-git clone -q "$FIXTURE_ORIGIN" "$FIXTURE_LATE"
-git -C "$FIXTURE_LATE" config user.email fixture@example.invalid
-git -C "$FIXTURE_LATE" config user.name fixture
-git -C "$FIXTURE_LATE" config commit.gpgsign false
-git -C "$FIXTURE_LATE" config core.hooksPath /dev/null
+gitf clone -q "$FIXTURE_ORIGIN" "$FIXTURE_LATE"
+gitf -C "$FIXTURE_LATE" config user.email fixture@example.invalid
+gitf -C "$FIXTURE_LATE" config user.name fixture
+gitf -C "$FIXTURE_LATE" config commit.gpgsign false
+gitf -C "$FIXTURE_LATE" config core.hooksPath /dev/null
 printf 'fixture\n' >"$FIXTURE_LATE/late-arrival"
-git -C "$FIXTURE_LATE" add late-arrival
-git -C "$FIXTURE_LATE" commit -qm 'lands after the working clone last looked'
-git -C "$FIXTURE_LATE" push -q origin master
+gitf -C "$FIXTURE_LATE" add late-arrival
+gitf -C "$FIXTURE_LATE" commit -qm 'lands after the working clone last looked'
+gitf -C "$FIXTURE_LATE" push -q origin master
 
 gh_prs '[]'
-if [ "$(git -C "$FIXTURE" cat-file -e origin/master:late-arrival 2>&1; echo $?)" = "0" ]; then
+if [ "$(gitf -C "$FIXTURE" cat-file -e origin/master:late-arrival 2>&1; echo $?)" = "0" ]; then
     bad "the fetch is what makes a newly-merged path visible" \
         "the tracking ref is not stale, so this row cannot witness the fetch"
 else
@@ -1485,7 +1548,7 @@ argv_brief() { [ -s "$1" ] && sed '/^--append-system-prompt$/q' "$1" | tr '\n' '
 TOWN="$TMP/town"
 mkdir -p "$TOWN"
 TOWN=$(cd "$TOWN" && pwd -P) # git reports the physical path; mktemp may hand back a symlink
-git init -q "$TOWN"
+gitf init -q "$TOWN"
 mkdir -p "$TOWN-seat-hayk" "$TOWN-seat-mihr"
 
 ARGV=""
@@ -1601,6 +1664,398 @@ else
     ok "a misspelled level is refused, named on stderr, and the seat still launches"
 fi
 
+# --- deploy: the town must run the code that merged --------------------------
+# PR #1081 merged the P0 dispatcher fix and the town was told it was fixed. The
+# systemd units execute kingdom/bin/km out of the main checkout, which nothing
+# advances, so the defect kept running for hours behind a healthy indicator
+# (bd gqlc-ed2u). Two halves are pinned here: a detector that FAILS rather than
+# warns, and a deploy that moves the tree without touching what bd exported
+# into it.
+
+cat >"$BIN/claude" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+chmod +x "$BIN/claude"
+
+deploy_case() { # <name> : a fresh origin + clone, and KM_DEPLOY_ROOT pointing at it
+    mk_origin "$TMP/$1.git"
+    mk_clone "$TMP/$1.git" "$TMP/$1"
+    export KM_DEPLOY_ROOT="$TMP/$1"
+}
+run_stubbed() { OUT="$(PATH="$BIN:$PATH" "$KM" "$@" 2>&1)"; RC=$?; }
+doctor_line() { printf '%s' "$OUT" | grep -i 'kingdom.*origin/master\|origin/master.*kingdom' | head -1; }
+
+# The two doctor rows are one differential: same stubs, same PATH, same state
+# dir, and the ONLY difference is whether the deploy root matches origin/master.
+# That is what makes the non-zero exit attributable to the drift rather than to
+# a missing tmux — "does it FAIL?", not "is there a check?" (bd gqlc-z1qw).
+
+deploy_case doctor-clean
+run_stubbed doctor
+if [ "$RC" -ne 0 ]; then
+    bad "doctor passes a deploy root that matches origin/master" "rc=$RC out=$OUT"
+elif ! doctor_line | grep -q '^ok:'; then
+    bad "doctor passes a deploy root that matches origin/master" "no ok: row names the deployed tree: $OUT"
+else
+    ok "doctor passes when the deployed kingdom/ matches origin/master"
+fi
+
+deploy_case doctor-behind
+advance_origin "$TMP/doctor-behind.git" kingdom/bin/km "fixed"
+gitf -C "$TMP/doctor-behind" fetch -q origin
+run_stubbed doctor
+if [ "$RC" -eq 0 ]; then
+    bad "doctor FAILS on a stale deploy root" "exited 0 — a warning is not a gate: $OUT"
+elif ! doctor_line | grep -q '^FAIL:'; then
+    bad "doctor FAILS on a stale deploy root" "the deployed-tree row is not a FAIL: $OUT"
+else
+    ok "doctor FAILS, not warns, when the deployed kingdom/ is behind origin/master"
+fi
+
+# Drift is a property of the tree that executes, not of HEAD. An implementation
+# that compared revisions would pass this row while the town ran edited code.
+deploy_case doctor-edited
+printf 'hand-edited\n' >"$TMP/doctor-edited/kingdom/bin/km"
+run_stubbed doctor
+if [ "$RC" -eq 0 ] || ! doctor_line | grep -q '^FAIL:'; then
+    bad "an edited deployed file is drift even at the right commit" "rc=$RC out=$OUT"
+else
+    ok "doctor FAILS on a deployed file edited in place, though HEAD is origin/master"
+fi
+
+# The refusals. A detector nobody runs every two minutes is still a detector you
+# must remember, so the timer-driven commands check their own freshness.
+
+# An exported GIT_DIR is the shape that made this suite destructive, and the
+# decoy is a LINKED WORKTREE because that shape is load-bearing:
+#   - `git -C <path> commit` writes through GIT_DIR, so the fixture commits landed
+#     in the repo under test and force-moved its branch; `switch -c` parked it.
+#   - a plain `git init <dir>` re-initialises GIT_DIR, and git guesses bareness
+#     from the gitdir's own NAME (guess_repository_type). A linked worktree's
+#     gitdir is .git/worktrees/<name>, which does not end in .git, so git guesses
+#     BARE and writes core.bare=true into the SHARED config — after which every
+#     checkout on that repo has no work tree. The pushes that broke this repo came
+#     from a seat worktree, and a decoy whose GIT_DIR ends in .git cannot witness
+#     the flip at all: it would pass this row on a technicality (bd gqlc-ed2u).
+# `git init --bare` and `git clone` are not vectors — --bare re-points GIT_DIR at
+# "." after its chdir, and clone ignores it — but they still go through gitf,
+# because a scrubbing rule with a remembered exception is the same failure shape
+# as a deploy you must remember.
+
+# The decoy is a deployable-looking repo left BEHIND its own origin — the most
+# attractive victim an unscrubbed fetch-and-merge could find, and the shape of
+# the checkout that actually got moved.
+mk_origin "$TMP/decoy.git"
+mk_clone "$TMP/decoy.git" "$TMP/decoy"
+gitf -C "$TMP/decoy" worktree add -q "$TMP/decoy-wt" -b decoy-wt
+advance_origin "$TMP/decoy.git" kingdom/bin/km "fixed"
+gitf -C "$TMP/decoy-wt" fetch -q origin
+# A distinct identity, because the fixtures write one and the writes are silent:
+# unscrubbed, `config user.email` landed in this repo's shared config and stayed
+# there until a commit hook refused the address days later.
+gitf -C "$TMP/decoy" config user.email decoy@decoy
+decoy_email=$(gitf -C "$TMP/decoy" config --local user.email)
+decoy_head=$(gitf -C "$TMP/decoy-wt" rev-parse HEAD)
+DECOY_GITDIR=$(gitf -C "$TMP/decoy-wt" rev-parse --absolute-git-dir)
+export GIT_DIR="$DECOY_GITDIR"
+case "$GIT_DIR" in
+    *.git) bad "the decoy exposes a worktree gitdir" "GIT_DIR=$GIT_DIR ends in .git, so the bare-guess cannot fire" ;;
+    *)     ok "the decoy exposes a worktree gitdir, where git's bare-guess applies" ;;
+esac
+mk_origin "$TMP/leak.git"
+mk_clone "$TMP/leak.git" "$TMP/leak"
+gitf -C "$TMP/leak" switch -qc parked
+unset GIT_DIR
+if [ "$(gitf -C "$TMP/decoy" config --local core.bare)" != false ]; then
+    bad "an exported GIT_DIR cannot redirect the fixtures" "a fixture init flipped core.bare on the decoy"
+elif [ "$(gitf -C "$TMP/decoy-wt" rev-parse HEAD)" != "$decoy_head" ]; then
+    bad "an exported GIT_DIR cannot redirect the fixtures" "a fixture commit moved the decoy worktree's HEAD"
+elif [ "$(gitf -C "$TMP/decoy-wt" symbolic-ref --short HEAD)" != decoy-wt ]; then
+    bad "an exported GIT_DIR cannot redirect the fixtures" "a fixture switch parked the decoy worktree"
+elif [ "$(gitf -C "$TMP/decoy" config --local user.email)" != "$decoy_email" ]; then
+    bad "an exported GIT_DIR cannot redirect the fixtures" "a fixture config write took over the decoy's identity"
+elif [ "$(gitf -C "$TMP/leak.git.seed" rev-list --count HEAD 2>/dev/null)" != 1 ]; then
+    bad "an exported GIT_DIR cannot redirect the fixtures" "the fixture did not land in its own repo"
+else
+    ok "an exported GIT_DIR redirects neither the fixture commits, its branch, its identity, nor init"
+fi
+
+# km reads paths from the environment too, so the same leak must not move its
+# drift check off KM_DEPLOY_ROOT and onto whichever repo invoked the hook.
+deploy_case doctor-git-dir
+advance_origin "$TMP/doctor-git-dir.git" kingdom/bin/km "fixed"
+gitf -C "$TMP/doctor-git-dir" fetch -q origin
+OUT="$(PATH="$BIN:$PATH" GIT_DIR="$DECOY_GITDIR" "$KM" doctor 2>&1)"
+RC=$?
+if [ "$RC" -eq 0 ] || ! doctor_line | grep -q '^FAIL:'; then
+    bad "km reads its deploy root, not an exported GIT_DIR" "rc=$RC out=$OUT"
+else
+    ok "km still measures KM_DEPLOY_ROOT when a hook has exported GIT_DIR"
+fi
+
+# The same leak with the sign reversed, and the pair is the point: the decoy is
+# behind its own origin, so a drift check that reads through the inherited env
+# reports drift on a root that has none. A single row only catches the direction
+# it happens to share with the leak, and then passes for the wrong reason.
+deploy_case doctor-git-dir-clean
+OUT="$(PATH="$BIN:$PATH" GIT_DIR="$DECOY_GITDIR" "$KM" doctor 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ] || ! doctor_line | grep -q '^ok:'; then
+    bad "a clean root stays clean when the hook's repo is drifted" "rc=$RC out=$OUT"
+else
+    ok "doctor passes a clean deploy root though GIT_DIR names a repo that is behind"
+fi
+
+# The row above pins KM_DEPLOY_ROOT, so it never exercises the derivation. With
+# the override absent the root comes from git, and that must be read from the
+# working directory rather than from a hook's exported GIT_DIR — deploy is the
+# first thing in km that WRITES to the root it resolves.
+deploy_case main-root-git-dir
+advance_origin "$TMP/main-root-git-dir.git" kingdom/bin/km "fixed"
+gitf -C "$TMP/main-root-git-dir" fetch -q origin
+OUT="$(cd "$TMP/main-root-git-dir" \
+    && PATH="$BIN:$PATH" GIT_DIR="$DECOY_GITDIR" env -u KM_DEPLOY_ROOT "$KM" status 2>&1)"
+if ! printf '%s' "$OUT" | grep -q "DRIFT: $TMP/main-root-git-dir is not origin/master"; then
+    bad "the derived deploy root comes from the cwd, not an exported GIT_DIR" "no DRIFT for the cwd's repo: $OUT"
+elif printf '%s' "$OUT" | grep -q "$TMP/decoy"; then
+    bad "the derived deploy root comes from the cwd, not an exported GIT_DIR" "km resolved the decoy: $OUT"
+else
+    ok "with no KM_DEPLOY_ROOT the deploy root is derived from the cwd, not a hook's GIT_DIR"
+fi
+export KM_DEPLOY_ROOT="$TMP/main-root-git-dir"
+
+# Unknowable is not clean. If the ref the check reads is missing the answer must
+# be drift, or the gate opens exactly where it has the least information.
+deploy_case doctor-no-ref
+gitf -C "$TMP/doctor-no-ref" update-ref -d refs/remotes/origin/master
+run_stubbed doctor
+if [ "$RC" -eq 0 ] || ! doctor_line | grep -q '^FAIL:'; then
+    bad "no origin/master ref is drift, not clean" "rc=$RC out=$OUT"
+else
+    ok "a deploy root with no origin/master ref FAILS rather than reading as deployed"
+fi
+
+# ...and it must stay unknowable when a hook has exported a repo that DOES know
+# origin/master. Read the ref through the inherited env and the check clears its
+# own guard, then diffs against a ref its own root has never heard of: empty
+# output, which this file spells "no drift". The row above cannot see that — its
+# ambient environment has no repo to borrow an answer from.
+deploy_case no-ref-git-dir
+gitf -C "$TMP/no-ref-git-dir" update-ref -d refs/remotes/origin/master
+OUT="$(PATH="$BIN:$PATH" GIT_DIR="$DECOY_GITDIR" "$KM" doctor 2>&1)"
+RC=$?
+if [ "$RC" -eq 0 ] || ! doctor_line | grep -q '^FAIL:'; then
+    bad "a missing ref stays drift when the hook's repo has one" "rc=$RC out=$OUT"
+else
+    ok "a deploy root with no origin/master is drift even when GIT_DIR names a repo that has one"
+fi
+
+deploy_case dispatch-stale
+advance_origin "$TMP/dispatch-stale.git" kingdom/bin/km "fixed"
+gitf -C "$TMP/dispatch-stale" fetch -q origin
+export KM_STATE_DIR="$TMP/dispatch-stale-state"
+mkdir -p "$KM_STATE_DIR"
+export KM_FAKE_READY="$KM_STATE_DIR/ready.json"
+export KM_FAKE_INPROG="$KM_STATE_DIR/inprog.json"
+printf '[{"id":"gqlc-w9","priority":0,"assignee":null,"labels":["class:warrior"]}]' >"$KM_FAKE_READY"
+printf '[]' >"$KM_FAKE_INPROG"
+run_stubbed dispatch
+if [ "$RC" -eq 0 ]; then
+    bad "a stale dispatcher refuses" "exited 0: $OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "a stale dispatcher refuses" "it routed work from stale code: $(woken_seats)"
+elif ! printf '%s' "$OUT" | grep -q 'km deploy'; then
+    bad "a stale dispatcher refuses" "the refusal does not name the remedy: $OUT"
+else
+    ok "a dispatcher whose own tree is behind origin/master refuses and names 'km deploy'"
+fi
+
+run_stubbed guard-sweep
+if [ "$RC" -eq 0 ]; then
+    bad "a stale guard sweep refuses" "exited 0: $OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "a stale guard sweep refuses" "it woke: $(woken_seats)"
+else
+    ok "the guard sweep refuses from a stale tree too, so Րաֆֆի is not run by dead code"
+fi
+
+# A refusal visible only in the journal is gqlc-vzpn again, so the glance says it.
+run_stubbed status
+if ! printf '%s' "$OUT" | grep -q 'DRIFT'; then
+    bad "status shows the drift" "the town's glance is silent about stale machinery: $OUT"
+else
+    ok "km status announces DRIFT, so a refusing dispatcher is not journal-only"
+fi
+
+# Unmeasurable is not clean either, and this is the arm the no-ref rows cannot
+# reach: origin/master IS present, so the guard above clears, and the failure
+# happens in the diff — which exits non-zero with empty stdout, the same output
+# a matching tree produces. core.bare=true is the shape that put it here: a
+# stray `git init` under an exported GIT_DIR writes it into the shared config
+# (see the decoy note above), after which every checkout on that repo has no
+# work tree and every diff against it fails.
+deploy_case doctor-unmeasurable
+gitf -C "$TMP/doctor-unmeasurable" config core.bare true
+run_stubbed doctor
+if [ "$RC" -eq 0 ]; then
+    bad "a deploy root git cannot read is drift, not clean" "doctor exited 0: $OUT"
+elif ! doctor_line | grep -q '^FAIL:'; then
+    bad "a deploy root git cannot read is drift, not clean" "the deployed-tree row is not a FAIL: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'cannot measure drift'; then
+    bad "the refusal says it could not measure" "it reports drift without saying the measurement failed: $OUT"
+else
+    ok "doctor FAILS on a deploy root whose diff cannot run, and says it could not measure"
+fi
+
+run_stubbed dispatch
+if [ "$RC" -eq 0 ]; then
+    bad "an unmeasurable dispatcher refuses" "exited 0: $OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "an unmeasurable dispatcher refuses" "it routed work it could not certify: $(woken_seats)"
+elif ! printf '%s' "$OUT" | grep -q 'cannot measure drift'; then
+    bad "an unmeasurable dispatcher refuses" "the refusal does not name the unmeasured root: $OUT"
+else
+    ok "dispatch refuses when it cannot measure its own tree, naming the root it could not read"
+fi
+
+deploy_case status-clean
+run_stubbed status
+if printf '%s' "$OUT" | grep -q 'DRIFT'; then
+    bad "status is quiet when deployed" "it cried DRIFT on a matching tree: $OUT"
+else
+    ok "km status says nothing about drift when the deployed tree matches"
+fi
+
+export KM_STATE_DIR="$TMP/state"
+
+# Deploy proper. The live main checkout carries a STAGED .beads/issues.jsonl and
+# an UNSTAGED .beads/interactions.jsonl — bd's export — and clobbering those
+# reverts ledger state. These rows fix which of the two shapes moves the tree.
+
+deploy_case deploy-ff
+advance_origin "$TMP/deploy-ff.git" kingdom/bin/km "fixed"
+gitf -C "$TMP/deploy-ff" fetch -q origin
+printf 'local-export\n' >"$TMP/deploy-ff/.beads/issues.jsonl"
+gitf -C "$TMP/deploy-ff" add .beads/issues.jsonl
+printf 'local-inter\n' >"$TMP/deploy-ff/.beads/interactions.jsonl"
+run_stubbed deploy
+if [ "$RC" -ne 0 ]; then
+    bad "deploy fast-forwards past unrelated local dirt" "rc=$RC out=$OUT"
+elif [ "$(cat "$TMP/deploy-ff/kingdom/bin/km")" != fixed ]; then
+    bad "deploy fast-forwards past unrelated local dirt" "the tree did not move: $(cat "$TMP/deploy-ff/kingdom/bin/km")"
+elif [ "$(cat "$TMP/deploy-ff/.beads/issues.jsonl")" != local-export ] ||
+    [ "$(cat "$TMP/deploy-ff/.beads/interactions.jsonl")" != local-inter ]; then
+    bad "deploy fast-forwards past unrelated local dirt" "it clobbered bd's export"
+elif [ -z "$(gitf -C "$TMP/deploy-ff" diff --cached --name-only)" ]; then
+    bad "deploy fast-forwards past unrelated local dirt" "the staged export was unstaged under it"
+else
+    ok "deploy advances the tree while a staged and an unstaged bd export survive byte-intact"
+fi
+
+deploy_case deploy-conflict
+advance_origin "$TMP/deploy-conflict.git" .beads/issues.jsonl "export-v2"
+gitf -C "$TMP/deploy-conflict" fetch -q origin
+printf 'local-export\n' >"$TMP/deploy-conflict/.beads/issues.jsonl"
+gitf -C "$TMP/deploy-conflict" add .beads/issues.jsonl
+before="$(gitf -C "$TMP/deploy-conflict" rev-parse HEAD)"
+run_stubbed deploy
+if [ "$RC" -eq 0 ]; then
+    bad "deploy refuses when the incoming commit is under local dirt" "exited 0: $OUT"
+elif [ "$(cat "$TMP/deploy-conflict/.beads/issues.jsonl")" != local-export ]; then
+    bad "deploy refuses when the incoming commit is under local dirt" "the local export was overwritten anyway"
+elif [ "$(gitf -C "$TMP/deploy-conflict" rev-parse HEAD)" != "$before" ]; then
+    bad "deploy refuses when the incoming commit is under local dirt" "HEAD moved under a refusal"
+elif ! printf '%s' "$OUT" | grep -q '\.beads/issues\.jsonl'; then
+    bad "deploy refuses when the incoming commit is under local dirt" "the refusal does not name the file in the way: $OUT"
+else
+    ok "deploy refuses rather than clobber a dirty file the incoming commit touches"
+fi
+
+deploy_case deploy-off-master
+gitf -C "$TMP/deploy-off-master" switch -qc parked
+advance_origin "$TMP/deploy-off-master.git" kingdom/bin/km "fixed"
+gitf -C "$TMP/deploy-off-master" fetch -q origin
+run_stubbed deploy
+if [ "$RC" -eq 0 ]; then
+    bad "deploy refuses a deploy root parked off master" "exited 0: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'parked'; then
+    bad "deploy refuses a deploy root parked off master" "the refusal does not name the branch: $OUT"
+else
+    ok "deploy refuses when the deploy root is parked on a branch that is not master"
+fi
+
+deploy_case deploy-current
+run_stubbed deploy
+if [ "$RC" -ne 0 ]; then
+    bad "deploy on a current root is a no-op that says so" "rc=$RC out=$OUT"
+else
+    ok "deploy on an already-current root exits 0 instead of inventing work"
+fi
+
+# A merge cannot undo a hand edit, so deploy must not report success after one.
+deploy_case deploy-edited
+printf 'hand-edited\n' >"$TMP/deploy-edited/kingdom/bin/km"
+run_stubbed deploy
+if [ "$RC" -eq 0 ]; then
+    bad "deploy does not vouch for a hand-edited tree" "exited 0 with kingdom/ still differing: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'kingdom/bin/km'; then
+    bad "deploy does not vouch for a hand-edited tree" "the refusal does not name what still differs: $OUT"
+else
+    ok "deploy refuses to certify a deploy root whose kingdom/ was edited in place"
+fi
+
+# deploy is the only command in km that WRITES to a repo, and km is reachable
+# from a hook, so this is where an inherited GIT_DIR costs the most. The decoy is
+# behind its origin and would fast-forward cleanly if asked — so the row can tell
+# "deploy moved the right repo" apart from "deploy moved nothing".
+# No pre-fetch here, unlike the rows above: deploy has to reach origin itself,
+# and the check is against the bare repo's master rather than the root's own
+# tracking ref — a fetch that lands in the wrong repo leaves that ref stale, and
+# a stale ref agrees with everything.
+deploy_case deploy-git-dir
+advance_origin "$TMP/deploy-git-dir.git" kingdom/bin/km "fixed"
+victim_head=$(gitf -C "$TMP/decoy-wt" rev-parse HEAD)
+victim_branch=$(gitf -C "$TMP/decoy-wt" symbolic-ref --short HEAD)
+OUT="$(GIT_DIR="$DECOY_GITDIR" "$KM" deploy 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "deploy under an exported GIT_DIR moves its own root" "rc=$RC out=$OUT"
+elif [ "$(gitf -C "$TMP/deploy-git-dir" rev-parse HEAD)" != "$(gitf -C "$TMP/deploy-git-dir.git" rev-parse master)" ]; then
+    bad "deploy under an exported GIT_DIR moves its own root" "the root did not reach origin's master: $OUT"
+elif [ "$(gitf -C "$TMP/decoy-wt" rev-parse HEAD)" != "$victim_head" ]; then
+    bad "deploy under an exported GIT_DIR moves its own root" "it fast-forwarded the repo named by GIT_DIR"
+elif [ "$(gitf -C "$TMP/decoy-wt" symbolic-ref --short HEAD)" != "$victim_branch" ]; then
+    bad "deploy under an exported GIT_DIR moves its own root" "it moved the branch of the repo named by GIT_DIR"
+else
+    ok "deploy advances its own root under an exported GIT_DIR and leaves that repo where it stood"
+fi
+
+# The scrub is an allowlist, so it needs a witness on the KEEP side too. Every
+# row above proves something was dropped; drop everything and they all still
+# pass, while deploy quietly loses the transport it fetches over. Origin is
+# rewritten to ssh so the fetch must invoke GIT_SSH_COMMAND. The fetch is
+# EXPECTED to fail — there is no server — and what is asserted is that the
+# transport was reached at all, which is the only part the scrub decides.
+deploy_case deploy-ssh-env
+gitf -C "$TMP/deploy-ssh-env" remote set-url origin ssh://git@km-test.invalid/town.git
+cat >"$TMP/fake-ssh" <<SSH
+#!/usr/bin/env bash
+printf 'reached\n' >>"$TMP/ssh-marker"
+exit 255
+SSH
+chmod +x "$TMP/fake-ssh"
+rm -f "$TMP/ssh-marker"
+GIT_DIR="$DECOY_GITDIR" GIT_SSH_COMMAND="$TMP/fake-ssh" "$KM" deploy >/dev/null 2>&1 || true
+if [ ! -s "$TMP/ssh-marker" ]; then
+    bad "the scrub keeps the ssh transport deploy fetches over" \
+        "GIT_SSH_COMMAND did not survive git_at, so the fetch never reached it"
+else
+    ok "the scrub drops GIT_DIR and keeps GIT_SSH_COMMAND, so deploy can still reach an ssh origin"
+fi
+
+export KM_DEPLOY_ROOT="$TMP/deployed"
+
 # This suite builds git repositories, so it must be able to prove it built them
 # somewhere else. On PR #1128 it could not: a leaked GIT_DIR sent the fixture's
 # `git init` and `git commit` into the repo under test, grafting six fixture
@@ -1608,7 +2063,7 @@ fi
 # times, and the third one pushed. The unset at the top of this file is the fix.
 # This is the alarm, kept because that failure is invisible in a green run and
 # its blast radius is shipped history.
-suite_end_head="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
+suite_end_head="$(gitf -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
 if [ "$SUITE_START_HEAD" = none ]; then
     # Both sides would read "none" and the comparison would pass having compared
     # nothing. Say so instead of banking a green row.

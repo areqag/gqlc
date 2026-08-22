@@ -2480,3 +2480,7 @@ kingdom-resume:
 # health checks for the kingdom machinery
 kingdom-doctor:
     kingdom/bin/km doctor
+
+# fast-forward the checkout the systemd timers execute; merging a km fix does not deploy it
+kingdom-deploy:
+    kingdom/bin/km deploy
