@@ -763,6 +763,7 @@ fmt-check: ensure-golangci
 # reading it.
 test-hooks:
     bash .githooks/tests/claude-pre-bash-test.sh
+    bash .githooks/tests/claude-pre-ask-test.sh
     bash .githooks/tests/commit-msg-test.sh
     bash .githooks/tests/bd-gh-sync-test.sh
     bash .githooks/tests/lint-hooks-test.sh

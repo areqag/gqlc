@@ -58,6 +58,27 @@ sweep, or a nudge). Then:
 `bd mail read <id>`. Etiquette in `mail.md`. Check mail at wake and at
 natural boundaries (after a PR opens, after a review lands, before sleep).
 
+## Unattended means non-blocking
+
+Nobody is at your terminal. A tool that waits for a live human answer —
+`AskUserQuestion`, entering plan mode — therefore waits until someone kills
+your session, and nothing reports it: the statusline heartbeat keeps
+refreshing throughout, because your turn is still live. One seat sat that way
+for 13 minutes holding a worker slot while every indicator read green (bd
+gqlc-n97e).
+
+`.githooks/claude-pre-ask` refuses those tools whenever `KINGDOM_SEAT` is
+set. The refusal is the protocol speaking, not an obstacle to route around.
+When you need someone else's judgment: write the question and its options
+onto the bead (`--append-notes`), mail whoever decides (unread mail wakes
+Սեդրակ; other seats read at their next wake), then sleep or carry on with
+other work. The answer is waiting at your next wake.
+
+Waiting is not the cautious choice. In gqlc-n97e both options the seat was
+offering had been falsified by the time anyone could have answered — a late
+decision is made on premises that have rotted, which is a wrong decision
+arrived at slowly.
+
 ## Sleeping
 
 End your workday when your assignment is done, when you are blocked with
