@@ -644,6 +644,37 @@ free_worker_of_class() { # asleep, no queued wake
     return 1
 }
 
+# A JSON payload belongs on a descriptor, never in argv. `--argjson` puts the
+# whole document in ONE command-line argument, and Linux caps a single argument
+# at MAX_ARG_STRLEN — 32 pages, 131072 bytes on a 4 KiB-page machine. That is a
+# hard kernel ceiling in the binfmt loader: it is not ARG_MAX, it does not move
+# with `ulimit -s`, and no amount of free memory raises it.
+#
+# The reason this is a rule here and not a note on one call site: the payload is
+# `bd ready`, so its size is the length of the BACKLOG. The failure is monotonic
+# in the queue — once crossed it cannot self-heal, and the fuller the queue, the
+# more certainly the dispatcher that drains it is switched off. It is an outage
+# that arrives on the worst day, by construction.
+#
+# MEASURED 2026-08-22 (gqlc-fo48): `bd ready --json -n 0` was 1222148 bytes,
+# 9.3x the ceiling, and the fresh pass had been dead 63 consecutive runs over
+# two hours. --slurpfile reads the document from a file descriptor and wraps it
+# in an array, hence the [0] on each binding.
+dispatch_candidate_docs() { # ready deps parents ids -> candidate documents
+    jq -c -n \
+        --slurpfile ready <(printf '%s' "$1") \
+        --slurpfile deps <(printf '%s' "$2") \
+        --slurpfile parents <(printf '%s' "$3") \
+        --rawfile ids <(printf '%s' "$4") '
+        ($ready[0] | map({key: .id, value: .}) | from_entries) as $byId
+        | ($parents[0] | map({key: .id, value: .status}) | from_entries) as $status
+        | [ ($ids | split("\n") | .[] | select(length > 0)) as $i
+            | { id: $i,
+                labels: ($byId[$i].labels // []),
+                deps: [ $deps[0][]? | select(.issue_id == $i)
+                        | {depends_on_id, type, status: ($status[.depends_on_id] // "unknown")} ] } ]'
+}
+
 # Wakes every sleeping seat that owns work in <list> (lines of "seat id"), with
 # <prefix> naming what those ids are to it. Both routing passes that hand a seat
 # its OWN bead go through here: the cap arithmetic is the part that must not
@@ -837,15 +868,7 @@ cmd_dispatch() {
                 return 0
             fi
         fi
-        if ! docs=$(jq -c -n --argjson ready "$ready" --argjson deps "$deps" \
-            --argjson parents "$parents" --arg ids "$ids" '
-            ($ready | map({key: .id, value: .}) | from_entries) as $byId
-            | ($parents | map({key: .id, value: .status}) | from_entries) as $status
-            | [ ($ids | split("\n") | .[] | select(length > 0)) as $i
-                | { id: $i,
-                    labels: ($byId[$i].labels // []),
-                    deps: [ $deps[]? | select(.issue_id == $i)
-                            | {depends_on_id, type, status: ($status[.depends_on_id] // "unknown")} ] } ]'); then
+        if ! docs=$(dispatch_candidate_docs "$ready" "$deps" "$parents" "$ids"); then
             echo "dispatch: the candidate documents could not be assembled; fresh pass skipped this run"
             return 0
         fi
@@ -997,8 +1020,18 @@ cmd_hold_verdict() {
         present=$(printf '%s\n' "$subjects" | hold_paths_on_master)
     fi
 
+    # On descriptors for the same reason dispatch_candidate_docs is, and before
+    # rather than after it fires: $prs carries every open PR's full file list, so
+    # it grows with the PR queue exactly as the ready payload grows with the bead
+    # queue. Measured 2026-08-22 at 26 open PRs it was already within ~30% of the
+    # 131072-byte per-argument ceiling. $prKnown is a bare true/false and could
+    # stay in argv; it moves anyway, so that no future reader has to work out
+    # which of three adjacent bindings was the safe one.
     printf '%s' "$input" | jq -r \
-        --argjson prs "$prs" --argjson prKnown "$pr_known" --argjson present "$present" '
+        --slurpfile prs <(printf '%s' "$prs") \
+        --slurpfile prKnown <(printf '%s' "$pr_known") \
+        --slurpfile present <(printf '%s' "$present") '
+        ($prs[0]) as $prs | ($prKnown[0]) as $prKnown | ($present[0]) as $present |
         def subjects_of:
             [ .labels[] | select(type == "string" and startswith("subject:"))
               | .[8:] | sub("/+$"; "") | select(length > 0) ];
