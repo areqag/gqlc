@@ -30,21 +30,25 @@ permission_mode = "bypassPermissions"
 
 [effort]
 # Starting depth per class (Constitution V.6). These are STARTING levels — a
-# bound in neither direction: a citizen moves their own either way with
-# `/effort <level>` mid-session, needing nobody's permission (V.6.2). Tuning
-# these is a config edit, never an amendment (V.6.1) — so argue about the
-# numbers here, not in the constitution.
+# bound in neither direction, deeper or shallower, needing nobody's permission
+# (V.6.2). Tuning these is a config edit, never an amendment (V.6.1) — so argue
+# about the numbers here, not in the constitution.
 #
-# `/effort` is measured to work in the interactive mode km-seat launches
-# (Միհր, 2026-08-22, verdict-6muh-r1); it is NOT available under headless
-# `claude -p`.
+# The mechanism, stated at what is actually measured (Միհր, 2026-08-22,
+# verdict-6muh-r1): `/effort` changes the level mid-session in the interactive
+# mode km-seat:66 launches, offering exactly the five levels below. It is
+# unavailable under headless `claude -p`. What is NOT yet measured is whether a
+# seat can put text into its OWN prompt — so a citizen's own hand on the level,
+# unaided, is a right the machinery does not demonstrably serve yet (gqlc-w6tl).
 # Levels: low | medium | high | xhigh | max.
 #
 # Provisional, adopted 2026-08-22 with the numbers explicitly open: the town
 # had spent its entire life at xhigh, inherited from an operator settings file
 # nobody chose, so any number here is better evidence than what it replaces —
 # but none of them is measured yet. Re-tune from the depths recorded on beads
-# (V.6.5), not from impatience.
+# (V.6.6 — NOT V.6.5, which records escalations only: a tuner reading just the
+# escalations sees only the moves that went deeper, and the defaults ratchet
+# upward by construction), not from impatience.
 mayor     = "medium"
 architect = "high"
 warrior   = "medium"
