@@ -798,6 +798,47 @@ bd-export-monotonic base:
 bd-export-monotonic-local:
     just bd-export-monotonic $(git merge-base HEAD origin/master)
 
+# An orphan is an open GH issue no bead names, byte-identical in title AND body
+# to an issue a bead does name, created seconds from it: .githooks/bd-gh-sync's
+# push pass minted both for one bead and the ledger kept only one, so the close
+# pass — which keys on external_ref — can never reach the other (bd gqlc-mmej,
+# gqlc-mb8v). Deliberately not wired into `just test` or into any hook: it
+# reaches the network, and the only reason to run it is that someone is about to
+# read the answer.
+#
+# This recipe takes no parameters ON PURPOSE, and that is the whole of what
+# keeps the reporting name off the write path. `-close` is a flag on the tool,
+# so a recipe with a `*args` tail forwards it: this one carried one until bd
+# gqlc-mb8v's review measured `just -n gh-orphans -close` rendering `go run
+# ./internal/tools/ghorphan -close` while the `just --list` line beside it said
+# "mutates nothing". With no parameter to take it, just reads a trailing
+# `-close` as a second recipe name and stops at rc=1 before running anything.
+# Pinned by TestTheReportingRecipeCannotBeHandedTheCloseFlag, which asks just
+# rather than reading these lines.
+#
+# The cost is real and is paid on purpose: -window and -limit are now reachable
+# through the acting recipe below or a direct `go run`, and not from this name.
+# What each of them does to a verdict is written where they are read, in the
+# tool's package comment — this line does not summarise it, because summarising
+# it is how the claim this recipe used to carry got written.
+#
+# reports duplicate GH issues the bd↔GH sync minted twice; mutates nothing
+gh-orphans:
+    go run ./internal/tools/ghorphan
+
+# Irreversible enough to be worth typing out: closing an issue is visible to
+# everyone watching the repository, and a wrong close is undone by hand. Run
+# `just gh-orphans` first and read every line, including the refusals — a
+# refusal is a pair this tool will not decide.
+#
+# The body runs the tool directly. Spelling it `just gh-orphans -close` is what
+# made the reporting name a write path, and it would need that recipe to take
+# the parameter again.
+#
+# CLOSES the duplicates `just gh-orphans` reports, each pointing at its canonical
+gh-orphans-close *args:
+    go run ./internal/tools/ghorphan -close {{args}}
+
 # The quality fence over every module in this tree that the root gates do not
 # already cover: compile (go build), vet, module tidiness (go mod tidy -diff),
 # and golangci-lint against the root config. Generated code must uphold the same
