@@ -32,3 +32,11 @@ The choices that shaped the kingdom, and what was rejected:
 7. **Models**: Ճարտարապետ = claude-fable-5 (design/review), Ռազմիկ and
    Քաղաքապետ = claude-opus-5 (execution/coordination), Պահակ =
    claude-sonnet-5 (sweeps are short; upgrade if his judgment proves thin).
+
+---
+
+**Superseded in part, 2026-08-22, by Անդրանիկ.** Item 7's parenthetical
+"(design/review)" no longer describes the Ճարտարապետ role: architects design
+and do not review. Review belongs to the Դատաւոր, and a design is not
+reviewed at all. Constitution V.1–V.2 carry the current rule. The rest of
+this record stands.

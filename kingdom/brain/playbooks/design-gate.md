@@ -65,5 +65,12 @@ link it from the bead.
 
 Nothing to do: the execution bead becomes ready on its own and the
 dispatcher routes it to a free Ռազմիկ. The architect who designed it stays
-available by mail for questions — and per Constitution Article V.2 someone
-ELSE reviews the resulting PR when the designer also wrote the code.
+available by mail for questions, and takes their next design bead — they do
+not execute this one, and per Constitution Article V.2 they do not review the
+resulting PR either. The Ռազմիկ files a `class:judge` bead and Միհր reviews.
+The design itself is not reviewed by anyone; closing the bead is the
+architect's own assertion that it is executable.
+
+An architect who finds themselves writing the implementation should stop and
+mail Սեդրակ: the pair was never split, and that is a triage defect to fix at
+the source rather than absorb.
