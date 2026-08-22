@@ -152,10 +152,24 @@ type finding struct {
 	Evidence  []string
 }
 
+// registerFlags installs the command-line surface on fs. Split out of main() so
+// a test renders the help an operator is actually shown rather than a copy of
+// the strings — the -window text is a disclosure and it has already gone out of
+// step with the behaviour once (bd gqlc-mb8v, review rounds 1 and 2).
+//
+// -window's text names the flip narrowing can cause because that is the only
+// account of the flag most operators read; the package comment's enumeration
+// sits in a file they have no reason to open, and "narrows the predicate",
+// standing alone, reads as "strictly safer".
+func registerFlags(fs *flag.FlagSet) (act *bool, window *time.Duration, limit *int) {
+	act = fs.Bool("close", false, "actually close the orphans on GitHub; without it nothing is mutated")
+	window = fs.Duration("window", defaultWindow, "maximum creation-time separation between an orphan and its canonical; a larger value is refused, so this only ever narrows. Narrowing is not only the safer direction: where two canonicals match equally the tool refuses to pick between them, and dropping one out of the window picks for it, turning that refusal into a close")
+	limit = fs.Int("limit", defaultLimit, "--limit handed to `gh issue list`; a listing that reaches it is refused as a page rather than read as a set")
+	return act, window, limit
+}
+
 func main() {
-	act := flag.Bool("close", false, "actually close the orphans on GitHub; without it nothing is mutated")
-	window := flag.Duration("window", defaultWindow, "maximum creation-time separation between an orphan and its canonical; a value above the default is refused, so this narrows the predicate or leaves it alone")
-	limit := flag.Int("limit", defaultLimit, "--limit handed to `gh issue list`; a listing that reaches it is refused as a page rather than read as a set")
+	act, window, limit := registerFlags(flag.CommandLine)
 	flag.Parse()
 
 	src := source{
@@ -234,6 +248,10 @@ func run(ctx context.Context, out io.Writer, cfg config, src source) error {
 		// in both directions (see the package comment). Nothing replaced it —
 		// the counts are the report, and the per-candidate evidence above them
 		// is what a refusal is decided on.
+		//
+		// TestTheDryRunSummarySaysWhatHappenedAndNothingElse pins the whole
+		// line rather than the words that were removed from it, so a fresh
+		// clause here fails whatever it is built from. Change it there too.
 		rep.printf("ghorphan: DRY RUN — nothing was mutated. %d issue(s) would be closed, %d refused. Re-run with -close to act.\n", closes, refusals)
 		return rep.err
 	}
@@ -245,15 +263,18 @@ func run(ctx context.Context, out io.Writer, cfg config, src source) error {
 // plan is the comparator: given both listings, decide what to do. It performs no
 // I/O, so every branch below is reachable from a table test. Measured with
 // `go test ./internal/tools/ghorphan -coverprofile=c.out && go tool cover
-// -func=c.out`: plan, apply, render, closeComment, candidateEvidence,
-// bodyRelation, digest and checkTruncation are at 100.0% of statements.
+// -func=c.out`: registerFlags, printf, run, plan, apply, render, closeComment,
+// candidateEvidence, bodyRelation, digest and checkTruncation are at 100.0% of
+// statements.
 //
 // The uncovered remainder in that same profile is main(), ghIssues, bdBeads,
-// ghCloseIssue and run3, all at 0.0% — the flag entrypoint and the process
-// boundary, which no automated test may reach here: this tool's write is `gh
-// issue close` against the live repository. Two statements more are unreachable
-// rather than untested, and are named where they sit: boundIssues' strconv
-// failure on a \d+ capture, and firstDifference's terminal return.
+// ghCloseIssue and run3, all at 0.0% — the process boundary, which no automated
+// test may reach here: this tool's write is `gh issue close` against the live
+// repository. The flag surface is no longer in that set: registerFlags holds it
+// and main() only calls it, so the help an operator is shown is covered. Two
+// statements more are unreachable rather than untested, and are named where they
+// sit: boundIssues' strconv failure on a \d+ capture, and firstDifference's
+// terminal return.
 //
 // Both inputs are refused when empty. An empty issue listing and a repository
 // with nothing to reconcile produce the same empty plan, and only the second is
@@ -268,6 +289,16 @@ func plan(issues []issue, beads []bead, window time.Duration) ([]finding, error)
 	// 61s apart and go REFUSE at 60s, CLOSE at 120s. Refused rather than warned
 	// about, because the operator reading the warning would be reading it in
 	// the report of the run that had already decided.
+	//
+	// That last sentence applies to the narrow direction too, which is allowed,
+	// so the reason cannot be the one that reads best. It is the blast radius:
+	// widening can close an issue that is not a race artefact at all — equal
+	// title and body, minted far apart, so nothing ties the two together —
+	// while narrowing only ever closes one that is byte-identical to a bound
+	// mirror inside the default window, which is certainly a duplicate. What
+	// narrowing decides is which canonical the closing comment names, not
+	// whether a duplicate is being closed. Both are disclosed, in -window's own
+	// help and above; only the second is left reachable.
 	if window > defaultWindow {
 		return nil, fmt.Errorf("ghorphan: -window is %s, above the %s ceiling; a wider window loosens the adjacency clause and can turn a refusal into a close, which is an irreversible write. Every candidate's Δt is already in the report, so read that instead", window, defaultWindow)
 	}

@@ -4,8 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -420,6 +425,119 @@ func TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose(t *testing.T) {
 	}
 	if len(narrow) != 1 || narrow[0].Verdict != verdictClose || narrow[0].Canonical != 816 {
 		t.Fatalf("at a 5s window: findings = %+v, want CLOSE 814->816", narrow)
+	}
+}
+
+// TestTheWindowHelpNamesTheFlipNarrowingCanCause pins the -window stanza of
+// `-h`. That stanza is the only account of the flag most operators will read,
+// and until bd gqlc-mb8v's round-2 review it ended "so this narrows the
+// predicate or leaves it alone" — true, and read by anyone who had not opened
+// the package comment as "narrowing is the safe direction". It is not:
+// TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose holds the row where a
+// narrower window produces a close the default refused.
+//
+// The division of labour is that the row above owns whether the sentence is
+// true and this owns whether an operator is still shown it. It renders through
+// registerFlags rather than comparing a constant to itself, and
+// TestMainRegistersNoFlagOfItsOwn is what makes registerFlags the help an
+// operator gets — without it, main() could re-inline its own strings and this
+// would stay green over a function nothing calls.
+//
+// This is an exact pin, so it fails on a harmless rewording too. That is
+// deliberate — the failure it exists for is a silent one — but it means the
+// test cannot tell you a new wording is honest, only that it is new. The
+// trailing "(default 1m0s)" is PrintDefaults' own and is pinned with the rest:
+// the default is also the ceiling, so an operator reading the stanza is reading
+// the largest window they can ask for.
+func TestTheWindowHelpNamesTheFlipNarrowingCanCause(t *testing.T) {
+	const want = "maximum creation-time separation between an orphan and its canonical; " +
+		"a larger value is refused, so this only ever narrows. Narrowing is not only the " +
+		"safer direction: where two canonicals match equally the tool refuses to pick " +
+		"between them, and dropping one out of the window picks for it, turning that " +
+		"refusal into a close (default 1m0s)"
+
+	fs := flag.NewFlagSet("ghorphan", flag.ContinueOnError)
+	registerFlags(fs)
+	var help strings.Builder
+	fs.SetOutput(&help)
+	fs.PrintDefaults()
+
+	// PrintDefaults writes "  -window duration\n    \tusage (default 1m0s)\n".
+	// Cutting at the header and taking the line after it needs no not-found
+	// branch: a miss leaves got empty, which fails the comparison below with a
+	// value the message names. A branch here would be one no passing run can
+	// reach, and so one no mutation of it could be caught by.
+	_, afterHeader, _ := strings.Cut(help.String(), "  -window duration\n    \t")
+	got, _, _ := strings.Cut(afterHeader, "\n")
+
+	if got != want {
+		t.Errorf("`-h` describes -window as\n\t%q\nwant\n\t%q\n"+
+			"(an empty value means the -window stanza was not in the rendered help at all).\n"+
+			"The narrow direction is not merely the safe one and this is where an "+
+			"operator is told so. If the wording is being changed on purpose, change it here too.", got, want)
+	}
+}
+
+// TestMainRegistersNoFlagOfItsOwn reads main.go's syntax tree and holds main()
+// to calling registerFlags and registering nothing itself. Without it,
+// TestTheWindowHelpNamesTheFlipNarrowingCanCause pins a function that main()
+// need not call: re-inlining flag.Duration("window", …, "narrows the predicate")
+// in main() leaves both green while `-h` prints the wording round 2 removed.
+// Measured — that mutation survived until this test existed.
+//
+// It matches on method name and argument count, not on types, because
+// go/parser carries none: a registration spelled some other way, or reached
+// through an alias, is not caught. Reading the AST rather than the source bytes
+// is deliberate, so a commented-out registration cannot read as a live one.
+func TestMainRegistersNoFlagOfItsOwn(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse main.go: %v", err)
+	}
+
+	var mainFn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == "main" {
+			mainFn = fn
+		}
+	}
+	if mainFn == nil {
+		t.Fatalf("no func main in main.go; this test would pass on silence")
+	}
+
+	// flag's registrars all take at least three arguments, so a nullary
+	// String() on some other value is not mistaken for one.
+	registrar := map[string]bool{
+		"Bool": true, "BoolFunc": true, "Duration": true, "Float64": true,
+		"Func": true, "Int": true, "Int64": true, "String": true,
+		"TextVar": true, "Uint": true, "Uint64": true, "Var": true,
+	}
+	callsRegisterFlags := false
+	var own []string
+	ast.Inspect(mainFn, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch fn := call.Fun.(type) {
+		case *ast.Ident:
+			if fn.Name == "registerFlags" {
+				callsRegisterFlags = true
+			}
+		case *ast.SelectorExpr:
+			if registrar[fn.Sel.Name] && len(call.Args) >= 3 {
+				own = append(own, fn.Sel.Name)
+			}
+		}
+		return true
+	})
+
+	if !callsRegisterFlags {
+		t.Errorf("main() does not call registerFlags, so the flag help the tests pin is not the help `-h` prints")
+	}
+	if len(own) != 0 {
+		t.Errorf("main() registers %v itself; every flag goes through registerFlags, which is where "+
+			"TestTheWindowHelpNamesTheFlipNarrowingCanCause can see the usage text", own)
 	}
 }
 
@@ -886,19 +1004,33 @@ func TestDryRunOverTheRealCorpusMutatesNothingAndSaysWhatItWould(t *testing.T) {
 	}
 }
 
-// TestTheDryRunSummaryMakesNoClaimAboutWhatAFlagCanDo holds the summary line to
-// saying what happened and not what could have. It carried "(a refusal needs a
-// human, not a wider flag)" until bd gqlc-mb8v's round-1 review, which is a
-// claim about the flag surface printed underneath a report the flags had
-// already shaped — and false in both directions, per plan()'s ceiling comment
-// and TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose.
+// TestTheDryRunSummarySaysWhatHappenedAndNothingElse holds the summary line to
+// an exact shape. It carried "(a refusal needs a human, not a wider flag)"
+// until bd gqlc-mb8v's round-1 review — a claim about the flag surface printed
+// underneath a report the flags had already shaped, and false in both
+// directions per plan()'s ceiling comment and
+// TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose.
 //
-// The word is what is looked for, not the sentence: a rephrasing of the same
-// claim is what this is here to catch. It looks at the summary line alone, not
-// the whole report — the CLOSE lines carry bead ids and a four-character bd
-// suffix can spell anything, so searching them for a word would be a test that
-// fails on a bead name.
-func TestTheDryRunSummaryMakesNoClaimAboutWhatAFlagCanDo(t *testing.T) {
+// Round 2 deleted the sentence and pinned the deletion by searching the line
+// for the token "flag". Round-2 review broke that pin: five rewordings of the
+// same claim that avoid the token left the suite green, among them the round-1
+// string with one word changed — "a refusal needs a human, not a wider window",
+// which names the flag that actually does move refusals. An absence check can
+// only ever name spellings, and the set of spellings is unbounded, so the check
+// is replaced rather than extended.
+//
+// What is pinned instead is the shape: the line carries the two counts and
+// nothing else, so an added clause fails whatever words it is built from. What
+// this does NOT do is judge whether an added sentence is true — it declines all
+// of them, including true ones. The cost is that a deliberate edit to the
+// summary has to be made here too, which is the point: this is the line an
+// operator reads while deciding what to run next.
+//
+// The pattern owns the wording only; the counts in it are pinned by
+// TestDryRunOverTheRealCorpusMutatesNothingAndSaysWhatItWould. It reads the
+// summary line alone, not the whole report — CLOSE lines carry bead ids and a
+// four-character bd suffix can spell anything.
+func TestTheDryRunSummarySaysWhatHappenedAndNothingElse(t *testing.T) {
 	issues, beads := loadCorpus(t)
 	closer := newCloser(t)
 	closer.failIfCalled = true
@@ -917,11 +1049,13 @@ func TestTheDryRunSummaryMakesNoClaimAboutWhatAFlagCanDo(t *testing.T) {
 	if summary == "" {
 		t.Fatalf("no summary line in the report; this test would pass on silence:\n%s", out.String())
 	}
-	if strings.Contains(summary, "flag") {
-		t.Errorf("the dry-run summary %q talks about a flag. The operator reads this "+
-			"line while deciding what to run next, so a sentence here about what a "+
-			"flag can or cannot do has to hold for both -window directions and for "+
-			"-limit; say nothing instead.", summary)
+	shape := regexp.MustCompile(`^ghorphan: DRY RUN — nothing was mutated\. \d+ issue\(s\) would be closed, \d+ refused\. Re-run with -close to act\.$`)
+	if !shape.MatchString(summary) {
+		t.Errorf("the dry-run summary is\n\t%q\nand the only shape allowed here is\n\t%q\n"+
+			"Anything beyond the two counts is a claim made at the moment the operator "+
+			"decides what to run next, and the last one was false in both -window "+
+			"directions. If this line is being changed on purpose, change it here too.",
+			summary, shape)
 	}
 }
 
