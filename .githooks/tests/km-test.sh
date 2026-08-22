@@ -1860,6 +1860,111 @@ else
     ok "when the hold verdict cannot be computed the fresh pass is skipped out loud and nothing is routed unchecked, while the resume wakes already taken stand"
 fi
 
+# --- the per-argument ceiling (gqlc-fo48) ------------------------------------
+# On 2026-08-22 the fresh pass died 63 consecutive runs over two hours with
+#
+#     km: line 652: /usr/bin/jq: Argument list too long
+#     dispatch: the candidate documents could not be assembled
+#
+# because `--argjson ready "$ready"` puts the whole `bd ready` document into ONE
+# command-line argument, and Linux caps a single argument at MAX_ARG_STRLEN —
+# 131072 bytes on a 4 KiB-page machine. That is a hard ceiling in the binfmt
+# loader: not ARG_MAX, unmoved by `ulimit`, and unrelated to free memory.
+#
+# The reason these rows exist rather than a comment on the call site: THE
+# PAYLOAD IS THE BACKLOG. The failure is monotonic in the queue, so it cannot
+# self-heal, and the dispatcher that drains the queue switches off precisely as
+# the queue grows. Nothing about a full queue looks like a broken router; the
+# line above it in the journal read `5/5 capped seats awake; no free slot`, a
+# complete and plausible account of an idle town, printed by an arm that was
+# working correctly.
+#
+# THE FALSIFIER IS MEASURED, NOT ASSUMED. A fixture that fits in argv would pass
+# these rows on the pre-fix km too, and a queue-length fixture is exactly the
+# kind that drifts under a threshold as someone trims it. So each row first
+# offers ITS OWN payload to jq the old way and requires that to fail, while the
+# same bytes on a descriptor parse — two-sided, so an argv failure for any other
+# reason cannot be read as the ceiling. If the payload turns out to fit, the row
+# reports a skip and witnesses nothing, rather than banking a green.
+
+over_arg_ceiling() { # payload -> true when argv rejects it AND a descriptor takes it
+    printf '%s' "$1" | jq -e . >/dev/null 2>&1 || return 1
+    jq -n --argjson probe "$1" '1' >/dev/null 2>&1 && return 1
+    return 0
+}
+
+# 4 KiB of padding per bead, so the document clears the ceiling in tens of beads
+# rather than thousands and the row stays fast.
+ceil_ready="$(jq -c -n '
+    [ range(0; 64)
+      | { id: "gqlc-ceil\(.)", priority: 3, assignee: null,
+          labels: ["class:warrior"],
+          design: ("x" * 4096) } ]
+    + [ { id: "gqlc-ceilwin", priority: 0, assignee: null,
+          labels: ["class:warrior"] } ]')"
+
+ceiling_row="the fresh pass survives a ready queue larger than one argv slot"
+if ! over_arg_ceiling "$ceil_ready"; then
+    printf 'skip - %s: the fixture (%d bytes) still fits in one argument here\n' \
+        "$ceiling_row" "${#ceil_ready}"
+else
+    gh_prs '[]'
+    dispatch_case "$ceil_ready" '[]'
+    run_dispatch
+    if printf '%s' "$OUT" | grep -q 'could not be assembled'; then
+        bad "$ceiling_row" "the assembly died on the payload size: $OUT"
+    elif [ "$RC" -ne 0 ]; then
+        bad "$ceiling_row" "rc=$RC out=$OUT"
+    elif ! grep -rq 'gqlc-ceilwin' "$KM_STATE_DIR/seats" 2>/dev/null; then
+        bad "$ceiling_row" \
+            "nothing routed off a queue of $((${#ceil_ready} / 1024)) KiB (woken: '$(woken_seats)'): $OUT"
+    else
+        ok "a ready queue past the per-argument ceiling still routes its top bead, so the dispatcher does not switch itself off as the backlog it drains grows"
+    fi
+fi
+
+# The same defect at the hold verdict's own input, pinned BEFORE it fires rather
+# than after. $prs carries every open PR's full file list, so it grows with the
+# PR queue exactly as the ready payload grows with the bead queue — measured
+# 2026-08-22 at 26 open PRs it was already within ~30% of the ceiling. The
+# candidate here is subject-labelled, which is what makes km consult the PR map
+# at all; the verdict asserted is HOLD, and the row below it is the falsifier
+# that stops HOLD from being the answer to everything.
+ceil_prs="$(jq -c -n '
+    [ range(0; 64)
+      | { number: (2000 + .),
+          changedFiles: 1,
+          files: [ { path: "pad/\("y" * 4080)/\(.)" } ] } ]
+    + [ { number: 1057, changedFiles: 1, files: [ { path: "justfile" } ] } ]')"
+
+prs_row="the hold verdict survives a PR map larger than one argv slot"
+if ! over_arg_ceiling "$ceil_prs"; then
+    printf 'skip - %s: the fixture (%d bytes) still fits in one argument here\n' \
+        "$prs_row" "${#ceil_prs}"
+else
+    gh_prs "$ceil_prs"
+    hv '[{"id":"gqlc-ceilhold","labels":["class:warrior","subject:justfile"]}]'
+    if [ "$RC" -ne 0 ]; then
+        bad "$prs_row" "rc=$RC out=$OUT err=$ERR"
+    elif [ "$OUT" != "HOLD gqlc-ceilhold — open PR #1057 touches justfile" ]; then
+        bad "$prs_row" "the verdict changed under a large PR map: '$OUT' err=$ERR"
+    else
+        ok "a PR map past the per-argument ceiling still yields its verdict, and still names the PR that caused the hold"
+    fi
+
+    # Falsifier: the same oversized map with #1057 dropped. Without it, a HOLD
+    # above could mean "km fell over and held everything", which is the shape
+    # this whole section is about.
+    gh_prs "$(printf '%s' "$ceil_prs" | jq -c '[ .[] | select(.number != 1057) ]')"
+    hv '[{"id":"gqlc-ceilhold","labels":["class:warrior","subject:justfile"]}]'
+    if [ "$RC" -ne 0 ] || [ "$OUT" != "ROUTE gqlc-ceilhold" ]; then
+        bad "$prs_row is not a blanket hold" \
+            "the same oversized map without #1057 did not release the bead: rc=$RC out='$OUT' err=$ERR"
+    else
+        ok "the oversized PR map releases the bead when nothing in it touches the subject, so the row above measured the verdict and not a collapse"
+    fi
+fi
+
 unset KM_HOLD_SKIP_FETCH KM_FAKE_GH
 # --- the cap counts sessions, not claims (gqlc-s16s) -------------------------
 # `awake` in a status file is a CLAIM, written by km-seat before it starts a
