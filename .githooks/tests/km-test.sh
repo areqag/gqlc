@@ -1399,7 +1399,7 @@ else
     # and initialises in the cwd when it finds none. The .beads check below
     # guards a case today's bd does not produce, and is kept only because what
     # it would cost is 105 fixture issues in the town's tracker.
-    bd_in_ws() { (unset "${!GIT_@}"; cd "$ws" && bd "$@"); }
+    bd_in_ws() { (cd "$ws" && bd "$@"); }
     if ! bd_in_ws init >"$ws/setup.log" 2>&1; then
         bad "$bd_contract" "no throwaway bd workspace: $(tail -1 "$ws/setup.log")"
     elif [ ! -d "$ws/.beads" ]; then
@@ -1548,8 +1548,22 @@ argv_brief() { [ -s "$1" ] && sed '/^--append-system-prompt$/q' "$1" | tr '\n' '
 TOWN="$TMP/town"
 mkdir -p "$TOWN"
 TOWN=$(cd "$TOWN" && pwd -P) # git reports the physical path; mktemp may hand back a symlink
-gitf init -q "$TOWN"
-mkdir -p "$TOWN-seat-hayk" "$TOWN-seat-mihr"
+gitf init -q -b master "$TOWN"
+gitf -C "$TOWN" config user.email t@t.invalid
+gitf -C "$TOWN" config user.name t
+# A WELL-FORMED town, not merely a git directory. km-seat refreshes a seat's
+# worktree before launching it (bd gqlc-xtre), and refresh judges the seat
+# against origin/master — so a town with no origin makes km-seat report a
+# degraded town on stderr, and the argv rows below assert on stderr being
+# EMPTY. Giving the fixture the origin and the real worktrees a town always has
+# keeps that silence assertion at full strength instead of teaching it to
+# ignore a line (Միհր, verdict-uhqh-r1 N1).
+gitf init -q --bare "$TMP/town-origin.git"
+gitf -C "$TOWN" commit -q --allow-empty -m base
+gitf -C "$TOWN" remote add origin "$TMP/town-origin.git"
+gitf -C "$TOWN" push -q origin master
+gitf -C "$TOWN" worktree add -q --detach "$TOWN-seat-hayk" master
+gitf -C "$TOWN" worktree add -q --detach "$TOWN-seat-mihr" master
 
 ARGV=""
 STDERR=""
@@ -1683,7 +1697,6 @@ fi
 
 hk="$TMP/hk"
 mkdir -p "$hk"
-g() { (unset "${!GIT_@}"; git "$@"); }
 
 # The gate refuses by DESTINATION, the way guard-push-destination does, rather
 # than refusing everything: the fixture has to push master itself, and a hook
@@ -1705,45 +1718,45 @@ exit 0
 
 fixture_ok=1
 {
-    g init --quiet --bare "$hk/upstream.git"
-    g clone --quiet "$hk/upstream.git" "$hk/town"
-    g -C "$hk/town" config user.email seat@example.invalid
-    g -C "$hk/town" config user.name "seat fixture"
-    g -C "$hk/town" config core.hooksPath .githooks
+    gitf init --quiet --bare "$hk/upstream.git"
+    gitf clone --quiet "$hk/upstream.git" "$hk/town"
+    gitf -C "$hk/town" config user.email seat@example.invalid
+    gitf -C "$hk/town" config user.name "seat fixture"
+    gitf -C "$hk/town" config core.hooksPath .githooks
     mkdir -p "$hk/town/.githooks"
 
     # C1: a pre-push that allows. This is the hook a parked seat keeps running.
     printf '%s' "$allow_hook" >"$hk/town/.githooks/pre-push"
     chmod +x "$hk/town/.githooks/pre-push"
-    g -C "$hk/town" add -A
-    g -C "$hk/town" commit --quiet -m "c1: a pre-push that allows"
-    g -C "$hk/town" branch -M master
-    g -C "$hk/town" push --quiet -u origin master
+    gitf -C "$hk/town" add -A
+    gitf -C "$hk/town" commit --quiet -m "c1: a pre-push that allows"
+    gitf -C "$hk/town" branch -M master
+    gitf -C "$hk/town" push --quiet -u origin master
 } >"$hk/setup.log" 2>&1 || fixture_ok=0
 
-c1=$(g -C "$hk/town" rev-parse HEAD 2>/dev/null || true)
+c1=$(gitf -C "$hk/town" rev-parse HEAD 2>/dev/null || true)
 
 # Park four seats at C1, exactly as `km up` does.
 for s in raffi mihr vahagn artur; do
-    g -C "$hk/town" worktree add --detach --quiet "$hk/town-seat-$s" master \
+    gitf -C "$hk/town" worktree add --detach --quiet "$hk/town-seat-$s" master \
         >>"$hk/setup.log" 2>&1 || fixture_ok=0
 done
 
 {
     # C2: the merged gate. Everything above is now stale.
     printf '%s' "$refuse_hook" >"$hk/town/.githooks/pre-push"
-    g -C "$hk/town" add -A
-    g -C "$hk/town" commit --quiet -m "c2: a pre-push that refuses"
-    g -C "$hk/town" push --quiet origin master
+    gitf -C "$hk/town" add -A
+    gitf -C "$hk/town" commit --quiet -m "c2: a pre-push that refuses"
+    gitf -C "$hk/town" push --quiet origin master
 } >>"$hk/setup.log" 2>&1 || fixture_ok=0
 
-c2=$(g -C "$hk/town" rev-parse HEAD 2>/dev/null || true)
+c2=$(gitf -C "$hk/town" rev-parse HEAD 2>/dev/null || true)
 
 # Does a push from this seat worktree run a hook that refuses? Answered by
 # pushing, not by reading a file. Echoes "refused" / "allowed".
 seat_push_verdict() { # <seat> <branch>
     local out
-    if out=$( (unset "${!GIT_@}"; cd "$hk/town-seat-$1" && git push origin "HEAD:refs/heads/$2" 2>&1) ); then
+    if out=$( (cd "$hk/town-seat-$1" && gitf push origin "HEAD:refs/heads/$2" 2>&1) ); then
         echo allowed
     elif printf '%s' "$out" | grep -q MERGED-GATE-SPEAKING; then
         echo refused
@@ -1753,11 +1766,11 @@ seat_push_verdict() { # <seat> <branch>
 }
 
 refresh() { # <seat> -> OUT/RC, run from inside the fixture town
-    OUT="$( (unset "${!GIT_@}"; cd "$hk/town" && "$KM" seat-refresh "$1") 2>&1 )"
+    OUT="$( (cd "$hk/town" && "$KM" seat-refresh "$1") 2>&1 )"
     RC=$?
 }
 
-seat_head() { g -C "$hk/town-seat-$1" rev-parse HEAD 2>/dev/null || echo none; }
+seat_head() { gitf -C "$hk/town-seat-$1" rev-parse HEAD 2>/dev/null || echo none; }
 
 if [ "$fixture_ok" -ne 1 ] || [ -z "$c1" ] || [ -z "$c2" ] || [ "$c1" = "$c2" ]; then
     bad "the seat-refresh fixture builds" "$(tail -3 "$hk/setup.log" 2>&1)"
@@ -1816,15 +1829,15 @@ else
     # WORK IN FLIGHT, half two: a seat on a branch. This is the vahagn shape —
     # on a branch, cut from a STALE master, so it carries the hole through its
     # whole bead. It must be reported, and it must not be moved off its branch.
-    (unset "${!GIT_@}"; cd "$hk/town-seat-vahagn" \
-        && git checkout --quiet -b fix/in-flight \
-        && git -c user.email=s@example.invalid -c user.name=s commit --quiet --allow-empty -m "own work") \
+    (cd "$hk/town-seat-vahagn" \
+        && gitf checkout --quiet -b fix/in-flight \
+        && gitf -c user.email=s@example.invalid -c user.name=s commit --quiet --allow-empty -m "own work") \
         >>"$hk/setup.log" 2>&1
     vahagn_head=$(seat_head vahagn)
     refresh vahagn
     if [ "$(seat_head vahagn)" != "$vahagn_head" ]; then
         bad "seat-refresh holds off a seat on a branch" "it moved to $(seat_head vahagn)"
-    elif [ "$(g -C "$hk/town-seat-vahagn" rev-parse --abbrev-ref HEAD)" != fix/in-flight ]; then
+    elif [ "$(gitf -C "$hk/town-seat-vahagn" rev-parse --abbrev-ref HEAD)" != fix/in-flight ]; then
         bad "seat-refresh holds off a seat on a branch" "it dropped the branch checkout"
     elif [ "$RC" -ne 3 ]; then
         bad "a seat on a stale branch is reported" "rc=$RC out=$OUT"
@@ -1840,16 +1853,16 @@ else
     # gates at the same time, and only a count restricted to the gate paths can
     # tell those apart. Count every commit instead and the banner fires at every
     # working seat on every wake, which is how a banner stops being read.
-    (unset "${!GIT_@}"; cd "$hk/town-seat-artur" \
-        && git checkout --quiet --detach master \
-        && git checkout --quiet -b fix/fresh-cut \
-        && git -c user.email=s@example.invalid -c user.name=s commit --quiet --allow-empty -m "own work") \
+    (cd "$hk/town-seat-artur" \
+        && gitf checkout --quiet --detach master \
+        && gitf checkout --quiet -b fix/fresh-cut \
+        && gitf -c user.email=s@example.invalid -c user.name=s commit --quiet --allow-empty -m "own work") \
         >>"$hk/setup.log" 2>&1
     {
         echo "ordinary work, no gate in it" >"$hk/town/README.md"
-        g -C "$hk/town" add -A
-        g -C "$hk/town" commit --quiet -m "c3: a commit that touches no hook"
-        g -C "$hk/town" push --quiet origin master
+        gitf -C "$hk/town" add -A
+        gitf -C "$hk/town" commit --quiet -m "c3: a commit that touches no hook"
+        gitf -C "$hk/town" push --quiet origin master
     } >>"$hk/setup.log" 2>&1 || bad "the fixture can move master past a seat without touching hooks" "see $hk/setup.log"
     refresh artur
     if [ "$RC" -ne 0 ]; then
@@ -1865,12 +1878,12 @@ fi
 # reports a seat current, the one answer it has no evidence for.
 lone_row="seat-refresh refuses to judge a seat with no origin/master, rather than calling it current"
 {
-    g init --quiet "$hk/lone"
-    g -C "$hk/lone" -c user.email=s@example.invalid -c user.name=s \
+    gitf init --quiet "$hk/lone"
+    gitf -C "$hk/lone" -c user.email=s@example.invalid -c user.name=s \
         commit --quiet --allow-empty -m "lone"
-    g -C "$hk/lone" worktree add --detach --quiet "$hk/lone-seat-astghik" HEAD
+    gitf -C "$hk/lone" worktree add --detach --quiet "$hk/lone-seat-astghik" HEAD
 } >>"$hk/setup.log" 2>&1
-OUT="$( (unset "${!GIT_@}"; cd "$hk/lone" && "$KM" seat-refresh astghik) 2>&1 )"
+OUT="$( (cd "$hk/lone" && "$KM" seat-refresh astghik) 2>&1 )"
 RC=$?
 if [ "$RC" -eq 0 ]; then
     bad "$lone_row" "it returned 0 with no origin/master to judge against: $OUT"
