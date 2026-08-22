@@ -23,7 +23,16 @@ trap 'rm -rf "$TMP"' EXIT
 # repo — the hook only cares about MERGE_HEAD existence, not history shape.
 REPO="$TMP/repo"
 git init -q -b master "$REPO"
-git -C "$REPO" -c user.email=t@t.invalid -c user.name=t commit -q --allow-empty -m init
+# The identity rows below export GIT_AUTHOR_EMAIL, but the trailer rows do not,
+# so the hook reads whoever runs the suite. Pin a repo-local identity that no
+# rule here reserves: with `user.email = jane@example.com` in the runner's
+# ~/.gitconfig — a developer whose own address falls under a name this hook
+# newly refuses — the trailer rows "no trailer at all" and "human co-author
+# trailer" both went red, on innocent diffs, for a reason named nowhere in
+# their output. Measured 31/2 against 33/0 on the author's machine (Աստղիկ).
+git -C "$REPO" config user.email dev@hermetic-fixture.io
+git -C "$REPO" config user.name dev
+git -C "$REPO" commit -q --allow-empty -m init
 
 pass=0
 fail=0
@@ -206,11 +215,19 @@ run_identity_case "author at example.org"                                   reje
 
 # Must still accept. These are the over-match rows: a reserved name appearing
 # as a SUBSTRING of a real domain is a real address, and rejecting it would
-# lock a contributor out of the repo.
+# lock a contributor out of the repo. A suite with no ACCEPT witness is one
+# edit from refusing every developer, and the refusal would look correct.
+#
+# The reserved word can sit at either end of a label and the two ends are
+# separate defects, so both are pinned. `notinvalid`/`myexample` were the only
+# two here and are both the SUFFIX half; the PREFIX half came in from Աստղիկ's
+# #1195, which is the collision this branch resolves.
 run_identity_case "an ordinary address"                                     accept "$GOOD"                    "$GOOD"
 run_identity_case "reserved TLD as a label inside a real domain"            accept "dev@example.invalid.io"   "$GOOD"
-run_identity_case "a real domain merely ending in the reserved word"        accept "dev@notinvalid.com"       "$GOOD"
-run_identity_case "a real domain merely prefixed by the reserved name"      accept "dev@myexample.com"        "$GOOD"
+run_identity_case "label ENDING in the reserved word (.invalid)"            accept "dev@notinvalid.com"       "$GOOD"
+run_identity_case "label ENDING in the reserved word (example)"             accept "dev@myexample.com"        "$GOOD"
+run_identity_case "label STARTING with the reserved word (.invalid)"        accept "ops@invalid-arguments.io" "$GOOD"
+run_identity_case "label STARTING with the reserved word (example)"         accept "ops@example-corp.io"      "$GOOD"
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
