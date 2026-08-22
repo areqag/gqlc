@@ -43,23 +43,26 @@ bad() { fail=$((fail + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
 # 2026-08-22: a file touched by three PRs, one touched by two, one touched by
 # exactly one, and a path that is a prefix of another path so that a substring
 # match cannot pass for a path match.
+# changedFiles is the PR's true file count and is carried on every record: gh
+# truncates the files array at 100 and says nothing, so the two disagreeing is
+# the only in-band signal that a record is short.
 CORPUS='[
-  {"number":1213,"title":"a sha is a sha in any case","files":[
+  {"number":1213,"title":"a sha is a sha in any case","changedFiles":2,"files":[
      {"path":".githooks/claude-pre-bash"},
      {"path":".githooks/tests/claude-pre-bash-test.sh"}]},
-  {"number":1181,"title":"the drift message named a value","files":[
+  {"number":1181,"title":"the drift message named a value","changedFiles":2,"files":[
      {"path":".githooks/claude-pre-bash"},
      {"path":".githooks/tests/claude-pre-bash-test.sh"}]},
-  {"number":1177,"title":"the drift detector read a value git would not use","files":[
+  {"number":1177,"title":"the drift detector read a value git would not use","changedFiles":1,"files":[
      {"path":".githooks/claude-pre-bash"}]},
-  {"number":1195,"title":"stop a fixture identity reaching the shared repo","files":[
+  {"number":1195,"title":"stop a fixture identity reaching the shared repo","changedFiles":2,"files":[
      {"path":"justfile"},
      {"path":"kingdom/justfile.md"}]},
-  {"number":1225,"title":"fail a test run that changed its repository","files":[
+  {"number":1225,"title":"fail a test run that changed its repository","changedFiles":1,"files":[
      {"path":"justfile"}]},
-  {"number":1069,"title":"corpus subtest silence","files":[
+  {"number":1069,"title":"corpus subtest silence","changedFiles":1,"files":[
      {"path":"internal/codegen/corpus.go"}]},
-  {"number":1300,"title":"touches only the longer path","files":[
+  {"number":1300,"title":"touches only the longer path","changedFiles":1,"files":[
      {"path":"kingdom/justfile.md"}]}
 ]'
 
@@ -211,9 +214,37 @@ expect "an empty body is a refusal" 2
 # A record with no files key is not a PR that touches nothing — it is a query
 # that did not return what was asked for. Treating it as touching nothing is
 # how a real overlap goes unreported.
-GH_NOFILES="$(make_gh '[{"number":1213,"title":"t"}]' 0)"
+GH_NOFILES="$(make_gh '[{"number":1213,"title":"t","changedFiles":1}]' 0)"
 run_overlap "$GH_NOFILES" path justfile
 expect "a record with no files key is a refusal" 2 "1213"
+
+# MEASURED 2026-08-22 against kubernetes/kubernetes#141360: `gh pr list --json
+# files` returned 100 paths for a PR whose changed_files is 322, and `gh pr view`
+# returned the same 100. gh truncates a record's file list at 100 and gives no
+# signal. Unguarded, the 101st file of a large PR is invisible to the census, and
+# `path <that file>` answers "no open PR touches this" — the fail-open this whole
+# tool refuses. changedFiles is the true count, so the two disagreeing detects it
+# exactly, with no threshold to guess at.
+GH_TRUNC="$(make_gh '[{"number":1360,"title":"a large PR","changedFiles":322,"files":[
+    {"path":"justfile"},{"path":"a"},{"path":"b"}]}]' 0)"
+run_overlap "$GH_TRUNC" path justfile
+expect "a record whose file list is shorter than its true count is a refusal" 2 "1360"
+
+# The overlap is real and reported; the refusal is about the files NOT returned.
+run_overlap "$GH_TRUNC" path some/file/not/listed
+expect "a truncated record refuses even when the query would have missed anyway" 2 "1360"
+
+# The guard must not fire on the ordinary case, or the tool refuses every run.
+GH_EXACT="$(make_gh '[{"number":1361,"title":"an ordinary PR","changedFiles":2,"files":[
+    {"path":"justfile"},{"path":"README.md"}]}]' 0)"
+run_overlap "$GH_EXACT" path justfile
+expect "a record whose file list matches its true count is trusted" 1 "#1361"
+
+# Absent, the field cannot witness anything, and a query that did not return it
+# is not a PR that changed nothing.
+GH_NOCOUNT="$(make_gh '[{"number":1362,"title":"no count","files":[{"path":"justfile"}]}]' 0)"
+run_overlap "$GH_NOCOUNT" path justfile
+expect "a record with no changedFiles is a refusal" 2 "1362"
 
 # gh pr list caps at 30 by default and says nothing when it truncates. The tool
 # asks for an explicit limit; if the answer comes back AT that limit it may
@@ -231,6 +262,19 @@ if grep -q -- '-L' "$(dirname "$GH_OK")/argv" 2>/dev/null; then
 else
     bad "the limit is passed to gh, not left to its default" \
         "no -L in argv: $(cat "$(dirname "$GH_OK")/argv" 2>/dev/null)"
+fi
+
+# The truncation guard compares files against changedFiles, so it is inert
+# unless changedFiles was asked for. Every stub above prints changedFiles no
+# matter what argv it got, which means the whole truncation half stays green
+# with the field dropped from the request — against real gh the record would
+# simply arrive without a count and the guard would compare against null. Only
+# argv can witness the ask.
+if grep -q -- 'changedFiles' "$(dirname "$GH_OK")/argv" 2>/dev/null; then
+    ok "changedFiles is requested from gh, so the truncation guard has a count"
+else
+    bad "changedFiles is requested from gh, so the truncation guard has a count" \
+        "no changedFiles in argv: $(cat "$(dirname "$GH_OK")/argv" 2>/dev/null)"
 fi
 
 # --------------------------------------------------------------------- usage
@@ -259,7 +303,7 @@ if command -v gh >/dev/null 2>&1; then
     # Run outside the repo: gh validates --json field names before it needs a
     # repo, a remote or a token, so this row costs no network and cannot flake.
     FIELDS="$(cd "$TMP" || exit 1; gh pr list --json __km_overlap_bogus__ 2>&1)"
-    for want in number files state; do
+    for want in number files state changedFiles; do
         case "$FIELDS" in
             *"$want"*) ok "real gh still offers the '$want' field the stub is written against" ;;
             *) bad "real gh still offers the '$want' field the stub is written against" \

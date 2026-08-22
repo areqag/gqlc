@@ -50,7 +50,7 @@ fetch() {
     command -v jq >/dev/null 2>&1 || die "jq is not available; cannot look"
 
     local raw rc
-    raw="$("$GH" pr list --state open --json number,title,files -L "$LIMIT" 2>&1)"
+    raw="$("$GH" pr list --state open --json number,title,files,changedFiles -L "$LIMIT" 2>&1)"
     rc=$?
     # A body that parses is not evidence the query ran: gh prints usable-looking
     # text on failure too.
@@ -63,10 +63,25 @@ fetch() {
     # query that did not return what was asked for. Counting it as touching
     # nothing is how a real overlap goes unreported.
     local missing
-    missing="$(printf '%s' "$raw" | jq -r '[.[] | select(has("files") | not) | .number] | join(" ")')"
-    [ -z "$missing" ] && missing=""
+    missing="$(printf '%s' "$raw" | jq -r '
+        [.[] | select((has("files") and has("changedFiles")) | not) | .number] | join(" ")')"
     if [ -n "$missing" ]; then
-        die "gh returned no files for PR(s) $missing; cannot look"
+        die "gh returned no file list for PR(s) $missing; cannot look"
+    fi
+
+    # gh truncates a record's file list at 100 and says nothing. Measured
+    # 2026-08-22 against kubernetes/kubernetes#141360: `--json files` returned
+    # 100 paths for a PR whose changed_files is 322, from both `pr list` and
+    # `pr view`. Unguarded, the 101st file of a large PR is invisible and
+    # `path <that file>` answers "no open PR touches this" — the fail-open this
+    # tool exists to refuse. changedFiles is the true count, so the two
+    # disagreeing detects it exactly and there is no threshold to guess at.
+    local short
+    short="$(printf '%s' "$raw" | jq -r '
+        [.[] | select((.files | length) < .changedFiles)
+             | "#\(.number) (\(.files | length) of \(.changedFiles))"] | join(", ")')"
+    if [ -n "$short" ]; then
+        die "gh returned a truncated file list for $short; cannot look"
     fi
 
     local n
