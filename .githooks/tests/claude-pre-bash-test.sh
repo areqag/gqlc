@@ -473,6 +473,49 @@ run_env_drift_case "bare GIT_CONFIG is not drift"     silent     "$OK_REPO" 'git
 # which predates these rows and covers the identical case; a second copy here
 # would only be a second thing to keep true.
 
+# --- the message has to name WHERE the value came from ----------------------
+# The rows above prove both drift shapes are refused. They do not distinguish
+# them, and the two need OPPOSITE repairs: a value written into .git/config is
+# what `just init` exists to undo, while a value arriving through
+# GIT_CONFIG_PARAMETERS lives in this process's environment, leaves .git/config
+# already correct, and survives `just init` untouched. Told only the value, a
+# reader runs the repair, watches it report success, and is refused again.
+#
+# So these assert on the reason TEXT rather than classify()'s verdict. That is a
+# deliberate exception to the note above about asserting verdicts: the claim
+# here IS the wording, because the wording is what a human acts on.
+reason_of() { # $1=hook stdout -> permissionDecisionReason, or empty
+  printf '%s' "$1" | python3 -c 'import json,sys
+raw = sys.stdin.read().strip()
+try:
+    d = json.loads(raw)
+except Exception:
+    print("")
+    raise SystemExit
+print((d.get("hookSpecificOutput") or {}).get("permissionDecisionReason") or "")'
+}
+
+run_reason_case() { # $1=name $2=substring the reason must contain $3=cwd $4=cmd $5..=VAR=VAL
+  name="$1"; want="$2"; cwd="$3"; cmd="$4"; shift 4
+  got="$(reason_of "$(run_hook_env "$cwd" "$cmd" "$@")")"
+  case "$got" in
+    *"$want"*) record "$name" "reason names [$want]" "reason names [$want]" ;;
+    *)         record "$name" "reason names [$want]" "ABSENT, reason was: ${got:-<none>}" ;;
+  esac
+}
+
+# env-borne: git reports origin 'command line:' even though nothing is on a
+# command line here — it is the origin git uses for GIT_CONFIG_PARAMETERS too.
+run_reason_case "env drift names the environment" "came from the ENVIRONMENT" \
+  "$OK_REPO" 'git commit -m x' "GIT_CONFIG_PARAMETERS='core.hooksPath=/dev/null'"
+run_reason_case "env drift does not say just init" "will not help" \
+  "$OK_REPO" 'git commit -m x' "GIT_CONFIG_PARAMETERS='core.hooksPath=/dev/null'"
+# file-borne: the recorded gqlc-nzwa shape, where just init IS the repair.
+run_reason_case "file drift names the config file" "from file:" \
+  "$SAMPLE_REPO" 'git commit -m x'
+run_reason_case "file drift still says just init"  "just init" \
+  "$SAMPLE_REPO" 'git commit -m x'
+
 # the repair has to stay runnable, or the guard wedges the session that has to
 # fix it. `just init` and a direct git config write are the two documented forms.
 run_drift_case "just init still runs while drifted"  warn       "$UNSET_REPO"  'just init'
@@ -1098,7 +1141,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=168
+EXPECTED_ROWS=172
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
@@ -1110,7 +1153,7 @@ fi
 # strings — no path, sha or temp dir reaches one — so the digest is the same on
 # every machine. Update it deliberately when a row is added, renamed or
 # reordered; a drift you did not intend is the finding.
-EXPECTED_ROW_DIGEST=c5ad06d738cd93d8
+EXPECTED_ROW_DIGEST=89b92d958dcb753f
 ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
   'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
 if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then
