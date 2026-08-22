@@ -567,6 +567,67 @@ run_check_hooks "$REPO"
 check "install: a non-executable source still installs an executable hook" yes \
     "$([ -x "$(hooks_dir "$REPO")/pre-commit" ] && echo yes || echo no)"
 
+# --- what check-hooks counts as ABSENT: both clauses of the predicate ---------
+# `[ ! -x "$target" ] || ! grep -q <marker> "$target"` decides which names reach
+# the self-heal. Every fixture above either deletes a file (so both clauses agree)
+# or leaves all five real (so neither fires), which is why deleting either clause
+# once left the whole suite green. The two fixtures below separate them: each is
+# a state where exactly one clause is what bites.
+
+# The -x clause. All five installed and marker-bearing at mode 644. git skips a
+# non-executable hook without a word, so this is an install that passes a marker
+# grep and gates nothing. Distinct from the `install-mode` rows above, which cover
+# the INSTALLER setting the bit on a copy it makes from a 644 source; here the
+# already-installed files are 644 and it is check-hooks that has to notice.
+REPO="$TMP/ch-installed-644"
+make_repo "$REPO"
+chmod 644 "$(hooks_dir "$REPO")"/{pre-commit,commit-msg,pre-push,post-checkout,post-merge}
+check "644 fixture: all five carry the marker (so the grep clause passes them)" 5 \
+    "$(count_marked "$REPO")"
+check "644 fixture: none of the five is executable" 0 \
+    "$(find "$(hooks_dir "$REPO")" -maxdepth 1 -perm -u+x \
+        \( -name pre-commit -o -name commit-msg -o -name pre-push \
+           -o -name post-checkout -o -name post-merge \) | wc -l)"
+run_check_hooks "$REPO"
+check "check-hooks: a marker-bearing 644 install is HEALED, not refused" passed "$(verdict $?)"
+check "check-hooks: the healed install is executable at all five names" 5 \
+    "$(find "$(hooks_dir "$REPO")" -maxdepth 1 -perm -u+x \
+        \( -name pre-commit -o -name commit-msg -o -name pre-push \
+           -o -name post-checkout -o -name post-merge \) | wc -l)"
+# The consequence, which is what the clause is for: measured with the clause
+# deleted, check-hooks left the five at 644 and a drifted commit LANDED.
+git -C "$REPO" config --unset core.hooksPath
+check "check-hooks: a drifted commit after healing a 644 install is REFUSED" blocked \
+    "$(try_commit "$REPO")"
+
+# The marker-grep clause. All five present and executable, one of them a foreign
+# script. It exits 1, so the blocking-arm behaviour loop below is satisfied by it
+# and the grep is the only thing that can tell it from the tripwire. The
+# `ch-foreign` fixture above does not reach this: there the other four are deleted,
+# so the -x clause puts them in `absent` and the installer meets the squatter
+# anyway.
+SQUATTER="$TMP/foreign-blocker"
+printf '#!/usr/bin/env bash\n# somebody else wrote this too\nexit 1\n' >"$SQUATTER"
+chmod +x "$SQUATTER"
+REPO="$TMP/ch-squatter-all-present"
+make_repo "$REPO"
+cp "$SQUATTER" "$(hooks_dir "$REPO")/pre-commit"
+chmod +x "$(hooks_dir "$REPO")/pre-commit"
+check "squatter fixture: all five are present and executable" 5 \
+    "$(find "$(hooks_dir "$REPO")" -maxdepth 1 -perm -u+x \
+        \( -name pre-commit -o -name commit-msg -o -name pre-push \
+           -o -name post-checkout -o -name post-merge \) | wc -l)"
+check "squatter fixture: the squatter exits non-zero (so the behaviour loop passes it)" 1 \
+    "$("$(hooks_dir "$REPO")/pre-commit" >/dev/null 2>&1; echo $?)"
+run_check_hooks "$REPO"
+check "check-hooks: a foreign squatter among five present hooks is REFUSED" refused \
+    "$(verdict $?)"
+case "$CH_OUT" in
+    *"not the drift tripwire:"*"/pre-commit"*)
+        check "check-hooks: the refusal names the squatted pre-commit" yes yes ;;
+    *) check "check-hooks: the refusal names the squatted pre-commit" yes no ;;
+esac
+
 # --- summary -----------------------------------------------------------------
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
