@@ -39,6 +39,19 @@ func isolateGit(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_EMAIL", "fixture@invalid")
 }
 
+// useScratchRoot points the -apply guard at a fixture directory for the duration
+// of one test. The guard's list is two absolute literals and reads nothing from
+// the environment, so without this a fixture is scratch only when the toolchain
+// happens to put t.TempDir() under /tmp: `just test` sets GOTMPDIR inside the
+// repository, and every -apply row then measures the machine rather than the
+// fixture. Measured — with GOTMPDIR set, five rows that pass here fail.
+func useScratchRoot(t *testing.T, dir string) {
+	t.Helper()
+	saved := scratchCandidates
+	scratchCandidates = []string{dir}
+	t.Cleanup(func() { scratchCandidates = saved })
+}
+
 func mustGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	out, err := git(t.Context(), dir, args...)
