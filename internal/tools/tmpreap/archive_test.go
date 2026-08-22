@@ -141,6 +141,31 @@ func TestArchiveEntries_OversizeFileSkippedNotTruncating(t *testing.T) {
 	}
 }
 
+// -archive-max-file is the largest size that is TAKEN, not the smallest that is
+// dropped. The boundary is the whole content of the flag an operator raises and
+// re-runs after reading the report, and off by one it drops a file the report
+// just told them raising the limit would keep (verdict-osuz-r2, survivor A10).
+func TestArchiveEntries_AFileExactlyAtTheLimitIsTaken(t *testing.T) {
+	root := t.TempDir()
+	scratch := filepath.Join(root, "edge")
+	const body = "exactly sixteen\n"
+	writeFile(t, filepath.Join(scratch, "at.log"), body)
+	writeFile(t, filepath.Join(scratch, "over.log"), body+"x")
+	dest := filepath.Join(t.TempDir(), "reap.tar.gz")
+
+	stats, err := archiveEntries(dest, root, []entry{{path: scratch, kind: kindPlain}},
+		archiveLimits{maxFileBytes: int64(len(body)), maxTotalBytes: 1 << 20})
+	if err != nil {
+		t.Fatalf("archiveEntries: %v", err)
+	}
+	if got := archiveNames(t, dest); !slices.Equal(got, []string{"edge/at.log"}) {
+		t.Errorf("archive holds %v, want just the file whose size equals the limit", got)
+	}
+	if stats.large.files != 1 {
+		t.Errorf("large = %d, want 1: only the file one byte OVER the limit is a drop", stats.large.files)
+	}
+}
+
 // The two oversize cases are different losses: a build artefact nobody wanted a
 // copy of, and the agent log this archive exists for. Counting them together
 // would report the 24 MiB text file on the live /tmp as one of 47 oversize
