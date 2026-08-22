@@ -44,10 +44,19 @@ echo asleep >"$home/status"
 trap 'echo asleep >"$home/status"' EXIT
 trap 'exit 0' INT TERM
 
-compose() { # $1 = wake reasons, one per line
+compose() { # $1 = wake reasons, one per line; $2 = a stale-hooks warning, or empty
     printf 'Բարի լոյս, %s։ A new workday begins in your seat (%s).\n\n' "$display" "$seat"
     printf 'Why you were woken:\n'
     printf '%s\n' "$1" | sed 's/^/  - /'
+
+    if [ -n "$2" ]; then
+        printf '\nBEFORE YOU PUSH — your gates are not master'"'"'s:\n  %s\n' "$2"
+        printf 'You have work in flight here, so nothing was moved for you. The hooks in\n'
+        printf 'this worktree (and .claude/settings.json) are the versions your branch was\n'
+        printf 'cut from — including the guard that refuses a push resolving to master.\n'
+        printf 'Rebase onto origin/master, or check your push destination by hand with\n'
+        printf 'git branch -vv (bd gqlc-xtre).\n'
+    fi
 
     local unread
     unread=$(find "$sd/mail/$seat/inbox" -type f -name '*.md' 2>/dev/null | wc -l)
@@ -69,7 +78,21 @@ while :; do
     until [ -s "$home/wake" ]; do sleep 5; done
     reasons=$(cat "$home/wake")
     rm -f "$home/wake"
-    msg=$(compose "$reasons")
+
+    # A seat runs the hooks in its own checkout, so a parked one keeps running
+    # the gates it was created with however many have merged since (bd
+    # gqlc-xtre). Wake is the only safe moment to move it: the session has not
+    # started, so no checkout happens under a live claude. A seat holding work
+    # is never moved — it gets told instead, in its first message.
+    refresh_out=$("$KM" seat-refresh "$seat" 2>&1) && refresh_rc=0 || refresh_rc=$?
+    stale=""
+    case "$refresh_rc" in
+        0) ;;
+        3) stale=$refresh_out ;;
+        *) echo "km-seat: could not refresh $seat's worktree: $refresh_out" >&2 ;;
+    esac
+
+    msg=$(compose "$reasons" "$stale")
 
     echo awake >"$home/status"
     (
