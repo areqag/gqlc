@@ -638,6 +638,53 @@ free_worker_of_class() { # asleep, no queued wake
     return 1
 }
 
+# Wakes every sleeping seat that owns work in <list> (lines of "seat id"), with
+# <prefix> naming what those ids are to it. Both routing passes that hand a seat
+# its OWN bead go through here: the cap arithmetic is the part that must not
+# exist in two copies, because a divergence between them overspends the cap
+# silently, and the cap is what keeps the town inside its quota.
+#
+# It reads and updates cmd_dispatch's `slots` and `wakes` through bash's dynamic
+# scope, which is why it is only ever called from there.
+route_owners() { # <"seat id" lines> <reason prefix>
+    local list=$1 prefix=$2 s capped mine
+    for s in $(worker_seats); do
+        [ "$(seat_status "$s")" = asleep ] || continue
+        # A seat with a wake already queued is skipped rather than woken twice.
+        # A seat holding in-progress work AND assigned an unclaimed bead is
+        # therefore told about the in-progress half only, and hears about the
+        # other when it next sleeps — a delay, not a strand, and the order
+        # Constitution III.3 asks for.
+        [ ! -f "$(seat_home "$s")/wake" ] || continue
+        capped=1
+        if [ "$(seat_class "$s")" = judge ]; then capped=0; fi
+        [ "$capped" -eq 0 ] || [ "$slots" -gt 0 ] || continue
+        mine=$(echo "$list" | awk -v s="$s" '$1 == s { print $2 }')
+        [ -n "$mine" ] || continue
+        cmd_wake "$s" --reason "$prefix: $(echo "$mine" | tr '\n' ' ')"
+        wakes=$((wakes + 1))
+        if [ "$capped" -eq 1 ]; then slots=$((slots - 1)); fi
+    done
+}
+
+# The state no dispatch pass can reach. The resume pass takes in_progress beads
+# that name a seat, the owned and fresh passes take ready ones — and `bd ready`
+# returns beads whose status is open only, so an in_progress bead with no
+# assignee is in no pass and cannot re-enter one. It reads as work underway and
+# no wake will ever come for it. Unassigning a bead a seat had already claimed
+# produces exactly this state, and did on gqlc-gwf0 (recorded in gqlc-mro7),
+# done by someone trying to make the bead more routable.
+#
+# NOT counted here, though it is equally unreachable: a bead assigned to a name
+# that is not a seat. People hold beads here legitimately, so failing on that
+# would mean failing whenever a human takes one — but it also means a RETIRED
+# seat's work would hide in that category, indistinguishable from a person's
+# (gqlc-t4zx).
+stranded_ids() {
+    bd list --status in_progress -n 0 --json 2>/dev/null |
+        jq -r '[ .[] | select(.assignee == null) | .id ] | join(" ")'
+}
+
 cmd_dispatch() {
     assert_deployed dispatch || return 1
     session_up || { echo "dispatch: the town is down; nothing to do"; return 0; }
@@ -701,47 +748,64 @@ cmd_dispatch() {
         jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"' | sort); then
         die "dispatch: the in-progress query failed; nothing routed this run"
     fi
-    local mine capped
-    for s in $(worker_seats); do
-        [ "$(seat_status "$s")" = asleep ] || continue
-        [ ! -f "$(seat_home "$s")/wake" ] || continue
-        capped=1
-        if [ "$(seat_class "$s")" = judge ]; then capped=0; fi
-        [ "$capped" -eq 0 ] || [ "$slots" -gt 0 ] || continue
-        mine=$(echo "$inprog" | awk -v s="$s" '$1 == s { print $2 }')
-        [ -n "$mine" ] || continue
-        cmd_wake "$s" --reason "resume your in-progress work: $(echo "$mine" | tr '\n' ' ')"
-        wakes=$((wakes + 1))
-        if [ "$capped" -eq 1 ]; then slots=$((slots - 1)); fi
-    done
+    route_owners "$inprog" "resume your in-progress work"
 
-    # Fresh pass: ready, unassigned, class-labelled beads, priority first. It
-    # runs with no slots left too, because judge work does not need one.
-    local routed ready id cls seat
+    # The ready queue serves the two passes below. Its rows split by whether the
+    # bead names an owner:
+    #
+    #   owned — assigned to a seat. It goes to that seat and to nobody else, at
+    #           any status. Before this split, a bead that was assigned but
+    #           still OPEN was in neither pass — not null-assignee for the fresh
+    #           one, not in_progress for the resume one — so it sat on the board
+    #           looking owned and routed to nobody, at any priority, with
+    #           nothing reporting the omission (gqlc-xq8a, gqlc-g10n).
+    #   fresh — unassigned and class-labelled, routed to a free seat of its
+    #           class.
+    #
+    # A class label decides nothing for an owned bead: the assignee already
+    # names the seat, which is the rule the resume pass has always used. Hence
+    # the `select($cls != null)` sits on the fresh arm only, where a label is
+    # the sole way to choose a seat at all.
+    #
     # Captured once rather than piped: the hold verdict below needs each
     # candidate's labels, and re-querying could read a different queue.
+    local queue routed owned ready id cls seat
     if ! ready=$(bd ready -n 0 --json 2>/dev/null); then
-        die "dispatch: the ready-queue query failed; no fresh bead routed (any resume wakes above stand)"
+        die "dispatch: the ready-queue query failed; nothing routed beyond the resume wakes above"
     fi
     # `. as $c` binds the class name before the pipe, and must stay bound: inside
     # `map(...)` the pipe in `($b.labels // []) | index(...)` rebinds `.` to the
     # labels array, so a bare `"class:" + .` is string + array — a type error that
     # aborts the whole program on any unassigned bead, labelled or not.
-    if ! routed=$(jq -r '
+    if ! queue=$(jq -r '
         [ .[]
-          | select(.assignee == null)
           | . as $b
           | (["architect", "warrior", "judge"]
              | map(. as $c | select(($b.labels // []) | index("class:" + $c))))[0] as $cls
-          | select($cls != null)
-          | {id, priority, cls: $cls}
-        ] | sort_by(.priority) | .[] | "\(.id) \(.cls)"' <<<"$ready"); then
+          | {id, priority, assignee, cls: $cls}
+        ] | sort_by(.priority) | .[]
+          | if .assignee != null then "owned \(.assignee) \(.id)"
+            elif .cls != null    then "fresh \(.id) \(.cls)"
+            else empty end' <<<"$ready"); then
         # Not "nothing routed": the resume pass above may already have queued
         # wakes, and they stand. An operator reading this during an incident has
         # to be able to trust it.
-        die "dispatch: the ready-queue query failed; no fresh bead routed (any resume wakes above stand)"
+        # The owned pass is downstream of this query, so nothing owned has been
+        # routed yet — only the resume wakes stand here.
+        die "dispatch: the ready-queue query failed; neither owned nor fresh beads routed (the resume wakes above stand)"
     fi
+    owned=$(echo "$queue" | awk '$1 == "owned" { print $2, $3 }')
+    routed=$(echo "$queue" | awk '$1 == "fresh" { print $2, $3 }')
 
+    # Owned pass: an unclaimed bead that names a seat goes back to that seat,
+    # ahead of any fresh routing, for the same reason the resume pass runs first
+    # (Constitution III.3). An assignee that is not a seat — a person, most of
+    # them — matches no seat here and is left alone.
+    route_owners "$owned" "assigned work waiting — claim it before you begin"
+
+    # Fresh pass: ready, unassigned, class-labelled beads, priority first. It
+    # runs with no slots left too, because judge work does not need one.
+    #
     # Before routing anything, ask whether each candidate's premise is actually
     # on master and out of every open PR's way (gqlc-pj4r). The edges come from
     # ONE multi-id `bd dep list` — the single-id form returns the parent issue
@@ -753,7 +817,7 @@ cmd_dispatch() {
     if [ -n "$ids" ]; then
         # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
         if ! deps=$(bd dep list $ids --json 2>/dev/null); then
-            echo "dispatch: the dependency query failed; fresh pass skipped this run (any resume wakes above stand)"
+            echo "dispatch: the dependency query failed; fresh pass skipped this run (the resume and owned wakes above stand)"
             return 0
         fi
         parent_ids=$(jq -r '[ .[]? | select(.type == "discovered-from") | .depends_on_id ] | unique | .[]' \
@@ -763,7 +827,7 @@ cmd_dispatch() {
             # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
             if ! parents=$(bd show $parent_ids --json 2>/dev/null |
                 jq -c 'if type == "array" then . else [.] end' 2>/dev/null); then
-                echo "dispatch: the parent-status query failed; fresh pass skipped this run (any resume wakes above stand)"
+                echo "dispatch: the parent-status query failed; fresh pass skipped this run (the resume and owned wakes above stand)"
                 return 0
             fi
         fi
@@ -783,7 +847,7 @@ cmd_dispatch() {
             # Never fall through to routing unchecked. The resume wakes taken
             # above stand, and an operator reading this during an incident must
             # be able to trust that sentence.
-            echo "dispatch: hold-verdict failed (rc=$?); fresh pass skipped this run (any resume wakes above stand)"
+            echo "dispatch: hold-verdict failed (rc=$?); fresh pass skipped this run (the resume and owned wakes above stand)"
             return 0
         fi
     fi
@@ -814,6 +878,19 @@ cmd_dispatch() {
             if [ "$cls" != judge ]; then slots=$((slots - 1)); fi
         fi
     done <<<"$routed"
+
+    # The report the routing cannot make for itself. This run's passes are done;
+    # a bead none of them could reach is named here rather than left to be found
+    # by accident, which is how each of the previous three invisibility shapes
+    # was found. It does not stop the run: routing is the job, and a diagnostic
+    # that can abort it would be a worse failure than the one it reports. `km
+    # doctor` is where the same fact is a gate that FAILS.
+    local stranded
+    if ! stranded=$(stranded_ids); then
+        echo "dispatch: the reachability check could not run; the routing above stands"
+    elif [ -n "$stranded" ]; then
+        echo "dispatch: STRANDED — in progress and assigned to nobody, so no pass can wake anyone for them: $stranded"
+    fi
     echo "dispatch: done ($wakes wake(s) this run, $held held)"
 }
 
@@ -827,8 +904,10 @@ cmd_dispatch() {
 # HOLD a fresh-routing candidate if EITHER its declared subject path is absent
 # from origin/master, OR an open PR modifies it. Release is automatic: merging
 # or closing the PR changes the answer on the next run, so nobody has to
-# remember anything. Holds gate FRESH routing only; a seat's own in-progress
-# work is never withheld (Constitution III.3).
+# remember anything. Holds gate FRESH routing only; work that already names a
+# seat is never withheld, whether that seat has started it or merely been
+# assigned it (Constitution III.3) — both owner-facing passes run upstream of
+# the verdict, so no hold can reach them.
 #
 # The convention this reads is a bd label `subject:<path>`, repo-relative, file
 # or directory. A title-prefix→path map was measured and rejected: it would live
@@ -1079,6 +1158,19 @@ cmd_doctor() {
         echo "FAIL: deployed kingdom/ is not certified against origin/master:"
         echo "      ${drift//$'\n'/$'\n      '}"
         ok=1
+    fi
+    # Not a `check` row either, and for the same reason twice over: this one has
+    # three outcomes, and the failing one has to NAME the beads. A gate an
+    # operator cannot act on is a warning wearing a gate's clothes.
+    local stranded
+    if ! stranded=$(stranded_ids); then
+        echo "FAIL: the reachability query failed, so no bead can be certified reachable"
+        ok=1
+    elif [ -n "$stranded" ]; then
+        echo "FAIL: in progress and assigned to nobody, so no dispatch pass can wake anyone: $stranded"
+        ok=1
+    else
+        echo "ok:   every bead is in some dispatch pass"
     fi
     check soft "bd mail.delegate points at km" sh -c "bd config get mail.delegate | grep -q 'km mail'"
     check soft "dispatch timer enabled" systemctl --user is-enabled kingdom-dispatch.timer

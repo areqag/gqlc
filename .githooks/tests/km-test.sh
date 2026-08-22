@@ -554,10 +554,12 @@ elif ! wake_of aramazd | grep -q 'ready warrior work'; then
     bad "the fresh pass routes a bead of each class" "the wake reason does not name the class: $(wake_of aramazd)"
 elif grep -rq 'gqlc-unl' "$KM_STATE_DIR/seats" 2>/dev/null; then
     bad "the fresh pass routes a bead of each class" "the unlabelled bead was routed to a seat"
-elif grep -rq 'gqlc-taken' "$KM_STATE_DIR/seats" 2>/dev/null; then
-    bad "the fresh pass routes a bead of each class" "a bead another seat already holds was routed again"
+elif ! wake_of ar | grep -q 'gqlc-taken'; then
+    bad "the fresh pass routes a bead of each class" "the assigned bead did not reach its own assignee: $(woken_seats)"
+elif grep -rl 'gqlc-taken' "$KM_STATE_DIR/seats" 2>/dev/null | grep -qv '/ar/'; then
+    bad "the fresh pass routes a bead of each class" "a bead ար already holds was handed to somebody else: $(grep -rl 'gqlc-taken' "$KM_STATE_DIR/seats" 2>/dev/null | tr '\n' ' ')"
 else
-    ok "the fresh pass routes architect, warrior and judge beads to free seats of their class, and routes neither the unlabelled bead nor one already assigned"
+    ok "the fresh pass routes architect, warrior and judge beads to free seats of their class, routes the unlabelled bead nowhere, and sends the assigned one to its own assignee rather than to a stranger"
 fi
 
 # A queue of nothing but unlabelled beads is Սեդրակ's chore, not a failure. It
@@ -617,6 +619,201 @@ elif grep -rq 'gqlc-h1' "$KM_STATE_DIR/seats" 2>/dev/null; then
     bad "a human's bead wakes no seat" "the human's bead was routed to a seat"
 else
     ok "an in-progress bead assigned to a human wakes no seat, while a seat-classed bead in the same run still routes"
+fi
+
+# --- the owned pass: a bead that names a seat goes to that seat (gqlc-xq8a) ---
+# The two passes above do not cover the board between them. The resume pass
+# reads `--status in_progress`; the fresh pass selects `.assignee == null`. A
+# bead that is ASSIGNED but still OPEN satisfies neither, so it sits on the
+# board looking owned and routes to nobody, at any priority including P0, with
+# nothing reporting the omission. That is why it survived: to a human reading
+# the board, "assigned" says someone has it.
+#
+# The rule these rows pin is the resume pass's rule widened to every status: a
+# bead that names a seat is that seat's, and labels do not decide it. So the
+# owned bead below carries NO class label and must still route.
+dispatch_case '[
+  {"id":"gqlc-own","priority":1,"assignee":"ar","labels":null},
+  {"id":"gqlc-ctl","priority":2,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a ready bead assigned to a seat reaches that seat" "rc=$RC out=$OUT"
+elif ! wake_of aramazd | grep -q 'bead:gqlc-ctl'; then
+    bad "a ready bead assigned to a seat reaches that seat" "the control bead did not route, so this row proves nothing (woken: $(woken_seats)) out=$OUT"
+elif ! wake_of ar | grep -q 'gqlc-own'; then
+    bad "a ready bead assigned to a seat reaches that seat" "ար was not woken for the bead assigned to him (woken: $(woken_seats)) out=$OUT"
+elif wake_of ar | grep -q 'resume your in-progress work'; then
+    bad "a ready bead assigned to a seat reaches that seat" "an open bead was announced as work already in progress: $(wake_of ar)"
+elif ! wake_of ar | grep -q 'claim'; then
+    bad "a ready bead assigned to a seat reaches that seat" "the wake does not tell him to claim it first: $(wake_of ar)"
+elif [ "$(grep -rl 'gqlc-own' "$KM_STATE_DIR/seats" 2>/dev/null | wc -l)" -ne 1 ]; then
+    bad "a ready bead assigned to a seat reaches that seat" "the owned bead reached more than its owner: $(grep -rl 'gqlc-own' "$KM_STATE_DIR/seats" 2>/dev/null | tr '\n' ' ')"
+else
+    ok "a ready bead assigned to a seat wakes that seat and no other, is announced as unclaimed rather than in progress, and needs no class label to route"
+fi
+
+# The other half of the same rule, and the reason the fresh pass filtered
+# assigned beads out in the first place: an assigned bead must not be handed to
+# a free seat of its class as though it were unclaimed.
+dispatch_case '[
+  {"id":"gqlc-mine","priority":0,"assignee":"hayk","labels":["class:warrior"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "an assigned bead is not re-routed to a stranger" "rc=$RC out=$OUT"
+elif ! wake_of hayk | grep -q 'gqlc-mine'; then
+    bad "an assigned bead is not re-routed to a stranger" "its owner was not woken, so the row cannot see a re-route (woken: $(woken_seats)) out=$OUT"
+elif [ "$(woken_seats)" != "hayk " ]; then
+    bad "an assigned bead is not re-routed to a stranger" "seats other than the owner were woken: $(woken_seats)"
+else
+    ok "a ready bead assigned to one warrior wakes only that warrior, and is not offered to the other free warriors as fresh work"
+fi
+
+# The seat that is in BOTH lists, which is a state this branch creates: before
+# it, one pass flowed through route_owners; now two do, in one run. The guard is
+# the wake-file skip, and until this row its behaviour lived in a comment — the
+# exact shape this branch exists to end. Delete the skip and the suite stays
+# green — 63/63 where Անահիտ found it (#1237 round 1, head 5e6c3f34), 118/0
+# where I reproduced it after the rebase (e7872b4b).
+#
+# Both halves of the guard are asserted, because they fail differently. WITHIN a
+# run, dropping the skip wakes Հայկ twice and spends two capped slots for one
+# seat. ACROSS runs it compounds: cmd_wake APPENDS, and a seat that has been
+# woken but has not yet risen is still `asleep`, so every tick re-wakes it and
+# re-charges a slot — silent under-routing, which is the defect class of this
+# whole branch. The second run therefore resets nothing on purpose.
+dispatch_case '[
+  {"id":"gqlc-both-open","priority":0,"assignee":"hayk","labels":null}
+]' '[
+  {"id":"gqlc-both-ip","assignee":"hayk","labels":null}
+]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a seat in both lists is woken once, for the in-progress half" "rc=$RC out=$OUT"
+elif [ "$(wake_of hayk | wc -l)" -ne 1 ]; then
+    bad "a seat in both lists is woken once, for the in-progress half" \
+        "$(wake_of hayk | wc -l) wake line(s), so both passes reached him in one run: $(wake_of hayk)"
+elif ! wake_of hayk | grep -q 'resume your in-progress work.*gqlc-both-ip'; then
+    bad "a seat in both lists is woken once, for the in-progress half" \
+        "the single wake is not the resume one, so the passes ran in the wrong order: $(wake_of hayk)"
+elif wake_of hayk | grep -q 'gqlc-both-open'; then
+    bad "a seat in both lists is woken once, for the in-progress half" \
+        "the owned half was announced too, which is the double wake this guard exists to prevent: $(wake_of hayk)"
+else
+    # Deliberately NOT reset: a queued wake outlives the run that made it, and
+    # the seat is still asleep, so this is what the next timer tick actually
+    # meets.
+    run_dispatch
+    if [ "$(wake_of hayk | wc -l)" -ne 1 ]; then
+        bad "a queued wake is not re-queued on the next tick" \
+            "the wake file grew to $(wake_of hayk | wc -l) lines across two runs, so each tick re-wakes and re-charges a slot: $(wake_of hayk)"
+    else
+        ok "a seat holding in-progress work and assigned an unclaimed bead is woken once, for the in-progress half, and a second dispatch over the same unreset state neither appends a second wake nor spends a second slot"
+    fi
+fi
+
+# A ready bead assigned to a human is nobody's to route — the same rule the
+# in-progress row above pins, on the status the fresh pass sees. The one live
+# instance of this shape on the board today is exactly this: gqlc-do1, open and
+# assigned to antranig-yeretzian.
+dispatch_case '[
+  {"id":"gqlc-hum","priority":0,"assignee":"antranig-yeretzian","labels":["class:warrior"]},
+  {"id":"gqlc-ctl2","priority":1,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a human's ready bead wakes no seat" "rc=$RC out=$OUT"
+elif ! wake_of aramazd | grep -q 'bead:gqlc-ctl2'; then
+    bad "a human's ready bead wakes no seat" "the control bead did not route, so this row proves nothing (woken: $(woken_seats)) out=$OUT"
+elif grep -rq 'gqlc-hum' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "a human's ready bead wakes no seat" "the human's bead was routed to a seat: $(woken_seats)"
+else
+    ok "a ready bead assigned to a human wakes no seat, while an unassigned bead in the same run still routes"
+fi
+
+# The owned pass is capped work like any other. հայկ is the assignee and is
+# asleep; the five capped seats awake around him are what must hold him back,
+# and the printed cap line is the control proving the cap engaged.
+dispatch_case '[
+  {"id":"gqlc-owncap","priority":0,"assignee":"hayk","labels":["class:warrior"]}
+]' '[]'
+fill_cap aramazd vahagn astghik ar nvard
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "an owned bead waits for a slot" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'no free slot'; then
+    bad "an owned bead waits for a slot" "the cap never engaged, so this row proves nothing: $OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "an owned bead waits for a slot" "it woke: $(woken_seats) out=$OUT"
+else
+    ok "a ready bead assigned to a sleeping warrior does not wake him while every capped slot is held"
+fi
+
+# ...and the judge's exemption reaches it too, for the same reason it reaches
+# the other two passes: the town's merge gate must not be held shut by the
+# town's own throughput (gqlc-dz85).
+dispatch_case '[
+  {"id":"gqlc-ownjudge","priority":0,"assignee":"mihr","labels":null}
+]' '[]'
+fill_cap aramazd vahagn astghik ar nvard
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "an owned judge bead is exempt from the cap" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'no free slot'; then
+    bad "an owned judge bead is exempt from the cap" "the cap never engaged, so this row proves nothing: $OUT"
+elif ! wake_of mihr | grep -q 'gqlc-ownjudge'; then
+    bad "an owned judge bead is exempt from the cap" "the judge was not woken for his own assigned bead (woken: $(woken_seats)) out=$OUT"
+else
+    ok "a ready bead assigned to the judge wakes him at a full cap, as his in-progress beads already do"
+fi
+
+# --- the state no pass can reach, named rather than left to be found ---------
+# Closing the assigned-and-open hole leaves one shape that no pass can wake
+# anyone for: in_progress with no assignee. The resume pass wants a non-null
+# assignee and the fresh pass wants status open, and `bd ready` returns open
+# beads only — so nothing returns it to circulation. It is reachable by hand:
+# unassigning a bead a seat had already claimed does exactly this, and it has
+# happened here (gqlc-mro7), done by someone trying to make the bead MORE
+# routable.
+#
+# This is the third distinct way a bead has been ready, labelled and invisible,
+# after pre-assigned review beads and assigned-and-open ones. The point of the
+# report is that the fourth is found by the report and not by accident.
+dispatch_case '[
+  {"id":"gqlc-live","priority":0,"assignee":null,"labels":["class:warrior"]}
+]' '[
+  {"id":"gqlc-orphan","assignee":null,"labels":["class:warrior"]}
+]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the dispatcher names a bead no pass can reach" "rc=$RC out=$OUT"
+elif ! wake_of aramazd | grep -q 'bead:gqlc-live'; then
+    bad "the dispatcher names a bead no pass can reach" "the control bead did not route, so this row proves nothing (woken: $(woken_seats)) out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'gqlc-orphan'; then
+    bad "the dispatcher names a bead no pass can reach" "the orphaned bead was not named in the run's output: $OUT"
+elif grep -rq 'gqlc-orphan' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the dispatcher names a bead no pass can reach" "it was routed to a seat instead of reported: $(woken_seats)"
+else
+    ok "an in-progress bead with no assignee is named in the dispatch run's output rather than passing silently, and is not routed to a stranger"
+fi
+
+# A healthy board must not print the warning, or the line stops meaning
+# anything and the next real one is read as noise.
+dispatch_case '[
+  {"id":"gqlc-live2","priority":0,"assignee":null,"labels":["class:warrior"]}
+]' '[
+  {"id":"gqlc-held","assignee":"vahagn","labels":["class:warrior"]}
+]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a healthy board prints no stranding warning" "rc=$RC out=$OUT"
+elif ! wake_of vahagn | grep -q 'gqlc-held'; then
+    bad "a healthy board prints no stranding warning" "the resume wake did not happen, so the board was not the healthy one: $OUT"
+elif printf '%s' "$OUT" | grep -qi 'stranded'; then
+    bad "a healthy board prints no stranding warning" "it warned about a board where every bead is in a pass: $OUT"
+else
+    ok "a board whose beads are all in some pass draws no stranding warning"
 fi
 
 # Priority decides who gets the last seat. Every warrior but հայկ is given a
@@ -1503,6 +1700,36 @@ elif ! grep -rq 'gqlc-held' "$KM_STATE_DIR/seats" 2>/dev/null; then
         "it was held with no open PR and its subject on master (woken: '$(woken_seats)'): $OUT"
 else
     ok "with the PR closed, the same subject-labelled bead routes — the hold is released by the merge, not by anyone remembering"
+fi
+
+# The owned pass is upstream of the verdict, so no hold can reach it. This is
+# the pair for the FIRST row of this section, not the falsifier above: same open
+# PR, same subject, same held condition — the only difference is that this bead
+# names a seat. Both answers are defensible and the split this branch adds is
+# what forces the choice, so the choice gets a row rather than being left as an
+# artifact of a diff. It goes this way because the hold's premise is that a
+# fresh routing sends a stranger to branch from origin/master and find nothing;
+# an assignee already holds the context the hold exists to protect, and
+# withholding here would make a bead unroutable for as long as any PR touched
+# its file, which is most of the time on kingdom/ paths.
+gh_prs '[{"number":1057,"files":[{"path":"justfile"}]}]'
+dispatch_case '[
+  {"id":"gqlc-owned","priority":0,"assignee":"vahagn","labels":["class:warrior","subject:justfile"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a hold does not withhold a bead that names a seat" "rc=$RC out=$OUT"
+elif ! wake_of vahagn | grep -q 'gqlc-owned'; then
+    bad "a hold does not withhold a bead that names a seat" \
+        "its assignee was not woken under the same condition that holds an unassigned bead (woken: '$(woken_seats)') out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'hold gqlc-owned'; then
+    bad "a hold does not withhold a bead that names a seat" \
+        "it was reported held as well as routed, so the journal contradicts the wake: $OUT"
+elif ! printf '%s' "$OUT" | grep -qF 'this run, 0 held'; then
+    bad "a hold does not withhold a bead that names a seat" \
+        "the run counts a hold it did not act on: $OUT"
+else
+    ok "a ready bead assigned to a seat reaches that seat even when an open PR touches its subject — the condition that holds the identical unassigned bead — and the run reports no hold"
 fi
 
 # The dep arm reaches dispatch only through two further bd queries, whose shapes
@@ -2573,6 +2800,63 @@ else
 fi
 
 export KM_DEPLOY_ROOT="$TMP/deployed"
+
+# --- doctor: the stranding report is a gate, not a remark (gqlc-xq8a) --------
+# A check that warns and exits 0 is not a gate — the question to ask of it is
+# "does it FAIL?", not "is there a check?" (gqlc-z1qw, and `just doctor`
+# printing ok over a warning at gqlc-bn5r). So these rows read the exit status,
+# and the clean row is what makes the dirty one mean something: without it a
+# doctor that fails for an unrelated reason would look like a working gate.
+#
+# Two confounds are held off rather than one, because doctor now has two rows
+# that can redden it. claude is stubbed above, for the deploy rows, and these
+# rows need it for the same reason — it is a hard check, so its absence would
+# put the exit status on a binary this suite does not care about. And
+# KM_DEPLOY_ROOT is left pointing at the clean tree the line above set, so the
+# drift gate stays quiet and the status is attributable to the stranding.
+run_doctor() {
+    OUT="$(PATH="$BIN:$PATH" "$KM" doctor 2>&1)"
+    RC=$?
+}
+
+dispatch_case '[]' '[
+  {"id":"gqlc-doc1","assignee":"vahagn","labels":["class:warrior"]}
+]'
+run_doctor
+if [ "$RC" -ne 0 ]; then
+    bad "doctor passes a board with nothing stranded" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q '^ok: .*stranded\|^ok: .*dispatch pass'; then
+    bad "doctor passes a board with nothing stranded" "doctor does not report on stranding at all: $OUT"
+else
+    ok "doctor exits 0 and says so when every bead is in some dispatch pass"
+fi
+
+dispatch_case '[]' '[
+  {"id":"gqlc-doc2","assignee":null,"labels":["class:warrior"]}
+]'
+run_doctor
+if [ "$RC" -eq 0 ]; then
+    bad "doctor FAILS on a bead no pass can reach" "it exited 0 over a stranded bead: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^FAIL:'; then
+    bad "doctor FAILS on a bead no pass can reach" "nonzero, but no check reported FAIL — the status came from somewhere else: $OUT"
+elif ! printf '%s' "$OUT" | grep '^FAIL:' | grep -q 'gqlc-doc2'; then
+    bad "doctor FAILS on a bead no pass can reach" "the failing line does not name the bead, so the operator cannot act on it: $OUT"
+else
+    ok "doctor fails, names the stranded bead, and does not merely warn"
+fi
+
+# Fail-closed, the property the whole dispatcher was rebuilt around: a query
+# that cannot be answered is not an answer of "nothing wrong".
+dispatch_case '[]' '[]'
+printf '1' >"$KM_FAKE_INPROG.rc"
+run_doctor
+if [ "$RC" -eq 0 ]; then
+    bad "doctor refuses to certify what it could not read" "a failed query certified the town healthy: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^FAIL:'; then
+    bad "doctor refuses to certify what it could not read" "nonzero without a FAIL line: $OUT"
+else
+    ok "a stranding query that fails makes doctor fail, rather than reading as a board with nothing stranded"
+fi
 
 # This suite builds git repositories, so it must be able to prove it built them
 # somewhere else. On PR #1128 it could not: a leaked GIT_DIR sent the fixture's
