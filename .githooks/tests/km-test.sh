@@ -21,6 +21,19 @@ trap 'rm -rf "$TMP"' EXIT
 export KM_STATE_DIR="$TMP/state"
 # The suite may itself run inside a seat one day; identity must not leak in.
 unset KINGDOM_SEAT
+# Nor may the invoking git's environment. `git push` runs this suite from a hook
+# with GIT_DIR set to the real repo, and `git rev-parse` — which is how km finds
+# its repo — honours GIT_DIR over the CWD. The fixture below would be built and
+# then silently bypassed, every row answering about the real checkout instead.
+# Most rows would still pass, because the paths they ask about exist there too;
+# only the fetch row caught it. Passing for the wrong reason is the exact defect
+# the fixture exists to end, so the environment is cleared here rather than
+# worked around per row (measured on PR #1128, green direct, red under push).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX GIT_NAMESPACE
+# Read after the unset, so it is the real repo's HEAD and not a hijacked one.
+# Asserted again at the end of the file; see the note there.
+SUITE_START_HEAD="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
 
 # A hermetic git fixture, because km resolves the repo from its CWD and the hold
 # rows ask real questions of `origin/master`. Run against the checkout the suite
@@ -1515,6 +1528,25 @@ elif ! grep -q 'mediun' "$STDERR"; then
     bad "a misspelled level must be named on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
 else
     ok "a misspelled level is refused, named on stderr, and the seat still launches"
+fi
+
+# This suite builds git repositories, so it must be able to prove it built them
+# somewhere else. On PR #1128 it could not: a leaked GIT_DIR sent the fixture's
+# `git init` and `git commit` into the repo under test, grafting six fixture
+# commits onto the branch and rewriting what the PR contained — silently, three
+# times, and the third one pushed. The unset at the top of this file is the fix.
+# This is the alarm, kept because that failure is invisible in a green run and
+# its blast radius is shipped history.
+suite_end_head="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo none)"
+if [ "$SUITE_START_HEAD" = none ]; then
+    # Both sides would read "none" and the comparison would pass having compared
+    # nothing. Say so instead of banking a green row.
+    printf 'skip - the suite leaves the repo it runs in untouched: %s has no HEAD to watch\n' "$REPO"
+elif [ "$suite_end_head" != "$SUITE_START_HEAD" ]; then
+    bad "the suite leaves the repo it runs in untouched" \
+        "HEAD of $REPO moved $SUITE_START_HEAD -> $suite_end_head during this run"
+else
+    ok "the suite's own git fixtures land outside the repo under test, leaving its HEAD where it found it"
 fi
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
