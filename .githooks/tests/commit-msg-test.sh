@@ -105,5 +105,99 @@ Merge branch 'foo'
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 " merge
 
+# --- author / committer identity --------------------------------------------
+# Until gqlc-s989 this half of the hook had NO rows at all. Every case above
+# inherits the machine's real global identity, so all of them satisfy the
+# identity check incidentally, and a hole in its denylist could not redden
+# anything. It did not: `test@example.invalid` was spelled out while only
+# `.com` and `.org` were globbed, so `fixture@example.invalid` committed
+# cleanly, and one did (42191059, a real feature commit).
+#
+# Identity comes from GIT_AUTHOR_EMAIL / GIT_COMMITTER_EMAIL here because
+# that is what `git var GIT_{AUTHOR,COMMITTER}_IDENT` reads first, and it
+# leaves the fixture repo's config untouched.
+# The expectation is not accept/reject but WHICH GUARD rejected, spelled
+# `denylist:<label>` or `shape:<label>`. Both guards reject, so a plain
+# accept/reject row cannot tell them apart — and under that coarser
+# expectation every dotless reserved name (`ci@invalid`, `root@localhost`)
+# is carried by the shape check's dot requirement while appearing to
+# witness its denylist arm. Deleting `*@invalid` or the `.localhost` arm
+# then changes nothing observable and the suite stays green. Mutation
+# screen, 2026-08-22: that is 2 of 8 survivors; naming the guard kills
+# both, and the message the committer reads ("reserved by RFC 2606" vs
+# "Implausible") is the thing that differs, so it is worth asserting anyway.
+run_ident_case() { # $1=name $2=expected $3=author-email [$4=committer-email]
+    local name="$1" expected="$2" email="$3" cemail="${4:-$3}"
+    local msg_file="$TMP/msg.$$"
+    printf 'a subject line\n' >"$msg_file"
+    rm -f "$REPO/.git/MERGE_HEAD"
+
+    local err decision
+    if err="$(cd "$REPO" && env \
+            GIT_AUTHOR_NAME=fixture    GIT_AUTHOR_EMAIL="$email" \
+            GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL="$cemail" \
+            "$HOOK" "$msg_file" 2>&1 >/dev/null)"; then
+        decision=accept
+    else
+        case "$err" in
+            *"Bogus author identity"*)       decision=denylist:author ;;
+            *"Bogus committer identity"*)    decision=denylist:committer ;;
+            *"Implausible author email"*)    decision=shape:author ;;
+            *"Implausible committer email"*) decision=shape:committer ;;
+            *) decision="reject:unrecognised" ;;
+        esac
+    fi
+
+    if [ "$decision" = "$expected" ]; then
+        pass=$((pass + 1)); printf 'ok   - %s\n' "$name"
+    else
+        fail=$((fail + 1)); printf 'FAIL - %s (expected %s, got %s)\n' "$name" "$expected" "$decision"
+    fi
+    rm -f "$msg_file"
+}
+
+# RFC 2606 reserves example.{com,net,org} and the .invalid / .test / .example
+# TLDs; RFC 6761 adds .localhost. One row per reserved name, and each with a
+# local-part that is NOT 'test', because a denylist that enumerates local-parts
+# is the exact defect this section exists to pin.
+run_ident_case "the local-part that was hardcoded"   denylist:author test@example.invalid
+run_ident_case "the address that actually leaked"    denylist:author fixture@example.invalid
+run_ident_case "another local-part at example.invalid" denylist:author stub@example.invalid
+run_ident_case "any host under .invalid"             denylist:author ci@build.invalid
+run_ident_case "the bare .invalid TLD"               denylist:author ci@invalid
+run_ident_case "example.com"                         denylist:author someone@example.com
+run_ident_case "example.org"                         denylist:author someone@example.org
+run_ident_case "example.net"                         denylist:author someone@example.net
+run_ident_case "a host under .test"                  denylist:author runner@ci.test
+run_ident_case "a host under .example"               denylist:author runner@ci.example
+run_ident_case "root@localhost"                      denylist:author root@localhost
+run_ident_case "any user at localhost"               denylist:author build@localhost
+run_ident_case "an empty email"                      denylist:author ""
+
+# The shape check is the second guard and the only one covering addresses no
+# denylist can enumerate. Each row below is rejected by shape and by nothing
+# else, so each pins one clause of `[[ $email != *@* ]] || [[ $domain != *.* ]]`.
+# `plainaddress.com` is the one that needs the `*@*` clause specifically: with
+# no @, `${email##*@}` is the whole string, so the dot clause is satisfied and
+# only the @ clause is left to reject it.
+run_ident_case "no @ and no dot"                     shape:author nobody
+run_ident_case "no @ but a dotted domain"            shape:author plainaddress.com
+run_ident_case "an @ but an undotted domain"         shape:author user@nodot
+
+# Author and committer are separate calls and diverge in real life — rebases,
+# `--author`, and patch application all set one without the other. With the
+# same address in both slots the author call rejects first, so no row above can
+# tell whether the committer is checked at all.
+run_ident_case "bogus committer, real author"        denylist:committer \
+    antranig.yeretzian@proton.me fixture@example.invalid
+run_ident_case "bogus author, real committer"        denylist:author \
+    fixture@example.invalid antranig.yeretzian@proton.me
+
+# The other direction matters as much: a gate that rejects real contributors
+# stops the town rather than protecting it.
+run_ident_case "a real address is accepted"          accept antranig.yeretzian@proton.me
+run_ident_case "a noreply github address"            accept 12345+someone@users.noreply.github.com
+run_ident_case "a plausible corporate address"       accept dev@invalidate.example-host.co.uk
+
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

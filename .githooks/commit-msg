@@ -28,12 +28,31 @@ _check_identity() {
     local email
     email="$(printf '%s' "$ident" | sed 's/.*<\(.*\)>.*/\1/')"
 
-    # Denylist: known test-fixture and placeholder addresses
+    # Denylist: the names RFC 2606 and RFC 6761 reserve so that they can never
+    # be a real mailbox. Matched on DOMAIN only, never on local-part.
+    #
+    # The previous version spelled out `test@example.invalid` beside globbed
+    # `*@example.com` and `*@example.org`. The globs made it read as
+    # categorical; it was not. Every local-part other than `test`, at the one
+    # TLD whose entire purpose is to be unresolvable, went through — and one
+    # did: 42191059, a genuine feature commit authored `fixture
+    # <fixture@example.invalid>`. Nothing on master carries it, but only because
+    # squash-merge re-authors to the PR author, which discards the evidence and
+    # not the defect (bd gqlc-s989).
+    #
+    # Do not add local-parts here. If a domain cannot receive mail, no mailbox
+    # at it is real.
     case "$email" in
-        test@example.invalid|*@example.com|*@example.org|root@localhost|"")
+        *@example.com|*@example.net|*@example.org|\
+        *@invalid|*@*.invalid|\
+        *@test|*@*.test|\
+        *@example|*@*.example|\
+        *@localhost|*@*.localhost|\
+        "")
             cat >&2 <<ERRMSG
 ERROR: Bogus $label identity: <$email>
-       This address is a known test fixture or placeholder.
+       That domain is reserved by RFC 2606 / RFC 6761 and can never receive
+       mail, so this is a test fixture or placeholder, not a person.
        Fix with: git commit --amend --reset-author
 ERRMSG
             return 1
