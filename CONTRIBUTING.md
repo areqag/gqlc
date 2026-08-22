@@ -15,6 +15,68 @@ because linked worktrees share one `.git/config`, does so in every worktree
 simultaneously. CI cannot see local git config, so this is where drift surfaces.
 Repair with `just init`, which is idempotent.
 
+`just init` also installs `.githooks/hooks-drift-tripwire` into the repository's
+default hooks directory (`$(git rev-parse --git-common-dir)/hooks`). That is the
+directory git falls back to when `core.hooksPath` is unset or points at it —
+the shape the drift has taken every time it has been observed — so in the
+drifted state the tripwire is exactly what git runs, and it **refuses the commit
+or the push** and names `just init` as the repair. In the healthy state git never
+looks in that directory and the tripwire is silent. That is what stops the drift
+from depending on someone choosing to run a recipe: it reports at commit and
+push time, which is when it matters.
+
+It has to live outside the working tree. A check at the top of
+`.githooks/pre-commit` cannot report that `.githooks/` is unwired, because a
+dead hook does not run; and a checkout parked on a branch predating a fix has
+every *tracked* file at that commit, which is why the `PreToolUse` detector in
+`.claude/settings.json` was inert in the one repository it was written for. The
+git common dir is shared by every linked worktree, so one `just init` anywhere
+arms all of them, and it is the same directory whichever branch you are parked
+on.
+
+Nobody has to remember to run `just init` for it. `just check-hooks` — which
+`just test` depends on, and `just test` is what `.githooks/pre-push` runs —
+**installs the tripwire itself when it is absent**, and says so on stderr, in the
+same spirit as the pinned linter being provisioned rather than demanded. Absence
+is what it repairs, since an absent file is unambiguous. Two other states it
+reports and leaves alone: a hook this repo did not write squatting one of the
+five names, and a marker-bearing copy that fails the behavioural check below.
+Installing over either would be overwriting somebody's file on a guess. And it
+will *not* repair `core.hooksPath` itself: healing that would silently rewrite
+the drift the check exists to report, in the config every worktree shares.
+
+That refusal comes *first*, which bounds the sentence above: in a fresh clone —
+`core.hooksPath` unset, nothing installed yet — `check-hooks` exits 1 on the
+value and never reaches the install arm, so it installs nothing (measured: rc=1,
+0 of 5 installed, a drifted commit lands). `just init` is still the bootstrap.
+What the self-heal buys is every *already-initialised* checkout, which is all of
+them after this lands.
+
+`check-hooks` holds the installed copy to its behaviour rather than to its bytes:
+it runs the five and requires the three blocking arms to refuse and the two
+`post-*` arms not to. A file carrying the marker line and nothing else would
+otherwise certify itself as installed while gating nothing. Bytes are the wrong
+test here because the install is shared while each worktree's copy of the source
+sits at its own parked commit — an older copy that still refuses is a working
+copy, and reinstalling over it on every push is what byte-equality would demand.
+
+Four limits, stated rather than left to be found. A drift to some *third*
+directory is not caught, because git then runs that directory's hooks and never
+reaches the tripwire; `just check-hooks` compares the configured value and so
+catches any spelling, but only when someone runs it, and the two are layered
+deliberately. The tripwire refuses rather than repairing: `git commit
+--no-verify` skips it exactly as it skips the real hooks, so it is a report, not
+a lock. The self-heal does not reach a fresh clone, for the reason given above.
+And `check-hooks` runs the five with no arguments and without `GIT_INDEX_FILE`,
+so an installed copy can tell the check apart from a real commit: one keying on
+that variable refuses when the check runs it, permits when git runs it as
+`pre-commit` or `commit-msg`, and leaves `just doctor` printing `ok` (measured).
+That is one usable key among several rather than the only door — `$#`, stdin,
+`GIT_EDITOR` and `GIT_AUTHOR_*` are equally usable, and `GIT_EXEC_PATH` and
+`GIT_PREFIX` are set by git for all five names and do reach the recipe when it
+runs from `pre-push`. Executing the hooks removes the accidental shapes — a
+stub, a `cp` truncation — and raises the price of a deliberate one.
+
 Those recipes only run when someone runs them, so `.githooks/claude-pre-bash`
 runs a stricter version of the check on every Bash tool call. Drifted here means
 a repo that *ships* `.githooks/` and whose `core.hooksPath` does not point live

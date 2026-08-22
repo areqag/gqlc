@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# gqlc-hooks-drift-tripwire
+#
+# Refuses commits and pushes while core.hooksPath has drifted off `.githooks`,
+# from a location the drift itself cannot disarm.
+#
+# THE INVERSION. Every other drift check in this repo lives somewhere the drift
+# kills. `.githooks/pre-commit` cannot report that `.githooks/` is unwired — a
+# dead hook does not run (bd gqlc-4thl). `.claude/settings.json` runs the
+# WORKING-TREE copy of `.githooks/claude-pre-bash`, so a checkout parked on a
+# branch predating that detector runs a copy that has never heard of it (bd
+# gqlc-pyk2). `just check-hooks` sees everything and runs only when invoked.
+#
+# The observed drift points core.hooksPath at `$GIT_COMMON_DIR/hooks` — either
+# spelled absolutely, or by being unset, which is the same directory by default.
+# That directory ships 14 files, all `*.sample`, and git ignores a `.sample`, so
+# it is a live hooks directory with nothing live in it. This script is what
+# `just init` puts there. In the drifted state it is precisely what git DOES
+# run; in the healthy state git never looks at that directory at all. So the
+# detector goes where the drift redirects execution, and its carrier is outside
+# the working tree — under the git common dir — which is what lets it survive an
+# arbitrary parked branch when every tracked file is at the parked commit.
+#
+# Linked worktrees share one common dir, so one `just init` anywhere arms all of
+# them at once; the same sharing is why the drift hits all of them at once.
+#
+# WHAT IT DOES NOT CATCH, stated rather than left to be found: a drift to a
+# THIRD directory (neither `.githooks` nor the common dir's `hooks`). Git then
+# runs that directory's hooks, this file is never reached, and nothing here
+# fires. Nothing observed has taken that shape — the two shapes in bd gqlc-4thl
+# and gqlc-pyk2 are the absolute common-dir path and unset — but the limit is
+# real. `just check-hooks` compares the configured VALUE and so covers arbitrary
+# spellings; it just only runs when someone runs it. The two are layered on
+# purpose, and neither subsumes the other.
+#
+# Installed by: just init. Not activated by core.hooksPath — being reached at
+# all is the finding.
+
+set -u
+
+hook="$(basename -- "$0")"
+
+# Read for the message, not for the decision. Being executed from the common
+# dir's hooks directory is already proof the repo's own hooks are unwired, and a
+# decision that re-derived it from `git config` would go quiet exactly when that
+# call fails. `git config --get` exits 1 when the key is unset, which is itself
+# a drifted state (git falls back to this directory), so the empty value is
+# reported as <unset> rather than treated as an error.
+configured="$(git config --get core.hooksPath 2>/dev/null || true)"
+
+{
+    echo "ERROR: local git hooks are inactive — core.hooksPath is '${configured:-<unset>}', expected '.githooks'."
+    echo "       This ran from the default hooks directory, which only happens when"
+    echo "       .githooks/ is unwired. While it stands, ALL of these are dead:"
+    echo "         pre-commit  — the master/main branch guard and the gofumpt/gci format gate"
+    echo "         commit-msg  — the no-AI-attribution guard CLAUDE.md relies on at commit time"
+    echo "         pre-push    — just test and just lint-new"
+    echo "         post-merge  — the bd/GitHub issue mirror"
+    echo "       Linked worktrees share one .git/config, so every worktree is affected."
+    echo ""
+    echo "       Repair (idempotent, arms every worktree at once): just init"
+} >&2
+
+case "$hook" in
+    # These two exit 0, and the two hooks reach that decision differently.
+    #
+    # post-merge's status IS ignored: measured, `git merge` and `git pull` both
+    # return 0 with a post-merge exiting 1, and the merge lands. githooks(5)
+    # agrees — it "cannot affect the outcome of git merge". A non-zero code there
+    # is unobservable, so it buys nothing.
+    #
+    # post-checkout's status is NOT ignored, and that is why it must be 0.
+    # githooks(5): "This hook cannot affect the outcome of git switch or git
+    # checkout, other than that the hook's exit status becomes the exit status of
+    # these two commands." Measured: with post-checkout exiting 1, `git checkout
+    # -b` and `git switch` both return 1 with the branch switched and HEAD moved,
+    # and `git worktree add` returns 1 with the worktree already created. So a
+    # blocking arm here would not gate anything — it would make every branch
+    # switch in every drifted worktree report a failure that already happened.
+    #
+    # What these two arms buy is a message on stderr and nothing else. Under
+    # drift `git worktree add` still returns 0 and still creates and populates
+    # the worktree, so the agent spawn that CAUSED the drift (bd gqlc-7ijy)
+    # proceeds exactly as it would have. post-checkout fires at `git worktree
+    # add`, which is the drift's own trigger — but the trigger is narrated, not
+    # caught. The gate is the blocking arm below, and only that.
+    post-checkout | post-merge)
+        exit 0
+        ;;
+    *)
+        exit 1
+        ;;
+esac
