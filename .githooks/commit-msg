@@ -28,12 +28,30 @@ _check_identity() {
     local email
     email="$(printf '%s' "$ident" | sed 's/.*<\(.*\)>.*/\1/')"
 
-    # Denylist: known test-fixture and placeholder addresses
-    case "$email" in
-        test@example.invalid|*@example.com|*@example.org|root@localhost|"")
+    local domain="${email##*@}"
+    # DNS is case-insensitive; matching case-sensitively would let
+    # FIXTURE@EXAMPLE.INVALID through a rule that stops the lowercase spelling.
+    local host
+    host="$(printf '%s' "$domain" | tr '[:upper:]' '[:lower:]')"
+
+    # RFC 2606 reserves these names so that no real address can ever fall under
+    # them, which is what makes them safe to refuse wholesale. Match the
+    # reserved name, not a list of addresses that happen to use it: an
+    # enumeration has to be extended by hand every time someone invents a
+    # fixture identity, and is therefore always one name behind. It was
+    # `fixture@example.invalid` that got past the list — one word from the
+    # `test@example.invalid` that was on it — and reached two seats' commits
+    # (gqlc-n8n0, gqlc-7iea).
+    # First line: s.2 reserved TLDs, plus localhost itself, which has no dot to
+    # spare. Second: s.3 reserved second-level names, and anything beneath them.
+    case "$host" in
+        *.invalid | *.test | *.example | *.localhost | localhost | \
+        example.com | example.net | example.org | \
+        *.example.com | *.example.net | *.example.org | "")
             cat >&2 <<ERRMSG
 ERROR: Bogus $label identity: <$email>
-       This address is a known test fixture or placeholder.
+       <$host> is reserved by RFC 2606 and can never be a real address,
+       so this is a test fixture or placeholder rather than a person.
        Fix with: git commit --amend --reset-author
 ERRMSG
             return 1
@@ -41,7 +59,6 @@ ERRMSG
     esac
 
     # Shape: must contain @ and the domain part must contain a dot
-    local domain="${email##*@}"
     if [[ "$email" != *@* ]] || [[ "$domain" != *.* ]]; then
         cat >&2 <<ERRMSG
 ERROR: Implausible $label email: <$email>

@@ -105,5 +105,89 @@ Merge branch 'foo'
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 " merge
 
+# --- author / committer identity (gqlc-n8n0) --------------------------------
+# The hook's other half, which had no rows at all before this section. That is
+# why an enumeration one name short stayed green: `fixture@example.invalid` is
+# one word from the denylisted `test@example.invalid` and reached two seats'
+# commits.
+#
+# The identity comes from GIT_AUTHOR_* / GIT_COMMITTER_*, which `git var`
+# prefers over config. Each row varies ONE side and leaves the other
+# deliberately good, so a rejection names which check fired instead of leaving
+# the two indistinguishable.
+GOOD="areqag@proton.me"
+
+# $1=name $2=expected(reject|accept) $3=author-email $4=committer-email
+# $5=optional substring the refusal must contain.
+#
+# $5 is not decoration. A dotless domain is refused by the SHAPE check whatever
+# the reserved-name rule says, so a row that only asserts "rejected" cannot see
+# whether the reserved-name rule fired at all: deleting `localhost` from that
+# rule left such a row green (mutation M5). Naming the reason is what separates
+# the two refusals.
+run_identity_case() {
+    local name="$1" expected="$2" author="$3" committer="$4" reason="${5:-}"
+    local msg_file="$TMP/msg.$$"
+    printf 'subject line\n' >"$msg_file"
+    rm -f "$REPO/.git/MERGE_HEAD"
+
+    local decision out
+    if out=$( (cd "$REPO" \
+        && GIT_AUTHOR_NAME=a GIT_AUTHOR_EMAIL="$author" \
+           GIT_COMMITTER_NAME=c GIT_COMMITTER_EMAIL="$committer" \
+           "$HOOK" "$msg_file") 2>&1 ); then
+        decision=accept
+    else
+        decision=reject
+    fi
+
+    if [ "$decision" != "$expected" ]; then
+        fail=$((fail + 1)); printf 'FAIL - %s (expected %s, got %s)\n' "$name" "$expected" "$decision"
+    elif [ -n "$reason" ] && ! printf '%s' "$out" | grep -qF "$reason"; then
+        fail=$((fail + 1)); printf 'FAIL - %s (rejected, but not for %s: %s)\n' "$name" "$reason" "$out"
+    else
+        pass=$((pass + 1)); printf 'ok   - %s\n' "$name"
+    fi
+    rm -f "$msg_file"
+}
+
+# RFC 2606 s.2 reserved TLDs, each with a local part that is NOT `test` — the
+# point of the bead. A rule over the reserved TLD cannot be walked around by
+# inventing a new local part; an enumeration of addresses can.
+run_identity_case "author under .invalid, the address that reached master"  reject "fixture@example.invalid"  "$GOOD"
+run_identity_case "author under .test"                                      reject "ci@build.test"            "$GOOD"
+run_identity_case "author under .example"                                   reject "bot@corp.example"         "$GOOD"
+run_identity_case "author under .localhost"                                 reject "dev@my.localhost"         "$GOOD"
+run_identity_case "author at bare localhost"                                reject "root@localhost"           "$GOOD" "RFC 2606"
+
+# The shape check, which had no row either. It is the reason the bare-localhost
+# row above has to name RFC 2606: without that, both refusals look alike.
+run_identity_case "author at a dotless domain"                              reject "dev@nodots"               "$GOOD" "Implausible"
+
+# RFC 2606 s.3 reserved second-level names. example.net was absent from the old
+# denylist entirely, and subdomains of all three were reachable.
+run_identity_case "author at example.net, absent from the old denylist"     reject "someone@example.net"      "$GOOD"
+run_identity_case "author at a subdomain of example.com"                    reject "someone@mail.example.com" "$GOOD"
+
+# Domains are case-insensitive; the guard must not be case-sensitive where DNS
+# is not.
+run_identity_case "author under .INVALID in capitals"                       reject "FIXTURE@EXAMPLE.INVALID"  "$GOOD"
+
+# The committer is checked as well as the author, and independently of it.
+run_identity_case "committer under .invalid while the author is good"       reject "$GOOD" "fixture@example.invalid"
+
+# Regressions: what the old enumeration did catch must stay caught.
+run_identity_case "author at the old denylist's exact string"               reject "test@example.invalid"     "$GOOD"
+run_identity_case "author at example.com"                                   reject "jane@example.com"         "$GOOD"
+run_identity_case "author at example.org"                                   reject "jane@example.org"         "$GOOD"
+
+# Must still accept. These are the over-match rows: a reserved name appearing
+# as a SUBSTRING of a real domain is a real address, and rejecting it would
+# lock a contributor out of the repo.
+run_identity_case "an ordinary address"                                     accept "$GOOD"                    "$GOOD"
+run_identity_case "reserved TLD as a label inside a real domain"            accept "dev@example.invalid.io"   "$GOOD"
+run_identity_case "a real domain merely ending in the reserved word"        accept "dev@notinvalid.com"       "$GOOD"
+run_identity_case "a real domain merely prefixed by the reserved name"      accept "dev@myexample.com"        "$GOOD"
+
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
