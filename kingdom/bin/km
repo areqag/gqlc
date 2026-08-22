@@ -29,6 +29,7 @@ km — the machinery of the Թագաւորութիւն
   km mail send <to> -s SUBJ [-m BODY]   (body on stdin if no -m)
   km mail inbox [--seat NAME] | read <id> | sent
   km dispatch                    route ready beads to free seats (timer)
+  km hold-verdict                ROUTE/HOLD per candidate bead, docs on stdin
   km guard-sweep                 wake Րաֆֆի for a round (timer)
   km halt [reason] | resume      raise / lower the town halt
   km install-units | uninstall-units
@@ -485,12 +486,17 @@ cmd_dispatch() {
 
     # Fresh pass: ready, unassigned, class-labelled beads, priority first. It
     # runs with no slots left too, because judge work does not need one.
-    local routed id cls seat
+    local routed ready id cls seat
+    # Captured once rather than piped: the hold verdict below needs each
+    # candidate's labels, and re-querying could read a different queue.
+    if ! ready=$(bd ready -n 0 --json 2>/dev/null); then
+        die "dispatch: the ready-queue query failed; no fresh bead routed (any resume wakes above stand)"
+    fi
     # `. as $c` binds the class name before the pipe, and must stay bound: inside
     # `map(...)` the pipe in `($b.labels // []) | index(...)` rebinds `.` to the
     # labels array, so a bare `"class:" + .` is string + array — a type error that
     # aborts the whole program on any unassigned bead, labelled or not.
-    if ! routed=$(bd ready -n 0 --json 2>/dev/null | jq -r '
+    if ! routed=$(jq -r '
         [ .[]
           | select(.assignee == null)
           | . as $b
@@ -498,14 +504,73 @@ cmd_dispatch() {
              | map(. as $c | select(($b.labels // []) | index("class:" + $c))))[0] as $cls
           | select($cls != null)
           | {id, priority, cls: $cls}
-        ] | sort_by(.priority) | .[] | "\(.id) \(.cls)"'); then
+        ] | sort_by(.priority) | .[] | "\(.id) \(.cls)"' <<<"$ready"); then
         # Not "nothing routed": the resume pass above may already have queued
         # wakes, and they stand. An operator reading this during an incident has
         # to be able to trust it.
         die "dispatch: the ready-queue query failed; no fresh bead routed (any resume wakes above stand)"
     fi
+
+    # Before routing anything, ask whether each candidate's premise is actually
+    # on master and out of every open PR's way (gqlc-pj4r). The edges come from
+    # ONE multi-id `bd dep list` — the single-id form returns the parent issue
+    # object instead of {issue_id, depends_on_id, type} rows, so a per-id loop
+    # would parse a different shape and quietly find no edges — and the parent
+    # statuses from ONE `bd show` over the discovered-from parents.
+    local ids deps parents parent_ids docs verdicts="" held=0
+    ids=$(awk 'NF { print $1 }' <<<"$routed")
+    if [ -n "$ids" ]; then
+        # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
+        if ! deps=$(bd dep list $ids --json 2>/dev/null); then
+            echo "dispatch: the dependency query failed; fresh pass skipped this run (any resume wakes above stand)"
+            return 0
+        fi
+        parent_ids=$(jq -r '[ .[]? | select(.type == "discovered-from") | .depends_on_id ] | unique | .[]' \
+            <<<"$deps" 2>/dev/null) || parent_ids=""
+        parents='[]'
+        if [ -n "$parent_ids" ]; then
+            # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
+            if ! parents=$(bd show $parent_ids --json 2>/dev/null |
+                jq -c 'if type == "array" then . else [.] end' 2>/dev/null); then
+                echo "dispatch: the parent-status query failed; fresh pass skipped this run (any resume wakes above stand)"
+                return 0
+            fi
+        fi
+        if ! docs=$(jq -c -n --argjson ready "$ready" --argjson deps "$deps" \
+            --argjson parents "$parents" --arg ids "$ids" '
+            ($ready | map({key: .id, value: .}) | from_entries) as $byId
+            | ($parents | map({key: .id, value: .status}) | from_entries) as $status
+            | [ ($ids | split("\n") | .[] | select(length > 0)) as $i
+                | { id: $i,
+                    labels: ($byId[$i].labels // []),
+                    deps: [ $deps[]? | select(.issue_id == $i)
+                            | {depends_on_id, type, status: ($status[.depends_on_id] // "unknown")} ] } ]'); then
+            echo "dispatch: the candidate documents could not be assembled; fresh pass skipped this run"
+            return 0
+        fi
+        if ! verdicts=$(cmd_hold_verdict <<<"$docs"); then
+            # Never fall through to routing unchecked. The resume wakes taken
+            # above stand, and an operator reading this during an incident must
+            # be able to trust that sentence.
+            echo "dispatch: hold-verdict failed (rc=$?); fresh pass skipped this run (any resume wakes above stand)"
+            return 0
+        fi
+    fi
+
+    local verdict reason
     while IFS=' ' read -r id cls; do
         [ -n "$id" ] || continue
+        verdict=$(awk -v i="$id" '$2 == i { $1 = $1; print; exit }' <<<"$verdicts")
+        # An explicit ROUTE is the only thing that routes. A hold and a bead the
+        # verdict never mentioned take the same arm on purpose: the default for
+        # anything we did not affirmatively clear is to leave it alone.
+        if [ "$verdict" != "ROUTE $id" ]; then
+            reason=${verdict#HOLD "$id" — }
+            [ -n "$reason" ] || reason="no verdict returned for this bead"
+            echo "dispatch: hold $id — $reason"
+            held=$((held + 1))
+            continue
+        fi
         # `continue`, not `break`: the queue is sorted by priority, not by class,
         # so exhausted slots must skip past capped beads to reach judge work
         # sitting behind them rather than abandoning the rest of the queue.
@@ -518,7 +583,141 @@ cmd_dispatch() {
             if [ "$cls" != judge ]; then slots=$((slots - 1)); fi
         fi
     done <<<"$routed"
-    echo "dispatch: done ($wakes wake(s) this run)"
+    echo "dispatch: done ($wakes wake(s) this run, $held held)"
+}
+
+# ---------- the routing hold ----------
+#
+# A bead filed against code that exists only on an unmerged PR branch reads
+# `ready`, and a warrior routed to it branches from origin/master and finds
+# nothing to fix. Until now the only guard was Սեդրակ declining to class-label
+# such beads, from a list he carried in his handoff — a person remembering.
+#
+# HOLD a fresh-routing candidate if EITHER its declared subject path is absent
+# from origin/master, OR an open PR modifies it. Release is automatic: merging
+# or closing the PR changes the answer on the next run, so nobody has to
+# remember anything. Holds gate FRESH routing only; a seat's own in-progress
+# work is never withheld (Constitution III.3).
+#
+# The convention this reads is a bd label `subject:<path>`, repo-relative, file
+# or directory. A title-prefix→path map was measured and rejected: it would live
+# on master and be maintained reactively, so residue about a NEW subsystem — the
+# premise-absent case exactly — hits it as an unknown prefix and fails open at
+# the worst spot.
+
+hold_fetch_master() {
+    [ -z "${KM_HOLD_SKIP_FETCH:-}" ] || return 0
+    timeout 30 git -C "$(main_root)" fetch --quiet origin master 2>/dev/null && return 0
+    # Over-holding, and it self-heals next run: a stale origin/master can only
+    # make a path look absent, never make an absent one look present.
+    echo "hold-verdict: could not fetch; consulting a possibly-stale origin/master" >&2
+}
+
+hold_open_pr_files() { # -> [{number, files:[path], truncated}]; rc 1 if gh cannot answer
+    local raw
+    raw=$(timeout 30 gh pr list --state open --limit 100 --json number,changedFiles,files 2>/dev/null) || return 1
+    # MEASURED 2026-08-22 on PR #742: changedFiles 102, files 100 — `--json files`
+    # caps per PR and says nothing. A capped list is an UNKNOWN list, not a
+    # complete one; reading it as complete fails OPEN on the largest PRs.
+    # changedFiles is the cap-independent tell, so no threshold is guessed here.
+    printf '%s' "$raw" | jq -c '[ .[] | {
+        number,
+        files: [ .files[]?.path ],
+        truncated: (.changedFiles > (.files | length))
+    } ]' 2>/dev/null || return 1
+}
+
+hold_paths_on_master() { # subjects on stdin, one per line -> {"<path>": true|false}
+    local mr s present out='{}'
+    mr=$(main_root)
+    while IFS= read -r s; do
+        [ -n "$s" ] || continue
+        if git -C "$mr" cat-file -e "origin/master:$s" 2>/dev/null; then present=true; else present=false; fi
+        out=$(printf '%s' "$out" | jq -c --arg s "$s" --argjson p "$present" '.[$s] = $p')
+    done
+    printf '%s' "$out"
+}
+
+cmd_hold_verdict() {
+    local input
+    input=$(cat)
+    if ! printf '%s' "$input" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        die "hold-verdict: stdin is not a JSON array of candidate documents"
+    fi
+
+    local subjects
+    subjects=$(printf '%s' "$input" | jq -r '
+        [ .[]? | select(type == "object") | .labels
+          | select(type == "array") | .[]
+          | select(type == "string" and startswith("subject:"))
+          | .[8:] | sub("/+$"; "") | select(length > 0) ] | unique | .[]')
+
+    # gh and the fetch cost a network round trip each, so they are paid only
+    # when some candidate actually declares a subject. That is also what keeps
+    # the ordinary-bead path — the overwhelming majority — free, and the test
+    # suite hermetic without stubbing anything for it.
+    local prs='[]' pr_known=true present='{}'
+    if [ -n "$subjects" ]; then
+        hold_fetch_master
+        if ! prs=$(hold_open_pr_files); then
+            prs='[]'
+            pr_known=false
+        fi
+        present=$(printf '%s\n' "$subjects" | hold_paths_on_master)
+    fi
+
+    printf '%s' "$input" | jq -r \
+        --argjson prs "$prs" --argjson prKnown "$pr_known" --argjson present "$present" '
+        def subjects_of:
+            [ .labels[] | select(type == "string" and startswith("subject:"))
+              | .[8:] | sub("/+$"; "") | select(length > 0) ];
+
+        # Fail closed per candidate, never a silent drop: gqlc-z1qw was a jq
+        # abort that read as a healthy zero, and one bad row must cost one line
+        # rather than the whole run.
+        def malformed:
+            if type != "object" then "not an object"
+            elif (.id | type) != "string" or (.id == "") then "no id"
+            elif (.labels | type) != "array" then "labels is not an array"
+            else null end;
+
+        # The slash boundary is the whole point of the second clause: a plain
+        # substring test would hold internal/tools/tmpreaper for a PR touching
+        # internal/tools/tmpreap, which are different subsystems.
+        def touching($s): [ $prs[] | select(any(.files[]; . == $s or startswith($s + "/"))) ];
+
+        def reason($s):
+            if ($present[$s] // false) | not then
+                "premise absent from origin/master: \($s)"
+            elif ($prKnown | not) then
+                "gh unavailable — cannot rule out an open PR touching \($s)"
+            elif (touching($s) | length) > 0 then
+                "open PR #\(touching($s)[0].number) touches \($s)"
+            elif ([ $prs[] | select(.truncated) ] | length) > 0 then
+                "open PR #\([ $prs[] | select(.truncated) ][0].number) file list is truncated — cannot rule out \($s)"
+            else null end;
+
+        .[]
+        | . as $c
+        | (if (type == "object") and ((.id | type) == "string") then .id else "?" end) as $id
+        | (malformed) as $bad
+        | if $bad != null then "HOLD \($id) — malformed candidate: \($bad)"
+          else
+            (subjects_of) as $subs
+            | if ($subs | length) == 0 then
+                # Residue with no subject label yet. Only discovered-from carries
+                # the "filed against that PR" meaning; until and related do not.
+                [ ($c.deps // [])[] | select(type == "object")
+                  | select(.type == "discovered-from")
+                  | select(.status == "open" or .status == "in_progress") ] as $par
+                | if ($par | length) > 0
+                  then "HOLD \($id) — unlabelled residue of open \($par[0].depends_on_id) — needs a subject: label"
+                  else "ROUTE \($id)" end
+              else
+                [ $subs[] | reason(.) | select(. != null) ] as $why
+                | if ($why | length) > 0 then "HOLD \($id) — \($why[0])" else "ROUTE \($id)" end
+              end
+          end'
 }
 
 cmd_guard_sweep() {
@@ -640,6 +839,7 @@ case "$cmd" in
     sleep)           cmd_sleep "$@" ;;
     mail)            cmd_mail "$@" ;;
     dispatch)        cmd_dispatch "$@" ;;
+    hold-verdict)    cmd_hold_verdict "$@" ;;
     guard-sweep)     cmd_guard_sweep "$@" ;;
     halt)            cmd_halt "$@" ;;
     resume)          cmd_resume "$@" ;;

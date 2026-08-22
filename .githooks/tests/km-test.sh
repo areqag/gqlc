@@ -242,6 +242,18 @@ case "$1" in
                *"--status in_progress"*) ;;
                *) echo "bd stub: unexpected list query: $_all" >&2; exit 1 ;;
            esac ;;
+    # The hold verdict's two inputs (gqlc-pj4r). Neither is capped by bd, so
+    # neither models a limit. `dep list` is pinned to the MULTI-id form on
+    # purpose: the single-id form returns the parent issue object instead of
+    # {issue_id, depends_on_id, type} rows, so a caller that drifted to
+    # one-id-per-call would parse a different shape and silently find no edges.
+    dep)   [ "${2:-}" = list ] || { echo "bd stub: unexpected dep query: $_all" >&2; exit 1; }
+           f="${KM_FAKE_DEPS:-}"; limit=0
+           case "$_all" in
+               *"gqlc-"*" gqlc-"*|*"gqlc-"*) ;;
+               *) echo "bd stub: dep list with no ids: $_all" >&2; exit 1 ;;
+           esac ;;
+    show)  f="${KM_FAKE_PARENTS:-}"; limit=0 ;;
     *) exit 0 ;;
 esac
 shift
@@ -272,14 +284,20 @@ STUB
 chmod +x "$BIN/tmux" "$BIN/bd"
 
 DCASE=0
-dispatch_case() { # $1=ready payload, $2=in-progress payload; fresh state each time
+dispatch_case() { # $1=ready, $2=in-progress, $3=dep edges, $4=parent statuses
     DCASE=$((DCASE + 1))
     export KM_STATE_DIR="$TMP/dispatch-$DCASE"
     mkdir -p "$KM_STATE_DIR"
     export KM_FAKE_READY="$KM_STATE_DIR/ready.json"
     export KM_FAKE_INPROG="$KM_STATE_DIR/inprog.json"
+    export KM_FAKE_DEPS="$KM_STATE_DIR/deps.json"
+    export KM_FAKE_PARENTS="$KM_STATE_DIR/parents.json"
     printf '%s' "$1" >"$KM_FAKE_READY"
     printf '%s' "$2" >"$KM_FAKE_INPROG"
+    # An empty edge set is the shape almost every bead has, so it is the default
+    # rather than something each case restates.
+    printf '%s' "${3:-[]}" >"$KM_FAKE_DEPS"
+    printf '%s' "${4:-[]}" >"$KM_FAKE_PARENTS"
 }
 
 run_dispatch() {
@@ -733,6 +751,380 @@ else
     ok "km status shows a seat's in-progress bead even when it sorts past bd list's silent cap"
 fi
 
+# --- km hold-verdict: the mechanical routing hold (gqlc-pj4r) ----------------
+# Review residue — a bead filed against code that exists only on an unmerged PR
+# branch — reads `ready`, and a warrior routed to it would branch from master and
+# find nothing to fix. The only guard was Սեդրակ declining to class-label such
+# beads from a list in his handoff: a person remembering. These rows pin the
+# mechanical replacement, whose release condition is the PR merging rather than
+# anyone's recall.
+#
+# Every row below is paired with a falsifier differing in exactly ONE input. A
+# row that cannot fail witnesses nothing, and the hold direction is especially
+# prone to that: HOLD is the answer this command gives when it knows nothing, so
+# a broken build holds everything and every hold assertion passes.
+#
+# gh is stubbed; git is real but read-only (`cat-file` against the shared repo's
+# origin/master) and the fetch is skipped, so nothing here touches the network.
+
+cat >"$BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+# Answers `gh pr list --state open --limit N --json <fields>` from a fixture
+# holding gh's shape: [{"number":N,"changedFiles":M,"files":[{"path":"..."}]}].
+case "$*" in
+    *"pr list"*"--json"*) ;;
+    *) echo "gh stub: unexpected query: $*" >&2; exit 1 ;;
+esac
+if [ -n "${KM_FAKE_GH_RC:-}" ]; then
+    echo "gh: could not connect to github.com" >&2
+    exit "$KM_FAKE_GH_RC"
+fi
+fields="" prev=""
+for a in "$@"; do
+    [ "$prev" = "--json" ] && fields="$a"
+    prev="$a"
+done
+[ -n "$fields" ] || { echo "gh stub: --json with no field list: $*" >&2; exit 1; }
+raw=$(cat "${KM_FAKE_GH:-/dev/null}")
+[ -n "$raw" ] || raw='[]'
+# gh returns ONLY the fields asked for. The stub must project the same way, or a
+# fixture keeps supplying a field the caller stopped requesting and that field's
+# guard goes untested — the truncation tell reads null and fails open silently.
+printf '%s' "$raw" | jq -c --arg f "$fields" \
+    '($f | split(",")) as $keep | [ .[] | with_entries(select(.key | IN($keep[]))) ]'
+STUB
+chmod +x "$BIN/gh"
+
+HVGH="$TMP/hv-gh.json"
+GH_RC=""
+ERR=""
+gh_prs() { printf '%s' "$1" >"$HVGH"; }
+hv() { # $1 = candidate docs on stdin
+    printf '%s' "$1" | PATH="$BIN:$PATH" KM_HOLD_SKIP_FETCH=1 \
+        KM_FAKE_GH="$HVGH" KM_FAKE_GH_RC="$GH_RC" "$KM" hold-verdict \
+        >"$TMP/hv.out" 2>"$TMP/hv.err"
+    RC=$?
+    OUT="$(cat "$TMP/hv.out")"
+    ERR="$(cat "$TMP/hv.err")"
+}
+
+# Rows 1 and 2 — the pair that gives condition (2) its meaning. Only the PR map
+# varies between them; the candidate is byte-identical. Without row 1, "HOLD"
+# could be this command's answer to everything.
+gh_prs '[]'
+hv '[{"id":"gqlc-r1","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a subject present on master with no open PR routes" "rc=$RC out=$OUT err=$ERR"
+elif [ "$OUT" != "ROUTE gqlc-r1" ]; then
+    bad "a subject present on master with no open PR routes" "expected 'ROUTE gqlc-r1', got: $OUT"
+else
+    ok "a bead whose subject is on origin/master and in no open PR is routed"
+fi
+
+gh_prs '[{"number":1057,"files":[{"path":"justfile"}]}]'
+hv '[{"id":"gqlc-r1","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "an open PR touching the subject holds it" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-r1 '; then
+    bad "an open PR touching the subject holds it" "not held: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '#1057'; then
+    bad "an open PR touching the subject holds it" "the hold does not name the PR: $OUT"
+else
+    ok "a bead whose subject an open PR modifies is held, and the hold names that PR number"
+fi
+
+# Row 3 — the slash boundary, as its own pair. A substring match would hold
+# every bead under `internal/tools/tmpreaper` for a PR touching
+# `internal/tools/tmpreap`, and the two are different subsystems. `kingdom/bin`
+# is a TREE on master, which also exercises cat-file's directory case.
+gh_prs '[{"number":900,"files":[{"path":"kingdom/bin/km"}]}]'
+hv '[{"id":"gqlc-dir","labels":["class:warrior","subject:kingdom/bin"]}]'
+if [ "$RC" -ne 0 ] || ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-dir .*#900'; then
+    bad "a directory subject is held by a PR touching a file under it" "rc=$RC out=$OUT err=$ERR"
+else
+    ok "a directory subject is held by an open PR touching a file beneath it"
+fi
+
+gh_prs '[{"number":900,"files":[{"path":"kingdom/binary-thing"}]}]'
+hv '[{"id":"gqlc-dir","labels":["class:warrior","subject:kingdom/bin"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a shared string prefix without the slash boundary does not hold" "rc=$RC out=$OUT err=$ERR"
+elif [ "$OUT" != "ROUTE gqlc-dir" ]; then
+    bad "a shared string prefix without the slash boundary does not hold" \
+        "kingdom/binary-thing was read as being under kingdom/: $OUT"
+else
+    ok "a path merely sharing the subject's string prefix, without the slash boundary, does not hold it"
+fi
+
+# Row 4 — condition (1), which is the non-redundant half: it still covers a PR
+# closed without merging, a branch with no PR yet, and any run where gh is
+# unreachable. Its falsifier is row 1, which differs only in the path existing.
+gh_prs '[]'
+hv '[{"id":"gqlc-gone","labels":["class:warrior","subject:no/such/path/km-hold-test"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a subject absent from origin/master is held" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-gone .*premise absent'; then
+    bad "a subject absent from origin/master is held" "expected a premise-absent hold, got: $OUT"
+else
+    ok "a bead whose subject path does not exist on origin/master is held as premise-absent"
+fi
+
+# Rows 5, 6 and 7 — the dep arm, for residue that has no subject: label yet.
+# Three rows, one varying input each: the parent's STATUS (5), the presence of a
+# dep at all (6), and the dep's TYPE (7). Together they pin that the gate is
+# discovered-from-and-open, not "has any edge".
+gh_prs '[]'
+hv '[{"id":"gqlc-res","labels":["class:warrior"],
+      "deps":[{"depends_on_id":"gqlc-par","type":"discovered-from","status":"open"}]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "residue of an open parent is held" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-res .*gqlc-par'; then
+    bad "residue of an open parent is held" "expected a hold naming the parent, got: $OUT"
+else
+    ok "an unlabelled bead discovered from a still-open parent is held, and the hold names that parent"
+fi
+
+hv '[{"id":"gqlc-res","labels":["class:warrior"],
+      "deps":[{"depends_on_id":"gqlc-par","type":"discovered-from","status":"closed"}]}]'
+if [ "$RC" -ne 0 ] || [ "$OUT" != "ROUTE gqlc-res" ]; then
+    bad "residue of a closed parent routes" "rc=$RC out=$OUT err=$ERR"
+else
+    ok "the same bead routes once its parent closes — the hold releases itself, with nobody remembering"
+fi
+
+hv '[{"id":"gqlc-plain","labels":["class:warrior"]}]'
+if [ "$RC" -ne 0 ] || [ "$OUT" != "ROUTE gqlc-plain" ]; then
+    bad "an ordinary bead is unaffected" "rc=$RC out=$OUT err=$ERR"
+else
+    ok "an ordinary bead with no subject label and no deps routes exactly as before"
+fi
+
+hv '[{"id":"gqlc-oth","labels":["class:warrior"],
+      "deps":[{"depends_on_id":"gqlc-par","type":"until","status":"open"},
+              {"depends_on_id":"gqlc-p2","type":"related","status":"in_progress"}]}]'
+if [ "$RC" -ne 0 ] || [ "$OUT" != "ROUTE gqlc-oth" ]; then
+    bad "only discovered-from gates" "an until/related edge to an open parent held it: rc=$RC out=$OUT"
+else
+    ok "until and related edges to open parents do not hold — only discovered-from carries the residue meaning"
+fi
+
+# Row 8 — fail-closed is SCOPED. A gh outage must not stop the town: it holds
+# exactly the guarded class and lets ordinary beads through. Both candidates are
+# in ONE invocation, so this cannot pass by holding everything.
+GH_RC=1
+hv '[{"id":"gqlc-sub","labels":["class:warrior","subject:justfile"]},
+     {"id":"gqlc-nosub","labels":["class:warrior"]}]'
+GH_RC=""
+if [ "$RC" -ne 0 ]; then
+    bad "a gh outage holds only the subject-labelled candidates" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-sub .*gh unavailable'; then
+    bad "a gh outage holds only the subject-labelled candidates" "the subject-labelled bead was not held: $OUT"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-nosub'; then
+    bad "a gh outage holds only the subject-labelled candidates" \
+        "the outage stopped an ordinary bead too, so an outage would idle the whole town: $OUT"
+else
+    ok "when gh is unreachable the subject-labelled bead holds and the ordinary one still routes — the fail-closed direction is scoped, not global"
+fi
+
+# Row 9 — the abort is loud, and a malformed candidate costs one line, not the
+# run. gqlc-z1qw is the whole reason: a jq abort that reads as a healthy zero.
+gh_prs '[]'
+hv '[{"id":"gqlc-a","labels":["class:warrior"]},
+     {"id":"gqlc-b"},
+     {"id":"gqlc-c","labels":["class:warrior"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a malformed candidate holds itself and does not abort the run" "rc=$RC out=$OUT err=$ERR"
+elif [ "$(printf '%s\n' "$OUT" | grep -c .)" -ne 3 ]; then
+    bad "a malformed candidate holds itself and does not abort the run" "expected 3 lines, got: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-b .*malformed'; then
+    bad "a malformed candidate holds itself and does not abort the run" "the candidate with no labels was not held: $OUT"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-a' || ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-c'; then
+    bad "a malformed candidate holds itself and does not abort the run" "it swallowed its neighbours: $OUT"
+else
+    ok "a candidate missing its labels is held as malformed while its neighbours are still answered — one bad row costs one line, not the run"
+fi
+
+hv 'not json at all'
+if [ "$RC" -eq 0 ]; then
+    bad "unparseable stdin refuses" "exited 0: $OUT"
+elif [ -n "$OUT" ]; then
+    bad "unparseable stdin refuses" "it emitted verdicts anyway: $OUT"
+elif ! printf '%s' "$ERR" | grep -q 'hold-verdict'; then
+    # Not merely "something on stderr": a bare `jq: error (at <stdin>:0)` is
+    # what this looks like when the refusal is deleted and the downstream jq
+    # happens to fail too, which is a different program being right by luck.
+    bad "unparseable stdin refuses" "the refusal does not identify itself: err=$ERR"
+else
+    ok "stdin that is not a JSON array exits nonzero and says so in its own name, rather than printing an empty and healthy-looking verdict set"
+fi
+
+# A junk element inside a well-formed array. The array parses, so the run must
+# continue; the element is not a candidate document, so it cannot be cleared.
+hv '["just a string",{"id":"gqlc-ok","labels":["class:warrior"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a non-object candidate is held, not cleared" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD ? — malformed candidate: not an object'; then
+    bad "a non-object candidate is held, not cleared" "expected a malformed hold for the junk element, got: $OUT"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-ok'; then
+    bad "a non-object candidate is held, not cleared" "the good candidate beside it was lost: $OUT"
+else
+    ok "an array element that is not a candidate document at all is held as malformed, and its well-formed neighbour still routes"
+fi
+
+# Row 10 — gh's own silent cap, which the design named as an unverified risk.
+# MEASURED 2026-08-22 on PR #742: changedFiles 102 against a files array of 100.
+# `--json files` caps per PR and says nothing, so a capped list taken at face
+# value makes condition (2) fail OPEN on precisely the largest PRs.
+#
+# changedFiles is the tell, and this pair holds the file COUNT fixed at 3 to say
+# so: what decides is the DISAGREEMENT, not the size. A count threshold cannot
+# pass this pair at all — both sides are far under any cap.
+gh_prs "$(jq -cn '[{number: 742, changedFiles: 5, files: [range(3) | {path: "pad/f\(.).go"}]}]')"
+hv '[{"id":"gqlc-cap","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a truncated PR file list is unknown, not empty" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-cap .*#742'; then
+    bad "a truncated PR file list is unknown, not empty" \
+        "changedFiles 5 over 3 listed says two paths are withheld, and they were read as absent: $OUT"
+else
+    ok "a PR that reports more changed files than it lists is treated as unknown and holds, instead of silently reading as a PR that does not touch the subject"
+fi
+
+gh_prs "$(jq -cn '[{number: 742, changedFiles: 3, files: [range(3) | {path: "pad/f\(.).go"}]}]')"
+hv '[{"id":"gqlc-cap","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ] || [ "$OUT" != "ROUTE gqlc-cap" ]; then
+    bad "a complete PR file list that misses the subject routes" \
+        "changedFiles agrees with the 3 listed and none of them is the subject: rc=$RC out=$OUT"
+else
+    ok "a PR whose changedFiles agrees with its file list is trusted, so a complete list does not hold everything"
+fi
+
+# The over-holding half. A threshold guard reads any 100-file PR as suspect; the
+# real cap is only a cap when something was actually withheld, and a PR that
+# changed exactly 100 files withheld nothing.
+gh_prs "$(jq -cn '[{number: 742, changedFiles: 100, files: [range(100) | {path: "pad/f\(.).go"}]}]')"
+hv '[{"id":"gqlc-cap","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ] || [ "$OUT" != "ROUTE gqlc-cap" ]; then
+    bad "a complete file list sitting exactly on gh's cap is still complete" \
+        "100 listed and 100 changed withholds nothing, so this must not hold: rc=$RC out=$OUT"
+else
+    ok "a PR that changed exactly as many files as gh's cap allows is read as complete, instead of held forever by a boundary the data does not support"
+fi
+
+# Input order is the contract cmd_dispatch relies on to keep priority order.
+gh_prs '[]'
+hv '[{"id":"gqlc-o1","labels":["class:warrior"]},
+     {"id":"gqlc-o2","labels":["class:warrior","subject:no/such/path/km-hold-test"]},
+     {"id":"gqlc-o3","labels":["class:warrior"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "verdicts come back in input order" "rc=$RC out=$OUT err=$ERR"
+elif [ "$(printf '%s\n' "$OUT" | awk '{print $2}' | tr '\n' ' ')" != "gqlc-o1 gqlc-o2 gqlc-o3 " ]; then
+    bad "verdicts come back in input order" "order lost: $OUT"
+else
+    ok "one line per candidate, in input order, so the caller can keep its priority ordering"
+fi
+
+# --- cmd_dispatch honours the verdict (gqlc-pj4r) ----------------------------
+# The unit rows above prove the verdict is computed. These prove it is OBEYED —
+# a held bead reaching a seat anyway would leave every row above green.
+
+export KM_HOLD_SKIP_FETCH=1
+export KM_FAKE_GH="$HVGH"
+gh_prs '[{"number":1057,"files":[{"path":"justfile"}]}]'
+
+dispatch_case '[
+  {"id":"gqlc-held","priority":0,"assignee":null,"labels":["class:warrior","subject:justfile"]},
+  {"id":"gqlc-free","priority":1,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "dispatch refuses to route a held bead" "rc=$RC out=$OUT"
+elif grep -rq 'gqlc-held' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "dispatch refuses to route a held bead" "the held bead was routed to a seat anyway: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'hold gqlc-held'; then
+    bad "dispatch refuses to route a held bead" "the hold is not reported, so it would be invisible: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '#1057'; then
+    bad "dispatch refuses to route a held bead" "the reported hold does not say WHICH condition fired: $OUT"
+elif ! grep -rq 'gqlc-free' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "dispatch refuses to route a held bead" \
+        "the lower-priority routable bead did not reach a seat either, so the hold stopped the pass: $OUT"
+else
+    ok "dispatch holds the bead whose subject an open PR touches, says which condition fired, and still routes the next routable bead behind it"
+fi
+
+# The falsifier for the row above: the SAME queue with the PR map empty. Without
+# it, "held" could be this dispatcher's answer to every subject-labelled bead.
+gh_prs '[]'
+dispatch_case '[
+  {"id":"gqlc-held","priority":0,"assignee":null,"labels":["class:warrior","subject:justfile"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "dispatch routes a subject-labelled bead once nothing touches it" "rc=$RC out=$OUT"
+elif ! grep -rq 'gqlc-held' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "dispatch routes a subject-labelled bead once nothing touches it" \
+        "it was held with no open PR and its subject on master (woken: '$(woken_seats)'): $OUT"
+else
+    ok "with the PR closed, the same subject-labelled bead routes — the hold is released by the merge, not by anyone remembering"
+fi
+
+# The dep arm reaches dispatch only through two further bd queries, whose shapes
+# the design measured and which this pins: `dep list` multi-id rows carry
+# issue_id, and parent status arrives from a separate `show`.
+gh_prs '[]'
+dispatch_case '[
+  {"id":"gqlc-dres","priority":0,"assignee":null,"labels":["class:warrior"]}
+]' '[]' '[{"issue_id":"gqlc-dres","depends_on_id":"gqlc-dpar","type":"discovered-from"}]' \
+   '[{"id":"gqlc-dpar","status":"in_progress"}]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "dispatch holds residue of an unfinished parent" "rc=$RC out=$OUT"
+elif grep -rq 'gqlc-dres' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "dispatch holds residue of an unfinished parent" "it was routed: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'hold gqlc-dres .*gqlc-dpar'; then
+    bad "dispatch holds residue of an unfinished parent" "the hold does not name the parent: $OUT"
+else
+    ok "dispatch assembles the dep edges and parent statuses from bd and holds unlabelled residue of a parent still in progress"
+fi
+
+dispatch_case '[
+  {"id":"gqlc-dres","priority":0,"assignee":null,"labels":["class:warrior"]}
+]' '[]' '[{"issue_id":"gqlc-dres","depends_on_id":"gqlc-dpar","type":"discovered-from"}]' \
+   '[{"id":"gqlc-dpar","status":"closed"}]'
+run_dispatch
+if [ "$RC" -ne 0 ] || ! grep -rq 'gqlc-dres' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "dispatch routes residue once the parent closes" "rc=$RC out=$OUT woken='$(woken_seats)'"
+else
+    ok "the same residue routes once its parent is closed, so the dispatcher's hold self-releases"
+fi
+
+# A verdict that cannot be computed must skip the fresh pass, never fall through
+# to routing unchecked. The resume wakes taken earlier in the run still stand.
+gh_prs '[]'
+dispatch_case '[
+  {"id":"gqlc-x1","priority":0,"assignee":null,"labels":["class:warrior"]}
+]' '[
+  {"id":"gqlc-x2","assignee":"vahagn","labels":["class:warrior"]}
+]' 'not json at all'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a failed verdict skips the fresh pass" "rc=$RC out=$OUT"
+elif grep -rq 'gqlc-x1' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "a failed verdict skips the fresh pass" "it routed the fresh bead unchecked: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'fresh pass skipped'; then
+    bad "a failed verdict skips the fresh pass" "the skip is not announced: $OUT"
+elif printf '%s' "$OUT" | grep -q 'dispatch: done'; then
+    # The skip must not ALSO sign off as a completed run. A pass that announces
+    # its own failure and then prints its ordinary closing line reads, to anyone
+    # scanning the journal for the last line, exactly like a healthy run.
+    bad "a failed verdict skips the fresh pass" "it announced the skip and then signed off as a normal run: $OUT"
+elif ! wake_of vahagn | grep -q 'gqlc-x2'; then
+    bad "a failed verdict skips the fresh pass" "it discarded the resume wake taken earlier in the run: $OUT"
+else
+    ok "when the hold verdict cannot be computed the fresh pass is skipped out loud and nothing is routed unchecked, while the resume wakes already taken stand"
+fi
+
+unset KM_HOLD_SKIP_FETCH KM_FAKE_GH
 export KM_STATE_DIR="$TMP/state"
 
 # --- the contract with the real bd (gqlc-mlca) -------------------------------
