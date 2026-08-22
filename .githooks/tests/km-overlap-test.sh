@@ -29,6 +29,14 @@
 # Run via: just test-hooks
 set -u
 
+# No row here invokes git today, so this scrubs nothing today. It is here
+# because the FIRST git call added to this suite months from now would inherit
+# git's exported environment when the suite runs from a hook, and follow GIT_DIR
+# out of its fixture and into the real repo — green on every direct run, red
+# only under `git push` (gqlc-tl78, measured on PR #1128). The glob form takes
+# GIT_CONFIG_GLOBAL and whatever git exports next; a list written today does not.
+unset "${!GIT_@}"
+
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$REPO/kingdom/bin/km-overlap"
 TMP="$(mktemp -d)"
@@ -214,9 +222,16 @@ expect "an empty body is a refusal" 2
 # A record with no files key is not a PR that touches nothing — it is a query
 # that did not return what was asked for. Treating it as touching nothing is
 # how a real overlap goes unreported.
+#
+# Each of these rows names the REASON, not just the refusal. Measured: with the
+# usability guard struck, this record still exits 2 — the truncation guard
+# catches it and reports "a truncated file list for #1213 (0 of 1)", because an
+# absent files key has length 0 and 0 < 1. Two paths to one exit status, so a
+# row asserting only rc 2 and the PR number stayed green with the guard it
+# exists for deleted, and the surviving message named the wrong cause.
 GH_NOFILES="$(make_gh '[{"number":1213,"title":"t","changedFiles":1}]' 0)"
 run_overlap "$GH_NOFILES" path justfile
-expect "a record with no files key is a refusal" 2 "1213"
+expect "a record with no files key is a refusal" 2 "1213" "no usable file list"
 
 # MEASURED 2026-08-22 against kubernetes/kubernetes#141360: `gh pr list --json
 # files` returned 100 paths for a PR whose changed_files is 322, and `gh pr view`
@@ -228,11 +243,11 @@ expect "a record with no files key is a refusal" 2 "1213"
 GH_TRUNC="$(make_gh '[{"number":1360,"title":"a large PR","changedFiles":322,"files":[
     {"path":"justfile"},{"path":"a"},{"path":"b"}]}]' 0)"
 run_overlap "$GH_TRUNC" path justfile
-expect "a record whose file list is shorter than its true count is a refusal" 2 "1360"
+expect "a record whose file list is shorter than its true count is a refusal" 2 "1360" "truncated"
 
 # The overlap is real and reported; the refusal is about the files NOT returned.
 run_overlap "$GH_TRUNC" path some/file/not/listed
-expect "a truncated record refuses even when the query would have missed anyway" 2 "1360"
+expect "a truncated record refuses even when the query would have missed anyway" 2 "1360" "truncated"
 
 # The guard must not fire on the ordinary case, or the tool refuses every run.
 GH_EXACT="$(make_gh '[{"number":1361,"title":"an ordinary PR","changedFiles":2,"files":[
@@ -244,7 +259,47 @@ expect "a record whose file list matches its true count is trusted" 1 "#1361"
 # is not a PR that changed nothing.
 GH_NOCOUNT="$(make_gh '[{"number":1362,"title":"no count","files":[{"path":"justfile"}]}]' 0)"
 run_overlap "$GH_NOCOUNT" path justfile
-expect "a record with no changedFiles is a refusal" 2 "1362"
+expect "a record with no changedFiles is a refusal" 2 "1362" "no usable file list"
+
+# A key that is PRESENT and null passes has(), and jq sorts null below every
+# number, so `(.files|length) < .changedFiles` is false against a null count:
+# such a record walked both guards and was reported as trusted. Absence and
+# null are different shapes and only a type check refuses both.
+GH_NULLCOUNT="$(make_gh '[{"number":1213,"title":"t","changedFiles":null,"files":[
+    {"path":"justfile"}]}]' 0)"
+run_overlap "$GH_NULLCOUNT" path justfile
+expect "a null changedFiles is a refusal, not a trusted count" 2 "1213" "no usable file list"
+
+# The reason matters here too: with the type guard reverted to has(), this
+# record's query jq dies on the null and the query-status guard refuses it — the right
+# exit status by way of the wrong guard, and a row pinned only to rc 2 would
+# have called that a pass.
+GH_NULLFILES="$(make_gh '[{"number":1213,"title":"t","changedFiles":null,"files":null}]' 0)"
+run_overlap "$GH_NULLFILES" path justfile
+expect "a null files list is a refusal, not an empty one" 2 "1213" "no usable file list"
+
+# The three query pipelines are the second half of the same hole. This record
+# passes every guard fetch can make — files IS an array, changedFiles IS a
+# number that agrees with its length — and still kills the query jq, which used
+# to return empty output with nobody reading its status, so `[ -z "$hits" ]`
+# converted the death into "no open PR touches justfile" at rc 0. That is the
+# exact answer this tool exists to never give.
+#
+# One row per command on purpose: each entry point has its own pipeline and its
+# own status check, so a shared row would leave two of the three deletable with
+# the suite still green.
+GH_BADFILES="$(make_gh '[{"number":1213,"title":"t","changedFiles":1,"files":["justfile"]}]' 0)"
+run_overlap "$GH_BADFILES" path justfile
+expect "a path query that dies is a refusal, not an all-clear" 2
+expect_absent "a dead path query never prints the all-clear" 2 "no open PR touches"
+
+run_overlap "$GH_BADFILES" pr 1213
+expect "a sibling query that dies is a refusal, not an all-clear" 2
+expect_absent "a dead sibling query never prints the all-clear" 2 "shares no file"
+
+run_overlap "$GH_BADFILES" census
+expect "a census query that dies is a refusal, not an all-clear" 2
+expect_absent "a dead census query never prints the all-clear" 2 "no file is touched"
 
 # gh pr list caps at 30 by default and says nothing when it truncates. The tool
 # asks for an explicit limit; if the answer comes back AT that limit it may
@@ -264,6 +319,21 @@ else
         "no -L in argv: $(cat "$(dirname "$GH_OK")/argv" 2>/dev/null)"
 fi
 
+# Presence of the flag is not the value of the flag. Hardcoding `-L 200` left
+# every row above green: the grep is satisfied by any constant containing -L,
+# and the --limit rows exercise the GUARD (n >= LIMIT), never the transmission,
+# because the stub ignores its argv. The fail-open is reachable by following
+# this tool's own printed remedy — past the hardcoded number, "raise --limit"
+# raises the threshold while gh stays pinned, so the census under-reports with
+# the at-limit refusal disarmed. The `--limit 7` run above is what put this in
+# argv; only argv witnesses the ask.
+if grep -q -- '-L 7' "$(dirname "$GH_OK")/argv" 2>/dev/null; then
+    ok "the limit's VALUE reaches gh, not just the flag"
+else
+    bad "the limit's VALUE reaches gh, not just the flag" \
+        "no '-L 7' in argv: $(cat "$(dirname "$GH_OK")/argv" 2>/dev/null)"
+fi
+
 # The truncation guard compares files against changedFiles, so it is inert
 # unless changedFiles was asked for. Every stub above prints changedFiles no
 # matter what argv it got, which means the whole truncation half stays green
@@ -275,6 +345,18 @@ if grep -q -- 'changedFiles' "$(dirname "$GH_OK")/argv" 2>/dev/null; then
 else
     bad "changedFiles is requested from gh, so the truncation guard has a count" \
         "no changedFiles in argv: $(cat "$(dirname "$GH_OK")/argv" 2>/dev/null)"
+fi
+
+# Same blindness, milder consequence: every stub prints a title whatever it was
+# asked for, so dropping `title` from the --json ask left the whole suite green
+# while real gh would return records without one and every answer would name the
+# PRs as "null". Cosmetic rather than fail-open — and one grep away from being
+# witnessed, so it is witnessed.
+if grep -q -- 'title' "$(dirname "$GH_OK")/argv" 2>/dev/null; then
+    ok "title is requested from gh, so answers can name the PRs"
+else
+    bad "title is requested from gh, so answers can name the PRs" \
+        "no title in argv: $(cat "$(dirname "$GH_OK")/argv" 2>/dev/null)"
 fi
 
 # --------------------------------------------------------------------- usage
@@ -318,7 +400,11 @@ if command -v gh >/dev/null 2>&1; then
     FIELDS="$(cd "$TMP" || exit 1
         GH_TOKEN=x GITHUB_TOKEN=x GH_CONFIG_DIR="$TMP/gh-config" \
             gh pr list --json __km_overlap_bogus__ 2>&1)"
-    for want in number files state changedFiles; do
+    # Exactly the four fields the tool's --json asks for, and no others: `state`
+    # was checked here and is never requested (--state is a flag, not a field),
+    # while `title` is requested and was not checked — a rename of it upstream
+    # would have degraded every row's output to "null" unwitnessed.
+    for want in number title files changedFiles; do
         case "$FIELDS" in
             *"$want"*) ok "real gh still offers the '$want' field the stub is written against" ;;
             *) bad "real gh still offers the '$want' field the stub is written against" \
