@@ -1104,6 +1104,7 @@ test-hooks:
     bash .githooks/tests/shared-config-drift-test.sh
     bash .githooks/tests/git-env-sandbox-test.sh
     bash .githooks/tests/km-overlap-test.sh
+    bash .githooks/tests/repo-purity-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
