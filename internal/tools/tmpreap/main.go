@@ -20,11 +20,14 @@
 //	tmpreap [-root DIR] [-repo DIR]     # pressure, composition, and the reap plan
 //	tmpreap [-root DIR] [-repo DIR] -apply
 //
-// Nothing is deleted without -apply. -apply archives every text artefact under
-// -archive-max-file to a tarball outside the scan root first, then reports what
-// it could not archive: every dropped file is counted, in a category that says
-// why, and the first pathsListed of each category are named with the remainder
-// disclosed as a count. Those files are unrecoverable once the deletion runs, so
+// Nothing is deleted without -apply. -apply archives text artefacts under
+// -archive-max-file to a tarball outside the scan root first, up to a total of
+// -archive-max-total, then reports what it could not archive: every dropped file
+// is counted, in a category that says why, and the first pathsListed of each
+// category are named with the remainder disclosed as a count. Reaching the total
+// budget is the one drop that is not merely reported — it leaves entries unread,
+// so the deletion is refused rather than run over an incomplete record. The rest
+// are unrecoverable once the deletion runs, so
 // a run that does not say so is a run that lied. One thing goes unreported, and
 // only because there is nothing left to delete by then: a file that vanished
 // between the walk and the read.
