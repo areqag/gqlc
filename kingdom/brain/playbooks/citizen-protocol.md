@@ -48,7 +48,7 @@ sweep, or a nudge). Then:
 7. Request review by filing a `class:judge` bead naming the PR number and what
    you most doubt about the change — a Դատաւոր is the reviewer, and a bead
    is what wakes one. **File it UNASSIGNED**: the dispatcher's fresh pass
-   selects `.assignee == null` (km:461) and its resume pass reads only
+   selects `.assignee == null` (`cmd_dispatch` in km) and its resume pass reads only
    `in_progress`, so a pre-assigned review bead is ready, labelled, and
    invisible to both — it wakes nobody, silently, at any cap level. Give it
    the priority of the work it reviews. Mail wakes nobody but Սեդրակ either,
@@ -57,6 +57,25 @@ sweep, or a nudge). Then:
 8. Merge on a Դատաւոր's review PASS — a FAIL blocks the merge until answered
    (Constitution V.4). After merge: close the bead citing the merged SHA,
    delete the branch, file follow-up beads for anything you deferred.
+9. File freely, and label what you file. A defect you find while working a
+   bead, whose fix is not that bead's work, gets its own bead and your own
+   `class:` label — you need nobody's permission for either, and a branch
+   should not absorb every defect it makes visible.
+
+   A bead about specific code also carries a `subject:<path>` label, one per
+   file or directory the finding is about, repo-relative and with no trailing
+   slash. Review residue additionally gets a `discovered-from` edge to the
+   bead whose PR the review was of. Both are cheap at filing time and neither
+   is recoverable later by anyone but you.
+
+   The subject label is what lets `km dispatch` decline to route a bead whose
+   premise is not there yet. It holds the bead while its path is absent from
+   `origin/master`, or while an open PR is modifying that path, and prints
+   which of the two fired. The hold releases itself when the PR merges or
+   closes, so no part of it depends on anyone remembering. Residue with no
+   subject label yet is held while its parent is open, naming that parent:
+   that hold is the machinery asking you for the label, not a refusal of the
+   work.
 
 ## Mail
 
