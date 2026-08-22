@@ -2286,6 +2286,228 @@ else
     unset KM_TMUX_SESSION
 fi
 
+# --- the services' last result is READ, not just journalled (gqlc-vzpn) ------
+# gqlc-z1qw made the dispatcher fail-closed, so a failed run now dies and is
+# recorded on the unit. Nothing read that record: `km doctor` asked only whether
+# the TIMER was enabled, and the board did not mention the services at all. The
+# loudness landed in `journalctl --user -u kingdom-dispatch`, where nobody
+# looks — the same invisibility the fail-closed refusal was meant to end.
+#
+# The four states below are not a taxonomy invented here; each was measured
+# against real systemd on 2026-08-22 (`systemctl --user show`), and the reason
+# there are four is the third row:
+#
+#   loaded, ran, Result=success                     -> ok
+#   loaded, ran, Result=exit-code ExecMainStatus=7  -> failed
+#   LoadState=not-found                             -> Result=success ANYWAY
+#   loaded, never fired                             -> InactiveEnterTimestamp=
+#
+# A unit that DOES NOT EXIST reports Result=success. So a report keyed on Result
+# alone calls an uninstalled dispatcher healthy, which is precisely the shape of
+# defect this bead exists to end.
+cat >"$BIN/systemctl" <<'STUB'
+#!/usr/bin/env bash
+# Answers `show` from a fixture file per unit, named by KM_FAKE_SYSTEMD.
+#
+# Properties are printed in FIXTURE order, which is deliberately not the order
+# they were asked for: real systemd does not answer in request order (measured
+# — LoadState, ActiveState, ActiveEnterTimestamp, InactiveEnterTimestamp,
+# Result, NRestarts, ExecMainStatus came back for a request that named them in
+# another order). A stub that echoed the request order would let a positional
+# parser pass here and misread the real thing.
+#
+# KM_FAKE_SYSTEMCTL_RC models "systemctl cannot answer" — an absent binary, or
+# the absent user bus that CI has. It is one state to km either way.
+if [ -n "${KM_FAKE_SYSTEMCTL_RC:-}" ]; then
+    echo "Failed to connect to bus: No medium found" >&2
+    exit "$KM_FAKE_SYSTEMCTL_RC"
+fi
+case "${2:-}" in
+    show) ;;
+    *) exit 0 ;;   # is-enabled and friends: not what these rows are about
+esac
+unit="${3:-}"
+want=""
+shift 3
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -p) want="$want ${2:-}"; shift ;;
+    esac
+    shift
+done
+f="${KM_FAKE_SYSTEMD:-}/$unit.props"
+# No fixture = the unit is not on this machine, which is what systemd says
+# about one: not-found, and a Result of success regardless.
+[ -f "$f" ] || printf 'LoadState=not-found\nInactiveEnterTimestamp=\nResult=success\nExecMainStatus=0\n' >"/dev/stdout"
+[ -f "$f" ] || exit 0
+while IFS= read -r line; do
+    for w in $want; do
+        case "$line" in "$w="*) printf '%s\n' "$line" ;; esac
+    done
+done <"$f"
+STUB
+chmod +x "$BIN/systemctl"
+
+# $1=unit, rest=KEY=VALUE property lines
+fake_unit() {
+    local unit=$1
+    shift
+    mkdir -p "$KM_FAKE_SYSTEMD"
+    printf '%s\n' "$@" >"$KM_FAKE_SYSTEMD/$unit.props"
+}
+
+svc_case() { # fresh state + fixture dir for one board rendering
+    dispatch_case '[]' '[]'
+    make_inboxes
+    export KM_FAKE_SYSTEMD="$KM_STATE_DIR/systemd"
+    unset KM_FAKE_SYSTEMCTL_RC
+    mkdir -p "$KM_FAKE_SYSTEMD"
+}
+
+run_status() {
+    OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+    RC=$?
+}
+
+# The liveness control, and it comes first: every loud row below would pass
+# against a board that shouted unconditionally, and a board that cries failure
+# at a working town teaches everyone to stop reading it.
+svc_case
+fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:17:53 EDT' 'Result=success' 'ExecMainStatus=0'
+fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=success' 'ExecMainStatus=0'
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "the board reports a healthy dispatcher quietly" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -qi 'dispatch.*ok'; then
+    bad "the board reports a healthy dispatcher quietly" "no ok line for dispatch: $OUT"
+elif printf '%s' "$OUT" | grep -q 'FAILED\|NEVER RUN\|NOT INSTALLED'; then
+    bad "the board reports a healthy dispatcher quietly" \
+        "a successful run was rendered as an alarm: $(printf '%s' "$OUT" | grep -E 'dispatch|guard')"
+else
+    ok "km status renders a successful last run as ok, so the loud states below mean something"
+fi
+
+# The row the bead is about.
+svc_case
+fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=failed' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:18:46 EDT' 'Result=exit-code' 'ExecMainStatus=7'
+fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=success' 'ExecMainStatus=0'
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "the board reports a FAILED dispatch run" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'FAILED'; then
+    bad "the board reports a FAILED dispatch run" "the board is silent about it: $OUT"
+elif ! printf '%s' "$OUT" | grep 'FAILED' | grep -q 'journalctl'; then
+    bad "the board reports a FAILED dispatch run" \
+        "the failure line does not say where to read the run: $(printf '%s' "$OUT" | grep FAILED)"
+else
+    ok "km status renders a failed dispatch run loudly, and names the journal that holds it"
+fi
+
+# The measured trap: systemd reports Result=success for a unit that does not
+# exist, so this state is indistinguishable from health on Result alone.
+svc_case
+fake_unit kingdom-dispatch.service 'LoadState=not-found' 'InactiveEnterTimestamp=' \
+    'Result=success' 'ExecMainStatus=0'
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "an uninstalled dispatcher is not reported as healthy" "rc=$RC out=$OUT"
+elif printf '%s' "$OUT" | grep -E '^dispatch' | grep -qi 'ok'; then
+    bad "an uninstalled dispatcher is not reported as healthy" \
+        "Result=success on a not-found unit read as ok: $(printf '%s' "$OUT" | grep -E '^dispatch')"
+elif ! printf '%s' "$OUT" | grep -q 'NOT INSTALLED'; then
+    bad "an uninstalled dispatcher is not reported as healthy" \
+        "no not-installed line: $(printf '%s' "$OUT" | grep -E '^dispatch')"
+else
+    ok "km status distinguishes an uninstalled unit from a healthy one, which systemd's Result does not"
+fi
+
+# Enabled but never fired: the ed2u/z1qw shape — machinery that has never done
+# its job, with nothing in its own record to say so.
+svc_case
+fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=' 'Result=success' 'ExecMainStatus=0'
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "a dispatcher that has never run is not reported as healthy" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'NEVER RUN'; then
+    bad "a dispatcher that has never run is not reported as healthy" \
+        "no never-run line: $(printf '%s' "$OUT" | grep -E '^dispatch')"
+else
+    ok "km status separates 'never fired' from 'last run succeeded', which share a Result value"
+fi
+
+# The guard is the other half of the ask, and nothing else here would notice if
+# only the dispatcher were wired up.
+svc_case
+fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:17:53 EDT' 'Result=success' 'ExecMainStatus=0'
+fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=failed' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=exit-code' 'ExecMainStatus=2'
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "the board reports a FAILED guard run too" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -E '^guard' | grep -q 'FAILED'; then
+    bad "the board reports a FAILED guard run too" \
+        "guard's failure is not on the board: $(printf '%s' "$OUT" | grep -E '^guard')"
+else
+    ok "km status reports the guard's last run as well as the dispatcher's"
+fi
+
+# km's own header promises every tmux-touching path degrades rather than
+# crashing, because CI has no tmux. CI has no user bus either, so the same
+# promise has to hold for systemctl: a board that aborted here would take the
+# seat table and the queue counters down with it.
+svc_case
+export KM_FAKE_SYSTEMCTL_RC=1
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "an unanswerable systemctl does not abort the board" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'ready queue:'; then
+    bad "an unanswerable systemctl does not abort the board" \
+        "the board stopped before its counters: $OUT"
+elif printf '%s' "$OUT" | grep -E '^dispatch' | grep -qi 'ok'; then
+    bad "an unanswerable systemctl does not abort the board" \
+        "an unanswered query read as ok: $(printf '%s' "$OUT" | grep -E '^dispatch')"
+else
+    ok "km status survives a systemctl that cannot answer, and does not call the silence ok"
+fi
+unset KM_FAKE_SYSTEMCTL_RC
+
+# doctor asked whether the TIMER was enabled and never whether the last RUN
+# worked, which is how it kept reporting a healthy town over a dead dispatcher.
+svc_case
+fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=failed' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:18:46 EDT' 'Result=exit-code' 'ExecMainStatus=7'
+fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=success' 'ExecMainStatus=0'
+DOUT="$(PATH="$BIN:$PATH" "$KM" doctor 2>&1)"
+if ! printf '%s' "$DOUT" | grep -qi 'dispatch last run'; then
+    bad "km doctor checks the last run, not just the timer" "no last-run check: $DOUT"
+elif printf '%s' "$DOUT" | grep -i 'dispatch last run' | grep -q '^ok:'; then
+    bad "km doctor checks the last run, not just the timer" \
+        "a failed run passed the check: $(printf '%s' "$DOUT" | grep -i 'dispatch last run')"
+else
+    ok "km doctor reports a failed last dispatch run instead of only its timer"
+fi
+
+svc_case
+fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:17:53 EDT' 'Result=success' 'ExecMainStatus=0'
+fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=success' 'ExecMainStatus=0'
+DOUT="$(PATH="$BIN:$PATH" "$KM" doctor 2>&1)"
+if ! printf '%s' "$DOUT" | grep -i 'dispatch last run' | grep -q '^ok:'; then
+    bad "km doctor passes a healthy dispatcher" \
+        "a successful run did not pass: $(printf '%s' "$DOUT" | grep -i 'dispatch last run')"
+else
+    ok "km doctor passes a dispatcher whose last run succeeded"
+fi
+
+unset KM_FAKE_SYSTEMD
 export KM_STATE_DIR="$TMP/state"
 
 # --- the contract with the real bd (gqlc-mlca) -------------------------------
@@ -2340,6 +2562,29 @@ else
             ok "$bd_contract"
         fi
     fi
+fi
+
+# --- the contract with the real systemd (gqlc-vzpn) --------------------------
+# The unit rows above pin km against a MODEL of systemd, and the model carries
+# the whole reason km reads LoadState at all: a unit that DOES NOT EXIST is
+# reported with Result=success. Were that to change — not-found answered with a
+# failure, or refused outright — the stub rows would stay green while a real
+# board called something healthy on evidence that no longer means health. This
+# row is the one place the real binary is asked. CI has no user bus, and asking
+# there proves nothing, so it skips out loud.
+sd_contract="the real systemd calls a unit that does not exist Result=success, which is why km reads LoadState"
+absent="km-no-such-unit-$$.service"
+if ! command -v systemctl >/dev/null 2>&1; then
+    printf 'skip - %s: no systemctl on PATH\n' "$sd_contract"
+elif ! sd_out=$(systemctl --user show "$absent" -p LoadState -p Result 2>&1); then
+    printf 'skip - %s: no user bus here (%s)\n' "$sd_contract" "$(printf '%s' "$sd_out" | head -1)"
+elif ! printf '%s' "$sd_out" | grep -q '^LoadState=not-found$'; then
+    bad "$sd_contract" "an absent unit no longer reports LoadState=not-found: $sd_out"
+elif ! printf '%s' "$sd_out" | grep -q '^Result=success$'; then
+    bad "$sd_contract" \
+        "an absent unit no longer reports Result=success — the trap the parser is built around has changed, so re-argue which property discriminates: $sd_out"
+else
+    ok "$sd_contract"
 fi
 
 # --- sleep outside a seat is a no-op, not an error ---------------------------
