@@ -2,8 +2,10 @@
 # Tests for kingdom/bin/km — the state machinery of the Թագաւորութիւն.
 #
 # Everything runs against a throwaway KM_STATE_DIR, so the real town's mail
-# and seat state are never touched, and nothing here needs tmux, claude, bd,
-# or a running dispatcher. What is pinned is the machinery the society stands
+# and seat state are never touched, and nothing here needs tmux, claude, or a
+# running dispatcher. One row is the exception and asks the real bd, in a
+# throwaway workspace of its own; it skips where bd is absent, and it says so.
+# What is pinned is the machinery the society stands
 # on: the config reader, seat identity, mail delivery (single, broadcast, and
 # the read/unread move), wake queueing, and the halt flag — plus the refusals,
 # because a mail system that misdelivers silently or a wake that invents a
@@ -532,6 +534,47 @@ else
 fi
 
 export KM_STATE_DIR="$TMP/state"
+
+# --- the contract with the real bd (gqlc-mlca) -------------------------------
+# Every row above pins km against a MODEL of bd, and the model is where `-n 0`
+# gets its meaning. So if bd stopped honouring it — a flag rename, a cap
+# reintroduced at another number, `0` reread as "none" — those rows would all
+# stay green while the dispatcher went blind again in precisely the shape of the
+# defect they exist to close. This row is the one place the real binary is asked.
+# CI installs no bd, so it skips there, out loud.
+#
+# Both halves are deliberate. `-n 0` returning all 105 is the contract; the
+# default stopping at 100 is what proves the fixture straddles the cap, and
+# without it "bd honoured -n 0" and "bd never capped" are the same green — this
+# bead's own defect one level up. Should bd drop the cap, this goes red to
+# report that the premise changed, rather than passing on a technicality.
+bd_contract="the real bd returns the whole ready queue for -n 0, past the cap it applies by default"
+if ! command -v bd >/dev/null 2>&1; then
+    printf 'skip - %s: no bd on PATH\n' "$bd_contract"
+else
+    ws="$TMP/bd-contract"
+    mkdir -p "$ws"
+    # Ours, so it is bound once; the 100 below is bd's and stays a literal.
+    fixture_n=105
+    jq -nc --argjson n "$fixture_n" 'range($n) | {
+        _type: "issue", id: "cap-\(.)", title: "cap fixture \(.)",
+        status: "open", priority: 3, issue_type: "task"
+    }' >"$ws/fixture.jsonl"
+    if ! (cd "$ws" && bd init && bd import fixture.jsonl) >"$ws/setup.log" 2>&1; then
+        bad "$bd_contract" "no throwaway bd workspace: $(tail -1 "$ws/setup.log")"
+    else
+        capped="$(cd "$ws" && bd ready --json 2>/dev/null | jq -r 'length')"
+        whole="$(cd "$ws" && bd ready -n 0 --json 2>/dev/null | jq -r 'length')"
+        if [ "$capped" != 100 ]; then
+            bad "$bd_contract" \
+                "the default query returned $capped, so $fixture_n issues no longer straddle bd's cap — re-argue whether -n 0 is still load-bearing"
+        elif [ "$whole" != "$fixture_n" ]; then
+            bad "$bd_contract" "-n 0 returned $whole of the $fixture_n ready issues"
+        else
+            ok "$bd_contract"
+        fi
+    fi
+fi
 
 # --- sleep outside a seat is a no-op, not an error ---------------------------
 # The /handoff skill ends with `km sleep`; Անդրանիկ's own sessions run it too.
