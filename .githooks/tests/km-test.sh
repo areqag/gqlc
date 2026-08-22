@@ -821,9 +821,10 @@ if [ -n "${KM_FAKE_GH_RC:-}" ]; then
     echo "gh: could not connect to github.com" >&2
     exit "$KM_FAKE_GH_RC"
 fi
-fields="" prev=""
+fields="" limit="" prev=""
 for a in "$@"; do
     [ "$prev" = "--json" ] && fields="$a"
+    [ "$prev" = "--limit" ] && limit="$a"
     prev="$a"
 done
 [ -n "$fields" ] || { echo "gh stub: --json with no field list: $*" >&2; exit 1; }
@@ -832,8 +833,14 @@ raw=$(cat "${KM_FAKE_GH:-/dev/null}")
 # gh returns ONLY the fields asked for. The stub must project the same way, or a
 # fixture keeps supplying a field the caller stopped requesting and that field's
 # guard goes untested — the truncation tell reads null and fails open silently.
-printf '%s' "$raw" | jq -c --arg f "$fields" \
-    '($f | split(",")) as $keep | [ .[] | with_entries(select(.key | IN($keep[]))) ]'
+#
+# --limit is honoured for the same reason: real gh returns at most N rows and
+# says nothing about what it dropped, so a stub that hands back all of them
+# makes the list-level cap unreachable from any fixture.
+printf '%s' "$raw" | jq -c --arg f "$fields" --argjson n "${limit:-0}" \
+    '($f | split(",")) as $keep
+     | [ .[] | with_entries(select(.key | IN($keep[]))) ]
+     | if $n > 0 then .[0:$n] else . end'
 STUB
 chmod +x "$BIN/gh"
 
@@ -1084,6 +1091,65 @@ if [ "$RC" -ne 0 ] || [ "$OUT" != "ROUTE gqlc-cap" ]; then
         "100 listed and 100 changed withholds nothing, so this must not hold: rc=$RC out=$OUT"
 else
     ok "a PR that changed exactly as many files as gh's cap allows is read as complete, instead of held forever by a boundary the data does not support"
+fi
+
+# Row 11 — the LIST-level cap, one level up from the per-PR one above. gh has no
+# list-level tell at all: asked for 100 it returns 100 whether there are 100 open
+# PRs or 400, so the 101st PR is indistinguishable from no PR. The per-PR
+# truncation guard cannot see this — every listed PR can be individually complete
+# while the PR that touches the subject was never listed. Length == the limit
+# asked for is therefore UNKNOWN, and unknown holds.
+#
+# The fixture holds 101 open PRs and the stub hands back the first 100, so the
+# PR that touches the subject is the one gh never mentions — the real shape,
+# rather than a hundred PRs that happen to sit on the boundary.
+gh_prs "$(jq -cn '[ range(100) | {number: (2000 + .), changedFiles: 1, files: [{path: "pad/f\(.).go"}]} ]
+                  + [{number: 2999, changedFiles: 1, files: [{path: "justfile"}]}]')"
+hv '[{"id":"gqlc-lcap","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "a PR list sitting on the limit is unknown, not complete" "rc=$RC out=$OUT err=$ERR"
+elif [ "$OUT" != "HOLD gqlc-lcap — gh unavailable — cannot rule out an open PR touching justfile" ]; then
+    # On the REASON, not merely on HOLD: the 101st PR in this fixture touches the
+    # subject, so a harness that hands back all 101 also holds — for a definite
+    # match. Asserting the verdict alone would pass on the run where the cap was
+    # never consulted at all.
+    bad "a PR list sitting on the limit is unknown, not complete" \
+        "none of the 100 listed PRs touches justfile, but the 101st does and would never appear: $OUT"
+elif ! printf '%s' "$ERR" | grep -q 'hold-verdict.*100'; then
+    # The hold degrades to the existing cannot-answer reason, which says "gh
+    # unavailable" — true of the answer, not of the cause. Without this note the
+    # journal blames an outage for a cap, and the operator checks the wrong thing.
+    bad "a PR list sitting on the limit is unknown, not complete" \
+        "the cap must name itself on stderr, or the hold is attributed to an outage that did not happen: err=$ERR"
+else
+    ok "an open-PR list whose length equals the limit asked for is treated as unknown and holds, and the cap names itself rather than being logged as a gh outage"
+fi
+
+# The falsifier: one PR fewer. Same fixture shape, same subject, and the only
+# thing that changed is that the list is now demonstrably not truncated.
+gh_prs "$(jq -cn '[ range(99) | {number: (2000 + .), changedFiles: 1, files: [{path: "pad/f\(.).go"}]} ]')"
+hv '[{"id":"gqlc-lcap","labels":["class:warrior","subject:justfile"]}]'
+if [ "$RC" -ne 0 ] || [ "$OUT" != "ROUTE gqlc-lcap" ]; then
+    bad "a PR list under the limit is complete" \
+        "99 returned against a limit of 100 proves gh had nothing more to give: rc=$RC out=$OUT err=$ERR"
+else
+    ok "a list that comes back shorter than the limit is trusted as complete, so the list-cap guard does not hold the town forever"
+fi
+
+# Row 12 — the residue arm clears only on AFFIRMATIVE evidence. A parent whose
+# status is anything other than "closed" — including a status this code has never
+# heard of, and including the empty subset bd hands back for an id it cannot find —
+# is not evidence the parent is done.
+gh_prs '[]'
+hv '[{"id":"gqlc-unk","labels":["class:warrior"],
+      "deps":[{"depends_on_id":"gqlc-par","type":"discovered-from","status":"unknown"}]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "residue of a parent in an unrecognised state is held" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-unk .*gqlc-par'; then
+    bad "residue of a parent in an unrecognised state is held" \
+        "an open/in_progress whitelist clears every state it does not recognise, which is the fail-OPEN direction: $OUT"
+else
+    ok "residue whose parent status is neither open nor closed is held rather than cleared — the gate reads 'not closed', so a state this code has not met yet cannot release work"
 fi
 
 # Input order is the contract cmd_dispatch relies on to keep priority order.

@@ -614,8 +614,21 @@ hold_fetch_master() {
 }
 
 hold_open_pr_files() { # -> [{number, files:[path], truncated}]; rc 1 if gh cannot answer
-    local raw
-    raw=$(timeout 30 gh pr list --state open --limit 100 --json number,changedFiles,files 2>/dev/null) || return 1
+    local raw limit=100 got
+    raw=$(timeout 30 gh pr list --state open --limit "$limit" --json number,changedFiles,files 2>/dev/null) || return 1
+    # The LIST-level cap, one level up from the per-PR one below. gh offers no
+    # list-level tell: asked for N it returns N whether N or 4N are open, so the
+    # (N+1)th PR is indistinguishable from no PR — and every PR it DID return can
+    # be individually complete, so the per-PR guard never fires. A full-length
+    # list is an unknown list; degrade to the hold a gh outage already takes.
+    got=$(printf '%s' "$raw" | jq 'length' 2>/dev/null) || return 1
+    if [ "$got" = "$limit" ]; then
+        # Named on stderr because the reason line downstream says "gh unavailable",
+        # which is true of the answer but not of the cause; without this the
+        # journal sends an operator looking for an outage that did not happen.
+        echo "hold-verdict: gh returned $got open PRs against a limit of $limit — the list may be truncated, holding" >&2
+        return 1
+    fi
     # MEASURED 2026-08-22 on PR #742: changedFiles 102, files 100 — `--json files`
     # caps per PR and says nothing. A capped list is an UNKNOWN list, not a
     # complete one; reading it as complete fails OPEN on the largest PRs.
@@ -715,7 +728,11 @@ cmd_hold_verdict() {
                 # the "filed against that PR" meaning; until and related do not.
                 [ ($c.deps // [])[] | select(type == "object")
                   | select(.type == "discovered-from")
-                  | select(.status == "open" or .status == "in_progress") ] as $par
+                  # "not closed", never a whitelist of the states known today: a
+                  # whitelist clears every state it has not met — including the
+                  # empty subset bd returns for an id it cannot find — and that
+                  # clearing is the fail-OPEN direction.
+                  | select(.status != "closed") ] as $par
                 | if ($par | length) > 0
                   then "HOLD \($id) — unlabelled residue of open \($par[0].depends_on_id) — needs a subject: label"
                   else "ROUTE \($id)" end
