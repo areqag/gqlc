@@ -514,9 +514,18 @@ git -C "$BD_REPO" checkout -q master
 git -C "$BD_REPO" checkout -q -b doomed
 git -C "$BD_REPO" -c user.email=t@t.invalid -c user.name=t commit -q --allow-empty -m doomed
 ORPHAN_SHA="$(git -C "$BD_REPO" rev-parse --short=8 HEAD)"
+# The uppercase rows need a sha whose uppercase form is a DIFFERENT string, and
+# an 8-char abbreviation is all-digits about once in 43 fixtures — which would
+# make those rows silently re-run their lowercase siblings and still print ok.
+# The full 40 puts that near one in 10^8, and the fixture row below turns even
+# that into a loud failure rather than a quiet tautology.
+ORPHAN_SHA_FULL="$(git -C "$BD_REPO" rev-parse HEAD)"
+ORPHAN_UPPER="$(printf '%s' "$ORPHAN_SHA_FULL" | tr 'a-f' 'A-F')"
+ORPHAN_MIXED="${ORPHAN_SHA_FULL:0:20}$(printf '%s' "${ORPHAN_SHA_FULL:20}" | tr 'a-f' 'A-F')"
 git -C "$BD_REPO" checkout -q master
 git -C "$BD_REPO" branch -q -D doomed
 ABSENT_SHA=deadbeefdeadbeef
+ABSENT_UPPER=DEADBEEFDEADBEEF
 printf 'Closed by branch doomed at %s (not yet pushed).\n' "$ORPHAN_SHA" > "$TMP/reason.txt"
 printf 'Closed by branch master at %s.\n' "$PUSHED_SHA" > "$TMP/reason-ok.txt"
 
@@ -544,6 +553,21 @@ fixture_check "orphan sha object still exists locally" \
   "commit" "$(git -C "$BD_REPO" cat-file -t "$ORPHAN_SHA" 2>&1)"
 fixture_check "absent sha resolves to nothing" \
   "missing" "$(printf '%s\n' "$ABSENT_SHA" | git -C "$BD_REPO" cat-file --batch-check | awk '{print $2}')"
+# The uppercase rows assert that git and the hook agree on a sha the hook used
+# to miss. Both halves of that need saying out loud: the uppercase spelling must
+# be a different STRING (else the row is its lowercase sibling wearing a hat),
+# and git must still RESOLVE it (else the row would pass against a fixed hook
+# for the same reason it passed against the broken one — nothing there to find).
+fixture_check "uppercase orphan sha is a different string" \
+  "differs" "$([ "$ORPHAN_UPPER" != "$ORPHAN_SHA_FULL" ] && echo differs || echo IDENTICAL)"
+fixture_check "mixed-case orphan sha differs from both" \
+  "differs" "$([ "$ORPHAN_MIXED" != "$ORPHAN_SHA_FULL" ] && [ "$ORPHAN_MIXED" != "$ORPHAN_UPPER" ] && echo differs || echo IDENTICAL)"
+fixture_check "git resolves the UPPERCASE orphan sha" \
+  "commit" "$(git -C "$BD_REPO" cat-file -t "$ORPHAN_UPPER" 2>&1)"
+fixture_check "git resolves the mixed-case orphan sha" \
+  "commit" "$(git -C "$BD_REPO" cat-file -t "$ORPHAN_MIXED" 2>&1)"
+fixture_check "uppercase orphan sha is still on NO remote ref" \
+  "" "$(git -C "$BD_REPO" branch -r --contains "$ORPHAN_UPPER" | tr -d ' \n')"
 
 # run_verdict asserts the NAME close_verdict() returned, by importing the hook
 # as a module. An allow asserted only as "not denied" cannot tell an allow that
@@ -760,6 +784,53 @@ run_verdict "commit <sha> anchors an orphan sha" deny-unpushed-sha "$BD_REPO" \
 # cannot resolve. It is the sole match for 2 of the 309 corpus close reasons.
 run_verdict "@<sha> anchors an absent sha"       deny-absent-object "$BD_REPO" \
   "bd close gqlc-x -r \"landed @$ABSENT_SHA, review followed.\""
+
+# --- case (gqlc-vzqi) -------------------------------------------------------
+# git resolves hex in any case, and both regexes matched `[0-9a-f]` only, so
+# `-r "Closed at 453E5D20."` named a real unpushed commit and the hook saw no
+# sha at all. Every row above spells its sha lowercase, which is why this
+# survived six rounds of adversarial review on this very arm.
+#
+# Two independent defects, so they need rows that fail independently:
+#
+#   the HEX CLASS   — split by tier, because widening one regex and not the
+#                     other leaves half the bypass standing. An ABSENT sha can
+#                     only be reached by the anchored tier (a loose token git
+#                     cannot resolve is dropped as prose), and an UNANCHORED
+#                     orphan can only be reached by the loose tier. So one row
+#                     each, and neither can stand in for the other.
+#
+#   the ANCHOR WORD — pinned with LOWERCASE hex so the hex class is not in
+#                     play; the only thing that can carry these is `(?i:)`.
+#                     Absent shas again, that being the one state where being
+#                     anchored changes the answer.
+run_verdict "UPPERCASE hex, anchored, absent"    deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b at $ABSENT_UPPER.\""
+run_verdict "UPPERCASE hex, loose, orphan"       deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"$ORPHAN_UPPER fixed the doomed thing\""
+run_verdict "mixed-case hex, anchored, orphan"   deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed at $ORPHAN_MIXED.\""
+run_verdict "the anchor word AT in capitals"     deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b AT $ABSENT_SHA.\""
+# The corpus instance, not a hypothetical: gqlc-v23's close reason opens a
+# sentence with `Commits 4491fb8(model)+...`, and the capital alone is what put
+# it outside the anchor. Measured over .beads/issues.jsonl at eb28226b, it is
+# the ONE field of 498 whose verdict this whole change moves — allow-no-sha to
+# deny-absent-object, because that sha names no object in the repo.
+run_verdict "sentence-initial Commit is an anchor" deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"Commit $ABSENT_SHA(model) closed it.\""
+run_verdict "@ with UPPERCASE hex"               deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"landed @$ABSENT_UPPER, review followed.\""
+# main() reads the deny MESSAGE and run_verdict reads only the NAME, so without
+# a run_case the uppercase refusal could be decided and never reach the caller.
+run_case    "UPPERCASE hex is refused to the caller" deny "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b at $ABSENT_UPPER.\""
+# The other direction. Widening the class puts all-hex English words in CAPS
+# within reach of the loose tier, and a fix that answered this by refusing loose
+# tokens outright would stop real closes — the majority corpus shape is
+# unanchored. `DEFACED` is all-hex, resolves to nothing, and must stay prose.
+run_verdict "an ALL-CAPS hex word is not a citation" allow-no-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"The docs were DEFACED and then restored.\""
 
 # --- the effective repo is resolved, like the master guard's --------------
 #
@@ -1053,7 +1124,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=164
+EXPECTED_ROWS=177
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
@@ -1065,7 +1136,7 @@ fi
 # strings — no path, sha or temp dir reaches one — so the digest is the same on
 # every machine. Update it deliberately when a row is added, renamed or
 # reordered; a drift you did not intend is the finding.
-EXPECTED_ROW_DIGEST=2d4146148eed7cb3
+EXPECTED_ROW_DIGEST=eaecee7ef165a3ab
 ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
   'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
 if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then
