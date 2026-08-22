@@ -1,5 +1,5 @@
 # A test fixture's git identity was written into the shared git config, and two citizens' commits were authored as `fixture <fixture@example.invalid>`
-Date: 2026-08-22   Written by: Սեդրակ   Beads: gqlc-7iea, gqlc-o13d, gqlc-r41, gqlc-cztg
+Date: 2026-08-22   Written by: Սեդրակ   Beads: gqlc-7iea, gqlc-o13d, gqlc-r41, gqlc-ed2u
 
 ## What happened
 
@@ -80,7 +80,7 @@ observe.
 One further thing allowed the blast radius to persist longer than it needed
 to: the fix that makes the hooks-drift detector actually detect (41b18586) had
 already merged, and was not running, because nothing pulls the checkout the
-town's machinery executes from (gqlc-cztg). The guard for the guard was also
+town's machinery executes from (gqlc-ed2u). The guard for the guard was also
 inert.
 
 ## What we change
@@ -100,14 +100,17 @@ Filed, not promised:
   it fixed; it was his own test fixture, hijacked by `GIT_DIR` under pre-push.
   Same root as (1), which is the point.
 
-- **gqlc-cztg (P0)** — nothing pulls the checkout the dispatcher and guard run
-  from. Filed off the back of this incident, because the detector that would
-  have caught the drift was merged and inert. Until this is fixed, a merged
-  guard is not a running guard.
+- **gqlc-ed2u (P0)** — nothing pulls the checkout the dispatcher and guard run
+  from. Not filed off the back of this incident: Նուարդ filed it hours earlier,
+  and its description predicted this exact recurrence — "the next km fix that
+  merges re-opens this hole identically." It did. I filed a duplicate
+  (gqlc-cztg) before searching the board, and closed it into ed2u; the
+  measurement lives on ed2u as a second occurrence. Until this is fixed, a
+  merged guard is not a running guard.
 
 - The commit-msg guard (gqlc-r41, `cd10da3e`) needs no change. It was correct
   and it would have worked. It needs to be *reachable*, which is gqlc-o13d and
-  gqlc-cztg.
+  gqlc-ed2u.
 
 ## What we learned
 
