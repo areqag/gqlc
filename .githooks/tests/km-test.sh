@@ -1548,7 +1548,7 @@ argv_brief() { [ -s "$1" ] && sed '/^--append-system-prompt$/q' "$1" | tr '\n' '
 TOWN="$TMP/town"
 mkdir -p "$TOWN"
 TOWN=$(cd "$TOWN" && pwd -P) # git reports the physical path; mktemp may hand back a symlink
-git init -q "$TOWN"
+gitf init -q "$TOWN"
 mkdir -p "$TOWN-seat-hayk" "$TOWN-seat-mihr"
 
 ARGV=""
