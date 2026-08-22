@@ -57,6 +57,10 @@ git -C "$DETACHED_REPO" checkout -q --detach   # at master's tip, but not ON mas
 
 pass=0
 fail=0
+# Every row's name, in run order, for the membership pin at the end of the file.
+ROWS=""
+note_row() { ROWS="$ROWS$1
+"; }
 
 run_hook() { # $1=cwd-for-hook $2=command-string -> hook stdout
   (
@@ -66,6 +70,7 @@ run_hook() { # $1=cwd-for-hook $2=command-string -> hook stdout
 }
 
 record() { # $1=name $2=expected $3=actual
+  note_row "$1"
   if [ "$3" = "$2" ]; then
     pass=$((pass + 1)); printf 'ok   - %s\n' "$1"
   else
@@ -276,6 +281,21 @@ run_guard_case "cont-split \$( in heredoc"       silent "$MASTER_REPO" "$(printf
 run_guard_case "cont-split \$( bare"             deny-master "$MASTER_REPO" "$(printf 'echo $\\\n(git commit -m x)')"
 # shellcheck disable=SC2016 # ditto
 run_guard_case "cont-split \$( double-quoted"    silent "$MASTER_REPO" "$(printf 'echo "$\\\n(git commit -m x)"')"
+# A third mechanism, and the only one of the three where the extractor DOES
+# match: a `case` pattern's `)` is an ordinary closing paren to the depth count,
+# so the span ends at the pattern and the body handed on is `case x in a`. The
+# commit is left in the surrounding text, double-quoted, where shlex collapses
+# it — silent. The contrast row is the same line with the case removed, so what
+# the pair pins is the case pattern doing it and not the quoting: parens that
+# balance for the shell do not balance for this scan. The silent row alone
+# cannot be killed — a mutation that breaks the scan makes it silent too, which
+# is what it already asserts — so the contrast is the half that discriminates,
+# and it is the half that reddens (measured: stop counting `)` at all and the
+# contrast row goes silent, in a 150/14 run).
+# shellcheck disable=SC2016 # ditto
+run_guard_case "case pattern ) hides a later commit" silent "$MASTER_REPO" 'echo "$(case x in a) git commit -m y;; esac)"'
+# shellcheck disable=SC2016 # ditto
+run_guard_case "case pattern ) contrast, no case"    deny-master "$MASTER_REPO" 'echo "$(git commit -m y)"'
 # HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt arms on the prefix `EOF`; no
 # line ever equals that, the body swallows the rest of the command, and the
 # real commit after it is not seen. The quoted spelling of the same delimiter
@@ -505,6 +525,7 @@ printf 'Closed by branch master at %s.\n' "$PUSHED_SHA" > "$TMP/reason-ok.txt"
 # failed to push (or failed to orphan) would make every row below pass for the
 # wrong reason.
 fixture_check() { # $1=label $2=expected $3=actual
+  note_row "fixture: $1"
   if [ "$2" = "$3" ]; then
     pass=$((pass + 1)); printf 'ok   - fixture: %s\n' "$1"
   else
@@ -543,6 +564,7 @@ mod.git_targets(sys.argv[2], __import__("os").getcwd(), mod.HOOK_GATED, closes=c
 print(",".join(mod.close_verdict(c)[0] for c in closes) or "no-close-seen")
 PY
   )"
+  note_row "$1"
   if [ "$got" = "$2" ]; then
     pass=$((pass + 1)); printf 'ok   - %s\n' "$1"
   else
@@ -846,13 +868,24 @@ run_verdict "quoted substitution, parenthesised reason" deny-unpushed-sha "$BD_R
 # whatever is parenthesised.
 run_verdict "quoted substitution, parenthesised reachable reason" allow-reachable "$BD_REPO" \
   "echo \"\$(bd close gqlc-x -r 'Closed at $PUSHED_SHA (1 commit, pushed).')\""
-# The limit the counting leaves: quoting is not tracked, so a `(` the shell
-# would read as a literal is counted too, and a body whose parens do not
-# balance closes nothing. The span is then not extracted at all and, quoted,
-# shlex hands back one token — so this is fail-OPEN and pinned as such. One of
-# the 192 paren-bearing corpus reasons is in this state (a truncated reason).
-run_verdict "unbalanced paren in the body is unread" no-close-seen "$BD_REPO" \
+# The limit the counting leaves: quoting is not tracked, so a paren the shell
+# would read as a literal is counted too. The two unbalanced directions part
+# company here. A surplus `(` never brings the depth back to zero, so nothing
+# closes the span, it is not extracted at all, and quoted, shlex hands back one
+# token — fail-OPEN, this row.
+run_verdict "a surplus ( leaves the span unclosed and unread" no-close-seen "$BD_REPO" \
   "echo \"\$(bd close gqlc-x -r 'Closed at $ORPHAN_SHA (12 commits.')\""
+# A surplus `)` brings the depth to zero EARLY, so the span is closed at that
+# paren and the body does come back, truncated there. Written so the truncation
+# falls outside the reason's quote, the shortened body still tokenizes and the
+# close is read and verdicted on the sha it carries. Make matching_paren treat a
+# negative depth as "nothing closes this" and return None, and this row verdicts
+# no-close-seen. The one unbalanced reason among the 192 paren-bearing corpus
+# reasons is this direction, not the row above: gqlc-oxne, 6 `(` to 7 `)`, depth
+# first going negative 857 characters in on a `case " ${a} ${b} " in *" ${x} "*)`
+# pattern, in a reason that is not truncated and runs on for another kilobyte.
+run_verdict "a surplus ) closes the span early" deny-unpushed-sha "$BD_REPO" \
+  "echo \"\$(bd close gqlc-x -r 'Closed at $ORPHAN_SHA.'; esac) tail)\""
 
 # --- what the extractor hands back, for a body that nests -------------------
 # Three decisions inside substitution_bodies() share one end-to-end verdict:
@@ -860,9 +893,15 @@ run_verdict "unbalanced paren in the body is unread" no-close-seen "$BD_REPO" \
 # blanked out of it, and that the nested body is returned alongside rather than
 # left to a further recursion. Blanking is what stops a nested close being
 # counted twice; returning it alongside is what keeps it at the same depth as
-# one written bare, which is what the depth cap is measured against. Asserted on
-# the extractor's own output, since mutating any one of the three on its own
-# leaves every verdict row in this suite green.
+# one written bare, which is what the depth cap is measured against.
+# Asserted on the extractor's own output because TWO of the three are invisible
+# end to end: mutated on its own, not blanking runs 163/1 and not flattening
+# runs 163/1, this fixture the only red in each. The depth count is NOT in that
+# position — making the first `)` close the outer span runs 160/4, and three of
+# those are verdict rows (`quoted substitution, parenthesised reason`, the
+# `... reachable reason` beside it, and `a surplus ( leaves the span unclosed
+# and unread`). So this fixture is the only guard for two of the decisions and
+# a second witness for the third.
 SUBST_PROBE="$(
   python3 - "$HOOK" <<'PY'
 import importlib.machinery, importlib.util, sys
@@ -1012,9 +1051,26 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=161
+EXPECTED_ROWS=164
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
+  fail=$((fail + 1))
+fi
+
+# The total above still leaves a RENAME or a SWAP invisible: retitle a row, or
+# delete one and add an unrelated one, and the count is unmoved. This digest is
+# over every row NAME in run order, so both move it. Row names are static
+# strings — no path, sha or temp dir reaches one — so the digest is the same on
+# every machine. Update it deliberately when a row is added, renamed or
+# reordered; a drift you did not intend is the finding.
+EXPECTED_ROW_DIGEST=2d4146148eed7cb3
+ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
+  'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
+if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then
+  printf 'FAIL - suite membership drifted: row-name digest %s, expected %s\n' \
+    "$ROW_DIGEST" "$EXPECTED_ROW_DIGEST"
+  printf 'the %d row names that ran, in order:\n' "$((pass + fail))"
+  printf '%s' "$ROWS" | sed 's/^/    /'
   fail=$((fail + 1))
 fi
 

@@ -79,9 +79,14 @@
 #     majority spelling here — 192 of the 309 close reasons in
 #     .beads/issues.jsonl at 15091c86 carry a paren, 106 of those a sha too.
 #     Quoting is not tracked inside the scan, so a paren the shell would read
-#     as a literal is counted; where that leaves a body's parens unbalanced,
-#     nothing closes the span and it goes unread -> allow (one of those 192 is
-#     in that state, pinned by "unbalanced paren in the body is unread")
+#     as a literal is counted, and the two unbalanced directions part company.
+#     A surplus `(` never closes, so the span goes unread -> allow (pinned by
+#     "a surplus ( leaves the span unclosed and unread"). A surplus `)` closes
+#     the span early, so the body does come back, truncated there, and is
+#     analyzed (pinned by "a surplus ) closes the span early"). The one
+#     unbalanced reason among those 192 is the second direction, not the
+#     first: gqlc-oxne, 6 `(` to 7 `)`, going negative 857 characters in on a
+#     `case " ${a} ${b} " in *" ${x} "*)` pattern
 #   - the rest is shlex-tokenized, so a multi-word quoted run collapses to one
 #     token and stops matching: `echo "git commit -m x"` is silent (measured).
 #     Word-by-word quoting does not collapse, so `echo "git" "commit" -m x`
@@ -113,6 +118,15 @@
 #     double-quoted` and `cont-split $( double-quoted`), shlex collapsing the
 #     whole run to one token — so what saves the bare spelling is the absence
 #     of quoting rather than the absence of a heredoc
+#   - a `case` pattern's `)` inside a `$( )` closes the span early, because the
+#     paren scan does not know shell grammar. What comes back is the body up to
+#     that pattern, and the commands after it are left in the surrounding text —
+#     where, double-quoted, shlex collapses them into one token and stops
+#     matching. So `echo "$(case x in a) git commit -m y;; esac)"` is allowed
+#     (measured, on this hook and on its parent alike), while the same body
+#     without the case is denied. Pinned by `case pattern ) hides a later
+#     commit`. This is the surplus-`)` direction below, reached by a spelling
+#     whose parens balance in the shell's reading but not in this one
 #   - HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt and <<EOF-1 arm on the
 #     prefix `EOF`. The real terminator line does not equal that, so the body
 #     goes on swallowing until some line is exactly `EOF` — and when none is,
@@ -256,9 +270,12 @@ OPERATOR_CHARS = set("();<>|&")
 GIT_OPTS_WITH_ARG = ("-c", "--namespace", "--exec-path", "--super-prefix")
 
 # `bd close` arm. BD_OPTS_WITH_ARG exists so a flag VALUE spelled `close` is not
-# read as the subcommand; an unlisted flag is treated as boolean, which can only
-# over-detect a close, and over-detection is inert (a close with no reason flag
-# is allowed). `done` is bd's documented alias for `close`.
+# read as the subcommand; a LONG flag outside that list is treated as boolean,
+# which can only over-detect a close, and over-detection is inert (a close with
+# no reason flag is allowed). The list does not govern shorthands: a cluster is
+# walked letter by letter (shorthand_arg), so a token absent from it — `-fr` —
+# still consumes a value, which is what pflag does. `done` is bd's documented
+# alias for `close`.
 BD_CLOSE_SUBCOMMANDS = ("close", "done")
 BD_OPTS_WITH_ARG = (
     "-C", "--directory", "--db", "--actor", "--dolt-auto-commit",
@@ -363,28 +380,44 @@ def strip_heredocs(text):
     return "\n".join(kept), "\n".join(expanded)
 
 
-def matching_paren(text, opening):
-    """Index of the `)` closing text[opening], or None when nothing closes it.
+def paren_matches(text):
+    """Map from each `(` in text to the `)` that closes it, built in one pass.
 
     Parens are counted rather than excluded, which is what lets a substitution
     body hold one: `bd close x -r "at 1234567 (12 commits, not yet pushed)"` is
     the majority spelling of this repo's close reasons — 192 of the 309 in
     .beads/issues.jsonl at 15091c86 carry a paren and 106 of those carry a sha
-    as well — and it is the witnessed incident's own reason text. Quoting is
-    not tracked, so a paren the shell would read as a literal is counted here
-    too; the effect is on reasons whose parens do not balance, of which that
-    corpus holds one, and there the span goes unread (fail-open, pinned by
-    "unbalanced paren in the body is unread").
+    as well — and it is the witnessed incident's own reason text.
+
+    One pass, not a depth count restarted at each `$(`: an unclosed `$(` has no
+    closing paren to find, so a per-span count read to end-of-text before
+    giving up, and a text holding many of them cost O(n^2). End-to-end hook
+    wall time on a heredoc of lone `$(` lines, restarted count vs this one:
+    14 KB 447 ms -> 23 ms, 57 KB 7071 ms -> 26 ms, 144 KB >= 30 s (killed at a
+    30 s CPU cap) -> 42 ms. This hook runs before every Bash call. A length cap
+    was rejected instead: text past the cap would go unanalyzed, which turns a
+    slow path into a silent one.
+
+    It does NOT make the scan linear in general. Deep NESTING is still
+    quadratic, because substitution_bodies re-splits each body it pops and each
+    such call maps that body again — `$(` x d then `)` x d measured 21/43/399 ms
+    at d = 200/800/3200 against 23/50/506 ms here, i.e. this map is about a
+    quarter slower on that shape, its cost being a dict build where the
+    restarted count could stop at the first match. Same order, unfixed either
+    way, tracked as bd gqlc-hv81.
+
+    Dropping a `)` that has nothing open is what makes this identical to the
+    restarted count it replaces — verified exhaustively over every string of
+    `(`, `)` and `x` up to length 12, and over 200k random strings of shell
+    metacharacters.
     """
-    depth = 0
-    for j in range(opening, len(text)):
-        if text[j] == "(":
-            depth += 1
-        elif text[j] == ")":
-            depth -= 1
-            if depth == 0:
-                return j
-    return None
+    matches, stack = {}, []
+    for j, c in enumerate(text):
+        if c == "(":
+            stack.append(j)
+        elif c == ")" and stack:
+            matches[stack.pop()] = j
+    return matches
 
 
 def split_substitutions(text):
@@ -392,16 +425,17 @@ def split_substitutions(text):
 
     A span whose delimiter never closes is left in the text and contributes no
     body, so `a $( b` comes back unchanged with nothing extracted (pinned by
-    "unbalanced paren in the body is unread"). Blanking a closed span rather
-    than leaving it in place is what stops a nested body being analyzed twice,
-    once on its own and once inside its parent.
+    "a surplus ( leaves the span unclosed and unread"). Blanking a closed span
+    rather than leaving it in place is what stops a nested body being analyzed
+    twice, once on its own and once inside its parent.
     """
     kept, bodies = [], []
+    closes = paren_matches(text)
     i, n = 0, len(text)
     while i < n:
         end = None
         if text[i] == "$" and i + 1 < n and text[i + 1] == "(":
-            end = matching_paren(text, i + 1)
+            end = closes.get(i + 1)
             if end is not None:
                 bodies.append(text[i + 2 : end])
         elif text[i] == "`":
