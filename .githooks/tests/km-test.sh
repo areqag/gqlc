@@ -346,6 +346,13 @@ fi
 BIN="$TMP/bin"
 mkdir -p "$BIN"
 
+# The bd stub's default answer to a query no row has an opinion about. Exported
+# because the stub is written from a QUOTED heredoc: $TMP does not exist inside
+# it, and an unset path there would read as "no fixture named" and redden every
+# row that merely happens to make the query.
+export KM_EMPTY_BOARD="$TMP/empty-board.json"
+printf '[]' >"$KM_EMPTY_BOARD"
+
 cat >"$BIN/tmux" <<'STUB'
 #!/usr/bin/env bash
 # The town is up. WHICH seats hold a window is data, not a constant: a seat is
@@ -553,9 +560,17 @@ cat >"$BIN/bd" <<'STUB'
 _all="$*"
 case "$1" in
     ready) f="${KM_FAKE_READY:-}"; limit=100 ;;
-    list)  f="${KM_FAKE_INPROG:-}"; limit=50
+    list)  limit=50
            case "$_all" in
-               *"--status in_progress"*) ;;
+               *"--status in_progress"*) f="${KM_FAKE_INPROG:-}" ;;
+               # doctor's identity arm (gqlc-0rv9). Defaulted to an EMPTY board
+               # rather than to the "no fixture named" refusal, because every
+               # row written before this arm existed would otherwise redden on
+               # a query it says nothing about. A row that wants the arm to
+               # fire sets KM_FAKE_OPEN itself; the rows that do are below and
+               # they assert the exit status, so the arm is pinned by them and
+               # not by this default.
+               *"--status open"*) f="${KM_FAKE_OPEN:-$KM_EMPTY_BOARD}" ;;
                *) echo "bd stub: unexpected list query: $_all" >&2; exit 1 ;;
            esac ;;
     # The hold verdict's two inputs (gqlc-pj4r). Neither is capped by bd, so
@@ -2089,20 +2104,122 @@ fi
 
 # Row 9 — the abort is loud, and a malformed candidate costs one line, not the
 # run. gqlc-z1qw is the whole reason: a jq abort that reads as a healthy zero.
+#
+# The malformed candidate is `labels: "class:warrior"` — a SCALAR where an array
+# belongs. It used to be `{"id":"gqlc-b"}` with no labels key at all, and that
+# was the defect gqlc-bcir names: absent and null are what bd emits for an
+# ordinary unlabelled bead, so the row was pinning the wrong population as
+# corrupt. The rows below hold the new boundary; this one still holds the
+# containment property, which is unchanged.
 gh_prs '[]'
 hv '[{"id":"gqlc-a","labels":["class:warrior"]},
-     {"id":"gqlc-b"},
+     {"id":"gqlc-b","labels":"class:warrior"},
      {"id":"gqlc-c","labels":["class:warrior"]}]'
 if [ "$RC" -ne 0 ]; then
     bad "a malformed candidate holds itself and does not abort the run" "rc=$RC out=$OUT err=$ERR"
 elif [ "$(printf '%s\n' "$OUT" | grep -c .)" -ne 3 ]; then
     bad "a malformed candidate holds itself and does not abort the run" "expected 3 lines, got: $OUT"
 elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-b .*malformed'; then
-    bad "a malformed candidate holds itself and does not abort the run" "the candidate with no labels was not held: $OUT"
+    bad "a malformed candidate holds itself and does not abort the run" "the candidate whose labels are a scalar was not held: $OUT"
 elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-a' || ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-c'; then
     bad "a malformed candidate holds itself and does not abort the run" "it swallowed its neighbours: $OUT"
 else
-    ok "a candidate missing its labels is held as malformed while its neighbours are still answered — one bad row costs one line, not the run"
+    ok "a candidate whose labels are a scalar is held as malformed while its neighbours are still answered — one bad row costs one line, not the run"
+fi
+
+# --- gqlc-bcir: `labels: null` is the commonest shape in the town, not corrupt -
+# MEASURED 2026-08-22 over the whole ready queue: 293 candidates carried a
+# labels ARRAY and 14 carried null. bd serialises a bead with no labels that
+# way; it is what an unlabelled bead IS. All 14 were reported to the operator
+# as "malformed candidate: labels is not an array" — 14 of the 27 holds the
+# town was issuing, so a majority of the hold census was an artefact spelled in
+# the vocabulary of data corruption, and a citizen auditing it went looking for
+# corrupt records that did not exist. The same file already disagreed with
+# itself: km:601, 609, 650 and the two ready-queue counters in cmd_status all
+# write `(.labels // [])`, and one of those counters PRINTS the unlabelled
+# population to the operator as a standing chore.
+#
+# The guard itself is right and stays: `.labels[]` aborts jq on null, and one
+# aborted run reading as a healthy zero is gqlc-z1qw. Only the predicate was
+# wider than the hazard.
+#
+# The five spellings are held in ONE invocation on purpose. null and absent must
+# agree with [], and a real scalar must still be refused — a fix that widens the
+# guard by deleting it passes any one of the routing rows alone.
+bcir_row="labels null, absent and [] are the same unlabelled bead, and a scalar is still malformed"
+hv '[{"id":"gqlc-null","labels":null},
+     {"id":"gqlc-absent"},
+     {"id":"gqlc-empty","labels":[]},
+     {"id":"gqlc-scalar","labels":"class:warrior"},
+     {"id":"gqlc-num","labels":42}]'
+if [ "$RC" -ne 0 ]; then
+    bad "$bcir_row" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-null'; then
+    bad "$bcir_row" "labels:null was not routed — this is the 14-of-27 defect: $OUT"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-absent'; then
+    bad "$bcir_row" "an absent labels key diverged from null: $OUT"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-empty'; then
+    bad "$bcir_row" "the two spellings of no-labels diverged — [] did not route: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-scalar — malformed candidate: labels is string, not an array'; then
+    # NAMES the type it found. "labels is not an array" tells a reader what was
+    # wanted and not what is there, which is the difference between a message
+    # they can act on and one that sends them looking for a corrupt record.
+    bad "$bcir_row" "a string labels value was not held, or the reason does not name the type: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-num — malformed candidate: labels is number, not an array'; then
+    bad "$bcir_row" "a numeric labels value was not held, or the reason does not name the type: $OUT"
+else
+    ok "$bcir_row"
+fi
+
+# The consequence, and the reason this is not a wording nit. Under the old
+# predicate a null-labelled bead never REACHED the residue arm, so the logic
+# written for exactly that bead — unlabelled, filed off an open parent — was
+# unreachable for the entire population it was written for. gqlc-0rv9 is a live
+# instance: labels null, a discovered-from parent, and described on its own bead
+# as held by the subject-path mechanism when it was in fact held by this guard.
+bcir_res="a null-labelled bead reaches the residue arm instead of dying at the malformed guard"
+hv '[{"id":"gqlc-nres","labels":null,
+      "deps":[{"depends_on_id":"gqlc-npar","type":"discovered-from","status":"open"}]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "$bcir_res" "rc=$RC out=$OUT err=$ERR"
+elif printf '%s' "$OUT" | grep -q 'malformed'; then
+    bad "$bcir_res" "it still died at the malformed guard, so the residue arm never ran: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^HOLD gqlc-nres — unlabelled residue of open gqlc-npar'; then
+    bad "$bcir_res" "the residue arm did not judge it: $OUT"
+else
+    ok "$bcir_res"
+fi
+
+# ...and the arm must still CLEAR it when the parent is closed, or the fix
+# trades a wrong hold for a permanent one.
+bcir_clr="a null-labelled bead whose discovered-from parent is closed routes"
+hv '[{"id":"gqlc-cres","labels":null,
+      "deps":[{"depends_on_id":"gqlc-cpar","type":"discovered-from","status":"closed"}]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "$bcir_clr" "rc=$RC out=$OUT err=$ERR"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-cres'; then
+    bad "$bcir_clr" "routing null-labelled beads into the residue arm made them hold forever: $OUT"
+else
+    ok "$bcir_clr"
+fi
+
+# is_judge reads .labels too, at a SECOND site. Under the old code a
+# null-labelled candidate never got that far, so widening subjects_of alone
+# leaves a `.labels[]` that aborts the WHOLE run — the gqlc-z1qw shape again,
+# and invisible in the rows above because none of them reaches the judge
+# exemption. Two candidates in one invocation, so a partial fix cannot pass by
+# answering the easy one.
+bcir_jdg="the judge exemption survives a null-labelled candidate in the same batch"
+hv '[{"id":"gqlc-jnull","labels":null},
+     {"id":"gqlc-jrev","labels":["class:judge","subject:kingdom/bin/km"]}]'
+if [ "$RC" -ne 0 ]; then
+    bad "$bcir_jdg" "rc=$RC out=$OUT err=$ERR"
+elif [ "$(printf '%s\n' "$OUT" | grep -c .)" -ne 2 ]; then
+    bad "$bcir_jdg" "the run aborted part way — expected 2 verdicts, got: $OUT"
+elif ! printf '%s' "$OUT" | grep -qx 'ROUTE gqlc-jnull'; then
+    bad "$bcir_jdg" "the null candidate did not route: $OUT"
+else
+    ok "$bcir_jdg"
 fi
 
 hv 'not json at all'
@@ -4255,8 +4372,11 @@ fixture_ok=1
 
 c1=$(gitf -C "$hk/town" rev-parse HEAD 2>/dev/null || true)
 
-# Park four seats at C1, exactly as `km up` does.
-for s in raffi mihr vahagn artur hayk; do
+# Park the seats at C1, exactly as `km up` does. The last three carry the
+# gqlc-d38n / gqlc-p1ek rows at the foot of this section: aramazd stays parked
+# and stale, nvard is moved to master, tsovinar goes onto a branch cut from the
+# stale commit. Nothing above touches them.
+for s in raffi mihr vahagn artur hayk aramazd nvard tsovinar; do
     gitf -C "$hk/town" worktree add --detach --quiet "$hk/town-seat-$s" master \
         >>"$hk/setup.log" 2>&1 || fixture_ok=0
 done
@@ -4417,6 +4537,135 @@ else
         bad "$ahead_row" "held, but not for the commits it carries: $OUT"
     else
         ok "$ahead_row"
+    fi
+
+    # --- gqlc-p1ek: --check reports and moves NOTHING --------------------
+    # status and doctor have to be able to ask this question without acting on
+    # the answer, and the reason it is a MODE rather than a second derivation
+    # is written on the bead: the obvious second way to ask is to read
+    # `git config --get core.hooksPath`, which returned '.githooks' in all 14
+    # seats while 7 of them held no push guard. Two derivations of one fact
+    # drift, and this one drifts toward reporting healthy.
+    #
+    # The row asserts BOTH halves. rc=3 alone passes against a --check that
+    # moved the seat and then reported the staleness it had just repaired.
+    chk_row="seat-refresh --check reports a stale parked seat and does not move it"
+    aramazd_before=$(seat_head aramazd)
+    OUT="$( (cd "$hk/town" && "$KM" seat-refresh aramazd --check) 2>&1 )"
+    RC=$?
+    if [ "$aramazd_before" != "$c1" ]; then
+        bad "$chk_row" "the fixture did not park aramazd at c1; see $hk/setup.log"
+    elif [ "$(seat_head aramazd)" != "$aramazd_before" ]; then
+        bad "$chk_row" "--check MOVED the worktree to $(seat_head aramazd)"
+    elif [ "$RC" -ne 3 ]; then
+        bad "$chk_row" "rc=$RC — a seat still missing the merged gate must report exposed: $OUT"
+    elif ! printf '%s' "$OUT" | grep -q 'STALE'; then
+        bad "$chk_row" "it exited 3 without saying what it found: $OUT"
+    else
+        v=$(seat_push_verdict aramazd probe-check)
+        if [ "$v" != allowed ]; then
+            # The whole point: --check leaves the seat exactly as exposed as it
+            # found it. If the push is refused, something moved the worktree and
+            # the rows above measured the wrong thing.
+            bad "$chk_row" "after --check the merged gate is running, so it moved something: $v"
+        else
+            ok "$chk_row"
+        fi
+    fi
+
+    # --- gqlc-d38n / gqlc-p1ek: the board carries the tell ----------------
+    # A seat 14 commits behind renders IDENTICALLY to one at master, because
+    # every other cell in the table is read out of the shared state dir. It was
+    # measured on the guard himself: detached at the founding commit, fifteen
+    # hours old, reading a roster with one judge in it and correctly concluding
+    # the roster was broken. His `git status` was clean and there was no other
+    # tell anywhere in the town.
+    #
+    # Three seats in ONE render, because the distinction the bead insists on is
+    # between two kinds of behind:
+    #   aramazd  parked and behind         -> STALE. This is the defect.
+    #   tsovinar on a branch, behind       -> NOT stale. A seat mid-PR is
+    #                                         legitimately behind, and a tell
+    #                                         that fires on it fires on every
+    #                                         working seat and stops being read.
+    #   nvard    at master                 -> silent.
+    # A row that only asserts aramazd passes against a check that flags all
+    # three.
+    gitf -C "$hk/town-seat-nvard" checkout --quiet --detach master >>"$hk/setup.log" 2>&1
+    (cd "$hk/town-seat-tsovinar" && gitf checkout --quiet -b fix/mid-pr) >>"$hk/setup.log" 2>&1
+
+    dispatch_case '[]' '[]'
+    make_inboxes
+    st_row="km status marks a PARKED stale worktree, and does not mark a working seat that is merely behind"
+    OUT="$( (cd "$hk/town" && PATH="$BIN:$PATH" "$KM" status) 2>&1 )"
+    RC=$?
+    stale_line=$(printf '%s\n' "$OUT" | grep '^STALE:' || true)
+    exposed_line=$(printf '%s\n' "$OUT" | grep '^EXPOSED:' || true)
+    if [ "$RC" -ne 0 ]; then
+        bad "$st_row" "status exited $RC: $OUT"
+    elif [ -z "$stale_line" ]; then
+        bad "$st_row" "no STALE line at all — a seat parked two commits back rendered as healthy: $OUT"
+    elif ! printf '%s' "$stale_line" | grep -q 'aramazd'; then
+        bad "$st_row" "the STALE line does not name the parked seat: $stale_line"
+    elif printf '%s' "$stale_line" | grep -q 'tsovinar'; then
+        bad "$st_row" "it called a seat on an in-flight branch stale: $stale_line"
+    elif printf '%s' "$stale_line" | grep -q 'nvard'; then
+        bad "$st_row" "it called a seat sitting on origin/master stale: $stale_line"
+    else
+        ok "$st_row"
+    fi
+
+    # The gate-coverage half (gqlc-p1ek), and it is a DIFFERENT population from
+    # the one above: tsovinar is not stale but IS missing the merged pre-push,
+    # because the refresh at wake deliberately does not move a seat holding
+    # work — and tells only that seat, in its own banner. Nobody sweeping the
+    # town could see it, and the population it covers is exactly the seats that
+    # are about to push.
+    ex_row="km status names every seat whose worktree is missing a merged .githooks commit, working or parked"
+    if [ -z "$exposed_line" ]; then
+        bad "$ex_row" "no EXPOSED line: $OUT"
+    elif ! printf '%s' "$exposed_line" | grep -q 'aramazd'; then
+        bad "$ex_row" "the parked seat missing the gate is not named: $exposed_line"
+    elif ! printf '%s' "$exposed_line" | grep -q 'tsovinar'; then
+        bad "$ex_row" "a seat on an in-flight branch cut from stale master is missing the gate and was not named: $exposed_line"
+    elif printf '%s' "$exposed_line" | grep -q 'nvard'; then
+        bad "$ex_row" "a seat at origin/master was reported exposed: $exposed_line"
+    else
+        ok "$ex_row"
+    fi
+
+    # An unanswered question is not a clean answer. Most of the roster has no
+    # worktree under this fixture at all, and the cell for those seats must not
+    # read the same as nvard's.
+    unj_row="a seat km cannot measure gets '?' and a named UNJUDGED line, never 'ok'"
+    if ! printf '%s' "$OUT" | grep -q '^UNJUDGED:.*astghik'; then
+        bad "$unj_row" "a seat with no worktree was not reported unmeasurable: $OUT"
+    elif ! printf '%s\n' "$OUT" | grep -E '^nvard ' | grep -q ' ok '; then
+        bad "$unj_row" "the control seat sitting on origin/master does not read ok, so the cell above proves nothing: $(printf '%s\n' "$OUT" | grep -E '^nvard ')"
+    elif printf '%s\n' "$OUT" | grep -E '^astghik ' | grep -q ' ok '; then
+        bad "$unj_row" "an unmeasurable seat rendered as ok: $(printf '%s\n' "$OUT" | grep -E '^astghik ')"
+    else
+        ok "$unj_row"
+    fi
+
+    # doctor's coverage arm reads the SAME derivation. It is soft on purpose —
+    # a worktree legitimately mid-PR is not an operator error, and VI.2 forbids
+    # anything here from coercing the citizen standing in it — so the row reads
+    # the LINE, not the exit status.
+    dc_row="km doctor reports per-seat gate coverage and names the seats that lack it"
+    OUT="$( (cd "$hk/town" && PATH="$BIN:$PATH" env -u KM_DEPLOY_ROOT "$KM" doctor) 2>&1 )"
+    # `\.githooks`, not `gate`: doctor also prints "bd mail.delegate points at
+    # km", which contains the substring, and a looser match picked that line up
+    # and then reported the coverage arm missing for the wrong reason.
+    cov_line=$(printf '%s\n' "$OUT" | grep '^warn:\|^ok:' | grep '\.githooks' || true)
+    if [ -z "$cov_line" ]; then
+        bad "$dc_row" "doctor says nothing about seat gate coverage: $OUT"
+    elif ! printf '%s' "$cov_line" | grep -q '^warn:'; then
+        bad "$dc_row" "two seats are missing the merged gate and doctor reported coverage clean: $cov_line"
+    elif ! printf '%s' "$cov_line" | grep -q 'aramazd'; then
+        bad "$dc_row" "the coverage line does not name the exposed seat: $cov_line"
+    else
+        ok "$dc_row"
     fi
 fi
 
@@ -5024,6 +5273,211 @@ elif ! printf '%s' "$OUT" | grep -q '^FAIL:'; then
     bad "doctor refuses to certify what it could not read" "nonzero without a FAIL line: $OUT"
 else
     ok "a stranding query that fails makes doctor fail, rather than reading as a board with nothing stranded"
+fi
+
+# --- doctor: a bead's owner must be an address that can reach a person -------
+# gqlc-0rv9. `.githooks/commit-msg` refuses an implausible author and the CI arm
+# refuses one on a PR — both gate GIT. Nothing gated BD, and both stores consume
+# the same ambient `git config user.email`. When a fixture identity leaked into
+# the shared repo config, git refused the commit and bd silently wrote the false
+# address onto every bead created in the window: MEASURED 2026-08-22, 15 beads
+# across 5 citizens, two windows 50 minutes apart (km@test, then
+# fixture@example.invalid). The human noticed at 03:20Z; the second window had
+# closed at 03:01Z. The noticing arrives after the window, structurally.
+#
+# The clean row comes FIRST and is what makes the dirty ones mean anything —
+# doctor has five other arms that can redden it, so a row reading only the exit
+# status would pass against a gate that never fired. dispatch_case leaves the
+# board unstranded and KM_DEPLOY_ROOT points at the clean tree.
+dispatch_case '[]' '[]'
+export KM_FAKE_OPEN="$KM_STATE_DIR/open.json"
+printf '[{"id":"gqlc-i1","owner":"antranig.yeretzian@proton.me"},
+         {"id":"gqlc-i2","owner":"ops@example-corp.io"},
+         {"id":"gqlc-i3","owner":null}]' >"$KM_FAKE_OPEN"
+run_doctor
+id_clean="doctor passes a board whose owners are all deliverable, and says so"
+if [ "$RC" -ne 0 ]; then
+    bad "$id_clean" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q '^ok: .*owner'; then
+    bad "$id_clean" "doctor does not report on bead ownership at all: $OUT"
+else
+    # example-corp.io merely CONTAINS a reserved name and is a real domain, and
+    # a null owner is an unassigned bead, not a bad address. Both are here so
+    # that a gate written as a substring match reddens this row rather than
+    # passing the ones below for the wrong reason.
+    ok "$id_clean"
+fi
+
+# RESERVED TLD. `test` and `invalid` are RFC 2606 / RFC 6761 names: nothing sent
+# there reaches anyone, so an address under one belongs to a fixture by
+# construction. Both live offenders are here.
+id_bad="doctor FAILS and names the bead owner that cannot belong to a person"
+printf '[{"id":"gqlc-i4","owner":"km@test"},
+         {"id":"gqlc-i5","owner":"fixture@example.invalid"},
+         {"id":"gqlc-i6","owner":"antranig.yeretzian@proton.me"}]' >"$KM_FAKE_OPEN"
+run_doctor
+if [ "$RC" -eq 0 ]; then
+    # "does it FAIL?", not "is there a check?" — gqlc-z1qw, and `just doctor`
+    # printing ok over a warning at gqlc-bn5r. A check that complains and exits
+    # 0 is not a gate, and the bead asks for a gate in as many words.
+    bad "$id_bad" "it exited 0 over two undeliverable owners: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^FAIL:.*owner'; then
+    bad "$id_bad" "nonzero, but no FAIL line about ownership — the status came from another arm: $OUT"
+elif ! printf '%s' "$OUT" | grep '^FAIL:.*owner' | grep -q 'km@test'; then
+    bad "$id_bad" "the failing line does not name the address, so the operator cannot act on it: $OUT"
+elif ! printf '%s' "$OUT" | grep '^FAIL:.*owner' | grep -q 'fixture@example.invalid'; then
+    bad "$id_bad" "it named the first offender and stopped: $OUT"
+else
+    ok "$id_bad"
+fi
+
+# The SHAPE half of the same predicate, and it is a separate arm inside it: an
+# address with no domain has no reserved name to match, so a fix that only
+# walked the TLD list would clear this one.
+id_shape="doctor FAILS on an owner that is not an address at all"
+printf '[{"id":"gqlc-i7","owner":"km"}]' >"$KM_FAKE_OPEN"
+run_doctor
+if [ "$RC" -eq 0 ] || ! printf '%s' "$OUT" | grep -q '^FAIL:.*owner'; then
+    bad "$id_shape" "rc=$RC out=$OUT"
+else
+    ok "$id_shape"
+fi
+
+# SOURCED, NOT COPIED. This is the predicate's third consumer, and gqlc-gy3q is
+# the record of what a second copy costs: while that bead was open, two PRs
+# carried independent copies that had ALREADY disagreed on four inputs. A copy
+# diverges silently in the direction where bd accepts what commit-msg refuses.
+# The row proves the dependency by MUTATING the one definition and watching km
+# follow it — a grep for `implausible_email_reason` in km would pass against a
+# call whose result was thrown away.
+id_src="doctor reads the identity rule from .githooks/implausible-identity.sh rather than a second copy"
+idsrc="$REPO/.githooks/implausible-identity.sh"
+if [ ! -r "$idsrc" ]; then
+    bad "$id_src" "$idsrc is missing, so the rule has nowhere single to live"
+else
+    shadow="$TMP/shadow-hooks"
+    mkdir -p "$shadow/.githooks" "$shadow/kingdom"
+    cp -r "$REPO/kingdom/bin" "$shadow/kingdom/bin"
+    cp "$REPO/kingdom/kingdom.toml" "$shadow/kingdom/kingdom.toml"
+    # ONE substitution in the shared file: a domain that is not reserved
+    # anywhere else in the system. If km carries its own copy of the rule, it
+    # cannot possibly know about this one.
+    sed 's/^IMPLAUSIBLE_RESERVED_DOMAINS=(/IMPLAUSIBLE_RESERVED_DOMAINS=(mutated-for-the-suite /' \
+        "$idsrc" >"$shadow/.githooks/implausible-identity.sh"
+    printf '[{"id":"gqlc-i8","owner":"someone@mutated-for-the-suite"}]' >"$KM_FAKE_OPEN"
+    OUT="$(PATH="$BIN:$PATH" "$shadow/kingdom/bin/km" doctor 2>&1)"
+    RC=$?
+    if [ "$RC" -eq 0 ] || ! printf '%s' "$OUT" | grep -q '^FAIL:.*owner'; then
+        bad "$id_src" "a domain added to the shared list did not reach km, so km holds its own copy: rc=$RC out=$OUT"
+    else
+        ok "$id_src"
+    fi
+fi
+
+# Fail-closed, the property this whole file is organised around: a question that
+# could not be asked is not an answer of "nothing wrong". Found by mutation —
+# delete the rc test on the query and every row above stays green while doctor
+# certifies an empty answer from a database it could not open.
+id_rc="a bead query that fails makes doctor refuse to certify the owners it never saw"
+printf '[]' >"$KM_FAKE_OPEN"
+printf '1' >"$KM_FAKE_OPEN.rc"
+run_doctor
+if [ "$RC" -eq 0 ]; then
+    bad "$id_rc" "a failed owner query certified the board: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^FAIL:.*owner'; then
+    bad "$id_rc" "nonzero, but not because the owner query failed: $OUT"
+else
+    ok "$id_rc"
+fi
+rm -f "$KM_FAKE_OPEN.rc"
+unset KM_FAKE_OPEN
+
+# --- status: the king's inbox count measures delivery, not reading -----------
+# gqlc-2abx. A letter leaves inbox/ in exactly one way: mail_read's final `mv`,
+# which runs only when someone invokes `km mail read`. Every SEAT is a process
+# that runs it. Անդրանիկ is a human who opens the file in an editor, so the
+# letter stays in his inbox forever. MEASURED 2026-08-22: inbox 30, read 0, zero
+# reads since the town was founded — a number that reads identically whether he
+# has read every word or none of them.
+#
+# It is not a weak signal, it is no signal, and it was rendered in the same
+# column as counts that ARE signals. It had already changed the mayor's conduct
+# twice in one day, both toward silence: two digests were withheld with "he has
+# 30 unread" written down as the reason, and the thing withheld was a bench
+# decision only the king could make.
+dispatch_case '[]' '[]'
+make_inboxes
+mkdir -p "$KM_STATE_DIR/mail/andranik/inbox"
+printf 'x' >"$KM_STATE_DIR/mail/andranik/inbox/20260822T001840Z--sedrak--digest.md"
+printf 'x' >"$KM_STATE_DIR/mail/andranik/inbox/20260822T101840Z--nvard--ask.md"
+king_row="km status refuses to call the king's never-drained inbox 'unread'"
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+kline=$(printf '%s\n' "$OUT" | grep "king's inbox" || true)
+if [ -z "$kline" ]; then
+    bad "$king_row" "no line about the king's inbox at all: $OUT"
+elif ! printf '%s' "$kline" | grep -q '2'; then
+    bad "$king_row" "the count is wrong or absent, so the row below proves nothing: $kline"
+elif printf '%s' "$kline" | grep -q '2 unread'; then
+    bad "$king_row" "it still claims two letters are unread on evidence that cannot distinguish read from unread: $kline"
+elif ! printf '%s' "$kline" | grep -q 'UNKNOWN'; then
+    bad "$king_row" "it dropped the word 'unread' without saying what the number DOES mean: $kline"
+else
+    ok "$king_row"
+fi
+
+# The other half, and the one that stops the fix from being a blanket hedge: a
+# box that HAS been drained carries real information, and the line must report
+# it rather than printing UNKNOWN over every box forever. A remedy that always
+# says "cannot tell" is the same absent signal wearing an apology.
+king_drained="a drained box is reported as a count, not as UNKNOWN"
+mkdir -p "$KM_STATE_DIR/mail/andranik/read"
+printf 'x' >"$KM_STATE_DIR/mail/andranik/read/20260821T101840Z--sedrak--older.md"
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+kline=$(printf '%s\n' "$OUT" | grep "king's inbox" || true)
+if printf '%s' "$kline" | grep -q 'UNKNOWN'; then
+    bad "$king_drained" "a box with a read/ history still reads UNKNOWN: $kline"
+elif ! printf '%s' "$kline" | grep -q '1'; then
+    bad "$king_drained" "the read count is not reported: $kline"
+else
+    ok "$king_drained"
+fi
+
+# unread_count's `find` exits 1 on a directory that does not exist, and under
+# `set -o pipefail` that killed km mid-table (gqlc-6wqw). read/ is missing far
+# more often than inbox/ is, so the counter above would meet it constantly.
+king_missing="status survives a mail box whose read/ directory has never been created"
+rm -rf "$KM_STATE_DIR/mail/andranik/read"
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "$king_missing" "status died on a missing read/ dir: rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q "king's inbox"; then
+    bad "$king_missing" "the table stopped before the king's line: $OUT"
+else
+    ok "$king_missing"
+fi
+
+# gqlc-6wqw, the same defect on inbox/ and the one that was actually filed: a
+# seat in kingdom.toml that no letter has ever reached has no inbox dir either,
+# and status died mid-table on it. Note that this row deliberately does NOT call
+# make_inboxes — that helper exists in this file precisely to hold the defect
+# off, and every status row above stands on it, so none of them can see this.
+inbox_row="status renders a full table when a configured seat has no inbox directory"
+dispatch_case '[]' '[]'
+rm -rf "$KM_STATE_DIR/mail"
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "$inbox_row" "status exited $RC part way through: $OUT"
+elif [ "$(printf '%s\n' "$OUT" | grep -cE '^(sedrak|raffi|tir) ')" -ne 3 ]; then
+    # The LAST seats in roster order, not the first: an abort mid-table still
+    # prints a header and some rows, so a row asserting rc alone, or asserting
+    # the table started, passes against a table that stopped.
+    bad "$inbox_row" "the seat table is short — it aborted part way: $OUT"
+elif ! printf '%s' "$OUT" | grep -q "king's inbox"; then
+    bad "$inbox_row" "it never reached the counters below the table: $OUT"
+else
+    ok "$inbox_row"
 fi
 
 # This suite builds git repositories, so it must be able to prove it built them
