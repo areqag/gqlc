@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Exits 0, silently, only when GIT ITSELF has just executed a hook out of this
+# repository's .githooks/. On anything else it prints what is in the way and
+# exits 1.
+#
+# WHY THIS IS NOT A CONFIG READ (bd gqlc-o13d). Every existing detector here
+# answers "what does core.hooksPath say", and that string is not the claim
+# anybody makes on it. Measured 2026-08-23 on a throwaway repo:
+#
+#     .git/config                        core.hooksPath = .githooks
+#     GIT_CONFIG_PARAMETERS              'core.hooksPath=/dev/null'
+#     git commit with a refusing pre-commit in .githooks/   -> LANDED, rc 0
+#
+# The file says the right thing, `just init` writes the right thing into it and
+# reports success, and no hook runs. That is the bead's complaint — "just init
+# does not hold" — in its deterministic form, with no race and no writer to
+# catch: the repair is a no-op that announces itself as a repair. Running a hook
+# is the only reading that cannot be satisfied by a value nobody consults.
+#
+# It also happens to cover, in one probe, states the value check cannot see at
+# all: core.hooksPath correct but .githooks/ holding no executable file, a hook
+# left non-executable, a noexec mount. `just check-hooks` documents both of the
+# first two as gaps it exits 0 on.
+#
+# WHAT IT STILL DOES NOT BUY, and the message says so where it matters: this is
+# a reading of one instant. core.hooksPath lives in the config every linked
+# worktree shares, so a live sibling session can revert it a second after this
+# exits 0. No check over a rewritable artefact can be the guarantee (bd
+# gqlc-zqrw / gqlc-p159); what this removes is the case where the check was
+# green about the wrong thing.
+set -uo pipefail
+
+# Spelled again in .githooks/gqlc-liveness-probe. See the header there.
+TOKEN='gqlc-hooks-live-witness'
+PROBE='gqlc-liveness-probe'
+
+# `git hook run` arrived in git 2.36 with --allow-unknown-hook-name. On an older
+# git there is no way to make git resolve a hook on demand, so this reports that
+# it could not read rather than reporting a failure it did not observe — a
+# refusal here would break every commit and push on that git for a reason that
+# is not about this repository. Fail-open, and loud about it: silence would be
+# indistinguishable from a proven-live run.
+MIN_GIT=2.36.0
+git_version="$(git version 2>/dev/null | awk '{print $3}')"
+if [ -z "$git_version" ] \
+    || [ "$(printf '%s\n%s\n' "$git_version" "$MIN_GIT" | sort -V | head -1)" != "$MIN_GIT" ]; then
+    echo "notice: git ${git_version:-<unknown>} has no 'git hook run', so whether git actually" >&2
+    echo "        runs this repository's hooks was NOT verified here (needs git $MIN_GIT+)." >&2
+    echo "        core.hooksPath reads '$(git config --get core.hooksPath 2>/dev/null || echo '<unset>')'," >&2
+    echo "        which is a string, not a witness." >&2
+    exit 0
+fi
+
+out="$(git hook run --allow-unknown-hook-name "$PROBE" 2>&1)"
+case "$out" in
+    *"$TOKEN"*) exit 0 ;;
+esac
+
+# Dead. Everything below only builds the diagnosis, and the two facts it needs
+# are the ORIGIN of the value (which says whether repairing the file can help)
+# and whether the probe is present in this checkout (which separates a drifted
+# lookup from a hooks directory missing its contents).
+raw="$(git config --show-origin --get core.hooksPath 2>/dev/null || true)"
+origin="${raw%%	*}"
+value="${raw#*	}"
+# No empty-raw guard: git prints "<origin>\t<value>" on rc 0 and nothing at all
+# otherwise, so both expansions already yield '' for the unset case. A guard for
+# it would be an equivalent no branch could witness.
+
+root="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+
+echo "error: git did not run this repository's hooks just now." >&2
+echo "       'git hook run --allow-unknown-hook-name $PROBE' produced no witness." >&2
+echo "       core.hooksPath: ${value:-<unset>} (${origin:-origin unreported by git})" >&2
+echo "       probe file:     $root/.githooks/$PROBE $( [ -x "$root/.githooks/$PROBE" ] && echo present-and-executable || echo 'MISSING or not executable')" >&2
+
+if [ "$origin" = "command line:" ]; then
+    # git reports 'command line:' for GIT_CONFIG_PARAMETERS and the
+    # GIT_CONFIG_COUNT/KEY_n/VALUE_n triple as well as for a literal -c, so it
+    # means the value arrived through the ENVIRONMENT. .git/config is unchanged,
+    # and `just init` rewrites a file that was never wrong — which is exactly the
+    # shape that made a repair report success and change nothing.
+    echo "       This value came from the ENVIRONMENT, not from a config file:" >&2
+    echo "       GIT_CONFIG_PARAMETERS or the GIT_CONFIG_COUNT/KEY_n/VALUE_n triple, as" >&2
+    echo "       exported by a 'git -c core.hooksPath=...' somewhere up the process tree." >&2
+    echo "       'just init' CANNOT repair this: it writes .git/config, which is already" >&2
+    echo "       correct. Repair: clear those variables in the process that exported them." >&2
+elif [ "$value" != ".githooks" ]; then
+    echo "       Repair: just init" >&2
+elif [ ! -x "$root/.githooks/$PROBE" ]; then
+    echo "       core.hooksPath is correct, so the lookup is fine and the probe is what is" >&2
+    echo "       missing. Repair: restore .githooks/$PROBE and make it executable." >&2
+else
+    echo "       core.hooksPath is correct and the probe is present and executable, so" >&2
+    echo "       neither the value nor the file explains this. Look for a noexec mount, a" >&2
+    echo "       core.hooksPath resolved relative to a different working tree, or a git" >&2
+    echo "       that refuses the hook for a reason it printed above." >&2
+fi
+exit 1
