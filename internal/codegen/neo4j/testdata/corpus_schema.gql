@@ -81,6 +81,10 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
         payload :: ANY VALUE NOT NULL,
         maybe   :: ANY VALUE
     }),
+    (:AnyProp {
+        badge :: ANY PROPERTY VALUE NOT NULL,
+        tag   :: ANY PROPERTY VALUE
+    }),
     (:Scalar) -[:Edgy {
         rank    :: INT32 NOT NULL,
         ranks   :: LIST<INT32> NOT NULL,

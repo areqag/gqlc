@@ -178,3 +178,139 @@ func (q *Queries) EventPayload(ctx context.Context) (*any, error) {
 	}
 	return value0, nil
 }
+
+const eventPropertyColumnsQueryText = `MATCH (e:Event) RETURN e.badge AS badge, e.tag AS tag`
+
+type EventPropertyColumnsRow struct {
+	Badge any
+	Tag   *any
+}
+
+// EventPropertyColumns executes the EventPropertyColumns query.
+//
+//	MATCH (e:Event) RETURN e.badge AS badge, e.tag AS tag
+func (q *Queries) EventPropertyColumns(ctx context.Context) ([]EventPropertyColumnsRow, error) {
+	stmt, err := q.cypherStmt("$gqlc$", eventPropertyColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return nil, fmt.Errorf("EventPropertyColumns: %w", err)
+	}
+	defer rows.Close()
+	out := make([]EventPropertyColumnsRow, 0)
+	for rows.Next() {
+		var raw0 []byte
+		var raw1 []byte
+		if err := rows.Scan(&raw0, &raw1); err != nil {
+			return nil, fmt.Errorf("EventPropertyColumns: scan row: %w", err)
+		}
+		if raw0 == nil {
+			return nil, fmt.Errorf("EventPropertyColumns: column %q is non-nullable but arrived null", "badge")
+		}
+		value0, err := agtypeValue(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("EventPropertyColumns: decode column %q: %w", "badge", err)
+		}
+		var value1 *any
+		if raw1 != nil {
+			decoded, err := agtypeValue(raw1)
+			if err != nil {
+				return nil, fmt.Errorf("EventPropertyColumns: decode column %q: %w", "tag", err)
+			}
+			value1 = &decoded
+		}
+		out = append(out, EventPropertyColumnsRow{
+			Badge: value0,
+			Tag:   value1,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("EventPropertyColumns: %w", err)
+	}
+	return out, nil
+}
+
+const eventBadgeQueryText = `MATCH (e:Event) RETURN e.badge AS badge`
+
+// EventBadge executes the EventBadge query.
+//
+//	MATCH (e:Event) RETURN e.badge AS badge
+func (q *Queries) EventBadge(ctx context.Context) (any, error) {
+	stmt, err := q.cypherStmt("$gqlc$", eventBadgeQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return nil, fmt.Errorf("EventBadge: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("EventBadge: %w", err)
+		}
+		return nil, ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return nil, fmt.Errorf("EventBadge: scan row: %w", err)
+	}
+	if rows.Next() {
+		return nil, ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("EventBadge: %w", err)
+	}
+	if raw0 == nil {
+		return nil, fmt.Errorf("EventBadge: column %q is non-nullable but arrived null", "badge")
+	}
+	value0, err := agtypeValue(raw0)
+	if err != nil {
+		return nil, fmt.Errorf("EventBadge: decode column %q: %w", "badge", err)
+	}
+	return value0, nil
+}
+
+const eventTagQueryText = `MATCH (e:Event) RETURN e.tag AS tag`
+
+// EventTag executes the EventTag query.
+//
+//	MATCH (e:Event) RETURN e.tag AS tag
+func (q *Queries) EventTag(ctx context.Context) (*any, error) {
+	stmt, err := q.cypherStmt("$gqlc$", eventTagQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return nil, fmt.Errorf("EventTag: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("EventTag: %w", err)
+		}
+		return nil, ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return nil, fmt.Errorf("EventTag: scan row: %w", err)
+	}
+	if rows.Next() {
+		return nil, ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("EventTag: %w", err)
+	}
+	var value0 *any
+	if raw0 != nil {
+		decoded, err := agtypeValue(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("EventTag: decode column %q: %w", "tag", err)
+		}
+		value0 = &decoded
+	}
+	return value0, nil
+}

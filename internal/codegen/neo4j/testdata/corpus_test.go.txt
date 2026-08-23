@@ -829,6 +829,73 @@ func TestAnythingColumnsCarryTheirNull(t *testing.T) {
 	}
 }
 
+// ANY PROPERTY VALUE is a second spelling of the same declared width as
+// ANY VALUE — internal/schema/gql/propertytype.go maps "ANY VALUE",
+// "ANY", "PROPERTY VALUE" and "ANY PROPERTY VALUE" all onto
+// graph.TypeAnyPropertyValue — and the emission is therefore expected to
+// be the same record.Get lane the two tests above run. Expected is not
+// measured: codegen reads a graph.PropertyType, so the only thing that
+// could put the two spellings on different lanes is a change to that
+// mapping, and no test in this repo held the column path against the
+// second spelling at all (bd gqlc-v7vu, found reviewing gqlc-dcap).
+//
+// So this pair is not a claim that the two widths differ. It is the row
+// that goes red if they ever stop agreeing, held one emission down from
+// the schema fixture that pins the same pair as golden bytes: golden
+// bytes move under -update and this does not.
+func TestAnyPropertyValueColumnsReadWhatTheGraphHolds(t *testing.T) {
+	for _, want := range []any{
+		nil, int64(1), 1.5, "x", true,
+		[]any{int64(1), nil, "x"},
+		map[string]any{"k": "v"},
+	} {
+		got, err := queriesOver([]string{"badge", "tag"}, []any{want, want}).AnyPropColumns(t.Context())
+		if err != nil {
+			t.Errorf("AnyPropColumns(badge: %#v) = error %v", want, err)
+			continue
+		}
+		if len(got) != 1 {
+			t.Fatalf("AnyPropColumns(badge: %#v) returned %d rows, want 1", want, len(got))
+		}
+		if !reflect.DeepEqual(got[0].Badge, want) {
+			t.Errorf("AnyPropColumns(badge: %#v)[0].Badge = %#v", want, got[0].Badge)
+		}
+	}
+}
+
+// The null half, held apart from the read half for the reason
+// TestAnythingColumnsCarryTheirNull gives: a record holds a key for every
+// column the query projected, so the nullable column's pointer has only
+// the graph's null to spend itself on, and a missing key is the driver
+// disagreeing with the plan rather than a value.
+func TestAnyPropertyValueColumnsCarryTheirNull(t *testing.T) {
+	null, err := queriesOver([]string{"badge", "tag"}, []any{int64(1), nil}).AnyPropColumns(t.Context())
+	if err != nil {
+		t.Fatalf("AnyPropColumns(tag: null) = error %v", err)
+	}
+	if len(null) != 1 {
+		t.Fatalf("AnyPropColumns(tag: null) returned %d rows, want 1", len(null))
+	}
+	if null[0].Tag != nil {
+		t.Errorf("AnyPropColumns(tag: null)[0].Tag = %#v, want nil", null[0].Tag)
+	}
+
+	held, err := queriesOver([]string{"badge", "tag"}, []any{int64(1), "v"}).AnyPropColumns(t.Context())
+	if err != nil {
+		t.Fatalf("AnyPropColumns(tag: \"v\") = error %v", err)
+	}
+	if held[0].Tag == nil {
+		t.Fatalf("AnyPropColumns(tag: \"v\")[0].Tag = nil, want a pointer")
+	}
+	if *held[0].Tag != any("v") {
+		t.Errorf("AnyPropColumns(tag: \"v\")[0].Tag points at %#v, want \"v\"", *held[0].Tag)
+	}
+
+	if _, err := queriesOver([]string{"badge"}, []any{int64(1)}).AnyPropColumns(t.Context()); err == nil {
+		t.Errorf("AnyPropColumns(no tag) = no error, want a refusal")
+	}
+}
+
 // scalarProps, listyProps and edgyProps are the driver values the three
 // entities above are decoded from, as a whole-entity column carries
 // them: a Props map on one dbtype value rather than a column per
