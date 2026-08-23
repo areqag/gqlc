@@ -52,9 +52,11 @@ bd close <id>         # Complete work
 
 ## Working directory
 
-**Every session that will modify files runs in its own sibling git worktree.** The shared repo cwd (`/home/antranig/Developer/gqlc/gqlc`) is only for read-only research work (grep, read, `bd show`, `git log`) — the moment intent shifts to modification (any `bd create/close/update`, any file write, any branch creation), spin up a sibling worktree.
+**No session modifies files in the shared repo cwd** (`/home/antranig/Developer/gqlc/gqlc`). It is for read-only research work (grep, read, `bd show`, `git log`) — the moment intent shifts to modification (any `bd create/close/update`, any file write, any branch creation), you work somewhere else. WHERE depends on who you are, and there are two answers.
 
-At bead-claim time, before any modification:
+**If you are a seat of the Թագաւորութիւն** (`KINGDOM_SEAT` is set), you already have one: `../gqlc-seat-<you>`, and it is PERMANENT. Do not create another and do not remove it; cut a branch per bead inside it. Your recipe is `kingdom/brain/playbooks/citizen-protocol.md`, "Working a bead" step 1, which is authoritative for seats — the rest of this section is deliberately not a second copy of it, so the two cannot drift apart again (bd `gqlc-wuax`).
+
+**Everyone else** — a human, or a one-off agent like a `/tdd` run or a factory session — has no seat worktree, so make an ephemeral sibling one per session, at bead-claim time, before any modification:
 
 ```bash
 git worktree add --no-track -b <branch-name> ../<repo>-<bead-slug> origin/master
@@ -75,7 +77,9 @@ After the PR merges and beads are closed:
 git worktree remove ../<repo>-<bead-slug>
 ```
 
-**Why:** two agent sessions sharing one cwd share one HEAD, one index, one working tree. Whichever ran `git checkout` last wins — the other session's `git status` / `git log --oneline master..HEAD` silently report the wrong branch. Staged files bleed across branches. `MERGE_HEAD` / `CHERRY_PICK_HEAD` state confuses hook logic. All observed 2026-07-18 (bd `gqlc-2fi`).
+**That removal is best-effort, and the leak it fails to prevent is expected.** It runs only if the session survives to run it, and sessions here are killed without warning by quota walls and stall watchdogs, so it is frequently never reached: 70 stale worktrees were removed by hand once, and a later sweep found 93 registered worktrees among 621 stale `/tmp` directories (bd `gqlc-osuz`). So do not read the line above as the mechanism that keeps the disk clean. The mechanisms are `git worktree prune` for the registrations, and `just tmp-report` / `just tmp-reap apply` for the directories — run them when you find yourself in the shared checkout, not only when you leaked one. The per-seat model has none of this failure mode, because there is nothing to reap; that is the argument for it, and the reason a seat must not adopt the recipe above.
+
+**Why a worktree at all:** two agent sessions sharing one cwd share one HEAD, one index, one working tree. Whichever ran `git checkout` last wins — the other session's `git status` / `git log --oneline master..HEAD` silently report the wrong branch. Staged files bleed across branches. `MERGE_HEAD` / `CHERRY_PICK_HEAD` state confuses hook logic. All observed 2026-07-18 (bd `gqlc-2fi`).
 
 Nest sibling worktrees at a sibling path (`../<repo>-<slug>`), never nested inside the main cwd — nesting breaks Go tooling paths and creates stale LSP diagnostics.
 
@@ -155,11 +159,13 @@ town at a glance.
 work was executed by spawning per-bead agent teams (implementer +
 adversarial reviewer, the "Carmack + Linus" shape). Under the kingdom,
 work is taken by the persistent seats instead: Ճարտարապետներ design and hand
-off, Ռազմիկներ execute test-driven (`/tdd`), and the Դատաւորներ review —
-every Ռազմիկ PR merges on one judge's PASS
-(`/thermo-nuclear-code-quality-review`).
-The disciplines carry over — tests first, adversarial review, merge on
-PASS — the ephemeral instances do not. Humans do not block: citizens
+off, Ռազմիկներ execute test-driven (`/tdd`), and the Դատաւորներ review
+(`/thermo-nuclear-code-quality-review`). Review follows the design gate: a PR
+is read by a judge if its bead was blocked by a design bead, if it amends the
+constitution, or if a citizen asks — everything else merges on green gates
+(Constitution V.2, `kingdom/brain/decisions/0003-the-restart.md`).
+The disciplines carry over — tests first, adversarial review where it is
+owed — the ephemeral instances do not. Humans do not block: citizens
 decide, merge, and amend their own constitution.
 
 ## Build & Test

@@ -40,12 +40,34 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    is `origin/master`, so a bare `git push` here resolves to master (bd
    gqlc-tfh1). `git branch --unset-upstream` repairs a branch already in that
    state.
+
+   **Your seat worktree is permanent.** Never `git worktree add` and never
+   remove it: it is created once and reused at every wake, and the branch you
+   cut above lives inside it. CLAUDE.md's "Working directory" section
+   prescribes an EPHEMERAL worktree per session, removed after the merge —
+   that recipe is for sessions that are not seats (a human, or a one-off
+   agent), which have no seat worktree to work in. It is not an instruction to
+   you, and following it leaves worktrees nobody reaps (bd gqlc-wuax,
+   gqlc-osuz).
 2. Keep the bead current: notes for material state changes, `--append-notes`
    (never bare `--notes`, which replaces).
 3. Tests first. Ռազմիկներ write code test-driven — the `/tdd` skill walks
    the loop: a failing test that witnesses the requirement, then the code
    that turns it green, then refactor (Constitution V.5). Bug fixes start
    with the reproducer red. Code without a witnessing test is not done.
+
+   **A bead that adds or changes a GUARD is not done until you have watched
+   that guard fail.** Break the condition it exists to catch and see a test go
+   red. A guard nothing turns red for is inert, and inert is a guard's normal
+   failure mode: the suite is green either way, so no other step in this
+   protocol will tell you. Whatever class holds the bead — a Ռազմիկ's gate, a
+   Ճարտարապետ's invariant, a Դատաւոր's detector — the answer to a guard is the
+   mutation and not the effort dial: `high` is the ceiling for every class but
+   a Ճարտարապետ on a design (ADR 0003), so a guard bead does not raise it. If
+   you cannot get a red, that IS the finding — say so on the bead rather than
+   shipping a guard asserted by nothing (bd gqlc-uqta; on gqlc-07e3 a hook's
+   own FAIL-CLOSED paragraph turned out to be asserted by nothing, and the
+   suite had been green throughout).
 4. Quality gates before any PR: `just fmt-check`, `just lint`, `just test`.
    Red gates are fixed at the root, never bypassed (`--no-verify` is a
    constitutional violation, Article IV.4).
@@ -107,7 +129,22 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    an inbox sleeps. Ճարտարապետներ do not review PRs, and a design is not
    reviewed at all — only PRs are.
 
-   Then merge on the Դատաւոր's PASS — a FAIL blocks the merge until answered
+   **File it with `--deps blocks:<your-impl-bead-id>`**, which makes the NEW
+   bead block that one, so the review bead blocks your implementation bead.
+   Measured 2026-08-23 in a throwaway `bd init` workspace: after
+   `bd create <review> --deps blocks:$impl`, the review bead appears under
+   `bd show $impl`'s `.dependencies` with `dependency_type: "blocks"`, the impl
+   bead reads BLOCKED and leaves `bd ready`, and closing the review bead puts
+   it back. That dependency is what lets the dispatcher's resume pass leave you
+   asleep while the verdict is owed: it wakes a seat only for in-progress beads
+   carrying no OPEN blocks-dependency. Forget the flag and you are woken every
+   cycle to rediscover that you are still waiting, each wake eating a slot from
+   `concurrency.max_active` that the judge who would unblock you is competing
+   for. One review bead per verdict round — after answering a FAIL, file a
+   fresh one for the re-review.
+
+   Then merge on the Դատաւոր's PASS; your resume wake arrives when the review
+   bead closes, PASS and FAIL alike. A FAIL blocks the merge until answered
    (Constitution V.4). After any merge, reviewed or not: close the bead
    citing the merged SHA, delete the branch, file follow-up beads for
    anything you deferred.
@@ -157,6 +194,42 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    that exemption, of 21 open review beads the only two carrying a subject
    label were the only two held, one of them for nine hours, looking from the
    board exactly like ordinary queue depth (bd gqlc-n4oe).
+
+## Holding a bead
+
+**Withholding a bead's `class:` label does not hold it.** A held bead and an
+untriaged one are the same state — open, no class label — and clearing the
+unlabelled backlog is Սեդրակ's standing chore, so the sweep that exists to
+label untriaged beads is guaranteed to label the held ones too. The release
+condition you wrote in the notes is read by nobody at labelling time. Measured
+2026-08-22 against the live DB (bd gqlc-jvp5): of 20 beads whose own text said
+they were deliberately unlabelled, 16 had been labelled anyway, and one of
+those was already `in_progress` with a citizen working it. No amount of care
+fixes this — the distinction is not representable, so the failure is silent on
+both sides: the sweeper sees a bead that wants a label, and the holder's note
+still reads HELD long after it stopped being true.
+
+Labelling says WHO should do the work. Holding says WHEN. Give the bead its
+correct label and hold it separately, by one of the two mechanisms the
+machinery already enforces:
+
+- **A `blocks` dependency**, when some specific bead closing is the release
+  condition. At filing time: `bd create ... --deps blocks:<the-bead-to-hold>`
+  (the new bead blocks that one). Afterwards:
+  `bd dep <blocker> --blocks <held>`. All three dispatch passes respect it —
+  `bd ready` is blocker-aware and both the fresh and owned passes route from
+  it, and the resume pass skips an in-progress bead carrying an open
+  blocks-dep (kingdom/bin/km). It releases itself when the blocker closes, so
+  nothing depends on anyone remembering.
+- **The `subject:<path>` label**, when the release condition is "an open PR is
+  touching this file". `km dispatch` holds a subject-labelled bead while its
+  path is under an open PR and releases it when that PR merges or closes, and
+  prints which hold fired. This is the case the unlabelled advice was invented
+  for, and it needs no hold of your own — just the label.
+
+If you meet a bead whose notes claim it is held by being unlabelled, it is not
+held. Give it its class label plus one of the two above, or release it
+explicitly and say in the notes that you did.
 
 ## How a bead reaches a seat
 
