@@ -318,14 +318,60 @@ else
     ok "a halted dispatcher wakes nobody, not even the mayor with unread mail"
 fi
 
+# --- only Սեդրակ or Անդրանիկ lowers a halt (Article VI.4) --------------------
+# VI.4: "Anyone may raise a halt for cause; only Սեդրակ or Անդրանիկ lowers it."
+# km recorded WHO lowered it and let anyone do it: a guard lowered one on
+# 2026-08-22 and km printed "halt lowered by raffi" cheerfully (bd gqlc-5hex).
+# The halt is the town's only emergency brake, so the check fails closed — an
+# identity the rule does not name, and no identity at all, are both refused,
+# and neither may leave the flag removed on the way out.
+
+run_as() { local s="$1"; shift; OUT="$(KINGDOM_SEAT="$s" "$KM" "$@" 2>&1)"; RC=$?; }
+
+run_as raffi resume
+if [ "$RC" -eq 0 ]; then
+    bad "a seat outside VI.4 cannot lower the halt" "raffi lowered it: rc=0, out=$OUT"
+elif [ ! -f "$haltf" ]; then
+    bad "a seat outside VI.4 cannot lower the halt" "refused, then removed the flag anyway: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'VI.4'; then
+    bad "a seat outside VI.4 cannot lower the halt" "the refusal names no authority: $OUT"
+else
+    ok "a seat the constitution does not name is refused, and the halt flag survives the refusal"
+fi
+
+# KINGDOM_SEAT unset reads as andranik everywhere else in km. For the one
+# command that releases the emergency brake that default is the hole: every
+# ephemeral agent session in the shared checkout runs without it, so the crown
+# has to say so on purpose.
 run resume
+if [ "$RC" -eq 0 ]; then
+    bad "an unidentified caller cannot lower the halt" "rc=0: $OUT"
+elif [ ! -f "$haltf" ]; then
+    bad "an unidentified caller cannot lower the halt" "the flag is gone: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'KINGDOM_SEAT'; then
+    bad "an unidentified caller cannot lower the halt" "the refusal does not say how to declare an identity: $OUT"
+else
+    ok "with KINGDOM_SEAT unset the halt is not lowered, and the refusal says how to declare who you are"
+fi
+
+run_as sedrak resume
 if [ "$RC" -ne 0 ] || [ -f "$haltf" ]; then
     bad "resume lowers the flag" "rc=$RC out=$OUT"
 else
-    ok "resume lowers the halt flag"
+    ok "resume lowers the halt flag for the mayor"
 fi
 
-run resume
+# The other half of the clause, and the raise that sets it up carries no
+# identity on purpose: VI.4 restricts only the lowering.
+run halt second cause
+run_as andranik resume
+if [ "$RC" -ne 0 ] || [ -f "$haltf" ]; then
+    bad "the crown lowers the flag too" "rc=$RC out=$OUT"
+else
+    ok "the crown lowers the halt flag too, so the rule names two and not one"
+fi
+
+run_as sedrak resume
 if [ "$RC" -ne 0 ] || ! printf '%s' "$OUT" | grep -q 'no halt'; then
     bad "resume without a halt says so" "rc=$RC out=$OUT"
 else

@@ -903,10 +903,38 @@ cmd_halt() {
     echo "  km wake and km herratsayn still reach a seat, so the town stays workable by hand."
 }
 
+# Constitution VI.4, in full: "A halt (kingdom-state/halt) stops new wakes;
+# running sessions finish their day. Anyone may raise a halt for cause; only
+# Սեդրակ or Անդրանիկ lowers it." Raising stays open to everyone above; this list
+# is the whole of the restriction, and it is two names because the clause names
+# two. Widening it is a constitutional amendment (Article VII), not a patch.
+HALT_LOWERERS="sedrak andranik"
+
 cmd_resume() {
+    local seat="${KINGDOM_SEAT:-}"
+    # Fail closed on an absent identity rather than defaulting to andranik the
+    # way the rest of km does. Everywhere else that default is a convenience for
+    # the operator at a terminal; here it is the hole, because every ephemeral
+    # agent session in the shared checkout also runs with KINGDOM_SEAT unset and
+    # would inherit the crown's authority over the town's only emergency brake.
+    if [ -z "$seat" ]; then
+        echo "resume: refused — this session has no identity (KINGDOM_SEAT is unset)." >&2
+        echo "  Constitution VI.4 reserves lowering a halt to Սեդրակ or Անդրանիկ." >&2
+        echo "  If you are the crown, say so: KINGDOM_SEAT=andranik km resume" >&2
+        return 1
+    fi
+    case " $HALT_LOWERERS " in
+        *" $seat "*) ;;
+        *)
+            echo "resume: refused — $seat may not lower a halt." >&2
+            echo "  Constitution VI.4 reserves that to Սեդրակ (sedrak) or Անդրանիկ (andranik);" >&2
+            echo "  anyone may RAISE one. Ask sedrak to lower it: km mail send sedrak -s ..." >&2
+            return 1
+            ;;
+    esac
     if [ -f "$(state_dir)/halt" ]; then
         rm -f "$(state_dir)/halt"
-        echo "halt lowered by ${KINGDOM_SEAT:-andranik}: the dispatcher may wake seats again"
+        echo "halt lowered by $seat: the dispatcher may wake seats again"
     else
         echo "no halt was raised"
     fi
