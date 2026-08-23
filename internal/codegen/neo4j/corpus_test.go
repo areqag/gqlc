@@ -128,6 +128,14 @@ var corpusTests = []string{
 	"TestDecodersRefuseAValueOfAnotherType",
 	"TestNodeDecoderAcceptsLabelsTheSchemaDoesNotDeclare",
 	"TestNodeDecoderRefusesAnUnlabelledNode",
+	"TestScalarColumnsNarrowTheirCarriers",
+	"TestScalarColumnRefusalsCarryTheDriversError",
+	"TestOptionalEntityColumnsCarryTheirNull",
+	"TestOptionalEdgeUnionColumnCarriesItsNull",
+	"TestVarLengthEdgeColumnDecodesEveryElement",
+	"TestVarLengthEdgeUnionColumnDispatchesPerElement",
+	"TestEdgySpareSeparatesAbsentFromNullOverARelationship",
+	"TestTwoEdgeUnionColumnsDoNotShareLocals",
 }
 
 // corpusSubtests names, per top-level test, how many subtest passes the
