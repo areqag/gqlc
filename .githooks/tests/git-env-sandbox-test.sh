@@ -349,6 +349,21 @@ FAKE_HOME="$TMP/fake-home"
 mkdir -p "$FAKE_HOME"
 home_snapshot() { find "$FAKE_HOME" | sort; }
 
+# A throwaway home is not only $HOME. Measured on CI and not locally:
+# km-overlap-test.sh runs `gh`, and gh writes a device id to
+# $XDG_STATE_HOME/gh, defaulting to ~/.local/state/gh — so the row fired on a
+# write no suite chose to make and could not avoid short of never invoking the
+# tool. Redirecting the XDG roots is part of standing the home up, not an
+# exemption from the row: a tool that ignores XDG and writes to ~ directly
+# still trips it, and so does the suite's own dotfile.
+XDG_ROOTS=(
+    "XDG_STATE_HOME=$TMP/xdg/state"
+    "XDG_CONFIG_HOME=$TMP/xdg/config"
+    "XDG_CACHE_HOME=$TMP/xdg/cache"
+    "XDG_DATA_HOME=$TMP/xdg/data"
+)
+mkdir -p "$TMP/xdg"
+
 # RED control for the HOME row in the loop below. Same reason part B has one for
 # the shim: a tripwire watching the wrong directory reports every suite clean.
 # The fixture is composed with printf rather than written as a literal, so this
@@ -398,6 +413,7 @@ for suite in "${suites[@]}"; do
       && env "${poison[@]}" \
              "GQLC_GIT_ENV_LOG=$log" \
              "HOME=$FAKE_HOME" \
+             "${XDG_ROOTS[@]}" \
              "PATH=$SHIM_DIR:$PATH" \
              timeout 120 bash "$suite" ${self_arg[@]+"${self_arg[@]}"} ) >/dev/null 2>&1 || rc=$?
     canary_after="$(snapshot)"
