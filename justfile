@@ -93,7 +93,14 @@ reap_threshold := "75"
 # one place alone reddens a named row (measured). The installer refuses to
 # overwrite a hook it did not write, classifies all five names before writing any,
 # and writes through a temp name and a rename rather than over the live path.
-init:
+#
+# The third half, added later and wired as a dependency rather than inline:
+# check-push-keepalive puts ssh keepalives in core.sshCommand so a push whose
+# pre-push run outlasts GitHub's idle timeout is not lost (bd gqlc-ehgg). It is
+# a dependency because `just test` and `just doctor` need it too — this recipe
+# is run once after a clone, and the worktrees that predate it never run it
+# again.
+init: check-push-keepalive
     #!/usr/bin/env bash
     set -euo pipefail
     git config core.hooksPath .githooks
@@ -377,6 +384,144 @@ check-shared-config dir=".":
     done
     exit "$rc"
 
+# puts ssh keepalives in the repository's own git config, so an ordinary
+# `git push` survives .githooks/pre-push — bd gqlc-ehgg / GH #1414.
+#
+# THE DEFECT. git opens the transport to the remote BEFORE it runs pre-push,
+# then this repository's pre-push holds it idle for the whole gate chain: the
+# full go suite, every shell suite, golangci-lint. Twelve to fifteen minutes on
+# a loaded machine, and longer the more seats are pushing. GitHub's server-side
+# idle timeout closes the connection during that window, so git exits 141
+# (SIGPIPE, "Connection to github.com closed by remote host") or 143 AFTER every
+# gate has passed. Four independent lanes hit it in one night on 2026-08-23.
+#
+# It is vicious in three directions. The tail of the hook output is all `ok`, so
+# a lane that tails its push log reads a green run and the one line that matters
+# is a page above it. The objects sometimes ARRIVE ANYWAY — measured: a lane
+# reported five consecutive rc=141 failures while `git ls-remote` showed its
+# branch already on origin at the local SHA — so two lanes abandoned work that
+# had landed. And the gate is what is running when the connection dies, so the
+# gate looks like the obstacle: one lane reached for `git push --no-verify` on
+# its fourth attempt, which is the one thing this repository never does.
+#
+# WHY THE CONFIG AND NOT THE ENV VAR. `GIT_SSH_COMMAND='ssh -o
+# ServerAliveInterval=15 ...' git push` is measured to work and is what got
+# every lane through that night, but it only helps someone who already knows to
+# type it. core.sshCommand is read by every `git push` from every worktree
+# sharing this repository, including one a human runs without having read the
+# bead. That is the difference between a workaround and a fix.
+#
+# WHAT IT DOES NOT COVER, stated because a partial fix read as a complete one is
+# how this defect keeps costing hours. core.sshCommand governs ssh and nothing
+# else, and rc=141 was measured over HTTPS too on 2026-08-23 by a second lane —
+# git spawns no ssh there, so there is nothing for the keepalive to attach to
+# and no equivalent key to set. It covers every push from this repository as it
+# is configured: all 17 seat worktrees and the shared checkout resolve origin to
+# git@github.com:areqag/gqlc.git, with no url.insteadOf rewrite, and remotes live
+# in the shared config so a per-worktree difference is not reachable (measured
+# 2026-08-23). A clone made over https is the uncovered case, and
+# .githooks/push-transport-notice tells that operator so on every push rather
+# than leaving the silence to be read as cover.
+#
+# WHY IT SELF-HEALS RATHER THAN REFUSING, unlike check-hooks above. The key is
+# absent on every fresh clone and in every worktree registered before this
+# landed, so a refusal would have failed every push in the town on the day it
+# shipped — and the obvious answer to a push refused for a reason unrelated to
+# the commits is `git push --no-verify`, which is the exact behaviour this whole
+# recipe exists to remove the pressure for. This follows check-hooks' tripwire
+# arm and ensure-golangci: absence is unambiguous and the repair is one write.
+#
+# WHAT IT WILL NOT DO. It writes core.sshCommand and nothing else. The shared
+# config is where the damage lives — bd gqlc-qhno's core.bare, and the spawns
+# that rewrote core.hooksPath to /dev/null and disabled every hook repo-wide —
+# so an existing value is REPORTED and never overwritten. `ssh -i ~/.ssh/id_foo`
+# is legitimate configuration that belongs to whoever wrote it, and clobbering
+# it would lock its author out of the remote entirely; a lost push is a smaller
+# harm than a broken key. That arm warns and exits 0 for the same reason.
+#
+# It reads --get, not --get-all, which is the opposite of check-shared-config
+# above, and the two questions are why. That recipe asks "is a dangerous value
+# PRESENT", where any occurrence convicts. This one asks "is the keepalive IN
+# EFFECT", and what is in effect is the value git resolves — the last one. A
+# keepalive-bearing value masked by a later plain `ssh` is not in effect and
+# must be reported, which --get-all would miss by finding the good one.
+#
+# An empty value is treated as absent: git reads `[core]\n\tsshCommand =` back
+# as a present empty string and then falls through to plain ssh, so it carries
+# no keepalive and is nobody's deliberate configuration.
+#
+# Skipped under CI, which pushes over https with no local hooks and would only
+# be writing a key into a checkout thrown away at the end of the job.
+[private]
+check-push-keepalive dir=".":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dir="{{ dir }}"
+    if [ -n "${CI:-}" ]; then
+        exit 0
+    fi
+    want='ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=120'
+    have="$(git -C "$dir" config --get core.sshCommand 2>/dev/null || true)"
+    if [ -z "$have" ]; then
+        if git -C "$dir" config core.sshCommand "$want" 2>/dev/null; then
+            echo "note: core.sshCommand set to '$want' — an ordinary 'git push' now keepalives" >&2
+            echo "      the transport while .githooks/pre-push runs (bd gqlc-ehgg)." >&2
+        else
+            echo "warn: could not write core.sshCommand in '$dir', so a push whose pre-push run" >&2
+            echo "      outlasts GitHub's ssh idle timeout will still die at rc=141 with every" >&2
+            echo "      gate passed (bd gqlc-ehgg). Push under this instead:" >&2
+            echo "        GIT_SSH_COMMAND='$want' git push ..." >&2
+        fi
+        exit 0
+    fi
+    case "$have" in
+        *ServerAliveInterval=*) exit 0 ;;
+    esac
+    echo "warn: core.sshCommand is '$have', which sets no ServerAliveInterval, and it is NOT" >&2
+    echo "      overwritten here — it is someone's deliberate configuration (bd gqlc-ehgg)." >&2
+    echo "      A push whose pre-push run outlasts GitHub's ssh idle timeout will die at" >&2
+    echo "      rc=141 with every gate passed. Add the keepalive to your own value:" >&2
+    echo "        git -C '$dir' config core.sshCommand '$have -o ServerAliveInterval=15 -o ServerAliveCountMax=120'" >&2
+    exit 0
+
+# answers whether a push that reported failure actually landed — bd gqlc-ehgg.
+#
+# The rc=141 above does not mean the objects stayed home. Measured 2026-08-23: a
+# lane reported five consecutive push failures and stalled, while its branch was
+# already on origin at the same SHA as local. Two lanes abandoned landed work
+# that night, and the alternative to this recipe is a hand investigation by
+# someone who has just watched fifteen minutes of green gates end in a failure.
+#
+# READ-ONLY, and deliberately not a retry. Pushing again into a remote state
+# nobody has looked at is how a force-push argument gets made at 3am; this
+# reports the three states and stops.
+push-landed branch="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    branch="{{ branch }}"
+    [ -n "$branch" ] || branch="$(git rev-parse --abbrev-ref HEAD)"
+    local_sha="$(git rev-parse --verify "$branch" 2>/dev/null || true)"
+    if [ -z "$local_sha" ]; then
+        echo "error: '$branch' is not a branch in this worktree." >&2
+        exit 1
+    fi
+    remote_sha="$(git ls-remote origin "refs/heads/$branch" 2>/dev/null | awk 'NR==1 { print $1 }')"
+    if [ -z "$remote_sha" ]; then
+        echo "NOT LANDED: origin has no refs/heads/$branch. Local is $local_sha."
+        echo "            The push did fail. Retry it; nothing on the remote is at stake."
+        exit 1
+    fi
+    if [ "$remote_sha" = "$local_sha" ]; then
+        echo "LANDED: origin/$branch is $remote_sha, the same commit as local."
+        echo "        The push SUCCEEDED whatever rc git reported (bd gqlc-ehgg). Do not retry;"
+        echo "        do not abandon this work as unpushed."
+        exit 0
+    fi
+    echo "DIVERGED: origin/$branch is $remote_sha, local is $local_sha."
+    echo "          Something landed, but not this commit. Look before pushing again:"
+    echo "            git fetch origin '$branch' && git log --oneline FETCH_HEAD...$branch"
+    exit 1
+
 # refuses to run when bd's auto-export cannot stage its own output — bd
 # gqlc-c2ch / GH #1170.
 #
@@ -524,7 +669,7 @@ check-tmp root=scratch_root:
     just tmpreap {{quote(root)}} -check
 
 # health check for local dev environment; extend as new drift modes emerge
-doctor: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp
+doctor: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp check-push-keepalive
     @echo "ok"
 
 # what is holding the shared scratch filesystem, in bytes AND inodes, with the
@@ -1678,7 +1823,7 @@ test-hooks:
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # -shuffle catches inter-test coupling; go build link-checks package main,
 # which has no tests and is otherwise only compile-checked by lint.
-test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp test-hooks
+test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp check-push-keepalive test-hooks
     go build ./...
     go test -shuffle=on ./...
 
