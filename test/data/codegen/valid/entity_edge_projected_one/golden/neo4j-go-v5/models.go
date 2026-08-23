@@ -15,8 +15,19 @@ type Movie struct {
 }
 
 // decodeMovie decodes a driver dbtype.Node into a Movie struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeMovie(node dbtype.Node) (Movie, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Movie" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Movie{}, fmt.Errorf("decode Movie: expected a node labelled %q, got labels %q", "Movie", node.Labels)
+	}
 	var out Movie
 	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
@@ -32,8 +43,19 @@ type Person struct {
 }
 
 // decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodePerson(node dbtype.Node) (Person, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Person" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
+	}
 	var out Person
 	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
@@ -49,8 +71,12 @@ type ACTEDIN struct {
 }
 
 // decodeACTEDIN decodes a driver dbtype.Relationship into a ACTEDIN struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeACTEDIN(rel dbtype.Relationship) (ACTEDIN, error) {
+	if rel.Type != "ACTED_IN" {
+		return ACTEDIN{}, fmt.Errorf("decode ACTEDIN: expected a relationship of type %q, got %q", "ACTED_IN", rel.Type)
+	}
 	var out ACTEDIN
 	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {

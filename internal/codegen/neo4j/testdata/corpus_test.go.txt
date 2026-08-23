@@ -11,13 +11,21 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
-// node is the shape the driver hands a decoder: a Props map holding the
-// Go values neo4j.PropertyValue names, and nothing else. Every value in
-// every test below is one a Bolt hydrator can actually build — an
-// integer of any width arrives as int64, a float of any width as
-// float64, and an array of anything but bytes as []any.
-func node(props map[string]any) dbtype.Node {
-	return dbtype.Node{Id: 1, ElementId: "4:corpus:1", Labels: []string{"Corpus"}, Props: props}
+// node is the shape the driver hands a decoder: the labels the graph
+// stamped on the value, and a Props map holding the Go values
+// neo4j.PropertyValue names, and nothing else. Every value in every test
+// below is one a Bolt hydrator can actually build — an integer of any
+// width arrives as int64, a float of any width as float64, and an array
+// of anything but bytes as []any.
+//
+// The label is a parameter rather than one fixed spelling because the
+// emitted decoders guard on it (bd gqlc-2h9w). Under a fixed spelling
+// every caller below would have to be handed a value of the wrong type
+// for the helper it calls, which is the defect the guard exists to
+// refuse — so a battery written that way would test nothing but the
+// guard, over and over.
+func node(label string, props map[string]any) dbtype.Node {
+	return dbtype.Node{Id: 1, ElementId: "4:corpus:1", Labels: []string{label}, Props: props}
 }
 
 // relationship is the shape the driver hands an edge decoder. Its Props
@@ -98,7 +106,7 @@ func driverRefusal[T neo4j.RecordValue](t *testing.T, keys []string, values []an
 // internal/codegen/age/testdata/corpus_test.go.txt, TestAgtypeValue), so
 // a caller who moves between the two backends is handed the same list.
 func TestBinCarriesNullElements(t *testing.T) {
-	got, err := decodeBin(node(map[string]any{
+	got, err := decodeBin(node("Bin", map[string]any{
 		"loose": []any{true, nil, 3.5},
 		"bag":   []any{int64(1), nil, "x"},
 		"piles": []any{[]any{int64(1), nil}, []any{}},
@@ -128,7 +136,7 @@ func TestBinCarriesNullElements(t *testing.T) {
 // as an empty list, and a property holding something that is not a list
 // at all is refused rather than carried through.
 func TestBinNullabilityAndShape(t *testing.T) {
-	got, err := decodeBin(node(map[string]any{"loose": []any{}}))
+	got, err := decodeBin(node("Bin", map[string]any{"loose": []any{}}))
 	if err != nil {
 		t.Fatalf("decodeBin(absent) = error %v", err)
 	}
@@ -142,13 +150,13 @@ func TestBinNullabilityAndShape(t *testing.T) {
 		t.Errorf("decodeBin(absent).Piles = %#v, want nil", got.Piles)
 	}
 
-	if _, err := decodeBin(node(map[string]any{"loose": []any{}, "bag": "not a list"})); err == nil {
+	if _, err := decodeBin(node("Bin", map[string]any{"loose": []any{}, "bag": "not a list"})); err == nil {
 		t.Errorf("decodeBin(bag: string) = no error, want a refusal")
 	}
-	if _, err := decodeBin(node(map[string]any{"loose": []any{}, "piles": []any{int64(1)}})); err == nil {
+	if _, err := decodeBin(node("Bin", map[string]any{"loose": []any{}, "piles": []any{int64(1)}})); err == nil {
 		t.Errorf("decodeBin(piles: [int]) = no error, want a refusal")
 	}
-	if _, err := decodeBin(node(map[string]any{})); err == nil {
+	if _, err := decodeBin(node("Bin", map[string]any{})); err == nil {
 		t.Errorf("decodeBin(no loose) = no error, want a refusal")
 	}
 }
@@ -160,7 +168,7 @@ func TestBinNullabilityAndShape(t *testing.T) {
 // arrive as themselves.
 func TestListyNarrowsEachElement(t *testing.T) {
 	stamp := time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)
-	got, err := decodeListy(node(map[string]any{
+	got, err := decodeListy(node("Listy", map[string]any{
 		"tags":   []any{"a", "b"},
 		"ranks":  []any{int64(1), int64(-2)},
 		"matrix": []any{[]any{int64(7), int64(8)}, []any{}},
@@ -200,7 +208,7 @@ func TestListyNarrowsEachElement(t *testing.T) {
 // which is what keeps a `len(xs) == 0` check meaning the same thing on
 // either backend.
 func TestListyEmptyIsNotAbsent(t *testing.T) {
-	empty, err := decodeListy(node(map[string]any{
+	empty, err := decodeListy(node("Listy", map[string]any{
 		"tags": []any{}, "ranks": []any{}, "matrix": []any{},
 		"blobs": []any{}, "stamps": []any{}, "depths": []any{},
 	}))
@@ -225,7 +233,7 @@ func TestListyEmptyIsNotAbsent(t *testing.T) {
 		t.Errorf("decodeListy(empty).Depths = %#v, want a pointer to an empty list", empty.Depths)
 	}
 
-	absent, err := decodeListy(node(map[string]any{
+	absent, err := decodeListy(node("Listy", map[string]any{
 		"tags": []any{}, "ranks": []any{}, "matrix": []any{}, "blobs": []any{}, "stamps": []any{},
 	}))
 	if err != nil {
@@ -240,7 +248,7 @@ func TestListyEmptyIsNotAbsent(t *testing.T) {
 // the position, because a list is decoded whole and the caller otherwise
 // has nothing to go on.
 func TestListyRefusesAMisTypedElement(t *testing.T) {
-	_, err := decodeListy(node(map[string]any{
+	_, err := decodeListy(node("Listy", map[string]any{
 		"tags": []any{}, "ranks": []any{int64(1), "no"}, "matrix": []any{},
 		"blobs": []any{}, "stamps": []any{},
 	}))
@@ -268,7 +276,7 @@ func TestAnythingReadsWhatTheGraphHolds(t *testing.T) {
 		[]any{int64(1), nil, "x"},
 		map[string]any{"k": "v"},
 	} {
-		got, err := decodeAnything(node(map[string]any{"payload": want}))
+		got, err := decodeAnything(node("Anything", map[string]any{"payload": want}))
 		if err != nil {
 			t.Errorf("decodeAnything(payload: %#v) = error %v", want, err)
 			continue
@@ -283,7 +291,7 @@ func TestAnythingReadsWhatTheGraphHolds(t *testing.T) {
 // graph can hold: a property the graph does not have at all, and a
 // property it holds whose value is null.
 func TestAnythingSeparatesAbsentFromNull(t *testing.T) {
-	absent, err := decodeAnything(node(map[string]any{"payload": int64(1)}))
+	absent, err := decodeAnything(node("Anything", map[string]any{"payload": int64(1)}))
 	if err != nil {
 		t.Fatalf("decodeAnything(no maybe) = error %v", err)
 	}
@@ -291,7 +299,7 @@ func TestAnythingSeparatesAbsentFromNull(t *testing.T) {
 		t.Errorf("decodeAnything(no maybe).Maybe = %#v, want nil", absent.Maybe)
 	}
 
-	held, err := decodeAnything(node(map[string]any{"payload": int64(1), "maybe": nil}))
+	held, err := decodeAnything(node("Anything", map[string]any{"payload": int64(1), "maybe": nil}))
 	if err != nil {
 		t.Fatalf("decodeAnything(maybe: null) = error %v", err)
 	}
@@ -307,7 +315,7 @@ func TestAnythingSeparatesAbsentFromNull(t *testing.T) {
 // way the driver fails, or a caller could tell which decode path a
 // property took from the error text alone.
 func TestAnythingMissingPropertyReadsLikeTheDrivers(t *testing.T) {
-	n := node(map[string]any{})
+	n := node("Anything", map[string]any{})
 	decodeErr := func() error {
 		_, err := decodeAnything(n)
 		return err
@@ -328,7 +336,7 @@ func TestAnythingMissingPropertyReadsLikeTheDrivers(t *testing.T) {
 // a nullable one the graph does not hold is a nil pointer rather than a
 // pointer to the zero value.
 func TestScalarNarrows(t *testing.T) {
-	got, err := decodeScalar(node(map[string]any{
+	got, err := decodeScalar(node("Scalar", map[string]any{
 		"id": int64(7), "rank": int64(-3), "active": true, "name": "n", "weight": 0.5,
 	}))
 	if err != nil {
@@ -344,7 +352,7 @@ func TestScalarNarrows(t *testing.T) {
 		t.Errorf("decodeScalar().Weight = %#v, want 0.5", got.Weight)
 	}
 
-	absent, err := decodeScalar(node(map[string]any{"id": int64(7), "rank": int64(0), "active": false}))
+	absent, err := decodeScalar(node("Scalar", map[string]any{"id": int64(7), "rank": int64(0), "active": false}))
 	if err != nil {
 		t.Fatalf("decodeScalar(absent) = error %v", err)
 	}
@@ -858,7 +866,7 @@ func edgyProps() map[string]any {
 // between them is a third carrier local under the same rule.
 func TestEntityColumnsDecodeWholeEntities(t *testing.T) {
 	got, err := queriesOver([]string{"s", "e", "l"}, []any{
-		node(scalarProps()), relationship(edgyProps()), node(listyProps()),
+		node("Scalar", scalarProps()), relationship(edgyProps()), node("Listy", listyProps()),
 	}).EntityColumns(t.Context())
 	if err != nil {
 		t.Fatalf("EntityColumns = error %v", err)
@@ -897,7 +905,7 @@ func TestEntityColumnsDecodeWholeEntities(t *testing.T) {
 	// emit the edge column's read as dbtype.Node and the nested module
 	// stops compiling, so this case never runs.
 	if _, err := queriesOver([]string{"s", "e", "l"}, []any{
-		relationship(edgyProps()), node(scalarProps()), node(listyProps()),
+		relationship(edgyProps()), node("Scalar", scalarProps()), node("Listy", listyProps()),
 	}).EntityColumns(t.Context()); err == nil {
 		t.Errorf("EntityColumns(s: relationship) = no error, want a refusal")
 	}
@@ -906,7 +914,7 @@ func TestEntityColumnsDecodeWholeEntities(t *testing.T) {
 	// carried as the struct's zero composite, which is what the caller
 	// would otherwise be handed for a row the graph does not have.
 	_, err = queriesOver([]string{"s", "e", "l"}, []any{
-		node(scalarProps()), nil, node(listyProps()),
+		node("Scalar", scalarProps()), nil, node("Listy", listyProps()),
 	}).EntityColumns(t.Context())
 	if err == nil {
 		t.Fatalf("EntityColumns(e: null) = no error, want a refusal")
@@ -923,7 +931,7 @@ func TestEntityColumnsDecodeWholeEntities(t *testing.T) {
 	missing := scalarProps()
 	delete(missing, "rank")
 	_, err = queriesOver([]string{"s", "e", "l"}, []any{
-		node(missing), relationship(edgyProps()), node(listyProps()),
+		node("Scalar", missing), relationship(edgyProps()), node("Listy", listyProps()),
 	}).EntityColumns(t.Context())
 	if err == nil {
 		t.Fatalf("EntityColumns(s: no rank) = no error, want a refusal")
@@ -972,7 +980,7 @@ func TestEntityColumnRefusalsCarryTheDriversError(t *testing.T) {
 	}
 
 	// A relationship under a node column.
-	sIsRel := []any{relationship(edgyProps()), node(scalarProps()), node(listyProps())}
+	sIsRel := []any{relationship(edgyProps()), node("Scalar", scalarProps()), node("Listy", listyProps())}
 	_, err := queriesOver(keys, sIsRel).EntityColumns(t.Context())
 	check("EntityColumns(s: relationship)", `"s"`,
 		driverRefusal[dbtype.Node](t, keys, sIsRel, "s"), "decode Scalar.", err)
@@ -984,7 +992,7 @@ func TestEntityColumnRefusalsCarryTheDriversError(t *testing.T) {
 	// helper. This one is the gate reached at a column that is not the
 	// first, after the column ahead of it decoded — the case above returns
 	// at `s` and never gets here.
-	eIsNode := []any{node(scalarProps()), node(scalarProps()), node(listyProps())}
+	eIsNode := []any{node("Scalar", scalarProps()), node("Scalar", scalarProps()), node("Listy", listyProps())}
 	_, err = queriesOver(keys, eIsNode).EntityColumns(t.Context())
 	check("EntityColumns(e: node)", `"e"`,
 		driverRefusal[dbtype.Relationship](t, keys, eIsNode, "e"), "decode Edgy.", err)
@@ -993,7 +1001,7 @@ func TestEntityColumnRefusalsCarryTheDriversError(t *testing.T) {
 	// tells absence and wrong type apart, but the column has one gate for
 	// both, so a gate that drops the error drops this too.
 	absent := []string{"nope", "e", "l"}
-	held := []any{node(scalarProps()), relationship(edgyProps()), node(listyProps())}
+	held := []any{node("Scalar", scalarProps()), relationship(edgyProps()), node("Listy", listyProps())}
 	_, err = queriesOver(absent, held).EntityColumns(t.Context())
 	check("EntityColumns(no s)", `"s"`,
 		driverRefusal[dbtype.Node](t, absent, held, "s"), "decode Scalar.", err)
@@ -1063,7 +1071,7 @@ func TestEdgeUnionColumnDispatchesOnTheWireLabel(t *testing.T) {
 	// So each refusal below is worded by the emission itself — the
 	// non-relationship off its own type assertion, the held null off
 	// its own nil check, the missing key off Get's bool.
-	_, err = queriesOver([]string{"e"}, []any{node(scalarProps())}).EdgeUnionColumn(t.Context())
+	_, err = queriesOver([]string{"e"}, []any{node("Scalar", scalarProps())}).EdgeUnionColumn(t.Context())
 	if err == nil {
 		t.Fatalf("EdgeUnionColumn(e: node) = no error, want a refusal")
 	}
@@ -1085,5 +1093,83 @@ func TestEdgeUnionColumnDispatchesOnTheWireLabel(t *testing.T) {
 	}
 	if want := "missing from record"; !strings.Contains(err.Error(), want) {
 		t.Errorf("EdgeUnionColumn(no e) = %q, want it to mention %s", err, want)
+	}
+}
+
+// A decoder handed a value of another entity's type refuses it rather
+// than filling the struct from whatever Props happen to be there. This
+// is the defect bd gqlc-2h9w records: Scalar and Edgy both declare a
+// non-nullable INT32 named rank, so before the guard landed
+// decodeScalar(a Listy node) and decodeEdgy(an Edgier relationship)
+// were free to succeed on the overlap and report no error.
+//
+// The overlap is what makes this a behaviour test rather than a reading
+// of the emission. The props handed over below are the ones the target
+// entity itself declares, so nothing in the property reads can fail:
+// only the label check stands between the caller and a populated struct
+// built out of the wrong graph value.
+func TestDecodersRefuseAValueOfAnotherType(t *testing.T) {
+	_, err := decodeScalar(node("Listy", scalarProps()))
+	if err == nil {
+		t.Fatalf("decodeScalar(a Listy node) = no error, want a refusal")
+	}
+	for _, want := range []string{"Scalar", "Listy"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("decodeScalar(a Listy node) = %q, want it to name %s", err, want)
+		}
+	}
+
+	_, err = decodeEdgy(typedRelationship("Edgier", edgyProps()))
+	if err == nil {
+		t.Fatalf("decodeEdgy(an Edgier relationship) = no error, want a refusal")
+	}
+	for _, want := range []string{"Edgy", "Edgier"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("decodeEdgy(an Edgier relationship) = %q, want it to name %s", err, want)
+		}
+	}
+}
+
+// The node guard is containment, not equality. A deployment stamps
+// labels the schema never declared — a lifecycle marker, a tenant tag —
+// and a node still carrying the key label the schema names is still that
+// entity. An equality check against the key set would refuse it, which
+// would make the guard a second defect rather than a fix for one.
+//
+// The refusal half is here as well as in the test above so that the two
+// sit side by side: what moves between them is one extra label on the
+// value, and the verdict flips on the key label alone.
+func TestNodeDecoderAcceptsLabelsTheSchemaDoesNotDeclare(t *testing.T) {
+	extra := node("Scalar", scalarProps())
+	extra.Labels = []string{"Archived", "Scalar", "Tenant7"}
+	got, err := decodeScalar(extra)
+	if err != nil {
+		t.Fatalf("decodeScalar(a Scalar carrying extra labels) = error %v", err)
+	}
+	if got.Id != 7 || got.Rank != int32(-3) {
+		t.Errorf("decodeScalar(a Scalar carrying extra labels) = %#v", got)
+	}
+
+	none := node("Scalar", scalarProps())
+	none.Labels = []string{"Archived", "Tenant7"}
+	if _, err := decodeScalar(none); err == nil {
+		t.Fatalf("decodeScalar(a node carrying neither the key label nor nothing) = no error, want a refusal")
+	}
+}
+
+// A zero-labelled value is the other end of the same axis: the driver
+// hands back a Node whose Labels slice is empty, and a guard written as
+// a loop over that slice reports nothing wrong if it forgets that the
+// empty case is a miss. Held separately because the loop is the shape
+// the emitter writes and an empty range body never runs.
+func TestNodeDecoderRefusesAnUnlabelledNode(t *testing.T) {
+	bare := node("Scalar", scalarProps())
+	bare.Labels = nil
+	_, err := decodeScalar(bare)
+	if err == nil {
+		t.Fatalf("decodeScalar(an unlabelled node) = no error, want a refusal")
+	}
+	if want := "Scalar"; !strings.Contains(err.Error(), want) {
+		t.Errorf("decodeScalar(an unlabelled node) = %q, want it to name %s", err, want)
 	}
 }

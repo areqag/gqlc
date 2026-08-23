@@ -16,8 +16,19 @@ type Actor struct {
 }
 
 // decodeActor decodes a driver dbtype.Node into a Actor struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeActor(node dbtype.Node) (Actor, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Person" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Actor{}, fmt.Errorf("decode Actor: expected a node labelled %q, got labels %q", "Person", node.Labels)
+	}
 	var out Actor
 	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {

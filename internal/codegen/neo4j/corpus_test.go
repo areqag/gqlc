@@ -125,6 +125,9 @@ var corpusTests = []string{
 	"TestEntityColumnsDecodeWholeEntities",
 	"TestEntityColumnRefusalsCarryTheDriversError",
 	"TestEdgeUnionColumnDispatchesOnTheWireLabel",
+	"TestDecodersRefuseAValueOfAnotherType",
+	"TestNodeDecoderAcceptsLabelsTheSchemaDoesNotDeclare",
+	"TestNodeDecoderRefusesAnUnlabelledNode",
 }
 
 // corpusSubtests names, per top-level test, how many subtest passes the
