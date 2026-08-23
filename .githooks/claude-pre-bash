@@ -187,6 +187,22 @@
 #     until git itself parses it. Measured allowed, 2026-08-22. This is the
 #     same class as `git commit --no-verify`, which is also allowed here and
 #     which the Constitution governs by rule rather than by hook (bd gqlc-0tsh).
+#   - a working tree PARKED on a commit that predates any of the above. This is
+#     the whole of bd gqlc-pyk2, and it is not fixable from inside this file or
+#     from .claude/settings.json, which is what that bead proposed. The bead
+#     reads the defect as a PATH problem — settings.json wires the hook
+#     relatively, so it resolves against the working tree — and offers "an
+#     absolute or git-common-dir-anchored path in settings.json" as the repair.
+#     That is falsified by the carrier: .claude/settings.json is itself a
+#     TRACKED file, so a checkout parked before the fix reads its own copy of
+#     settings.json and never learns the new path. Every tracked artifact has
+#     this shape; the escape is an untracked carrier (.claude/settings.local.json,
+#     ~/.claude/settings.json) or the git common dir, and only the last of those
+#     can be shipped by a commit — which is what .githooks/hooks-drift-tripwire
+#     does for the git-hook channel (PR #1044). What actually bounds this today
+#     is CLAUDE.md's rule that the shared checkout stays on master and every
+#     session cuts a sibling worktree from origin/master. That is a discipline,
+#     not a gate, and it is stated here rather than claimed closed.
 #
 # The `bd close` arm reads the reason as it is written on the command line, or
 # out of a literal `--reason-file` path. Reaches, and does not reach:
