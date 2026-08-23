@@ -54,22 +54,54 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    NOT closed by child PRs. Verify presence AND number at merge time.
 6. No AI attribution in commits or PR bodies (CLAUDE.md; commit-msg hook
    enforces the trailer half).
-7. Request review by filing a `class:judge` bead naming the PR number and what
-   you most doubt about the change — a Դատաւոր is the reviewer, and a bead
-   is what wakes one. **File it UNASSIGNED**: the dispatcher's fresh pass
-   selects `.assignee == null` (`cmd_dispatch` in km) and its resume pass reads only
-   `in_progress`, so a pre-assigned review bead is ready, labelled, and
-   invisible to both — it wakes nobody, silently, at any cap level. Give it
-   the priority of the work it reviews. Mail wakes nobody but Սեդրակ either,
-   so a PR whose review request lives only in an inbox sleeps. Ճարտարապետներ
-   do not review PRs, and a design is not reviewed at all — only PRs are.
-8. Merge on a Դատաւոր's review PASS — a FAIL blocks the merge until answered
-   (Constitution V.4). After merge: close the bead citing the merged SHA,
-   delete the branch, file follow-up beads for anything you deferred.
+7. **Ask whether review is owed** (Constitution V.2). It is owed when your
+   bead is blocked by a design bead — you executed a Ճարտարապետ's plan — and
+   when the PR amends the constitution. `bd show <id>` names the dependency;
+   if there is no design behind your work, no review is owed and you merge on
+   green gates without waiting for one. Most beads are in this second case,
+   and merging one is not a shortcut: it is the rule.
+
+   Two things that do not change with it. If the work turned out larger than
+   the bead described, stop and say so rather than shipping a design-sized
+   change through the unreviewed path — the bead is resized and a resized
+   bead is reviewed. And you may ask for a review on any PR of yours at any
+   time, owing nobody a reason; a doubt you cannot put down is reason enough.
+
+8. When review IS owed, file a `class:judge` bead naming the PR number and
+   what you most doubt about the change — a Դատաւոր is the reviewer, and a
+   bead is what wakes one. **File it UNASSIGNED**: the dispatcher's fresh
+   pass selects `.assignee == null` (`cmd_dispatch` in km) and its resume
+   pass reads only `in_progress`, so a pre-assigned review bead is ready,
+   labelled, and invisible to both — it wakes nobody, silently, at any cap
+   level. Give it the priority of the work it reviews, and never below P2:
+   the dispatcher does not route P3 or P4 at all, so a review bead filed
+   there waits forever. Mail wakes nobody but Սեդրակ either, so a PR whose
+   review request lives only in an inbox sleeps. Ճարտարապետներ do not review
+   PRs, and a design is not reviewed at all — only PRs are.
+
+   Then merge on the Դատաւոր's PASS — a FAIL blocks the merge until answered
+   (Constitution V.4). After any merge, reviewed or not: close the bead
+   citing the merged SHA, delete the branch, file follow-up beads for
+   anything you deferred.
 9. File freely, and label what you file. A defect you find while working a
    bead, whose fix is not that bead's work, gets its own bead and your own
    `class:` label — you need nobody's permission for either, and a branch
    should not absorb every defect it makes visible.
+
+   **Priority is what decides whether anyone is ever woken for it.** The
+   dispatcher routes P0, P1 and P2; P3 and P4 are filed, searchable, and
+   never routed. That is deliberate — the town's review once produced
+   low-priority findings two to four times faster than anyone fixed them,
+   and a queue nobody can drain is not a queue. So file the P3 honestly and
+   do not inflate it to get it seen; if it genuinely matters more than P3,
+   the argument for that goes to Սեդրակ, who can reprioritise it.
+
+   A bead may also carry `effort:<level>` — low, medium, high, xhigh, max —
+   which wakes its seat at that depth instead of the class default. This is
+   how Constitution V.6.2's right is actually delivered, since `/effort`
+   cannot be typed by a citizen. Use it on the bead, for the bead; the
+   default returns on the next wake. xhigh and max are for a Ճարտարապետ on a
+   genuinely complex design, and `high` is the ceiling everywhere else.
 
    A bead about specific code also carries a `subject:<path>` label, one per
    file or directory the finding is about, repo-relative and with no trailing

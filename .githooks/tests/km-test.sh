@@ -357,9 +357,73 @@ cat >"$BIN/tmux" <<'STUB'
 # Panes carry a synthetic tty per seat, which is what lets the `ps` stub decide
 # SEPARATELY whether a claude runs on it. Window-exists and session-is-alive are
 # different facts; conflating them is the defect under test (gqlc-s16s).
+#
+# A THIRD fact joins them here: whether the km-seat loop that IS the window's
+# command still exists (gqlc-6ha4). It lives in the pgrep stub, because that is
+# where km asks — but the window list is what it hangs off, so new-window and
+# kill-window have to move it or a respawn would fix nothing and still pass.
+#
+# And a FOURTH: what the pane SAYS. `km status` cannot tell a working seat from
+# one frozen at a modal or finished at an empty prompt, and the pane is the only
+# place that difference is written down (gqlc-5vp7). So this stub keeps a pane
+# per seat whose last line is the prompt, and send-keys edits it the way a TUI
+# would — which is also what lets a row express the paste-swallowed Enter that
+# dropped six nudges while reporting success on every one.
 _wins="${KM_STATE_DIR:-}/fake-windows"
+_seat_of_target() { # <args after the subcommand> -> the seat named by -t
+    # The ARGUMENT AFTER -t, not "the last thing with a colon in it": a nudge's
+    # text is an argument too, and a stub that scanned for a colon would start
+    # reading the message as the address.
+    local a prev="" t=""
+    for a in "$@"; do
+        [ "$prev" = "-t" ] && { t="$a"; break; }
+        prev="$a"
+    done
+    t="${t##*:}"
+    printf '%s' "${t#=}"
+}
+_pane_of() { printf '%s' "${KM_STATE_DIR:-}/fake-pane-$1"; }
+_prompt_set() { # <seat> <text after the prompt, or empty>
+    local f; f=$(_pane_of "$1")
+    [ -f "$f" ] || return 0
+    # The prompt is the last line, which is where a TUI puts it.
+    sed -i '$d' "$f"
+    if [ -n "$2" ]; then printf '❯ %s\n' "$2" >>"$f"; else printf '❯\n' >>"$f"; fi
+}
 case "$1" in
     has-session) exit 0 ;;
+    new-window)
+        _n=""; _prev=""
+        for _a in "$@"; do [ "$_prev" = "-n" ] && _n="$_a"; _prev="$_a"; done
+        [ -n "$_n" ] || exit 1
+        # Real tmux would start the command; here what matters downstream is
+        # that the window exists again AND that its runner is no longer dead,
+        # since a respawn that left the seat on the dead list would let a row
+        # assert recovery that never happened.
+        echo "$_n" >>"$_wins"
+        if [ -f "${KM_STATE_DIR:-}/fake-dead-runners" ]; then
+            grep -vx "$_n" "${KM_STATE_DIR}/fake-dead-runners" >"${KM_STATE_DIR}/fake-dead-runners.tmp" || true
+            mv "${KM_STATE_DIR}/fake-dead-runners.tmp" "${KM_STATE_DIR}/fake-dead-runners"
+        fi
+        [ -z "${KM_NEWWINDOW_LOG:-}" ] || printf '%s\n' "$_n" >>"$KM_NEWWINDOW_LOG"
+        exit 0 ;;
+    kill-window)
+        shift
+        _k=$(_seat_of_target "$@")
+        [ -n "$_k" ] || exit 0
+        if [ -f "$_wins" ]; then
+            grep -vx "$_k" "$_wins" >"$_wins.tmp" || true
+            mv "$_wins.tmp" "$_wins"
+        fi
+        [ -z "${KM_KILLWINDOW_LOG:-}" ] || printf '%s\n' "$_k" >>"$KM_KILLWINDOW_LOG"
+        exit 0 ;;
+    capture-pane)
+        shift
+        _c=$(_seat_of_target "$@")
+        _f=$(_pane_of "$_c")
+        [ -f "$_f" ] || exit 1
+        cat "$_f"
+        exit 0 ;;
     list-windows)
         [ -f "$_wins" ] && cat "$_wins"
         exit 0 ;;
@@ -397,9 +461,24 @@ case "$1" in
         # invocation per line, arguments tab-separated. Bundling the text and
         # the Enter into a single call is what strands the text (gqlc-s16s).
         if [ -n "${KM_SENDKEYS_LOG:-}" ]; then
-            shift
-            printf '%s\n' "$(printf '%s\t' "$@")" >>"$KM_SENDKEYS_LOG"
+            printf '%s\n' "$(printf '%s\t' "${@:2}")" >>"$KM_SENDKEYS_LOG"
         fi
+        shift
+        _t=$(_seat_of_target "$@")
+        # The keystroke, which is the last argument.
+        _k="${!#}"
+        case "$_k" in
+            C-u)   _prompt_set "$_t" "" ;;
+            Enter)
+                # A seat on the sticky list never submits: this is the TUI that
+                # read the burst as a paste and took the CR as literal text, so
+                # the line sits typed and unsent while every send reports
+                # success (gqlc-5vp7 addendum, measured on six seats).
+                if [ -f "${KM_STATE_DIR:-}/fake-sticky-prompt" ] &&
+                    grep -qx "$_t" "${KM_STATE_DIR}/fake-sticky-prompt"; then :
+                else _prompt_set "$_t" ""; fi ;;
+            *)     _prompt_set "$_t" "$_k" ;;
+        esac
         exit 0 ;;
 esac
 exit 0
@@ -424,6 +503,33 @@ case "$_tty" in
     fake/*) ;;
     *) exec /usr/bin/pgrep "$@" ;;
 esac
+
+# The second query on the same tty: `-f "km-seat <seat>$"`, asking whether the
+# RUNNER is still parked there (gqlc-6ha4). It is a different process from the
+# claude above and the two disagree in the ordinary case — a healthy asleep seat
+# has a runner and no claude — so this arm reads a fixture of its own.
+#
+# A window's command IS km-seat, so the DEFAULT is that a window has a runner;
+# what a row states is the anomaly, by naming a seat on fake-dead-runners. And
+# the pattern is really matched against a cmdline rather than assumed, so a km
+# that stopped anchoring it does not pass here for free.
+_pat=""
+_prev=""
+for _a in "$@"; do
+    [ "$_prev" = "-f" ] && _pat="$_a"
+    _prev="$_a"
+done
+if [ -n "$_pat" ]; then
+    _seat="${_tty#fake/}"
+    _dead="${KM_STATE_DIR:-}/fake-dead-runners"
+    if [ -f "$_dead" ] && grep -qx "$_seat" "$_dead"; then exit 1; fi
+    if printf '%s' "/fake/kingdom/bin/km-seat $_seat" | grep -Eq "$_pat"; then
+        echo 4242
+        exit 0
+    fi
+    exit 1
+fi
+
 _live="${KM_STATE_DIR:-}/fake-claude-ttys"
 if [ -f "$_live" ] && grep -qx "$_tty" "$_live"; then
     echo 4242
@@ -544,6 +650,44 @@ seat_state()   { mkdir -p "$KM_STATE_DIR/seats/$1"; echo "$2" >"$KM_STATE_DIR/se
 
 fill_cap() { local s; for s in "$@"; do seat_state "$s" awake; seat_window "$s"; seat_claude "$s"; done; }
 
+# The runner — km-seat, the pane's own command and the only reader of a wake
+# file. A window implies one unless a row says otherwise, which is what
+# seat_runner_dead says (gqlc-6ha4).
+seat_runner_dead() { local s; for s in "$@"; do echo "$s" >>"$KM_STATE_DIR/fake-dead-runners"; done; }
+
+# What the pane SAYS. The three shapes the town has actually measured:
+#   working  — claude's spinner line, which carries "esc to interrupt" for the
+#              whole of a turn
+#   idle     — a prompt with nothing typed after it (six seats, eleven hours)
+#   modal    — no prompt line at all, because the modal covers the box (two
+#              judges, 80 and 152 minutes)
+# The prompt is the LAST line, which is where the send-keys arm of the tmux stub
+# edits it.
+#
+# working KEEPS the empty prompt line. That is what the TUI actually renders —
+# the input box stays below the spinner all turn, so you can type ahead — and
+# it is the whole reason the spinner test has to exist. A first version of this
+# fixture dropped the prompt line, and the empty-prompt half of seat_pane_idle
+# rejected it on its own; deleting the spinner test outright then left the suite
+# green (mutation M7). A fixture that a guard does not need is a guard that is
+# not tested.
+pane_working() { printf 'Reading kingdom/bin/km\n✳ Thinking… (41s · esc to interrupt)\n\n❯\n' >"$KM_STATE_DIR/fake-pane-$1"; }
+pane_idle()    { printf 'I have pushed the branch and written my handoff.\n\n❯\n' >"$KM_STATE_DIR/fake-pane-$1"; }
+pane_modal()   { printf 'Background work is running\n  Exit anyway\n> Stay\n' >"$KM_STATE_DIR/fake-pane-$1"; }
+pane_of()      { cat "$KM_STATE_DIR/fake-pane-$1" 2>/dev/null; }
+
+# A TUI that swallows the Enter after a burst it read as a paste.
+pane_sticky()  { local s; for s in "$@"; do echo "$s" >>"$KM_STATE_DIR/fake-sticky-prompt"; done; }
+
+# The statusline's heartbeat, at a chosen age. `updated` is what km reads —
+# never the mtime, so a row can age a heartbeat without touching the clock.
+seat_heartbeat() { # <seat> <seconds old> [context_pct]
+    mkdir -p "$KM_STATE_DIR/seats/$1"
+    jq -cn --arg s "$1" --arg u "$(date -u -d "@$(($(date +%s) - $2))" +%Y-%m-%dT%H:%M:%SZ)" \
+        --argjson p "${3:-42}" '{seat: $s, context_pct: $p, updated: $u}' \
+        >"$KM_STATE_DIR/seats/$1/heartbeat.json"
+}
+
 # The three broken shapes, each a slot the town is spending on nothing.
 #   windowless: status says awake, the tmux window is GONE  (witnessed live on
 #               `ayg`, 2026-08-22T05:35Z, still counted against max_active)
@@ -628,12 +772,17 @@ fill_cap_leaving() {
 # every row below it — it is the only one that proves the stubs, the tmux seam
 # and the wake-file path all work, so a "nobody was woken" assertion elsewhere
 # means the dispatcher declined rather than that the harness was inert.
+#
+# Every bead here is at or above [dispatch] max_priority on purpose. gqlc-j1 was
+# a P3 until the floor existed, and under the floor it stopped being routed —
+# which would have turned this liveness control into a row asserting that a
+# judge bead reaches nobody. The floor gets rows of its own below.
 dispatch_case '[
   {"id":"gqlc-unl","priority":0,"assignee":null,"labels":null},
   {"id":"gqlc-taken","priority":0,"assignee":"ar","labels":["class:warrior"]},
   {"id":"gqlc-w1","priority":1,"assignee":null,"labels":["class:warrior"]},
   {"id":"gqlc-a1","priority":2,"assignee":null,"labels":["area:parser","class:architect"]},
-  {"id":"gqlc-j1","priority":3,"assignee":null,"labels":["class:judge"]}
+  {"id":"gqlc-j1","priority":2,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
 run_dispatch
 if [ "$RC" -ne 0 ]; then
@@ -920,8 +1069,13 @@ fi
 # queued wake, so there is exactly one free seat and the two beads are in real
 # contention — without that there are eight free warriors, both beads route, and
 # the ordering is unobservable.
+#
+# gqlc-lo is P2, not the P3 it was written as: under [dispatch] max_priority the
+# loser would be withheld from the queue entirely, so the row would pass because
+# there was only ever one candidate and would witness no ordering at all. Both
+# beads must be routable for the contention to be real.
 dispatch_case '[
-  {"id":"gqlc-lo","priority":3,"assignee":null,"labels":["class:warrior"]},
+  {"id":"gqlc-lo","priority":2,"assignee":null,"labels":["class:warrior"]},
   {"id":"gqlc-hi","priority":0,"assignee":null,"labels":["class:warrior"]}
 ]' '[]'
 for s in aramazd vahagn astghik ar nvard ayg tsovinar; do
@@ -937,6 +1091,124 @@ elif ! wake_of hayk | grep -q 'bead:gqlc-hi'; then
     bad "the last free seat goes to the higher-priority bead" "it took the lower-priority bead: $(wake_of hayk)"
 else
     ok "with one free seat and two ready beads, the higher-priority bead is the one routed"
+fi
+
+# --- the priority floor: [dispatch] max_priority ------------------------------
+# The town restarted with 158 of 319 open beads at P3 — mostly defect findings
+# its own adversarial review produced faster than anyone could fix them. The
+# fresh pass now declines them. What must NOT change is a citizen's right to
+# finish their own work (Constitution III.3): the resume and owned passes ignore
+# the floor entirely, so a seat already holding a P3 is never stranded by it.
+#
+# These rows run against the town's REAL kingdom.toml, like every dispatch row
+# above, so the floor they test is the shipped one rather than a number invented
+# here — and the fixture priorities are derived from it rather than hard-coded,
+# so raising the floor retunes the rows instead of falsifying them.
+FLOOR=$("$KM" cfg dispatch max_priority 2>/dev/null)
+OVER=$((FLOOR + 1))
+case "$FLOOR" in
+    '' | *[!0-9]*)
+        bad "[dispatch] max_priority is declared in the town's config" "read '$FLOOR'" ;;
+    *)
+        ok "[dispatch] max_priority is declared in the town's config, as a number" ;;
+esac
+
+# One case, both halves: the bead at the floor routes and the bead one below it
+# does not. Same class, same run, adjacent priorities — so a dispatcher that had
+# simply stopped routing warriors fails the first assertion, and one that
+# ignored the floor fails the second. The floor bead is also the liveness
+# control: without it, "gqlc-under reached nobody" is equally true of a harness
+# that did nothing at all.
+dispatch_case "[
+  {\"id\":\"gqlc-atfloor\",\"priority\":$FLOOR,\"assignee\":null,\"labels\":[\"class:warrior\"]},
+  {\"id\":\"gqlc-under\",\"priority\":$OVER,\"assignee\":null,\"labels\":[\"class:warrior\"]}
+]" '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the fresh pass declines a bead below the floor" "rc=$RC out=$OUT"
+elif ! woken_seats | grep -q .; then
+    bad "the fresh pass declines a bead below the floor" "nobody was woken at all, so the harness proves nothing: $OUT"
+elif ! grep -rq 'gqlc-atfloor' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the fresh pass declines a bead below the floor" "the bead AT the floor was not routed either: $(woken_seats) out=$OUT"
+elif grep -rq 'gqlc-under' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the fresh pass declines a bead below the floor" \
+        "a P$OVER bead was routed under a floor of $FLOOR: $(grep -rl 'gqlc-under' "$KM_STATE_DIR/seats" | tr '\n' ' ')"
+else
+    ok "the fresh pass routes a bead at max_priority and declines the one below it"
+fi
+
+# Declining SILENTLY is the failure this dispatcher has shipped three times
+# (gqlc-z1qw, gqlc-fo48): a pass that routes nothing and prints a summary that
+# reads healthy. So the refusal is asserted twice — named per bead, and counted
+# in the one line an operator reads. Both halves, because a count with no id is
+# unactionable and an id with no count is invisible in a long run.
+if ! printf '%s' "$OUT" | grep -q 'gqlc-under'; then
+    bad "a bead declined for priority is named out loud" "the run never mentions it: $OUT"
+elif ! printf '%s' "$OUT" | grep -q "gqlc-under.*priority $OVER"; then
+    bad "a bead declined for priority is named out loud" "it is mentioned without its priority: $OUT"
+# The count is pinned exactly, not as "greater than zero": the queue held two
+# beads and only one was declined, so a floor that counted everything it looked
+# at — or counted the routed bead too — reads 2 here and fails.
+elif ! printf '%s' "$OUT" | grep -qF ", 1 below max_priority $FLOOR)"; then
+    bad "a bead declined for priority is counted in the summary" "the done line hides it: $(printf '%s' "$OUT" | grep 'done')"
+else
+    ok "the declined bead is named with its priority and counted in the done line"
+fi
+
+# Constitution III.3, the half the floor must not touch. A seat holding an
+# in-progress P-below-the-floor bead gets it back, and a ready one that NAMES a
+# seat still reaches that seat. Both passes run before the fresh one and neither
+# consults max_priority; a floor applied to the queue as a whole rather than to
+# the fresh arm alone would strand both, mid-work, with nothing said.
+dispatch_case "[
+  {\"id\":\"gqlc-ownlow\",\"priority\":$OVER,\"assignee\":\"ayg\",\"labels\":[\"class:warrior\"]}
+]" "[
+  {\"id\":\"gqlc-reslow\",\"priority\":$OVER,\"assignee\":\"vahagn\",\"labels\":[\"class:warrior\"]}
+]"
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the floor does not strand a citizen's own work" "rc=$RC out=$OUT"
+elif ! wake_of vahagn | grep -q 'gqlc-reslow'; then
+    bad "the floor does not strand a citizen's own work" \
+        "a P$OVER bead in progress never came back to the seat holding it (woken: $(woken_seats)) out=$OUT"
+elif ! wake_of ayg | grep -q 'gqlc-ownlow'; then
+    bad "the floor does not strand a citizen's own work" \
+        "a ready P$OVER bead naming a seat never reached it (woken: $(woken_seats)) out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'below the floor'; then
+    bad "the floor does not strand a citizen's own work" "it was applied to an owned bead: $OUT"
+else
+    ok "a bead below the floor still resumes to the seat holding it and still reaches the seat it names (III.3)"
+fi
+
+# The floor fails OPEN, and that choice is the whole of this row. A number the
+# dispatcher cannot read is a typo in a config file; if it fell back to routing
+# nothing, one bad character would stop the town while every board still read
+# healthy — the exact shape of gqlc-z1qw and gqlc-fo48. Routing everything and
+# saying why is loud, recoverable, and visible to an operator.
+#
+# The fixture is the REAL config with one line rewritten, not a minimal town, so
+# the roster the rows above route against is the roster this one routes against.
+badfloor="$TMP/badfloor.toml"
+sed 's/^max_priority = .*/max_priority = "banana"/' "$REPO/kingdom/kingdom.toml" >"$badfloor"
+if ! grep -q '^max_priority = "banana"' "$badfloor"; then
+    bad "an unreadable max_priority routes everything" "the fixture rewrite missed, so this row would pass against the real floor"
+else
+    dispatch_case "[
+      {\"id\":\"gqlc-badfloor\",\"priority\":$OVER,\"assignee\":null,\"labels\":[\"class:warrior\"]}
+    ]" '[]'
+    OUT="$(cd "$FIXTURE" && PATH="$BIN:$PATH" KM_CONFIG="$badfloor" "$KM" dispatch 2>&1)"
+    RC=$?
+    if [ "$RC" -ne 0 ]; then
+        bad "an unreadable max_priority routes everything" "rc=$RC out=$OUT"
+    elif ! grep -rq 'gqlc-badfloor' "$KM_STATE_DIR/seats" 2>/dev/null; then
+        bad "an unreadable max_priority routes everything" \
+            "it failed CLOSED — one typo halted routing (woken: $(woken_seats)) out=$OUT"
+    elif ! printf '%s' "$OUT" | grep -q "banana"; then
+        bad "an unreadable max_priority names the value it could not read" \
+            "it failed open silently, so nobody can find the typo: $OUT"
+    else
+        ok "a malformed max_priority routes every priority and names the value it could not read"
+    fi
 fi
 
 # --- the concurrency cap, and the judge's exemption from it (gqlc-dz85) ------
@@ -1159,7 +1431,7 @@ fi
 dispatch_case '[
   {"id":"gqlc-jbusy","priority":0,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
-fill_cap_leaving 0 mihr anahit
+fill_cap_leaving 0 mihr anahit tir
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "an awake judge is not woken again" "rc=$RC out=$OUT"
@@ -1169,10 +1441,16 @@ else
     ok "a judge who is already awake is not woken again for ready judge work"
 fi
 
-# The whole point of a second judge: one busy judge no longer stalls the
-# review queue at a full cap. Guards the roster, not just the routing — with
-# `anahit` dropped from [seats] this wakes nobody and the bench serialises
-# again.
+# The whole point of a bench rather than a single judge: a busy judge no longer
+# stalls the review queue at a full cap. Guards the roster, not just the routing
+# — with every judge but `mihr` dropped from [seats] this wakes nobody and the
+# bench serialises again.
+#
+# The row above needs the WHOLE bench named; this one deliberately does not, so
+# that seating a further judge cannot silently disarm it. It asserts only that
+# SOME free judge took the bead and that the busy one was left alone, which is
+# the property, rather than pinning which seat gets it — that is
+# free_worker_of_class's roster order and is not what this row is about.
 dispatch_case '[
   {"id":"gqlc-jfree","priority":0,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
@@ -1180,12 +1458,12 @@ fill_cap_leaving 0 mihr
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "a busy judge does not stall the review queue" "rc=$RC out=$OUT"
-elif ! wake_of anahit | grep -q 'gqlc-jfree'; then
-    bad "a busy judge does not stall the review queue" "expected anahit, woke: $(woken_seats) out=$OUT"
+elif ! { wake_of anahit; wake_of tir; } | grep -q 'gqlc-jfree'; then
+    bad "a busy judge does not stall the review queue" "no free judge took it, woke: $(woken_seats) out=$OUT"
 elif woken_seats | grep -qw mihr; then
     bad "a busy judge does not stall the review queue" "it also woke the busy judge: $(woken_seats) out=$OUT"
 else
-    ok "with one judge awake and one free, ready review work routes to the free judge at a full cap"
+    ok "with one judge awake and others free, ready review work routes to a free judge at a full cap"
 fi
 
 # The property this whole section exists to keep. Four of the rows above once
@@ -2438,6 +2716,304 @@ unset KM_SENDKEYS_LOG
 # below at a file in /tmp and have them pass for the wrong reason.
 unset KM_CONFIG
 
+# --- the runner: the loop that reads a wake file (gqlc-6ha4) -----------------
+# km-seat is an endless loop parked on the seat's wake file, and it is the ONLY
+# consumer of one anywhere in the system. When it exits, `km wake` still appends
+# a reason and still reports "queued" — true about the queue, false about the
+# world — and BOTH dispatch passes then skip the seat because it has a wake file
+# pending, so the undelivered wake is itself what removes the seat from routing.
+# Measured 2026-08-22T18:3xZ: 7 of 15 seats, all three architects and one of two
+# judges; a judge's wake had been unread for four hours while she held three
+# in-progress P0 review beads.
+#
+# The probe cannot be seat_session_live. A HEALTHY asleep seat has no claude at
+# all — that is what asleep IS — so the session probe calls every resting
+# citizen dead. These first two rows are the pair that states that difference,
+# because a fix that reused the session probe would pass every row below.
+dispatch_case '[]' '[]'
+seat_window ayg
+runner_row="the runner probe is not the session probe"
+if ! PATH="$BIN:$PATH" "$KM" seat-runner ayg; then
+    bad "$runner_row" "a parked km-seat with no claude on the pane was read as no runner"
+elif PATH="$BIN:$PATH" "$KM" seat-live ayg; then
+    bad "$runner_row" "the fixture is wrong: no claude was placed and the session read live"
+else
+    ok "$runner_row — a healthy asleep seat has a runner and no session, and the two probes disagree about it"
+fi
+
+dispatch_case '[]' '[]'
+seat_window ayg
+seat_runner_dead ayg
+if PATH="$BIN:$PATH" "$KM" seat-runner ayg; then
+    bad "a dead runner is seen" "a window whose km-seat has exited still read as having a runner"
+else
+    ok "a window whose km-seat loop has exited is not read as having a runner"
+fi
+
+# The false report itself. Nothing else in the town creates a window, so a wake
+# queued at a seat with no runner is a message to nobody, and Article IV.1 is
+# the reason a record saying otherwise matters.
+dispatch_case '[]' '[]'
+export KM_NEWWINDOW_LOG="$KM_STATE_DIR/newwindows.log"
+: >"$KM_NEWWINDOW_LOG"
+OUT="$(PATH="$BIN:$PATH" "$KM" wake ayg --reason "a P0 review" 2>&1)"
+if ! grep -qx ayg "$KM_NEWWINDOW_LOG"; then
+    bad "a wake at a seat with no runner puts one back" "no km-seat window was created: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'respawned'; then
+    bad "a wake at a seat with no runner puts one back" \
+        "the report does not say the queue had no reader: $OUT"
+elif [ ! -s "$KM_STATE_DIR/seats/ayg/wake" ]; then
+    bad "a wake at a seat with no runner puts one back" "the reason was not queued at all: $OUT"
+else
+    ok "a wake at a seat with no runner respawns km-seat and says so, instead of reporting 'queued' to a queue with no reader"
+fi
+unset KM_NEWWINDOW_LOG
+
+# THE POLARITY. reconcile's status arms look at seats recorded awake or
+# asleep-pending; a dead runner lives in the `asleep` seats they skip, and an
+# asleep seat with no session is exactly what a resting citizen looks like
+# (III.5). So this row states the case the old shape could not reach: status
+# asleep, window present, runner gone. The kill is what makes it specific — a
+# seat with no window at all is respawned too, but only a window that survived
+# its runner is replaced.
+dispatch_case '[]' '[]'
+seat_state ayg asleep
+seat_window ayg
+seat_runner_dead ayg
+export KM_NEWWINDOW_LOG="$KM_STATE_DIR/newwindows.log"
+export KM_KILLWINDOW_LOG="$KM_STATE_DIR/killwindows.log"
+: >"$KM_NEWWINDOW_LOG"; : >"$KM_KILLWINDOW_LOG"
+OUT="$(PATH="$BIN:$PATH" "$KM" reconcile 2>&1)"
+RC=$?
+polarity_row="reconcile sees a dead runner under an ASLEEP status"
+if [ "$RC" -ne 0 ]; then
+    bad "$polarity_row" "rc=$RC out=$OUT"
+elif ! grep -qx ayg "$KM_KILLWINDOW_LOG"; then
+    bad "$polarity_row" "the empty window was left standing, so the respawn happened nowhere: $OUT"
+elif ! grep -qx ayg "$KM_NEWWINDOW_LOG"; then
+    bad "$polarity_row" "no km-seat was put back: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'ayg had no km-seat parked on its wake file'; then
+    bad "$polarity_row" "the repair is not named in the output: $OUT"
+else
+    ok "$polarity_row and replaces it, instead of skipping the one status the defect lives in"
+fi
+unset KM_NEWWINDOW_LOG KM_KILLWINDOW_LOG
+
+# The refusal, and it is the constitutional half. A window holding a LIVE claude
+# and no runner is a citizen at work behind a loop that has died: replacing the
+# window would end that session (VI.2). It is reported and left alone, and the
+# next pass repairs it for free once the session ends on its own.
+dispatch_case '[]' '[]'
+fill_cap ayg
+seat_runner_dead ayg
+export KM_NEWWINDOW_LOG="$KM_STATE_DIR/newwindows.log"
+export KM_KILLWINDOW_LOG="$KM_STATE_DIR/killwindows.log"
+: >"$KM_NEWWINDOW_LOG"; : >"$KM_KILLWINDOW_LOG"
+OUT="$(PATH="$BIN:$PATH" "$KM" reconcile 2>&1)"
+noforce_row="a live session is never replaced to repair its runner"
+if grep -qx ayg "$KM_KILLWINDOW_LOG"; then
+    bad "$noforce_row" "the window of a live claude was killed: $OUT"
+elif grep -qx ayg "$KM_NEWWINDOW_LOG"; then
+    bad "$noforce_row" "a second window was opened over a live session: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'ayg has a live session but no km-seat runner'; then
+    bad "$noforce_row" "the state was neither repaired nor reported, so it is invisible: $OUT"
+else
+    ok "$noforce_row — it is reported and left standing, because ending a session nobody asked to end is VI.2"
+fi
+unset KM_NEWWINDOW_LOG KM_KILLWINDOW_LOG
+
+# --- the idle seat: awake, finished, and unreachable (gqlc-5vp7) -------------
+# Six seats finished their work, wrote handoffs, never ran `km sleep`, and sat
+# at empty prompts for ELEVEN hours holding all five slots. The dispatcher wakes
+# only ASLEEP seats, an awake seat still counts against the cap, and the only
+# mail-driven wake in the whole file was Սեդրակ's — so every one of them was
+# unroutable by every automatic mechanism the town had, while the board called
+# them awake and the merge gate stayed shut.
+#
+# The idle test is the crux, and each of the three panes below is a shape that
+# was actually observed. Two consecutive sightings are required, so each row
+# ages its own marker the way the cadence would.
+age_idle_sighting() { local s; for s in "$@"; do touch -d '2 minutes ago' "$KM_STATE_DIR/seats/$s/idle"; done; }
+nudge_setup() { # <seat> — awake, live, one unread letter, inboxes made
+    make_inboxes
+    fill_cap "$1"
+    PATH="$BIN:$PATH" "$KM" mail send "$1" -s "a bead for you" -m "please pick this up" >/dev/null 2>&1
+    export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
+    : >"$KM_SENDKEYS_LOG"
+}
+
+dispatch_case '[]' '[]'
+nudge_setup ayg
+pane_idle ayg
+run_dispatch
+first_row="an idle seat is confirmed before it is nudged"
+if ! printf '%s' "$OUT" | grep -q 'confirming next pass before nudging'; then
+    bad "$first_row" "the first sighting did not announce itself: $OUT"
+elif [ -s "$KM_SENDKEYS_LOG" ]; then
+    bad "$first_row" "keys were sent on a single sighting of a TUI: $(cat "$KM_SENDKEYS_LOG")"
+else
+    age_idle_sighting ayg
+    run_dispatch
+    if ! printf '%s' "$OUT" | grep -q 'nudged ayg'; then
+        bad "an idle awake seat with unread mail is nudged" "the second pass sent nothing: $OUT"
+    elif ! printf '%s' "$OUT" | grep -q 'the prompt cleared, so it was delivered'; then
+        bad "an idle awake seat with unread mail is nudged" "delivery was claimed without being confirmed: $OUT"
+    else
+        ok "$first_row, and the second pass nudges it — the mail-driven wake is no longer Սեդրակ's alone"
+        assert_delivery_shape "the nudge keeps the clear/text/Enter shape that stops the paste from swallowing it" "$KM_SENDKEYS_LOG"
+    fi
+fi
+unset KM_SENDKEYS_LOG
+
+# The falsifier that matters most, because getting it wrong means typing into a
+# citizen's session mid-thought. A seat inside a turn shows the same empty
+# prompt LINE; what separates them is the body above it.
+dispatch_case '[]' '[]'
+nudge_setup ayg
+pane_working ayg
+run_dispatch
+age_idle_sighting ayg 2>/dev/null || true
+run_dispatch
+if [ -s "$KM_SENDKEYS_LOG" ]; then
+    bad "a working seat is not nudged" "keys were typed at a seat mid-turn: $(cat "$KM_SENDKEYS_LOG")"
+elif printf '%s' "$OUT" | grep -q 'nudged ayg'; then
+    bad "a working seat is not nudged" "a seat with a live spinner was called idle: $OUT"
+else
+    ok "a seat mid-turn is not nudged, however empty its prompt line looks"
+fi
+unset KM_SENDKEYS_LOG
+
+# The other falsifier, and it is why the idle test asks for the PROMPT rather
+# than merely for the absence of a spinner. A frozen seat's modal covers the
+# prompt box; the nudge ends in Enter, and Enter on a usage-limit modal chooses
+# whichever option is highlighted. "Stop and wait / Switch to extra usage /
+# Upgrade" is not a menu the dispatcher may press (VI.2, gqlc-eier).
+dispatch_case '[]' '[]'
+nudge_setup ayg
+pane_modal ayg
+run_dispatch
+age_idle_sighting ayg 2>/dev/null || true
+run_dispatch
+if [ -s "$KM_SENDKEYS_LOG" ]; then
+    bad "a seat frozen at a modal is not nudged" "an Enter was sent at a modal, which presses whatever is highlighted: $(cat "$KM_SENDKEYS_LOG")"
+else
+    ok "a seat frozen at a modal is not nudged, because the nudge would press a button nobody consented to"
+fi
+unset KM_SENDKEYS_LOG
+
+# Confirm after the fact, always. The town's only channel to an awake seat
+# dropped six messages in a row while reporting success on every one, and an
+# operator repairing the stall by hand believed the town unblocked while nothing
+# moved. A nudge path that reported success here would ship that same lie.
+dispatch_case '[]' '[]'
+nudge_setup ayg
+pane_idle ayg
+pane_sticky ayg
+run_dispatch
+age_idle_sighting ayg
+run_dispatch
+sticky_row="an undelivered nudge is reported as undelivered"
+if printf '%s' "$OUT" | grep -q 'the prompt cleared, so it was delivered'; then
+    bad "$sticky_row" "a nudge still sitting in the prompt box was reported delivered: $(pane_of ayg)"
+elif ! printf '%s' "$OUT" | grep -q 'NUDGE UNDELIVERED to ayg'; then
+    bad "$sticky_row" "nothing said the message never landed: $OUT"
+elif ! grep -c 'Enter' "$KM_SENDKEYS_LOG" >/dev/null || [ "$(grep -c 'Enter' "$KM_SENDKEYS_LOG")" -lt 2 ]; then
+    bad "$sticky_row" "the bare Enter that repaired this by hand was never re-sent: $(cat "$KM_SENDKEYS_LOG")"
+else
+    ok "$sticky_row, after a bare Enter is re-sent — km's own success message is not evidence of delivery"
+fi
+unset KM_SENDKEYS_LOG
+
+# The direction nobody reported until Նուարդ was seen mid-generation on PR #1122
+# under a board that read her ASLEEP. It strands nobody; it interrupts — both
+# passes wake asleep seats, so she is handed a second bead on top of the one she
+# holds. A fix whose predicate is "detect an idle awake seat" passes its own
+# tests and leaves this half untouched, which is why it has a row of its own.
+dispatch_case '[]' '[]'
+seat_state nvard asleep
+seat_window nvard
+seat_claude nvard
+OUT="$(PATH="$BIN:$PATH" "$KM" reconcile 2>&1)"
+if [ "$(cat "$KM_STATE_DIR/seats/nvard/status" 2>/dev/null)" != awake ]; then
+    bad "a working seat recorded asleep is corrected" \
+        "status stayed [$(cat "$KM_STATE_DIR/seats/nvard/status" 2>/dev/null)], so both passes will still route work at her: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'nvard is recorded asleep with a live session'; then
+    bad "a working seat recorded asleep is corrected" "the correction is silent: $OUT"
+else
+    ok "a seat recorded asleep with a live session is recorded awake, so no pass hands her a second bead"
+fi
+
+# --- the frozen seat: a heartbeat the board threw away (gqlc-eier) -----------
+# Both judges froze on modals at once — 80 and 152 minutes — with the merge gate
+# shut and every instrument in the town reading healthy. The evidence was
+# already on disk: heartbeat.json carries an `updated` timestamp, and the status
+# table opened that very file, rendered context_pct, and discarded the one field
+# that would have shown it.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap mihr
+seat_heartbeat mihr 300 42
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+if ! printf '%s' "$OUT" | grep -E '^mihr' | grep -q '5m'; then
+    bad "the board renders heartbeat age" "the age is still discarded: $(printf '%s' "$OUT" | grep -E '^mihr')"
+elif printf '%s' "$OUT" | grep -q 'UNRESPONSIVE'; then
+    bad "the board renders heartbeat age" "a five-minute-old heartbeat was called unresponsive: $OUT"
+else
+    ok "km status renders the heartbeat's age, the field it used to open the file and throw away"
+fi
+
+# Միհր's shape: awake, on a usage-limit modal, 80 minutes without a heartbeat.
+# The STATE column still says awake and that is not a bug — it is the report
+# that is true about its own input and false about the world, and the point is
+# that a second column now disagrees with it out loud.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap mihr
+seat_heartbeat mihr 4800 42
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+frozen_row="a frozen seat is named rather than counted as a working citizen"
+if ! printf '%s' "$OUT" | grep -E '^mihr' | grep -q '1h20m'; then
+    bad "$frozen_row" "the 80-minute age is not rendered: $(printf '%s' "$OUT" | grep -E '^mihr')"
+elif ! printf '%s' "$OUT" | grep '^UNRESPONSIVE' | grep -q mihr; then
+    bad "$frozen_row" "no line names the seat, so the operator has nothing to act on: $OUT"
+elif ! printf '%s' "$OUT" | grep -E '^mihr' | grep -q awake; then
+    bad "$frozen_row" "the STATE column was rewritten; the two accounts must be able to disagree in the open: $OUT"
+else
+    ok "$frozen_row, while the STATE column keeps saying what the status FILE says"
+fi
+
+# Անահիտ's shape, and the reason the age is not read for `awake` alone: she had
+# written her handoff and run `km sleep`, so she froze under asleep-pending on
+# the shutdown modal. A column that looked at awake seats only would have shown
+# a dash for the worse of the two freezes.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_pending anahit
+seat_heartbeat anahit 9120 61
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+if ! printf '%s' "$OUT" | grep '^UNRESPONSIVE' | grep -q anahit; then
+    bad "a seat frozen under asleep-pending is named too" \
+        "152 minutes without a heartbeat under asleep-pending passed unremarked: $OUT"
+else
+    ok "a seat frozen under asleep-pending is named too, which is the half a column reading only 'awake' would have missed"
+fi
+
+# Unknown is not zero. A heartbeat that cannot be parsed says NOTHING about the
+# seat, and rendering it as an age would say the most reassuring possible thing.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap ayg
+mkdir -p "$KM_STATE_DIR/seats/ayg"
+printf 'not json at all\n' >"$KM_STATE_DIR/seats/ayg/heartbeat.json"
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+if ! printf '%s' "$OUT" | grep -E '^ayg' | grep -q '?'; then
+    bad "an unreadable heartbeat renders as unknown" "row: $(printf '%s' "$OUT" | grep -E '^ayg')"
+elif printf '%s' "$OUT" | grep -E '^ayg' | grep -qE '(^| )0s'; then
+    bad "an unreadable heartbeat renders as unknown" "it was rendered as a fresh heartbeat: $(printf '%s' "$OUT" | grep -E '^ayg')"
+else
+    ok "a heartbeat that cannot be parsed renders as unknown rather than as a zero-second age"
+fi
+
 # --- the contract with real tmux ---------------------------------------------
 # Every row above stands on a stubbed tmux and a stubbed ps, and a stub encodes
 # what I BELIEVE those tools do. The belief is load-bearing here in a way it was
@@ -2483,6 +3059,50 @@ else
             bad "$real_tmux" "a seat was still live after its real session was killed"
         else
             ok "$real_tmux"
+        fi
+    fi
+    tmux kill-session -t "=$KM_TMUX_SESSION" 2>/dev/null
+    unset KM_TMUX_SESSION
+fi
+
+# The same contract for the RUNNER probe, and it needs its own row because it
+# asks pgrep a different question: `-f` against the whole command line rather
+# than `-x` against comm. km-seat has an `env bash` shebang, so its comm is the
+# interpreter's — a probe written the way the session probe is written would
+# find nothing, and every stubbed row above would stay green while no dead
+# runner was ever detected again.
+real_runner="seat_runner_live agrees with real tmux and real pgrep about a parked km-seat"
+if ! command -v tmux >/dev/null 2>&1; then
+    printf 'skip - %s: no tmux on PATH\n' "$real_runner"
+else
+    export KM_STATE_DIR="$TMP/real-runner"
+    mkdir -p "$KM_STATE_DIR"
+    runnerbin="$TMP/runnerbin"
+    mkdir -p "$runnerbin"
+    # A shell script, deliberately: that is what km-seat is, and the point of
+    # the row is that its comm is not its name.
+    printf '#!/usr/bin/env bash\nsleep 120\n' >"$runnerbin/km-seat"
+    chmod +x "$runnerbin/km-seat"
+    export KM_TMUX_SESSION="km-test-runner-$$"
+    tmux new-session -d -s "$KM_TMUX_SESSION" -n artur -x 80 -y 24 "$runnerbin/km-seat artur" 2>/dev/null
+    for _ in $(seq 1 50); do
+        "$KM" seat-runner artur && break
+        sleep 0.1
+    done
+    if ! "$KM" seat-runner artur; then
+        bad "$real_runner" "a real pane running a real km-seat script was not seen as having a runner"
+    elif "$KM" seat-live artur; then
+        bad "$real_runner" "a parked runner with no claude was read as a live SESSION, which would call every asleep seat busy"
+    elif "$KM" seat-runner ar; then
+        # `ar` is a seat, and a prefix of artur, so this asks both halves at
+        # once: tmux's prefix resolution and pgrep's unanchored -f pattern.
+        bad "$real_runner" "a windowless seat borrowed a longer seat's runner by prefix"
+    else
+        tmux kill-session -t "=$KM_TMUX_SESSION" 2>/dev/null
+        if "$KM" seat-runner artur; then
+            bad "$real_runner" "a runner was still seen after its real window was killed"
+        else
+            ok "$real_runner, and a parked runner is not a live session"
         fi
     fi
     tmux kill-session -t "=$KM_TMUX_SESSION" 2>/dev/null
@@ -2902,7 +3522,22 @@ printf '%s\n' "$@" >"$KM_TEST_ARGV"
 # The seat's ENVIRONMENT is part of what km-seat composes, not just its argv.
 printf 'KM_CONFIG=%s\n' "${KM_CONFIG-<unset>}" >"$KM_TEST_ARGV.env"
 STUB
-chmod +x "$stubdir/claude"
+
+# The bead ledger km-seat consults for an `effort:` label, in the same shape the
+# dispatcher's bd stub uses: a fixture file named by the environment. It answers
+# the MULTI-id form, because that is the one call km-seat makes, and it echoes
+# the whole fixture rather than filtering — km-seat picks its own bead out of the
+# answer, and a stub that filtered would hide a km-seat that took the wrong row.
+# With no fixture named it answers nothing, so every argv row written before the
+# label existed keeps launching exactly as it did.
+cat >"$stubdir/bd" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+    show) [ -n "${KM_TEST_BEADS:-}" ] || exit 1; cat "$KM_TEST_BEADS" ;;
+    *) exit 0 ;;
+esac
+STUB
+chmod +x "$stubdir/claude" "$stubdir/bd"
 
 # The argv carries the whole soul, so a raw dump buries the flag it is being
 # printed to show. Everything before --append-system-prompt is the part these
@@ -2937,15 +3572,19 @@ gitf -C "$TOWN" worktree add -q --detach "$TOWN-seat-mihr" master
 
 ARGV=""
 STDERR=""
-compose_argv() { # compose_argv <config> [seat] -> ARGV (one arg per line), STDERR
-    local cfgfile=$1 seat=${2:-hayk} sdir pid waited=0
+compose_argv() { # compose_argv <config> [seat] [wake-lines] -> ARGV (one arg per line), STDERR
+    # The wake reasons are an INPUT to the launch now, not just to the message:
+    # `km wake --bead ID` writes "bead:ID <reason>", and the bead's labels can
+    # move --effort. Default unchanged, so every row written before that keeps
+    # asking the same question.
+    local cfgfile=$1 seat=${2:-hayk} wake=${3:-a test wake} sdir pid waited=0
     ARGV="$TMP/argv.$RANDOM"
     STDERR="$TMP/stderr.$RANDOM"
     sdir="$TMP/seatstate.$RANDOM"
     mkdir -p "$sdir/seats/$seat"
-    echo "a test wake" >"$sdir/seats/$seat/wake"
+    printf '%s\n' "$wake" >"$sdir/seats/$seat/wake"
     (cd "$TOWN" && PATH="$stubdir:$PATH" KM_CONFIG="$cfgfile" KM_STATE_DIR="$sdir" \
-        KM_TEST_ARGV="$ARGV" "$KM_SEAT" "$seat") >"$STDERR" 2>&1 &
+        KM_TEST_ARGV="$ARGV" KM_TEST_BEADS="${BEADS_FIXTURE:-}" "$KM_SEAT" "$seat") >"$STDERR" 2>&1 &
     pid=$!
     # km-seat parks again after the stub exits, so it never runs away; we stop
     # waiting as soon as the argv lands, or give up and report what we have.
@@ -3047,6 +3686,84 @@ elif ! grep -q 'mediun' "$STDERR"; then
 else
     ok "a misspelled level is refused, named on stderr, and the seat still launches"
 fi
+
+# --- the per-bead effort escalation (Constitution V.6.2, bd gqlc-jmwh) --------
+# `/effort` is a client-side TUI command parsed from USER input, so a citizen —
+# which emits assistant turns — cannot invoke it, and the level was otherwise
+# fixed at launch. V.6.2's right was therefore unreachable in practice. A bead
+# carrying `effort:<level>` now moves the launch instead.
+#
+# These rows go through compose_argv like every row above: a real km-seat, a
+# real wake file with a real `bead:ID` reason in it, and the argv the stub
+# claude actually received. What is stubbed is bd (the labels) and claude (the
+# argv sink); what EXECUTES is km-seat's whole wake path — parsing the bead id
+# out of the reasons, the bd call, the label extraction, the validation, and the
+# argv assembly.
+
+BEADS_FIXTURE="$TMP/beads.json"
+
+# Escalation. The config says `low` for warriors in the same breath, so a row
+# that merely saw `xhigh` cannot be satisfied by the class default leaking
+# through — the two values are different and the bead's must win.
+printf '[{"id":"gqlc-deep","labels":["class:warrior","effort:xhigh"]}]' >"$BEADS_FIXTURE"
+alt_config "$TMP/labelcfg.toml" 'warrior = "low"'
+compose_argv "$TMP/labelcfg.toml" hayk "bead:gqlc-deep ready warrior work"
+if [ ! -s "$ARGV" ]; then
+    bad "an effort: label reaches the launch" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
+elif [ "$(grep -A1 -x -- '--effort' "$ARGV" | tail -1)" != xhigh ]; then
+    bad "an effort: label reaches the launch" "argv: $(argv_brief "$ARGV")"
+elif ! grep -q 'gqlc-deep' "$STDERR"; then
+    bad "an escalation is said out loud" "the seat launched deeper without naming why: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "a bead labelled effort:xhigh launches its seat at xhigh though the class default is low"
+fi
+
+# The control the row above needs to mean anything: the SAME wake, the same bead
+# id, the same config — and no effort: label. Without it, a km-seat that ignored
+# the config and hard-wired xhigh whenever a bead was named would pass.
+printf '[{"id":"gqlc-deep","labels":["class:warrior"]}]' >"$BEADS_FIXTURE"
+compose_argv "$TMP/labelcfg.toml" hayk "bead:gqlc-deep ready warrior work"
+if [ "$(grep -A1 -x -- '--effort' "$ARGV" 2>/dev/null | tail -1)" != low ]; then
+    bad "an unlabelled bead leaves the class default alone" "argv: $(argv_brief "$ARGV")"
+elif [ -s "$STDERR" ]; then
+    bad "an unlabelled bead launches quietly" "stderr: $(cat "$STDERR")"
+else
+    ok "a bead with no effort: label launches at the class default, quietly"
+fi
+
+# The same gate the config gets, and for a worse threat: any citizen may write a
+# label and nobody reviews one, while `claude --effort dragon` refuses to start.
+# So the level is dropped, named on stderr, and the seat launches at its class
+# default rather than not at all — a bad label must cost nobody their day.
+printf '[{"id":"gqlc-bad","labels":["effort:dragon"]}]' >"$BEADS_FIXTURE"
+compose_argv "$TMP/labelcfg.toml" hayk "bead:gqlc-bad ready warrior work"
+if [ ! -s "$ARGV" ]; then
+    bad "a bad effort: label still launches the seat" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
+elif [ "$(grep -A1 -x -- '--effort' "$ARGV" | tail -1)" != low ]; then
+    bad "a bad effort: label must not reach claude" "argv: $(argv_brief "$ARGV")"
+elif ! grep -q 'dragon' "$STDERR"; then
+    bad "a bad effort: label must be named on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "an unrecognised effort: label is dropped, named on stderr, and the seat launches at its class default"
+fi
+
+# The wake file APPENDS, so one wake can name several beads and they can
+# disagree. The documented rule is that the FIRST bead named wins; the row pins
+# both halves, because "first wins" is unobservable without the loser being
+# heard from. Second bead first in the bd answer, so a km-seat that took bd's
+# order rather than the wake file's fails here.
+printf '[{"id":"gqlc-second","labels":["effort:max"]},{"id":"gqlc-first","labels":["effort:high"]}]' >"$BEADS_FIXTURE"
+compose_argv "$TMP/labelcfg.toml" hayk "bead:gqlc-first one
+bead:gqlc-second two"
+if [ "$(grep -A1 -x -- '--effort' "$ARGV" 2>/dev/null | tail -1)" != high ]; then
+    bad "the first bead named in a wake decides the level" "argv: $(argv_brief "$ARGV")"
+elif ! grep -q 'gqlc-second also asks' "$STDERR"; then
+    bad "the overruled bead is said out loud" "the second ask vanished silently: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "when a wake names two beads asking for different levels, the first wins and the second is named on stderr"
+fi
+
+BEADS_FIXTURE=""
 
 # --- seat-refresh: a merged hook reaches a parked seat (gqlc-xtre) -----------
 # core.hooksPath is RELATIVE, so every seat runs the hooks in its own checkout
