@@ -104,10 +104,17 @@ is_seat() { seats_all | grep -qx "$1"; }
 # later, in someone else's repo. Default-deny puts the new unknown on the safe
 # side. The allowlist is transport only: GIT_CONFIG_* is deliberately absent,
 # since it can inject core.hooksPath and aliases.
+#
+# KM_GIT_TIMEOUT bounds the call when a caller declares one. It is read here
+# rather than wrapped per call site because a caller sets it with `local` and
+# every git the callee reaches is then bounded, which is the property a timer
+# needs: deploy now runs from inside the dispatch and guard ticks (gqlc-nm7w),
+# and OnUnitActiveSec means the next tick cannot begin until this one ends, so
+# one hung fetch is a stopped town.
 git_at() { # git_at <dir> <args...>
     local dir=$1
     shift
-    local -a scrub=() keep=()
+    local -a scrub=() keep=() bound=()
     local v
     for v in "${!GIT_@}"; do
         case $v in
@@ -116,7 +123,8 @@ git_at() { # git_at <dir> <args...>
             *) scrub+=(-u "$v") ;;
         esac
     done
-    env "${scrub[@]}" "${keep[@]}" git -C "$dir" "$@"
+    [ -n "${KM_GIT_TIMEOUT:-}" ] && bound=(timeout "$KM_GIT_TIMEOUT")
+    env "${scrub[@]}" "${keep[@]}" "${bound[@]}" git -C "$dir" "$@"
 }
 
 # Scrubbed like the rest: an exported GIT_DIR would otherwise name the repo that
@@ -198,28 +206,124 @@ kingdom_drift() {
 
 deployed_ok() { [ -z "$(kingdom_drift)" ]; }
 
-# Fail-closed: an unexpected failure inside leaves the caller refusing.
-assert_deployed() { # <command name for the message>
-    local drift
+# Fail OPEN, after trying to fix it. This used to be assert_deployed, which
+# refused, and the refusal is what stopped the town (gqlc-nm7w): nothing in the
+# Թագաւորութիւն ever ran `km deploy` on its own — no systemd unit, no km-seat,
+# no justfile recipe, no line of citizen-protocol.md — while origin/master DOES
+# move under the timers, because hold_fetch_master and cmd_seat_refresh both
+# fetch. So any merged PR touching a gate path made every dispatch tick and
+# every guard tick exit non-zero into the journal, and the town routed nobody
+# until a human typed `just kingdom-deploy`. Measured 2026-08-23:
+# kingdom-guard.service exit 1 at 03:25:43, naming twenty-odd kingdom/ paths.
+#
+# Both arms of the trade have now been observed here, which is what decides it.
+# gqlc-ed2u is stale code running behind a healthy indicator; gqlc-nm7w is NO
+# code running behind a healthy indicator. Routing from a tree one merge behind
+# is recoverable and self-corrects on the next tick; a halted town needs a
+# human at 3am and gets one at 9am. So the timers heal themselves and then
+# continue either way — but never silently, and `km doctor` and the `km status`
+# board still FAIL and still say DRIFT, because those are read by someone who
+# can act.
+#
+# KM_SELF_DEPLOYED bounds the hand-off below to one hop.
+ensure_deployed() { # <command name for the message> [the args to hand on]
+    local name=$1 drift out km
+    shift
     drift=$(kingdom_drift)
-    if [ -z "$drift" ]; then return 0; fi
+    [ -n "$drift" ] || return 0
+    if [ -z "${KM_SELF_DEPLOYED:-}" ]; then
+        echo "$name: DRIFT — deploying $(deploy_root) before it runs" >&2
+        if out=$(cmd_deploy 2>&1); then
+            printf '%s: %s\n' "$name" "${out//$'\n'/ }" >&2
+            # The km executing this line is the copy the fast-forward just
+            # replaced, so finishing the tick here runs exactly the stale code
+            # the deploy retired — gqlc-ed2u, one level down. Hand the command
+            # to the deployed copy instead.
+            km="$(deploy_root)/kingdom/bin/km"
+            if [ -x "$km" ]; then
+                export KM_SELF_DEPLOYED=1
+                exec "$km" "$name" "$@"
+            fi
+            return 0
+        fi
+        drift=$(kingdom_drift)
+        [ -n "$drift" ] || return 0
+        printf '%s: deploy failed: %s\n' "$name" "${out//$'\n'/ }" >&2
+    fi
     {
-        echo "$1: DRIFT — $(deploy_root) is not origin/master, so the town would run stale code:"
+        echo "$name: WARNING — $(deploy_root) is not origin/master and could not be deployed; running from this tree anyway:"
         echo "  ${drift//$'\n'/$'\n  '}"
-        echo "$1: run 'km deploy' (just kingdom-deploy) first"
+        echo "$name: run 'km deploy' (just kingdom-deploy) by hand — km status and km doctor carry this too"
     } >&2
-    return 1
+    return 0
+}
+
+# The one class of local dirt a deploy may resolve by itself, and the reason
+# --ff-only alone was a permanent stop (gqlc-n8h3). bd re-exports
+# .beads/issues.jsonl into the deploy root continuously, so a modified export
+# is that tree's STEADY STATE rather than a leftover — measured 2026-08-23 in
+# the shared checkout: staged-modified, 125 insertions against 92 deletions.
+# Nearly every commit in this repo touches that file, because every bd write is
+# exported and committed, so git refuses the fast-forward with "Your local
+# changes to the following files would be overwritten by merge" at the first
+# attempt where HEAD is genuinely behind. Since deploy is the remedy that
+# dispatch and guard both name, that is a loop with no exit.
+#
+# Discarding the local export is lossless, and it was measured rather than
+# assumed. The Dolt DB under .beads/embeddeddolt is bd's source of truth and
+# the jsonl is a passive export: a fresh `bd export` of the live ledger came
+# back with the same 790 lines as the dirty working-tree copy and an empty
+# sorted diff, and every id in the COMMITTED copy was present in the export
+# too. The DIRECTION is the whole argument — taking the incoming version drops
+# nothing the DB cannot re-emit, whereas restoring the local copy over the
+# merged one would revert whatever bead rows other citizens pushed while this
+# tree stood still. The bytes are copied aside anyway, because "the database
+# can regenerate it" is a claim about bd, and this function should not be the
+# only thing standing between an operator and a file.
+#
+# Scope is exactly .beads/. Everything else dirty in that tree is a human's
+# uncommitted work — the shared checkout is where Անդրանիկ works — so if
+# anything else is in the way the merge is left to refuse, naming it, and
+# nothing at all is set aside, not even the exports: a partial one would leave
+# him resolving a tree km had already edited under him.
+merge_blockers() { # <root> : tracked files that are both dirty and incoming
+    local root=$1 incoming dirty
+    incoming=$(git_at "$root" diff --name-only HEAD origin/master 2>/dev/null) || return 1
+    dirty=$(git_at "$root" diff --name-only HEAD 2>/dev/null) || return 1
+    [ -n "$incoming" ] && [ -n "$dirty" ] || return 0
+    comm -12 <(printf '%s\n' "$incoming" | sort -u) <(printf '%s\n' "$dirty" | sort -u)
+}
+
+set_aside_bd_exports() { # <root>
+    local root=$1 blockers aside f
+    blockers=$(merge_blockers "$root") || return 0
+    [ -n "$blockers" ] || return 0
+    printf '%s\n' "$blockers" | grep -qv '^\.beads/' && return 0
+    aside="$(state_dir)/deploy-set-aside/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        mkdir -p "$aside/$(dirname "$f")"
+        cp -p "$root/$f" "$aside/$f" 2>/dev/null || true
+        git_at "$root" checkout HEAD -- "$f" \
+            || die "deploy: could not set aside $f in $root; nothing was moved"
+    done <<<"$blockers"
+    echo "deploy: set aside bd's export so the fast-forward could pass: ${blockers//$'\n'/ } (copy: $aside)"
 }
 
 cmd_deploy() {
     local root branch drift
+    # The fetch and the merge reach the network and the disk from inside a
+    # systemd tick; see git_at. A caller may raise or lower it.
+    local KM_GIT_TIMEOUT="${KM_FETCH_TIMEOUT:-60}"
     root=$(deploy_root)
     branch=$(git_at "$root" symbolic-ref --quiet --short HEAD || true)
     [ "$branch" = master ] || die "deploy: $root is parked on '${branch:-a detached HEAD}', not master"
     git_at "$root" fetch --quiet origin master || die "deploy: cannot reach origin from $root"
-    # --ff-only is the whole safety argument: git itself refuses to overwrite a
-    # dirty file the incoming commits touch, and refuses a divergence, so bd's
-    # exports in that tree are never clobbered by a stash-and-reset dance.
+    set_aside_bd_exports "$root"
+    # --ff-only is still the safety argument for everything except bd's own
+    # exports: git refuses to overwrite a dirty file the incoming commits
+    # touch, and refuses a divergence, so no stash-and-reset dance can clobber
+    # a human's uncommitted work in that tree.
     git_at "$root" merge --ff-only origin/master || die "deploy: refused to move $root; resolve the above by hand"
     drift=$(kingdom_drift)
     if [ -n "$drift" ]; then
@@ -1038,7 +1142,7 @@ stranded_ids() {
 }
 
 cmd_dispatch() {
-    assert_deployed dispatch || return 1
+    ensure_deployed dispatch "$@" || return 1
     session_up || { echo "dispatch: the town is down; nothing to do"; return 0; }
     local sd
     sd=$(state_dir)
@@ -1571,7 +1675,7 @@ cmd_hold_verdict() {
 }
 
 cmd_guard_sweep() {
-    assert_deployed guard-sweep || return 1
+    ensure_deployed guard-sweep "$@" || return 1
     session_up || { echo "guard-sweep: the town is down"; return 0; }
     # The halt binds every TIMER-driven wake, not just the dispatcher's. This is
     # the second one, and each wake here starts a real claude session, so a halt
