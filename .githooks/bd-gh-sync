@@ -447,9 +447,38 @@ PYEOF
   # unreported and the summary would count it as absent.
   sed -n '/^HOLD /p' "$_tmp/plan.txt" >"$_tmp/holds.txt"
   sed -n '/^ORPHAN /p' "$_tmp/plan.txt" >"$_tmp/orphans.txt"
-  while read -r _ bid n reason; do
-    echo "bd-gh-sync: holding $bid (GH #$n) out of the pull — $reason" >&2
-  done <"$_tmp/holds.txt"
+  # One line per distinct reason, not one per bead. Measured 2026-08-23 over 784
+  # beads and 806 issues: 7 beads sit permanently on
+  # bd-description-not-a-prefix-of-gh-body, every one of them bd AHEAD of GitHub,
+  # so the pull is right to hold them and the push path never rewrites an
+  # existing issue body — neither direction of this script can clear them. They
+  # printed seven stderr lines on every merge, forever, which is how an operator
+  # stops reading the output that also carries the two actionable notices. The
+  # divergence is unchanged and is bd gqlc-myee; what changed is that it no
+  # longer costs seven lines to say.
+  #
+  # A single-bead group keeps the old wording verbatim, because the common case
+  # is one hold and "holding 1 beads" is a worse line than the one it replaces.
+  # The enumeration is capped and declares its own elision: an unbounded list is
+  # the same unreadability in one line instead of N. The count is never capped.
+  awk -v cap=12 '
+    { r = $4
+      if (!(r in n)) { order[++k] = r; n[r] = 0 }
+      n[r]++
+      if (n[r] <= cap)
+        ids[r] = ids[r] (n[r] > 1 ? ", " : "") $2 " (GH #" $3 ")" }
+    END {
+      for (i = 1; i <= k; i++) {
+        r = order[i]
+        if (n[r] == 1) {
+          printf "bd-gh-sync: holding %s out of the pull — %s\n", ids[r], r
+        } else {
+          more = n[r] > cap ? sprintf(" and %d more", n[r] - cap) : ""
+          printf "bd-gh-sync: holding %d beads out of the pull — %s: %s%s\n", \
+            n[r], r, ids[r], more
+        }
+      }
+    }' "$_tmp/holds.txt" >&2
   while read -r _ n; do
     echo "bd-gh-sync: GH #$n has no bead; not creating one. Adopt it with 'bd github pull $n'." >&2
   done <"$_tmp/orphans.txt"
@@ -1057,6 +1086,17 @@ fi
 # get is an attempt. So it counts toward the denominator and never toward
 # _pushed, which is what makes the summary read "0 of 1" rather than announcing
 # a push that GitHub would have refused whole.
+#
+# This verdict was nearly demoted to a non-failing notice on 2026-08-23, on the
+# argument that the condition is permanent and the citizen who sees the alarm is
+# not the one who can clear it. Both halves were falsified the same night.
+# gqlc-njqk, gqlc-a7we and gqlc-to7k did carry the 51-character
+# `subject:kingdom/brain/playbooks/citizen-protocol.md`; they now carry
+# `subject:kingdom/brain/playbooks`, 31 characters — the deepest ancestor
+# directory that fits, which is verbatim the remedy the NOTE line below prints —
+# and all three mirrored normally (GH #1358, #1359, #1360). Measured over the
+# whole board the same day: zero beads carry an over-cap label. So the alarm is
+# clearable, was cleared, and PUSH FAILED stays.
 _unmirrorable=$(_count '^UNMIRRORABLE ' "$_tmp/plan.txt")
 _pushable=$(_count '^NEW ' "$_tmp/plan.txt")
 _new=$((_pushable + _unmirrorable))
@@ -1134,6 +1174,73 @@ fi
 _post_rc=0
 bd list --status all --limit 0 --json >"$_tmp/beads_after.json" 9>&- 2>/dev/null \
   || { _post_rc=$?; : >"$_tmp/beads_after.json"; }
+
+# _pushed is a count of intent: ids handed to a batch that exited 0. `bd github
+# push` exits 0 even where the GitHub API refuses an individual bead — a rate
+# limit, a transient 5xx, a field GitHub rejects — so a bead left with no mirror
+# at all used to arrive underneath a summary line saying it was pushed. That is
+# the shape this whole script is written against, and it was in the one number
+# the caller keeps (gqlc-mprc).
+#
+# The evidence is the ledger: `bd github push` is what assigns external_ref, so
+# a bead is mirrored iff it carries one after the push. Read off the same
+# post-push snapshot the stale-mirror pass uses, so no third `bd list` is spent.
+# Only ever run over beads this run actually offered — with nothing offered
+# there is no claim to check and none to withdraw, which keeps a repository with
+# nothing to push out of the failure path entirely.
+_mirrored=$_pushed
+_unverified=""
+if [ "$_pushed" -gt 0 ]; then
+  if [ "$_post_rc" -ne 0 ]; then
+    _unverified="'bd list' exited ${_post_rc} after the push"
+  else
+    _vrc=0
+    python3 - "$_tmp/new.txt" "$_tmp/beads_after.json" \
+      >"$_tmp/verify.txt" 9>&- 2>/dev/null <<'PYEOF' || _vrc=$?
+import json, sys
+
+def one_line(s):
+    return str(s).encode("unicode_escape").decode("ascii")
+
+with open(sys.argv[1], encoding="utf-8") as fh:
+    offered = [ln.rstrip("\n") for ln in fh if ln.strip()]
+with open(sys.argv[2], encoding="utf-8") as fh:
+    beads = json.load(fh)
+# An empty post-push list is not "no bead gained a mirror": this run just minted
+# issues, so it is a snapshot that was lost. Reported as such rather than as a
+# count of zero, which would read as a measured shortfall.
+if not beads:
+    print("EMPTY")
+    print("DONE")
+    sys.exit(0)
+have = {b.get("id"): bool(b.get("external_ref")) for b in beads}
+n = 0
+for bid in offered:
+    if have.get(bid):
+        n += 1
+    else:
+        print("MISSING " + one_line(bid))
+print("MIRRORED %d" % n)
+print("DONE")
+PYEOF
+    if [ "$_vrc" -ne 0 ] ||
+       [ "$(tail -n 1 "$_tmp/verify.txt" 2>/dev/null)" != "DONE" ]; then
+      _unverified="the post-push bead list could not be read"
+    elif grep -q '^EMPTY$' "$_tmp/verify.txt"; then
+      _unverified="the post-push bead list came back empty"
+    else
+      _mirrored=$(sed -n 's/^MIRRORED //p' "$_tmp/verify.txt")
+      while IFS= read -r _lost; do
+        echo "bd-gh-sync: ${_lost} was handed to 'bd github push' and came back with no GitHub mirror; 'bd github push ${_lost}' by hand, or check the API error above." >&2
+      done < <(sed -n 's/^MISSING //p' "$_tmp/verify.txt")
+    fi
+  fi
+  if [ -n "$_unverified" ]; then
+    echo "bd-gh-sync: whether the ${_pushed} bead(s) offered to GitHub gained a mirror" >&2
+    echo "bd-gh-sync: could not be checked (${_unverified}). 'bd github push' exits 0" >&2
+    echo "bd-gh-sync: over a bead the API refused, so the offer is not the evidence." >&2
+  fi
+fi
 
 # Close GH mirrors for beads that are closed locally but still open on GH.
 # One bulk `gh issue list` + one `gh issue close` per mismatch. Idempotent:
@@ -1314,14 +1421,17 @@ fi
 # came back empty is the fail-open this whole guard exists to close, and writing
 # it into the failure line would hand it back on the one line the caller keeps.
 _rc=0
-_new_arm="${_pushed} of ${_new} new bead(s) mirrored"
+_new_arm="${_mirrored} of ${_new} new bead(s) mirrored"
+[ -n "$_unverified" ] &&
+  _new_arm="${_pushed} new bead(s) offered to GitHub, none of them checked for a mirror"
 [ -n "$_uncounted" ] &&
-  _new_arm="${_pushed} new bead(s) mirrored out of a number that was never established"
+  _new_arm="${_mirrored} new bead(s) mirrored out of a number that was never established"
 _close_arm="${_closed} of ${_stale} stale GH mirror(s) closed"
 [ -n "$_blind" ] &&
   _close_arm="an unknown number of stale GH mirror(s) left open"
-if [ "$_pushed" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] ||
-   [ -n "$_blind" ] || [ -n "$_uncounted" ] || [ -n "$_capunknown" ]; then
+if [ "$_mirrored" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] ||
+   [ -n "$_blind" ] || [ -n "$_uncounted" ] || [ -n "$_capunknown" ] ||
+   [ -n "$_unverified" ]; then
   _rc=1
   _summary="bd-gh-sync: PUSH FAILED — ${_new_arm}, ${_close_arm}"
   [ "$_failed" -gt 0 ] &&
@@ -1335,6 +1445,8 @@ if [ "$_pushed" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] ||
     _summary="${_summary}; no batch ran at all"
   [ "$_unmirrorable" -gt 0 ] &&
     _summary="${_summary}; ${_unmirrorable} bead(s) were not offered to GitHub at all, carrying a label longer than it accepts — see the line(s) above for the shorter label to use"
+  [ -n "$_unverified" ] &&
+    _summary="${_summary}; whether the bead(s) offered to GitHub gained a mirror could not be checked (${_unverified})"
   [ -n "$_capunknown" ] &&
     _summary="${_summary}; no bead was screened for an unmirrorable label (the cap could not be read from ${_capunknown})"
   [ -n "$_blind" ] &&
@@ -1343,7 +1455,7 @@ if [ "$_pushed" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] ||
     _summary="${_summary}; which beads needed a mirror could not be counted (${_uncounted})"
   _summary="${_summary}."
 else
-  _summary="bd-gh-sync: pushed ${_pushed} new bead(s), closed ${_closed} stale GH mirror(s)."
+  _summary="bd-gh-sync: pushed ${_mirrored} new bead(s), closed ${_closed} stale GH mirror(s)."
 fi
 echo "$_summary" >&2
 exit "$_rc"
