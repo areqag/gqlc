@@ -35,8 +35,10 @@ max_active = 6
 
 [dispatch]
 # The lowest priority the FRESH pass will wake a citizen for. A ready,
-# unassigned, class-labelled bead numbered above this is named in the run's
-# output and left where it is — filed, searchable, and routed to nobody.
+# unassigned bead numbered above this is named in the run's output and left
+# where it is — filed, searchable, and routed to nobody. A class label is no
+# longer part of that sentence: since gqlc-38ye an unlabelled bead is routed as
+# class:warrior by inference, so the floor is the only thing withholding one.
 #
 # It binds the fresh pass ONLY. The resume pass (in-progress beads returning to
 # the seat that holds them) and the owned pass (ready beads naming an assignee)
@@ -50,9 +52,16 @@ max_active = 6
 # defect findings that the town's own adversarial review produced faster than
 # anyone could fix them, so half the board was work the board itself had
 # manufactured, and the dispatcher spent citizens on it while 25 PRs sat open.
-# "2" is therefore a throughput decision about the backlog we have, not a
-# judgement that a P3 is worthless — raise it when the P0-P2 queue drains.
-max_priority = "2"
+# "2" was therefore a throughput decision about the backlog we had, not a
+# judgement that a P3 is worthless — to be raised when the P0-P2 queue drained.
+#
+# RAISED TO "3" on 2026-08-23 (gqlc-38ye), which is that condition arriving from
+# the other side. MEASURED that morning: 209 open beads, 162 P3 and 5 P4. At a
+# floor of two, 167 ready beads were unroutable BY CONFIGURATION and the fresh
+# pass named every one of them on every two-minute tick — the noise this comment
+# was written to justify had become the whole output. A floor of three opens the
+# 162 and leaves the five P4 parked, which is still a floor and still says so.
+max_priority = "3"
 
 [cadence]
 dispatch_minutes = 2
