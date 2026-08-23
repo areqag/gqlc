@@ -483,12 +483,17 @@ done
 # SPELLING, and says nothing about whether any file is actually sandboxed. It
 # is the half B cannot do, in the same way B is the half this cannot do.
 #
-# LEGACY, and why the gate lands with exceptions rather than not at all. Four
-# files still carry the copy. All four are outside the file set this change
-# owns, and editing them tonight would collide with the lanes that do own them.
-# Naming them is what lets the gate refuse a FIFTH, which is the value: a
-# convention with no gate drifts back. Each entry is a debt, and the stale-entry
-# row below is what stops an entry outliving the copy it excuses.
+# LEGACY, and why the gate lands with exceptions rather than not at all. Five
+# files still carry the copy, and all five are outside the file set the change
+# that added this gate owned. Naming them is what lets the gate refuse a SIXTH,
+# which is the value: a convention with no gate drifts back. Each entry is a
+# debt, and the stale-entry row below is what stops an entry outliving the copy
+# it excuses.
+#
+# The list is not decoration. It started at four; cron-freshness-test.sh was
+# added to master while the branch carrying this gate was in review, spelling
+# the scrub inline, and this row is what found it — which is the whole argument
+# for landing a gate with exceptions rather than waiting for a clean tree.
 PATTERN='^[[:space:]]*unset[[:space:]]+"\$\{!GIT_@\}"'
 
 # The definition itself, which necessarily carries the line.
@@ -506,6 +511,7 @@ legacy=(
     '.githooks/tests/km-overlap-test.sh'
     '.githooks/tests/km-test.sh'
     '.github/scripts/tests/ci-identity-gate-test.sh'
+    '.github/scripts/tests/cron-freshness-test.sh'
 )
 
 # C1, the RED control, and it is the row that keeps C2 from being decoration: a
@@ -569,7 +575,7 @@ if [ "${#offenders[@]}" -eq 0 ]; then
     ok "no tracked file outside the named legacy set spells the scrub inline"
 else
     bad "no tracked file outside the named legacy set spells the scrub inline" \
-        "${offenders[*]} carries its own \`unset \"\${!GIT_@}\"\`. Replace it with: source \"\$(cd \"\$(dirname \"\$0\")/..\" && pwd)/git-env-sandbox.sh\" — the shared file carries the reason, a copy does not. Do not add the file to the legacy list above; that list is four debts, not a door."
+        "${offenders[*]} carries its own \`unset \"\${!GIT_@}\"\`. Replace it with: source \"\$(cd \"\$(dirname \"\$0\")/..\" && pwd)/git-env-sandbox.sh\" — the shared file carries the reason, a copy does not. Do not add the file to the legacy list above; that list is a set of debts, not a door."
 fi
 
 # C3, against the list rotting. An entry that no longer describes anything is a
