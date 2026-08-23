@@ -407,17 +407,23 @@ var invalidFixtures = map[string]error{
 	// used to commit `c` to Company alone, so Part 1 accepted, WITH carried a
 	// singular type with no provenance, and the refusal fell to Part 2's
 	// projection of `p2`. Phase B now leaves `c` over both company types, and
-	// `WITH c` projects the whole entity — which is ErrAmbiguousLabel on any
-	// plural node binding, exactly as `MATCH (c:Company) WITH c ...` is on this
-	// same schema. Those are the only two cells of the corpus sweep this change
-	// moves without being a fixture written for it — this query against each of
-	// the two copies of the schema, and nothing else.
+	// `WITH c` projects the whole entity, which a plural node binding is refused
+	// for. The sentinel is ErrAmbiguousBinding and not the ErrAmbiguousLabel
+	// `MATCH (c:Company) WITH c ...` gets on this same schema, because `c` here
+	// carries no labels — Phase B's plural commitment put it in the cands lane,
+	// not resolveNodeLabels. The refusal is Part 1's, at the `WITH` itself: the
+	// query never reaches Part 2, which is why nothing in the resolver carries
+	// this provenance across a Part boundary (see scope.pluralByInference).
+	// Those are the only two cells of the corpus sweep the sxzj change moved
+	// without being a fixture written for it — this query against each of the
+	// two copies of the schema, and nothing else — and they are also the only
+	// two that the sentinel split moves.
 	//
 	// The carry lane it used to pin (newScope leaving a carried entry out of
 	// resolvedCovers) is still live; this fixture no longer reaches it, because
 	// Part 1 stops before the carry. carried_uncovered_endpoint_stays_plural
 	// below reaches it instead.
-	"plural_endpoint_carried_hop_property_stays_plural.cypher": ErrAmbiguousLabel,
+	"plural_endpoint_carried_hop_property_stays_plural.cypher": ErrAmbiguousBinding,
 	// The carry lane, reached by the route sxzj left open: `p` is singular from
 	// its label, the ONE WORKS_AT out of Person&Employee lands on Company&Large,
 	// and no edge touching `c` is trustworthy — the hop is OPTIONAL — so Phase B
@@ -1531,6 +1537,95 @@ func (s *ResolverSuite) TestANativelyPluralBindingDefersEvenWhenEveryCandidateDe
 	s.Require().NoError(err,
 		"the widened plural binding resolves a property every candidate declares; the native one above does not")
 	s.Require().NotEmpty(cols)
+}
+
+// TestAWholeEntityProjectionNamesTheFaultItActuallyHas pins which of the two
+// ambiguity sentinels the plural whole-entity refusal carries, on the axis that
+// selects it: whether the binding carried labels.
+//
+// errors.go draws that line and the code did not. ErrAmbiguousLabel is
+// documented as "a query's LABEL SET has no exact match on a declared node type
+// key and its proper-superset satisfying set has more than one element", and
+// disclaims the other case in the same comment — "Not overloaded onto
+// ErrAmbiguousBinding either, whose documented meaning is Phase B inference
+// failure at an unlabelled binding". ErrAmbiguousBinding is documented as "an
+// unlabelled node binding cannot be uniquely typed from the edges that touch
+// it: either its candidate set (intersected across touching edges) has more
+// than one node type, or ...". A whole-entity projection of an unlabelled
+// binding whose committed candidate set is plural is the first arm of that
+// sentence, verbatim, and refProjectionType returned the other sentinel for it.
+//
+// The falsifier is the first two rows: ONE binding, ONE candidate set, ONE
+// projection, two sentinels selected by an OPTIONAL MATCH that touches neither.
+// Measured at 412b9612, on valid/schemas/satisfy_plural_edges_inline_subtype.gql:
+//
+//	MATCH (p:Person)-[q:WORKS_AT]->(c)
+//	OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk)
+//	RETURN c
+//	  -> ambiguous label: c is satisfied by more than one declared node
+//	     type: Company, Company&Large
+//
+//	MATCH (p:Person)-[q:WORKS_AT]->(c)
+//	RETURN c
+//	  -> ambiguous binding: cannot uniquely infer type of unlabelled
+//	     binding "c" — candidate types: Company, Company&Large
+//
+// The second is Phase B's terminal deferral; the first is the widened lane, in
+// which commit() substituted `attainable` for a singleton `inferred` and bound
+// the plural set, so the refusal moved to projection time. Same fault, same
+// candidates, different name.
+//
+// The labelled row is the guard, not decoration: it is what a fix collapsing
+// both arms onto ErrAmbiguousBinding dies against. That collapse is not
+// available — the nodeCands whole-entity arm is ErrAmbiguousLabel's only
+// fail-site in the package, so taking it wholesale retires a sentinel
+// docs/specs/resolver-stage-r1.md declares and defends by name, which is the
+// posture gqlc-yxqq refused for the mirror-image case.
+//
+// What this does NOT claim: that the deferral is the only route to
+// ErrAmbiguousBinding. It is not, after this change — that is the point. Bead
+// gqlc-yxqq asked whether ErrAmbiguousBinding survives a future widening of the
+// natively-plural deferral (bead gqlc-icfq, pinned by the test above), given
+// that the deferral was its ONLY reachable site and the widening retires it.
+// This gives it a second site that the widening does not touch, so the answer
+// is that it survives and the two beads are independent.
+func (s *ResolverSuite) TestAWholeEntityProjectionNamesTheFaultItActuallyHas() {
+	resolve := func(dir, schemaFile, src string) error {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		_, err = New(s.loadSchema(dir, schemaFile), WithRegistry(regR7)).Resolve(q)
+		return err
+	}
+
+	const widened = "MATCH (p:Person)-[q:WORKS_AT]->(c)\n" +
+		"OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk)\n"
+	const inlineSubtype = "satisfy_plural_edges_inline_subtype.gql"
+
+	err := resolve("valid", inlineSubtype, widened+"RETURN c")
+	s.Require().ErrorIs(err, ErrAmbiguousBinding,
+		"`c` carries no labels, so its plural candidate set is a Phase B inference failure and not an ambiguous label set")
+	s.Require().NotErrorIs(err, ErrAmbiguousLabel,
+		"asserting the absence too: a widening that folds in the old sentinel keeps every errors.Is(ErrAmbiguousBinding) row green")
+	s.Require().ErrorContains(err, "Company, Company&Large",
+		"the refusal names the committed set, so a narrowing that dropped one and still refused fails here")
+
+	// Same binding, same candidates, same projection, without the widening —
+	// the deferral. Both routes must now answer with one name.
+	err = resolve("valid", inlineSubtype, "MATCH (p:Person)-[q:WORKS_AT]->(c)\nRETURN c")
+	s.Require().ErrorIs(err, ErrAmbiguousBinding)
+
+	// A property projection of the widened binding is untouched: it still goes
+	// through unionNodeProperty, which is what says the change is confined to
+	// the whole-entity arm and did not swallow the property lane.
+	s.Require().ErrorIs(resolve("valid", inlineSubtype, widened+"RETURN c.largeOnly"), ErrUnknownProperty)
+	s.Require().NoError(resolve("valid", inlineSubtype, widened+"RETURN c.name"))
+
+	// THE GUARD. `p` carries a label, its satisfying set has two elements, and
+	// that is ErrAmbiguousLabel's documented fault. A fix that reads the arm
+	// rather than the binding takes this row with it.
+	err = resolve("invalid", "satisfy_singular.gql", "MATCH (p:Person) RETURN p")
+	s.Require().ErrorIs(err, ErrAmbiguousLabel)
+	s.Require().NotErrorIs(err, ErrAmbiguousBinding)
 }
 
 // TestAnUnnarrowedFarEndKeepsItsKeys pins narrowedEndpointKeys' two

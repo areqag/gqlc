@@ -10,7 +10,7 @@ import (
 
 // scope is the resolver-typed state evolving through one Part's phases
 // (spec docs/specs/resolver-branch-scope.md §2.1). Fields are private;
-// every mutation runs through a method so the twelve lanes stay
+// every mutation runs through a method so the thirteen lanes stay
 // consistent — a cross-lane shadow on one lane cascades to the mirrors.
 //
 // Constructor seed order is fixed at newScope: carry-in → live-lane
@@ -22,15 +22,43 @@ import (
 type scope struct {
 	// Live tables — written by Phases A/B/C/D via Bind*/CloseEdges/
 	// InferUnlabelled/SeedLocalNullability/DemoteNullability.
-	nodeTypes       map[string]schema.NodeType
-	nodeCands       map[string][]schema.NodeType
-	resolvedCovers  map[string]struct{}
-	edgeTypes       map[string]schema.EdgeType
-	edgeKeys        map[string]schema.EdgeKey
-	edgeCands       map[string][]schema.EdgeKey
-	edgeBindings    map[string]query.EdgeBinding
-	nullableBinding map[string]bool
-	callTypes       map[string]callBindingSlot
+	nodeTypes map[string]schema.NodeType
+	nodeCands map[string][]schema.NodeType
+	// pluralByInference holds the names Phase B's plural commitment put in
+	// nodeCands — as against BindNodeCands, which puts a LABELLED binding's
+	// plural satisfying set there. That is the axis errors.go selects the
+	// whole-entity refusal's sentinel on (ErrAmbiguousLabel for a label set,
+	// ErrAmbiguousBinding for an unlabelled binding), and it is not
+	// recoverable from nodeCands, whose values are the same []schema.NodeType
+	// either way.
+	//
+	// One writer, deliberately, and the membership test defaults false for
+	// every name that writer did not name. BindNodeCands does NOT write a
+	// false here and the carry does not seed the lane; both were written and
+	// both SURVIVED mutation, because neither can be reached:
+	//
+	//   - A name cannot be in the lane before BindNodeCands runs. Phase A1
+	//     precedes Phase B within a Part, so the only ordering that would let
+	//     an inference entry be inherited by a later labelled re-bind does not
+	//     occur, and the zero value is already the answer.
+	//   - No carry can hold one. Export records a nodeCands entry only for a
+	//     bare `WITH v` (alias equal to the variable, no property), and a bare
+	//     whole-entity projection of a plural binding is refused in that very
+	//     Part — so the resolve stops before any downstream Part reads it.
+	//
+	// Nothing deletes from the lane either. The narrowing's shrink rewrites a
+	// name already in it, and shrinking a candidate set does not change how
+	// the binding was written; the narrowing's collapse and Bind*'s shadow
+	// cascade both take the name out of nodeCands, and refProjectionType asks
+	// this lane only from inside the nodeCands arm.
+	pluralByInference map[string]bool
+	resolvedCovers    map[string]struct{}
+	edgeTypes         map[string]schema.EdgeType
+	edgeKeys          map[string]schema.EdgeKey
+	edgeCands         map[string][]schema.EdgeKey
+	edgeBindings      map[string]query.EdgeBinding
+	nullableBinding   map[string]bool
+	callTypes         map[string]callBindingSlot
 
 	// Ingested Part — set once by Ingest, read by every phase method.
 	// Only the fields the phase methods actually consume are captured
@@ -57,7 +85,7 @@ type scope struct {
 	ingested bool
 }
 
-// newScope seeds a scope from Part K's exported carry — the ten fields
+// newScope seeds a scope from Part K's exported carry — the eleven fields
 // of branchState. Part 0's carry is the zero-value branchState (nil
 // maps everywhere) and the constructor treats it as empty without
 // nil-guards at every read; the make calls give every downstream
@@ -66,6 +94,7 @@ func newScope(carry branchState) *scope {
 	s := &scope{
 		nodeTypes:            make(map[string]schema.NodeType),
 		nodeCands:            make(map[string][]schema.NodeType),
+		pluralByInference:    make(map[string]bool),
 		resolvedCovers:       make(map[string]struct{}),
 		edgeTypes:            make(map[string]schema.EdgeType),
 		edgeKeys:             make(map[string]schema.EdgeKey),
@@ -86,8 +115,8 @@ func newScope(carry branchState) *scope {
 	// inference is one of the things it can be. Leaving it uncovered means the
 	// narrowing declines to learn from a carried singular endpoint, which lands
 	// on the pre-narrowing answer. The cost is precision on
-	// `MATCH (a:Only) WITH a MATCH (p:Plural)-[r]->(a)`; the alternative is an
-	// eleventh branchState lane, and no fixture pays the precision.
+	// `MATCH (a:Only) WITH a MATCH (p:Plural)-[r]->(a)`; the alternative is a
+	// twelfth branchState lane, and no fixture pays the precision.
 	for name, nt := range carry.exportedNodeTypes {
 		s.nodeTypes[name] = nt
 	}
@@ -329,7 +358,7 @@ func (s *scope) BindCall(cb query.CallBinding, r procsig.Registry) error {
 // is the provenance bit, and dropping it is what makes a Phase B commitment
 // read as a set of satisfying types.
 func (s *scope) nodeTable() nodeTable {
-	return nodeTable{resolved: s.nodeTypes, cands: s.nodeCands, resolvedCovers: s.resolvedCovers}
+	return nodeTable{resolved: s.nodeTypes, cands: s.nodeCands, pluralByInference: s.pluralByInference, resolvedCovers: s.resolvedCovers}
 }
 
 // CloseEdges runs Phases A2 + B + C scope-internally: try every edge
@@ -892,7 +921,23 @@ func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedTyp
 	}
 	if nts, ok := s.nodeCands[ref.Variable]; ok {
 		if ref.Property == "" {
-			return nil, fmt.Errorf("%w: %s is satisfied by more than one declared node type: %s", ErrAmbiguousLabel, ref.Variable, formatNodeTypeKeys(nts))
+			// Which sentinel is the binding's provenance, not this arm's:
+			// errors.go documents ErrAmbiguousLabel as a LABEL SET whose
+			// proper-superset satisfying set has more than one element, and
+			// ErrAmbiguousBinding as an unlabelled binding whose candidate set
+			// has more than one node type. An unlabelled binding reaching here
+			// has no label set to be ambiguous about; it got here because
+			// commit() bound the widened plural set instead of deferring, and
+			// the same query without the widening refuses with
+			// ErrAmbiguousBinding at Phase B's terminal deferral. The message
+			// text is one string for both because the fault is one fault —
+			// only its category-grained name differs (r1 §5, sentinels are
+			// category-grained).
+			sentinel := ErrAmbiguousLabel
+			if s.pluralByInference[ref.Variable] {
+				sentinel = ErrAmbiguousBinding
+			}
+			return nil, fmt.Errorf("%w: %s is satisfied by more than one declared node type: %s", sentinel, ref.Variable, formatNodeTypeKeys(nts))
 		}
 		return unionNodeProperty(nts, ref.Variable, ref.Property, s.nullableBinding[ref.Variable])
 	}
