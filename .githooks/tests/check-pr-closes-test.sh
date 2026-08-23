@@ -82,6 +82,22 @@ expect_red() {
     fi
 }
 
+# $1=case name, $2=export, $3=body file, $4=branch, $5=forbidden substring.
+# The other half of a refusal's wording: what it must NOT say. Used where the
+# text a message hands the reader is the thing being fixed, because a message
+# can gain the right sentence and keep the wrong one, and every other helper
+# here would stay green through that.
+expect_red_not_saying() {
+    run_check "$2" "$3" "$4"
+    if [ "$RC" -eq 0 ]; then
+        bad "$1" "exited 0: $OUT"
+    elif printf '%s' "$OUT" | grep -qF "$5"; then
+        bad "$1" "refused, but still said '$5': $OUT"
+    else
+        ok "$1"
+    fi
+}
+
 # $1=case name, $2=export, $3=body file, $4=branch.
 # Status 0 and some output. A pass that prints nothing is one no reader can
 # tell from this gate not having run, which is what bd gqlc-mk7v and bd
@@ -114,6 +130,15 @@ expect_green_saying() {
     fi
 }
 
+# Backticks and fences are built rather than written literally: shellcheck
+# reads a backtick inside a quoted argument as a command substitution (SC2016)
+# whichever quotes it is in.
+BT="$(printf '\140')"
+FENCE3="$BT$BT$BT"
+FENCE4="$FENCE3$BT"
+TILDE3='~~~'
+TILDE4='~~~~'
+
 # --- the gate's reason for existing -----------------------------------------
 
 expect_green "a body closing the bead's own issue passes" \
@@ -130,6 +155,73 @@ expect_red "a body closing the wrong issue is refused, naming both numbers" \
 
 Closes #123')" "some/branch" \
     "closes #123 but bead gqlc-mirrored maps to #617"
+
+# What the demand reads. It used to read the raw body, so a 'Closes #617'
+# quoted in a fence or an inline span satisfied it -- and GitHub, which does
+# not act on either, left #617 open while this printed '(ok)'. That is the
+# expensive direction for this question: the gate affirms a close that does
+# not happen. Both carriers below are rowed because either alone would leave
+# the other live.
+expect_red "a Closes quoted in a fence does not satisfy the demand" \
+    "$EXPORT" "$(body "Bead: gqlc-mirrored
+
+${FENCE3}
+Closes #617
+${FENCE3}")" "some/branch" \
+    "missing 'Closes #617'"
+
+expect_red "a Closes quoted in an inline code span does not satisfy the demand" \
+    "$EXPORT" "$(body "Bead: gqlc-mirrored
+
+The gate wants ${BT}Closes #617${BT} on a line of its own.")" "some/branch" \
+    "missing 'Closes #617'"
+
+# The other side of the same read, and the shape bd gqlc-tysj was filed over:
+# a body that closes the right issue and also *quotes* a closing keyword for
+# another one. Reading the raw body put the quoted number in the found list,
+# where it was harmless only because the right number was there too. The
+# quoted one is not a claim, so the body passes.
+expect_green_saying "a quoted wrong number beside the right one is not a claim" \
+    "$EXPORT" "$(body "Bead: gqlc-mirrored
+
+An earlier revision of this body wrote ${BT}Closes #980${BT}, which on merge
+would have closed a live bead.
+
+Closes #617")" "some/branch" \
+    "gqlc-mirrored -> Closes #617 (ok)"
+
+# ...and it is not a substitute for the real one either, so the same quote
+# with no line to back it is refused rather than passed.
+expect_red "a quoted number alone does not close the bead's issue" \
+    "$EXPORT" "$(body "Bead: gqlc-mirrored
+
+An earlier revision wrote ${BT}Closes #617${BT}.")" "some/branch" \
+    "missing 'Closes #617'"
+
+# The wrong-number refusal's wording (bd gqlc-tysj). It used to read
+# "Replace 'Closes #123' with 'Closes #617'", which assumes the replacement
+# is the fix and never mentions that leaving the issue open is a declarable
+# answer. An author who decides the gate is wrong then writes the opt-out and
+# quotes the rejected instruction back into the body to explain why -- which
+# is how the message's own text becomes an extra claim. The three rows below
+# hold the two answers it must offer and the imperative it must not hand back.
+expect_red "the wrong-number refusal spells the opt-out as an answer" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #123')" "some/branch" \
+    "'Refs: gqlc-mirrored #617'"
+
+expect_red "the wrong-number refusal says an edit alone re-runs the check" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #123')" "some/branch" \
+    "Editing the body re-runs this check on its own"
+
+expect_red_not_saying "the wrong-number refusal hands back no line to paste" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #123')" "some/branch" \
+    "Replace 'Closes #123'"
 
 # The escape from the state this bead was filed over: the failure has to say
 # that editing the body is enough. Pushing a commit and reopening the PR were
@@ -250,14 +342,6 @@ expect_red "a malformed line ahead of the bead does not hide it" \
 # token nothing could match is seen and named. The two spellings below both
 # used to reach "bead not in export - skipping", which demands nothing; the
 # backticked one printed no line at all.
-
-# Built rather than written literally: shellcheck reads a backtick inside a
-# quoted argument as a command substitution (SC2016) whichever quotes it is in.
-BT="$(printf '\140')"
-FENCE3="$BT$BT$BT"
-FENCE4="$FENCE3$BT"
-TILDE3='~~~'
-TILDE4='~~~~'
 
 expect_red "a backticked id on a Bead line is refused, naming the token" \
     "$EXPORT" "$(body "Bead: ${BT}gqlc-mirrored${BT}")" "some/branch" \
@@ -495,38 +579,55 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # a toggle: any ``` or ~~~ line flipped the state, which is not how a fence
 # closes.
 #
-# Counted at this commit: this section holds 59 rows, the three above
+# This whole section reads visible_prose(), which is the strict half of
+# prose_only(): the question here is "can a reader of the PR see this
+# marker", and honouring one nobody can see is the expensive answer, so it
+# errs towards blanking. The claim section further down reads
+# claimable_prose(), which errs the other way. Rows that would collide if one
+# function served both say so where they stand.
+#
+# Counted at this commit: this section holds 65 rows, the three above
 # included. The last three are about GH_CLOSES and Bead: precedence rather
-# than about whether the marker is visible, so 56 are the sweep — 37 red and
-# 19 green. Every body in those 56 was put to GitHub's own renderer
+# than about whether the marker is visible, so 62 are the sweep — 42 red and
+# 20 green. Every body in those 62 was put to GitHub's own renderer
 # (POST /markdown, mode gfm, a read-only call) and the row's colour reports
 # what came back: red where GitHub puts the marker inside a <pre> or a
 # <code> element or drops it from the output entirely, green where GitHub
 # leaves it as prose. An inline code span counts as prose here rather than
 # as a <code> element, because it is visible monospace; the red rows over
-# one are named as exceptions below. Nine
-# rows are the exceptions and each says so where it stands — six red over a
-# body GitHub renders the marker in (five of them prose_only()'s doing, the
-# sixth the marker pattern's line anchor), and three green: two over a body
-# GitHub renders nothing of, and one over a body GitHub renders the marker
-# inside a <pre>.
+# one are named as exceptions below. Seven rows are the exceptions and each
+# says so where it stands, and all seven are now red — six over a body
+# GitHub renders the marker in that visible_prose() blanks anyway, and a
+# seventh that is the marker pattern's line anchor rather than the blanking.
 #
-# Put the toggle back in place of prose_only (commit 4446b7fc's
-# outside_fences, verbatim) and 35 of this section's rows fail — 33 red ones
+# There is no green exception left. Until this commit there were three, and
+# they were the expensive direction: a marker inside an unterminated HTML
+# attribute (bd gqlc-ncb8), one below a raw block whose opening tag has text
+# before it on its line, and one below a comment the sanitiser holds open
+# past its '-->' (both bd gqlc-xz16), each honoured over a body GitHub
+# renders the marker nowhere in. Those three rows are red now and each names
+# what closed it. That is a statement about the rows in this file, not a
+# proof that no such shape remains: what it says is that every body measured
+# here that GitHub hides the marker in is refused.
+#
+# Put the toggle back in place of prose_only's body (commit 4446b7fc's
+# outside_fences and the FENCE it read, both verbatim, which also makes the
+# strict flag do nothing) and 40 of this section's rows fail — 38 red ones
 # that pass and 2 green ones that lose their annotation. The run's own total
-# is higher, because main()'s no-bead check reads prose_only too and the
-# no-bead section below has a row that moves with it. What the 33 share is a
-# marker the toggle honours and prose_only blanks, which is where the two
+# is 41, because main()'s no-bead check reads the same function and the
+# no-bead section below has a row that moves with it. What the 38 share is a
+# marker the toggle honours and visible_prose blanks, which is where the two
 # functions part rather than what a reader sees: put those bodies back
 # through the renderer that coloured the rows above and it shows the marker
 # in some of them, and there it is the toggle that agrees with GitHub. The
 # same is said of that direction in prose_only's docstring — one
 # counterfactual carried in two files, and correcting it in one of them
-# alone is how this paragraph came to say otherwise. Every number in this
-# paragraph was measured at this commit rather than derived from a rule, so
-# a row added below can move any of them. Nesting a fence in a longer one is
-# not an exotic spelling: it is the ordinary way to show a fence, and
-# showing this marker is what the beads queued against this file are for.
+# alone is how this paragraph once came to say otherwise. Every number in
+# this paragraph was measured at this commit rather than derived from a
+# rule, so a row added below can move any of them. Nesting a fence in a
+# longer one is not an exotic spelling: it is the ordinary way to show a
+# fence, and showing this marker is what the beads queued against this file
+# are for.
 expect_red "a fence nested in a longer one does not close it" \
     "$EXPORT" "$(body "${FENCE4}
 ${FENCE3}
@@ -701,9 +802,16 @@ Refs: gqlc-mirrored #617
 # What this does NOT blank, stated as a row rather than left to be found. A
 # code span opens and closes with backtick runs shorter than a fence, and can
 # span lines; GitHub renders the marker inside one as <code>, which is
-# visible monospace text rather than something a reader cannot see. Blanking
-# it needs inline parsing, and the invisibility this section exists for is
-# absent, so the marker is honoured and the limit is pinned here.
+# visible monospace text rather than something a reader cannot see. So the
+# marker is honoured here and the limit is pinned.
+#
+# This is the one carrier the two functions read differently, and the
+# difference is deliberate rather than an omission. claimable_prose() blanks
+# a code span, because GitHub does not act on a closing keyword inside one
+# (measured on PR #901; the rows are in the no-bead section). visible_prose()
+# leaves it, because a reader can see it. Serving both questions with one
+# blanking is what made bd gqlc-tysj a defect, and one of the two answers has
+# to be wrong for whichever question it is not being asked.
 expect_green_saying "a marker inside a multi-line code span is a declaration" \
     "$EXPORT" "$(body 'Bead-free body.
 
@@ -981,11 +1089,16 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # measures is the rows above and below, every one of them put to the same
 # renderer at head.
 #
-# Both directions are in those rows. The row below headed "a marker inside
-# an open HTML attribute is honoured" puts the marker on its own line inside
-# an unterminated attribute value, where GitHub renders nothing of it and
-# this honours it anyway -- so "it errs towards refusing" is a description of
-# the rows, not a property of the function.
+# One direction is in those rows and the other is not, and that is a claim
+# about this commit rather than about the function. Until this commit the row
+# below headed "a marker inside an open HTML attribute" was green: the marker
+# sat on its own line inside an unterminated attribute value, GitHub rendered
+# nothing of it, and this honoured it anyway. It and the two rows like it are
+# red now, so every disagreement left in this section is a refusal over a
+# body GitHub does render. "It errs towards refusing" is what visible_prose()
+# is FOR -- see the paragraph at the head of this section -- but it stays a
+# reading of the rows, because a shape nobody has put to the renderer is
+# rowed nowhere.
 expect_red "a fence indented into a list item blanks the marker below it" \
     "$EXPORT" "$(body "- item
 
@@ -994,20 +1107,57 @@ Refs: gqlc-mirrored #617
   ${FENCE3}")" "fix/gqlc-mirrored-thing" \
     "missing 'Closes #617'"
 
-# The fail-open the sentence above declines to bound, pinned as it stands
-# rather than fixed (bd gqlc-ncb8). An open tag whose attribute value never
-# terminates swallows the lines below it as part of that value: GitHub
-# renders the body below as '<p>z</p>' and the marker appears nowhere in the
-# output, yet prose_only() -- which reads lines and knows nothing of
-# attributes -- leaves it live and the gate annotates the run. Closing it
-# needs inline-HTML parsing, which is a different function from the
-# line-oriented block model here.
-expect_green_saying "a marker inside an open HTML attribute is honoured" \
+# The fail-open the sentence above declines to bound, closed by visible_prose
+# rather than pinned (bd gqlc-ncb8). An open tag whose attribute value never
+# terminates swallows the lines below it as part of that value: GitHub renders
+# the body below as '<p>z</p>' and the marker appears nowhere in the output.
+# Re-measured through POST /markdown at this commit. prose_only() reads lines
+# and knows nothing of attributes, so it left this live; open_attr_quote()
+# tracks the quote across lines, which is the inline-HTML reading the bead
+# said this needed, and it runs only on the visibility side where
+# over-blanking costs a refusal rather than a lost claim.
+expect_red "a marker inside an open HTML attribute is blanked" \
     "$EXPORT" "$(body 'Bead-free body.
 
 <a href="
 Refs: gqlc-mirrored #617
-">z</a>')" "some/branch" \
+">z</a>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# Both bounds on that tracking, because "hide everything after a quote" would
+# blank most bodies. An attribute value that closes on its own line hides
+# nothing: GitHub renders '<p><a href="x">z</a><br>Refs: ...</p>', the marker
+# visible. Measured.
+expect_green_saying "a closed HTML attribute hides nothing below it" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<a href="x">z</a>
+Refs: gqlc-mirrored #617')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# And the value closes on the line below, so only that line is inside it.
+# GitHub renders the marker as prose here too (measured), which is what stops
+# the attribute state from running to the end of the body.
+expect_green_saying "an attribute closed a line down releases the line after" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<a href="
+x">z</a>
+Refs: gqlc-mirrored #617')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# The quote has to be an attribute value's, not any quote inside a tag-shaped
+# run of prose. An apostrophe in a sentence that happens to follow a '<' and
+# a word is the shape that would otherwise swallow a body: 'a <b isn't c'.
+# open_attr_quote() opens a value only at a quote whose preceding non-space
+# character is '=', so this marker survives. GitHub renders the whole thing as
+# prose -- '<b isn' is not a tag it honours -- so honouring the marker is the
+# agreeing answer.
+expect_green_saying "an apostrophe in a tag-shaped sentence opens no attribute" \
+    "$EXPORT" "$(body "Bead-free body.
+
+a <b isn't c
+Refs: gqlc-mirrored #617")" "some/branch" \
     "issue #617 stays open at merge"
 
 # The rest of what this does not blank, rowed rather than left to be found.
@@ -1024,10 +1174,9 @@ Refs: gqlc-mirrored #617
 </details>')" "some/branch" \
     "issue #617 stays open at merge"
 
-# Two more the same way as the attribute row above: measured, honoured,
-# rowed as they stand rather than fixed (bd gqlc-xz16). Both are the
-# line-oriented block model meeting a sanitiser that works on the assembled
-# HTML, and neither needs a comment to trigger.
+# Two more the same way as the attribute row above, and closed the same way
+# (bd gqlc-xz16). Both are the line-oriented block model meeting a sanitiser
+# that works on the assembled HTML, and neither needs a comment to trigger.
 #
 # HTML_OPEN reads a raw block's opening tag only where markdown starts an
 # HTML block: at the start of a line, indented no more than three spaces,
@@ -1035,45 +1184,90 @@ Refs: gqlc-mirrored #617
 # inline '<pre>' part-way along a paragraph line opens the element in the
 # output all the same, and the marker below it lands inside. The body below
 # renders as
-# '<p>x </p><pre class="notranslate">Refs: gqlc-mirrored #617</pre>' and this
-# honours it. Searching the whole line for the tag would blank any body that
-# writes '<pre>' in a sentence -- the bodies on this file's own PRs do --
-# which is why the anchor stays and this is a row.
-expect_green_saying "a marker below a <pre> opened part-way along a line is honoured" \
+# '<p>x </p><pre class="notranslate">Refs: gqlc-mirrored #617</pre>'
+# (re-measured at this commit). visible_prose() searches the whole line for
+# the tag; the objection to doing that was that it blanks any body writing
+# '<pre>' in a sentence, and the bodies on this file's own PRs do -- but that
+# objection was about the claim side, which reads claimable_prose() and is
+# not affected. On the visibility side the cost is a refusal the author
+# clears by moving the marker above the sentence.
+expect_red "a marker below a <pre> opened part-way along a line is blanked" \
     "$EXPORT" "$(body 'Bead-free body.
 
 x <pre>
 Refs: gqlc-mirrored #617
-</pre>')" "some/branch" \
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The bound on that search, so it is not "any line mentioning <pre>": a tag
+# that closes again on its own line opens nothing below it. GitHub renders
+# 'x <pre>y</pre>' followed by the marker as prose (measured), and this
+# honours it.
+expect_green_saying "an inline <pre> closed on its own line hides nothing" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+x <pre>y</pre>
+Refs: gqlc-mirrored #617')" "some/branch" \
     "issue #617 stays open at merge"
+
+# The <code> spelling, which is the fail-closed one: with no blank line above
+# it GitHub keeps the element inline and renders
+# '<p>x <code class="notranslate">Refs: gqlc-mirrored #617</code></p>' --
+# visible monospace, measured -- and this blanks it. Same class as the two
+# <code> rows above, and accepted for the same reason.
+expect_red "a marker below a <code> opened part-way along a line is blanked" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+x <code>
+Refs: gqlc-mirrored #617
+</code>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
 
 # The block closes on its own opening line, so markdown's HTML block ends
 # there and the '<!--' after it is emitted raw with nothing to close it: the
 # '-->' on the next line is markdown text by then and comes back escaped, so
 # the sanitiser's comment runs to the end of the body. GitHub renders this
 # one as '<pre class="notranslate"></pre>' and nothing else -- the marker
-# appears nowhere -- and this honours it, because here the comment does end
-# at its '-->'. The direction the attribute row above is filed for, in a
-# second carrier.
-expect_green_saying "a marker below a comment left open by a closed block is honoured" \
+# appears nowhere. visible_prose() reads a comment opening on a line the
+# block ends on as one that never closes.
+expect_red "a marker below a comment left open by a closed block is blanked" \
     "$EXPORT" "$(body 'Bead-free body.
 
 <pre></pre><!--
 -->
-Refs: gqlc-mirrored #617')" "some/branch" \
-    "issue #617 stays open at merge"
+Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The same reading where the block spans lines and ends on the line the
+# comment opens on, which is the rule stated as "the line the block ends on"
+# rather than as "a one-line block". The body carries a second '</pre>' after
+# the '-->' so that the row discriminates: without this reading the state
+# machine resumes the enclosing block at the '-->', sees that closer on the
+# tail, and puts the marker back in prose. GitHub renders the whole thing as
+# '<pre class="notranslate">y\n</pre>' and nothing else -- the marker appears
+# nowhere -- because markdown's HTML block ended on the '</pre><!--' line and
+# everything below it is escaped text. Measured at this commit.
+expect_red "a comment opening the line a multi-line block ends on swallows the rest" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<pre>
+y
+</pre><!--
+--> </pre>
+Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
 
 # Three more shapes where this refuses and GitHub does not hide, all found
 # after the 85-shape sweep and all the fail-closed direction: the author
-# moves the line and the refusal names what to write. Two are prose_only()'s
-# blanking; the third, at the foot of the three, is the marker pattern's
-# line anchor and says so.
+# moves the line and the refusal names what to write. Two are
+# visible_prose()'s blanking; the third, at the foot of the three, is the
+# marker pattern's line anchor and says so.
 #
 # <code> is not one of the tags that can interrupt a paragraph, so with no
 # blank line above it GitHub keeps it inline and renders the marker as
 # visible monospace inside the <p> -- the same class as the code span rowed
-# above, which is honoured. This one is blanked, because HTML_OPEN reads the
-# line and not the paragraph it is in.
+# above, which is honoured. This one is blanked, because the tag is read off
+# the line and not off the paragraph it is in.
 expect_red "a <code> opened against a paragraph blanks the marker" \
     "$EXPORT" "$(body 'some text
 <code>
@@ -1106,13 +1300,19 @@ expect_red "a marker sharing the closing tag's line is refused by the anchor" \
 </pre>Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
     "missing 'Closes #617'"
 
-# Both ends of HTML_OPEN's `^ {0,3}`, which is markdown's own rule for where
+# Both ends of the indentation rule, which is markdown's own rule for where
 # an HTML block may start. The list-item row above is the lower end -- two
 # spaces of indent and the tag is still read. This is the upper end: at four
 # the line is an indented code block, so GitHub renders '<pre>' as the code
 # block's text and leaves the marker below it as a <p>, which is a marker a
 # reader sees and this honours. Agreement, not a divergence, and the twin of
 # "an opener indented four spaces opens no fence" in the fence section.
+#
+# Which guard holds it moved with visible_prose(). HTML_OPEN's `^ {0,3}` used
+# to be the whole of it; the strict pass searches the line rather than
+# anchoring to its start, so what keeps this green is INDENTED_CODE and the
+# preceding blank line. Take that test out and this row is the one that
+# reddens, which is what it was measured under.
 expect_green_saying "a <pre> indented four spaces opens no block" \
     "$EXPORT" "$(body 'Bead-free body.
 
@@ -1122,7 +1322,8 @@ Refs: gqlc-mirrored #617
     "issue #617 stays open at merge"
 
 # And the other bound on the same pattern: the tag has to end where the name
-# does. '<pretend>' is not a <pre>, and dropping HTML_OPEN's `(?:[\s>]|$)`
+# does. '<pretend>' is not a <pre>, and dropping the `(?:[\s>/]|$)` from
+# HTML_OPEN_ANY -- which is what this section's reads go through now --
 # would blank it -- fail-closed, so it costs a refusal rather than a hidden
 # honouring, but nothing else in this file notices. GitHub strips the unknown
 # tag and leaves the marker as visible text, so honouring it is the agreeing
@@ -1261,6 +1462,57 @@ expect_red "a closing keyword in a one-line HTML comment is a claim" \
 
 <!-- Closes #902 -->')" "chore/tidy-the-workflow" \
     "the PR body closes #902, but no bead resolves for this PR"
+
+# The carrier this section used to leave live, and the one an author writing
+# about the gate reaches for (bd gqlc-tysj). An inline code span is where a
+# body explains a decision -- "an earlier revision wrote `Closes #980`" -- and
+# reading it as a claim is how the most careful explanation becomes the
+# wrongest body.
+#
+# Whether GitHub acts on it was the half that bead could not settle, and it is
+# settled here first-party without opening a scratch PR: PR #901's body
+# carries 'Closes #617' and 'Closes: #617' in inline spans and nothing else
+# naming 617, and its closingIssuesReferences lists 862 and 883 only. All
+# three issues are CLOSED, so the omission is not "closed issues are dropped".
+# Re-measurable: gh pr view 901 --json closingIssuesReferences.
+#
+# So GitHub does not act on it, and claimable_prose() blanks it. The two rows
+# below are the pair: blanking must not blind the check to a keyword written
+# in prose beside the quoted one.
+expect_green_saying "a closing keyword inside an inline code span is not a claim" \
+    "$EXPORT" "$(body "Nothing to close here. An earlier revision of this body
+wrote ${BT}Closes #902${BT}, which would have closed a live bead.")" \
+    "chore/tidy-the-workflow" \
+    "no closing keyword in the body's prose"
+
+expect_red "a quoted keyword does not hide a real one beside it" \
+    "$EXPORT" "$(body "An earlier revision wrote ${BT}Closes #902${BT}.
+
+Closes #904")" "chore/tidy-the-workflow" \
+    "the PR body closes #904, but no bead resolves for this PR"
+
+# A code span is inline syntax and cannot cross a blank line, so an unpaired
+# backtick above one and an unpaired backtick below it do not make the lines
+# between them a span. Without that bound the blanking is the fail-open
+# direction this whole section is about: a stray backtick in a body would
+# swallow the claim. GitHub renders both backticks below as literal text.
+expect_red "two unpaired backticks across a blank line span nothing" \
+    "$EXPORT" "$(body "a stray ${BT} here
+
+Closes #902
+
+and another ${BT} there")" "chore/tidy-the-workflow" \
+    "the PR body closes #902, but no bead resolves for this PR"
+
+# The closing run has to be the length the opening one was, which is
+# CommonMark's rule and is what keeps a double-backtick span from being
+# closed by a single backtick inside it. The keyword sits after that inner
+# backtick, so a pairing that ignored the length would end the span before
+# reaching it and read the tail as a claim.
+expect_green_saying "a double-backtick span holds over a single backtick" \
+    "$EXPORT" "$(body "Nothing to close here: ${BT}${BT} a ${BT} Closes #902 ${BT}${BT}")" \
+    "chore/tidy-the-workflow" \
+    "no closing keyword in the body's prose"
 
 # The scope of the new refusal, from the other side: it fires only where no
 # bead resolves. A branch that carries an id resolves one, so the body is
