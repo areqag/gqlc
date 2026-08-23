@@ -54,6 +54,14 @@ var (
 	// set (intersected across touching edges) has more than one node type,
 	// or the pattern's unlabelled bindings form a cycle no single edge can
 	// break. Introduced at R1.
+	//
+	// Two fail-sites carry the first arm, and which one a query reaches is
+	// about when the plural set was noticed, not about the fault: Phase B's
+	// terminal deferral (inferUnlabelled), and — since Phase B began
+	// committing the widened plural set rather than deferring (PR #1032) —
+	// the whole-entity projection of a binding it committed that way
+	// (refProjectionType, on scope.pluralByInference). Same binding, same
+	// candidates, same refusal, so the same sentinel; bead gqlc-yxqq.
 	ErrAmbiguousBinding = errors.New("ambiguous binding")
 
 	// ErrParameterTypeConflict is returned when a parameter's Uses carry

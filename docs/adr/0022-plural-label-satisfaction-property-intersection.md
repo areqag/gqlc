@@ -42,6 +42,12 @@ Where that set is plural:
   property must exist with identical type and nullability on every satisfying
   type, else ErrUnknownProperty. This mirrors `unionProperty` for edge unions.
 - A **whole-entity reference** (`RETURN p`) is **rejected** with ErrAmbiguousLabel.
+  *Amendment 2026-08-23 (bead gqlc-yxqq):* that sentinel is this ADR's case —
+  a binding that spelled labels. Phase B's plural commitment (ADR 0022 as
+  applied by PR #1032) reaches the same whole-entity refusal from a binding
+  that spelled none, and there the sentinel is `ErrAmbiguousBinding`, which
+  `internal/resolver/errors.go` already documented as the unlabelled case.
+  Both are refusals; only the category-grained name differs.
 
 (B) narrows one accepted query (`label_satisfy_exact_wins`) to a rejected one.
 ADR 0006's caution about narrowing applies; it is overridden here because the

@@ -506,6 +506,16 @@ imports the openCypher noun into the resolver vocabulary; the resolver
 speaks in `EdgeKey`, so `ErrUnknownEdge` is closer to the domain
 language.
 
+*Amendment 2026-08-23 (bead gqlc-yxqq).* The defence below is normative
+for the whole-entity projection too, not only for Phase B's deferral. Once
+Phase B commits a widened plural set instead of deferring (ADR 0022 as
+applied by PR #1032), an unlabelled binding's refusal moves to projection
+time — and that site returned `ErrAmbiguousLabel`, so one fault answered to
+two names depending on whether an unrelated clause widened it. It now
+answers to `ErrAmbiguousBinding` on both routes. `ErrAmbiguousLabel` keeps
+the case this defence assigns it: a binding that spelled a label set whose
+proper-superset satisfying set has more than one element.
+
 **Naming defence — `ErrAmbiguousBinding`, not `ErrAmbiguousLabel` or
 `ErrUnresolvableBinding`.** The failure is on a specific binding (a
 named query variable), not on a label — the ambiguity is in the schema

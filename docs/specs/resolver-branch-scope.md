@@ -139,7 +139,7 @@ Part's outgoing carry, and the parameter-attribution snapshot.
 ```go
 // scope is the resolver-typed state evolving through one Part's phases.
 // Fields are private; every mutation runs through a method so the
-// twelve lanes stay consistent (a delete on one lane cascades to the
+// thirteen lanes stay consistent (a delete on one lane cascades to the
 // others that mirror it).
 type scope struct {
     // Live tables — written by Phases A/B/C/D via Bind*/CloseEdge/

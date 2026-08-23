@@ -646,6 +646,12 @@ func (k endpointKeys) covering() ([]graph.LabelSetKey, bool) { return k.keys, k.
 type nodeTable struct {
 	resolved map[string]schema.NodeType
 	cands    map[string][]schema.NodeType
+	// pluralByInference mirrors scope.pluralByInference. It is on the table
+	// because its one writer is here: Phase B's plural commitment below writes
+	// `cands` directly rather than through BindNodeCands, and without this it
+	// would leave no provenance — so the whole-entity refusal would name the
+	// labelled fault for a binding that spelled no labels.
+	pluralByInference map[string]bool
 	// resolvedCovers qualifies `resolved` alone, and holds the entries whose
 	// type set covers every type a matching row can put at that variable. Three
 	// writers can put an entry in it:
@@ -1236,6 +1242,11 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 				return nil, 0, fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, n.Variable(), joinCandidates(cands))
 			}
 			t.cands[n.Variable()] = nodeTypesForKeys(cands, s)
+			// Unconditionally true, and it is the only value this writer can
+			// write: every `n` in Phase B's pending set is an unlabelled node
+			// binding, since resolveBranch routes a binding here exactly when
+			// len(bb.Labels()) == 0.
+			t.pluralByInference[n.Variable()] = true
 			committed++
 		}
 	}
@@ -2266,7 +2277,11 @@ func validateDeleteEffect(sc *scope, e query.DeleteEffect, s schema.Schema) erro
 //   - len == 1: singular, bind via BindNode.
 //   - len > 1:  plural, bind via BindNodeCands; property projection uses
 //     intersection (unionNodeProperty); whole-entity reference is refused
-//     with ErrAmbiguousLabel.
+//     with ErrAmbiguousLabel. This function is only reached for a binding
+//     that spelled labels, which is why the refusal names the label set;
+//     Phase B's plural commitment reaches the same whole-entity arm from an
+//     unlabelled binding and is refused with ErrAmbiguousBinding, on the
+//     scope.unlabelledCands provenance.
 //
 // Zero satisfying types with all labels declared returns ErrUnknownLabel
 // (no type carries the full combination). Any undeclared label also returns
