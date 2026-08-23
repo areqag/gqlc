@@ -218,6 +218,20 @@ else
   exit 1
 fi
 
+# LAST, deliberately: an advisory about a branch name is only worth reading on a
+# push that is actually going to happen, and every refusal above exits before
+# reaching here. It is not placed beside guard-push-destination at the top,
+# because the top is where a REFUSAL belongs — so it is the last line on the
+# terminal rather than a page above the tail of the test output — and this is
+# not a refusal. It exits 0 on every path; see its header for why a gate here
+# would be wrong. bd gqlc-uz3c.
+#
+# Guarded on a non-empty ref list for the reason gate-pushed-commits is: an
+# empty stdin publishes no commit, so there is no branch about to acquire a PR.
+if [ -n "${_push_refs}" ]; then
+  _replay_push_refs | "$(dirname "$0")/warn-missing-bead-id" "$@" || true
+fi
+
 # GH↔bd sync: push locally-created beads to GH.
 # Non-blocking — never fail the underlying `git push`. Progress chatter is
 # dropped, but stderr survives: the sync ends by reporting what reached GitHub

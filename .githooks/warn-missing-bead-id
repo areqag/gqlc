@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Advisory: the branch about to be published carries no bead id, so CI's
+# `tidy` job will have nothing to resolve a `Closes #N` against.
+#
+# ADVISORY, NEVER REFUSING. Every path here exits 0. The thing it is warning
+# about lives in a PR body that does not exist yet — a branch may be pushed
+# with no PR ever opened, and a PR opened later may carry a `Bead:` line that
+# settles the matter. So this can only say what the author will need to do IF
+# they write a closing keyword, and a gate that refused on a guess would block
+# legitimate pushes. bd gqlc-uz3c.
+#
+# WHAT IT IS FOR. .github/scripts/check-pr-closes.py resolves the PR's bead
+# from a `Bead:`/`Refs:` line in the body, and falls back to a bead id in the
+# BRANCH NAME. A body that says `Closes #N` and resolves to no bead exits 1.
+# Measured three times on the night of 2026-08-23 — PRs #1382, #1387 and one
+# earlier — each costing about an hour, and one lane died before diagnosing
+# it. Two things compounded to make the failure unreadable:
+#
+#   1. `tidy` then carried `needs:` children, so its failure left lint, test
+#      and codegen-fence reporting `skipping`. The check table read like a run
+#      still in progress and both lanes watched went looking at their own diff
+#      first. THAT HALF IS FIXED: PR #1323 removed the `needs:` edges the same
+#      night, for an unrelated reason (a SKIPPED required context satisfies
+#      branch protection — bd gqlc-yc6x), so today a tidy failure presents as
+#      one red cell among green ones. Named here as history rather than as a
+#      current symptom, because a warning that describes a check table nobody
+#      will see is one a reader learns to distrust.
+#   2. Nothing said anything before the push. The first signal was a red check
+#      twenty seconds into a run the author had stopped watching. That half is
+#      what this file is for, and it is untouched by #1323.
+#
+# The branch-name fallback exists for exactly this and was not firing, because
+# this repo's own worktree recipe put the bead slug in the DIRECTORY name and
+# left the branch descriptive. Measured over the 60 most recently merged PRs on
+# 2026-08-23: 57 head branches carried no `gqlc-` id at all. Several carried a
+# bead's SUFFIX without the prefix (`fix/sync-drift-x98l-mdhr`), which the
+# checker cannot read — its pattern is anchored on `gqlc-`.
+#
+# LIMITS, stated because a warning that overclaims is worse than none:
+#   - It cannot see the PR body. Silence here is not a promise that `tidy`
+#     will pass; a body naming a bead id no bead has still fails.
+#   - It does not check that the id in the branch names a bead that EXISTS.
+#     A branch called `fix/gqlc-parser-rewrite` satisfies the pattern, so this
+#     stays quiet, and the checker then fails on an id it cannot resolve.
+#     Quieting that too would mean reading the ledger from a push hook.
+#   - It says nothing about a branch with no commits ahead of origin/master:
+#     there is no PR to open.
+#
+# Args: <remote-name> <remote-url>, as git passes them (both unused).
+# Stdin: the push's ref list, one `<local-ref> <local-sha> <remote-ref>
+# <remote-sha>` line per ref, replayed to it by pre-push.
+set -uo pipefail
+
+# The checker's own alphabet, kept byte-identical to BEAD_IN_BRANCH in
+# .github/scripts/check-pr-closes.py. Drift in either direction is a defect:
+# a narrower pattern here warns about branches the gate accepts, a wider one
+# stays silent on branches it refuses. .githooks/tests/pre-push-bead-id-test.sh
+# extracts both and compares them, so this comment is not the only thing
+# holding them together.
+BEAD_IN_BRANCH_ERE='gqlc-[a-z0-9.]+'
+
+ZERO='^0\{40,\}$'
+
+warned=''
+
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+    # A delete pushes no commit and opens no PR, so there is nothing here to
+    # warn about. git spells it `(delete) 0000...`, and the ref spelling is
+    # caught by the `*)` arm of the case below rather than here — a
+    # `[ "$local_ref" = '(delete)' ]` test alongside these was unkillable,
+    # measured by mutation on 2026-08-23: removing it left the suite at 22/22
+    # because no input reaches it that something else has not already dropped.
+    #
+    # The all-zero sha is checked on its own account: it is what would be
+    # handed to `git rev-list` below, where an unresolvable left-hand side
+    # yields "cannot tell" and this hook errs towards warning. So a zero sha
+    # arriving under any ref spelling would produce a warning about a branch
+    # nobody is publishing.
+    [ -n "${local_ref:-}" ] || continue
+    [ -n "${local_sha:-}" ] || continue
+    printf '%s' "$local_sha" | grep -q "$ZERO" && continue
+
+    case "$local_ref" in
+        refs/tags/*) continue ;;
+        HEAD) branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)" ;;
+        refs/heads/*) branch="${local_ref#refs/heads/}" ;;
+        *) continue ;;
+    esac
+    [ -n "$branch" ] || continue
+
+    # master/main are pushed by nobody here and guarded elsewhere; a warning
+    # about the trunk carrying no bead id is noise.
+    case "$branch" in
+        master | main) continue ;;
+    esac
+
+    printf '%s' "$branch" | grep -Eqi "$BEAD_IN_BRANCH_ERE" && continue
+
+    # Nothing to open a PR about. `--count` over a range whose left side git
+    # cannot resolve exits non-zero and prints nothing, which is why the
+    # count is defaulted rather than tested bare: on a checkout with no
+    # origin/master ref the honest answer is "cannot tell", and this errs
+    # towards saying its piece.
+    ahead="$(git rev-list --count "origin/master..${local_sha}" 2>/dev/null || echo unknown)"
+    [ "$ahead" = 0 ] && continue
+
+    case " ${warned} " in
+        *" ${branch} "*) continue ;;
+    esac
+    warned="${warned} ${branch}"
+
+    echo "" >&2
+    echo "NOTE: the branch '${branch}' carries no bead id, so CI cannot resolve a bead" >&2
+    echo "      for a PR opened from it (bd gqlc-uz3c). This is ADVISORY — the push is" >&2
+    echo "      going ahead and nothing here is refusing it." >&2
+    echo "      IF your PR body uses a closing keyword ('Closes #N', 'Fixes #N'," >&2
+    echo "      'Resolves #N'), the tidy job WILL fail until the body also carries:" >&2
+    echo "" >&2
+    echo "          Bead: <bead-id>" >&2
+    echo "" >&2
+    echo "      Editing the PR body is enough — no new commit and no new push; the" >&2
+    echo "      workflow re-runs on an 'edited' event. It fails in the 'tidy' job, whose" >&2
+    echo "      name says nothing about bead ids, so read tidy's log rather than your" >&2
+    echo "      own diff. Next time, put the bead id in the branch name instead:" >&2
+    echo "      <type>/<bead-id>-<slug>, e.g. fix/gqlc-uz3c-prepush-bead-warning." >&2
+done
+
+exit 0
