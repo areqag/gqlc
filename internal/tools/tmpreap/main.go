@@ -73,6 +73,14 @@ type options struct {
 	warnPct  float64
 	failPct  float64
 	archiveL archiveLimits
+	// procDir is the procfs mount the in-use scan reads. It is not a flag: an
+	// operator has no reason to move it, and a wrong value silently empties the
+	// held set, which reads exactly like "nothing is in use". It exists so plan
+	// and apply can be shown to fail CLOSED when the process table is
+	// unreadable. procRefsIn already had that seam; its two callers did not, so
+	// deleting either fail-closed clause left the whole suite green — both
+	// mutations measured SURVIVED on 2026-08-23 (bd gqlc-2459).
+	procDir string
 }
 
 // defaultArchiveMaxFile bounds one file's contribution to the archive, and so
@@ -96,7 +104,7 @@ type options struct {
 const defaultArchiveMaxFile = 64 << 20
 
 func parseOptions(args []string, errOut io.Writer) (options, error) {
-	var o options
+	o := options{procDir: "/proc"}
 	fs := flag.NewFlagSet("tmpreap", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.StringVar(&o.root, "root", "/tmp", "scratch filesystem to report on")
@@ -197,7 +205,7 @@ func plan(ctx context.Context, o options, root string) ([]entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	refs, err := procRefs(root)
+	refs, err := procRefsIn(o.procDir, root)
 	if err != nil {
 		return nil, err
 	}
@@ -259,9 +267,22 @@ func listTop(pr *printer, entries []entry, n int) {
 	}
 }
 
-// apply archives first and deletes second, and re-reads the live process set in
-// between: the scan can take a minute over a full tmpfs, and an agent that
-// started using a directory during it must not lose it.
+// apply archives first and deletes second, and re-reads the live process set
+// immediately before the delete loop: an agent that started using a directory
+// after the plan was taken must not lose it.
+//
+// The re-read used to sit before the archive, which protected the scan and not
+// the archive — and the archive is the long half. Writing a tarball over 1.4 GiB
+// takes minutes; a full-tmpfs scan takes about a minute. So the window a
+// pre-archive read leaves open is the larger of the two (bd gqlc-kg5i). Reading
+// last shrinks the window to the delete loop itself.
+//
+// The cost is that the tarball is written over a set slightly larger than what
+// is deleted: an entry claimed during the archive is archived and then kept.
+// That is the safe direction — a spare copy of a directory that survives, rather
+// than a deletion with no copy — and it is what
+// TestApply_ReReadsTheProcessTableAfterArchivingNotBefore pins, because the
+// tarball's contents are the only externally visible witness of the ordering.
 func apply(ctx context.Context, o options, root string, entries []entry, pr *printer) error {
 	var doomed []entry
 	for _, e := range entries {
@@ -273,21 +294,6 @@ func apply(ctx context.Context, o options, root string, entries []entry, pr *pri
 		pr.printf("\nnothing to reclaim.\n")
 		return nil
 	}
-
-	refs, err := procRefs(root)
-	if err != nil {
-		return err
-	}
-	held := heldTopLevel(root, refs)
-	kept := doomed[:0]
-	for _, e := range doomed {
-		if who, ok := held[filepath.Base(e.path)]; ok {
-			pr.printf("skipping %s: a process started using it during the scan (%s)\n", e.path, who)
-			continue
-		}
-		kept = append(kept, e)
-	}
-	doomed = kept
 
 	dest := o.archive
 	if dest == "" {
@@ -304,6 +310,24 @@ func apply(ctx context.Context, o options, root string, entries []entry, pr *pri
 			"not a complete record of what would be deleted; raise the limit or narrow -root, and nothing was deleted",
 			humanBytes(o.archiveL.maxTotalBytes))
 	}
+
+	// The last thing before the first deletion. Fail-closed: an unreadable
+	// process table yields an empty held set, which is indistinguishable from
+	// "nothing is in use" and would delete every planned entry.
+	refs, err := procRefsIn(o.procDir, root)
+	if err != nil {
+		return err
+	}
+	held := heldTopLevel(root, refs)
+	kept := doomed[:0]
+	for _, e := range doomed {
+		if who, ok := held[filepath.Base(e.path)]; ok {
+			pr.printf("skipping %s: a process started using it after it was planned (%s)\n", e.path, who)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	doomed = kept
 
 	var failures []string
 	var freed, freedInodes int64
