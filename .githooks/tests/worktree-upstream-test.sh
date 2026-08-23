@@ -18,7 +18,9 @@ set -u
 # When run under a git hook (this file runs from pre-push via `just test`),
 # GIT_DIR etc. leak in and would redirect every throwaway repo's git commands
 # to the parent repo. Isolate completely.
-unset "${!GIT_@}"
+# Through the SHARED line rather than a private copy of it (bd gqlc-o9wz).
+# shellcheck source=../git-env-sandbox.sh disable=SC1091
+source "$(cd "$(dirname "$0")/.." && pwd)/git-env-sandbox.sh"
 
 HOOKS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ROOT="$(cd "$HOOKS_DIR/.." && pwd)"

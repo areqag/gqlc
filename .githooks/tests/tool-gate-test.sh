@@ -25,7 +25,9 @@ set -u
 
 # When run under a git hook (this file runs from pre-push via `just test`),
 # GIT_DIR and friends leak in and would point the sandbox at the parent repo.
-unset "${!GIT_@}"
+# Through the SHARED line rather than a private copy of it (bd gqlc-o9wz).
+# shellcheck source=../git-env-sandbox.sh disable=SC1091
+source "$(cd "$(dirname "$0")/.." && pwd)/git-env-sandbox.sh"
 
 HOOKS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$HOOKS_DIR/.." && pwd)"

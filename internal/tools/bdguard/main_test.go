@@ -67,7 +67,7 @@ func witnessedReopen() (head, base string, ex exemptions) {
 	base = closedAtBase("a", hookClose(closingSHA), baseClosedAt) + "\n"
 	head = reopenedAtHead("a", "in_progress", headFixedAt) + "\n"
 	ex = exemptions{
-		reopens:       map[string]string{"a": closingSHA},
+		reopens:       map[string]declaration{"a": {sha: closingSHA}},
 		refContaining: noRefContains,
 	}
 	return head, base, ex
@@ -283,7 +283,7 @@ func TestCheck_GrantDoesNotDependOnWhichNonClosedStatusHeadCarries(t *testing.T)
 		t.Run(status, func(t *testing.T) {
 			head := reopenedAtHead("a", status, headFixedAt) + "\n"
 			ex := exemptions{
-				reopens:       map[string]string{"a": closingSHA},
+				reopens:       map[string]declaration{"a": {sha: closingSHA}},
 				refContaining: noRefContains,
 			}
 			if err := check([]byte(head), []byte(base), "test-base", ex); err != nil {
@@ -300,7 +300,7 @@ func TestCheck_StaleExportIsRefusedEvenWhenDeclared(t *testing.T) {
 	base := closedAtBase("a", hookClose(closingSHA), baseClosedAt) + "\n"
 	head := reopenedAtHead("a", "in_progress", "2026-08-16T10:00:00Z") + "\n"
 	ex := exemptions{
-		reopens:       map[string]string{"a": closingSHA},
+		reopens:       map[string]declaration{"a": {sha: closingSHA}},
 		refContaining: noRefContains,
 	}
 	err := check([]byte(head), []byte(base), "test-base", ex)
@@ -321,7 +321,7 @@ func TestCheck_EqualUpdatedAtIsRefused(t *testing.T) {
 	base := closedAtBase("a", hookClose(closingSHA), baseClosedAt) + "\n"
 	head := reopenedAtHead("a", "in_progress", baseClosedAt) + "\n"
 	ex := exemptions{
-		reopens:       map[string]string{"a": closingSHA},
+		reopens:       map[string]declaration{"a": {sha: closingSHA}},
 		refContaining: noRefContains,
 	}
 	err := check([]byte(head), []byte(base), "test-base", ex)
@@ -339,7 +339,7 @@ func TestCheck_DeclaredSHANotCitedAtBaseIsRefused(t *testing.T) {
 	base := closedAtBase("a", hookClose("aaaaaaa1"), baseClosedAt) + "\n"
 	head := reopenedAtHead("a", "in_progress", headFixedAt) + "\n"
 	ex := exemptions{
-		reopens:       map[string]string{"a": closingSHA},
+		reopens:       map[string]declaration{"a": {sha: closingSHA}},
 		refContaining: noRefContains,
 	}
 	err := check([]byte(head), []byte(base), "test-base", ex)
@@ -358,7 +358,7 @@ func TestCheck_LaterCloseUnderADifferentSHADoesNotInheritTheEntry(t *testing.T) 
 	base := closedAtBase("a", "Closed by branch x at bbbbbbb2 (merged).", baseClosedAt) + "\n"
 	head := reopenedAtHead("a", "in_progress", headFixedAt) + "\n"
 	ex := exemptions{
-		reopens:       map[string]string{"a": closingSHA},
+		reopens:       map[string]declaration{"a": {sha: closingSHA}},
 		refContaining: noRefContains,
 	}
 	err := check([]byte(head), []byte(base), "test-base", ex)
@@ -421,7 +421,7 @@ func TestCheck_MissingUpdatedAtIsRefused(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ex := exemptions{
-				reopens:       map[string]string{"a": closingSHA},
+				reopens:       map[string]declaration{"a": {sha: closingSHA}},
 				refContaining: noRefContains,
 			}
 			err := check([]byte(tt.head), []byte(tt.base), "test-base", ex)
@@ -441,7 +441,7 @@ func TestCheck_RefusedDeclarationNamesTheEntry(t *testing.T) {
 	base := closedAtBase("a", hookClose(closingSHA), baseClosedAt) + "\n"
 	head := reopenedAtHead("a", "in_progress", "2026-08-16T10:00:00Z") + "\n"
 	ex := exemptions{
-		reopens:       map[string]string{"a": closingSHA},
+		reopens:       map[string]declaration{"a": {sha: closingSHA}},
 		refContaining: noRefContains,
 	}
 	err := check([]byte(head), []byte(base), "test-base", ex)
@@ -460,7 +460,7 @@ func TestCheck_UndeclaredReopenAlongsideADeclaredOneStillFails(t *testing.T) {
 	head := reopenedAtHead("a", "in_progress", headFixedAt) + "\n" +
 		reopenedAtHead("b", "in_progress", headFixedAt) + "\n"
 	ex := exemptions{
-		reopens:       map[string]string{"a": closingSHA},
+		reopens:       map[string]declaration{"a": {sha: closingSHA}},
 		refContaining: noRefContains,
 	}
 	err := check([]byte(head), []byte(base), "test-base", ex)
@@ -495,7 +495,7 @@ func TestCheck_StaleReopenEntryPasses(t *testing.T) {
 	base := reopenedAtHead("a", "in_progress", baseClosedAt) + "\n"
 	head := reopenedAtHead("a", "in_progress", headFixedAt) + "\n"
 	ex := exemptions{
-		reopens:       map[string]string{"a": closingSHA},
+		reopens:       map[string]declaration{"a": {sha: closingSHA}},
 		refContaining: noRefContains,
 	}
 	if err := check([]byte(head), []byte(base), "test-base", ex); err != nil {
@@ -509,7 +509,7 @@ func TestCheck_ReopenExemptionDoesNotReachDrops(t *testing.T) {
 	base := closedAtBase("a", hookClose(closingSHA), baseClosedAt) + "\n"
 	head := issueOpenB + "\n"
 	ex := exemptions{
-		reopens:       map[string]string{"a": closingSHA},
+		reopens:       map[string]declaration{"a": {sha: closingSHA}},
 		refContaining: noRefContains,
 	}
 	err := check([]byte(head), []byte(base), "test-base", ex)
@@ -583,17 +583,22 @@ func TestParseAllowedReopens(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
-		want map[string]string
+		want map[string]declaration
 	}{
-		{"empty", "", map[string]string{}},
-		{"blank lines", "\n   \n\t\n", map[string]string{}},
-		{"comments", "# unearned close\n   # indented\n", map[string]string{}},
-		{"pair", "gqlc-rz0l 3dd322dc\n", map[string]string{"gqlc-rz0l": "3dd322dc"}},
-		{"trimmed and tab separated", "  gqlc-1\t3dd322dc  \n", map[string]string{"gqlc-1": "3dd322dc"}},
-		{"crlf", "gqlc-1 3dd322dc\r\n", map[string]string{"gqlc-1": "3dd322dc"}},
-		{"no trailing newline", "gqlc-1 3dd322dc", map[string]string{"gqlc-1": "3dd322dc"}},
-		{"full length sha", "gqlc-1 " + strings.Repeat("a", 40) + "\n", map[string]string{"gqlc-1": strings.Repeat("a", 40)}},
-		{"two ids", "gqlc-1 3dd322dc\ngqlc-2 aaaaaaa1\n", map[string]string{"gqlc-1": "3dd322dc", "gqlc-2": "aaaaaaa1"}},
+		{"empty", "", map[string]declaration{}},
+		{"blank lines", "\n   \n\t\n", map[string]declaration{}},
+		{"comments", "# unearned close\n   # indented\n", map[string]declaration{}},
+		{"pair", "gqlc-rz0l 3dd322dc\n", map[string]declaration{"gqlc-rz0l": {sha: "3dd322dc"}}},
+		{"trimmed and tab separated", "  gqlc-1\t3dd322dc  \n", map[string]declaration{"gqlc-1": {sha: "3dd322dc"}}},
+		{"crlf", "gqlc-1 3dd322dc\r\n", map[string]declaration{"gqlc-1": {sha: "3dd322dc"}}},
+		{"no trailing newline", "gqlc-1 3dd322dc", map[string]declaration{"gqlc-1": {sha: "3dd322dc"}}},
+		{"full length sha", "gqlc-1 " + strings.Repeat("a", 40) + "\n", map[string]declaration{"gqlc-1": {sha: strings.Repeat("a", 40)}}},
+		{"two ids", "gqlc-1 3dd322dc\ngqlc-2 aaaaaaa1\n", map[string]declaration{"gqlc-1": {sha: "3dd322dc"}, "gqlc-2": {sha: "aaaaaaa1"}}},
+		// The second shape (bd gqlc-j068). Which field it lands in is decided
+		// by the token, so these rows also pin that the two do not collide.
+		{"timestamp", "gqlc-1 2026-08-01T10:00:00Z\n", map[string]declaration{"gqlc-1": {closedAt: "2026-08-01T10:00:00Z"}}},
+		{"timestamp with offset", "gqlc-1 2026-08-01T12:00:00+02:00\n", map[string]declaration{"gqlc-1": {closedAt: "2026-08-01T12:00:00+02:00"}}},
+		{"one of each", "gqlc-1 3dd322dc\ngqlc-2 2026-08-01T10:00:00Z\n", map[string]declaration{"gqlc-1": {sha: "3dd322dc"}, "gqlc-2": {closedAt: "2026-08-01T10:00:00Z"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -616,13 +621,17 @@ func TestParseAllowedReopens_MalformedIsAnError(t *testing.T) {
 	}{
 		// The load-bearing row: a bare id is allowed-drops.txt's shape, and
 		// taking it here would make this arm a bare-id allowlist.
-		{"bare id", "gqlc-rz0l\n", "want `<bead-id> <closing-sha>`, got 1 field"},
-		{"three fields", "gqlc-1 3dd322dc extra\n", "want `<bead-id> <closing-sha>`, got 3 field"},
-		{"sha too short", "gqlc-1 3dd322\n", "not a 7-40 character lowercase hex sha"},
-		{"sha too long", "gqlc-1 " + strings.Repeat("a", 41) + "\n", "not a 7-40 character lowercase hex sha"},
-		{"sha not hex", "gqlc-1 3dd322dg\n", "not a 7-40 character lowercase hex sha"},
-		{"sha uppercase", "gqlc-1 3DD322DC\n", "not a 7-40 character lowercase hex sha"},
-		{"asterisk is not a wildcard sha", "gqlc-1 *\n", "not a 7-40 character lowercase hex sha"},
+		{"bare id", "gqlc-rz0l\n", "got 1 field"},
+		{"three fields", "gqlc-1 3dd322dc extra\n", "got 3 field"},
+		{"sha too short", "gqlc-1 3dd322\n", "neither a 7-40 character lowercase hex sha nor an RFC3339 timestamp"},
+		{"sha too long", "gqlc-1 " + strings.Repeat("a", 41) + "\n", "neither a 7-40 character lowercase hex sha nor an RFC3339 timestamp"},
+		{"sha not hex", "gqlc-1 3dd322dg\n", "neither a 7-40 character lowercase hex sha nor an RFC3339 timestamp"},
+		{"sha uppercase", "gqlc-1 3DD322DC\n", "neither a 7-40 character lowercase hex sha nor an RFC3339 timestamp"},
+		{"asterisk is not a wildcard sha", "gqlc-1 *\n", "neither a 7-40 character lowercase hex sha nor an RFC3339 timestamp"},
+		// The timestamp shape must not become a second door for a loose token:
+		// a bare date, or a time with no zone, is not RFC3339 and is refused.
+		{"bare date", "gqlc-1 2026-08-01\n", "neither a 7-40 character lowercase hex sha nor an RFC3339 timestamp"},
+		{"timestamp with no zone", "gqlc-1 2026-08-01T10:00:00\n", "neither a 7-40 character lowercase hex sha nor an RFC3339 timestamp"},
 		{"duplicate id", "gqlc-1 3dd322dc\ngqlc-1 aaaaaaa1\n", "declared twice"},
 	}
 	for _, tt := range tests {
@@ -703,7 +712,7 @@ func TestReadAllowedReopens(t *testing.T) {
 		if err != nil {
 			t.Fatalf("readAllowedReopens: %v", err)
 		}
-		if !maps.Equal(got, map[string]string{"gqlc-1": "3dd322dc"}) {
+		if !maps.Equal(got, map[string]declaration{"gqlc-1": {sha: "3dd322dc"}}) {
 			t.Errorf("allowed = %v, want {gqlc-1:3dd322dc}", got)
 		}
 	})
@@ -807,4 +816,201 @@ func TestParse_KeepsTheFieldsTheReopenArmReads(t *testing.T) {
 	if got["a"].CloseReason != hookClose(closingSHA) {
 		t.Errorf("CloseReason = %q, want the hook wording", got["a"].CloseReason)
 	}
+}
+
+// --- the timestamp declaration shape (bd gqlc-j068) -------------------------
+// The sha shape reaches only closes whose reason cites a sha, which on the
+// export at 92ebb9a7 was 86 of 290 closed beads. A close written by hand — a
+// prose reason, no sha anywhere in it — had no declaration bdguard would grant,
+// so a wrong close there had to be carried in the export until someone re-closed
+// the bead for real. These rows are that gap and the fence around it.
+
+// proseClose is what a hand-written close looks like: a reason that names no
+// commit at all, which is what makes the sha shape unusable for it.
+const proseClose = "Closed as answered rather than coded; the behaviour was already covered."
+
+func TestCheck_TimestampDeclarationGrantsAProseClose(t *testing.T) {
+	base := closedAtBase("a", proseClose, baseClosedAt) + "\n"
+	head := reopenedAtHead("a", "in_progress", headFixedAt) + "\n"
+	ex := exemptions{
+		reopens:       map[string]declaration{"a": {closedAt: baseClosedAt}},
+		refContaining: noRefContains,
+	}
+	if err := check([]byte(head), []byte(base), "test-base", ex); err != nil {
+		t.Fatalf("expected pass, got: %v", err)
+	}
+}
+
+func TestCheck_TimestampDeclarationIsTheSAMEINSTANTNotTheSameBytes(t *testing.T) {
+	// A declaration quotes a fact, not a spelling. bd writes UTC, but a
+	// timestamp read from another tool can carry an offset, and refusing that
+	// would be refusing the right answer for being written differently.
+	base := closedAtBase("a", proseClose, "2026-08-17T07:54:46Z") + "\n"
+	head := reopenedAtHead("a", "in_progress", headFixedAt) + "\n"
+	ex := exemptions{
+		reopens:       map[string]declaration{"a": {closedAt: "2026-08-17T09:54:46+02:00"}},
+		refContaining: noRefContains,
+	}
+	if err := check([]byte(head), []byte(base), "test-base", ex); err != nil {
+		t.Fatalf("expected pass for the same instant spelled with an offset, got: %v", err)
+	}
+}
+
+func TestCheck_TimestampDeclarationMustQuoteBase(t *testing.T) {
+	// The property that stops this being a bare-id allowlist: base comes out of
+	// a git ref, so the entry has to name something already committed there. A
+	// timestamp nobody recorded is an assertion the head made alone.
+	base := closedAtBase("a", proseClose, baseClosedAt) + "\n"
+	head := reopenedAtHead("a", "in_progress", headFixedAt) + "\n"
+	ex := exemptions{
+		reopens:       map[string]declaration{"a": {closedAt: "2026-08-17T07:54:47Z"}},
+		refContaining: noRefContains,
+	}
+	err := check([]byte(head), []byte(base), "test-base", ex)
+	if err == nil {
+		t.Fatal("expected failure: the declared timestamp is not base's updated_at")
+	}
+	if !strings.Contains(err.Error(), "is not base's updated_at") {
+		t.Errorf("expected the quoting refusal, got: %v", err)
+	}
+	// Both values, so the reader can see which one is wrong without opening
+	// the export at base by hand.
+	if !strings.Contains(err.Error(), "2026-08-17T07:54:47Z") || !strings.Contains(err.Error(), baseClosedAt) {
+		t.Errorf("expected both timestamps as the witness, got: %v", err)
+	}
+}
+
+func TestCheck_TimestampDeclarationStillObeysRecency(t *testing.T) {
+	// The revert/correction separator is shared by both shapes. A head record
+	// older than base's close is an older export copied forward, whichever way
+	// the declaration is written.
+	base := closedAtBase("a", proseClose, baseClosedAt) + "\n"
+	head := reopenedAtHead("a", "in_progress", "2026-08-16T10:00:00Z") + "\n"
+	ex := exemptions{
+		reopens:       map[string]declaration{"a": {closedAt: baseClosedAt}},
+		refContaining: noRefContains,
+	}
+	err := check([]byte(head), []byte(base), "test-base", ex)
+	if err == nil {
+		t.Fatal("expected failure: a record older than base's close is a revert")
+	}
+	if !strings.Contains(err.Error(), "is not after base") {
+		t.Errorf("expected the recency refusal, got: %v", err)
+	}
+}
+
+func TestCheck_TimestampDeclarationCannotDodgeTheSHAVeto(t *testing.T) {
+	// The reason the two shapes are kept disjoint. The sha shape has a veto —
+	// a ref containing the closing sha means the close was earned — and the
+	// timestamp shape has nothing to apply it to. Left open, an author whose
+	// sha declaration was vetoed could quote the timestamp instead and be
+	// granted. So a close_reason citing a sha that IS on a ref refuses the
+	// timestamp shape outright.
+	base := closedAtBase("a", hookClose(closingSHA), baseClosedAt) + "\n"
+	head := reopenedAtHead("a", "in_progress", headFixedAt) + "\n"
+	ex := exemptions{
+		reopens:       map[string]declaration{"a": {closedAt: baseClosedAt}},
+		refContaining: refContains("refs/remotes/origin/master"),
+	}
+	err := check([]byte(head), []byte(base), "test-base", ex)
+	if err == nil {
+		t.Fatal("expected failure: the timestamp shape must not grant what the sha shape's veto refuses")
+	}
+	if !strings.Contains(err.Error(), "cannot be granted over that") {
+		t.Errorf("expected the veto-dodge refusal, got: %v", err)
+	}
+	// Named, so the refusal is actionable: the reader needs the sha and the
+	// ref, not just the fact of a refusal.
+	if !strings.Contains(err.Error(), closingSHA) || !strings.Contains(err.Error(), "refs/remotes/origin/master") {
+		t.Errorf("expected the sha and the ref named, got: %v", err)
+	}
+}
+
+func TestCheck_TimestampDeclarationIsGrantedOverAnOrphanedSHA(t *testing.T) {
+	// The other side of the row above, and it is what stops that fence being
+	// a blanket ban on the timestamp shape for any reason mentioning a commit.
+	// An orphaned sha is exactly the witnessed case (gqlc-rz0l), where the veto
+	// stays silent — so the two shapes agree and either may be used.
+	base := closedAtBase("a", hookClose(closingSHA), baseClosedAt) + "\n"
+	head := reopenedAtHead("a", "in_progress", headFixedAt) + "\n"
+	ex := exemptions{
+		reopens:       map[string]declaration{"a": {closedAt: baseClosedAt}},
+		refContaining: noRefContains,
+	}
+	if err := check([]byte(head), []byte(base), "test-base", ex); err != nil {
+		t.Fatalf("expected pass over an orphaned sha, got: %v", err)
+	}
+}
+
+func TestCitedSHATokens(t *testing.T) {
+	// The veto-dodge fence reads this, so a scanner that found nothing would
+	// turn that fence into a pass with no visible symptom.
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"none", "Closed as answered rather than coded.", nil},
+		{"one", hookClose(closingSHA), []string{closingSHA}},
+		{"two", "merged as 3dd322dc after aaaaaaa1", []string{"3dd322dc", "aaaaaaa1"}},
+		// The delimiting is citesSHA's, so a token embedded in a longer word
+		// is not a citation.
+		{"embedded in a longer alnum run", "x3dd322dcx", nil},
+		{"too short", "closed at 3dd322", nil},
+		{"not hex", "closed at 3dd322dg", nil},
+		// gqlc-7fn3's shape: an all-decimal token is sha-shaped here on
+		// purpose, since about four in a hundred real abbreviations are.
+		{"all decimal", "the cache is 1048576 bytes", []string{"1048576"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := citedSHATokens(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("citedSHATokens(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("citedSHATokens(%q)[%d] = %q, want %q", tt.in, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestCheck_ReopenHintNamesBothShapes(t *testing.T) {
+	// The hint is the whole of what an author sees when they hit this. It named
+	// only the sha shape, which is how a prose close read as "no remedy exists".
+	base := closedAtBase("a", proseClose, baseClosedAt) + "\n"
+	head := reopenedAtHead("a", "in_progress", headFixedAt) + "\n"
+	err := check([]byte(head), []byte(base), "test-base", exemptions{refContaining: noRefContains})
+	if err == nil {
+		t.Fatal("expected an undeclared reopen to fail")
+	}
+	for _, want := range []string{"<bead-id> <closing-sha>", "<bead-id> <base-updated-at>", "RFC3339"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the hint to carry %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestRefuseDeclaredFact_UnparseableTimestampsAreRefused(t *testing.T) {
+	// Neither branch is reachable through parseAllowedReopens, which stores
+	// only a token that already parsed, nor through a bd export, which writes
+	// RFC3339. They are refusals rather than skips because the whole
+	// discrimination rests on comparing two instants: a value that will not
+	// parse has to stop the grant, not be assumed in either direction.
+	t.Run("declared", func(t *testing.T) {
+		base := record{Status: "closed", UpdatedAt: baseClosedAt, CloseReason: proseClose}
+		got := refuseDeclaredFact(base, declaration{closedAt: "yesterday"}, noRefContains)
+		if !strings.Contains(got, "declared timestamp") || !strings.Contains(got, "not RFC3339") {
+			t.Errorf("expected the declared-timestamp refusal, got: %q", got)
+		}
+	})
+	t.Run("base", func(t *testing.T) {
+		base := record{Status: "closed", UpdatedAt: "not-a-time", CloseReason: proseClose}
+		got := refuseDeclaredFact(base, declaration{closedAt: baseClosedAt}, noRefContains)
+		if !strings.Contains(got, "base updated_at") || !strings.Contains(got, "not RFC3339") {
+			t.Errorf("expected the base-timestamp refusal, got: %q", got)
+		}
+	})
 }
