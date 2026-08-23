@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Prints one token and exits 0. It exists to be RUN, by git, so that something
+# can witness that git runs this repository's hooks at all.
+#
+# Not a native hook name, and deliberately so: git never invokes this by itself,
+# only `git hook run --allow-unknown-hook-name gqlc-liveness-probe` does, so
+# adding it changes the behaviour of no commit, push, merge or checkout. What it
+# adds is a hook git will resolve through core.hooksPath exactly the way it
+# resolves pre-commit — same lookup, same executable test, same relative-path
+# rules — with none of the cost or side effects of running a real gate.
+#
+# .githooks/verify-hooks-live is the reader. The token is spelled there too and
+# the two have to agree; that is a fact spelled twice, and what holds them
+# together is .githooks/tests/verify-hooks-live-test.sh, which fails if a run of
+# the real verifier against a fixture carrying the real probe does not come back
+# live.
+#
+# It writes to stdout rather than to a file. `git hook run` redirects a hook's
+# stdout to ITS stderr, so the reader captures both streams and looks for the
+# token anywhere in them; a witness file would need a writable location chosen
+# without knowing whose repository this is, and /tmp here is a shared tmpfs that
+# has run out of inodes (bd gqlc-vze6).
+printf '%s\n' 'gqlc-hooks-live-witness'
