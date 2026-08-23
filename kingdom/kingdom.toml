@@ -188,3 +188,29 @@ mihr     = "judge:claude-fable-5:Միհր"
 anahit   = "judge:claude-fable-5:Անահիտ"
 tir      = "judge:claude-fable-5:Տիր"
 raffi    = "guard:claude-sonnet-5:Րաֆֆի"
+
+# The people who hold beads here. NOT seats: nothing is ever dispatched to a
+# name in this list, and that is the point — a bead assigned to a person is held
+# deliberately and is not a defect.
+#
+# It exists so that the OTHER kind of unresolvable assignee can be seen. Every
+# dispatch pass matches assignees against [seats], so a bead assigned to a name
+# that is not a seat is never routed anywhere; against kingdom.toml alone, a
+# person's name and a RETIRED seat's name are indistinguishable, and the retired
+# seat's work would go quiet while every board read healthy (gqlc-t4zx). With
+# this list, an assignee in NEITHER roster can be named.
+#
+# It fails toward noise rather than silence: a new person who takes a bead
+# before their name is added here is reported as unresolvable, which is a wrong
+# line an operator fixes in one edit. The alternative — inferring "must be a
+# person" from "is not a seat" — is the silence this section removes.
+#
+# name = "who they are". The key is the bd assignee string, VERBATIM; one human
+# may appear under more than one key, because bd's assignee and the GitHub
+# handle are different fields and both land on beads here.
+#
+# MEASURED 2026-08-23 across all 814 beads (`bd list --status all -n 0 --json`):
+# the only two non-seat assignees on the board are the two below.
+[humans]
+areqag             = "Անդրանիկ Երէցեան — the king, GitHub handle"
+antranig-yeretzian = "Անդրանիկ Երէցեան — the king, bd assignee form"

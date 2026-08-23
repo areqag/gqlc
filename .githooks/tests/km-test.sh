@@ -624,6 +624,16 @@ cat >"$BIN/bd" <<'STUB'
 # always handed back the whole fixture would make a truncated query look
 # exactly like a complete one, which is the property that hid this.
 _all="$*"
+# EVERY invocation, before any dispatch on the subcommand, so a row can assert
+# what km did NOT ask bd to do. A negative claim about writes cannot be made
+# against the read fixtures — an `update` falls through to the catch-all `exit
+# 0` below, leaving no trace at all — and "detect, never reassign" is exactly
+# such a claim (gqlc-t4zx).
+# Guarded on the directory rather than on the variable: an unwritable path here
+# would put "No such file or directory" on stderr, which every row captures with
+# 2>&1 and reads as km's own output.
+[ -d "${KM_STATE_DIR:-}" ] &&
+    printf '%s\n' "${_all//$'\n'/ }" >>"$KM_STATE_DIR/bd-calls"
 case "$1" in
     ready) f="${KM_FAKE_READY:-}"; limit=100 ;;
     list)  limit=50
@@ -7154,6 +7164,211 @@ elif ! printf '%s' "$OUT" | grep -q '^FAIL:'; then
 else
     ok "a stranding query that fails makes doctor fail, rather than reading as a board with nothing stranded"
 fi
+
+# --- the assignee that resolves to nobody (gqlc-t4zx) ------------------------
+# The second unreachable shape, and the meaner one: a stranded bead at least
+# looks unrouted, while a bead assigned to a name that is not a seat looks like
+# somebody is working on it. Every dispatch pass matches assignees against the
+# SEAT roster, so no wake is ever queued for one, and against kingdom.toml alone
+# a retired seat's name and a person's name are the same string.
+#
+# THREE cases, and the rows below are organised around them because conflating
+# them is the defect rather than a simplification of it: a live seat (routed,
+# silent), a person in [humans] (held deliberately, and reporting it would put a
+# line on the board every time a human takes a bead), and a name in neither (the
+# only finding). The two SILENT cases are rows in their own right — without them
+# a report that named every assignee would pass the finding row.
+#
+# The board fixture is the WHOLE ledger, closed beads included, because the
+# status filter is itself under test twice: closed work must not be reported,
+# and `--status open` must not be the filter, since it excludes in_progress and
+# blocked — the states a bead held by a departed seat is most likely to be in.
+ua_board() { # <whole-ledger json>
+    KM_FAKE_ALL="$KM_STATE_DIR/all-board.json"
+    export KM_FAKE_ALL
+    printf '%s' "$1" >"$KM_FAKE_ALL"
+}
+ua_lines() { printf '%s\n' "$OUT" | grep 'UNREACHABLE ASSIGNEE'; }
+
+# Every SILENT-case board below carries a control bead held by `gone-ctl`, and
+# each of those rows asserts the report FIRED before asserting what it left out.
+# Watched go red without it: an absence row is satisfied by an absent feature, so
+# all three passed against a km that had never heard of any of this. A row that
+# is green before the code exists certifies nothing.
+UA_CTL='{"id":"gqlc-uactl","status":"in_progress","assignee":"gone-ctl"}'
+
+bn="unresolvable assignee: a live seat is not reported"
+dispatch_case '[]' '[]'
+ua_board "[{\"id\":\"gqlc-ua1\",\"status\":\"in_progress\",\"assignee\":\"vahagn\"}, $UA_CTL]"
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif ! ua_lines | grep -q 'gone-ctl'; then
+    bad "$bn" "the control was not reported, so this row would pass over a report that never runs: $OUT"
+elif ua_lines | grep -q 'vahagn\|gqlc-ua1'; then
+    bad "$bn" "a seat on the roster was reported unreachable: $(ua_lines)"
+else
+    ok "$bn"
+fi
+
+bn="unresolvable assignee: a person in [humans] is not reported"
+dispatch_case '[]' '[]'
+ua_board "[{\"id\":\"gqlc-ua2\",\"status\":\"open\",\"assignee\":\"areqag\"},
+           {\"id\":\"gqlc-ua3\",\"status\":\"in_progress\",\"assignee\":\"antranig-yeretzian\"}, $UA_CTL]"
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif ! ua_lines | grep -q 'gone-ctl'; then
+    bad "$bn" "the control was not reported, so this row would pass over a report that never runs: $OUT"
+elif ua_lines | grep -q 'areqag\|antranig-yeretzian'; then
+    bad "$bn" "a human holding their own work was reported as a defect, which is how a report becomes noise: $(ua_lines)"
+else
+    ok "$bn"
+fi
+
+bn="unresolvable assignee: a name in neither roster is reported, and named"
+dispatch_case '[]' '[]'
+ua_board '[{"id":"gqlc-ua4","status":"in_progress","assignee":"gone-seat"}]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ -z "$(ua_lines)" ]; then
+    bad "$bn" "a bead held by a name the town cannot resolve was not reported at all: $OUT"
+elif ! ua_lines | grep -q 'gone-seat'; then
+    bad "$bn" "the line does not carry the assignee that could not be resolved, which is the thing an operator acts on: $(ua_lines)"
+elif ! ua_lines | grep -q 'gqlc-ua4'; then
+    bad "$bn" "the line does not name the bead: $(ua_lines)"
+else
+    ok "$bn"
+fi
+
+# The status filter, twice over and in both directions.
+bn="unresolvable assignee: a CLOSED bead's assignee is not reported"
+dispatch_case '[]' '[]'
+ua_board "[{\"id\":\"gqlc-ua5\",\"status\":\"closed\",\"assignee\":\"gone-seat\"}, $UA_CTL]"
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif ! ua_lines | grep -q 'gone-ctl'; then
+    bad "$bn" "the control was not reported, so this row would pass over a report that never runs: $OUT"
+elif ua_lines | grep -q 'gqlc-ua5\|gone-seat'; then
+    bad "$bn" "finished work was reported as unreachable — 599 of this board's 814 beads are closed, so this would drown the finding: $(ua_lines)"
+else
+    ok "$bn"
+fi
+
+bn="unresolvable assignee: in_progress and blocked are reported, not just open"
+dispatch_case '[]' '[]'
+ua_board '[{"id":"gqlc-ua6","status":"in_progress","assignee":"gone-a"},
+           {"id":"gqlc-ua7","status":"blocked","assignee":"gone-b"}]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif ! ua_lines | grep -q 'gqlc-ua6'; then
+    bad "$bn" "an in_progress bead was missed — bd's --status open excludes it, and that is the reading this row exists to refuse: $OUT"
+elif ! ua_lines | grep -q 'gqlc-ua7'; then
+    bad "$bn" "a blocked bead was missed, for the same reason: $OUT"
+else
+    ok "$bn"
+fi
+
+bn="unresolvable assignee: one line per NAME, carrying everything it holds"
+dispatch_case '[]' '[]'
+ua_board '[{"id":"gqlc-ua8","status":"open","assignee":"gone-seat"},
+           {"id":"gqlc-ua9","status":"in_progress","assignee":"gone-seat"}]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ "$(ua_lines | wc -l)" -ne 1 ]; then
+    bad "$bn" "$(ua_lines | wc -l) lines for one name; a retired seat holding twenty beads must appear once: $(ua_lines)"
+elif ! ua_lines | grep -q 'gqlc-ua8' || ! ua_lines | grep -q 'gqlc-ua9'; then
+    bad "$bn" "the single line drops one of the beads: $(ua_lines)"
+else
+    ok "$bn"
+fi
+
+# DETECT AND NAME, NEVER ACT. The whole point of reporting rather than repairing
+# is that this code cannot tell a retired seat from a person the roster has not
+# caught up with. Asserted against the bytes km handed bd, not against the
+# output: an `update` would fall through the stub's catch-all and leave the
+# report looking identical.
+bn="unresolvable assignee: nothing is reassigned or cleared"
+dispatch_case '[]' '[]'
+ua_board '[{"id":"gqlc-ua10","status":"in_progress","assignee":"gone-seat"}]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ -z "$(ua_lines)" ]; then
+    bad "$bn" "the finding never fired, so this row would pass over a report that does not exist: $OUT"
+elif grep -Eq '^(update|assign|close|delete)\b' "$KM_STATE_DIR/bd-calls" 2>/dev/null; then
+    bad "$bn" "km wrote to the ledger over another citizen's claimed work: $(grep -E '^(update|assign|close|delete)\b' "$KM_STATE_DIR/bd-calls")"
+else
+    ok "$bn"
+fi
+
+# Fail-LOUD, not fail-silent: a query that did not answer must not read as a
+# board on which every assignee resolves.
+bn="unresolvable assignee: a failed board query says so"
+dispatch_case '[]' '[]'
+ua_board '[]'
+printf '1' >"$KM_FAKE_ALL.rc"
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "the diagnostic aborted the run; routing is the job and a report must not stop it: rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'assignee-resolution check could not run'; then
+    bad "$bn" "an unanswered query left no trace, so it reads as a clean board: $OUT"
+else
+    ok "$bn"
+fi
+
+# And the same three cases at `km doctor`, where the stranding arm is a gate.
+# This one is deliberately a WARN: it rests on a hand-maintained roster, so a
+# person added to the board before they are added to [humans] would otherwise
+# redden the gate through no fault of the board — and a gate that goes red when
+# a human takes work is one an operator learns to run with.
+bn="unresolvable assignee: doctor warns, and does not fail"
+dispatch_case '[]' '[]'
+ua_board '[{"id":"gqlc-ua11","status":"in_progress","assignee":"gone-seat"}]'
+run_doctor
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "doctor failed over an unresolvable assignee; the roster is hand-maintained and this gate would stay red: $OUT"
+elif ! printf '%s' "$OUT" | grep '^warn:' | grep -q 'gone-seat'; then
+    bad "$bn" "no warn line names the assignee: $OUT"
+elif ! printf '%s' "$OUT" | grep '^warn:' | grep -q 'gqlc-ua11'; then
+    bad "$bn" "the warn line does not name the bead, so the operator cannot act on it: $OUT"
+else
+    ok "$bn"
+fi
+
+bn="unresolvable assignee: doctor says so when every assignee resolves"
+dispatch_case '[]' '[]'
+ua_board '[{"id":"gqlc-ua12","status":"in_progress","assignee":"vahagn"},
+           {"id":"gqlc-ua13","status":"open","assignee":"areqag"}]'
+run_doctor
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif printf '%s' "$OUT" | grep '^warn:' | grep -q 'neither \[seats\] nor \[humans\]'; then
+    bad "$bn" "a seat and a human were warned about: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^ok: .*every assignee'; then
+    bad "$bn" "doctor is silent about assignee resolution, so its absence and its cleanliness are indistinguishable: $OUT"
+else
+    ok "$bn"
+fi
+
+# The roster reader itself. [humans] is a second section parsed by the same
+# reader as [seats]; a row here is what stops the two drifting into disagreeing
+# about what counts as an entry, which would make "in neither roster" a parsing
+# difference rather than a finding.
+bn="unresolvable assignee: [humans] is read from kingdom.toml, not hardcoded"
+if ! grep -q '^\[humans\]' "$REPO/kingdom/kingdom.toml"; then
+    bad "$bn" "kingdom.toml has no [humans] section, so the three-way test has no second roster to consult"
+elif grep -n 'areqag\|antranig-yeretzian' "$KM" >/dev/null 2>&1; then
+    bad "$bn" "km names a person inline; the roster must live in the config or it goes stale where nobody looks: $(grep -n 'areqag\|antranig-yeretzian' "$KM")"
+else
+    ok "$bn"
+fi
+
+unset KM_FAKE_ALL
 
 # --- doctor: a bead's owner must be an address that can reach a person -------
 # gqlc-0rv9. `.githooks/commit-msg` refuses an implausible author and the CI arm
