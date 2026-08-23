@@ -129,6 +129,25 @@ func TestVulnRefusesAHeaderThatIsOnlyPartOfALineTheScanPrinted(t *testing.T) {
 	requireRefusal(t, run, "reports a header the scan of")
 }
 
+// The header pattern is relaxed to a bare `standard library`, so it stops
+// asking for the line govulncheck prints above the module list and takes
+// whichever line first mentions the standard library.
+//
+// The stub scan carries a decoy above the real header for this: without it the
+// fixture holds one matching line, the relaxation is an equivalent mutant, and
+// all eight tests above stay green over a pattern that can no longer tell "no
+// header found" from "wrong header found" (bd gqlc-2tyr). What is asserted is
+// not merely a refusal — the relaxed pattern also refuses — but that the line
+// the grading quotes back is the DECOY, which is the pattern having matched
+// the wrong line rather than the recipe having failed for some other reason.
+func TestVulnRefusesAGradingThatMatchesAnyMentionOfTheStandardLibrary(t *testing.T) {
+	run := runVuln(t, edit{
+		old: `        line="$(grep -m1 -E '^Govulncheck scanned the following [0-9]+ modules and the .*standard library:$' <<<"${scan}" || true)"`,
+		new: `        line="$(grep -m1 -E 'standard library' <<<"${scan}" || true)"`,
+	})
+	requireRefusal(t, run, "\n         No standard library vulnerabilities found.\n")
+}
+
 // requireRefusal: the run failed, and it named what it found.
 //
 // The status alone is not enough. A recipe that died three hundred lines

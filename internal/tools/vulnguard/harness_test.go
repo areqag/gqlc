@@ -170,6 +170,14 @@ list_tags() { if [ "$1" = "." ]; then printf '%s\n' '@BLINDTAG@'; fi; }
 scan() {
     local i=1 id
     printf 'Scanning your code and 210 packages across @MODULES@ dependent modules...\n\n'
+    # DECOY. The only other line of this scan naming the standard library,
+    # printed BEFORE the real header so a pattern that is not anchored takes
+    # this one first. Without it the fixture holds exactly one matching line,
+    # every relaxation of the recipe's header pattern is an equivalent mutant,
+    # and the precision that makes the absent-header branch mean anything is
+    # untested — measured: widening the pattern to the two words "standard
+    # library" alone left all eight tests in this package green (bd gqlc-2tyr).
+    printf 'No standard library vulnerabilities found.\n\n'
     printf '=== Symbol Results ===\n\nNo vulnerabilities found.\n\n=== Package Results ===\n\n'
     for id in "${ids[@]}"; do
         printf 'Vulnerability #%d: %s\n' "${i}" "${id}"
@@ -332,6 +340,22 @@ type vulnRun struct {
 // close.
 func runVuln(t *testing.T, edits ...edit) vulnRun {
 	t.Helper()
+	return runVulnOver(t, nil, edits...)
+}
+
+// runVulnOver is the same, with the fixture tree handed to `spoil` after it is
+// laid out and before the recipe runs.
+//
+// That parameter is what lets a test violate a selftest's PRECONDITION rather
+// than its assertion. A selftest's assertions are witnessed by the edits above,
+// which reach the body of the clause; nothing there reaches its CALL, and a
+// call site is a line someone can delete. Measured at 620cea66: deleting either
+// `selftest_platformtag` or `selftest_tagblind` from the recipe left `just vuln`
+// exiting 0 (bd gqlc-65sl). A run over a tree the selftest is supposed to refuse
+// is the assertion the call site cannot be dropped from, because there is no
+// line inside the clause that produces it.
+func runVulnOver(t *testing.T, spoil func(*testing.T, string), edits ...edit) vulnRun {
+	t.Helper()
 
 	justBin, err := exec.LookPath("just")
 	require.NoError(t, err, "`just` is not on PATH, and this test runs the %q recipe rather "+
@@ -343,6 +367,9 @@ func runVuln(t *testing.T, edits ...edit) vulnRun {
 
 	dir := t.TempDir()
 	writeTree(t, dir, justfileFor(t, string(src), edits), registerIn(t, string(src)))
+	if spoil != nil {
+		spoil(t, dir)
+	}
 
 	cmd := exec.CommandContext(t.Context(), justBin, vulnRecipe)
 	cmd.Dir = dir
