@@ -933,6 +933,12 @@ python3 - "$_tmp/beads.json" "$_label_gate" \
   >"$_tmp/plan.txt" 9>&- 2>"$_tmp/plan.err" <<'PYEOF' || _rc=$?
 import importlib.util, json, sys
 
+# Importing the CI gate below compiles it, and python caches that compilation by
+# writing .github/scripts/__pycache__/ into the work tree. That directory is not
+# in .gitignore, so every push would leave an untracked directory behind in a
+# lane this script does not own. Measured on the first run of this path.
+sys.dont_write_bytecode = True
+
 # Escaped for the reason the pull selection escapes: the records below are
 # line-delimited, and an id carrying a newline splits into two the charset gate
 # waves through.

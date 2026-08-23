@@ -2664,6 +2664,23 @@ else
     ok "GitHub's label cap is read from the CI gate, not spelled in bd-gh-sync"
 fi
 
+# Importing that gate compiles it, and python's default is to cache the
+# compilation next to the source. MEASURED on the first push after this path
+# landed: `git status --short` in the real checkout reported an untracked
+# `.github/scripts/__pycache__/`, which is neither in .gitignore nor in a
+# directory bd-gh-sync owns. The fixture above is the same import, so it is the
+# place to pin it: the run just made must have left the planted gate's directory
+# exactly as it found it.
+_pc="reading the label cap leaves no __pycache__ beside the gate"
+if [ ! -f "$GATEREPO/.github/scripts/check-label-lengths.py" ]; then
+    bad "$_pc" "the planted gate is gone, so the import above cannot have happened"
+elif [ -e "$GATEREPO/.github/scripts/__pycache__" ]; then
+    bad "$_pc" \
+        "the push wrote $(find "$GATEREPO/.github/scripts/__pycache__" -type f -printf '%f ')into a directory it does not own"
+else
+    ok "$_pc"
+fi
+
 # ...and the gate being unreadable is a finding, not a pass. Screening nothing
 # and reporting every bead mirrorable is the 422 arriving under a summary that
 # says the bead was pushed — the exact shape this whole block removes.
@@ -3436,6 +3453,7 @@ a bead whose label is exactly at GitHub's cap is mirrored
 the refusal names the deepest ancestor directory that fits
 an unmirrorable bead does not stop the beads beside it being mirrored
 GitHub's label cap is read from the CI gate, not spelled in bd-gh-sync
+reading the label cap leaves no __pycache__ beside the gate
 a label cap that cannot be read screens nothing and says so
 an unhandled write failure aborts the pull with a verdict, exit 0
 an unhandled write failure aborts the push with a verdict, exit 1
