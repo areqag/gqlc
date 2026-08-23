@@ -14,7 +14,18 @@ set -euo pipefail
 # master.
 "$(dirname "$0")/guard-push-destination" "$@"
 
-just test
+# Under the purity guard, not bare. Everything below `just test` runs from a git
+# hook, and git exports GIT_DIR to a hook — which git honours over both the CWD
+# and an explicit `-C <dir>`, so a suite that builds its fixture without
+# scrubbing writes THIS repo while believing it is writing a throwaway. On
+# 2026-08-22 that flipped core.bare on the shared config, force-moved a seat's
+# branch onto a fixture commit, and left `user.email=km@test` where it sat until
+# a commit hook refused the address days later (bd gqlc-ed2u). Every one of those
+# was found by hand, afterwards. The guard fails the push when the run changed
+# the repository it ran in, so no suite has to remember to be careful for the
+# damage to be reported (bd gqlc-2zet). It propagates the suite's own exit
+# status, so a plain test failure still reads as a plain test failure.
+"$(dirname "$0")/repo-purity" just test
 
 # ensure-golangci self-heals the pinned binary in .bin/; a provisioning failure
 # BLOCKS the push. Until bd gqlc-l45j this arm warned and continued, justified

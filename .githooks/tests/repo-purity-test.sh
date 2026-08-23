@@ -186,5 +186,52 @@ if [ "$rc" = 0 ]; then quiet_got=0; else quiet_got="rc=$rc: $(cat "$T/out")"; fi
 check "writes confined to a fixture path: guard does not fail on its own account" \
     0 "$quiet_got"
 
+# --- the guard is actually WRAPPED AROUND the test run --------------------------
+# Every row above measures a guard that could be wired to nothing at all. This
+# branch shipped exactly that for a while: `.githooks/repo-purity` existed, was
+# tested here, and a whole-tree grep found no caller but this file. A detector
+# nothing invokes is the defect this bead was filed to end, one level up.
+#
+# `.githooks/pre-push` is the site: `just test` runs there with GIT_DIR exported
+# by git, which is the condition every observed damage shape needed, and it is
+# the developer's own repo that is at risk. Read with comments stripped, because
+# a commented-out invocation is not one — the harness rows below are what hold
+# that, since a grep over raw bytes passes on a `#`-prefixed line (bd gqlc-sgot).
+#
+# A text pin, and named as one: running the real hook would re-enter `just test`.
+# What it buys is that removing the wiring cannot stay green.
+
+# Echoes the effective full-suite invocation in the file named by $1 — comments
+# stripped, whitespace trimmed — or nothing when the file runs `just test`
+# nowhere. Anchored at the tail so `just test-hooks` is not mistaken for it.
+suite_invocation() {
+    sed 's/#.*//' "$1" | grep -E 'just test[[:space:]]*$' | head -1 \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+PREPUSH="$(cd "$(dirname "$0")/.." && pwd)/pre-push"
+
+# The control. Without it, a pre-push that stopped running the suite at all
+# would satisfy every "not unguarded" phrasing by running nothing.
+check "pre-push: the hook runs the full suite" yes \
+    "$([ -n "$(suite_invocation "$PREPUSH")" ] && echo yes || echo no)"
+
+check "pre-push: the suite runs under the purity guard" yes \
+    "$(case "$(suite_invocation "$PREPUSH")" in *repo-purity*) echo yes ;; *) echo no ;; esac)"
+
+# --- and the reader above is not fooled by a comment -------------------------
+# The two harness rows that keep the pin honest. Both drive suite_invocation
+# over a synthetic hook rather than the real one, so they stay meaningful
+# whatever pre-push grows next.
+
+T="$TMP/reader"; mkdir -p "$T"
+printf '%s\n' '#!/usr/bin/env bash' '# repo-purity just test' 'just test' >"$T/commented"
+check "reader: a commented-out guard reads as unwired" no \
+    "$(case "$(suite_invocation "$T/commented")" in *repo-purity*) echo yes ;; *) echo no ;; esac)"
+
+printf '%s\n' '#!/usr/bin/env bash' 'just test-hooks' >"$T/hooksonly"
+check "reader: 'just test-hooks' is not the full-suite line" "" \
+    "$(suite_invocation "$T/hooksonly")"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
