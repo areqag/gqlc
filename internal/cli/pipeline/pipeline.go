@@ -63,6 +63,16 @@ var ErrConfigMissing = errors.New("config file not found")
 type Result struct {
 	Targets     []TargetResult
 	Diagnostics []string
+
+	// Warnings are the ADR 0032 non-fatal lines from every target's
+	// front-end walk, in pipeline order and shaped exactly like
+	// Diagnostics. They are orthogonal to the field invariant above:
+	// a warning neither implies nor forbids a populated Targets, and
+	// they are returned on BOTH the accumulating and the successful
+	// branch. A caller that only prints them when Diagnostics is empty
+	// hides them on precisely the runs where they are most likely to
+	// name the cause.
+	Warnings []string
 }
 
 // TargetResult is one target's generated batch and the resolved
@@ -99,6 +109,9 @@ type TargetResult struct {
 //     non-nil and sorted by Path (codegen.Generate's contract), each
 //     OutDir is resolved against filepath.Dir(cfgPath).
 //
+// Warnings cuts across all three: it is populated on either err == nil
+// branch and empty when err != nil (no walk ran).
+//
 // No other combinations exist; the caller may rely on this. In
 // particular a failed run never returns a partially populated Targets:
 // a wipe-and-write driven from one would half-generate the project.
@@ -118,26 +131,30 @@ func Run(cfgPath string, backends codegen.Registry) (Result, error) {
 
 	baseDir := filepath.Dir(cfgPath)
 	targets := make([]TargetResult, 0, len(cfg.Targets))
-	var diags []string
+	var diags, warns []string
 	for i, tgt := range cfg.Targets {
 		// A setup failure aborts the whole run at this entry and
 		// discards whatever earlier targets accumulated (§6.1).
-		tr, tdiags, err := runTarget(baseDir, tgt, backends, len(diags) == 0)
+		tr, tdiags, twarns, err := runTarget(baseDir, tgt, backends, len(diags) == 0)
 		if err != nil {
 			return Result{}, fmt.Errorf("graph[%d]: %w", i, err)
 		}
 		for _, d := range tdiags {
 			diags = append(diags, fmt.Sprintf("graph[%d]: %s", i, d))
 		}
+		for _, w := range twarns {
+			warns = append(warns, fmt.Sprintf("graph[%d]: %s", i, w))
+		}
 		targets = append(targets, tr)
 	}
 
 	// All-or-nothing (§6.2): one diagnostic anywhere discards every
-	// target's batch, so the caller cannot write a subset.
+	// target's batch, so the caller cannot write a subset. Warnings ride
+	// out on both branches — the rule is about batches, not advice.
 	if len(diags) > 0 {
-		return Result{Diagnostics: diags}, nil
+		return Result{Diagnostics: diags, Warnings: warns}, nil
 	}
-	return Result{Targets: targets}, nil
+	return Result{Targets: targets, Warnings: warns}, nil
 }
 
 // runTarget runs CLI-1 §3.1 stages 2-8 against one generation target.
@@ -149,7 +166,7 @@ func Run(cfgPath string, backends codegen.Registry) (Result, error) {
 // genBatch false skips stage 8. An earlier target already accumulated
 // a diagnostic, so every batch is discarded (§6.2) and generating this
 // one could only add a codegen error to a run that is already failing.
-func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, genBatch bool) (TargetResult, []string, error) {
+func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, genBatch bool) (TargetResult, []string, []string, error) {
 	// Stage 2 — resolve paths against the config file's directory.
 	// No existence checks here; each consuming stage owns its own
 	// open failure.
@@ -163,15 +180,15 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 	case config.SchemaLangGQL:
 		schemaParser = gql.New()
 	default:
-		return TargetResult{}, nil, fmt.Errorf("internal: no pipeline mapping for schema_language %q", string(tgt.SchemaLang))
+		return TargetResult{}, nil, nil, fmt.Errorf("internal: no pipeline mapping for schema_language %q", string(tgt.SchemaLang))
 	}
 	schemaBytes, err := os.ReadFile(schemaPath)
 	if err != nil {
-		return TargetResult{}, nil, fmt.Errorf("schema: %w", err)
+		return TargetResult{}, nil, nil, fmt.Errorf("schema: %w", err)
 	}
 	sch, err := schemaParser.Parse(bytes.NewReader(schemaBytes))
 	if err != nil {
-		return TargetResult{}, nil, fmt.Errorf("schema %s: %w", schemaPath, err)
+		return TargetResult{}, nil, nil, fmt.Errorf("schema %s: %w", schemaPath, err)
 	}
 
 	// Stage 4 — load procsig. When the key is absent the zero
@@ -182,7 +199,7 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 	if tgt.ProcsigPath != "" {
 		reg, err = procsig.Load(resolvePath(baseDir, tgt.ProcsigPath))
 		if err != nil {
-			return TargetResult{}, nil, err
+			return TargetResult{}, nil, nil, err
 		}
 	}
 
@@ -193,26 +210,26 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 	case config.QueryLangOpenCypher:
 		queryParser = cypher.New(cypher.WithRegistry(reg))
 	default:
-		return TargetResult{}, nil, fmt.Errorf("internal: no pipeline mapping for query_language %q", string(tgt.QueryLang))
+		return TargetResult{}, nil, nil, fmt.Errorf("internal: no pipeline mapping for query_language %q", string(tgt.QueryLang))
 	}
 	res := resolver.New(sch, resolver.WithRegistry(reg))
 
 	// Stage 6 — discover query files (spec §4).
 	names, err := discoverQueryFiles(queryDir)
 	if err != nil {
-		return TargetResult{}, nil, err
+		return TargetResult{}, nil, nil, err
 	}
 
 	// Stage 7 — front-end walk with error accumulation (spec §3.3).
 	// The caller (CLI) prints diagnostics and forms the summary error;
 	// Run returns nil error + populated Diagnostics in this branch.
-	batch, diags := frontEndWalk(queryParser, res, queryDir, names)
+	batch, diags, warns := frontEndWalk(queryParser, res, queryDir, names)
 	if len(diags) > 0 || !genBatch {
 		// The zero TargetResult, not one carrying outDir: this branch is
 		// reached only when the run already has a diagnostic, and Run
 		// discards every target in that case, so a populated OutDir here
 		// is a value no caller can read.
-		return TargetResult{}, diags, nil
+		return TargetResult{}, diags, warns, nil
 	}
 
 	// Stage 8 — generate, with the Driver axis resolved through the
@@ -220,14 +237,14 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 	// the loader rejects an empty one).
 	newGen, ok := backends.Lookup(string(tgt.Go.Driver))
 	if !ok {
-		return TargetResult{}, nil, fmt.Errorf("internal: no pipeline mapping for driver %q", string(tgt.Go.Driver))
+		return TargetResult{}, nil, nil, fmt.Errorf("internal: no pipeline mapping for driver %q", string(tgt.Go.Driver))
 	}
 	files, err := newGen(tgt.Go.Package).Generate(codegen.Input{Schema: sch, Queries: batch})
 	if err != nil {
-		return TargetResult{}, nil, err
+		return TargetResult{}, nil, nil, err
 	}
 
-	return TargetResult{Files: files, OutDir: outDir}, nil, nil
+	return TargetResult{Files: files, OutDir: outDir}, nil, warns, nil
 }
 
 // resolvePath joins a config-file-relative path against the config
@@ -271,10 +288,16 @@ func discoverQueryFiles(queryDir string) ([]string, error) {
 // discovery order × annotation order) and the diagnostics in pipeline
 // order, shaped per spec §2.3: "<path>: <message>" for a file
 // failure, "<path>: query <Name>: <message>" for a query failure.
-func frontEndWalk(queryParser query.Parser, res *resolver.Resolver, queryDir string, names []string) ([]codegen.NamedQuery, []string) {
+//
+// The third return is the ADR 0032 warnings, in the same order and the
+// same "<path>: query <Name>: <message>" shape. A query that resolves
+// contributes both a batch entry and its warnings; a query that fails
+// contributes a diagnostic and no warnings, because the zero
+// ValidatedQuery carries none.
+func frontEndWalk(queryParser query.Parser, res *resolver.Resolver, queryDir string, names []string) ([]codegen.NamedQuery, []string, []string) {
 	fileParser := queryfile.New()
 	var batch []codegen.NamedQuery
-	var diags []string
+	var diags, warns []string
 	for _, name := range names {
 		path := filepath.Join(queryDir, name)
 		src, err := os.ReadFile(path)
@@ -298,6 +321,9 @@ func frontEndWalk(queryParser query.Parser, res *resolver.Resolver, queryDir str
 				diags = append(diags, fmt.Sprintf("%s: query %s: %s", path, aq.Name, err))
 				continue
 			}
+			for _, w := range vq.Warnings {
+				warns = append(warns, fmt.Sprintf("%s: query %s: %s", path, aq.Name, w))
+			}
 			batch = append(batch, codegen.NamedQuery{
 				Name:        aq.Name,
 				Cardinality: aq.Cardinality,
@@ -307,5 +333,5 @@ func frontEndWalk(queryParser query.Parser, res *resolver.Resolver, queryDir str
 			})
 		}
 	}
-	return batch, diags
+	return batch, diags, warns
 }

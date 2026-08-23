@@ -19,6 +19,17 @@ type ValidatedQuery struct {
 	Parameters []ResolvedParameter `json:"parameters"`
 	Statement  StatementKind       `json:"statement"`
 	Distinct   bool                `json:"distinct"`
+
+	// Warnings are non-fatal diagnostics about a decision the resolver made
+	// that the author cannot see in the generated code (ADR 0032). A query
+	// carrying warnings still resolves and still generates; the pipeline
+	// carries them to stderr alongside the run rather than failing it.
+	//
+	// Omitted from JSON when empty, so the corpus goldens of every query that
+	// warns about nothing are unchanged. A warning is an event; an
+	// always-emitted empty list would put a shape into 200-odd goldens that
+	// says nothing.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Column is one result column in projection order: its name (an explicit alias
