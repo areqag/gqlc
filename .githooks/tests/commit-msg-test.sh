@@ -12,8 +12,14 @@ set -u
 
 # When run under a git hook (pre-push via `just test`), GIT_DIR etc. leak in
 # and would redirect the throwaway repo's git commands to the parent repo.
-# Isolate completely.
-unset "${!GIT_@}"
+# Isolate completely — through the SHARED line, not a private copy of it (bd
+# gqlc-07bf). The gate on this (git-env-sandbox-test.sh) verifies BEHAVIOUR, so
+# it passes either spelling and witnesses nothing about this edit; what it is
+# worth is that the least good place to keep a private copy of a shared rule is
+# the suite for the hook that gates every commit in the town. The check that this
+# was not a regression is that the row count below is unchanged.
+# shellcheck source=../git-env-sandbox.sh disable=SC1091
+source "$(cd "$(dirname "$0")/.." && pwd)/git-env-sandbox.sh"
 
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/commit-msg"
 TMP="$(mktemp -d)"
@@ -102,14 +108,33 @@ subject line
 Co-Authored-By: Jane Doe <jane@example.com>
 "
 
-# --- merge escape hatch -----------------------------------------------------
-# Even if the merged message would otherwise trip the guard, the hook must
-# bail early when MERGE_HEAD exists — commits on the source branch are the
-# right place to catch this, not on the merger's machine.
-run_case "merge commit with claude trailer" accept "\
+# --- merge: the skip is SPLIT, not blanket (bd gqlc-7y7e) ---------------------
+# This row used to expect `accept`, and that expectation was the defect. The hook
+# exited 0 on any commit made while MERGE_HEAD was set, ahead of both the
+# identity checks and the trailer scan — measured on master, the SAME trailer
+# rejected rc=1 on a plain commit committed rc=0 on a merge, with the trailer
+# present in the object. CLAUDE.md says the rule is enforced at commit time by
+# this hook; that was true for ordinary commits and false for merges, which is
+# the repository's own signature defect appearing in the hook that polices
+# attribution.
+#
+# A merge message is not beyond repair either: git DRAFTS it and the merger can
+# edit it, so a refusal here is actionable in a way an identity refusal is not.
+#
+# Three rows, because the split has three claims and no one of them holds the
+# other two: a merge WITH the trailer denies, a clean merge allows, and an
+# ordinary commit is unaffected (every row above this section is that last
+# claim). The identity half of the skip is pinned separately below.
+run_case "merge commit with claude trailer is REFUSED" reject "\
 Merge branch 'foo'
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+" merge
+
+run_case "clean merge commit is allowed" accept "\
+Merge branch 'foo'
+
+Merging the side branch.
 " merge
 
 # --- author / committer identity --------------------------------------------
@@ -194,6 +219,56 @@ run_identity_case "bare reserved TLD, root dot"     reject "ci@invalid."
 
 # The committer is checked separately from the author, and a rebase or an
 # --amend is exactly how a fixture identity ends up on one and not the other.
+# --- WHICH ARM refused, not merely that something did (bd gqlc-76gk) ----------
+# A bare reserved TLD — `x@invalid`, `x@test`, `x@localhost`, `x@example` — is
+# refused today. The bead was filed because it was refused by the SHAPE arm
+# ("the domain part must contain a dot") rather than by the reserved-name arm,
+# which is passing for the wrong reason: green test, unexercised rule, and the
+# day someone relaxes the shape arm for intranet or single-label addresses,
+# `x@invalid` becomes an accepted commit author with no row going red.
+#
+# The predicate has since been rewritten to a domain rule whose list holds the
+# bare names, so it DOES match them itself (measured: all four report the
+# reserved reason). What was still missing is the pin. A row asserting only the
+# verdict cannot see the two arms trade responsibility, and this hook has exactly
+# two arms that both say "reject".
+#
+# So these rows assert the REASON. The reason is prose rather than a code because
+# that is what the hook prints; the pin is on the clause naming which rule bit.
+run_reason_case() { # $1=name $2=expected reason substring $3=author email
+    local name="$1" want="$2" email="$3"
+    local msg_file="$TMP/reason.$$"
+    printf 'subject line\n' >"$msg_file"
+    rm -f "$REPO/.git/MERGE_HEAD"
+
+    local out
+    out="$( (cd "$REPO" \
+        && GIT_AUTHOR_NAME="Author" GIT_AUTHOR_EMAIL="$email" \
+           GIT_COMMITTER_NAME="Committer" GIT_COMMITTER_EMAIL="$email" \
+           "$HOOK" "$msg_file") 2>&1 >/dev/null || true )"
+    rm -f "$msg_file"
+
+    case "$out" in
+        *"$want"*) pass=$((pass + 1)); printf 'ok   - %s\n' "$name" ;;
+        *) fail=$((fail + 1)); printf 'FAIL - %s (no %q in: %s)\n' "$name" "$want" "$out" ;;
+    esac
+}
+
+RESERVED_REASON='its domain is reserved'
+SHAPE_REASON='it is not of the form user@host.tld'
+
+for bare in invalid test localhost example; do
+    run_reason_case "bare reserved TLD x@$bare is refused BY THE RESERVED RULE" \
+        "$RESERVED_REASON" "x@$bare"
+done
+# The other arm, so the pin above is a distinction and not a constant. An address
+# with a dotless domain that is NOT a reserved name is the shape arm's own case,
+# and it must still be attributed to the shape arm.
+run_reason_case "a dotless non-reserved domain is refused by the SHAPE rule" \
+    "$SHAPE_REASON" "nobody@host"
+run_reason_case "an empty address is refused by the SHAPE rule" \
+    "$SHAPE_REASON" ""
+
 run_identity_case "plausible author, fixture committer" reject "jane@doe.dev" "fixture@example.invalid"
 run_identity_case "fixture author, plausible committer" reject "fixture@example.invalid" "jane@doe.dev"
 
@@ -208,6 +283,93 @@ run_identity_case "domain containing 'example'"     accept "ops@example-corp.io"
 # make the rule refuse anyone. Without this row, "strip trailing dots" and
 # "refuse anything ending in a dot" both pass the reject rows above.
 run_identity_case "citizen address, root dot"       accept "jane@doe.dev."
+
+# --- the OTHER half of the merge split: identity still stands down ------------
+# bd gqlc-7y7e's ruling was to split the MERGE_HEAD exit by what each arm is
+# about, not to delete it. The trailer scan is a property of the MESSAGE and now
+# runs on a merge; the identity arms are a property of the config doing the
+# merging and stay skipped, which is the arm the original comment was written
+# for.
+#
+# Without this row the split is untested in the direction that would make the
+# change over-broad: deleting the `if [ "$_in_merge" = no ]` guard entirely
+# passes every other row in this file, and starts refusing merges on every
+# machine whose git identity this hook dislikes.
+run_identity_merge_case() { # $1=name $2=expected(reject|accept) $3=author email
+    local name="$1" expected="$2" email="$3"
+    local msg_file="$TMP/idmerge.$$"
+    printf "Merge branch 'foo'\n" >"$msg_file"
+    printf '%s\n' "$(git -C "$REPO" rev-parse HEAD)" >"$REPO/.git/MERGE_HEAD"
+
+    local decision
+    if (cd "$REPO" \
+        && GIT_AUTHOR_NAME="Author" GIT_AUTHOR_EMAIL="$email" \
+           GIT_COMMITTER_NAME="Committer" GIT_COMMITTER_EMAIL="$email" \
+           "$HOOK" "$msg_file") >/dev/null 2>&1; then
+        decision=accept
+    else
+        decision=reject
+    fi
+    rm -f "$msg_file" "$REPO/.git/MERGE_HEAD"
+
+    if [ "$decision" = "$expected" ]; then
+        pass=$((pass + 1)); printf 'ok   - %s\n' "$name"
+    else
+        fail=$((fail + 1)); printf 'FAIL - %s (expected %s, got %s)\n' "$name" "$expected" "$decision"
+    fi
+}
+
+# The premise: the SAME address is refused on an ordinary commit, three rows up.
+# Without that pairing this row is green on an address nothing objects to.
+run_identity_case       "fixture identity on an ordinary commit is refused" reject "fixture@example.invalid"
+run_identity_merge_case "fixture identity DURING A MERGE stands down"       accept "fixture@example.invalid"
+
+# --- the line-number citation stays retired (bd gqlc-m83s) --------------------
+# `.githooks/commit-msg:15-17` was cited from three places for the MERGE_HEAD
+# guard. Nothing gated it: the reviewer of PR #946 round 7 shifted the guard from
+# line 15 to line 20 and all three hook suites stayed green — and by the time
+# this row was written the guard had in fact moved to line 29 and every citation
+# was already wrong. The repository's standing preference is to cite a construct
+# a reader can grep, so the citations were retired rather than pinned, and this
+# is what stops them coming back.
+#
+# The scan is over the whole repository, not just .githooks/, because two of the
+# three sites were elsewhere. `git ls-files` rather than a find: a citation has
+# to be tracked to rot.
+#
+# Two exclusions, both because the file is not a citation a reader would follow.
+# .beads/*.jsonl is the issue tracker's export, and the beads recording this very
+# defect quote the range verbatim — rewriting history to remove them would erase
+# the record of what was fixed. This file is the other: the probe below has to
+# construct the shape to prove the pattern matches it.
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cited="$(
+    cd "$ROOT" || exit 0
+    git ls-files -z \
+        | xargs -0 grep -lE 'commit-msg:[0-9]+' -- 2>/dev/null \
+        | grep -v '^\.beads/' \
+        | grep -v '^\.githooks/tests/commit-msg-test\.sh$'
+    exit 0
+)"
+if [ -z "$cited" ]; then
+    pass=$((pass + 1)); printf 'ok   - %s\n' "no file cites .githooks/commit-msg by line number"
+else
+    fail=$((fail + 1))
+    printf 'FAIL - %s\n' "no file cites .githooks/commit-msg by line number"
+    printf '       cite the construct (MERGE_HEAD) instead; these carry a line range: %s\n' \
+        "$(printf '%s' "$cited" | tr '\n' ' ')"
+fi
+# The scan's own falsifier: a pattern that matched nothing would report success
+# over a repository full of citations. This asserts the grep finds the shape when
+# it is there, against a string this file constructs so that the file itself is
+# excluded from the scan above.
+probe="$TMP/citation-probe"
+printf 'see .githooks/%s-msg:%s-17 for the guard\n' commit 15 >"$probe"
+if grep -qE 'commit-msg:[0-9]+' "$probe"; then
+    pass=$((pass + 1)); printf 'ok   - %s\n' "the citation pattern matches a citation"
+else
+    fail=$((fail + 1)); printf 'FAIL - %s\n' "the citation pattern matches a citation"
+fi
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

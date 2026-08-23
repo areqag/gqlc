@@ -48,8 +48,71 @@ hook="$(basename -- "$0")"
 # reported as <unset> rather than treated as an error.
 configured="$(git config --get core.hooksPath 2>/dev/null || true)"
 
+# WHICH ARM THIS IS, decided BEFORE the message rather than after it (bd
+# gqlc-g1o8). The block below used to run unconditionally and identically for all
+# five installed names, and then three of them exited 1 and two exited 0 — so
+# after a `git checkout` or a `git worktree add` under drift, a reader met a
+# block headed ERROR describing dead gates, over an operation that had SUCCEEDED
+# and that this hook deliberately did not block. Nothing in the text said so.
+#
+# That is the worst possible first meeting with this message, because
+# `git worktree add` is the operation that CAUSES the drift (bd gqlc-7ijy): the
+# first time anyone sees it, it is on a command that worked, under a heading that
+# says it did not. Crying wolf in an autonomous town is expensive — the block
+# read as noise is the block that gets ignored when it is the real one.
+#
+# The severity word now agrees with the exit status, and each arm states what
+# happened to the caller's command. The repair is the same either way, which is
+# the second thing a reader needs and the reason the block is kept whole rather
+# than suppressed on the warn arms.
+#
+# The exit status is DERIVED from the same variable the message is, and not from
+# a second `case` over $hook. A second copy of the name list is how the block
+# above came to disagree with the status below in the first place: two arms that
+# can drift apart, where the whole defect was the two disagreeing.
+#
+# post-checkout and post-merge exit 0, and the two hooks reach that decision
+# differently.
+#
+# post-merge's status IS ignored: measured, `git merge` and `git pull` both
+# return 0 with a post-merge exiting 1, and the merge lands. githooks(5)
+# agrees — it "cannot affect the outcome of git merge". A non-zero code there
+# is unobservable, so it buys nothing.
+#
+# post-checkout's status is NOT ignored, and that is why it must be 0.
+# githooks(5): "This hook cannot affect the outcome of git switch or git
+# checkout, other than that the hook's exit status becomes the exit status of
+# these two commands." Measured: with post-checkout exiting 1, `git checkout
+# -b` and `git switch` both return 1 with the branch switched and HEAD moved,
+# and `git worktree add` returns 1 with the worktree already created. So a
+# blocking arm here would not gate anything — it would make every branch
+# switch in every drifted worktree report a failure that already happened.
+#
+# What these two arms buy is a message on stderr and nothing else. Under
+# drift `git worktree add` still returns 0 and still creates and populates
+# the worktree, so the agent spawn that CAUSED the drift (bd gqlc-7ijy)
+# proceeds exactly as it would have. post-checkout fires at `git worktree
+# add`, which is the drift's own trigger — but the trigger is narrated, not
+# caught. The gate is the blocking arm below, and only that.
+case "$hook" in
+post-checkout | post-merge) blocking=no ;;
+*) blocking=yes ;;
+esac
+
 {
-    echo "ERROR: local git hooks are inactive — core.hooksPath is '${configured:-<unset>}', expected '.githooks'."
+    if [ "$blocking" = yes ]; then
+        echo "ERROR: local git hooks are inactive — core.hooksPath is '${configured:-<unset>}', expected '.githooks'."
+        echo "       This operation was REFUSED. Nothing was written."
+    else
+        # "cannot block it, and did not try", not "is ignored". post-merge's
+        # status genuinely IS ignored by git; post-checkout's BECOMES the exit
+        # status of `git checkout` and `git switch`, so it is observed and this
+        # hook returns 0 on purpose. A message saying "ignored" is false for one
+        # of the two names that reach this arm.
+        echo "WARNING: local git hooks are inactive — core.hooksPath is '${configured:-<unset>}', expected '.githooks'."
+        echo "       This operation was ALLOWED — the '$hook' hook cannot block it, and did not try."
+        echo "       Nothing was undone."
+    fi
     echo "       This ran from the default hooks directory, which only happens when"
     echo "       .githooks/ is unwired. While it stands, ALL of these are dead:"
     echo "         pre-commit  — the master/main branch guard and the gofumpt/gci format gate"
@@ -61,33 +124,7 @@ configured="$(git config --get core.hooksPath 2>/dev/null || true)"
     echo "       Repair (idempotent, arms every worktree at once): just init"
 } >&2
 
-case "$hook" in
-    # These two exit 0, and the two hooks reach that decision differently.
-    #
-    # post-merge's status IS ignored: measured, `git merge` and `git pull` both
-    # return 0 with a post-merge exiting 1, and the merge lands. githooks(5)
-    # agrees — it "cannot affect the outcome of git merge". A non-zero code there
-    # is unobservable, so it buys nothing.
-    #
-    # post-checkout's status is NOT ignored, and that is why it must be 0.
-    # githooks(5): "This hook cannot affect the outcome of git switch or git
-    # checkout, other than that the hook's exit status becomes the exit status of
-    # these two commands." Measured: with post-checkout exiting 1, `git checkout
-    # -b` and `git switch` both return 1 with the branch switched and HEAD moved,
-    # and `git worktree add` returns 1 with the worktree already created. So a
-    # blocking arm here would not gate anything — it would make every branch
-    # switch in every drifted worktree report a failure that already happened.
-    #
-    # What these two arms buy is a message on stderr and nothing else. Under
-    # drift `git worktree add` still returns 0 and still creates and populates
-    # the worktree, so the agent spawn that CAUSED the drift (bd gqlc-7ijy)
-    # proceeds exactly as it would have. post-checkout fires at `git worktree
-    # add`, which is the drift's own trigger — but the trigger is narrated, not
-    # caught. The gate is the blocking arm below, and only that.
-    post-checkout | post-merge)
-        exit 0
-        ;;
-    *)
-        exit 1
-        ;;
-esac
+if [ "$blocking" = yes ]; then
+    exit 1
+fi
+exit 0

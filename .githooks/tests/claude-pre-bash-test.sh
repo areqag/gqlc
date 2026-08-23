@@ -384,13 +384,16 @@ run_drift_case "correct value, live hooks: pull"     silent     "$OK_REPO"     '
 run_drift_case "correct value, live hooks: ls"       silent     "$OK_REPO"     'ls -la'
 run_drift_case "unset: commit refused"               deny-hooks "$UNSET_REPO"  'git commit -m x'
 run_drift_case "unset: push refused"                 deny-hooks "$UNSET_REPO"  'git push'
-# A merge or pull is refused because post-merge runs bd-gh-sync, NOT because of
-# AI attribution: commit-msg does fire on a merge, but it exits 0 whenever
-# MERGE_HEAD is set (.githooks/commit-msg:15-17), ahead of both the identity
-# checks and the Co-Authored-By scan, so a merge commit is unscreened whether
-# the hooks are healthy or dead (measured rc=0 with hooksPath correct, against a
-# plain-commit control rejected rc=1). What a drifted merge loses is at most the
-# bd mirror; the commit-msg half is bd gqlc-7y7e, pre-existing and out of scope.
+# A merge or pull is refused because post-merge runs bd-gh-sync. It used to be
+# the only thing a drifted merge lost: commit-msg fires on a merge, but its
+# MERGE_HEAD guard exited 0 ahead of both the identity checks and the
+# Co-Authored-By scan, so a merge commit was unscreened whether the hooks were
+# healthy or dead (measured rc=0 with hooksPath correct, against a plain-commit
+# control rejected rc=1). That was bd gqlc-7y7e and it is fixed — the guard is
+# split, the trailer scan runs on a merge message — so a drifted merge now loses
+# the AI-attribution gate too. Cited by construct rather than by the line range
+# this comment used to carry, which had already gone stale unnoticed
+# (bd gqlc-m83s).
 # Other shapes fire less: `pull --rebase` on the row below fired post-merge
 # while the branch was still fast-forwardable and none of the four once it had
 # diverged. It is refused anyway because HOOK_GATED keys on the subcommand,

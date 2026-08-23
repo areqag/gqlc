@@ -17,8 +17,10 @@
 set -u
 
 # When run under a git hook (pre-push via `just test`), GIT_DIR and friends leak
-# in and would redirect the fixture's git commands at the parent repo.
-unset "${!GIT_@}"
+# in and would redirect the fixture's git commands at the parent repo. Through
+# the SHARED line rather than a private copy of it (bd gqlc-07bf).
+# shellcheck source=../git-env-sandbox.sh disable=SC1091
+source "$(cd "$(dirname "$0")/.." && pwd)/git-env-sandbox.sh"
 
 TRIPWIRE="$(cd "$(dirname "$0")/.." && pwd)/hooks-drift-tripwire"
 INSTALLER="$(cd "$(dirname "$0")/.." && pwd)/install-hooks-drift-tripwire"
@@ -222,6 +224,77 @@ case "$out" in
     *commit-msg*) check "the refusal names the dead AI-attribution gate" yes yes ;;
     *) check "the refusal names the dead AI-attribution gate" yes no ;;
 esac
+
+# --- the severity word must agree with what happened (bd gqlc-g1o8) -----------
+# The message block used to run UNCONDITIONALLY, before the case that decides the
+# exit status, so all five installed names printed an identical block headed
+# ERROR and then three exited 1 while two exited 0. Measured, three copies run by
+# name: pre-commit exit=1 "ERROR: ...", post-checkout exit=0 "ERROR: ...",
+# post-merge exit=0 "ERROR: ...".
+#
+# So after `git checkout` or `git worktree add` under drift, a reader met a block
+# saying ERROR over an operation that SUCCEEDED and that the hook deliberately
+# did not block, with nothing in the text saying so. That is the worst place for
+# it: `git worktree add` is the operation that CAUSES the drift (bd gqlc-7ijy),
+# so the first meeting with this message is on a command that worked. Crying wolf
+# in an autonomous town is expensive — the block read as noise is the block
+# ignored when it is real.
+#
+# Three claims per arm, and the exit status is asserted alongside the words:
+# without that pairing, a copy that printed WARNING and then exited 1 would
+# satisfy the word rows, which is the same disagreement in the other direction.
+
+NAMED="$TMP/named"
+mkdir -p "$NAMED"
+
+# run_named <hook name>, leaving the stderr block in NAMED_OUT and the exit
+# status in NAMED_RC. Both are variables and neither is echoed: an echoed status
+# consumed by `$(...)` runs the function in a subshell, so every NAMED_OUT it set
+# is discarded and the word rows read a stale value — measured on the first cut
+# of this section, where all twelve went red against an empty string, and where
+# a differently-ordered section would instead have gone GREEN against the
+# previous row's output.
+NAMED_OUT=""
+NAMED_RC=0
+run_named() {
+    cp "$TRIPWIRE" "$NAMED/$1"
+    chmod +x "$NAMED/$1"
+    NAMED_RC=0
+    NAMED_OUT="$( (cd "$REPO" || exit 1; "$NAMED/$1" 2>&1 >/dev/null) )" || NAMED_RC=$?
+}
+
+says() { # $1=name $2=needle
+    case "$NAMED_OUT" in
+        *"$2"*) check "$1" yes yes ;;
+        *) check "$1" yes no ;;
+    esac
+}
+
+run_named pre-commit
+check "as pre-commit: exits 1" 1 "$NAMED_RC"
+says "as pre-commit: the block is headed ERROR" "ERROR: local git hooks are inactive"
+says "as pre-commit: it says the operation was REFUSED" "was REFUSED"
+
+for warn in post-checkout post-merge; do
+    run_named "$warn"
+    check "as $warn: exits 0" 0 "$NAMED_RC"
+    says "as $warn: the block is headed WARNING" "WARNING: local git hooks are inactive"
+    says "as $warn: it says the operation was ALLOWED" "was ALLOWED"
+    # "cannot block it, and did not try", never "is ignored". post-merge's
+    # status genuinely IS ignored by git; post-checkout's BECOMES `git
+    # checkout`'s and `git switch`'s, so it is observed and the 0 is deliberate.
+    # A message saying "ignored" would be false for one of the two names.
+    says "as $warn: it does not claim the status is ignored" "cannot block it, and did not try"
+    case "$NAMED_OUT" in
+        *"is ignored"*) check "as $warn: the word 'ignored' is absent" yes no ;;
+        *) check "as $warn: the word 'ignored' is absent" yes yes ;;
+    esac
+    # The whole block survives on the warn arms: the reader still needs to know
+    # which gates are dead and how to repair it, and the repair is the same
+    # either way.
+    says "as $warn: the repair is still named" "just init"
+    says "as $warn: the dead gates are still enumerated" "commit-msg"
+done
 
 # --- a push is refused too ---------------------------------------------------
 
