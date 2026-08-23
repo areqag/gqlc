@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Advisory printed by pre-push AFTER every gate has passed, saying so, so that a
+# transport failure that follows cannot be read as a gate failure — bd
+# gqlc-ehgg / GH #1414.
+#
+# ADVISORY, NEVER REFUSING. Every path here exits 0. Everything it describes
+# happens after this hook returns, so there is nothing here to refuse; a gate
+# that blocked on a prediction would block legitimate pushes.
+#
+# WHAT IT IS FOR. git opens the transport before running pre-push and this
+# repository's pre-push then holds it idle for the whole gate chain — twelve to
+# fifteen minutes under load. GitHub's idle timeout closes it, and git exits 141
+# (SIGPIPE) or 143 with every gate PASSED. Four lanes hit it on the night of
+# 2026-08-23. What made it cost hours rather than minutes is that the last
+# twenty lines of hook output are all `ok`, so the failure reads as a pipe
+# artefact and the branch reads as refused. Two lanes abandoned work that had
+# actually landed; one reached for `git push --no-verify`.
+#
+# So the message has to do two things the exit code cannot: say the gates
+# finished, and say that the answer to "did it land" is a command rather than a
+# guess. check-push-keepalive in the justfile is what removes the failure; this
+# is what makes the residue legible — a keepalive is not a promise, an ssh
+# connection can still die of a real network fault.
+#
+# Args: <remote-name> <remote-url>, as git passes them to pre-push. The url is
+# read; the name is not.
+# Env: GQLC_PREPUSH_ELAPSED, the hook's ${SECONDS} at the point of the call.
+# Optional — the message is worth printing without it.
+set -uo pipefail
+
+remote_url="${2:-}"
+elapsed="${GQLC_PREPUSH_ELAPSED:-}"
+
+# The EFFECTIVE ssh command, which is not what core.sshCommand says. GIT_SSH_COMMAND
+# overrides the config, and this repository's own instructions have told agents
+# to set it, so reading the config alone would report a keepalive that a plain
+# `ssh` in the environment has already displaced.
+if [ -n "${GIT_SSH_COMMAND:-}" ]; then
+  ssh_command="${GIT_SSH_COMMAND}"
+else
+  ssh_command="$(git config --get core.sshCommand 2>/dev/null || true)"
+fi
+
+# Whether this push even goes over ssh. An https remote reaches GitHub through a
+# different transport with different timeouts, and prescribing an ssh option
+# there would be a confident wrong diagnosis. The scp-like spelling
+# (git@github.com:owner/repo) carries no scheme, which is why the second arm
+# exists. An EMPTY url is not classified as ssh: git passes the url on a real
+# push, and a caller that has none has told us nothing.
+case "${remote_url}" in
+  ssh://*) over_ssh=1 ;;
+  ""|http://*|https://*|git://*|ftp://*|ftps://*|/*|file://*) over_ssh=0 ;;
+  *:*) over_ssh=1 ;;
+  *) over_ssh=0 ;;
+esac
+
+if [ -n "${elapsed}" ]; then
+  echo "pre-push: every gate PASSED (${elapsed}s). Anything that fails from here on is the" >&2
+else
+  echo "pre-push: every gate PASSED. Anything that fails from here on is the" >&2
+fi
+echo "          TRANSPORT handing the objects over, not this branch (bd gqlc-ehgg)." >&2
+echo "          If git exits 141 or 143 now, the push MAY STILL HAVE LANDED. Do not retry" >&2
+echo "          and do not abandon the branch until you have asked:  just push-landed" >&2
+
+case "${ssh_command}" in
+  *ServerAliveInterval=*) exit 0 ;;
+esac
+
+if [ "${over_ssh}" -eq 1 ]; then
+  echo "          NO SSH KEEPALIVE IS IN EFFECT for this push, so the idle timeout above is" >&2
+  echo "          live rather than hypothetical. 'just init' configures one for every later" >&2
+  echo "          push from this repository; it cannot help the one now in flight." >&2
+fi
+
+exit 0

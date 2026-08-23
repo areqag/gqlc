@@ -238,3 +238,18 @@ fi
 # and what did not, and discarding that is what let a push that mirrored nothing
 # read exactly like one with nothing to mirror.
 "$(dirname "$0")/bd-gh-sync" push >/dev/null || true
+
+# LAST of all, after every gate and every advisory: the transport handoff
+# notice. It says the gates are DONE, so it is only true once nothing left in
+# this file can refuse — and it has to be the last thing on the terminal,
+# because what it is about is the failure that follows it. Its own header argues
+# why a push dying there reads as a gate failure and what that has cost.
+# Non-blocking, like every advisory here. bd gqlc-ehgg.
+#
+# Unguarded on the ref list, unlike the two advisories above. Those describe a
+# branch about to acquire a PR; this describes the transport, which git opened
+# before this hook started whatever the ref list holds.
+#
+# ${SECONDS} is bash's, counting from the top of this hook, so it measures how
+# long the connection has been held idle — the quantity the notice is about.
+GQLC_PREPUSH_ELAPSED="${SECONDS}" "$(dirname "$0")/push-transport-notice" "$@" || true
