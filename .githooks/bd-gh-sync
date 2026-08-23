@@ -99,11 +99,68 @@
 # bead listing alone is ~1MB, and execve caps any single argument or
 # environment string at 128KB (MAX_ARG_STRLEN) — a limit no ulimit raises.
 
+# This file ran 1067 lines with no shell options at all until gqlc-650j: an
+# unset variable expanded to empty, a failing stage of a pipeline was invisible
+# behind a succeeding last one, and any command that failed mid-run carried on
+# to the next statement — in the one tool that decides what to overwrite in the
+# bead ledger.
+#
+# `set -e` on its own would trade one silence for another. Both callers keep
+# only the last stderr line, and a script that dies where it stands writes no
+# such line, so an abort and a run with nothing to do arrive as the same bytes —
+# the shape this header refuses everywhere else. The options therefore come with
+# an ERR trap that puts the abort on the line the caller keeps, and exits with
+# the status the action is allowed to carry: pull always 0, because it rides on
+# `git pull` and on session start where a non-zero aborts the operation
+# underneath it, push non-zero, because its caller reads the status as the
+# verdict.
+#
+# `-E` is load-bearing: without it an ERR trap is not inherited by shell
+# functions, and the two batch functions below are where a failure would
+# otherwise abort in silence. It also means the trap fires inside command
+# substitutions, which is why every line it writes goes to stderr — a trap
+# writing to stdout would be captured into the value being assigned.
+#
+# Zero matches is an answer, not a failure, and `grep -c` reports it as exit 1.
+# Every count taken here goes through _count for that reason, rather than
+# through a `|| true` that would also absorb grep's exit 2.
+set -Eeuo pipefail
+
 _action="${1:-}"
 case "$_action" in pull|push) ;; *)
   echo "usage: $0 pull|push" >&2
   exit 0
 esac
+
+# shellcheck disable=SC2317 # reached only through the ERR trap installed below
+_abort() {
+  _status=$?
+  # Disarmed first: every echo below is a command, and one of them failing
+  # inside the handler would re-enter it.
+  trap - ERR
+  echo "bd-gh-sync: a command failed at line ${1} (status ${_status}) and stopped this" >&2
+  echo "bd-gh-sync: run where it stood. Nothing after that line was attempted, so the" >&2
+  echo "bd-gh-sync: counts this run would have reported were never established, and" >&2
+  echo "bd-gh-sync: whatever it had already written to bd or GitHub stands." >&2
+  if [ "$_action" = "pull" ]; then
+    echo "bd-gh-sync: PULL FAILED — aborted at line ${1}; the pull is incomplete." >&2
+    exit 0
+  fi
+  echo "bd-gh-sync: PUSH FAILED — aborted at line ${1}; the push is incomplete." >&2
+  exit 1
+}
+trap '_abort "$LINENO"' ERR
+
+# `grep -c` exits 1 when the count is zero. That is the answer, not a failure,
+# and under `set -e` an unguarded count of zero would abort the run — so the
+# distinction has to be made here rather than by a blanket `|| true`, which
+# would also swallow exit 2 (an unreadable file, a bad pattern) and hand the
+# summary line a zero nobody measured.
+_count() {
+  _n=$(grep -c "$1" "$2") && _s=0 || _s=$?
+  [ "$_s" -le 1 ] || return "$_s"
+  printf '%s\n' "${_n:-0}"
+}
 
 command -v bd >/dev/null 2>&1 || exit 0
 command -v gh >/dev/null 2>&1 || exit 0
@@ -164,8 +221,13 @@ if [ "$_action" = "pull" ]; then
   # separates "selection ran and chose nothing" from "selection did not run";
   # without it an empty result is indistinguishable from a crash, which is how
   # the previous guard fell through into an unscoped pull.
+  # The status is taken on the command rather than from `$?` on the next line:
+  # under `set -e` a selection that died would never reach that line, and the
+  # refusal below — the one thing this path exists to guarantee — would be
+  # replaced by a bare abort.
+  _rc=0
   python3 - "$_tmp/beads.json" "$_tmp/gh.json" "$_gh_limit_all" \
-    >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF'
+    >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF' || _rc=$?
 import datetime, json, re, sys
 
 def load(path):
@@ -341,7 +403,6 @@ for line in out:
     print(line)
 print("DONE")
 PYEOF
-  _rc=$?
 
   if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]; then
     # Detail first, verdict last. This is the one exit that produces no summary
@@ -375,8 +436,11 @@ PYEOF
   # Whole remainder of the line, not `cut -f2`: an id carrying a space would be
   # silently truncated to its first token and a *different* bead would be named
   # in --issues. Taking it whole lets the gate below see it and refuse it.
-  grep '^ALLOW ' "$_tmp/plan.txt" | sed 's/^ALLOW //' >"$_tmp/allow.txt"
-  _eligible=$(grep -c '^ALLOW ' "$_tmp/plan.txt")
+  # One `sed -n .../p` rather than `grep | sed`: under pipefail a grep that
+  # matched nothing — the steady state here — fails the whole pipeline, and the
+  # allowlist being empty is not an error.
+  sed -n 's/^ALLOW //p' "$_tmp/plan.txt" >"$_tmp/allow.txt"
+  _eligible=$(_count '^ALLOW ' "$_tmp/plan.txt")
   _batches=0
   _failed=0
   _pulled=0
@@ -387,7 +451,15 @@ PYEOF
   # it, because the postcondition has no fallback for its absence: an empty file
   # is a run that pulled nothing, and no file at all is a run whose exemption set
   # was never established, which stops the check rather than emptying it.
-  : >"$_tmp/pulled.txt"
+  #
+  # Its failure is taken explicitly rather than left to `set -e`. Aborting here
+  # would lose the pull itself over a scratch file, and the pull is the
+  # operation; the absence of this file is already the postcondition's own "the
+  # exemption set was never established", which reaches the summary line. What
+  # the options add is that the failure is now said out loud instead of being
+  # inferred downstream.
+  : >"$_tmp/pulled.txt" ||
+    echo "bd-gh-sync: could not create ${_tmp}/pulled.txt, so which beads this run pulled cannot be recorded and the held-bead check will report itself as not run." >&2
 
   # Batched here rather than by `xargs -n`, because xargs parses quotes: a
   # single bead id containing an apostrophe aborted the whole construction with
@@ -403,7 +475,11 @@ PYEOF
       # Ids reach here only past the charset gate, which admits neither a comma
       # nor a newline, so the accumulator splits back into exactly the ids that
       # went into it and each lands on a line of its own.
-      printf '%s\n' "$1" | tr ',' '\n' >>"$_tmp/pulled.txt"
+      # Same reading as the file's creation above: a batch whose ids cannot be
+      # recorded leaves the postcondition without an exemption set, which it
+      # reports, rather than aborting a pull that has already happened.
+      printf '%s\n' "$1" | tr ',' '\n' >>"$_tmp/pulled.txt" ||
+        echo "bd-gh-sync: could not record batch ${_batches}'s ids in ${_tmp}/pulled.txt; the held-bead check will report itself as not run." >&2
     else
       _failed=$((_failed + 1))
       echo "bd-gh-sync: 'bd github sync' exited non-zero on batch ${_batches}; those beads may not have been pulled." >&2
@@ -586,7 +662,12 @@ PYEOF
   # owed the difference between "nothing moved" and "nobody looked". An empty
   # status file means the python itself never got far enough to write one.
   _blind=""
-  case "$(cat "$_tmp/post_status.txt" 2>/dev/null)" in
+  # Read through a test rather than by letting `cat` fail: absence is the
+  # script's own "the check did not run at all" signal, and under `set -e` a
+  # failing `cat` in an assignment aborts before that signal is read.
+  _post_status=""
+  [ -f "$_tmp/post_status.txt" ] && _post_status=$(cat "$_tmp/post_status.txt")
+  case "$_post_status" in
     OK | VACUOUS) ;;
     BLIND*) _blind="the post-pull bead list was unreadable" ;;
     *) _blind="the check itself did not run" ;;
@@ -685,8 +766,8 @@ PYEOF
   # unenumerated bead list takes both, a capped GitHub listing takes only the
   # orphan arm. Same rule as the push side's two arms: no number goes on the one
   # line the caller keeps unless the set behind it was witnessed.
-  _held_arm="held $(grep -c '^HOLD ' "$_tmp/plan.txt")"
-  _orphan_arm="left $(grep -c '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone"
+  _held_arm="held $(_count '^HOLD ' "$_tmp/plan.txt")"
+  _orphan_arm="left $(_count '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone"
   if [ -n "$_unwitnessed" ]; then
     _held_arm="held an unknown number of bead(s) (${_unwitnessed})"
     _orphan_arm="left an unknown number of unmirrored GH issue(s) alone (${_unwitnessed})"
@@ -713,7 +794,7 @@ PYEOF
     # prints, and there is no such line for a bead that is gone. A reader who
     # takes this one line and finds nothing to re-assert is a reader who
     # concludes the warning was noise.
-    _gone=$(grep -c '^GONE ' "$_tmp/moved.txt")
+    _gone=$(_count '^GONE ' "$_tmp/moved.txt")
     # The record tag comes off by field and the records are joined one by one: a
     # bead id is not guaranteed to be a single word here, and flattening the
     # three onto a line to separate them on every space renders one bead as two
@@ -759,6 +840,26 @@ _unusable=0
 # .git, which git neither tracks nor reports, so it is not a file anyone has to
 # ignore.
 #
+# WHAT THAT GRANULARITY EXCLUDES, said here because the sentence above is the
+# one a maintainer reads and a granularity stated without its limit is read as
+# "the push pass is serialised, full stop".
+# It does NOT serialise two separate clones of this repository: they have
+# different common directories, so they take different lock files, neither
+# waits, and both mint. Measured in the
+# round-2 review of PR #1037 (C-V2+N1): two clones, `bd github push b-conc` ran
+# 2 times. Two clones on one machine is not exotic — a second checkout for a
+# long-running review is exactly it.
+#
+# That is a decision and not an oversight. A lock covering two clones would have
+# to live at a path neither clone owns — a fixed location outside both work
+# trees — and inventing one trades a bounded, self-cleaning lock for a global
+# one that no `git clean` reaches and that a stale holder can wedge for every
+# checkout on the machine. The measured incident was sibling worktrees of one
+# clone (18 unreachable issues), which this covers. Cross-clone is out of scope
+# until somebody measures it happening. .githooks/tests/bd-gh-sync-test.sh pins
+# both halves — that two clones mint twice, and that this paragraph still says
+# so — so the limit cannot be widened into a claim by editing either one alone.
+#
 # fd 9 carries the lock for the rest of this process; closing that fd is what
 # releases the lock, and the kernel closes it however the process ends. bash
 # cannot mark an fd close-on-exec, so every `bd`, `gh` and `python3` below is
@@ -787,8 +888,10 @@ if ! exec 9>"$_lock"; then
   echo "bd-gh-sync: PUSH FAILED — the push lock file could not be opened." >&2
   exit 1
 fi
-flock -w "$_lock_wait" 9
-_flock_rc=$?
+# Status taken on the command, not from `$?` below it: under `set -e` a flock
+# that could not be taken would abort before the refusal that names it.
+_flock_rc=0
+flock -w "$_lock_wait" 9 || _flock_rc=$?
 if [ "$_flock_rc" -ne 0 ]; then
   # The status separates the two shapes: 127 is the shell not finding flock at
   # all, and the remedy for that is not "push again".
@@ -805,12 +908,36 @@ _list_rc=0
 bd list --status all --limit 0 --json >"$_tmp/beads.json" 9>&- 2>/dev/null \
   || { _list_rc=$?; : >"$_tmp/beads.json"; }
 
+# GitHub's cap on a label name is measured and owned by the CI gate at
+# .github/scripts/check-label-lengths.py (bd gqlc-89vw), which reddens a PR over
+# the committed export. The selection below reads the cap and the remedy out of
+# that file rather than writing either a third time: two spellings of one number
+# disagree exactly when somebody raises one of them, and the whole point of
+# refusing at filing time is that the citizen meets the same words here as in
+# CI. Resolved beside this script first, because all three callers invoke it by
+# path, and off the work tree only as a fallback.
+_hooks_dir=$(cd "$(dirname "$0")" && pwd)
+_label_gate="$_hooks_dir/../.github/scripts/check-label-lengths.py"
+if [ ! -f "$_label_gate" ]; then
+  _repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || _repo_root=""
+  [ -n "$_repo_root" ] &&
+    _label_gate="$_repo_root/.github/scripts/check-label-lengths.py"
+fi
+
 # The DONE sentinel serves the same purpose it serves on the pull side: a bead
 # list that would not load used to become an empty selection, and an empty
 # selection is byte-for-byte the steady state. "Nothing needs a mirror" and
 # "which beads need a mirror is unknowable" are different runs.
-python3 - "$_tmp/beads.json" >"$_tmp/plan.txt" 9>&- 2>"$_tmp/plan.err" <<'PYEOF'
-import json, sys
+_rc=0
+python3 - "$_tmp/beads.json" "$_label_gate" \
+  >"$_tmp/plan.txt" 9>&- 2>"$_tmp/plan.err" <<'PYEOF' || _rc=$?
+import importlib.util, json, sys
+
+# Importing the CI gate below compiles it, and python caches that compilation by
+# writing .github/scripts/__pycache__/ into the work tree. That directory is not
+# in .gitignore, so every push would leave an untracked directory behind in a
+# lane this script does not own. Measured on the first run of this path.
+sys.dont_write_bytecode = True
 
 # Escaped for the reason the pull selection escapes: the records below are
 # line-delimited, and an id carrying a newline splits into two the charset gate
@@ -818,18 +945,78 @@ import json, sys
 def one_line(s):
     return str(s).encode("unicode_escape").decode("ascii")
 
+# The cap and the prefix, read from the CI gate that owns them. Importing by
+# file path because the filename carries hyphens; the module defines its work
+# under `if __name__ == "__main__"`, so loading it runs nothing.
+def label_rule(path):
+    spec = importlib.util.spec_from_file_location("_check_label_lengths", path)
+    if spec is None or spec.loader is None:
+        raise ImportError("no loadable module at " + path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return int(mod.MAX_LABEL), str(mod.PREFIX)
+
+# The remedy gqlc-89vw ratified: the deepest ancestor DIRECTORY that fits. Same
+# rule the CI gate prints, so the two answers cannot diverge into two different
+# instructions for one label.
+def shorter(label, cap, prefix):
+    if not label.startswith(prefix):
+        return None
+    budget = cap - len(prefix)
+    tail = label[len(prefix):]
+    s = tail
+    while len(s) > budget and "/" in s:
+        s = s.rsplit("/", 1)[0]
+    return prefix + s if len(s) <= budget and s != tail else None
+
+cap = None
+prefix = ""
+try:
+    cap, prefix = label_rule(sys.argv[2])
+except Exception as exc:  # noqa: BLE001 - every failure here has one meaning
+    # No number, so no screening and no claim that any bead's labels are
+    # mirrorable. Reported rather than defaulted: a cap guessed at here is the
+    # 422 this whole path exists to make unreachable, arriving under a summary
+    # line that says the bead was pushed.
+    print("CAPUNKNOWN " + one_line(sys.argv[2]) + ": " + one_line(exc))
+
 with open(sys.argv[1], encoding="utf-8") as fh:
     beads = json.load(fh)
 for b in beads:
-    if not b.get("external_ref"):
-        print("NEW " + one_line(b["id"]))
+    if b.get("external_ref"):
+        continue
+    bid = one_line(b["id"])
+    over = [] if cap is None else [
+        lab for lab in (b.get("labels") or []) if len(lab) > cap]
+    if not over:
+        print("NEW " + bid)
+        continue
+    # GitHub rejects the ISSUE, not the label, so a bead offered with one of
+    # these comes back 422 and ends up with no mirror at all while the run
+    # reports a push. Held here instead, where the citizen who chose the label
+    # can still choose another one.
+    print("UNMIRRORABLE " + bid)
+    for lab in over:
+        note = ("%s carries a label GitHub cannot hold: %r is %d characters and "
+                "the cap is %d. The bead was NOT offered to GitHub, because the "
+                "API refuses the whole issue over one label and the bead would "
+                "have been left with no mirror."
+                % (bid, one_line(lab), len(lab), cap))
+        fits = shorter(lab, cap, prefix)
+        if fits:
+            note += (" Use the deepest ancestor directory that fits: %s (%d "
+                     "characters)." % (one_line(fits), len(fits)))
+        elif prefix and lab.startswith(prefix):
+            note += (" The budget after '%s' is %d characters, and no ancestor "
+                     "directory of this path fits."
+                     % (prefix, cap - len(prefix)))
+        print("NOTE " + note)
 # How many beads the selection actually walked. "No bead needs a mirror" and
 # "the list this ran on was empty" both emit zero NEW records, and only the
 # first of them is a measurement of anything.
 print("COUNT " + str(len(beads)))
 print("DONE")
 PYEOF
-_rc=$?
 
 if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]; then
   # Detail first, verdict last: this exit produces no summary line, so the
@@ -845,11 +1032,37 @@ if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]
   exit 1
 fi
 
-_new=$(grep -c '^NEW ' "$_tmp/plan.txt")
+# A bead whose label GitHub cannot hold still needs a mirror; what it does not
+# get is an attempt. So it counts toward the denominator and never toward
+# _pushed, which is what makes the summary read "0 of 1" rather than announcing
+# a push that GitHub would have refused whole.
+_unmirrorable=$(_count '^UNMIRRORABLE ' "$_tmp/plan.txt")
+_pushable=$(_count '^NEW ' "$_tmp/plan.txt")
+_new=$((_pushable + _unmirrorable))
 _before_n=$(sed -n 's/^COUNT //p' "$_tmp/plan.txt")
+
+# One line per refused label, naming the bead, the length, the cap and the
+# shorter label to use. Printed above the summary, where the detail belongs; the
+# summary carries the count, because a `tail -1` caller keeps only that.
+while IFS= read -r _note; do
+  echo "bd-gh-sync: ${_note}" >&2
+done < <(sed -n 's/^NOTE //p' "$_tmp/plan.txt")
+
+# No cap means no screening happened, and a run that screened nothing may not
+# report that every bead's labels were mirrorable. Same rule as every other
+# withdrawn count on this line.
+_capunknown=""
+if grep -q '^CAPUNKNOWN ' "$_tmp/plan.txt"; then
+  _capunknown=$(sed -n 's/^CAPUNKNOWN //p' "$_tmp/plan.txt" | head -n 1)
+  echo "bd-gh-sync: GitHub's label cap could not be read from ${_capunknown}" >&2
+  echo "bd-gh-sync: so no bead was screened for a label GitHub will refuse. A bead" >&2
+  echo "bd-gh-sync: offered with one comes back 422 and is left with no mirror at all." >&2
+fi
 # Whole remainder of the line, for the reason the pull path takes it whole: an
-# id cut at its first token names a different, possibly real, bead.
-grep '^NEW ' "$_tmp/plan.txt" | sed 's/^NEW //' >"$_tmp/new.txt"
+# id cut at its first token names a different, possibly real, bead. One `sed -n`
+# rather than `grep | sed`, because under pipefail a grep that matched nothing —
+# the steady state — would fail the pipeline.
+sed -n 's/^NEW //p' "$_tmp/plan.txt" >"$_tmp/new.txt"
 
 # Batched by hand rather than through `xargs -n`, because xargs parses quotes:
 # one bead id carrying an apostrophe aborted the whole construction, so no batch
@@ -1021,7 +1234,11 @@ _stale=0
 _closed=0
 _blind=""
 _uncounted=""
-_close_status=$(cat "$_tmp/close_status.txt" 2>/dev/null)
+# Read through a test rather than by letting `cat` fail: the file's absence is
+# the script's own "the pass did not run at all", and under `set -e` a failing
+# `cat` in an assignment aborts before that signal is read.
+_close_status=""
+[ -f "$_tmp/close_status.txt" ] && _close_status=$(cat "$_tmp/close_status.txt")
 case "$_close_status" in
   "OK "*)
     _stale=$(echo "$_close_status" | cut -d' ' -f2)
@@ -1083,15 +1300,22 @@ _close_arm="${_closed} of ${_stale} stale GH mirror(s) closed"
 [ -n "$_blind" ] &&
   _close_arm="an unknown number of stale GH mirror(s) left open"
 if [ "$_pushed" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] ||
-   [ -n "$_blind" ] || [ -n "$_uncounted" ]; then
+   [ -n "$_blind" ] || [ -n "$_uncounted" ] || [ -n "$_capunknown" ]; then
   _rc=1
   _summary="bd-gh-sync: PUSH FAILED — ${_new_arm}, ${_close_arm}"
   [ "$_failed" -gt 0 ] &&
     _summary="${_summary}; ${_failed} of ${_batches} 'bd github push' batch(es) exited non-zero"
   [ "$_unusable" -gt 0 ] &&
     _summary="${_summary}; ${_unusable} bead id(s) unusable"
-  [ "$_new" -gt 0 ] && [ "$_batches" -eq 0 ] &&
+  # Over the beads a batch could have carried, not over _new: a run whose only
+  # unmirrored bead was refused for its label ran no batch on purpose, and
+  # "no batch ran at all" there names a fault that is not there.
+  [ "$_pushable" -gt 0 ] && [ "$_batches" -eq 0 ] &&
     _summary="${_summary}; no batch ran at all"
+  [ "$_unmirrorable" -gt 0 ] &&
+    _summary="${_summary}; ${_unmirrorable} bead(s) were not offered to GitHub at all, carrying a label longer than it accepts — see the line(s) above for the shorter label to use"
+  [ -n "$_capunknown" ] &&
+    _summary="${_summary}; no bead was screened for an unmirrorable label (the cap could not be read from ${_capunknown})"
   [ -n "$_blind" ] &&
     _summary="${_summary}; the stale-mirror pass could not run (${_blind})"
   [ -n "$_uncounted" ] &&
