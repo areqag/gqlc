@@ -137,6 +137,10 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # The workflow-runs endpoint is under Actions, not Contents. Without this
+      # the cron-liveness step below gets a 403 and fails closed, which reddens
+      # every PR for a reason that is not a dead cron.
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -241,6 +245,25 @@ jobs:
       # absent gate. These checkers are not hooks, and the justfile was owned by
       # another change in flight the night this landed. bd gqlc-xqf6 covers
       # naming it in `test-hooks` as well, so `just test` runs it locally too.
+      # bd gqlc-zqa3: GitHub disables cron-triggered workflows repo-wide after
+      # 60 days of no repository activity, and a nightly that stops firing is
+      # indistinguishable from a nightly that passes — there is no red check,
+      # there is nothing. codegen-live.yml's nightly-alert job covers a
+      # scheduled run that FAILS; it cannot cover one that never happens.
+      #
+      # A pull_request trigger is the one a disablement leaves alive, so this is
+      # the only place the observation can be made. codegen-live.yml is the
+      # daily cron, so it goes stale first; vuln.yml's weekly sweep dies in the
+      # same event and needs no second check.
+      #
+      # It BLOCKS. The threshold is 14 days against a daily cron, which is long
+      # enough that no transient this repository has seen can reach it, and the
+      # remedy is one command named in the failure. The argument for blocking
+      # rather than warning is written out at the top of the script.
+      - name: "the nightly cron is still firing"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/check-cron-freshness.sh codegen-live.yml 14
       - run: bash .github/scripts/tests/ci-identity-gate-test.sh
       # shellcheck over .github/scripts. `just lint-hooks` defaults to
       # .githooks and so has never looked at this directory; the recipe takes

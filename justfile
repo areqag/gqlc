@@ -18,6 +18,11 @@ actionlint_version := "v1.7.7"
 # Same self-heal contract as golangci-lint above, for the hooks tree.
 shellcheck_version := "v0.10.0"
 shellcheck := justfile_directory() + "/.bin/shellcheck"
+# Same self-heal contract again, for the Python that runs inside required CI
+# contexts. Upstream tags releases without a leading `v`, so this pin is written
+# without one and `ruff --version` prints it back verbatim (bd gqlc-tqi4).
+ruff_version := "0.16.4"
+ruff := justfile_directory() + "/.bin/ruff"
 
 # Single source of truth for the discovery-probe names. Three recipes mktemp a
 # throwaway module under test/data to witness that the module set is read off
@@ -594,6 +599,81 @@ ensure-shellcheck:
         | tar -xJ -C "$stage"
     install -m 0755 "$stage/shellcheck-$want/shellcheck" {{quote(shellcheck)}}
 
+# provisions the pinned ruff into the gitignored .bin/, exactly as
+# ensure-shellcheck does. Upstream ships a static binary per target triple, so
+# this is a download and not a pip install: there is no virtualenv here, nothing
+# resolves a dependency graph, and the happy path is a ~10ms version check.
+#
+# The asset name embeds `uname -m` unchanged because ruff's triples use the same
+# spellings the kernel does (x86_64, aarch64). shellcheck's asset does too, so
+# the two lines are deliberately the same shape.
+[private]
+ensure-ruff:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    want="{{ruff_version}}"
+    have="$({{quote(ruff)}} --version 2>/dev/null | sed -n 's/^ruff //p' || true)"
+    if [ "$have" = "$want" ]; then
+        exit 0
+    fi
+    echo "provisioning ruff $want into .bin/" >&2
+    mkdir -p {{quote(justfile_directory() + "/.bin")}}
+    stage="$(mktemp -d)"
+    trap 'rm -rf "$stage"' EXIT
+    curl --proto '=https' --tlsv1.2 -sSfL --retry 5 --retry-all-errors --retry-delay 2 \
+        "https://github.com/astral-sh/ruff/releases/download/$want/ruff-$(uname -m)-unknown-linux-gnu.tar.gz" \
+        | tar -xz -C "$stage"
+    install -m 0755 "$stage/ruff-$(uname -m)-unknown-linux-gnu/ruff" {{quote(ruff)}}
+
+# ruff over the Python in .github/scripts (bd gqlc-tqi4).
+#
+# Until this recipe existed, NO linter, formatter or syntax check ran over any
+# Python in this tree. Not ruff, not flake8, not pylint, not mypy, not black,
+# not `py_compile`. Measured by grepping the justfile and every workflow for
+# each of those names on 2026-08-23: nothing. `lint-hooks` reaches these two
+# files and skips them by design, because shellcheck only supports shell.
+#
+# What that left unchecked is not incidental code. `check-pr-closes.py` is the
+# gate deciding what a pull request may claim to close, run from the `tidy` job,
+# which is a required status context — and since ADR 0003 a green CI is the only
+# merge gate this repository has. Its own suite was the whole of its cover, so a
+# NameError on a branch no row reaches, an unused import, or a shadowed builtin
+# all shipped green. FALSIFIED before this landed and again after: an undefined
+# name added to a function nothing calls in check-pr-closes.py leaves the tree
+# green at HEAD~ and reports `F821 Undefined name` at rc=1 here.
+#
+# The rule set is pinned in .github/ruff.toml and passed with `--config`, so no
+# config anywhere else in this tree or on the machine can widen or narrow it.
+# That file argues its own location and its own `select`.
+#
+# Directory taken as a parameter for the same reason lint-hooks takes one: so a
+# second Python directory can be linted without this recipe learning its name,
+# and so the empty case below can be reached from a test.
+#
+# The empty case FAILS. A glob that matches nothing lints nothing and exits 0,
+# which on every dashboard is the shape of a clean tree — the same fail-open
+# refusal test-hooks and lint-hooks make.
+lint-python dir=".github/scripts": ensure-ruff
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="{{dir}}"
+    if [ ! -d "$dir" ]; then
+        echo "error: '$dir' is not a directory, so ruff has nothing to lint" >&2
+        exit 1
+    fi
+    shopt -s nullglob globstar
+    files=("$dir"/**/*.py)
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "error: no .py file found under $dir, so ruff ran over nothing and exited 0" >&2
+        echo "       over it — indistinguishable from every file passing. Either the" >&2
+        echo "       scripts moved, or this is not the repository root (bd gqlc-tqi4)." >&2
+        exit 1
+    fi
+    echo "ruff {{ruff_version}} over ${#files[@]} python file(s) under $dir:"
+    printf '  %s\n' "${files[@]}"
+    {{ruff}} check --no-cache \
+        --config {{quote(justfile_directory() + "/.github/ruff.toml")}} -- "${files[@]}"
+
 # shellcheck over the hooks tree (bd gqlc-jhi2). The hooks carry `# shellcheck
 # disable=` directives over deliberate exceptions — the SC2086 disable in
 # .githooks/bd-gh-sync's _push_batch, over the unquoted `bd github push $1` that
@@ -785,6 +865,116 @@ lint-just file=justfile(): ensure-shellcheck
 # vocabulary places nothing, so the derivation stops on the first constrained
 # file in the tree rather than producing an empty set that agrees with an empty
 # config — which would be green because both sides went missing at once.
+# `golangci-lint run` must keep reporting the `formatters:` block as issues.
+#
+# This is the only server-side enforcement of gofumpt and gci in the whole
+# repository, and it is not obvious that it is. The formatters have recipes of
+# their own (`just fmt`, `just fmt-check`), they have their own block in
+# .golangci.yml, and NO workflow calls fmt-check — `fmt-check` is not a required
+# status context. What makes unformatted Go unmergeable is a property of a
+# pinned third-party binary: `run` reports `formatters:` entries as ordinary
+# issues, so the required `lint` context reddens on them.
+#
+# Measured at the pin, v2.13.1 (bd gqlc-lsku, 2026-08-23). Nothing held it. A
+# golangci-lint bump that stops reporting formatters through `run`, or an edit
+# moving gofumpt and gci out of `formatters:`, takes that enforcement away and
+# every check stays green — the tell would be unformatted Go reaching master,
+# noticed by a human. This recipe is bd gqlc-sh4j, which is that property made
+# to fail.
+#
+# It asserts by DOING, not by reading the config: a throwaway module outside the
+# tree, this repository's own .golangci.yml copied into it, and three runs — a
+# pristine control that must exit 0, a gofumpt violation that must be named, and
+# a gci violation that must be named. The control is what stops the two
+# violations passing for the wrong reason; without it a linter that refuses
+# everything, or a config that fails to load, reads exactly like a working gate.
+#
+# Outside the tree deliberately. A probe module under test/data would be seen by
+# `go list ./...`, by modscope's module walk and by the discovery-probe sweep,
+# and the sweep's own comment explains what one leaked probe costs.
+#
+# ~1s measured locally with a cold cache, one tiny package.
+[private]
+check-golangci-formatters-report: ensure-golangci
+    #!/usr/bin/env bash
+    set -euo pipefail
+    probe="$(mktemp -d "{{scratch_root}}/gqlc-fmtprobe-XXXXXX")"
+    trap 'rm -rf "${probe}"' EXIT
+    cp {{quote(justfile_directory() + "/.golangci.yml")}} "${probe}/.golangci.yml"
+    printf 'module gqlcfmtprobe\n\ngo 1.25\n' >"${probe}/go.mod"
+
+    # The pristine file. It carries a package comment and a doc comment on the
+    # one exported symbol because .golangci.yml runs revive, and a control that
+    # exits 1 for an unrelated reason witnesses nothing.
+    cat >"${probe}/probe.go" <<'PROBE'
+    // Package gqlcfmtprobe is written by a gate, not by a person.
+    package gqlcfmtprobe
+
+    import (
+    	"fmt"
+    	"os"
+    )
+
+    // Probe returns a string so that the imports above are used.
+    func Probe() string {
+    	return fmt.Sprint(len(os.Args))
+    }
+    PROBE
+    # just indents a shebang recipe's body, heredoc included, so the leading four
+    # spaces come back off here. A tab-indented line inside the Go source would
+    # be mangled by a blanket strip, so only the four spaces just added are cut.
+    sed -i 's/^    //' "${probe}/probe.go"
+    cp "${probe}/probe.go" "${probe}/probe.clean"
+
+    # Cache under the probe so a formatter verdict is never served out of this
+    # repository's cache, and so the directory is removed with the trap.
+    run_probe() {
+        ( cd "${probe}" && GOLANGCI_LINT_CACHE="${probe}/cache" \
+            {{quote(golangci)}} run ./... 2>&1 ) || return $?
+    }
+
+    if ! control="$(run_probe)"; then
+        echo "error: golangci-lint refused a pristine probe package, so the two violation" >&2
+        echo "       runs below would exit 1 for a reason that has nothing to do with the" >&2
+        echo "       formatters and this gate would pass while asserting nothing" >&2
+        echo "       (bd gqlc-sh4j). What it said:" >&2
+        printf '%s\n' "${control}" | sed 's/^/         /' >&2
+        exit 1
+    fi
+
+    # Each violation is introduced on its own, from the clean file, so a run
+    # names one formatter and the other's silence is visible.
+    check_formatter() {
+        local formatter="${1}" out
+        if out="$(run_probe)"; then
+            echo "error: a ${formatter} violation was written into the probe package and" >&2
+            echo "       'golangci-lint run' exited 0 over it. That command is the ONLY" >&2
+            echo "       server-side enforcement of gofumpt and gci in this repository:" >&2
+            echo "       fmt-check is not a required status context, and no workflow calls" >&2
+            echo "       it. Unformatted Go is now mergeable (bd gqlc-sh4j)." >&2
+            exit 1
+        fi
+        case "${out}" in
+            *"(${formatter})"*) ;;
+            *)  echo "error: 'golangci-lint run' refused the probe package, but did not name" >&2
+                echo "       ${formatter} in what it printed — so whatever reddened it, it was" >&2
+                echo "       not the formatter this row is about (bd gqlc-sh4j):" >&2
+                printf '%s\n' "${out}" | sed 's/^/         /' >&2
+                exit 1
+                ;;
+        esac
+    }
+
+    # gofumpt: a blank line straight after a function's opening brace.
+    sed 's/^func Probe() string {$/func Probe() string {\n/' \
+        "${probe}/probe.clean" >"${probe}/probe.go"
+    check_formatter gofumpt
+
+    # gci: the import block reordered into two sections.
+    printf '%s\n' '/^\t"fmt"$/{N;s/.*/\t"os"\n\n\t"fmt"/}' >"${probe}/gci.sed"
+    sed -f "${probe}/gci.sed" "${probe}/probe.clean" >"${probe}/probe.go"
+    check_formatter gci
+
 [private]
 check-golangci-build-tags: sweep-discovery-probes
     #!/usr/bin/env bash
@@ -1232,7 +1422,17 @@ sweep-discovery-probes:
 # does: those scripts run inside required contexts, and a tree where they are
 # linted only on the runner is one where the first reader of a shellcheck
 # finding is a red PR (bd gqlc-xqf6).
-lint: ensure-golangci lint-hooks (lint-hooks "kingdom/bin") (lint-hooks ".github/scripts") lint-just check-golangci-build-tags
+#
+# lint-python is the Python half of that same argument, and it is newer: until
+# bd gqlc-tqi4 no linter of any kind read the two .py files in .github/scripts,
+# one of which is the PR-body merge gate.
+#
+# check-golangci-formatters-report rides here rather than anywhere else because
+# `lint` is what the required context runs, and the property it holds is a
+# property of the very next line: that `golangci-lint run` reddens on gofumpt
+# and gci. Ahead of the lint, so a tree whose formatter enforcement has gone
+# quiet says so before spending eighty seconds.
+lint: ensure-golangci lint-hooks (lint-hooks "kingdom/bin") (lint-hooks ".github/scripts") lint-python lint-just check-golangci-formatters-report check-golangci-build-tags
     {{golangci}} run
 
 # Guard: the golangci-lint analysis cache must be non-empty after lint.
