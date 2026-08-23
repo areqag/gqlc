@@ -67,13 +67,25 @@ cfg() { # cfg <section> <key> -> value with quotes and inline comment stripped
     ' "$CONFIG"
 }
 
-seats_all() {
-    awk -F' *= *' '
-        /^\[seats\]/ { s = 1; next }
-        /^\[/        { s = 0 }
+# The bare keys of every entry under one section header. There are two rosters
+# now — [seats] and [humans] — and they are read by the same reader on purpose:
+# a second copy of this awk would let the two disagree about what counts as an
+# entry, and the whole value of the second roster is that a name found in
+# neither is a real finding rather than a parsing difference (gqlc-t4zx).
+roster_names() { # <section> -> one name per line
+    awk -F' *= *' -v sec="[$1]" '
+        index($0, sec) == 1 { s = 1; next }
+        /^\[/               { s = 0 }
         s && NF >= 2 && $1 !~ /^#/ { print $1 }
     ' "$CONFIG"
 }
+
+seats_all() { roster_names seats; }
+
+# The people who legitimately hold beads. They are not seats and nothing routes
+# to them; the list exists so that an assignee in NEITHER roster can be told
+# apart from a person's name. See the [humans] comment in kingdom.toml.
+humans_all() { roster_names humans; }
 
 seat_raw() {
     local raw
@@ -86,7 +98,8 @@ seat_class()   { seat_raw "$1" | cut -d: -f1; }
 seat_model()   { seat_raw "$1" | cut -d: -f2; }
 seat_display() { seat_raw "$1" | cut -d: -f3; }
 
-is_seat() { seats_all | grep -qx "$1"; }
+is_seat()  { seats_all  | grep -qx "$1"; }
+is_human() { humans_all | grep -qx "$1"; }
 
 # ---------- paths ----------
 
@@ -1248,14 +1261,61 @@ route_owners() { # <"seat id" lines> <reason prefix>
 # produces exactly this state, and did on gqlc-gwf0 (recorded in gqlc-mro7),
 # done by someone trying to make the bead more routable.
 #
-# NOT counted here, though it is equally unreachable: a bead assigned to a name
-# that is not a seat. People hold beads here legitimately, so failing on that
-# would mean failing whenever a human takes one — but it also means a RETIRED
-# seat's work would hide in that category, indistinguishable from a person's
-# (gqlc-t4zx).
+# NOT counted here: a bead assigned to a name that is not a seat. That is the
+# SECOND unreachable shape and it has its own predicate below,
+# unreachable_owner_rows, because the two want different treatment — this one is
+# always a defect and fails `km doctor`, that one is usually a person holding
+# their own work and must not.
 stranded_ids() {
     bd list --status in_progress -n 0 --json 2>/dev/null |
         jq -r '[ .[] | select(.assignee == null) | .id ] | join(" ")'
+}
+
+# The other unreachable shape. Every dispatch pass matches an assignee against
+# the SEAT roster — the resume pass over in-progress beads, the owned pass over
+# ready ones — so a bead assigned to a name that is not a seat is routed by
+# nobody. Unlike a stranded bead it does not even look unrouted: it looks like
+# somebody is working on it, which is why nothing has ever found one.
+#
+# Three cases, and conflating them is the actual defect (gqlc-t4zx):
+#
+#   a live seat   — routed normally, nothing to report.
+#   a person      — [humans] in kingdom.toml. Held deliberately. Reporting these
+#                   would put a line on the board every time a human takes a
+#                   bead, and an operator learns to ignore a channel that is
+#                   always noisy; the reachability gate was nearly not written
+#                   at all for this reason.
+#   neither       — the only defect. A retired seat's name lands here, and so
+#                   does a typo'd assignee and a person nobody has added to the
+#                   roster yet.
+#
+# NOT CLOSED, not `--status open`: bd's `--status open` is the literal status
+# and excludes in_progress and blocked, so a claimed bead held by a name the
+# town cannot resolve — the exact state this exists to find — would read as
+# absent. Any status this code does not recognise counts too, which is the safe
+# side for a report.
+#
+# It reports and does not act. Repointing another citizen's claimed work is a
+# confident sweep over evidence this function does not have: it cannot tell a
+# retired seat from a person the roster has not caught up with, and both look
+# identical here. Naming them is the whole job; the decision is a human's.
+unreachable_owner_rows() { # -> lines of "<assignee> <id> <id> ..."
+    local board rows name ids
+    board=$(bd list --status all -n 0 --json 2>/dev/null) || return 1
+    jq -e 'type == "array"' >/dev/null 2>&1 <<<"$board" || return 1
+    # Grouped in jq, resolved in bash: each distinct assignee is tested against
+    # the rosters ONCE, rather than once per bead it holds.
+    rows=$(jq -r '[ .[]
+                    | select(.status != "closed")
+                    | select(.assignee != null and .assignee != "") ]
+                  | group_by(.assignee)[]
+                  | "\(.[0].assignee) \([ .[].id ] | sort | join(" "))"' <<<"$board") || return 1
+    while IFS=' ' read -r name ids; do
+        [ -n "$name" ] || continue
+        if is_seat "$name"; then continue; fi
+        if is_human "$name"; then continue; fi
+        echo "$name $ids"
+    done <<<"$rows"
 }
 
 cmd_dispatch() {
@@ -1714,6 +1774,20 @@ cmd_dispatch() {
         echo "dispatch: the reachability check could not run; the routing above stands"
     elif [ -n "$stranded" ]; then
         echo "dispatch: STRANDED — in progress and assigned to nobody, so no pass can wake anyone for them: $stranded"
+    fi
+
+    # And the second unreachable shape, one line per unresolvable NAME rather
+    # than per bead, because the name is the thing an operator acts on: a
+    # retired seat appears once with its whole holding behind it. Nothing is
+    # reassigned or cleared here — see unreachable_owner_rows.
+    local urows uname uids
+    if ! urows=$(unreachable_owner_rows); then
+        echo "dispatch: the assignee-resolution check could not run; the routing above stands"
+    else
+        while IFS=' ' read -r uname uids; do
+            [ -n "$uname" ] || continue
+            echo "dispatch: UNREACHABLE ASSIGNEE $uname — it is in neither [seats] nor [humans] in kingdom.toml, so every pass matching assignees against the seat roster skips this work and no wake will ever come for it; nothing has been reassigned: $uids"
+        done <<<"$urows"
     fi
     echo "dispatch: done ($wakes wake(s) this run, $held held, $epic_n epic, $skipped below max_priority $maxprio, $inferred class inferred, $unroutable unroutable ($stalled at P0))"
 }
@@ -2550,6 +2624,26 @@ cmd_doctor() {
         ok=1
     else
         echo "ok:   every bead is in some dispatch pass"
+    fi
+    # The second unreachable shape (gqlc-t4zx), and deliberately a WARN where
+    # the arm above is a FAIL. The difference is what the finding rests on. A
+    # bead in progress with no assignee is unreachable as a matter of the
+    # dispatcher's own arithmetic; an unresolvable assignee is unreachable as a
+    # matter of a roster somebody maintains by hand, so a person who took a bead
+    # before their name was added reddens this arm through no fault of the
+    # board. A gate that goes red when a human takes work is one operators learn
+    # to run with, and this file has that failure written into it twice already.
+    # A named warning is the thing an operator can act on; the acting is theirs.
+    local urows uname uids
+    if ! urows=$(unreachable_owner_rows); then
+        echo "warn: the assignee-resolution query failed, so no assignee can be certified reachable"
+    elif [ -n "$urows" ]; then
+        while IFS=' ' read -r uname uids; do
+            [ -n "$uname" ] || continue
+            echo "warn: assigned to '$uname', which is in neither [seats] nor [humans], so no dispatch pass can wake anyone for it — add them to [humans] if they are a person, or move the work if the seat is gone: $uids"
+        done <<<"$urows"
+    else
+        echo "ok:   every assignee on the board is a seat or a known person"
     fi
     # THE IDENTITY ARM (gqlc-0rv9). `.githooks/commit-msg` refuses an
     # implausible author and `.github/scripts/check-pr-authors.sh` refuses one
