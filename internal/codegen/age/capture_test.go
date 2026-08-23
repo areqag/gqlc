@@ -236,10 +236,9 @@ func (s *EmissionSuite) TestNoEmittedNameTakesAQueryParameterName() {
 				s.Run(name, func() {
 					for _, shape := range captureArities {
 						s.Run(shape.label, func() {
-							emitted := s.emitCapturing(fx, name, shape)
-							for _, path := range sortedKeys(emitted) {
-								s.requireNameIsUncapturable(emitted[path], name, path)
-							}
+							s.requirePackageIsUncapturable(
+								s.emitCapturingPackage(fx, captureProbeParam, shape),
+								s.emitCapturingPackage(fx, name, shape), name)
 						})
 					}
 				})
@@ -284,7 +283,119 @@ func (s *EmissionSuite) requireNameIsUncapturable(body, name, path string) {
 	}
 	s.Require().NotContains(s.bodyLocalsOf(body), codegen.ParamArg,
 		"%s: a body local shadows the caller's argument", path)
-	s.requireNothingDeclaredIsCaptured(body)
+}
+
+// requirePackageIsUncapturable is requireNameIsUncapturable over a whole
+// emitted package, plus the one check that cannot be asked of a single
+// file: reachability.
+//
+// The signature and body-local checks are per file and stay per file — a
+// method captures in the file it is written in, and they read a query
+// method's shape, which db.go's WithTx does not have. Reachability is
+// not per file. Go's package scope is package-wide, so "is this
+// declaration still resolved by somebody" has to be asked of every
+// file's declarations against every file's method bodies at once. Asked
+// per file it reports two different falsehoods: db.go's New and Queries
+// are resolved only from .cypher.go bodies and read as captured, while a
+// string-typed const declared in db.go and captured out of a .cypher.go
+// body reads as fine.
+//
+// gqlc-dfcb is that second falsehood. Before this, the sweep's parse set
+// was the .cypher.go files alone, so a package-level declaration emitted
+// into db.go or models.go was never a candidate for capture at all. That
+// was safe only by accident of typing: the cross-file set happened to be
+// error-typed, type-named, func-named or unreferenced, so a string
+// parameter shadowing one failed to compile. A string-typed cross-file
+// declaration read from a method body is the silent case, and it is the
+// same shape as the query-text const — the worst instance of this class.
+//
+// The reachability claim is DIFFERENTIAL, against the same batch emitted
+// under a generated parameter name, and that is forced by widening the
+// parse set. Capture's signature is a declaration a method used to
+// resolve and no longer does; the per-file version approximated that
+// with the absolute claim "every declaration is resolved by somebody",
+// which happens to hold inside a .cypher.go file and does not hold of
+// the package. ReadQuerier is the witness: it is the consumer-facing
+// interface, resolved by the caller and by nothing the emitter writes,
+// so the absolute claim calls every AGE package captured. An allowlist
+// of consumer-facing names would have to be maintained by hand and would
+// admit the next one silently; the differential claim needs no list and
+// is strictly stronger, because a name the baseline does not resolve
+// cannot be captured out of a body that never read it.
+func (s *EmissionSuite) requirePackageIsUncapturable(baseline, files map[string]string, name string) {
+	paths := sortedKeys(files)
+	s.Require().NotEmpty(paths, "the emission has no files to sweep")
+
+	queryFiles := 0
+	for _, path := range paths {
+		// The signature and body-local checks read a query method's
+		// shape — ctx plus exactly one generated argument — so they are
+		// asked of the query files alone.
+		if strings.HasSuffix(path, ".cypher.go") {
+			queryFiles++
+			s.requireNameIsUncapturable(files[path], name, path)
+		}
+	}
+
+	// The per-file half is conditional on a suffix, and a conditional
+	// guard is silent when its condition never holds. A batch reaching
+	// here has queries — the caller skips a fixture whose one-parameter
+	// emission is empty — so at least one query file must have been read.
+	s.Require().Positive(queryFiles, "no .cypher.go file was swept, so the per-file half ran on nothing")
+
+	wantDeclared, wantResolved := s.packageScope(baseline)
+	gotDeclared, gotResolved := s.packageScope(files)
+
+	// A sweep over a collapsed parse set agrees with every emission there
+	// could have been, so the two halves of the differential are pinned
+	// non-empty before they are compared.
+	s.Require().NotEmpty(wantDeclared, "the baseline package declares nothing at package level")
+	s.Require().NotEmpty(wantResolved, "no method in the baseline package resolves a package-level name")
+
+	s.Require().Equal(wantDeclared, gotDeclared,
+		"renaming a query parameter to %q changed what the emitted package declares", name)
+	s.Require().Equal(wantResolved, gotResolved,
+		"renaming a query parameter to %q changed which package-level names the emitted package's "+
+			"methods resolve: the caller's argument captured one", name)
+}
+
+// packageScope reads an emitted package's two name sets: what it declares
+// at package level, and which of those declarations some method in the
+// package resolves. Both sorted, both package-wide, both read off the
+// syntax tree.
+//
+// The second is intersected with the first on purpose. A method resolves
+// plenty of names the package does not declare — imported ones, universe
+// ones — and those are gqlc-ni66's class, loud rather than silent,
+// tracked elsewhere. Leaving them in would make the differential move
+// whenever an unrelated import did.
+func (s *EmissionSuite) packageScope(files map[string]string) (declared, resolved []string) {
+	declaredSet := make(map[string]bool)
+	free := make(map[string]bool)
+	for _, path := range sortedKeys(files) {
+		file := s.parseEmission(files[path])
+		for _, decl := range packageDecls(file) {
+			declaredSet[decl] = true
+		}
+		for _, d := range file.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			for ident := range freeIdents(fn) {
+				free[ident] = true
+			}
+		}
+	}
+	for decl := range declaredSet {
+		declared = append(declared, decl)
+		if free[decl] {
+			resolved = append(resolved, decl)
+		}
+	}
+	sort.Strings(declared)
+	sort.Strings(resolved)
+	return declared, resolved
 }
 
 // candidateNames is every identifier the emitted query files mention,
@@ -354,9 +465,9 @@ var singleCaptureArity = captureArities[0]
 // collide with a swept candidate under the mangle.
 const captureFillerPrefix = "gqlcCaptureFiller"
 
-// emitCapturing emits one fixture with every query rebound to the given
-// parameter shape, the swept name carried at that shape's swept index,
-// and returns its query files by path.
+// capturingBatch rebinds every query in a fixture to the given parameter
+// shape, carrying the swept name at that shape's swept index, and
+// returns the batch with the label an emission failure should print.
 //
 // Every parameter is STRING, which is the width that makes a collision
 // silent: it is what the composed statement and the query-text const
@@ -364,7 +475,7 @@ const captureFillerPrefix = "gqlcCaptureFiller"
 // rather than rejected by the compiler. A narrower width would turn the
 // interesting case into a build failure and the sweep would stop
 // measuring it.
-func (s *EmissionSuite) emitCapturing(fx ageFixture, param string, shape captureArity) map[string]string {
+func (s *EmissionSuite) capturingBatch(fx ageFixture, param string, shape captureArity) ([]codegen.NamedQuery, string) {
 	s.Require().Positive(shape.arity, "shape %s binds no parameter", shape.label)
 	s.Require().Less(shape.swept, shape.arity, "shape %s sweeps past its own arity", shape.label)
 
@@ -384,25 +495,45 @@ func (s *EmissionSuite) emitCapturing(fx ageFixture, param string, shape capture
 	for i := range queries {
 		queries[i].Validated.Parameters = params
 	}
-	return s.emitQueryFiles(fx, queries, fmt.Sprintf("%s as %s", param, shape.label))
+	return queries, fmt.Sprintf("%s as %s", param, shape.label)
+}
+
+// emitCapturing emits a capturing batch and returns its QUERY files by
+// path. Used to read a fixture's own vocabulary, which is what the
+// .cypher.go files carry: reading it off the whole package would feed
+// db.go's boilerplate names back into the sweep at every fixture, which
+// multiplies the runtime by the size of a set that does not vary between
+// fixtures.
+func (s *EmissionSuite) emitCapturing(fx ageFixture, param string, shape captureArity) map[string]string {
+	queries, label := s.capturingBatch(fx, param, shape)
+	return s.emitQueryFiles(fx, queries, label)
+}
+
+// emitCapturingPackage emits a capturing batch and returns EVERY file,
+// which since gqlc-dfcb is the capture sweep's parse set.
+//
+// The old parse set was the .cypher.go files alone — narrower than the
+// scope a query parameter is bound in, because the generated package is
+// one Go package and a method body also resolves what db.go and
+// models.go declare.
+//
+// Nothing structural had closed that gap. It was closed only by how the
+// cross-file set happens to be typed — ErrNoRows and ErrMultipleResults
+// are error-typed, DBTX and Queries are types, New is a func,
+// maxGraphNameBytes is an untyped int no .cypher.go body reads — so a
+// STRING parameter shadowing any of them failed to compile rather than
+// silently taking its place. A string-typed cross-file declaration
+// referenced from a method body is the silent case, and the old parse
+// set could not see it.
+func (s *EmissionSuite) emitCapturingPackage(fx ageFixture, param string, shape captureArity) map[string]string {
+	queries, label := s.capturingBatch(fx, param, shape)
+	return s.emitAllFiles(fx, queries, label)
 }
 
 // emitQueryFiles generates a fixture's batch and returns the
-// <name>.cypher.go files by path. That is the whole of this guard's
-// parse set, and it is narrower than the scope a query parameter is
-// bound in: the generated package is one Go package, so a method body
-// also resolves what db.go and models.go declare, and none of those
-// declarations is swept here.
-//
-// Nothing structural closes that gap. It is closed only by how the
-// current cross-file set happens to be typed — ErrNoRows and
-// ErrMultipleResults are error-typed, DBTX and Queries are types, New is
-// a func, maxGraphNameBytes is an untyped int no .cypher.go body reads —
-// so a STRING parameter shadowing any of them fails to compile rather
-// than silently taking its place. A string-typed cross-file declaration
-// referenced from a method body would be the silent case, and this guard
-// would not see it. Widening the parse set to the whole emitted package
-// is gqlc-dfcb.
+// <name>.cypher.go files by path. The readers that ask for it —
+// paramLocalsOf and the arity guard — read a query METHOD's shape, which
+// db.go's New and WithTx do not have.
 func (s *EmissionSuite) emitQueryFiles(fx ageFixture, queries []codegen.NamedQuery, label string) map[string]string {
 	files := s.emitAllFiles(fx, queries, label)
 	out := make(map[string]string)
