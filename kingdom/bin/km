@@ -810,24 +810,46 @@ cmd_dispatch() {
     #
     # Captured once rather than piped: the hold verdict below needs each
     # candidate's labels, and re-querying could read a different queue.
-    local queue routed owned ready id cls seat
+    local queue routed owned lowpri ready id cls prio seat
     if ! ready=$(bd ready -n 0 --json 2>/dev/null); then
         die "dispatch: the ready-queue query failed; nothing routed beyond the resume wakes above"
     fi
+
+    # The floor the FRESH arm below applies, from [dispatch] max_priority.
+    # Fail-OPEN and loud, deliberately: a config this pass cannot read must not
+    # be able to stop the town, because "routed nothing, printed a healthy
+    # summary" is the failure this file has been bitten by three times
+    # (gqlc-z1qw, gqlc-fo48). An absent or malformed value routes everything and
+    # says why, which an operator can see; the fail-closed alternative is silent.
+    local maxprio
+    maxprio=$(cfg dispatch max_priority)
+    case "$maxprio" in
+        '' | *[!0-9]*)
+            echo "dispatch: [dispatch] max_priority = '${maxprio:-<unset>}' is not a number; every priority is routable this run"
+            maxprio=99
+            ;;
+    esac
     # `. as $c` binds the class name before the pipe, and must stay bound: inside
     # `map(...)` the pipe in `($b.labels // []) | index(...)` rebinds `.` to the
     # labels array, so a bare `"class:" + .` is string + array — a type error that
     # aborts the whole program on any unassigned bead, labelled or not.
-    if ! queue=$(jq -r '
+    #
+    # The `lowpri` arm is the priority floor, and it sits on the FRESH branch
+    # alone — after the `owned` test, so a bead that names a seat is never
+    # withheld from it by a number (Constitution III.3, same reason the resume
+    # pass runs first). It emits rather than drops, so the beads it withholds
+    # can be named in the output below instead of vanishing.
+    if ! queue=$(jq -r --argjson maxp "$maxprio" '
         [ .[]
           | . as $b
           | (["architect", "warrior", "judge"]
              | map(. as $c | select(($b.labels // []) | index("class:" + $c))))[0] as $cls
           | {id, priority, assignee, cls: $cls}
         ] | sort_by(.priority) | .[]
-          | if .assignee != null then "owned \(.assignee) \(.id)"
-            elif .cls != null    then "fresh \(.id) \(.cls)"
-            else empty end' <<<"$ready"); then
+          | if .assignee != null           then "owned \(.assignee) \(.id)"
+            elif .cls == null              then empty
+            elif (.priority // 0) > $maxp  then "lowpri \(.id) \(.priority // 0)"
+            else "fresh \(.id) \(.cls)" end' <<<"$ready"); then
         # Not "nothing routed": the resume pass above may already have queued
         # wakes, and they stand. An operator reading this during an incident has
         # to be able to trust it.
@@ -837,6 +859,19 @@ cmd_dispatch() {
     fi
     owned=$(echo "$queue" | awk '$1 == "owned" { print $2, $3 }')
     routed=$(echo "$queue" | awk '$1 == "fresh" { print $2, $3 }')
+    lowpri=$(echo "$queue" | awk '$1 == "lowpri" { print $2, $3 }')
+
+    # Said out loud, one line per bead, in the same shape as the hold verdicts
+    # below. A pass that declines work silently and then prints a summary that
+    # reads healthy is this dispatcher's oldest recurring defect, and a priority
+    # floor is a machine for producing exactly that — 158 of the 319 open beads
+    # the morning it was added.
+    local skipped=0
+    while IFS=' ' read -r id prio; do
+        [ -n "$id" ] || continue
+        echo "dispatch: below the floor $id — priority $prio, and [dispatch] max_priority is $maxprio; filed and searchable, routed to nobody"
+        skipped=$((skipped + 1))
+    done <<<"$lowpri"
 
     # Owned pass: an unclaimed bead that names a seat goes back to that seat,
     # ahead of any fresh routing, for the same reason the resume pass runs first
@@ -924,7 +959,7 @@ cmd_dispatch() {
     elif [ -n "$stranded" ]; then
         echo "dispatch: STRANDED — in progress and assigned to nobody, so no pass can wake anyone for them: $stranded"
     fi
-    echo "dispatch: done ($wakes wake(s) this run, $held held)"
+    echo "dispatch: done ($wakes wake(s) this run, $held held, $skipped below max_priority $maxprio)"
 }
 
 # ---------- the routing hold ----------

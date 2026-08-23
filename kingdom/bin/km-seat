@@ -24,17 +24,23 @@ soul="$KINGDOM_DIR/seats/$seat/soul.md"
 pm=$("$KM" cfg claude permission_mode)
 : "${pm:=bypassPermissions}"
 
-# Thinking depth for this class, from [effort]. A seat must launch whatever the
-# config says, so anything we would not recognise is dropped rather than passed
-# on: claude refuses an unknown --effort, and a typo here would otherwise take
-# out every seat of that class at once.
-effort_args=()
-effort=$("$KM" cfg effort "$class")
-case "$effort" in
-    low | medium | high | xhigh | max) effort_args=(--effort "$effort") ;;
-    "") ;;
-    *) echo "km-seat: [effort] $class = '$effort' is not a level claude takes; launching $seat without --effort" >&2 ;;
-esac
+# Thinking depth. Two sources now, one gate: the class default from [effort],
+# and a per-bead `effort:<level>` label that overrides it for one wake
+# (Constitution V.6.2, bd gqlc-jmwh). A seat must launch whatever it is told, so
+# anything we would not recognise is dropped rather than passed on: claude
+# refuses an unknown --effort, and a bad value would otherwise take out every
+# seat of that class at once. The label is the LESS trustworthy of the two —
+# any citizen can write one, and nobody reviews a label — so it goes through the
+# same gate and not a laxer one.
+valid_effort() { # <level> <where it came from> -> the level, or nothing and a warning
+    case "$1" in
+        low | medium | high | xhigh | max) printf '%s' "$1" ;;
+        "") ;;
+        *) echo "km-seat: $2 = '$1' is not a level claude takes; launching $seat without it" >&2 ;;
+    esac
+}
+
+class_effort=$(valid_effort "$("$KM" cfg effort "$class")" "[effort] $class")
 
 [ -f "$soul" ] || { echo "km-seat: no soul at $soul" >&2; exit 1; }
 [ -d "$wt" ] || { echo "km-seat: no worktree at $wt (km up creates it)" >&2; exit 1; }
@@ -78,6 +84,47 @@ while :; do
     until [ -s "$home/wake" ]; do sleep 5; done
     reasons=$(cat "$home/wake")
     rm -f "$home/wake"
+
+    # V.6.2 delivered at wake. `km wake --bead ID` writes "bead:ID <reason>", so
+    # the reasons are where a seat learns which bead it is being woken for, and
+    # an `effort:<level>` label on that bead launches this session at that level
+    # instead of the class default. Scoped to the wake by construction: the next
+    # one recomputes from scratch, so nothing has to remember to put it back.
+    #
+    # The wake file APPENDS, so one wake can name several beads. The FIRST bead
+    # named wins, because that is the one the citizen is asked to begin with; a
+    # later bead asking for a different level is said out loud rather than
+    # silently overruling it or being silently overruled. A label that is not a
+    # level is not a request at all — it is dropped with a warning by the same
+    # gate the config goes through, and the next bead's ask is still considered.
+    effort=$class_effort
+    bead_ids=$(printf '%s\n' "$reasons" | sed -n 's/^bead:\([^[:space:]][^[:space:]]*\).*$/\1/p' | tr '\n' ' ')
+    asked=""
+    if [ -n "$bead_ids" ]; then
+        # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
+        asks=$(bd show $bead_ids --json 2>/dev/null |
+            jq -r 'if type == "array" then . else [.] end
+                   | .[] | .id as $i | (.labels // [])[]
+                   | select(startswith("effort:")) | "\($i) \(ltrimstr("effort:"))"' 2>/dev/null) || asks=""
+        for b in $bead_ids; do
+            # Wake order, not bd's: `bd show a b` does not promise to answer in
+            # the order it was asked, and "the first bead named" is a claim
+            # about the wake file.
+            lvl=$(awk -v i="$b" '$1 == i { print $2; exit }' <<<"$asks")
+            [ -n "$lvl" ] || continue
+            if [ -n "$asked" ]; then
+                echo "km-seat: $b also asks for --effort $lvl; $seat launches at $effort, which $asked asked for first" >&2
+                continue
+            fi
+            lvl=$(valid_effort "$lvl" "bead $b's effort: label")
+            [ -n "$lvl" ] || continue
+            asked=$b
+            effort=$lvl
+            echo "km-seat: $b asks for --effort $effort; $seat launches there rather than the $class default '${class_effort:-<none>}'" >&2
+        done
+    fi
+    effort_args=()
+    [ -z "$effort" ] || effort_args=(--effort "$effort")
 
     # A seat runs the hooks in its own checkout, so a parked one keeps running
     # the gates it was created with however many have merged since (bd

@@ -33,6 +33,27 @@ state_dirname = "kingdom-state"
 # queue being long is what a backlog looks like, not evidence about this number.
 max_active = 6
 
+[dispatch]
+# The lowest priority the FRESH pass will wake a citizen for. A ready,
+# unassigned, class-labelled bead numbered above this is named in the run's
+# output and left where it is — filed, searchable, and routed to nobody.
+#
+# It binds the fresh pass ONLY. The resume pass (in-progress beads returning to
+# the seat that holds them) and the owned pass (ready beads naming an assignee)
+# ignore it entirely, because Constitution III.3 is a citizen's right to finish
+# their OWN work: being handed a P3 is what stops here, finishing one you
+# already hold does not. A seat mid-P3 must never be stranded by a number in a
+# config file.
+#
+# MEASURED 2026-08-22, the morning the town was restarted: 319 open beads — 10
+# P0, 39 P1, 106 P2, 158 P3, 6 P4. The P3s are overwhelmingly low-priority
+# defect findings that the town's own adversarial review produced faster than
+# anyone could fix them, so half the board was work the board itself had
+# manufactured, and the dispatcher spent citizens on it while 25 PRs sat open.
+# "2" is therefore a throughput decision about the backlog we have, not a
+# judgement that a P3 is worthless — raise it when the P0-P2 queue drains.
+max_priority = "2"
+
 [cadence]
 dispatch_minutes = 2
 guard_minutes = 15
@@ -55,12 +76,16 @@ permission_mode = "bypassPermissions"
 #
 # The mechanism, stated at what is actually measured (Միհր, 2026-08-22,
 # verdict-6muh-r1): `/effort` changes the level mid-session in the interactive
-# mode km-seat:83 launches, offering exactly the five levels below. It is
+# mode km-seat launches, offering exactly the five levels below. It is
 # unavailable under headless `claude -p`. It is also a client-side TUI command
 # parsed from USER input and never sent to the model, so a citizen — which emits
-# assistant turns — cannot invoke it by writing it. V.6.2's right therefore needs
-# a deliverer, and which one is still open (gqlc-jmwh, not gqlc-w6tl: that bead
-# is the launch flag, and closes with it).
+# assistant turns — cannot invoke it by writing it.
+#
+# So V.6.2's right is delivered at WAKE instead of mid-session: a bead carrying
+# an `effort:<level>` label wakes its seat at that level rather than the class
+# default below (gqlc-jmwh). The escalation is scoped to that bead and the
+# default resumes on the next wake, which is V.6.3 enforced by construction
+# rather than by memory. Anyone may label a bead; nobody needs permission.
 # Levels: low | medium | high | xhigh | max.
 #
 # Provisional, adopted 2026-08-22 with the numbers explicitly open: the town
@@ -81,9 +106,19 @@ permission_mode = "bypassPermissions"
 # were also in a hurry. Not measured, and V.6.2 leaves every judge free to go
 # deeper without asking — if a judge finds `high` too shallow to sign honestly,
 # the number is wrong and not the judge.
+#
+# warrior medium -> high, 2026-08-22 (Անդրանիկ, directly). `high` is the level
+# he wants a Ռազմիկ to execute at: medium was set the same hurried afternoon as
+# the judge change above and is shallower than the work asks for. He also fixed
+# the ceiling: `high` is the maximum for warriors, judges, the mayor and the
+# guard. xhigh and max exist for one case only — a Ճարտարապետ on a design
+# genuinely complex enough to need one — and are reached per-bead through the
+# `effort:` label, never by raising a default here. A citizen may still go
+# SHALLOWER at any time (V.6.2); what is bounded is the town's ability to sit at
+# maximum by default, which is what it did for its entire life before today.
 mayor     = "medium"
 architect = "high"
-warrior   = "medium"
+warrior   = "high"
 judge     = "high"
 guard     = "low"
 
@@ -103,4 +138,5 @@ tsovinar = "warrior:claude-opus-5:Ծովինար"
 hayk     = "warrior:claude-opus-5:Հայկ"
 mihr     = "judge:claude-fable-5:Միհր"
 anahit   = "judge:claude-fable-5:Անահիտ"
+tir      = "judge:claude-fable-5:Տիր"
 raffi    = "guard:claude-sonnet-5:Րաֆֆի"

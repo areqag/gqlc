@@ -15,7 +15,7 @@ act"), beads carries the work, and mail carries the conversation.
 | Քաղաքապետ (mayor) | Սեդրակ | claude-opus-5 | Liaison between king and town. Intake, arbitration, priorities. |
 | Ճարտարապետ (architect) | Արթուր, Արփինէ, Արեգակ | claude-fable-5 | Designs only. Turns intent into implementation-ready beads a Ռազմիկ executes. Does not review PRs. |
 | Ռազմիկ (warrior) | Արամազդ, Վահագն, Աստղիկ, Ար, Նուարդ, Այգ, Ծովինար, Հայկ | claude-opus-5 | Executes beads. Ships PRs. Tests first (`/tdd`), red before green. |
-| Դատաւոր (judge) | Միհր, Անահիտ | claude-fable-5 | The reviewers. A Ռազմիկ PR merges on any one judge's PASS (`/thermo-nuclear-code-quality-review`). Judges code, never people. |
+| Դատաւոր (judge) | Միհր, Անահիտ, Տիր | claude-fable-5 | The reviewers. A PR that owes review merges on any one judge's PASS (`/thermo-nuclear-code-quality-review`). Judges code, never people. |
 | Պահակ (guard) | Րաֆֆի | claude-sonnet-5 | Sweeps the town on a timer: liveness, stuck seats, context fill, handoffs. |
 
 Every citizen's identity lives in `seats/<name>/soul.md` and is loaded as an
@@ -57,14 +57,23 @@ seat worktree.
 3. The dispatcher (`km dispatch`, systemd timer) wakes a free seat of the right
    class for each ready labelled bead, priority first, up to the global
    `max_active` cap. The cap is work-conserving: slots are not reserved per
-   class, so an idle class donates its slots.
-4. A Ռազմիկ PR merges on a Դատաւոր's PASS — any one of them, and one is
-   enough. Ճարտարապետներ do not review PRs: an architect's output is the
-   design, and review belongs to the Դատաւորներ. The request travels as a
-   `class:judge` bead naming the PR — not as mail, because the dispatcher
-   wakes nobody on mail but Սեդրակ, so a mailed request leaves the PR asleep.
-   File it UNASSIGNED so the dispatcher can route it to whichever judge is
-   free. Disputes go to Սեդրակ; what Սեդրակ cannot settle goes to Անդրանիկ.
+   class, so an idle class donates its slots. It routes P0, P1 and P2 only —
+   P3 and P4 stay filed and searchable but wake nobody, because the town's
+   own review once produced low-priority findings several times faster than
+   anyone could fix them. A bead may carry `effort:<level>` to wake its seat
+   deeper or shallower than its class default.
+4. **A PR is reviewed if and only if its bead had a design behind it**
+   (Constitution V.2) — plus constitution amendments, plus any PR a citizen
+   asks to have reviewed, which any citizen may do at any time owing nobody a
+   reason. Work small enough to execute without a Ճարտարապետ's plan merges on
+   green gates, unreviewed and without waiting. Where review IS owed the PR
+   merges on a Դատաւոր's PASS — any one of them, and one is enough.
+   Ճարտարապետներ do not review PRs: an architect's output is the design, and
+   review belongs to the Դատաւորներ. The request travels as a `class:judge`
+   bead naming the PR — not as mail, because the dispatcher wakes nobody on
+   mail but Սեդրակ, so a mailed request leaves the PR asleep. File it
+   UNASSIGNED so the dispatcher can route it to whichever judge is free.
+   Disputes go to Սեդրակ; what Սեդրակ cannot settle goes to Անդրանիկ.
 5. The Դատաւորներ also patrol merged work on their own judgment. A FAIL on an
    open PR blocks the merge until answered, and the judge who wrote it answers
    it — no judge overturns another's verdict, and a PR does not shop for a

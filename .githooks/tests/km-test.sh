@@ -628,12 +628,17 @@ fill_cap_leaving() {
 # every row below it — it is the only one that proves the stubs, the tmux seam
 # and the wake-file path all work, so a "nobody was woken" assertion elsewhere
 # means the dispatcher declined rather than that the harness was inert.
+#
+# Every bead here is at or above [dispatch] max_priority on purpose. gqlc-j1 was
+# a P3 until the floor existed, and under the floor it stopped being routed —
+# which would have turned this liveness control into a row asserting that a
+# judge bead reaches nobody. The floor gets rows of its own below.
 dispatch_case '[
   {"id":"gqlc-unl","priority":0,"assignee":null,"labels":null},
   {"id":"gqlc-taken","priority":0,"assignee":"ar","labels":["class:warrior"]},
   {"id":"gqlc-w1","priority":1,"assignee":null,"labels":["class:warrior"]},
   {"id":"gqlc-a1","priority":2,"assignee":null,"labels":["area:parser","class:architect"]},
-  {"id":"gqlc-j1","priority":3,"assignee":null,"labels":["class:judge"]}
+  {"id":"gqlc-j1","priority":2,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
 run_dispatch
 if [ "$RC" -ne 0 ]; then
@@ -920,8 +925,13 @@ fi
 # queued wake, so there is exactly one free seat and the two beads are in real
 # contention — without that there are eight free warriors, both beads route, and
 # the ordering is unobservable.
+#
+# gqlc-lo is P2, not the P3 it was written as: under [dispatch] max_priority the
+# loser would be withheld from the queue entirely, so the row would pass because
+# there was only ever one candidate and would witness no ordering at all. Both
+# beads must be routable for the contention to be real.
 dispatch_case '[
-  {"id":"gqlc-lo","priority":3,"assignee":null,"labels":["class:warrior"]},
+  {"id":"gqlc-lo","priority":2,"assignee":null,"labels":["class:warrior"]},
   {"id":"gqlc-hi","priority":0,"assignee":null,"labels":["class:warrior"]}
 ]' '[]'
 for s in aramazd vahagn astghik ar nvard ayg tsovinar; do
@@ -937,6 +947,124 @@ elif ! wake_of hayk | grep -q 'bead:gqlc-hi'; then
     bad "the last free seat goes to the higher-priority bead" "it took the lower-priority bead: $(wake_of hayk)"
 else
     ok "with one free seat and two ready beads, the higher-priority bead is the one routed"
+fi
+
+# --- the priority floor: [dispatch] max_priority ------------------------------
+# The town restarted with 158 of 319 open beads at P3 — mostly defect findings
+# its own adversarial review produced faster than anyone could fix them. The
+# fresh pass now declines them. What must NOT change is a citizen's right to
+# finish their own work (Constitution III.3): the resume and owned passes ignore
+# the floor entirely, so a seat already holding a P3 is never stranded by it.
+#
+# These rows run against the town's REAL kingdom.toml, like every dispatch row
+# above, so the floor they test is the shipped one rather than a number invented
+# here — and the fixture priorities are derived from it rather than hard-coded,
+# so raising the floor retunes the rows instead of falsifying them.
+FLOOR=$("$KM" cfg dispatch max_priority 2>/dev/null)
+OVER=$((FLOOR + 1))
+case "$FLOOR" in
+    '' | *[!0-9]*)
+        bad "[dispatch] max_priority is declared in the town's config" "read '$FLOOR'" ;;
+    *)
+        ok "[dispatch] max_priority is declared in the town's config, as a number" ;;
+esac
+
+# One case, both halves: the bead at the floor routes and the bead one below it
+# does not. Same class, same run, adjacent priorities — so a dispatcher that had
+# simply stopped routing warriors fails the first assertion, and one that
+# ignored the floor fails the second. The floor bead is also the liveness
+# control: without it, "gqlc-under reached nobody" is equally true of a harness
+# that did nothing at all.
+dispatch_case "[
+  {\"id\":\"gqlc-atfloor\",\"priority\":$FLOOR,\"assignee\":null,\"labels\":[\"class:warrior\"]},
+  {\"id\":\"gqlc-under\",\"priority\":$OVER,\"assignee\":null,\"labels\":[\"class:warrior\"]}
+]" '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the fresh pass declines a bead below the floor" "rc=$RC out=$OUT"
+elif ! woken_seats | grep -q .; then
+    bad "the fresh pass declines a bead below the floor" "nobody was woken at all, so the harness proves nothing: $OUT"
+elif ! grep -rq 'gqlc-atfloor' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the fresh pass declines a bead below the floor" "the bead AT the floor was not routed either: $(woken_seats) out=$OUT"
+elif grep -rq 'gqlc-under' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the fresh pass declines a bead below the floor" \
+        "a P$OVER bead was routed under a floor of $FLOOR: $(grep -rl 'gqlc-under' "$KM_STATE_DIR/seats" | tr '\n' ' ')"
+else
+    ok "the fresh pass routes a bead at max_priority and declines the one below it"
+fi
+
+# Declining SILENTLY is the failure this dispatcher has shipped three times
+# (gqlc-z1qw, gqlc-fo48): a pass that routes nothing and prints a summary that
+# reads healthy. So the refusal is asserted twice — named per bead, and counted
+# in the one line an operator reads. Both halves, because a count with no id is
+# unactionable and an id with no count is invisible in a long run.
+if ! printf '%s' "$OUT" | grep -q 'gqlc-under'; then
+    bad "a bead declined for priority is named out loud" "the run never mentions it: $OUT"
+elif ! printf '%s' "$OUT" | grep -q "gqlc-under.*priority $OVER"; then
+    bad "a bead declined for priority is named out loud" "it is mentioned without its priority: $OUT"
+# The count is pinned exactly, not as "greater than zero": the queue held two
+# beads and only one was declined, so a floor that counted everything it looked
+# at — or counted the routed bead too — reads 2 here and fails.
+elif ! printf '%s' "$OUT" | grep -qF ", 1 below max_priority $FLOOR)"; then
+    bad "a bead declined for priority is counted in the summary" "the done line hides it: $(printf '%s' "$OUT" | grep 'done')"
+else
+    ok "the declined bead is named with its priority and counted in the done line"
+fi
+
+# Constitution III.3, the half the floor must not touch. A seat holding an
+# in-progress P-below-the-floor bead gets it back, and a ready one that NAMES a
+# seat still reaches that seat. Both passes run before the fresh one and neither
+# consults max_priority; a floor applied to the queue as a whole rather than to
+# the fresh arm alone would strand both, mid-work, with nothing said.
+dispatch_case "[
+  {\"id\":\"gqlc-ownlow\",\"priority\":$OVER,\"assignee\":\"ayg\",\"labels\":[\"class:warrior\"]}
+]" "[
+  {\"id\":\"gqlc-reslow\",\"priority\":$OVER,\"assignee\":\"vahagn\",\"labels\":[\"class:warrior\"]}
+]"
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the floor does not strand a citizen's own work" "rc=$RC out=$OUT"
+elif ! wake_of vahagn | grep -q 'gqlc-reslow'; then
+    bad "the floor does not strand a citizen's own work" \
+        "a P$OVER bead in progress never came back to the seat holding it (woken: $(woken_seats)) out=$OUT"
+elif ! wake_of ayg | grep -q 'gqlc-ownlow'; then
+    bad "the floor does not strand a citizen's own work" \
+        "a ready P$OVER bead naming a seat never reached it (woken: $(woken_seats)) out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'below the floor'; then
+    bad "the floor does not strand a citizen's own work" "it was applied to an owned bead: $OUT"
+else
+    ok "a bead below the floor still resumes to the seat holding it and still reaches the seat it names (III.3)"
+fi
+
+# The floor fails OPEN, and that choice is the whole of this row. A number the
+# dispatcher cannot read is a typo in a config file; if it fell back to routing
+# nothing, one bad character would stop the town while every board still read
+# healthy — the exact shape of gqlc-z1qw and gqlc-fo48. Routing everything and
+# saying why is loud, recoverable, and visible to an operator.
+#
+# The fixture is the REAL config with one line rewritten, not a minimal town, so
+# the roster the rows above route against is the roster this one routes against.
+badfloor="$TMP/badfloor.toml"
+sed 's/^max_priority = .*/max_priority = "banana"/' "$REPO/kingdom/kingdom.toml" >"$badfloor"
+if ! grep -q '^max_priority = "banana"' "$badfloor"; then
+    bad "an unreadable max_priority routes everything" "the fixture rewrite missed, so this row would pass against the real floor"
+else
+    dispatch_case "[
+      {\"id\":\"gqlc-badfloor\",\"priority\":$OVER,\"assignee\":null,\"labels\":[\"class:warrior\"]}
+    ]" '[]'
+    OUT="$(cd "$FIXTURE" && PATH="$BIN:$PATH" KM_CONFIG="$badfloor" "$KM" dispatch 2>&1)"
+    RC=$?
+    if [ "$RC" -ne 0 ]; then
+        bad "an unreadable max_priority routes everything" "rc=$RC out=$OUT"
+    elif ! grep -rq 'gqlc-badfloor' "$KM_STATE_DIR/seats" 2>/dev/null; then
+        bad "an unreadable max_priority routes everything" \
+            "it failed CLOSED — one typo halted routing (woken: $(woken_seats)) out=$OUT"
+    elif ! printf '%s' "$OUT" | grep -q "banana"; then
+        bad "an unreadable max_priority names the value it could not read" \
+            "it failed open silently, so nobody can find the typo: $OUT"
+    else
+        ok "a malformed max_priority routes every priority and names the value it could not read"
+    fi
 fi
 
 # --- the concurrency cap, and the judge's exemption from it (gqlc-dz85) ------
@@ -1159,7 +1287,7 @@ fi
 dispatch_case '[
   {"id":"gqlc-jbusy","priority":0,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
-fill_cap_leaving 0 mihr anahit
+fill_cap_leaving 0 mihr anahit tir
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "an awake judge is not woken again" "rc=$RC out=$OUT"
@@ -1169,10 +1297,16 @@ else
     ok "a judge who is already awake is not woken again for ready judge work"
 fi
 
-# The whole point of a second judge: one busy judge no longer stalls the
-# review queue at a full cap. Guards the roster, not just the routing — with
-# `anahit` dropped from [seats] this wakes nobody and the bench serialises
-# again.
+# The whole point of a bench rather than a single judge: a busy judge no longer
+# stalls the review queue at a full cap. Guards the roster, not just the routing
+# — with every judge but `mihr` dropped from [seats] this wakes nobody and the
+# bench serialises again.
+#
+# The row above needs the WHOLE bench named; this one deliberately does not, so
+# that seating a further judge cannot silently disarm it. It asserts only that
+# SOME free judge took the bead and that the busy one was left alone, which is
+# the property, rather than pinning which seat gets it — that is
+# free_worker_of_class's roster order and is not what this row is about.
 dispatch_case '[
   {"id":"gqlc-jfree","priority":0,"assignee":null,"labels":["class:judge"]}
 ]' '[]'
@@ -1180,12 +1314,12 @@ fill_cap_leaving 0 mihr
 run_dispatch
 if [ "$RC" -ne 0 ]; then
     bad "a busy judge does not stall the review queue" "rc=$RC out=$OUT"
-elif ! wake_of anahit | grep -q 'gqlc-jfree'; then
-    bad "a busy judge does not stall the review queue" "expected anahit, woke: $(woken_seats) out=$OUT"
+elif ! { wake_of anahit; wake_of tir; } | grep -q 'gqlc-jfree'; then
+    bad "a busy judge does not stall the review queue" "no free judge took it, woke: $(woken_seats) out=$OUT"
 elif woken_seats | grep -qw mihr; then
     bad "a busy judge does not stall the review queue" "it also woke the busy judge: $(woken_seats) out=$OUT"
 else
-    ok "with one judge awake and one free, ready review work routes to the free judge at a full cap"
+    ok "with one judge awake and others free, ready review work routes to a free judge at a full cap"
 fi
 
 # The property this whole section exists to keep. Four of the rows above once
@@ -2902,7 +3036,22 @@ printf '%s\n' "$@" >"$KM_TEST_ARGV"
 # The seat's ENVIRONMENT is part of what km-seat composes, not just its argv.
 printf 'KM_CONFIG=%s\n' "${KM_CONFIG-<unset>}" >"$KM_TEST_ARGV.env"
 STUB
-chmod +x "$stubdir/claude"
+
+# The bead ledger km-seat consults for an `effort:` label, in the same shape the
+# dispatcher's bd stub uses: a fixture file named by the environment. It answers
+# the MULTI-id form, because that is the one call km-seat makes, and it echoes
+# the whole fixture rather than filtering — km-seat picks its own bead out of the
+# answer, and a stub that filtered would hide a km-seat that took the wrong row.
+# With no fixture named it answers nothing, so every argv row written before the
+# label existed keeps launching exactly as it did.
+cat >"$stubdir/bd" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+    show) [ -n "${KM_TEST_BEADS:-}" ] || exit 1; cat "$KM_TEST_BEADS" ;;
+    *) exit 0 ;;
+esac
+STUB
+chmod +x "$stubdir/claude" "$stubdir/bd"
 
 # The argv carries the whole soul, so a raw dump buries the flag it is being
 # printed to show. Everything before --append-system-prompt is the part these
@@ -2937,15 +3086,19 @@ gitf -C "$TOWN" worktree add -q --detach "$TOWN-seat-mihr" master
 
 ARGV=""
 STDERR=""
-compose_argv() { # compose_argv <config> [seat] -> ARGV (one arg per line), STDERR
-    local cfgfile=$1 seat=${2:-hayk} sdir pid waited=0
+compose_argv() { # compose_argv <config> [seat] [wake-lines] -> ARGV (one arg per line), STDERR
+    # The wake reasons are an INPUT to the launch now, not just to the message:
+    # `km wake --bead ID` writes "bead:ID <reason>", and the bead's labels can
+    # move --effort. Default unchanged, so every row written before that keeps
+    # asking the same question.
+    local cfgfile=$1 seat=${2:-hayk} wake=${3:-a test wake} sdir pid waited=0
     ARGV="$TMP/argv.$RANDOM"
     STDERR="$TMP/stderr.$RANDOM"
     sdir="$TMP/seatstate.$RANDOM"
     mkdir -p "$sdir/seats/$seat"
-    echo "a test wake" >"$sdir/seats/$seat/wake"
+    printf '%s\n' "$wake" >"$sdir/seats/$seat/wake"
     (cd "$TOWN" && PATH="$stubdir:$PATH" KM_CONFIG="$cfgfile" KM_STATE_DIR="$sdir" \
-        KM_TEST_ARGV="$ARGV" "$KM_SEAT" "$seat") >"$STDERR" 2>&1 &
+        KM_TEST_ARGV="$ARGV" KM_TEST_BEADS="${BEADS_FIXTURE:-}" "$KM_SEAT" "$seat") >"$STDERR" 2>&1 &
     pid=$!
     # km-seat parks again after the stub exits, so it never runs away; we stop
     # waiting as soon as the argv lands, or give up and report what we have.
@@ -3047,6 +3200,84 @@ elif ! grep -q 'mediun' "$STDERR"; then
 else
     ok "a misspelled level is refused, named on stderr, and the seat still launches"
 fi
+
+# --- the per-bead effort escalation (Constitution V.6.2, bd gqlc-jmwh) --------
+# `/effort` is a client-side TUI command parsed from USER input, so a citizen —
+# which emits assistant turns — cannot invoke it, and the level was otherwise
+# fixed at launch. V.6.2's right was therefore unreachable in practice. A bead
+# carrying `effort:<level>` now moves the launch instead.
+#
+# These rows go through compose_argv like every row above: a real km-seat, a
+# real wake file with a real `bead:ID` reason in it, and the argv the stub
+# claude actually received. What is stubbed is bd (the labels) and claude (the
+# argv sink); what EXECUTES is km-seat's whole wake path — parsing the bead id
+# out of the reasons, the bd call, the label extraction, the validation, and the
+# argv assembly.
+
+BEADS_FIXTURE="$TMP/beads.json"
+
+# Escalation. The config says `low` for warriors in the same breath, so a row
+# that merely saw `xhigh` cannot be satisfied by the class default leaking
+# through — the two values are different and the bead's must win.
+printf '[{"id":"gqlc-deep","labels":["class:warrior","effort:xhigh"]}]' >"$BEADS_FIXTURE"
+alt_config "$TMP/labelcfg.toml" 'warrior = "low"'
+compose_argv "$TMP/labelcfg.toml" hayk "bead:gqlc-deep ready warrior work"
+if [ ! -s "$ARGV" ]; then
+    bad "an effort: label reaches the launch" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
+elif [ "$(grep -A1 -x -- '--effort' "$ARGV" | tail -1)" != xhigh ]; then
+    bad "an effort: label reaches the launch" "argv: $(argv_brief "$ARGV")"
+elif ! grep -q 'gqlc-deep' "$STDERR"; then
+    bad "an escalation is said out loud" "the seat launched deeper without naming why: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "a bead labelled effort:xhigh launches its seat at xhigh though the class default is low"
+fi
+
+# The control the row above needs to mean anything: the SAME wake, the same bead
+# id, the same config — and no effort: label. Without it, a km-seat that ignored
+# the config and hard-wired xhigh whenever a bead was named would pass.
+printf '[{"id":"gqlc-deep","labels":["class:warrior"]}]' >"$BEADS_FIXTURE"
+compose_argv "$TMP/labelcfg.toml" hayk "bead:gqlc-deep ready warrior work"
+if [ "$(grep -A1 -x -- '--effort' "$ARGV" 2>/dev/null | tail -1)" != low ]; then
+    bad "an unlabelled bead leaves the class default alone" "argv: $(argv_brief "$ARGV")"
+elif [ -s "$STDERR" ]; then
+    bad "an unlabelled bead launches quietly" "stderr: $(cat "$STDERR")"
+else
+    ok "a bead with no effort: label launches at the class default, quietly"
+fi
+
+# The same gate the config gets, and for a worse threat: any citizen may write a
+# label and nobody reviews one, while `claude --effort dragon` refuses to start.
+# So the level is dropped, named on stderr, and the seat launches at its class
+# default rather than not at all — a bad label must cost nobody their day.
+printf '[{"id":"gqlc-bad","labels":["effort:dragon"]}]' >"$BEADS_FIXTURE"
+compose_argv "$TMP/labelcfg.toml" hayk "bead:gqlc-bad ready warrior work"
+if [ ! -s "$ARGV" ]; then
+    bad "a bad effort: label still launches the seat" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
+elif [ "$(grep -A1 -x -- '--effort' "$ARGV" | tail -1)" != low ]; then
+    bad "a bad effort: label must not reach claude" "argv: $(argv_brief "$ARGV")"
+elif ! grep -q 'dragon' "$STDERR"; then
+    bad "a bad effort: label must be named on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "an unrecognised effort: label is dropped, named on stderr, and the seat launches at its class default"
+fi
+
+# The wake file APPENDS, so one wake can name several beads and they can
+# disagree. The documented rule is that the FIRST bead named wins; the row pins
+# both halves, because "first wins" is unobservable without the loser being
+# heard from. Second bead first in the bd answer, so a km-seat that took bd's
+# order rather than the wake file's fails here.
+printf '[{"id":"gqlc-second","labels":["effort:max"]},{"id":"gqlc-first","labels":["effort:high"]}]' >"$BEADS_FIXTURE"
+compose_argv "$TMP/labelcfg.toml" hayk "bead:gqlc-first one
+bead:gqlc-second two"
+if [ "$(grep -A1 -x -- '--effort' "$ARGV" 2>/dev/null | tail -1)" != high ]; then
+    bad "the first bead named in a wake decides the level" "argv: $(argv_brief "$ARGV")"
+elif ! grep -q 'gqlc-second also asks' "$STDERR"; then
+    bad "the overruled bead is said out loud" "the second ask vanished silently: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "when a wake names two beads asking for different levels, the first wins and the second is named on stderr"
+fi
+
+BEADS_FIXTURE=""
 
 # --- seat-refresh: a merged hook reaches a parked seat (gqlc-xtre) -----------
 # core.hooksPath is RELATIVE, so every seat runs the hooks in its own checkout
