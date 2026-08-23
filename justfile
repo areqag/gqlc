@@ -3175,6 +3175,17 @@ kingdom-install:
     kingdom/bin/km doctor
     kingdom/bin/km install-units
 
+# the full off-switch: disable and remove the systemd user timers, so nothing
+# fires again after logout or reboot. State, mail and seat worktrees are left
+# alone, so kingdom-install puts it back.
+#
+# kingdom-halt is the SOFT stop — the timers keep firing, they just wake
+# nobody, and any citizen's `km resume` lowers it. This is the hard one, and it
+# is the half that had no recipe: turning the town on was a documented
+# one-liner and turning it off was not (bd gqlc-yxnf).
+kingdom-uninstall:
+    kingdom/bin/km uninstall-units
+
 # raise the halt flag: the dispatcher wakes nobody until kingdom-resume
 kingdom-halt reason="":
     kingdom/bin/km halt {{reason}}
