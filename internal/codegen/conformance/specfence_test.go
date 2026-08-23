@@ -90,17 +90,30 @@ const repoRoot = "../../../"
 // documents, not roots, so they are silent about anything docRoots does
 // not reach (gqlc-jfwo).
 //
-// One graded site per listed document is the floor, not one per site.
-// Every site past the first can leave the sweep with nothing said — not
-// by being corrected, but by ceasing to print an anchor, each of which
-// is a delimiter as well as the text after it: `(ctx context.Context`
-// or a code span's opening backticks before it for a signature,
-// `map[string]any` with its opening brace for a binding. C4 §3.2's
-// WriteQuerier member `RemovePerson(ctx context.Context, arg int64)` is
-// one of ten graded signatures in that document, and rewriting its
-// context parameter leaves every sweep here green (gqlc-0rjn, ADR 0029
-// decision 3; docs/specs/codegen-stage-c1.md §5.3 states it to the
-// reader).
+// A site swapped for another inside one document. specSigDocs and
+// specBindDocs carry a per-document FLOOR — how many graded sites the
+// document owes, not merely that it owes one — so a site that stops
+// printing its anchor takes its document under its floor and is named
+// there. What a floor does not distinguish is a document that loses one
+// site and gains another: a count is a size, not a membership. The
+// membership reading is a per-site verbatim census, priced and refused
+// on gqlc-0rjn because it makes this file a copy of the documents, red
+// on every honest edit to an example — which is how a census gets
+// bulk-updated without being read.
+//
+// Until those floors, one graded site per listed document was the whole
+// requirement, and every site past the first could leave the sweep with
+// nothing said — not by being corrected, but by ceasing to print an
+// anchor, each of which is a delimiter as well as the text after it:
+// `(ctx context.Context` or a code span's opening backticks before it
+// for a signature, `map[string]any` with its opening brace for a
+// binding. C4 §3.2's WriteQuerier member
+// `RemovePerson(ctx context.Context, arg int64)` was one of ten graded
+// signatures in that document, and rewriting its context parameter left
+// every sweep here green (gqlc-0rjn, ADR 0029 decision 3;
+// docs/specs/codegen-stage-c1.md §5.3 states it to the reader). Under
+// the floors that edit takes C4's signature count below what specSigDocs
+// declares, and is reported by document name with both numbers.
 const (
 	specC1   = "docs/specs/codegen-stage-c1.md"
 	specC3   = "docs/specs/codegen-stage-c3.md"
@@ -110,13 +123,23 @@ const (
 )
 
 // specSigDocs are the documents that print an emitted query method
-// signature whole, and so must contribute at least one graded argument
-// name.
-var specSigDocs = []string{specC1, specC4, specC5}
+// signature whole, mapped to how many graded argument names each owes.
+//
+// The number is a floor, not an equality: a document that grows a
+// signature is green, and only a document that loses one is red. That
+// asymmetry is deliberate. An equality reddens on every honest addition,
+// and a census that reddens on honest edits is a census maintainers bump
+// without reading — which is the failure mode the per-site verbatim
+// census was refused for (gqlc-0rjn). Adding a signature and leaving the
+// floor where it is costs nothing and protects the sites already
+// counted; only a REMOVAL has to be written down here, which is the same
+// price the membership half of this census already charges.
+var specSigDocs = map[string]int{specC1: 5, specC4: 10, specC5: 3}
 
 // specBindDocs are the documents that print a `map[string]any` driver
-// binding, and so must contribute at least one graded binding value.
-var specBindDocs = []string{specC1, specC3, specC4, specC5}
+// binding, mapped to how many graded binding values each owes. A floor,
+// on the same terms as specSigDocs.
+var specBindDocs = map[string]int{specC1: 3, specC3: 3, specC4: 3, specC5: 1}
 
 // specListRuleDocs are the documents whose method-shape template prints
 // a placeholder standing for the whole parameter list. Such a document
@@ -303,10 +326,11 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 			"that no author-chosen identifier reaches the scope the method body resolves in (gqlc-lhs3, gqlc-rz0l)",
 			codegen.ParamArg))
 
-	requireCensus(t, specSigDocs, sweep.sigDocs, "specSigDocs",
-		"each document on this list prints an emitted query method whose argument this fence reads, so it must\n"+
-			"contribute at least one graded signature; contributing none means its method surface has moved out\n"+
-			"of the sweep, or the scanner no longer reads it")
+	requireCensusFloors(t, specSigDocs, sweep.sigDocs, "specSigDocs", "graded signature",
+		"each document on this list prints emitted query methods whose arguments this fence reads, and the\n"+
+			"number beside it is how many it owes; contributing fewer means one of its signatures has moved out\n"+
+			"of the sweep — stopped printing `(ctx context.Context`, or the code span around it — or the scanner\n"+
+			"no longer reads it. Contributing none means the whole surface went")
 
 	requireCensus(t, specListRuleDocs, sweep.ruleDocs, "specListRuleDocs",
 		"each document on this list prints a placeholder where its method-shape template's parameters go, so\n"+
@@ -370,10 +394,11 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 
 	// A document quoting a signature owes a binding only while it is
 	// listed here (ADR 0029 decision 9).
-	requireCensus(t, specBindDocs, sweep.bindDocs, "specBindDocs",
-		"each document on this list prints the `map[string]any` the emitted body passes to the run seam, so it\n"+
-			"must contribute at least one graded binding; contributing none means its literals have moved out of\n"+
-			"the sweep, or the scanner no longer reads them")
+	requireCensusFloors(t, specBindDocs, sweep.bindDocs, "specBindDocs", "graded binding",
+		"each document on this list prints the `map[string]any` literals the emitted body passes to the run\n"+
+			"seam, and the number beside it is how many bindings it owes; contributing fewer means one literal\n"+
+			"has stopped printing `map[string]any{` — the anchor is the type with its opening brace, so rewriting\n"+
+			"it to any other literal type unreads every binding inside it. Contributing none means they all went")
 }
 
 // sigSweep is one pass of the signature scanners over a set of
@@ -391,7 +416,7 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 type sigSweep struct {
 	graded       []specSig
 	unclosed     []specSig
-	sigDocs      map[string]bool
+	sigDocs      map[string]int
 	exemptDocs   map[string]bool
 	ruleDocs     map[string]bool
 	bareExhibits map[string]bool
@@ -401,7 +426,7 @@ type sigSweep struct {
 type bindSweep struct {
 	graded   []specSig
 	unclosed []specSig
-	bindDocs map[string]bool
+	bindDocs map[string]int
 }
 
 // sweepSigs runs all three signature scanners over every named document,
@@ -411,7 +436,7 @@ type bindSweep struct {
 // in the same document is read on the same terms as any other's.
 func sweepSigs(files []string, read func(string) string, exhibits map[string][]string) sigSweep {
 	out := sigSweep{
-		sigDocs:      map[string]bool{},
+		sigDocs:      map[string]int{},
 		exemptDocs:   map[string]bool{},
 		ruleDocs:     map[string]bool{},
 		bareExhibits: map[string]bool{},
@@ -442,7 +467,7 @@ func sweepSigs(files []string, read func(string) string, exhibits map[string][]s
 		}
 
 		for _, sig := range sigs {
-			out.sigDocs[file] = true
+			out.sigDocs[file]++
 			out.graded = append(out.graded, sig)
 		}
 		for _, sig := range scanParamListRules(file, text) {
@@ -459,12 +484,12 @@ func sweepSigs(files []string, read func(string) string, exhibits map[string][]s
 
 // sweepBinds runs the binding scanner over every named document.
 func sweepBinds(files []string, read func(string) string) bindSweep {
-	out := bindSweep{bindDocs: map[string]bool{}}
+	out := bindSweep{bindDocs: map[string]int{}}
 	for _, file := range files {
 		binds, broken := scanSpecBinds(file, read(file))
 		out.unclosed = append(out.unclosed, broken...)
 		for _, bind := range binds {
-			out.bindDocs[file] = true
+			out.bindDocs[file]++
 			out.graded = append(out.graded, bind)
 		}
 	}
@@ -500,7 +525,7 @@ func TestSpecSweepsCarryUnreadableSites(t *testing.T) {
 		require.Equal(t, "unreadable.md", sweep.unclosed[0].file)
 		require.Equal(t, 2, sweep.unclosed[0].line)
 		require.NotEmpty(t, sweep.graded, "the readable document is still swept")
-		require.True(t, sweep.sigDocs["readable.md"])
+		require.Positive(t, sweep.sigDocs["readable.md"])
 	})
 
 	t.Run("the binding sweep carries an unreadable literal out of the scanner", func(t *testing.T) {
@@ -509,7 +534,7 @@ func TestSpecSweepsCarryUnreadableSites(t *testing.T) {
 		require.Equal(t, "unreadable.md", sweep.unclosed[0].file)
 		require.Equal(t, 4, sweep.unclosed[0].line)
 		require.NotEmpty(t, sweep.graded, "the readable document is still swept")
-		require.True(t, sweep.bindDocs["readable.md"])
+		require.Positive(t, sweep.bindDocs["readable.md"])
 	})
 }
 
@@ -571,6 +596,73 @@ func TestSpecSweepRoutesBareSitesByExhibit(t *testing.T) {
 		require.Equal(t, "minAge", sweep.graded[0].arg)
 		require.Equal(t, map[string]bool{"twice.md: " + drifted: true}, sweep.bareExhibits)
 	})
+}
+
+// requireCensusFloors is requireCensus over a census whose entries carry
+// a count: it reconciles membership in both directions exactly as
+// requireCensus does, and then holds each declared document to the
+// number of graded sites written beside it.
+//
+// The floor is what closes gqlc-0rjn. Membership alone gives a document
+// an entry for as long as ONE graded site survives it, so C4 could go
+// from ten graded signatures to one and stay declared, observed and
+// green. The count is compared per document rather than in total,
+// because a total is answered by any other document having grown: a
+// sum over sources is satisfied while individual sources go silent, and
+// the failure it prints names no document a reader can open.
+//
+// A floor of zero or less is refused. Writing one down is the same act
+// as deleting the document's line, except that it leaves the line there
+// looking like a guard, and the membership half of the reconciliation
+// would then be satisfied by a document that grades nothing.
+//
+// The comparison is >=, not ==. See specSigDocs for why the asymmetry is
+// deliberate rather than a weakening.
+func requireCensusFloors(t fenceT, written map[string]int, observed map[string]int, census, unit, why string) {
+	t.Helper()
+
+	declared := make([]string, 0, len(written))
+	for doc := range written {
+		declared = append(declared, doc)
+	}
+	sort.Strings(declared)
+
+	seen := make(map[string]bool, len(observed))
+	for doc, n := range observed {
+		if n > 0 {
+			seen[doc] = true
+		}
+	}
+	requireCensus(t, declared, seen, census, why)
+
+	var zeroed, under []string
+	for _, doc := range declared {
+		floor := written[doc]
+		if floor <= 0 {
+			zeroed = append(zeroed, fmt.Sprintf("  %s: %d", doc, floor))
+			continue
+		}
+		if got := observed[doc]; got < floor {
+			under = append(under, fmt.Sprintf("  %s: %s declares %d %s(s), the sweep graded %d",
+				doc, census, floor, unit, got))
+		}
+	}
+
+	if len(zeroed) > 0 {
+		require.Fail(t, census+" declares a floor of zero",
+			"a document owing no graded site is a document this census is not guarding, and its line here reads\n"+
+				"like a guard. Remove the line, or write down the number of sites the document actually owes:\n"+
+				strings.Join(zeroed, "\n"))
+	}
+	if len(under) > 0 {
+		require.Fail(t, census+" declares more graded sites than the sweep found",
+			"each document below still contributes at least one site, so the membership reconciliation above is\n"+
+				"satisfied; it is the count that fell. A site leaves the sweep by ceasing to print its anchor, not\n"+
+				"by being corrected, so this is the arm that sees a claim quietly stop being graded:\n"+
+				strings.Join(under, "\n")+"\n\n"+
+				"Restore the site, or — if the document genuinely no longer states it — lower the number here in\n"+
+				"the same commit, so that the removal is written down where the child text cannot edit it.\n\n"+why)
+	}
 }
 
 // requireCensus reconciles a written census against what a sweep
@@ -743,6 +835,76 @@ func TestSpecFailuresAreWired(t *testing.T) {
 		},
 		wantFail: true,
 		wantMsg:  []string{"census names the same entry twice"},
+	}, {
+		name: "requireCensusFloors passes a document at its floor",
+		call: func(ft fenceT) {
+			requireCensusFloors(ft, map[string]int{"a": 2}, map[string]int{"a": 2}, "census", "site", "why")
+		},
+	}, {
+		name: "requireCensusFloors passes a document above its floor",
+		call: func(ft fenceT) {
+			requireCensusFloors(ft, map[string]int{"a": 2}, map[string]int{"a": 3}, "census", "site", "why")
+		},
+	}, {
+		// The gqlc-0rjn shape, reduced: the document still contributes,
+		// so the membership half above is satisfied and only the count
+		// fell. Both numbers are in the message because "fewer than
+		// declared" without them is the bare inequality this census was
+		// not allowed to become.
+		name: "requireCensusFloors fails a document that lost all but one site",
+		call: func(ft fenceT) {
+			requireCensusFloors(ft, map[string]int{"a": 10}, map[string]int{"a": 1}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares more graded sites than the sweep found", "a: census declares 10 site(s), the sweep graded 1", "why"},
+	}, {
+		name: "requireCensusFloors reports the document that fell, not one that held",
+		call: func(ft fenceT) {
+			requireCensusFloors(ft, map[string]int{"a": 2, "b": 2}, map[string]int{"a": 2, "b": 1}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"b: census declares 2 site(s), the sweep graded 1"},
+	}, {
+		name: "requireCensusFloors fails a floor of zero",
+		call: func(ft fenceT) {
+			requireCensusFloors(ft, map[string]int{"a": 0}, map[string]int{"a": 1}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares a floor of zero", "a: 0"},
+	}, {
+		// The membership half is not lost to the floor half: a document
+		// that grades nothing is reported as absent, by requireCensus,
+		// before any count is consulted.
+		name: "requireCensusFloors still fails a declared document the sweep did not grade",
+		call: func(ft fenceT) {
+			requireCensusFloors(ft, map[string]int{"a": 1, "b": 1}, map[string]int{"a": 1}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares an entry the sweep did not produce", "b"},
+	}, {
+		name: "requireCensusFloors still fails a document nobody declared",
+		call: func(ft fenceT) {
+			requireCensusFloors(ft, map[string]int{"a": 1}, map[string]int{"a": 1, "b": 1}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"the sweep produced an entry census does not declare", "b"},
+	}, {
+		name: "requireCensusFloors fails a census that declares nothing",
+		call: func(ft fenceT) {
+			requireCensusFloors(ft, nil, map[string]int{}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares no entry"},
+	}, {
+		// A zero observation is an absence, not a graded site: without
+		// this the floor arm would report "declares 1, graded 0" for a
+		// document the membership arm owes a clearer failure for.
+		name: "requireCensusFloors reads a zero observation as an ungraded document",
+		call: func(ft fenceT) {
+			requireCensusFloors(ft, map[string]int{"a": 1}, map[string]int{"a": 0}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares an entry the sweep did not produce", "a"},
 	}, {
 		name: "requireSwept passes over a run that read something",
 		call: func(ft fenceT) { requireSwept(ft, 1, "the sweep", "why") },
