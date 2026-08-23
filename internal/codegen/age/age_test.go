@@ -1114,7 +1114,17 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			Name: "t", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalDate},
 		}}
 	})
+	// A list expression column is judged by its ELEMENT, not by the
+	// fact that it is a list (bd gqlc-p6cb): a list of string scalars
+	// generates, and this one is refused for the vertex it holds, which
+	// has no element decoder. The whole element table is
+	// TestListExpressionColumnIsJudgedByItsElement's.
 	list := moved("Tags", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "t", Type: resolver.ResolvedList{Element: resolver.ResolvedNode{Labels: graph.LabelSetKey(personLabel)}},
+		}}
+	})
+	servedList := moved("Handles", func(q *codegen.NamedQuery) {
 		q.Validated.Columns = []resolver.Column{{
 			Name: "t", Type: resolver.ResolvedList{Element: resolver.ResolvedScalar{Kind: resolver.ScalarString}},
 		}}
@@ -1255,9 +1265,16 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			wantError: true,
 		},
 		{
-			name:      "a list column is dropped",
+			// The decode path a schema list property rides is the one an
+			// expression list rides, so a served element generates here
+			// as it does there.
+			name:    "a list expression column of a served element generates",
+			queries: []codegen.NamedQuery{servedList},
+		},
+		{
+			name:      "a list column whose element has no decoder is dropped, naming the element",
 			queries:   []codegen.NamedQuery{list},
-			wantSub:   `1 query would be dropped: Tags (column "t" projects list)`,
+			wantSub:   `1 query would be dropped: Tags (column "t" projects a list of node)`,
 			wantError: true,
 		},
 		{
@@ -1322,7 +1339,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		{
 			name:      "every dropped query is named, in batch order",
 			queries:   []codegen.NamedQuery{execUncarriedParam, mapCol, list},
-			wantSub:   "3 queries would be dropped: Batch (parameter $for is property:DURATION), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects list)",
+			wantSub:   "3 queries would be dropped: Batch (parameter $for is property:DURATION), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects a list of node)",
 			wantError: true,
 		},
 		{
@@ -1334,7 +1351,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			// exactly where it was.
 			name:      "an unserved query outranks a refused temporal kind",
 			queries:   []codegen.NamedQuery{temporal, list},
-			wantSub:   `1 query would be dropped: Tags (column "t" projects list)`,
+			wantSub:   `1 query would be dropped: Tags (column "t" projects a list of node)`,
 			wantError: true,
 		},
 		{

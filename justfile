@@ -1997,14 +1997,21 @@ test-codegen-live:
 test-codegen-live-neo4j:
     cd test/data/codegen && go test -tags codegen_live -run TestLiveSmoke -skip 'TestLiveSmoke/apache-age' ./...
 
-# the Apache AGE half: the smoke battery's AGE arm, the session-init contract
-# and the dialect fact the AGE backend's edge-union refusal rests on, each on
-# its own apache/age container. Nightly and manual only — these containers are
-# cost this project does not charge to a pull request. -count=1 because this is
-# the AGE arm's only gate and no pull request pays for it, so the run it reports
-# on has to be a real one.
+# the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
+# the dialect fact the AGE backend's edge-union refusal rests on, the offset
+# sidecar's two live branches, and the probe that prints what AGE answers to the
+# constructors the gap table only suspects — each on its own apache/age
+# container. Nightly and manual only — these containers are cost this project
+# does not charge to a pull request. -count=1 because this is the AGE arm's only
+# gate and no pull request pays for it, so the run it reports on has to be a real
+# one.
+#
+# The alternation is a NAME LIST, not a pattern: go test's -run is unanchored, so
+# a prefix here would silently claim every test that extends it, and
+# TestEveryLiveTestIsRunByARecipeThatNamesIt reads it as names for that reason. A
+# live test added to the codegen module and not added here runs in no job at all.
 test-codegen-live-age:
-    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGEOffsetSidecar|TestAGEAnswersTheConstructorsNobodyRan' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than
