@@ -1828,6 +1828,7 @@ dirty_open_prs() { # -> TSV number, head oid, head branch; rc 1 if gh cannot ans
 dirty_conflicted_paths() { # <root> <base ref> <head oid> -> paths; rc 1 = unknown
     local root=$1 base=$2 head=$3 out rc=0
     local KM_GIT_TIMEOUT="${KM_GIT_TIMEOUT:-30}"
+    git_at "$root" rev-parse --verify --quiet "$head^{commit}" >/dev/null 2>&1 || return 1
     out=$(git_at "$root" merge-tree --write-tree --name-only "$base" "$head" 2>/dev/null) || rc=$?
     [ "$rc" -ne 0 ] || return 0
     # Line 1 is the written tree's oid; the conflicted names run to the first
@@ -1879,7 +1880,7 @@ tell_dirty_authors() {
     told="$sd/dirty-told"
     mkdir -p "$told"
     while IFS=$'\t' read -r n oid branch; do
-        [ -n "$n" ] && [ -n "$oid" ] || continue
+        if [ -z "$n" ] || [ -z "$oid" ]; then continue; fi
         if ! paths=$(dirty_conflicted_paths "$root" origin/master "$oid"); then
             echo "guard-sweep: PR #$n — git could not merge-test $oid (a deleted branch?); not reported" >&2
             continue
