@@ -1,0 +1,40 @@
+# ruff's configuration for the Python that runs inside required CI contexts.
+#
+# `just lint-python` names this file with `--config`, which is stronger than
+# leaving ruff to discover it. Discovery walks up from each file to the nearest
+# pyproject.toml / ruff.toml and stops there, so a stray config in a developer's
+# home directory could never have reached these files — but a pyproject.toml
+# added at this repository's root for some unrelated reason could, silently, by
+# sitting closer to them than this file does. Naming it removes the question. A
+# gate whose rule set depends on the machine it runs on is not a gate.
+#
+# It sits in .github/ rather than beside the scripts for a duller reason:
+# `just lint-hooks .github/scripts` refuses, by design, any file under that
+# directory carrying no shebang it recognises, and a TOML file carries none.
+# That refusal is load-bearing — it is what stops a script being added there and
+# silently skipped — so the config moved rather than the rule bending.
+#
+# `select` is written out for the same reason. ruff's default selection is a
+# moving target across releases: at 0.16.4, run with no config at all over this
+# directory, it reported FURB167, SIM115 and EXE001 — none of which are in the
+# documented E4/E7/E9/F default. Naming the rules means a ruff bump changes what
+# is enforced only when someone edits this file (bd gqlc-tqi4).
+#
+# What each family is here for:
+#   E4/E7/E9  pycodestyle errors ruff implements: imports, statement and syntax
+#             errors. E9 is the parse failure — the floor this gate exists for.
+#   F         pyflakes. F821 (undefined name) is the specific hole bd gqlc-tqi4
+#             was filed on: check-pr-closes.py decides what a PR may claim to
+#             close, and a NameError on a branch its own suite does not reach
+#             shipped green before this.
+#   B         flake8-bugbear. Mutable default arguments, `except` clauses that
+#             swallow, loop-variable capture in closures — the class of defect
+#             that reads correct and behaves wrong on the second call.
+#
+# Line length is NOT enforced (E501 is not selected) and `ruff format` is not
+# run over these files. Reformatting a thousand-line merge gate is a change to
+# the gate, and it is not one this bead is buying.
+line-length = 100
+
+[lint]
+select = ["E4", "E7", "E9", "F", "B"]
