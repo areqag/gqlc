@@ -1,0 +1,19 @@
+{
+  "queries": [
+    {
+      "name": "FindPerson",
+      "cardinality": "one",
+      "text": "MATCH (p:Person {id: $id})\n// an interior comment stays: it is part of this query\nRETURN p"
+    },
+    {
+      "name": "ListPeople",
+      "cardinality": "many",
+      "text": "MATCH (p:Person) RETURN p\n// an abutting comment stays: no blank line separates it from the query"
+    },
+    {
+      "name": "DeletePerson",
+      "cardinality": "exec",
+      "text": "MATCH (p:Person {id: $id}) DETACH DELETE p"
+    }
+  ]
+}
