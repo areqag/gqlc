@@ -28,7 +28,9 @@ set -u
 # When run under a git hook (pre-push via `just test`), GIT_DIR etc. leak in
 # and redirect every git call — repo setup would re-init the parent repo and
 # the hook under test would resolve the wrong branch. Isolate completely.
-unset "${!GIT_@}"
+# Through the SHARED line rather than a private copy of it (bd gqlc-o9wz).
+# shellcheck source=../git-env-sandbox.sh disable=SC1091
+source "$(cd "$(dirname "$0")/.." && pwd)/git-env-sandbox.sh"
 
 # The bd-close rows import the hook as a module to read its verdict names.
 # SourceFileLoader.exec_module caches bytecode NEXT TO THE SOURCE, i.e. inside
@@ -636,8 +638,8 @@ run_drift_case "subdir of a drifted repo warns"      warn       "$UNSET_REPO/sub
 # hooks_drift() strips GIT_* before shelling out, because repo-discovery env
 # redirects `git -C <root> config --get` at whichever repo exported it — a
 # drifted repo would then read a healthy repo's config and fall silent. The
-# `unset "${!GIT_@}"` at the top of this file means no row above can reach that
-# guard, so this one puts GIT_DIR back for a single call, pointed at the healthy
+# git-env-sandbox.sh sourced at the top of this file means no row above can
+# reach that guard, so this one puts GIT_DIR back for a single call, at the healthy
 # repo while the cwd is the drifted one. Measured without the strip: the answer
 # is `silent`, not merely a downgraded `warn` — GIT_DIR masks the drift outright.
 run_gitdir_case() { # $1=name $2=expected $3=cwd $4=command $5=GIT_DIR
@@ -1345,7 +1347,7 @@ fixture_check "a short, long, failed or empty-rev batch-check answers 'could not
   "None|None|None|None" "$OBJTYPES_PROBE"
 
 # --- git_env() is what keeps a leaked GIT_DIR from answering for another repo -
-# The `unset "${!GIT_@}"` at the top of this file means no row above can reach
+# git-env-sandbox.sh sourced at the top of this file means no row above can reach
 # git_env() at all — dropping `env=git_env()` from both subprocess calls left the
 # whole suite green. These two put GIT_DIR back for a single call each, and they
 # are aimed at DIFFERENT call sites, because one row cannot separate them:

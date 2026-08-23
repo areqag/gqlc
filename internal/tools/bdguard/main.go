@@ -11,8 +11,28 @@
 //
 // Correcting a close that was never earned (bd gqlc-npyp: a branch-close hook
 // closed gqlc-rz0l against a SHA a rebase then discarded) is declared in
-// `.beads/allowed-reopens.txt` as `<bead-id> <closing-sha>`. That arm has to
-// separate two shapes that look identical in the status columns:
+// `.beads/allowed-reopens.txt` as `<bead-id> <closing-sha>`, or — for a close
+// whose reason cites no SHA at all — as `<bead-id> <base-updated-at>`, an
+// RFC3339 timestamp that must name the same instant as the base record's
+// `updated_at`. Both shapes quote a fact that is already committed on the base
+// ref, which is the property that stops this being the bare-id allowlist
+// gqlc-npyp exists to avoid; the second shape exists because the first reaches
+// only closes whose reason happens to cite a SHA (bd gqlc-j068 — measured on
+// the export at 92ebb9a7, that was 86 of 290 closed beads, so roughly seven in
+// ten hand-written closes had no declaration bdguard would grant).
+//
+// The two shapes are kept disjoint on purpose. The SHA shape carries a veto —
+// if a ref contains the SHA, the close was earned and the declaration is
+// refused — and the timestamp shape has nothing to veto against, so a
+// declaration could otherwise dodge the veto by naming the timestamp instead.
+// A timestamp declaration is therefore refused outright when the base close
+// reason cites a SHA some ref does contain, with a message pointing at the SHA
+// shape. What that leaves, stated rather than left to be found: a reason
+// citing an ORPHANED SHA accepts either shape, and the two agree there, since
+// the veto would have stayed silent anyway.
+//
+// That arm has to separate two shapes that look identical in the status
+// columns:
 //
 //   - REVERT — an older export overwriting a newer close. This is the defect
 //     bdguard exists for.
@@ -71,8 +91,17 @@ type record struct {
 // an error rather than a disabled veto, so losing the wiring is loud.
 type exemptions struct {
 	drops         map[string]bool
-	reopens       map[string]string
+	reopens       map[string]declaration
 	refContaining func(sha string) string
+}
+
+// declaration is one entry of allowed-reopens.txt: which fact about the BASE
+// record the entry quotes. Exactly one field is set, and which one is decided
+// by the token's own shape, not by a keyword the author picks — a hex token is
+// a sha, an RFC3339 token is a timestamp, and nothing else parses.
+type declaration struct {
+	sha      string // a sha the base close_reason cites, verbatim
+	closedAt string // base's updated_at, for a close whose reason cites no sha
 }
 
 func main() {
@@ -151,7 +180,7 @@ func parseAllowedDrops(data []byte) map[string]bool {
 
 // readAllowedReopens shares readAllowedDrops' absent-is-empty treatment, and
 // its reasons.
-func readAllowedReopens(path string) (map[string]string, error) {
+func readAllowedReopens(path string) (map[string]declaration, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -162,14 +191,14 @@ func readAllowedReopens(path string) (map[string]string, error) {
 	return parseAllowedReopens(data)
 }
 
-// parseAllowedReopens reads `<bead-id> <closing-sha>` per line, ignoring blank
-// lines and lines whose first non-blank byte is '#'. A malformed line is an
-// error: an id on its own is the shape allowed-drops.txt uses, and accepting it
-// here would reduce this arm to a bare-id allowlist. A second entry for an id
-// already seen is an error too, since the two would disagree about which close
-// is being disputed.
-func parseAllowedReopens(data []byte) (map[string]string, error) {
-	allowed := make(map[string]string)
+// parseAllowedReopens reads `<bead-id> <closing-sha>` or `<bead-id>
+// <base-updated-at>` per line, ignoring blank lines and lines whose first
+// non-blank byte is '#'. A malformed line is an error: an id on its own is the
+// shape allowed-drops.txt uses, and accepting it here would reduce this arm to
+// a bare-id allowlist. A second entry for an id already seen is an error too,
+// since the two would disagree about which close is being disputed.
+func parseAllowedReopens(data []byte) (map[string]declaration, error) {
+	allowed := make(map[string]declaration)
 	for i, raw := range bytes.Split(data, []byte("\n")) {
 		line := string(bytes.TrimSpace(raw))
 		if len(line) == 0 || line[0] == '#' {
@@ -177,20 +206,49 @@ func parseAllowedReopens(data []byte) (map[string]string, error) {
 		}
 		fields := strings.Fields(line)
 		if len(fields) != 2 {
-			return nil, fmt.Errorf("line %d: want `<bead-id> <closing-sha>`, got %d field(s): %q", i+1, len(fields), line)
+			return nil, fmt.Errorf("line %d: want `<bead-id> <closing-sha>` or `<bead-id> <base-updated-at>`, got %d field(s): %q", i+1, len(fields), line)
 		}
-		id, sha := fields[0], fields[1]
-		if !isSHAToken(sha) {
-			return nil, fmt.Errorf("line %d: %q is not a 7-40 character lowercase hex sha", i+1, sha)
+		id, token := fields[0], fields[1]
+		var decl declaration
+		switch {
+		case isSHAToken(token):
+			decl.sha = token
+		case isRFC3339Token(token):
+			decl.closedAt = token
+		default:
+			return nil, fmt.Errorf("line %d: %q is neither a 7-40 character lowercase hex sha nor an RFC3339 timestamp", i+1, token)
 		}
 		if prev, dup := allowed[id]; dup {
-			return nil, fmt.Errorf("line %d: %s declared twice (%s then %s)", i+1, id, prev, sha)
+			return nil, fmt.Errorf("line %d: %s declared twice (%s then %s)", i+1, id, prev.token(), decl.token())
 		}
-		allowed[id] = sha
+		allowed[id] = decl
 	}
 	return allowed, nil
 }
 
+// token renders the declaration as the second field that produced it, so a
+// message can quote what the file says rather than a reconstruction of it.
+func (d declaration) token() string {
+	if d.sha != "" {
+		return d.sha
+	}
+	return d.closedAt
+}
+
+func isRFC3339Token(s string) bool {
+	_, err := time.Parse(time.RFC3339, s)
+	return err == nil
+}
+
+// isSHAToken accepts an all-decimal token, deliberately and unlike the bd-close
+// hook, which was taught to reject one (bd gqlc-7fn3: a close reason saying
+// "1048576" was read as citing a sha and refused). About four in a hundred
+// seven-character abbreviations are all-decimal, so rejecting the shape here
+// would refuse real declarations. It is safe in this direction because a
+// declaration is not granted for LOOKING like a sha: citesSHA still requires
+// the base close_reason to quote the same token, and gitRefContaining still
+// gets its veto. A declaration naming a decimal token resolves to no object, so
+// the veto stays silent — the same outcome as any orphaned sha.
 func isSHAToken(s string) bool {
 	if len(s) < 7 || len(s) > 40 {
 		return false
@@ -280,13 +338,13 @@ func check(headBytes, baseBytes []byte, baseLabel string, ex exemptions) error {
 			continue
 		}
 		line := fmt.Sprintf("%s (base=closed, head=%s)", id, headRec.Status)
-		sha, declared := ex.reopens[id]
+		decl, declared := ex.reopens[id]
 		if !declared {
 			reopened = append(reopened, line)
 			continue
 		}
-		if refusal := refuseReopen(baseRec, headRec, sha, ex.refContaining); refusal != "" {
-			reopened = append(reopened, line+"\n      declaration `"+id+" "+sha+"` refused: "+refusal)
+		if refusal := refuseReopen(baseRec, headRec, decl, ex.refContaining); refusal != "" {
+			reopened = append(reopened, line+"\n      declaration `"+id+" "+decl.token()+"` refused: "+refusal)
 		}
 	}
 	if len(dropped) == 0 && len(reopened) == 0 {
@@ -314,7 +372,7 @@ func check(headBytes, baseBytes []byte, baseLabel string, ex exemptions) error {
 		fmt.Fprintf(&buf, "\nhint: a deliberate deletion is declared by listing the exact id in %s (drops only — that file does not reach the reopened arm)", allowedDropsPath)
 	}
 	if len(reopened) > 0 {
-		fmt.Fprintf(&buf, "\nhint: an unearned close is corrected by adding `<bead-id> <closing-sha>` to %s, where the sha is one the base record's close_reason cites, and the head record's updated_at is later than base's", allowedReopensPath)
+		fmt.Fprintf(&buf, "\nhint: an unearned close is corrected by adding `<bead-id> <closing-sha>` to %s, where the sha is one the base record's close_reason cites, and the head record's updated_at is later than base's. When the base close_reason cites no sha at all, quote base's updated_at instead: `<bead-id> <base-updated-at>` in RFC3339", allowedReopensPath)
 	}
 	return errors.New(buf.String())
 }
@@ -322,9 +380,9 @@ func check(headBytes, baseBytes []byte, baseLabel string, ex exemptions) error {
 // refuseReopen returns why a declared reopen is refused, or "" to grant it.
 // Both timestamps must parse: an unreadable one is refused rather than assumed
 // in either direction, since the whole discrimination rests on their order.
-func refuseReopen(baseRec, headRec record, sha string, refContaining func(string) string) string {
-	if !citesSHA(baseRec.CloseReason, sha) {
-		return fmt.Sprintf("the close_reason recorded at base cites no such sha, so the declaration names a close this base does not show (base close_reason %d bytes)", len(baseRec.CloseReason))
+func refuseReopen(baseRec, headRec record, decl declaration, refContaining func(string) string) string {
+	if refusal := refuseDeclaredFact(baseRec, decl, refContaining); refusal != "" {
+		return refusal
 	}
 	baseAt, err := time.Parse(time.RFC3339, baseRec.UpdatedAt)
 	if err != nil {
@@ -337,10 +395,75 @@ func refuseReopen(baseRec, headRec record, sha string, refContaining func(string
 	if !headAt.After(baseAt) {
 		return fmt.Sprintf("head updated_at %s is not after base %s, which is the shape of an older export overwriting a newer close, not of a correction", headRec.UpdatedAt, baseRec.UpdatedAt)
 	}
-	if ref := refContaining(sha); ref != "" {
-		return fmt.Sprintf("%s contains %s, so the close cites work that is on a ref", ref, sha)
+	if decl.sha != "" {
+		if ref := refContaining(decl.sha); ref != "" {
+			return fmt.Sprintf("%s contains %s, so the close cites work that is on a ref", ref, decl.sha)
+		}
 	}
 	return ""
+}
+
+// refuseDeclaredFact checks the half that differs between the two shapes: that
+// the declaration quotes something the BASE record actually says. The recency
+// rule and the reachability veto are shared and live in the caller.
+func refuseDeclaredFact(baseRec record, decl declaration, refContaining func(string) string) string {
+	if decl.sha != "" {
+		if !citesSHA(baseRec.CloseReason, decl.sha) {
+			return fmt.Sprintf("the close_reason recorded at base cites no such sha, so the declaration names a close this base does not show (base close_reason %d bytes)", len(baseRec.CloseReason))
+		}
+		return ""
+	}
+
+	// The timestamp shape. It has no reachability veto of its own, so it is
+	// refused whenever the sha shape WOULD have had one to apply: otherwise a
+	// declaration could escape the veto by quoting the timestamp instead of the
+	// sha the reason already carries. An orphaned sha is not a bar, because
+	// there the veto would have stayed silent and the two shapes agree.
+	for _, cited := range citedSHATokens(baseRec.CloseReason) {
+		if ref := refContaining(cited); ref != "" {
+			return fmt.Sprintf("the base close_reason cites %s and %s contains it, so this close is on a ref; a timestamp declaration cannot be granted over that — declare the sha instead and see the refusal for what it is", cited, ref)
+		}
+	}
+
+	declaredAt, err := time.Parse(time.RFC3339, decl.closedAt)
+	if err != nil {
+		// Unreachable via parseAllowedReopens, which only stores a token that
+		// already parsed. Kept because refuseReopen is also called directly by
+		// tests, where a hand-built declaration can carry anything.
+		return fmt.Sprintf("declared timestamp %q is not RFC3339: %v", decl.closedAt, err)
+	}
+	baseAt, err := time.Parse(time.RFC3339, baseRec.UpdatedAt)
+	if err != nil {
+		return fmt.Sprintf("base updated_at %q is not RFC3339: %v", baseRec.UpdatedAt, err)
+	}
+	if !declaredAt.Equal(baseAt) {
+		return fmt.Sprintf("the declared timestamp %s is not base's updated_at %s, so the declaration names a close this base does not show", decl.closedAt, baseRec.UpdatedAt)
+	}
+	return ""
+}
+
+// citedSHATokens returns the sha-shaped tokens in text, delimited the same way
+// citesSHA requires. Used only to decide whether a timestamp declaration is
+// dodging the sha shape's veto, so a false positive costs a refusal with a
+// message naming the token, not a silent grant.
+func citedSHATokens(text string) []string {
+	var out []string
+	start := -1
+	for i := 0; i <= len(text); i++ {
+		if i < len(text) && isAlnum(text[i]) {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if start >= 0 {
+			if tok := text[start:i]; isSHAToken(tok) {
+				out = append(out, tok)
+			}
+			start = -1
+		}
+	}
+	return out
 }
 
 // gitRefContaining names a ref whose history contains sha, or "" when it finds
