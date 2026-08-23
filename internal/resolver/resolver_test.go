@@ -1468,6 +1468,71 @@ func (s *ResolverSuite) TestNarrowedEndsThatDisagreeKeepTheWideAnswer() {
 	s.Require().ErrorIs(err, ErrUnknownProperty)
 }
 
+// TestANativelyPluralBindingDefersEvenWhenEveryCandidateDeclaresTheProperty
+// pins the asymmetry between the two ways an unlabelled binding's candidate set
+// reaches two or more types. Both are recorded here because nothing else in
+// this package separates them, and PR #1032's body named only two moved classes
+// while this is a third (bead gqlc-icfq).
+//
+// The WIDENED case — commit() substituting `attainable` for a one-element
+// `inferred` — commits the plural set, and the projection path then resolves a
+// property every candidate declares. The NATIVE case — `inferred` itself
+// holding two or more — never reaches the plural lane at all, because
+// commitUnlabelledRound's default arm enters it only on commit()'s `widened`
+// flag, so the round defers and Phase B eventually refuses.
+//
+// The refusal is fail-closed, not unsound: `id` really is INT NOT NULL on both
+// candidates, so accepting it would be a widening in the same direction as the
+// widened case. It is left in place rather than narrowed because the deferral
+// is ErrAmbiguousBinding's only reachable site. Measured while preparing this
+// pin: with the plural commit extended to the native case at Phase B's terminal
+// refusal, the corpus sweep moves ZERO verdicts and fourteen sentinels, and
+// TestSweepReachesEverySentinel then fails because no cell of the cross product
+// refuses with ErrAmbiguousBinding at all. Retiring a sentinel that
+// docs/specs/resolver-stage-r1.md declares, and defends by name against
+// ErrAmbiguousLabel, is a posture decision this pin deliberately does not take;
+// it records the current answer so the decision cannot be taken by accident.
+// Guarding the extension on `covered` does not separate the two cases — all
+// fourteen moved cells are covered.
+//
+// MEMBER_OF is the native shape: it runs from Author and from Author&Editor to
+// the one Guild type, so `(p)` folds to both and no widening was involved.
+// `id` is declared INT NOT NULL on each of them.
+func (s *ResolverSuite) TestANativelyPluralBindingDefersEvenWhenEveryCandidateDeclaresTheProperty() {
+	sch := s.loadSchema("invalid", "narrowed_ends_disagree.gql")
+	resolve := func(sc schema.Schema, src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sc, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	// Both candidates declare `id`, so the column is answerable without knowing
+	// which type the row carries. It is refused anyway.
+	_, err := resolve(sch, "MATCH (p)-[m:MEMBER_OF]->(g:Guild)\nRETURN p.id")
+	s.Require().ErrorIs(err, ErrAmbiguousBinding,
+		"the native plural set never enters the plural lane, so the shared property is not consulted")
+	s.Require().Contains(err.Error(), "candidate types: Author, Author&Editor")
+
+	// The unshared property refuses with the SAME sentinel, which is what says
+	// the refusal is the deferral and not the property check: were the plural
+	// lane entered, this one would be ErrUnknownProperty and the one above
+	// would be accepted.
+	_, err = resolve(sch, "MATCH (p)-[m:MEMBER_OF]->(g:Guild)\nRETURN p.authorOnly")
+	s.Require().ErrorIs(err, ErrAmbiguousBinding,
+		"authorOnly is declared on Author alone; reaching ErrUnknownProperty here would mean the plural lane ran")
+
+	// The widened direction, read from disk so the contrast cannot drift: the
+	// same "every candidate declares it" reasoning, applied where commit()
+	// substituted attainable for a singleton inferred, ACCEPTS.
+	src, err := os.ReadFile(filepath.Join(fixtureDir, "valid", "unlabelled_optional_hop_shared_property.cypher"))
+	s.Require().NoError(err)
+	cols, err := resolve(s.loadSchema("valid", "satisfy_plural_edges_inline_subtype.gql"), string(src))
+	s.Require().NoError(err,
+		"the widened plural binding resolves a property every candidate declares; the native one above does not")
+	s.Require().NotEmpty(cols)
+}
+
 // TestAnUnnarrowedFarEndKeepsItsKeys pins narrowedEndpointKeys' two
 // leave-it-alone arms: a far end that is not a variable, and a variable
 // endpointNarrowing gave no entry.
