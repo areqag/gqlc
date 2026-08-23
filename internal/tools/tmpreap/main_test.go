@@ -431,6 +431,105 @@ func TestRun_DryRunIsNotConstrainedByTheApplyGuard(t *testing.T) {
 	}
 }
 
+// --- the -apply-above gate: what makes this safe on a timer (bd gqlc-u078) ---
+//
+// A cadence that reaps on every tick is a cadence that deletes a citizen's
+// twelve-hour-old scratch on a filesystem at 12%, for nothing. The gate is what
+// makes the timer's default behaviour "do nothing", so the only runs that touch
+// the filesystem are the ones the town actually needs.
+
+// The quiet tick, which is nearly every tick. Below the threshold nothing is
+// deleted AND nothing is walked — the second half is why the walk's own report
+// is asserted absent rather than merely the survivors.
+func TestRun_ApplyAboveAnUnreachedThresholdScansNothingAndDeletesNothing(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+
+	out, err := runTool(t,
+		"-root", root, "-repo", repo, "-base", "master", "-age", "12h",
+		"-archive", archive, "-apply", "-apply-above", "100")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, name := range []string{"factory", "probe937r3", "gqlc-landed", "gqlc-open", "gqlc-dirty", "impl-osuz"} {
+		if _, statErr := os.Stat(filepath.Join(root, name)); statErr != nil {
+			t.Errorf("%s was deleted below the reap threshold: %v", name, statErr)
+		}
+	}
+	if !strings.Contains(out, "under the 100% reap threshold") {
+		t.Errorf("the run does not say the threshold held it, so a silent tick is indistinguishable from a broken one:\n%s", out)
+	}
+	if strings.Contains(out, "REAP") || strings.Contains(out, "RETAIN") {
+		t.Errorf("the decision table was computed below the threshold, so the cadence pays for a walk it did not need:\n%s", out)
+	}
+	if _, statErr := os.Stat(archive); statErr == nil {
+		t.Error("an archive was written on a tick that deleted nothing")
+	}
+}
+
+// The loud tick. Same fixture, same flags, threshold reached: the reap this
+// bead exists to schedule must actually happen, and must say that it is
+// happening. Without this row the one above passes on a tool that never reaps.
+func TestRun_ApplyAboveAReachedThresholdReapsExactlyAsAHandTypedApplyDoes(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+
+	out, err := runTool(t,
+		"-root", root, "-repo", repo, "-base", "master", "-age", "12h",
+		"-archive", archive, "-apply", "-apply-above", "0")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, name := range []string{"factory", "probe937r3", "gqlc-landed"} {
+		if _, statErr := os.Stat(filepath.Join(root, name)); !os.IsNotExist(statErr) {
+			t.Errorf("%s survived a reap past its threshold (err=%v)", name, statErr)
+		}
+	}
+	// The gate changes WHEN the reap runs, never WHAT it spares.
+	for _, name := range []string{"gqlc-open", "gqlc-dirty", "impl-osuz", ".X11-unix"} {
+		if _, statErr := os.Stat(filepath.Join(root, name)); statErr != nil {
+			t.Errorf("%s was deleted by the gated reap though a hand-typed one keeps it: %v", name, statErr)
+		}
+	}
+	if !strings.Contains(out, "reap threshold") {
+		t.Errorf("the run never says a threshold decided it:\n%s", out)
+	}
+	// The archive path matters more here than under a hand-typed apply: nobody
+	// is watching a timer, so the tarball is the only surviving record.
+	if _, statErr := os.Stat(archive); statErr != nil {
+		t.Errorf("the unattended reap wrote no archive, so what it took is unrecoverable: %v", statErr)
+	}
+}
+
+// -apply-above without -apply reads as a brake and is none. Refused, because the
+// same words one flag later are the cadence's real command line.
+func TestParseOptions_ApplyAboveWithoutApplyRefused(t *testing.T) {
+	var errOut bytes.Buffer
+	if _, err := parseOptions([]string{"-apply-above", "75"}, &errOut); err == nil {
+		t.Fatal("-apply-above was accepted on a run that deletes nothing, where it gates nothing")
+	}
+}
+
+// A threshold no filesystem can reach is a cadence that never fires, and the
+// only symptom is /tmp filling up months later.
+func TestParseOptions_ApplyAboveOverAHundredRefused(t *testing.T) {
+	var errOut bytes.Buffer
+	if _, err := parseOptions([]string{"-apply", "-apply-above", "120"}, &errOut); err == nil {
+		t.Fatal("an unreachable reap threshold was accepted, so the cadence would never fire")
+	}
+}
+
+// The default has to be the old behaviour exactly: `just tmp-reap apply`, typed
+// by a person who has already decided, must not consult a threshold.
+func TestParseOptions_ApplyAboveDefaultsToDisabled(t *testing.T) {
+	var errOut bytes.Buffer
+	o, err := parseOptions([]string{"-apply"}, &errOut)
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if o.applyAbove >= 0 {
+		t.Errorf("applyAbove = %v, want a negative value so a bare -apply reaps unconditionally", o.applyAbove)
+	}
+}
+
 // An archive that hit its total limit is a short record of a long deletion. The
 // reap has to stop rather than delete over it, and it has to say why.
 func TestRun_TruncatedArchiveDeletesNothing(t *testing.T) {
