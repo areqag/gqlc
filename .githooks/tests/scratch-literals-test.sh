@@ -96,7 +96,6 @@ raw_scan() {
 # names is gone, the row goes red and the line must be deleted. An allowlist
 # nobody prunes is a pattern carve-out with extra steps.
 ALLOWED=(
-    ".githooks/gate-pushed-commits|$T/m|Printed ADVICE, not a write by this repo: a remedy line telling a citizen how to re-screen one commit by hand. It is still the wrong thing to teach, and bd is filed to reword it; the file belongs to another lane, so it is allowlisted rather than edited here."
     ".githooks/tests/claude-pre-bash-test.sh|$T/x.patch|A command STRING fed to the hook under test as input. Nothing opens it; the row is about how claude-pre-bash classifies 'git am <file>'."
     ".githooks/tests/claude-pre-bash-test.sh|$T/r|Same shape: the text of a bd close command handed to the hook as a fixture, never executed."
     "CLAUDE.md|$T/km.orig|The rule's own prose, NAMING the anti-pattern and the incident that produced it. The three tokens in this section are the examples a citizen is told not to write."
