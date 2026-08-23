@@ -5331,41 +5331,93 @@ else
     ok "a deploy root with no origin/master is drift even when GIT_DIR names a repo that has one"
 fi
 
-deploy_case dispatch-stale
-advance_origin "$TMP/dispatch-stale.git" kingdom/bin/km "fixed"
-gitf -C "$TMP/dispatch-stale" fetch -q origin
-export KM_STATE_DIR="$TMP/dispatch-stale-state"
+# --- the timers deploy themselves rather than refusing (gqlc-nm7w) -----------
+# Nothing in the town ever ran `km deploy`: no systemd unit, no km-seat, no
+# justfile recipe, no line of citizen-protocol.md calls it. origin/master DOES
+# move under the timers, because hold_fetch_master and cmd_seat_refresh both
+# fetch. So the sequence was: a citizen merges any PR touching kingdom/ -> the
+# next fetch moves the ref -> every dispatch tick and every guard tick exits
+# non-zero to the journal -> the town routes nobody until a human types
+# `just kingdom-deploy`. Measured: kingdom-guard.service exited 1 at 03:25:43 on
+# 2026-08-23 for exactly that, naming twenty-odd kingdom/ paths.
+#
+# These rows are the reversal of the two that stood here, which pinned the
+# refusal. The refusal is still the right answer for `doctor` and for the status
+# board — they are read by a human who can act — and it is still wrong for a
+# timer, whose only reader is the journal.
+selfheal="a dispatcher behind origin/master deploys itself and then routes"
+deploy_case dispatch-selfheal
+advance_origin "$TMP/dispatch-selfheal.git" kingdom/bin/km "fixed"
+gitf -C "$TMP/dispatch-selfheal" fetch -q origin
+export KM_STATE_DIR="$TMP/dispatch-selfheal-state"
 mkdir -p "$KM_STATE_DIR"
 export KM_FAKE_READY="$KM_STATE_DIR/ready.json"
 export KM_FAKE_INPROG="$KM_STATE_DIR/inprog.json"
 printf '[{"id":"gqlc-w9","priority":0,"assignee":null,"labels":["class:warrior"]}]' >"$KM_FAKE_READY"
 printf '[]' >"$KM_FAKE_INPROG"
 run_stubbed dispatch
-if [ "$RC" -eq 0 ]; then
-    bad "a stale dispatcher refuses" "exited 0: $OUT"
-elif [ -n "$(woken_seats)" ]; then
-    bad "a stale dispatcher refuses" "it routed work from stale code: $(woken_seats)"
-elif ! printf '%s' "$OUT" | grep -q 'km deploy'; then
-    bad "a stale dispatcher refuses" "the refusal does not name the remedy: $OUT"
+if [ "$RC" -ne 0 ]; then
+    bad "$selfheal" "rc=$RC — the tick still fails, which is the halt: $OUT"
+elif [ "$(cat "$TMP/dispatch-selfheal/kingdom/bin/km")" != fixed ]; then
+    bad "$selfheal" "the deploy root did not advance: $(cat "$TMP/dispatch-selfheal/kingdom/bin/km")"
+elif [ -z "$(woken_seats)" ]; then
+    bad "$selfheal" "it deployed and then routed nobody, so the town is still stopped"
 else
-    ok "a dispatcher whose own tree is behind origin/master refuses and names 'km deploy'"
+    ok "$selfheal"
 fi
 
+# The deploy is only half of it. After a successful fast-forward the km still
+# executing is the copy that was just REPLACED, so finishing the tick in this
+# process runs the stale code the deploy existed to retire — gqlc-ed2u exactly.
+# The command is handed to the deployed copy instead, once, and the bound is
+# what stops a tree that re-drifts from exec'ing forever.
+selfexec="after a self-deploy the tick is handed to the deployed km, exactly once"
+deploy_case dispatch-selfexec
+# shellcheck disable=SC2016 # $1 is the stub's own argument, written not expanded
+printf '#!/usr/bin/env bash\nprintf "deployed-km ran: %%s\\n" "$1"\n' \
+    >"$TMP/dispatch-selfexec.git.seed/kingdom/bin/km"
+chmod +x "$TMP/dispatch-selfexec.git.seed/kingdom/bin/km"
+gitf -C "$TMP/dispatch-selfexec.git.seed" add -A
+gitf -C "$TMP/dispatch-selfexec.git.seed" commit -qm "an executable deployed km"
+gitf -C "$TMP/dispatch-selfexec.git.seed" push -q "$TMP/dispatch-selfexec.git" HEAD:master
+gitf -C "$TMP/dispatch-selfexec" fetch -q origin
+run_stubbed dispatch
+if [ "$(printf '%s\n' "$OUT" | grep -c 'deployed-km ran: dispatch')" -ne 1 ]; then
+    bad "$selfexec" "the deployed copy did not take over exactly once: $OUT"
+else
+    ok "$selfexec"
+fi
+
+guardheal="the guard sweep deploys itself too, so Րաֆֆի is not stopped by a merge"
+deploy_case guard-selfheal
+advance_origin "$TMP/guard-selfheal.git" kingdom/bin/km "fixed"
+gitf -C "$TMP/guard-selfheal" fetch -q origin
 run_stubbed guard-sweep
-if [ "$RC" -eq 0 ]; then
-    bad "a stale guard sweep refuses" "exited 0: $OUT"
-elif [ -n "$(woken_seats)" ]; then
-    bad "a stale guard sweep refuses" "it woke: $(woken_seats)"
+if [ "$RC" -ne 0 ]; then
+    bad "$guardheal" "rc=$RC: $OUT"
+elif [ "$(cat "$TMP/guard-selfheal/kingdom/bin/km")" != fixed ]; then
+    bad "$guardheal" "the guard tick did not advance its own tree"
 else
-    ok "the guard sweep refuses from a stale tree too, so Րաֆֆի is not run by dead code"
+    ok "$guardheal"
 fi
 
-# A refusal visible only in the journal is gqlc-vzpn again, so the glance says it.
+export KM_STATE_DIR="$TMP/dispatch-selfheal-state"
+
+# A drift visible only in the journal is gqlc-vzpn again, and it matters MORE
+# now than when the timers refused: the timers no longer stop, so the board is
+# the place a human meets an un-deployable tree. status does not self-heal —
+# it is a read, and a glance that silently rewrote the operator's checkout
+# would be worse than the condition it reports.
+deploy_case status-stale
+advance_origin "$TMP/status-stale.git" kingdom/bin/km "fixed"
+gitf -C "$TMP/status-stale" fetch -q origin
 run_stubbed status
 if ! printf '%s' "$OUT" | grep -q 'DRIFT'; then
     bad "status shows the drift" "the town's glance is silent about stale machinery: $OUT"
+elif [ "$(cat "$TMP/status-stale/kingdom/bin/km")" = fixed ]; then
+    bad "status shows the drift" "the glance deployed the operator's checkout under him"
 else
-    ok "km status announces DRIFT, so a refusing dispatcher is not journal-only"
+    ok "km status announces DRIFT without deploying anything, so the condition is still visible"
 fi
 
 # Unmeasurable is not clean either, and this is the arm the no-ref rows cannot
@@ -5388,15 +5440,31 @@ else
     ok "doctor FAILS on a deploy root whose diff cannot run, and says it could not measure"
 fi
 
+# The fail-OPEN arm, and the one that decides whether gqlc-nm7w is really
+# fixed. A self-heal that still exits non-zero when the heal fails has moved
+# the halt rather than removed it, and core.bare=true is a deploy no
+# fast-forward can repair. Two halves are asserted together: the tick keeps
+# routing, AND it says loudly why it is routing from a tree it could not
+# certify. Either half alone is a defect — a silent continue is a town running
+# stale code behind a healthy indicator, which is gqlc-ed2u.
+unmeasurable="an undeployable dispatcher warns and keeps routing rather than halting the town"
+export KM_STATE_DIR="$TMP/unmeasurable-state"
+mkdir -p "$KM_STATE_DIR"
+export KM_FAKE_READY="$KM_STATE_DIR/ready.json"
+export KM_FAKE_INPROG="$KM_STATE_DIR/inprog.json"
+printf '[{"id":"gqlc-w8","priority":0,"assignee":null,"labels":["class:warrior"]}]' >"$KM_FAKE_READY"
+printf '[]' >"$KM_FAKE_INPROG"
 run_stubbed dispatch
-if [ "$RC" -eq 0 ]; then
-    bad "an unmeasurable dispatcher refuses" "exited 0: $OUT"
-elif [ -n "$(woken_seats)" ]; then
-    bad "an unmeasurable dispatcher refuses" "it routed work it could not certify: $(woken_seats)"
+if [ "$RC" -ne 0 ]; then
+    bad "$unmeasurable" "rc=$RC — the tick still fails, so the town is still stopped: $OUT"
+elif [ -z "$(woken_seats)" ]; then
+    bad "$unmeasurable" "it routed nobody, which is the halt this bead is about"
 elif ! printf '%s' "$OUT" | grep -q 'cannot measure drift'; then
-    bad "an unmeasurable dispatcher refuses" "the refusal does not name the unmeasured root: $OUT"
+    bad "$unmeasurable" "it continued without naming the root it could not read: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'WARNING'; then
+    bad "$unmeasurable" "it continued SILENTLY, which is stale code behind a healthy indicator: $OUT"
 else
-    ok "dispatch refuses when it cannot measure its own tree, naming the root it could not read"
+    ok "$unmeasurable"
 fi
 
 deploy_case status-clean
@@ -5433,23 +5501,90 @@ else
     ok "deploy advances the tree while a staged and an unstaged bd export survive byte-intact"
 fi
 
-deploy_case deploy-conflict
-advance_origin "$TMP/deploy-conflict.git" .beads/issues.jsonl "export-v2"
-gitf -C "$TMP/deploy-conflict" fetch -q origin
-printf 'local-export\n' >"$TMP/deploy-conflict/.beads/issues.jsonl"
-gitf -C "$TMP/deploy-conflict" add .beads/issues.jsonl
-before="$(gitf -C "$TMP/deploy-conflict" rev-parse HEAD)"
+# --- deploy gets past bd's own export (gqlc-n8h3) ----------------------------
+# The row that stood here pinned the opposite: deploy REFUSED when an incoming
+# commit touched a locally-modified file, and .beads/issues.jsonl was cited as
+# the file worth protecting. Measured 2026-08-23 in the shared checkout, that
+# refusal is not a safety property, it is a permanent stop. bd re-exports that
+# file continuously, so staged-modified is its STEADY STATE (125 insertions
+# against 92 deletions at the time of measurement), and nearly every commit in
+# this repo touches it because every bd write is exported and committed. So
+# `merge --ff-only` refuses at the first attempt where HEAD is genuinely
+# behind, and deploy is the remedy dispatch and guard both name — a loop with
+# no exit. It read as working only because HEAD happened to equal origin/master
+# and the merge was a no-op, which is why the case below advances origin TWICE:
+# once under kingdom/ so the deploy has real work to do, and once under the
+# export so the local dirt is genuinely in the way.
+#
+# Discarding the local export is lossless and it was MEASURED, not assumed. The
+# Dolt DB under .beads/embeddeddolt is bd's source of truth and the jsonl is a
+# passive export: a fresh `bd export` of the live ledger came back with the
+# same 790 lines as the dirty working-tree copy and an empty sorted diff, and
+# every id in the COMMITTED copy was present in the export too. The direction
+# is what matters — RESTORING the local copy over the merged one would revert
+# whatever bead rows other citizens pushed while this tree stood still, which
+# is the failure the "a diffstat is not a diff" memory records.
+beads_ff="deploy fast-forwards past bd's permanently-dirty export instead of refusing"
+deploy_case deploy-beads-blocked
+advance_origin "$TMP/deploy-beads-blocked.git" kingdom/bin/km "fixed"
+advance_origin "$TMP/deploy-beads-blocked.git" .beads/issues.jsonl "export-v2"
+gitf -C "$TMP/deploy-beads-blocked" fetch -q origin
+printf 'local-export\n' >"$TMP/deploy-beads-blocked/.beads/issues.jsonl"
+gitf -C "$TMP/deploy-beads-blocked" add .beads/issues.jsonl
+printf 'local-inter\n' >"$TMP/deploy-beads-blocked/.beads/interactions.jsonl"
+run_stubbed deploy
+if [ "$RC" -ne 0 ]; then
+    bad "$beads_ff" "rc=$RC — this is the stop the town could not get past: $OUT"
+elif [ "$(cat "$TMP/deploy-beads-blocked/kingdom/bin/km")" != fixed ]; then
+    bad "$beads_ff" "deploy reported success without the merged machinery arriving"
+elif [ "$(cat "$TMP/deploy-beads-blocked/.beads/issues.jsonl")" != export-v2 ]; then
+    bad "$beads_ff" "the tree did not take the merged export: $(cat "$TMP/deploy-beads-blocked/.beads/issues.jsonl")"
+else
+    ok "$beads_ff"
+fi
+
+# Lossless in the only sense available to a shell script: the bytes it dropped
+# are somewhere a human can read them. The DB re-emits the export by itself;
+# the copy is for the case where it cannot.
+aside="the local export deploy dropped is copied aside, not merely destroyed"
+copy=$(find "$KM_STATE_DIR" -path '*deploy-set-aside*' -name 'issues.jsonl' 2>/dev/null | head -1)
+if [ -z "$copy" ]; then
+    bad "$aside" "no copy of the discarded export exists anywhere under the state dir"
+elif [ "$(cat "$copy")" != local-export ]; then
+    bad "$aside" "the copy does not hold the bytes that were on disk: $(cat "$copy")"
+elif ! printf '%s' "$OUT" | grep -q 'set aside'; then
+    bad "$aside" "deploy dropped the operator's bytes without saying so: $OUT"
+else
+    ok "$aside"
+fi
+
+# The scope of the discard is the whole safety argument, so it gets its own
+# row. .beads/ is bd's, regenerable, and nobody edits it by hand. Everything
+# else in that tree is a human's uncommitted work, and a deploy that resolved
+# it would be the blanket `reset --hard` this function exists to avoid. When
+# the two are mixed, NOTHING is set aside — a partial one would leave the
+# operator resolving a tree km had already edited under him.
+mixed="deploy still refuses over non-bd dirt, and sets nothing aside when the dirt is mixed"
+deploy_case deploy-mixed-dirt
+advance_origin "$TMP/deploy-mixed-dirt.git" kingdom/bin/km "fixed"
+advance_origin "$TMP/deploy-mixed-dirt.git" .beads/issues.jsonl "export-v2"
+gitf -C "$TMP/deploy-mixed-dirt" fetch -q origin
+printf 'local-export\n' >"$TMP/deploy-mixed-dirt/.beads/issues.jsonl"
+printf 'my-uncommitted-work\n' >"$TMP/deploy-mixed-dirt/kingdom/bin/km"
+before="$(gitf -C "$TMP/deploy-mixed-dirt" rev-parse HEAD)"
 run_stubbed deploy
 if [ "$RC" -eq 0 ]; then
-    bad "deploy refuses when the incoming commit is under local dirt" "exited 0: $OUT"
-elif [ "$(cat "$TMP/deploy-conflict/.beads/issues.jsonl")" != local-export ]; then
-    bad "deploy refuses when the incoming commit is under local dirt" "the local export was overwritten anyway"
-elif [ "$(gitf -C "$TMP/deploy-conflict" rev-parse HEAD)" != "$before" ]; then
-    bad "deploy refuses when the incoming commit is under local dirt" "HEAD moved under a refusal"
-elif ! printf '%s' "$OUT" | grep -q '\.beads/issues\.jsonl'; then
-    bad "deploy refuses when the incoming commit is under local dirt" "the refusal does not name the file in the way: $OUT"
+    bad "$mixed" "exited 0 over a human's uncommitted work: $OUT"
+elif [ "$(cat "$TMP/deploy-mixed-dirt/kingdom/bin/km")" != my-uncommitted-work ]; then
+    bad "$mixed" "it clobbered work that was not bd's"
+elif [ "$(cat "$TMP/deploy-mixed-dirt/.beads/issues.jsonl")" != local-export ]; then
+    bad "$mixed" "it set the export aside anyway, editing a tree it then refused to move"
+elif [ "$(gitf -C "$TMP/deploy-mixed-dirt" rev-parse HEAD)" != "$before" ]; then
+    bad "$mixed" "HEAD moved under a refusal"
+elif ! printf '%s' "$OUT" | grep -q 'kingdom/bin/km'; then
+    bad "$mixed" "the refusal does not name the file in the way: $OUT"
 else
-    ok "deploy refuses rather than clobber a dirty file the incoming commit touches"
+    ok "$mixed"
 fi
 
 deploy_case deploy-off-master
@@ -5532,6 +5667,29 @@ if [ ! -s "$TMP/ssh-marker" ]; then
         "GIT_SSH_COMMAND did not survive git_at, so the fetch never reached it"
 else
     ok "the scrub drops GIT_DIR and keeps GIT_SSH_COMMAND, so deploy can still reach an ssh origin"
+fi
+
+# deploy now runs from inside the dispatch and guard ticks (gqlc-nm7w), and
+# OnUnitActiveSec means the next tick cannot start until this one ends. So a
+# fetch that hangs is a new way to stop the town — the exact failure mode the
+# self-heal was added to remove. The fetch is bounded, and the bound is
+# exercised rather than asserted: a transport that sleeps far longer than the
+# timeout must not hold the command for anything like that long.
+fetch_bound="deploy's fetch is bounded, so a hung transport cannot stall the tick that called it"
+deploy_case deploy-fetch-timeout
+gitf -C "$TMP/deploy-fetch-timeout" remote set-url origin ssh://git@km-test.invalid/town.git
+cat >"$TMP/slow-ssh" <<'SSH'
+#!/usr/bin/env bash
+sleep 25
+SSH
+chmod +x "$TMP/slow-ssh"
+before_s=$SECONDS
+GIT_SSH_COMMAND="$TMP/slow-ssh" KM_FETCH_TIMEOUT=2 "$KM" deploy >/dev/null 2>&1 || true
+elapsed=$((SECONDS - before_s))
+if [ "$elapsed" -ge 12 ]; then
+    bad "$fetch_bound" "deploy held the caller for ${elapsed}s against a 2s bound"
+else
+    ok "$fetch_bound"
 fi
 
 export KM_DEPLOY_ROOT="$TMP/deployed"
