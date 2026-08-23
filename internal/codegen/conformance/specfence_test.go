@@ -180,12 +180,36 @@ var specBareListExhibits = map[string][]string{
 	},
 }
 
+// specBareBindExhibits is the same census for the binding half: the
+// brace-less `"key": value` spans a document prints as exhibits of what
+// the fence catches rather than as claims about the emitted surface.
+//
+// Both documents named here print the spelling gqlc-offa was filed
+// about, inside the sentence recording that it was unread. Closing that
+// bead turns those sentences into graded sites, and a limit's own
+// statement of itself is not a claim about the emitter — so each is
+// exempted by text, per site, on exactly the terms specBareListExhibits
+// sets for the signature half.
+//
+// The exemption is per site and spelled verbatim, so a second span
+// spelled the same way in the same document is graded, and an entry the
+// document stopped printing is red by its text.
+var specBareBindExhibits = map[string][]string{
+	specC1:   {`"minAge": minAge`, `"key": value`},
+	adrFence: {`"key": value`},
+}
+
 // exhibitCensus flattens specBareListExhibits to one entry per exempted
 // list, so that the reconciliation names the list to add or remove
 // rather than the document holding it.
-func exhibitCensus() []string {
+func exhibitCensus() []string { return flattenExhibits(specBareListExhibits) }
+
+// bindExhibitCensus is the same flattening for specBareBindExhibits.
+func bindExhibitCensus() []string { return flattenExhibits(specBareBindExhibits) }
+
+func flattenExhibits(m map[string][]string) []string {
 	var out []string
-	for doc, lists := range specBareListExhibits {
+	for doc, lists := range m {
 		for _, list := range lists {
 			out = append(out, exhibitEntry(doc, list))
 		}
@@ -372,7 +396,7 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 	files := docFiles(t)
 	require.NotEmpty(t, files, "the fence swept no documents; docRoots is stale")
 
-	sweep := sweepBinds(files, func(file string) string { return readDoc(t, file) })
+	sweep := sweepBinds(files, func(file string) string { return readDoc(t, file) }, specBareBindExhibits)
 
 	var bad []specSig
 	for _, bind := range sweep.graded {
@@ -399,6 +423,18 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 			"seam, and the number beside it is how many bindings it owes; contributing fewer means one literal\n"+
 			"has stopped printing `map[string]any{` — the anchor is the type with its opening brace, so rewriting\n"+
 			"it to any other literal type unreads every binding inside it. Contributing none means they all went")
+
+	// The brace-less spans a document prints as exhibits of what the
+	// binding sweep used to miss, reconciled in both directions
+	// (gqlc-offa). An entry whose span the document stopped printing is
+	// an exemption outliving the exhibit it covers; a bare binding this
+	// census does not name is graded rather than exempted, so the sweep
+	// produces no entry the census lacks.
+	requireCensus(t, bindExhibitCensus(), sweep.bareExhibits, "specBareBindExhibits",
+		"a `\"key\": value` span with no `map[string]any{` around it is a documented binding the sweep now\n"+
+			"reads (gqlc-offa). The entries here are the spans printed as exhibits of that limit rather than as\n"+
+			"claims about the emitted surface, and each covers exactly one site — a second span spelled the same\n"+
+			"way in the same document is graded")
 }
 
 // sigSweep is one pass of the signature scanners over a set of
@@ -427,6 +463,11 @@ type bindSweep struct {
 	graded   []specSig
 	unclosed []specSig
 	bindDocs map[string]int
+
+	// bareExhibits are the brace-less binding spans a document prints as
+	// exhibits of the limit rather than as claims, routed out of the
+	// graded set and reconciled against specBareBindExhibits (gqlc-offa).
+	bareExhibits map[string]bool
 }
 
 // sweepSigs runs all three signature scanners over every named document,
@@ -482,15 +523,40 @@ func sweepSigs(files []string, read func(string) string, exhibits map[string][]s
 	return out
 }
 
-// sweepBinds runs the binding scanner over every named document.
-func sweepBinds(files []string, read func(string) string) bindSweep {
-	out := bindSweep{bindDocs: map[string]int{}}
+// sweepBinds runs both binding scanners over every named document: the
+// one reading a `map[string]any{…}` literal, and the one reading a
+// binding stated as a bare code span with no literal around it
+// (gqlc-offa). A bare span the exhibits census names for that document
+// is routed out of the graded set, one entry per site, the way
+// sweepSigs routes a parenthesis-less parameter list.
+//
+// A bare site does NOT set bindDocs. That census asks which documents
+// print the map literal the emitted body passes to the run seam, and a
+// document that stopped printing it while keeping a sentence about
+// bindings would otherwise keep its entry on the sentence.
+func sweepBinds(files []string, read func(string) string, exhibits map[string][]string) bindSweep {
+	out := bindSweep{bindDocs: map[string]int{}, bareExhibits: map[string]bool{}}
 	for _, file := range files {
-		binds, broken := scanSpecBinds(file, read(file))
+		text := read(file)
+
+		binds, broken := scanSpecBinds(file, text)
 		out.unclosed = append(out.unclosed, broken...)
 		for _, bind := range binds {
 			out.bindDocs[file]++
 			out.graded = append(out.graded, bind)
+		}
+
+		unclaimed := map[string]bool{}
+		for _, span := range exhibits[file] {
+			unclaimed[span] = true
+		}
+		for _, site := range scanBareBinds(file, text) {
+			if !unclaimed[site.list] {
+				out.graded = append(out.graded, site.binds...)
+				continue
+			}
+			delete(unclaimed, site.list)
+			out.bareExhibits[exhibitEntry(file, site.list)] = true
 		}
 	}
 	return out
@@ -506,6 +572,101 @@ func sweepBinds(files []string, read func(string) string) bindSweep {
 // document is swept first, so that the readable one behind it still
 // being graded is asserted: carrying the site correctly and giving up on
 // the rest of the corpus would satisfy every other assertion here.
+// TestSpecBareBindScannerReadsOnlyABindingShapedSpan pins both halves of
+// scanBareBinds' narrowing on synthetic input.
+//
+// The corpus cannot pin either. The reject rows are shapes the swept
+// documents hold by the dozen, so a relaxation reddens the live run
+// loudly — but it reddens it on a document, and what a reader then
+// learns is that a spec is wrong rather than that this scanner widened.
+// The accept rows are the reverse: the three bare bindings in the corpus
+// today are all exempted exhibits, so a scanner that stopped reading
+// them would be caught by the census reconciliation and by nothing that
+// says what it stopped reading.
+//
+// The two narrowings are separable here and are separately mutated: drop
+// the jsonScalars exclusion and the `"nullable": true` row goes graded;
+// drop the requirement that the whole span be pairs and the JSON-object
+// and prose rows do (gqlc-offa).
+func TestSpecBareBindScannerReadsOnlyABindingShapedSpan(t *testing.T) {
+	for _, row := range []struct {
+		name  string
+		span  string
+		binds []string
+		why   string
+	}{{
+		name:  "a bare driver binding",
+		span:  `"minAge": minAge`,
+		binds: []string{"minAge"},
+		why:   "the shape gqlc-offa was filed about, and the whole reason this scanner exists",
+	}, {
+		name:  "a bare binding through a carrier conversion",
+		span:  `"seenAt": agtypeNullableMicros(arg.SeenAt)`,
+		binds: []string{"arg.SeenAt"},
+		why:   "the widen is orthogonal to who owns the name, as it is inside a literal",
+	}, {
+		name:  "two pairs in one span",
+		span:  `"id": arg.ID, "name": arg.Name`,
+		binds: []string{"arg.ID", "arg.Name"},
+		why:   "a binding list is still a binding list without the literal around it",
+	}, {
+		name: "a JSON scalar",
+		span: `"nullable": true`,
+		why: "the corpus states model shapes this way in dozens of files; a scanner reading " +
+			"them reddens on prose, which is why ADR 0029 decision 10 declined the symmetric " +
+			"move and gqlc-offa recorded the hole rather than closing it wide",
+	}, {
+		name: "a JSON type name",
+		span: `"directed": bool`,
+		why:  "same, and it is not an expression in the emitted method's Go scope either",
+	}, {
+		name: "a JSON object",
+		span: `{"kind": "property", "type": "INT", "nullable": true}`,
+		why:  "the brace makes the head of the span something other than a quoted key",
+	}, {
+		name: "a quoted value",
+		span: `"kind": "expr"`,
+		why:  "a string literal is not an identifier the emitted method could read",
+	}, {
+		name: "prose that happens to contain a pair",
+		span: `config: <src>: field "version": yaml: unmarshal errors`,
+		why:  "the span is read whole, so a pair buried in a message is not a binding",
+	}, {
+		name: "a Go composite literal of some other type",
+		span: `exportedOptionalGroup{"a": g, "b": g}`,
+		why:  "the head is a type name, so the span is not a bare pair list",
+	}, {
+		// This row is the one that separates the head-of-span test from
+		// the value test. Measured: relax `bareBindValues` to seek the
+		// first quote instead of requiring the span to open with one, and
+		// every other reject row above stays rejected — splitTopLevel
+		// keeps a braced span whole and the value test then throws it out
+		// — so without this row the head test is an equivalent mutant.
+		//
+		// It is also the residual of gqlc-offa rather than a shape nobody
+		// would write: a binding stated inside a sentence that is itself
+		// one code span is read by nothing here. The hole is narrower than
+		// the one that bead measured, and it is still a hole.
+		name: "a pair at the tail of a prose span",
+		span: `the driver binding is "minAge": minAge`,
+		why: "the span is graded whole or not at all; a sentence carrying a pair is not a " +
+			"pair list, and reading one would put every English clause ending in a colon " +
+			"into the graded set",
+	}} {
+		t.Run(row.name, func(t *testing.T) {
+			text := "prose `" + row.span + "` prose\n"
+			var got []string
+			for _, site := range scanBareBinds("synthetic.md", text) {
+				for _, bind := range site.binds {
+					got = append(got, bind.arg)
+				}
+			}
+			require.Equalf(t, row.binds, got, "scanBareBinds read %v out of `%s`, want %v. %s",
+				got, row.span, row.binds, row.why)
+		})
+	}
+}
+
 func TestSpecSweepsCarryUnreadableSites(t *testing.T) {
 	docs := map[string]string{
 		"readable.md": "func (q *Queries) PersonById(ctx context.Context, arg int64) (PersonRow, error)\n" +
@@ -529,7 +690,7 @@ func TestSpecSweepsCarryUnreadableSites(t *testing.T) {
 	})
 
 	t.Run("the binding sweep carries an unreadable literal out of the scanner", func(t *testing.T) {
-		sweep := sweepBinds(files, read)
+		sweep := sweepBinds(files, read, nil)
 		require.Len(t, sweep.unclosed, 1)
 		require.Equal(t, "unreadable.md", sweep.unclosed[0].file)
 		require.Equal(t, 4, sweep.unclosed[0].line)
@@ -1811,6 +1972,142 @@ func scanSpecBinds(file, text string) (binds, unclosed []specSig) {
 		}
 	}
 	return binds, unclosed
+}
+
+// jsonScalars are the value words a JSON model shape writes where a
+// driver binding writes an expression. They are excluded by name, and
+// that exclusion is what makes a brace-less binding scanner possible at
+// all: the swept documents state JSON shapes as bare `"key": value`
+// spans everywhere — `"nullable": true`, `"directed": bool`,
+// `"labels": null` — and a recogniser that read those would redden on
+// prose across the corpus, which is why ADR 0029 decision 10 declined
+// the symmetric move for bindings and gqlc-offa recorded the hole.
+//
+// What makes the narrowing sound rather than convenient: a documented
+// driver binding's value is an expression in the emitted method's Go
+// scope, composed by paramsMapText / argsMapText from codegen.ParamArg,
+// so it is an identifier or a selector rooted at one. None of these
+// words can be that value, and a binding that drifted to one of them is
+// past what this scanner claims to read — a limit narrower than the one
+// it replaces, and stated rather than assumed.
+//
+// Measured over the corpus on this branch: with these excluded, the
+// scanner grades three sites, and all three are the exhibits
+// specBareBindExhibits names. Without them it grades 60.
+var jsonScalars = map[string]bool{
+	"true": true, "false": true, "null": true, "nil": true,
+	"bool": true, "string": true, "number": true, "object": true, "array": true,
+	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"float32": true, "float64": true, "byte": true, "rune": true, "any": true,
+}
+
+// scanBareBinds is the second binding anchor gqlc-offa asks for: a
+// driver binding stated as a bare code span, with no `map[string]any{`
+// around it.
+//
+// mapAnchor's opening brace is part of that anchor, so the whole of the
+// binding sweep was blind to a bullet reading "the driver binding is
+// `"minAge": minAge`" — measured live on PR #804, where inserting that
+// line into C1 §5.3 left TestSpecParamsMapBindsGeneratorOwnedValue
+// green. It documents the capture vector gqlc-lhs3 removed from the
+// emitter, in the section gqlc-rz0l exists to correct, and the fence
+// said nothing.
+//
+// The span has to be a pair list and NOTHING else — no `{` opening it,
+// no prose around it — and every value in it has to be a Go identifier
+// or selector that is not one of jsonScalars. That is what keeps it off
+// the JSON model shapes: `{"kind": "expr", …}` opens with a brace,
+// `config: <src>: field "version": yaml: …` has a head that is not a
+// quoted key, and `"nullable": true` binds a scalar. Both narrowings are
+// load-bearing and each is mutated in
+// TestSpecBareBindScannerReadsOnlyABindingShapedSpan.
+//
+// `.list` carries the span verbatim, because specBareBindExhibits
+// reconciles the exemptions by identity the way specBareListExhibits
+// does for signatures.
+func scanBareBinds(file, text string) []bareBindSite {
+	var out []bareBindSite
+	for _, code := range inlineCodeSpans(text, 0, len(text)) {
+		values, ok := bareBindValues(code.text)
+		if !ok {
+			continue
+		}
+		site := bareBindSite{list: code.text}
+		for _, value := range values {
+			site.binds = append(site.binds, specSig{
+				file: file,
+				line: 1 + strings.Count(text[:code.at], "\n"),
+				arg:  value,
+				list: code.text,
+				text: strings.TrimSpace(collapse(lineAt(text, code.at))),
+			})
+		}
+		out = append(out, site)
+	}
+	return out
+}
+
+// bareBindSite is one such span and the bindings read out of it. The
+// span is the unit the exemption is granted in — a span carrying two
+// pairs is one exhibit, not two — so the bindings are kept under it
+// rather than flattened before the census sees them.
+type bareBindSite struct {
+	list  string
+	binds []specSig
+}
+
+// bareBindValues reads a code span as a comma-separated list of
+// `"key": <expr>` pairs, returning each value reduced the way
+// scanSpecBinds reduces one inside a literal. It reports false unless
+// every entry of the span is such a pair, which is the whole of what
+// keeps this scanner off the corpus's JSON shapes.
+func bareBindValues(span string) ([]string, bool) {
+	entries := splitTopLevel(strings.TrimSpace(span))
+	if len(entries) == 0 {
+		return nil, false
+	}
+	values := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if !strings.HasPrefix(entry, `"`) {
+			return nil, false
+		}
+		closing := strings.IndexByte(entry[1:], '"')
+		if closing < 0 {
+			return nil, false
+		}
+		rest := strings.TrimSpace(entry[closing+2:])
+		if !strings.HasPrefix(rest, ":") {
+			return nil, false
+		}
+		value := unwrapConversions(strings.TrimSpace(rest[1:]))
+		if !isBindableExpr(value) {
+			return nil, false
+		}
+		values = append(values, value)
+	}
+	return values, true
+}
+
+// isBindableExpr reports whether a value could be the expression an
+// emitted method passes to the run seam: an identifier or a selector
+// rooted at one, and not a JSON scalar.
+func isBindableExpr(value string) bool {
+	if value == "" || jsonScalars[value] {
+		return false
+	}
+	c := value[0]
+	isLetter := ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
+	if !isLetter && c != '_' {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if !isIdentByte(value[i]) && value[i] != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 // unwrapConversions peels carrier conversions and pointer operators off
