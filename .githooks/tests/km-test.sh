@@ -569,13 +569,41 @@ case "$1" in
                *"gqlc-"*" gqlc-"*|*"gqlc-"*) ;;
                *) echo "bd stub: dep list with no ids: $_all" >&2; exit 1 ;;
            esac ;;
-    show)  f="${KM_FAKE_PARENTS:-}"; limit=0 ;;
+    # The EXPLICIT-ID query, and it serves two call sites: the hold verdict's
+    # parent statuses and the resume pass's blocker join. Three properties, all
+    # different from ready/list and all load-bearing:
+    #
+    #   no cap is modelled — an explicit-id query has no renderer window to
+    #     fall past, which is the whole reason the blocker join is done this
+    #     way rather than against `bd blocked` (which has no -n flag at all, so
+    #     its overflow behaviour is unmeasurable and would fail OPEN) or
+    #     against list's dependency_count (reads 0 beside an open blocker;
+    #     measured 2026-08-21). The asymmetry with ready/list above is
+    #     deliberate, not an omission.
+    #   the ids FILTER the answer, as real bd does. One fixture can then be the
+    #     union both call sites read, and a caller that asked for the wrong ids
+    #     gets nothing rather than getting the other caller's payload.
+    #   ZERO ids print an error OBJECT on STDOUT. Real bd exits 1 with it
+    #     (re-measured 2026-08-23: `{"error": "at least one issue ID is
+    #     required (use positional args, --id flag, or --current)",
+    #     "schema_version": 1}`); an earlier note here said exit 0 and was
+    #     wrong. The stub keeps exit 0 ON PURPOSE, as the strictly HARDER case:
+    #     with rc=1 the caller's pipefail catches the mistake for free, so the
+    #     `[ -n "$ids" ]` guard could be deleted and no row would notice. At
+    #     exit 0 the failure rides in on stdout only, and killing the guard
+    #     means killing it against the shape it actually has to survive. km is
+    #     safe under BOTH: the guard prevents the call, `.[]` aborts jq on an
+    #     object, and pipefail sees the rc.
+    show)  f="${KM_FAKE_SHOW:-}"; limit=0; _show=1 ;;
     *) exit 0 ;;
 esac
 shift
+_ids=""
 while [ $# -gt 0 ]; do
     case "$1" in
         -n|--limit) limit="${2:-}"; shift ;;
+        -*) ;;
+        *) _ids="$_ids $1" ;;
     esac
     shift
 done
@@ -586,6 +614,22 @@ if [ -f "$f.rc" ]; then
     _rc="$(cat "$f.rc")"
     echo "bd: error: database is locked by another process" >&2
     exit "${_rc:-1}"
+fi
+if [ "${_show:-0}" = 1 ]; then
+    if [ -z "${_ids//[[:space:]]/}" ]; then
+        echo '{"error":"no issue ids supplied"}'
+        exit 0
+    fi
+    if jq -e . "$f" >/dev/null 2>&1; then
+        jq -c --argjson ids \
+            "$(printf '%s\n' $_ids | jq -Rsc 'split("\n") | map(select(length > 0))')" \
+            'map(select(.id as $i | $ids | index($i)))' "$f"
+    else
+        # Malformed fixtures flow through untouched, as they do above, so the
+        # rows that redden the jq half of the pipeline still can.
+        cat "$f"
+    fi
+    exit 0
 fi
 # 0 is unlimited. Any other limit truncates SILENTLY — no notice, no marker —
 # which is exactly how the real renderer behaves and why km must ask for 0.
@@ -600,20 +644,43 @@ STUB
 chmod +x "$BIN/tmux" "$BIN/bd" "$BIN/pgrep"
 
 DCASE=0
-dispatch_case() { # $1=ready, $2=in-progress, $3=dep edges, $4=parent statuses
+dispatch_case() { # $1=ready, $2=in-progress, $3=dep edges, $4=parent statuses, $5=bd show
     DCASE=$((DCASE + 1))
     export KM_STATE_DIR="$TMP/dispatch-$DCASE"
     mkdir -p "$KM_STATE_DIR"
     export KM_FAKE_READY="$KM_STATE_DIR/ready.json"
     export KM_FAKE_INPROG="$KM_STATE_DIR/inprog.json"
     export KM_FAKE_DEPS="$KM_STATE_DIR/deps.json"
-    export KM_FAKE_PARENTS="$KM_STATE_DIR/parents.json"
+    export KM_FAKE_SHOW="$KM_STATE_DIR/show.json"
     printf '%s' "$1" >"$KM_FAKE_READY"
     printf '%s' "$2" >"$KM_FAKE_INPROG"
     # An empty edge set is the shape almost every bead has, so it is the default
     # rather than something each case restates.
     printf '%s' "${3:-[]}" >"$KM_FAKE_DEPS"
-    printf '%s' "${4:-[]}" >"$KM_FAKE_PARENTS"
+    # ONE `bd show` fixture for both explicit-id call sites — the hold verdict's
+    # parents ($4) and the resume pass's blocker join — because real bd answers
+    # both from one table and the stub filters by the ids each caller asks for.
+    #
+    # The default derives an ALL-UNBLOCKED payload from the in-progress fixture,
+    # which is what lets every row written before the blocker join existed pass
+    # unchanged through the new code path. That preservation is the assertion:
+    # an assigned in_progress bead with no blocker resumes exactly as it did.
+    # A row that wants a blocker passes $5 and states the whole union itself.
+    if [ -n "${5:-}" ]; then
+        printf '%s' "$5" >"$KM_FAKE_SHOW"
+    else
+        {
+            # A fixture that does not parse is left out rather than repaired:
+            # those rows redden the query BEFORE the show call is reached, and
+            # inventing JSON for them would change what they mean.
+            if jq -e . <<<"$2" >/dev/null 2>&1
+            then jq -c 'map({id, assignee, dependencies: []})' <<<"$2"
+            else echo '[]'; fi
+            if jq -e . <<<"${4:-[]}" >/dev/null 2>&1
+            then printf '%s\n' "${4:-[]}"
+            else echo '[]'; fi
+        } | jq -sc 'add' >"$KM_FAKE_SHOW"
+    fi
 }
 
 run_dispatch() {
@@ -1547,6 +1614,152 @@ elif ! printf '%s' "$OUT" | grep -q 'in-progress'; then
     bad "a failed in-progress query refuses too" "the refusal does not name the in-progress query: $OUT"
 else
     ok "an in-progress query that fails refuses before the fresh pass, so no seat is routed work another seat is holding"
+fi
+
+# --- the resume pass wakes only for ACTIONABLE work (gqlc-s1lm / gqlc-3jmx) --
+# Post-#1116 law: a warrior's implementation bead stays in_progress while its
+# class:judge review bead awaits a verdict. The resume pass woke every
+# in-progress holder, so every two-minute cycle re-woke review-blocked warriors
+# who could only read mail and sleep again — each one burning a slot from
+# max_active, with the judge who would unblock them competing for the slots
+# they had just eaten. The town spent eight hours in that shape.
+#
+# The predicate is the bead's own dependency graph: actionable means no OPEN
+# blocks-type dep. The warrior files the review bead with
+# `--deps blocks:<impl-bead>`, which makes the review bead block the impl bead;
+# the judge's close is the single toggle that frees it.
+#
+# These rows pass the show fixture EXPLICITLY (the fifth dispatch_case
+# argument), because the default derives an all-unblocked payload and that
+# default is what every row above is asserting.
+blocked_show() { # <impl id> <assignee> <blocker id> <blocker status>
+    jq -cn --arg i "$1" --arg a "$2" --arg b "$3" --arg s "$4" \
+        '[{id: $i, assignee: $a,
+           dependencies: [{id: $b, status: $s, dependency_type: "blocks"}]}]'
+}
+
+# R1. The headline, and all three halves belong in one row. The cap is ONE, so
+# the slot the blocked warrior used to eat is the only slot there is: under the
+# old pass he took it to read mail and sleep again, and the capped work behind
+# him reached nobody. Asserting only "he was not woken" would pass a change that
+# simply stopped resuming; the handoff is what makes it a fix.
+cap_config 1
+dispatch_case '[
+  {"id":"gqlc-jrev","priority":0,"assignee":null,"labels":["class:judge"]},
+  {"id":"gqlc-wfresh","priority":0,"assignee":null,"labels":["class:warrior"]}
+]' '[
+  {"id":"gqlc-impl","assignee":"aramazd","labels":["class:warrior"]}
+]' '[]' '[]' "$(blocked_show gqlc-impl aramazd gqlc-jrev open)"
+run_dispatch
+r1="a review-blocked warrior sleeps through dispatch and the slot he was eating is spent on work"
+if [ "$RC" -ne 0 ]; then
+    bad "$r1" "rc=$RC out=$OUT"
+elif wake_of aramazd | grep -q 'gqlc-impl'; then
+    bad "$r1" "the blocked warrior was resume-woken anyway: $(wake_of aramazd)"
+elif ! wake_of mihr | grep -q 'gqlc-jrev'; then
+    bad "$r1" "the review bead reached no judge (woken: $(woken_seats)) out=$OUT"
+elif ! grep -rq 'gqlc-wfresh' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "$r1" "the freed slot bought nothing — the capped warrior bead reached nobody (woken: $(woken_seats)) out=$OUT"
+else
+    ok "$r1 — at max_active=1 the wake that used to eat the only slot no longer does"
+fi
+unset KM_CONFIG
+
+# R2. The release. Nothing else changes state back: `bd ready` is open-only, so
+# an in_progress bead never re-enters it and this pass is the ONLY way back.
+dispatch_case '[]' '[
+  {"id":"gqlc-impl","assignee":"aramazd","labels":["class:warrior"]}
+]' '[]' '[]' "$(blocked_show gqlc-impl aramazd gqlc-jrev closed)"
+run_dispatch
+r2="a closed blocker is what wakes the warrior again"
+if [ "$RC" -ne 0 ]; then
+    bad "$r2" "rc=$RC out=$OUT"
+elif ! wake_of aramazd | grep -q 'gqlc-impl'; then
+    bad "$r2" "the judge's close freed nothing (woken: $(woken_seats)) out=$OUT"
+elif ! wake_of aramazd | grep -q 'resume your in-progress work'; then
+    bad "$r2" "the wake does not read as a resume: $(wake_of aramazd)"
+else
+    ok "$r2 — a blocker whose status is closed no longer withholds the resume wake"
+fi
+
+# R3. Only blocks-type deps gate readiness; `related` and `discovered-from`
+# state a fact about provenance and withhold nothing. A predicate that dropped
+# the type conjunct would put every bead with any open neighbour to sleep.
+dispatch_case '[]' '[
+  {"id":"gqlc-impl","assignee":"aramazd","labels":["class:warrior"]}
+]' '[]' '[]' "$(jq -cn '[{id: "gqlc-impl", assignee: "aramazd",
+        dependencies: [{id: "gqlc-note", status: "open", dependency_type: "related"}]}]')"
+run_dispatch
+r3="an open dep that is not a blocker withholds nothing"
+if [ "$RC" -ne 0 ]; then
+    bad "$r3" "rc=$RC out=$OUT"
+elif ! wake_of aramazd | grep -q 'gqlc-impl'; then
+    bad "$r3" "a related-type dep was treated as a blocker (woken: $(woken_seats)) out=$OUT"
+else
+    ok "$r3 — only blocks-type dependencies gate the resume wake, as they gate bd's own readiness"
+fi
+
+# R4. Mixed holdings, and this is where a plausible wrong fix shows: filter the
+# WAKE but build the reason from the pre-filter id set, and the seat is handed
+# back a bead it cannot act on beside one it can.
+dispatch_case '[]' '[
+  {"id":"gqlc-blk","assignee":"aramazd","labels":["class:warrior"]},
+  {"id":"gqlc-act","assignee":"aramazd","labels":["class:warrior"]}
+]' '[]' '[]' "$(jq -cn '[{id: "gqlc-blk", assignee: "aramazd",
+        dependencies: [{id: "gqlc-jrev", status: "open", dependency_type: "blocks"}]},
+       {id: "gqlc-act", assignee: "aramazd", dependencies: []}]')"
+run_dispatch
+r4="a seat holding one blocked and one actionable bead is woken for the actionable one only"
+if [ "$RC" -ne 0 ]; then
+    bad "$r4" "rc=$RC out=$OUT"
+elif ! wake_of aramazd | grep -q 'gqlc-act'; then
+    bad "$r4" "the actionable bead was withheld too: $(wake_of aramazd)"
+elif wake_of aramazd | grep -q 'gqlc-blk'; then
+    bad "$r4" "the wake reason names the blocked bead, so he is handed work he cannot act on: $(wake_of aramazd)"
+else
+    ok "$r4, and the reason names it alone"
+fi
+
+# R5 / R6. Fail-closed, both halves, the same four assertions the older failed-
+# query rows make. A blocker query that fails is not a graph with no blockers
+# in it, and the shape it must not take is a clean "done (0 wake(s) this run)".
+for blocker_fail in rc parse; do
+    dispatch_case '[]' '[
+      {"id":"gqlc-impl","assignee":"aramazd","labels":["class:warrior"]}
+    ]' '[]' '[]' "$(blocked_show gqlc-impl aramazd gqlc-jrev open)"
+    case "$blocker_fail" in
+        rc)    printf '1' >"$KM_FAKE_SHOW.rc" ;;
+        parse) printf 'not json at all' >"$KM_FAKE_SHOW" ;;
+    esac
+    run_dispatch
+    r5="a failed blocker query refuses instead of reading as an unblocked graph ($blocker_fail)"
+    if [ "$RC" -eq 0 ]; then
+        bad "$r5" "exited 0: $OUT"
+    elif [ -n "$(woken_seats)" ]; then
+        bad "$r5" "it woke: $(woken_seats)"
+    elif ! printf '%s' "$OUT" | grep -q 'blocker query'; then
+        bad "$r5" "the refusal does not name the blocker query: $OUT"
+    elif printf '%s' "$OUT" | grep -q '0 wake(s)'; then
+        bad "$r5" "it still reported a normal idle run: $OUT"
+    else
+        ok "$r5"
+    fi
+done
+
+# The zero-id guard, stated as a row rather than left to the '[]' '[]' cases
+# above to catch by accident. Real `bd show --json` with no ids prints an error
+# OBJECT on stdout (and exits 1; see the stub, which models exit 0 as the
+# harder case), so an unguarded call would abort jq on every idle run and the
+# dispatcher would refuse where it should report a quiet one.
+dispatch_case '[]' '[]'
+run_dispatch
+r7="an empty in-progress set never reaches the blocker query at all"
+if [ "$RC" -ne 0 ]; then
+    bad "$r7" "an idle run refused: rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q '0 wake(s)'; then
+    bad "$r7" "an idle run does not report itself as one: $OUT"
+else
+    ok "$r7, so a run with nothing in progress reports a quiet run rather than a refusal"
 fi
 
 # --- the halt stops the guard sweep too (gqlc-6dzi) --------------------------
@@ -2632,12 +2845,100 @@ assert_delivery_shape "km sleep clears the line, then sends /exit, then Enter �
 
 # The nudge path has the same shape and the same failure — a wake reason typed
 # at an already-awake seat, stranded in its input box, wakes nobody.
+#
+# The pane is set here rather than left absent: a real awake seat has one, and
+# the rows below turn on what it SAYS, so a fixture with no pane at all would be
+# a seat shape the town has never had.
 dispatch_case '[]' '[]'
 fill_cap ayg
+pane_idle ayg
 export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
 : >"$KM_SENDKEYS_LOG"
 PATH="$BIN:$PATH" "$KM" wake ayg --reason "a nudge" >/dev/null 2>&1
 assert_delivery_shape "km wake nudges an awake seat with the clear, the text and Enter each on their own" "$KM_SENDKEYS_LOG"
+
+# --- km wake CONFIRMS its nudge, exactly as the dispatcher's does (gqlc-01ev) -
+# Half of this bead was already fixed when it was read: the single bundled
+# `send-keys ... "text" Enter` it was filed against had since been split into
+# the clear/text/Enter of send_line, and the row above pins that. The half that
+# was NOT fixed is the one that matters, because send_line's own contract says
+# the split is NECESSARY AND NOT SUFFICIENT — the tty re-coalesces at any delay
+# if the reader is not in read() between the writes. seat_nudge exists to obey
+# that contract by confirming after the fact, and on 2026-08-22 it was wired
+# into the dispatcher's mail nudge (km:990) and NOT into cmd_wake's
+# already-awake nudge, which is the path this bead was filed about and the path
+# `km wake` and route_owners both take.
+#
+# So: the same four assertions the dispatcher's sticky row makes, on cmd_wake.
+dispatch_case '[]' '[]'
+fill_cap ayg
+pane_idle ayg
+pane_sticky ayg
+export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
+: >"$KM_SENDKEYS_LOG"
+OUT="$(PATH="$BIN:$PATH" "$KM" wake ayg --reason "a nudge" 2>&1)"
+RC=$?
+wake_sticky_row="km wake reports a nudge that never left the prompt box"
+if [ "$RC" -ne 0 ]; then
+    bad "$wake_sticky_row" "rc=$RC — an undelivered nudge must not abort the dispatcher that called it: $OUT"
+elif printf '%s' "$OUT" | grep -q 'is already awake; nudged instead'; then
+    bad "$wake_sticky_row" "success was reported for a line still sitting unsent: $OUT / pane: $(pane_of ayg)"
+elif ! printf '%s' "$OUT" | grep -q 'NUDGE UNDELIVERED to ayg'; then
+    bad "$wake_sticky_row" "nothing said the message never landed: $OUT"
+elif [ "$(grep -c 'Enter' "$KM_SENDKEYS_LOG")" -lt 2 ]; then
+    bad "$wake_sticky_row" "the bare Enter that repaired this by hand was never re-sent: $(cat "$KM_SENDKEYS_LOG")"
+elif ! wake_of ayg | grep -q 'a nudge'; then
+    bad "$wake_sticky_row" "the reason was dropped instead of queued, so it dies with the send: $(wake_of ayg)"
+else
+    ok "$wake_sticky_row, re-sends the bare Enter, and queues the reason so it survives the failed send"
+fi
+unset KM_SENDKEYS_LOG
+
+# The other side of the same guard. A nudge that DID land must say it was
+# confirmed, and must not queue a duplicate onto the wake file — a report that
+# cannot distinguish the two is the report `km wake` printed for the whole of
+# 2026-08-22 while delivering nothing.
+dispatch_case '[]' '[]'
+fill_cap ayg
+pane_idle ayg
+export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
+: >"$KM_SENDKEYS_LOG"
+OUT="$(PATH="$BIN:$PATH" "$KM" wake ayg --reason "a nudge" 2>&1)"
+wake_ok_row="km wake claims delivery only after the prompt is seen clear"
+if ! printf '%s' "$OUT" | grep -q 'the prompt cleared, so it was delivered'; then
+    bad "$wake_ok_row" "delivery was claimed without being confirmed: $OUT"
+elif printf '%s' "$OUT" | grep -q 'UNDELIVERED'; then
+    bad "$wake_ok_row" "a delivered nudge was reported undelivered: $OUT"
+elif [ -n "$(wake_of ayg)" ]; then
+    bad "$wake_ok_row" "a delivered nudge also queued itself, so the seat hears it twice: $(wake_of ayg)"
+else
+    ok "$wake_ok_row"
+fi
+unset KM_SENDKEYS_LOG
+
+# VI.2, on the operator's path this time. cmd_wake typed at any awake seat with
+# a window, and a nudge ends in Enter; a seat frozen on a usage-limit or
+# shutdown modal has no prompt line at all because the modal covers the box, so
+# that Enter CHOOSES whichever option is highlighted. The dispatcher's mail
+# nudge has been guarded against this since gqlc-eier; `km wake` was not, and
+# route_owners reaches it on every dispatch run.
+dispatch_case '[]' '[]'
+fill_cap ayg
+pane_modal ayg
+export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
+: >"$KM_SENDKEYS_LOG"
+OUT="$(PATH="$BIN:$PATH" "$KM" wake ayg --reason "a nudge" 2>&1)"
+wake_modal_row="km wake does not type at a seat frozen on a modal"
+if [ -s "$KM_SENDKEYS_LOG" ]; then
+    bad "$wake_modal_row" "an Enter was sent at a modal, which presses whatever is highlighted: $(cat "$KM_SENDKEYS_LOG")"
+elif ! printf '%s' "$OUT" | grep -q 'no prompt to type at'; then
+    bad "$wake_modal_row" "the refusal is silent, so the reason looks delivered: $OUT"
+elif ! wake_of ayg | grep -q 'a nudge'; then
+    bad "$wake_modal_row" "the reason was dropped rather than queued for when the modal clears: $(wake_of ayg)"
+else
+    ok "$wake_modal_row — it queues the reason instead, because Enter on a modal is not consent (VI.2)"
+fi
+unset KM_SENDKEYS_LOG
 
 # --- a requested departure that never arrived is re-delivered ----------------
 # The citizen ran `km sleep`; consent is not in question. What failed is the
@@ -3012,6 +3313,137 @@ elif printf '%s' "$OUT" | grep -E '^ayg' | grep -qE '(^| )0s'; then
     bad "an unreadable heartbeat renders as unknown" "it was rendered as a fresh heartbeat: $(printf '%s' "$OUT" | grep -E '^ayg')"
 else
     ok "a heartbeat that cannot be parsed renders as unknown rather than as a zero-second age"
+fi
+
+# --- a seat whose CHECKOUT cannot report is named, not read as idle (h17n) ---
+# heartbeat.json is written by no heartbeat script. It is a side effect of
+# kingdom/bin/km-statusline, which runs only because .claude/settings.json wires
+# it as the statusLine command — and both of those are TRACKED. So a seat's
+# ability to report its own liveness is a property of the COMMIT its worktree is
+# parked on. Վահագն's seat sat on a branch forked three days before the kingdom
+# landed and went silent for a whole night's work, while the board's blank HB
+# column read exactly like the eight genuinely idle seats beside him.
+#
+# The rows run from the hermetic $FIXTURE, because km derives seat_worktree from
+# its CWD. Run from the real checkout they would read whatever seat worktrees
+# happen to exist on the operator's disk — green on his box and answering a
+# different question on every other.
+status_at_fixture() { OUT="$(cd "$FIXTURE" && PATH="$BIN:$PATH" "$KM" status 2>&1)"; RC=$?; }
+seat_checkout() { # <seat> <wired|unwired>
+    local wt="$FIXTURE-seat-$1"
+    mkdir -p "$wt/.claude" "$wt/kingdom/bin"
+    rm -f "$wt/.claude/settings.local.json"
+    if [ "$2" = wired ]; then
+        printf '#!/usr/bin/env bash\n' >"$wt/kingdom/bin/km-statusline"
+        printf '{"statusLine":{"type":"command","command":"kingdom/bin/km-statusline"}}\n' \
+            >"$wt/.claude/settings.json"
+    elif [ "$2" = halfwired ]; then
+        # Script present, wiring absent — the half the file-existence check
+        # cannot see. Reachable two ways: a branch that carries kingdom/bin but
+        # forked before the statusLine key was added, and a checkout whose
+        # settings.json was replaced by hand. Nothing runs km-statusline in
+        # either, so the seat is exactly as silent as the fully-unwired one.
+        printf '#!/usr/bin/env bash\n' >"$wt/kingdom/bin/km-statusline"
+        printf '{}\n' >"$wt/.claude/settings.json"
+    else
+        # The measured shape, and BOTH halves of it: on that branch the key was
+        # absent AND km-statusline did not exist, so even an untracked local
+        # override could not have pointed at anything.
+        printf '{}\n' >"$wt/.claude/settings.json"
+        rm -f "$wt/kingdom/bin/km-statusline"
+    fi
+}
+
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap vahagn
+seat_checkout vahagn unwired
+status_at_fixture
+blind_row="a live seat whose checkout has no statusline wiring is named blind"
+if [ "$RC" -ne 0 ]; then
+    bad "$blind_row" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -E '^vahagn' | grep -q 'blind'; then
+    bad "$blind_row" "the HB column still reads as an ordinary silence: $(printf '%s' "$OUT" | grep -E '^vahagn')"
+elif ! printf '%s' "$OUT" | grep '^BLIND' | grep -q vahagn; then
+    bad "$blind_row" "no line names the seat, so the operator has nothing to act on: $OUT"
+elif ! printf '%s' "$OUT" | grep '^BLIND' | grep -q 'seat-refresh'; then
+    bad "$blind_row" "the line names the seat but not the remedy: $(printf '%s' "$OUT" | grep '^BLIND')"
+else
+    ok "$blind_row, so the instrument's own silence is no longer indistinguishable from an idle seat"
+fi
+
+# The same claim through the OTHER half of the guard. seat_can_report asks two
+# questions — is km-statusline there, and does settings.json wire it — and the
+# row above answers only the first, because its fixture deletes the script and
+# the file check short-circuits before the grep ever runs. Measured, not
+# supposed: blinding the grep (to a pattern that matches nothing, then `|| true`)
+# left the suite at 214/0 on 2026-08-23. So this row pins the wiring half on a
+# fixture where the script IS present, and it is the only row that can fail when
+# the settings.json check stops discriminating.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap vahagn
+seat_checkout vahagn halfwired
+status_at_fixture
+half_row="a checkout that has km-statusline but does not wire it is blind too"
+if [ "$RC" -ne 0 ]; then
+    bad "$half_row" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -E '^vahagn' | grep -q 'blind'; then
+    bad "$half_row" "the present script was taken for a working instrument: $(printf '%s' "$OUT" | grep -E '^vahagn')"
+elif ! printf '%s' "$OUT" | grep '^BLIND' | grep -q vahagn; then
+    bad "$half_row" "no line names the seat: $OUT"
+else
+    ok "$half_row — the guard reads the wiring, not merely the presence of the file"
+fi
+
+# The falsifier that keeps the new arm from swallowing the old signal. A seat
+# that CAN report and simply is not running is the ordinary case — nine of
+# fifteen seats on the day this was measured — and calling those blind would
+# turn one over-broad reading of a blank into another.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap vahagn
+seat_checkout vahagn wired
+status_at_fixture
+wired_row="a wired checkout with no heartbeat yet is not called blind"
+if printf '%s' "$OUT" | grep -q '^BLIND'; then
+    bad "$wired_row" "a seat that can report was reported as unable to: $(printf '%s' "$OUT" | grep '^BLIND')"
+elif printf '%s' "$OUT" | grep -E '^vahagn' | grep -q 'blind'; then
+    bad "$wired_row" "the HB column claims the instrument is out: $(printf '%s' "$OUT" | grep -E '^vahagn')"
+else
+    ok "$wired_row — the misconfiguration arm reads the checkout, not the absence of the file"
+fi
+
+# And a seat that is not live at all says nothing either way: an asleep seat has
+# no session to hear from, so its blank is the reading that was always correct.
+dispatch_case '[]' '[]'
+make_inboxes
+seat_state vahagn asleep
+seat_checkout vahagn unwired
+status_at_fixture
+asleep_row="an asleep seat is not called blind, however its checkout is wired"
+if printf '%s' "$OUT" | grep -q '^BLIND'; then
+    bad "$asleep_row" "a seat with no session was reported as a broken instrument: $(printf '%s' "$OUT" | grep '^BLIND')"
+else
+    ok "$asleep_row"
+fi
+
+# The heartbeat still wins where there is one. A seat that HAS reported has
+# demonstrated the wiring works, whatever a later read of its checkout says, and
+# a blind marker there would overwrite a real age with a guess.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap vahagn
+seat_heartbeat vahagn 300 42
+seat_checkout vahagn unwired
+status_at_fixture
+beats_row="a seat that has actually reported is rendered by its heartbeat, not by its checkout"
+if ! printf '%s' "$OUT" | grep -E '^vahagn' | grep -q '5m'; then
+    bad "$beats_row" "the age was replaced: $(printf '%s' "$OUT" | grep -E '^vahagn')"
+elif printf '%s' "$OUT" | grep -q '^BLIND'; then
+    bad "$beats_row" "a seat with a five-minute-old heartbeat was called blind: $OUT"
+else
+    ok "$beats_row"
 fi
 
 # --- the contract with real tmux ---------------------------------------------
