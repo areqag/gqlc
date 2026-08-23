@@ -22,6 +22,12 @@
 #      refuses to run. What is asserted is that no git invocation the suite
 #      reaches inherits a poisoned value.
 #
+#      B emits two rows per suite, deliberately not folded into one. The first
+#      reads the recording git's log. The second asks a question no log can
+#      answer — did the poisoned repo itself move while the suite ran — and it
+#      is what covers everything the shim cannot see. They detect different
+#      things, so folded together either could rot while the row stayed green.
+#
 #      Including itself is not symmetry for its own sake. While this file was
 #      exempt, deleting its own `source` line left it green at 13/13: the gate
 #      could not gate its author. Its self-row is shallower than the others by
@@ -29,13 +35,26 @@
 #      recursing into part B — and that one command is the whole of what part B
 #      reads from any suite anyway.
 #
-# What B does NOT witness, stated rather than left to be found: the recording
-# git refuses to run, so a suite aborts at its first git command and the calls
-# it would have made afterwards are never seen. Sanitisation is a top-of-file
-# property — the first call is where it holds or fails — but a suite that
-# cleared the environment, ran a while, and then re-exported a poisoned value
-# would pass here. B also sees only git invocations resolved through PATH: a
-# suite calling /usr/bin/git directly is outside its reach.
+# What B's LOG row does not witness, stated rather than left to be found: the
+# recording git refuses to run, so a suite aborts at its first git command and
+# the calls it would have made afterwards are never seen. Sanitisation is a
+# top-of-file property — the first call is where it holds or fails — but a
+# suite that cleared the environment, ran a while, and then re-exported a
+# poisoned value passes that row. The log row also sees only git invocations
+# resolved through PATH: a suite calling /usr/bin/git, or shelling out to a
+# tool that does, never touches the shim.
+#
+# Both of those are why the CANARY row exists. It is blind to intent and to
+# spelling alike: it does not ask what the suite invoked or how, only whether
+# the repository GIT_DIR names was written. Measured before it was added — a
+# suite spelled `/usr/bin/git config --local user.name mutant`, dropped into
+# this directory, was reported "runs no git command" and left this gate green
+# at 23/23 (bd gqlc-10co, gqlc-kl2d).
+#
+# What the canary row does NOT witness, in turn: a read. A suite that runs
+# `git log` against the shared repo and asserts on the answer corrupts nothing
+# and moves nothing, so it passes both rows. Neither row is a claim that a
+# suite is hermetic; together they are a claim that it does no damage.
 #
 # Run via: just test-hooks
 set -u
@@ -233,6 +252,86 @@ else
         "the recording git logged no poisoned value for a script that never sandboxed itself, so every row below would pass whatever the suites do"
 fi
 
+# RED control: compliance that is only a comment is not compliance.
+#
+# This gate is behavioural, and this row is what says so rather than leaving it
+# to be assumed. A gate that read the suite's source bytes for a `source
+# .../git-env-sandbox.sh` line would accept the line below, because the line
+# below is there — it is just commented out, so it clears nothing. The
+# repository has been bitten by exactly that (a sweep over a function's raw
+# source bytes accepting commented-out evidence, bd gqlc-tfh1's family), so the
+# case is pinned here rather than argued.
+COMMENTED="$TMP/commented-suite.sh"
+cat >"$COMMENTED" <<COMMENTED_SCRIPT
+#!/usr/bin/env bash
+# The next line looks like the house idiom and does nothing at all.
+# source "$HOOKS_DIR/git-env-sandbox.sh"
+#     unset "\${!GIT_@}"
+git --version >/dev/null 2>&1 || true
+COMMENTED_SCRIPT
+
+commented_log="$TMP/env.commented.log"
+: >"$commented_log"
+( cd "$ROOT" \
+  && env "${poison[@]}" \
+         "GQLC_GIT_ENV_LOG=$commented_log" \
+         "PATH=$SHIM_DIR:$PATH" \
+         timeout 120 bash "$COMMENTED" ) >/dev/null 2>&1 || true
+
+if grep -qF "$MARK" "$commented_log"; then
+    ok "RED control: a sandbox line inside a comment is still a leak"
+else
+    bad "RED control: a sandbox line inside a comment is still a leak" \
+        "a script whose only sandbox line is commented out was not seen to leak, which means this gate is reading text rather than behaviour"
+fi
+
+# RED control: git reached by a path, which the shim above cannot see.
+#
+# Part B replaces `git` on PATH, so it witnesses only invocations resolved
+# through PATH. A suite calling $REAL_GIT — or /usr/bin/git, or any tool that
+# does — is outside the shim's reach entirely, and the log-half of every row
+# below is blind to it. That blind spot was stated in this file's header and
+# witnessed by nothing; it is witnessed here, and the canary check added to the
+# loop below is what covers it.
+#
+# So this control asserts BOTH halves: the log does not see it (the blind spot
+# is real, and if that ever stops being true this row says so) and the canary
+# does (the cover works).
+REAL_GIT="$(command -v git)"
+
+PATHED="$TMP/pathed-suite.sh"
+cat >"$PATHED" <<PATHED_SCRIPT
+#!/usr/bin/env bash
+# No sandbox, and git by absolute path: the shim on PATH never runs.
+"$REAL_GIT" config --local user.email "$MARK@canary.example" >/dev/null 2>&1 || true
+PATHED_SCRIPT
+
+pathed_log="$TMP/env.pathed.log"
+: >"$pathed_log"
+pathed_before="$(snapshot)"
+( cd "$ROOT" \
+  && env "${poison[@]}" \
+         "GQLC_GIT_ENV_LOG=$pathed_log" \
+         "PATH=$SHIM_DIR:$PATH" \
+         timeout 120 bash "$PATHED" ) >/dev/null 2>&1 || true
+pathed_after="$(snapshot)"
+
+if grep -qF "$MARK" "$pathed_log"; then
+    bad "RED control: the shim is blind to git reached by a path" \
+        "the shim logged a poisoned value for a script that never invoked git through PATH, so this control no longer describes the blind spot it was written for"
+else
+    ok "RED control: the shim is blind to git reached by a path"
+fi
+
+if [ "$pathed_before" != "$pathed_after" ]; then
+    ok "RED control: the canary sees git reached by a path"
+else
+    bad "RED control: the canary sees git reached by a path" \
+        "a script that wrote the poisoned repo by absolute path left the canary unchanged, so the canary rows in the loop below witness nothing"
+fi
+
+init_canary
+
 # The directory is the classifier, as it is for ciguard's hookSuites: a glob
 # for `*-test.sh` would silently skip a suite spelled some other way, and a
 # skipped suite is the case this whole file exists to catch.
@@ -258,11 +357,35 @@ for suite in "${suites[@]}"; do
     [ "$name" = "$SELF" ] && self_arg=(--self-test)
 
     rc=0
+    canary_before="$(snapshot)"
     ( cd "$ROOT" \
       && env "${poison[@]}" \
              "GQLC_GIT_ENV_LOG=$log" \
              "PATH=$SHIM_DIR:$PATH" \
              timeout 120 bash "$suite" ${self_arg[@]+"${self_arg[@]}"} ) >/dev/null 2>&1 || rc=$?
+    canary_after="$(snapshot)"
+
+    # The second half, and it is a row of its own rather than a branch of the
+    # one below: the two halves detect different things, and folded together
+    # either could rot while the row stayed green.
+    #
+    # The shim only replaces `git` on PATH. Anything reaching git another way —
+    # an absolute path, a tool the suite shells out to that carries its own —
+    # is invisible in the log and yet does the exact damage this file exists to
+    # stop. This asks the other question: not what the suite invoked, but
+    # whether the poisoned repo moved while it ran. Measured before it existed:
+    # a suite spelled `/usr/bin/git config --local user.name mutant`, dropped
+    # into this directory, was reported "runs no git command" and left the gate
+    # green at 23/23.
+    if [ "$canary_before" = "$canary_after" ]; then
+        ok "$name leaves the poisoned repo untouched"
+    else
+        bad "$name leaves the poisoned repo untouched" \
+            "it wrote the repo GIT_DIR pointed at: $(diff <(printf '%s\n' "$canary_before") <(printf '%s\n' "$canary_after") | tr '\n' ' '). Under a hook that repo is the shared checkout. Source .githooks/git-env-sandbox.sh at the top of the file — and note the shim did not see this, so the call did not go through PATH."
+        # Independent rows: the next suite is measured against a clean canary,
+        # not against this one's damage.
+        init_canary
+    fi
 
     leaked="$(grep -F "$MARK" "$log" | sort -u | tr '\n' ' ')"
     if [ -n "$leaked" ]; then
