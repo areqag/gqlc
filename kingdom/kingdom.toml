@@ -11,8 +11,27 @@ state_dirname = "kingdom-state"
 
 [concurrency]
 # Global and work-conserving: any free slot goes to whichever class has ready
-# labelled beads, priority first. Mayor and guard do not count against it.
-max_active = 5
+# labelled beads, priority first. Mayor and guard do not count against it, and
+# neither do the judge seats (gqlc-dz85 — the merge gate must stay reachable, or
+# the cap shuts the gate the town's own throughput depends on). The exemption is
+# per seat, so the awake count may exceed this number by the size of the bench.
+#
+# 5 -> 6 on 2026-08-22 by Սեդրակ, at Անդրանիկ's ask to consider raising it
+# against a backlog that only grows. Deliberately small, because the binding
+# constraint he measured was not this number but the host: load 12.5 on 24 cores
+# and 9 GiB available with 5 sessions up, so each added slot is ~2 GiB of real
+# memory. A cap above the host's headroom does not buy throughput, it buys an
+# OOM that strands branches mid-work — strictly worse than a slow queue.
+#
+# The other half of his argument has since been settled rather than deferred:
+# gqlc-s16s (a finished turn holding its slot forever — 2 of 5 observed dead)
+# and gqlc-0gjt (a live session under asleep-pending holding none) are both
+# fixed, so a slot is now spent by a session that exists. Effective concurrency
+# tracks this number again, which is what made the raise worth making at all.
+#
+# So: raise this against measured host headroom, not against a long queue. The
+# queue being long is what a backlog looks like, not evidence about this number.
+max_active = 6
 
 [cadence]
 dispatch_minutes = 2

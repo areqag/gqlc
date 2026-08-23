@@ -10,8 +10,12 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 KINGDOM_DIR=$(dirname "$SCRIPT_DIR")
-# KM_CONFIG exists so the test suite can read a throwaway roster; the town
-# itself never sets it.
+# KM_CONFIG overrides for tests, as KM_STATE_DIR does for state; the town
+# itself never sets it. Without it a test that exercises a tuning parameter has
+# to assert the town's live value, so the parameter can no longer be tuned
+# without editing the suite that guards it — Constitution V.6.1 says these
+# numbers change by a config edit, and that is only true if nothing else pins
+# them (gqlc-p5s8).
 CONFIG="${KM_CONFIG:-$KINGDOM_DIR/kingdom.toml}"
 
 die() { echo "km: $*" >&2; exit 1; }
@@ -38,7 +42,7 @@ km — the machinery of the Թագաւորութիւն
   km deploy                      fast-forward the checkout the timers run from
   km doctor                      health checks
   km seat-refresh <s>            bring a parked seat's worktree (and its hooks) up to master
-  km state-dir | seat-info <s> | seat-worktree <s>
+  km state-dir | capped-seats | seat-info <s> | seat-worktree <s>
 EOF
 }
 
@@ -1395,6 +1399,7 @@ case "$cmd" in
     install-units)   cmd_install_units "$@" ;;
     uninstall-units) cmd_uninstall_units "$@" ;;
     state-dir)       state_dir ;;
+    capped-seats)    capped_seats ;;
     cfg)             cfg "${1:?km cfg <section> <key>}" "${2:?km cfg <section> <key>}" ;;
     seat-info)       is_seat "${1:-}" || die "seat-info: unknown seat ${1:-<none>}"
                      echo "$(seat_class "$1") $(seat_model "$1") $(seat_display "$1")" ;;
