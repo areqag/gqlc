@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Re-runs .githooks/commit-msg over every commit this push would publish.
+#
+# WHY A SECOND RUN OF A HOOK THAT ALREADY RAN. It did not necessarily run.
+# commit-msg is a per-commit, one-shot gate, and core.hooksPath drift disarms it
+# silently and repo-wide (bd gqlc-4thl, gqlc-pyk2). Every commit made inside a
+# drift window is ungated, and the window closes without telling anyone: the
+# env-borne shape is per-process, so the next shell has healthy hooks and a
+# history that was never screened. Nothing downstream re-screens it — CI does not
+# read commit messages, and master is squash-merged, so a trailer that reaches a
+# feature branch reaches the PR but not the base, which is why this has been
+# invisible rather than absent.
+#
+# THE INVERSION, and it is the answer to bd gqlc-zqrw. That bead asks how a check
+# can bind an actor that can rewrite the config the check reads, and concludes it
+# cannot. That is right, and the way out is to stop trying to make the drift not
+# happen. This gate reads no config and asks nothing about hook state. It asks
+# only whether the commits about to leave this machine satisfy the rule, and it
+# asks at a chokepoint every commit must pass through, however it was made. A
+# drift window therefore only has to END before the push; it does not have to
+# have been noticed, reported, or repaired in time. That converts a one-shot gate
+# into an idempotent, retroactive one.
+#
+# WHY IT RE-EXECS commit-msg RATHER THAN RESTATING ITS RULES. The rule is the
+# thing that must not fork. Restating the trailer regex here would give the repo
+# two copies of a rule that has already been amended once in place (bd gqlc-7iea
+# rewrote the identity half from an address list to a domain rule), and the copy
+# nobody edits is the one that goes quiet.
+#
+# THE IDENTITY ARMS ARE DELIBERATELY NOT RE-GRADED, and this is the one place
+# this gate is narrower than the hook it runs. commit-msg asks two questions: is
+# the message free of AI-attribution trailers (a property OF THE COMMIT, and the
+# one bd gqlc-pyk2 calls the only automated enforcement of the rule), and is the
+# committing identity deliverable (a property of the CONFIG doing the
+# committing). Only the first survives being asked later: at push time `git var`
+# reports the pusher, not the author, so a re-run would grade every historical
+# commit against whoever is pushing. Handing it each commit's own %ae/%ce
+# instead was tried and is worse — it refuses any throwaway repository whose
+# fixture identity was never meant to be deliverable, which is most of this
+# repo's own test suites, and none of those commits are going anywhere near a
+# remote a person reads.
+#
+# So the identity arms are switched off through commit-msg's OWN documented
+# escape rather than by feeding it a fabricated person: it skips an identity
+# whose `git var` call fails, and an empty GIT_AUTHOR_NAME makes that call fail
+# (`fatal: empty ident name`, measured). The live commit-msg still grades
+# identity at commit time, and `just doctor` still grades the config.
+#
+# WHAT IT DOES NOT CATCH, stated rather than left to be found:
+#   - `git push --no-verify` skips it, exactly as it skips every other hook. This
+#     is a gate on the honest path, not a lock.
+#   - It runs from .githooks/, so a drift that is STILL ACTIVE at push time kills
+#     it along with everything else. Under the common-dir drift shape the #1044
+#     tripwire refuses that push; under the /dev/null shape nothing refuses it,
+#     because git runs no hook at all from a directory that holds none. So this
+#     gate covers commits made during a window that has closed, and covers
+#     nothing during a window that is open. That is a real limit and it is why
+#     the value here is retroactive coverage rather than enforcement.
+#   - Merge commits are skipped, matching commit-msg's own MERGE_HEAD arm: git
+#     copies trailers from the merged branch's HEAD into a merge message, those
+#     were screened on the source branch, and refusing here cannot rewrite them.
+#   - It screens what the push PUBLISHES, not all of history. Commits already on
+#     a remote are excluded, so a trailer that landed before this gate existed
+#     does not block every future push from that clone.
+#
+# usage: gate-pushed-commits [<remote> <url>]   # pre-push argv, unused
+#        reads pre-push stdin: <local ref> <local sha> <remote ref> <remote sha>
+set -euo pipefail
+
+hooks_dir="$(cd -- "$(dirname -- "$0")" && pwd)"
+commit_msg="$hooks_dir/commit-msg"
+
+if [ ! -x "$commit_msg" ]; then
+    echo "ERROR: $commit_msg is missing or not executable, so the commits this push" >&2
+    echo "       would publish cannot be screened. Refusing rather than passing" >&2
+    echo "       unverified — an absent gate is the state this one exists to survive." >&2
+    exit 1
+fi
+
+zero_re='^0+$'
+
+# Collected across every ref line, then reported once. A push of several branches
+# should not report the first offender and hide the rest.
+offenders=()
+checked=0
+
+msg_file="$(mktemp)"
+cleanup() {
+    rm -f -- "$msg_file"
+    return 0
+}
+trap cleanup EXIT
+
+while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    # Extra fields folded into the last name rather than dropped; a line shape
+    # this does not understand is not a licence to screen nothing.
+    read -r local_ref local_sha remote_ref remote_sha _extra <<<"$line" || true
+    : "${local_ref:=}" "${remote_ref:=}"
+
+    # Deletion: nothing is published, so there is nothing to screen.
+    if [ -z "${local_sha:-}" ] || [[ "$local_sha" =~ $zero_re ]]; then
+        continue
+    fi
+
+    if [ -z "${remote_sha:-}" ] || [[ "$remote_sha" =~ $zero_re ]]; then
+        # New ref on the remote. `--not --remotes` is what keeps this to the
+        # commits this clone is actually contributing: without it, a first push
+        # of a branch cut from master re-screens all of master's history, which
+        # is both slow and a re-litigation of commits that are already published.
+        mapfile -t revs < <(git rev-list --no-merges "$local_sha" --not --remotes)
+    else
+        mapfile -t revs < <(git rev-list --no-merges "$remote_sha..$local_sha")
+    fi
+
+    for rev in ${revs[@]+"${revs[@]}"}; do
+        checked=$((checked + 1))
+        git log -1 --format=%B "$rev" >"$msg_file"
+        # Empty ident names make commit-msg's `git var` calls fail, which is the
+        # condition its own identity arms return 0 on. See the header for why
+        # identity is out of scope here and the trailer is not.
+        rc=0
+        GIT_AUTHOR_NAME='' GIT_AUTHOR_EMAIL='' \
+        GIT_COMMITTER_NAME='' GIT_COMMITTER_EMAIL='' \
+            "$commit_msg" "$msg_file" >/dev/null 2>&1 || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            offenders+=("$(git log -1 --format='%h %s' "$rev")")
+        fi
+    done
+done
+
+if [ "${#offenders[@]}" -ne 0 ]; then
+    {
+        echo "ERROR: ${#offenders[@]} of ${checked} commit message(s) this push would publish are"
+        echo "       refused by .githooks/commit-msg. They were made while that hook was not"
+        echo "       running — core.hooksPath drift disarms it silently, repo-wide (bd"
+        echo "       gqlc-pyk2), and the window closes without saying so."
+        printf '         %s\n' "${offenders[@]}"
+        echo ""
+        echo "       See the individual refusal with:"
+        echo "         git log -1 --format=%B <sha> > /tmp/m && .githooks/commit-msg /tmp/m"
+        echo "       Repair by rewriting those messages:  git rebase -i --root  (or ..<base>)"
+        echo "       Then re-check the hooks are live:    just check-hooks"
+    } >&2
+    exit 1
+fi
