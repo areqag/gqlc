@@ -12,6 +12,7 @@ import (
 
 // Event corresponds to the Event node type.
 type Event struct {
+	Badge   any
 	Id      int64
 	Marker  any
 	Payload *any
@@ -29,26 +30,31 @@ func decodeEvent(raw []byte) (Event, error) {
 		return Event{}, fmt.Errorf("decode Event: expected label %q, got %q", "Event", label)
 	}
 	var out Event
-	value0, err := agtypeProperty(props, "id", agtypeInt64)
+	value0, err := agtypeProperty(props, "badge", agtypeValue)
+	if err != nil {
+		return Event{}, fmt.Errorf("decode Event.Badge: %w", err)
+	}
+	out.Badge = value0
+	value1, err := agtypeProperty(props, "id", agtypeInt64)
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.Id: %w", err)
 	}
-	out.Id = value0
-	value1, err := agtypeProperty(props, "marker", agtypeValue)
+	out.Id = value1
+	value2, err := agtypeProperty(props, "marker", agtypeValue)
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.Marker: %w", err)
 	}
-	out.Marker = value1
-	value2, err := agtypeNullableProperty(props, "payload", agtypeValue)
+	out.Marker = value2
+	value3, err := agtypeNullableProperty(props, "payload", agtypeValue)
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.Payload: %w", err)
 	}
-	out.Payload = value2
-	value3, err := agtypeNullableProperty(props, "tag", agtypeValue)
+	out.Payload = value3
+	value4, err := agtypeNullableProperty(props, "tag", agtypeValue)
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.Tag: %w", err)
 	}
-	out.Tag = value3
+	out.Tag = value4
 	return out, nil
 }
 

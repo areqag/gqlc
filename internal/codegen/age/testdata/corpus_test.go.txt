@@ -324,6 +324,10 @@ const (
 	listyNulls = `{"id": 844424930131971, "label": "Listy", "properties": {"tags": ["a, b] c\": {d", ""], "ranks": [0], "matrix": []}}::vertex`
 
 	anyInt = `{"id": 1125899906842625, "label": "Anything", "properties": {"other": "text", "payload": 42}}::vertex`
+	// anyTag holds the second spelling of the same declared width, ANY
+	// PROPERTY VALUE, beside the first. Both properties are here at once
+	// so what the assertion compares is the two spellings on one vertex.
+	anyTag = `{"id": 1125899906842628, "label": "Anything", "properties": {"payload": 42, "tag": {"a": 1}}}::vertex`
 	anyMap = `{"id": 1125899906842626, "label": "Anything", "properties": {"payload": {"a": 1, "b": [true, null, "z"], "c": {"d": 1.5}}}}::vertex`
 	anyList = `{"id": 1125899906842627, "label": "Anything", "properties": {"payload": [1, "two", 3.5, true, null, [1, 2], {"k": "v"}]}}::vertex`
 )
@@ -631,6 +635,30 @@ func TestDecodeVertexWithAnyProperty(t *testing.T) {
 	}
 	if xs, ok := list.Payload.([]any); !ok || len(xs) != 7 {
 		t.Errorf("decodeAnything(anyList).Payload = %#v", list.Payload)
+	}
+
+	// ANY PROPERTY VALUE is a second spelling of the width payload is
+	// declared with -- internal/schema/gql/propertytype.go maps "ANY
+	// VALUE", "ANY", "PROPERTY VALUE" and "ANY PROPERTY VALUE" all onto
+	// graph.TypeAnyPropertyValue -- so the emission is expected to give
+	// tag the same decode payload gets. That expectation had no row on
+	// any target until bd gqlc-v7vu: the schema fixture pinned the
+	// spelling as golden bytes only, and -update blesses golden bytes
+	// away. This runs it.
+	tagged, err := decodeAnything([]byte(anyTag))
+	if err != nil {
+		t.Fatalf("decodeAnything(anyTag) = error %v", err)
+	}
+	if tagged.Tag == nil {
+		t.Fatalf("decodeAnything(anyTag).Tag = nil, want a pointer to the held value")
+	}
+	if m, ok := (*tagged.Tag).(map[string]any); !ok || m["a"] != int64(1) {
+		t.Errorf("decodeAnything(anyTag).Tag points at %#v, want map[a:1]", *tagged.Tag)
+	}
+	// The absent half: anyInt declares no tag, and the pointer is what
+	// carries that, the same way Maybe carries it one property over.
+	if got.Tag != nil {
+		t.Errorf("decodeAnything(anyInt).Tag = %#v, want nil", got.Tag)
 	}
 }
 

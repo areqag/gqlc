@@ -9,6 +9,9 @@ type ReadQuerier interface {
 	EventColumns(ctx context.Context) ([]EventColumnsRow, error)
 	EventMarker(ctx context.Context) (any, error)
 	EventPayload(ctx context.Context) (*any, error)
+	EventPropertyColumns(ctx context.Context) ([]EventPropertyColumnsRow, error)
+	EventBadge(ctx context.Context) (any, error)
+	EventTag(ctx context.Context) (*any, error)
 }
 
 type WriteQuerier interface {

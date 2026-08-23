@@ -37,7 +37,8 @@ CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
     }),
     (:Anything {
         payload :: ANY VALUE NOT NULL,
-        maybe   :: ANY VALUE
+        maybe   :: ANY VALUE,
+        tag     :: ANY PROPERTY VALUE
     }),
     (:Person) -[:ACTED_IN { since :: INT64 NOT NULL }]-> (:Person)
 }

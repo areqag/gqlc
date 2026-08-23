@@ -3,6 +3,7 @@ CREATE PROPERTY GRAPH TYPE SchemaAnyProperty AS {
         id      :: INT64 NOT NULL,
         payload :: ANY VALUE,
         tag     :: ANY PROPERTY VALUE,
-        marker  :: ANY VALUE NOT NULL
+        marker  :: ANY VALUE NOT NULL,
+        badge   :: ANY PROPERTY VALUE NOT NULL
     })
 }

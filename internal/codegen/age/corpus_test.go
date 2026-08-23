@@ -1,18 +1,17 @@
 package age_test
 
 import (
-	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/printer"
 	"go/token"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
+	"github.com/areqag/gqlc/internal/codegen/corpusrun"
 )
 
 // corpusPackage is the name the emission is asked for, so the extracted
@@ -72,35 +71,12 @@ func (d *recordingDB) Exec(ctx context.Context, sql string, args ...any) (int, e
 // pass.
 //
 // It is written down here rather than censused out of
-// testdata/corpus_test.go.txt, because that fixture is the artefact
-// under check: a name the fixture stops declaring is a name a census of
-// it stops naming, so both sides of the comparison lose it at once.
-// Measured against such a census — the fixture's top-level `func Test…`
-// declarations — commenting a test out and deleting it each took it out
-// of the census and out of the child run together and left the
-// comparison green. Held against this list both fail, because this list
-// does not move when the fixture does.
-//
-// A fixture emptied to its package clause is a child run that reports
-// success: `go test` prints `[no tests to run]` and exits 0 over a
-// _test.go declaring no tests, so the child's exit status says nothing
-// about it. Requiring this exact set catches such a run, because the
-// pass set it produces is empty and this list is not.
-//
-// "This list is not" is a condition, not a property of the list.
-// Emptying the fixture and this literal together leaves both sides of
-// the comparison empty, and two empty sets match. The census this list
-// replaces carried a require.NotEmpty against that silence; the test
-// below requires this list non-empty before it compares.
-//
-// This list is a declaration rather than a gate. A test can leave the
-// fixture and its name leave this literal in one commit's edit; both
-// sides of the comparison below then name the same tests, and a run
-// with one name and its test removed together came back green.
-// Removing the last name is where that stops: it leaves this literal
-// empty, which is what the non-empty requirement below refuses. What
-// the edit costs the remover either way is writing the removal down
-// in a file the child module is not given.
+// testdata/corpus_test.go.txt, for the reason corpusrun.Declared gives
+// about all three of these literals. Measured against such a census —
+// the fixture's top-level `func Test…` declarations — commenting a test
+// out and deleting it each took it out of the census and out of the
+// child run together and left the comparison green. Held against this
+// list both fail, because this list does not move when the fixture does.
 var corpusTests = []string{
 	"TestAgtypeString",
 	"TestAgtypeBool",
@@ -151,12 +127,48 @@ var corpusTests = []string{
 // A top-level test with no subtests is absent from this map rather than
 // written down as zero, so the keys carry the distinction the guard needs:
 // a tree that goes silent drops a key this file still holds, and a tree
-// that appears adds one this file does not. Either way the two maps are
-// unequal. Taking a tree out without a red run costs the same edit taking
-// a name out of corpusTests costs — writing it down here, in a file the
-// child module is not given.
+// that appears adds one this file does not.
 var corpusSubtests = map[string]int{
 	"TestAgtypeString": 11,
+}
+
+// corpusTables counts, per top-level test, the in-body range tables the
+// fixture declares, as corpusrun.Tables censuses them.
+//
+// This is the third census because the first two cannot see the fixture's
+// commonest shape. corpusTests names top-level tests and a top-level test
+// passes whether or not anything ran inside it; corpusSubtests counts
+// subtest passes and this fixture has exactly one t.Run in 30 top-level
+// tests, so a test whose table goes empty has no key on either side,
+// which is equality. Measured: emptying the five-entry table in
+// TestAgtypeListRefusesAnElementOfTheWrongScalar reddens this census and
+// nothing else in the run moved (bd gqlc-eum1, the half gqlc-mlf4 left
+// open).
+//
+// Every test here that ranges over anything has an entry, and a test that
+// ranges over nothing has none — see corpusrun.Table for what Rows and
+// Dynamic each refuse. When a deliberate fixture edit moves a number, the
+// failure prints the fixture's current census as a Go literal to paste.
+var corpusTables = map[string]corpusrun.Table{
+	"TestAgtypeArgs":    {Rows: 7},
+	"TestAgtypeBool":    {Rows: 17},
+	"TestAgtypeFloat64": {Rows: 21},
+	"TestAgtypeInstantCountsMicrosecondsFromTheEpoch":  {Rows: 11},
+	"TestAgtypeInstantRefusesACountOutsideTheCalendar": {Rows: 6},
+	"TestAgtypeInt64":                                     {Rows: 27},
+	"TestAgtypeListOfString":                              {Rows: 15},
+	"TestAgtypeListRefusesAnElementOfTheWrongScalar":      {Rows: 14},
+	"TestAgtypeMicrosEncodesTheInstantAndNotTheWallClock": {Rows: 8},
+	"TestAgtypeNestedList":                                {Rows: 5},
+	"TestAgtypeNullableMicrosCarriesAbsence":              {Rows: 4},
+	"TestAgtypeString":                                    {Rows: 26},
+	"TestAgtypeValue":                                     {Rows: 21},
+	"TestAgtypeZoneReadsAnOffsetInSeconds":                {Rows: 8},
+	"TestAgtypeZoneRefusesAnOffsetOutsideADay":            {Rows: 8},
+	"TestBoundGraphCountsBytes":                           {Rows: 7},
+	"TestCypherStmtComposesOneStatement":                  {Rows: 6},
+	"TestDecodeVertexRefusesMisshapenText":                {Rows: 16},
+	"TestEmittedMethodBindsAnInstantAsMicroseconds":       {Rows: 4},
 }
 
 // TestEmittedHelpersDecodeTheAgtypeCorpus runs the emitted agtype
@@ -198,64 +210,10 @@ func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 		s.Require().NoError(os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))
 	}
 
-	passed, subtests, log, err := s.runCorpus(dir)
-	s.Require().NoError(err, "the emitted helpers do not satisfy the captured corpus:\n%s", log)
-	s.Require().NotEmpty(corpusTests,
-		"corpusTests names no test, so the set comparison below is satisfied by a child run that ran none")
-	// The comparison is by multiset, so a name written twice differs from
-	// the same name passing once. Which way the two differ is in the lists
-	// testify prints above this message, so naming the ways here would only
-	// be a shorter list than the one already on screen.
-	s.Require().ElementsMatch(corpusTests, passed,
-		"the corpus module's passing tests are not what corpusTests names, entry for entry and "+
-			"counting repeats:\n%s", log)
-	// Compared whole rather than per key, because the two disagreements
-	// this has to catch are a key whose count fell and a key only one side
-	// holds, and map equality is both. Testify prints the differing keys.
-	s.Require().Equal(corpusSubtests, subtests,
-		"the corpus module's subtest passes are not what corpusSubtests declares, "+
-			"top-level test by top-level test:\n%s", log)
-}
-
-// runCorpus runs the assembled corpus module's own tests, reporting the
-// top-level tests that passed, how many subtest passes each top-level test
-// carried, and the run's output as a reader sees it.
-//
-// Both sets are read from `go test -json`, whose Test field the testing
-// framework fills in, rather than from "--- PASS" lines, which a subtest
-// name or anything a test writes to stdout can also spell.
-//
-// A subtest is counted under its top-level test rather than under the
-// parent that ran it, so a tree nested two deep reports as one entry.
-func (s *EmissionSuite) runCorpus(dir string) (passed []string, subtests map[string]int, log string, err error) {
-	cmd := exec.CommandContext(s.T().Context(), "go", "test", "-json", "-count=1", ".")
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOFLAGS=", "GOPROXY=off")
-	out, err := cmd.CombinedOutput()
-
-	var text strings.Builder
-	subtests = make(map[string]int)
-	for line := range strings.Lines(string(out)) {
-		var event struct {
-			Action string `json:"Action"`
-			Test   string `json:"Test"`
-			Output string `json:"Output"`
-		}
-		if !strings.HasPrefix(line, "{") || json.Unmarshal([]byte(line), &event) != nil {
-			text.WriteString(line)
-			continue
-		}
-		text.WriteString(event.Output)
-		if event.Action != "pass" || event.Test == "" {
-			continue
-		}
-		if parent, _, isSubtest := strings.Cut(event.Test, "/"); isSubtest {
-			subtests[parent]++
-		} else {
-			passed = append(passed, event.Test)
-		}
-	}
-	return passed, subtests, text.String(), err
+	report, err := corpusrun.Run(s.T().Context(), dir)
+	s.Require().NoError(err, "the emitted helpers do not satisfy the captured corpus:\n%s", report.Log)
+	declared := corpusrun.Declared{Tests: corpusTests, Subtests: corpusSubtests, Tables: corpusTables}
+	s.Require().NoError(declared.Check(report, "corpus_test.go", string(driver)), report.Log)
 }
 
 // declarations prints the named top-level declarations of an emitted
