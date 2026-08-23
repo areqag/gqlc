@@ -1,23 +1,23 @@
 -- The same property name declared twice in one propertyTypeList. The ISO BNF
 -- admits it — <property type list> ::= <property type> [{ <comma> <property
--- type> }...] states no uniqueness constraint — so it parses, and it resolves.
+-- type> }...] states no uniqueness constraint — so it parses. gqlc rejects it
+-- with ErrDuplicatePropertyName.
 --
--- It resolves to ONE property, the last one. listener.properties builds a map
--- keyed by name and writes every element of the list into it in walk order, so
--- the second `id` overwrites the first and takes its INT and its NOT NULL with
--- it. The semanticCases row proves that mechanically: this file and the same
--- file spelling only `id :: STRING` resolve to models that compare equal.
+-- That rejection is ADR 0030, and it is provisional by construction. The free
+-- BNF settles the SYNTAX and nothing else; whether a repeat is an error is
+-- Syntax Rules prose in the paid PDF gqlc-lir declined to buy. Two readings
+-- were defensible — reject, or define a precedence between the two
+-- declarations — and rejection is the interim posture on the same grounds as
+-- ErrEdgeKindArcMismatch: it is the only one of the two that cannot be wrong
+-- silently. gqlc-tlbo revisits it if the clause is ever bought.
 --
--- gqlc rejects a duplicate node type and a duplicate edge type on exactly the
--- reasoning that a map keyed by identity cannot hold two things under one key.
--- A property map is keyed by name and has the same problem, and this is the one
--- duplicate gqlc does not reject.
---
--- Whether the right answer is a sentinel or an explicitly decided precedence is
--- gqlc-4np's ADR, and this file does not prejudge it: a semantic case asserts
--- the model is wrong, not that the behaviour is wanted. What it closes is the
--- separate risk that last-wins — an accident of map assignment, not a decision —
--- flips to first-wins under a refactor with the suite still green.
+-- Until gqlc-4np this file resolved, to ONE property, the last one.
+-- listener.properties built a map keyed by name and wrote every element of the
+-- list into it in walk order, so the second `id` overwrote the first and took
+-- its INT and its NOT NULL with it, and nothing anywhere said so. gqlc
+-- rejected a duplicate node type and a duplicate edge type on exactly the
+-- reasoning that a map keyed by identity cannot hold two things under one key,
+-- and this was the one duplicate it did not reject.
 CREATE PROPERTY GRAPH TYPE T AS {
     (:Person { id :: INT NOT NULL, id :: STRING })
 }

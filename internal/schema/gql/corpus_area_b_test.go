@@ -110,11 +110,12 @@ var corpusAreaB = []corpusEntry{
 		feature: "mandatory",
 	},
 	{
-		file:    "18.2-node-type/property_name_repeated.gql",
-		outcome: resolves,
-		feature: "mandatory",
-		bead:    "gqlc-4np",
-		reason:  "the second `id` overwrites the first in listener.properties' name-keyed map, so the declared INT and its NOT NULL are gone from the model with no diagnostic. gqlc rejects a duplicate node type and a duplicate edge type on the same reasoning and does not reject this one. Whether the answer is a sentinel or a decided precedence is gqlc-4np's ADR; the entry exists so the accidental last-wins cannot flip to first-wins with the suite green",
+		file:     "18.2-node-type/property_name_repeated.gql",
+		outcome:  unsupported,
+		sentinel: ErrDuplicatePropertyName,
+		feature:  "mandatory",
+		bead:     "gqlc-tlbo",
+		reason:   "ADR 0030 rejects a repeated property name rather than deciding a precedence between the two declarations. The free ISO BNF admits the syntax — <property type list> states no uniqueness constraint — so which reading the standard intends is Syntax Rules prose gqlc has not bought, and rejection is the interim posture on the same grounds as ErrEdgeKindArcMismatch: keeping one declaration and discarding the other is the only reading that can be wrong silently. This was a resolves entry with a semanticCase pinning the accidental last-wins; the sentinel supersedes both",
 	},
 	{
 		file:    "18.4-label-set/label_forms.gql",
@@ -129,12 +130,10 @@ var corpusAreaB = []corpusEntry{
 // back rather than deleting this. Should the list ever empty out again, keep the
 // []semanticCase{} spelling: the manifest requires non-nil, so
 // `var x []semanticCase` reads as a lost wiring.
-var semanticAreaB = []semanticCase{
-	{
-		file:     "18.2-node-type/property_name_repeated.gql",
-		bead:     "gqlc-4np",
-		why:      "two declarations of `id` resolve to one property carrying only the second's type and nullability; the first is discarded, so the model cannot be told apart from one that never declared it",
-		spelling: "id :: INT NOT NULL, id :: STRING",
-		siblings: []string{"id :: STRING"},
-	},
-}
+//
+// It is empty again as of gqlc-4np: its one case — property_name_repeated.gql,
+// two declarations of `id` resolving to one property — stopped being a blind
+// spot when ADR 0030 gave the construct ErrDuplicatePropertyName. The file did
+// not go; it is now an unsupported entry above, the same passage
+// kind_undirected_arc_directed made under gqlc-h9n.3.
+var semanticAreaB = []semanticCase{}

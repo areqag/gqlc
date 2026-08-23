@@ -94,9 +94,17 @@ import (
 // be wrong — and TestSemanticCaseCollisions asserts those. Neither reads its
 // expectations off the map under test, which is what keeps them evidence.
 const (
-	wantCorpusEntries   = 123
-	wantCorpusResolving = 68
-	wantSemanticCases   = 18
+	wantCorpusEntries = 123
+	// 68 → 67 under gqlc-4np: 18.2-node-type/property_name_repeated.gql was
+	// demoted from resolves to unsupported, ADR 0030 having decided that a
+	// repeated property name is rejected rather than silently resolved to one
+	// of the two declarations. The file stayed; only its declared outcome moved.
+	wantCorpusResolving = 67
+	// 18 → 17 under gqlc-4np, the legitimate once-per-case drop this pin exists
+	// to make an author account for: the property_name_repeated case is closed
+	// by ErrDuplicatePropertyName, so it is an unsupported entry now rather than
+	// a model known to be wrong.
+	wantSemanticCases = 17
 )
 
 // isValidFeature reports whether v is an accepted value of corpusEntry.feature:

@@ -35,6 +35,17 @@ var (
 // Tracked as gqlc-xtq.
 var ErrEdgeKindArcMismatch = errors.New("edge kind contradicts arc direction")
 
+// ErrDuplicatePropertyName is returned when one propertyTypeList declares the
+// same property name twice. Like ErrEdgeKindArcMismatch this is a provisional
+// deviation rather than a settled reading: the free ISO BNF admits the syntax
+// (<property type list> ::= <property type> [{ <comma> <property type> }...]
+// states no uniqueness constraint), so whether a repeat is an error lives in
+// the Syntax Rules prose gqlc-lir declined to buy. Rejection is the interim
+// posture, chosen because the alternative — keeping one declaration and
+// discarding the other — is the only reading that can be wrong silently. See
+// ADR 0030. Revisit when the Syntax Rules are available.
+var ErrDuplicatePropertyName = errors.New("property name declared more than once in one property types specification")
+
 // ErrUnsupportedSource is the class of rejected <graph type source> alternatives
 // rather than a leaf sentinel: the two reachable rejections below wrap it, so a
 // caller that only asks "was the source rejected" still matches with errors.Is,

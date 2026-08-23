@@ -501,6 +501,14 @@ func nestedDepth(ctx antlr.ParserRuleContext) int {
 // properties lowers a property types specification into a map keyed by property
 // name. A nil spec (a type with no properties) yields a nil map. The same rule
 // shape backs both node and edge property types, so both paths reuse this.
+//
+// The repeated-name check is here rather than in resolve() because this is the
+// only place the LIST is still visible: the map is the thing that loses the
+// collision, so a guard downstream of it has nothing left to compare. Per ADR
+// 0030 a repeat is rejected — the map cannot hold two declarations under one
+// name, and the previous behaviour (last write wins, by accident of assignment
+// order) discarded the first declaration's type and its NOT NULL with nothing
+// said.
 func (l *listener) properties(spec gen.IPropertyTypesSpecificationContext) (map[string]schema.Property, error) {
 	if spec == nil {
 		return nil, nil
@@ -515,6 +523,9 @@ func (l *listener) properties(spec gen.IPropertyTypesSpecificationContext) (map[
 		p, err := property(pt, l.ts)
 		if err != nil {
 			return nil, err
+		}
+		if _, seen := out[p.Name]; seen {
+			return nil, fmt.Errorf("%w: %q", ErrDuplicatePropertyName, p.Name)
 		}
 		out[p.Name] = p
 	}
