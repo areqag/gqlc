@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+# Claude Code PreToolUse/PostToolUse hook: the town's PROGRESS witness.
+#
+# Everything the board knew about a seat's liveness before this file vouched for
+# a live PROCESS, not for progress. heartbeat.json is written by km-statusline,
+# which keeps firing all through a wedged turn — measured on gqlc-n97e, a
+# turn-elapsed clock climbing past 13 minutes with the heartbeat green — and the
+# two judges of gqlc-eier sat on modals for 80 and 152 minutes while every
+# instrument in the town read healthy. A witness rewritten on a timer proves the
+# timer runs. This one is written only by a tool call starting and a tool call
+# finishing, so it cannot advance while nothing happens.
+#
+# It records, per seat, in $KM_STATE_DIR/seats/<seat>/progress.json:
+#
+#   started       count of PreToolUse events since the file was created
+#   completed     count of PostToolUse events
+#   last_start    when a tool call last STARTED   (existence of an attempt)
+#   last_progress when a tool call last FINISHED  (the thing that is progress)
+#   last_tool     the tool named by the newest PreToolUse
+#
+# km reads it (progress_field / cmd_status). A tool call in flight is
+# last_start strictly later than last_progress; how long it has been in flight
+# is now - last_start. With several tool calls in one block that measures the
+# NEWEST start, so it UNDERSTATES a wedge whose first call hung while later ones
+# returned — late, never early, which is the direction a marker should err.
+#
+# Known false reading, stated so nobody has to rediscover it: a tool DENIED at
+# PreToolUse (claude-pre-ask does exactly that to AskUserQuestion) fires no
+# PostToolUse, so it leaves last_start ahead of last_progress. A seat that goes
+# on working immediately overwrites last_start and nothing shows; a seat whose
+# last act was a denied tool reads WEDGED after the threshold instead of NOWORK.
+# Both markers mean "not working", so the reading is wrong in its label and
+# right in its claim.
+#
+# Never blocks and never fails loudly. A PreToolUse hook that exits 2 DENIES the
+# tool, so a bug here would wedge the very session it exists to watch: every
+# path exits 0 and prints nothing.
+#
+# Tests: .githooks/tests/claude-tool-witness-test.sh, and the km half in
+# .githooks/tests/km-test.sh (run via `just test-hooks`).
+
+import fcntl
+import json
+import os
+import sys
+import time
+
+
+def now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def read_state(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def counter(state, key):
+    # A corrupted or hand-edited count must not take the witness down with it,
+    # and must not read as a fresh file either: anything non-numeric restarts at
+    # zero, which is what an unreadable file already gives.
+    v = state.get(key)
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
+
+
+def record(seat, state_dir, event, tool):
+    seat_dir = os.path.join(state_dir, "seats", seat)
+    os.makedirs(seat_dir, exist_ok=True)
+    path = os.path.join(seat_dir, "progress.json")
+    lock = os.path.join(seat_dir, ".progress.lock")
+    stamp = now()
+    # Tool calls in one assistant block run in PARALLEL, so two hook processes
+    # read-modify-write this file at once. Without the lock one increment is
+    # simply lost, and a lost PostToolUse is a seat that reads wedged forever.
+    with open(lock, "a+", encoding="utf-8") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            state = read_state(path)
+            state["seat"] = seat
+            state["started"] = counter(state, "started")
+            state["completed"] = counter(state, "completed")
+            if event == "PostToolUse":
+                state["completed"] += 1
+                state["last_progress"] = stamp
+            else:
+                state["started"] += 1
+                state["last_start"] = stamp
+                if tool:
+                    state["last_tool"] = tool
+            tmp = os.path.join(seat_dir, ".progress.tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+            os.replace(tmp, path)
+        finally:
+            fcntl.flock(lk, fcntl.LOCK_UN)
+
+
+def main():
+    seat = os.environ.get("KINGDOM_SEAT", "").strip()
+    state_dir = os.environ.get("KM_STATE_DIR", "").strip()
+    # Not a seat, or no state dir to write into: this is somebody's ordinary
+    # session and the town has no board to put it on.
+    if not seat or not state_dir:
+        return
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    event = str(payload.get("hook_event_name") or "")
+    # The event decides the arm, and an unrecognised one writes NOTHING. Guessing
+    # from the payload's shape would let a future hook event increment a counter
+    # that means something else.
+    if event not in ("PreToolUse", "PostToolUse"):
+        return
+    record(seat, state_dir, event, str(payload.get("tool_name") or "") or None)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:  # noqa: BLE001 — see header: this hook must never block
+        pass
+    sys.exit(0)
