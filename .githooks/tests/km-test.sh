@@ -2117,6 +2117,272 @@ else
 fi
 unset KM_CONFIG
 
+# --- a STALLED P0 leaves the journal (gqlc-tz95) ------------------------------
+# The block above gave a P0 no seat could take a line of its own. That line goes
+# to the dispatcher's journal, which is write-only: it exists for whoever runs
+# journalctl with the right filter in the right two-minute window, and gqlc-2ve4
+# was itself filed because a number in a queue nobody watches is not a report.
+# A better line in the same queue is the same defect.
+#
+# So dispatch now leaves DURABLE state — one marker file in the state dir — and
+# the two surfaces a human already reads, `km status` and `km doctor`, carry it.
+# The rows below pin all three halves, and two bounds that matter more than the
+# feature: the marker must not re-announce on every two-minute tick (48 unread
+# nudges is how this town has already learned that volume is its own silence),
+# and a marker that cannot be written must not stop the dispatcher (km:113, a
+# hung fetch is a stopped town).
+stall_marker() { echo "$KM_STATE_DIR/stalled-p0"; }
+# The surfaces, run from the hermetic fixture for the same reason
+# status_at_fixture below does: km derives seat_worktree from its CWD.
+stall_status() { make_inboxes; OUT="$(cd "$FIXTURE" && PATH="$BIN:$PATH" "$KM" status 2>&1)"; }
+stall_doctor() { DOUT="$(cd "$FIXTURE" && PATH="$BIN:$PATH" "$KM" doctor 2>&1)" || true; }
+
+# The marker itself. It carries the id, the class and the REASON, because the
+# four conditions above have four different remedies and a marker that only said
+# "a P0 is stalled" would send the reader back to the journal it replaces.
+dispatch_case '[
+  {"id":"gqlc-mark0","priority":0,"assignee":null,"labels":["class:architect"]},
+  {"id":"gqlc-markw","priority":1,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+fill_cap artur arpine aregak
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a STALLED P0 is written to a marker the read surfaces can find" "rc=$RC out=$OUT"
+elif ! grep -rq 'gqlc-markw' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "a STALLED P0 is written to a marker the read surfaces can find" \
+        "the warrior control reached nobody, so this row proves nothing: $OUT"
+elif [ ! -s "$(stall_marker)" ]; then
+    bad "a STALLED P0 is written to a marker the read surfaces can find" \
+        "the run named the stall and left nothing behind, so it is journal-only again: $OUT"
+elif ! grep -q 'gqlc-mark0' "$(stall_marker)"; then
+    bad "a STALLED P0 is written to a marker the read surfaces can find" \
+        "the marker does not name the bead: $(cat "$(stall_marker)")"
+elif ! grep -q 'architect' "$(stall_marker)"; then
+    bad "a STALLED P0 is written to a marker the read surfaces can find" \
+        "the marker does not carry the class: $(cat "$(stall_marker)")"
+elif ! grep -q 'awake' "$(stall_marker)"; then
+    bad "a STALLED P0 is written to a marker the read surfaces can find" \
+        "the marker does not carry the reason, so the reader is sent back to the journal: $(cat "$(stall_marker)")"
+elif grep -q 'gqlc-markw' "$(stall_marker)"; then
+    bad "a STALLED P0 is written to a marker the read surfaces can find" \
+        "a bead that routed was recorded as stalled: $(cat "$(stall_marker)")"
+elif ! awk '{ exit ($1 ~ /^[0-9]+$/) ? 0 : 1 }' "$(stall_marker)"; then
+    bad "a STALLED P0 is written to a marker the read surfaces can find" \
+        "the first field is not a first-seen timestamp, so no surface can age the stall: $(cat "$(stall_marker)")"
+elif ! printf '%s' "$OUT" | grep -q 'escalated'; then
+    bad "a STALLED P0 is written to a marker the read surfaces can find" \
+        "the run does not say it escalated, so an operator reading the journal cannot tell this run from the ones before the marker existed: $OUT"
+else
+    ok "a STALLED P0 is recorded in a marker carrying its id, class, reason and first-seen time, and the run says it escalated"
+fi
+STALL_MARK1="$(stall_marker)"
+
+# Escalate on a CHANGE of state, not on a tick. The dispatcher runs every two
+# minutes; a P0 that stays stalled for an hour is 30 runs, and a report that
+# repeats itself 30 times is the volume that makes an operator stop reading —
+# the same failure as silence, reached from the other side. The first-seen
+# stamp is forged an hour back, so a second run that rewrote it blindly is
+# distinguishable from one that preserved it.
+FORGED=$(( $(date +%s) - 3600 ))
+awk -v t="$FORGED" '{ $1 = t; print }' "$STALL_MARK1" >"$STALL_MARK1.forged"
+mv "$STALL_MARK1.forged" "$STALL_MARK1"
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a stall that has not changed is not re-announced, and its clock is not reset" "rc=$RC out=$OUT"
+elif [ ! -s "$STALL_MARK1" ]; then
+    bad "a stall that has not changed is not re-announced, and its clock is not reset" \
+        "the second run dropped a marker for a condition that still holds: $OUT"
+elif ! awk -v t="$FORGED" '$1 == t { found = 1 } END { exit found ? 0 : 1 }' "$STALL_MARK1"; then
+    bad "a stall that has not changed is not re-announced, and its clock is not reset" \
+        "the first-seen stamp was rewritten, so the stall always reads as brand new and never ages into a FAIL: $(cat "$STALL_MARK1")"
+elif printf '%s' "$OUT" | grep -q 'escalated'; then
+    bad "a stall that has not changed is not re-announced, and its clock is not reset" \
+        "it escalated a second time on an unchanged condition, which is the 48-unread-nudges failure: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'STALLED gqlc-mark0'; then
+    bad "a stall that has not changed is not re-announced, and its clock is not reset" \
+        "silence went too far — the per-run STALLED line gqlc-2ve4 added is gone: $OUT"
+else
+    ok "a second run over an unchanged stall keeps the marker and its first-seen time, prints the STALLED line, and does not escalate again"
+fi
+
+# The negative control, and the half that keeps the marker from becoming a
+# permanent red cell: the run on which the condition clears must take the marker
+# with it, and say so.
+mkdir -p "$TMP/dispatch-carry"
+cp "$STALL_MARK1" "$TMP/dispatch-carry/stalled-p0"
+dispatch_case '[
+  {"id":"gqlc-heal0","priority":0,"assignee":null,"labels":["class:architect"]}
+]' '[]'
+cp "$TMP/dispatch-carry/stalled-p0" "$(stall_marker)"
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the run that clears the stall clears the marker and says so" "rc=$RC out=$OUT"
+elif ! grep -rq 'gqlc-heal0' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the run that clears the stall clears the marker and says so" \
+        "the bead did not route with every architect free (woken: $(woken_seats)) out=$OUT"
+elif [ -e "$(stall_marker)" ]; then
+    bad "the run that clears the stall clears the marker and says so" \
+        "a healed town still fails doctor forever: $(cat "$(stall_marker)")"
+elif ! printf '%s' "$OUT" | grep -q 'cleared'; then
+    bad "the run that clears the stall clears the marker and says so" \
+        "the clear is silent, so nothing distinguishes a stall that healed from a marker somebody deleted by hand: $OUT"
+else
+    ok "the first run with no stalled P0 removes the marker and announces the clear"
+fi
+
+# The marker is the P0 escalation and not a second copy of the unroutable
+# report. A P1 is named on its own line already (the block above pins that) and
+# an ordinary backlog bead is counted; neither is an emergency, and a marker
+# that carried them would put `km doctor` permanently red on a 209-bead board.
+dispatch_case '[
+  {"id":"gqlc-nomark1","priority":1,"assignee":null,"labels":["class:architect"]},
+  {"id":"gqlc-nomark2","priority":3,"assignee":null,"labels":["class:architect"]}
+]' '[]'
+fill_cap artur arpine aregak
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "only a P0 reaches the marker; an unroutable P1 does not" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'unroutable gqlc-nomark1'; then
+    bad "only a P0 reaches the marker; an unroutable P1 does not" \
+        "the P1 did not go unroutable, so this row proves nothing: $OUT"
+elif [ -e "$(stall_marker)" ]; then
+    bad "only a P0 reaches the marker; an unroutable P1 does not" \
+        "ordinary backlog reached the escalation surface: $(cat "$(stall_marker)")"
+else
+    ok "an unroutable P1 and an unroutable P3 are reported without raising the P0 marker"
+fi
+
+# --- the read surfaces (gqlc-tz95) -------------------------------------------
+# `km status` is the one glance a human takes at this town. A P0 that no seat
+# can take is invisible there, which is the defect: every seat legitimately
+# working, every indicator green, and the highest-priority bead in the kingdom
+# reaching nobody.
+export KM_STATE_DIR="$TMP/stall-surface"
+mkdir -p "$KM_STATE_DIR"
+printf '%s gqlc-surf0 architect all 3 architect seats are awake\n' "$(( $(date +%s) - 4500 ))" \
+    >"$KM_STATE_DIR/stalled-p0"
+stall_status
+if ! printf '%s' "$OUT" | grep -q 'STALLED'; then
+    bad "km status carries a stalled P0" \
+        "the board is silent about a P0 no seat can take, which is the defect: $OUT"
+elif ! printf '%s' "$OUT" | grep 'STALLED' | grep -q 'gqlc-surf0'; then
+    bad "km status carries a stalled P0" \
+        "it says something is stalled without naming it: $(printf '%s' "$OUT" | grep STALLED)"
+elif ! printf '%s' "$OUT" | grep 'STALLED' | grep -q '1h15m'; then
+    bad "km status carries a stalled P0" \
+        "the line does not carry how long it has been stalled, which is the whole difference between a transient miss and an emergency: $(printf '%s' "$OUT" | grep STALLED)"
+elif ! printf '%s' "$OUT" | grep 'STALLED' | grep -q 'awake'; then
+    bad "km status carries a stalled P0" \
+        "the reason is dropped, so the reader is sent back to the journal: $(printf '%s' "$OUT" | grep STALLED)"
+else
+    ok "km status names a stalled P0, its age and the reason no seat could take it"
+fi
+
+# A line printed on every board tells an operator nothing.
+export KM_STATE_DIR="$TMP/stall-surface-clean"
+mkdir -p "$KM_STATE_DIR"
+stall_status
+if printf '%s' "$OUT" | grep -q 'STALLED'; then
+    bad "km status says nothing about stalled P0s when there are none" \
+        "it complained with no marker present: $(printf '%s' "$OUT" | grep STALLED)"
+else
+    ok "with no marker km status prints no STALLED line at all"
+fi
+
+# doctor is the gate, and a gate that prints a complaint and exits 0 is not a
+# gate (gqlc-z1qw). It FAILS, in the same shape as the stranded-bead arm beside
+# it, and it FAILS on the AGE rather than on the fact: a P0 whose class has a
+# wake already queued routes on the next tick, and a hard failure on a condition
+# that self-heals in two minutes trains the reader to ignore the row.
+export KM_STATE_DIR="$TMP/stall-doctor-old"
+mkdir -p "$KM_STATE_DIR"
+printf '%s gqlc-doc0 architect all 3 architect seats are awake\n' "$(( $(date +%s) - 4500 ))" \
+    >"$KM_STATE_DIR/stalled-p0"
+stall_doctor
+if ! printf '%s' "$DOUT" | grep -q 'gqlc-doc0'; then
+    bad "km doctor FAILS on a P0 that has been stalled past the threshold" \
+        "doctor never mentions the stalled bead: $DOUT"
+elif ! printf '%s' "$DOUT" | grep 'gqlc-doc0' | grep -q '^FAIL:'; then
+    bad "km doctor FAILS on a P0 that has been stalled past the threshold" \
+        "it is mentioned without failing, so the gate is a comment: $(printf '%s' "$DOUT" | grep 'gqlc-doc0')"
+elif ! printf '%s' "$DOUT" | grep 'gqlc-doc0' | grep -q '1h15m'; then
+    bad "km doctor FAILS on a P0 that has been stalled past the threshold" \
+        "the row does not say how long: $(printf '%s' "$DOUT" | grep 'gqlc-doc0')"
+elif ! printf '%s' "$DOUT" | grep 'gqlc-doc0' | grep -q 'awake'; then
+    bad "km doctor FAILS on a P0 that has been stalled past the threshold" \
+        "the row does not carry the reason: $(printf '%s' "$DOUT" | grep 'gqlc-doc0')"
+else
+    ok "km doctor FAILS, names the bead, its age and the reason, when a P0 has been stalled past the threshold"
+fi
+
+# The other side of the threshold, and the row that keeps the one above from
+# being satisfied by a check that fails on ANY marker.
+export KM_STATE_DIR="$TMP/stall-doctor-fresh"
+mkdir -p "$KM_STATE_DIR"
+printf '%s gqlc-doc1 architect every architect seat has a wake queued\n' "$(date +%s)" \
+    >"$KM_STATE_DIR/stalled-p0"
+stall_doctor
+if ! printf '%s' "$DOUT" | grep -q 'gqlc-doc1'; then
+    bad "km doctor marks a fresh stall without failing on it" \
+        "a stall one tick old is invisible to doctor: $DOUT"
+elif printf '%s' "$DOUT" | grep 'gqlc-doc1' | grep -q '^FAIL:'; then
+    bad "km doctor marks a fresh stall without failing on it" \
+        "a condition that routes on the next tick took the town's health down with it: $(printf '%s' "$DOUT" | grep 'gqlc-doc1')"
+elif ! printf '%s' "$DOUT" | grep 'gqlc-doc1' | grep -q '^warn:'; then
+    bad "km doctor marks a fresh stall without failing on it" \
+        "it is neither a warning nor a failure, so the row has no severity at all: $(printf '%s' "$DOUT" | grep 'gqlc-doc1')"
+else
+    ok "a stall younger than the threshold is a doctor warning and not a failure"
+fi
+
+export KM_STATE_DIR="$TMP/stall-doctor-clean"
+mkdir -p "$KM_STATE_DIR"
+stall_doctor
+# 'stalled P0' and not 'stalled': `ok: tmux installed` contains the substring
+# "stalled", and this row passed on it before the phrase was pinned — a row
+# green on a check that did not exist.
+if ! printf '%s' "$DOUT" | grep -q 'stalled P0'; then
+    bad "km doctor says out loud that no P0 is stalled" \
+        "the clean case is silent, so an absent arm and a passing one look the same: $DOUT"
+elif ! printf '%s' "$DOUT" | grep 'stalled P0' | grep -q '^ok:'; then
+    bad "km doctor says out loud that no P0 is stalled" \
+        "with no marker the arm did not pass: $(printf '%s' "$DOUT" | grep 'stalled P0')"
+else
+    ok "with no marker km doctor prints a passing row rather than saying nothing"
+fi
+
+# km:113 — a hung fetch is a stopped town, and the same holds for anything the
+# dispatcher does to announce itself. The escalation is a side effect of
+# routing; it must never be able to stop it. A directory where the marker goes
+# makes every write to that path fail.
+dispatch_case '[
+  {"id":"gqlc-blind0","priority":0,"assignee":null,"labels":["class:architect"]},
+  {"id":"gqlc-blindw","priority":1,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+fill_cap artur arpine aregak
+mkdir -p "$(stall_marker)"
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a marker that cannot be written does not stop the dispatcher" \
+        "routing died because a report could not be filed: rc=$RC out=$OUT"
+elif ! grep -rq 'gqlc-blindw' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "a marker that cannot be written does not stop the dispatcher" \
+        "the run survived but routed nobody: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'STALLED gqlc-blind0'; then
+    bad "a marker that cannot be written does not stop the dispatcher" \
+        "the journal line went down with the marker: $OUT"
+# The announcement is pinned to its own words, not to the word "marker": the
+# SUCCESS line ("escalated — the stalled-P0 marker now names ...") contains that
+# word too, so a grep for it passed a mutant that had disabled the write and
+# announced nothing.
+elif ! printf '%s' "$OUT" | grep -q 'could not be written'; then
+    bad "a marker that cannot be written does not stop the dispatcher" \
+        "it failed to escalate and said nothing, so km status and km doctor are silently blind and nothing anywhere says why: $OUT"
+else
+    ok "a marker path that cannot be written leaves routing untouched and the failure to escalate is announced"
+fi
+rmdir "$(stall_marker)" 2>/dev/null || true
+
 # Fail-closed, the half that made this invisible for the kingdom's whole life:
 # a query that FAILS must not read as a queue with nothing in it.
 dispatch_case 'not json at all' '[]'

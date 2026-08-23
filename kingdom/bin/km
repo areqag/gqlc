@@ -1267,6 +1267,10 @@ report_unroutable() { # <id> <class> <priority> <reason>
     if [ "$rprio" -eq 0 ]; then
         stalled=$((stalled + 1))
         echo "dispatch: STALLED $rid — P0 $rcls work, ready and unassigned, and no seat can take it: $rwhy"
+        # And durably, because the line above is write-only (gqlc-tz95): see
+        # record_stalled_p0, which is handed this list at the end of the run.
+        stalled_beads="$stalled_beads$rid|$rcls|$rwhy
+"
     elif [ "$rprio" -le "$DISPATCH_LOUD_PRIORITY" ]; then
         echo "dispatch: unroutable $rid — P$rprio $rcls work and no seat can take it: $rwhy"
     else
@@ -1274,6 +1278,120 @@ report_unroutable() { # <id> <class> <priority> <reason>
 "
     fi
 }
+
+# ---------- the stalled-P0 marker ----------
+#
+# gqlc-2ve4 gave a P0 that no seat could take a line of its own in the run's
+# output. gqlc-tz95 is that line's own limitation: the dispatcher's output is a
+# journal, which exists for whoever runs journalctl with the right filter inside
+# the right two-minute window. gqlc-2ve4's complaint was "a number in a queue
+# nobody is watching", and a better line in the same queue does not answer it.
+#
+# So the run leaves DURABLE state — one file — and the two surfaces a human
+# already reads carry it: `km status`, the one glance at the town, and
+# `km doctor`, which FAILS. That is the whole choice, and the alternatives were
+# rejected for reasons worth keeping. MAIL to Սեդրակ makes the mayor a required
+# actor in a hot path, which is the opposite of the direction his role is being
+# taken in, and the king's own box has been measured at 30 delivered / 0 read
+# (gqlc-2abx) — a second write-only carrier. An AUTO-WAKE acts on a citizen,
+# which is Constitution VI.2 for an awake seat and is coercion for a condition
+# that is often two minutes from healing on its own.
+#
+# The file is a marker and NOT a queue of events, which is what bounds the
+# repetition. A stall that persists for an hour is 30 dispatch runs; 30 letters,
+# or 30 anything, is the volume at which the report becomes the silence it was
+# written to end (this town has 48 unread nudges on record). Writing the same
+# marker 30 times says the same thing once.
+#
+# Format, one line per stalled bead:  <first-seen epoch> <id> <class> <reason>
+# The first-seen stamp is per BEAD, so a second P0 joining the stall does not
+# restart the first one's clock, and it is what lets doctor separate a stall two
+# minutes old — which the next tick may route — from one that has held all night.
+#
+# A run that never reaches here — the town is halted, or the ready query failed
+# and dispatch refused — leaves the marker exactly as it was, and that is the
+# direction to fail in: a stall stands until a run PROVES it has cleared, rather
+# than being cleared by a run that could not look. Both read surfaces say the
+# marker is the dispatcher's record and is only as fresh as its last run.
+stalled_marker_path() { echo "$(state_dir)/stalled-p0"; }
+
+record_stalled_p0() { # <newline-separated "<id>|<class>|<reason>">
+    local pending=$1 marker prev="" now id cls why seen out="" ids="" previds=""
+    marker=$(stalled_marker_path)
+    if [ -f "$marker" ]; then prev=$(cat "$marker" 2>/dev/null || true); fi
+    previds=$(printf '%s' "$prev" | awk 'NF { print $2 }' | sort | tr '\n' ' ')
+    if [ -z "$pending" ]; then
+        # The clearing run, and it must happen: a marker nothing removes is a
+        # doctor that fails forever, which is a gate that gets ignored.
+        if [ -e "$marker" ]; then
+            if rm -f "$marker" 2>/dev/null; then
+                echo "dispatch: cleared the stalled-P0 marker — no P0 was unroutable this run, so km status and km doctor are clean again (was:${previds:- unreadable})"
+            else
+                echo "dispatch: the stalled-P0 marker at $marker could not be removed, so km status and km doctor will keep reporting a stall that has cleared" >&2
+            fi
+        fi
+        return 0
+    fi
+    now=$(date +%s)
+    while IFS='|' read -r id cls why; do
+        [ -n "$id" ] || continue
+        seen=$(printf '%s' "$prev" | awk -v i="$id" '$2 == i { print $1; exit }')
+        case "$seen" in '' | *[!0-9]*) seen=$now ;; esac
+        out="$out$seen $id $cls $why
+"
+        ids="$ids$id "
+    done <<<"$pending"
+    ids=$(printf '%s' "$ids" | tr ' ' '\n' | awk 'NF' | sort | tr '\n' ' ')
+    # NON-FATAL, in the shape km:113 argues for: routing is the town's work and
+    # a report about it must never be able to stop it. Said out loud on stderr,
+    # because a failure to escalate that escalates nothing leaves both read
+    # surfaces silently blind, which is this bead's own defect one layer down.
+    if ! printf '%s' "$out" >"$marker" 2>/dev/null; then
+        echo "dispatch: the stalled-P0 marker at $marker could not be written, so km status and km doctor cannot report this stall; the STALLED line(s) above are all there is" >&2
+        return 0
+    fi
+    # ON CHANGE, never on a tick — and keyed on the ID SET rather than on the
+    # file's bytes. The REASON for a stall flips between "awake" and "wake
+    # queued" as seats move, and re-announcing on that would restore the
+    # per-tick repetition through the back door.
+    if [ "$ids" != "$previds" ]; then
+        echo "dispatch: escalated — the stalled-P0 marker now names $ids and km status and km doctor carry it until it clears"
+    fi
+}
+
+# What the two read surfaces say about the marker, in ONE place. They differ in
+# severity and in nothing else; two copies of this loop would be two accounts of
+# the same stall, free to disagree about which beads and how long.
+#
+# rc 1 for "no stall recorded". A marker that is not a readable file (the path
+# taken over by a directory, say) reads the same way rather than aborting: this
+# is an instrument on a status command, and status commands that die are status
+# commands nobody runs.
+stalled_p0_render() { # -> "<oldest age in seconds><TAB><summary>", rc 1 if none
+    local marker seen id cls why now age oldest="" list=""
+    marker=$(stalled_marker_path)
+    [ -f "$marker" ] || return 1
+    now=$(date +%s)
+    while read -r seen id cls why || [ -n "$id" ]; do
+        [ -n "$id" ] || continue
+        case "$seen" in '' | *[!0-9]*) seen=$now ;; esac
+        age=$((now - seen))
+        [ "$age" -ge 0 ] || age=0
+        if [ -z "$oldest" ] || [ "$age" -gt "$oldest" ]; then oldest=$age; fi
+        list="$list $id (P0 ${cls:-?}, stalled $(fmt_age "$age") — ${why:-no reason recorded});"
+        id=""
+    done <"$marker"
+    [ -n "$list" ] || return 1
+    printf '%s\t%s\n' "$oldest" "${list# }"
+}
+
+# How long a P0 may be unroutable before doctor stops calling it a warning.
+# 15 minutes is seven dispatch ticks. Below it the commonest cause is a class
+# whose wakes are already queued, which routes on the next run with nobody
+# acting at all; a hard failure on a condition that heals itself in two minutes
+# is how a gate teaches its reader to skip it. A config key and not a constant,
+# per Constitution V.6.1: it is a threshold on a report.
+stalled_p0_after() { cfg_minutes dispatch stalled_p0_after_minutes 15; }
 
 # A JSON payload belongs on a descriptor, never in argv. `--argjson` puts the
 # whole document in ONE command-line argument, and Linux caps a single argument
@@ -1791,7 +1909,7 @@ cmd_dispatch() {
     fi
 
     # report_unroutable's accumulators; see its comment where it is defined.
-    local unroutable=0 stalled=0 quiet=""
+    local unroutable=0 stalled=0 quiet="" stalled_beads=""
 
     local verdict reason how
     while IFS=' ' read -r id cls origin prio; do
@@ -1871,6 +1989,10 @@ cmd_dispatch() {
             echo "dispatch: UNREACHABLE ASSIGNEE $uname — it is in neither [seats] nor [humans] in kingdom.toml, so every pass matching assignees against the seat roster skips this work and no wake will ever come for it; nothing has been reassigned: $uids"
         done <<<"$urows"
     fi
+
+    # The escalation, after every pass has had its chance at the queue, so the
+    # marker describes the run's final state and not an intermediate one.
+    record_stalled_p0 "$stalled_beads"
     echo "dispatch: done ($wakes wake(s) this run, $held held, $epic_n epic, $skipped below max_priority $maxprio, $inferred class inferred, $unroutable unroutable ($stalled at P0))"
 }
 
@@ -2461,6 +2583,7 @@ cmd_status() {
     local sd s disp class st stcol ctx hb beads unread age hbcol stale frozen="" blind="" idle=""
     local target tree fresh fstate fball fbgates fahead fdetail stalewt="" exposed="" unjudged=""
     local workcol wage sage dry wedged="" nowork="" unwitnessed=""
+    local stall stall_age stall_list
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
     if session_up; then echo "town: UP (tmux session '$SESSION')"; else echo "town: DOWN"; fi
@@ -2469,6 +2592,15 @@ cmd_status() {
     # (bd gqlc-vzpn), so the town's one glance carries it.
     if ! deployed_ok; then
         echo "DRIFT: $(deploy_root) is not origin/master in kingdom/, .githooks/ or .claude/ — the timers refuse, and the hooks that run there are the stale copies, until 'km deploy'"
+    fi
+    # In the HEADER and not among the trailing marks: this is the town's highest
+    # work standing still, and it is invisible in every other cell of this board
+    # by construction — each seat is legitimately working or legitimately
+    # resting, and the bead reaching nobody is a property of the pair (gqlc-tz95).
+    if stall=$(stalled_p0_render); then
+        stall_age=${stall%%$'\t'*}
+        stall_list=${stall#*$'\t'}
+        echo "STALLED P0: $stall_list oldest $(fmt_age "$stall_age") — ready P0 work the last dispatch run could hand to no seat. Recorded by the dispatcher, so it is as old as its last run; it clears itself on the first run that can route it. Nothing here wakes anyone (VI.2): free a seat, or take it yourself."
     fi
     echo
 
@@ -2791,6 +2923,33 @@ cmd_doctor() {
         done <<<"$urows"
     else
         echo "ok:   every assignee on the board is a seat or a known person"
+    fi
+
+    # The stranded arm above answers "can any pass reach this bead"; this one
+    # answers "did the last run actually place the town's highest work", which
+    # is a different question with the same consequence — nothing happens, and
+    # every board reads healthy (gqlc-tz95).
+    #
+    # Graded on AGE and not on the fact. Under the threshold the commonest
+    # cause is a class whose wakes are already queued and which routes on the
+    # next tick without anybody acting; failing hard on that trains the reader
+    # to skip the row, which costs more than the row is worth.
+    local stall stall_age stall_list
+    if ! stall=$(stalled_p0_render); then
+        # Named on the clean path too: an arm that is silent when it passes is
+        # indistinguishable from an arm that is not there. It says whose record
+        # it is, because absence here means the DISPATCHER saw no stall — the
+        # last-run row below is what says whether it ran at all.
+        echo "ok:   the last dispatch run recorded no stalled P0"
+    else
+        stall_age=${stall%%$'\t'*}
+        stall_list=${stall#*$'\t'}
+        if [ "$stall_age" -ge "$(stalled_p0_after)" ]; then
+            echo "FAIL: P0 work has been unroutable for $(fmt_age "$stall_age") — ready, unassigned, and no seat can take it: $stall_list"
+            ok=1
+        else
+            echo "warn: P0 work went unroutable on the last dispatch run, under $(fmt_age "$(stalled_p0_after)") ago, so it may still route on the next tick: $stall_list"
+        fi
     fi
     # THE IDENTITY ARM (gqlc-0rv9). `.githooks/commit-msg` refuses an
     # implausible author and `.github/scripts/check-pr-authors.sh` refuses one
