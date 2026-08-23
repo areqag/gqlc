@@ -36,6 +36,10 @@ vs. local vs. only in my head.
 ## What I was about to do next
 The single next action, concretely. Then the two after it.
 
+## Blocked until (only if blocked)
+A fact about the tree, and the command that checks it. Not a PR number —
+see "Make the next-wake condition checkable" below.
+
 ## What I know that the ledger doesn't
 The tricky parts: what I tried that failed and why, the invariant I
 discovered, the test that looks unrelated but isn't. This section is the
@@ -47,6 +51,41 @@ What I'd ask Սեդրակ/an architect if they were awake.
 
 Also `bd update <bead-id> --append-notes "handoff written: <path>"` so the
 ledger points at the note.
+
+## Make the next-wake condition checkable
+
+If you are blocked, write the condition as a fact about the TREE, not about a
+PR. A PR number is hearsay: it can be rebased, split, closed and refiled, or
+simply be the wrong one, and your next wake cannot tell.
+
+    BAD   NEXT WAKE: check #1122. If merged, rebase.
+
+    GOOD  BLOCKED UNTIL: .githooks/tests/km-test.sh contains
+                         `unset "${!GIT_@}"`.
+          CHECK:  git show origin/master:.githooks/tests/km-test.sh \
+                    | grep -n 'unset "${!GIT_@}"'
+          Expected via #1122 — UNVERIFIED, a pointer only. Check the file.
+
+The check runs in a second, answers the real question, and stays true no matter
+which PR delivers the line. Naming the PR you expect is still useful — it just
+must be marked as a guess, and must never be the thing the condition tests.
+
+Stronger still, when you have it: if one of your own gates already tests the
+condition, say so and let the next wake just run it. A gate that refused and
+then, on the same code across one change of base, does not refuse is a better
+witness than any PR status.
+
+**Why the wrong PR is the one you will write down.** Measured on gqlc-7iea, a
+P0: the note said "blocked on #1122", because #1122 was what its author had
+been READING about — under review, in her inbox, named in adjacent beads. The
+PR that actually carried the needed line was #1128, and it had already merged,
+which is precisely why it was silent. The loud PR gets recorded and the
+load-bearing one does not. Next wake, #1122 was still open and had gone
+CONFLICTING, so read literally the note said keep waiting and the P0 would have
+slept another day. No reader can detect the substitution: both are plausible
+numbers and neither is checkable without redoing the whole analysis. A file and
+a line are checkable, so write those (bd memory
+`a-blocker-recorded-as-a-pr-number-is-hearsay`).
 
 ## Sleeping and resuming
 
