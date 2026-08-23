@@ -49,6 +49,31 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    agent), which have no seat worktree to work in. It is not an instruction to
    you, and following it leaves worktrees nobody reaps (bd gqlc-wuax,
    gqlc-osuz).
+
+   **Read the unreviewed merge you are about to build on** (ADR 0004 §1). Once
+   you are synced, look at what has recently landed in your bead's `subject:`
+   path, and where a merge into it was not reviewed, read that merge
+   adversarially before you depend on it:
+
+       git log --oneline origin/master -15 -- <the subject: path>
+
+   You are the first reader who is not its author, and you are reading it at
+   the one moment you have a reason to understand it properly. File what you
+   find as an ordinary defect bead — with `from-pr:<N>`, since the code has
+   merged (step 9).
+
+   This adds no wake, no label, no routing and no dependency; it rides the wake
+   the bead already caused, which is the only reason the town can afford it.
+   **Filing against another citizen's merged work is normal and is not rude.**
+   Constitution V.4 says a judge judges code and never people, and that clause
+   is not only for judges — it is the standard for every finding anyone files
+   here. A citizen who reads your merge and files against it has done you a
+   service and should be thanked, not answered.
+
+   Its limit, which you should not let this paragraph hide: it covers only code
+   somebody happens to work next to. Code nobody touches again is not read by
+   this at all, and nothing in this step claims otherwise. Patrol (README §5)
+   is the compensating control for that gap, and it is not complete either.
 2. Keep the bead current: notes for material state changes, `--append-notes`
    (never bare `--notes`, which replaces).
 3. Tests first. Ռազմիկներ write code test-driven — the `/tdd` skill walks
@@ -181,6 +206,13 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    change through the unreviewed path — the bead is resized and a resized
    bead is reviewed. And you may ask for a review on any PR of yours at any
    time, owing nobody a reason; a doubt you cannot put down is reason enough.
+
+   **V.2's rules are about open PRs, and only about open PRs.** So the bar on a
+   Ճարտարապետ reviewing a Ռազմիկ's PR does not reach the ride-along read of
+   step 1 or a patrol round (README §5): neither touches an open PR, neither
+   produces a verdict, and any citizen of any class may do the first. No
+   constitutional amendment is needed for either, and none should be written
+   (ADR 0004, answer 3 of its six).
 
    **Rebase before you ask for review.** Do not ask for a review on a PR that
    is DIRTY *in the files under review*: if a judge PASSes at that SHA you must
