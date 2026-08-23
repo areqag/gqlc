@@ -2248,44 +2248,6 @@ func (s *EmissionSuite) TestNoQueryArgumentReachesTheStatementText() {
 		"a function outside the statement composer builds text by concatenation")
 }
 
-// requireNothingDeclaredIsCaptured holds every package-level name the
-// emitted file declares to being resolvable from some method that needs
-// it. Capture has one signature and this is it: the const stays in the
-// file, the body still reads a name spelled the same way, and that name
-// now resolves to the parameter — leaving the declaration referenced by
-// nobody. Asserting reachability rather than comparing name lists is
-// what keeps this closed, because it never has to know what the emitter
-// chose to call anything.
-//
-// Names the file does not declare are out of scope here and tracked by
-// gqlc-ni66: fmt, agtypeArgs and the rest arrive from an import or
-// another file of the package, and capturing one is a compile failure of
-// the generated package — a string has no method Errorf and cannot be
-// called. The query-text const is the only silent one, because it is
-// string-typed and lands where a string is expected.
-func (s *EmissionSuite) requireNothingDeclaredIsCaptured(body string) {
-	file := s.parseEmission(body)
-
-	var free []map[string]bool
-	for _, decl := range file.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok {
-			free = append(free, freeIdents(fn))
-		}
-	}
-
-	for _, name := range packageDecls(file) {
-		reachable := false
-		for _, f := range free {
-			if f[name] {
-				reachable = true
-				break
-			}
-		}
-		s.Require().True(reachable,
-			"package-level %q is declared but no method resolves it: the caller's argument captured it", name)
-	}
-}
-
 // freeIdents names the identifiers a function resolves outside itself —
 // every identifier it mentions, less every name it binds. Flat rather
 // than block-scoped, which errs towards calling a name bound: an
