@@ -411,6 +411,18 @@ check-shared-config dir=".":
 # sharing this repository, including one a human runs without having read the
 # bead. That is the difference between a workaround and a fix.
 #
+# WHAT IT DOES NOT COVER, stated because a partial fix read as a complete one is
+# how this defect keeps costing hours. core.sshCommand governs ssh and nothing
+# else, and rc=141 was measured over HTTPS too on 2026-08-23 by a second lane —
+# git spawns no ssh there, so there is nothing for the keepalive to attach to
+# and no equivalent key to set. It covers every push from this repository as it
+# is configured: all 17 seat worktrees and the shared checkout resolve origin to
+# git@github.com:areqag/gqlc.git, with no url.insteadOf rewrite, and remotes live
+# in the shared config so a per-worktree difference is not reachable (measured
+# 2026-08-23). A clone made over https is the uncovered case, and
+# .githooks/push-transport-notice tells that operator so on every push rather
+# than leaving the silence to be read as cover.
+#
 # WHY IT SELF-HEALS RATHER THAN REFUSING, unlike check-hooks above. The key is
 # absent on every fresh clone and in every worktree registered before this
 # landed, so a refusal would have failed every push in the town on the day it

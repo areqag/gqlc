@@ -166,7 +166,7 @@ esac
 # A FOREIGN VALUE IS NEVER OVERWRITTEN. `ssh -i ~/.ssh/id_foo` is legitimate and
 # belongs to whoever wrote it; clobbering it locks its author out of the remote,
 # which is a larger harm than a lost push. Warn, do not touch, exit 0.
-foreign='ssh -i /tmp/nonexistent-key-for-test'
+foreign="ssh -i $TMP/nonexistent-key"
 "${GIT[@]}" -C "$REPO" config core.sshCommand "$foreign"
 out="$(keepalive)"
 rc=$?
@@ -295,7 +295,8 @@ fi
 
 # An https remote reaches GitHub through another transport; prescribing an ssh
 # option there is a confident wrong diagnosis.
-out="$(notice "" 'https://github.com/areqag/gqlc.git' env)"
+https_url='https://github.com/areqag/gqlc.git'
+out="$(notice "" "$https_url" env)"
 if printf '%s' "$out" | grep -qF 'NO SSH KEEPALIVE'; then
     bad "notice: prescribed an ssh keepalive for an https remote: $out"
 else
@@ -305,6 +306,42 @@ if printf '%s' "$out" | grep -qF 'every gate PASSED'; then
     ok "notice: an https push still gets the gates-passed statement"
 else
     bad "notice: an https push got no notice at all: $out"
+fi
+
+# THE LIMIT IS STATED, and stated even when the keepalive IS configured — which
+# after `just init` is every push. rc=141 was measured over https too by an
+# independent lane on 2026-08-23, and core.sshCommand governs no part of an
+# https push; a notice that went quiet there would be reassuring the one
+# operator the fix does not reach. This row is the whole guard on that: fold the
+# keepalive short-circuit back out of the ssh arm and it is the only thing red.
+"${GIT[@]}" -C "$REPO" config core.sshCommand 'ssh -o ServerAliveInterval=15'
+out="$(notice "" "$https_url" env)"
+if printf '%s' "$out" | grep -qF 'NOT OVER SSH'; then
+    ok "notice: an https push is told the ssh keepalive does not cover it, keepalive configured or not"
+else
+    bad "notice: a configured keepalive silenced the https limit — false reassurance: $out"
+fi
+"${GIT[@]}" -C "$REPO" config --unset-all core.sshCommand
+out="$(notice "" "$https_url" env)"
+if printf '%s' "$out" | grep -qF 'NOT OVER SSH'; then
+    ok "notice: an unprotected https push is told the same limit"
+else
+    bad "notice: said nothing about the transport on an https push: $out"
+fi
+
+# A CALLER WITH NO URL is told nothing about the transport. git passes the url
+# on a real push, so an empty one is absence of evidence, and both claims above
+# would be made on none.
+out="$(notice "" "" env)"
+if printf '%s' "$out" | grep -qE 'NOT OVER SSH|NO SSH KEEPALIVE'; then
+    bad "notice: made a transport claim with no url to base it on: $out"
+else
+    ok "notice: with no remote url it makes no transport claim at all"
+fi
+if printf '%s' "$out" | grep -qF 'every gate PASSED'; then
+    ok "notice: with no remote url it still says the gates passed"
+else
+    bad "notice: with no remote url it printed nothing: $out"
 fi
 
 # GIT_SSH_COMMAND OVERRIDES core.sshCommand. Config keepalived, env not: the
