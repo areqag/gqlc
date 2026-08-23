@@ -5457,6 +5457,29 @@ else
     ok "$king_missing"
 fi
 
+# gqlc-6wqw, the same defect on inbox/ and the one that was actually filed: a
+# seat in kingdom.toml that no letter has ever reached has no inbox dir either,
+# and status died mid-table on it. Note that this row deliberately does NOT call
+# make_inboxes — that helper exists in this file precisely to hold the defect
+# off, and every status row above stands on it, so none of them can see this.
+inbox_row="status renders a full table when a configured seat has no inbox directory"
+dispatch_case '[]' '[]'
+rm -rf "$KM_STATE_DIR/mail"
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "$inbox_row" "status exited $RC part way through: $OUT"
+elif [ "$(printf '%s\n' "$OUT" | grep -cE '^(sedrak|raffi|tir) ')" -ne 3 ]; then
+    # The LAST seats in roster order, not the first: an abort mid-table still
+    # prints a header and some rows, so a row asserting rc alone, or asserting
+    # the table started, passes against a table that stopped.
+    bad "$inbox_row" "the seat table is short — it aborted part way: $OUT"
+elif ! printf '%s' "$OUT" | grep -q "king's inbox"; then
+    bad "$inbox_row" "it never reached the counters below the table: $OUT"
+else
+    ok "$inbox_row"
+fi
+
 # This suite builds git repositories, so it must be able to prove it built them
 # somewhere else. On PR #1128 it could not: a leaked GIT_DIR sent the fixture's
 # `git init` and `git commit` into the repo under test, grafting six fixture
