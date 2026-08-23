@@ -1104,6 +1104,7 @@ var allSentinels = map[string]error{
 	"ErrMultiLabelEdgeType":          ErrMultiLabelEdgeType,
 	"ErrDuplicateNodeType":           ErrDuplicateNodeType,
 	"ErrDuplicateEdgeType":           ErrDuplicateEdgeType,
+	"ErrDuplicatePropertyName":       ErrDuplicatePropertyName,
 	"ErrNoGraphType":                 ErrNoGraphType,
 	"ErrMultipleGraphTypes":          ErrMultipleGraphTypes,
 	"ErrLikeGraphSource":             ErrLikeGraphSource,
@@ -1250,4 +1251,70 @@ func declaredSentinels(t *testing.T) []string {
 	}
 	require.NotEmpty(t, names, "errors.go declares no sentinel, so the scan is broken and every check below is vacuous")
 	return names
+}
+
+// TestRepeatedPropertyNameIsRejected pins ADR 0030: a property name declared
+// twice in one propertyTypeList is rejected, not silently resolved to the last
+// declaration. The rows exercise both collectors — node and edge fillers reach
+// listener.properties through separate hand-written paths (nodeContent and
+// edgeContent), so a guard added to one and not the other leaves the whole
+// diagnostic missing on the other half with the corpus still green.
+//
+// The name is asserted as well as the sentinel: the entire point of the
+// rejection is that an author who left a stale declaration behind is told
+// WHICH property collided, and a bare sentinel would let the message drop the
+// name with every errors.Is row still passing.
+func TestRepeatedPropertyNameIsRejected(t *testing.T) {
+	cases := map[string]struct {
+		src  string
+		name string
+	}{
+		"node type": {
+			src: `CREATE PROPERTY GRAPH TYPE T AS {
+				(:Person { id :: INT NOT NULL, id :: STRING })
+			}`,
+			name: "id",
+		},
+		"edge type": {
+			src: `CREATE PROPERTY GRAPH TYPE T AS {
+				(:Person),
+				(:Company),
+				(:Person)-[:WORKS_AT { since :: INT NOT NULL, since :: STRING }]->(:Company)
+			}`,
+			name: "since",
+		},
+		"repeat is not adjacent": {
+			src: `CREATE PROPERTY GRAPH TYPE T AS {
+				(:Person { id :: INT, name :: STRING, id :: STRING })
+			}`,
+			name: "id",
+		},
+	}
+
+	for label, tc := range cases {
+		t.Run(label, func(t *testing.T) {
+			got, err := New().Parse(strings.NewReader(tc.src))
+			require.ErrorIs(t, err, ErrDuplicatePropertyName)
+			require.Contains(t, err.Error(), tc.name,
+				"the diagnostic must name the property that collided; that is what the rejection is for")
+			require.Equal(t, schema.Schema{}, got, "model must be the zero value on error")
+		})
+	}
+}
+
+// TestDistinctPropertyNamesStillResolve is the ALLOW half of the guard above.
+// Without it, a guard that rejected every property types specification with
+// more than one entry — or every one at all — would pass every row of
+// TestRepeatedPropertyNameIsRejected.
+func TestDistinctPropertyNamesStillResolve(t *testing.T) {
+	const src = `CREATE PROPERTY GRAPH TYPE T AS {
+		(:Person { id :: INT NOT NULL, name :: STRING })
+	}`
+
+	got, err := New().Parse(strings.NewReader(src))
+	require.NoError(t, err)
+	require.Len(t, got.Nodes, 1)
+	for _, nt := range got.Nodes {
+		require.Len(t, nt.Properties, 2)
+	}
 }
