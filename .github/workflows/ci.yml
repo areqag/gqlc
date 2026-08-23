@@ -68,9 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
       - uses: ./.github/actions/setup-golangci
       # Ratchets the set of packages govulncheck cannot see through (ADR 0026,
@@ -123,9 +121,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
       - run: just test
 
@@ -143,9 +139,7 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
       - run: just tidy-check
       # bd gqlc-v2p: fails when a PR's `.beads/issues.jsonl` drops or reopens
@@ -276,9 +270,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
       # test-codegen-fence depends on ensure-golangci, so this job downloads the
       # linter too — it is where the 429 in bd gqlc-l45j's first witness landed.
@@ -289,8 +281,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
       - run: just actionlint
