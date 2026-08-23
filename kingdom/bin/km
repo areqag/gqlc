@@ -579,6 +579,69 @@ heartbeat_age() { # <seat> -> seconds
     echo $((now - t))
 }
 
+# ---------- the progress witness ----------
+#
+# The heartbeat above answers "is a process alive". It CANNOT answer "is this
+# seat doing anything", and the comment at status_unresponsive_after is careful
+# about why: km-statusline goes on writing all through a wedged turn, so a seat
+# frozen on a modal inside a tool call has a heartbeat as fresh as a seat doing
+# real work (gqlc-n97e, 13+ minutes measured; gqlc-eier, 80 and 152).
+#
+# progress.json is the other half. It is written by .githooks/claude-tool-witness
+# on PreToolUse and PostToolUse and by nothing else — no timer, no statusline, no
+# daemon — so its `last_progress` field advances only when a tool call actually
+# FINISHED. That is the whole design: an instrument that ticks on a schedule
+# vouches for the schedule, and this town has been burned by that shape four
+# times in one night.
+progress_field() { # <seat> <jq field> -> value on stdout, rc 1 if unreadable
+    local f v
+    f="$(seat_home "$1")/progress.json"
+    [ -f "$f" ] || return 1
+    v=$(jq -r "$2 // empty" "$f" 2>/dev/null) || return 1
+    [ -n "$v" ] || return 1
+    printf '%s\n' "$v"
+}
+
+# Seconds since a stamp field in progress.json. rc 1 for unknown, never 0 — a
+# zero would be the most reassuring possible rendering of a file nobody can read,
+# which is the lesson the HB column already had to be taught (gqlc-eier).
+progress_age() { # <seat> <.last_start|.last_progress> -> seconds
+    local t now
+    t=$(progress_field "$1" "$2") || return 1
+    t=$(date -u -d "$t" +%s 2>/dev/null) || return 1
+    now=$(date +%s)
+    echo $((now - t))
+}
+
+# Is a tool call in flight? Timestamps decide it, not the started/completed
+# counters the witness also keeps: a start strictly LATER than the newest finish
+# is exactly "something began and has not come back". The counters are there for
+# a human reading the file and are deliberately not the test — a lost increment
+# (a killed hook, a hand edit) would wedge the reading permanently, where a stamp
+# comparison self-heals at the seat's next tool call.
+seat_tool_in_flight() { # <seat> -> 0 if a tool call started and has not finished
+    local s p
+    s=$(progress_age "$1" .last_start) || return 1
+    p=$(progress_age "$1" .last_progress) || return 0 # started, never finished
+    [ "$s" -lt "$p" ]
+}
+
+# Can this seat witness its own progress at all? The same question seat_can_report
+# asks of the heartbeat, with the same answer shape and the same reason for
+# existing: .githooks/claude-tool-witness and the PostToolUse wiring in
+# .claude/settings.json are TRACKED files, so a worktree parked on a commit older
+# than this one writes no progress.json — and a silent instrument renders exactly
+# like a seat that has completed no tool call, which is the stall this whole path
+# exists to name. Fail-closed: a worktree that is absent, or cannot be read, is
+# not evidence that the wiring is there.
+seat_can_witness() { # <seat> -> 1 if its checkout cannot write a progress witness
+    local wt
+    wt=$(seat_worktree "$1")
+    [ -d "$wt" ] || return 1
+    [ -f "$wt/.githooks/claude-tool-witness" ] || return 1
+    grep -qs 'claude-tool-witness' "$wt/.claude/settings.json" "$wt/.claude/settings.local.json"
+}
+
 # ---------- mail ----------
 
 # mail_box_count <seat> <inbox|read|sent>
@@ -2238,6 +2301,22 @@ unit_ran_ok() { case "$(unit_health "$1")" in ok*) return 0 ;; *) return 1 ;; es
 # that is one line of text asking someone to look at a pane.
 status_unresponsive_after() { cfg_minutes welfare unresponsive_after_minutes 30; }
 
+# How long without a COMPLETED tool call before the board says a live seat is
+# making no progress. Separate from the heartbeat threshold above and necessarily
+# so: that one measures whether the instrument reported, this one measures
+# whether anything happened, and the whole point of gqlc-r3ac is that the first
+# stays green while the second runs dry.
+#
+# 20 minutes. The two freezes it is sized against were 80 and 152 (gqlc-eier),
+# and the longest legitimate single tool call anyone here has a number for is the
+# ~10-minute pre-push suite — so 20 is twice the longest known honest wait and a
+# quarter of the shortest measured freeze. Long-running Agent spawns can exceed
+# it and will be marked; that costs one line of text asking a human to look at a
+# pane, which is the same trade UNRESPONSIVE already makes. There is deliberately
+# NO per-tool allowance: a per-tool exemption is a list of names, and the wedge
+# this exists to catch was a tool whose name nobody had written down.
+status_stalled_after() { cfg_minutes welfare stalled_after_minutes 20; }
+
 # Compact enough for a column: 45s, 12m, 3h20m.
 fmt_age() { # <seconds>
     local s=$1
@@ -2250,6 +2329,7 @@ fmt_age() { # <seconds>
 cmd_status() {
     local sd s disp class st stcol ctx hb beads unread age hbcol stale frozen="" blind="" idle=""
     local target tree fresh fstate fball fbgates fahead fdetail stalewt="" exposed="" unjudged=""
+    local workcol wage sage dry wedged="" nowork="" unwitnessed=""
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
     if session_up; then echo "town: UP (tmux session '$SESSION')"; else echo "town: DOWN"; fi
@@ -2284,11 +2364,12 @@ cmd_status() {
         jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"') || { inprog=""; inprog_ok=0; }
 
     stale=$(status_unresponsive_after)
+    dry=$(status_stalled_after)
     # No fetch: see seat_freshness. An absent ref makes every TREE cell "?" and
     # prints the UNJUDGED line below, rather than letting sixteen unanswered
     # questions render as sixteen healthy seats.
     target=$(git_at "$(main_root)" rev-parse --verify --quiet origin/master 2>/dev/null || true)
-    printf '%-10s %-10s %-9s %-6s %-7s %-7s %-6s %s\n' SEAT CLASS STATE CTX HB TREE MAIL BEADS
+    printf '%-10s %-10s %-9s %-6s %-7s %-8s %-7s %-6s %s\n' SEAT CLASS STATE CTX HB WORK TREE MAIL BEADS
     for s in $(seats_all); do
         disp=$(seat_display "$s")
         class=$(seat_class "$s")
@@ -2321,6 +2402,7 @@ cmd_status() {
         fi
         ctx="-"
         hbcol="-"
+        workcol="-"
         hb="$sd/seats/$s/heartbeat.json"
         # BOTH live statuses, not `awake` alone. Անահիտ was frozen under
         # asleep-pending — she had written her handoff and run `km sleep`, and
@@ -2354,6 +2436,43 @@ cmd_status() {
                     # (gqlc-h17n).
                     hbcol="blind"
                     blind="$blind $s"
+                fi
+                # The WORK column, and the reason it cannot be folded into HB:
+                # the two columns answer different questions and the whole of
+                # gqlc-r3ac is that they disagree. HB says the instrument
+                # reported. WORK says a tool call FINISHED — the only event on
+                # this seat that nothing on a timer produces. A seat wedged on a
+                # modal keeps a fresh HB forever and its WORK age climbs from the
+                # moment it froze.
+                if ! sage=$(progress_age "$s" .last_start); then sage=""; fi
+                if ! wage=$(progress_age "$s" .last_progress); then wage=""; fi
+                if [ -z "$sage" ] && [ -z "$wage" ]; then
+                    if [ -f "$sd/seats/$s/progress.json" ]; then
+                        # Present and unreadable. Unknown, never an age: see the
+                        # HB column's "?" above for the same argument.
+                        workcol="?"
+                    elif ! seat_can_witness "$s"; then
+                        workcol="unwired"
+                        unwitnessed="$unwitnessed $s"
+                    fi
+                    # A wired seat that has simply not run a tool yet keeps the
+                    # dash. That blank was always the correct reading and the
+                    # arm above exists so it stops being the ONLY reading.
+                elif seat_tool_in_flight "$s"; then
+                    # Leading * — a tool call that started and has not come back.
+                    # The age is from the NEWEST start, so several calls in one
+                    # block understate a wedge: late, never early.
+                    workcol="*$(fmt_age "$sage")"
+                    if [ "$sage" -ge "$dry" ]; then
+                        workcol="$workcol!"
+                        wedged="$wedged $s($workcol $(progress_field "$s" .last_tool || echo tool))"
+                    fi
+                else
+                    workcol=$(fmt_age "$wage")
+                    if [ "$wage" -ge "$dry" ]; then
+                        workcol="$workcol!"
+                        nowork="$nowork $s($workcol)"
+                    fi
                 fi
                 ;;
         esac
@@ -2390,7 +2509,7 @@ cmd_status() {
         else
             beads=$(echo "$inprog" | awk -v s="$s" '$1 == s { printf "%s ", $2 }')
         fi
-        printf '%-10s %-10s %-9s %-6s %-7s %-7s %-6s %s  (%s)\n' "$s" "$class" "$stcol" "$ctx" "$hbcol" "$tree" "$unread" "${beads:-—}" "$disp"
+        printf '%-10s %-10s %-9s %-6s %-7s %-8s %-7s %-6s %s  (%s)\n' "$s" "$class" "$stcol" "$ctx" "$hbcol" "$workcol" "$tree" "$unread" "${beads:-—}" "$disp"
     done
     if [ -n "$frozen" ]; then
         echo "UNRESPONSIVE:$frozen — no heartbeat for over $(fmt_age "$stale"); read the pane before believing the STATE column. A frozen seat holds its slot, answers no mail, and reports as healthy. Do not end the session: a modal is not consent (VI.2)."
@@ -2398,8 +2517,14 @@ cmd_status() {
     if [ -n "$idle" ]; then
         echo "IDLE:$idle — awake, alive, and sitting at an empty prompt: unroutable, because every dispatch pass wakes ASLEEP seats only, while the live session still spends one of $(cfg concurrency max_active) slots. Six of these stalled the whole town for eleven hours with every board reading healthy (gqlc-5vp7). One capture of a TUI is not proof — read the pane first, and 'km sleep --seat <seat>' frees the slot if the citizen is done. Nothing here ends a session: a seat that has not asked to leave has not consented (VI.2, gqlc-971s)."
     fi
+    if [ -n "$wedged" ]; then
+        echo "WEDGED:$wedged — a tool call that STARTED and has not come back, for longer than $(fmt_age "$dry"). This is the signal the heartbeat cannot carry: km-statusline keeps writing all through a wedged turn, so these seats' HB cells are as fresh as a seat doing real work (gqlc-n97e, 13+ minutes; gqlc-eier, 80 and 152 while every board read healthy). The named tool is the newest one started, not necessarily the one that hung. Read the pane. Do not end the session: a modal is not consent (VI.2)."
+    fi
+    if [ -n "$nowork" ]; then
+        echo "NOWORK:$nowork — awake, nothing in flight, and no tool call has FINISHED for that long. Two seats look like this: one wedged between turns (a usage-limit modal eats the turn, so no tool ever starts) and one that finished its work and never ran 'km sleep' — which is the LEAST available state there is, because it holds a slot against max_active and answers no dispatch. Both want a human at the pane; neither is a working citizen."
+    fi
     # MARK, never act — Constitution VI.2. Nothing in km consumes any of the
-    # three lines below; they exist so a human or the mayor can decide, exactly
+    # lines below; they exist so a human or the mayor can decide, exactly
     # as UNRESPONSIVE above does.
     if [ -n "$stalewt" ]; then
         echo "STALE:$stalewt — a PARKED worktree that many commits behind origin/master. Nothing else in this table can show it: the seat reads its own tree correctly, its commands succeed, its tests pass and its own km prints a healthy board — of a town that no longer exists. Measured 2026-08-22: five seats at the founding commit, 14 behind, among them the guard and one of two judges (gqlc-d38n). 'km seat-refresh <seat>' moves a parked worktree to origin/master. A wip- cell is NOT this: a seat mid-PR is legitimately behind."
@@ -2412,6 +2537,9 @@ cmd_status() {
     fi
     if [ "$inprog_ok" -eq 0 ]; then
         echo "BEADS: UNAVAILABLE — the in-progress query (bd list --status in_progress, or the jq over it) did not answer, so the BEADS column above is '?' for every seat and this board cannot tell you what is in flight. It is NOT a town with nothing in flight; that is the same rendering, and the equivalence is what hid gqlc-z1qw for the kingdom's whole life. Run the query by hand before concluding anything about who is working (gqlc-bn5r)."
+    fi
+    if [ -n "$unwitnessed" ]; then
+        echo "UNWITNESSED:$unwitnessed — a live seat whose CHECKOUT cannot write a progress witness: .githooks/claude-tool-witness and the PostToolUse wiring in .claude/settings.json are tracked files, so a worktree parked before they landed writes no progress.json. Its WORK cell is this instrument's silence, not the seat's, and an unwitnessed seat working all night reads exactly like a stalled one — which is the equivalence the WORK column exists to break. 'km seat-refresh <seat>' moves a parked worktree to origin/master."
     fi
     if [ -n "$blind" ]; then
         echo "BLIND:$blind — a live seat whose CHECKOUT cannot write a heartbeat: kingdom/bin/km-statusline and the statusLine key in .claude/settings.json are both tracked files, so a worktree parked on a branch that forked before the kingdom landed has neither. The blank HB column above is this instrument's silence, not the seat's, and a seat working all night reads exactly like an idle one. Read the pane, and 'km seat-refresh <seat>' moves a parked worktree back to origin/master."

@@ -90,6 +90,22 @@ unresponsive_after_minutes = 30
 # every tick that the slot is still held, so holding off is not going quiet.
 renudge_after_minutes = 30
 
+# How long a live seat may go without a COMPLETED tool call before `km status`
+# marks it WEDGED (a tool call in flight that long) or NOWORK (nothing in flight
+# and nothing finished that long). Not the same question as the threshold above
+# and deliberately not merged with it: that one asks whether the INSTRUMENT
+# reported, this one asks whether anything HAPPENED, and gqlc-r3ac exists
+# because the first stays green through the whole of a stall. The witness is
+# .githooks/claude-tool-witness, written only by tool calls starting and
+# finishing — never by a timer, which is the property that makes it evidence of
+# progress rather than of existence. It MARKS; it never acts.
+#
+# 20: twice the longest legitimate wait anyone here has a number for (the
+# ~10-minute pre-push suite), a quarter of the shortest measured freeze (80 min,
+# gqlc-eier). Raise it if honest long tool calls are being named; lowering it
+# below the pre-push suite makes every push look like a wedge.
+stalled_after_minutes = 20
+
 [claude]
 # The factory runs unattended; the constitution, git hooks, and
 # claude-pre-bash remain the guardrails. Set to "acceptEdits" to supervise —
