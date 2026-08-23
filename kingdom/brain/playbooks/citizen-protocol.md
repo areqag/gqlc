@@ -161,8 +161,8 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
 ## How a bead reaches a seat
 
 `km dispatch` has THREE routing passes, not one. Know all three: the shape you
-give a bead decides which pass can see it, and the two mistakes below are both
-made while trying to be helpful.
+give a bead decides which pass can see it, and the first mistake below is made
+while trying to be helpful.
 
 | pass | the bead | the floor |
 | --- | --- | --- |
@@ -174,16 +174,20 @@ So, in one line: a bead wakes a seat iff *(ready AND unassigned AND
 class-labelled AND at or above the floor)* OR *(assigned AND either ready or
 in progress)*.
 
-Three consequences worth holding onto.
+Four consequences worth holding onto.
 
-**Unassigning a claimed bead blinds it.** `bd update <id> --unclaim` on a bead
-that is already `in_progress` leaves it in-progress with a null assignee:
-invisible to the resume pass (which wants an assignee), invisible to the owned
-and fresh passes (which read the ready queue, and it is not on it). It wakes
-nobody, silently. Releasing work is TWO fields — set it back to `open` as well
-— and you read the result back with `bd ready`, not `bd show`. `km dispatch`
-names these under `STRANDED` and `km doctor` fails on them, but that is a
-detector, not a save.
+**Unassigning a claimed bead blinds it.** Clearing the assignee on a bead that
+is already `in_progress` leaves it in-progress with a null assignee: invisible
+to the resume pass (which wants an assignee), and invisible to the owned and
+fresh passes (which read the ready queue, and an in-progress bead is not on
+it). It wakes nobody, silently, and the citizen who does it is usually trying
+to make the bead MORE routable. Releasing work is TWO fields:
+
+    bd update <id> --assignee "" --status open
+
+Read the result back with `bd ready`, not `bd show` — `bd show` will happily
+display a bead no pass can reach. `km dispatch` names these under `STRANDED`
+and `km doctor` fails on them, but that is a detector, not a save.
 
 **The priority floor binds the fresh pass only** (`[dispatch] max_priority`,
 `2` today). Being HANDED a P3 stops at the floor; finishing a P3 you already

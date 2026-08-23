@@ -63,12 +63,18 @@ simply be the wrong one, and your next wake cannot tell.
     GOOD  BLOCKED UNTIL: .githooks/tests/km-test.sh contains
                          `unset "${!GIT_@}"`.
           CHECK:  git show origin/master:.githooks/tests/km-test.sh \
-                    | grep -n 'unset "${!GIT_@}"'
+                    | grep -nF 'unset "${!GIT_@}"'
           Expected via #1122 — UNVERIFIED, a pointer only. Check the file.
 
 The check runs in a second, answers the real question, and stays true no matter
 which PR delivers the line. Naming the PR you expect is still useful — it just
 must be marked as a guess, and must never be the thing the condition tests.
+
+**Run your own CHECK line before you write it down**, on a tree where you know
+the answer. That `-F` is load-bearing: without it grep reads `${!GIT_@}` as a
+pattern, matches nothing, and exits 1 — measured 2026-08-22 on master, where
+the line is present five times in that file. A check that silently answers "not
+there yet" is worse than no check, because your next wake will believe it.
 
 Stronger still, when you have it: if one of your own gates already tests the
 condition, say so and let the next wake just run it. A gate that refused and
@@ -101,6 +107,9 @@ A cleanly finished day leaves `handoff/` empty, and your next wake starts
 unburdened: no note, no mention, no stale context to re-read.
 
 Your work comes back to YOU (Constitution Article III.3). It moves to
-another citizen only if you release it (`bd update <id> --unclaim` plus a
-note saying so) or Սեդրակ reassigns a retired seat's work — in which case
+another citizen only if you release it (`bd update <id> --assignee "" --status
+open`, both fields — measured 2026-08-22: bd has no `--unclaim`, and clearing
+the assignee alone leaves the bead in-progress and unreachable by every
+dispatch pass — plus a note saying so) or Սեդրակ reassigns a retired seat's
+work — in which case
 your note travels with the bead, and the ledger records the reassignment.
