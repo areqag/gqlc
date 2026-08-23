@@ -63,3 +63,82 @@ jobs:
             test/data/codegen/go.sum
       - uses: ./.github/actions/setup-just
       - run: just test-codegen-live-age
+
+  # bd gqlc-0oau. The AGE arm runs nowhere but here, so a red nightly is the
+  # only signal that master has an AGE regression — and by default a red
+  # scheduled run notifies GitHub's own default recipient (the last committer to
+  # the cron file) and nobody else. An email nobody owns is not a gate. This
+  # turns the failure into a durable artefact instead: one tracking issue,
+  # reopened and commented on every failing night, closed by hand when the
+  # regression is.
+  #
+  # Scheduled runs only. On workflow_dispatch a person is already watching the
+  # run they started, and on a pull request live-smoke's red check is the
+  # signal; neither needs an issue, and filing one on a developer's manual
+  # dispatch would train people to ignore the issue that matters.
+  #
+  # `always()` is what lets this job run at all after a needed job failed;
+  # without it the job is skipped exactly when it is wanted. `cancelled` is in
+  # the condition beside `failure` because a nightly the runner killed also
+  # produced no verdict on AGE, and silence is the failure mode this closes.
+  #
+  # NOT covered here, and filed rather than left implicit: GitHub disables
+  # cron-triggered workflows after 60 days with no repository activity, and it
+  # does so repo-wide, so no other cron in this tree can witness it. Only a
+  # PR-triggered check can, and whether that check should block merges is
+  # unresolved (bd gqlc-zqa3).
+  nightly-alert:
+    needs: [live-smoke, live-smoke-age]
+    if: >-
+      ${{ always() && github.event_name == 'schedule'
+      && (contains(needs.*.result, 'failure')
+      || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: open or update the nightly-red tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          NEO4J_RESULT: ${{ needs.live-smoke.result }}
+          AGE_RESULT: ${{ needs.live-smoke-age.result }}
+        run: |
+          set -euo pipefail
+          label='nightly-red'
+          title='codegen-live nightly is red'
+
+          # --force so a re-run over an existing label is not an error. Creating
+          # the label here rather than relying on it existing keeps this job
+          # working in a fresh fork or after someone tidies the label list.
+          gh label create "$label" --color B60205 \
+              --description 'the scheduled codegen-live run failed (bd gqlc-0oau)' \
+              --force
+
+          body="$(printf '%s\n' \
+              "The scheduled \`codegen-live\` run failed." \
+              "" \
+              "- live-smoke (neo4j): \`${NEO4J_RESULT}\`" \
+              "- live-smoke-age: \`${AGE_RESULT}\`" \
+              "- run: ${RUN_URL}" \
+              "" \
+              "The AGE arm runs on this schedule only — no pull request exercises it —" \
+              "so an AGE regression sits on master until this is read. Close this issue" \
+              "when the nightly is green again; the next failing night reopens it.")"
+
+          # --state all: a closed tracking issue is reopened rather than
+          # duplicated, so the history of every red night stays on one thread.
+          num="$(gh issue list --label "$label" --state all --limit 1 \
+              --json number --jq '.[0].number // ""')"
+
+          if [ -z "$num" ]; then
+            gh issue create --title "$title" --label "$label" --body "$body"
+            exit 0
+          fi
+
+          state="$(gh issue view "$num" --json state --jq '.state')"
+          if [ "$state" = "CLOSED" ]; then
+            gh issue reopen "$num"
+          fi
+          gh issue comment "$num" --body "$body"
