@@ -174,6 +174,31 @@ func TestScanRoot_UnregisteredRepositoryRetainedAsForeign(t *testing.T) {
 	}
 }
 
+// The OTHER spelling of .git, and the one measure()'s comment claims. A linked
+// worktree carries .git as a FILE holding a gitdir pointer, not as a directory,
+// and the object this clause protects is exactly that: a gqlc worktree in /tmp
+// whose registration was pruned, which is the highest-value thing on that
+// filesystem. Only the directory spelling was ever built, so adding
+// `&& d.IsDir()` to that clause survived the whole suite (bd gqlc-6ygg).
+func TestScanRoot_UnregisteredWorktreeWithAGitFileRetainedAsForeign(t *testing.T) {
+	root := t.TempDir()
+	wt := mkdir(t, filepath.Join(root, "gqlc-orphaned-worktree"))
+	writeFile(t, filepath.Join(wt, ".git"), "gitdir: /elsewhere/.git/worktrees/gqlc-orphaned-worktree\n")
+	writeFile(t, filepath.Join(wt, "work.go"), "package work\n")
+	ageTree(t, root, time.Now().Add(-72*time.Hour))
+
+	e := findEntry(t, scanFixture(t, root, nil, stubOracle(nil), nil), "gqlc-orphaned-worktree")
+	if e.reap {
+		t.Fatalf("reaped a worktree holding a .git file: %s", e.reason)
+	}
+	if e.kind != kindForeignRepo {
+		t.Errorf("kind = %q, want %q (reason: %s)", e.kind, kindForeignRepo, e.reason)
+	}
+	if !strings.Contains(e.reason, ".git") {
+		t.Errorf("reason %q does not name the .git that saved it", e.reason)
+	}
+}
+
 func TestScanRoot_SystemNamedEntriesRetained(t *testing.T) {
 	root := t.TempDir()
 	names := []string{

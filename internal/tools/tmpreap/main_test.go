@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -453,5 +454,144 @@ func TestRun_TruncatedArchiveDeletesNothing(t *testing.T) {
 	}
 	if strings.Contains(out, "reclaimed") {
 		t.Error("the report claims it reclaimed space after refusing to delete")
+	}
+}
+
+// planOptions is the option set plan and apply actually read, with a real
+// /proc. Tests that want the fail-closed clauses to fire override procDir.
+func planOptions(repo, archive string) options {
+	return options{
+		repo:     repo,
+		base:     "master",
+		maxAge:   12 * time.Hour,
+		archive:  archive,
+		procDir:  "/proc",
+		archiveL: archiveLimits{maxFileBytes: defaultArchiveMaxFile, maxTotalBytes: 2 << 30},
+	}
+}
+
+// fakeProcHolding builds a procfs mount naming THIS process with its working
+// directory inside dir. The self pid is mandatory rather than decoration:
+// procRefsIn refuses a table that does not name the caller, so a fixture
+// without it would exercise that refusal instead of the held-set path.
+func fakeProcHolding(t *testing.T, dir string) string {
+	t.Helper()
+	proc := t.TempDir()
+	self := mkdir(t, filepath.Join(proc, strconv.Itoa(os.Getpid()), "fd"))
+	if err := os.Symlink(dir, filepath.Join(filepath.Dir(self), "cwd")); err != nil {
+		t.Fatal(err)
+	}
+	return proc
+}
+
+// An unreadable process table yields an EMPTY held set, and an empty held set is
+// bit-for-bit the value that means "nothing is in use" — so every idle entry
+// becomes reapable, which is the largest blast radius in this tool. Deleting
+// plan's fail-closed clause left the whole suite green: measured SURVIVED on
+// 2026-08-23 at origin/master 4a478f85 (bd gqlc-2459).
+func TestPlan_UnreadableProcessTableRefusesRatherThanReportingEverythingIdle(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+	o := planOptions(repo, archive)
+	o.procDir = filepath.Join(t.TempDir(), "no-such-procfs")
+
+	entries, err := plan(t.Context(), o, root)
+	if err == nil {
+		t.Fatalf("plan over an unreadable process table returned %d entries instead of refusing", len(entries))
+	}
+	if !strings.Contains(err.Error(), o.procDir) {
+		t.Errorf("the error does not name the process table it could not read: %v", err)
+	}
+	// Not merely "an error": the mutation's signature is a SUCCESSFUL plan in
+	// which the abandoned entries are marked reapable on no in-use evidence.
+	if len(entries) != 0 {
+		t.Errorf("plan returned %d entries alongside its refusal", len(entries))
+	}
+
+	// The control, so the refusal above is about the process table and not about
+	// the fixture: the same plan with a real /proc succeeds and does reap.
+	good := planOptions(repo, archive)
+	okEntries, err := plan(t.Context(), good, root)
+	if err != nil {
+		t.Fatalf("plan with a real /proc: %v", err)
+	}
+	if !findEntry(t, okEntries, "factory").reap {
+		t.Error("the control plan reaped nothing, so the refusal above is not the difference under test")
+	}
+}
+
+// The same clause on the deleting path, where the consequence is not a wrong
+// report but a wrong deletion. Also measured SURVIVED on 2026-08-23.
+func TestApply_UnreadableProcessTableDeletesNothing(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+	entries, err := plan(t.Context(), planOptions(repo, archive), root)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+
+	o := planOptions(repo, archive)
+	o.procDir = filepath.Join(t.TempDir(), "no-such-procfs")
+	var buf bytes.Buffer
+	pr := &printer{w: &buf}
+	if err := apply(t.Context(), o, root, entries, pr); err == nil {
+		t.Fatal("apply deleted over an unreadable process table instead of refusing")
+	}
+	t.Logf("stdout:\n%s", buf.String())
+
+	for _, name := range []string{"factory", "probe937r3", "gqlc-landed"} {
+		if _, statErr := os.Stat(filepath.Join(root, name)); statErr != nil {
+			t.Errorf("%s was deleted with no live-process evidence: %v", name, statErr)
+		}
+	}
+	if strings.Contains(buf.String(), "reclaimed") {
+		t.Errorf("apply claims it reclaimed space after refusing:\n%s", buf.String())
+	}
+}
+
+// The mid-scan re-read, and its ORDER. Both were unguarded: deleting the re-read
+// entirely survived the whole suite (bd gqlc-2459), and the re-read that existed
+// ran before the archive, so it protected the scan and left the archive — the
+// long half, minutes over a large tree — wide open (bd gqlc-kg5i).
+//
+// The tarball is the ordering witness. Reading the process table BEFORE the
+// archive filters the claimed entry out of the doomed set, so it is neither
+// archived nor deleted. Reading it AFTER archives it and then keeps it. Only the
+// second puts the claimed entry in the tarball, so "present in the archive AND
+// present on disk" is a proposition only the post-archive order satisfies.
+func TestApply_ReReadsTheProcessTableAfterArchivingNotBefore(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+	// Planned while nothing held it, which is the whole premise: the claim
+	// arrives after the decision was taken.
+	entries, err := plan(t.Context(), planOptions(repo, archive), root)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	claimed := filepath.Join(root, "factory")
+	if !findEntry(t, entries, "factory").reap {
+		t.Fatal("the fixture entry was not planned for reaping, so nothing here is being rescued")
+	}
+
+	o := planOptions(repo, archive)
+	o.procDir = fakeProcHolding(t, claimed)
+	var buf bytes.Buffer
+	pr := &printer{w: &buf}
+	if err := apply(t.Context(), o, root, entries, pr); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	out := buf.String()
+	t.Logf("stdout:\n%s", out)
+
+	if _, statErr := os.Stat(claimed); statErr != nil {
+		t.Errorf("a directory a live process had claimed was deleted anyway: %v", statErr)
+	}
+	if !strings.Contains(out, "skipping "+claimed) {
+		t.Errorf("the report does not say the entry was skipped:\n%s", out)
+	}
+	names := archiveNames(t, archive)
+	if !slices.Contains(names, "factory/logs/run.log") {
+		t.Errorf("the claimed entry is absent from the archive %v, which is the pre-archive read order: the archive must be taken over the larger set", names)
+	}
+	// The rest of the plan still ran, so the skip is a skip and not an abort.
+	if _, statErr := os.Stat(filepath.Join(root, "probe937r3")); !os.IsNotExist(statErr) {
+		t.Errorf("an unclaimed entry survived alongside the claimed one (err=%v), so apply aborted rather than skipping", statErr)
 	}
 }

@@ -189,8 +189,48 @@ func TestListWorktrees_IncludesMainAndLinkedResolved(t *testing.T) {
 // checks.
 func TestListWorktrees_NonRepositoryRefused(t *testing.T) {
 	isolateGit(t)
-	if _, err := listWorktrees(t.Context(), t.TempDir()); err == nil {
+	dir := t.TempDir()
+	// t.TempDir() sits under $GOTMPDIR, and this repo's recipes set GOTMPDIR to
+	// .bin/gotmp INSIDE the repository. `git worktree list` then walks up out of
+	// the fixture, finds gqlc, and answers — so this row passed only where
+	// GOTMPDIR happened to be unset. Measured 2026-08-23 on origin/master at
+	// 4a478f85: a bare `go test` is ok; `GOTMPDIR=$PWD/.bin/gotmp go test` fails
+	// on this row and no other (bd gqlc-7gqr). The ceiling stops the upward walk
+	// at the fixture, so the refusal under test is reached under either.
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+
+	// The precondition, asserted rather than assumed: if git can still discover
+	// an enclosing repository from here, the refusal below is not what makes
+	// this row pass.
+	if out, err := git(t.Context(), dir, "rev-parse", "--show-toplevel"); err == nil {
+		t.Fatalf("the fixture is inside repository %s, so this row cannot witness the refusal", out)
+	}
+
+	if _, err := listWorktrees(t.Context(), dir); err == nil {
 		t.Fatal("a directory that is not a repository produced a worktree registry instead of an error")
+	}
+}
+
+// A `git status` that fails — a broken index, a dubious-ownership refusal, a
+// gitdir pointer into nothing — must not read as clean-and-landed. Returning
+// wtState{landed: true}, nil from that clause survived the whole suite before
+// this row existed (bd gqlc-2459): classify's worktree arm would then reap a
+// registered worktree having successfully asked git nothing.
+func TestGitOracle_StatusFailureIsAnErrorNotACleanLandedWorktree(t *testing.T) {
+	isolateGit(t)
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	// The worktree spelling of .git, pointed at a gitdir that is not there, so
+	// the failure lands on the FIRST git invocation rather than on merge-base —
+	// which TestGitOracle_MissingBaseRefIsAnError already covers.
+	writeFile(t, filepath.Join(dir, ".git"), "gitdir: "+filepath.Join(dir, "no-such-gitdir")+"\n")
+
+	st, err := gitOracle{base: "master"}.state(t.Context(), dir)
+	if err == nil {
+		t.Fatalf("a worktree whose `git status` fails answered %+v with no error", st)
+	}
+	if st.landed || st.dirty {
+		t.Errorf("state = %+v alongside an error, want the zero value: a caller that reads the state before the error must not read `clean and landed`", st)
 	}
 }
 
