@@ -1183,13 +1183,29 @@ cmd_dispatch() {
     # what makes the second sighting a different moment rather than the same
     # one. The marker is cleared by a nudge as well as by any sign of life, so
     # the floor between two nudges is two full passes rather than every tick.
-    local s idle_marker pending
+    local s idle_marker nudged_marker pending ask floor since
+    floor=$(cfg_minutes welfare renudge_after_minutes 30)
     for s in $(seats_all); do
         [ "$(seat_status "$s")" = awake ] || continue
         idle_marker="$(seat_home "$s")/idle"
-        if ! seat_pane_idle "$s"; then rm -f "$idle_marker"; continue; fi
+        nudged_marker="$(seat_home "$s")/idle-nudged"
+        # Any sign of life ends the episode, and BOTH markers go with it. The
+        # floor below is per episode and not per seat: keyed to the seat it
+        # would silence the town's only channel to a citizen who came back,
+        # worked, and went idle again, for its whole window.
+        if ! seat_pane_idle "$s"; then rm -f "$idle_marker" "$nudged_marker"; continue; fi
         pending=$(unread_count "$s")
-        [ "$pending" -gt 0 ] || continue
+        # An empty inbox is no longer a reason to say nothing, and that was the
+        # residual hole rather than a corner of one. The six seats of gqlc-5vp7
+        # had FINISHED — pushed, handoffs written — and a citizen who has
+        # finished has usually just drained her inbox, so `pending -gt 0` was
+        # false for exactly the seats this pass was written to reach. The unread
+        # count now chooses the WORDS; being awake and idle is the trigger.
+        if [ "$pending" -gt 0 ]; then
+            ask="[km] you have $pending unread letter(s) — bd mail inbox, and km sleep when you are done for the day (it is what makes you reachable)"
+        else
+            ask="[km] you are awake at an empty prompt with no unread mail: that holds one of the town's slots AND makes you unroutable, because every dispatch pass wakes asleep seats only. Pick up work, or run km sleep if you are done for the day"
+        fi
         if [ ! -f "$idle_marker" ]; then
             : >"$idle_marker"
             echo "dispatch: $s is awake at an empty prompt with $pending unread; confirming next pass before nudging"
@@ -1197,7 +1213,21 @@ cmd_dispatch() {
         fi
         [ "$(($(date +%s) - $(stat -c %Y "$idle_marker")))" -ge 60 ] || continue
         rm -f "$idle_marker"
-        if seat_nudge "$s" "[km] you have $pending unread letter(s) — bd mail inbox, and km sleep when you are done for the day (it is what makes you reachable)"; then
+        # A nudge is not free: it STARTS A TURN in the citizen's session and
+        # spends her quota. Without a floor, a seat that does not act on one is
+        # typed at every two passes — 165 times over the eleven hours this pass
+        # exists to end — and the town's one channel to an awake seat becomes a
+        # metronome nobody reads (the same shape as the repeated welfare
+        # check-ins, 48 unread). Reported and never silent: a slot is still held.
+        if [ -f "$nudged_marker" ]; then
+            since=$(($(date +%s) - $(stat -c %Y "$nudged_marker")))
+            if [ "$since" -lt "$floor" ]; then
+                echo "dispatch: $s is still awake and idle $(fmt_age "$since") after a nudge that changed nothing; holding off another for $(fmt_age "$floor") rather than spending her quota on a repeat — read the pane"
+                continue
+            fi
+        fi
+        : >"$nudged_marker"
+        if seat_nudge "$s" "$ask"; then
             echo "dispatch: nudged $s — awake, idle, $pending unread; the prompt cleared, so it was delivered"
             wakes=$((wakes + 1))
         else
@@ -2015,7 +2045,7 @@ fmt_age() { # <seconds>
 }
 
 cmd_status() {
-    local sd s disp class st ctx hb beads unread age hbcol stale frozen="" blind=""
+    local sd s disp class st stcol ctx hb beads unread age hbcol stale frozen="" blind="" idle=""
     local target tree fresh fstate fball fbgates fahead fdetail stalewt="" exposed="" unjudged=""
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
@@ -2061,6 +2091,31 @@ cmd_status() {
         class=$(seat_class "$s")
         st=$(seat_status "$s")
         if [ "$st" = awake ] && ! window_up "$s"; then st="awake?"; fi
+        # The state a citizen reaches by ordinary SUCCESS — finish, write the
+        # handoff, forget `km sleep` — and the LEAST available one a seat has.
+        # Every dispatch pass wakes ASLEEP seats only, so an awake seat is
+        # unroutable, and its live session still spends a max_active slot: the
+        # same record costs the town twice. Six of them held all five slots for
+        # eleven hours while this table called each of them `awake`, which is
+        # the same cell it prints for a citizen mid-work (gqlc-5vp7).
+        #
+        # The STATE cell and not a line alone, and unlike UNRESPONSIVE — which
+        # deliberately leaves STATE saying what the status FILE says, because
+        # the heartbeat is a separate instrument that must be able to disagree
+        # in the open. This is not a second account of the same field; it is the
+        # same kind of live probe as the `awake?` above it, refining the cell
+        # from the pane rather than contradicting it.
+        #
+        # MARK, never act. cmd_reconcile cannot end this session: from outside,
+        # idle and thinking are told apart only by one photograph of a TUI, and
+        # ending a citizen's session on that is VI.2 (gqlc-971s). What this
+        # buys is that an operator who can SEE the seat fixes it in one command,
+        # and a marker costs nobody's uncommitted work when it is wrong.
+        stcol="$st"
+        if [ "$st" = awake ] && seat_pane_idle "$s"; then
+            stcol="awake-idle"
+            idle="$idle $s"
+        fi
         ctx="-"
         hbcol="-"
         hb="$sd/seats/$s/heartbeat.json"
@@ -2132,10 +2187,13 @@ cmd_status() {
         else
             beads=$(echo "$inprog" | awk -v s="$s" '$1 == s { printf "%s ", $2 }')
         fi
-        printf '%-10s %-10s %-9s %-6s %-7s %-7s %-6s %s  (%s)\n' "$s" "$class" "$st" "$ctx" "$hbcol" "$tree" "$unread" "${beads:-—}" "$disp"
+        printf '%-10s %-10s %-9s %-6s %-7s %-7s %-6s %s  (%s)\n' "$s" "$class" "$stcol" "$ctx" "$hbcol" "$tree" "$unread" "${beads:-—}" "$disp"
     done
     if [ -n "$frozen" ]; then
         echo "UNRESPONSIVE:$frozen — no heartbeat for over $(fmt_age "$stale"); read the pane before believing the STATE column. A frozen seat holds its slot, answers no mail, and reports as healthy. Do not end the session: a modal is not consent (VI.2)."
+    fi
+    if [ -n "$idle" ]; then
+        echo "IDLE:$idle — awake, alive, and sitting at an empty prompt: unroutable, because every dispatch pass wakes ASLEEP seats only, while the live session still spends one of $(cfg concurrency max_active) slots. Six of these stalled the whole town for eleven hours with every board reading healthy (gqlc-5vp7). One capture of a TUI is not proof — read the pane first, and 'km sleep --seat <seat>' frees the slot if the citizen is done. Nothing here ends a session: a seat that has not asked to leave has not consented (VI.2, gqlc-971s)."
     fi
     # MARK, never act — Constitution VI.2. Nothing in km consumes any of the
     # three lines below; they exist so a human or the mayor can decide, exactly

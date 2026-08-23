@@ -3454,6 +3454,97 @@ else
 fi
 unset KM_SENDKEYS_LOG
 
+# --- the idle seat with NOTHING in its inbox (gqlc-971s) ---------------------
+# The residual hole in the pass above, and it is the measured shape rather than
+# a corner: the six seats of gqlc-5vp7 FINISHED — pushed, wrote their handoffs —
+# and then forgot `km sleep`. A citizen who has finished has typically just
+# drained her inbox, so `pending -gt 0` is exactly the condition that is FALSE
+# for her, and the mail nudge skipped her without a word. Nothing else in the
+# town looks at an awake seat, so she sat there for eleven hours.
+#
+# The ask is the same ask: it types a line at a citizen who is demonstrably
+# between turns, and it ends nobody's session. What changes is that having no
+# mail is no longer a reason to say nothing to a seat that is holding a slot and
+# is unroutable while it does.
+nudge_setup_nomail() { # <seat> — awake, live, inbox EMPTY
+    make_inboxes
+    fill_cap "$1"
+    export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
+    : >"$KM_SENDKEYS_LOG"
+}
+
+dispatch_case '[]' '[]'
+nudge_setup_nomail ayg
+pane_idle ayg
+run_dispatch
+nomail_row="an idle seat with an empty inbox is asked to sleep"
+if ! printf '%s' "$OUT" | grep -q 'confirming next pass before nudging'; then
+    bad "$nomail_row" "a seat with no unread mail was passed over in silence, which is the eleven-hour shape: $OUT"
+elif [ -s "$KM_SENDKEYS_LOG" ]; then
+    bad "$nomail_row" "keys were sent on a single sighting of a TUI: $(cat "$KM_SENDKEYS_LOG")"
+else
+    age_idle_sighting ayg
+    run_dispatch
+    if ! printf '%s' "$OUT" | grep -q 'nudged ayg'; then
+        bad "$nomail_row" "the second pass sent nothing, so an empty inbox still buys eleven hours of silence: $OUT"
+    elif ! grep -q 'km sleep' "$KM_SENDKEYS_LOG"; then
+        bad "$nomail_row" "the line typed at her does not name the one command that frees the slot: $(cat "$KM_SENDKEYS_LOG")"
+    else
+        ok "$nomail_row, and it is confirmed over two passes exactly as the mail nudge is"
+    fi
+fi
+unset KM_SENDKEYS_LOG
+
+# And it must not become a metronome. A nudge is not free: it STARTS A TURN in
+# the citizen's session and spends her quota, so a seat that does not act on one
+# would be typed at every two passes — 165 times over the eleven hours this pass
+# exists to end. The floor is per idle episode: any sign of life clears it, so
+# it delays nobody who is actually working.
+dispatch_case '[]' '[]'
+nudge_setup_nomail ayg
+pane_idle ayg
+run_dispatch
+age_idle_sighting ayg
+run_dispatch
+: >"$KM_SENDKEYS_LOG"
+run_dispatch
+age_idle_sighting ayg
+run_dispatch
+floor_row="a seat that ignores its nudge is not nudged again immediately"
+if [ -s "$KM_SENDKEYS_LOG" ]; then
+    bad "$floor_row" "a second nudge was typed minutes after the first, which spends the citizen's quota on a repeat: $(cat "$KM_SENDKEYS_LOG")"
+elif ! printf '%s' "$OUT" | grep -q 'still awake and idle'; then
+    bad "$floor_row" "the pass went quiet instead of saying it was holding off, so the held slot is invisible again: $OUT"
+else
+    ok "$floor_row, and the pass says so rather than going silent about a slot still held"
+fi
+unset KM_SENDKEYS_LOG
+
+# The falsifier for the floor: a seat that came back to life and went idle again
+# is a NEW episode, and must be reachable. A floor keyed to the seat rather than
+# to the episode would silence the town's only channel to her for its whole
+# window, which is the fail-silent shape all of these beads are in.
+dispatch_case '[]' '[]'
+nudge_setup_nomail ayg
+pane_idle ayg
+run_dispatch
+age_idle_sighting ayg
+run_dispatch
+pane_working ayg
+run_dispatch
+pane_idle ayg
+: >"$KM_SENDKEYS_LOG"
+run_dispatch
+age_idle_sighting ayg
+run_dispatch
+episode_row="a seat that worked and went idle again is nudged again"
+if [ ! -s "$KM_SENDKEYS_LOG" ]; then
+    bad "$episode_row" "the floor outlived the episode it was measuring, so a citizen who came back is unreachable: $OUT"
+else
+    ok "$episode_row — the floor is cleared by any sign of life, so it holds off a repeat and not a citizen"
+fi
+unset KM_SENDKEYS_LOG
+
 # The direction nobody reported until Նուարդ was seen mid-generation on PR #1122
 # under a board that read her ASLEEP. It strands nobody; it interrupts — both
 # passes wake asleep seats, so she is handed a second bead on top of the one she
@@ -3673,6 +3764,119 @@ elif printf '%s' "$OUT" | grep -q '^BLIND'; then
     bad "$beats_row" "a seat with a five-minute-old heartbeat was called blind: $OUT"
 else
     ok "$beats_row"
+fi
+
+# --- the awake-and-idle seat is NAMED on the board (gqlc-971s) ----------------
+# The state the town can enter by ordinary SUCCESS: a citizen finishes, writes
+# her handoff, and does not run `km sleep`. She is then awake with a live
+# session at an empty prompt, which is the LEAST available state a seat can be
+# in — every dispatch pass wakes ASLEEP seats only, so she is unroutable, while
+# the live session still spends one of max_active's slots. Six of these held all
+# five slots for eleven hours and the board called every one of them healthy
+# (gqlc-5vp7), because `awake` and `awake and working` are the same cell.
+#
+# The board is where this belongs. `km reconcile` cannot end such a session —
+# that is VI.2, and the bead this row is filed under is the argument — but an
+# operator who can SEE the seat fixes it in one command, and marking costs
+# nobody's uncommitted work.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap ayg
+pane_idle ayg
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+idle_row="an awake seat idle at its prompt is named on the board"
+if ! printf '%s' "$OUT" | grep '^IDLE' | grep -q ayg; then
+    bad "$idle_row" "no line names the seat, so the slot it holds is invisible exactly as it was for eleven hours: $OUT"
+elif ! printf '%s' "$OUT" | grep '^IDLE' | grep -q 'km sleep'; then
+    bad "$idle_row" "the line names the seat but not the remedy: $(printf '%s' "$OUT" | grep '^IDLE')"
+elif ! printf '%s' "$OUT" | grep -E '^ayg' | grep -q 'awake-idle'; then
+    bad "$idle_row" "the STATE cell still reads like a working citizen: $(printf '%s' "$OUT" | grep -E '^ayg')"
+else
+    ok "$idle_row, with the remedy, and its STATE cell no longer reads like a working citizen"
+fi
+
+# The falsifier that matters most, and it is the same one the nudge has: a seat
+# INSIDE a turn renders the same empty prompt line below its spinner. Naming her
+# idle would send an operator to run `km sleep --seat` at a citizen mid-work,
+# which is ending a session against her will by way of a report (VI.2).
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap ayg
+pane_working ayg
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+working_row="a seat mid-turn is not named idle, however empty its prompt line looks"
+if printf '%s' "$OUT" | grep -q '^IDLE'; then
+    bad "$working_row" "a seat with a live spinner was named idle: $(printf '%s' "$OUT" | grep '^IDLE')"
+elif printf '%s' "$OUT" | grep -E '^ayg' | grep -q 'awake-idle'; then
+    bad "$working_row" "the STATE cell called a working citizen idle: $(printf '%s' "$OUT" | grep -E '^ayg')"
+else
+    ok "$working_row"
+fi
+
+# And a FROZEN seat is not idle either, which is a separate claim from the one
+# above and needs its own row. A modal covers the input box, so there is no
+# prompt line at all — and the remedy this line prints is `km sleep --seat`,
+# which sends /exit and an Enter. An Enter on a usage-limit modal CHOOSES
+# whichever option is highlighted (gqlc-eier, two judges, 80 and 152 minutes).
+# The frozen seat already has a line of its own, UNRESPONSIVE, whose remedy is
+# to read the pane and press nothing.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap ayg
+pane_modal ayg
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+modal_row="a seat frozen at a modal is not named idle"
+if printf '%s' "$OUT" | grep -q '^IDLE'; then
+    bad "$modal_row" "a frozen seat was named idle, and the remedy that line prints presses a button nobody consented to: $(printf '%s' "$OUT" | grep '^IDLE')"
+else
+    ok "$modal_row, because the remedy an IDLE line prints would press whatever the modal has highlighted"
+fi
+
+# A seat recorded awake with NO session is a different fault with a different
+# remedy — a stale record, which cmd_reconcile frees on its own without asking
+# anybody. Reading it as idle would send an operator to sleep a seat that is
+# already gone, and would hide the one case the town repairs automatically.
+#
+# fill_zombie and not fill_windowless, and the difference is the whole row.
+# A windowless seat is rejected by seat_pane's OWN window_up guard, so that
+# fixture passes with the session check deleted outright — measured, mutation
+# M7: removing `seat_session_live` from seat_pane_idle left the suite at 284/0.
+# The zombie has a window, and a pane that reads exactly like an idle citizen's;
+# what it does not have is a claude on the tty, and the session probe is the
+# only thing in the file that can tell.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_zombie ayg
+pane_idle ayg
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+stale_rec_row="a seat recorded awake with no session is not named idle"
+if printf '%s' "$OUT" | grep -q '^IDLE'; then
+    bad "$stale_rec_row" "a stale record was reported as a live citizen holding a slot: $(printf '%s' "$OUT" | grep '^IDLE')"
+else
+    ok "$stale_rec_row — that is a stale record, and reconcile frees it needing nobody's consent"
+fi
+
+# The status guard is `awake` and not merely "a live session at an empty
+# prompt", and this is the row that says why. A seat RECORDED ASLEEP with a live
+# session is Նուարդ's shape (gqlc-5vp7) — and it is not this waste at all: both
+# dispatch passes wake asleep seats, so that record leaves her REACHABLE, which
+# is the one thing the awake record takes away. Her repair is cmd_reconcile's
+# own arm, which corrects the status without asking anybody. Naming her here
+# would point an operator at `km sleep --seat` for a seat the town can already
+# route work to, and the fixture is deliberately LIVE so this row fails if the
+# status guard stops discriminating rather than passing on an absent session.
+dispatch_case '[]' '[]'
+make_inboxes
+seat_state ayg asleep
+seat_window ayg
+seat_claude ayg
+pane_idle ayg
+OUT="$(PATH="$BIN:$PATH" "$KM" status 2>&1)"
+asleep_idle_row="a live seat RECORDED asleep is not named idle"
+if printf '%s' "$OUT" | grep -q '^IDLE'; then
+    bad "$asleep_idle_row" "an asleep record was named: $(printf '%s' "$OUT" | grep '^IDLE')"
+else
+    ok "$asleep_idle_row — an asleep record is the one the dispatcher can still route to, and reconcile corrects it needing nobody's consent"
 fi
 
 # --- the contract with real tmux ---------------------------------------------

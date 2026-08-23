@@ -79,6 +79,17 @@ handoff_threshold_pct = 75
 # froze on modals for 80 and 152 minutes while every board read healthy.
 unresponsive_after_minutes = 30
 
+# How long the dispatcher waits before typing a SECOND nudge at a seat that is
+# still awake and idle after the first. Per idle EPISODE, not per seat: any sign
+# of life in the pane clears it, so it delays nobody who is working.
+#
+# A nudge starts a turn in the citizen's session and spends her quota, and the
+# confirm-then-nudge cadence is two passes — so with no floor at all, the eleven
+# hours of gqlc-5vp7 would have been 165 nudges at each of six seats. 30 minutes
+# is 15 passes: slow enough not to be a metronome, and the pass says out loud on
+# every tick that the slot is still held, so holding off is not going quiet.
+renudge_after_minutes = 30
+
 [claude]
 # The factory runs unattended; the constitution, git hooks, and
 # claude-pre-bash remain the guardrails. Set to "acceptEdits" to supervise.
