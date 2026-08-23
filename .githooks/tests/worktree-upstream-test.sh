@@ -240,11 +240,12 @@ else
 fi
 
 # The same defect in a second spelling. citizen-protocol.md step 1 branches with
-# `git checkout -b <type>/<slug> origin/master`, which tracks for the reason the
-# worktree recipe did; every citizen runs it at the start of every bead, so it is
-# the more travelled of the two. Fixing one spelling and shipping the other would
-# close this bead on a false premise (Սեդրակ's ruling, 2026-08-21). Extracted and
-# run rather than grepped, for the reason given in section C.
+# `git checkout -b <type>/<bead-id>-<slug> origin/master`, which tracked for the
+# reason the worktree recipe did; every citizen runs it at the start of every
+# bead, so it is the more travelled of the two. Fixing one spelling and shipping
+# the other would close this bead on a false premise (Սեդրակ's ruling,
+# 2026-08-21). Extracted and run rather than grepped, for the reason given in
+# section C.
 PROTOCOL="$ROOT/kingdom/brain/playbooks/citizen-protocol.md"
 # The recipe is inline markdown code, so the delimiter is a backtick. Built from
 # its octal rather than written literally: a backtick inside single quotes is
@@ -256,7 +257,43 @@ if [ -z "$proto" ]; then
 else
     PDOC="$TMP/proto"
     "${GIT[@]}" clone -q "$ORIGIN" "$PDOC"
-    pcmd="${proto//<type>\/<slug>/feat/proto-probe}"
+    # The branch token the recipe names, whatever shape it has, read out of the
+    # recipe rather than spelled here. A substitution spelling one shape stops
+    # matching the moment the document names another, and what it then eval's is
+    # a string still holding `<` and `>`, which the shell reads as redirection
+    # (bd gqlc-cn49). That failure lands on the upstream row, whose message says
+    # nothing about placeholders.
+    ptoken="$(printf '%s' "$proto" | sed -n 's/.* -b \([^ ]*\) .*/\1/p')"
+    pfilled="${ptoken//<type>/feat}"
+    pfilled="${pfilled//<bead-id>/gqlc-cn49}"
+    pfilled="${pfilled//<slug>/proto-probe}"
+    # Vacuity guard for the three substitutions above: a placeholder this suite
+    # does not know is left in the string, and every row below it is then run on
+    # a branch name no citizen would type.
+    case "$pfilled" in
+        *'<'* | *'>'*)
+            bad "citizen-protocol.md: branch token '$ptoken' holds a placeholder this suite cannot fill ('$pfilled')"
+            ;;
+        '')
+            bad "citizen-protocol.md: no branch token found in the recipe ($proto)"
+            ;;
+        *) ok "citizen-protocol.md: branch token '$ptoken' fills to '$pfilled'" ;;
+    esac
+    # The bead-id half. The branch a seat cuts is the ONLY thing CI can fall back
+    # to when a PR body names no bead, and check-pr-closes.py is anchored on the
+    # literal `gqlc-` prefix — a branch carrying a bead's bare suffix
+    # (`fix/sync-drift-x98l`) resolves to nothing. Asked against the checker's own
+    # pattern, lifted from its source, so this row fails if the gate's alphabet
+    # moves under the document and not only if the document moves.
+    checker_ere="$(sed -n 's/^BEAD_IN_BRANCH = re\.compile(r"(?i)(\(.*\))")$/\1/p' "$ROOT/.github/scripts/check-pr-closes.py")"
+    if [ -z "$checker_ere" ]; then
+        bad "check-pr-closes.py: could not extract BEAD_IN_BRANCH to test the protocol's branch form against"
+    elif printf '%s' "$pfilled" | grep -Eqi "$checker_ere"; then
+        ok "citizen-protocol.md: the documented branch form '$pfilled' is one CI can resolve to a bead"
+    else
+        bad "citizen-protocol.md: the documented branch form '$pfilled' carries no bead id CI can read"
+    fi
+    pcmd="${proto//$ptoken/$pfilled}"
     if (cd "$PDOC" && eval "$pcmd") >/dev/null 2>&1; then
         pup="$("${GIT[@]}" -C "$PDOC" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
         if [ "$pup" = "origin/master" ]; then
@@ -273,6 +310,16 @@ if grep -qF 'git push -u origin HEAD' "$PROTOCOL"; then
     ok "citizen-protocol.md: names the first push that sets the upstream"
 else
     bad "citizen-protocol.md: no 'git push -u origin HEAD' — the recipe leaves no upstream and no way to set one"
+fi
+
+# A branch already cut without an id is the common case, not the exception, and
+# the only move the recipe alone leaves is re-cutting it and force-pushing. The
+# document has to name the cheaper one: a `Bead:` line in the PR body outranks
+# the branch-name fallback and re-runs the gate with no new commit.
+if grep -qF 'Bead: <bead-id>' "$PROTOCOL"; then
+    ok "citizen-protocol.md: names the 'Bead:' line that rescues a branch already cut"
+else
+    bad "citizen-protocol.md: no 'Bead: <bead-id>' remedy for a branch already cut"
 fi
 
 # --- D. just check-worktree-upstream ----------------------------------------
