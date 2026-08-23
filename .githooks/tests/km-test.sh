@@ -4609,6 +4609,124 @@ else
     ok "km doctor passes a dispatcher whose last run succeeded"
 fi
 
+# --- does the town survive logout? (gqlc-yxnf) -------------------------------
+# Systemd USER timers live in the login session's user manager, which is torn
+# down at logout unless `loginctl enable-linger` holds it open. So the same
+# installed, enabled, healthy pair of timers means two different things on two
+# boxes: on one the town stops when the operator logs out, on the other it
+# keeps dispatching with nobody attached to any pane and comes back after a
+# reboot. Nothing anywhere reported which of those this box was.
+#
+# Neither state is an error, so this is not a pass/fail arm — it is a NAMING
+# arm, and what the rows below pin is that the two states are DISTINGUISHABLE
+# and each names its own consequence. A row that printed one sentence for both
+# would satisfy "doctor mentions lingering" and answer nothing.
+cat >"$BIN/loginctl" <<'STUB'
+#!/usr/bin/env bash
+# KM_FAKE_LINGER: yes | no | unanswerable (no user bus, which is CI's state).
+#
+# The stub is also an assertion: it refuses any call that is not a Linger
+# query for a named user. If km stops asking that question, the refusal drives
+# doctor down the unanswerable branch and the two definite rows below redden,
+# rather than a wrong-shaped call being answered anyway.
+[ "${1:-}" = show-user ] || { echo "loginctl: unexpected verb ${1:-<none>}" >&2; exit 64; }
+[ -n "${2:-}" ] || { echo "loginctl: no user named" >&2; exit 64; }
+want=no
+shift 2
+while [ $# -gt 0 ]; do
+    case "$1" in -p) [ "${2:-}" = Linger ] && want=yes; shift ;; esac
+    shift
+done
+[ "$want" = yes ] || { echo "loginctl: Linger was not asked for" >&2; exit 64; }
+[ "${KM_FAKE_LINGER:-no}" != unanswerable ] || {
+    echo "Failed to connect to bus: No medium found" >&2
+    exit 1
+}
+printf 'Linger=%s\n' "${KM_FAKE_LINGER:-no}"
+STUB
+chmod +x "$BIN/loginctl"
+
+linger_row() { printf '%s\n' "$DOUT" | grep -i 'linger' | head -1; }
+run_linger() { # $1 = KM_FAKE_LINGER
+    svc_case
+    fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=inactive' \
+        'InactiveEnterTimestamp=Fri 2026-08-21 22:17:53 EDT' 'Result=success' 'ExecMainStatus=0'
+    fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=inactive' \
+        'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=success' 'ExecMainStatus=0'
+    DOUT="$(KM_FAKE_LINGER="$1" PATH="$BIN:$PATH" "$KM" doctor 2>&1)"
+}
+
+# The state the bead is about: enabled, and it outlives the operator.
+lrow="km doctor says out loud when the town survives logout"
+run_linger yes
+LON="$(linger_row)"
+if [ -z "$LON" ]; then
+    bad "$lrow" "doctor says nothing about lingering at all: $DOUT"
+elif ! printf '%s' "$LON" | grep -q 'lingering is ON'; then
+    bad "$lrow" "lingering was on and the row does not say so: $LON"
+elif ! printf '%s' "$LON" | grep -q 'logout'; then
+    bad "$lrow" "the row does not name the consequence it exists to report: $LON"
+elif ! printf '%s' "$LON" | grep -q 'disable-linger'; then
+    bad "$lrow" "the row reports a state the operator is given no way to undo: $LON"
+else
+    ok "$lrow, and names what to run to end it"
+fi
+
+# The other state, and it is not a failure: it is the default, and it is what
+# an attended box wants. What it must not do is read like the row above.
+lrow="km doctor reports a town that stops at logout as such, not as lingering"
+run_linger no
+LOFF="$(linger_row)"
+if [ -z "$LOFF" ]; then
+    bad "$lrow" "doctor says nothing about lingering at all: $DOUT"
+elif [ "$LOFF" = "$LON" ]; then
+    bad "$lrow" "both linger states render the same row, so the row answers nothing: $LOFF"
+elif printf '%s' "$LOFF" | grep -q 'lingering is ON'; then
+    bad "$lrow" "lingering was off and the row claims it is on: $LOFF"
+elif ! printf '%s' "$LOFF" | grep -q 'enable-linger'; then
+    bad "$lrow" "the row does not say what a headless town would need: $LOFF"
+elif printf '%s' "$LOFF" | grep -q '^FAIL:'; then
+    bad "$lrow" "a legitimate attended configuration was failed: $LOFF"
+else
+    ok "$lrow, and points at enable-linger for the headless case"
+fi
+
+# CI has no user bus — the same reason every systemctl row above is soft. An
+# unanswered query must not render as either definite state, and must not take
+# the rest of doctor down with it (gqlc-z1qw: the silence that reads as clean).
+lrow="km doctor does not call an unanswerable loginctl a definite state"
+run_linger unanswerable
+LUNK="$(linger_row)"
+if [ -z "$LUNK" ]; then
+    bad "$lrow" "doctor went silent about lingering instead of saying it could not ask: $DOUT"
+elif ! printf '%s' "$LUNK" | grep -q 'UNKNOWN'; then
+    bad "$lrow" "an unanswered query rendered as an answer: $LUNK"
+elif [ "$LUNK" = "$LOFF" ] || [ "$LUNK" = "$LON" ]; then
+    bad "$lrow" "'could not ask' is indistinguishable from a measured state: $LUNK"
+elif ! printf '%s' "$DOUT" | grep -q 'town is up'; then
+    bad "$lrow" "doctor stopped at the linger arm instead of finishing: $DOUT"
+else
+    ok "$lrow, and finishes the remaining checks anyway"
+fi
+
+# --- the off-switch has a recipe (gqlc-yxnf) ---------------------------------
+# Turning the town on was `just kingdom-install`; turning it off — removing the
+# units, so nothing fires after a reboot — was an undocumented `km` subcommand
+# nobody reading the README would find. `just --show` parses the real justfile,
+# so this cannot pass against a recipe that does not parse; it is deliberately
+# not a grep for the name.
+lrow="the full off-switch is a just recipe beside the on-switch"
+if ! command -v just >/dev/null 2>&1; then
+    printf 'skip - %s: no just on PATH\n' "$lrow"
+elif ! JUST_SHOW="$(just --justfile "$REPO/justfile" --show kingdom-uninstall 2>&1)"; then
+    bad "$lrow" "no kingdom-uninstall recipe: $JUST_SHOW"
+elif ! printf '%s' "$JUST_SHOW" | grep -q 'km uninstall-units'; then
+    bad "$lrow" "kingdom-uninstall does not remove the units: $JUST_SHOW"
+else
+    ok "$lrow, and it calls km uninstall-units"
+fi
+
+rm -f "$BIN/loginctl"
 unset KM_FAKE_SYSTEMD
 export KM_STATE_DIR="$TMP/state"
 

@@ -127,9 +127,29 @@ just kingdom-attach s   attach to any seat's window
 just kingdom-up         create state dir, seat worktrees, tmux session, runners
 just kingdom-down       graceful stop (notice by mail, then kill the session)
 just kingdom-install    check deps, install+enable systemd user timers, set bd mail.delegate
+just kingdom-uninstall  remove the systemd user timers (state, mail, worktrees untouched)
 just kingdom-halt       touch the halt flag: dispatcher stops waking seats
 just kingdom-resume     remove the halt flag
 ```
+
+### The on/off ladder
+
+Three rungs, and they are not interchangeable:
+
+- `just kingdom-halt` — soft. The timers keep firing; the dispatcher wakes
+  nobody. Any citizen's `km resume` lowers it.
+- `just kingdom-down` — kills the tmux session. The timers still fire, and
+  `km up` is inside the dispatcher's reach.
+- `just kingdom-uninstall` — hard. The units are disabled and deleted, so
+  nothing fires again after a reboot. This is the rung that ends autonomous
+  operation with no human standing by.
+
+Systemd **user** timers run inside your login session's user manager, which is
+torn down when you log out — so by default the town stops when you do.
+`loginctl enable-linger $USER` keeps that manager alive, which is what a
+headless box needs and also means the town keeps dispatching with nobody logged
+in. `just kingdom-doctor` reports which of those two states this box is in;
+`loginctl disable-linger $USER` reverses it without touching the units.
 
 Mail from anyone to the king lands in `kingdom-state/mail/andranik/inbox/`;
 `just kingdom` shows the unread count.
