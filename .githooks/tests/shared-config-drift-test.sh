@@ -55,8 +55,16 @@ bad() {
 # --- A. wiring --------------------------------------------------------------
 # Read out of just's parsed recipe graph rather than grepped out of the
 # justfile, so a dependency sitting in a comment cannot answer for a wired one.
+#
+# `-f "$ROOT/justfile"` for the same reason every recipe_case row carries it: a
+# bare `just --dump` resolves whatever justfile the CURRENT cwd finds, so these
+# two rows judged a different artifact from the rest of the suite. In the wired
+# path (just test-hooks, cwd = repo root) the two agree, so the disagreement is
+# invisible until someone runs the suite from elsewhere — measured from /tmp, it
+# failed loud with a python traceback rather than reporting on $ROOT (bd
+# gqlc-n836 item 2). One flag makes the whole file judge one artifact.
 for target in test doctor; do
-    if just --dump --dump-format json 2>/dev/null | python3 -c '
+    if just -f "$ROOT/justfile" --dump --dump-format json 2>/dev/null | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 deps = [x["recipe"] for x in d["recipes"][sys.argv[1]]["dependencies"]]
@@ -117,7 +125,7 @@ recipe_case "core.bare=false, which git init itself writes, is accepted" accept
 
 # core.worktree — same blast radius, and it has no legitimate value here, so
 # unlike core.bare there is no accepted spelling other than absent.
-"${GIT[@]}" -C "$REPO" config core.worktree /tmp/somewhere-else
+"${GIT[@]}" -C "$REPO" config core.worktree "$TMP/somewhere-else"
 recipe_case "core.worktree pointing elsewhere is refused" reject "error: core.worktree is"
 "${GIT[@]}" -C "$REPO" config --unset-all core.worktree
 recipe_case "the documented repair clears core.worktree" accept
@@ -134,6 +142,39 @@ recipe_case "core.bare set twice, drifted value masked by a good one, is refused
     reject "error: core.bare is"
 "${GIT[@]}" -C "$REPO" config --unset-all core.bare
 recipe_case "clearing both values restores health" accept
+
+# THE VALUELESS SPELLING. `[core]\n\tbare\n` with no `=` is TRUE to git and
+# bricks the main worktree exactly as `bare = true` does — measured here by the
+# two rows below rather than asserted. The git config CLI cannot write it:
+# `git config core.bare ""` emits `bare =`, which git reads as FALSE and which
+# the recipe therefore accepts. So the line is appended by hand.
+#
+# It is pinned because it is the witness that convicts a charged survivor. The
+# recipe's `[ "$value" = "$candidate" ]` mutated to a reverse substring match,
+# `[[ "$candidate" == *"$value"* ]]`, passed all fifteen rows above (measured
+# 2026-08-22 at 3697391d): every allowed candidate contains the empty string, so
+# the mutant accepts a bricked repo and nothing was red. Any future cleanup that
+# drops empty lines out of the mapfile lands the same way. bd gqlc-n836 item 1.
+printf '[core]\n\tbare\n' >>"$REPO/.git/config"
+
+if [ "$("${GIT[@]}" -C "$REPO" config --get-all core.bare | wc -l)" -eq 1 ] \
+    && [ -z "$("${GIT[@]}" -C "$REPO" config --get-all core.bare)" ]; then
+    ok "valueless core.bare reads back as one EMPTY-STRING value, not as absent"
+else
+    bad "valueless core.bare did not read back as an empty value (premise gone): $("${GIT[@]}" -C "$REPO" config --get-all core.bare | cat -A)"
+fi
+
+if "${GIT[@]}" -C "$REPO" status --short >/dev/null 2>&1; then
+    bad "valueless core.bare left the MAIN worktree working (premise gone — the spelling is harmless and this row is not worth its cost)"
+else
+    ok "valueless core.bare bricks the main worktree, so it is drift worth refusing"
+fi
+
+recipe_case "valueless core.bare, which the config CLI cannot write, is refused" \
+    reject "error: core.bare is ''"
+
+"${GIT[@]}" -C "$REPO" config --unset-all core.bare
+recipe_case "the documented repair clears the valueless spelling too" accept
 
 # --- the asymmetry that dictates the probe ----------------------------------
 # Why the recipe reads the config instead of asking git whether it is bare:

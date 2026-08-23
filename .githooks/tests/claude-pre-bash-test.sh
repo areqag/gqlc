@@ -1101,8 +1101,43 @@ run_verdict "cd chain retargets, reachable sha allowed" allow-reachable "$TMP" \
   "cd $BD_REPO && bd close gqlc-x -r \"Closed at $PUSHED_SHA.\""
 run_case    "bd -C to the fixture repo"        deny  "$TMP" \
   "bd -C $BD_REPO close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+# THE FOUR ROWS BELOW CITE THE FULL 40, AND THAT IS NOT COSMETIC — bd gqlc-c3sw.
+#
+# They are the only rows in this file whose verdict needs the citation to be
+# ANCHORED. Every other sha row runs against a repo the hook can reach, where a
+# loose hex token is promoted to a citation once git says it names a commit;
+# these four are the arms where the repo is unreachable or the probe silent, so
+# `anchored` empty means allow-no-sha and, end to end, SILENCE.
+#
+# `rev-parse --short=8` returns an all-digit abbreviation about once in 43
+# fixtures — (10/16)^8 — and an all-decimal token is deliberately DEMOTED out of
+# the anchored tier by the hook (DECIMAL_TOKEN_RE, bd gqlc-7fn3), because prose
+# reasons carry decimal numbers. So on roughly one CI run in 43 these rows drew a
+# fixture sha that was not a citation at all and read:
+#
+#   FAIL - unresolvable cwd is refused, not skipped (expected deny-unverifiable-repo, got allow-no-sha)
+#   FAIL - unresolvable cwd refuses end-to-end (expected deny-unresolvable-dir, got silent)
+#   FAIL - an unanswerable object probe refuses end-to-end (expected deny-unanswerable-objects, got silent)
+#
+# — observed on CI run 32631514489 at base 4a478f85, green locally on the same
+# tree, green on `gh run rerun --failed` at the same sha, which is what made it
+# read as a runner-environment problem. It is not: the fixture sha is different
+# every run and the environment is irrelevant. Reproduced two ways on 2026-08-23:
+# from an unresolvable cwd this hook DENIES `Closed at 1234567a.` and is SILENT
+# on `Closed at 12345678.`; and pointing these four rows at the all-decimal
+# fixture sha below reproduced all three failures above verbatim, including
+# `got allow-no-sha` and `got silent`.
+#
+# The full 40 puts the same draw near one in 10^9, and the fixture_check below
+# turns even that into a named failure rather than a permissive verdict. This is
+# the remedy this file already applied to the uppercase rows for the same 1-in-43
+# hazard; these four were left on the short form.
+fixture_check "the anchored-citation fixture sha is not all-decimal" \
+  "anchorable" \
+  "$(printf '%s' "$ORPHAN_SHA_FULL" | grep -qE '^[0-9]+$' && echo ALL-DECIMAL || echo anchorable)"
+
 run_verdict "unresolvable cwd is refused, not skipped" deny-unverifiable-repo "$TMP" \
-  "cd \"\$WT\" && bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+  "cd \"\$WT\" && bd close gqlc-x -r \"Closed at $ORPHAN_SHA_FULL.\""
 
 # ...and the three rows that make that refusal REACH the caller. The row above
 # reads close_verdict()'s name; main() reads only its message, so the name is
@@ -1111,13 +1146,24 @@ run_verdict "unresolvable cwd is refused, not skipped" deny-unverifiable-repo "$
 # replace any one of those messages with None and its row, and only its row,
 # goes red with `silent`.
 run_close_case "unresolvable cwd refuses end-to-end" deny-unresolvable-dir "$TMP" \
-  "cd \"\$WT\" && bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+  "cd \"\$WT\" && bd close gqlc-x -r \"Closed at $ORPHAN_SHA_FULL.\""
 run_unanswerable_case "an unanswerable object probe refuses end-to-end" \
   deny-unanswerable-objects "$BD_REPO" \
-  "bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\"" object_types
+  "bd close gqlc-x -r \"Closed at $ORPHAN_SHA_FULL.\"" object_types
 run_unanswerable_case "an unanswerable reachability probe refuses end-to-end" \
   deny-unanswerable-reachability "$BD_REPO" \
-  "bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\"" remote_refs_containing
+  "bd close gqlc-x -r \"Closed at $ORPHAN_SHA_FULL.\"" remote_refs_containing
+
+# And the behaviour that was being SAMPLED at one run in 43 is now pinned on
+# purpose, with a token guaranteed all-decimal by its own fixture rows below.
+# The hook allows here, and that is the designed answer, not a hole: it cannot
+# reach the repo, so it cannot tell a decimal sha from the decimal number in a
+# reason that says "refused three times at 1048576 inodes", and refusing prose
+# is the worse error. Pinning it means the next person to meet this shape reads
+# a green row that explains it instead of a red row that blames the runner.
+run_verdict "an all-decimal token from an unresolvable cwd is not a citation" \
+  allow-no-sha "$TMP" \
+  "cd \"\$WT\" && bd close gqlc-x -r \"Closed at $DECIMAL_SHA.\""
 
 # --- --reason-file is READ, not merely noticed ------------------------------
 # Both halves, for the same reason as above: a hook that ignored the flag
@@ -1447,7 +1493,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=225
+EXPECTED_ROWS=227
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
@@ -1459,7 +1505,7 @@ fi
 # strings — no path, sha or temp dir reaches one — so the digest is the same on
 # every machine. Update it deliberately when a row is added, renamed or
 # reordered; a drift you did not intend is the finding.
-EXPECTED_ROW_DIGEST=3b76226a048d22be
+EXPECTED_ROW_DIGEST=48199579b64216a3
 ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
   'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
 if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then

@@ -86,12 +86,64 @@ just test
 if just ensure-golangci >/dev/null 2>&1; then
   lint_log="$(mktemp)"
   trap 'rm -f "${lint_log}"' EXIT
-  # tee, not capture-then-echo: lint-new streams, and a developer watching a
-  # slow lint should not be given a blank terminal so that this hook can grep
-  # the output afterwards. `set -o pipefail` at the top is what makes the `if`
-  # read lint-new's status rather than tee's.
-  lint_rc=0
-  just lint-new 2>&1 | tee "${lint_log}" || lint_rc=$?
+  # A BOUNDED WAIT ON A NEIGHBOUR'S LOCK, not a hatch past the gate (bd
+  # gqlc-hg61). golangci-lint holds a process-wide lock and refuses to start
+  # while another instance owns it:
+  #
+  #     The command is terminated due to an error: parallel golangci-lint is running
+  #     error: recipe `lint-new` failed on line ... with exit code 3
+  #
+  # Observed twice first-party — seat hayk on 2026-08-22, and a second lane on
+  # 2026-08-23 during an eleven-lane wave, both while a DIFFERENT worker was
+  # linting and both green on a bare retry. Nothing was wrong with either
+  # branch. With one worker this is unreachable; the town runs sixteen seats,
+  # so it is routine and gets worse as the town gets busier.
+  #
+  # Why it is worth waiting rather than reporting: the message names
+  # golangci-lint but not the cause, so a tired seat reads "my branch is
+  # broken", and our own rule says work is not complete until `git push`
+  # succeeds. A session killed by a quota wall or a stall watchdog right there
+  # sleeps with the branch on one disk. That has already cost a rescue.
+  #
+  # The retry is NARROW in both directions, which is the whole safety argument:
+  #   - it requires the lock's own sentence in the output, AND
+  #   - it requires an exit code that is not 1. golangci-lint's
+  #     --issues-exit-code is 1 and nothing here overrides it, so 1 is the only
+  #     code that means "I graded the code and found issues". A real finding in
+  #     the pusher's own diff is therefore never retried, whatever it prints.
+  # On exhaustion the push is still REFUSED. A gate that yields under load is
+  # not a gate.
+  lint_attempts=$((1 + ${GQLC_LINT_LOCK_RETRIES:-12}))
+  lint_delay="${GQLC_LINT_LOCK_DELAY:-10}"
+  lint_attempt=0
+  while :; do
+    lint_attempt=$((lint_attempt + 1))
+    lint_rc=0
+    # tee, not capture-then-echo: lint-new streams, and a developer watching a
+    # slow lint should not be given a blank terminal so that this hook can grep
+    # the output afterwards. `set -o pipefail` at the top is what makes this
+    # read lint-new's status rather than tee's.
+    just lint-new 2>&1 | tee "${lint_log}" || lint_rc=$?
+    if [ "${lint_rc}" -eq 0 ] || [ "${lint_rc}" -eq 1 ] \
+      || ! grep -qF 'parallel golangci-lint is running' "${lint_log}"; then
+      break
+    fi
+    if [ "${lint_attempt}" -ge "${lint_attempts}" ]; then
+      echo "ERROR: golangci-lint never got its lock: another worker on this machine held" >&2
+      echo "       it for all ${lint_attempts} attempts (${lint_delay}s apart)." >&2
+      echo "       THIS IS ALMOST CERTAINLY NOT YOUR BRANCH. The linter refused to START;" >&2
+      echo "       it did not grade your diff and found nothing wrong with it. Do not go" >&2
+      echo "       debugging a branch this hook never looked at." >&2
+      echo "       Correct response: wait for the other lint to finish and push again." >&2
+      echo "       Who holds it:  ps -eo pid,etimes,args= | grep '[g]olangci-lint'" >&2
+      echo "       Do NOT push with --no-verify (Constitution IV.4) and do NOT sleep with" >&2
+      echo "       this branch unpushed — unpushed work here is lost work (bd gqlc-hg61)." >&2
+      break
+    fi
+    echo "NOTE: another worker holds the golangci-lint lock; this is not your branch." >&2
+    echo "      Waiting ${lint_delay}s and retrying (attempt ${lint_attempt} of ${lint_attempts}) — bd gqlc-hg61." >&2
+    sleep "${lint_delay}"
+  done
   if [ "${lint_rc}" -ne 0 ]; then
     # TWO TELLS, because the same cause has two presentations. Both were
     # produced on this repo on 2026-08-22 by the same command, minutes apart,
@@ -110,8 +162,14 @@ if just ensure-golangci >/dev/null 2>&1; then
     #    about the push. The `* typecheck: N` summary line is NOT usable on its
     #    own: a tree that genuinely does not compile reports typecheck too,
     #    in-repo, and that one must keep reading as a finding.
-    if [ "${lint_rc}" -ne 1 ] \
-      || grep -qE '^(/|\.\./)[^:]*:[0-9]+:[0-9]+:.*\(typecheck\)$' "${lint_log}"; then
+    #
+    # The lock exhaustion above is excluded here even though it exits 3: it has
+    # already said what happened, and this block's remedy is GOTOOLCHAIN, which
+    # cannot move a lock. Two diagnoses for one failure, the second of them
+    # wrong, is worse than one.
+    if { [ "${lint_rc}" -ne 1 ] \
+      || grep -qE '^(/|\.\./)[^:]*:[0-9]+:[0-9]+:.*\(typecheck\)$' "${lint_log}"; } \
+      && ! grep -qF 'parallel golangci-lint is running' "${lint_log}"; then
       want_go="$(awk '$1 == "go" { print $2; exit }' go.mod 2>/dev/null || true)"
       if [ -n "${want_go}" ]; then
         remedy="GOTOOLCHAIN=go${want_go} git push ..."
