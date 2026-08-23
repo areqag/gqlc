@@ -408,10 +408,19 @@ check-beads-export dir=".":
     #!/usr/bin/env bash
     set -uo pipefail
     # git exports GIT_DIR / GIT_WORK_TREE to every hook, `just test` runs from
-    # .githooks/pre-push, and those variables beat `git -C`. Without this line
+    # .githooks/pre-push, and those variables beat `git -C`. Without the scrub
     # the probe judges the hook's repository rather than the one at $dir — it
-    # would report on a healthy tree while a bricked one went unread.
-    unset "${!GIT_@}"
+    # would report on a healthy tree while a bricked one went unread. Through
+    # the shared file rather than a private copy of the line (bd gqlc-o9wz);
+    # $0 here is just's temp script, so the path comes from the justfile.
+    sandbox={{ quote(justfile_directory() + "/.githooks/git-env-sandbox.sh") }}
+    if [ ! -f "$sandbox" ]; then
+        echo "error: $sandbox is missing, so the git environment cannot be scrubbed and" >&2
+        echo "       this probe would judge whatever repository a hook was running in." >&2
+        exit 1
+    fi
+    # shellcheck source=.githooks/git-env-sandbox.sh disable=SC1091
+    source "$sandbox"
     dir="{{ dir }}"
     common="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
     if [ -z "$common" ]; then

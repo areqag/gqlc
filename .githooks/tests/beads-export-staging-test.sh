@@ -206,5 +206,18 @@ else
 fi
 "${GIT[@]}" -C "$REPO" config --unset-all core.bare
 
+# And the scrub is fail-closed on its own absence. A `source` of a missing file
+# under `set -u` without `-e` prints to stderr and carries on, leaving GIT_*
+# standing — the recipe would then run with exactly the redirect the two rows
+# above rule out, and pass. Arranged by copying the justfile somewhere with no
+# .githooks beside it, which is what justfile_directory() resolves against.
+mkdir -p "$TMP/nosandbox"
+cp "$ROOT/justfile" "$TMP/nosandbox/justfile"
+if just -f "$TMP/nosandbox/justfile" check-beads-export "$HEALTHY" >/dev/null 2>&1; then
+    bad "env: a missing git-env-sandbox.sh was ignored rather than refused"
+else
+    ok "env: a missing git-env-sandbox.sh is refused rather than silently skipped"
+fi
+
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
