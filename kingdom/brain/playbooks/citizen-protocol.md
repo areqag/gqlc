@@ -409,17 +409,23 @@ re-read, so say so plainly rather than describing it as a rebase.
 
 ## Holding a bead
 
-**Withholding a bead's `class:` label does not hold it.** A held bead and an
-untriaged one are the same state — open, no class label — and clearing the
-unlabelled backlog is Սեդրակ's standing chore, so the sweep that exists to
-label untriaged beads is guaranteed to label the held ones too. The release
-condition you wrote in the notes is read by nobody at labelling time. Measured
-2026-08-22 against the live DB (bd gqlc-jvp5): of 20 beads whose own text said
-they were deliberately unlabelled, 16 had been labelled anyway, and one of
-those was already `in_progress` with a citizen working it. No amount of care
-fixes this — the distinction is not representable, so the failure is silent on
-both sides: the sweeper sees a bead that wants a label, and the holder's note
-still reads HELD long after it stopped being true.
+**Withholding a bead's `class:` label does not hold it — it dispatches it.**
+Since gqlc-38ye an unassigned bead carrying no `class:` label is routed as
+`class:warrior` by inference on the very next tick, and the run says so. So an
+unlabelled bead is not waiting to be triaged; it is on its way to a Ռազմիկ,
+typically within two minutes.
+
+This is a stronger conclusion than the one this passage used to draw, and it is
+worth seeing why the older reason ALSO still bites. A held bead and an
+untriaged one are the same state — open, no class label — so the release
+condition you wrote in the notes is read by nobody. Measured 2026-08-22 against
+the live DB (bd gqlc-jvp5): of 20 beads whose own text said they were
+deliberately unlabelled, 16 had been labelled anyway, and one of those was
+already `in_progress` with a citizen working it. No amount of care fixes this —
+the distinction is not representable, so the failure is silent on both sides.
+What has changed is only WHAT defeats the prose hold: it used to be a mayor's
+labelling sweep, and it is now the dispatcher itself, which is faster and
+answers to nobody's calendar.
 
 Labelling says WHO should do the work. Holding says WHEN. Give the bead its
 correct label and hold it separately, by one of the two mechanisms the
@@ -453,13 +459,13 @@ while trying to be helpful.
 | --- | --- | --- |
 | resume | `in_progress` AND assigned → back to the seat that holds it | ignores it |
 | owned | ready AND assigned → to that seat, whatever its class label says | ignores it |
-| fresh | ready AND unassigned AND `class:`-labelled → a free seat of that class | applies |
+| fresh | ready AND unassigned → a free seat of its class; a `class:` label names that class, an absent one INFERS `warrior` | applies |
 
-So, in one line: a bead wakes a seat iff *(ready AND unassigned AND
-class-labelled AND at or above the floor)* OR *(assigned AND either ready or
-in progress)*.
+So, in one line: a bead wakes a seat iff *(ready AND unassigned AND at or above
+the floor)* OR *(assigned AND either ready or in progress)*. Note what is NOT
+in that sentence: a class label. It decides WHICH seat, never WHETHER.
 
-Four consequences worth holding onto.
+Five consequences worth holding onto.
 
 **Unassigning a claimed bead blinds it.** Clearing the assignee on a bead that
 is already `in_progress` leaves it in-progress with a null assignee: invisible
@@ -475,15 +481,38 @@ display a bead no pass can reach. `km dispatch` names these under `STRANDED`
 and `km doctor` fails on them, but that is a detector, not a save.
 
 **The priority floor binds the fresh pass only** (`[dispatch] max_priority`,
-`2` today). Being HANDED a P3 stops at the floor; finishing a P3 you already
-hold does not, because Constitution III.3 is your right to finish your own
-work. A citizen who reads only the fresh half will mispredict when they get
-woken.
+`3` since gqlc-38ye). It is configuration and it moves, so read it with
+`km cfg` rather than trusting this sentence. Being HANDED a bead below the
+floor stops there; finishing one you already hold does not, because
+Constitution III.3 is your right to finish your own work. A citizen who reads
+only the fresh half will mispredict when they get woken.
 
 **All three passes wake ASLEEP seats only.** Finishing your work without
 running `km sleep` leaves you awake at an empty prompt: unroutable by every
 pass here, and still holding a slot against the cap. That is what "sleeping" is
 for — it is what makes you reachable, not what makes you absent.
+
+**Label the bead you FILE, if it is not warrior work.** Nobody labels on your
+behalf any more — the mayor's labelling sweep is gone (gqlc-d91u) and there is
+no queue of untriaged beads waiting for a triager. There is only the inference,
+and the inference says `warrior`.
+
+That is right far more often than not. Of the 414 labelled beads on the ledger
+2026-08-23: 343 warrior, 45 judge, 26 architect. So the default is correct for
+roughly five beads in six, and the cost of it being wrong is one escalation
+under Constitution III.1 — a Ռազմիկ who was woken for a bead that is not their
+work says so and hands it on.
+
+Which tells you exactly when to spend the flag. Add `-l class:judge` or
+`-l class:architect` when you file a review or a design bead, because those are
+the two the inference cannot guess and the two whose creator always knows:
+you are filing a review bead BECAUSE something needs reviewing. Everything else
+can be left to infer. `km guard-sweep` already does this for the patrol bead it
+files (`-l class:judge,patrol`), which is the shape to copy.
+
+Do not treat this as a gate on yourself. A bead filed with a guessed class is
+recoverable in one hop; a bead you did not file because you were unsure how to
+label it is invisible forever, and that is the strictly worse failure.
 
 **An assignee outranks a class label.** On the owned pass the assignee names
 the seat, so a bead assigned to you comes to you whether or not it carries a
