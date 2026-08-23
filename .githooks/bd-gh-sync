@@ -99,11 +99,68 @@
 # bead listing alone is ~1MB, and execve caps any single argument or
 # environment string at 128KB (MAX_ARG_STRLEN) — a limit no ulimit raises.
 
+# This file ran 1067 lines with no shell options at all until gqlc-650j: an
+# unset variable expanded to empty, a failing stage of a pipeline was invisible
+# behind a succeeding last one, and any command that failed mid-run carried on
+# to the next statement — in the one tool that decides what to overwrite in the
+# bead ledger.
+#
+# `set -e` on its own would trade one silence for another. Both callers keep
+# only the last stderr line, and a script that dies where it stands writes no
+# such line, so an abort and a run with nothing to do arrive as the same bytes —
+# the shape this header refuses everywhere else. The options therefore come with
+# an ERR trap that puts the abort on the line the caller keeps, and exits with
+# the status the action is allowed to carry: pull always 0, because it rides on
+# `git pull` and on session start where a non-zero aborts the operation
+# underneath it, push non-zero, because its caller reads the status as the
+# verdict.
+#
+# `-E` is load-bearing: without it an ERR trap is not inherited by shell
+# functions, and the two batch functions below are where a failure would
+# otherwise abort in silence. It also means the trap fires inside command
+# substitutions, which is why every line it writes goes to stderr — a trap
+# writing to stdout would be captured into the value being assigned.
+#
+# Zero matches is an answer, not a failure, and `grep -c` reports it as exit 1.
+# Every count taken here goes through _count for that reason, rather than
+# through a `|| true` that would also absorb grep's exit 2.
+set -Eeuo pipefail
+
 _action="${1:-}"
 case "$_action" in pull|push) ;; *)
   echo "usage: $0 pull|push" >&2
   exit 0
 esac
+
+# shellcheck disable=SC2317 # reached only through the ERR trap installed below
+_abort() {
+  _status=$?
+  # Disarmed first: every echo below is a command, and one of them failing
+  # inside the handler would re-enter it.
+  trap - ERR
+  echo "bd-gh-sync: a command failed at line ${1} (status ${_status}) and stopped this" >&2
+  echo "bd-gh-sync: run where it stood. Nothing after that line was attempted, so the" >&2
+  echo "bd-gh-sync: counts this run would have reported were never established, and" >&2
+  echo "bd-gh-sync: whatever it had already written to bd or GitHub stands." >&2
+  if [ "$_action" = "pull" ]; then
+    echo "bd-gh-sync: PULL FAILED — aborted at line ${1}; the pull is incomplete." >&2
+    exit 0
+  fi
+  echo "bd-gh-sync: PUSH FAILED — aborted at line ${1}; the push is incomplete." >&2
+  exit 1
+}
+trap '_abort "$LINENO"' ERR
+
+# `grep -c` exits 1 when the count is zero. That is the answer, not a failure,
+# and under `set -e` an unguarded count of zero would abort the run — so the
+# distinction has to be made here rather than by a blanket `|| true`, which
+# would also swallow exit 2 (an unreadable file, a bad pattern) and hand the
+# summary line a zero nobody measured.
+_count() {
+  _n=$(grep -c "$1" "$2") && _s=0 || _s=$?
+  [ "$_s" -le 1 ] || return "$_s"
+  printf '%s\n' "${_n:-0}"
+}
 
 command -v bd >/dev/null 2>&1 || exit 0
 command -v gh >/dev/null 2>&1 || exit 0
@@ -164,8 +221,13 @@ if [ "$_action" = "pull" ]; then
   # separates "selection ran and chose nothing" from "selection did not run";
   # without it an empty result is indistinguishable from a crash, which is how
   # the previous guard fell through into an unscoped pull.
+  # The status is taken on the command rather than from `$?` on the next line:
+  # under `set -e` a selection that died would never reach that line, and the
+  # refusal below — the one thing this path exists to guarantee — would be
+  # replaced by a bare abort.
+  _rc=0
   python3 - "$_tmp/beads.json" "$_tmp/gh.json" "$_gh_limit_all" \
-    >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF'
+    >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF' || _rc=$?
 import datetime, json, re, sys
 
 def load(path):
@@ -341,7 +403,6 @@ for line in out:
     print(line)
 print("DONE")
 PYEOF
-  _rc=$?
 
   if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]; then
     # Detail first, verdict last. This is the one exit that produces no summary
@@ -375,8 +436,11 @@ PYEOF
   # Whole remainder of the line, not `cut -f2`: an id carrying a space would be
   # silently truncated to its first token and a *different* bead would be named
   # in --issues. Taking it whole lets the gate below see it and refuse it.
-  grep '^ALLOW ' "$_tmp/plan.txt" | sed 's/^ALLOW //' >"$_tmp/allow.txt"
-  _eligible=$(grep -c '^ALLOW ' "$_tmp/plan.txt")
+  # One `sed -n .../p` rather than `grep | sed`: under pipefail a grep that
+  # matched nothing — the steady state here — fails the whole pipeline, and the
+  # allowlist being empty is not an error.
+  sed -n 's/^ALLOW //p' "$_tmp/plan.txt" >"$_tmp/allow.txt"
+  _eligible=$(_count '^ALLOW ' "$_tmp/plan.txt")
   _batches=0
   _failed=0
   _pulled=0
@@ -387,7 +451,15 @@ PYEOF
   # it, because the postcondition has no fallback for its absence: an empty file
   # is a run that pulled nothing, and no file at all is a run whose exemption set
   # was never established, which stops the check rather than emptying it.
-  : >"$_tmp/pulled.txt"
+  #
+  # Its failure is taken explicitly rather than left to `set -e`. Aborting here
+  # would lose the pull itself over a scratch file, and the pull is the
+  # operation; the absence of this file is already the postcondition's own "the
+  # exemption set was never established", which reaches the summary line. What
+  # the options add is that the failure is now said out loud instead of being
+  # inferred downstream.
+  : >"$_tmp/pulled.txt" ||
+    echo "bd-gh-sync: could not create ${_tmp}/pulled.txt, so which beads this run pulled cannot be recorded and the held-bead check will report itself as not run." >&2
 
   # Batched here rather than by `xargs -n`, because xargs parses quotes: a
   # single bead id containing an apostrophe aborted the whole construction with
@@ -403,7 +475,11 @@ PYEOF
       # Ids reach here only past the charset gate, which admits neither a comma
       # nor a newline, so the accumulator splits back into exactly the ids that
       # went into it and each lands on a line of its own.
-      printf '%s\n' "$1" | tr ',' '\n' >>"$_tmp/pulled.txt"
+      # Same reading as the file's creation above: a batch whose ids cannot be
+      # recorded leaves the postcondition without an exemption set, which it
+      # reports, rather than aborting a pull that has already happened.
+      printf '%s\n' "$1" | tr ',' '\n' >>"$_tmp/pulled.txt" ||
+        echo "bd-gh-sync: could not record batch ${_batches}'s ids in ${_tmp}/pulled.txt; the held-bead check will report itself as not run." >&2
     else
       _failed=$((_failed + 1))
       echo "bd-gh-sync: 'bd github sync' exited non-zero on batch ${_batches}; those beads may not have been pulled." >&2
@@ -586,7 +662,12 @@ PYEOF
   # owed the difference between "nothing moved" and "nobody looked". An empty
   # status file means the python itself never got far enough to write one.
   _blind=""
-  case "$(cat "$_tmp/post_status.txt" 2>/dev/null)" in
+  # Read through a test rather than by letting `cat` fail: absence is the
+  # script's own "the check did not run at all" signal, and under `set -e` a
+  # failing `cat` in an assignment aborts before that signal is read.
+  _post_status=""
+  [ -f "$_tmp/post_status.txt" ] && _post_status=$(cat "$_tmp/post_status.txt")
+  case "$_post_status" in
     OK | VACUOUS) ;;
     BLIND*) _blind="the post-pull bead list was unreadable" ;;
     *) _blind="the check itself did not run" ;;
@@ -685,8 +766,8 @@ PYEOF
   # unenumerated bead list takes both, a capped GitHub listing takes only the
   # orphan arm. Same rule as the push side's two arms: no number goes on the one
   # line the caller keeps unless the set behind it was witnessed.
-  _held_arm="held $(grep -c '^HOLD ' "$_tmp/plan.txt")"
-  _orphan_arm="left $(grep -c '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone"
+  _held_arm="held $(_count '^HOLD ' "$_tmp/plan.txt")"
+  _orphan_arm="left $(_count '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone"
   if [ -n "$_unwitnessed" ]; then
     _held_arm="held an unknown number of bead(s) (${_unwitnessed})"
     _orphan_arm="left an unknown number of unmirrored GH issue(s) alone (${_unwitnessed})"
@@ -713,7 +794,7 @@ PYEOF
     # prints, and there is no such line for a bead that is gone. A reader who
     # takes this one line and finds nothing to re-assert is a reader who
     # concludes the warning was noise.
-    _gone=$(grep -c '^GONE ' "$_tmp/moved.txt")
+    _gone=$(_count '^GONE ' "$_tmp/moved.txt")
     # The record tag comes off by field and the records are joined one by one: a
     # bead id is not guaranteed to be a single word here, and flattening the
     # three onto a line to separate them on every space renders one bead as two
@@ -787,8 +868,10 @@ if ! exec 9>"$_lock"; then
   echo "bd-gh-sync: PUSH FAILED — the push lock file could not be opened." >&2
   exit 1
 fi
-flock -w "$_lock_wait" 9
-_flock_rc=$?
+# Status taken on the command, not from `$?` below it: under `set -e` a flock
+# that could not be taken would abort before the refusal that names it.
+_flock_rc=0
+flock -w "$_lock_wait" 9 || _flock_rc=$?
 if [ "$_flock_rc" -ne 0 ]; then
   # The status separates the two shapes: 127 is the shell not finding flock at
   # all, and the remedy for that is not "push again".
@@ -809,7 +892,8 @@ bd list --status all --limit 0 --json >"$_tmp/beads.json" 9>&- 2>/dev/null \
 # list that would not load used to become an empty selection, and an empty
 # selection is byte-for-byte the steady state. "Nothing needs a mirror" and
 # "which beads need a mirror is unknowable" are different runs.
-python3 - "$_tmp/beads.json" >"$_tmp/plan.txt" 9>&- 2>"$_tmp/plan.err" <<'PYEOF'
+_rc=0
+python3 - "$_tmp/beads.json" >"$_tmp/plan.txt" 9>&- 2>"$_tmp/plan.err" <<'PYEOF' || _rc=$?
 import json, sys
 
 # Escaped for the reason the pull selection escapes: the records below are
@@ -829,7 +913,6 @@ for b in beads:
 print("COUNT " + str(len(beads)))
 print("DONE")
 PYEOF
-_rc=$?
 
 if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]; then
   # Detail first, verdict last: this exit produces no summary line, so the
@@ -845,11 +928,13 @@ if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]
   exit 1
 fi
 
-_new=$(grep -c '^NEW ' "$_tmp/plan.txt")
+_new=$(_count '^NEW ' "$_tmp/plan.txt")
 _before_n=$(sed -n 's/^COUNT //p' "$_tmp/plan.txt")
 # Whole remainder of the line, for the reason the pull path takes it whole: an
-# id cut at its first token names a different, possibly real, bead.
-grep '^NEW ' "$_tmp/plan.txt" | sed 's/^NEW //' >"$_tmp/new.txt"
+# id cut at its first token names a different, possibly real, bead. One `sed -n`
+# rather than `grep | sed`, because under pipefail a grep that matched nothing —
+# the steady state — would fail the pipeline.
+sed -n 's/^NEW //p' "$_tmp/plan.txt" >"$_tmp/new.txt"
 
 # Batched by hand rather than through `xargs -n`, because xargs parses quotes:
 # one bead id carrying an apostrophe aborted the whole construction, so no batch
@@ -1021,7 +1106,11 @@ _stale=0
 _closed=0
 _blind=""
 _uncounted=""
-_close_status=$(cat "$_tmp/close_status.txt" 2>/dev/null)
+# Read through a test rather than by letting `cat` fail: the file's absence is
+# the script's own "the pass did not run at all", and under `set -e` a failing
+# `cat` in an assignment aborts before that signal is read.
+_close_status=""
+[ -f "$_tmp/close_status.txt" ] && _close_status=$(cat "$_tmp/close_status.txt")
 case "$_close_status" in
   "OK "*)
     _stale=$(echo "$_close_status" | cut -d' ' -f2)

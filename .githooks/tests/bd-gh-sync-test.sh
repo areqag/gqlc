@@ -2525,6 +2525,87 @@ for act in pull push; do
     fi
 done
 
+# --- gqlc-650j: the shell options, and the trap that keeps them from silencing
+# the script ------------------------------------------------------------------
+# bd-gh-sync ran 1067 lines with no shell options at all, and it is the tool
+# that decides what to overwrite in the bead ledger. `set -e` on its own would
+# have been a poor trade: both callers keep only the last stderr line, so a
+# script that dies where it stands writes no verdict, and an abort then arrives
+# as the same bytes as a run with nothing to do. What the options are worth
+# therefore turns on the ERR trap, and these rows are about the trap.
+#
+# Sabotage: a file the script writes with no handler of its own is replaced by a
+# directory, so a redirection fails at a point the script has no branch for.
+# Both arms assert the verdict AND the exit status, because the two actions are
+# allowed different ones — pull rides on `git pull` and on session start, where
+# a non-zero aborts the operation underneath it; push's caller reads the status
+# as the verdict — and a trap that had those the wrong way round would pass an
+# arm that checked only the text.
+#
+# RED control, measured 2026-08-23 by running this file against the optionless
+# bd-gh-sync at origin/master e580fd70, by the recipe in this file's header. All
+# three rows below fail there, and the pull arm's line is the shape they exist
+# to make unreachable:
+#
+#   bd-gh-sync: pulled 0 bead(s), held 0, left 0 unmirrored GH issue(s) alone.
+#   WARNING: 0 bead(s) held out of the pull changed anyway ();
+#   see the WARNING lines above for what moved and how to recover it.
+#
+# Three counts and a warning about nought beads named as `()`, over a working
+# directory that had just refused a write, on exit 0.
+MKTEMP_BLOCK=moved.txt
+run_sync pull '[{"id":"b-opt","status":"open","external_ref":""}]' '[]' '[]'
+MKTEMP_BLOCK=
+if [ "$RC" -ne 0 ]; then
+    bad "an unhandled write failure aborts the pull with a verdict, exit 0" \
+        "pull exited $RC, which aborts the 'git pull' it rides on: $(last_line)"
+else
+    case "$(last_line)" in
+        *"PULL FAILED — aborted at line "*)
+            ok "an unhandled write failure aborts the pull with a verdict, exit 0" ;;
+        *) bad "an unhandled write failure aborts the pull with a verdict, exit 0" \
+            "the run carried on past a failed write: $(last_line)" ;;
+    esac
+fi
+
+MKTEMP_BLOCK=new.txt
+run_sync push '[{"id":"b-opt","status":"open","external_ref":""}]' '[]' '[]'
+MKTEMP_BLOCK=
+if [ "$RC" -eq 0 ]; then
+    bad "an unhandled write failure aborts the push with a verdict, exit 1" \
+        "push exited 0, so pre-push's status carries no sign of it: $(last_line)"
+else
+    case "$(last_line)" in
+        *"PUSH FAILED — aborted at line "*)
+            ok "an unhandled write failure aborts the push with a verdict, exit 1" ;;
+        *) bad "an unhandled write failure aborts the push with a verdict, exit 1" \
+            "exited $RC without the verdict a tail -1 caller keeps: $(last_line)" ;;
+    esac
+fi
+
+# ...and the options themselves, named rather than only implied by the two rows
+# above. Read off the first `set -` line that is not inside a comment — a
+# commented-out declaration clears nothing, and this repository has been bitten
+# by a sweep that accepted one. The two rows above witness the behaviour; this
+# one makes deleting the declaration a visible act rather than a silent
+# widening of every fail-open path in the file.
+_setline="$(grep -E '^[[:space:]]*set -[A-Za-z]+' "$SYNC" | head -n 1)"
+_flags="$(printf '%s\n' "$_setline" | sed -n 's/^[[:space:]]*set -\([A-Za-z]*\).*/\1/p')"
+_missing=""
+case "$_flags" in *e*) ;; *) _missing="$_missing errexit" ;; esac
+case "$_flags" in *u*) ;; *) _missing="$_missing nounset" ;; esac
+case "$_flags" in *E*) ;; *) _missing="$_missing errtrace" ;; esac
+case "$_setline" in *pipefail*) ;; *) _missing="$_missing pipefail" ;; esac
+if [ -z "$_setline" ]; then
+    bad "bd-gh-sync declares errexit, nounset, errtrace and pipefail" \
+        "no uncommented 'set -' line in $SYNC at all"
+elif [ -n "$_missing" ]; then
+    bad "bd-gh-sync declares errexit, nounset, errtrace and pipefail" \
+        "'$_setline' is missing:$_missing"
+else
+    ok "bd-gh-sync declares errexit, nounset, errtrace and pipefail"
+fi
+
 # ...and the control: the stub is only ever a stub when the knob is set, so a
 # run with it unset has to reach GitHub exactly as before. Without this the two
 # cases above would pass just as well against a stub that always failed. The
@@ -3136,6 +3217,9 @@ both withdrawals at once name the bead list, not the cap
 a bead whose external_ref names another repository is held, not refused
 a temp directory that cannot be made is reported (pull)
 a temp directory that cannot be made is reported (push)
+an unhandled write failure aborts the pull with a verdict, exit 0
+an unhandled write failure aborts the push with a verdict, exit 1
+bd-gh-sync declares errexit, nounset, errtrace and pipefail
 the mktemp stub is transparent when its knob is unset
 two concurrent pushes mint one GH issue, not two
 the second push waits for the lock rather than giving up
