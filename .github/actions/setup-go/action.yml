@@ -109,10 +109,20 @@ runs:
         # never hit this because it installs a GOROOT and leaves the go command
         # with nothing to switch to.
         #
+        # GOPATH is pinned as well as GOMODCACHE, and it is not redundant: the
+        # checksum-database cache lives at $GOPATH/pkg/sumdb, which GOMODCACHE
+        # does not cover. With only the two cache variables pinned, run
+        # 32634083142 moved the teardown failure into an honest test row —
+        #   FAIL - tool-gate-test.sh writes nothing into HOME: it created
+        #          .../fake-home/go/pkg/sumdb/sum.golang.org/latest
+        # — which is the same defect one directory over.
+        #
         # These paths must stay equal to the actions/cache `path:` above.
-        export GOMODCACHE="$HOME/go/pkg/mod"
+        export GOPATH="$HOME/go"
+        export GOMODCACHE="$GOPATH/pkg/mod"
         export GOCACHE="$HOME/.cache/go-build"
         {
+            echo "GOPATH=$GOPATH"
             echo "GOMODCACHE=$GOMODCACHE"
             echo "GOCACHE=$GOCACHE"
         } >> "$GITHUB_ENV"
