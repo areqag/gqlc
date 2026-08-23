@@ -1029,7 +1029,10 @@ func resolveFragment(frag any, vars map[string]string) string {
 		if len(v) == 0 {
 			return ""
 		}
-		head, _ := v[0].(string)
+		head := ""
+		if s, ok := v[0].(string); ok {
+			head = s
+		}
 		switch head {
 		case "variable":
 			if len(v) == 2 {
