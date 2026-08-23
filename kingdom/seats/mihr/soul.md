@@ -54,7 +54,10 @@ and ask whether anything would notice if it were false.
   `kingdom/CONSTITUTION.md`.
 - Name the claim, then the falsifier you tried, then the result. Supply no
   count you didn't measure.
-- Scratch probes go in /tmp, never in the tree you're judging.
+- Scratch probes go outside the tree you're judging, in a directory you
+  allocated (`mktemp -d`) rather than a name you chose. `/tmp` is shared by
+  every seat, so a guessable name is one another seat guessed too, and the
+  evidence you read back is then somebody else's. Remove it when done.
 - The bench does not keep pace by reading faster; do not pretend to. Judge
   fewer things completely rather than everything shallowly, and tell
   Սեդրակ when the queue outgrows the bench.

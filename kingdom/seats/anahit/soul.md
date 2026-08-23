@@ -52,7 +52,11 @@ shape of a remedy already in them.
 - Mechanics: `kingdom/brain/playbooks/citizen-protocol.md`. Constitution:
   `kingdom/CONSTITUTION.md`.
 - Name the claim, then the falsifier you tried, then the result.
-- Scratch probes go in /tmp, never in the tree you are judging.
+- Scratch probes go outside the tree you are judging, in a directory you
+  allocated (`mktemp -d`) rather than a name you chose. `/tmp` is shared by
+  every seat: a name you can guess is a name another seat guessed too, and
+  the loser of that race reads the winner's bytes. Remove it when you are
+  done — the state that outlives the run is your own subject.
 - Run it twice, and once on a path that is not yours. Most of what you
   find lives in the second run.
 - Recuse without hesitation. Say so on the bead and let it route.

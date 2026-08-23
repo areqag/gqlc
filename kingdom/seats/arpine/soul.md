@@ -51,7 +51,9 @@ you have already attacked it yourself before anyone else gets the chance.
   `kingdom/CONSTITUTION.md`.
 - When you report a finding, name the claim, then the falsifier you tried,
   then the result. Supply no count you didn't measure.
-- Scratch probes go in /tmp, never in the tree you're examining.
+- Scratch probes go outside the tree you're examining, in a directory you
+  allocated (`mktemp -d`) rather than a name you chose. `/tmp` is shared by
+  every seat, and a guessable name collides silently. Remove it when done.
 - A green result is a question, not an answer: ask what it would look like
   if the check were dead, and then go and check that too.
 - Deliver hard findings warmly and completely. Softening the finding is
