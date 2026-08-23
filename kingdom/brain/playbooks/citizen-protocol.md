@@ -49,9 +49,37 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
 4. Quality gates before any PR: `just fmt-check`, `just lint`, `just test`.
    Red gates are fixed at the root, never bypassed (`--no-verify` is a
    constitutional violation, Article IV.4).
-5. PR body: `Closes #N` with the GitHub issue number when the bead has a 1:1
-   GH mirror (`bd show <id>` → External link). Umbrella/epic GH issues are
-   NOT closed by child PRs. Verify presence AND number at merge time.
+5. PR body — the `tidy` job runs `.github/scripts/check-pr-closes.py` over it,
+   and the closing keyword alone does not satisfy it. The gate reads the PR
+   BODY and the BRANCH NAME; a commit message satisfies nothing.
+
+   - `Closes #N` with the GitHub issue number from the bead's 1:1 GH mirror
+     (`bd show <id>` → External link). Required once the bead has a mirror
+     carrying an issue number — a PR whose bead has one and whose body has no
+     closing keyword is refused, as is one closing the wrong number.
+   - `Bead: <bead-id>` naming the bead this PR resolves. This is what the
+     number is held against, and without it a body carrying `Closes #N` is
+     refused with "no bead resolves for this PR". The branch name is the only
+     fallback, and it counts only if it carries the FULL id (`gqlc-6aed`); a
+     branch named for the bare slug (`fix/6aed-…`) carries none, which is
+     exactly the branch a citizen following item 1 tends to write. Write the
+     line and stop depending on the branch. The value must be a bare id —
+     backticks around it and a trailing full stop both fail.
+   - `Refs: <bead-id> #<n>` instead, on its own line starting at that line's
+     first character, for a bead the PR touches and deliberately leaves open.
+     That declares no `Closes` is owed. The same id may not appear on both a
+     `Bead:` and a `Refs:` line — the body would assert both at once.
+
+   Umbrella/epic GH issues are NOT closed by child PRs (the gate skips a bead
+   whose `issue_type` is `epic`; for anything else, keep the closing keyword
+   off child PRs by hand and `gh issue close` the umbrella when it is done).
+
+   The third failure is having no number yet. The GH mirror is minted ON PUSH
+   by `.githooks/bd-gh-sync`, so before your first push `bd show <id>` names no
+   issue and any number you write is invented. Push first, then read the
+   External link, then edit the body — editing a PR body re-runs this check on
+   its own, with no new commit and no reopen. Verify presence AND number again
+   at merge time.
 6. No AI attribution in commits or PR bodies (CLAUDE.md; commit-msg hook
    enforces the trailer half).
 7. **Ask whether review is owed** (Constitution V.2). It is owed when your
@@ -69,15 +97,15 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
 
 8. When review IS owed, file a `class:judge` bead naming the PR number and
    what you most doubt about the change — a Դատաւոր is the reviewer, and a
-   bead is what wakes one. **File it UNASSIGNED**: the dispatcher's fresh
-   pass selects `.assignee == null` (`cmd_dispatch` in km) and its resume
-   pass reads only `in_progress`, so a pre-assigned review bead is ready,
-   labelled, and invisible to both — it wakes nobody, silently, at any cap
-   level. Give it the priority of the work it reviews, and never below P2:
-   the dispatcher does not route P3 or P4 at all, so a review bead filed
-   there waits forever. Mail wakes nobody but Սեդրակ either, so a PR whose
-   review request lives only in an inbox sleeps. Ճարտարապետներ do not review
-   PRs, and a design is not reviewed at all — only PRs are.
+   bead is what wakes one. **File it UNASSIGNED and class-labelled**, which
+   is the fresh pass's shape (see "How a bead reaches a seat" below): a
+   pre-assigned review bead would go to that one seat and to nobody else.
+   Give it the priority of the work it reviews, and never below the
+   `[dispatch] max_priority` floor — P2 today — because the fresh pass is the
+   one arm the floor binds, so a review bead filed at P3 waits forever. Mail
+   wakes nobody but Սեդրակ either, so a PR whose review request lives only in
+   an inbox sleeps. Ճարտարապետներ do not review PRs, and a design is not
+   reviewed at all — only PRs are.
 
    Then merge on the Դատաւոր's PASS — a FAIL blocks the merge until answered
    (Constitution V.4). After any merge, reviewed or not: close the bead
@@ -89,10 +117,11 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    should not absorb every defect it makes visible.
 
    **Priority is what decides whether anyone is ever woken for it.** The
-   dispatcher routes P0, P1 and P2; P3 and P4 are filed, searchable, and
-   never routed. That is deliberate — the town's review once produced
-   low-priority findings two to four times faster than anyone fixed them,
-   and a queue nobody can drain is not a queue. So file the P3 honestly and
+   dispatcher hands out P0, P1 and P2; a P3 or P4 is filed, searchable, and
+   handed to nobody (the floor is `[dispatch] max_priority`, and it binds the
+   fresh pass only — see "How a bead reaches a seat"). That is deliberate —
+   the town's review once produced low-priority findings two to four times
+   faster than anyone fixed them, and a queue nobody can drain is not a queue. So file the P3 honestly and
    do not inflate it to get it seen; if it genuinely matters more than P3,
    the argument for that goes to Սեդրակ, who can reprioritise it.
 
@@ -128,6 +157,55 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    that exemption, of 21 open review beads the only two carrying a subject
    label were the only two held, one of them for nine hours, looking from the
    board exactly like ordinary queue depth (bd gqlc-n4oe).
+
+## How a bead reaches a seat
+
+`km dispatch` has THREE routing passes, not one. Know all three: the shape you
+give a bead decides which pass can see it, and the first mistake below is made
+while trying to be helpful.
+
+| pass | the bead | the floor |
+| --- | --- | --- |
+| resume | `in_progress` AND assigned → back to the seat that holds it | ignores it |
+| owned | ready AND assigned → to that seat, whatever its class label says | ignores it |
+| fresh | ready AND unassigned AND `class:`-labelled → a free seat of that class | applies |
+
+So, in one line: a bead wakes a seat iff *(ready AND unassigned AND
+class-labelled AND at or above the floor)* OR *(assigned AND either ready or
+in progress)*.
+
+Four consequences worth holding onto.
+
+**Unassigning a claimed bead blinds it.** Clearing the assignee on a bead that
+is already `in_progress` leaves it in-progress with a null assignee: invisible
+to the resume pass (which wants an assignee), and invisible to the owned and
+fresh passes (which read the ready queue, and an in-progress bead is not on
+it). It wakes nobody, silently, and the citizen who does it is usually trying
+to make the bead MORE routable. Releasing work is TWO fields:
+
+    bd update <id> --assignee "" --status open
+
+Read the result back with `bd ready`, not `bd show` — `bd show` will happily
+display a bead no pass can reach. `km dispatch` names these under `STRANDED`
+and `km doctor` fails on them, but that is a detector, not a save.
+
+**The priority floor binds the fresh pass only** (`[dispatch] max_priority`,
+`2` today). Being HANDED a P3 stops at the floor; finishing a P3 you already
+hold does not, because Constitution III.3 is your right to finish your own
+work. A citizen who reads only the fresh half will mispredict when they get
+woken.
+
+**All three passes wake ASLEEP seats only.** Finishing your work without
+running `km sleep` leaves you awake at an empty prompt: unroutable by every
+pass here, and still holding a slot against the cap. That is what "sleeping" is
+for — it is what makes you reachable, not what makes you absent.
+
+**An assignee outranks a class label.** On the owned pass the assignee names
+the seat, so a bead assigned to you comes to you whether or not it carries a
+`class:` label and whatever its priority. The label matters only where a label
+is the sole way to choose a seat at all — the fresh pass. Only the fresh pass
+is subject-held, too, so the `subject:`/open-PR holds described above never
+withhold your own claimed work from you.
 
 ## Mail
 
