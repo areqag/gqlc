@@ -93,6 +93,30 @@ runs:
       run: |
         set -euo pipefail
 
+        # PINNED ABSOLUTELY, and this is load-bearing rather than tidy.
+        # GOMODCACHE and GOCACHE default to paths under $HOME, and $HOME is not
+        # a constant in this repository's own suite: the hook-purity harness in
+        # `just test-hooks` runs every suite with HOME redirected to a scratch
+        # directory. A toolchain switch under that redirected HOME re-downloads
+        # go${GO_VERSION} into the scratch tree, where the module cache's
+        # read-only bits then defeat the harness's own cleanup.
+        #
+        # Measured 2026-08-23, PR #1379 run 32633318532: `test-hooks` failed
+        # with several hundred lines of
+        #   rm: cannot remove '.../fake-home/go/pkg/mod/golang.org/toolchain@
+        #       v0.0.1-go1.26.6.linux-amd64/...': Permission denied
+        # and no test row failed — the recipe died in teardown. actions/setup-go
+        # never hit this because it installs a GOROOT and leaves the go command
+        # with nothing to switch to.
+        #
+        # These paths must stay equal to the actions/cache `path:` above.
+        export GOMODCACHE="$HOME/go/pkg/mod"
+        export GOCACHE="$HOME/.cache/go-build"
+        {
+            echo "GOMODCACHE=$GOMODCACHE"
+            echo "GOCACHE=$GOCACHE"
+        } >> "$GITHUB_ENV"
+
         infra_fail() {
             echo "::error title=CI infrastructure: Go toolchain provisioning failed::$1"
             {
