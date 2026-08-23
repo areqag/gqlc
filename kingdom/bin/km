@@ -366,6 +366,21 @@ seat_prompt_holds_nudge() { # <seat>
     grep -qE '❯[[:space:]]*\[km\]' <<<"$pane"
 }
 
+# Is there an input box to type into at all? Weaker than seat_pane_idle on
+# purpose: a seat mid-turn still renders its prompt below the spinner and
+# type-ahead there is harmless, so this does NOT ask whether the seat is idle.
+# What it excludes is the one shape where typing is not an ask but an action —
+# a modal covers the input box, so no prompt line means the next Enter CHOOSES
+# whichever option is highlighted (gqlc-eier: "Stop and wait / Switch to extra
+# usage / Upgrade", two judges, 80 and 152 minutes). A pane that cannot be read
+# is excluded too: an unreadable pane is not evidence that a prompt is there,
+# and this is the guard, so it fails closed.
+seat_prompt_visible() { # <seat>
+    local pane
+    pane=$(seat_pane "$1") || return 1
+    grep -qF '❯' <<<"$pane"
+}
+
 # Send, then CONFIRM, then repair with the bare Enter that repaired it by hand.
 # The two waits are the reader's chance to come back to read(): the tty
 # re-coalesces at any delay if it is not in read() between the writes, which is
@@ -398,6 +413,33 @@ cfg_minutes() { # <section> <key> <default minutes> -> seconds
 # writer states, and a copied or restored state dir would give an mtime that
 # means nothing. rc 1 for "unknown", which every caller must render as unknown
 # and not as zero.
+# Can this seat report at all? heartbeat.json is written by no heartbeat script:
+# it is a side effect of kingdom/bin/km-statusline, which runs only because
+# .claude/settings.json names it as the statusLine command. BOTH are TRACKED
+# files, so whether a seat can report its liveness is a property of the COMMIT
+# its worktree is parked on — not of the seat, the machine, or the session. A
+# worktree on a branch that forked before the kingdom landed has neither file
+# and goes silent while working (measured 2026-08-22 on Վահագն, who had worked
+# all night: fifteen seat worktrees, one of them without the key, and the
+# welfare round could not read the one seat it most wanted to).
+#
+# That matters because an absent heartbeat is otherwise overloaded three ways —
+# idle (no action), misconfigured (the instrument is blind), and WEDGED, which
+# is the case the welfare round exists to catch — and the board resolved all
+# three as the first. A detector whose failure mode is indistinguishable from
+# its all-clear is not a detector. This separates the second arm out so it can
+# be named.
+#
+# Fail-closed: a worktree that is absent, or that cannot be read, is not
+# evidence that the wiring is there.
+seat_can_report() { # <seat> -> 1 if its checkout cannot write a heartbeat
+    local wt
+    wt=$(seat_worktree "$1")
+    [ -d "$wt" ] || return 1
+    [ -f "$wt/kingdom/bin/km-statusline" ] || return 1
+    grep -qs '"statusLine"' "$wt/.claude/settings.json" "$wt/.claude/settings.local.json"
+}
+
 heartbeat_age() { # <seat> -> seconds
     local f t now
     f="$(seat_home "$1")/heartbeat.json"
@@ -562,8 +604,31 @@ cmd_wake() {
     [ -n "$reason" ] || reason="a new day"
     mkdir -p "$(seat_home "$seat")"
     if [ "$(seat_status "$seat")" = awake ] && window_up "$seat"; then
-        send_line "=$SESSION:$seat" "[km] $reason — check bd mail inbox when convenient"
-        echo "wake: $seat is already awake; nudged instead"
+        # Through seat_nudge, never bare send_line. send_line's own contract
+        # says a return from it is not delivery — the split into clear/text/
+        # Enter is necessary and NOT sufficient, because the tty re-coalesces
+        # at any delay if the reader is not in read() between the writes. This
+        # path had the split and not the confirmation, so it went on printing
+        # its cheerful success line while six nudges in a row sat typed and
+        # unsent (gqlc-01ev; the dispatcher's mail nudge was given the
+        # confirming helper on 2026-08-22 and this one was not).
+        #
+        # Reported, never fatal: route_owners and the mayor's wake both call
+        # this from inside cmd_dispatch under `set -e`, so a non-zero return
+        # here would take the whole routing run down with it.
+        if ! seat_prompt_visible "$seat"; then
+            # A nudge ends in Enter, and on a modal Enter presses a button
+            # nobody consented to (VI.2). Queued rather than dropped: km-seat
+            # reads that queue when the session ends, so declining to type now
+            # costs a delay and not the message.
+            printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
+            echo "wake: $seat is awake but its pane shows no prompt to type at — a modal covers the input box, or the pane cannot be read. NOT nudged: Enter there would choose whichever option is highlighted, and a modal is not consent (VI.2). Queued instead — $reason"
+        elif seat_nudge "$seat" "[km] $reason — check bd mail inbox when convenient"; then
+            echo "wake: $seat is already awake; nudged instead — the prompt cleared, so it was delivered"
+        else
+            printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
+            echo "wake: NUDGE UNDELIVERED to $seat — the line is still sitting unsent in its prompt box after a re-sent Enter; read the pane by hand. Queued to the wake file so the reason outlives the failed send — $reason"
+        fi
     else
         printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
         # "queued" was a statement about the QUEUE, and it stayed true while
@@ -1031,11 +1096,62 @@ cmd_dispatch() {
     # that cannot read prose is the only one not told. A bead past the window
     # is not a bead nobody claimed, it is a bead nobody was shown, and the two
     # are indistinguishable from the board (gqlc-mlca).
-    local inprog
-    if ! inprog=$(bd list --status in_progress -n 0 --json 2>/dev/null |
-        jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"' | sort); then
+    #
+    # ACTIONABLE, not merely in progress. Post-#1116 law is that a warrior's
+    # implementation bead STAYS in_progress while its class:judge review bead
+    # awaits a verdict, so a resume pass that woke every in-progress holder woke
+    # review-blocked warriors on every two-minute cycle — each burning a slot
+    # from concurrency.max_active to check mail and sleep again, with the judge
+    # who would unblock them competing for the slots they ate (gqlc-3jmx). A
+    # bead is actionable here iff it carries no OPEN blocks-type dependency;
+    # the warrior files the review bead with `--deps blocks:<impl-bead>`, and
+    # the judge's close of it is what makes the impl bead actionable again.
+    # `bd ready` returns status open ONLY, so an in_progress bead never
+    # re-enters it and this pass is the only wake path back — which is why the
+    # predicate has to live here and nowhere else.
+    #
+    # The blocker join is a second, EXPLICIT-ID `bd show`, and the two
+    # alternatives were rejected on measurement rather than taste:
+    #   `bd blocked --json` has no -n flag at all, so its cap behaviour cannot
+    #     be measured; an overflow bead would read as unblocked. Fail-open and
+    #     silent, in the very function gqlc-z1qw burned.
+    #   list's `dependency_count` reads 0 beside an open blocker (measured
+    #     2026-08-21). Unusable.
+    # An explicit-id query has no renderer window at all, so it is complete by
+    # construction. The `[ -n "$ids" ]` guard is load-bearing and not a tidiness
+    # check: `bd show --json` with ZERO ids prints an error OBJECT on stdout, so
+    # that failure arrives as data and not only as a status. (Re-measured
+    # 2026-08-23: real bd also exits 1, so pipefail would catch this one too —
+    # an earlier note here said exit 0. The guard does not rest on either: the
+    # data half is what is certain across bd versions.)
+    # `.[]` is deliberately not wrapped in an array coercion for the same
+    # reason — on that object jq aborts, and the die below is what the town
+    # sees instead of a silent all-clear.
+    local inprog ids
+    if ! ids=$(bd list --status in_progress -n 0 --json 2>/dev/null |
+        jq -r '.[] | select(.assignee != null) | .id'); then
         die "dispatch: the in-progress query failed; nothing routed this run"
     fi
+    inprog=""
+    if [ -n "$ids" ]; then
+        # One call, all ids: the argv is bounded by the count of ASSIGNED
+        # in-progress beads (≲20 here), not by the backlog, so it is nowhere
+        # near the E2BIG ceiling that killed the ready query (gqlc-fo48).
+        # shellcheck disable=SC2086 # deliberate word splitting: ids are [a-z0-9-]
+        if ! inprog=$(bd show $ids --json 2>/dev/null | jq -r '
+            .[]
+            | select(.assignee != null)
+            | select([.dependencies // [] | .[]
+                      | select(.dependency_type == "blocks" and .status != "closed")]
+                     | length == 0)
+            | "\(.assignee) \(.id)"' | sort); then
+            die "dispatch: the blocker query failed; nothing routed this run"
+        fi
+    fi
+    # `mine` is now the actionable subset, so the wake reason names only
+    # actionable beads — behaviour, pinned by a row, not an accident. A seat
+    # whose every in-progress bead is blocked matches nothing, is not woken, and
+    # its slot flows to the passes below, which is where the judge is routed.
     route_owners "$inprog" "resume your in-progress work"
 
     # The ready queue serves the two passes below. Its rows split by whether the
@@ -1485,7 +1601,7 @@ fmt_age() { # <seconds>
 }
 
 cmd_status() {
-    local sd s disp class st ctx hb beads unread age hbcol stale frozen=""
+    local sd s disp class st ctx hb beads unread age hbcol stale frozen="" blind=""
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
     if session_up; then echo "town: UP (tmux session '$SESSION')"; else echo "town: DOWN"; fi
@@ -1535,6 +1651,14 @@ cmd_status() {
                         # most reassuring possible thing.
                         hbcol="?"
                     fi
+                elif ! seat_can_report "$s"; then
+                    # A live seat with no heartbeat file at all. Left as a dash
+                    # this is the third reading of a blank the board already had
+                    # two readings for, and the one that says the INSTRUMENT is
+                    # out — so it is named rather than rendered as quiet
+                    # (gqlc-h17n).
+                    hbcol="blind"
+                    blind="$blind $s"
                 fi
                 ;;
         esac
@@ -1544,6 +1668,9 @@ cmd_status() {
     done
     if [ -n "$frozen" ]; then
         echo "UNRESPONSIVE:$frozen — no heartbeat for over $(fmt_age "$stale"); read the pane before believing the STATE column. A frozen seat holds its slot, answers no mail, and reports as healthy. Do not end the session: a modal is not consent (VI.2)."
+    fi
+    if [ -n "$blind" ]; then
+        echo "BLIND:$blind — a live seat whose CHECKOUT cannot write a heartbeat: kingdom/bin/km-statusline and the statusLine key in .claude/settings.json are both tracked files, so a worktree parked on a branch that forked before the kingdom landed has neither. The blank HB column above is this instrument's silence, not the seat's, and a seat working all night reads exactly like an idle one. Read the pane, and 'km seat-refresh <seat>' moves a parked worktree back to origin/master."
     fi
 
     echo
