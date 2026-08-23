@@ -840,6 +840,26 @@ _unusable=0
 # .git, which git neither tracks nor reports, so it is not a file anyone has to
 # ignore.
 #
+# WHAT THAT GRANULARITY EXCLUDES, said here because the sentence above is the
+# one a maintainer reads and a granularity stated without its limit is read as
+# "the push pass is serialised, full stop".
+# It does NOT serialise two separate clones of this repository: they have
+# different common directories, so they take different lock files, neither
+# waits, and both mint. Measured in the
+# round-2 review of PR #1037 (C-V2+N1): two clones, `bd github push b-conc` ran
+# 2 times. Two clones on one machine is not exotic — a second checkout for a
+# long-running review is exactly it.
+#
+# That is a decision and not an oversight. A lock covering two clones would have
+# to live at a path neither clone owns — a fixed location outside both work
+# trees — and inventing one trades a bounded, self-cleaning lock for a global
+# one that no `git clean` reaches and that a stale holder can wedge for every
+# checkout on the machine. The measured incident was sibling worktrees of one
+# clone (18 unreachable issues), which this covers. Cross-clone is out of scope
+# until somebody measures it happening. .githooks/tests/bd-gh-sync-test.sh pins
+# both halves — that two clones mint twice, and that this paragraph still says
+# so — so the limit cannot be widened into a claim by editing either one alone.
+#
 # fd 9 carries the lock for the rest of this process; closing that fd is what
 # releases the lock, and the kernel closes it however the process ends. bash
 # cannot mark an fd close-on-exec, so every `bd`, `gh` and `python3` below is

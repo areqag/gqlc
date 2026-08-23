@@ -3019,6 +3019,56 @@ else
     fi
 fi
 
+# --- gqlc-hv5u: ...and the limit of that lock, pinned so it cannot be widened
+# into a claim ------------------------------------------------------------------
+# The lock is keyed to `git rev-parse --git-common-dir`, which is one path per
+# CLONE. Two worktrees of one clone therefore contend, which is the incident
+# above; two separate clones do not, because they have different common
+# directories and so different lock files. The comment in bd-gh-sync used to
+# state the granularity without stating what it excludes, and a reader took that
+# for "the push pass is serialised, full stop" (round-2 review C-V2+N1: two
+# clones, `bd github push b-conc` ran 2 times).
+#
+# This row asserts the limit rather than the guarantee. Two clones is a
+# reachable configuration — a second checkout for a long-running review is
+# exactly it — and the decision recorded in bd-gh-sync is that it stays out of
+# scope, because a cross-clone lock would need a path neither clone owns. So the
+# row exists to keep the two facts together: the code does not serialise this,
+# and the comment says so. It goes red if someone widens the comment, and red if
+# someone implements cross-clone locking without amending it.
+CLONEA="$TMP/clone_a"
+CLONEB="$TMP/clone_b"
+git init -q "$CLONEA" >/dev/null 2>&1 || { echo "cannot git init $CLONEA" >&2; exit 1; }
+git init -q "$CLONEB" >/dev/null 2>&1 || { echo "cannot git init $CLONEB" >&2; exit 1; }
+_cl_cd_a=$(git_dir_abs "$CLONEA" --git-common-dir)
+_cl_cd_b=$(git_dir_abs "$CLONEB" --git-common-dir)
+_cl="the push lock does not reach across two clones, and bd-gh-sync says so"
+if [ -z "$_cl_cd_a" ] || [ "$_cl_cd_a" = "$_cl_cd_b" ]; then
+    # Vacuity first: two directories that share a common dir are not two clones,
+    # and a contention test over them measures the row above this one.
+    bad "$_cl" \
+        "not two separate clones: common dirs [${_cl_cd_a}] [${_cl_cd_b}]"
+else
+    CONCCL="$TMP/conc_clone"
+    conc_pair "$CONCCL" "$CLONEA" "$CLONEB"
+    if [ ! -f "$CONCCL/started" ]; then
+        bad "$_cl" \
+            "the first run never reached 'bd github push', so nothing was contended"
+    elif [ "$CONC_MINTS" -ne 2 ]; then
+        # Not "must be 2" as an aspiration: it is what the code does, measured,
+        # and the point of the row is that the comment matches it. One mint here
+        # means cross-clone contention started working and the comment in
+        # bd-gh-sync now understates the lock.
+        bad "$_cl" \
+            "'bd github push b-conc' ran ${CONC_MINTS} time(s); if the lock now reaches across clones, amend the comment above it in .githooks/bd-gh-sync, which states that it does not"
+    elif ! grep -q 'It does NOT serialise two separate clones' "$SYNC"; then
+        bad "$_cl" \
+            "the code does not serialise two clones and the comment above the lock no longer says so"
+    else
+        ok "$_cl"
+    fi
+fi
+
 # --- gqlc-mmej: ...and the fixture's own window has to be a window ----------
 # Every arm above is also satisfied by a script with no lock in it, if the
 # second run's read never falls inside the first run's push window: with no
@@ -3395,6 +3445,7 @@ two concurrent pushes mint one GH issue, not two
 the second push waits for the lock rather than giving up
 the first push mirrors the bead and exits 0
 two pushes from sibling worktrees of one clone mint one GH issue, not two
+the push lock does not reach across two clones, and bd-gh-sync says so
 the concurrency fixture opens a real push window and launches the second run inside it
 a push that cannot take the lock mirrors nothing and says so
 the flock stub is transparent when its knob is unset
