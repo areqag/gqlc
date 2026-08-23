@@ -3046,6 +3046,8 @@ kingdom-install:
 kingdom-halt reason="":
     kingdom/bin/km halt {{reason}}
 
+# lower the halt flag. Constitution VI.4 reserves this to Սեդրակ or Անդրանիկ, so
+# it needs an identity: KINGDOM_SEAT=andranik just kingdom-resume
 kingdom-resume:
     kingdom/bin/km resume
 
