@@ -67,10 +67,8 @@ jobs:
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         if: github.event_name == 'schedule' || steps.deps.outputs.changed == 'true'
-        with:
-          go-version-file: go.mod
       - uses: ./.github/actions/setup-just
         if: github.event_name == 'schedule' || steps.deps.outputs.changed == 'true'
       - run: just vuln

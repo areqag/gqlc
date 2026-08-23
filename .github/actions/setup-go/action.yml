@@ -1,0 +1,212 @@
+# Provides the Go toolchain named in go.mod WITHOUT a GitHub-hosted action
+# download (bd gqlc-flko).
+#
+# `actions/setup-go@v5` is fetched by the runner during the "Set up job" phase,
+# before any repo-controlled step exists. Under this repository's own
+# concurrency GitHub has answered that fetch with HTTP 429, after the runner's
+# own three attempts, and killed required contexts before the change under
+# review had been compiled — witnessed on PR #932 and reported on five further
+# runs across #911 / #937 / #940. Nothing this tree could write was reached in
+# time, because nothing this tree writes runs that early.
+#
+# A `uses: ./.github/actions/...` reference is READ OUT OF THE CHECKOUT. It is
+# not downloaded. So moving toolchain provisioning here moves it from the
+# opaque pre-repo phase into a named step with its own log, its own retry, and
+# its own failure annotation. That is both halves of gqlc-flko at once:
+#   (a) fewer GitHub-hosted downloads per job, and the remaining fetch goes to
+#       proxy.golang.org — a different failure domain from the one that 429s;
+#   (b) when provisioning does fail it fails INSIDE the job, as a red step this
+#       file names, rather than in setup where the reader cannot tell an
+#       infrastructure death from a red change.
+#
+# It does NOT close the window. `actions/checkout@v4` is itself a downloaded
+# action and must run before this file can be read, and `actions/cache@v4`
+# below is downloaded too. What is claimed is narrowing, not removal: the count
+# of DISTINCT GitHub-hosted actions per job drops by one, and it drops without
+# adding any new one — every job that used setup-go already downloads
+# actions/cache through ./.github/actions/setup-just.
+#
+# Warm-cache behaviour is the real prize: the toolchain lands in the module
+# cache as golang.org/toolchain@v0.0.1-go<version>.<os>-<arch>, which the
+# actions/cache step below carries between runs. On a hit, provisioning makes
+# no network request at all.
+#
+# THE FIRST RUN AFTER THIS LANDS IS COLD BY CONSTRUCTION. The key prefix here
+# is new, so nothing restores; judge steady state on the SECOND run, never the
+# first (measured in this repo on an earlier actions/cache path change, where
+# prefix keys matched while the payload did not).
+name: setup-go
+description: provide the Go toolchain named in go.mod without downloading a GitHub-hosted action
+
+inputs:
+  cache-key-suffix:
+    description: >-
+      extra material to fold into the module/build cache key. The key already
+      carries hashFiles('go.sum'); a caller whose job builds a SECOND module
+      (codegen-live's generated project) passes that module's go.sum hash here,
+      or its dependencies ride a key that cannot see them change.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # `toolchain` wins over `go` when both are present, which is the go command's
+    # own precedence. Read from the file rather than restated as a literal here:
+    # a literal is a second place to bump and a stale one provisions a toolchain
+    # the build then switches away from, behind a green step.
+    - name: read the toolchain version out of go.mod
+      id: pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2; exit }' go.mod)"
+        if [ -z "$version" ]; then
+          version="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+        fi
+        if [ -z "$version" ]; then
+          echo "::error title=Go toolchain version unreadable::go.mod carries neither a \`toolchain\` nor a \`go\` directive, so there is no version to provision." >&2
+          exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    # Both caches under one key. The toolchain lives in the module cache, so a
+    # hit here is what makes provisioning below a no-op offline.
+    - name: restore the Go toolchain, module and build caches
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: gotoolchain-${{ runner.os }}-${{ steps.pin.outputs.version }}-${{ hashFiles('go.sum') }}${{ inputs.cache-key-suffix }}
+        restore-keys: |
+          gotoolchain-${{ runner.os }}-${{ steps.pin.outputs.version }}-
+
+    # Provisioning is EAGER and asserted. A lazy toolchain switch would happen
+    # inside whichever `just` recipe first ran a go command, which puts an
+    # infrastructure failure inside a step named "just test" — exactly the
+    # confusion gqlc-flko asks to remove.
+    - name: provision the Go toolchain named in go.mod
+      shell: bash
+      env:
+        GO_VERSION: ${{ steps.pin.outputs.version }}
+      run: |
+        set -euo pipefail
+
+        # PINNED ABSOLUTELY, and this is load-bearing rather than tidy.
+        # GOMODCACHE and GOCACHE default to paths under $HOME, and $HOME is not
+        # a constant in this repository's own suite: the hook-purity harness in
+        # `just test-hooks` runs every suite with HOME redirected to a scratch
+        # directory. A toolchain switch under that redirected HOME re-downloads
+        # go${GO_VERSION} into the scratch tree, where the module cache's
+        # read-only bits then defeat the harness's own cleanup.
+        #
+        # Measured 2026-08-23, PR #1379 run 32633318532: `test-hooks` failed
+        # with several hundred lines of
+        #   rm: cannot remove '.../fake-home/go/pkg/mod/golang.org/toolchain@
+        #       v0.0.1-go1.26.6.linux-amd64/...': Permission denied
+        # and no test row failed — the recipe died in teardown. actions/setup-go
+        # never hit this because it installs a GOROOT and leaves the go command
+        # with nothing to switch to.
+        #
+        # GOPATH is pinned as well as GOMODCACHE, and it is not redundant: the
+        # checksum-database cache lives at $GOPATH/pkg/sumdb, which GOMODCACHE
+        # does not cover. With only the two cache variables pinned, run
+        # 32634083142 moved the teardown failure into an honest test row —
+        #   FAIL - tool-gate-test.sh writes nothing into HOME: it created
+        #          .../fake-home/go/pkg/sumdb/sum.golang.org/latest
+        # — which is the same defect one directory over.
+        #
+        # These paths must stay equal to the actions/cache `path:` above.
+        export GOPATH="$HOME/go"
+        export GOMODCACHE="$GOPATH/pkg/mod"
+        export GOCACHE="$HOME/.cache/go-build"
+        {
+            echo "GOPATH=$GOPATH"
+            echo "GOMODCACHE=$GOMODCACHE"
+            echo "GOCACHE=$GOCACHE"
+        } >> "$GITHUB_ENV"
+
+        infra_fail() {
+            echo "::error title=CI infrastructure: Go toolchain provisioning failed::$1"
+            {
+                echo "### CI infrastructure failure — not your change"
+                echo
+                echo "The Go toolchain named in \`go.mod\` (\`go${GO_VERSION}\`) could not be"
+                echo "provisioned. Both sources were tried: the module proxy and go.dev/dl."
+                echo
+                echo "$1"
+                echo
+                echo "This job is red for an infrastructure reason. Re-run it; if it repeats,"
+                echo "the change is not what is broken (bd gqlc-flko)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+        }
+
+        # Recorded for the gqlc-flko measurement: whether the runner image's own
+        # Go already satisfies go.mod decides whether any fetch happens at all.
+        # GOTOOLCHAIN=local is what makes this a reading of the IMAGE. A bare
+        # `go version` here is run inside the checkout, so the default `auto`
+        # switches first and the line reports the toolchain go.mod asked for —
+        # measured 2026-08-23 on run 32632918186, where it printed
+        # "go: downloading go1.26.6" instead of the image's own version.
+        echo "bootstrap Go on the runner image: $(GOTOOLCHAIN=local go version 2>&1 || echo 'none on PATH')"
+
+        # Primary source: the module proxy, via the go command's own toolchain
+        # switch. Retried here because the runner's own retry does not exist for
+        # this, and because a transient is what killed the setup-go download.
+        resolved=""
+        for attempt in 1 2 3; do
+            if resolved="$(GOTOOLCHAIN="go${GO_VERSION}" go version 2>&1)"; then
+                break
+            fi
+            echo "attempt ${attempt}: the module proxy did not yield go${GO_VERSION}: ${resolved}"
+            resolved=""
+            sleep "$((attempt * 5))"
+        done
+
+        if [ -n "$resolved" ]; then
+            echo "GOTOOLCHAIN=go${GO_VERSION}" >> "$GITHUB_ENV"
+        else
+            # Fallback source: go.dev/dl. A second origin, deliberately not
+            # GitHub and deliberately not the module proxy, so one outage does
+            # not take both.
+            case "$(uname -s)" in
+                Linux) goos=linux ;;
+                Darwin) goos=darwin ;;
+                *) infra_fail "unsupported runner OS $(uname -s); no go.dev/dl fallback exists for it." ;;
+            esac
+            case "$(uname -m)" in
+                x86_64 | amd64) goarch=amd64 ;;
+                aarch64 | arm64) goarch=arm64 ;;
+                *) infra_fail "unsupported runner architecture $(uname -m); no go.dev/dl fallback exists for it." ;;
+            esac
+            url="https://go.dev/dl/go${GO_VERSION}.${goos}-${goarch}.tar.gz"
+            echo "falling back to ${url}"
+            tarball="${RUNNER_TEMP}/go-toolchain.tar.gz"
+            if ! curl --proto '=https' --tlsv1.2 -sSfL \
+                --retry 5 --retry-all-errors --retry-delay 3 \
+                -o "$tarball" "$url"; then
+                infra_fail "the go.dev/dl fallback also failed: could not download ${url}."
+            fi
+            mkdir -p "$HOME/.local"
+            rm -rf "$HOME/.local/go"
+            tar -C "$HOME/.local" -xzf "$tarball"
+            echo "$HOME/.local/go/bin" >> "$GITHUB_PATH"
+            # `local` and not the version: the binary IS the version now, and a
+            # GOTOOLCHAIN naming it would send this go command looking for the
+            # module proxy again on the next invocation.
+            echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+            if ! resolved="$("$HOME/.local/go/bin/go" version 2>&1)"; then
+                infra_fail "the go.dev/dl tarball unpacked but the binary would not run: ${resolved}"
+            fi
+        fi
+
+        # The assertion is the point of the eager step. A provisioning path that
+        # silently yields a DIFFERENT toolchain than go.mod names is green setup
+        # over a build nobody asked for.
+        case "$resolved" in
+            *"go${GO_VERSION} "* | *"go${GO_VERSION}") ;;
+            *) infra_fail "go.mod names go${GO_VERSION}, but the provisioned toolchain reports: ${resolved}" ;;
+        esac
+        echo "provisioned: ${resolved}"

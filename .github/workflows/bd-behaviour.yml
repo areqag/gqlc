@@ -1,0 +1,164 @@
+# Re-checks the ONE third-party behaviour .githooks/bd-gh-sync's pull ordering
+# rests on: that `bd update -d` moves the bead's `updated_at` (bd gqlc-1oe1,
+# successor to gqlc-3205).
+#
+# WHY IT IS NOT IN `just test`. bd is a Dolt-backed external binary. `just test`
+# is also the pre-push hook, so anything added there is paid on every local push
+# by every citizen, and this repository treats wall-time as critical.
+# .githooks/tests/bd-gh-sync-test.sh stubs bd on PATH and drives fixture JSON,
+# so it can never observe the real CLI — and a stub encodes belief, not witness.
+# This workflow is where the REAL binary runs at the boundary.
+#
+# WHY IT IS NOT A MERGE GATE, said plainly so nobody mistakes it for one. The
+# claim under test is about a binary this repository does not own and does not
+# vendor; a bd release, a GitHub release outage, or a Dolt engine change would
+# block every unrelated PR at 4am for a reason no PR author can fix. The same
+# argument .github/scripts/check-cron-freshness.sh makes for failing CLOSED runs
+# the other way here: a broken assumption in bd is a latched state someone must
+# act on, but it is not urgent within one merge. So this is an ALARM — a red run
+# in the Actions UI and on the PRs that touch the sync — and its id must stay
+# OFF master's required-check list.
+#
+# WHAT A GREEN RUN WITNESSES. Measured first-party 2026-08-23 against bd 1.0.4
+# (ce242a879) and bd 1.2.2 (6c124203e), throwaway workspaces, git env cleared:
+# both moved `updated_at` on a description edit, and both answered
+# `bd show --json` with an ARRAY. This workflow installs the LATEST bd release,
+# not the pinned one, deliberately: the point is to learn that a future bd
+# breaks the assumption BEFORE the town upgrades to it.
+#
+# WHAT A GREEN RUN DOES NOT WITNESS. It does not run .githooks/bd-gh-sync. It
+# checks the premise the script's dated header records, not the script's use of
+# it. And the negative arm below falsifies the COMPARATOR, not the field read;
+# a bd that renamed `updated_at` outright is caught instead by the non-empty and
+# parseable assertions on the before value.
+#
+# GitHub disables cron workflows repo-wide after 60 days of inactivity, which
+# would silence this one. It needs no freshness check of its own:
+# codegen-live.yml is the daily cron and goes stale first, and ci.yml's tidy job
+# already watches it. The disablement is a single repo-wide event.
+name: bd-behaviour
+
+on:
+  schedule:
+    - cron: "0 7 * * 2"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .githooks/bd-gh-sync
+      - .githooks/tests/bd-gh-sync-test.sh
+      - .github/workflows/bd-behaviour.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  bd-updated-at:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No checkout of bd's source and no `go install`: the release tarball is
+      # a download and an untar, which is what keeps this cheap enough to be
+      # worth having at all. Retried, because a GitHub download is exactly the
+      # thing this repository has watched answer 429 (bd gqlc-flko).
+      - name: install the latest released bd
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo gastownhall/beads --json tagName --jq .tagName)"
+          version="${tag#v}"
+          url="https://github.com/gastownhall/beads/releases/download/${tag}/beads_${version}_linux_amd64.tar.gz"
+          mkdir -p "$HOME/.local/bin"
+          curl --proto '=https' --tlsv1.2 -sSfL \
+            --retry 5 --retry-all-errors --retry-delay 3 \
+            -o "${RUNNER_TEMP}/beads.tar.gz" "$url"
+          tar -C "${RUNNER_TEMP}" -xzf "${RUNNER_TEMP}/beads.tar.gz" bd
+          install -m 0755 "${RUNNER_TEMP}/bd" "$HOME/.local/bin/bd"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: "bd update -d moves updated_at"
+        run: |
+          set -euo pipefail
+          bd version
+
+          # Every scratch path allocated, never spelled, and removed on the
+          # failure path too.
+          workspace="$(mktemp -d)"
+          trap 'rm -rf "$workspace"' EXIT
+
+          # git exports GIT_DIR and friends into hook and step environments, and
+          # bd follows them out of the workspace and into whatever repository
+          # they name. Cleared, or the probe writes to the checkout.
+          unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
+          # The comparator, separated from the bd interaction so the negative arm
+          # below can drive it directly. Seconds since epoch, not string order:
+          # a format change in bd must show up as a parse failure here, not as a
+          # silently wrong lexicographic comparison.
+          assert_moved() {
+              local before="$1" after="$2"
+              local before_s after_s
+              if [ -z "$before" ] || [ "$before" = "null" ]; then
+                  echo "the before value is empty or null. bd no longer answers with an" >&2
+                  echo "updated_at this probe can read, which is itself the regression." >&2
+                  return 1
+              fi
+              before_s="$(date -u -d "$before" +%s)" || return 1
+              after_s="$(date -u -d "$after" +%s)" || return 1
+              if [ "$after_s" -le "$before_s" ]; then
+                  echo "updated_at did not move: before=$before after=$after" >&2
+                  return 1
+              fi
+              return 0
+          }
+
+          cd "$workspace"
+          bd init --prefix probe --non-interactive
+          id="$(bd create "updated_at probe" --json | jq -r '.id')"
+          test -n "$id"
+
+          # bd's timestamps are rendered at second resolution, so an edit inside
+          # the same second is indistinguishable from no edit at all. This sleep
+          # is the difference between measuring bd and measuring the clock.
+          before="$(bd show "$id" --json | jq -r '.[0].updated_at')"
+          sleep 2
+          bd update "$id" -d "a description this bead did not have before"
+          after="$(bd show "$id" --json | jq -r '.[0].updated_at')"
+
+          echo "before=$before after=$after"
+
+          if ! assert_moved "$before" "$after"; then
+              {
+                  echo "### bd no longer moves updated_at on a description edit"
+                  echo
+                  echo "\`.githooks/bd-gh-sync\` orders a bead against its GitHub mirror on"
+                  echo "\`bd.updated_at\` vs \`gh.updatedAt\`. With updated_at frozen, every"
+                  echo "prefix-relation pair reads as \"GitHub not newer\" and the fail-open"
+                  echo "residue widens silently. bd version: $(bd version)"
+                  echo
+                  echo "before=\`$before\` after=\`$after\` (bd gqlc-1oe1)"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+          fi
+
+          # The falsifier gqlc-1oe1 asks for, run in-band on every run rather
+          # than performed once by hand and written down. A comparator that
+          # cannot refuse is a gate that cannot fire, and this arm is what makes
+          # the PASS above mean something. It falsifies the comparator only —
+          # see the header for what it does not reach.
+          if assert_moved "$before" "$before" 2>/dev/null; then
+              echo "::error title=This check cannot fail::the comparator accepted an" \
+                   "unchanged timestamp, so the PASS above witnesses nothing (bd gqlc-1oe1)."
+              exit 1
+          fi
+          if assert_moved "" "$after" 2>/dev/null; then
+              echo "::error title=This check cannot fail::the comparator accepted an empty" \
+                   "before value, so a renamed field would read as a pass (bd gqlc-1oe1)."
+              exit 1
+          fi
+          echo "comparator refuses an unchanged timestamp and an absent one; the pass above is a measurement."
