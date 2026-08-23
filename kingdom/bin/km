@@ -2598,6 +2598,32 @@ cmd_doctor() {
     # the journal unless something asks the unit how its last run went.
     check soft "dispatch last run succeeded" unit_ran_ok kingdom-dispatch.service
     check soft "guard last run succeeded" unit_ran_ok kingdom-guard.service
+    # THE LINGER ARM (gqlc-yxnf). Not a `check` row, and deliberately not a
+    # pass/fail one: both answers are legitimate configurations, and which is
+    # correct depends on something km cannot see. `loginctl enable-linger` is
+    # what a headless town NEEDS — without it the user manager is torn down at
+    # logout and neither timer fires again until the next login. With it, the
+    # timers keep dispatching after logout and across reboots, with nobody
+    # attached to any pane. So the row NAMES the state and its consequence.
+    #
+    # A boolean row here would have to pick one of those as the failure and
+    # would then be wrong for half the deployments; what nobody could see
+    # before is which of the two this box is in, and that is the whole ask.
+    #
+    # The unanswerable case is the one that must not read as either: CI has no
+    # user bus (the same reason every systemctl row above is soft), and
+    # loginctl exits non-zero with nothing on stdout there. Reporting "not
+    # lingering" for "could not ask" is the fail-open this file is organised
+    # against (gqlc-z1qw).
+    local lingerout
+    if ! lingerout=$(loginctl show-user "${USER:-$(id -un)}" -p Linger 2>/dev/null) ||
+        [ -z "$lingerout" ]; then
+        echo "warn: lingering is UNKNOWN — loginctl could not be asked, so whether the timers survive logout was not measured"
+    elif [ "${lingerout#*=}" = yes ]; then
+        echo "ok:   lingering is ON, so the timers keep dispatching after logout and across reboots — 'just kingdom-uninstall' removes the units, 'loginctl disable-linger' leaves them but stops them surviving logout"
+    else
+        echo "ok:   lingering is off, so the timers fire only while a login session is open — a headless town needs 'loginctl enable-linger'"
+    fi
     check soft "town is up" tmux has-session -t "=$SESSION"
     return "$ok"
 }
