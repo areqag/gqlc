@@ -50,6 +50,29 @@ bd close <id>         # Complete work
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
 
+## Querying the bd ledger
+
+`bd list` applies a **status filter** and a **row cap**, and they are two
+separate defaults. `-n 0` (`--limit 0`) disables only the second. It reads as
+the unfilter and is not one.
+
+- **When you mean every bead, write `bd list --all --json -n 0`.** Measured
+  2026-08-23: `bd list -n 0 --json` returned 261 rows and silently omitted 514
+  closed ones. This flipped a real diagnosis — an audit reported that PR #1122
+  had never had a review bead when it had had two, both closed, and *absent* and
+  *closed* call for opposite repairs.
+- **`--status open` means the literal status `open`,** not "not closed". It
+  excludes `in_progress` and `blocked`.
+- **State the status set and the row cap explicitly at every scripted call
+  site.** The row cap is disclosed on **stderr** even under `--json`, and every
+  scripted call site here redirects `2>/dev/null`, so a silent stderr is not
+  evidence that nothing was capped. The status filter is not disclosed at all.
+- `bd show <id> --json` returns an **array**; use `.[0]`. It does resolve closed
+  beads, so it is a safe way to test whether an id exists.
+
+Full measurements, the deployed-bd contract, and an audit of this repository's
+own call sites: [docs/bd-ledger-queries.md](docs/bd-ledger-queries.md).
+
 ## Working directory
 
 **No session modifies files in the shared repo cwd** (`/home/antranig/Developer/gqlc/gqlc`). It is for read-only research work (grep, read, `bd show`, `git log`) — the moment intent shifts to modification (any `bd create/close/update`, any file write, any branch creation), you work somewhere else. WHERE depends on who you are, and there are two answers.
