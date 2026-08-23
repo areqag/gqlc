@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,7 +76,7 @@ var (
 
 func planOrFatal(t *testing.T, issues []issue, beads []bead) []finding {
 	t.Helper()
-	got, err := plan(issues, beads, defaultWindow)
+	got, err := plan(issues, beads, defaultWindow, defaultRepo)
 	if err != nil {
 		t.Fatalf("plan: unexpected error: %v", err)
 	}
@@ -378,7 +379,7 @@ func TestPlanRefusesInputsItCannotStandOn(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := plan(tc.issues, tc.beads, tc.window)
+			got, err := plan(tc.issues, tc.beads, tc.window, defaultRepo)
 			if err == nil {
 				t.Fatalf("plan returned no error; findings = %v", got)
 			}
@@ -392,17 +393,31 @@ func TestPlanRefusesInputsItCannotStandOn(t *testing.T) {
 	}
 }
 
-// TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose is a disclosure rather
-// than a guard. plan() now refuses a window above the default, and the obvious
-// next sentence — "so no -window value can turn a refusal into a close" — is
-// false in the direction the ceiling leaves open. An ambiguity refusal says the
-// tool will not pick between two mirrors; narrowing the window until only one
-// of them is adjacent picks for it.
+// TestANarrowerWindowCannotTurnAnAmbiguousRefusalIntoAClose is bd gqlc-fzb2's
+// reproducer, inverted. Until the ambiguity guard in plan() this test existed
+// under the name TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose and PINNED
+// the flip as reachable, with the same fixture and the same numbers:
 //
-// It is pinned here so the paragraph in the package comment that says so is
-// checkable against a row instead of believed, and so that removing the
-// ceiling's counterpart claim without removing this behaviour is noisy.
-func TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose(t *testing.T) {
+//	w=60s  REFUSE #814: 2 bound issues match on title, body and creation time
+//	w=30s  REFUSE #814: (same)
+//	w=10s  CLOSE  #814 -> #816
+//	w=5s   CLOSE  #814 -> #816
+//
+// plan() refuses a window above the default, so widening cannot reach a
+// verdict. The obvious next sentence — "so no -window value can turn a refusal
+// into a close" — used to be false in the direction the ceiling left open: an
+// ambiguity refusal says the tool will not pick between two mirrors, and
+// narrowing the window until only one of them is adjacent picked for it. A
+// narrower window carries no information about which mirror is canonical; it
+// removes information. So the sentence is now made true rather than deleted,
+// and this row is what makes it checkable instead of believed.
+//
+// The 5s and 10s rows are the two the bead measured as CLOSE. 30s is a
+// narrowing that was already a refusal on this fixture and stays one, so a
+// guard firing on every narrowing rather than on a collapsed match set would
+// not be distinguished by this test alone —
+// TestNarrowingStillTurnsACloseIntoARefusal is what distinguishes it.
+func TestANarrowerWindowCannotTurnAnAmbiguousRefusalIntoAClose(t *testing.T) {
 	issues := []issue{
 		openIssue(814, titleA, bodyA, at(0)),
 		openIssue(816, titleA, bodyA, at(time.Second)),
@@ -419,26 +434,94 @@ func TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose(t *testing.T) {
 		t.Fatalf("at the default window: reason = %q, want the ambiguity refusal", wide[0].Reason)
 	}
 
-	narrow, err := plan(issues, beads, 5*time.Second)
+	for _, window := range []time.Duration{30 * time.Second, 10 * time.Second, 5 * time.Second, time.Nanosecond} {
+		t.Run(window.String(), func(t *testing.T) {
+			narrow, err := plan(issues, beads, window, defaultRepo)
+			if err != nil {
+				t.Fatalf("plan: %v", err)
+			}
+			if len(narrow) != 1 {
+				t.Fatalf("findings = %+v, want exactly one", narrow)
+			}
+			if narrow[0].Verdict != verdictRefuse {
+				t.Fatalf("verdict = %s (canonical #%d); narrowing -window from %s to %s turned "+
+					"an ambiguity refusal into a close, which is the tool inventing a certainty "+
+					"the default window declined to claim (bd gqlc-fzb2)",
+					narrow[0].Verdict, narrow[0].Canonical, defaultWindow, window)
+			}
+			if narrow[0].Canonical != 0 || len(narrow[0].Beads) != 0 {
+				t.Errorf("a refusal named canonical #%d / beads %v", narrow[0].Canonical, narrow[0].Beads)
+			}
+		})
+	}
+
+	// Assert the REASON, not just the verdict: at 5s only #816 is adjacent, so
+	// the plain two-match arm cannot be what fired, and without this the guard
+	// is indistinguishable from the refusal it stands in for.
+	narrow, err := plan(issues, beads, 5*time.Second, defaultRepo)
 	if err != nil {
 		t.Fatalf("at a 5s window: plan: %v", err)
 	}
-	if len(narrow) != 1 || narrow[0].Verdict != verdictClose || narrow[0].Canonical != 816 {
-		t.Fatalf("at a 5s window: findings = %+v, want CLOSE 814->816", narrow)
+	for _, want := range []string{"at the 1m0s default window", "the -window 5s in force leaves only #816"} {
+		if !strings.Contains(narrow[0].Reason, want) {
+			t.Errorf("at a 5s window: reason = %q, want it to contain %q", narrow[0].Reason, want)
+		}
 	}
 }
 
-// TestTheWindowHelpNamesTheFlipNarrowingCanCause pins the -window stanza of
-// `-h`. That stanza is the only account of the flag most operators will read,
-// and until bd gqlc-mb8v's round-2 review it ended "so this narrows the
-// predicate or leaves it alone" — true, and read by anyone who had not opened
-// the package comment as "narrowing is the safe direction". It is not:
-// TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose holds the row where a
-// narrower window produces a close the default refused.
+// TestNarrowingStillTurnsACloseIntoARefusal is the other side of the guard. It
+// must not have been built by making every narrowed run refuse: narrowing is
+// still allowed, and the operator asking for a stricter run must still get one
+// rather than a blanket refusal. Here the default window plans a CLOSE on a
+// single unambiguous candidate; a window below the pair's separation drops it
+// to a no-match refusal, and one above it still closes.
+func TestNarrowingStillTurnsACloseIntoARefusal(t *testing.T) {
+	issues := []issue{
+		openIssue(814, titleA, bodyA, at(0)),
+		openIssue(816, titleA, bodyA, at(10*time.Second)),
+		fillerIssue,
+	}
+	beads := []bead{boundTo("gqlc-u91z", 816), fillerBead}
+
+	wide := planOrFatal(t, issues, beads)
+	if len(wide) != 1 || wide[0].Verdict != verdictClose || wide[0].Canonical != 816 {
+		t.Fatalf("at the default window: findings = %+v, want CLOSE 814->816", wide)
+	}
+
+	narrow, err := plan(issues, beads, 5*time.Second, defaultRepo)
+	if err != nil {
+		t.Fatalf("at a 5s window: plan: %v", err)
+	}
+	if len(narrow) != 1 || narrow[0].Verdict != verdictRefuse {
+		t.Fatalf("at a 5s window: findings = %+v, want the close narrowed away to a REFUSE", narrow)
+	}
+	if !strings.Contains(narrow[0].Reason, "none of which matches on both body and creation time") {
+		t.Errorf("at a 5s window: reason = %q, want the no-match refusal rather than the ambiguity guard", narrow[0].Reason)
+	}
+
+	// The row that stops the guard being written as "refuse every narrowed
+	// close": 20s is narrower than the default and leaves the single candidate
+	// inside the window, so it must still close.
+	still, err := plan(issues, beads, 20*time.Second, defaultRepo)
+	if err != nil {
+		t.Fatalf("at a 20s window: plan: %v", err)
+	}
+	if len(still) != 1 || still[0].Verdict != verdictClose || still[0].Canonical != 816 {
+		t.Fatalf("at a 20s window: findings = %+v, want CLOSE 814->816 — narrowing is still allowed", still)
+	}
+}
+
+// TestTheWindowHelpSaysNarrowingCannotManufactureAClose pins the -window stanza
+// of `-h`. That stanza is the only account of the flag most operators will
+// read, and it has been wrong twice: it ended "so this narrows the predicate or
+// leaves it alone" until bd gqlc-mb8v's round-2 review, then described a flip
+// that bd gqlc-fzb2's guard has since removed. Both times the sentence and the
+// behaviour drifted apart silently.
 //
-// The division of labour is that the row above owns whether the sentence is
-// true and this owns whether an operator is still shown it. It renders through
-// registerFlags rather than comparing a constant to itself, and
+// The division of labour is that
+// TestANarrowerWindowCannotTurnAnAmbiguousRefusalIntoAClose owns whether the
+// sentence is true and this owns whether an operator is shown it. It renders
+// through registerFlags rather than comparing a constant to itself, and
 // TestMainRegistersNoFlagOfItsOwn is what makes registerFlags the help an
 // operator gets — without it, main() could re-inline its own strings and this
 // would stay green over a function nothing calls.
@@ -449,12 +532,12 @@ func TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose(t *testing.T) {
 // trailing "(default 1m0s)" is PrintDefaults' own and is pinned with the rest:
 // the default is also the ceiling, so an operator reading the stanza is reading
 // the largest window they can ask for.
-func TestTheWindowHelpNamesTheFlipNarrowingCanCause(t *testing.T) {
+func TestTheWindowHelpSaysNarrowingCannotManufactureAClose(t *testing.T) {
 	const want = "maximum creation-time separation between an orphan and its canonical; " +
-		"a larger value is refused, so this only ever narrows. Narrowing is not only the " +
-		"safer direction: where two canonicals match equally the tool refuses to pick " +
-		"between them, and dropping one out of the window picks for it, turning that " +
-		"refusal into a close (default 1m0s)"
+		"a larger value is refused, so this only ever narrows. Narrowing cannot make the " +
+		"tool more decisive than the default window is: a title whose bound mirrors are " +
+		"ambiguous at 1m0s stays refused however far this is narrowed, so the only verdict " +
+		"this flag can move is a close into a refusal (default 1m0s)"
 
 	fs := flag.NewFlagSet("ghorphan", flag.ContinueOnError)
 	registerFlags(fs)
@@ -473,8 +556,8 @@ func TestTheWindowHelpNamesTheFlipNarrowingCanCause(t *testing.T) {
 	if got != want {
 		t.Errorf("`-h` describes -window as\n\t%q\nwant\n\t%q\n"+
 			"(an empty value means the -window stanza was not in the rendered help at all).\n"+
-			"The narrow direction is not merely the safe one and this is where an "+
-			"operator is told so. If the wording is being changed on purpose, change it here too.", got, want)
+			"What the flag can and cannot do to a verdict is disclosed here and nowhere "+
+			"else an operator reads. If the wording is being changed on purpose, change it here too.", got, want)
 	}
 }
 
@@ -574,17 +657,65 @@ func TestBoundIssuesReadsEveryClaimOnANumber(t *testing.T) {
 		// A ref naming another repository still marks the local number as
 		// spoken for; that can only protect an issue from being closed.
 		{ID: "gqlc-elsewhere", ExternalRef: "https://github.com/other/repo/issues/452"},
+		// A repository whose name merely ENDS with the pinned one. The local
+		// pattern is anchored at a path separator, so this is foreign.
+		{ID: "gqlc-lookalike", ExternalRef: "https://github.com/evil/not-areqag/gqlc/issues/777"},
+		// The API spelling of a local ref. Same suffix, so it is local.
+		{ID: "gqlc-api", ExternalRef: "https://api.github.com/repos/areqag/gqlc/issues/303"},
 	}
-	got := boundIssues(beads)
+	got := boundIssues(beads, defaultRepo)
 
-	if want := []string{"gqlc-a", "gqlc-b"}; strings.Join(got[816], ",") != strings.Join(want, ",") {
-		t.Errorf("bound[816] = %v, want %v (sorted, both claimants kept)", got[816], want)
+	if want := []string{"gqlc-a", "gqlc-b"}; strings.Join(got.any[816], ",") != strings.Join(want, ",") {
+		t.Errorf("any[816] = %v, want %v (sorted, both claimants kept)", got.any[816], want)
 	}
-	if len(got[452]) != 1 || got[452][0] != "gqlc-elsewhere" {
-		t.Errorf("bound[452] = %v, want a cross-repository ref to still bind #452", got[452])
+	if want := []string{"gqlc-a", "gqlc-b"}; strings.Join(got.local[816], ",") != strings.Join(want, ",") {
+		t.Errorf("local[816] = %v, want %v", got.local[816], want)
 	}
-	if len(got) != 2 {
-		t.Errorf("bound has %d entries (%v), want 2 — a pull URL and an empty ref bind nothing", len(got), got)
+	if len(got.any[452]) != 1 || got.any[452][0] != "gqlc-elsewhere" {
+		t.Errorf("any[452] = %v, want a cross-repository ref to still bind #452", got.any[452])
+	}
+	if len(got.any) != 4 {
+		t.Errorf("any has %d entries (%v), want 4 — a pull URL and an empty ref bind nothing", len(got.any), got.any)
+	}
+
+	// The asymmetry (bd gqlc-hgos). A foreign ref vetoes the local number and
+	// must not make it eligible as a canonical: a canonical is what the closing
+	// comment points a human at, and its bead ids come straight off local.
+	for _, n := range []int{452, 777} {
+		if ids := got.local[n]; len(ids) != 0 {
+			t.Errorf("local[%d] = %v, want empty — a ref naming another repository must not qualify #%d as a canonical", n, ids, n)
+		}
+		if len(got.any[n]) == 0 {
+			t.Errorf("any[%d] is empty, want the foreign ref to still veto closing #%d", n, n)
+		}
+	}
+	if ids := got.local[303]; len(ids) != 1 || ids[0] != "gqlc-api" {
+		t.Errorf("local[303] = %v, want the api.github.com spelling of a local ref to be local", ids)
+	}
+}
+
+// TestOnlyALocalRefMakesAnIssueACanonical takes the split all the way through
+// plan(). #816 is named only by a ref pointing at some other repository's
+// issue 816, so the number is spoken for — #814 must not be closed against it,
+// and #816 must not itself be planned as an orphan either.
+func TestOnlyALocalRefMakesAnIssueACanonical(t *testing.T) {
+	issues := []issue{
+		openIssue(814, titleA, bodyA, at(0)),
+		openIssue(816, titleA, bodyA, at(time.Second)),
+		fillerIssue,
+	}
+	foreign := bead{ID: "gqlc-elsewhere", ExternalRef: "https://github.com/other/repo/issues/816"}
+
+	// The control: with a LOCAL ref on #816 this corpus plans CLOSE 814->816.
+	if got := planOrFatal(t, issues, []bead{boundTo("gqlc-u91z", 816), fillerBead}); len(got) != 1 ||
+		got[0].Verdict != verdictClose || got[0].Canonical != 816 {
+		t.Fatalf("control: findings = %+v, want CLOSE 814->816; without this the case below passes vacuously", got)
+	}
+
+	got := planOrFatal(t, issues, []bead{foreign, fillerBead})
+	for _, f := range got {
+		t.Errorf("planned %+v; #816 is named only by a ref into another repository, so it is "+
+			"not a canonical here, and #814 has no bound twin left to be an orphan of (bd gqlc-hgos)", f)
 	}
 }
 
@@ -604,7 +735,7 @@ func newCloser(t *testing.T) *recordingCloser {
 	return &recordingCloser{t: t, comments: map[int]string{}, fail: map[int]error{}}
 }
 
-func (r *recordingCloser) closeIssue(_ context.Context, number int, comment string) error {
+func (r *recordingCloser) closeIssue(_ context.Context, _ string, number int, comment string) error {
 	if r.failIfCalled {
 		r.t.Errorf("closeIssue(#%d) was called on a run that must mutate nothing", number)
 	}
@@ -615,7 +746,7 @@ func (r *recordingCloser) closeIssue(_ context.Context, number int, comment stri
 
 func fixedSource(issues []issue, beads []bead, closer *recordingCloser) source {
 	return source{
-		issues:     func(context.Context, int) ([]issue, error) { return issues, nil },
+		issues:     func(context.Context, string, int) ([]issue, error) { return issues, nil },
 		beads:      func(context.Context) ([]bead, error) { return beads, nil },
 		closeIssue: closer.closeIssue,
 	}
@@ -628,7 +759,7 @@ func TestRunIsADryRunUnlessToldOtherwise(t *testing.T) {
 	closer := newCloser(t)
 	closer.failIfCalled = true
 	var out strings.Builder
-	if err := run(context.Background(), &out, config{act: false, window: defaultWindow, limit: defaultLimit}, fixedSource(issues, beads, closer)); err != nil {
+	if err := run(context.Background(), &out, config{act: false, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, fixedSource(issues, beads, closer)); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if len(closer.calls) != 0 {
@@ -647,7 +778,7 @@ func TestRunClosesOnlyWithTheOptIn(t *testing.T) {
 
 	closer := newCloser(t)
 	var out strings.Builder
-	if err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit}, fixedSource(issues, beads, closer)); err != nil {
+	if err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, fixedSource(issues, beads, closer)); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if len(closer.calls) != 1 || closer.calls[0] != 814 {
@@ -673,16 +804,16 @@ func TestRunSurfacesAReadFailureRatherThanPlanningOnPartialInput(t *testing.T) {
 	boom := errors.New("gh: rate limited")
 
 	src := fixedSource(nil, nil, closer)
-	src.issues = func(context.Context, int) ([]issue, error) { return nil, boom }
+	src.issues = func(context.Context, string, int) ([]issue, error) { return nil, boom }
 	var out strings.Builder
-	err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit}, src)
+	err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, src)
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want it to wrap %v", err, boom)
 	}
 
 	src = fixedSource([]issue{openIssue(814, titleA, bodyA, at(0))}, nil, closer)
 	src.beads = func(context.Context) ([]bead, error) { return nil, boom }
-	err = run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit}, src)
+	err = run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, src)
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want it to wrap %v", err, boom)
 	}
@@ -690,7 +821,7 @@ func TestRunSurfacesAReadFailureRatherThanPlanningOnPartialInput(t *testing.T) {
 	// A refusal from plan() has to abort the run too, not report an empty plan
 	// and then act on it. Both reads succeed here; the ledger is what is empty.
 	src = fixedSource([]issue{openIssue(814, titleA, bodyA, at(0))}, nil, closer)
-	err = run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit}, src)
+	err = run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, src)
 	if err == nil || !strings.Contains(err.Error(), "bead ledger came back empty") {
 		t.Fatalf("err = %v, want plan's refusal surfaced", err)
 	}
@@ -712,7 +843,7 @@ func TestRunSurfacesAReportThatWentNowhere(t *testing.T) {
 	closer := newCloser(t)
 	closer.failIfCalled = true
 	w := &brokenWriter{}
-	err := run(context.Background(), w, config{act: false, window: defaultWindow, limit: defaultLimit}, fixedSource(issues, beads, closer))
+	err := run(context.Background(), w, config{act: false, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, fixedSource(issues, beads, closer))
 	if err == nil || !strings.Contains(err.Error(), "no such device") {
 		t.Fatalf("err = %v, want the write failure surfaced", err)
 	}
@@ -735,7 +866,7 @@ func TestApplyRefusesAPlanThatDisagreesWithTheLedger(t *testing.T) {
 	closer := newCloser(t)
 	closer.failIfCalled = true
 	var out strings.Builder
-	closed, err := apply(context.Background(), &reporter{w: &out}, findings, bound, closer.closeIssue)
+	closed, err := apply(context.Background(), &reporter{w: &out}, findings, bound, closer.closeIssue, defaultRepo)
 	if err == nil {
 		t.Fatal("apply closed a bead-bound issue")
 	}
@@ -757,7 +888,7 @@ func TestApplyRefusesASelfDuplicate(t *testing.T) {
 	closer := newCloser(t)
 	closer.failIfCalled = true
 	var out strings.Builder
-	closed, err := apply(context.Background(), &reporter{w: &out}, findings, map[int][]string{}, closer.closeIssue)
+	closed, err := apply(context.Background(), &reporter{w: &out}, findings, map[int][]string{}, closer.closeIssue, defaultRepo)
 	if err == nil || !strings.Contains(err.Error(), "duplicate of itself") {
 		t.Fatalf("err = %v, want a self-duplicate refusal", err)
 	}
@@ -776,7 +907,7 @@ func TestApplySkipsRefusalsAndCarriesOnPastAFailedClose(t *testing.T) {
 	closer.fail[814] = errors.New("gh: 403")
 
 	var out strings.Builder
-	closed, err := apply(context.Background(), &reporter{w: &out}, findings, map[int][]string{}, closer.closeIssue)
+	closed, err := apply(context.Background(), &reporter{w: &out}, findings, map[int][]string{}, closer.closeIssue, defaultRepo)
 	if closed != 1 {
 		t.Errorf("closed = %d, want 1", closed)
 	}
@@ -785,6 +916,306 @@ func TestApplySkipsRefusalsAndCarriesOnPastAFailedClose(t *testing.T) {
 	}
 	if len(closer.calls) != 2 || closer.calls[0] != 814 || closer.calls[1] != 817 {
 		t.Errorf("calls = %v, want [814 817] — the refusal is skipped, the failure is not fatal", closer.calls)
+	}
+}
+
+// ledgerReads is a bead leg that hands out a different snapshot per call, so a
+// test can move the ledger between the read plan() sees and the read taken at
+// the write boundary. It records how many times it was asked, which is the
+// other half of bd gqlc-345j: a run that re-reads and a run that reuses one
+// snapshot are indistinguishable from their output alone when the ledger did
+// not in fact move.
+type ledgerReads struct {
+	t         *testing.T
+	snapshots [][]bead
+	calls     int
+}
+
+func (l *ledgerReads) read(context.Context) ([]bead, error) {
+	l.calls++
+	if l.calls > len(l.snapshots) {
+		l.t.Fatalf("the bead ledger was read %d time(s); only %d snapshot(s) were provided, "+
+			"so this run reads the ledger more often than the test can account for", l.calls, len(l.snapshots))
+	}
+	return l.snapshots[l.calls-1], nil
+}
+
+// TestTheWriteBoundaryReReadsTheLedger is bd gqlc-345j. Before it, run() built
+// one bound map from one `bd list` and handed it to both plan() and apply(), so
+// apply()'s re-check was a self-consistency assertion over a value already read
+// — it agreed with itself under exactly the drift it existed to catch, and no
+// input could make it fire.
+//
+// The drift modelled here is the concrete hole the bead names: the mint race on
+// bd gqlc-mmej takes #814 and #816 for one bead, the first `bd github push`
+// writes external_ref=816, this tool snapshots and plans CLOSE #814, and the
+// second push then writes external_ref=814 — making #814 the bead's live
+// canonical a moment before this run would have closed it.
+//
+// What is asserted is that the run FAILS, having closed nothing. It is not
+// asserted that the race is closed, because it is not: the boundary read is a
+// snapshot too. See run()'s comment at the read.
+func TestTheWriteBoundaryReReadsTheLedger(t *testing.T) {
+	issues := []issue{
+		openIssue(814, titleA, bodyA, at(0)),
+		openIssue(816, titleA, bodyA, at(time.Second)),
+	}
+	planned := []bead{boundTo("gqlc-u91z", 816)}
+	// The losing mint's write landing after the plan was built.
+	drifted := []bead{{ID: "gqlc-u91z", ExternalRef: "https://github.com/areqag/gqlc/issues/814"}}
+
+	t.Run("the orphan gains a claimant between the two reads", func(t *testing.T) {
+		closer := newCloser(t)
+		closer.failIfCalled = true
+		ledger := &ledgerReads{t: t, snapshots: [][]bead{planned, drifted}}
+		src := fixedSource(issues, nil, closer)
+		src.beads = ledger.read
+
+		var out strings.Builder
+		err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, src)
+		if err == nil {
+			t.Fatalf("run closed #814 after a bead took it; output:\n%s", out.String())
+		}
+		if !strings.Contains(err.Error(), "the bead ledger moved") || !strings.Contains(err.Error(), "#814") {
+			t.Errorf("err = %q, want it to name the drift and the issue it refused to close", err)
+		}
+		if ledger.calls != 2 {
+			t.Errorf("the ledger was read %d time(s), want 2 — one for the plan and one at the write boundary. "+
+				"With a single read the check below is a map compared against itself (bd gqlc-345j)", ledger.calls)
+		}
+	})
+
+	t.Run("the canonical loses its claimant between the two reads", func(t *testing.T) {
+		// The other direction: nobody takes #814, but #816 stops being the
+		// mirror the ledger tracks, so the bead ids the closing comment would
+		// carry are stale and the CLOSE has lost its justification.
+		closer := newCloser(t)
+		closer.failIfCalled = true
+		reassigned := []bead{boundTo("gqlc-other", 816)}
+		ledger := &ledgerReads{t: t, snapshots: [][]bead{planned, reassigned}}
+		src := fixedSource(issues, nil, closer)
+		src.beads = ledger.read
+
+		var out strings.Builder
+		err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, src)
+		if err == nil {
+			t.Fatalf("run closed #814 against a canonical whose beads had changed; output:\n%s", out.String())
+		}
+		if !strings.Contains(err.Error(), "#816") {
+			t.Errorf("err = %q, want it to name the canonical that moved", err)
+		}
+	})
+
+	t.Run("an empty boundary read is refused rather than read as nothing bound", func(t *testing.T) {
+		closer := newCloser(t)
+		closer.failIfCalled = true
+		ledger := &ledgerReads{t: t, snapshots: [][]bead{planned, nil}}
+		src := fixedSource(issues, nil, closer)
+		src.beads = ledger.read
+
+		var out strings.Builder
+		err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, src)
+		if err == nil || !strings.Contains(err.Error(), "came back empty") {
+			t.Fatalf("err = %v, want the empty boundary read refused", err)
+		}
+	})
+
+	t.Run("a failing boundary read aborts before any close", func(t *testing.T) {
+		closer := newCloser(t)
+		closer.failIfCalled = true
+		boom := errors.New("bd: database is locked")
+		calls := 0
+		src := fixedSource(issues, nil, closer)
+		src.beads = func(context.Context) ([]bead, error) {
+			calls++
+			if calls == 1 {
+				return planned, nil
+			}
+			return nil, boom
+		}
+
+		var out strings.Builder
+		err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, src)
+		if !errors.Is(err, boom) {
+			t.Fatalf("err = %v, want it to wrap %v", err, boom)
+		}
+		if !strings.Contains(err.Error(), "write boundary") {
+			t.Errorf("err = %q, want it to say which of the two reads failed", err)
+		}
+	})
+
+	t.Run("an unmoved ledger still closes", func(t *testing.T) {
+		// The control. Without it every case above passes on a run() that
+		// refuses unconditionally at the write boundary.
+		closer := newCloser(t)
+		ledger := &ledgerReads{t: t, snapshots: [][]bead{planned, planned}}
+		src := fixedSource(issues, nil, closer)
+		src.beads = ledger.read
+
+		var out strings.Builder
+		if err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, src); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if len(closer.calls) != 1 || closer.calls[0] != 814 {
+			t.Fatalf("closed %v, want [814]", closer.calls)
+		}
+	})
+}
+
+// TestADryRunDoesNotReReadTheLedger holds the boundary read to the arm that has
+// a boundary. A dry run writes nothing, so a second `bd list` there is a
+// subprocess bought for no property — and it would make the counts in the
+// report disagree with the plan they were rendered from.
+func TestADryRunDoesNotReReadTheLedger(t *testing.T) {
+	issues := []issue{openIssue(814, titleA, bodyA, at(0)), openIssue(816, titleA, bodyA, at(time.Second))}
+	closer := newCloser(t)
+	closer.failIfCalled = true
+	ledger := &ledgerReads{t: t, snapshots: [][]bead{{boundTo("gqlc-u91z", 816)}}}
+	src := fixedSource(issues, nil, closer)
+	src.beads = ledger.read
+
+	var out strings.Builder
+	if err := run(context.Background(), &out, config{act: false, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, src); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if ledger.calls != 1 {
+		t.Errorf("a dry run read the ledger %d time(s), want 1", ledger.calls)
+	}
+}
+
+// TestCheckLedgerDriftIgnoresMovementItIsNotAbout is the guard's own bound. The
+// ledger here moves constantly — beads are created and closed by every session
+// — so a whole-ledger comparison would abort on activity that has nothing to do
+// with the numbers being written to, and an operator would learn to re-run
+// until it happened to pass.
+func TestCheckLedgerDriftIgnoresMovementItIsNotAbout(t *testing.T) {
+	findings := []finding{
+		{Orphan: 814, Verdict: verdictClose, Canonical: 816, Beads: []string{"gqlc-u91z"}},
+		// A refusal's numbers are never written to, so drift on them is not
+		// this guard's business either.
+		{Orphan: 900, Verdict: verdictRefuse, Reason: "bodies differ"},
+	}
+	planned := boundIssues([]bead{boundTo("gqlc-u91z", 816), boundTo("gqlc-old", 500)}, defaultRepo)
+	fresh := boundIssues([]bead{
+		boundTo("gqlc-u91z", 816),
+		// gqlc-old's issue #500 has gone and a wholly new bead has arrived.
+		boundTo("gqlc-new", 999),
+		// And a bead has taken the number of an issue only a REFUSE names.
+		boundTo("gqlc-late", 900),
+	}, defaultRepo)
+
+	if err := checkLedgerDrift(findings, planned, fresh); err != nil {
+		t.Errorf("checkLedgerDrift refused over movement outside the numbers being written to: %v", err)
+	}
+}
+
+// TestBothGhLegsPinTheRepository is bd gqlc-hgos. Neither leg carried --repo,
+// so both resolved the repository from gh's own order — the caller's cwd, its
+// upstream remote, or GH_REPO. Agents here run from a dozen sibling worktrees,
+// so a run that happened to resolve correctly witnesses nothing about the next
+// one, and the write leg is `gh issue close`.
+//
+// It reads the argv builders rather than running gh, because running the write
+// leg is the thing no test in this package may do.
+func TestBothGhLegsPinTheRepository(t *testing.T) {
+	const repo = "someone/elsewhere"
+
+	list := ghIssueListArgs(repo, 7)
+	closeArgs := ghIssueCloseArgs(repo, 814, "a comment")
+
+	for name, args := range map[string][]string{"issue list": list, "issue close": closeArgs} {
+		i := slices.Index(args, "--repo")
+		if i < 0 {
+			t.Errorf("`gh %s` argv is %v, which carries no --repo; gh would resolve the repository from the caller's cwd", name, args)
+			continue
+		}
+		if got := args[i+1]; got != repo {
+			t.Errorf("`gh %s` passes --repo %q, want %q", name, got, repo)
+		}
+	}
+
+	// The rest of each argv still has to be the invocation it was, or the pin
+	// above passes over a command that no longer reads or closes anything.
+	if !slices.Contains(list, "--json") || !slices.Contains(list, "number,title,body,createdAt,state") {
+		t.Errorf("`gh issue list` argv is %v, want the five fields the predicate reads", list)
+	}
+	if !slices.Contains(list, "7") {
+		t.Errorf("`gh issue list` argv is %v, want the limit forwarded", list)
+	}
+	if !slices.Contains(closeArgs, "814") || !slices.Contains(closeArgs, "not planned") || !slices.Contains(closeArgs, "a comment") {
+		t.Errorf("`gh issue close` argv is %v, want the number, the reason and the comment", closeArgs)
+	}
+}
+
+// TestRunRefusesARepoGhWouldNotUnderstand. gh falls back to ambient resolution
+// for a value it cannot parse as OWNER/NAME, which is the state -repo exists to
+// remove — so a malformed flag has to abort rather than be handed over.
+func TestRunRefusesARepoGhWouldNotUnderstand(t *testing.T) {
+	for _, repo := range []string{"", "gqlc", "areqag/gqlc/extra", "areqag /gqlc", "https://github.com/areqag/gqlc"} {
+		t.Run(fmt.Sprintf("%q", repo), func(t *testing.T) {
+			closer := newCloser(t)
+			closer.failIfCalled = true
+			issuesRead := false
+			src := fixedSource(nil, nil, closer)
+			src.issues = func(context.Context, string, int) ([]issue, error) {
+				issuesRead = true
+				return nil, nil
+			}
+
+			var out strings.Builder
+			err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: repo}, src)
+			if err == nil || !strings.Contains(err.Error(), "not OWNER/NAME") {
+				t.Fatalf("err = %v, want -repo %q refused", err, repo)
+			}
+			if issuesRead {
+				t.Errorf("the read leg ran before -repo was checked; gh had already resolved a repository by then")
+			}
+		})
+	}
+
+	// The control: the default is accepted, so the pattern above is not simply
+	// refusing everything.
+	closer := newCloser(t)
+	closer.failIfCalled = true
+	issues := []issue{openIssue(814, titleA, bodyA, at(0)), openIssue(816, titleA, bodyA, at(time.Second))}
+	var out strings.Builder
+	if err := run(context.Background(), &out, config{act: false, window: defaultWindow, limit: defaultLimit, repo: defaultRepo},
+		fixedSource(issues, []bead{boundTo("gqlc-u91z", 816)}, closer)); err != nil {
+		t.Fatalf("the default -repo was refused: %v", err)
+	}
+}
+
+// TestTheRepoFlagReachesBothLegs closes the gap between the argv builders and
+// run(): the builders can pin --repo perfectly while run() hands them a
+// different string, or none. Both legs record what they were given.
+func TestTheRepoFlagReachesBothLegs(t *testing.T) {
+	const repo = "someone/elsewhere"
+	issues := []issue{openIssue(814, titleA, bodyA, at(0)), openIssue(816, titleA, bodyA, at(time.Second))}
+	beads := []bead{{ID: "gqlc-u91z", ExternalRef: "https://github.com/someone/elsewhere/issues/816"}}
+
+	var readRepo, closeRepo string
+	src := source{
+		issues: func(_ context.Context, r string, _ int) ([]issue, error) {
+			readRepo = r
+			return issues, nil
+		},
+		beads: func(context.Context) ([]bead, error) { return beads, nil },
+		closeIssue: func(_ context.Context, r string, _ int, _ string) error {
+			closeRepo = r
+			return nil
+		},
+	}
+
+	var out strings.Builder
+	if err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: repo}, src); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if readRepo != repo {
+		t.Errorf("the read leg was given repo %q, want %q", readRepo, repo)
+	}
+	if closeRepo != repo {
+		t.Errorf("the write leg was given repo %q, want %q — an empty value means it was never called, "+
+			"so the ledger's local-ref pattern did not follow -repo either", closeRepo, repo)
 	}
 }
 
@@ -986,7 +1417,7 @@ func TestDryRunOverTheRealCorpusMutatesNothingAndSaysWhatItWould(t *testing.T) {
 	closer.failIfCalled = true
 
 	var out strings.Builder
-	if err := run(context.Background(), &out, config{act: false, window: defaultWindow, limit: defaultLimit}, fixedSource(issues, beads, closer)); err != nil {
+	if err := run(context.Background(), &out, config{act: false, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, fixedSource(issues, beads, closer)); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	t.Log("\n" + out.String())
@@ -1036,7 +1467,7 @@ func TestTheDryRunSummarySaysWhatHappenedAndNothingElse(t *testing.T) {
 	closer.failIfCalled = true
 
 	var out strings.Builder
-	if err := run(context.Background(), &out, config{act: false, window: defaultWindow, limit: defaultLimit}, fixedSource(issues, beads, closer)); err != nil {
+	if err := run(context.Background(), &out, config{act: false, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, fixedSource(issues, beads, closer)); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -1067,7 +1498,7 @@ func TestReconcilingTheRealCorpusIsIdempotent(t *testing.T) {
 
 	closer := newCloser(t)
 	var out strings.Builder
-	if err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit}, fixedSource(issues, beads, closer)); err != nil {
+	if err := run(context.Background(), &out, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, fixedSource(issues, beads, closer)); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	if len(closer.calls) != 16 {
@@ -1089,7 +1520,7 @@ func TestReconcilingTheRealCorpusIsIdempotent(t *testing.T) {
 	second := newCloser(t)
 	second.failIfCalled = true
 	var out2 strings.Builder
-	if err := run(context.Background(), &out2, config{act: true, window: defaultWindow, limit: defaultLimit}, fixedSource(after, beads, second)); err != nil {
+	if err := run(context.Background(), &out2, config{act: true, window: defaultWindow, limit: defaultLimit, repo: defaultRepo}, fixedSource(after, beads, second)); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
 	if len(second.calls) != 0 {
@@ -1106,12 +1537,18 @@ func TestReconcilingTheRealCorpusIsIdempotent(t *testing.T) {
 // by a bead, and none of them may appear as an orphan.
 func TestNoBoundIssueInTheRealCorpusIsEverPlanned(t *testing.T) {
 	issues, beads := loadCorpus(t)
-	bound := boundIssues(beads)
-	if len(bound) != 18 {
-		t.Fatalf("the fixture binds %d issue(s), want 18", len(bound))
+	bound := boundIssues(beads, defaultRepo)
+	if len(bound.any) != 18 {
+		t.Fatalf("the fixture binds %d issue(s), want 18", len(bound.any))
+	}
+	// Every ref in the real fixture names areqag/gqlc, so the two maps agree
+	// here. A drift between them would mean the fixture has grown a foreign
+	// ref and the count above stopped meaning what the next loop reads.
+	if len(bound.local) != 18 {
+		t.Fatalf("the fixture binds %d issue(s) LOCALLY, want 18 — every captured ref names %s", len(bound.local), defaultRepo)
 	}
 	for _, f := range planOrFatal(t, issues, beads) {
-		if ids := bound[f.Orphan]; len(ids) > 0 {
+		if ids := bound.any[f.Orphan]; len(ids) > 0 {
 			t.Errorf("#%d is named by bead(s) %v and was still planned as an orphan", f.Orphan, ids)
 		}
 	}
