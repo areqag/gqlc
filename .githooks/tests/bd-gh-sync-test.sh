@@ -2796,6 +2796,103 @@ else
     bad "the mktemp stub is transparent when its knob is unset" "got: $(last_line)"
 fi
 
+# --- gqlc-07c6: the ERR trap must not fire on a section with no records ------
+# The cost of the trap above, and the reason these rows sit under it. `set -E`
+# hands the ERR trap to every subshell, and the hold and orphan sections read
+# their input from `done < <(grep ...)`. `grep` exits 1 when nothing matched,
+# which for a plan carrying no HOLD and no ORPHAN records is the healthy steady
+# state — so the trap fired *inside* the process-substitution subshell and
+# _abort printed the whole PULL FAILED block there. The parent shell never saw
+# it, so the run carried on and printed its ordinary summary underneath. Both
+# lines cannot be true, and a ledger writer that shouts PULL FAILED on every
+# healthy run teaches sixteen agents to skip past the one run where it means it.
+#
+# RED control, measured 2026-08-23 against the bd-gh-sync at origin/master
+# c129a0a5 by the recipe in this file's header: all three "no abort" rows below
+# fail there. This is the observed shape, from a real `git merge` on 2026-08-22,
+# with seven beads held and no orphan:
+#
+#   bd-gh-sync: a command failed at line 814 (status 1) and stopped this run where it stood.
+#   bd-gh-sync: PULL FAILED — aborted at line 814; the pull is incomplete.
+#   bd-gh-sync: no bead is eligible for a --prefer-github pull; no pull issued.
+#   bd-gh-sync: pulled 0 bead(s), held 7, left 0 unmirrored GH issue(s) alone.
+#
+# Both sections are exercised separately, and empty separately, because a run
+# with holds masks the hold section's own defect: that 2026-08-22 run fired once
+# rather than twice only because seven holds happened to be there. Each row
+# below names which section is empty on it, so a fix to one of the two cannot
+# read as a fix to both.
+_no_abort() { # $1=assertion name — the run must carry no fragment of _abort
+    if grep -q 'a command failed at line' "$TMP/err"; then
+        bad "$1" "the abort block printed: $(grep -m1 'a command failed at line' "$TMP/err")"
+    elif grep -q 'PULL FAILED' "$TMP/err"; then
+        bad "$1" "the pull was declared failed: $(grep -m1 'PULL FAILED' "$TMP/err")"
+    else
+        ok "$1"
+    fi
+}
+
+# A bead whose mirror matches it exactly: nothing to pull, nothing to hold. Used
+# rather than an empty bead list, because a plan built over no beads withdraws
+# both counts from the summary line and the row could then pass on a run that
+# never got as far as either section.
+INSYNC="{\"id\":\"b-sync\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}"
+GH_INSYNC='{"number":7,"state":"OPEN","body":"same"}'
+# ...and one that GitHub and bd disagree about in a way no pull can resolve, so
+# it is held. This is the live shape: seven beads were held out of the pull with
+# exactly this reason on 2026-08-22.
+DRIFTED="{\"id\":\"b-drift\",\"status\":\"open\",\"external_ref\":\"$ISSUE/9\",\"description\":\"local text\"}"
+GH_DRIFTED='{"number":9,"state":"OPEN","body":"an unrelated body"}'
+
+# Neither section has a record: the healthy case, where it fired twice.
+run_sync pull "[$INSYNC]" "[$GH_INSYNC]"
+if [ "$(last_line)" != "bd-gh-sync: pulled 0 bead(s), held 0, left 0 unmirrored GH issue(s) alone." ]; then
+    bad "a plan with no holds and no orphans reports no abort" \
+        "the run did not reach its summary at all, so it proves nothing: $(last_line)"
+else
+    _no_abort "a plan with no holds and no orphans reports no abort"
+fi
+
+# One held bead, no orphan: the 2026-08-22 shape, where the orphan section alone
+# fired.
+run_sync pull "[$DRIFTED]" "[$GH_DRIFTED]"
+if ! grep -q 'holding b-drift (GH #9) out of the pull' "$TMP/err"; then
+    bad "a plan with a hold and no orphan reports no abort" \
+        "nothing was held, so the orphan section is not the only empty one: $(last_line)"
+else
+    _no_abort "a plan with a hold and no orphan reports no abort"
+fi
+
+# One orphan, no hold: the mirror image, where the hold section alone fired.
+run_sync pull "[$INSYNC]" "[$GH_INSYNC,{\"number\":597,\"state\":\"OPEN\",\"body\":\"orphan\"}]"
+if ! grep -q 'GH #597 has no bead' "$TMP/err"; then
+    bad "a plan with an orphan and no hold reports no abort" \
+        "nothing was orphaned, so the hold section is not the only empty one: $(last_line)"
+else
+    _no_abort "a plan with an orphan and no hold reports no abort"
+fi
+
+# ...and the other half, which is what stops the fix being a blanket `|| true`.
+# "no matches" is an answer; "the section could not be read or written" is a
+# fault, and it has to keep reaching the trap — a hold nobody could read would
+# go unreported while the summary counted it as absent. Sabotaged by planting a
+# directory where the hold selection writes its file, which is a failure at that
+# exact line and one the script has no branch for.
+MKTEMP_BLOCK=holds.txt
+run_sync pull "[$DRIFTED]" "[$GH_DRIFTED]"
+MKTEMP_BLOCK=
+if [ "$RC" -ne 0 ]; then
+    bad "an unreadable hold section still aborts the pull" \
+        "pull exited $RC, which aborts the 'git pull' it rides on: $(last_line)"
+else
+    case "$(last_line)" in
+        *"PULL FAILED — aborted at line "*)
+            ok "an unreadable hold section still aborts the pull" ;;
+        *) bad "an unreadable hold section still aborts the pull" \
+            "the run carried on past a section it could not write: $(last_line)" ;;
+    esac
+fi
+
 # --- gqlc-mmej: two pushes at once must mint one GH issue, not two -----------
 # `bd github push` is what assigns external_ref, and which beads still lack one
 # is read off `bd list` above it. Unserialised, two runs both read before either
@@ -3458,6 +3555,10 @@ a label cap that cannot be read screens nothing and says so
 an unhandled write failure aborts the pull with a verdict, exit 0
 an unhandled write failure aborts the push with a verdict, exit 1
 bd-gh-sync declares errexit, nounset, errtrace and pipefail
+a plan with no holds and no orphans reports no abort
+a plan with a hold and no orphan reports no abort
+a plan with an orphan and no hold reports no abort
+an unreadable hold section still aborts the pull
 the mktemp stub is transparent when its knob is unset
 two concurrent pushes mint one GH issue, not two
 the second push waits for the lock rather than giving up
