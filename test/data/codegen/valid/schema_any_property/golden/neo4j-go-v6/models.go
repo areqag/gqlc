@@ -11,6 +11,7 @@ import (
 
 // Event corresponds to the Event node type.
 type Event struct {
+	Badge   any
 	Id      int64
 	Marker  any
 	Payload *any
@@ -32,16 +33,21 @@ func decodeEvent(node dbtype.Node) (Event, error) {
 		return Event{}, fmt.Errorf("decode Event: expected a node labelled %q, got labels %q", "Event", node.Labels)
 	}
 	var out Event
-	value0, err := neo4j.GetProperty[int64](node, "id")
+	value0, ok := node.Props["badge"]
+	if !ok {
+		return Event{}, fmt.Errorf("decode Event.Badge: could not find any property named %s", "badge")
+	}
+	out.Badge = value0
+	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.Id: %w", err)
 	}
-	out.Id = value0
-	value1, ok := node.Props["marker"]
+	out.Id = value1
+	value2, ok := node.Props["marker"]
 	if !ok {
 		return Event{}, fmt.Errorf("decode Event.Marker: could not find any property named %s", "marker")
 	}
-	out.Marker = value1
+	out.Marker = value2
 	if v, ok := node.Props["payload"]; ok {
 		out.Payload = &v
 	}

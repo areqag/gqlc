@@ -119,3 +119,90 @@ func (q *Queries) EventPayload(ctx context.Context) (*any, error) {
 	}
 	return valuePtr, nil
 }
+
+const eventPropertyColumnsQueryText = `MATCH (e:Event) RETURN e.badge AS badge, e.tag AS tag`
+
+type EventPropertyColumnsRow struct {
+	Badge any
+	Tag   *any
+}
+
+// EventPropertyColumns executes the EventPropertyColumns query.
+//
+//	MATCH (e:Event) RETURN e.badge AS badge, e.tag AS tag
+func (q *Queries) EventPropertyColumns(ctx context.Context) ([]EventPropertyColumnsRow, error) {
+	records, err := q.db.run(ctx, eventPropertyColumnsQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]EventPropertyColumnsRow, 0, len(records))
+	for _, record := range records {
+		var row EventPropertyColumnsRow
+		value0, ok := record.Get("badge")
+		if !ok {
+			return nil, fmt.Errorf("EventPropertyColumns: decode column %q: key not found", "badge")
+		}
+		row.Badge = value0
+		value1, ok := record.Get("tag")
+		if !ok {
+			return nil, fmt.Errorf("EventPropertyColumns: decode column %q: key not found", "tag")
+		}
+		var value1Ptr *any
+		if value1 != nil {
+			value1Ptr = &value1
+		}
+		row.Tag = value1Ptr
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+const eventBadgeQueryText = `MATCH (e:Event) RETURN e.badge AS badge`
+
+// EventBadge executes the EventBadge query.
+//
+//	MATCH (e:Event) RETURN e.badge AS badge
+func (q *Queries) EventBadge(ctx context.Context) (any, error) {
+	records, err := q.db.run(ctx, eventBadgeQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, ErrNoRows
+	}
+	if len(records) > 1 {
+		return nil, ErrMultipleResults
+	}
+	value, ok := records[0].Get("badge")
+	if !ok {
+		return nil, fmt.Errorf("EventBadge: decode column %q: key not found", "badge")
+	}
+	return value, nil
+}
+
+const eventTagQueryText = `MATCH (e:Event) RETURN e.tag AS tag`
+
+// EventTag executes the EventTag query.
+//
+//	MATCH (e:Event) RETURN e.tag AS tag
+func (q *Queries) EventTag(ctx context.Context) (*any, error) {
+	records, err := q.db.run(ctx, eventTagQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, ErrNoRows
+	}
+	if len(records) > 1 {
+		return nil, ErrMultipleResults
+	}
+	value, ok := records[0].Get("tag")
+	if !ok {
+		return nil, fmt.Errorf("EventTag: decode column %q: key not found", "tag")
+	}
+	var valuePtr *any
+	if value != nil {
+		valuePtr = &value
+	}
+	return valuePtr, nil
+}
