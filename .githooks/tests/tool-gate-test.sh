@@ -90,7 +90,11 @@ cp "$HOOKS_DIR/pre-push" "$HOOKS/pre-push"
 # case it accepts — these tests are about the provisioning arms below it.
 # .githooks/tests/worktree-upstream-test.sh is where it is decided on.
 cp "$HOOKS_DIR/guard-push-destination" "$HOOKS/guard-push-destination"
-chmod +x "$HOOKS/pre-commit" "$HOOKS/pre-push" "$HOOKS/guard-push-destination"
+# Also real, for the same reason, and load-bearing for a duller one: pre-push
+# invokes it as "$(dirname "$0")/repo-purity", so a fixture that omits it fails
+# every arm below with exit 127 — a missing sibling, not a gate decision.
+cp "$HOOKS_DIR/repo-purity" "$HOOKS/repo-purity"
+chmod +x "$HOOKS/pre-commit" "$HOOKS/pre-push" "$HOOKS/guard-push-destination" "$HOOKS/repo-purity"
 
 cat >"$HOOKS/bd-gh-sync" <<'STUB'
 #!/usr/bin/env bash
