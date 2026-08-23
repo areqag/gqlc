@@ -1694,7 +1694,89 @@ cmd_guard_sweep() {
         echo "guard-sweep: Րաֆֆի is already on his rounds"
         return 0
     fi
+    file_patrol_bead
     cmd_wake raffi --reason "time for a round of the town (see your soul: rounds)"
+}
+
+# ADR 0004 §2, the execution half. ADR 0003 change 2 names the judges' PATROL
+# duty as the compensating control on the whole unreviewed-merge regime — very
+# nearly every PR now merges on green gates with the author as its only reader
+# — and measured at c129a0a5 patrol was two sentences in the tree,
+# kingdom/README.md line 77 and that clause of ADR 0003. It had no trigger, no
+# target and no output shape. A seat runs only when woken; dispatch wakes a
+# seat only for a bead; nothing filed one. So the compensating control on the
+# town's central throughput trade could not begin at all.
+#
+# Filed by km rather than by Րաֆֆի during his round, because a step in a soul
+# is a step an agent can forget and a line in cmd_guard_sweep is not. Called
+# AFTER that command's early returns, which is the whole reason it sits at the
+# bottom of the function: a halted town files no patrol bead (Article VI.4),
+# and a tick that returns because Րաֆֆի is already awake files none either.
+# Neither is a missed obligation — the next tick meets the same empty board.
+#
+# BOUNDED TO ONE, PERMANENTLY, and not configurable. Patrol's queue depth is
+# one whatever the merge rate. That clause is what keeps ADR 0004 inside ADR
+# 0003's constraint, and a later change making it a setting reintroduces
+# exactly the queue ADR 0003 was written to drain.
+#
+# The bound is measured as NOT CLOSED, never as `--status open`. In bd,
+# `--status open` is the literal status and excludes in_progress and blocked,
+# so a patrol bead a judge had already claimed would read as absent and the
+# next tick would file a second — the bound gone, silently, in precisely the
+# state it exists for. That is not hypothetical: the same `--status open`
+# reading made km doctor's identity arm miss a P0 (gqlc-18br, gqlc-c7b5). Any
+# status this code does not recognise counts as open too, which is the safe
+# side for a bound.
+patrol_open_ids() { # <board json>
+    jq -r '[ .[]
+             | select(.status != "closed")
+             | select((.labels // []) | index("patrol"))
+             | .id ] | join(" ")' <<<"$1" 2>/dev/null
+}
+
+file_patrol_bead() {
+    local board open since window rc=0
+    board=$(bd list --status all -n 0 --json 2>/dev/null) || rc=$?
+    if [ "$rc" -ne 0 ] || ! jq -e 'type == "array"' >/dev/null 2>&1 <<<"$board"; then
+        # A bound that cannot be measured is not raised. Filing blind here
+        # would add a patrol bead every cadence for as long as bd was unwell,
+        # which is the queue this function exists to prevent.
+        echo "guard-sweep: patrol not filed — the board query did not answer, so the one-open bound could not be measured" >&2
+        return 0
+    fi
+    open=$(patrol_open_ids "$board")
+    if [ -n "$open" ]; then
+        echo "guard-sweep: patrol already open ($open) — the bound is one"
+        return 0
+    fi
+    # The window is FRESH: it begins where the last patrol ended, because one
+    # starting at the founding commit re-reads what has already been read.
+    since=$(jq -r '[ .[]
+                     | select((.labels // []) | index("patrol"))
+                     | select(.status == "closed")
+                     | .closed_at // empty ] | max // empty' <<<"$board" 2>/dev/null)
+    if [ -n "$since" ]; then
+        window="merges to master since the previous patrol bead closed, at $since"
+    else
+        window="merges to master in the recent window — no previous patrol bead exists to start from, and the founding commit would re-read what has already been read, so take a window you can read properly and name it in your close"
+    fi
+    if ! bd create "patrol: read merged work since the last patrol round" \
+        -p 2 -l class:judge,patrol \
+        -d "Filed by km guard-sweep. See kingdom/brain/decisions/0004-the-adversarial-read-after-the-gate.md section 2.
+
+WINDOW: $window.
+
+TARGET: merges whose PR was NOT reviewed. Under ADR 0003 a PR is read by a judge only if its bead was blocked by a design bead, if it amends the constitution, or if a citizen asked; everything else merged on green gates alone.
+
+OUTPUT: defect beads, and a postmortem where something broke (Constitution V.4, Article III.4). Never a verdict — nothing in the window is open to one, the code has merged. A defect bead about already-merged code carries from-pr:<N>, the number of the PR that introduced it, and omits the label rather than guessing where no single PR can be identified (ADR 0004 section 3). That label is the only record Constitution V.2.0.4 will have when the town re-tunes its review gate.
+
+DEPTH is yours. A round that reads one merge properly is a round. Closing this bead asserts NOTHING about the window being clean, and no citizen should read its closure that way.
+
+BOUND: exactly one patrol bead is open at a time, permanently, whatever the merge rate (ADR 0004 section 2). This one was filed because none was open." >/dev/null 2>&1; then
+        echo "guard-sweep: patrol bead could not be filed — bd create refused" >&2
+        return 0
+    fi
+    echo "guard-sweep: filed a patrol bead — no open one was on the board"
 }
 
 # ---------- unit health ----------
