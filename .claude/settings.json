@@ -33,6 +33,26 @@
           }
         ],
         "matcher": "AskUserQuestion|EnterPlanMode"
+      },
+      {
+        "hooks": [
+          {
+            "command": ".githooks/claude-tool-witness",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": ".githooks/claude-tool-witness",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
       }
     ],
     "SessionStart": [

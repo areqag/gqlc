@@ -4407,6 +4407,325 @@ else
     ok "$asleep_idle_row — an asleep record is the one the dispatcher can still route to, and reconcile corrects it needing nobody's consent"
 fi
 
+# --- the WORK column: progress, not existence (gqlc-r3ac / gqlc-gw10) --------
+# Every row above this one measures whether an INSTRUMENT reported. None of them
+# can measure whether anything HAPPENED, and that gap is the whole bead: a seat
+# frozen inside a tool call keeps a heartbeat as fresh as a seat doing real work,
+# because km-statusline goes on writing all through the wedge (gqlc-n97e, 13+
+# minutes measured). progress.json is written by .githooks/claude-tool-witness
+# and by nothing on a timer, so its last_progress advances only when a tool call
+# actually finished.
+#
+# These run at $FIXTURE, for the reason the blind rows above give: km derives
+# seat_worktree from its CWD, and from the real checkout they would read whatever
+# seat worktrees happen to be on the operator's disk.
+stamp_ago() { date -u -d "@$(($(date +%s) - $1))" +%Y-%m-%dT%H:%M:%SZ; }
+
+# The WORK cell of one seat's row, BY POSITION. A grep over the whole line is
+# not good enough here and the difference was measured: at $FIXTURE most seats
+# have no worktree, so their TREE cell is "?" — and a row asserting the corrupt
+# witness renders as "?" passed on the TREE column while the WORK column said
+# anything at all. Column order is SEAT CLASS STATE CTX HB WORK TREE MAIL BEADS.
+work_cell() { # <seat>
+    printf '%s' "$OUT" | awk -v s="$1" '$1 == s { print $6; exit }'
+}
+assert_work_cell() { # <row name> <seat> <expected cell>
+    local got
+    got="$(work_cell "$2")"
+    if [ "$got" = "$3" ]; then
+        ok "$1"
+    else
+        bad "$1" "WORK cell for $2 is '$got', expected '$3': $(printf '%s' "$OUT" | grep -E "^$2")"
+    fi
+}
+
+# An ABSENT stamp is a state the town really reaches — a tool call that started
+# and has never once completed — so the fixture can leave either field out
+# rather than only aging it.
+seat_progress() { # <seat> <start secs ago|-> <progress secs ago|-> [tool]
+    local dir="$KM_STATE_DIR/seats/$1" j
+    mkdir -p "$dir"
+    j=$(jq -cn --arg seat "$1" --arg tool "${4:-Bash}" '{seat: $seat, last_tool: $tool}')
+    [ "$2" = - ] || j=$(jq -c --arg s "$(stamp_ago "$2")" '. + {last_start: $s}' <<<"$j")
+    [ "$3" = - ] || j=$(jq -c --arg p "$(stamp_ago "$3")" '. + {last_progress: $p}' <<<"$j")
+    printf '%s\n' "$j" >"$dir/progress.json"
+}
+
+# A checkout wired (or not) for the PROGRESS witness. Deliberately its own helper
+# rather than a fourth mode on seat_checkout: that one answers whether a worktree
+# can write a HEARTBEAT, these rows ask a different question of a different pair
+# of tracked files, and a shared fixture would let one guard's rows pass on the
+# other guard's wiring.
+seat_witness_checkout() { # <seat> <wired|halfwired|unwired>
+    local wt="$FIXTURE-seat-$1"
+    mkdir -p "$wt/.claude" "$wt/.githooks"
+    rm -f "$wt/.claude/settings.local.json"
+    case "$2" in
+        wired)
+            printf '#!/usr/bin/env python3\n' >"$wt/.githooks/claude-tool-witness"
+            printf '{"hooks":{"PostToolUse":[{"matcher":"","hooks":[{"type":"command","command":".githooks/claude-tool-witness"}]}]}}\n' \
+                >"$wt/.claude/settings.json"
+            ;;
+        halfwired)
+            # The script is there and nothing invokes it — a branch carrying
+            # .githooks/ that forked before the PostToolUse entry landed. As
+            # silent as the fully unwired case, and invisible to a check that
+            # only tests for the file.
+            printf '#!/usr/bin/env python3\n' >"$wt/.githooks/claude-tool-witness"
+            printf '{}\n' >"$wt/.claude/settings.json"
+            ;;
+        *)
+            printf '{}\n' >"$wt/.claude/settings.json"
+            rm -f "$wt/.githooks/claude-tool-witness"
+            ;;
+    esac
+}
+
+# A seat that is working: a tool call finished two minutes ago, nothing in
+# flight. The control for every row below — without it they all pass against a
+# board that shouted WEDGED at everyone.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap ayg
+seat_heartbeat ayg 30 42
+seat_progress ayg 200 120
+status_at_fixture
+working_row="a seat whose tool calls are completing is rendered as working"
+if [ "$(work_cell ayg)" != "2m" ]; then
+    bad "$working_row" "the WORK cell carries no age: $(printf '%s' "$OUT" | grep -E '^ayg')"
+elif printf '%s' "$OUT" | grep -qE '^(WEDGED|NOWORK)'; then
+    bad "$working_row" "a working seat was marked: $(printf '%s' "$OUT" | grep -E '^(WEDGED|NOWORK)')"
+else
+    ok "$working_row, and neither marker fires — the control the wedge rows below stand on"
+fi
+
+# THE row. Միհր's shape as it actually presented: heartbeat fresh (30 seconds
+# old, nowhere near UNRESPONSIVE), STATE awake, and a tool call that started 45
+# minutes ago and never came back. Before this column the board had nothing at
+# all to say about her.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap mihr
+seat_heartbeat mihr 30 42
+seat_progress mihr 2700 4000 Bash
+status_at_fixture
+wedge_row="a seat wedged in a tool call is named while its heartbeat is fresh"
+if printf '%s' "$OUT" | grep -q '^UNRESPONSIVE'; then
+    bad "$wedge_row" "the heartbeat arm fired, so this row is not testing the new one: $OUT"
+elif ! printf '%s' "$OUT" | grep '^WEDGED' | grep -q mihr; then
+    bad "$wedge_row" "no line names the seat, so a 45-minute wedge is still invisible: $OUT"
+elif [ "$(work_cell mihr)" != '*45m!' ]; then
+    bad "$wedge_row" "the WORK cell does not carry the age of the wedge: $(printf '%s' "$OUT" | grep -E '^mihr')"
+elif ! printf '%s' "$OUT" | grep -E '^mihr' | grep -q awake; then
+    bad "$wedge_row" "the STATE column was rewritten; the two accounts must disagree in the open: $OUT"
+else
+    ok "$wedge_row — the signal the heartbeat cannot carry, on the seat that proved it cannot"
+fi
+
+# The tool is named. Not decoration: the operator's next move is to read the
+# pane, and knowing which tool was last started says what to look for there.
+if printf '%s' "$OUT" | grep '^WEDGED' | grep -q 'Bash'; then
+    ok "the WEDGED line names the tool last started"
+else
+    bad "the WEDGED line names the tool last started" "$(printf '%s' "$OUT" | grep '^WEDGED')"
+fi
+
+# A tool call that started and has NEVER completed — the first tool call of a
+# session that wedged immediately. last_progress is absent, so a comparison of
+# two ages has nothing to compare and must still read as in flight.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap mihr
+seat_heartbeat mihr 30 42
+seat_progress mihr 2700 - Agent
+status_at_fixture
+first_row="a first tool call that never returned is a wedge, not an empty witness"
+if ! printf '%s' "$OUT" | grep '^WEDGED' | grep -q mihr; then
+    bad "$first_row" "a seat with no last_progress at all went unmarked: $OUT"
+else
+    ok "$first_row"
+fi
+
+# The falsifier for the wedge arm: a tool call in flight for five minutes is an
+# ordinary build, and a column that marked it would mark every seat that ever ran
+# a test suite.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap mihr
+seat_heartbeat mihr 30 42
+seat_progress mihr 300 900
+status_at_fixture
+young_row="a tool call in flight for five minutes is not a wedge"
+if printf '%s' "$OUT" | grep -q '^WEDGED'; then
+    bad "$young_row" "an ordinary long tool call was marked: $(printf '%s' "$OUT" | grep '^WEDGED')"
+elif [ "$(work_cell mihr)" != '*5m' ]; then
+    bad "$young_row" "the in-flight marker is missing, so the cell reads like a finished call: $(printf '%s' "$OUT" | grep -E '^mihr')"
+else
+    ok "$young_row, and the cell still says a call is in flight"
+fi
+
+# The other arm. Անահիտ froze BETWEEN turns on a usage-limit modal: no tool ever
+# started, so nothing is in flight and the wedge arm is silent. What is true is
+# that nothing has FINISHED for 45 minutes, and an awake seat in that state is
+# either frozen or done-and-not-asleep — the least available state there is.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap anahit
+seat_heartbeat anahit 30 61
+seat_progress anahit 3000 2700
+status_at_fixture
+nowork_row="an awake seat that has finished nothing for 45 minutes is named"
+if printf '%s' "$OUT" | grep -q '^WEDGED'; then
+    bad "$nowork_row" "the wedge arm fired on a seat with nothing in flight: $(printf '%s' "$OUT" | grep '^WEDGED')"
+elif ! printf '%s' "$OUT" | grep '^NOWORK' | grep -q anahit; then
+    bad "$nowork_row" "no line names the seat: $OUT"
+else
+    ok "$nowork_row, by the arm that fires when no tool call ever starts"
+fi
+
+# asleep-pending is live too, and it is the state the WORSE of the two measured
+# freezes was in — Անահիտ had run 'km sleep' and the shutdown modal ate the exit.
+# An arm reading 'awake' alone would show a dash for her.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_pending anahit
+seat_progress anahit 5400 9000
+status_at_fixture
+pending_row="a wedge under asleep-pending is named too"
+if ! printf '%s' "$OUT" | grep '^WEDGED' | grep -q anahit; then
+    bad "$pending_row" "a 90-minute wedge under asleep-pending passed unremarked: $OUT"
+else
+    ok "$pending_row — the half an arm reading only 'awake' would have missed"
+fi
+
+# A seat with no session says nothing either way. Its progress witness is as old
+# as its last working day, and marking it would fill the board with the past.
+dispatch_case '[]' '[]'
+make_inboxes
+seat_state ayg asleep
+seat_progress ayg 90000 86400
+status_at_fixture
+asleep_work_row="an asleep seat is never marked wedged or workless"
+if printf '%s' "$OUT" | grep -qE '^(WEDGED|NOWORK)'; then
+    bad "$asleep_work_row" "$(printf '%s' "$OUT" | grep -E '^(WEDGED|NOWORK)')"
+else
+    ok "$asleep_work_row"
+fi
+
+# The threshold is a config value, not a literal. Constitution V.6.1: a number
+# like this is tuned by editing kingdom.toml, and that is only true if nothing in
+# the code pins it. The same five-minute in-flight call that was NOT a wedge
+# above becomes one under a one-minute setting, and only the config changed.
+sed 's/^stalled_after_minutes = .*/stalled_after_minutes = 1/' \
+    "$REPO/kingdom/kingdom.toml" >"$TMP/impatient.toml"
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap mihr
+seat_heartbeat mihr 30 42
+seat_progress mihr 300 900
+OUT="$(cd "$FIXTURE" && PATH="$BIN:$PATH" KM_CONFIG="$TMP/impatient.toml" "$KM" status 2>&1)"
+tune_row="the stall threshold comes from kingdom.toml, not from a literal"
+if ! grep -q '^stalled_after_minutes = 1$' "$TMP/impatient.toml"; then
+    bad "$tune_row" "the fixture config was not rewritten, so this row asserts nothing"
+elif ! printf '%s' "$OUT" | grep '^WEDGED' | grep -q mihr; then
+    bad "$tune_row" "a one-minute threshold did not mark a five-minute call: $OUT"
+else
+    ok "$tune_row"
+fi
+
+# An unreadable witness is unknown, never an age — the argument the HB column's
+# "?" already carries. Rendering a corrupt file as a fresh one would say the most
+# reassuring possible thing about a seat nobody can read.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap ayg
+mkdir -p "$KM_STATE_DIR/seats/ayg"
+printf 'not json at all\n' >"$KM_STATE_DIR/seats/ayg/progress.json"
+status_at_fixture
+corrupt_work_row="a progress witness that cannot be parsed renders as unknown"
+if [ "$(work_cell ayg)" != '?' ]; then
+    bad "$corrupt_work_row" "row: $(printf '%s' "$OUT" | grep -E '^ayg')"
+elif printf '%s' "$OUT" | grep '^UNWITNESSED' | grep -q ayg; then
+    bad "$corrupt_work_row" "an unreadable file was reported as missing wiring, which points at the wrong repair: $OUT"
+else
+    ok "$corrupt_work_row, and is not confused with a checkout that cannot witness"
+fi
+
+# The instrument's own silence, separated from the seat's. A worktree parked
+# before this hook landed writes no progress.json at all, and a blank WORK cell
+# there means "nobody is watching", not "nothing happened" — the same overload
+# that hid Վահագն's whole night of work behind a blank HB column.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap vahagn
+seat_witness_checkout vahagn unwired
+status_at_fixture
+unwitnessed_row="a live seat whose checkout cannot write a progress witness is named"
+if [ "$(work_cell vahagn)" != 'unwired' ]; then
+    bad "$unwitnessed_row" "the WORK cell reads as an ordinary silence: $(printf '%s' "$OUT" | grep -E '^vahagn')"
+elif ! printf '%s' "$OUT" | grep '^UNWITNESSED' | grep -q vahagn; then
+    bad "$unwitnessed_row" "no line names the seat: $OUT"
+elif ! printf '%s' "$OUT" | grep '^UNWITNESSED' | grep -q 'seat-refresh'; then
+    bad "$unwitnessed_row" "the line names the seat but not the remedy: $(printf '%s' "$OUT" | grep '^UNWITNESSED')"
+else
+    ok "$unwitnessed_row"
+fi
+
+# The wiring half of that guard, on a fixture where the script IS present. The
+# row above deletes the file, so the existence check short-circuits and the grep
+# for the settings key never runs — measured on this guard's twin, where blinding
+# the equivalent grep left the whole suite green.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap vahagn
+seat_witness_checkout vahagn halfwired
+status_at_fixture
+half_witness_row="a checkout that has the witness script but does not wire it is unwitnessed too"
+if ! printf '%s' "$OUT" | grep '^UNWITNESSED' | grep -q vahagn; then
+    bad "$half_witness_row" "the present script was taken for a working instrument: $OUT"
+else
+    ok "$half_witness_row — the guard reads the wiring, not merely the file"
+fi
+
+# The falsifier that stops the new arm swallowing the ordinary case: a seat that
+# CAN witness and simply has not run a tool yet is not a broken instrument.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap vahagn
+seat_witness_checkout vahagn wired
+status_at_fixture
+wired_witness_row="a wired checkout with no progress witness yet is not called unwitnessed"
+if printf '%s' "$OUT" | grep -q '^UNWITNESSED'; then
+    bad "$wired_witness_row" "$(printf '%s' "$OUT" | grep '^UNWITNESSED')"
+else
+    ok "$wired_witness_row — the arm reads the checkout, not the absence of the file"
+fi
+
+# The witness wins where there is one. A seat that HAS reported progress has
+# demonstrated the wiring works, whatever a later read of its checkout says.
+dispatch_case '[]' '[]'
+make_inboxes
+fill_cap vahagn
+seat_progress vahagn 200 120
+seat_witness_checkout vahagn unwired
+status_at_fixture
+witness_beats_row="a seat that has actually witnessed progress is rendered by the witness"
+if [ "$(work_cell vahagn)" != '2m' ]; then
+    bad "$witness_beats_row" "the age was replaced: $(printf '%s' "$OUT" | grep -E '^vahagn')"
+elif printf '%s' "$OUT" | grep -q '^UNWITNESSED'; then
+    bad "$witness_beats_row" "$OUT"
+else
+    ok "$witness_beats_row"
+fi
+
+# The column has a heading, and it is not the HB column. A table that grew a cell
+# without a heading is a number nobody can read.
+if printf '%s' "$OUT" | grep -E '^SEAT' | grep -qE 'HB +WORK +TREE'; then
+    ok "the header names WORK between HB and TREE"
+else
+    bad "the header names WORK between HB and TREE" "$(printf '%s' "$OUT" | grep -E '^SEAT')"
+fi
+
 # --- the contract with real tmux ---------------------------------------------
 # Every row above stands on a stubbed tmux and a stubbed ps, and a stub encodes
 # what I BELIEVE those tools do. The belief is load-bearing here in a way it was
