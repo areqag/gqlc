@@ -18,12 +18,13 @@
 // backend's encoding of a zone, and a Neo4j arm running the same body would be
 // asserting a zone on a driver-native temporal that never consulted a sidecar.
 //
-// NOT YET ENROLLED, and therefore not yet a gate. test-codegen-live-age selects
-// its tests by an explicit -run allowlist that does not name TestAGEOffsetSidecar,
-// so as of this commit the file compiles, ships, and runs nowhere. Measured, not
-// assumed: under that recipe's flags `-v` prints four `=== RUN` lines and none of
-// them is this test, while `-list '.*'` under the same tag lists it. bd gqlc-zm6k
-// carries the one-line recipe change; gqlc-vs9i stays open until it lands.
+// Enrolled by name in test-codegen-live-age's -run alternation, because that
+// recipe selects by an explicit allowlist and a live test it does not name runs
+// in no job at all. TestEveryLiveTestIsRunByARecipeThatNamesIt
+// (internal/liverecipes) is what refuses the unenrolled state; this file was
+// written before that gate landed and measured as dead under the old recipe —
+// four `=== RUN` lines, none of them this one — which is exactly what it now
+// catches.
 
 package fixtures_test
 
