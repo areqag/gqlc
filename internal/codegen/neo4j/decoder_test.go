@@ -71,10 +71,16 @@ var decoderProbeScalars = []decoderProbeWidth{
 // to the table above arrives with its slice and its slice-of-slice
 // already declared. Two levels is where the derivation stops, and it is
 // the first depth that reaches writeSliceNarrow's recursive arm at all.
-// No depth would finish the job: that walk names its locals off the
-// recursion depth, so each further level of nesting introduces
-// identifiers no shallower probe has seen. gqlc-wdo7 carries the
-// measurement and what closing it would take.
+//
+// No depth finishes the job on its own: that walk names its locals off
+// the recursion depth, so each further level of nesting introduces
+// identifiers no shallower probe has seen, and extending this to three
+// would only move the boundary (bd gqlc-wdo7). What closes it is a
+// different measurement, not a deeper one —
+// TestDecoderLocalFamiliesAreClosedUnderDepth holds the *families* the
+// emitter draws from rather than the set one probe happens to observe.
+// This width table is what the per-width sweeps below read; the closure
+// test builds its own narrow schema.
 func decoderProbeWidths() []decoderProbeWidth {
 	out := make([]decoderProbeWidth, 0, 3*len(decoderProbeScalars))
 	for _, w := range decoderProbeScalars {
@@ -614,6 +620,170 @@ func (s *DecoderSuite) TestNoDecoderLocalTakesAPropertyName() {
 				"a property name reached the decoder's scope")
 		})
 	}
+}
+
+// closureProbeDepth is how deep the closure probe nests the list
+// constructor. Three is one level past decoderProbeWidths, which is
+// enough for a stem to be observed at three suffixes (elem0, elem1,
+// elem2) and so for "the suffix is the recursion depth" to be a reading
+// of the emission rather than of two points.
+const closureProbeDepth = 3
+
+// closureProbeFill is how many properties each entity in the closure
+// probe declares. The positional locals (value0, value1, …) are indexed
+// by field position rather than by nesting depth, and a schema of one
+// property per entity never reaches the second position — which is the
+// silence decoderProbeSchema's own doc comment records. Eight is past
+// any suffix the depth families reach here, so the two families are
+// probed over one shared candidate range.
+const closureProbeFill = 8
+
+// closureProbeSchema is a schema built to exercise every family of local
+// the entity decoders bind, at more than one index in each: the list
+// constructor nested 0..closureProbeDepth deep (elem<n>, i<n>,
+// nested<n>, acc<n>, v<n>), closureProbeFill properties per entity
+// (value<n>), and a multi-label node type (has<n>).
+//
+// prop names the one property whose name is under test; the rest are
+// fillers, spelled so they cannot themselves collide with anything.
+//
+// It is deliberately narrow on width — INT64 and nothing else — because
+// the claim it serves is about the identifiers the walk binds, which
+// depend on depth and position and not on the leaf carrier. The width
+// axis is decoderProbeSchema's.
+func closureProbeSchema(prop string, maxDepth int) string {
+	props := func() string {
+		var b strings.Builder
+		for depth := range maxDepth + 1 {
+			ty := "INT64"
+			for range depth {
+				ty = "LIST<" + ty + ">"
+			}
+			for i := range closureProbeFill {
+				name := fmt.Sprintf("zfiller%dx%d", depth, i)
+				if depth == maxDepth && i == 0 {
+					name = prop
+				}
+				fmt.Fprintf(&b, "%s :: %s NOT NULL, ", name, ty)
+			}
+		}
+		return strings.TrimSuffix(b.String(), ", ")
+	}()
+
+	var b strings.Builder
+	b.WriteString("CREATE PROPERTY GRAPH TYPE ClosureProbe AS {\n")
+	b.WriteString("    (:Endpoint),\n")
+	fmt.Fprintf(&b, "    (:Deep { %s }),\n", props)
+	fmt.Fprintf(&b, "    NODE TYPE Pair (p :Alpha&Beta&Gamma { %s }),\n", props)
+	fmt.Fprintf(&b, "    (:Endpoint) -[:EdgeDeep { %s }]-> (:Endpoint)\n", props)
+	b.WriteString("}")
+	return b.String()
+}
+
+// TestDecoderLocalFamiliesAreClosedUnderDepth is what
+// TestNoDecoderLocalTakesAPropertyName cannot be. That test reads the
+// identifiers off one emission and feeds each back as a property name,
+// so what it holds is the *set* a probe of a fixed shape happens to
+// produce. The emitter does not draw from a set: writeSliceNarrow names
+// its locals `fmt.Sprintf("elem%d", depth)` and three siblings the same
+// way, and writeLabelGuard and writeEntityFieldDecode index theirs by
+// key-label position and field position. Every one of those is a family
+// `<stem><n>` with no bound on n, so a schema nesting one level deeper
+// than the probe emits five identifiers no sweep has ever seen, and a
+// property named after any of them collides undetected (bd gqlc-wdo7).
+//
+// This holds the families instead, in two halves.
+//
+// The stem half: emitting at each depth from the first that reaches the
+// recursive arm up to closureProbeDepth must yield the same set of
+// stems. A depth that introduced a stem no shallower one carries would
+// be a family this file has not enumerated, and the candidate half
+// below would not be probing it.
+//
+// The suffix half: for every stem observed with a numeric suffix, a
+// property named `<stem><m>` — for every m in a range past any suffix
+// the emission reaches — must leave the decoders' scope exactly where
+// it was. That is the closure. It does not depend on the emission ever
+// reaching depth m, which is the whole point: the identifier `elem7` is
+// refused as a property name today, so the day a user's schema nests
+// seven deep and the emitter binds it, nothing collides.
+func (s *DecoderSuite) TestDecoderLocalFamiliesAreClosedUnderDepth() {
+	scopes := make(map[int][]string)
+	stems := make(map[int][]string)
+	for depth := 2; depth <= closureProbeDepth; depth++ {
+		models, err := s.emitClosureModels(unclaimedProperty, depth)
+		s.Require().NoError(err)
+		scopes[depth] = s.decoderScopeOf(models)
+		s.Require().NotEmpty(scopes[depth], "the emitted decoders bind no identifiers to check at depth %d", depth)
+		stems[depth] = suffixedStems(scopes[depth])
+		s.Require().NotEmpty(stems[depth],
+			"no identifier the decoders bind at depth %d carries a numeric suffix, so there is no family here "+
+				"to close and the candidate sweep below would run over nothing", depth)
+	}
+	for depth := 3; depth <= closureProbeDepth; depth++ {
+		s.Require().Equal(stems[2], stems[depth],
+			"nesting the list constructor %d deep rather than 2 changes which families of local the decoders "+
+				"bind. A stem only the deeper emission carries is one the closure sweep below never probes, so "+
+				"a property named after it would collide; a stem only the shallower one carries means the "+
+				"suffix is not the recursion depth after all", depth)
+	}
+
+	// The deepest emission is the reference: it is the one whose scope
+	// holds the highest suffix of every family, so a candidate that
+	// slipped into it would move the comparison.
+	reference := scopes[closureProbeDepth]
+	for _, stem := range stems[closureProbeDepth] {
+		for m := range closureProbeFill {
+			name := fmt.Sprintf("%s%d", stem, m)
+			s.Run(name, func() {
+				models, err := s.emitClosureModels(name, closureProbeDepth)
+				if err != nil {
+					s.T().Skipf("no property can be named %q: %v", name, err)
+				}
+				s.Require().Contains(models, "\t"+exportedField(name)+" ",
+					"the struct no longer carries the property under the name the schema gave it")
+				s.Require().Equal(reference, s.decoderScopeOf(models),
+					"a property named %q reached the decoder's scope: the %s family is not closed, so a "+
+						"schema deep or wide enough for the emitter to bind this identifier itself would "+
+						"emit a redeclaration", name, stem)
+			})
+		}
+	}
+}
+
+// suffixedStems is the sorted, deduplicated set of stems among names
+// ending in decimal digits. A name carrying no digit contributes
+// nothing: it is a fixed identifier, held by
+// TestNoDecoderLocalTakesAPropertyName, and has no family behind it.
+func suffixedStems(names []string) []string {
+	seen := make(map[string]bool)
+	for _, name := range names {
+		stem := strings.TrimRightFunc(name, unicode.IsDigit)
+		if stem == name || stem == "" {
+			continue
+		}
+		seen[stem] = true
+	}
+	return slices.Sorted(maps.Keys(seen))
+}
+
+// emitClosureModels emits models.go for the closure probe schema spelled
+// around prop at the given nesting depth. The error is the schema
+// parse's alone, for the reason emitModels gives.
+func (s *DecoderSuite) emitClosureModels(prop string, depth int) (string, error) {
+	sch, err := gql.New().Parse(strings.NewReader(closureProbeSchema(prop, depth)))
+	if err != nil {
+		return "", err
+	}
+	files, err := New().Generate(codegen.Input{Schema: sch})
+	s.Require().NoError(err)
+	for _, f := range files {
+		if f.Path == "models.go" {
+			return string(f.Contents), nil
+		}
+	}
+	s.Require().Fail("no models.go in the emission")
+	return "", nil
 }
 
 // emitModels emits models.go for the probe schema spelled around the

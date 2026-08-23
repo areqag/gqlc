@@ -18,8 +18,19 @@ type Bin struct {
 }
 
 // decodeBin decodes a driver dbtype.Node into a Bin struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeBin(node dbtype.Node) (Bin, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Bin" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Bin{}, fmt.Errorf("decode Bin: expected a node labelled %q, got labels %q", "Bin", node.Labels)
+	}
 	var out Bin
 	if v, ok := node.Props["bag"]; ok {
 		s, ok := v.([]any)

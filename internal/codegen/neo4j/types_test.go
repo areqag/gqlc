@@ -10,11 +10,19 @@ import (
 )
 
 // TestTypeMapProperty pins the driver's Go-type table for the property
-// axis (spec §5.1): 21 representable widths each map to their Go
-// carrier, the eight unrepresentable widths report ok=false so the
-// caller routes to ErrUnrepresentableWidth, and a list width recurses
-// element-wise. A width added to internal/graph without a row here
-// leaves the table silently unswept.
+// axis (spec §5.1): the representable widths each map to their Go
+// carrier, the unrepresentable ones report ok=false so the caller routes
+// to ErrUnrepresentableWidth, and a list width recurses element-wise.
+//
+// Which widths those are is derived, not counted. The two tables below
+// used to be held to the literals 21 and 8, and a count is a size rather
+// than a membership: it says nothing about which constants are in the
+// table, so graph.TypeAnyPropertyValue and graph.TypeList sat outside
+// both for as long as the arms answering `any` and `[]any` have existed
+// (bd gqlc-2l8v — 29 of internal/graph's 31 constants were named here).
+// The obligation is now read off typeMap.Property's own case
+// expressions by propertyArmNames, so a constant that gains an arm
+// there arrives owing a row, and one that loses its arm stops owing one.
 func TestTypeMapProperty(t *testing.T) {
 	representable := []struct {
 		pt   graph.PropertyType
@@ -41,8 +49,20 @@ func TestTypeMapProperty(t *testing.T) {
 		{graph.TypeLocalTime, "dbtype.LocalTime"},
 		{graph.TypeTimestamp, "time.Time"},
 		{graph.TypeDuration, "dbtype.Duration"},
+		// A property of no declared shape. `any` is the one answer that
+		// rides neither of the driver's constrained generics, which is
+		// what ridesADriverCarrier turns on and what routes the decode
+		// through the Props map.
+		{graph.TypeAnyPropertyValue, "any"},
+		// The bare LIST / ARRAY. Its arm in the switch is unreachable —
+		// TypeList is spelled "LIST<ANY>", so Kind() reports KindList and
+		// the recursion at the top of Property takes it, answering
+		// "[]" + Property(TypeAnyPropertyValue). The row is here because
+		// what a caller declaring a bare LIST gets is the table's answer
+		// however it is reached; the arm's own text is pinned by
+		// TestTypeMapPropertyListArmIsUnreachable below.
+		{graph.TypeList, "[]any"},
 	}
-	require.Len(t, representable, 21)
 	for _, tt := range representable {
 		t.Run("representable/"+string(tt.pt), func(t *testing.T) {
 			got, ok := typeMap{}.Property(tt.pt)
@@ -57,13 +77,47 @@ func TestTypeMapProperty(t *testing.T) {
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
 		graph.TypeDecimal,
 	}
-	require.Len(t, unrepresentable, 8)
 	for _, pt := range unrepresentable {
 		t.Run("unrepresentable/"+string(pt), func(t *testing.T) {
 			got, ok := typeMap{}.Property(pt)
 			require.False(t, ok)
 			require.Empty(t, got)
 		})
+	}
+
+	// Every constant the switch has an arm for owes a row above. The two
+	// walks read different files — propertyArmNames the case expressions
+	// in types.go, graphPropertyTypes the const specs in internal/graph —
+	// so a name in an arm that no constant declares fails here too,
+	// rather than quietly widening the obligation by a spelling nothing
+	// upstream holds.
+	declared := graphPropertyTypes(t)
+	covered := make(map[string]bool)
+	for _, tt := range representable {
+		name, known := declared[tt.pt]
+		require.True(t, known, "the representable table names %s, which %s declares no constant for", tt.pt, graphPropertyTypeSource)
+		require.False(t, covered[name], "graph.%s has two rows in this table", name)
+		covered[name] = true
+	}
+	for _, pt := range unrepresentable {
+		name, known := declared[pt]
+		require.True(t, known, "the unrepresentable table names %s, which %s declares no constant for", pt, graphPropertyTypeSource)
+		require.False(t, covered[name], "graph.%s has two rows in this table", name)
+		covered[name] = true
+	}
+	arms := propertyArmNames(t)
+	require.NotEmpty(t, arms,
+		"the walk read no case expression off %s, so the obligation below is satisfied by any table at all", typeTableSource)
+	for name := range arms {
+		require.True(t, covered[name],
+			"typeMap.Property has an arm for graph.%s and no row above names it, so what that arm answers is "+
+				"unswept: add it to the representable table with the Go carrier it returns, or to the "+
+				"unrepresentable one", name)
+	}
+	for name := range covered {
+		require.True(t, arms[name],
+			"a row above names graph.%s and typeMap.Property has no arm for it, so the row is measuring the "+
+				"fallthrough rather than a decision the table makes", name)
 	}
 
 	t.Run("list recurses element-wise", func(t *testing.T) {
@@ -76,6 +130,26 @@ func TestTypeMapProperty(t *testing.T) {
 		_, ok := typeMap{}.Property(graph.ListOf(graph.TypeDecimal, false))
 		require.False(t, ok)
 	})
+}
+
+// TestTypeMapPropertyListArmIsUnreachable pins the claim types.go makes
+// about its own graph.TypeList arm — "intercepted by the Kind() guard
+// above; unreachable here" — which rests on one fact upstream: TypeList
+// is spelled "LIST<ANY>", so Kind() reports KindList and the recursion
+// takes it before the switch is entered.
+//
+// It is worth pinning because the arm and the recursion answer the same
+// text today, so respelling the constant would move which of the two
+// runs without moving the result, and the comment would be false with
+// nothing red. The row in TestTypeMapProperty's table cannot catch it:
+// it asks what a caller gets, and both paths give "[]any".
+func TestTypeMapPropertyListArmIsUnreachable(t *testing.T) {
+	require.Equal(t, graph.KindList, graph.TypeList.Kind(),
+		"graph.TypeList no longer reports KindList, so typeMap.Property's recursion no longer intercepts it "+
+			"and the case arm types.go documents as unreachable is now the one that answers")
+	require.Equal(t, graph.TypeAnyPropertyValue, graph.TypeList.Elem(),
+		"a bare LIST's element type is no longer the open property-value union, so the recursion answers "+
+			"through some other arm than the one this table's row was written against")
 }
 
 // TestTypeMapTemporal pins the temporal column-shape row of the table

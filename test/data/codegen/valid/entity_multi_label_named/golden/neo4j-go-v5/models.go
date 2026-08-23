@@ -16,8 +16,29 @@ type PersonEmployee struct {
 }
 
 // decodePersonEmployee decodes a driver dbtype.Node into a PersonEmployee struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodePersonEmployee(node dbtype.Node) (PersonEmployee, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Employee" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return PersonEmployee{}, fmt.Errorf("decode PersonEmployee: expected a node labelled %q, got labels %q", "Employee", node.Labels)
+	}
+	has1 := false
+	for _, label := range node.Labels {
+		if label == "Person" {
+			has1 = true
+			break
+		}
+	}
+	if !has1 {
+		return PersonEmployee{}, fmt.Errorf("decode PersonEmployee: expected a node labelled %q, got labels %q", "Person", node.Labels)
+	}
 	var out PersonEmployee
 	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {

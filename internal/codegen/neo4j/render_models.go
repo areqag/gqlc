@@ -64,22 +64,20 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 		}
 	}
 
-	anyProp := false
+	// fmt is unconditional once an entity exists: every decode helper
+	// opens with the wire-label guard, whose mismatch arm is a
+	// fmt.Errorf. It used to gate on a property whose read can fail,
+	// which left a zero-property entity's helper importing nothing —
+	// that helper now reports a wrong-labelled value like every other.
+	anyProp := true
 	anyNonNull := false
 	anyTime := false
 	for _, e := range entities {
 		for _, f := range e.Fields {
-			// fmt is emitted for the decode failures and neo4j for
-			// GetProperty, and a property of no declared shape moves
-			// both: it never reaches GetProperty at all
-			// (ridesADriverCarrier), and on the nullable arm its read
-			// is a Props lookup whose miss is the schema's null rather
-			// than a failure to report. A schema of nothing but those
-			// imports neither package, and an import nothing names
-			// does not compile.
-			if !f.Nullable || ridesADriverCarrier(f.GoType) {
-				anyProp = true
-			}
+			// neo4j is emitted for GetProperty, which a property of no
+			// declared shape never reaches (ridesADriverCarrier) and a
+			// nullable one reads round through the Props map. An import
+			// nothing names does not compile.
 			if !f.Nullable && ridesADriverCarrier(f.GoType) {
 				anyNonNull = true
 			}
@@ -168,11 +166,13 @@ func writeEntityStruct(b *strings.Builder, e codegen.Entity) {
 }
 
 // writeEntityDecodeHelper emits the unexported decode<Name> helper for
-// one entity. A property of a declared shape reads through the driver:
-// nullable ones by direct Props lookup + type assertion (three-way
-// outcome), non-nullable ones through neo4j.GetProperty[T] (missing key
-// is a decode error). A property of no declared shape reads through the
-// Props map on both arms — see writeShapelessFieldDecode.
+// one entity. It opens with the wire-label guard (writeLabelGuard) and
+// then reads the properties. A property of a declared shape reads
+// through the driver: nullable ones by direct Props lookup + type
+// assertion (three-way outcome), non-nullable ones through
+// neo4j.GetProperty[T] (missing key is a decode error). A property of no
+// declared shape reads through the Props map on both arms — see
+// writeShapelessFieldDecode.
 func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 	var carrier, arg string
 	if e.Kind == codegen.EntityNode {
@@ -183,14 +183,70 @@ func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 		arg = "rel"
 	}
 	fmt.Fprintf(b, "// decode%s decodes a driver %s into a %s struct,\n", e.Name, carrier, e.Name)
-	b.WriteString("// enforcing per-property nullability against the schema.\n")
+	b.WriteString("// enforcing the wire label and the per-property nullability the\n")
+	b.WriteString("// schema declares.\n")
 	fmt.Fprintf(b, "func decode%s(%s %s) (%s, error) {\n", e.Name, arg, carrier, e.Name)
+	writeLabelGuard(b, e, arg)
 	fmt.Fprintf(b, "\tvar out %s\n", e.Name)
 	for i, f := range e.Fields {
 		writeEntityFieldDecode(b, e, i, f, arg)
 	}
 	b.WriteString("\treturn out, nil\n")
 	b.WriteString("}\n")
+}
+
+// writeLabelGuard emits the check that the driver value the helper was
+// handed carries the labels the schema keys this entity on. Without it a
+// decoder reads whatever Props it is given: hand decodePerson a Post
+// whose property names overlap and it fills a Person and reports no
+// error. What arrives is a dbtype.Node the driver built, not a value
+// gqlc constructed, so what the resolver asked for does not bound what
+// comes back — the decoder is a boundary and validates. AGE's decoders
+// have always done this (internal/codegen/age's writeEntityDecoder);
+// bd gqlc-2h9w is the ruling that the two backends may not disagree
+// about it.
+//
+// A mismatch is an error naming both the label wanted and what the value
+// carried. There is no correct value to return instead, so a silent
+// zero would trade one silent failure for another.
+//
+// The two carriers differ in what they can hold. A node carries a set,
+// which may hold labels beyond the key set the schema names — a
+// deployment's own "Archived", say — so the check is containment, one
+// pass per key label. A relationship carries exactly one type, so the
+// check is equality. An entity keyed on more than one label is a node
+// in every schema this backend has seen; on the relationship arm it
+// emits one equality per key label, which no single Type satisfies, and
+// that is the honest reading of a relationship the wire cannot carry.
+//
+// Locals are positional (has0, has1) or fixed (label), never derived
+// from anything the schema names, for the reason writeSliceNarrow gives.
+func writeLabelGuard(b *strings.Builder, e codegen.Entity, arg string) {
+	labels := e.Labels.Split()
+	if e.Kind == codegen.EntityEdge {
+		labels = e.EdgeKey.KeyLabels.Split()
+	}
+	for i, label := range labels {
+		if e.Kind == codegen.EntityEdge {
+			fmt.Fprintf(b, "\tif %s.Type != %q {\n", arg, label)
+			fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s: expected a relationship of type %%q, got %%q\", %q, %s.Type)\n",
+				e.Name, e.Name, label, arg)
+			b.WriteString("\t}\n")
+			continue
+		}
+		has := fmt.Sprintf("has%d", i)
+		fmt.Fprintf(b, "\t%s := false\n", has)
+		fmt.Fprintf(b, "\tfor _, label := range %s.Labels {\n", arg)
+		fmt.Fprintf(b, "\t\tif label == %q {\n", label)
+		fmt.Fprintf(b, "\t\t\t%s = true\n", has)
+		b.WriteString("\t\t\tbreak\n")
+		b.WriteString("\t\t}\n")
+		b.WriteString("\t}\n")
+		fmt.Fprintf(b, "\tif !%s {\n", has)
+		fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s: expected a node labelled %%q, got labels %%q\", %q, %s.Labels)\n",
+			e.Name, e.Name, label, arg)
+		b.WriteString("\t}\n")
+	}
 }
 
 // writeEntityFieldDecode emits the decode of the property at index i.
