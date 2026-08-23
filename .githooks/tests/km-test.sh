@@ -571,8 +571,28 @@ case "$1" in
                # they assert the exit status, so the arm is pinned by them and
                # not by this default.
                *"--status open"*) f="${KM_FAKE_OPEN:-$KM_EMPTY_BOARD}" ;;
+               # The patrol bound's query (ADR 0004 §2). It asks --status ALL
+               # on purpose — bd's `--status open` excludes in_progress and
+               # blocked, so a claimed patrol bead would read as absent — and
+               # the stub answers it from its own fixture so a row can put a
+               # patrol bead on the board in any status it likes. An empty
+               # board is the default for the same reason as the arm above:
+               # every row written before patrol existed says nothing about it.
+               *"--status all"*) f="${KM_FAKE_ALL:-$KM_EMPTY_BOARD}" ;;
                *) echo "bd stub: unexpected list query: $_all" >&2; exit 1 ;;
            esac ;;
+    # bd WRITES, which no other stubbed query does. The whole invocation is
+    # recorded rather than parsed, so a row can assert the priority, the labels
+    # and the ABSENCE of an assignee against the bytes km actually passed —
+    # a stub that decoded them into a tidy record could not witness a flag km
+    # never wrote. A sidecar rc makes the refusal path expressible.
+    # Newlines are squashed so the record is ONE LINE PER INVOCATION: the -d
+    # body is a multi-line brief, and a row counting beads filed would
+    # otherwise count the paragraphs of a single one.
+    create) printf '%s\n' "${_all//$'\n'/ }" >>"${KM_STATE_DIR:-/dev/null}/bd-created"
+            [ -z "${KM_FAKE_CREATE_RC:-}" ] || exit "$KM_FAKE_CREATE_RC"
+            echo "created: gqlc-fake1"
+            exit 0 ;;
     # The hold verdict's two inputs (gqlc-pj4r). Neither is capped by bd, so
     # neither models a limit. `dep list` is pinned to the MULTI-id form on
     # purpose: the single-id form returns the parent issue object instead of
@@ -6076,6 +6096,152 @@ elif ! printf '%s' "$OUT" | grep -q "king's inbox"; then
 else
     ok "$bn_both"
 fi
+
+# --- the patrol bead (ADR 0004 §2, bead gqlc-ferp) ---------------------------
+# The judges' patrol is the compensating control on ADR 0003's whole regime:
+# nearly every PR now merges on green gates with its author as the only reader,
+# and patrol is the thing that reads them afterwards. Measured at c129a0a5 it
+# was two sentences of prose with no trigger — a seat runs only when woken,
+# dispatch wakes a seat only for a bead, and nothing filed one — so the control
+# could not begin. km guard-sweep files it now.
+#
+# The BOUND is one open at a time, permanently. That clause is what keeps ADR
+# 0004 inside ADR 0003's constraint, so most of these rows are about the bound
+# rather than about the filing.
+patrol_board=""
+patrol_case() { # $1 = the whole board bd answers --status all with
+    dispatch_case '[]' '[]'
+    export KM_FAKE_ALL="$KM_STATE_DIR/board-all.json"
+    printf '%s' "$1" >"$KM_FAKE_ALL"
+    patrol_board="$KM_STATE_DIR/bd-created"
+}
+patrol_created() { cat "$patrol_board" 2>/dev/null; }
+
+bn="a sweep with no patrol bead open files one"
+patrol_case '[{"id":"gqlc-other","status":"open","labels":["class:judge"]}]'
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ ! -s "$patrol_board" ]; then
+    bad "$bn" "km filed nothing (out=$OUT)"
+elif [ "$(wc -l <"$patrol_board")" -ne 1 ]; then
+    bad "$bn" "it filed more than one bead in a single sweep: $(patrol_created)"
+elif ! patrol_created | grep -q -- '-p 2'; then
+    bad "$bn" "the filed bead is not P2 — ADR 0004 §2 sets patrol's priority: $(patrol_created)"
+elif ! patrol_created | grep -q 'class:judge'; then
+    bad "$bn" "the filed bead carries no class:judge label, so dispatch would never route it to a judge: $(patrol_created)"
+elif ! patrol_created | grep -q 'patrol'; then
+    bad "$bn" "the filed bead carries no patrol label, so the one-open bound below cannot find it: $(patrol_created)"
+elif patrol_created | grep -qE -- '(--assignee|(^| )-a )'; then
+    bad "$bn" "km assigned the bead to a seat; patrol goes on the board unassigned so the dispatcher picks the judge: $(patrol_created)"
+elif ! printf '%s' "$OUT" | grep -q 'filed a patrol bead'; then
+    bad "$bn" "it filed one silently — the sweep's output has to say so or nobody can tell it happened: $OUT"
+else
+    ok "$bn, unassigned and P2 with both labels"
+fi
+
+# The bound. Three rows, one per status bd calls not-closed, because the whole
+# defect this guards against is a status-name reading: bd's `--status open` is
+# the LITERAL status and excludes in_progress and blocked, so a patrol bead a
+# judge had already CLAIMED would read as absent and the next cadence would
+# file a second one — the bound gone, silently, in exactly the state it exists
+# for. The same reading made km doctor's identity arm miss a P0 (gqlc-18br,
+# gqlc-c7b5). The in_progress row is the one that fails if km ever asks bd the
+# convenient question.
+for st in open in_progress blocked; do
+    bn="a patrol bead already $st suppresses a second one"
+    patrol_case "[{\"id\":\"gqlc-pat1\",\"status\":\"$st\",\"labels\":[\"class:judge\",\"patrol\"]}]"
+    run_guard
+    if [ "$RC" -ne 0 ]; then
+        bad "$bn" "rc=$RC out=$OUT"
+    elif [ -s "$patrol_board" ]; then
+        bad "$bn" "km filed a second patrol bead beside the $st one: $(patrol_created)"
+    elif ! printf '%s' "$OUT" | grep -q 'patrol already open (gqlc-pat1)'; then
+        bad "$bn" "it filed nothing but does not name the bead that held it, so a silent sweep is indistinguishable from a broken one: $OUT"
+    else
+        ok "$bn, and the sweep names it"
+    fi
+done
+
+# A status nobody here has heard of counts as open. For a BOUND that is the
+# safe side: the failure of guessing wrong is one round of patrol deferred by a
+# cadence, against an unbounded queue if a future bd status defaulted to closed.
+bn="an unrecognised patrol status counts as open, not as closed"
+patrol_case '[{"id":"gqlc-pat9","status":"deferred","labels":["patrol"]}]'
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ -s "$patrol_board" ]; then
+    bad "$bn" "km treated the unknown status 'deferred' as closed and filed another: $(patrol_created)"
+else
+    ok "$bn"
+fi
+
+bn="a closed patrol bead does not suppress the next round"
+patrol_case '[{"id":"gqlc-pat0","status":"closed","closed_at":"2026-08-20T11:00:00Z","labels":["class:judge","patrol"]}]'
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ ! -s "$patrol_board" ]; then
+    bad "$bn" "patrol stopped forever after its first round closed (out=$OUT)"
+elif ! patrol_created | grep -q '2026-08-20T11:00:00Z'; then
+    bad "$bn" "the new bead does not carry the previous one's close time, so the judge re-reads merges already read: $(patrol_created)"
+else
+    ok "$bn, and the new one's window starts where the closed one ended"
+fi
+
+# The halt binds this too. Article VI.4 reserves lowering a halt to Սեդրակ or
+# Անդրանիկ; a halted town that goes on filing beads for a seat nobody may wake
+# is accumulating exactly the queue the halt was raised to stop.
+bn="a halted sweep files no patrol bead"
+patrol_case '[]'
+run halt patrol must stop under a halt
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ -s "$patrol_board" ]; then
+    bad "$bn" "the halt was raised and km filed anyway: $(patrol_created)"
+elif ! printf '%s' "$OUT" | grep -q 'halted'; then
+    bad "$bn" "the sweep was silent but does not say the halt held it: $OUT"
+else
+    ok "$bn"
+fi
+
+# A bound that cannot be MEASURED is not raised. Filing blind on an unwell bd
+# would add a patrol bead every cadence for as long as it stayed unwell, which
+# is the queue this function exists to prevent — so the refusal has to be the
+# fail-CLOSED direction here, and it has to be audible.
+bn="an unreadable board files nothing and says why"
+patrol_case '[]'
+printf '1' >"$KM_FAKE_ALL.rc"
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "a failed board query took the whole sweep down: rc=$RC out=$OUT"
+elif [ -s "$patrol_board" ]; then
+    bad "$bn" "km filed blind against a board it could not read: $(patrol_created)"
+elif ! printf '%s' "$OUT" | grep -q 'the one-open bound could not be measured'; then
+    bad "$bn" "it filed nothing silently, so an unwell bd looks exactly like a bounded board: $OUT"
+elif ! wake_of raffi | grep -q 'round'; then
+    bad "$bn" "it also stopped the round; patrol is an addition to the sweep, not a precondition for it"
+else
+    ok "$bn, and the round still happens"
+fi
+
+bn="a refused bd create does not cost Րաֆֆի his round"
+patrol_case '[]'
+export KM_FAKE_CREATE_RC=1
+run_guard
+unset KM_FAKE_CREATE_RC
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif ! wake_of raffi | grep -q 'round'; then
+    bad "$bn" "bd refusing the filing stopped the sweep waking him (woken: $(woken_seats)) out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'could not be filed'; then
+    bad "$bn" "the refusal is swallowed — patrol would silently never start: $OUT"
+else
+    ok "$bn, and the refusal is audible"
+fi
+unset KM_FAKE_ALL
 
 # This suite builds git repositories, so it must be able to prove it built them
 # somewhere else. On PR #1128 it could not: a leaked GIT_DIR sent the fixture's

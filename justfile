@@ -2010,8 +2010,20 @@ test-codegen-live-neo4j:
 # a prefix here would silently claim every test that extends it, and
 # TestEveryLiveTestIsRunByARecipeThatNamesIt reads it as names for that reason. A
 # live test added to the codegen module and not added here runs in no job at all.
+#
+# -v because one of those names is an INSTRUMENT, not an assertion:
+# TestAGEAnswersTheConstructorsNobodyRan runs four openCypher constructors the
+# gap table only suspects and t.Logf's what the server said, each line prefixed
+# `osf1:`, asserting only that the server answered at all. Go DISCARDS a passing
+# package's output without -v — not t.Log, not fmt.Println, not a direct write
+# to os.Stdout — so measured on run 32634892211 (success, master, 19.7s) the log
+# held zero `osf1:` lines. The instrument ran green, paid for a container and
+# threw away its only product. -v goes on the whole recipe rather than a second
+# `go test` invocation because a second one would start a second AGE container
+# for one test; this recipe's -run list is already only the live battery, so the
+# added volume is that battery's own RUN/PASS lines (bd gqlc-8cjn).
 test-codegen-live-age:
-    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGEOffsetSidecar|TestAGEAnswersTheConstructorsNobodyRan' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGEOffsetSidecar|TestAGEAnswersTheConstructorsNobodyRan' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than
