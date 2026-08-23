@@ -24,6 +24,8 @@ source "$(cd "$(dirname "$0")/.." && pwd)/git-env-sandbox.sh"
 
 TRIPWIRE="$(cd "$(dirname "$0")/.." && pwd)/hooks-drift-tripwire"
 INSTALLER="$(cd "$(dirname "$0")/.." && pwd)/install-hooks-drift-tripwire"
+PROBE="$(cd "$(dirname "$0")/.." && pwd)/gqlc-liveness-probe"
+VERIFIER="$(cd "$(dirname "$0")/.." && pwd)/verify-hooks-live"
 JUSTFILE="$(cd "$(dirname "$0")/../.." && pwd)/justfile"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -73,6 +75,14 @@ EOF
     cp "$TRIPWIRE" "$repo/.githooks/hooks-drift-tripwire"
     cp "$INSTALLER" "$repo/.githooks/install-hooks-drift-tripwire"
     chmod +x "$repo/.githooks/hooks-drift-tripwire" "$repo/.githooks/install-hooks-drift-tripwire"
+
+    # `just check-hooks` also runs `.githooks/verify-hooks-live`, which asks git
+    # to execute `.githooks/gqlc-liveness-probe`, both by working-directory
+    # relative paths. Without them every row here that drives the real recipe
+    # would be scoring the recipe's refusal to verify an incomplete fixture.
+    cp "$PROBE" "$repo/.githooks/gqlc-liveness-probe"
+    cp "$VERIFIER" "$repo/.githooks/verify-hooks-live"
+    chmod +x "$repo/.githooks/gqlc-liveness-probe" "$repo/.githooks/verify-hooks-live"
 
     local dir
     dir="$(hooks_dir "$repo")"

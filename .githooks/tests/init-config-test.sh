@@ -39,6 +39,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 JUSTFILE="$REPO_ROOT/justfile"
 TRIPWIRE="$REPO_ROOT/.githooks/hooks-drift-tripwire"
 INSTALLER="$REPO_ROOT/.githooks/install-hooks-drift-tripwire"
+PROBE="$REPO_ROOT/.githooks/gqlc-liveness-probe"
+VERIFIER="$REPO_ROOT/.githooks/verify-hooks-live"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -94,6 +96,12 @@ EOF
     cp "$TRIPWIRE" "$repo/.githooks/hooks-drift-tripwire"
     cp "$INSTALLER" "$repo/.githooks/install-hooks-drift-tripwire"
     chmod +x "$repo/.githooks/hooks-drift-tripwire" "$repo/.githooks/install-hooks-drift-tripwire"
+
+    # `just init` now verifies its own repair by asking git to run a hook, by the
+    # same relative paths, so the fixture needs those two as well.
+    cp "$PROBE" "$repo/.githooks/gqlc-liveness-probe"
+    cp "$VERIFIER" "$repo/.githooks/verify-hooks-live"
+    chmod +x "$repo/.githooks/gqlc-liveness-probe" "$repo/.githooks/verify-hooks-live"
 
     echo seed >"$repo/seed.txt"
     git -C "$repo" add -A
@@ -255,6 +263,35 @@ else
     check "init from a linked worktree: it writes no worktree-local config file" 0 \
         "$(find "$(common_dir "$REPO")/worktrees" -name 'config.worktree' 2>/dev/null | wc -l | tr -d ' ')"
 fi
+
+# --- init must not report success it cannot witness --------------------------
+#
+# bd gqlc-o13d, the P0: `just init` printed "git hooks activated" from the fact
+# that the write returned, and the write is not the claim. The state below is the
+# one where those come apart with no race and no writer to catch — the value is
+# overridden from the ENVIRONMENT, so .git/config is correct before init runs,
+# correct after it, reads back '.githooks', and no hook runs.
+#
+# Scored on the recipe's EXIT STATUS and on a real commit, not on its output
+# text: a recipe that printed a warning and exited 0 would leave the reader with
+# exactly the belief this bead is about.
+REPO="$TMP/env-override"
+make_repo "$REPO"
+git -C "$REPO" config core.hooksPath .githooks
+export GIT_CONFIG_PARAMETERS="'core.hooksPath=/dev/null'"
+check "env-override fixture: the config FILE is already correct" .githooks \
+    "$(git -C "$REPO" config --file "$REPO/.git/config" --get core.hooksPath)"
+check "env-override fixture: no hook runs on a real commit anyway" silent \
+    "$(precommit_witness "$REPO")"
+run_init "$REPO"
+check "init: REFUSES rather than reporting success it cannot witness" 1 "$INIT_STATUS"
+unset GIT_CONFIG_PARAMETERS
+# The same fixture with the override gone is repaired and says so, which is what
+# stops the row above from being satisfied by a recipe that refuses everything.
+run_init "$REPO"
+check "init: exits 0 again once the override is cleared" 0 "$INIT_STATUS"
+check "init: the repo's own pre-commit runs once the override is cleared" ran \
+    "$(precommit_witness "$REPO")"
 
 # --- containment -------------------------------------------------------------
 

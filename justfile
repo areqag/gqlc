@@ -100,13 +100,43 @@ reap_threshold := "75"
 # a dependency because `just test` and `just doctor` need it too — this recipe
 # is run once after a clone, and the worktrees that predate it never run it
 # again.
+#
+# THE SUCCESS MESSAGE IS PART OF THE CONTRACT (bd gqlc-o13d). This recipe used to
+# print "git hooks activated" straight after the write, from the WRITE, and that
+# claim is not the write's to make. Measured 2026-08-23 on a throwaway repo: with
+# GIT_CONFIG_PARAMETERS="'core.hooksPath=/dev/null'" exported, `git config
+# core.hooksPath .githooks` writes .git/config, the file reads back '.githooks',
+# and a real `git commit` with a refusing pre-commit in .githooks/ LANDS. Every
+# string in sight is correct and nothing is gated. So a developer who ran the
+# remedy the drift detector prints, saw success, and carried on was working
+# unhooked — the state this bead was raised to P0 for. Success is now printed from
+# a behavioural reading: git is asked to RUN a hook, or nothing is claimed.
+#
+# That reading is behavioural for a second reason now. This recipe writes the
+# shared config twice — core.hooksPath here, core.sshCommand through the
+# dependency above — and `just doctor` writes it too. A repair that verified
+# itself by re-reading the file it had just written would be one concurrent
+# `git config` away from reporting on somebody else's update; running a hook
+# asks the question no writer of that file can answer for git.
 init: check-push-keepalive
     #!/usr/bin/env bash
     set -euo pipefail
     git config core.hooksPath .githooks
-    echo "git hooks activated (core.hooksPath = .githooks)"
     .githooks/install-hooks-drift-tripwire
+    if ! .githooks/verify-hooks-live; then
+        echo "" >&2
+        echo "error: 'just init' wrote core.hooksPath = .githooks and git STILL does not run" >&2
+        echo "       this repository's hooks. The write is not the repair — the lines above" >&2
+        echo "       say what is actually in the way. Hooks are NOT active; do not proceed as" >&2
+        echo "       though this recipe had succeeded (bd gqlc-o13d)." >&2
+        exit 1
+    fi
+    echo "git hooks active — git ran .githooks/gqlc-liveness-probe just now (core.hooksPath = .githooks)"
     echo "hooksPath drift tripwire installed in $(git rev-parse --git-common-dir)/hooks (shared by every linked worktree)"
+    echo "NOTE: that is a reading of this instant, not a promise. core.hooksPath lives in the"
+    echo "      config every linked worktree shares, so any other live session can revert it"
+    echo "      after this line prints — a worktree-isolated agent spawn is one measured way"
+    echo "      (bd gqlc-o13d). 'just check-hooks' re-reads it; 'I ran just init' does not."
 
 # fails when core.hooksPath drifts from .githooks, which silently kills every
 # local pre-commit/pre-push gate at once (CI cannot see local git config).
@@ -115,12 +145,14 @@ init: check-push-keepalive
 # This recipe is what a plain terminal has, but it only runs when someone runs
 # it. .githooks/claude-pre-bash runs a superset of it on every Bash tool call
 # inside a Claude Code session, which is what closes the window between the
-# drifting write and the next `just test` (bd gqlc-nzwa). A superset because
-# this recipe compares the configured value and nothing else: with
-# core.hooksPath = .githooks but .githooks/ holding only *.sample files, or a
-# hook file left non-executable, this exits 0 without a word (and `doctor`,
-# which depends on it, prints "ok") where claude-pre-bash refuses. Both states
-# are fixtures in .githooks/tests/claude-pre-bash-test.sh.
+# drifting write and the next `just test` (bd gqlc-nzwa). A superset in latency,
+# no longer in coverage: this recipe compared the configured value and nothing
+# else, so with core.hooksPath = .githooks but .githooks/ holding only *.sample
+# files, or a hook file left non-executable, it exited 0 without a word (and
+# `doctor`, which depends on it, printed "ok") where claude-pre-bash refuses.
+# Both states are fixtures in .githooks/tests/claude-pre-bash-test.sh. The
+# verify-hooks-live arm below closes them by running a hook rather than reading
+# about one, and closes the environment-override state neither of them had.
 #
 # Skipped under CI, which has no local hooks by design and runs the equivalent
 # gates as workflow jobs; without the skip this would fail every CI `just test`.
@@ -202,6 +234,19 @@ check-hooks:
     if [ "$got" != ".githooks" ]; then
         echo "error: core.hooksPath is '${got:-<unset>}', expected '.githooks' — local hooks are inactive." >&2
         echo "       Run 'just init' to fix." >&2
+        exit 1
+    fi
+    # The behavioural arm. Everything above compares a string, and the header
+    # names two states it exits 0 on for that reason — .githooks/ holding only
+    # *.sample files, and a hook left non-executable. This asks git to RUN one, so
+    # it answers both, and it also answers the state where the value is overridden
+    # from the ENVIRONMENT: `git config --get` reports the override, but a value
+    # arriving that way is repaired by clearing a variable and not by `just init`,
+    # and the arm above would send the reader to the wrong repair (bd gqlc-o13d).
+    if ! .githooks/verify-hooks-live; then
+        echo "error: core.hooksPath reads '.githooks' and git still did not run a hook." >&2
+        echo "       The value is a string; the lines above are the behaviour. Repair as" >&2
+        echo "       they say — 'just init' is not the answer to every one of these." >&2
         exit 1
     fi
     dest_dir="$(git rev-parse --git-common-dir)/hooks"
