@@ -419,13 +419,14 @@ func formatLabelList(first, second string, rest ...string) string {
 // "" when it has one. Served are a schema property of any width the type
 // table carries — which is every scalar width with an agtype scalar, a
 // list of one at whatever depth, and a property of no declared shape — a
-// bool / integer / float / string expression, and a whole vertex or edge,
+// bool / integer / float / string expression, a whole vertex or edge —
 // the last of these because its label and its properties are together
-// enough to fill the entity struct the schema declares. What remains is a
-// width no emitted helper can fill, an expression the resolver typed as
-// something other than a property, or — for the edge union — a column
-// that could only arrive in answer to a statement this server will not
-// parse.
+// enough to fill the entity struct the schema declares — and a list
+// expression whose every element is served, which unservedListElement
+// decides. What remains is a width no emitted helper can fill, an
+// expression the resolver typed as something other than a property, or —
+// for the edge union — a column that could only arrive in answer to a
+// statement this server will not parse.
 func unservedColumn(t resolver.ResolvedType) string {
 	switch ct := t.(type) {
 	case resolver.ResolvedProperty:
@@ -450,7 +451,15 @@ func unservedColumn(t resolver.ResolvedType) string {
 		// refuses with ErrUnrepresentableTemporal naming the kind, which
 		// this gate cannot do — it reports one reason per query (ADR 0025).
 		return ""
-	case resolver.ResolvedList, resolver.ResolvedUnknown:
+	case resolver.ResolvedList:
+		// A list EXPRESSION column, judged by its element rather than by
+		// its kind — see unservedListElement for why the unconditional
+		// refusal that stood here was outlived by the decode path.
+		if elem := unservedListElement(ct.Element); elem != "" {
+			return "projects a list of " + elem
+		}
+		return ""
+	case resolver.ResolvedUnknown:
 		return "projects " + ct.String()
 	}
 	// Reached without a ninth variant. resolver.ResolvedType's unexported
@@ -544,6 +553,112 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// unserved_nil_type_test.go's, which reddens by panic if this render
 	// goes back to a direct t.String().
 	return "projects " + codegen.ResolvedTypeName(t)
+}
+
+// unservedListElement names the element of a list EXPRESSION column this
+// backend has no decode arm for, or "" when every element in the chain
+// has one. The caller renders it as "projects a list of <name>", so the
+// author is told which element has no carrier rather than that they
+// wrote a list.
+//
+// resolver.ResolvedList used to be an unconditional entry in
+// unservedColumn, and that was right while this backend had no list
+// decode path at all. It has one: agtype carries an array natively, so a
+// schema property of list width is served at whatever nesting depth its
+// element width is served at, and the emitted column reads through the
+// named slice wrapper writeListHelper emits around agtypeList
+// (render_models.go). A list expression column reaches emission by a
+// different provenance — resolver.ResolvedList, built from a collect()
+// or a list literal, where a list property arrives as a
+// resolver.ResolvedProperty whose width is a list — and decodes through
+// the very same wrapper. So the refusal outlived its reason, and what
+// replaces it narrows rather than disappears (bd gqlc-p6cb, GH #711).
+//
+// The narrowing is the element vocabulary an expression list can hold
+// that a property list cannot, because a property's element width comes
+// from the schema and is therefore a width, whereas an expression's
+// element is any resolved type at all:
+//
+//   - A whole vertex or edge is served as a TOP-LEVEL column and refused
+//     here. columnDecoder answers a top-level entity column with the
+//     entity's own decoder, which is where the label check lives;
+//     elemDecoder has no such arm and hands the entity struct name to
+//     decodeFunc, which panics on a carrier the type table never
+//     produced. Refusing keeps that panic unreachable.
+//
+//   - An edge union is refused for the reason the top-level arm refuses
+//     one it can answer for, one level in: a list with an edge union at
+//     its leaf makes Phase B synthesise a sealed interface for the column
+//     (prepare.go, findEdgeUnionLeaf), and this package emits no sealed
+//     interface and no marker method (render_models.go, writeEntities).
+//     Admitting it would exit 0 over Go that references a type nothing
+//     declares. It is named as the element rather than routed through
+//     edgeUnionReason, whose whole subject is the STATEMENT a top-level
+//     edge-union column could only arrive in answer to.
+//
+//   - An instant is served as a property and refused as an element, at
+//     every depth. The zone rides a flat <f>Offset sidecar named after
+//     the property; a list has one name for all of its elements, so there
+//     is nowhere to put the zone of any element but the first. That is
+//     the same argument typeMap.Property makes for refusing a
+//     LIST<TIMESTAMP> property (types.go), reached by the other
+//     provenance, so the two agree.
+//
+//   - A null or map scalar element is refused because the top-level arm
+//     refuses the same scalar kinds. Both have a decodeFunc arm, so this
+//     is not a missing carrier; keeping the two arms in step is what stops
+//     `RETURN [null]` from being served on a backend that refuses `RETURN
+//     null`.
+//
+// A temporal element yields, answering "". The shared phase asks the type
+// table and refuses with ErrUnrepresentableTemporal naming the KIND,
+// which this gate cannot do because it reports one reason per query (ADR
+// 0025) — the same standing-aside unservedColumn's own temporal arm does.
+//
+// A nested list recurses and reports the offending element, not the outer
+// list: a list of lists of vertices is refused for the vertex, which is
+// the type the author has to change.
+//
+// TestListExpressionColumnIsJudgedByItsElement is the row-per-element
+// witness, and TestListExpressionColumnDecodesThroughTheSliceWrapper is
+// the other half — that a served row reaches the wrapper rather than
+// merely passing the gate.
+func unservedListElement(t resolver.ResolvedType) string {
+	switch et := t.(type) {
+	case resolver.ResolvedProperty:
+		goType, ok := typeMap{}.Property(et.Type)
+		if !ok {
+			return et.String()
+		}
+		if goType == goInstant {
+			return et.String() + ", whose zone has no sidecar to ride in"
+		}
+		return ""
+	case resolver.ResolvedScalar:
+		switch et.Kind {
+		case resolver.ScalarBool, resolver.ScalarInt, resolver.ScalarFloat, resolver.ScalarString:
+			return ""
+		}
+		return et.String()
+	case resolver.ResolvedTemporal:
+		return ""
+	case resolver.ResolvedUnknown:
+		// Decodes through agtype's own value vocabulary, the same arm a
+		// property of no declared shape takes. Unlike the top-level
+		// unknown column, which has no Go type the table produced to
+		// declare the row field with, an element rides the "any" carrier
+		// the list wrapper is built around.
+		return ""
+	case resolver.ResolvedList:
+		return unservedListElement(et.Element)
+	}
+	// Every remaining variant is refused by name: ResolvedNode,
+	// ResolvedEdge and ResolvedEdgeUnion above, plus whatever composed
+	// shape reaches here without matching an arm. The render takes the
+	// same guard unservedColumn's fall-through takes, and for the same
+	// reason — see that comment: a value chosen because no arm matched it
+	// may have no String() to give.
+	return codegen.ResolvedTypeName(t)
 }
 
 // unservedParam names why a resolved parameter type cannot be encoded

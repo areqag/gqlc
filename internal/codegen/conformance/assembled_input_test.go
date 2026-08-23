@@ -580,7 +580,7 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 		},
 		{
 			name: "list-elem-temporal",
-			why:  "A resolver.Temporal outside its own constant set, the same shape as the out-of-set Cardinality above. The kind is derived from that block rather than written down, so a member added upstream moves it and TestTemporalEnumIsTheOneThisSuiteKnows says so. The query path is closed for a different reason: only AGE refuses a kind, and rejectUnservedQueries drops a list column before Prepare runs.",
+			why:  "A resolver.Temporal outside its own constant set, the same shape as the out-of-set Cardinality above. The kind is derived from that block rather than written down, so a member added upstream moves it and TestTemporalEnumIsTheOneThisSuiteKnows says so. The query path to the fail-site itself is OPEN: only AGE refuses a kind, and since bd gqlc-p6cb its pre-gate judges a list column by its ELEMENT and stands aside on a temporal one, so a projected collect(date()) reaches Prepare and is answered here (TestAgeGateAnswersBeforePrepare). What no query text produces is THIS row's kind — a resolver.Temporal naming no member of the constant block — so the row is still assembled from outside.",
 			in: codegen.Input{
 				Schema: probeSchema(),
 				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{
@@ -814,43 +814,65 @@ func (s *AssembledInputSuite) TestTemporalStringerAnswersForDeclaredKindsAlone()
 		"no member of an iota run is negative, so resolver.Temporal(-1) must reach the default arm")
 }
 
-// TestAgeGateAnswersBeforePrepare pins the claim §2's list-elem-temporal
-// row rests on: what closes the *query* path to that fail-site is the
-// Apache AGE backend's own pre-gate, not a phase inside codegen.
+// TestAgeGateAnswersBeforePrepare measures which of the two gates answers
+// a list column on the Apache AGE target, which is what §2's
+// list-elem-temporal row rests on.
 //
-// The row said Phase Z for three stages and Phase Z was never involved —
-// it walks the widths of schema properties, and the element of a
-// collect(...) column comes from an expression, so a schema declaring no
-// LIST property gives Phase Z nothing to refuse. The gate that does
-// answer is age.rejectUnservedQueries, which generate calls before
-// codegen.Prepare. Widen it — let unservedColumn serve ResolvedList —
-// and the temporal walk refuses instead, which is what this test would
-// then report.
+// The row once said Phase Z for three stages and Phase Z was never
+// involved — it walks the widths of schema properties, and the element of
+// a collect(...) column comes from an expression, so a schema declaring
+// no LIST property gives Phase Z nothing to refuse. The gate that answers
+// is age.rejectUnservedQueries, which generate calls before
+// codegen.Prepare.
+//
+// What CHANGED under bd gqlc-p6cb is which list columns that gate keeps.
+// It used to drop every one of them, which closed the query path to
+// Prepare's list-element fail-sites on this target; it now judges a list
+// column by its ELEMENT, so it keeps the ones whose element it has a
+// decode arm for and stands aside on a temporal element — exactly as the
+// top-level temporal arm does, and for the same reason: Prepare names the
+// KIND and this gate reports one reason per query. So the second row
+// below reaches the fail-site the first row's ancestor used to shadow,
+// and the taxonomy row's "query path closed" claim went with it.
 //
 // Asserted on the message rather than on age.ErrUnsupportedQuery: this
 // package sits above the backends and resolves them through the composed
 // registry, so importing one would break the rule that keeps it there.
-// The message names the gate unambiguously; no phase inside codegen
-// produces that wording.
+// The messages name their gate unambiguously — no phase inside codegen
+// produces the first wording, and no backend gate produces the second.
 func (s *AssembledInputSuite) TestAgeGateAnswersBeforePrepare() {
 	const ageTarget = "apache-age-pgx-v5"
 	newGen, ok := s.backends.Lookup(ageTarget)
 	s.Require().True(ok, "no backend registered under %q", ageTarget)
 
-	// A collect(date()) column: a list whose element is a declared
-	// temporal kind. AGE has no carrier for that kind, so if the gate
-	// stopped dropping list columns the element walk would refuse it.
-	in := codegen.Input{
-		Schema: probeSchema(),
-		Queries: []codegen.NamedQuery{probeQuery(resolver.Column{
-			Name: "xs",
-			Type: resolver.ResolvedList{Element: resolver.ResolvedTemporal{Kind: resolver.TemporalDate}},
-		})},
+	generate := func(elem resolver.ResolvedType) error {
+		files, err := newGen("").Generate(codegen.Input{
+			Schema: probeSchema(),
+			Queries: []codegen.NamedQuery{probeQuery(resolver.Column{
+				Name: "xs",
+				Type: resolver.ResolvedList{Element: elem},
+			})},
+		})
+		s.Nil(files)
+		s.Require().Error(err)
+		return err
 	}
 
-	files, err := newGen("").Generate(in)
-	s.Nil(files)
-	s.Require().Error(err)
-	s.EqualError(err, `unsupported query: the Apache AGE backend serves scalar and entity columns, `+
-		`so 1 query would be dropped: Fetch (column "xs" projects list)`)
+	s.Run("an element with no decode arm is dropped by the backend gate", func() {
+		// A list of whole vertices. The gate is what answers, and it
+		// answers before Prepare: Prepare's own refusal for this shape
+		// would name the node type the probe schema does not declare.
+		err := generate(resolver.ResolvedNode{Labels: "Ghost"})
+		s.EqualError(err, `unsupported query: the Apache AGE backend serves scalar and entity columns, `+
+			`so 1 query would be dropped: Fetch (column "xs" projects a list of node)`)
+	})
+
+	s.Run("a temporal element yields, so Prepare's list-element fail-site is reached", func() {
+		// A collect(date()) column: a list whose element is a declared
+		// temporal kind. AGE has no carrier for any temporal kind, and
+		// the gate stands aside so that the answer names the kind.
+		err := generate(resolver.ResolvedTemporal{Kind: resolver.TemporalDate})
+		s.EqualError(err, `query "Fetch" column 0 "xs": unrepresentable temporal kind: `+
+			`list element projects temporal(date), which the Apache AGE backend has no carrier for`)
+	})
 }
