@@ -111,7 +111,12 @@ runs:
 
         # Recorded for the gqlc-flko measurement: whether the runner image's own
         # Go already satisfies go.mod decides whether any fetch happens at all.
-        echo "bootstrap Go on the runner image: $(go version 2>&1 || echo 'none on PATH')"
+        # GOTOOLCHAIN=local is what makes this a reading of the IMAGE. A bare
+        # `go version` here is run inside the checkout, so the default `auto`
+        # switches first and the line reports the toolchain go.mod asked for —
+        # measured 2026-08-23 on run 32632918186, where it printed
+        # "go: downloading go1.26.6" instead of the image's own version.
+        echo "bootstrap Go on the runner image: $(GOTOOLCHAIN=local go version 2>&1 || echo 'none on PATH')"
 
         # Primary source: the module proxy, via the go command's own toolchain
         # switch. Retried here because the runner's own retry does not exist for
