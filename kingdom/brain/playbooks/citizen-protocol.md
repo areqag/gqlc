@@ -68,6 +68,71 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    shipping a guard asserted by nothing (bd gqlc-uqta; on gqlc-07e3 a hook's
    own FAIL-CLOSED paragraph turned out to be asserted by nothing, and the
    suite had been green throughout).
+
+   **Record that mutation in the PR body, in a shape a stranger can re-run**
+   (ADR 0005). This is a record of the duty above, not a second duty, and the
+   trigger is the same one: a PR that adds or changes a guard writes its rows;
+   a PR that adds or changes no guard owes nothing and writes nothing. A docs
+   change or a config line has no guard, so the trigger does not fire — that is
+   the whole exemption, and it needs no waiver and no judgment call. Where you
+   could not get a red, "no red obtainable, here is what I tried" IS the
+   record. Copy this and fill it in:
+
+   ```
+   ## Mutation battery
+   base: <sha the rows were run at>
+   compiler-kill screen: `<cmd>` → exit 0, so the artifact still builds
+
+   | # | edit (file:line, before → after) | expected victim (literal assertion) | command | expected | verdict |
+   |---|---|---|---|---|---|
+   | 1 | internal/x/y.go:88 `n > 0` → `n >= 0` | `require.EqualError(t, err, "empty batch")`, TestY/empty | `go test -run '^TestY$/^empty$' ./internal/x` | KILLED | KILLED (collateral: TestZ/zero) |
+   | 2 | .githooks/foo:40 drop the `exit 1` | `bad "foo: accepted a bare id"` | `bash .githooks/tests/foo-test.sh` | KILLED | SURVIVED — <what that says about the guard> |
+
+   blinding pass: <the row that killed everything> blinded → <second-pass rows>, or `n/a`
+   ```
+
+   Six things make that auditable rather than assertable, each earned by a
+   failure this town has actually had:
+
+   - **The expected victim is a literal assertion string, declared before the
+     run.** It is what turns a survivor from a shrug into a question with an
+     answer: not "is my test weak" but "why did *that* assertion not fire".
+     Rows reporting only a kill count cannot be audited at all — a reader
+     cannot tell a row that killed the right guard from one that killed a
+     neighbour.
+   - **Four verdicts, not two.** KILLED (the declared victim is among the
+     failures; print collateral kills too), WRONG (something died, not the
+     declared one), SURVIVED, NO-OP (the mutation changed nothing).
+   - **The compiler-kill screen is a command in the record, not a promise.** A
+     mutant reads KILLED when the artifact stopped building, for a reason that
+     has nothing to do with the guard. Go: `go test -c -o /dev/null <pkg>`,
+     because `go build` is blind to `_test.go`; the tell is a kill count of 1
+     with a BLANK test name. `just`: a parse error also prints `error:`. Shell
+     and jq: the tell is magnitude — 100 kills out of 110 rows is a syntax
+     error, not a strong suite.
+   - **A blinding pass when one guard killed every row.** Zero findings across
+     a battery one dominant guard swept certifies exactly one row. Blind that
+     guard, declare the per-row expected verdict for the second pass, run
+     again.
+   - **KILLED self-certifies and SURVIVED does not.** A SURVIVED row is a claim
+     about a sandbox: a key-lookup mutation with one fixture value certifies
+     coverage that is not there. Say what the sandbox held.
+   - **A battery over a directory, a glob, or "every caller of X" has a green
+     that expires**, because master owns the tree it ran on. Name the tree.
+
+   The PR body, not a commit message: `squash_merge_commit_message` is BLANK on
+   this repo (measured 2026-08-23), so a squash lands the title and the number
+   and destroys every commit body on the branch — while the merge commit's
+   `(#N)` is a one-hop reference to a PR that stays readable. A runnable script
+   committed in the branch is permitted, and is better when a later reader will
+   want to re-run rather than read; it is not required, because a file on every
+   guard PR puts scaffolding in the tree faster than anyone removes it.
+
+   On the reviewed minority, your rows do not discharge the judge. V.2.1 binds
+   the signer to mutate every guard whoever wrote the evidence, so a Դատաւոր
+   re-runs your recorded commands and adds at least one mutation you did not
+   declare. The saving is construction replaced by audit plus a delta: labour,
+   not standard.
 4. Quality gates before any PR: `just fmt-check`, `just lint`, `just test`.
    Red gates are fixed at the root, never bypassed (`--no-verify` is a
    constitutional violation, Article IV.4).
@@ -117,6 +182,35 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    bead is reviewed. And you may ask for a review on any PR of yours at any
    time, owing nobody a reason; a doubt you cannot put down is reason enough.
 
+   **Rebase before you ask for review.** Do not ask for a review on a PR that
+   is DIRTY *in the files under review*: if a judge PASSes at that SHA you must
+   afterwards resolve real conflicts in reviewed code, so what merges is bytes
+   no judge read, and the PASS was true of a SHA that never landed (ADR 0006).
+   Both qualifiers are load-bearing. A conflict in an unrelated file leaves the
+   reviewed bytes intact and is not this case. And a FAIL is unaffected — it
+   names a defect the rebase carries forward, so it binds at once; it is only a
+   PASS that must not be spent on a doomed SHA. Check with a merge, not with
+   GitHub's opinion:
+
+       git fetch origin
+       head=$(gh pr view <N> --json headRefOid --jq .headRefOid)
+       git merge-tree --write-tree --name-only origin/master "$head" \
+         | awk 'NR>1 && NF==0 {exit} NR>1'
+
+   Every line that prints is a conflicted path; no lines means clean. Line 1 is
+   the merged tree's oid and the `awk` drops it; the blank line it stops at is
+   what separates the path list from the `Auto-merging` / `CONFLICT` prose
+   underneath, which you should not read instead — it names different files on
+   adjacent lines and is routinely read backwards. Do not
+   substitute `gh pr view --json mergeable`: GitHub recomputes mergeability
+   lazily after any push and returns UNKNOWN meanwhile, which reads as "not
+   conflicting" — that check reported 2 DIRTY where there were 7. The cheerful
+   half, since the paragraph above is heavier than the act: production bytes
+   usually merge clean, so this is normally an append-both resolution in one
+   registry file, not a risky merge of reviewed logic.
+
+   If your head has to move while a reader is already live, see "When your head
+   moves under a reader" below.
 8. When review IS owed, file a `class:judge` bead naming the PR number and
    what you most doubt about the change — a Դատաւոր is the reviewer, and a
    bead is what wakes one. **File it UNASSIGNED and class-labelled**, which
@@ -175,6 +269,31 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    bead whose PR the review was of. Both are cheap at filing time and neither
    is recoverable later by anyone but you.
 
+   A defect bead about code that is **already merged** also carries
+   `from-pr:<N>`, the number of the PR that introduced it. Two ways to get N,
+   both one command; squash merges put `(#N)` at the end of the subject:
+
+       git log --format='%h %s' -S'<a distinctive string from the defect>' -- <path> | tail -1
+       gh api repos/areqag/gqlc/commits/<sha>/pulls --jq '.[].number'
+
+   If you cannot pin a single PR, **omit the label rather than guess** — a
+   wrong number is worse than a missing one here, because the whole point is a
+   count somebody will act on. You are not asked whether PR N was reviewed:
+   that is derived at re-tune time from PR N's own bead (was it blocked by a
+   design bead; was a `class:judge` bead ever filed against it) by whoever is
+   re-tuning. Deliberately so — you supply the fact you can cheaply know and
+   are not asked for a judgment you would have to reconstruct.
+
+   This label exists because Constitution V.2.0.4 makes merging most PRs
+   unreviewed a throughput measure, to be repealed or narrowed before the next
+   merge if a defect reaches master through an unreviewed merge, and requires
+   that a defect found on merged code record whether its PR was reviewed —
+   otherwise the town re-tunes on feeling. Nothing else in a bead records it.
+   Read the resulting number with its limit: it counts defects FOUND, not
+   defects present, and unreviewed code is also less likely to be looked at. A
+   rising `from-pr` count on unreviewed merges is evidence; a low one is not a
+   clean bill.
+
    The subject label is what lets `km dispatch` decline to route a bead whose
    premise is not there yet. It holds the bead while its path is absent from
    `origin/master`, or while an open PR is modifying that path, and prints
@@ -194,6 +313,67 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    that exemption, of 21 open review beads the only two carrying a subject
    label were the only two held, one of them for nine hours, looking from the
    board exactly like ordinary queue depth (bd gqlc-n4oe).
+
+## When your head moves under a reader
+
+A judge reads a SHA, not a branch. Moving the head while they read strands the
+read, and this is not rare: #1127, #1225, #1172, #1237 and #1195 all needed a
+rebase on 2026-08-22, none of them optional, several forced by another PR
+merging into a shared registry — the `EXPECTED_ROWS` pin in
+`.githooks/tests/km-test.sh`, the usage/case pair in `kingdom/bin/km`, the
+`test-hooks` recipe in the `justfile`. A merge that appends to a registry
+invalidates every open PR that appends to the same registry (ADR 0006). Nothing
+tells you it happened, so check before you push.
+
+A **forced** move — a rebase you did not choose, carrying no content change —
+is cheap for the reader, and stays cheap only if all four of these hold.
+
+1. **Warn the reader before the push, not after.** Find the live reader:
+
+       bd list -l class:judge --status open -n 0 --json \
+         | jq -r '.[] | select(((.title // "") + " " + (.description // "")) | contains("#<N>")) | .id'
+
+   Then `bd mail send <the judge's seat> -s "PR #<N>: forced rebase incoming"`,
+   with the old and new SHA and the delta sentence from clause 2 in the body.
+   If that query returns nothing, no review bead is open against your PR and
+   nobody is reading; rebase freely.
+
+2. **State the delta as a merge-base comparison, never a commit list.** A
+   rebase makes `git log <old>..<new>` read as fix work, and `git diff <old>
+   <new>` is contaminated by master's drift. Compare each head against its own
+   base instead:
+
+       a=$(mktemp); b=$(mktemp); trap 'rm -f "$a" "$b"' EXIT
+       git diff "$(git merge-base origin/master <OLD>)" <OLD> > "$a"
+       git diff "$(git merge-base origin/master <NEW>)" <NEW> > "$b"
+       diff -u "$a" "$b"
+
+   That output is the sentence you send. On a content-identical move every line
+   of it is an `index` blob-hash line or an `@@` hunk header (verified in a
+   scratch repo 2026-08-23; Աստղիկ's real case came out as hunk line numbers,
+   blob hashes and one added context line, and no line of her own). A reader
+   re-anchors on that in seconds. Anything else in the output is a content
+   change — see clause 4.
+
+3. **Correct the head on the review bead in the same minute** you push:
+   `bd update <bead> --append-notes "head moved <OLD> → <NEW>, forced rebase onto <master sha>, content-identical"`.
+   A bead naming a SHA that no longer exists on the branch is how a review gets
+   silently re-anchored to the wrong bytes.
+
+4. **A forced move must be content-identical.** Content-identity is the entire
+   reason a forced move is cheap, so a content change carried inside a forced
+   rebase is an *unforced* move and is treated as one: it is a new change, and
+   it owes the reader a fresh read, fresh mutation rows (step 3), and a fresh
+   review round rather than a note. Աստղիկ had an unpinned
+   `example.com.evil.io` row she had declined to add while a reviewer was live;
+   forced to move the head anyway, she could have taken it for free, considered
+   it, and declined. Without this clause the first three can all be satisfied
+   while the reader is still stranded.
+
+An **unforced** move under a live reader — you rebased because you wanted to,
+or you pushed a fix — is not forbidden here, and a FAIL you are answering
+demands one. It is simply not covered by the cheap path: it costs the reader a
+re-read, so say so plainly rather than describing it as a rebase.
 
 ## Holding a bead
 
