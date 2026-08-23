@@ -149,6 +149,63 @@ jobs:
               > "${RUNNER_TEMP}/pr-body.txt"
           python3 .github/scripts/check-pr-closes.py \
               .beads/issues.jsonl "${RUNNER_TEMP}/pr-body.txt" "$BRANCH"
+      # bd gqlc-gy3q: the SERVER-SIDE half of the identity rules in
+      # .githooks/commit-msg. That hook is advisory — --no-verify skips it, a
+      # clone that never ran `just init` never had it, and core.hooksPath has
+      # been observed rewritten to /dev/null in the SHARED config by
+      # worktree-isolated agent spawns with no tripwire (bd gqlc-r41). Here the
+      # configuration is not the developer's.
+      #
+      # PR-scoped, not master-scoped, because this repo squash-merges: the
+      # squash commit is authored by whoever merged and committed by GitHub, so
+      # the identities the work was written under are readable only up to the
+      # merge.
+      #
+      # `--jq '.[]'` is applied per page, so --paginate yields NDJSON rather
+      # than a nest of arrays. GitHub caps this endpoint at 250 commits; a PR
+      # longer than that is unreviewable for other reasons long before this
+      # gate is the problem.
+      #
+      # The rules themselves are NOT restated in the checker — it sources
+      # .githooks/implausible-identity.sh, the same file the hook reads.
+      - name: "PR commits carry a plausible author and no AI-attribution trailer"
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Not piped and not `|| true`: a silently-failed fetch would leave an
+          # empty file, and an empty file must not read as "no bad commits".
+          # The checker fails closed on one anyway; this is the outer half.
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" \
+              --jq '.[]' > "${RUNNER_TEMP}/pr-commits.ndjson"
+          .github/scripts/check-pr-authors.sh "${RUNNER_TEMP}/pr-commits.ndjson"
+      # bd gqlc-89vw: a bead label over 50 characters cannot be mirrored to a
+      # GitHub issue, and .githooks/bd-gh-sync only WARNS when the API refuses
+      # it — the bead is created, the board looks healthy, and the only casualty
+      # is the bd<->GH mirror the town uses for review and closing. Runs on
+      # master pushes too: the export is the input, and it is equally wrong
+      # there.
+      - name: "bead labels fit GitHub's 50-character cap"
+        run: python3 .github/scripts/check-label-lengths.py .beads/issues.jsonl
+      # The two checkers above have their own suite, and this step is what runs
+      # it — on every PR and on every master push, in the same job as the gates
+      # it covers.
+      #
+      # It sits beside the scripts rather than in .githooks/tests because that
+      # directory has a wiring contract of its own: internal/tools/ciguard
+      # requires every suite under it to be named by the justfile's `test-hooks`
+      # recipe, on the grounds that a suite which looks wired and is not is an
+      # absent gate. These checkers are not hooks, and the justfile was owned by
+      # another change in flight the night this landed. bd gqlc-xqf6 covers
+      # naming it in `test-hooks` as well, so `just test` runs it locally too.
+      - run: bash .github/scripts/tests/ci-identity-gate-test.sh
+      # shellcheck over .github/scripts. `just lint-hooks` defaults to
+      # .githooks and so has never looked at this directory; the recipe takes
+      # the directory as an argument precisely so it can. It fails rather than
+      # skips when a file carries no shebang it recognises, so a script added
+      # here tomorrow is either linted or loud.
+      - run: just lint-hooks .github/scripts
 
   codegen-fence:
     needs: [actionlint, tidy]
