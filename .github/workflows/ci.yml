@@ -207,8 +207,11 @@ jobs:
       # here tomorrow is either linted or loud.
       - run: just lint-hooks .github/scripts
 
+  # PROBE (bd gqlc-yc6x): job-level `if: false` makes this required context
+  # conclude SKIPPED while every other required context runs. Throwaway branch.
   codegen-fence:
     needs: [actionlint, tidy]
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -220,6 +223,22 @@ jobs:
       # linter too — it is where the 429 in bd gqlc-l45j's first witness landed.
       - uses: ./.github/actions/setup-golangci
       - run: just test-codegen-fence
+
+  # PROBE (bd gqlc-9qqj): a job that FAILS under job-level continue-on-error.
+  # Records what the job, its check run and the enclosing workflow run conclude.
+  coe-probe:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # PROBE (bd gqlc-flko): does the runner image's preinstalled Go already
+      # satisfy go.mod, i.e. can actions/setup-go be dropped or made a fallback?
+      - run: |
+          echo "runner go: $(go version)"
+          echo "which go: $(command -v go)"
+          echo "GOTOOLCHAIN=${GOTOOLCHAIN:-unset}"
+          grep -E '^(go|toolchain) ' go.mod
+      - run: exit 1
 
   actionlint:
     runs-on: ubuntu-latest
