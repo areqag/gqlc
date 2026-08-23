@@ -99,10 +99,31 @@ func agtypeInt64(raw []byte) (int64, error) {
 // stored property decides only how it prints.
 //
 // The zone is UTC because that is what the count alone determines.
+//
+// The count is bounded to the four-digit calendar — year 1 through year
+// 9999 inclusive — before the instant is built. gqlc's own encode writes
+// the micros, but it writes them to an ordinary agtype integer property
+// on a vertex any writer can touch, so the count read back is whatever
+// the graph holds, on the same argument that bounds the offset sidecar
+// below. Unbounded, an int64's far end is a year near 294247, and that
+// is not a date any wire format beside this one spells: RFC 3339 has
+// four year digits, and so does every timestamp text a SQL client
+// prints. A caller who formats such an instant gets a string no other
+// system reads back. The bound is the widest four-digit range rather
+// than anything narrower, so every instant this encoding was designed
+// to carry — pre-epoch dates included — survives the read.
 func agtypeInstant(raw []byte) (time.Time, error) {
 	micros, err := agtypeInt64(raw)
 	if err != nil {
 		return time.Time{}, err
+	}
+	// Year 1 midnight UTC and the last microsecond of year 9999, as
+	// counts. Written as literals because they are the encoding, and a
+	// derivation from time.Date would put the bound behind the same
+	// calendar arithmetic it is checking.
+	if micros < -62135596800000000 || micros > 253402300799999999 {
+		return time.Time{}, fmt.Errorf(
+			"gqlc: %d microseconds since the epoch is outside the year 1 to year 9999 range this encoding admits", micros)
 	}
 	return time.UnixMicro(micros).UTC(), nil
 }

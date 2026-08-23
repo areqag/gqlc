@@ -97,8 +97,14 @@ the fix is either a fixture that reaches it or a §3 row saying why none
 can. The two assertions are mirrors — §3's sites must measure zero,
 §2's must measure non-zero — so a claim in either direction has to be
 paid for in coverage. §5.1 gives the rule and the one exemption: a
-sentinel outside `allSentinels`, which is to say a §4 row, since a
-sentinel documented as deliberately unreachable has no coverage to owe.
+sentinel outside `allSentinels`, which is to say a §4 row.
+
+That exemption is from *this* section's obligation and from nothing else.
+A §4 sentinel owes the opposite measurement instead — every branch
+returning it must go unexecuted, exactly as a §3-tagged branch must —
+and `TestExcludedBranchesAreUnreached` collects it. Until that test
+existed §4 owed nothing at all, which made it a place to park a live
+sentinel with no fixture and no red run (`gqlc-4r01`).
 
 The measurement binds fail-sites rather than rows: a row's *prose* is
 still a hand-written claim about which construct reaches the site. What
@@ -139,6 +145,7 @@ dead, and that no dead site hides in it.
 | `ErrOutOfC6Scope` | A list element whose resolved type matches no arm of `buildListElemPlan`'s switch. Assembled: the same pointer form under a `ResolvedList`, on the same argument — that switch names the same eight arms and its default is open in the same two directions, pointer forms and embedded promotions. It renders through the same `ResolvedTypeName` for the same reason: all eight typed-nil pointer forms faulted in the `String()` call inside the `return` until `gqlc-edze`, and so did a `resolver.ResolvedList{Element: nil}`, whose nil element reaches the same line, a list element whose embedded pointer to a variant is nil, and one embedding `resolver.ResolvedType` itself. The column row above carries the argument, the limit, and the fact that those four shapes are witnessed rather than exhaustive. | Phase A |
 | `ErrUnrepresentableTemporal` | A list element whose temporal kind the target's type table has no carrier for. Assembled: a `resolver.Temporal` outside its own constant set, on the same footing as the out-of-set `Cardinality` above. No *query* reaches it, and would need a backend that both refuses a kind and serves list columns: only Apache AGE refuses a kind, and `age.rejectUnservedQueries` drops a query carrying a list column three lines before `age.generate` calls `codegen.Prepare`. Phase Z is not what stops it — Phase Z walks schema property widths, and a `collect(...)` element comes from an expression. | Phase A |
 | `ErrParamNameCollision` | Two parameters of one query mangling to one `Params` field. | Phase B |
+| `ErrOutOfC6Scope` | A parameter whose name mangles to no Go field name — `$_`, `$__`, any name of nothing but underscores — in a query binding two or more parameters. Arity-conditional because the emission is: the no-parameter and one-parameter forms take the bare typed argument and derive no identifier from the parameter name at all, so `$_` is served there and stays served. Deferred rather than permanent, which is why it sits here and not under an unrepresentability: a stage spelling `Params` fields positionally would admit it. Before `gqlc-2m2v` the two-or-more form emitted a struct field with no name and a bind expression reading `arg.,`, and `go/format` refused the file as `ErrFormatFailure` — an error naming a template bug, handed to an author whose query was what went wrong. | Phase B |
 | `ErrRowFieldCollision` | Two columns of one query deriving one `Row` field. | Phase B |
 | `ErrUnrepresentableTemporal` | A projected column whose temporal kind the target's type table has no carrier for. Phase B, not Phase A: Phase A does not ask the type table about temporal kinds, so the refusal lands at the row-field derivation site. | Phase B |
 | `ErrIdentifierCollision` | Two exported top-level identifiers colliding across the seven swept sources — the emitter's own package-scope declarations, entity structs, decode helpers, method names, `<Method>Params`, `<Method>Row`, edge-union interfaces. The first source is seeded from the `scopePackage` half of the reserved set: a `NODE TYPE Queries` or an edge-union interface deriving `ReadQuerier` redeclares a name `db.go` or `querier.go` already holds, which the Phase A gate does not see because that one reads a query's name (`gqlc-e6mh`). The `scopeMethod` half — `WithTx`, `EnsureGraph`, `DropGraph` — stays out: those are methods on `*Queries` and share no scope with a package-level type. The seeded half is uniform across targets while two of the declarations behind it are not — `DBTX` and `SessionInit` come from the Apache AGE emission alone, so seeding them refuses a name a neo4j-only batch leaves free. A false refusal, taken per D2 Resolved rather than admitting an input under one target and refusing it under another. §6 enumerates all twelve rows with the target each is declared by and the target each would actually break. | identifier sweep |
@@ -226,9 +233,22 @@ names the row — that half the fence does hold.
 Sentinels the package declares but keeps out of `allSentinels`, so no
 negative fixture is required of them.
 
+What is required of them instead is that the claim be true.
+`TestExcludedBranchesAreUnreached` measures every branch returning a
+sentinel in this table against the corpus coverage profile and fails if
+one of them executes — the same measurement §3's tagged branches get, off
+the same profile. Until it existed this table was the fence's one
+exemption that bought silence: a §4 row is skipped by
+`TestUnreachedBranchesAreUnreached`, which owns tagged branches, and
+exempted by name from `TestReachableBranchesAreReached`, so a live
+sentinel could be retired out of `allSentinels` and parked here with
+nothing to say otherwise (`gqlc-4r01`).
+
+The first thing that measurement found was a false row in this table.
+
 | Sentinel | Why it is out of the reachable set |
 |---|---|
-| `ErrFormatFailure` | `go/format.Source` rejected an emitted file. A well-formed emission cannot fail formatting, so firing this takes a template bug or synthetic corruption; a fixture for it would buy a test seam rather than coverage. |
+| `ErrFormatFailure` | `go/format.Source` rejected an emitted file. A well-formed emission cannot fail formatting, so firing this takes a template bug or synthetic corruption; a fixture for it would buy a test seam rather than coverage. **This row was false for as long as it existed, and nothing said so.** A query binding two or more parameters, one of them `$_`, emitted a `Params` struct field with no name and a bind expression reading `arg.,` — an emission `go/format` refused, on all three targets, from an ordinary `.cypher` file a user writes. `gqlc-2m2v` closed it by refusing that query at Phase B with `ErrOutOfC6Scope` (§2), which is what makes this row true rather than aspirational; `TestExcludedBranchesAreUnreached` is what will notice the next time it stops being. |
 
 ## 5. Adding, renaming or retiring a sentinel
 
@@ -240,7 +260,8 @@ short. In full:
    pairs each name with the message beside it.
 2. Add it to `allSentinels` if a user's input can reach it, and add a row
    to §1 above. Otherwise leave it out of the slice and add a row to §4
-   saying why.
+   saying why — and note that §4 is measured, not asserted: every branch
+   returning that sentinel has to go unexecuted when the corpus runs.
 3. Add a §2 row per construct that routes to it, and a negative fixture
    under `test/data/codegen/invalid` for at least one of them, which is
    what `TestSentinelReachability` asks for. A construct with no on-disk

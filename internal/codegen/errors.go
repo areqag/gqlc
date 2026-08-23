@@ -43,6 +43,13 @@ var (
 	// string when it does fire. Deliberately excluded from allSentinels
 	// because it is a codegen-internal invariant violation, not a
 	// user-facing failure mode; the reachability sweep skips it.
+	//
+	// "Unreachable via any legitimate fixture" was false until gqlc-2m2v:
+	// a query binding two or more parameters, one of them $_, emitted a
+	// nameless Params field and reached gofmt on all three targets. The
+	// exclusion is not self-certifying and is no longer taken on trust —
+	// TestExcludedBranchesAreUnreached measures this branch against the
+	// corpus coverage profile on every run.
 	ErrFormatFailure = errors.New("format failure")
 
 	// ErrOutOfC6Scope is returned when a C6-admissible input carries a
