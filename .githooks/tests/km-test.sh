@@ -870,17 +870,24 @@ fill_cap_leaving() {
 }
 
 # The fresh pass: a bead of each class reaches a free seat of that class, and
-# the unlabelled one reaches nobody. This row is also the liveness control for
-# every row below it — it is the only one that proves the stubs, the tmux seam
-# and the wake-file path all work, so a "nobody was woken" assertion elsewhere
-# means the dispatcher declined rather than that the harness was inert.
+# the unlabelled one reaches a WARRIOR by inference (gqlc-38ye). This row is also
+# the liveness control for every row below it — it is the only one that proves
+# the stubs, the tmux seam and the wake-file path all work, so a "nobody was
+# woken" assertion elsewhere means the dispatcher declined rather than that the
+# harness was inert.
 #
 # Every bead here is at or above [dispatch] max_priority on purpose. gqlc-j1 was
 # a P3 until the floor existed, and under the floor it stopped being routed —
 # which would have turned this liveness control into a row asserting that a
 # judge bead reaches nobody. The floor gets rows of its own below.
+#
+# gqlc-unl is P2, not the P0 it was written as: since an unlabelled bead now
+# routes as a warrior, a P0 one would sort AHEAD of gqlc-w1 and take the seat
+# this row names for it, so the row would redden on seat identity rather than on
+# the property it is here for. Behind gqlc-w1 it witnesses the inference without
+# disturbing the assertion above it.
 dispatch_case '[
-  {"id":"gqlc-unl","priority":0,"assignee":null,"labels":null},
+  {"id":"gqlc-unl","priority":2,"assignee":null,"labels":null},
   {"id":"gqlc-taken","priority":0,"assignee":"ar","labels":["class:warrior"]},
   {"id":"gqlc-w1","priority":1,"assignee":null,"labels":["class:warrior"]},
   {"id":"gqlc-a1","priority":2,"assignee":null,"labels":["area:parser","class:architect"]},
@@ -897,18 +904,27 @@ elif ! wake_of mihr | grep -q 'bead:gqlc-j1'; then
     bad "the fresh pass routes a bead of each class" "the judge bead reached no judge seat (woken: $(woken_seats)) out=$OUT"
 elif ! wake_of aramazd | grep -q 'ready warrior work'; then
     bad "the fresh pass routes a bead of each class" "the wake reason does not name the class: $(wake_of aramazd)"
-elif grep -rq 'gqlc-unl' "$KM_STATE_DIR/seats" 2>/dev/null; then
-    bad "the fresh pass routes a bead of each class" "the unlabelled bead was routed to a seat"
+elif ! grep -rq 'gqlc-unl' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the fresh pass routes a bead of each class" "the unlabelled bead reached nobody instead of being inferred to a warrior (woken: $(woken_seats)) out=$OUT"
+elif ! grep -rl 'gqlc-unl' "$KM_STATE_DIR/seats" 2>/dev/null | grep -qE '/(aramazd|vahagn|astghik|ar|nvard|ayg|tsovinar|hayk)/'; then
+    bad "the fresh pass routes a bead of each class" "the unlabelled bead went somewhere that is not a warrior seat: $(grep -rl 'gqlc-unl' "$KM_STATE_DIR/seats" 2>/dev/null | tr '\n' ' ')"
 elif ! wake_of ar | grep -q 'gqlc-taken'; then
     bad "the fresh pass routes a bead of each class" "the assigned bead did not reach its own assignee: $(woken_seats)"
 elif grep -rl 'gqlc-taken' "$KM_STATE_DIR/seats" 2>/dev/null | grep -qv '/ar/'; then
     bad "the fresh pass routes a bead of each class" "a bead ար already holds was handed to somebody else: $(grep -rl 'gqlc-taken' "$KM_STATE_DIR/seats" 2>/dev/null | tr '\n' ' ')"
 else
-    ok "the fresh pass routes architect, warrior and judge beads to free seats of their class, routes the unlabelled bead nowhere, and sends the assigned one to its own assignee rather than to a stranger"
+    ok "the fresh pass routes architect, warrior and judge beads to free seats of their class, routes the unlabelled bead to a warrior by inference, and sends the assigned one to its own assignee rather than to a stranger"
 fi
 
-# A queue of nothing but unlabelled beads is Սեդրակ's chore, not a failure. It
-# is also the row that pins the corrected account of gqlc-z1qw: the type error
+# A queue of nothing but unlabelled beads MOVES (gqlc-38ye). It used to be
+# Սեդրակ's chore and reached nobody until he labelled it; that made one seat a
+# mandatory step in front of every bead in the town, and 25 of 208 unassigned
+# open beads — one P0, three P1 — were sitting behind it, invisible and silent
+# about being invisible. Three shapes of absent label are here on purpose: null,
+# the empty array, and a labelled bead whose labels name no class. All three read
+# `.cls == null` and all three must route.
+#
+# It is also the row that pins the corrected account of gqlc-z1qw: the type error
 # fired on unassigned beads of ANY labelling, so under the bug this payload
 # aborts jq rather than passing quietly.
 dispatch_case '[
@@ -918,13 +934,21 @@ dispatch_case '[
 ]' '[]'
 run_dispatch
 if [ "$RC" -ne 0 ]; then
-    bad "an all-unlabelled queue is quiet, not broken" "rc=$RC out=$OUT"
-elif [ -n "$(woken_seats)" ]; then
-    bad "an all-unlabelled queue is quiet, not broken" "woke: $(woken_seats)"
-elif ! printf '%s' "$OUT" | grep -q 'done'; then
-    bad "an all-unlabelled queue is quiet, not broken" "the run did not report itself done: $OUT"
+    bad "an all-unlabelled queue still moves" "rc=$RC out=$OUT"
+elif [ -z "$(woken_seats)" ]; then
+    bad "an all-unlabelled queue still moves" "nobody was woken at all: $OUT"
 else
-    ok "a queue of only unlabelled beads routes nobody and still completes, instead of aborting the query"
+    _missed=""
+    for _b in gqlc-u1 gqlc-u2 gqlc-u3; do
+        grep -rq "$_b" "$KM_STATE_DIR/seats" 2>/dev/null || _missed="$_missed $_b"
+    done
+    if [ -n "$_missed" ]; then
+        bad "an all-unlabelled queue still moves" "these reached nobody:$_missed (woken: $(woken_seats)) out=$OUT"
+    elif ! printf '%s' "$OUT" | grep -q 'done'; then
+        bad "an all-unlabelled queue still moves" "the run did not report itself done: $OUT"
+    else
+        ok "a queue of only unlabelled beads — null labels, empty labels, and labels naming no class — routes all three rather than stranding them behind one seat's chore"
+    fi
 fi
 
 # The resume pass: a seat's own in-progress bead comes back to it before any
@@ -1251,7 +1275,7 @@ elif ! printf '%s' "$OUT" | grep -q "gqlc-under.*priority $OVER"; then
 # The count is pinned exactly, not as "greater than zero": the queue held two
 # beads and only one was declined, so a floor that counted everything it looked
 # at — or counted the routed bead too — reads 2 here and fails.
-elif ! printf '%s' "$OUT" | grep -qF ", 1 below max_priority $FLOOR)"; then
+elif ! printf '%s' "$OUT" | grep -qF ", 1 below max_priority $FLOOR,"; then
     bad "a bead declined for priority is counted in the summary" "the done line hides it: $(printf '%s' "$OUT" | grep 'done')"
 else
     ok "the declined bead is named with its priority and counted in the done line"
@@ -1311,6 +1335,68 @@ else
     else
         ok "a malformed max_priority routes every priority and names the value it could not read"
     fi
+fi
+
+# --- the inferred class, and the floor that lets P3 through (gqlc-38ye) -------
+# Owner's decision, 2026-08-23. Labelling stops being a gate and becomes an
+# optimisation: an unassigned bead nobody labelled routes as class:warrior, and
+# the warrior escalates under Constitution IV if the work is out of scope. The
+# risk was stated and accepted; a bead nobody can see is the worse failure.
+#
+# The inference must be VISIBLE. A routed-by-default bead and a labelled one
+# reaching the same seat are indistinguishable from the wake alone, so the run
+# has to say which it was — the same argument as the lowpri arm, which emits
+# rather than drops precisely so the withheld beads can be named. This row
+# asserts BOTH halves, because a seat woken with nothing said is the silent
+# shape, and a line printed for a bead that reached nobody is theatre.
+dispatch_case '[
+  {"id":"gqlc-noclass","priority":1,"assignee":null,"labels":["area:parser"]},
+  {"id":"gqlc-said","priority":1,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+run_dispatch
+_infseat="$(grep -rl 'gqlc-noclass' "$KM_STATE_DIR/seats" 2>/dev/null | sed 's|.*/seats/||; s|/wake$||')"
+if [ "$RC" -ne 0 ]; then
+    bad "an unlabelled bead routes as a warrior and says so" "rc=$RC out=$OUT"
+elif ! grep -rq 'gqlc-said' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "an unlabelled bead routes as a warrior and says so" \
+        "the labelled control reached nobody, so this row proves nothing: $OUT"
+elif [ -z "$_infseat" ]; then
+    bad "an unlabelled bead routes as a warrior and says so" \
+        "the unlabelled bead reached nobody (woken: $(woken_seats)) out=$OUT"
+elif [ "$("$KM" seat-info "$_infseat" | cut -d' ' -f1)" != warrior ]; then
+    bad "an unlabelled bead routes as a warrior and says so" \
+        "it went to $_infseat, class $("$KM" seat-info "$_infseat" | cut -d' ' -f1)"
+elif ! printf '%s' "$OUT" | grep -q 'gqlc-noclass.*inferred\|inferred.*gqlc-noclass'; then
+    bad "an unlabelled bead routes as a warrior and says so" \
+        "the run routed it without naming the class as inferred, so an operator cannot tell it from a labelled bead: $OUT"
+# The naming must be SPECIFIC to the inferred bead. A line printed for every
+# fresh bead would satisfy the assertion above and tell an operator nothing.
+elif printf '%s' "$OUT" | grep 'inferred' | grep -q 'gqlc-said'; then
+    bad "an unlabelled bead routes as a warrior and says so" \
+        "the labelled bead was announced as inferred too: $(printf '%s' "$OUT" | grep 'inferred')"
+else
+    ok "an unassigned bead with no class: label routes to a warrior seat and the run names the class as inferred, distinguishably from the labelled bead beside it"
+fi
+
+# The floor at P3, pinned against the LITERAL number rather than against
+# whatever cfg returns. Every floor row above derives its fixture from
+# `km cfg`, which is what lets them retune instead of falsifying — and is
+# exactly why none of them can witness the value. MEASURED at the time the
+# floor moved: the board held 162 P3 and 5 P4, so a floor of 2 made 167 ready
+# beads unroutable by configuration while the fresh pass named every one of
+# them on every two-minute tick.
+dispatch_case '[
+  {"id":"gqlc-p3","priority":3,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a P3 bead is routable" "rc=$RC out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'gqlc-p3.*below the floor\|below the floor.*gqlc-p3'; then
+    bad "a P3 bead is routable" "it was withheld by the floor, which is still below 3: $OUT"
+elif ! grep -rq 'gqlc-p3' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "a P3 bead is routable" "it reached nobody (woken: $(woken_seats)) out=$OUT"
+else
+    ok "a ready, unassigned, class-labelled P3 bead is routed rather than reported below the floor"
 fi
 
 # --- the concurrency cap, and the judge's exemption from it (gqlc-dz85) ------
@@ -1876,10 +1962,16 @@ fi
 # past the window is not a bead nobody claimed — it is a bead nobody was shown,
 # and the two are indistinguishable from the board.
 
-# Padding is unlabelled and unassigned, so it routes to nobody and occupies no
-# seat: the only bead that CAN route is the far one, which makes a silent
-# "0 wake(s)" the whole signal.
-dispatch_case "$(jq -cn '[range(100) | {id: "gqlc-pad\(.)", priority: 1, assignee: null, labels: ["area:pad"]}]
+# Padding is assigned to names that are not seats, so it takes the `owned` arm,
+# matches no seat there and occupies none: the only bead that CAN route is the
+# far one, which makes a silent "0 wake(s)" the whole signal.
+#
+# It used to be unassigned-and-unlabelled, which reached nobody for a different
+# reason — the fresh pass dropped it. Since gqlc-38ye an unlabelled bead is
+# inferred to class:warrior, so that padding filled every warrior seat and
+# gqlc-far reached nobody: the row went red on seat exhaustion while claiming to
+# report the cap. A non-seat assignee is inert under BOTH rules.
+dispatch_case "$(jq -cn '[range(100) | {id: "gqlc-pad\(.)", priority: 1, assignee: "nobody\(.)", labels: ["area:pad"]}]
                        + [{id: "gqlc-far", priority: 2, assignee: null, labels: ["class:warrior"]}]')" '[]'
 run_dispatch
 if [ "$RC" -ne 0 ]; then

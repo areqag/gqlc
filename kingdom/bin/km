@@ -1308,13 +1308,22 @@ cmd_dispatch() {
     #           one, not in_progress for the resume one — so it sat on the board
     #           looking owned and routed to nobody, at any priority, with
     #           nothing reporting the omission (gqlc-xq8a, gqlc-g10n).
-    #   fresh — unassigned and class-labelled, routed to a free seat of its
-    #           class.
+    #   fresh — unassigned, routed to a free seat of its class. A class label
+    #           names that class; an absent one INFERS warrior (gqlc-38ye).
     #
     # A class label decides nothing for an owned bead: the assignee already
     # names the seat, which is the rule the resume pass has always used. Hence
-    # the `select($cls != null)` sits on the fresh arm only, where a label is
-    # the sole way to choose a seat at all.
+    # the class question arises on the fresh arm only, where a label is the sole
+    # way to choose a seat at all.
+    #
+    # An unlabelled bead used to be DROPPED here, silently. That made labelling
+    # a gate rather than a hint, and put one seat — the Քաղաքապետ, whose soul
+    # carried it as a standing chore — in front of every bead in the town.
+    # MEASURED 2026-08-23: of 208 unassigned open beads, 25 carried no `class:`
+    # label, including one P0 and three P1; none of them was named in any
+    # dispatch run, because the drop said nothing. Inferring warrior costs an
+    # occasional escalation under Constitution III.1, which is cheap; a bead
+    # nobody can see is not. Owner's decision, recorded on gqlc-38ye.
     #
     # Captured once rather than piped: the hold verdict below needs each
     # candidate's labels, and re-querying could read a different queue.
@@ -1347,6 +1356,15 @@ cmd_dispatch() {
     # withheld from it by a number (Constitution III.3, same reason the resume
     # pass runs first). It emits rather than drops, so the beads it withholds
     # can be named in the output below instead of vanishing.
+    #
+    # It sits AHEAD of the class test, so an unlabelled bead below the floor is
+    # named by the floor rather than routed. Either order routes the same set;
+    # this one reports the more specific reason, and the reason is the point.
+    #
+    # Each fresh row carries a third field, `inferred` or `labelled`, saying
+    # where its class came from. Without it a routed-by-default bead and a
+    # deliberately-labelled one are indistinguishable at the wake, which is the
+    # silence this change is here to end rather than to relocate.
     if ! queue=$(jq -r --argjson maxp "$maxprio" '
         [ .[]
           | . as $b
@@ -1355,9 +1373,9 @@ cmd_dispatch() {
           | {id, priority, assignee, cls: $cls}
         ] | sort_by(.priority) | .[]
           | if .assignee != null           then "owned \(.assignee) \(.id)"
-            elif .cls == null              then empty
             elif (.priority // 0) > $maxp  then "lowpri \(.id) \(.priority // 0)"
-            else "fresh \(.id) \(.cls)" end' <<<"$ready"); then
+            elif .cls == null              then "fresh \(.id) warrior inferred"
+            else "fresh \(.id) \(.cls) labelled" end' <<<"$ready"); then
         # Not "nothing routed": the resume pass above may already have queued
         # wakes, and they stand. An operator reading this during an incident has
         # to be able to trust it.
@@ -1366,7 +1384,7 @@ cmd_dispatch() {
         die "dispatch: the ready-queue query failed; neither owned nor fresh beads routed (the resume wakes above stand)"
     fi
     owned=$(echo "$queue" | awk '$1 == "owned" { print $2, $3 }')
-    routed=$(echo "$queue" | awk '$1 == "fresh" { print $2, $3 }')
+    routed=$(echo "$queue" | awk '$1 == "fresh" { print $2, $3, $4 }')
     lowpri=$(echo "$queue" | awk '$1 == "lowpri" { print $2, $3 }')
 
     # Said out loud, one line per bead, in the same shape as the hold verdicts
@@ -1380,6 +1398,18 @@ cmd_dispatch() {
         echo "dispatch: below the floor $id — priority $prio, and [dispatch] max_priority is $maxprio; filed and searchable, routed to nobody"
         skipped=$((skipped + 1))
     done <<<"$lowpri"
+
+    # And the same courtesy for the beads whose class this pass GUESSED. Said
+    # before routing rather than after, so a bead the hold verdict later
+    # withholds is still on the record as unlabelled — the line reports where
+    # the class came from, not that a wake happened.
+    local origin inferred=0
+    while IFS=' ' read -r id cls origin; do
+        [ -n "$id" ] || continue
+        [ "$origin" = inferred ] || continue
+        echo "dispatch: class inferred $id — it carries no class: label, so it is routed as class:$cls by default; label it to send it somewhere else, or let the Ռազմիկ escalate it (Constitution III.1)"
+        inferred=$((inferred + 1))
+    done <<<"$routed"
 
     # Owned pass: an unclaimed bead that names a seat goes back to that seat,
     # ahead of any fresh routing, for the same reason the resume pass runs first
@@ -1428,8 +1458,8 @@ cmd_dispatch() {
         fi
     fi
 
-    local verdict reason
-    while IFS=' ' read -r id cls; do
+    local verdict reason how
+    while IFS=' ' read -r id cls origin; do
         [ -n "$id" ] || continue
         verdict=$(awk -v i="$id" '$2 == i { $1 = $1; print; exit }' <<<"$verdicts")
         # An explicit ROUTE is the only thing that routes. A hold and a bead the
@@ -1448,8 +1478,13 @@ cmd_dispatch() {
         if [ "$cls" != judge ]; then
             [ "$slots" -gt 0 ] || continue
         fi
+        # The seat is told too, not just the operator: a warrior who can see the
+        # class was guessed knows escalation is on the table, and one who cannot
+        # has to assume the bead was aimed at them deliberately.
+        how=""
+        [ "$origin" != inferred ] || how=" (class inferred — this bead carries no class: label; escalate if it is not warrior work)"
         if seat=$(free_worker_of_class "$cls"); then
-            cmd_wake "$seat" --bead "$id" --reason "ready ${cls} work — claim it before you begin"
+            cmd_wake "$seat" --bead "$id" --reason "ready ${cls} work${how} — claim it before you begin"
             wakes=$((wakes + 1))
             if [ "$cls" != judge ]; then slots=$((slots - 1)); fi
         fi
@@ -1467,7 +1502,7 @@ cmd_dispatch() {
     elif [ -n "$stranded" ]; then
         echo "dispatch: STRANDED — in progress and assigned to nobody, so no pass can wake anyone for them: $stranded"
     fi
-    echo "dispatch: done ($wakes wake(s) this run, $held held, $skipped below max_priority $maxprio)"
+    echo "dispatch: done ($wakes wake(s) this run, $held held, $skipped below max_priority $maxprio, $inferred class inferred)"
 }
 
 # ---------- the routing hold ----------
