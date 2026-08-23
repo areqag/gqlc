@@ -104,6 +104,20 @@ func (s *QueryfileSuite) TestInvalid() {
 // TestSentinelReachability is the bidirectional sweep: every allSentinels
 // member must have at least one invalid fixture; every mapped sentinel must
 // be in allSentinels.
+//
+// Both directions are quantified over a set, so on empty inputs each holds
+// vacuously and the sweep reconciles nothing against nothing. Measured
+// (bd gqlc-v1w8): gut invalidFixtures to `map[string]error{}` AND allSentinels
+// to `[]error{}` and this test passed, rc=0, no "[no tests to run]" — it was
+// green exactly when what it guards had vanished.
+//
+// The census guard below closes that, and it is deliberately ONE guard and not
+// two. The canonical list going empty on its own is already caught: the second
+// direction then finds a covered sentinel that is not canonical. Adding a
+// matching guard on allSentinels would make BOTH read non-load-bearing under
+// mutation, because either alone still kills the row. The composition is:
+// census empty -> this guard; canonical empty -> the covered/canonical
+// direction; both empty -> this guard.
 func TestSentinelReachability(t *testing.T) {
 	covered := make(map[error]bool)
 	for _, sentinel := range invalidFixtures {
@@ -111,6 +125,8 @@ func TestSentinelReachability(t *testing.T) {
 			covered[sentinel] = true
 		}
 	}
+	require.NotEmpty(t, covered,
+		"no invalid fixture maps to a sentinel, so both directions below hold vacuously and this sweep reconciles nothing against nothing")
 	canonical := make(map[error]bool, len(allSentinels))
 	for _, sentinel := range allSentinels {
 		canonical[sentinel] = true

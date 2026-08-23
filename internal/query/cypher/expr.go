@@ -708,6 +708,23 @@ func (l *listener) currentBranchIndex() int {
 // attributeUse returns the Use with its (branch, part) attribution coordinate
 // populated. Sum-preserving: the returned Use has the same variant as u. Used
 // by addParameterUse to stamp both indices onto every Use at emission time.
+//
+// The default arm panics rather than returning u. query.Use's unexported marker
+// seals DECLARATION of the sum, not INHABITATION of it: `*query.PropertyUse`
+// and `struct{ query.Use }` satisfy the interface from any package in the
+// module and match none of the arms above, so control reaches the default
+// (bd gqlc-vt45, from PR #916; TestQuerySumsAreNotClosed measures the same
+// claim in internal/query). Returning u there is the one answer that is
+// silently WRONG — the Use keeps whatever coordinate it arrived with, and that
+// coordinate is what the resolver keys parameter-type unification on, so the
+// parameter unifies against the wrong Part and the query still compiles.
+//
+// The limit that makes a panic affordable is not that the arm is unreachable.
+// It is that every Use reaching either call site (addParameterUse here,
+// addParameterUseUnsuppressed in listener.go) is constructed inside this
+// package from the three variants above, so reaching the arm takes a change to
+// this package's code and not a query. There is no error channel to refuse
+// through: neither call site returns one.
 func attributeUse(u query.Use, part, branch int) query.Use {
 	switch uu := u.(type) {
 	case query.PropertyUse:
@@ -717,7 +734,7 @@ func attributeUse(u query.Use, part, branch int) query.Use {
 	case query.ClauseSlotUse:
 		return query.NewClauseSlotUseAt(uu.Slot(), part, branch)
 	default:
-		return u
+		panic(fmt.Sprintf("cypher bug: attributeUse cannot stamp a coordinate onto query.Use variant %T", u))
 	}
 }
 

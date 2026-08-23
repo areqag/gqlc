@@ -1699,6 +1699,18 @@ func formatNodeTypeKeys(nts []schema.NodeType) string {
 // resolveType maps a parser Type into its ResolvedType. R5 is unchanged from
 // R4 in mechanic — the AggregateProjection.Type() dispatch (per §4.5.1) rides
 // this table for its result-type emission.
+//
+// query.Type is not a closed sum: its unexported marker has value receivers, so
+// `*query.TypeInt` and `struct{ query.Type }` satisfy it from any package in
+// the module and match no arm here (bd gqlc-vt45, from PR #916). The default is
+// a live branch and keeps its panic. What bounds it is not unreachability but
+// provenance: only parser-constructed Types reach this mapper, so arriving at
+// the default takes an in-module code change and not a query. Routing it to
+// ErrOutOfR0Scope instead would put a programming mistake into the channel the
+// resolver's callers render to the user as a diagnostic about their Cypher,
+// where it would read as "your query is unsupported". The three arms below it
+// (TypeNode, TypeEdge, TypePath) already take that reading. Pinned by
+// TestResolveTypeDefaultPanicsOnAForeignType.
 func resolveType(t query.Type) (ResolvedType, error) {
 	switch tt := t.(type) {
 	case query.TypeBool:
@@ -1919,9 +1931,23 @@ func unify(a, b ResolvedType) (ResolvedType, bool) {
 }
 
 // validateEffect dispatches one Effect through its per-variant validator against
-// the scope's committed binding tables. The dispatch is a type switch on the
-// closed Effect sum (query.go:1631-1660); the default arm is a defensive
-// tripwire for a future Effect variant landing without an R6 refresh.
+// the scope's committed binding tables. The dispatch is a type switch on
+// query.Effect — declared at internal/query/query.go's `type Effect interface`,
+// with the eight variants declaring isEffect below it.
+//
+// That sum is NOT closed, and this comment used to say it was while citing a
+// line range where Effect does not live (bd gqlc-vt45, from PR #916). The
+// unexported isEffect marker has value receivers, so it seals DECLARATION of
+// the interface, not INHABITATION: `*query.CreateEffect` and
+// `struct{ query.Effect }` satisfy Effect from any package in the module and
+// match none of the arms below. Control reaches the default arm.
+//
+// The default therefore refuses rather than resting on being unreachable, and
+// it refuses through the error channel — which validateEffect has and
+// attributeUse in internal/query/cypher does not — because an Effect the parser
+// built that R6 has no validator for is a coverage gap to report, not a
+// corrupted value to crash on. Pinned by
+// TestValidateEffectDefaultRefusesAForeignEffect.
 func validateEffect(sc *scope, e query.Effect, s schema.Schema) error {
 	switch ee := e.(type) {
 	case query.CreateEffect:
