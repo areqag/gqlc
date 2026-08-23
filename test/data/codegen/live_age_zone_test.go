@@ -83,7 +83,7 @@ func seedAGEZoneGraph(ctx context.Context, t *testing.T, pool *pgxpool.Pool, cyp
 	require.NoError(t, err, "seed: %s", cypher)
 }
 
-// TestAGEEntityDecodeReadsTheOffsetSidecar is bd gqlc-vs9i's missing witness:
+// testAGEEntityDecodeReadsTheOffsetSidecar is bd gqlc-vs9i's missing witness:
 // the emitted agtypeZone, reached through the emitted OneEvent, against agtype
 // that came back from Apache AGE.
 //
@@ -96,7 +96,7 @@ func seedAGEZoneGraph(ctx context.Context, t *testing.T, pool *pgxpool.Pool, cyp
 // come in pairs around it: 86399 is admitted and 86400 is refused, and the
 // same on the negative side. A guard widened or narrowed by one second
 // reddens exactly one row here.
-func testAGEEntityDecodeReadsTheOffsetSidecar(t *testing.T, ctx context.Context, q *tsage.Queries, seed func(string)) { //nolint:thelper // a scenario body owns its failure frame
+func testAGEEntityDecodeReadsTheOffsetSidecar(ctx context.Context, t *testing.T, q *tsage.Queries, seed func(string)) { //nolint:thelper // a scenario body owns its failure frame
 	micros := ageZoneInstant.UnixMicro()
 
 	for _, tc := range []struct {
@@ -195,13 +195,13 @@ func testAGEEntityDecodeReadsTheOffsetSidecar(t *testing.T, ctx context.Context,
 	}
 }
 
-// TestAGENullableInstantReadsItsOwnSidecar covers the second emitted
+// testAGENullableInstantReadsItsOwnSidecar covers the second emitted
 // agtypeZone call site. A nullable instant is decoded through a different arm
 // — agtypeNullableProperty, then a zone applied to the dereferenced value —
 // and that arm reads a sidecar named after ITS property. A generator that
 // emitted one sidecar name for every instant on a vertex would pass the test
 // above and fail here.
-func testAGENullableInstantReadsItsOwnSidecar(t *testing.T, ctx context.Context, q *tsage.Queries, seed func(string)) { //nolint:thelper // a scenario body owns its failure frame
+func testAGENullableInstantReadsItsOwnSidecar(ctx context.Context, t *testing.T, q *tsage.Queries, seed func(string)) { //nolint:thelper // a scenario body owns its failure frame
 	micros := ageZoneInstant.UnixMicro()
 	seed(fmt.Sprintf(
 		"CREATE (e:Event {id: 100, occurredAt: %d, occurredAtOffset: 3600, seenAt: %d, seenAtOffset: -12600})",
@@ -220,13 +220,13 @@ func testAGENullableInstantReadsItsOwnSidecar(t *testing.T, ctx context.Context,
 	require.Equal(t, -12600, seenOffset, "seenAt took the wrong sidecar")
 }
 
-// TestAGENullableInstantWithoutItsInstantIgnoresTheSidecar pins the guard the
+// testAGENullableInstantWithoutItsInstantIgnoresTheSidecar pins the guard the
 // nullable arm puts around the zone: agtypeZone is applied only when the
 // instant itself decoded to something. A vertex carrying the sidecar and no
 // instant is a graph gqlc did not write and has to read without failing —
 // there is nothing to put in a zone, so the absent instant survives and the
 // stray sidecar is not consulted at all, out-of-range or not.
-func testAGENullableInstantWithoutItsInstantIgnoresTheSidecar(t *testing.T, ctx context.Context, q *tsage.Queries, seed func(string)) { //nolint:thelper // a scenario body owns its failure frame
+func testAGENullableInstantWithoutItsInstantIgnoresTheSidecar(ctx context.Context, t *testing.T, q *tsage.Queries, seed func(string)) { //nolint:thelper // a scenario body owns its failure frame
 	seed(fmt.Sprintf(
 		"CREATE (e:Event {id: 200, occurredAt: %d, seenAtOffset: 99999})",
 		ageZoneInstant.UnixMicro()))
@@ -248,14 +248,14 @@ func TestAGEOffsetSidecar(t *testing.T) {
 
 	for _, sc := range []struct {
 		name string
-		run  func(*testing.T, context.Context, *tsage.Queries, func(string))
+		run  func(context.Context, *testing.T, *tsage.Queries, func(string))
 	}{
 		{name: "the sidecar beside a non-nullable instant", run: testAGEEntityDecodeReadsTheOffsetSidecar},
 		{name: "a nullable instant reads its own sidecar", run: testAGENullableInstantReadsItsOwnSidecar},
 		{name: "a sidecar with no instant beside it", run: testAGENullableInstantWithoutItsInstantIgnoresTheSidecar},
 	} {
 		t.Run(sc.name, func(t *testing.T) {
-			sc.run(t, ctx, q, seed)
+			sc.run(ctx, t, q, seed)
 		})
 	}
 }
