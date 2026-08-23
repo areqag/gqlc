@@ -2502,9 +2502,9 @@ Measured by km guard-sweep with 'git merge-tree --write-tree --name-only', not w
 # that is not installed at all — measured 2026-08-22: LoadState=not-found came
 # back with Result=success — so health cannot be read off Result alone.
 unit_health() { # <unit> -> "ok …" | "FAILED …" | "NEVER RUN …" | "NOT INSTALLED …" | "UNKNOWN …"
-    local props line load="" last="" result="" code=""
+    local props line load="" active="" last="" result="" code=""
     if ! props=$(systemctl --user show "$1" \
-        -p LoadState -p InactiveEnterTimestamp -p Result -p ExecMainStatus 2>/dev/null); then
+        -p LoadState -p ActiveState -p InactiveEnterTimestamp -p Result -p ExecMainStatus 2>/dev/null); then
         echo "UNKNOWN — systemctl could not answer (is there a user bus?)"
         return 0
     fi
@@ -2513,6 +2513,7 @@ unit_health() { # <unit> -> "ok …" | "FAILED …" | "NEVER RUN …" | "NOT INS
     while IFS= read -r line; do
         case "$line" in
             LoadState=*) load=${line#*=} ;;
+            ActiveState=*) active=${line#*=} ;;
             InactiveEnterTimestamp=*) last=${line#*=} ;;
             Result=*) result=${line#*=} ;;
             ExecMainStatus=*) code=${line#*=} ;;
@@ -2520,6 +2521,18 @@ unit_health() { # <unit> -> "ok …" | "FAILED …" | "NEVER RUN …" | "NOT INS
     done <<<"$props"
     if [ "$load" != loaded ]; then
         echo "NOT INSTALLED — $1 is ${load:-absent} (km install-units)"
+    elif [ "$active" = activating ] || [ "$active" = active ]; then
+        # gqlc-67ml. InactiveEnterTimestamp and Result describe the PREVIOUS
+        # run, and while the timer is actually firing the unit they are
+        # transiently inconsistent with each other: 'guard last run succeeded'
+        # flapped warn then ok between two doctor runs a minute apart, with
+        # Result=success ExecMainStatus=0 reported both times. So a unit systemd
+        # says is running now gets no verdict on the run before it — the run
+        # under way has not ended, and the record of the one before it is being
+        # overwritten. A cadence of two minutes makes that a wolf cry, and a
+        # verdict on an unfinished run is an unmeasured state rendered as a
+        # measured one, which is the thing this file exists to refuse.
+        echo "UNKNOWN — $1 is $active right now, so its last run was not measured"
     elif [ -z "$last" ]; then
         echo "NEVER RUN — $1 exists but its timer has never fired it"
     elif [ "$result" != success ]; then
@@ -2528,8 +2541,6 @@ unit_health() { # <unit> -> "ok …" | "FAILED …" | "NEVER RUN …" | "NOT INS
         echo "ok (last run $last)"
     fi
 }
-
-unit_ran_ok() { case "$(unit_health "$1")" in ok*) return 0 ;; *) return 1 ;; esac; }
 
 # ---------- status ----------
 
@@ -2860,24 +2871,35 @@ cmd_status() {
 
 cmd_doctor() {
     local ok=0
-    check() { # check <hard|soft> <label> <cmd...>
-        local kind=$1 label=$2
-        shift 2
+    # TWO labels, not one prefix (gqlc-67ml). A row that printed one label under
+    # both outcomes STATED THE OPPOSITE of what it measured whenever the label
+    # was phrased as a positive assertion: 'warn: town is up' over a town that
+    # was down, 'warn: guard last run succeeded' over a run that had failed,
+    # both in a real run on 2026-08-23. Four characters of prefix were carrying
+    # the whole negation of a sentence written to mean the other thing, and an
+    # operator scanning this on restart morning reads the sentence.
+    #
+    # So the failing phrasing is supplied per call and says what is wrong. It is
+    # a required argument, not a defaulted one: a default would silently
+    # reinstate the defect for every row that forgot it.
+    check() { # check <hard|soft> <label-when-true> <label-when-false> <cmd...>
+        local kind=$1 label=$2 negative=$3
+        shift 3
         if "$@" >/dev/null 2>&1; then
             echo "ok:   $label"
         elif [ "$kind" = hard ]; then
-            echo "FAIL: $label"
+            echo "FAIL: $negative"
             ok=1
         else
-            echo "warn: $label"
+            echo "warn: $negative"
         fi
     }
-    check hard "tmux installed" command -v tmux
-    check hard "claude installed" command -v claude
-    check hard "bd installed" command -v bd
-    check hard "jq installed" command -v jq
-    check hard "python3 installed" command -v python3
-    check hard "state dir writable" mkdir -p "$(state_dir)"
+    check hard "tmux installed" "tmux is NOT installed, and the town's panes are tmux windows" command -v tmux
+    check hard "claude installed" "claude is NOT installed, so no seat can be woken" command -v claude
+    check hard "bd installed" "bd is NOT installed, so there is no ledger to dispatch from" command -v bd
+    check hard "jq installed" "jq is NOT installed, and every ledger query here is parsed with it" command -v jq
+    check hard "python3 installed" "python3 is NOT installed" command -v python3
+    check hard "state dir writable" "the state dir could NOT be created or written: $(state_dir)" mkdir -p "$(state_dir)"
     # Not a `check` row: this one must NAME what it found. A boolean row labelled
     # "matches origin/master" reports a measured mismatch, so on a root that
     # could not be measured at all it sends the reader to `km deploy` for a
@@ -2977,12 +2999,31 @@ cmd_doctor() {
     else
         # shellcheck source=/dev/null
         . "$idsrc"
+        # THE POPULATION (gqlc-c7b5). This asked `--status open`, and in bd that
+        # is the LITERAL status `open`, not "not closed": a bead in in_progress
+        # or blocked was never queried and the arm reported on the rest with
+        # full confidence. Measured 2026-08-23 while repairing gqlc-3x1r — the
+        # arm named exactly three open beads owned by km@test and was silent
+        # about gqlc-o13d, in_progress, owner fixture@example.invalid, and a P0.
+        #
+        # So: `--all`, which applies no status filter, and CLOSED is excluded in
+        # jq rather than by asking for three statuses by name. Two reasons for
+        # that shape. A named list has to be revised every time bd gains a
+        # status, and it fails silently in the direction of omission when nobody
+        # does. And closed is excluded on purpose, not incidentally: a closed
+        # bead's owner is history — the window is shut, there is nothing to
+        # reassign — so failing on one would leave this arm permanently red over
+        # the beads gqlc-0rv9 already repaired, and a permanently red gate is
+        # one nobody reads.
+        #
+        # `-n 0` for the row cap, which is a SEPARATE default from the status
+        # filter and disables only itself.
         local owners bad_owners="" o why
-        if ! owners=$(bd list --status open -n 0 --json 2>/dev/null |
-            jq -r '[ .[] | .owner // empty | select(. != "") ] | unique | .[]'); then
+        if ! owners=$(bd list --all -n 0 --json 2>/dev/null |
+            jq -r '[ .[] | select(.status != "closed") | .owner // empty | select(. != "") ] | unique | .[]'); then
             # Fail-closed. gqlc-z1qw: an unanswered query that reads as a clean
             # board is the failure mode this whole file is organised against.
-            echo "FAIL: could not read the open beads, so no owner can be certified a real address"
+            echo "FAIL: could not read the beads, so no owner can be certified a real address"
             ok=1
         else
             while IFS= read -r o; do
@@ -2995,10 +3036,10 @@ cmd_doctor() {
                 # NAMES the address, and FAILS. A check that prints a complaint
                 # and exits 0 is not a gate (gqlc-z1qw, and `just doctor`
                 # printing ok over a warning at gqlc-bn5r).
-                echo "FAIL: open beads carry an owner that cannot belong to a person:$bad_owners fix 'git config user.email' and reassign them"
+                echo "FAIL: beads that are not closed carry an owner that cannot belong to a person:$bad_owners fix 'git config user.email' and reassign them"
                 ok=1
             else
-                echo "ok:   every open bead's owner is a deliverable address"
+                echo "ok:   every open, in progress and blocked bead's owner is a deliverable address"
             fi
         fi
     fi
@@ -3027,15 +3068,31 @@ cmd_doctor() {
             echo "ok:   every seat's worktree carries every merged .githooks/.claude commit"
         fi
     fi
-    check soft "bd mail.delegate points at km" sh -c "bd config get mail.delegate | grep -q 'km mail'"
-    check soft "dispatch timer enabled" systemctl --user is-enabled kingdom-dispatch.timer
-    check soft "guard timer enabled" systemctl --user is-enabled kingdom-guard.timer
+    check soft "bd mail.delegate points at km" "bd mail.delegate does NOT resolve to 'km mail', so mail bd delegates goes nowhere this town reads" sh -c "bd config get mail.delegate | grep -q 'km mail'"
+    check soft "dispatch timer enabled" "the dispatch timer is NOT enabled, so nothing will route a bead until someone runs km dispatch by hand" systemctl --user is-enabled kingdom-dispatch.timer
+    check soft "guard timer enabled" "the guard timer is NOT enabled, so no sweep will run until someone runs km guard-sweep by hand" systemctl --user is-enabled kingdom-guard.timer
     # An enabled timer says the machinery is armed, not that it works: the
     # dispatcher routed nothing for its whole life with both timers green
     # (gqlc-z1qw), and now that it dies on a bad query, the death lands only in
     # the journal unless something asks the unit how its last run went.
-    check soft "dispatch last run succeeded" unit_ran_ok kingdom-dispatch.service
-    check soft "guard last run succeeded" unit_ran_ok kingdom-guard.service
+    #
+    # Not `check` rows: three outcomes, not two. unit_health already separates
+    # never-fired, not-installed, mid-run and unanswerable from a genuine
+    # failure, and a boolean row threw all of that away and printed one label —
+    # 'guard last run succeeded', with the run having failed (gqlc-67ml). So the
+    # row renders unit_health's own sentence, which is the thing that was
+    # measured.
+    check_unit_run() { # <what> <unit>
+        local uh
+        uh=$(unit_health "$2")
+        case "$uh" in
+            ok*)      echo "ok:   $1 last run succeeded ${uh#ok }" ;;
+            UNKNOWN*) echo "warn: $1 last run is UNKNOWN — ${uh#UNKNOWN — }" ;;
+            *)        echo "warn: $1 last run did NOT succeed — $uh" ;;
+        esac
+    }
+    check_unit_run dispatch kingdom-dispatch.service
+    check_unit_run guard kingdom-guard.service
     # THE LINGER ARM (gqlc-yxnf). Not a `check` row, and deliberately not a
     # pass/fail one: both answers are legitimate configurations, and which is
     # correct depends on something km cannot see. `loginctl enable-linger` is
@@ -3062,7 +3119,27 @@ cmd_doctor() {
     else
         echo "ok:   lingering is off, so the timers fire only while a login session is open — a headless town needs 'loginctl enable-linger'"
     fi
-    check soft "town is up" tmux has-session -t "=$SESSION"
+    # THE TOWN ROW (gqlc-67ml), and it gets the linger arm's three outcomes
+    # rather than a negated label, because there are genuinely three. This
+    # printed 'warn: town is up' with the town down, and it is the row an
+    # operator reads first on a restart morning.
+    #
+    # `has-session` exits 1 both for "no such session" and for "no server
+    # running", and both of those mean the town is down, so 1 is a measurement.
+    # Anything else is not: 127 is an absent tmux, and other codes are a tmux
+    # that could not be run or could not reach its socket. Rendering those as
+    # DOWN is the same fail-open pointed the other way — the reader would go and
+    # start a town that may already be running.
+    local tmuxout tmuxrc=0
+    tmuxout=$(tmux has-session -t "=$SESSION" 2>&1) || tmuxrc=$?
+    : "$tmuxout"
+    if [ "$tmuxrc" -eq 0 ]; then
+        echo "ok:   the town is up — tmux session '$SESSION' exists"
+    elif [ "$tmuxrc" -eq 1 ]; then
+        echo "warn: the town is DOWN — there is no tmux session '$SESSION' ('km up' starts it)"
+    else
+        echo "warn: whether the town is up is UNKNOWN — tmux exited $tmuxrc rather than answering about session '$SESSION' (${tmuxout:-no output}), so this was not measured"
+    fi
     return "$ok"
 }
 
