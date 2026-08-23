@@ -1,7 +1,33 @@
 # The always-run merge-blocking checks: lint / test / tidy / actionlint.
-# tidy and actionlint are fast (< 30 s); they gate the slow jobs (lint, test,
-# codegen-fence) so a trivial formatting miss cancels expensive work early.
 # Tool versions are pinned once, in the justfile.
+#
+# EVERY JOB HERE IS INDEPENDENT, and that is load-bearing rather than tidy.
+# lint, test and codegen-fence used to carry `needs: [actionlint, tidy]` so a
+# trivial formatting miss cancelled expensive work early. The saving was real
+# and it was bought with the merge gate (bd gqlc-yc6x). A job whose `needs:`
+# fails does not fail — it concludes SKIPPED, and a required context concluding
+# SKIPPED SATISFIES branch protection. Measured first-party on this repo, PR
+# #1323 / run 32622299816, 2026-08-23: codegen-fence was forced to conclude
+# SKIPPED with the other six required contexts green, and the PR's
+# mergeStateStatus read UNSTABLE — the value for "mergeable, some non-required
+# check is red" — not BLOCKED. So the gate was open with a required check that
+# had never run.
+#
+# What that costs is not hypothetical: with `needs:` in place, a tidy failure
+# printed `skipping` against lint, test and codegen-fence, which reads to a
+# human like a pass and left three of the seven required contexts satisfied by
+# a job that did nothing. The blocking parent held the gate shut, so no merge
+# has been observed to slip through — but the gate then rests entirely on the
+# parent's own conclusion never being cleared while the children stay skipped,
+# and reruns, cancellations and concurrency all move that.
+#
+# The trade now runs the other way: a red PR spends runner minutes on jobs that
+# were going to be cancelled, and a green PR — the common case — stops waiting
+# ~30 s for actionlint and tidy before the slow jobs start. Do not restore the
+# `needs:` edges to save the minutes back.
+#
+# Nothing in this tree refuses a `needs:` here, so today that rule is held by
+# this paragraph alone. bd gqlc-zlqv is the guard.
 name: ci
 
 # `edited` is here for the check-PR-body gate in the tidy job (bd gqlc-w4al).
@@ -15,8 +41,9 @@ name: ci
 # for what is a one-line check. That is deliberate. Skipping the expensive jobs
 # on `edited` with a job-level `if:` would be cheaper and is a bypass: every job
 # in a triggered workflow emits a check run, a skipped one is conclusion
-# `skipped`, branch protection reads `skipped` as a pass, and the newest check
-# run for a context wins. So a red `lint` on the head SHA would be overwritten
+# `skipped`, branch protection reads `skipped` as a pass (measured above, not
+# assumed: PR #1323 / run 32622299816), and the newest check run for a context
+# wins. So a red `lint` on the head SHA would be overwritten
 # by a `skipped` one the moment anyone touched the PR description. Same reason
 # vuln.yml runs govulncheck on every PR and decides in-job rather than skipping.
 # Concurrency keeps the common case cheap anyway: an edit that lands alongside a
@@ -38,7 +65,6 @@ concurrency:
 
 jobs:
   lint:
-    needs: [actionlint, tidy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,11 +99,27 @@ jobs:
           key: golangci-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}-${{ github.run_id }}
           restore-keys: |
             golangci-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}-
+      # This step is also the repo's ONLY server-side enforcement of gofumpt and
+      # gci, and it is not obvious that it is: the formatters have their own
+      # recipes (`just fmt`, `just fmt-check`) and their own `formatters:` block
+      # in .golangci.yml, and no workflow calls fmt-check. What settles it is
+      # that `golangci-lint run` reports the `formatters:` entries as ordinary
+      # issues. Measured at the pinned v2.13.1 (bd gqlc-lsku, 2026-08-23),
+      # against an rc=0 control on the pristine files:
+      #   blank line after a function's opening brace ->
+      #     "internal/version/version.go:16:1: File is not properly formatted
+      #      (gofumpt)", rc=1
+      #   import block reordered ->
+      #     "internal/config/count_internal_test.go:4:1: File is not properly
+      #      formatted (gci)", rc=1
+      # So a clone whose pre-commit hook never ran — or ran during a
+      # core.hooksPath drift window (bd gqlc-4thl) — still cannot land
+      # unformatted Go. Nothing in the tree holds golangci-lint to that
+      # behaviour across a version bump; bd gqlc-sh4j is that gap.
       - run: just lint
       - run: just lint-cache-check
 
   test:
-    needs: [actionlint, tidy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -208,7 +250,6 @@ jobs:
       - run: just lint-hooks .github/scripts
 
   codegen-fence:
-    needs: [actionlint, tidy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
