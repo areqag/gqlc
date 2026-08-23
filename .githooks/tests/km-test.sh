@@ -643,10 +643,16 @@ case "$1" in
                # rather than to the "no fixture named" refusal, because every
                # row written before this arm existed would otherwise redden on
                # a query it says nothing about. A row that wants the arm to
-               # fire sets KM_FAKE_OPEN itself; the rows that do are below and
+               # fire sets KM_FAKE_BEADS itself; the rows that do are below and
                # they assert the exit status, so the arm is pinned by them and
                # not by this default.
-               *"--status open"*) f="${KM_FAKE_OPEN:-$KM_EMPTY_BOARD}" ;;
+               #
+               # `--all`, and there is deliberately NO `--status open` branch
+               # left (gqlc-c7b5): that filter means the literal status `open`
+               # and omitted in_progress and blocked, so an arm that drifted
+               # back to it must not be answered at all. It falls to the
+               # refusal below, doctor fails closed, and the rows redden.
+               *"--all"*) f="${KM_FAKE_BEADS:-$KM_EMPTY_BOARD}" ;;
                # The patrol bound's query (ADR 0004 §2). It asks --status ALL
                # on purpose — bd's `--status open` excludes in_progress and
                # blocked, so a claimed patrol bead would read as absent — and
@@ -5323,6 +5329,191 @@ else
     ok "km doctor passes a dispatcher whose last run succeeded"
 fi
 
+# --- a soft row must not assert the thing that failed (gqlc-67ml / #1349) ----
+# MEASURED 2026-08-23 with the town halted: doctor's check() printed the SAME
+# label under both outcomes, prefixed 'ok:' or 'warn:'. For a label phrased as a
+# positive assertion the warn line then STATES THE OPPOSITE of what happened —
+#
+#   warn: town is up               <- the town is DOWN; km status agreed
+#   warn: guard last run succeeded  <- the guard's last run FAILED
+#
+# and the four-character prefix is the only thing carrying the negation, in a
+# sentence written to mean the opposite. An operator scanning this on restart
+# morning is the whole reason the file exists.
+
+# check()'s negative arm, taken at the ONE soft row the stubs can fail on their
+# own: the bd stub answers `config get` with silence, so the delegate grep
+# fails. The row asserts the SENTENCE, not the prefix — a fix that only changed
+# 'warn:' to something louder would still be asserting a delegate that is not
+# configured.
+svc_case
+fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:17:53 EDT' 'Result=success' 'ExecMainStatus=0'
+fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=success' 'ExecMainStatus=0'
+DOUT="$(PATH="$BIN:$PATH" "$KM" doctor 2>&1)"
+crow="a soft check that fails says what is wrong, not the positive it just disproved"
+dline="$(printf '%s\n' "$DOUT" | grep -i 'mail.delegate' | head -1)"
+if [ -z "$dline" ]; then
+    bad "$crow" "doctor says nothing about mail.delegate at all: $DOUT"
+elif [ "${dline#ok:}" != "$dline" ]; then
+    bad "$crow" "the fixture never failed the delegate check, so this row witnesses nothing: $dline"
+elif printf '%s' "$dline" | grep -Eq 'delegate (points|is set)'; then
+    bad "$crow" "the failing line asserts the delegate IS configured: $dline"
+elif ! printf '%s' "$dline" | grep -Eq 'NOT|not '; then
+    bad "$crow" "the failing line does not state the negative: $dline"
+else
+    ok "$crow"
+fi
+
+# The HARD arm of the same helper, and it needs its own row: soft prints 'warn:'
+# and hard prints 'FAIL:', so a repair applied to one branch of check() leaves
+# the other still asserting the positive it just disproved. A state dir under
+# /dev/null cannot be created on any Unix, which makes this the one hard row a
+# test can fail without removing a binary from PATH.
+hrow="a hard check that fails says what is wrong, not the positive it just disproved"
+HOUT="$(KM_STATE_DIR=/dev/null/no-such-state-dir PATH="$BIN:$PATH" "$KM" doctor 2>&1)"
+hline="$(printf '%s\n' "$HOUT" | grep -i 'state dir' | head -1)"
+if [ -z "$hline" ]; then
+    bad "$hrow" "doctor says nothing about the state dir: $HOUT"
+elif ! printf '%s' "$hline" | grep -q '^FAIL:'; then
+    bad "$hrow" "an uncreatable state dir did not FAIL, so this row witnesses nothing: $hline"
+elif printf '%s' "$hline" | grep -Eq 'dir writable|dir is writable'; then
+    bad "$hrow" "the failing line asserts the state dir IS writable: $hline"
+elif ! printf '%s' "$hline" | grep -q 'no-such-state-dir'; then
+    bad "$hrow" "the failing line does not name the path, so the operator cannot act on it: $hline"
+else
+    ok "$hrow"
+fi
+
+# THE HEADLINE ROW, and it gets the linger arm's THREE outcomes rather than a
+# negated label: up, down, and an explicit UNKNOWN for a tmux that could not be
+# asked at all. `has-session` exits 1 for "no such session" and for "no server
+# running" — both mean the town is down — but 127 for an absent binary, and
+# rendering that as DOWN is the same fail-open in the other direction.
+town_bin="$TMP/bin-doctor-town"
+mkdir -p "$town_bin"
+run_town_doctor() { # $1 = tmux stub body
+    svc_case
+    fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=inactive' \
+        'InactiveEnterTimestamp=Fri 2026-08-21 22:17:53 EDT' 'Result=success' 'ExecMainStatus=0'
+    fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=inactive' \
+        'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=success' 'ExecMainStatus=0'
+    printf '#!/usr/bin/env bash\n%s\n' "$1" >"$town_bin/tmux"
+    chmod +x "$town_bin/tmux"
+    DOUT="$(KM_TMUX_SESSION=doctown PATH="$town_bin:$BIN:$PATH" "$KM" doctor 2>&1)"
+}
+town_row() { printf '%s\n' "$DOUT" | grep -i 'town is' | head -1; }
+
+trow="km doctor names a town that is DOWN instead of asserting it is up"
+run_town_doctor 'exit 1'
+TDOWN="$(town_row)"
+if [ -z "$TDOWN" ]; then
+    bad "$trow" "doctor says nothing about the town at all: $DOUT"
+elif printf '%s' "$TDOWN" | grep -q 'town is up'; then
+    bad "$trow" "the town is down and the line says it is up: $TDOWN"
+elif ! printf '%s' "$TDOWN" | grep -q 'DOWN'; then
+    bad "$trow" "the line neither asserts up nor states the town is down: $TDOWN"
+elif ! printf '%s' "$TDOWN" | grep -q 'doctown'; then
+    bad "$trow" "the line does not name the session it looked for: $TDOWN"
+else
+    ok "$trow"
+fi
+
+# The control. Every row here would pass against a doctor that said DOWN
+# unconditionally, and a report that cries down at a running town is the same
+# defect wearing the other sign.
+trow_up="km doctor reports a live tmux session as a town that is up"
+run_town_doctor 'exit 0'
+TUP="$(town_row)"
+if ! printf '%s' "$TUP" | grep -q '^ok:'; then
+    bad "$trow_up" "a live session did not read as ok: $TUP"
+elif ! printf '%s' "$TUP" | grep -q 'town is up'; then
+    bad "$trow_up" "the ok line does not say the town is up: $TUP"
+else
+    ok "$trow_up"
+fi
+
+# The third state, which is the whole point of gqlc-67ml: a probe that could not
+# be run was not a measurement, and must read as neither of the two answers.
+trow_unk="km doctor does not call a tmux it could not run a town that is down"
+run_town_doctor 'echo "tmux: command not found" >&2; exit 127'
+TUNK="$(town_row)"
+if [ -z "$TUNK" ]; then
+    bad "$trow_unk" "doctor went silent about the town instead of saying it could not ask: $DOUT"
+elif ! printf '%s' "$TUNK" | grep -q 'UNKNOWN'; then
+    bad "$trow_unk" "an unrunnable probe rendered as an answer: $TUNK"
+elif [ "$TUNK" = "$TUP" ] || [ "$TUNK" = "$TDOWN" ]; then
+    bad "$trow_unk" "'could not ask' is indistinguishable from a measured state: $TUNK"
+else
+    ok "$trow_unk"
+fi
+
+# The second, smaller half of gqlc-67ml. 'guard last run succeeded' FLAPPED warn
+# then ok between two doctor runs a minute apart, with systemd reporting
+# Result=success ExecMainStatus=0 BOTH times: InactiveEnterTimestamp and Result
+# describe the PREVIOUS run and are transiently inconsistent while the timer is
+# actually firing the unit. A health gate that reports failure because it caught
+# the unit mid-run cries wolf on a two-minute cadence — and, worse, renders a
+# verdict on a run that has not finished, which is an unmeasured state again.
+mrow="a unit caught mid-run is UNKNOWN, not a verdict on a run that has not ended"
+svc_case
+fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=activating' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:17:53 EDT' 'Result=exit-code' 'ExecMainStatus=2'
+fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=success' 'ExecMainStatus=0'
+DOUT="$(PATH="$BIN:$PATH" "$KM" doctor 2>&1)"
+mline="$(printf '%s\n' "$DOUT" | grep -i 'dispatch last run' | head -1)"
+if [ -z "$mline" ]; then
+    bad "$mrow" "doctor says nothing about the dispatcher's last run: $DOUT"
+elif printf '%s' "$mline" | grep -q 'FAILED'; then
+    bad "$mrow" "a unit that is still running was reported as a failed run: $mline"
+elif printf '%s' "$mline" | grep -q '^ok:'; then
+    bad "$mrow" "a run that has not ended was certified successful: $mline"
+elif ! printf '%s' "$mline" | grep -q 'UNKNOWN'; then
+    bad "$mrow" "the mid-run state is neither named nor UNKNOWN: $mline"
+else
+    ok "$mrow"
+fi
+
+# ActiveState=active is the same state for a service systemd is running now, and
+# a fix keyed on the string 'activating' alone would leave it reading FAILED.
+mrow2="a unit systemd reports ACTIVE is mid-run too, not a failed one"
+svc_case
+fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=active' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=exit-code' 'ExecMainStatus=2'
+fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:17:53 EDT' 'Result=success' 'ExecMainStatus=0'
+DOUT="$(PATH="$BIN:$PATH" "$KM" doctor 2>&1)"
+gline="$(printf '%s\n' "$DOUT" | grep -i 'guard last run' | head -1)"
+if [ -z "$gline" ]; then
+    bad "$mrow2" "doctor says nothing about the guard's last run: $DOUT"
+elif ! printf '%s' "$gline" | grep -q 'UNKNOWN'; then
+    bad "$mrow2" "an active unit's previous run got a verdict anyway: $gline"
+else
+    ok "$mrow2"
+fi
+
+# And the failure must still land. Widening 'running' is only safe if a unit
+# that is genuinely inactive-and-failed keeps saying so in as many words.
+mrow3="a unit that really failed still says FAILED, and does not say its run succeeded"
+svc_case
+fake_unit kingdom-guard.service 'LoadState=loaded' 'ActiveState=failed' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:19:00 EDT' 'Result=exit-code' 'ExecMainStatus=2'
+fake_unit kingdom-dispatch.service 'LoadState=loaded' 'ActiveState=inactive' \
+    'InactiveEnterTimestamp=Fri 2026-08-21 22:17:53 EDT' 'Result=success' 'ExecMainStatus=0'
+DOUT="$(PATH="$BIN:$PATH" "$KM" doctor 2>&1)"
+gline="$(printf '%s\n' "$DOUT" | grep -i 'guard last run' | head -1)"
+if printf '%s' "$gline" | grep -q '^ok:'; then
+    bad "$mrow3" "a failed run passed: $gline"
+elif printf '%s' "$gline" | grep -Eq 'last run succeeded'; then
+    bad "$mrow3" "the failing line asserts the run succeeded: $gline"
+elif ! printf '%s' "$gline" | grep -q 'FAILED'; then
+    bad "$mrow3" "the failure is not named: $gline"
+else
+    ok "$mrow3"
+fi
+
 # --- does the town survive logout? (gqlc-yxnf) -------------------------------
 # Systemd USER timers live in the login session's user manager, which is torn
 # down at logout unless `loginctl enable-linger` holds it open. So the same
@@ -5417,7 +5608,7 @@ elif ! printf '%s' "$LUNK" | grep -q 'UNKNOWN'; then
     bad "$lrow" "an unanswered query rendered as an answer: $LUNK"
 elif [ "$LUNK" = "$LOFF" ] || [ "$LUNK" = "$LON" ]; then
     bad "$lrow" "'could not ask' is indistinguishable from a measured state: $LUNK"
-elif ! printf '%s' "$DOUT" | grep -q 'town is up'; then
+elif ! printf '%s' "$DOUT" | grep -q 'the town is'; then
     bad "$lrow" "doctor stopped at the linger arm instead of finishing: $DOUT"
 else
     ok "$lrow, and finishes the remaining checks anyway"
@@ -7830,10 +8021,10 @@ unset KM_FAKE_ALL
 # status would pass against a gate that never fired. dispatch_case leaves the
 # board unstranded and KM_DEPLOY_ROOT points at the clean tree.
 dispatch_case '[]' '[]'
-export KM_FAKE_OPEN="$KM_STATE_DIR/open.json"
+export KM_FAKE_BEADS="$KM_STATE_DIR/open.json"
 printf '[{"id":"gqlc-i1","owner":"antranig.yeretzian@proton.me"},
          {"id":"gqlc-i2","owner":"ops@example-corp.io"},
-         {"id":"gqlc-i3","owner":null}]' >"$KM_FAKE_OPEN"
+         {"id":"gqlc-i3","owner":null}]' >"$KM_FAKE_BEADS"
 run_doctor
 id_clean="doctor passes a board whose owners are all deliverable, and says so"
 if [ "$RC" -ne 0 ]; then
@@ -7854,7 +8045,7 @@ fi
 id_bad="doctor FAILS and names the bead owner that cannot belong to a person"
 printf '[{"id":"gqlc-i4","owner":"km@test"},
          {"id":"gqlc-i5","owner":"fixture@example.invalid"},
-         {"id":"gqlc-i6","owner":"antranig.yeretzian@proton.me"}]' >"$KM_FAKE_OPEN"
+         {"id":"gqlc-i6","owner":"antranig.yeretzian@proton.me"}]' >"$KM_FAKE_BEADS"
 run_doctor
 if [ "$RC" -eq 0 ]; then
     # "does it FAIL?", not "is there a check?" — gqlc-z1qw, and `just doctor`
@@ -7875,12 +8066,60 @@ fi
 # address with no domain has no reserved name to match, so a fix that only
 # walked the TLD list would clear this one.
 id_shape="doctor FAILS on an owner that is not an address at all"
-printf '[{"id":"gqlc-i7","owner":"km"}]' >"$KM_FAKE_OPEN"
+printf '[{"id":"gqlc-i7","owner":"km"}]' >"$KM_FAKE_BEADS"
 run_doctor
 if [ "$RC" -eq 0 ] || ! printf '%s' "$OUT" | grep -q '^FAIL:.*owner'; then
     bad "$id_shape" "rc=$RC out=$OUT"
 else
     ok "$id_shape"
+fi
+
+# THE POPULATION, not just the predicate (gqlc-c7b5 / #1352). The arm asked
+# `bd list --status open`, and in bd that means the LITERAL status `open` — not
+# "not closed". A bead in `in_progress` or `blocked` was omitted, so the arm
+# reported confidently about a population it had not queried, which is the one
+# failure mode this whole file is organised against.
+#
+# FALSIFIER, first-party, measured 2026-08-23 while repairing gqlc-3x1r: the arm
+# named exactly three `open` beads with owner km@test and was silent about
+# gqlc-o13d — in_progress, owner fixture@example.invalid, and a P0.
+#
+# Both remaining non-closed statuses are here, separately, so a fix that widened
+# to open+in_progress only leaves `blocked` reddening this row.
+id_status="doctor's owner arm sees an in_progress or blocked bead, not only a literally-open one"
+printf '[{"id":"gqlc-i9","status":"in_progress","owner":"fixture@example.invalid"}]' >"$KM_FAKE_BEADS"
+run_doctor
+if [ "$RC" -eq 0 ]; then
+    bad "$id_status" "an in_progress bead with a fixture owner exited 0: $OUT"
+elif ! printf '%s' "$OUT" | grep '^FAIL:.*owner' | grep -q 'fixture@example.invalid'; then
+    bad "$id_status" "the in_progress bead's owner was never named: $OUT"
+else
+    printf '[{"id":"gqlc-i10","status":"blocked","owner":"km@test"}]' >"$KM_FAKE_BEADS"
+    run_doctor
+    if [ "$RC" -eq 0 ]; then
+        bad "$id_status" "a blocked bead with a fixture owner exited 0: $OUT"
+    elif ! printf '%s' "$OUT" | grep '^FAIL:.*owner' | grep -q 'km@test'; then
+        bad "$id_status" "the blocked bead's owner was never named: $OUT"
+    else
+        ok "$id_status"
+    fi
+fi
+
+# The other side of the same widening, and it is what stops the fix from being
+# "drop the filter entirely". A CLOSED bead's owner is history: the window it
+# was written in is shut, there is nothing to reassign, and failing on it would
+# leave the arm permanently red over the 15 beads gqlc-0rv9 already repaired. So
+# the arm widens to every non-closed status and stops exactly there.
+id_closed="doctor's owner arm does not fail over a closed bead's historical owner"
+printf '[{"id":"gqlc-i11","status":"closed","owner":"km@test"},
+         {"id":"gqlc-i12","status":"open","owner":"antranig.yeretzian@proton.me"}]' >"$KM_FAKE_BEADS"
+run_doctor
+if printf '%s' "$OUT" | grep -q '^FAIL:.*owner'; then
+    bad "$id_closed" "a closed bead's owner was raised as actionable: $OUT"
+elif ! printf '%s' "$OUT" | grep -q '^ok: .*owner'; then
+    bad "$id_closed" "the owner arm did not report at all: $OUT"
+else
+    ok "$id_closed"
 fi
 
 # SOURCED, NOT COPIED. This is the predicate's third consumer, and gqlc-gy3q is
@@ -7904,7 +8143,7 @@ else
     # cannot possibly know about this one.
     sed 's/^IMPLAUSIBLE_RESERVED_DOMAINS=(/IMPLAUSIBLE_RESERVED_DOMAINS=(mutated-for-the-suite /' \
         "$idsrc" >"$shadow/.githooks/implausible-identity.sh"
-    printf '[{"id":"gqlc-i8","owner":"someone@mutated-for-the-suite"}]' >"$KM_FAKE_OPEN"
+    printf '[{"id":"gqlc-i8","owner":"someone@mutated-for-the-suite"}]' >"$KM_FAKE_BEADS"
     OUT="$(PATH="$BIN:$PATH" "$shadow/kingdom/bin/km" doctor 2>&1)"
     RC=$?
     if [ "$RC" -eq 0 ] || ! printf '%s' "$OUT" | grep -q '^FAIL:.*owner'; then
@@ -7919,8 +8158,8 @@ fi
 # delete the rc test on the query and every row above stays green while doctor
 # certifies an empty answer from a database it could not open.
 id_rc="a bead query that fails makes doctor refuse to certify the owners it never saw"
-printf '[]' >"$KM_FAKE_OPEN"
-printf '1' >"$KM_FAKE_OPEN.rc"
+printf '[]' >"$KM_FAKE_BEADS"
+printf '1' >"$KM_FAKE_BEADS.rc"
 run_doctor
 if [ "$RC" -eq 0 ]; then
     bad "$id_rc" "a failed owner query certified the board: $OUT"
@@ -7929,8 +8168,8 @@ elif ! printf '%s' "$OUT" | grep -q '^FAIL:.*owner'; then
 else
     ok "$id_rc"
 fi
-rm -f "$KM_FAKE_OPEN.rc"
-unset KM_FAKE_OPEN
+rm -f "$KM_FAKE_BEADS.rc"
+unset KM_FAKE_BEADS
 
 # --- status: the king's inbox count measures delivery, not reading -----------
 # gqlc-2abx. A letter leaves inbox/ in exactly one way: mail_read's final `mv`,
