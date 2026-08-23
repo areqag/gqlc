@@ -86,6 +86,12 @@ git worktree add --no-track -b <branch-name> ../<repo>-<bead-slug> origin/master
 cd ../<repo>-<bead-slug>
 ```
 
+**`<branch-name>` must contain the bead id, in the form `<type>/<bead-id>-<slug>`** — for example `fix/gqlc-uz3c-prepush-bead-warning`. Not the bare suffix (`fix/sync-drift-x98l`): CI's reader is anchored on the `gqlc-` prefix and cannot see one without it.
+
+That is not cosmetic, and it is the half of this recipe that was wrong until 2026-08-23 (bd `gqlc-uz3c`). CI's `tidy` job runs `.github/scripts/check-pr-closes.py`, which resolves the PR's bead from a `Bead:` / `Refs:` line in the body and falls back to a bead id in the **branch** name. The recipe above put the slug in the DIRECTORY and left the branch descriptive, so the fallback never fired: measured over the 60 most recently merged PRs on 2026-08-23, 57 head branches carried no `gqlc-` id. A body that then says `Closes #N` fails the gate, under a job whose name says nothing about bead ids — three PRs in one night each burned about an hour on it and one lane died before diagnosing it. (It was worse then: `tidy` still carried `needs:` children, so lint/test/codegen-fence reported `skipping` and the check table read like a run in progress. PR #1323 removed those edges the same night, so today it is one red cell.) `.githooks/pre-push` now warns when it publishes a branch whose name carries no id — advisory only, since it cannot see a PR body that does not exist yet.
+
+If you are already on a branch without one, do not re-cut it: put a `Bead: <bead-id>` line in the PR body. Editing the body re-runs the gate with no new commit and no new push.
+
 The first push publishes the branch and sets its upstream:
 
 ```bash
