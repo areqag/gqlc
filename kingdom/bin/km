@@ -185,9 +185,6 @@ KM_GATE_PATHS=(kingdom/ .githooks/ .claude/)
 # Names the deployed paths where the tree differs from origin/master; silence
 # means no drift. It diffs the WORKING TREE, not HEAD, because that is what the
 # units execute: a file edited or staged in place is drift at the right commit.
-# Reads the remote-tracking ref rather than the network, so it cannot stall the
-# dispatcher — every seat worktree shares one ref store, so the ref is as fresh
-# as the last fetch by anyone in the town.
 #
 # gqlc-d20c widened this from kingdom/ alone. The hooks are executed out of the
 # main checkout exactly as the units are, and nothing advanced that checkout:
@@ -199,6 +196,28 @@ KM_GATE_PATHS=(kingdom/ .githooks/ .claude/)
 kingdom_drift() {
     local root out rc=0
     root=$(deploy_root)
+    # Refresh the ref this is about to read, because otherwise the measurement
+    # is circular. The only fetch in a dispatch tick lives in cmd_deploy, and
+    # cmd_deploy is reached only once drift is already non-empty — so while the
+    # town is halted or down, and hold_fetch_master / cmd_seat_refresh /
+    # guard-sweep are therefore not running either, nothing moves
+    # refs/remotes/origin/master, drift measures empty, and the detector is
+    # blind for exactly the outage across which merges accumulate. Measured
+    # 2026-08-23 (bd gqlc-iom4): the checkout sat at 43b1fbe9 while
+    # origin/master was cd7ee956, two of the three commits between them
+    # touching kingdom/; eight consecutive ticks logged only "the town is down"
+    # and never DRIFT. One hand-run `git fetch origin master`, nothing else,
+    # and the next tick logged DRIFT and fast-forwarded.
+    #
+    # Bounded and NON-FATAL. A hung fetch is a stopped town (see git_at), and a
+    # refusal here would stop it too — so a failure degrades to the older
+    # behaviour of judging against whatever ref is on disk. It says so on
+    # stderr, because rendering an unmeasured state as a measured one is the
+    # defect this fixes, one level up. Narrow (origin master), not --all: the
+    # ref this reads is the only one it needs.
+    local KM_GIT_TIMEOUT="${KM_FETCH_TIMEOUT:-30}"
+    git_at "$root" fetch --quiet origin master 2>/dev/null \
+        || echo "drift: could not fetch origin/master in $root; measuring against a possibly-stale ref" >&2
     if ! git_at "$root" rev-parse --verify -q origin/master >/dev/null 2>&1; then
         echo "origin/master is unknown in $root"
         return 0
