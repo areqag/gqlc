@@ -1173,3 +1173,458 @@ func TestNodeDecoderRefusesAnUnlabelledNode(t *testing.T) {
 		t.Errorf("decodeScalar(an unlabelled node) = %q, want it to name %s", err, want)
 	}
 }
+
+// A column of a declared scalar width is the one column arm that reads
+// through neo4j.GetRecordValue[T] for a T that is neither []any nor a
+// dbtype value: bool and string ride their own carriers, an INT32 rides
+// int64 and a FLOAT32 rides float64, and the narrowing is a plain Go
+// conversion the emission writes after the read.
+//
+// Nothing the list and entity columns pin reaches it. Those instantiate
+// GetRecordValue at []any, dbtype.Node and dbtype.Relationship, which
+// until this projection existed were the only three instantiations the
+// corpus produced at all — so the arm could be deleted whole and every
+// row stayed green (bd gqlc-8bl0).
+func TestScalarColumnsNarrowTheirCarriers(t *testing.T) {
+	keys := []string{"id", "rank", "active", "name", "weight"}
+	got, err := queriesOver(keys, []any{int64(7), int64(-3), true, "n", 0.5}).ScalarColumns(t.Context())
+	if err != nil {
+		t.Fatalf("ScalarColumns = error %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ScalarColumns returned %d rows, want 1", len(got))
+	}
+	row := got[0]
+	if row.Id != int64(7) || row.Rank != int32(-3) || !row.Active {
+		t.Errorf("ScalarColumns()[0] = %#v", row)
+	}
+	if row.Name == nil || *row.Name != "n" {
+		t.Errorf("ScalarColumns()[0].Name = %#v, want \"n\"", row.Name)
+	}
+	if row.Weight == nil || *row.Weight != float32(0.5) {
+		t.Errorf("ScalarColumns()[0].Weight = %#v, want 0.5", row.Weight)
+	}
+
+	// A nullable one the graph holds as null is a nil pointer rather than
+	// a pointer to the zero the driver hands back beside its isNil.
+	null, err := queriesOver(keys, []any{int64(7), int64(-3), true, nil, nil}).ScalarColumns(t.Context())
+	if err != nil {
+		t.Fatalf("ScalarColumns(name: null) = error %v", err)
+	}
+	if null[0].Name != nil {
+		t.Errorf("ScalarColumns(name: null)[0].Name = %#v, want nil", null[0].Name)
+	}
+	if null[0].Weight != nil {
+		t.Errorf("ScalarColumns(name: null)[0].Weight = %#v, want nil", null[0].Weight)
+	}
+
+	// A non-nullable one the graph holds as null is refused rather than
+	// carried as the carrier's zero, which is what the caller would
+	// otherwise read as a rank of 0.
+	_, err = queriesOver(keys, []any{int64(7), nil, true, "n", 0.5}).ScalarColumns(t.Context())
+	if err == nil {
+		t.Fatalf("ScalarColumns(rank: null) = no error, want a refusal")
+	}
+	for _, want := range []string{`"rank"`, "non-nullable"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("ScalarColumns(rank: null) = %q, want it to mention %s", err, want)
+		}
+	}
+}
+
+// The error gate this arm opens with, which no row reached before this
+// one. What a dropped gate costs here is silence rather than a
+// mis-worded error: neo4j.GetRecordValue reports a wrong dynamic type
+// and a missing key by returning its zero carrier with isNil FALSE, so
+// the isNil gate below it never fires and the caller is handed a rank of
+// 0 and a nil error for a column the driver refused.
+//
+// So the fact of an error is itself load-bearing here, and the message
+// checks are what separate this gate from a refusal of a neighbouring
+// kind: the positive is the driver's own wording, asked of the driver
+// rather than spelled out, and the negative is the null gate one line
+// down — a gate rewritten to route a type disagreement through that one
+// would report a column the graph holds as having arrived null.
+func TestScalarColumnRefusalsCarryTheDriversError(t *testing.T) {
+	keys := []string{"id", "rank", "active", "name", "weight"}
+	check := func(what string, got []ScalarColumnsRow, err error, want string) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("%s = %#v, want a refusal", what, got)
+		}
+		if !strings.Contains(err.Error(), `"rank"`) {
+			t.Errorf("%s = %q, want it to name the column %q", what, err, "rank")
+		}
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%s = %q, want it to carry the driver's answer %q", what, err, want)
+		}
+		if unwanted := "non-nullable"; strings.Contains(err.Error(), unwanted) {
+			t.Errorf("%s = %q, want the column's own error gate to refuse it rather than the null gate below it", what, err)
+		}
+	}
+
+	// A value of a type the carrier does not admit. The columns around it
+	// are well-formed, so the refusal is this column's.
+	misTyped := []any{int64(7), "not an int", true, "n", 0.5}
+	got, err := queriesOver(keys, misTyped).ScalarColumns(t.Context())
+	check("ScalarColumns(rank: string)", got, err, driverRefusal[int64](t, keys, misTyped, "rank"))
+
+	// A record that does not hold the key the query projected, which the
+	// driver reports through the same gate — and which it reports with
+	// isNil false, so nothing further down the arm can catch it either.
+	absent := []string{"id", "nope", "active", "name", "weight"}
+	held := []any{int64(7), int64(-3), true, "n", 0.5}
+	got, err = queriesOver(absent, held).ScalarColumns(t.Context())
+	check("ScalarColumns(no rank)", got, err, driverRefusal[int64](t, absent, held, "rank"))
+}
+
+// A whole-entity column the query made optional. The non-nullable arm is
+// TestEntityColumnsDecodeWholeEntities'; this is the other one, which
+// wraps the decoded struct in a pointer and skips the decode entirely
+// when the driver reports the column null. Both carriers are here
+// because the arm is written once and instantiated twice — dbtype.Node
+// for a node column and dbtype.Relationship for an edge one — and a
+// pointer wrap shown to work on one says nothing about the other.
+func TestOptionalEntityColumnsCarryTheirNull(t *testing.T) {
+	keys := []string{"s", "e", "l"}
+	got, err := queriesOver(keys, []any{
+		node("Scalar", scalarProps()), relationship(edgyProps()), node("Listy", listyProps()),
+	}).OptionalEntityColumns(t.Context())
+	if err != nil {
+		t.Fatalf("OptionalEntityColumns = error %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("OptionalEntityColumns returned %d rows, want 1", len(got))
+	}
+	if got[0].E == nil {
+		t.Fatalf("OptionalEntityColumns()[0].E = nil, want a pointer to an Edgy")
+	}
+	if got[0].E.Rank != int32(-3) {
+		t.Errorf("OptionalEntityColumns()[0].E.Rank = %#v, want -3", got[0].E.Rank)
+	}
+	if got[0].L == nil {
+		t.Fatalf("OptionalEntityColumns()[0].L = nil, want a pointer to a Listy")
+	}
+	if want := []string{"a"}; !reflect.DeepEqual(got[0].L.Tags, want) {
+		t.Errorf("OptionalEntityColumns()[0].L.Tags = %#v, want %#v", got[0].L.Tags, want)
+	}
+
+	// The optional half the pattern did not match. Both nullable columns
+	// arrive null in the same row, so what is asserted is each pointer
+	// rather than the fact that some pointer was nil.
+	null, err := queriesOver(keys, []any{node("Scalar", scalarProps()), nil, nil}).OptionalEntityColumns(t.Context())
+	if err != nil {
+		t.Fatalf("OptionalEntityColumns(e, l: null) = error %v", err)
+	}
+	if null[0].E != nil {
+		t.Errorf("OptionalEntityColumns(e: null)[0].E = %#v, want nil", null[0].E)
+	}
+	if null[0].L != nil {
+		t.Errorf("OptionalEntityColumns(l: null)[0].L = %#v, want nil", null[0].L)
+	}
+	if null[0].S.Id != int64(7) {
+		t.Errorf("OptionalEntityColumns(e, l: null)[0].S = %#v, want the row's own node decoded", null[0].S)
+	}
+
+	// The decode helper really runs inside the non-null branch: a
+	// relationship whose Props do not satisfy the entity fails the whole
+	// row rather than landing as a pointer to a half-filled struct.
+	missing := edgyProps()
+	delete(missing, "rank")
+	_, err = queriesOver(keys, []any{
+		node("Scalar", scalarProps()), relationship(missing), node("Listy", listyProps()),
+	}).OptionalEntityColumns(t.Context())
+	if err == nil {
+		t.Fatalf("OptionalEntityColumns(e: no rank) = no error, want a refusal")
+	}
+	for _, want := range []string{`"e"`, "decode Edgy.Rank"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("OptionalEntityColumns(e: no rank) = %q, want it to mention %s", err, want)
+		}
+	}
+}
+
+// An edge-union column the query made optional, decoded beside a second
+// column. Two arms meet here that no row reached before: the nullable
+// one, which assigns the nil interface rather than dispatching, and the
+// multi-column row assembly, whose locals carry a numeric suffix so two
+// columns in one row never share the raw / rel / entity bindings.
+func TestOptionalEdgeUnionColumnCarriesItsNull(t *testing.T) {
+	keys := []string{"s", "e"}
+	got, err := queriesOver(keys,
+		[]any{node("Scalar", scalarProps()), typedRelationship("Edgy", edgyProps())},
+		[]any{node("Scalar", scalarProps()), typedRelationship("Edgier", map[string]any{"tag": "t"})},
+		[]any{node("Scalar", scalarProps()), nil},
+	).OptionalEdgeUnionColumn(t.Context())
+	if err != nil {
+		t.Fatalf("OptionalEdgeUnionColumn = error %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("OptionalEdgeUnionColumn returned %d rows, want 3", len(got))
+	}
+	edgy, ok := got[0].E.(Edgy)
+	if !ok {
+		t.Fatalf("OptionalEdgeUnionColumn()[0].E = %T, want Edgy", got[0].E)
+	}
+	if edgy.Rank != int32(-3) {
+		t.Errorf("OptionalEdgeUnionColumn()[0].E.(Edgy).Rank = %#v, want -3", edgy.Rank)
+	}
+	edgier, ok := got[1].E.(Edgier)
+	if !ok {
+		t.Fatalf("OptionalEdgeUnionColumn()[1].E = %T, want Edgier", got[1].E)
+	}
+	if edgier.Tag != "t" {
+		t.Errorf("OptionalEdgeUnionColumn()[1].E.(Edgier).Tag = %#v, want \"t\"", edgier.Tag)
+	}
+	if got[2].E != nil {
+		t.Errorf("OptionalEdgeUnionColumn()[2].E = %#v, want nil", got[2].E)
+	}
+	// The column beside it decoded in every row, which is what says the
+	// null arm assigned rather than returned.
+	for i, row := range got {
+		if row.S.Id != int64(7) {
+			t.Errorf("OptionalEdgeUnionColumn()[%d].S = %#v, want the row's own node decoded", i, row.S)
+		}
+	}
+
+	// Nullable buys the null and nothing else: a label no candidate
+	// carries is still refused, and it is refused inside the branch the
+	// non-nil value took.
+	_, err = queriesOver(keys, []any{
+		node("Scalar", scalarProps()), typedRelationship("Nope", edgyProps()),
+	}).OptionalEdgeUnionColumn(t.Context())
+	if err == nil {
+		t.Fatalf("OptionalEdgeUnionColumn(type: Nope) = no error, want a refusal")
+	}
+	for _, want := range []string{`"e"`, `"Nope"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("OptionalEdgeUnionColumn(type: Nope) = %q, want it to mention %s", err, want)
+		}
+	}
+
+	// A value that is not a relationship at all takes the same branch and
+	// is refused by the type assertion the dispatch opens with.
+	_, err = queriesOver(keys, []any{
+		node("Scalar", scalarProps()), node("Scalar", scalarProps()),
+	}).OptionalEdgeUnionColumn(t.Context())
+	if err == nil {
+		t.Fatalf("OptionalEdgeUnionColumn(e: node) = no error, want a refusal")
+	}
+	if want := "expected dbtype.Relationship"; !strings.Contains(err.Error(), want) {
+		t.Errorf("OptionalEdgeUnionColumn(e: node) = %q, want it to mention %s", err, want)
+	}
+}
+
+// A whole entity inside a LIST column. A variable-length relationship
+// pattern is what reaches it: the binding resolves to a list of edges,
+// so the column reads []any through the driver and hands each element to
+// the entity's own decode helper — the element loop's entity arm, which
+// is a different emission from the entity COLUMN arm above and shares no
+// line with it.
+func TestVarLengthEdgeColumnDecodesEveryElement(t *testing.T) {
+	got, err := queriesOver([]string{"e"}, []any{
+		[]any{relationship(edgyProps()), relationship(edgyProps())},
+	}).VarLengthEdgeColumn(t.Context())
+	if err != nil {
+		t.Fatalf("VarLengthEdgeColumn = error %v", err)
+	}
+	if len(got) != 1 || len(got[0]) != 2 {
+		t.Fatalf("VarLengthEdgeColumn = %#v, want one row of two edges", got)
+	}
+	for i, edgy := range got[0] {
+		if edgy.Rank != int32(-3) {
+			t.Errorf("VarLengthEdgeColumn()[0][%d].Rank = %#v, want -3", i, edgy.Rank)
+		}
+	}
+
+	// An element that is not a relationship is refused by the loop's own
+	// assertion, and the refusal names the element's position — which is
+	// what a caller has to tell two elements of one column apart.
+	_, err = queriesOver([]string{"e"}, []any{
+		[]any{relationship(edgyProps()), node("Scalar", scalarProps())},
+	}).VarLengthEdgeColumn(t.Context())
+	if err == nil {
+		t.Fatalf("VarLengthEdgeColumn(element 1: node) = no error, want a refusal")
+	}
+	for _, want := range []string{`"e"`, "element 1", "expected dbtype.Relationship"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("VarLengthEdgeColumn(element 1: node) = %q, want it to mention %s", err, want)
+		}
+	}
+
+	// The helper really runs per element: a relationship the entity's own
+	// schema is not satisfied by fails the column, and the failure names
+	// the element beside the property.
+	missing := edgyProps()
+	delete(missing, "rank")
+	_, err = queriesOver([]string{"e"}, []any{
+		[]any{relationship(edgyProps()), relationship(missing)},
+	}).VarLengthEdgeColumn(t.Context())
+	if err == nil {
+		t.Fatalf("VarLengthEdgeColumn(element 1: no rank) = no error, want a refusal")
+	}
+	for _, want := range []string{"element 1", "decode Edgy.Rank"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("VarLengthEdgeColumn(element 1: no rank) = %q, want it to mention %s", err, want)
+		}
+	}
+}
+
+// The same list column over a pattern admitting two edge types, which
+// dispatches on the wire label per element. The column-level dispatch is
+// TestEdgeUnionColumnDispatchesOnTheWireLabel's; this one is emitted by
+// the element loop and is a second copy of the rule, so a label that
+// picks the right helper in one says nothing about the other.
+func TestVarLengthEdgeUnionColumnDispatchesPerElement(t *testing.T) {
+	got, err := queriesOver([]string{"e"}, []any{
+		[]any{
+			typedRelationship("Edgy", edgyProps()),
+			typedRelationship("Edgier", map[string]any{"tag": "t"}),
+		},
+	}).VarLengthEdgeUnionColumn(t.Context())
+	if err != nil {
+		t.Fatalf("VarLengthEdgeUnionColumn = error %v", err)
+	}
+	if len(got) != 1 || len(got[0]) != 2 {
+		t.Fatalf("VarLengthEdgeUnionColumn = %#v, want one row of two edges", got)
+	}
+	edgy, ok := got[0][0].(Edgy)
+	if !ok {
+		t.Fatalf("VarLengthEdgeUnionColumn()[0][0] = %T, want Edgy", got[0][0])
+	}
+	if edgy.Rank != int32(-3) {
+		t.Errorf("VarLengthEdgeUnionColumn()[0][0].(Edgy).Rank = %#v, want -3", edgy.Rank)
+	}
+	edgier, ok := got[0][1].(Edgier)
+	if !ok {
+		t.Fatalf("VarLengthEdgeUnionColumn()[0][1] = %T, want Edgier", got[0][1])
+	}
+	if edgier.Tag != "t" {
+		t.Errorf("VarLengthEdgeUnionColumn()[0][1].(Edgier).Tag = %#v, want \"t\"", edgier.Tag)
+	}
+
+	// The label picks the helper rather than the shape of what arrived:
+	// Edgy's own properties under Edgier's label reach decodeEdgier,
+	// which has no tag to read.
+	_, err = queriesOver([]string{"e"}, []any{
+		[]any{typedRelationship("Edgier", edgyProps())},
+	}).VarLengthEdgeUnionColumn(t.Context())
+	if err == nil {
+		t.Fatalf("VarLengthEdgeUnionColumn(Edgier: Edgy's props) = no error, want a refusal")
+	}
+	for _, want := range []string{"element 0", "decode Edgier.Tag"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("VarLengthEdgeUnionColumn(Edgier: Edgy's props) = %q, want it to mention %s", err, want)
+		}
+	}
+
+	// A label no candidate carries is refused by the loop's own default
+	// arm, quoting both the column and the label.
+	_, err = queriesOver([]string{"e"}, []any{
+		[]any{typedRelationship("Edgy", edgyProps()), typedRelationship("Nope", edgyProps())},
+	}).VarLengthEdgeUnionColumn(t.Context())
+	if err == nil {
+		t.Fatalf("VarLengthEdgeUnionColumn(element 1: Nope) = no error, want a refusal")
+	}
+	for _, want := range []string{`"e"`, "element 1", `"Nope"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("VarLengthEdgeUnionColumn(element 1: Nope) = %q, want it to mention %s", err, want)
+		}
+	}
+}
+
+// The nullable read of a property of no declared shape, off a
+// relationship. TestAnythingSeparatesAbsentFromNull makes the same claim
+// off a node, and until Edgy declared this property that was the only
+// carrier the arm ever ran on — a helper shown to survive on one entity
+// says nothing about another, because a helper is emitted per entity.
+func TestEdgySpareSeparatesAbsentFromNullOverARelationship(t *testing.T) {
+	absent, err := decodeEdgy(relationship(edgyProps()))
+	if err != nil {
+		t.Fatalf("decodeEdgy(no spare) = error %v", err)
+	}
+	if absent.Spare != nil {
+		t.Errorf("decodeEdgy(no spare).Spare = %#v, want nil", absent.Spare)
+	}
+
+	withNull := edgyProps()
+	withNull["spare"] = nil
+	held, err := decodeEdgy(relationship(withNull))
+	if err != nil {
+		t.Fatalf("decodeEdgy(spare: null) = error %v", err)
+	}
+	if held.Spare == nil {
+		t.Fatalf("decodeEdgy(spare: null).Spare = nil, want a pointer to nil")
+	}
+	if *held.Spare != nil {
+		t.Errorf("decodeEdgy(spare: null).Spare points at %#v, want nil", *held.Spare)
+	}
+
+	withValue := edgyProps()
+	withValue["spare"] = []any{int64(1), nil}
+	value, err := decodeEdgy(relationship(withValue))
+	if err != nil {
+		t.Fatalf("decodeEdgy(spare: list) = error %v", err)
+	}
+	if value.Spare == nil {
+		t.Fatalf("decodeEdgy(spare: list).Spare = nil, want a pointer")
+	}
+	if want := []any{int64(1), nil}; !reflect.DeepEqual(*value.Spare, want) {
+		t.Errorf("decodeEdgy(spare: list).Spare points at %#v, want %#v", *value.Spare, want)
+	}
+}
+
+// Two edge-union columns in one row assembly, which is the projection
+// that makes the union arm's multi-column branch observable. That branch
+// suffixes the arm's locals — raw, rel, ok, entity — by column position,
+// and a single union column beside a column of any other kind never
+// collides with anything whatever it calls them. Two of them share one
+// block: unsuffixed, the second column's `raw, ok := record.Get` is a
+// redeclaration of the first's and the emitted package stops compiling.
+//
+// So what refuses the regression here is the corpus module's own build
+// rather than an assertion below, and that is the honest reading — the
+// defect class is an emission that does not compile. The assertions are
+// what say the two columns then decode independently, which a shared
+// local would also break in the cases where it happened to typecheck.
+func TestTwoEdgeUnionColumnsDoNotShareLocals(t *testing.T) {
+	keys := []string{"e", "f"}
+	got, err := queriesOver(keys, []any{
+		typedRelationship("Edgy", edgyProps()),
+		typedRelationship("Edgier", map[string]any{"tag": "t"}),
+	}).TwoEdgeUnionColumns(t.Context())
+	if err != nil {
+		t.Fatalf("TwoEdgeUnionColumns = error %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("TwoEdgeUnionColumns returned %d rows, want 1", len(got))
+	}
+	edgy, ok := got[0].E.(Edgy)
+	if !ok {
+		t.Fatalf("TwoEdgeUnionColumns()[0].E = %T, want Edgy", got[0].E)
+	}
+	if edgy.Rank != int32(-3) {
+		t.Errorf("TwoEdgeUnionColumns()[0].E.(Edgy).Rank = %#v, want -3", edgy.Rank)
+	}
+	edgier, ok := got[0].F.(Edgier)
+	if !ok {
+		t.Fatalf("TwoEdgeUnionColumns()[0].F = %T, want Edgier", got[0].F)
+	}
+	if edgier.Tag != "t" {
+		t.Errorf("TwoEdgeUnionColumns()[0].F.(Edgier).Tag = %#v, want \"t\"", edgier.Tag)
+	}
+
+	// The second column is refused on its own account, which a dispatch
+	// reading the first column's binding would not do.
+	_, err = queriesOver(keys, []any{
+		typedRelationship("Edgy", edgyProps()), typedRelationship("Nope", edgyProps()),
+	}).TwoEdgeUnionColumns(t.Context())
+	if err == nil {
+		t.Fatalf("TwoEdgeUnionColumns(f: Nope) = no error, want a refusal")
+	}
+	for _, want := range []string{`"f"`, `"Nope"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("TwoEdgeUnionColumns(f: Nope) = %q, want it to mention %s", err, want)
+		}
+	}
+}
