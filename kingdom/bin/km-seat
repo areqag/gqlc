@@ -45,6 +45,55 @@ class_effort=$(valid_effort "$("$KM" cfg effort "$class")" "[effort] $class")
 [ -f "$soul" ] || { echo "km-seat: no soul at $soul" >&2; exit 1; }
 [ -d "$wt" ] || { echo "km-seat: no worktree at $wt (km up creates it)" >&2; exit 1; }
 
+# Permission mode, gated here with the other preflights and for the same reason:
+# one line of [claude] decides how every seat in the town starts, and one of the
+# six values claude takes cannot work here at all (bd gqlc-twmh).
+#
+# `plan` starts the session INSIDE the state .githooks/claude-pre-ask exists to
+# keep seats out of. That hook denies EnterPlanMode and deliberately leaves
+# ExitPlanMode open, because denying the exit would strand a session inside plan
+# mode — sound only while no seat STARTS there. Set permission_mode = "plan" and
+# it inverts: there is nothing to enter, so the gate never fires, and the only
+# way out is the plan-approval prompt with nobody at the pane to answer it. The
+# session then waits until someone kills it while the statusline heartbeat keeps
+# refreshing, because the turn is still live (bd gqlc-n97e measured 13 minutes
+# of that on one seat; this would be every seat, on one line of config).
+#
+# REFUSED rather than coerced to a workable mode, which is the trade this case
+# makes: the failure it prevents is silent, open-ended and town-wide, while the
+# refusal is one line of stderr and a one-line fix in kingdom.toml. Coercion
+# would launch sixteen seats at a mode the operator did not ask for and give
+# them no way to find out.
+#
+# An UNRECOGNISED value is refused too, and not dropped the way valid_effort
+# drops a bad level. Dropping --effort leaves claude at its own default, which
+# is a working seat; dropping --permission-mode leaves `default`, which prompts
+# for everything and puts the same wedge back. claude refuses the value anyway
+# ("Allowed choices are acceptEdits, auto, bypassPermissions, default, dontAsk,
+# plan"), but only after km-seat has consumed the wake — so the refusal belongs
+# here, before the loop, where the wake is still queued for the next attempt.
+#
+# The middle arm launches and complains. acceptEdits is what kingdom.toml itself
+# offers for a supervised run, so refusing it would take away a documented
+# affordance; what it must not do is stay quiet, because such a seat works only
+# while someone is watching the pane and nothing else in the town says so. Which
+# of auto/default/dontAsk can survive unattended is NOT measured here; that is
+# why they are warned about rather than blessed or refused.
+case "$pm" in
+    bypassPermissions) ;;
+    plan)
+        echo "km-seat: [claude] permission_mode = 'plan' cannot launch $seat: a seat is unattended, so the plan waits for an approval nobody is there to give, and the heartbeat stays green while it waits (bd gqlc-twmh, gqlc-n97e). Set permission_mode = \"bypassPermissions\" in kingdom/kingdom.toml." >&2
+        exit 1
+        ;;
+    acceptEdits | auto | default | dontAsk)
+        echo "km-seat: [claude] permission_mode = '$pm' is not the unattended mode the town runs (bypassPermissions); launching $seat there anyway, but a permission prompt in this mode blocks until someone attached to this pane answers it (bd gqlc-twmh)." >&2
+        ;;
+    *)
+        echo "km-seat: [claude] permission_mode = '$pm' is not a mode claude takes, so $seat was not launched: claude allows acceptEdits, auto, bypassPermissions, default, dontAsk, plan. Fix kingdom/kingdom.toml — the wake is still queued (bd gqlc-twmh)." >&2
+        exit 1
+        ;;
+esac
+
 mkdir -p "$home/handoff/archive"
 echo asleep >"$home/status"
 trap 'echo asleep >"$home/status"' EXIT

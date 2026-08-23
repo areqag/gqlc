@@ -4096,7 +4096,11 @@ alt_config() { # alt_config <path> [effort-section-lines...] -> a throwaway toml
     shift
     {
         printf '[kingdom]\ntmux_session = "kingdom-test"\nstate_dirname = "kingdom-state"\n\n'
-        printf '[claude]\npermission_mode = "acceptEdits"\n\n'
+        # The town's REAL mode, not an arbitrary one: km-seat now says something
+        # on stderr about every other mode (bd gqlc-twmh), and rows below assert
+        # that a launch it has no complaint about is SILENT. ALT_CONFIG_PM is
+        # how the permission-mode rows vary it.
+        printf '[claude]\npermission_mode = "%s"\n\n' "${ALT_CONFIG_PM:-bypassPermissions}"
         # Two seats of DIFFERENT classes. With a one-warrior roster every argv
         # row launches the same class, so `cfg effort "$class"` hard-wired to
         # `warrior` resolves correctly for the only seat there is and the suite
@@ -4242,6 +4246,7 @@ compose_argv() { # compose_argv <config> [seat] [wake-lines] -> ARGV (one arg pe
     ARGV="$TMP/argv.$RANDOM"
     STDERR="$TMP/stderr.$RANDOM"
     sdir="$TMP/seatstate.$RANDOM"
+    SEATSTATE="$sdir" # what the launch did to the seat's state, for rows about a launch that never happened
     mkdir -p "$sdir/seats/$seat"
     printf '%s\n' "$wake" >"$sdir/seats/$seat/wake"
     (cd "$TOWN" && PATH="$stubdir:$PATH" KM_CONFIG="$cfgfile" KM_STATE_DIR="$sdir" \
@@ -4254,7 +4259,11 @@ compose_argv() { # compose_argv <config> [seat] [wake-lines] -> ARGV (one arg pe
         waited=$((waited + 1))
     done
     kill "$pid" 2>/dev/null
+    # SEAT_RC only means anything when km-seat exited on its own: a launch that
+    # reached the stub is still parked on its wake file and is killed here, so
+    # that case reports the signal. Refusal rows read it; argv rows do not.
     wait "$pid" 2>/dev/null
+    SEAT_RC=$?
 }
 
 alt_config "$TMP/warrior-high.toml" 'warrior = "high"'
@@ -4346,6 +4355,120 @@ elif ! grep -q 'mediun' "$STDERR"; then
     bad "a misspelled level must be named on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
 else
     ok "a misspelled level is refused, named on stderr, and the seat still launches"
+fi
+
+# --- the permission mode (bd gqlc-twmh) --------------------------------------
+# One line of [claude] decides how every seat in the town starts, and one of the
+# six values claude takes cannot work here at all: `plan` starts the session
+# inside the state .githooks/claude-pre-ask exists to keep seats out of, where
+# the only way forward is a plan approval and nobody is at the pane to give one.
+# EnterPlanMode never fires, because there is nothing to enter.
+#
+# So these rows ask three different questions, and the third is the one that
+# makes the first two worth having: that the mode REACHES claude (a guard on a
+# value nobody passes on is decoration), that a launch km has no complaint about
+# is silent, and that a refusal names the seat and the value rather than dying
+# with the wake still queued and no account of why.
+pm_config() { # pm_config <dest> <mode> -> a throwaway toml at that permission mode
+    ALT_CONFIG_PM=$2
+    alt_config "$1" 'warrior = "high"'
+    ALT_CONFIG_PM=""
+}
+
+pm_config "$TMP/pm-bypass.toml" bypassPermissions
+compose_argv "$TMP/pm-bypass.toml"
+if [ ! -s "$ARGV" ]; then
+    bad "the town's own permission mode launches a seat" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
+elif [ "$(grep -A1 -x -- '--permission-mode' "$ARGV" | tail -1)" != bypassPermissions ]; then
+    bad "the configured permission mode reaches claude" "argv: $(argv_brief "$ARGV")"
+elif [ -s "$STDERR" ]; then
+    bad "bypassPermissions must launch quietly" "stderr: $(cat "$STDERR")"
+else
+    ok "bypassPermissions reaches claude's argv and the seat launches without a word"
+fi
+
+# THE ROW THIS BEAD IS ABOUT. Refusal, not coercion: a seat launched into plan
+# mode wedges silently and open-endedly with its heartbeat still green (bd
+# gqlc-n97e measured 13 minutes of exactly that), while a refusal costs one line
+# of stderr and one line of kingdom.toml. Asserted at the argv, because a guard
+# that warned and launched anyway would leave the wedge in place.
+pm_config "$TMP/pm-plan.toml" plan
+compose_argv "$TMP/pm-plan.toml"
+if [ -s "$ARGV" ]; then
+    bad "permission_mode = plan must not launch a seat" "argv: $(argv_brief "$ARGV")"
+elif [ "$SEAT_RC" -eq 0 ]; then
+    # A refusal that exits 0 reads to `km up` and to a tmux window as a seat
+    # that finished its day.
+    bad "a refused permission mode must exit non-zero" "rc=$SEAT_RC log: $(cat "$STDERR" 2>/dev/null)"
+elif ! grep -q "'plan'" "$STDERR"; then
+    bad "a refused permission mode must be named on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
+elif ! grep -q "approval" "$STDERR"; then
+    # WHY, not merely that it was refused. Deleting the plan arm leaves `plan`
+    # refused by the unknown-value arm — same verdict, and an operator told
+    # only that claude does not take `plan`, which is false and sends them
+    # looking for a typo.
+    bad "the plan refusal must say what plan mode is waiting for" "log: $(cat "$STDERR" 2>/dev/null)"
+elif ! grep -q "hayk" "$STDERR"; then
+    # Which seat, not merely which value: `km up` starts sixteen of these, and a
+    # refusal that does not say whose window just died is a scroll to read.
+    bad "a refused permission mode must name the seat" "log: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "permission_mode = plan refuses to launch hayk and names both the seat and the mode"
+fi
+
+# The wake must SURVIVE the refusal, which is a claim about WHERE the guard
+# sits. km-seat deletes the wake file the moment it reads it, so a guard inside
+# the loop would refuse and eat the reason the seat was woken for: the town
+# would lose the work quietly while looking merely misconfigured. Placed with
+# the soul and worktree preflights instead, the refusal happens before any wake
+# is touched, and whoever fixes the config gets the wake back.
+if [ ! -s "$SEATSTATE/seats/hayk/wake" ]; then
+    bad "a refused launch leaves the wake queued" "the wake file was consumed by a launch that never happened"
+else
+    ok "a refused permission mode leaves the seat's wake reason queued for the next attempt"
+fi
+
+# Case is not a formality here: `Plan` is not one of claude's six choices, so it
+# is refused by the same guard for the other reason — claude would refuse it
+# too, and dropping the flag falls back to `default`, which prompts for
+# everything. Neither arm may let it through.
+pm_config "$TMP/pm-case.toml" Plan
+compose_argv "$TMP/pm-case.toml"
+if [ -s "$ARGV" ]; then
+    bad "a permission mode claude does not take must not launch a seat" "argv: $(argv_brief "$ARGV")"
+elif ! grep -q "Plan" "$STDERR"; then
+    bad "an unknown permission mode must be named on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "'Plan' is not 'plan': an unknown permission mode is refused and named"
+fi
+
+pm_config "$TMP/pm-typo.toml" bypassPermission
+compose_argv "$TMP/pm-typo.toml"
+if [ -s "$ARGV" ]; then
+    bad "a misspelled permission mode must not launch a seat" "argv: $(argv_brief "$ARGV")"
+elif [ "$SEAT_RC" -eq 0 ]; then
+    bad "a misspelled permission mode must exit non-zero" "rc=$SEAT_RC log: $(cat "$STDERR" 2>/dev/null)"
+elif ! grep -q "bypassPermission'" "$STDERR"; then
+    bad "a misspelled permission mode must be named on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "a misspelled permission mode is refused and named, instead of falling back to prompts"
+fi
+
+# The middle tier, and the reason this is a case and not an if. acceptEdits is
+# what kingdom.toml itself offers for a supervised run, so refusing it would
+# take away a documented affordance; but a seat at that mode is only workable
+# while someone is attached to the pane, and nothing else says so. Launch, and
+# say it.
+pm_config "$TMP/pm-accept.toml" acceptEdits
+compose_argv "$TMP/pm-accept.toml"
+if [ ! -s "$ARGV" ]; then
+    bad "acceptEdits still launches the seat" "no argv; log: $(cat "$STDERR" 2>/dev/null)"
+elif [ "$(grep -A1 -x -- '--permission-mode' "$ARGV" | tail -1)" != acceptEdits ]; then
+    bad "acceptEdits reaches claude unchanged" "argv: $(argv_brief "$ARGV")"
+elif ! grep -q "acceptEdits" "$STDERR"; then
+    bad "a supervised permission mode must say so on stderr" "log: $(cat "$STDERR" 2>/dev/null)"
+else
+    ok "acceptEdits launches the seat unchanged and warns that the pane needs someone in it"
 fi
 
 # --- the per-bead effort escalation (Constitution V.6.2, bd gqlc-jmwh) --------

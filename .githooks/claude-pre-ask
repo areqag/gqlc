@@ -25,9 +25,13 @@
 # EnterPlanMode is gated and ExitPlanMode is NOT: plan-mode approval is the
 # other synchronous human prompt, and denying entry means never reaching it,
 # while denying the exit would strand a session inside plan mode — a new wedge
-# of the shape this file exists to remove. Seats are launched with
-# permission_mode bypassPermissions (km cfg claude permission_mode), so none
-# of them starts inside plan mode with the exit as its only way out.
+# of the shape this file exists to remove. That holds only while no seat STARTS
+# inside plan mode, which was merely true when this was written — the configured
+# mode happened to be bypassPermissions. It is enforced now: kingdom/bin/km-seat
+# refuses to launch a seat at permission_mode = "plan", naming the seat and the
+# value (bd gqlc-twmh). Without that refusal one line of kingdom.toml puts every
+# seat inside plan mode at once, where this gate never fires because there is
+# nothing left to enter and the ungated exit is the only way out.
 #
 # Tests: .githooks/tests/claude-pre-ask-test.sh (run via `just test-hooks`).
 
