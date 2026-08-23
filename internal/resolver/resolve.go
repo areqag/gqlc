@@ -51,6 +51,9 @@ func resolve(q query.Query, s schema.Schema, r procsig.Registry) (ValidatedQuery
 		Parameters: params,
 		Statement:  StatementKind(q.StatementKind),
 		Distinct:   computeDistinct(q),
+		// Last, and only on the success path: a query that fails resolution
+		// gets one verdict, the error (ADR 0032).
+		Warnings: undeclaredRelationshipTypeWarnings(q, s),
 	}, nil
 }
 
@@ -2273,6 +2276,67 @@ func undeclaredLabels(labels graph.LabelSet, s schema.Schema) []string {
 		}
 	}
 	return out
+}
+
+// undeclaredRelationshipTypeWarnings is ADR 0032's detector: one warning per
+// relationship type a query names that the schema declares NOWHERE.
+//
+// The test is deliberately "declared nowhere", not "absent from this edge's
+// candidate set". Losing a candidate to its endpoints is ADR 0022 narrowing
+// working as designed — `(:Person)-[r:AUTHORED|REPORTED]->(:Post)` drops
+// REPORTED because REPORTED runs the other way, and the author who wrote the
+// alternation to cover both directions wants exactly that. Warning there would
+// fire on ordinary queries and bury the signal this exists for. A relationship
+// type no declaration mentions at all is a different fact: either the author
+// misspelled it, or the graph has grown a type the schema has not caught up
+// with, and gqlc cannot tell those apart but can say what it did.
+//
+// Only edges whose closure SUCCEEDS reach this. An edge whose every named type
+// is undeclared has an empty candidate set and closeEdge refuses it with
+// ErrUnknownEdge, so resolve returns before the walk and no edge collects both
+// a refusal and a warning.
+//
+// Deduplicated query-wide by type name in first-appearance order: one
+// misspelling repeated across three MATCHes is one mistake.
+func undeclaredRelationshipTypeWarnings(q query.Query, s schema.Schema) []string {
+	declared := make(map[graph.LabelSetKey]struct{}, len(s.Edges))
+	for k := range s.Edges {
+		declared[k.KeyLabels] = struct{}{}
+	}
+
+	var out []string
+	seen := make(map[string]struct{})
+	for _, br := range q.Branches {
+		for _, part := range br.Parts {
+			for _, b := range part.Bindings {
+				e, ok := b.(query.EdgeBinding)
+				if !ok {
+					continue
+				}
+				for _, l := range e.Labels() {
+					if _, ok := declared[graph.LabelSet{l}.Key()]; ok {
+						continue
+					}
+					if _, dup := seen[l]; dup {
+						continue
+					}
+					seen[l] = struct{}{}
+					out = append(out, undeclaredRelationshipTypeMessage(l, e))
+				}
+			}
+		}
+	}
+	return out
+}
+
+// undeclaredRelationshipTypeMessage words one ADR 0032 warning. It has to be
+// actionable read alone on stderr, so it names the type, places the edge in the
+// author's own query text, states what gqlc did, and offers both readings —
+// gqlc cannot choose between them and must not pretend to.
+func undeclaredRelationshipTypeMessage(label string, e query.EdgeBinding) string {
+	return fmt.Sprintf(
+		"warning: relationship type %q is not declared in the schema; %s was narrowed to its declared types and no decoder is generated for %q, so a row of that type fails at runtime. Fix the spelling if it is misspelled, or declare it if the graph has drifted ahead of the schema.",
+		label, describeEdgeBinding(e), label)
 }
 
 // satisfyingNodeTypes returns the identities of the declared node types whose

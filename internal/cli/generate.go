@@ -79,6 +79,18 @@ func runGenerate(cmd *cobra.Command, cfgPath string) error {
 		return err
 	}
 
+	// ADR 0032 warnings, first and unconditionally. They are not
+	// counted by the summary error below: a warning did not fail the
+	// compile, and folding it into the count would make the exit
+	// status report a failure that did not happen. Printed ahead of
+	// the diagnostics because a misspelled relationship type is a
+	// plausible cause of the refusal that follows it.
+	for _, w := range res.Warnings {
+		if _, werr := fmt.Fprintln(cmd.ErrOrStderr(), w); werr != nil {
+			return werr
+		}
+	}
+
 	// Stage-7 accumulation: nil error + populated Diagnostics. Print
 	// every line to stderr in pipeline order, then return the
 	// singular/plural summary (spec §2.3). Files is nil in this
