@@ -32,7 +32,9 @@ set -u
 # When run under a git hook (pre-push via `just test`), GIT_DIR and friends leak
 # in and would redirect the fixture's git commands at the parent repo. This
 # suite exports GIT_DIR deliberately, per fixture, inside subshells only.
-unset "${!GIT_@}"
+# Through the SHARED line rather than a private copy of it (bd gqlc-07bf).
+# shellcheck source=../git-env-sandbox.sh disable=SC1091
+source "$(cd "$(dirname "$0")/.." && pwd)/git-env-sandbox.sh"
 
 GUARD="$(cd "$(dirname "$0")/.." && pwd)/repo-purity"
 TMP="$(mktemp -d)"

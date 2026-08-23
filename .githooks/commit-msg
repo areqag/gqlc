@@ -22,12 +22,33 @@ _HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=implausible-identity.sh disable=SC1091
 . "$_HOOK_DIR/implausible-identity.sh"
 
-# During a merge, git may auto-populate the message with trailers copied from
-# the merged branch's HEAD. Those were already screened at commit-time on the
-# source branch; blocking here would only make merges painful and cannot
-# rewrite history. Skip cleanly.
+# A merge in progress. This used to `exit 0` outright, and that blanket skip was
+# a hole shaped exactly like the thing being screened for (bd gqlc-7y7e):
+# measured on master, the SAME trailer that is refused rc=1 on a plain commit
+# committed rc=0 on a merge commit, and CLAUDE.md's claim that the rule is
+# enforced at commit time was therefore false for merges.
+#
+# The skip is now split by what each arm is ABOUT.
+#
+#   - The identity arms below are skipped. A merge is the one commit whose
+#     message git writes for you, and the two checks it needs to survive are
+#     different questions: an identity is a property of the config doing the
+#     merging, and refusing it here refuses a merge whose content is already
+#     screened. Kept skipped rather than removed because that is the arm the
+#     original comment was written for and no incident has argued against it.
+#   - The AI-attribution scan below is NOT skipped. It is a property OF THE
+#     MESSAGE, git copies trailers from the merged branch's HEAD into the merge
+#     message it drafts, and that draft is editable at merge time — so the
+#     refusal here is actionable, unlike the identity one. .githooks/
+#     gate-pushed-commits screens merge commits for the same reason.
+#
+# Referred to by name (MERGE_HEAD) and not by line number anywhere: a
+# `commit-msg:<n>-<m>` citation elsewhere in the tree went stale the first time a
+# line was inserted above it and no suite noticed (bd gqlc-m83s). The row that
+# keeps it retired lives in .githooks/tests/commit-msg-test.sh.
+_in_merge=no
 if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
-    exit 0
+    _in_merge=yes
 fi
 
 # Check author and committer identities for known-bogus patterns.
@@ -58,8 +79,10 @@ ERRMSG
     return 1
 }
 
-_check_identity "author"    GIT_AUTHOR_IDENT    || exit 1
-_check_identity "committer" GIT_COMMITTER_IDENT || exit 1
+if [ "$_in_merge" = no ]; then
+    _check_identity "author"    GIT_AUTHOR_IDENT    || exit 1
+    _check_identity "committer" GIT_COMMITTER_IDENT || exit 1
+fi
 
 # Look for Co-Authored-By values that mention `claude` or the `@anthropic.com`
 # email domain. The match itself lives in the shared file.
