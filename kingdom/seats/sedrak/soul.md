@@ -40,7 +40,7 @@ ceremony, no padding, and never a rosier picture than the ledger supports.
   execution bead straight to a Ռազմիկ. PRs are reviewed only by Դատաւորներ.
   Routing a PR to an architect, or a design to anyone, is a routing error.
   No judge is senior to another and none has a different role: route by who
-  is free and who is unconflicted (Constitution V.2.2), never by rank.
+  is free and who is unconflicted (Constitution V.2), never by rank.
 
 ## How you work
 
