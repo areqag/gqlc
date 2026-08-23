@@ -63,6 +63,21 @@ max_active = 6
 # 162 and leaves the five P4 parked, which is still a floor and still says so.
 max_priority = "3"
 
+# How long a P0 may sit unroutable before `km doctor` stops calling it a warning
+# and FAILS. The dispatcher records every stalled P0 in a marker the moment it
+# happens and `km status` names it from the first tick; this number governs the
+# GATE only.
+#
+# 15 minutes is seven dispatch ticks. The commonest cause of a fresh stall is a
+# class whose wakes are all queued already, which routes on the next run with
+# nobody acting at all; a hard failure on a condition that heals itself in two
+# minutes is how a gate teaches its reader to skip it.
+#
+# Not to be read as a sibling of [welfare] stalled_after_minutes below, which
+# they are only in name: that one is about a SEAT that is not progressing, this
+# one about a BEAD that found no seat. A town can hold either without the other.
+stalled_p0_after_minutes = 15
+
 [cadence]
 dispatch_minutes = 2
 guard_minutes = 15
