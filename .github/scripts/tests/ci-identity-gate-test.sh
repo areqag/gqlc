@@ -11,14 +11,14 @@
 # both checkers have more than one path to a refusal, so a row that only reads
 # the exit status passes when the wrong arm fired.
 #
-# Run: bash .githooks/tests/ci-identity-gate-test.sh
+# Run: bash .github/scripts/tests/ci-identity-gate-test.sh
 set -u
 
 # When run under a git hook (pre-push via `just test`), GIT_DIR and friends
 # leak in and redirect git calls to the parent repo. Isolate.
 unset "${!GIT_@}"
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 AUTHORS="$ROOT/.github/scripts/check-pr-authors.sh"
 LABELS="$ROOT/.github/scripts/check-label-lengths.py"
 TMP="$(mktemp -d)"

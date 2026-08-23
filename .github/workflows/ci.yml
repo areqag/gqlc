@@ -188,11 +188,18 @@ jobs:
       # there.
       - name: "bead labels fit GitHub's 50-character cap"
         run: python3 .github/scripts/check-label-lengths.py .beads/issues.jsonl
-      # The two checkers above have their own suite. It is not in `just
-      # test-hooks` yet (that list is hand-maintained and the justfile was
-      # owned by another change in flight — bd gqlc-xqf6): running it here is
-      # what keeps it from being a test nobody executes.
-      - run: bash .githooks/tests/ci-identity-gate-test.sh
+      # The two checkers above have their own suite, and this step is what runs
+      # it — on every PR and on every master push, in the same job as the gates
+      # it covers.
+      #
+      # It sits beside the scripts rather than in .githooks/tests because that
+      # directory has a wiring contract of its own: internal/tools/ciguard
+      # requires every suite under it to be named by the justfile's `test-hooks`
+      # recipe, on the grounds that a suite which looks wired and is not is an
+      # absent gate. These checkers are not hooks, and the justfile was owned by
+      # another change in flight the night this landed. bd gqlc-xqf6 covers
+      # naming it in `test-hooks` as well, so `just test` runs it locally too.
+      - run: bash .github/scripts/tests/ci-identity-gate-test.sh
       # shellcheck over .github/scripts. `just lint-hooks` defaults to
       # .githooks and so has never looked at this directory; the recipe takes
       # the directory as an argument precisely so it can. It fails rather than
