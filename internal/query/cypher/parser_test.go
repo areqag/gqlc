@@ -3147,15 +3147,29 @@ var allSentinels = cypher.AllSentinels()
 // It fails if a sentinel is declared but never exercised (orphaned), or if a case
 // maps to a sentinel missing from the canonical list (stray or renamed).
 //
-// Run A note: ErrUnboundVariable and ErrVariableKindConflict have no mustReject
-// case yet — they require build()-time self-consistency validation that lands in
-// run B — so this test is expected to fail now (an implementation gap), and run B
-// adds the two cases that turn it green.
+// The run-A note that used to sit here said ErrUnboundVariable and
+// ErrVariableKindConflict had no mustReject case and that this test was expected
+// to fail; run B landed those cases and the test has been green since, so the
+// note was describing a state the tree no longer has.
+//
+// Both directions are quantified over a set, so on empty inputs each holds
+// vacuously. Measured (bd gqlc-v1w8): drop every mustReject entry (keeping the
+// struct type so it compiles) AND gut allSentinels in errors.go to `[]error{}`,
+// and this test passed, rc=0, no "[no tests to run]".
+//
+// The census guard below closes that, and it is deliberately ONE guard and not
+// two. The canonical list going empty on its own is already caught by the
+// in-loop canonical[tc.want] assertion, which then fires on the first mustReject
+// case. Adding a matching guard on allSentinels would make BOTH read
+// non-load-bearing under mutation, because either alone still kills the row.
 func TestSentinelReachability(t *testing.T) {
 	canonical := make(map[error]bool, len(allSentinels))
 	for _, s := range allSentinels {
 		canonical[s] = true
 	}
+
+	require.NotEmpty(t, mustReject,
+		"no mustReject case exists, so both directions below hold vacuously and this sweep reconciles nothing against nothing")
 
 	covered := make(map[error]bool)
 	for _, tc := range mustReject {
