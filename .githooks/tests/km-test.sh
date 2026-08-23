@@ -6158,15 +6158,23 @@ else
 fi
 export KM_DEPLOY_ROOT="$TMP/main-root-git-dir"
 
-# Unknowable is not clean. If the ref the check reads is missing the answer must
-# be drift, or the gate opens exactly where it has the least information.
+# Unknowable is not clean. If the ref the check reads is missing AND cannot be
+# fetched, the answer must be drift, or the gate opens exactly where it has the
+# least information.
+#
+# The unreachable remote is part of the precondition now, not decoration: since
+# gqlc-iom4 the drift check fetches before it measures, so deleting the ref
+# alone no longer produces a root that does not know origin/master — the fetch
+# puts it back, which is the row two below. Breaking the remote is what keeps
+# this row about the guard it was written for.
 deploy_case doctor-no-ref
+gitf -C "$TMP/doctor-no-ref" remote set-url origin "$TMP/doctor-no-ref-gone.git"
 gitf -C "$TMP/doctor-no-ref" update-ref -d refs/remotes/origin/master
 run_stubbed doctor
 if [ "$RC" -eq 0 ] || ! doctor_line | grep -q '^FAIL:'; then
     bad "no origin/master ref is drift, not clean" "rc=$RC out=$OUT"
 else
-    ok "a deploy root with no origin/master ref FAILS rather than reading as deployed"
+    ok "a deploy root with no origin/master ref and no reachable origin FAILS rather than reading as deployed"
 fi
 
 # ...and it must stay unknowable when a hook has exported a repo that DOES know
@@ -6175,6 +6183,7 @@ fi
 # output, which this file spells "no drift". The row above cannot see that — its
 # ambient environment has no repo to borrow an answer from.
 deploy_case no-ref-git-dir
+gitf -C "$TMP/no-ref-git-dir" remote set-url origin "$TMP/no-ref-git-dir-gone.git"
 gitf -C "$TMP/no-ref-git-dir" update-ref -d refs/remotes/origin/master
 OUT="$(PATH="$BIN:$PATH" GIT_DIR="$DECOY_GITDIR" "$KM" doctor 2>&1)"
 RC=$?
@@ -6182,6 +6191,171 @@ if [ "$RC" -eq 0 ] || ! doctor_line | grep -q '^FAIL:'; then
     bad "a missing ref stays drift when the hook's repo has one" "rc=$RC out=$OUT"
 else
     ok "a deploy root with no origin/master is drift even when GIT_DIR names a repo that has one"
+fi
+
+# --- the drift check refreshes the ref it reads (gqlc-iom4) ------------------
+# Every drift row above this point fetches by hand before it measures, so all of
+# them passed while the detector could not see a merge on its own. The check
+# used to read refs/remotes/origin/master and never fetch, and the only fetch in
+# a dispatch tick lives in cmd_deploy — which is reached only once drift is
+# already non-empty. Circular: no fetch, so the ref never moves, so drift
+# measures empty, so no deploy, so no fetch.
+#
+# MEASURED 2026-08-23 on the halted town: the checkout sat at 43b1fbe9 while
+# origin/master was cd7ee956, two of the three commits between them touching
+# kingdom/. Eight consecutive dispatch ticks (10:54-11:10) logged only "the town
+# is down; nothing to do" and never DRIFT. One hand-run `git fetch origin
+# master`, nothing else changed, and the very next tick logged DRIFT and
+# fast-forwarded. While the town is halted or down, hold_fetch_master,
+# cmd_seat_refresh and the guard sweep are not running either, so nothing in the
+# town moves that ref for the whole outage — the exact window across which
+# merges accumulate, and the window a restart lands in.
+#
+# THE ROW THAT IS THE WHOLE CLAIM: no intervening manual fetch anywhere below.
+
+drift_sees="the drift check sees a merge with no intervening manual fetch"
+deploy_case drift-no-manual-fetch
+advance_origin "$TMP/drift-no-manual-fetch.git" kingdom/bin/km "the merged fix"
+# The precondition, asserted rather than assumed: the local ref really is stale
+# at the moment km runs, so a pass cannot come from a fetch someone else did.
+stale_ref="$(gitf -C "$TMP/drift-no-manual-fetch" rev-parse refs/remotes/origin/master)"
+origin_head="$(gitf -C "$TMP/drift-no-manual-fetch.git" rev-parse master)"
+if [ "$stale_ref" = "$origin_head" ]; then
+    bad "$drift_sees" "precondition unmet: the local ref already matched origin before km ran"
+else
+    run_stubbed doctor
+    if [ "$RC" -eq 0 ]; then
+        bad "$drift_sees" "doctor passed a root one kingdom/ commit behind: $OUT"
+    elif ! doctor_line | grep -q '^FAIL:'; then
+        bad "$drift_sees" "the deployed-tree row is not a FAIL: $OUT"
+    elif ! printf '%s' "$OUT" | grep -q 'kingdom/bin/km'; then
+        bad "$drift_sees" "the failure does not name the drifted path: $OUT"
+    else
+        ok "$drift_sees"
+    fi
+fi
+
+# The mechanism, separately: the ref MOVED, and it moved because km fetched. A
+# check that reported drift some other way would pass the row above and still
+# leave the deploy that follows it diffing against yesterday.
+drift_moved="measuring drift advances the deploy root's origin/master"
+now_ref="$(gitf -C "$TMP/drift-no-manual-fetch" rev-parse refs/remotes/origin/master)"
+if [ "$now_ref" != "$origin_head" ]; then
+    bad "$drift_moved" "the ref is still $now_ref, origin is at $origin_head"
+else
+    ok "$drift_moved"
+fi
+
+# The ORDER, which the two rows above cannot see because both have a ref to
+# start from. The fetch runs before the unknown-ref guard, so a root that has
+# simply never fetched — a fresh checkout, or the shape the no-ref rows above
+# construct — is repaired and then measured, rather than reported as permanently
+# unknowable. Put the fetch after that guard and this row reads DRIFT on a tree
+# that is byte-identical to origin/master.
+repaired="a deploy root that does not yet know origin/master is fetched, then measured"
+deploy_case drift-ref-repaired
+gitf -C "$TMP/drift-ref-repaired" update-ref -d refs/remotes/origin/master
+run_stubbed doctor
+if [ "$RC" -ne 0 ] || ! doctor_line | grep -q '^ok:'; then
+    bad "$repaired" "rc=$RC — a fetchable ref was reported as unknowable: $OUT"
+elif ! gitf -C "$TMP/drift-ref-repaired" rev-parse --verify -q refs/remotes/origin/master >/dev/null; then
+    bad "$repaired" "the run passed without the ref arriving, so it measured against nothing"
+else
+    ok "$repaired"
+fi
+
+# The status board is the other call site, through deployed_ok, and it is where
+# a human meets this. A fix applied to doctor alone would leave the glance clean
+# on a town that had drifted.
+board_sees="the status board's DRIFT line fires with no intervening manual fetch"
+deploy_case drift-board-no-fetch
+advance_origin "$TMP/drift-board-no-fetch.git" kingdom/bin/km "the merged fix"
+run_stubbed status
+if ! printf '%s' "$OUT" | grep -q '^DRIFT:'; then
+    bad "$board_sees" "the board is silent on an unfetched merge: $(printf '%s\n' "$OUT" | head -5)"
+else
+    ok "$board_sees"
+fi
+
+# A fetch that fails must NOT stop the town — a refusal here is the gqlc-nm7w
+# shape, and a hung one is a stopped town (km's git_at says why). It degrades to
+# the older behaviour of judging against whatever ref is on disk. What it may
+# not do is render that as a measured state, so the degradation is ANNOUNCED,
+# and the announcement is what these rows pin rather than the exit code: a row
+# that pins only rc passes against a silent stale measurement.
+DRIFT_STALE_NOTE='could not fetch origin/master'
+
+unreachable="a drift check whose fetch fails still measures, and says it may be stale"
+deploy_case drift-fetch-fails
+gitf -C "$TMP/drift-fetch-fails" remote set-url origin "$TMP/drift-fetch-fails-gone.git"
+printf 'hand-edited\n' >"$TMP/drift-fetch-fails/kingdom/bin/km"
+run_stubbed doctor
+if [ "$RC" -eq 0 ]; then
+    bad "$unreachable" "doctor passed over an edited deployed file: $OUT"
+elif ! printf '%s' "$OUT" | grep -q "$DRIFT_STALE_NOTE"; then
+    bad "$unreachable" "the failed fetch was silent, so a stale measurement reads as a fresh one: $OUT"
+elif ! doctor_line | grep -q '^FAIL:'; then
+    bad "$unreachable" "the drift the stale ref CAN see was lost: $OUT"
+else
+    ok "$unreachable"
+fi
+
+# ...and it is not a hard stop even when there is nothing to report. The
+# clean-tree arm is the one a refusal would hide in: rc must stay 0.
+soft="an unreachable origin is not fatal to a clean deploy root"
+deploy_case drift-fetch-fails-clean
+gitf -C "$TMP/drift-fetch-fails-clean" remote set-url origin "$TMP/drift-fetch-fails-clean-gone.git"
+run_stubbed doctor
+if [ "$RC" -ne 0 ]; then
+    bad "$soft" "doctor exited $RC on a clean root whose origin was unreachable: $OUT"
+elif ! printf '%s' "$OUT" | grep -q "$DRIFT_STALE_NOTE"; then
+    bad "$soft" "the clean verdict does not disclose that it was measured against a possibly-stale ref: $OUT"
+elif ! doctor_line | grep -q '^ok:'; then
+    bad "$soft" "the deployed-tree row is not ok: $OUT"
+else
+    ok "$soft"
+fi
+
+# The negative half. If the note is printed unconditionally it carries no
+# information, and every clean verdict above passes for the wrong reason.
+quiet="a fetch that succeeds does not claim the measurement may be stale"
+deploy_case drift-fetch-quiet
+run_stubbed doctor
+if printf '%s' "$OUT" | grep -q "$DRIFT_STALE_NOTE"; then
+    bad "$quiet" "a healthy fetch still announced staleness, so the note discriminates nothing: $OUT"
+else
+    ok "$quiet"
+fi
+
+# The bound. A fetch is a network call on a path that runs every two minutes
+# under OnUnitActiveSec, where the next tick cannot begin until this one ends —
+# so an unbounded one is a stopped town, not a slow one. The stub hangs only on
+# fetch and delegates everything else to the real git, so what is measured is
+# the bound and not a broken fixture.
+bounded="a hanging fetch is bounded and degrades to a stale measurement"
+HANGBIN="$TMP/hang-bin"
+mkdir -p "$HANGBIN"
+REAL_GIT="$(command -v git)"
+cat >"$HANGBIN/git" <<STUB
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = fetch ] && sleep 60; done
+exec "$REAL_GIT" "\$@"
+STUB
+chmod +x "$HANGBIN/git"
+deploy_case drift-fetch-hangs
+printf 'hand-edited\n' >"$TMP/drift-fetch-hangs/kingdom/bin/km"
+started=$(date +%s)
+OUT="$(PATH="$HANGBIN:$BIN:$PATH" KM_FETCH_TIMEOUT=2 "$KM" doctor 2>&1)"
+RC=$?
+elapsed=$(( $(date +%s) - started ))
+if [ "$elapsed" -ge 30 ]; then
+    bad "$bounded" "the fetch was not bounded: doctor took ${elapsed}s"
+elif ! printf '%s' "$OUT" | grep -q "$DRIFT_STALE_NOTE"; then
+    bad "$bounded" "the timed-out fetch was silent: $OUT"
+elif [ "$RC" -eq 0 ] || ! doctor_line | grep -q '^FAIL:'; then
+    bad "$bounded" "the drift the stale ref CAN see was lost after the timeout: rc=$RC out=$OUT"
+else
+    ok "$bounded"
 fi
 
 # --- the timers deploy themselves rather than refusing (gqlc-nm7w) -----------
