@@ -454,7 +454,7 @@ PYEOF
   # existing issue body — neither direction of this script can clear them. They
   # printed seven stderr lines on every merge, forever, which is how an operator
   # stops reading the output that also carries the two actionable notices. The
-  # divergence is unchanged and is bd gqlc-lm5w; what changed is that it no
+  # divergence is unchanged and is bd gqlc-myee; what changed is that it no
   # longer costs seven lines to say.
   #
   # A single-bead group keeps the old wording verbatim, because the common case
