@@ -57,6 +57,19 @@ discovery_probes := vuln_probe + " " + fence_probe + " " + xtest_probe
 scratch_root := "/tmp"
 gotmpdir := justfile_directory() + "/.bin/gotmp"
 
+# The pressure at which the unattended cadence (`tmp-reap-cadence`, invoked by
+# km's guard sweep) starts deleting, in whichever of bytes and inodes is fuller.
+#
+# 75 and not 95. The `check-tmp` gate warns at 85 and fails at 95, and those are
+# thresholds for a HUMAN who is present: a suite that stops and names the cause
+# is a good outcome at 95%. The cadence exists to stop anyone reaching them, so
+# it has to act below the warning — a reaper whose trigger is the same number as
+# the alarm has conceded the incident before it starts. It is also the number
+# with headroom: the reap itself writes an archive, and 2026-08-22's incident
+# went from comfortable to town-wide ENOSPC inside one working night with
+# sixteen seats allocating scratch (bd gqlc-vze6).
+reap_threshold := "75"
+
 # Configures local git settings required after a fresh clone.
 # Idempotent: safe to run multiple times.
 #
@@ -468,6 +481,30 @@ tmp-reap mode="dry-run" root=scratch_root:
             exit 1
             ;;
     esac
+
+# the unattended half: what km's guard sweep runs once per cadence, and the only
+# thing in this town that reclaims scratch without a person typing (bd gqlc-u078).
+#
+# Everything above this line is a REMEDY — a report someone reads, a gate that
+# stops a suite, an apply someone types. Each one needs a citizen to already
+# suspect the filesystem, and the state that motivated the whole tool is the one
+# where nobody does: /tmp reached 99% of its inode cap overnight and began
+# refusing writes town-wide while `df -h` still showed 5.9G free, so the error
+# and the obvious diagnostic pointed at different resources (bd gqlc-vze6). The
+# gqlc-vze6 close said it plainly: "A reaper nobody invokes is the state we were
+# already in."
+#
+# It is `-apply` with a threshold rather than a conditional around `tmp-reap`,
+# so the decision to delete is taken by the process that took the measurement,
+# in the same run. A shell that measured with one invocation and deleted with a
+# second would have to decide what a non-zero exit meant, and the only
+# unrecoverable way to be wrong here is to delete because you could not measure.
+# tmpreap returns an error and touches nothing on every unmeasurable filesystem.
+#
+# Under the threshold the tool stops at the statfs, so a tick costs microseconds
+# and does not walk half a million inodes to conclude it has nothing to do.
+tmp-reap-cadence root=scratch_root threshold=reap_threshold:
+    @just tmpreap {{quote(root)}} -apply -apply-above {{quote(threshold)}}
 
 # provisions the pinned golangci-lint into the gitignored .bin/ when missing
 # or version-mismatched (~3s; official release binary — golangci-lint does not

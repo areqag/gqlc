@@ -19,8 +19,14 @@
 //	tmpreap [-root DIR] -check          # pressure only; non-zero at the fail threshold
 //	tmpreap [-root DIR] [-repo DIR]     # pressure, composition, and the reap plan
 //	tmpreap [-root DIR] [-repo DIR] -apply
+//	tmpreap [-root DIR] [-repo DIR] -apply -apply-above PCT   # the timer's form
 //
-// Nothing is deleted without -apply. -apply archives text artefacts under
+// Nothing is deleted without -apply, and with -apply-above nothing is even
+// SCANNED until the filesystem is at or past PCT in whichever of bytes and
+// inodes is fuller. That gate is what lets an unattended cadence run this: see
+// `just tmp-reap-cadence`, which km's guard sweep invokes once per tick.
+//
+// -apply archives text artefacts under
 // -archive-max-file to a tarball outside the scan root first, up to a total of
 // -archive-max-total, then reports what it could not archive: every dropped file
 // is counted, in a category that says why, and the first pathsListed of each
@@ -62,17 +68,24 @@ func main() {
 // options is the whole surface; every field has a default that is safe to run
 // on a machine nobody has configured.
 type options struct {
-	root     string
-	repo     string
-	base     string
-	maxAge   time.Duration
-	apply    bool
-	check    bool
-	archive  string
-	top      int
-	warnPct  float64
-	failPct  float64
-	archiveL archiveLimits
+	root    string
+	repo    string
+	base    string
+	maxAge  time.Duration
+	apply   bool
+	check   bool
+	archive string
+	top     int
+	warnPct float64
+	failPct float64
+	// applyAbove gates -apply on measured pressure, and is what makes this tool
+	// safe to put on a timer: below the threshold the run stops at the statfs and
+	// never walks, so a cadence costs microseconds and deletes nothing on the
+	// overwhelming majority of ticks. A negative value disables the gate, which
+	// is the default and is what every hand-typed `just tmp-reap apply` gets —
+	// an operator who typed the word apply has already decided.
+	applyAbove float64
+	archiveL   archiveLimits
 	// procDir is the procfs mount the in-use scan reads. It is not a flag: an
 	// operator has no reason to move it, and a wrong value silently empties the
 	// held set, which reads exactly like "nothing is in use". It exists so plan
@@ -104,7 +117,7 @@ type options struct {
 const defaultArchiveMaxFile = 64 << 20
 
 func parseOptions(args []string, errOut io.Writer) (options, error) {
-	o := options{procDir: "/proc"}
+	o := options{procDir: "/proc", applyAbove: -1}
 	fs := flag.NewFlagSet("tmpreap", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.StringVar(&o.root, "root", "/tmp", "scratch filesystem to report on")
@@ -117,6 +130,7 @@ func parseOptions(args []string, errOut io.Writer) (options, error) {
 	fs.IntVar(&o.top, "top", 15, "how many entries to list per section")
 	fs.Float64Var(&o.warnPct, "warn", 85, "usage percentage, of bytes or inodes, at which -check warns")
 	fs.Float64Var(&o.failPct, "fail", 95, "usage percentage, of bytes or inodes, at which -check fails")
+	fs.Float64Var(&o.applyAbove, "apply-above", -1, "with -apply, reap only when bytes or inodes are at or past this percentage (negative: always reap)")
 	fs.Int64Var(&o.archiveL.maxFileBytes, "archive-max-file", defaultArchiveMaxFile, "largest single file the archive will take; a text file above it is reported as unrecoverable and deleted anyway")
 	fs.Int64Var(&o.archiveL.maxTotalBytes, "archive-max-total", 2<<30, "largest total input the archive will take")
 	if err := fs.Parse(args); err != nil {
@@ -127,6 +141,17 @@ func parseOptions(args []string, errOut io.Writer) (options, error) {
 	}
 	if o.warnPct > o.failPct {
 		return options{}, fmt.Errorf("-warn (%.0f) is above -fail (%.0f), so the warning can never be reached", o.warnPct, o.failPct)
+	}
+	// Refused rather than ignored. A caller who wrote -apply-above wrote it as a
+	// brake, and a brake silently absent from a run that does not delete anyway
+	// is harmless — but the same command line one word later is `-apply
+	// -apply-above 75`, and a reader who has seen the brake accepted without
+	// -apply has no reason to check the order. The cadence recipe passes both.
+	if o.applyAbove >= 0 && !o.apply {
+		return options{}, fmt.Errorf("-apply-above %.0f was given without -apply, so it gates nothing", o.applyAbove)
+	}
+	if o.applyAbove > 100 {
+		return options{}, fmt.Errorf("-apply-above %.0f can never be reached: a filesystem does not exceed 100%%", o.applyAbove)
 	}
 	return o, nil
 }
@@ -168,6 +193,27 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) error {
 			return errors.Join(pr.err, errors.New("scratch filesystem is past the fail threshold; run `just tmp-report` for what is holding it"))
 		}
 		return pr.err
+	}
+
+	// The cadence's brake, and it sits ABOVE the walk deliberately: a timer that
+	// scanned a 500k-inode filesystem every quarter hour to decide it had nothing
+	// to do would be its own load. Below the threshold this returns after one
+	// statfs, having opened nothing.
+	//
+	// It is also the fail-closed half. Everything that can go wrong before this
+	// point — an unresolvable root, a filesystem with no inode table, a statfs
+	// refusal — has already returned an error, so there is no path on which an
+	// unmeasured filesystem is read as "past the threshold" and reaped. The
+	// dangerous shape for an unattended reaper is deleting because it could not
+	// measure, and the measurement is the first thing this program does.
+	if o.applyAbove >= 0 {
+		worst, currency := p.worst()
+		if worst < o.applyAbove {
+			pr.printf("\nunder the %.0f%% reap threshold — %s are the fuller currency at %.0f%%. Nothing was scanned and nothing was deleted.\n",
+				o.applyAbove, currency, worst)
+			return pr.err
+		}
+		pr.printf("\nat or past the %.0f%% reap threshold — %s are %.0f%% used. Reaping.\n", o.applyAbove, currency, worst)
 	}
 
 	started := time.Now()

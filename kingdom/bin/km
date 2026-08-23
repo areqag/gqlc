@@ -348,6 +348,7 @@ seat_status() {
 SESSION="${KM_TMUX_SESSION:-$(cfg kingdom tmux_session)}"
 
 have_tmux()  { command -v tmux >/dev/null 2>&1; }
+have_just()  { command -v just >/dev/null 2>&1; }
 session_up() { have_tmux && tmux has-session -t "=$SESSION" 2>/dev/null; }
 window_up()  { session_up && tmux list-windows -t "=$SESSION" -F '#W' | grep -qx "$1"; }
 
@@ -1709,8 +1710,66 @@ cmd_hold_verdict() {
           end'
 }
 
+# The town's only unattended reclamation of the shared scratch filesystem
+# (bd gqlc-u078). internal/tools/tmpreap has existed since PR #1057 and was
+# wired to nothing: every reclamation to date was a person or an agent noticing,
+# and the one time nobody noticed, /tmp hit 99% of its 1048576-inode cap and
+# began refusing writes town-wide while `df -h` showed 5.9G free (bd gqlc-vze6).
+#
+# ADVISORY, in every direction. It cannot fail the sweep, because the sweep's
+# job is the Պահակ's round and a filesystem tool that could stop it would be a
+# second way for the town to go quiet. It cannot hang the sweep either: the
+# guard unit is OnUnitActiveSec, so the next tick cannot begin until this one
+# ends, and one wedged walk over a large /tmp would be a stopped cadence. The
+# timeout is generous because the walk is genuinely large, and short of the
+# 15-minute guard interval so two ticks cannot overlap.
+#
+# The threshold and the deletion policy live in the justfile recipe and in the
+# tool, not here. This function decides only WHEN to ask.
+reap_scratch() {
+    local repo out rc=0
+    if ! have_just; then
+        # Named rather than skipped silently. On this host just is at
+        # /usr/bin/just and is on the systemd user manager's PATH, so an absent
+        # one means the environment changed underneath the unit — which is
+        # exactly the shape of a cadence that stops firing without a symptom
+        # until the filesystem fills months later.
+        echo "guard-sweep: scratch not reaped — just is not on PATH, so nothing reclaims /tmp on a cadence" >&2
+        return 0
+    fi
+    repo=$(deploy_root)
+    if [ ! -f "$repo/justfile" ]; then
+        echo "guard-sweep: scratch not reaped — no justfile in $repo" >&2
+        return 0
+    fi
+    out=$(cd "$repo" && timeout "${KM_REAP_TIMEOUT:-600}" just tmp-reap-cadence 2>&1) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "guard-sweep: scratch reap exited $rc — ${out//$'\n'/ }" >&2
+        return 0
+    fi
+    # Reported on stdout on EVERY tick, including the quiet ones. The journal is
+    # the only reader a timer has, and a line that appears only when something
+    # was deleted cannot distinguish a healthy filesystem from a reaper that
+    # stopped running (bd gqlc-vze6's own finding: the reaper nobody invokes).
+    echo "guard-sweep: scratch — ${out//$'\n'/ }"
+}
+
 cmd_guard_sweep() {
     ensure_deployed guard-sweep "$@" || return 1
+    # ABOVE every early return below, and that placement is the design
+    # (bd gqlc-u078). Scratch accumulates from AGENTS, not from the town's own
+    # loop: a halted town, a town that is down, and a town whose Պահակ is
+    # already awake each still have sixteen worktrees and whatever factory wave
+    # is running writing into /tmp. Every one of those states returns before the
+    # wake, so a reap placed beside the wake would be disarmed in precisely the
+    # conditions that produced the incident — 2026-08-22 filled the inode table
+    # while the town was HALTED and no seat was routing at all.
+    #
+    # The halt does not bind it, for the reason the halt binds the wake: this
+    # starts no session, spends no tokens and touches no seat, so Article VI.4's
+    # reservation of the halt to Սեդրակ and Անդրանիկ is not engaged by it. What
+    # a halt promises is a quiet town, not a filling disk.
+    reap_scratch
     session_up || { echo "guard-sweep: the town is down"; return 0; }
     # The halt binds every TIMER-driven wake, not just the dispatcher's. This is
     # the second one, and each wake here starts a real claude session, so a halt
