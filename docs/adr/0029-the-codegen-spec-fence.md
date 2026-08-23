@@ -63,12 +63,18 @@ nothing is red (`lost`); a document that grades something without being listed
 is red too (`undeclared`); a document named twice is red (`duplicated`). One
 direction alone is free on the other side.
 
-## Decision 3 — the floor is one graded site per listed document
+## Decision 3 — the floor is a per-document count of graded sites
+
+**Superseded in part.** As first decided, the floor was *one* graded site per
+listed document; it is now a number written beside each document in
+`specSigDocs` and `specBindDocs`, and the paragraphs below record why the
+weaker form was accepted and what changed. The measurement that motivated it,
+and the three declined alternatives, still stand as written.
 
 A census keyed on documents is itself a count of one per document, and that
-count has slack. A listed document keeps its entry on **one** surviving graded
-site, so every site past the first can leave the sweep with nothing said — not
-by being corrected, but by ceasing to print an anchor it is found on. Each
+count has slack. A listed document kept its entry on **one** surviving graded
+site, so every site past the first could leave the sweep with nothing said —
+not by being corrected, but by ceasing to print an anchor it is found on. Each
 anchor is a delimiter and the context parameter or the literal's type, both
 halves: an open parenthesis or a code span's opening backticks before
 `ctx context.Context` for a signature, the opening brace of the `map[string]any`
@@ -92,8 +98,27 @@ The alternatives were considered and declined:
   A fence that reddens on honest edits is one whose census gets bulk-updated
   without being read, which buys less than a floor of one that is written down.
 
-So the floor is accepted and recorded, in this ADR and in
+So the floor of one was accepted and recorded, in this ADR and in
 `docs/specs/codegen-stage-c1.md` §5.3.
+
+**What changed.** The declined alternatives above are all *per-site*: they ask
+what the sites are. The form now in the tree asks only how many there are, per
+document — `specSigDocs` and `specBindDocs` map each listed document to the
+number of graded sites it owes, and `requireCensusFloors` reports a shortfall by
+document name with both numbers beside it. That is not the bare `9 != 10`
+Decision 2 rejects, which names nothing a reader can open; and it is not the
+verbatim census, which is a copy of these documents. It closes the measurement
+above: rewriting C4 §3.2's `RemovePerson` context parameter takes C4 from ten
+graded signatures to nine and is red, by name.
+
+The comparison is `>=`, not `==`. An equality reddens on every honest addition,
+and a census that reddens on honest edits is a census maintainers bump without
+reading — the same objection that declined the verbatim form. Only a removal has
+to be written down, which is the price the membership half already charges.
+
+What a count still does not distinguish is a document that loses one site and
+gains another. A count is a size, not a membership; the membership reading is
+the verbatim census, still declined, still for the reason above.
 
 ## Decision 4 — the exemption list and the requirement list are the same list
 
@@ -269,7 +294,8 @@ own header:
   it.
 - A claim put in the place of one of `specBareListExhibits`' exhibits, spelled
   the way that exhibit was, takes its exemption (`gqlc-x2sg`, Decision 10).
-- One graded site per listed document is the floor (`gqlc-0rjn`, Decision 3).
+- A site swapped for another inside one document is invisible: the per-document
+  floor is a count, not a membership (`gqlc-0rjn`, Decision 3).
 - A signature carrying the author's names as separate arguments is past the
   arity the signature sweep reads (`gqlc-vu7z`).
 - The prose around an intact graded span may say the opposite of it

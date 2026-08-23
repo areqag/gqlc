@@ -845,20 +845,23 @@ no census names a document under either, so dropping either from the
 fence's roots is green.
 
 The third is the largest and, unlike the first, is a single edit in
-one place. A listed document owes *one* graded site, not all of them,
-so every site past the first can leave the sweep silently — not by
-being corrected, but by ceasing to print an anchor. An anchor is a
-delimiter *and* the context parameter, both halves: an open
+one place. A listed document once owed *one* graded site, not all of
+them, so every site past the first could leave the sweep silently —
+not by being corrected, but by ceasing to print an anchor. An anchor
+is a delimiter *and* the context parameter, both halves: an open
 parenthesis before `ctx context.Context`, or the opening backticks of
 a code span the list is printed inside. The `RemovePerson(ctx
 context.Context, arg int64)` member of C4 §3.2's `WriteQuerier` block
-is one of ten graded signatures in C4; rewrite its context parameter
-and the fence stays green over whatever its argument position then
-says. The floor is one graded site per listed document. Closing that
-means recording every graded site rather than every graded document,
-which makes the test a verbatim copy of these documents and turns
-every honest edit to an example red — so it is written down here
-instead.
+is one of ten graded signatures in C4; rewriting its context parameter
+left the fence green over whatever its argument position then said.
+It no longer does. `specSigDocs` and `specBindDocs` now write down,
+beside each listed document, how many graded sites it owes, and a
+document that falls below its number is named with both numbers. What
+that does not reach is a site swapped for another inside one document:
+a count is a size, not a membership. Recording every graded site
+rather than counting them makes the test a verbatim copy of these
+documents and turns every honest edit to an example red, so the count
+is where this stops (ADR 0029 decision 3).
 
 The fourth is what the third's word *anchor* is carrying, and it is
 not decoration. Until ADR 0029 decision 10 the only signature anchor
