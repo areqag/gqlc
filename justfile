@@ -364,6 +364,93 @@ check-shared-config dir=".":
     done
     exit "$rc"
 
+# refuses to run when bd's auto-export cannot stage its own output — bd
+# gqlc-c2ch / GH #1170.
+#
+# The defect, measured 2026-08-22 from a seat worktree: every `bd update` ended
+# with
+#
+#     ✓ Updated issue: gqlc-cn8e — ...
+#     Warning: auto-export: git add failed: exit status 128: fatal: this
+#     operation must be run in a work tree
+#
+# The DB write succeeded, bd printed ✓ and exited 0, and `.beads/issues.jsonl`
+# silently stopped tracking the ledger. Reproduced here on a throwaway repo
+# 2026-08-23: the cause is `core.bare = true` in the SHARED config, which the
+# check above now refuses by name. This recipe exists because the state check
+# and the behavioural one answer different questions. check-shared-config
+# enumerates two keys known to have this blast radius; nobody has identified the
+# writer that sets them (gqlc-qhno item 2), and the failing operation has other
+# ways to break — a core.worktree redirect, a permission wall, a GIT_DIR that
+# points somewhere else. This recipe asks the operation itself.
+#
+# WHY IT PROBES $root AND NOT $dir. bd resolves one beads directory per
+# repository, at the MAIN worktree's root, and stages the export THERE no matter
+# which worktree you invoke it from. Measured on the live repo 2026-08-23: after
+# a bd write from the shared checkout the export was rewritten and staged there,
+# while gqlc-seat-sedrak's checked-out copy still carried its worktree-creation
+# mtime, 1.9 MB smaller. So a seat's own `.beads/issues.jsonl` never moves, and
+# a seat looking at its own tree can see neither the staleness nor the failure.
+# The probe has to reach across into the main checkout to see anything at all —
+# which is the same asymmetry that made check-shared-config read the config.
+#
+# TWO ARMS, and they are not redundant:
+#   A. `git add --dry-run` over the export path — the operation bd actually
+#      runs. Measured: rc=128 with the reported message under core.bare=true.
+#   B. the main checkout's toplevel is where we think it is. Measured: under
+#      `core.worktree = /tmp`, arm A exits 0 while staging a path under /tmp —
+#      a pass that stages the wrong file. Arm A alone cannot see that.
+#
+# --dry-run never writes the index, so this is read-only against the repository
+# it judges.
+[private]
+check-beads-export dir=".":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    # git exports GIT_DIR / GIT_WORK_TREE to every hook, `just test` runs from
+    # .githooks/pre-push, and those variables beat `git -C`. Without this line
+    # the probe judges the hook's repository rather than the one at $dir — it
+    # would report on a healthy tree while a bricked one went unread.
+    unset "${!GIT_@}"
+    dir="{{ dir }}"
+    common="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+    if [ -z "$common" ]; then
+        echo "error: '$dir' is not a git repository, so bd's export target cannot be" >&2
+        echo "       resolved (bd gqlc-c2ch)." >&2
+        exit 1
+    fi
+    # --git-common-dir, not --git-dir: from a linked worktree the latter answers
+    # <main>/.git/worktrees/<name>, whose parent is not a checkout at all.
+    root="$(cd "$(dirname "$common")" 2>/dev/null && pwd -P)"
+    rc=0
+    if [ -z "$root" ]; then
+        echo "error: the main checkout for '$dir' resolves to '$(dirname "$common")'," >&2
+        echo "       which is not a directory (bd gqlc-c2ch)." >&2
+        exit 1
+    fi
+    if [ ! -f "$root/.beads/issues.jsonl" ]; then
+        echo "error: bd's export target $root/.beads/issues.jsonl does not exist, so the" >&2
+        echo "       in-tree export is not being written at all (bd gqlc-c2ch)." >&2
+        rc=1
+    elif ! out="$(git -C "$root" add --dry-run -- .beads/issues.jsonl 2>&1)"; then
+        echo "error: bd's auto-export cannot stage .beads/issues.jsonl in $root" >&2
+        echo "       (bd gqlc-c2ch). git said: $out" >&2
+        echo "       bd hits this on every write, prints the warning AFTER its ✓, and exits" >&2
+        echo "       0 — so the export silently stops tracking the ledger. Run" >&2
+        echo "       'just check-shared-config' next: core.bare=true in the shared config is" >&2
+        echo "       the cause measured on 2026-08-22." >&2
+        rc=1
+    fi
+    top="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)"
+    [ -n "$top" ] && top="$(cd "$top" 2>/dev/null && pwd -P)"
+    if [ "$top" != "$root" ]; then
+        echo "error: the main checkout $root reports its work tree as '${top:-<none>}'" >&2
+        echo "       (bd gqlc-c2ch). bd's export would be staged against that tree instead," >&2
+        echo "       which 'git add' does without failing. Check core.worktree." >&2
+        rc=1
+    fi
+    exit "$rc"
+
 # The single entry point to internal/tools/tmpreap, so GOTMPDIR and the raw-df
 # fallback below are spelled once rather than once per caller.
 #
@@ -415,7 +502,7 @@ check-tmp root=scratch_root:
     just tmpreap {{quote(root)}} -check
 
 # health check for local dev environment; extend as new drift modes emerge
-doctor: check-hooks check-worktree-upstream check-shared-config check-tmp
+doctor: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp
     @echo "ok"
 
 # what is holding the shared scratch filesystem, in bytes AND inodes, with the
@@ -1545,7 +1632,7 @@ test-hooks:
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # -shuffle catches inter-test coupling; go build link-checks package main,
 # which has no tests and is otherwise only compile-checked by lint.
-test: check-hooks check-worktree-upstream check-shared-config check-tmp test-hooks
+test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp test-hooks
     go build ./...
     go test -shuffle=on ./...
 
