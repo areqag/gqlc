@@ -81,7 +81,12 @@ unresponsive_after_minutes = 30
 
 [claude]
 # The factory runs unattended; the constitution, git hooks, and
-# claude-pre-bash remain the guardrails. Set to "acceptEdits" to supervise.
+# claude-pre-bash remain the guardrails. Set to "acceptEdits" to supervise —
+# km-seat then launches every seat with a line on stderr saying the pane needs
+# someone in it, because a prompt in that mode waits for a person.
+# "plan" is REFUSED: a seat would start inside plan mode waiting for an approval
+# nobody is there to give, and km-seat will not launch one (bd gqlc-twmh). So is
+# any value claude does not take, rather than falling back to prompts.
 permission_mode = "bypassPermissions"
 
 [effort]
