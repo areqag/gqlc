@@ -2595,19 +2595,22 @@ elif [ "$(push_batches)" -ne 0 ]; then
 else
     ok "a bead whose label is one over GitHub's cap is not offered to GitHub"
 fi
-# The verdict was PUSH FAILED until gqlc-e9lh's lane measured what that costs: no
-# push can mirror these beads, so the alarm never clears and the citizens who see
-# it are not the ones who can act on it. The count and the remedy stay on the
-# line a `tail -1` caller keeps; the status does not, because pre-push reads it
-# as "your push did not land" and this bead's push never can.
-if [ "$RC" -ne 0 ]; then
-    bad "an unmirrorable label is named on the last line without failing the push" \
-        "exited $RC over data no push can accept: $(last_line)"
+# RE-MEASURED 2026-08-23, because this verdict was nearly demoted to a
+# non-failing notice on the argument that the condition is permanent: no push can
+# mirror the bead, and the citizen who meets the alarm is not the one who chose
+# the label. Both halves are false. gqlc-njqk, gqlc-a7we and gqlc-to7k did carry
+# the 51-character $LSUBJ below; they now carry `subject:kingdom/brain/playbooks`
+# at 31, which is verbatim the remedy the row after next pins, and all three
+# mirrored (GH #1358, #1359, #1360). Zero beads on the whole board carry an
+# over-cap label. The alarm is clearable, it was cleared, and PUSH FAILED stays.
+if [ "$RC" -eq 0 ]; then
+    bad "an unmirrorable label makes the push non-zero and says so on the last line" \
+        "exited 0, so pre-push's status reads as a clean mirror: $(last_line)"
 else
     case "$(last_line)" in
-        *"pushed 0 new bead(s), closed 0 stale GH mirror(s); 1 bead(s) were not offered to GitHub at all, carrying a label longer than it accepts"*)
-            ok "an unmirrorable label is named on the last line without failing the push" ;;
-        *) bad "an unmirrorable label is named on the last line without failing the push" \
+        *"PUSH FAILED — 0 of 1 new bead(s) mirrored"*"1 bead(s) were not offered to GitHub at all, carrying a label longer than it accepts"*)
+            ok "an unmirrorable label makes the push non-zero and says so on the last line" ;;
+        *) bad "an unmirrorable label makes the push non-zero and says so on the last line" \
             "got: $(last_line)" ;;
     esac
 fi
@@ -2663,7 +2666,7 @@ else
     # this file, and the default-assignment form would silently compare this
     # row against that run's summary line.
     _ll="$(last_line)"
-    if [ -n "${_ll##*pushed 1 new bead(s), closed 0 stale GH mirror(s); 1 bead(s) were not offered to GitHub at all*}" ]; then
+    if [ -n "${_ll##*PUSH FAILED — 1 of 2 new bead(s) mirrored*}" ]; then
         bad "an unmirrorable bead does not stop the beads beside it being mirrored" \
             "the count does not describe the run: $_ll"
     else
@@ -3498,32 +3501,6 @@ else
     esac
 fi
 
-# --- gqlc-e9lh sibling: an unmirrorable label is not a push failure ----------
-# gqlc-njqk, gqlc-a7we and gqlc-to7k carry
-# `subject:kingdom/brain/playbooks/citizen-protocol.md`, 51 characters against
-# GitHub's cap of 50. They can never gain a mirror through this script, so every
-# push printed PUSH FAILED over data no push can accept — a permanent alarm, and
-# the real gate for the label is .github/scripts/check-label-lengths.py in CI.
-# Still named, still counted, no longer a failure.
-run_sync push \
-    "[{\"id\":\"b-perm\",\"status\":\"open\",\"external_ref\":\"\",\"labels\":[\"$LSUBJ\"]},
-      {\"id\":\"b-fine\",\"status\":\"open\",\"external_ref\":\"\",\"labels\":[\"short\"]}]" \
-    '[]' '[{"number":1}]'
-if [ "$RC" -ne 0 ]; then
-    bad "a label GitHub can never accept does not fail the push" \
-        "exited $RC: $(last_line)"
-elif ! grep -q 'b-perm carries a label GitHub cannot hold' "$TMP/err"; then
-    bad "a label GitHub can never accept does not fail the push" \
-        "the refusal went silent as well as non-fatal"
-else
-    case "$(last_line)" in
-        *"pushed 1 new bead(s), closed 0 stale GH mirror(s); 1 bead(s) were not offered to GitHub at all, carrying a label longer than it accepts"*)
-            ok "a label GitHub can never accept does not fail the push" ;;
-        *) bad "a label GitHub can never accept does not fail the push" \
-            "got: $(last_line)" ;;
-    esac
-fi
-
 # --- the assertion census ----------------------------------------------------
 # The one property this file cannot get from `set -u`, from shellcheck or from
 # its own exit status: that it still makes every assertion it made yesterday.
@@ -3733,7 +3710,7 @@ a bead whose external_ref names another repository is held, not refused
 a temp directory that cannot be made is reported (pull)
 a temp directory that cannot be made is reported (push)
 a bead whose label is one over GitHub's cap is not offered to GitHub
-an unmirrorable label is named on the last line without failing the push
+an unmirrorable label makes the push non-zero and says so on the last line
 the refusal names the label, its length and the cap
 a bead whose label is exactly at GitHub's cap is mirrored
 the refusal names the deepest ancestor directory that fits
@@ -3766,7 +3743,6 @@ a long hold group names the count in full and the ids up to a cap
 a bead the push exited 0 over but never mirrored is not counted as pushed
 the bead that gained no mirror is named
 an unreadable post-push ledger withdraws the mirrored count
-a label GitHub can never accept does not fail the push
 the assertion census matches the assertions that ran
 CENSUS
 
