@@ -63,6 +63,13 @@ guard_minutes = 15
 # For Րաֆֆի's eyes only — never quoted at a citizen.
 handoff_threshold_pct = 75
 
+# How stale a seat's heartbeat must be before `km status` marks it
+# UNRESPONSIVE. It MARKS; it never acts — status_unresponsive_after in
+# kingdom/bin/km carries the argument for why that does not contradict the
+# refusal to reap on a heartbeat, and gqlc-eier carries the two judges who
+# froze on modals for 80 and 152 minutes while every board read healthy.
+unresponsive_after_minutes = 30
+
 [claude]
 # The factory runs unattended; the constitution, git hooks, and
 # claude-pre-bash remain the guardrails. Set to "acceptEdits" to supervise.
