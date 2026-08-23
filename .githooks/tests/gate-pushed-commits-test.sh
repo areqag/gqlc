@@ -146,6 +146,27 @@ check "a commit carrying the AI-attribution trailer is REFUSED" refused "$GATE_V
 contains "the refusal names the offending sha" "$GATE_OUT" "$TAINTED_SHA"
 contains "the refusal names the offending subject" "$GATE_OUT" "carries the trailer"
 
+# ...and the remedy it prints ALLOCATES its scratch file rather than spelling
+# one. bd gqlc-7ysc: this hook used to advise writing to a chosen name under
+# /tmp, which is the exact shape CLAUDE.md's "## Scratch space" section forbids,
+# and printing it is worse than doing it — it teaches the collision to every
+# citizen the gate refuses. Two seats screening a commit at the same moment both
+# write the chosen name and the loser reads the winner's bytes (bd gqlc-b8gd).
+#
+# Asserted on the RENDERED refusal rather than by grepping the hook's source:
+# the source is already swept by scratch-literals-test.sh, and a second copy of
+# that sweep would only re-measure the same bytes. What this row adds is that
+# the advice a citizen actually SEES is runnable and self-cleaning.
+contains "the remedy allocates its scratch file with mktemp" "$GATE_OUT" 'mktemp'
+contains "the remedy removes the scratch file afterwards" "$GATE_OUT" 'rm -f'
+# The negative half. Without it, an advice line that both calls mktemp AND keeps
+# the old fixed path would pass the two rows above.
+FIXED_TMP="/tmp"/
+case "$GATE_OUT" in
+    *"$FIXED_TMP"*) check "the remedy spells no fixed scratch name" no yes ;;
+    *) check "the remedy spells no fixed scratch name" no no ;;
+esac
+
 # --- 2. GREEN: the same history without that commit passes --------------------
 # The falsifier for a gate that refuses everything. Without this row, `exit 1`
 # planted at the top of the script passes every reject row above.

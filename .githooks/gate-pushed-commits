@@ -143,7 +143,12 @@ if [ "${#offenders[@]}" -ne 0 ]; then
         printf '         %s\n' "${offenders[@]}"
         echo ""
         echo "       See the individual refusal with:"
-        echo "         git log -1 --format=%B <sha> > /tmp/m && .githooks/commit-msg /tmp/m"
+        # Allocated, not spelled, and cleaned up on the way out. A chosen scratch
+        # name is not yours (CLAUDE.md, "## Scratch space"), and printing one as
+        # advice is worse than writing one: it teaches the collision to every
+        # citizen this gate refuses. bd gqlc-7ysc.
+        echo "         m=\$(mktemp) && git log -1 --format=%B <sha> >\"\$m\" &&"
+        echo "         .githooks/commit-msg \"\$m\"; rm -f \"\$m\""
         echo "       Repair by rewriting those messages:  git rebase -i --root  (or ..<base>)"
         echo "       Then re-check the hooks are live:    just check-hooks"
     } >&2
