@@ -4704,6 +4704,214 @@ else
     ok "seat-refresh refuses a seat that is not in the roster"
 fi
 
+# --- seat-refresh --all: the sweep the condition actually needs (gqlc-k9r2) --
+# The single-seat command above is correct and was unreachable at the scale of
+# the defect. MEASURED 2026-08-23 across the live town: 15 of 16 seat worktrees
+# were missing merged .githooks/.claude commits, 7 of them PARKED as far as 53
+# commits back — all three architects, both seated judges and the guard among
+# them — and a 16th roster seat had no worktree at all. Fixing that meant
+# knowing which seats were parked, typing sixteen commands, and reading the
+# ones that refused. An operator who has to compose the sweep himself, at the
+# moment he is switching the town on, will run some of it.
+#
+# So `--all` exists to make the safe act the easy one. Three properties, and
+# the last two are what stop it being a footgun:
+#   it moves ONLY the parked seats, exactly as the single-seat path does;
+#   a seat with no worktree is a reported ROW, not an abort — otherwise one
+#     unseated seat (tir, live) truncates the sweep and the seats after it in
+#     roster order are silently never visited;
+#   it exits non-zero while any seat is still exposed or unjudged, so a script
+#     or a human cannot read "it ran" as "the town is covered".
+#
+# A SECOND fixture, built the same way as hk above but never touched by those
+# rows. The rows above deliberately dirty, branch and advance seats in hk, so a
+# sweep run over it would be asserting against whatever they happened to leave.
+
+hka="$TMP/hka"
+mkdir -p "$hka"
+allfix_ok=1
+{
+    gitf init --quiet --bare "$hka/upstream.git"
+    gitf clone --quiet "$hka/upstream.git" "$hka/town"
+    gitf -C "$hka/town" config user.email seat@example.invalid
+    gitf -C "$hka/town" config user.name "seat fixture"
+    gitf -C "$hka/town" config core.hooksPath .githooks
+    mkdir -p "$hka/town/.githooks"
+    printf '%s' "$allow_hook" >"$hka/town/.githooks/pre-push"
+    chmod +x "$hka/town/.githooks/pre-push"
+    gitf -C "$hka/town" add -A
+    gitf -C "$hka/town" commit --quiet -m "a1: a pre-push that allows"
+    gitf -C "$hka/town" branch -M master
+    gitf -C "$hka/town" push --quiet -u origin master
+} >"$hka/setup.log" 2>&1 || allfix_ok=0
+
+a1=$(gitf -C "$hka/town" rev-parse HEAD 2>/dev/null || true)
+
+# Four states, one per hazard the sweep has to respect. tir gets NO worktree,
+# which is the live shape and the one that aborts a naive loop.
+for s in artur arpine aregak astghik mihr anahit raffi vahagn aramazd nvard; do
+    gitf -C "$hka/town" worktree add --detach --quiet "$hka/town-seat-$s" master \
+        >>"$hka/setup.log" 2>&1 || allfix_ok=0
+done
+{
+    # vahagn: a branch in flight. aramazd: uncommitted work. nvard: committed
+    # on no branch, the shape where a move orphans the commit off every ref.
+    gitf -C "$hka/town-seat-vahagn" switch -qc fix/in-flight
+    printf 'half a fix\n' >"$hka/town-seat-aramazd/WIP.txt"
+    printf 'a finished fix\n' >"$hka/town-seat-nvard/DONE.txt"
+    gitf -C "$hka/town-seat-nvard" add -A
+    gitf -C "$hka/town-seat-nvard" commit --quiet -m "nvard's own commit, on no branch"
+} >>"$hka/setup.log" 2>&1 || allfix_ok=0
+nvard_own=$(gitf -C "$hka/town-seat-nvard" rev-parse HEAD 2>/dev/null || true)
+
+{
+    printf '%s' "$refuse_hook" >"$hka/town/.githooks/pre-push"
+    gitf -C "$hka/town" add -A
+    gitf -C "$hka/town" commit --quiet -m "a2: a pre-push that refuses"
+    gitf -C "$hka/town" push --quiet origin master
+} >>"$hka/setup.log" 2>&1 || allfix_ok=0
+a2=$(gitf -C "$hka/town" rev-parse HEAD 2>/dev/null || true)
+
+hka_head() { gitf -C "$hka/town-seat-$1" rev-parse HEAD 2>/dev/null || echo none; }
+# The push verdict, pointed at this fixture. Same argument as seat_push_verdict
+# above: the question is whether the merged hook RUNS, and only a real push
+# can answer it.
+seat_push_verdict_a() { # <seat> <branch>
+    local out
+    if out=$( (cd "$hka/town-seat-$1" && gitf push origin "HEAD:refs/heads/$2" 2>&1) ); then
+        echo allowed
+    elif printf '%s' "$out" | grep -q MERGED-GATE-SPEAKING; then
+        echo refused
+    else
+        echo "broken: $out"
+    fi
+}
+refresh_all() { OUT="$( (cd "$hka/town" && "$KM" seat-refresh --all "$@") 2>&1 )"; RC=$?; }
+
+if [ "$allfix_ok" -ne 1 ] || [ -z "$a1" ] || [ -z "$a2" ] || [ "$a1" = "$a2" ]; then
+    bad "the --all fixture builds" "$(tail -3 "$hka/setup.log" 2>&1)"
+elif [ "$nvard_own" = "$a1" ]; then
+    bad "the --all fixture builds" "nvard's own commit did not land, so the orphaning hazard is not represented"
+else
+    ok "the --all fixture builds a town with parked, branched, dirty, committed and unseated seats"
+
+    # --check FIRST, because it is what an operator runs before he trusts the
+    # acting run, and because a --check that moved something would be found
+    # here and nowhere else.
+    chk_all="seat-refresh --all --check reports every seat and moves nothing"
+    refresh_all --check
+    if [ "$(hka_head artur)" != "$a1" ] || [ "$(hka_head aramazd)" != "$a1" ]; then
+        bad "$chk_all" "--check moved a worktree: artur=$(hka_head artur) aramazd=$(hka_head aramazd)"
+    elif [ ! -f "$hka/town-seat-aramazd/WIP.txt" ]; then
+        bad "$chk_all" "--check destroyed uncommitted work"
+    elif [ "$RC" -eq 0 ]; then
+        bad "$chk_all" "exited 0 with seven seats still exposed: $OUT"
+    elif [ "$(printf '%s\n' "$OUT" | grep -cE '^ *(artur|arpine|aregak|astghik|mihr|anahit|raffi|vahagn|aramazd|nvard|tir)\b')" -lt 11 ]; then
+        # Every roster seat gets a line. A sweep that reports only the ones it
+        # would act on leaves the operator unable to tell "held" from "skipped".
+        bad "$chk_all" "not every seat is reported: $OUT"
+    else
+        ok "$chk_all"
+    fi
+
+    # The abort hazard, on its own row: tir is LAST in roster order in the live
+    # kingdom.toml, so a loop that dies on him would still have printed most of
+    # the table. This asserts he is reported AND that the run reached its
+    # summary, which a `die` cannot do.
+    tir_row="an unseated seat is a reported row, not an abort that truncates the sweep"
+    if [ -d "$hka/town-seat-tir" ]; then
+        bad "$tir_row" "the fixture gave tir a worktree, so the hazard is not represented"
+    elif ! printf '%s\n' "$OUT" | grep -E '^ *tir\b' | grep -qi 'no worktree'; then
+        bad "$tir_row" "tir's line does not say he has no worktree: $(printf '%s\n' "$OUT" | grep -E '^ *tir\b')"
+    elif ! printf '%s' "$OUT" | grep -qi 'seat-refresh --all:'; then
+        bad "$tir_row" "the sweep printed no summary, so it did not run to the end: $OUT"
+    else
+        ok "$tir_row"
+    fi
+
+    # THE ACT.
+    act_all="seat-refresh --all moves every parked seat to origin/master"
+    refresh_all
+    moved_ok=1
+    for s in artur arpine aregak astghik mihr anahit raffi; do
+        [ "$(hka_head "$s")" = "$a2" ] || { moved_ok=0; moved_bad="$s at $(hka_head "$s")"; }
+    done
+    if [ "$moved_ok" -ne 1 ]; then
+        bad "$act_all" "a parked seat was left behind: $moved_bad"
+    else
+        ok "$act_all"
+    fi
+
+    # Not "a file appeared": the hook RUNNING. Same argument as the single-seat
+    # section — 7 of 14 seats read core.hooksPath='.githooks' while holding no
+    # push guard at all, so existence proves nothing.
+    push_all="after --all a refreshed seat's push is refused by the merged gate"
+    if [ "$(seat_push_verdict_a raffi probe-all-1)" != refused ]; then
+        bad "$push_all" "the merged hook does not run in raffi's refreshed worktree"
+    else
+        ok "$push_all"
+    fi
+
+    # THE THREE REFUSALS, after the acting run rather than before it: this is
+    # the state in which work is actually lost, and the single-seat rows above
+    # cannot see a sweep that treats "held" as "skip the guard and move on".
+    held_all="--all leaves in-flight work exactly where it found it"
+    if [ "$(hka_head vahagn)" = "$a2" ]; then
+        bad "$held_all" "it moved a seat that was on a branch"
+    elif [ "$(gitf -C "$hka/town-seat-vahagn" symbolic-ref --quiet --short HEAD)" != fix/in-flight ]; then
+        bad "$held_all" "it dropped vahagn's branch checkout"
+    elif [ ! -f "$hka/town-seat-aramazd/WIP.txt" ]; then
+        bad "$held_all" "it destroyed aramazd's uncommitted work"
+    elif [ "$(hka_head aramazd)" = "$a2" ]; then
+        bad "$held_all" "it moved a dirty worktree"
+    elif [ "$(hka_head nvard)" != "$nvard_own" ]; then
+        bad "$held_all" "it orphaned nvard's commit off every ref: head is now $(hka_head nvard)"
+    else
+        ok "$held_all"
+    fi
+
+    # The exit status is the only thing a morning script reads. Seven seats
+    # moved and three are still exposed, so "it ran" must not read as "done".
+    exposed_all="--all still exits non-zero while any seat remains exposed, and names them"
+    if [ "$RC" -eq 0 ]; then
+        bad "$exposed_all" "exited 0 with vahagn, aramazd and nvard still uncovered: $OUT"
+    elif ! printf '%s' "$OUT" | grep -qi 'vahagn'; then
+        bad "$exposed_all" "the summary does not name a held seat: $OUT"
+    else
+        ok "$exposed_all"
+    fi
+
+    # Idempotence, and it is not a formality: the seven moved seats must now
+    # report current rather than being checked out again on every sweep.
+    idem_all="a second --all moves nothing and says the refreshed seats are current"
+    refresh_all
+    if [ "$(hka_head artur)" != "$a2" ]; then
+        bad "$idem_all" "artur moved off master on the second pass: $(hka_head artur)"
+    elif ! printf '%s\n' "$OUT" | grep -E '^ *artur\b' | grep -qi 'current'; then
+        bad "$idem_all" "artur is not reported current: $(printf '%s\n' "$OUT" | grep -E '^ *artur\b')"
+    else
+        ok "$idem_all"
+    fi
+
+    # --all and a seat name together is ambiguous — does the name narrow the
+    # sweep or is it a typo for a single-seat run? Refuse rather than guess.
+    both_all="seat-refresh refuses --all together with a seat name"
+    OUT="$( (cd "$hka/town" && "$KM" seat-refresh --all raffi) 2>&1 )"
+    RC=$?
+    # Pinned on the ambiguity being NAMED, and explicitly NOT on `unknown flag`:
+    # before --all existed this row passed on that message, which is non-zero
+    # and carries the word "all", against a km holding no sweep at all.
+    if [ "$RC" -eq 0 ]; then
+        bad "$both_all" "it accepted both and guessed which was meant: $OUT"
+    elif printf '%s' "$OUT" | grep -q 'unknown flag'; then
+        bad "$both_all" "--all is not a flag this km knows, so this row measures nothing: $OUT"
+    elif ! printf '%s' "$OUT" | grep -q 'a seat name'; then
+        bad "$both_all" "the refusal does not say what is ambiguous: $OUT"
+    else
+        ok "$both_all"
+    fi
+fi
+
 # THE WIRING ROW. The mechanism above is worth nothing if nobody calls it: a
 # refresh that exists and never runs deploys exactly as many hooks as no
 # refresh at all. km-seat must call it, and must call it BEFORE the session
@@ -4885,6 +5093,116 @@ if [ "$RC" -eq 0 ] || ! doctor_line | grep -q '^FAIL:'; then
 else
     ok "doctor FAILS on a deployed file edited in place, though HEAD is origin/master"
 fi
+
+# --- the deployed tree includes the GATES, not just kingdom/ (gqlc-d20c) -----
+# Claude Code's PreToolUse hook executes .githooks/claude-pre-bash out of the
+# main checkout, and so do the git hooks under core.hooksPath. Nothing advanced
+# that checkout and the drift check above looked only at `-- kingdom/`, so a
+# merged hook fix reached nobody working there and no instrument said a word.
+#
+# MEASURED 2026-08-23, first party: the shared checkout sat at 2ca5465d while
+# origin/master was b323fed1, 34 commits back. PR #1333 had merged the fix for
+# gqlc-gtxl; running `bd close` from a sibling worktree was still DENIED by the
+# pre-fix hook, and feeding the same JSON to the merged copy was silent. Same
+# input, two copies of one file, opposite verdicts. `git status` in that
+# checkout was clean apart from two .beads exports, so there was nothing to
+# see. The condition was found by a human comparing shas by hand.
+#
+# The gate paths here are the same two seat_freshness counts commits against —
+# one definition of "what is a gate", so the deployed root and a seat worktree
+# cannot come to disagree about it.
+
+hooks_behind="doctor FAILS when the deployed .githooks is behind origin/master"
+deploy_case doctor-hooks-behind
+mkdir -p "$TMP/doctor-hooks-behind.git.seed/.githooks"
+advance_origin "$TMP/doctor-hooks-behind.git" .githooks/claude-pre-bash "the merged hook"
+gitf -C "$TMP/doctor-hooks-behind" fetch -q origin
+run_stubbed doctor
+if [ "$RC" -eq 0 ]; then
+    bad "$hooks_behind" "exited 0 over a stale deployed hook — the shape that made #1333 inert: $OUT"
+elif ! doctor_line | grep -q '^FAIL:'; then
+    bad "$hooks_behind" "the deployed-tree row is not a FAIL: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'claude-pre-bash'; then
+    # NAMES the file. An operator who is told "something drifted" cannot tell
+    # whether the thing gating him is the thing that moved.
+    bad "$hooks_behind" "the failure does not name the stale hook, so it cannot be acted on: $OUT"
+else
+    ok "$hooks_behind"
+fi
+
+# .claude/ is the other half of the same gate set — settings.json carries the
+# PreToolUse wiring, so a checkout that has the hook file but not the hook
+# REGISTRATION runs neither.
+claude_behind="doctor FAILS when the deployed .claude is behind origin/master"
+deploy_case doctor-claude-behind
+mkdir -p "$TMP/doctor-claude-behind.git.seed/.claude"
+advance_origin "$TMP/doctor-claude-behind.git" .claude/settings.json '{"hooks":{}}'
+gitf -C "$TMP/doctor-claude-behind" fetch -q origin
+run_stubbed doctor
+if [ "$RC" -eq 0 ] || ! printf '%s' "$OUT" | grep -q 'settings.json'; then
+    bad "$claude_behind" "rc=$RC, and the drift row does not name it: $OUT"
+else
+    ok "$claude_behind"
+fi
+
+# Content drift, at the right commit: the same argument the kingdom/ row above
+# makes, restated for the gate paths, because these are the files most likely
+# to be poked at by hand while debugging a gate.
+hooks_edited="a hand-edited deployed hook is drift even when HEAD is origin/master"
+deploy_case doctor-hooks-edited
+mkdir -p "$TMP/doctor-hooks-edited.git.seed/.githooks"
+advance_origin "$TMP/doctor-hooks-edited.git" .githooks/pre-push "the merged gate"
+gitf -C "$TMP/doctor-hooks-edited" pull -q --ff-only origin master
+printf 'exit 0\n' >"$TMP/doctor-hooks-edited/.githooks/pre-push"
+run_stubbed doctor
+if [ "$RC" -eq 0 ] || ! printf '%s' "$OUT" | grep -q 'pre-push'; then
+    bad "$hooks_edited" "a neutered deployed hook at the right commit read as clean: rc=$RC out=$OUT"
+else
+    ok "$hooks_edited"
+fi
+
+# THE REMEDY, exercised rather than asserted. A detector whose fix is a command
+# nobody has run against this condition is half a fix; `km deploy` predates the
+# widened path set and had no row proving it picks these files up.
+hooks_deploy="km deploy brings the stale gate files current and doctor then passes"
+deploy_case doctor-hooks-deploy
+mkdir -p "$TMP/doctor-hooks-deploy.git.seed/.githooks"
+advance_origin "$TMP/doctor-hooks-deploy.git" .githooks/claude-pre-bash "the merged hook"
+gitf -C "$TMP/doctor-hooks-deploy" fetch -q origin
+run_stubbed doctor
+if [ "$RC" -eq 0 ]; then
+    bad "$hooks_deploy" "the precondition is not met — doctor already passed before the deploy: $OUT"
+else
+    run_stubbed deploy
+    if [ "$RC" -ne 0 ]; then
+        bad "$hooks_deploy" "km deploy refused: $OUT"
+    elif [ ! -f "$TMP/doctor-hooks-deploy/.githooks/claude-pre-bash" ]; then
+        bad "$hooks_deploy" "deploy reported success without the hook arriving on disk"
+    else
+        run_stubbed doctor
+        if [ "$RC" -ne 0 ] || ! doctor_line | grep -q '^ok:'; then
+            bad "$hooks_deploy" "still failing after a successful deploy: $OUT"
+        else
+            ok "$hooks_deploy"
+        fi
+    fi
+fi
+
+# The status board is where a human would actually meet this, and the DRIFT
+# line there is fed by the same predicate — but through deployed_ok, a second
+# call site, so a fix applied to doctor alone would leave the glance clean.
+hooks_board="the status board's DRIFT line fires on a stale deployed hook, not only doctor"
+deploy_case status-hooks-behind
+mkdir -p "$TMP/status-hooks-behind.git.seed/.githooks"
+advance_origin "$TMP/status-hooks-behind.git" .githooks/claude-pre-bash "the merged hook"
+gitf -C "$TMP/status-hooks-behind" fetch -q origin
+run_stubbed status
+if ! printf '%s' "$OUT" | grep -q '^DRIFT:'; then
+    bad "$hooks_board" "the board is silent about a stale deployed hook: $(printf '%s\n' "$OUT" | head -5)"
+else
+    ok "$hooks_board"
+fi
+export KM_DEPLOY_ROOT="$TMP/deployed"
 
 # The refusals. A detector nobody runs every two minutes is still a detector you
 # must remember, so the timer-driven commands check their own freshness.
@@ -5478,6 +5796,127 @@ elif ! printf '%s' "$OUT" | grep -q "king's inbox"; then
     bad "$inbox_row" "it never reached the counters below the table: $OUT"
 else
     ok "$inbox_row"
+fi
+
+# --- status is honest about the queries it could not answer (gqlc-bn5r) ------
+# `km dispatch` was made fail-closed on both its queries (gqlc-z1qw) and this
+# board was left fail-open on both of its own. The two are not symmetrical and
+# must not be fixed the same way: dispatch is a timer job whose refusal belongs
+# in the journal, so `die` is right there; status is the one glance a citizen
+# and the king take at the town, and a status command that dies is a status
+# command nobody runs. So the fix here is a MARKER on the parts it could not
+# read, not an exit.
+#
+# What makes this worth a gate rather than a tolerated rough edge: this exact
+# divergence is what hid gqlc-z1qw for the whole life of the kingdom. Routing
+# was dead while the board printed a healthy idle town, and the board was the
+# only witness anybody consulted. An empty answer and an unanswerable question
+# rendered identically — "0 architect, 0 warrior, 0 judge" over a query that
+# never returned, and an em dash in every seat's BEADS cell.
+
+# The control, and it comes first: every loud row below would pass against a
+# board that printed UNAVAILABLE unconditionally, and a board that cries
+# failure at a working town is one people learn to skip.
+dispatch_case '[{"id":"gqlc-bn1","labels":["class:warrior"]}]' \
+    '[{"id":"gqlc-bn2","assignee":"vahagn","labels":["class:warrior"]}]'
+make_inboxes
+run_status
+bn_clean="the board renders real counts quietly when both its queries answer"
+if [ "$RC" -ne 0 ]; then
+    bad "$bn_clean" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q '1 warrior'; then
+    bad "$bn_clean" "the ready queue line does not carry the one warrior in the fixture: $OUT"
+elif ! printf '%s\n' "$OUT" | grep -E '^vahagn ' | grep -q 'gqlc-bn2'; then
+    bad "$bn_clean" "the seat's BEADS cell does not carry her in-progress bead: $(printf '%s\n' "$OUT" | grep -E '^vahagn ')"
+elif printf '%s' "$OUT" | grep -q 'UNAVAILABLE'; then
+    bad "$bn_clean" "a board with two working queries still cried UNAVAILABLE: $OUT"
+else
+    ok "$bn_clean"
+fi
+
+# THE DEFECT, first half. bd itself fails; the pipeline's exit status is the
+# only signal, and `|| inprog=""` swallowed it.
+status_beads_row() { printf '%s\n' "$OUT" | grep -E '^vahagn ' | head -1; }
+bn_inprog="the BEADS column says UNAVAILABLE when the in-progress query fails"
+dispatch_case '[]' '[{"id":"gqlc-bn3","assignee":"vahagn"}]'
+make_inboxes
+printf '1' >"$KM_FAKE_INPROG.rc"
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "$bn_inprog" "status died on a failed query instead of marking it: rc=$RC out=$OUT"
+elif ! printf '%s\n' "$OUT" | grep -qE '^sedrak '; then
+    bad "$bn_inprog" "the seat table did not finish, so the marker cost the board: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'BEADS: UNAVAILABLE'; then
+    bad "$bn_inprog" "no marker line — a failed query rendered as a town with no work in flight: $OUT"
+elif printf '%s' "$(status_beads_row)" | grep -q '—'; then
+    bad "$bn_inprog" "the cell still reads as an answer: $(status_beads_row)"
+else
+    ok "$bn_inprog"
+fi
+
+# THE DEFECT, second half, and it is a DIFFERENT failure: bd succeeds and jq
+# aborts on what it handed back. `|| inprog=""` caught this one too and threw
+# away the same distinction, so a fix that only checked bd's own rc would leave
+# half the bead open. The fixture holds text that is not JSON.
+bn_jq="the BEADS column says UNAVAILABLE when jq aborts on what bd returned"
+dispatch_case '[]' '[]'
+make_inboxes
+printf 'bd: database is locked\n' >"$KM_FAKE_INPROG"
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "$bn_jq" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'BEADS: UNAVAILABLE'; then
+    bad "$bn_jq" "a jq abort rendered as an empty board: $OUT"
+else
+    ok "$bn_jq"
+fi
+
+# The ready queue is the other query, and it is the one the mayor sizes his
+# standing chore off. Its fail-open shape prints four precise-looking zeroes.
+bn_ready="the ready queue says UNAVAILABLE instead of counting four zeroes it never read"
+dispatch_case '[]' '[]'
+make_inboxes
+printf '1' >"$KM_FAKE_READY.rc"
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "$bn_ready" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q '^ready queue: UNAVAILABLE'; then
+    bad "$bn_ready" "no marker: $(printf '%s\n' "$OUT" | grep '^ready queue')"
+elif printf '%s\n' "$OUT" | grep '^ready queue' | grep -q '0 architect'; then
+    bad "$bn_ready" "it still printed counts derived from a query that failed: $(printf '%s\n' "$OUT" | grep '^ready queue')"
+else
+    ok "$bn_ready"
+fi
+
+bn_ready_jq="the ready queue says UNAVAILABLE when bd answers with something jq cannot parse"
+dispatch_case '[]' '[]'
+make_inboxes
+printf 'not json at all\n' >"$KM_FAKE_READY"
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "$bn_ready_jq" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q '^ready queue: UNAVAILABLE'; then
+    bad "$bn_ready_jq" "an unparseable answer counted as zero of everything: $(printf '%s\n' "$OUT" | grep '^ready queue')"
+else
+    ok "$bn_ready_jq"
+fi
+
+# Neither marker may cost the rest of the board. The whole argument for marking
+# rather than dying is that the board keeps printing what it CAN.
+bn_both="a board whose every bd query fails still prints the seat table and the king's inbox"
+dispatch_case '[]' '[]'
+make_inboxes
+printf '1' >"$KM_FAKE_READY.rc"
+printf '1' >"$KM_FAKE_INPROG.rc"
+run_status
+if [ "$RC" -ne 0 ]; then
+    bad "$bn_both" "rc=$RC out=$OUT"
+elif [ "$(printf '%s\n' "$OUT" | grep -cE '^(sedrak|raffi|tir) ')" -ne 3 ]; then
+    bad "$bn_both" "the seat table is short — it aborted part way: $OUT"
+elif ! printf '%s' "$OUT" | grep -q "king's inbox"; then
+    bad "$bn_both" "it never reached the counters below the table: $OUT"
+else
+    ok "$bn_both"
 fi
 
 # This suite builds git repositories, so it must be able to prove it built them

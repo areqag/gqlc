@@ -43,7 +43,10 @@ km — the machinery of the Թագաւորութիւն
   km install-units | uninstall-units
   km deploy                      fast-forward the checkout the timers run from
   km doctor                      health checks
-  km seat-refresh <s> [--check]  bring a parked seat's worktree (and its hooks) up to master
+  km seat-refresh <s>|--all [--check]
+                                 bring a parked seat's worktree (and its hooks) up to master
+                                 --all sweeps the roster; it moves ONLY parked seats and
+                                 refuses a dirty tree, a branch, or commits of its own
                                  --check reports and moves nothing (status/doctor read it)
   km state-dir | capped-seats | seat-info <s> | seat-worktree <s>
 EOF
@@ -147,12 +150,31 @@ seat_worktree() {
 # KM_DEPLOY_ROOT overrides, for tests, as KM_STATE_DIR does for state.
 deploy_root() { echo "${KM_DEPLOY_ROOT:-$(main_root)}"; }
 
-# Names the kingdom/ paths where the deployed tree differs from origin/master;
-# silence means no drift. It diffs the WORKING TREE, not HEAD, because that is
-# what the units execute: a file edited or staged in place is drift at the right
-# commit. Reads the remote-tracking ref rather than the network, so it cannot
-# stall the dispatcher — every seat worktree shares one ref store, so the ref is
-# as fresh as the last fetch by anyone in the town.
+# The paths whose content IS a gate. One definition, read by kingdom_drift for
+# the deployed root and by seat_freshness for each seat worktree, so the two
+# cannot come to disagree about what counts as a gate.
+#
+# kingdom/ is the machinery the systemd units execute. .githooks/ is what
+# core.hooksPath resolves to AND where Claude Code's PreToolUse hook
+# (claude-pre-bash) lives. .claude/ carries the registration that makes that
+# hook run at all — a checkout holding the hook file but not the settings runs
+# neither, so the two travel together.
+KM_GATE_PATHS=(kingdom/ .githooks/ .claude/)
+
+# Names the deployed paths where the tree differs from origin/master; silence
+# means no drift. It diffs the WORKING TREE, not HEAD, because that is what the
+# units execute: a file edited or staged in place is drift at the right commit.
+# Reads the remote-tracking ref rather than the network, so it cannot stall the
+# dispatcher — every seat worktree shares one ref store, so the ref is as fresh
+# as the last fetch by anyone in the town.
+#
+# gqlc-d20c widened this from kingdom/ alone. The hooks are executed out of the
+# main checkout exactly as the units are, and nothing advanced that checkout:
+# measured 2026-08-23, it sat 34 commits back while PR #1333's hook fix was
+# already merged, so `bd close` from a sibling worktree was refused by the
+# pre-fix copy and allowed by the merged one — same input, same file, two
+# verdicts. `git status` there was clean apart from two .beads exports, so the
+# condition had no tell at all and was found by comparing shas by hand.
 kingdom_drift() {
     local root out rc=0
     root=$(deploy_root)
@@ -166,7 +188,7 @@ kingdom_drift() {
     # where it knows least. Measured shape: core.bare=true in the config, which
     # clears the rev-parse guard above and then fails here (bd gqlc-ed2u).
     # Carry the failure as drift, like the missing ref above.
-    out=$(git_at "$root" diff --name-only origin/master -- kingdom/ 2>&1) || rc=$?
+    out=$(git_at "$root" diff --name-only origin/master -- "${KM_GATE_PATHS[@]}" 2>&1) || rc=$?
     if [ "$rc" -ne 0 ]; then
         echo "cannot measure drift in $root (git exited $rc): ${out//$'\n'/ }"
         return 0
@@ -1648,13 +1670,31 @@ cmd_status() {
     # A dispatcher refusing on drift is otherwise visible only in the journal
     # (bd gqlc-vzpn), so the town's one glance carries it.
     if ! deployed_ok; then
-        echo "DRIFT: $(deploy_root) is not origin/master — the timers refuse until 'km deploy'"
+        echo "DRIFT: $(deploy_root) is not origin/master in kingdom/, .githooks/ or .claude/ — the timers refuse, and the hooks that run there are the stale copies, until 'km deploy'"
     fi
     echo
 
-    local inprog
+    # MARKED, not swallowed and not fatal (gqlc-bn5r). `|| inprog=""` here made
+    # an unanswerable question render identically to an answer of "nobody is
+    # working": an em dash in all sixteen BEADS cells, which is also what a
+    # genuinely idle town looks like. That equivalence is what hid gqlc-z1qw
+    # for the kingdom's whole life — routing was dead and the board was the
+    # only witness, and it was never contradicted.
+    #
+    # Not `die`, though dispatch does exactly that on the same query. Dispatch
+    # is a timer job whose refusal belongs in the journal; this is the one
+    # glance a human takes at the town, and a status command that dies is a
+    # status command nobody runs. So it prints everything it CAN and names the
+    # part it could not read.
+    #
+    # One capture over the whole pipeline, deliberately: bd failing and jq
+    # aborting on what bd returned are two different faults with one remedy
+    # here, and under `set -o pipefail` this catches both. Checking bd's rc
+    # alone would leave the jq half fail-open — measured, that half renders the
+    # ready line as "  architect,   warrior", a blank where a count should be.
+    local inprog inprog_ok=1
     inprog=$(bd list --status in_progress -n 0 --json 2>/dev/null |
-        jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"') || inprog=""
+        jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"') || { inprog=""; inprog_ok=0; }
 
     stale=$(status_unresponsive_after)
     # No fetch: see seat_freshness. An absent ref makes every TREE cell "?" and
@@ -1730,7 +1770,14 @@ cmd_status() {
         esac
         if [ "$fbgates" -gt 0 ]; then exposed="$exposed $s($fbgates)"; fi
         unread=$(unread_count "$s")
-        beads=$(echo "$inprog" | awk -v s="$s" '$1 == s { printf "%s ", $2 }')
+        if [ "$inprog_ok" -eq 0 ]; then
+            # "?" and never the em dash: the dash is this column's word for
+            # "nothing in flight", and printing it over a query that never
+            # returned is the fail-open shape itself.
+            beads="?"
+        else
+            beads=$(echo "$inprog" | awk -v s="$s" '$1 == s { printf "%s ", $2 }')
+        fi
         printf '%-10s %-10s %-9s %-6s %-7s %-7s %-6s %s  (%s)\n' "$s" "$class" "$st" "$ctx" "$hbcol" "$tree" "$unread" "${beads:-—}" "$disp"
     done
     if [ -n "$frozen" ]; then
@@ -1748,6 +1795,9 @@ cmd_status() {
     if [ -n "$unjudged" ]; then
         echo "UNJUDGED:$unjudged — no worktree, or git could not read one, or this checkout has no origin/master ref. The TREE cell is '?' rather than 'ok': a question that was not answered is not a clean answer."
     fi
+    if [ "$inprog_ok" -eq 0 ]; then
+        echo "BEADS: UNAVAILABLE — the in-progress query (bd list --status in_progress, or the jq over it) did not answer, so the BEADS column above is '?' for every seat and this board cannot tell you what is in flight. It is NOT a town with nothing in flight; that is the same rendering, and the equivalence is what hid gqlc-z1qw for the kingdom's whole life. Run the query by hand before concluding anything about who is working (gqlc-bn5r)."
+    fi
     if [ -n "$blind" ]; then
         echo "BLIND:$blind — a live seat whose CHECKOUT cannot write a heartbeat: kingdom/bin/km-statusline and the statusLine key in .claude/settings.json are both tracked files, so a worktree parked on a branch that forked before the kingdom landed has neither. The blank HB column above is this instrument's silence, not the seat's, and a seat working all night reads exactly like an idle one. Read the pane, and 'km seat-refresh <seat>' moves a parked worktree back to origin/master."
     fi
@@ -1761,8 +1811,21 @@ cmd_status() {
     # `-n 0`: without it these counters are silently FLOORS, not counts — and a
     # precise-looking wrong number is worse than none, because the mayor sizes
     # his standing labelling chore off this line (gqlc-mlca).
-    ready=$(bd ready -n 0 --json 2>/dev/null) || ready="[]"
-    echo "ready queue: $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:architect"))] | length') architect, $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:warrior"))] | length') warrior, $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:judge"))] | length') judge, $(echo "$ready" | jq '[.[] | select([((.labels // []) | index("class:architect")), ((.labels // []) | index("class:warrior")), ((.labels // []) | index("class:judge"))] | all(. == null))] | length') unlabelled (Սեդրակ's chore)"
+    #
+    # `|| ready="[]"` substituted an EMPTY BOARD for an unanswered question and
+    # then counted it, printing "0 architect, 0 warrior, 0 judge, 0 unlabelled"
+    # — four precise-looking numbers, none of them measured (gqlc-bn5r). The
+    # `jq -e .` is the second half and not decoration: bd can exit 0 and hand
+    # back a lock message, and the counting jqs below then each fail
+    # independently under command substitution, rendering "  architect,
+    # warrior" — a blank where a count goes, which is a worse lie than a zero
+    # because nothing in the line says a query failed.
+    if ! ready=$(bd ready -n 0 --json 2>/dev/null) || ! printf '%s' "$ready" | jq -e . >/dev/null 2>&1; then
+        echo "ready queue: UNAVAILABLE — 'bd ready' did not answer, or answered with something jq could not parse. No count is printed because none was measured: the four zeroes this line used to print in exactly this situation are indistinguishable from an empty queue (gqlc-bn5r)."
+        ready=""
+    else
+        echo "ready queue: $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:architect"))] | length') architect, $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:warrior"))] | length') warrior, $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:judge"))] | length') judge, $(echo "$ready" | jq '[.[] | select([((.labels // []) | index("class:architect")), ((.labels // []) | index("class:warrior")), ((.labels // []) | index("class:judge"))] | all(. == null))] | length') unlabelled (Սեդրակ's chore)"
+    fi
     # The king's box is NOT a seat's box, and the old line printed the same word
     # over both (gqlc-2abx). A letter leaves inbox/ only when someone runs
     # `km mail read`; every seat is a process that runs it, and Անդրանիկ is a
@@ -1816,9 +1879,9 @@ cmd_doctor() {
     local drift
     drift=$(kingdom_drift)
     if [ -z "$drift" ]; then
-        echo "ok:   deployed kingdom/ matches origin/master"
+        echo "ok:   the deployed kingdom/, .githooks/ and .claude/ match origin/master"
     else
-        echo "FAIL: deployed kingdom/ is not certified against origin/master:"
+        echo "FAIL: the deployed kingdom/, .githooks/ or .claude/ is not certified against origin/master, so the town runs stale machinery or stale gates:"
         echo "      ${drift//$'\n'/$'\n      '}"
         ok=1
     fi
@@ -1978,6 +2041,11 @@ seat_freshness() {
     ahead=$(git_at "$wt" rev-list --count "$target..HEAD" 2>/dev/null) || ahead=0
     behind_all=$(git_at "$wt" rev-list --count "HEAD..$target" 2>/dev/null) || behind_all=0
     # Restricted to the paths that ARE the gates, and counted before any move.
+    # kingdom/ is deliberately NOT in this count, though it is in KM_GATE_PATHS:
+    # the machinery a seat runs is the DEPLOYED copy (deploy_root), never the
+    # seat's own, so kingdom/ staleness in a worktree costs that seat nothing.
+    # The hooks are the opposite — core.hooksPath is relative, so they resolve
+    # inside the seat's own checkout.
     behind_gates=$(git_at "$wt" rev-list --count "HEAD..$target" -- .githooks .claude 2>/dev/null) || behind_gates=0
 
     if [ -n "$dirty" ] || [ -n "$branch" ] || [ "$ahead" -gt 0 ]; then
@@ -1994,16 +2062,145 @@ seat_freshness() {
     echo "parked $behind_all $behind_gates 0 at-$(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
 }
 
+# seat_refresh_step <seat> <check> <target> <mr> <stale_note>
+#
+# One seat's verdict and, unless --check, the one move that is ever safe.
+# Echoes a line beginning "<seat>: "; the exit status is the whole point of
+# separating it from the printing:
+#
+#   0  covered — current, refreshed, or held with its hooks already current
+#   3  still exposed: a gate has merged that this seat does not run
+#   4  unjudged — no worktree, or git could not answer, or the move failed
+#
+# 3 and 4 are distinct because the remedies are: 3 wants the citizen standing
+# in that tree to rebase, 4 wants `km up` or a human with a shell. Collapsing
+# them would send an unseated seat's operator to a citizen who does not exist.
+#
+# SHARED by the single-seat path and the sweep, not copied into each. The two
+# differ only in whether an unjudged seat aborts, and gqlc-gy3q is the record
+# of what a second copy of a predicate costs — two copies of one rule had
+# already disagreed on four inputs while that bead was open.
+seat_refresh_step() {
+    local seat=$1 check=$2 target=$3 mr=$4 stale_note=$5
+    local wt f state behind_all behind_gates ahead detail head
+    wt=$(seat_worktree "$seat")
+    f=$(seat_freshness "$seat" "$target")
+    read -r state behind_all behind_gates ahead detail <<<"$f"
+    : "$ahead"
+
+    case "$state" in
+        unknown)
+            echo "$seat: cannot judge — ${detail//-/ }"
+            return 4
+            ;;
+        working)
+            local why="${detail//-/ }"
+            if [ "$behind_gates" -eq 0 ]; then
+                echo "$seat: held ($why); its hooks are current$stale_note"
+                return 0
+            fi
+            echo "$seat: HELD — $behind_gates hook/settings change(s) behind master and NOT applied ($why)$stale_note"
+            return 3
+            ;;
+        current)
+            echo "$seat: current at $(git_at "$wt" rev-parse --short HEAD)$stale_note"
+            return 0
+            ;;
+    esac
+
+    # parked: safe to move, and the only state in which anything moves.
+    head=$(git_at "$wt" rev-parse HEAD)
+    if [ "$check" -eq 1 ]; then
+        # --check never moves, so a parked seat behind on gates is STILL
+        # exposed when this returns, and the exit status has to say so — the
+        # same 3 the acting path uses, for the same condition.
+        echo "$seat: STALE (--check, nothing moved) — $behind_all commit(s) behind origin/master, $behind_gates of them touching .githooks/.claude$stale_note"
+        [ "$behind_gates" -eq 0 ] || return 3
+        return 0
+    fi
+    if ! git_at "$wt" checkout --detach --quiet "$target" 2>/dev/null; then
+        echo "$seat: could not move its parked worktree to origin/master"
+        return 4
+    fi
+    echo "$seat: refreshed $(git_at "$mr" rev-parse --short "$head") -> $(git_at "$wt" rev-parse --short HEAD) ($behind_gates hook/settings change(s) picked up)$stale_note"
+    return 0
+}
+
+# The sweep (gqlc-k9r2). MEASURED 2026-08-23 on the live town: 15 of 16 seat
+# worktrees were missing merged .githooks/.claude commits, 7 of them PARKED as
+# far as 53 commits back — all three architects, both seated judges and the
+# guard — and a 16th roster seat had no worktree at all. The per-seat command
+# was already correct and already refused every unsafe move; what was missing
+# was any way to apply it to the town without composing sixteen invocations by
+# hand at the moment of switching the town on.
+#
+# It refuses exactly what the single-seat path refuses, seat by seat, and it
+# moves nothing else — Constitution VI.2's no-forcing applies to a citizen's
+# work in a tree as much as to their session. The failure this must never have
+# is the convenient one: a sweep that treats "held" as "skip the guard".
+cmd_seat_refresh_all() {
+    local check=$1 mr target stale_note="" s line rc
+    local refreshed=0 current=0 held=0 exposed="" unjudged=""
+    mr=$(main_root)
+    git_at "$mr" fetch --quiet origin 2>/dev/null ||
+        stale_note=" [fetch failed: judged against the last known origin/master]"
+    target=$(git_at "$mr" rev-parse --verify --quiet origin/master) ||
+        die "seat-refresh --all: no origin/master to refresh anyone against"
+
+    for s in $(seats_all); do
+        rc=0
+        line=$(seat_refresh_step "$s" "$check" "$target" "$mr" "$stale_note") || rc=$?
+        printf '  %s\n' "$line"
+        case "$rc" in
+            3) exposed="$exposed $s" ;;
+            # NOT fatal, and this is the property the sweep turns on: tir is
+            # last in roster order and has no worktree at all, so a loop that
+            # died here would print most of the table and silently never visit
+            # the seats after him. A seat that cannot be judged is a row.
+            4) unjudged="$unjudged $s" ;;
+            *) case "$line" in
+                   *refreshed*) refreshed=$((refreshed + 1)) ;;
+                   *current*)   current=$((current + 1)) ;;
+                   *)           held=$((held + 1)) ;;
+               esac ;;
+        esac
+    done
+
+    local summary="seat-refresh --all: $refreshed refreshed, $current already current, $held held with hooks current"
+    if [ -n "$exposed" ]; then
+        summary="$summary; STILL EXPOSED:$exposed — each is holding work, so nothing here will move it; its citizen must rebase"
+    fi
+    if [ -n "$unjudged" ]; then
+        summary="$summary; UNJUDGED:$unjudged — no worktree or git could not read one, so a bead routed there goes nowhere ('km up' seats it)"
+    fi
+    echo "$summary$stale_note"
+    # Non-zero while anything is uncovered. The exit status is all a morning
+    # script reads, and "it ran" must not be readable as "the town is covered".
+    [ -z "$exposed$unjudged" ] || return 3
+    return 0
+}
+
 cmd_seat_refresh() {
-    local seat="" check=0 a
+    local seat="" check=0 all=0 a
     for a in "$@"; do
         case "$a" in
             --check) check=1 ;;
+            --all) all=1 ;;
             -*) die "seat-refresh: unknown flag $a" ;;
             *) [ -z "$seat" ] || die "seat-refresh: one seat at a time"; seat=$a ;;
         esac
     done
-    [ -n "$seat" ] || die "seat-refresh: which seat?"
+    # Ambiguous rather than merely redundant: does a seat name narrow the sweep,
+    # or is --all a typo away from a single-seat run the operator meant? Refuse
+    # instead of guessing, since one reading moves sixteen worktrees.
+    if [ "$all" -eq 1 ] && [ -n "$seat" ]; then
+        die "seat-refresh: --all sweeps the whole roster; pass it or a seat name, not both (got --all and '$seat')"
+    fi
+    if [ "$all" -eq 1 ]; then
+        cmd_seat_refresh_all "$check"
+        return
+    fi
+    [ -n "$seat" ] || die "seat-refresh: which seat? (or --all for the whole roster)"
     is_seat "$seat" || die "seat-refresh: unknown seat: $seat"
 
     local mr wt
@@ -2022,43 +2219,14 @@ cmd_seat_refresh() {
     target=$(git_at "$mr" rev-parse --verify --quiet origin/master) ||
         die "seat-refresh: no origin/master to refresh $seat against"
 
-    local f state behind_all behind_gates ahead detail head
-    f=$(seat_freshness "$seat" "$target")
-    read -r state behind_all behind_gates ahead detail <<<"$f"
-    : "$ahead"
-
-    case "$state" in
-        unknown)
-            die "seat-refresh: cannot judge $seat: ${detail//-/ }"
-            ;;
-        working)
-            local why="${detail//-/ }"
-            if [ "$behind_gates" -eq 0 ]; then
-                echo "seat-refresh $seat: held ($why); its hooks are current$stale_note"
-                return 0
-            fi
-            echo "seat-refresh $seat: HELD — $behind_gates hook/settings change(s) behind master and NOT applied ($why)$stale_note"
-            return 3
-            ;;
-        current)
-            echo "seat-refresh $seat: current at $(git_at "$wt" rev-parse --short HEAD)$stale_note"
-            return 0
-            ;;
-    esac
-
-    # parked: safe to move, and the only state in which anything moves.
-    head=$(git_at "$wt" rev-parse HEAD)
-    if [ "$check" -eq 1 ]; then
-        # --check never moves, so a parked seat behind on gates is STILL
-        # exposed when this returns, and the exit status has to say so — the
-        # same 3 the acting path uses, for the same condition.
-        echo "seat-refresh $seat: STALE (--check, nothing moved) — $behind_all commit(s) behind origin/master, $behind_gates of them touching .githooks/.claude$stale_note"
-        [ "$behind_gates" -eq 0 ] || return 3
-        return 0
-    fi
-    git_at "$wt" checkout --detach --quiet "$target" ||
-        die "seat-refresh: could not move $seat's parked worktree to origin/master"
-    echo "seat-refresh $seat: refreshed $(git_at "$mr" rev-parse --short "$head") -> $(git_at "$wt" rev-parse --short HEAD) ($behind_gates hook/settings change(s) picked up)$stale_note"
+    # A single named seat that cannot be judged is an operator error worth an
+    # exit — he asked about THIS seat and got no answer. The sweep treats the
+    # same rc as a row, because there the alternative is truncating the table.
+    local line rc=0
+    line=$(seat_refresh_step "$seat" "$check" "$target" "$mr" "$stale_note") || rc=$?
+    [ "$rc" -ne 4 ] || die "seat-refresh: $line"
+    echo "seat-refresh $line"
+    return "$rc"
 }
 
 render_unit() { # <src> <dst>
