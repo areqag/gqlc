@@ -299,7 +299,7 @@ run_sync() {
         FAKE_FD_PROBE="${FD_PROBE:-}" \
         REAL_MKTEMP="$REAL_MKTEMP" REAL_PYTHON3="$REAL_PYTHON3" \
         REAL_FLOCK="$REAL_FLOCK" \
-        "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err" )
+        "${SYNC_BIN:-$SYNC}" "$1" >"$TMP/out" 2>"$TMP/err" )
     RC=$?
     rm -f "$TMP"/bd_list_rc_* "$TMP"/bd_list_out_* "$TMP"/py_rc_*
 }
@@ -316,6 +316,11 @@ FLOCK_RC=0
 FD_PROBE=
 # Where run_sync runs the script from; only the gqlc-mmej lock arms move it.
 SYNC_CWD="$REPO"
+# Which copy of the script run_sync executes. Empty means the one in this
+# checkout. The gqlc-7b59 label arms point it at a copy planted beside a
+# different .github/scripts/check-label-lengths.py, which is how they witness
+# that the cap is read from that file rather than written into bd-gh-sync.
+SYNC_BIN=
 
 scoped_ids() { grep -o -- '--issues [^ ]*' "$TMP/calls" | cut -d' ' -f2 | tr ',' '\n'; }
 pull_ran()   { grep -q -- 'bd github sync' "$TMP/calls"; }
@@ -2525,6 +2530,163 @@ for act in pull push; do
     fi
 done
 
+# --- gqlc-7b59 / gqlc-s2mx: a label GitHub cannot hold is refused at filing
+# time, not discovered afterwards ----------------------------------------------
+# MEASURED 2026-08-22 in the pre-push output of PR #1133:
+#
+#   Warning: Failed to create gqlc-xiri in GitHub: failed to create issue:
+#   API error: {"message":"Validation Failed","errors":[{
+#     "value":"subject:kingdom/brain/playbooks/citizen-protocol.md",
+#     "resource":"Label","field":"name","code":"invalid"}]} (status 422)
+#   bd-gh-sync: pushed 1 new bead(s), closed 0 stale GH mirror(s).
+#
+# GitHub refuses the ISSUE over the label, so the bead ends with no mirror at
+# all — and the line under it says the push succeeded. The fix is to not offer
+# the label: the bead is held here, where the citizen who chose it can still
+# choose another, and counted as unmirrored rather than as pushed.
+#
+# 50 and 51 are both pinned. A cap enforced only from above passes just as well
+# on an off-by-one that refuses the boundary itself, and a scheme that quietly
+# rejects a legal label sends citizens shortening labels that were fine.
+L50="$(printf 'a%.0s' $(seq 1 50))"
+L51="$(printf 'a%.0s' $(seq 1 51))"
+LSUBJ='subject:kingdom/brain/playbooks/citizen-protocol.md'
+if [ "${#L50}" -ne 50 ] || [ "${#L51}" -ne 51 ] || [ "${#LSUBJ}" -ne 51 ]; then
+    echo "fixture error: label lengths are ${#L50}/${#L51}/${#LSUBJ}, wanted 50/51/51" >&2
+    exit 1
+fi
+
+run_sync push "[{\"id\":\"b-lab\",\"status\":\"open\",\"external_ref\":\"\",\"labels\":[\"$L51\"]}]" \
+    '[]' '[{"number":1}]'
+if pushed_ids | grep -qx 'b-lab'; then
+    bad "a bead whose label is one over GitHub's cap is not offered to GitHub" \
+        "it was handed to 'bd github push' and GitHub would have refused the issue whole"
+elif [ "$(push_batches)" -ne 0 ]; then
+    bad "a bead whose label is one over GitHub's cap is not offered to GitHub" \
+        "$(push_batches) batch(es) ran with nothing legal to carry"
+else
+    ok "a bead whose label is one over GitHub's cap is not offered to GitHub"
+fi
+if [ "$RC" -eq 0 ]; then
+    bad "an unmirrorable label makes the push non-zero and says so on the last line" \
+        "exited 0, so pre-push's status reads as a clean mirror: $(last_line)"
+else
+    case "$(last_line)" in
+        *"PUSH FAILED — 0 of 1 new bead(s) mirrored"*"1 bead(s) were not offered to GitHub at all, carrying a label longer than it accepts"*)
+            ok "an unmirrorable label makes the push non-zero and says so on the last line" ;;
+        *) bad "an unmirrorable label makes the push non-zero and says so on the last line" \
+            "got: $(last_line)" ;;
+    esac
+fi
+if grep -q "b-lab carries a label GitHub cannot hold: '$L51' is 51 characters and the cap is 50" \
+        "$TMP/err"; then
+    ok "the refusal names the label, its length and the cap"
+else
+    bad "the refusal names the label, its length and the cap" \
+        "got: $(grep 'b-lab' "$TMP/err" | tr '\n' '|')"
+fi
+
+# The boundary from below. `subject:` is the scheme that reaches it in practice,
+# so the ALLOW pin is the widest label the scheme permits, not an arbitrary one.
+run_sync push "[{\"id\":\"b-lab50\",\"status\":\"open\",\"external_ref\":\"\",\"labels\":[\"$L50\"]}]" \
+    '[]' '[{"number":1}]'
+if ! pushed_ids | grep -qx 'b-lab50'; then
+    bad "a bead whose label is exactly at GitHub's cap is mirrored" \
+        "a legal label was refused: $(last_line)"
+elif [ "$(last_line)" != "bd-gh-sync: pushed 1 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    bad "a bead whose label is exactly at GitHub's cap is mirrored" \
+        "got: $(last_line)"
+else
+    ok "a bead whose label is exactly at GitHub's cap is mirrored"
+fi
+
+# The remedy, and it has to be the one CI already prints (gqlc-89vw option (b)):
+# the deepest ancestor DIRECTORY that fits. A citizen who meets one instruction
+# here and a different one on the PR has been told the scheme is arbitrary.
+run_sync push "[{\"id\":\"b-subj\",\"status\":\"open\",\"external_ref\":\"\",\"labels\":[\"$LSUBJ\"]}]" \
+    '[]' '[{"number":1}]'
+if grep -q 'Use the deepest ancestor directory that fits: subject:kingdom/brain/playbooks (31 characters)' \
+        "$TMP/err"; then
+    ok "the refusal names the deepest ancestor directory that fits"
+else
+    bad "the refusal names the deepest ancestor directory that fits" \
+        "got: $(grep 'b-subj' "$TMP/err" | tr '\n' '|')"
+fi
+
+# One bad bead must not cost the good ones their mirror. Held per bead, not per
+# batch: the batch is the unit `bd github push` takes, and dropping it whole
+# would turn one long label into a repository-wide stall.
+run_sync push \
+    "[{\"id\":\"b-bad\",\"status\":\"open\",\"external_ref\":\"\",\"labels\":[\"$L51\"]},{\"id\":\"b-good\",\"status\":\"open\",\"external_ref\":\"\",\"labels\":[\"short\"]}]" \
+    '[]' '[{"number":1}]'
+if ! pushed_ids | grep -qx 'b-good'; then
+    bad "an unmirrorable bead does not stop the beads beside it being mirrored" \
+        "b-good was not pushed either: $(last_line)"
+elif pushed_ids | grep -qx 'b-bad'; then
+    bad "an unmirrorable bead does not stop the beads beside it being mirrored" \
+        "b-bad went to GitHub after all"
+else
+    # Plain assignment, not `${_ll:=...}`: _ll is set by an earlier block in
+    # this file, and the default-assignment form would silently compare this
+    # row against that run's summary line.
+    _ll="$(last_line)"
+    if [ -n "${_ll##*PUSH FAILED — 1 of 2 new bead(s) mirrored*}" ]; then
+        bad "an unmirrorable bead does not stop the beads beside it being mirrored" \
+            "the count does not describe the run: $_ll"
+    else
+        ok "an unmirrorable bead does not stop the beads beside it being mirrored"
+    fi
+fi
+
+# ...and the cap itself comes out of .github/scripts/check-label-lengths.py, the
+# CI gate that owns the measurement, rather than being written into bd-gh-sync a
+# second time. Witnessed by moving the number: a copy of the script planted
+# beside a gate that says 10 must refuse an 11-character label that the real
+# gate — and every row above — accepts. A hard-coded 50 passes every other row
+# in this file and fails only this one.
+GATEREPO="$TMP/gaterepo"
+mkdir -p "$GATEREPO/.githooks" "$GATEREPO/.github/scripts"
+cp "$SYNC" "$GATEREPO/.githooks/bd-gh-sync"
+chmod +x "$GATEREPO/.githooks/bd-gh-sync"
+printf 'MAX_LABEL = 10\nPREFIX = "subject:"\n' \
+    >"$GATEREPO/.github/scripts/check-label-lengths.py"
+SYNC_BIN="$GATEREPO/.githooks/bd-gh-sync"
+run_sync push '[{"id":"b-cap","status":"open","external_ref":"","labels":["aaaaaaaaaaa"]}]' \
+    '[]' '[{"number":1}]'
+SYNC_BIN=
+if pushed_ids | grep -qx 'b-cap'; then
+    bad "GitHub's label cap is read from the CI gate, not spelled in bd-gh-sync" \
+        "an 11-character label passed under a gate declaring MAX_LABEL = 10, so the number is written twice"
+elif ! grep -q 'is 11 characters and the cap is 10' "$TMP/err"; then
+    bad "GitHub's label cap is read from the CI gate, not spelled in bd-gh-sync" \
+        "the bead was refused but not by the gate's number: $(grep 'b-cap' "$TMP/err" | tr '\n' '|')"
+else
+    ok "GitHub's label cap is read from the CI gate, not spelled in bd-gh-sync"
+fi
+
+# ...and the gate being unreadable is a finding, not a pass. Screening nothing
+# and reporting every bead mirrorable is the 422 arriving under a summary that
+# says the bead was pushed — the exact shape this whole block removes.
+NOGATE="$TMP/nogate"
+mkdir -p "$NOGATE/.githooks"
+cp "$SYNC" "$NOGATE/.githooks/bd-gh-sync"
+chmod +x "$NOGATE/.githooks/bd-gh-sync"
+SYNC_BIN="$NOGATE/.githooks/bd-gh-sync"
+run_sync push '[{"id":"b-nogate","status":"open","external_ref":"","labels":["short"]}]' \
+    '[]' '[{"number":1}]'
+SYNC_BIN=
+if [ "$RC" -eq 0 ]; then
+    bad "a label cap that cannot be read screens nothing and says so" \
+        "exited 0 having screened no label at all: $(last_line)"
+else
+    case "$(last_line)" in
+        *"no bead was screened for an unmirrorable label (the cap could not be read from "*)
+            ok "a label cap that cannot be read screens nothing and says so" ;;
+        *) bad "a label cap that cannot be read screens nothing and says so" \
+            "got: $(last_line)" ;;
+    esac
+fi
+
 # --- gqlc-650j: the shell options, and the trap that keeps them from silencing
 # the script ------------------------------------------------------------------
 # bd-gh-sync ran 1067 lines with no shell options at all, and it is the tool
@@ -3217,6 +3379,14 @@ both withdrawals at once name the bead list, not the cap
 a bead whose external_ref names another repository is held, not refused
 a temp directory that cannot be made is reported (pull)
 a temp directory that cannot be made is reported (push)
+a bead whose label is one over GitHub's cap is not offered to GitHub
+an unmirrorable label makes the push non-zero and says so on the last line
+the refusal names the label, its length and the cap
+a bead whose label is exactly at GitHub's cap is mirrored
+the refusal names the deepest ancestor directory that fits
+an unmirrorable bead does not stop the beads beside it being mirrored
+GitHub's label cap is read from the CI gate, not spelled in bd-gh-sync
+a label cap that cannot be read screens nothing and says so
 an unhandled write failure aborts the pull with a verdict, exit 0
 an unhandled write failure aborts the push with a verdict, exit 1
 bd-gh-sync declares errexit, nounset, errtrace and pipefail

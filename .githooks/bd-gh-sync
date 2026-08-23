@@ -888,13 +888,30 @@ _list_rc=0
 bd list --status all --limit 0 --json >"$_tmp/beads.json" 9>&- 2>/dev/null \
   || { _list_rc=$?; : >"$_tmp/beads.json"; }
 
+# GitHub's cap on a label name is measured and owned by the CI gate at
+# .github/scripts/check-label-lengths.py (bd gqlc-89vw), which reddens a PR over
+# the committed export. The selection below reads the cap and the remedy out of
+# that file rather than writing either a third time: two spellings of one number
+# disagree exactly when somebody raises one of them, and the whole point of
+# refusing at filing time is that the citizen meets the same words here as in
+# CI. Resolved beside this script first, because all three callers invoke it by
+# path, and off the work tree only as a fallback.
+_hooks_dir=$(cd "$(dirname "$0")" && pwd)
+_label_gate="$_hooks_dir/../.github/scripts/check-label-lengths.py"
+if [ ! -f "$_label_gate" ]; then
+  _repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || _repo_root=""
+  [ -n "$_repo_root" ] &&
+    _label_gate="$_repo_root/.github/scripts/check-label-lengths.py"
+fi
+
 # The DONE sentinel serves the same purpose it serves on the pull side: a bead
 # list that would not load used to become an empty selection, and an empty
 # selection is byte-for-byte the steady state. "Nothing needs a mirror" and
 # "which beads need a mirror is unknowable" are different runs.
 _rc=0
-python3 - "$_tmp/beads.json" >"$_tmp/plan.txt" 9>&- 2>"$_tmp/plan.err" <<'PYEOF' || _rc=$?
-import json, sys
+python3 - "$_tmp/beads.json" "$_label_gate" \
+  >"$_tmp/plan.txt" 9>&- 2>"$_tmp/plan.err" <<'PYEOF' || _rc=$?
+import importlib.util, json, sys
 
 # Escaped for the reason the pull selection escapes: the records below are
 # line-delimited, and an id carrying a newline splits into two the charset gate
@@ -902,11 +919,72 @@ import json, sys
 def one_line(s):
     return str(s).encode("unicode_escape").decode("ascii")
 
+# The cap and the prefix, read from the CI gate that owns them. Importing by
+# file path because the filename carries hyphens; the module defines its work
+# under `if __name__ == "__main__"`, so loading it runs nothing.
+def label_rule(path):
+    spec = importlib.util.spec_from_file_location("_check_label_lengths", path)
+    if spec is None or spec.loader is None:
+        raise ImportError("no loadable module at " + path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return int(mod.MAX_LABEL), str(mod.PREFIX)
+
+# The remedy gqlc-89vw ratified: the deepest ancestor DIRECTORY that fits. Same
+# rule the CI gate prints, so the two answers cannot diverge into two different
+# instructions for one label.
+def shorter(label, cap, prefix):
+    if not label.startswith(prefix):
+        return None
+    budget = cap - len(prefix)
+    tail = label[len(prefix):]
+    s = tail
+    while len(s) > budget and "/" in s:
+        s = s.rsplit("/", 1)[0]
+    return prefix + s if len(s) <= budget and s != tail else None
+
+cap = None
+prefix = ""
+try:
+    cap, prefix = label_rule(sys.argv[2])
+except Exception as exc:  # noqa: BLE001 - every failure here has one meaning
+    # No number, so no screening and no claim that any bead's labels are
+    # mirrorable. Reported rather than defaulted: a cap guessed at here is the
+    # 422 this whole path exists to make unreachable, arriving under a summary
+    # line that says the bead was pushed.
+    print("CAPUNKNOWN " + one_line(sys.argv[2]) + ": " + one_line(exc))
+
 with open(sys.argv[1], encoding="utf-8") as fh:
     beads = json.load(fh)
 for b in beads:
-    if not b.get("external_ref"):
-        print("NEW " + one_line(b["id"]))
+    if b.get("external_ref"):
+        continue
+    bid = one_line(b["id"])
+    over = [] if cap is None else [
+        lab for lab in (b.get("labels") or []) if len(lab) > cap]
+    if not over:
+        print("NEW " + bid)
+        continue
+    # GitHub rejects the ISSUE, not the label, so a bead offered with one of
+    # these comes back 422 and ends up with no mirror at all while the run
+    # reports a push. Held here instead, where the citizen who chose the label
+    # can still choose another one.
+    print("UNMIRRORABLE " + bid)
+    for lab in over:
+        note = ("%s carries a label GitHub cannot hold: %r is %d characters and "
+                "the cap is %d. The bead was NOT offered to GitHub, because the "
+                "API refuses the whole issue over one label and the bead would "
+                "have been left with no mirror."
+                % (bid, one_line(lab), len(lab), cap))
+        fits = shorter(lab, cap, prefix)
+        if fits:
+            note += (" Use the deepest ancestor directory that fits: %s (%d "
+                     "characters)." % (one_line(fits), len(fits)))
+        elif prefix and lab.startswith(prefix):
+            note += (" The budget after '%s' is %d characters, and no ancestor "
+                     "directory of this path fits."
+                     % (prefix, cap - len(prefix)))
+        print("NOTE " + note)
 # How many beads the selection actually walked. "No bead needs a mirror" and
 # "the list this ran on was empty" both emit zero NEW records, and only the
 # first of them is a measurement of anything.
@@ -928,8 +1006,32 @@ if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]
   exit 1
 fi
 
-_new=$(_count '^NEW ' "$_tmp/plan.txt")
+# A bead whose label GitHub cannot hold still needs a mirror; what it does not
+# get is an attempt. So it counts toward the denominator and never toward
+# _pushed, which is what makes the summary read "0 of 1" rather than announcing
+# a push that GitHub would have refused whole.
+_unmirrorable=$(_count '^UNMIRRORABLE ' "$_tmp/plan.txt")
+_pushable=$(_count '^NEW ' "$_tmp/plan.txt")
+_new=$((_pushable + _unmirrorable))
 _before_n=$(sed -n 's/^COUNT //p' "$_tmp/plan.txt")
+
+# One line per refused label, naming the bead, the length, the cap and the
+# shorter label to use. Printed above the summary, where the detail belongs; the
+# summary carries the count, because a `tail -1` caller keeps only that.
+while IFS= read -r _note; do
+  echo "bd-gh-sync: ${_note}" >&2
+done < <(sed -n 's/^NOTE //p' "$_tmp/plan.txt")
+
+# No cap means no screening happened, and a run that screened nothing may not
+# report that every bead's labels were mirrorable. Same rule as every other
+# withdrawn count on this line.
+_capunknown=""
+if grep -q '^CAPUNKNOWN ' "$_tmp/plan.txt"; then
+  _capunknown=$(sed -n 's/^CAPUNKNOWN //p' "$_tmp/plan.txt" | head -n 1)
+  echo "bd-gh-sync: GitHub's label cap could not be read from ${_capunknown}" >&2
+  echo "bd-gh-sync: so no bead was screened for a label GitHub will refuse. A bead" >&2
+  echo "bd-gh-sync: offered with one comes back 422 and is left with no mirror at all." >&2
+fi
 # Whole remainder of the line, for the reason the pull path takes it whole: an
 # id cut at its first token names a different, possibly real, bead. One `sed -n`
 # rather than `grep | sed`, because under pipefail a grep that matched nothing —
@@ -1172,15 +1274,22 @@ _close_arm="${_closed} of ${_stale} stale GH mirror(s) closed"
 [ -n "$_blind" ] &&
   _close_arm="an unknown number of stale GH mirror(s) left open"
 if [ "$_pushed" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] ||
-   [ -n "$_blind" ] || [ -n "$_uncounted" ]; then
+   [ -n "$_blind" ] || [ -n "$_uncounted" ] || [ -n "$_capunknown" ]; then
   _rc=1
   _summary="bd-gh-sync: PUSH FAILED — ${_new_arm}, ${_close_arm}"
   [ "$_failed" -gt 0 ] &&
     _summary="${_summary}; ${_failed} of ${_batches} 'bd github push' batch(es) exited non-zero"
   [ "$_unusable" -gt 0 ] &&
     _summary="${_summary}; ${_unusable} bead id(s) unusable"
-  [ "$_new" -gt 0 ] && [ "$_batches" -eq 0 ] &&
+  # Over the beads a batch could have carried, not over _new: a run whose only
+  # unmirrored bead was refused for its label ran no batch on purpose, and
+  # "no batch ran at all" there names a fault that is not there.
+  [ "$_pushable" -gt 0 ] && [ "$_batches" -eq 0 ] &&
     _summary="${_summary}; no batch ran at all"
+  [ "$_unmirrorable" -gt 0 ] &&
+    _summary="${_summary}; ${_unmirrorable} bead(s) were not offered to GitHub at all, carrying a label longer than it accepts — see the line(s) above for the shorter label to use"
+  [ -n "$_capunknown" ] &&
+    _summary="${_summary}; no bead was screened for an unmirrorable label (the cap could not be read from ${_capunknown})"
   [ -n "$_blind" ] &&
     _summary="${_summary}; the stale-mirror pass could not run (${_blind})"
   [ -n "$_uncounted" ] &&
