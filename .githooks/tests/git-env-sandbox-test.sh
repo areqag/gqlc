@@ -332,6 +332,41 @@ fi
 
 init_canary
 
+# The operator's dotfiles, stood in for. Nothing in .githooks/ reads HOME today
+# — measured, `grep -rn HOME .githooks/` finds no reference outside prose — so
+# this starts empty and every path that appears in it was put there by a suite.
+#
+# Pointing HOME at a throwaway is the half that stops mattering the moment
+# someone adds the first `$HOME` row: a suite that wrote the real ~/.gitconfig
+# would be green on the author's machine and red on a runner, which is the shape
+# in the memory `seat worktree hides non-hermetic tests`. Part D below refuses
+# the SPELLING; this refuses the damage, and neither implies the other.
+#
+# What it does not witness, in the same terms part B already uses for the
+# canary: a READ. A suite that reads ~/.gitconfig and asserts on it creates
+# nothing here and passes this row. bd gqlc-1mha.
+FAKE_HOME="$TMP/fake-home"
+mkdir -p "$FAKE_HOME"
+home_snapshot() { find "$FAKE_HOME" | sort; }
+
+# RED control for the HOME row in the loop below. Same reason part B has one for
+# the shim: a tripwire watching the wrong directory reports every suite clean.
+# The fixture is composed with printf rather than written as a literal, so this
+# file does not itself contain the spelling part D refuses.
+DOTFILE_LEAK="$TMP/home-leak-suite.sh"
+printf '#!/usr/bin/env bash\n: > "$%s/leaked-dotfile"\n' HOME >"$DOTFILE_LEAK"
+
+home_control_before="$(home_snapshot)"
+( cd "$ROOT" && env "HOME=$FAKE_HOME" timeout 120 bash "$DOTFILE_LEAK" ) >/dev/null 2>&1 || true
+if [ "$home_control_before" != "$(home_snapshot)" ]; then
+    ok "RED control: the HOME tripwire sees a suite writing a dotfile"
+else
+    bad "RED control: the HOME tripwire sees a suite writing a dotfile" \
+        "a script whose only statement creates a file under HOME left the tripwire unchanged, so every HOME row in the loop below witnesses nothing"
+fi
+rm -rf "${FAKE_HOME:?}"
+mkdir -p "$FAKE_HOME"
+
 # The directory is the classifier, as it is for ciguard's hookSuites: a glob
 # for `*-test.sh` would silently skip a suite spelled some other way, and a
 # skipped suite is the case this whole file exists to catch.
@@ -358,12 +393,24 @@ for suite in "${suites[@]}"; do
 
     rc=0
     canary_before="$(snapshot)"
+    home_before="$(home_snapshot)"
     ( cd "$ROOT" \
       && env "${poison[@]}" \
              "GQLC_GIT_ENV_LOG=$log" \
+             "HOME=$FAKE_HOME" \
              "PATH=$SHIM_DIR:$PATH" \
              timeout 120 bash "$suite" ${self_arg[@]+"${self_arg[@]}"} ) >/dev/null 2>&1 || rc=$?
     canary_after="$(snapshot)"
+    home_after="$(home_snapshot)"
+
+    if [ "$home_before" = "$home_after" ]; then
+        ok "$name writes nothing into HOME"
+    else
+        bad "$name writes nothing into HOME" \
+            "it created $(diff <(printf '%s\n' "$home_before") <(printf '%s\n' "$home_after") | grep '^>' | tr '\n' ' ') under HOME. On a developer machine that is the operator's own dotfiles. Keep the suite inside its own mktemp -d."
+        rm -rf "${FAKE_HOME:?}"
+        mkdir -p "$FAKE_HOME"
+    fi
 
     # The second half, and it is a row of its own rather than a branch of the
     # one below: the two halves detect different things, and folded together
@@ -402,6 +449,193 @@ for suite in "${suites[@]}"; do
             "it ran no git command and exited $rc, so this row witnessed nothing either way"
     fi
 done
+
+
+# --- C. the shared line is the only spelling a new file may use --------------
+# Parts A and B are behavioural, so they pass either spelling: a file with its
+# own `unset "${!GIT_@}"` is as sandboxed as one that sources the shared file,
+# and neither row above can tell them apart. That is exactly why the private
+# copies spread to eleven files before anyone noticed (bd gqlc-07bf, gqlc-o9wz).
+#
+# A copy is not a duplication nuisance. The shared file is where the REASON
+# lives — the incident, the measurement, the fact that a private copy passes
+# every direct run and fails only under a real push. A copy carries the line
+# without the reason, so the next author to touch it has nothing telling them
+# what it is for, and deleting it looks free.
+#
+# This row is textual on purpose and that is its whole limitation: it refuses a
+# SPELLING, and says nothing about whether any file is actually sandboxed. It
+# is the half B cannot do, in the same way B is the half this cannot do.
+#
+# LEGACY, and why the gate lands with exceptions rather than not at all. Four
+# files still carry the copy. All four are outside the file set this change
+# owns, and editing them tonight would collide with the lanes that do own them.
+# Naming them is what lets the gate refuse a FIFTH, which is the value: a
+# convention with no gate drifts back. Each entry is a debt, and the stale-entry
+# row below is what stops an entry outliving the copy it excuses.
+PATTERN='^[[:space:]]*unset[[:space:]]+"\$\{!GIT_@\}"'
+
+# The definition itself, which necessarily carries the line.
+DEFINITION='.githooks/git-env-sandbox.sh'
+
+# And this file, because C1 below has to CONSTRUCT the shape to prove the
+# pattern still matches it. That exemption is the one thing that could hide a
+# regression here, so it is paid for immediately: the row after C1 asserts this
+# file sources the shared line, which is the only thing the scan would have
+# checked about it anyway.
+SELF_PATH='.githooks/tests/git-env-sandbox-test.sh'
+
+legacy=(
+    '.githooks/tests/bd-gh-sync-test.sh'
+    '.githooks/tests/km-overlap-test.sh'
+    '.githooks/tests/km-test.sh'
+    '.github/scripts/tests/ci-identity-gate-test.sh'
+)
+
+# C1, the RED control, and it is the row that keeps C2 from being decoration: a
+# PATTERN that matched nothing would report a clean tree and read as a pass.
+# Different invocation from C2's `git grep`, same PATTERN variable — what is
+# being controlled for is the pattern rotting, not the search command.
+LIVENESS="$TMP/liveness-fixture.sh"
+cat >"$LIVENESS" <<'LIVENESS_FIXTURE'
+#!/usr/bin/env bash
+set -u
+        unset "${!GIT_@}"
+LIVENESS_FIXTURE
+if grep -qE "$PATTERN" "$LIVENESS"; then
+    ok "RED control: the inline-copy pattern matches an inline copy"
+else
+    bad "RED control: the inline-copy pattern matches an inline copy" \
+        "the pattern found nothing in a file whose third line IS the copy, so the tree scan below would report clean over any number of them"
+fi
+
+# The pattern reads a live line, not a mention of one. Every suite that
+# converted kept prose naming the construct, and a gate that could not tell a
+# comment from code would have made those edits impossible to describe.
+MENTION="$TMP/mention-fixture.sh"
+cat >"$MENTION" <<'MENTION_FIXTURE'
+#!/usr/bin/env bash
+# This file talks about `unset "${!GIT_@}"` and does not run it.
+#     unset "${!GIT_@}"
+set -u
+MENTION_FIXTURE
+if grep -qE "$PATTERN" "$MENTION"; then
+    bad "the inline-copy pattern ignores a commented mention" \
+        "a file that only NAMES the construct in prose was reported as carrying a copy, so the gate forbids describing the rule it enforces"
+else
+    ok "the inline-copy pattern ignores a commented mention"
+fi
+
+# What the self-exemption above costs, paid back. The scan skips this file, so
+# this is the row that would notice if it stopped sourcing the shared line.
+if grep -qE '^source ".*/git-env-sandbox\.sh"$' "$ROOT/$SELF_PATH"; then
+    ok "this file sources the shared line, which the scan below skips it for"
+else
+    bad "this file sources the shared line, which the scan below skips it for" \
+        "$SELF_PATH is exempt from C2 because its fixtures construct the copy, and it no longer sources the shared file either, so nothing checks it at all"
+fi
+
+# C2, the gate. Tracked files only: git ls-files is the boundary, so a scratch
+# file under /tmp or an untracked local edit is not the subject.
+offenders=()
+while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    [ "$hit" = "$DEFINITION" ] && continue
+    [ "$hit" = "$SELF_PATH" ] && continue
+    skip=""
+    for allowed in "${legacy[@]}"; do
+        [ "$hit" = "$allowed" ] && skip=1 && break
+    done
+    [ -n "$skip" ] || offenders+=("$hit")
+done < <(git -C "$ROOT" grep -lE "$PATTERN" -- . || true)
+
+if [ "${#offenders[@]}" -eq 0 ]; then
+    ok "no tracked file outside the named legacy set spells the scrub inline"
+else
+    bad "no tracked file outside the named legacy set spells the scrub inline" \
+        "${offenders[*]} carries its own \`unset \"\${!GIT_@}\"\`. Replace it with: source \"\$(cd \"\$(dirname \"\$0\")/..\" && pwd)/git-env-sandbox.sh\" — the shared file carries the reason, a copy does not. Do not add the file to the legacy list above; that list is four debts, not a door."
+fi
+
+# C3, against the list rotting. An entry that no longer describes anything is a
+# standing permission nobody is watching, and the next author to convert one of
+# the four has no reason to remember to delete its line here.
+for allowed in "${legacy[@]}"; do
+    if [ ! -f "$ROOT/$allowed" ]; then
+        bad "legacy entry $allowed still names a file" \
+            "the path does not exist, so this entry excuses nothing and should be deleted"
+    elif grep -qE "$PATTERN" "$ROOT/$allowed"; then
+        ok "legacy entry $allowed still carries the copy it excuses"
+    else
+        bad "legacy entry $allowed still carries the copy it excuses" \
+            "the file no longer spells the scrub inline, so the exception outlived the debt. Delete the line from the legacy list in this file — and if that empties the list, the gate is unconditional and this loop can go with it."
+    fi
+done
+
+
+# --- D. no suite reads the machine it runs on through HOME ------------------
+# The audit for bd gqlc-3qpx read all sixteen suites and found no reference to
+# HOME at all, and three deliberate reads of the host, each the point of its own
+# row and each documented in its own suite header: init-config-test.sh reads the
+# real checkout's core.hooksPath as a tripwire on itself, claude-pre-ask-test.sh
+# reads the shipped .claude/settings.json because a fixture copy would assert
+# nothing, and km-test.sh asks real questions of origin/master. None of those is
+# a HOME read and none is affected by this row.
+#
+# So this refuses a row that does not exist yet, which is the whole point: a
+# suite reading ~/.gitconfig or ~/.claude/settings.json would be green on the
+# author's machine, where those files say what the author expects, and red on a
+# runner where they are absent. That asymmetry is the one this repo keeps paying
+# for (memory: seat worktree hides non-hermetic tests). bd gqlc-1mha.
+#
+# Textual, and its limits are the limits of that: `${H}OME`, `getent passwd`,
+# `eval` and `/home/$USER` all pass. The loop above is the behavioural half and
+# catches a WRITE however it is spelled; neither half implies the other, and
+# neither is a claim that a suite is hermetic.
+#
+# Full-line comments are exempt, so a suite can still explain the rule — this
+# file's own header does. A line with code on it is not, wherever the mention
+# sits on the line.
+# Composed rather than written out, so that this file carries no literal its
+# own pattern matches and the scan below can include it. The alternative was a
+# self-exemption, and the exempt file is the one the gate cannot gate.
+DOTFILE_PATTERN="$(printf '^[[:space:]]*[^#[:space:]].*([$]%s|[$][{]%s[}]|~[/])' HOME HOME)"
+
+# D1, the RED control. Composed with printf so this file carries no literal the
+# pattern would match, which is what lets the scan below include this file.
+DOTFILE_LIVENESS="$TMP/home-liveness-fixture.sh"
+printf '#!/usr/bin/env bash\ncfg="$%s/.gitconfig"\n' HOME >"$DOTFILE_LIVENESS"
+if grep -qE "$DOTFILE_PATTERN" "$DOTFILE_LIVENESS"; then
+    ok "RED control: the HOME pattern matches a HOME read"
+else
+    bad "RED control: the HOME pattern matches a HOME read" \
+        "the pattern found nothing in a file whose second line reads the operator's .gitconfig, so the scan below would report clean over any number of them"
+fi
+
+# D2. The exemption that D1 alone would let rot into a blanket one.
+DOTFILE_MENTION="$TMP/home-mention-fixture.sh"
+printf '#!/usr/bin/env bash\n# A suite must not read $%s, nor anything under ~%s.\nset -u\n' HOME / >"$DOTFILE_MENTION"
+if grep -qE "$DOTFILE_PATTERN" "$DOTFILE_MENTION"; then
+    bad "the HOME pattern ignores a full-line comment" \
+        "a file that only NAMES HOME in prose was reported as reading it, so the gate forbids describing the rule it enforces"
+else
+    ok "the HOME pattern ignores a full-line comment"
+fi
+
+# D3, the gate. Same file list part B uses, for the same reason: the directory
+# is the classifier, not a glob.
+home_readers=()
+for suite in "${suites[@]}"; do
+    if grep -qE "$DOTFILE_PATTERN" "$suite"; then
+        home_readers+=("$(basename "$suite")")
+    fi
+done
+
+if [ "${#home_readers[@]}" -eq 0 ]; then
+    ok "no suite reads the operator's HOME"
+else
+    bad "no suite reads the operator's HOME" \
+        "${home_readers[*]} names HOME, or a path under the home directory, on a line that is not a comment. A suite that reads the operator's dotfiles is green on the machine that has them and red on a runner. Put what the row needs in its own mktemp -d, or read it from the tree."
+fi
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

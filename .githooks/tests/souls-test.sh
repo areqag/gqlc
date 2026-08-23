@@ -17,7 +17,11 @@
 # Run via: just test-hooks
 set -u
 
-unset "${!GIT_@}"
+# This suite reads the tree, not a fixture, but it runs from pre-push like the
+# rest, so it clears git's exported environment through the SHARED line rather
+# than a private copy of it (bd gqlc-o9wz).
+# shellcheck source=../git-env-sandbox.sh disable=SC1091
+source "$(cd "$(dirname "$0")/.." && pwd)/git-env-sandbox.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SEATS="$ROOT/kingdom/seats"

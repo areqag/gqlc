@@ -31,7 +31,9 @@ set -u
 
 # When run under a git hook (pre-push via `just test`), GIT_DIR and friends leak
 # in and would redirect the fixture's git commands at the parent repo.
-unset "${!GIT_@}"
+# Through the SHARED line rather than a private copy of it (bd gqlc-o9wz).
+# shellcheck source=../git-env-sandbox.sh disable=SC1091
+source "$(cd "$(dirname "$0")/.." && pwd)/git-env-sandbox.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 JUSTFILE="$REPO_ROOT/justfile"
