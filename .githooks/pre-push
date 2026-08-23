@@ -6,13 +6,38 @@
 # (run `just init` after cloning)
 set -euo pipefail
 
-# FIRST, ahead of everything slow, and it consumes the hook's stdin (nothing
-# below reads it): a push that would land on master has to be refused before
-# the suite runs, and the refusal has to be the last line on the terminal
-# rather than a page above the tail of the test output. bd gqlc-tfh1 — see the
-# header of guard-push-destination for what routes a feature branch onto
-# master.
-"$(dirname "$0")/guard-push-destination" "$@"
+# FIRST, ahead of everything slow: a push that would land on master has to be
+# refused before the suite runs, and the refusal has to be the last line on the
+# terminal rather than a page above the tail of the test output. bd gqlc-tfh1 —
+# see the header of guard-push-destination for what routes a feature branch onto
+# master. gate-pushed-commits runs here for the same reason.
+#
+# git hands the hook's stdin — the push's ref list — exactly once, and there are
+# now two consumers, so it is captured and replayed to each. Command substitution
+# strips trailing newlines, which the replay restores; on an empty capture, which
+# is the stdin a delete-only push presents, it replays nothing rather than a bare
+# newline. `set -o pipefail` above is what makes each pipeline report the
+# consumer's status rather than the replay's.
+_push_refs="$(cat)"
+_replay_push_refs() {
+  if [ -n "${_push_refs}" ]; then printf '%s\n' "${_push_refs}"; fi
+}
+
+_replay_push_refs | "$(dirname "$0")/guard-push-destination" "$@"
+
+# Re-screens every commit this push would publish against .githooks/commit-msg.
+# commit-msg is a one-shot per-commit gate and core.hooksPath drift disarms it
+# silently; this is what covers the commits made inside a drift window that has
+# since closed. Its own header argues the position and states its limits.
+#
+# Guarded on a non-empty ref list rather than called unconditionally: an empty
+# stdin is git's "nothing to push", which publishes no commit and so has nothing
+# to screen. Skipping there is not a hole — the gate's own loop would iterate
+# zero times — and it keeps a hook sandbox that feeds an empty ref list from
+# having to own a copy of every sibling this file grows.
+if [ -n "${_push_refs}" ]; then
+  _replay_push_refs | "$(dirname "$0")/gate-pushed-commits" "$@"
+fi
 
 just test
 
