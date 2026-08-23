@@ -451,11 +451,15 @@ tmp-report root=scratch_root:
 tmp-reap mode="dry-run" root=scratch_root:
     #!/usr/bin/env bash
     set -uo pipefail
-    case "{{mode}}" in
+    # Shell-quoted into one variable rather than pasted raw into the case head
+    # and the message: `{{{{mode}}}}` interpolates verbatim, so a value carrying a
+    # quote or a `)` is shell syntax there rather than data (bd gqlc-4seg).
+    mode={{quote(mode)}}
+    case "$mode" in
         dry-run) just tmpreap {{quote(root)}} ;;
         apply)   just tmpreap {{quote(root)}} -apply ;;
         *)
-            echo "error: unknown mode '{{mode}}' — expected 'dry-run' or 'apply'." >&2
+            echo "error: unknown mode '$mode' — expected 'dry-run' or 'apply'." >&2
             exit 1
             ;;
     esac
@@ -479,34 +483,94 @@ tmp-reap mode="dry-run" root=scratch_root:
 # tests in .githooks/tests/tool-gate-test.sh set them to keep the failing case
 # fast. An attempts value below 1 runs the loop zero times and falls through to
 # the error, so a malformed budget blocks rather than passes.
+#
+# AND THEN REFUSES A LINTER OLDER THAN THE TOOLCHAIN, by name (bd gqlc-6rf3).
+# just reads the pin from the justfile of the tree you are standing in, so a
+# branch based before the last pin bump provisions the OLD linter — and a
+# go1.N-built golangci-lint cannot load go1.(N+1) source. It dies inside
+# go/types with a stack trace that names neither the pin nor the branch base,
+# and nothing anywhere says "your base is old". Measured by Նուարդ across three
+# trees: same branch, panic before `git merge origin/master` and green after.
+# It cost her most of a session and cost the mayor two wrong town-wide
+# broadcasts — the second of which told seats to declare a WORKING gate unrun in
+# their PR bodies, which is the real loss, because a gate everyone ritually
+# disclaims can no longer be told apart from one that genuinely did not run.
+#
+# The pin is deliberately read from the tree under test rather than from
+# origin/master, so that a branch can test a linter change; that is why this
+# reports rather than repairs. What it owes is a cause, and the message carries
+# both the pin and the remedy.
+#
+# The comparison is on the Go MINOR version the linter binary was built with, as
+# `golangci-lint version` reports it, against `go env GOVERSION`. Older only: a
+# linter built with a NEWER Go than the local toolchain loads older source
+# fine, so refusing that direction would redden a working tree.
 [private]
 ensure-golangci:
     #!/usr/bin/env bash
     set -euo pipefail
     want="{{golangci_version}}"
-    if [ "$({{quote(golangci)}} version --short 2>/dev/null || true)" = "${want#v}" ]; then
-        exit 0
+    if [ "$({{quote(golangci)}} version --short 2>/dev/null || true)" != "${want#v}" ]; then
+        echo "provisioning golangci-lint $want into .bin/" >&2
+        attempts="${GQLC_PROVISION_ATTEMPTS:-4}"
+        delay="${GQLC_PROVISION_DELAY:-2}"
+        attempt=1
+        installed=0
+        while [ "$attempt" -le "$attempts" ]; do
+            if curl --proto '=https' --tlsv1.2 -sSfL \
+                    "https://raw.githubusercontent.com/golangci/golangci-lint/$want/install.sh" \
+                | sh -s -- -b {{quote(justfile_directory() + "/.bin")}} "$want"; then
+                installed=1
+                break
+            fi
+            echo "ensure-golangci: provisioning attempt $attempt of $attempts failed" >&2
+            if [ "$attempt" -lt "$attempts" ]; then
+                sleep "$delay"
+                delay=$((delay * 2))
+            fi
+            attempt=$((attempt + 1))
+        done
+        if [ "$installed" -ne 1 ]; then
+            echo "error: could not provision golangci-lint $want after $attempts attempt(s)." >&2
+            echo "       This is a tool-download failure, not a lint finding." >&2
+            exit 1
+        fi
     fi
-    echo "provisioning golangci-lint $want into .bin/" >&2
-    attempts="${GQLC_PROVISION_ATTEMPTS:-4}"
-    delay="${GQLC_PROVISION_DELAY:-2}"
-    attempt=1
-    while [ "$attempt" -le "$attempts" ]; do
-        if curl --proto '=https' --tlsv1.2 -sSfL \
-                "https://raw.githubusercontent.com/golangci/golangci-lint/$want/install.sh" \
-            | sh -s -- -b {{quote(justfile_directory() + "/.bin")}} "$want"; then
-            exit 0
+
+    # Both fields are "<major> <minor>", or empty when the shape was not
+    # recognised. Unrecognised means silent rather than refusing: this is a
+    # diagnosis attached to a provisioning step, and a linter that runs must not
+    # be blocked because upstream reworded its version banner.
+    #
+    # `|| true` on both, because these run under `set -euo pipefail` and either
+    # side can be absent: tool-gate-test.sh drives this recipe with a stub
+    # install and no `go` on PATH, where the substitution exits 127 and takes
+    # the whole recipe with it. A missing tool is the same case as an
+    # unrecognised banner — no comparison to make, not an accusation.
+    built="$({{quote(golangci)}} version 2>/dev/null | sed -n 's/.*built with go\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p' | head -n 1 || true)"
+    here="$(go env GOVERSION 2>/dev/null | sed -n 's/^go\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p' || true)"
+    if [ -n "$built" ] && [ -n "$here" ]; then
+        built_major="${built%% *}"; built_minor="${built##* }"
+        here_major="${here%% *}"; here_minor="${here##* }"
+        if [ "$built_major" -lt "$here_major" ] \
+            || { [ "$built_major" -eq "$here_major" ] && [ "$built_minor" -lt "$here_minor" ]; }; then
+            echo "error: golangci-lint $want is built with go${built_major}.${built_minor}, and this" >&2
+            echo "       machine's toolchain is go${here_major}.${here_minor}. A linter built with an older Go" >&2
+            echo "       cannot load newer source; it panics inside go/types, and that stack" >&2
+            echo "       trace names neither the pin nor the cause." >&2
+            echo "" >&2
+            echo "       The cause is almost always a STALE BRANCH BASE. just reads the pin" >&2
+            echo "       'golangci_version' from the justfile of the tree you are standing in," >&2
+            echo "       and this tree pins $want. A branch based before the commit that last" >&2
+            echo "       bumped that line still provisions the older linter." >&2
+            echo "" >&2
+            echo "       Remedy: git fetch origin && git merge origin/master" >&2
+            echo "       If this branch genuinely cannot take master yet, the run of record is" >&2
+            echo "         GOTOOLCHAIN=go${built_major}.${built_minor} just lint-new" >&2
+            echo "       which is a real run and not a bypass (bd gqlc-6rf3)." >&2
+            exit 1
         fi
-        echo "ensure-golangci: provisioning attempt $attempt of $attempts failed" >&2
-        if [ "$attempt" -lt "$attempts" ]; then
-            sleep "$delay"
-            delay=$((delay * 2))
-        fi
-        attempt=$((attempt + 1))
-    done
-    echo "error: could not provision golangci-lint $want after $attempts attempt(s)." >&2
-    echo "       This is a tool-download failure, not a lint finding." >&2
-    exit 1
+    fi
 
 # provisions the pinned shellcheck into the gitignored .bin/ when missing or
 # version-mismatched, exactly as ensure-golangci does: the happy path is a
@@ -567,8 +631,14 @@ lint-hooks dir=".githooks": ensure-shellcheck
         case "$head" in
             "#!"*[\ /]sh | "#!"*[\ /]bash | "#!"*[\ /]dash | "#!"*[\ /]ksh)
                 scripts+=("$f") ;;
-            # shellcheck only supports shell; SC1071 on a python hook would have
-            # to be silenced globally, which turns it off for the shell files too.
+            # Python is skipped because the linter only supports shell: SC1071
+            # on a python hook would have to be silenced globally, which turns
+            # it off for the shell files too.
+            #
+            # This comment does not open with the tool's name on purpose. A
+            # comment beginning that word inside a case branch is read as a
+            # directive in the wrong place (SC1124, an ERROR), and this recipe
+            # body is itself linted now (bd gqlc-wprl).
             "#!"*python*) ;;
             *) unclassified+=("$f") ;;
         esac
@@ -592,6 +662,83 @@ lint-hooks dir=".githooks": ensure-shellcheck
     echo "shellcheck {{shellcheck_version}} over ${#scripts[@]} shell script(s) under $dir:"
     printf '  %s\n' "${scripts[@]}"
     {{shellcheck}} -- "${scripts[@]}"
+
+# shellcheck over the justfile's OWN recipe bodies (bd gqlc-wprl).
+#
+# A shebang recipe body is a bash script with `set -euo pipefail`, several of
+# them 60+ lines long and carrying this repo's gate logic, and until now no
+# linter read a line of it. The bug class that motivated this is not exotic: a
+# collision guard shipped matching newline-delimited `sort -u` output with the
+# space-delimited `case " $a $b " in *" $x "*)` idiom, so it could not fire, and
+# it shipped in the commit whose job was to close a no-coverage finding. Scalar
+# versus array is exactly what a linter tracks and a reader does not.
+#
+# Bodies are taken from `just --dump --dump-format json` rather than from a
+# reader of my own, so the set under the gate is just's own parse. Only bodies
+# whose first line is a shell shebang are enrolled: a non-shebang recipe is a
+# sequence of independent one-line shell invocations, not a script, and
+# concatenating those lines into one file would invent both a scope and a
+# control flow that never exist at runtime.
+#
+# `{{{{...}}}}` becomes the literal token INTERP. That is the one place this
+# gate reads something other than what runs, and it is why severity stops at
+# `warning`: the info and style bands are dense with quoting advice about that
+# token. Errors and warnings are not artefacts of the substitution.
+#
+# No check is excluded. SC2194 (a constant case word) was the one candidate,
+# raised by `case "{{{{mode}}}}" in` in tmp-reap — and that reading was right: the
+# value was pasted in raw, so a mode carrying a `)` was shell syntax there
+# rather than data. Binding it through `{{{{quote(mode)}}}}` fixed the recipe and
+# retired the exclusion with it (bd gqlc-4seg).
+#
+# The justfile read is an argument so the recipe can be exercised over a
+# throwaway one (internal/tools/ciguard/justbodies_test.go), the same way
+# lint-hooks takes its directory; CI and developers take the default.
+[private]
+lint-just file=justfile(): ensure-shellcheck
+    #!/usr/bin/env bash
+    set -euo pipefail
+    file="{{file}}"
+    if [ ! -f "$file" ]; then
+        echo "error: '$file' is not a file, so there are no recipe bodies to lint and this" >&2
+        echo "       gate is watching nothing (bd gqlc-wprl)." >&2
+        exit 1
+    fi
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+
+    # `just --dump` resolves the whole file, so a justfile that stopped parsing
+    # dies here rather than yielding an empty recipe set that lints clean.
+    just --justfile "$file" --working-directory "$(dirname -- "$file")" \
+        --dump --dump-format json >"$work/dump.json"
+
+    jq -r '
+        def flat: map(if type == "string" then . else "INTERP" end) | join("");
+        .recipes | to_entries[]
+        | select((.value.body | length) > 0)
+        | select((.value.body[0] | flat) | test("^#!.*(bash|sh)$"))
+        | .key + "\t" + ((.value.body | map(flat) | join("\n")) | @base64)
+    ' "$work/dump.json" >"$work/index"
+
+    bodies=()
+    while IFS="$(printf '\t')" read -r name encoded; do
+        printf '%s' "$encoded" | base64 -d >"$work/$name.sh"
+        bodies+=("$work/$name.sh")
+    done <"$work/index"
+
+    if [ "${#bodies[@]}" -eq 0 ]; then
+        echo "error: no shebang recipe body was extracted from the justfile, so this gate" >&2
+        echo "       ran shellcheck over nothing and exited 0 over it — indistinguishable" >&2
+        echo "       from every body being clean. Either every recipe lost its shebang, or" >&2
+        echo "       just's json dump changed shape (bd gqlc-wprl)." >&2
+        exit 1
+    fi
+
+    # Printed by recipe name rather than by temp path, because the path is a
+    # throwaway and the name is what a reader has to go and open.
+    echo "shellcheck {{shellcheck_version}} over ${#bodies[@]} justfile recipe body/bodies:"
+    cut -f1 <"$work/index" | sed 's/^/  /'
+    {{shellcheck}} --severity=warning -- "${bodies[@]}"
 
 # .golangci.yml's run.build-tags list must be the tags this tree actually uses.
 #
@@ -868,12 +1015,38 @@ sweep-discovery-probes:
     # mktemp template, with no dot between, makes a directory neither that glob
     # nor .gitignore's own dotted rules match.
     #
-    # WHAT THIS DOES NOT REACH: `mktemp -d` under test/data is the one idiom it
-    # looks for. A probe put there by `mkdir`, by `install -d`, or by Go code
-    # this justfile calls is not a site to any of the checks below, and the
-    # declared names are not held to it (bd gqlc-lj9s).
-    site_re="mktemp -d ""test/data/"
+    # The allocators are enumerated rather than left at `mktemp -d`, which used
+    # to be the only idiom this recognised: a probe put under test/data by
+    # `mkdir -p` or `install -d` was a site to none of the checks here, so the
+    # declared names were not held to it and the sweep glob did not clear it
+    # (bd gqlc-lj9s).
+    #
+    # An enumeration is still a list, so it is backed by the refusal that
+    # follows it rather than trusted: a line that names a *_probe variable
+    # beside test/data and is not one of these shapes FAILS, instead of being
+    # invisible the way an unlisted allocator was. What remains out of reach is
+    # a probe created by something this justfile only calls — Go code, a script
+    # — which names nothing here and appears in no dump.
+    alloc_re="\(mktemp -d\|mkdir -p\|mkdir\|install -d\)"
+    site_re="${alloc_re} ""test/data/"
     site_var_re="${site_re}[{][{] *\([A-Za-z_][A-Za-z0-9_]*\) *[}][}]\."
+
+    # Split across two string literals for the same reason site_re is: this
+    # recipe's body is inside the dump being searched, and a pattern written out
+    # whole here would match the line it is written on.
+    probe_ref_re="test/data/""[{][{] *[A-Za-z_][A-Za-z0-9_]*_pro""be"
+    stray_sites="$(printf '%s\n' "${dumped}" | grep -e "${probe_ref_re}" \
+        | grep -v -e "${site_re}" || true)"
+    if [ -n "${stray_sites}" ]; then
+        echo "error: these lines name a probe variable under test/data through a command this" >&2
+        echo "       recipe does not recognise as an allocator:" >&2
+        printf '%s\n' "${stray_sites}" | sed 's/^/         /' >&2
+        echo "       Teach alloc_re about it, or route the creation through one of the shapes" >&2
+        echo "       it lists. An unrecognised allocator makes a probe that no check here" >&2
+        echo "       holds and no glob here clears (bd gqlc-lj9s)." >&2
+        exit 1
+    fi
+
     odd_sites="$(printf '%s\n' "${dumped}" | grep -e "${site_re}" \
         | grep -v -e "${site_var_re}" || true)"
     if [ -n "${odd_sites}" ]; then
@@ -886,8 +1059,12 @@ sweep-discovery-probes:
         exit 1
     fi
 
+    # \2, not \1: alloc_re is a group of its own inside site_var_re, so the
+    # probe variable is the second capture. The s/// delimiter is % rather than
+    # | because alloc_re is an alternation and | inside the pattern would end
+    # the expression early — silently, as an empty match.
     site_vars="$(printf '%s\n' "${dumped}" \
-        | sed -n "s|^.*${site_var_re}.*|\1|p")"
+        | sed -n "s%^.*${site_var_re}.*%\2%p")"
     if [ -z "${site_vars}" ]; then
         echo "error: no recipe in this justfile creates a probe under test/data, so the names" >&2
         echo "       checked below are held to nothing and this sweep clears a thing no run" >&2
@@ -902,7 +1079,7 @@ sweep-discovery-probes:
         esac
     done <<<"${site_vars}"
     if [ -n "${unheld}" ]; then
-        echo "error: these justfile variables name a probe at a mktemp site and are not spelled" >&2
+        echo "error: these justfile variables name a probe at an allocator site and are not spelled" >&2
         echo "       *_probe:${unheld}" >&2
         echo "       The comparison below reads *_probe variables only, so a probe created" >&2
         echo "       through one of these is not reached by it (bd gqlc-oxne)." >&2
@@ -1048,8 +1225,14 @@ sweep-discovery-probes:
     done
 
 # full static analysis: golangci-lint over the Go tree (.golangci.yml) and
-# shellcheck over the hooks + kingdom trees, as linters + formatter diffs as issues
-lint: ensure-golangci lint-hooks (lint-hooks "kingdom/bin") check-golangci-build-tags
+# shellcheck over the hooks + kingdom + CI-script trees, as linters + formatter
+# diffs as issues
+#
+# .github/scripts is here because a developer must see the same verdict as CI
+# does: those scripts run inside required contexts, and a tree where they are
+# linted only on the runner is one where the first reader of a shellcheck
+# finding is a red PR (bd gqlc-xqf6).
+lint: ensure-golangci lint-hooks (lint-hooks "kingdom/bin") (lint-hooks ".github/scripts") lint-just check-golangci-build-tags
     {{golangci}} run
 
 # Guard: the golangci-lint analysis cache must be non-empty after lint.
@@ -1118,24 +1301,42 @@ fmt-check: ensure-golangci
 # stubbed suites — one stubbed to fail, asserting that nothing after it ran —
 # rather than by reading the carrier. That behavioural test is why the carrier
 # could change at all.
+#
+# TWO directories, not one. .github/scripts/tests/ holds the suite covering the
+# two PR gates that live beside it; it is there deliberately, because those
+# scripts are not hooks. Until bd gqlc-xqf6 it was run only by a step of its own
+# in ci.yml, so `just test` and .githooks/pre-push did not run it and a
+# developer's local verdict differed from CI's — and bd gqlc-snzq F4 is the
+# other half: the ciguard walk was rooted at .githooks/, so a suite anywhere
+# else was invisible to every rule holding suites to this recipe.
+#
+# The emptiness refusal is PER DIRECTORY. One check over the combined array
+# fires only when BOTH globs go silent, so deleting or renaming
+# .github/scripts/tests/ would leave the recipe green on the strength of the
+# other directory still matching — an aggregate emptiness guard hides partial
+# silence.
 test-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
-    # The expansion below is sorted by the shell's collation, and that order is
+    # The expansions below are sorted by the shell's collation, and that order is
     # the order the suites run in — so it is pinned rather than left to whatever
     # locale the caller happens to carry. Not exported: bash applies LC_ALL to
     # itself on assignment, and the suites should run under the developer's own
     # locale, not this one.
     LC_ALL=C
     shopt -s nullglob
-    suites=(.githooks/tests/*-test.sh)
-    if [ "${#suites[@]}" -eq 0 ]; then
-        echo "error: .githooks/tests/*-test.sh matched nothing, so this recipe would run zero" >&2
-        echo "       suites and exit 0 — indistinguishable from every suite passing. Either" >&2
-        echo "       the suites moved, or this is not the repository root (bd gqlc-234l)." >&2
+    hook_suites=(.githooks/tests/*-test.sh)
+    script_suites=(.github/scripts/tests/*-test.sh)
+    if [ "${#hook_suites[@]}" -eq 0 ] || [ "${#script_suites[@]}" -eq 0 ]; then
+        echo "error: a suite glob matched nothing, so this recipe would run zero suites from" >&2
+        echo "       that directory and exit 0 over them — indistinguishable from every suite" >&2
+        echo "       passing. Either the suites moved, or this is not the repository root" >&2
+        echo "       (bd gqlc-234l, bd gqlc-snzq)." >&2
+        echo "         .githooks/tests/*-test.sh matched ${#hook_suites[@]}" >&2
+        echo "         .github/scripts/tests/*-test.sh matched ${#script_suites[@]}" >&2
         exit 1
     fi
-    for suite in "${suites[@]}"; do
+    for suite in "${hook_suites[@]}" "${script_suites[@]}"; do
         echo "==> ${suite}"
         bash "${suite}"
     done

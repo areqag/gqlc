@@ -24,6 +24,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+
+	"github.com/areqag/gqlc/internal/liverecipes"
 )
 
 const (
@@ -88,8 +90,10 @@ func spell(n yaml.Node) string {
 	return n.Tag
 }
 
-// uncommented is src with every line truncated at its first `#` and blank lines
-// dropped: the text a scan for a live command may look in.
+// uncommented is src with every line's comment dropped and blank lines removed:
+// the text a scan for a live command may look in. Two strips, because the two
+// artefacts read here spell a comment by different rules and one function
+// modelling both models neither (bd gqlc-snzq F6).
 //
 // An assertion about what a step runs must not be satisfiable by a line that is
 // commented out. Commenting out the version read and restating the pin as a
@@ -100,51 +104,71 @@ func spell(n yaml.Node) string {
 // measured on this branch: with the scans reading raw text, `# just test` in
 // the ci.yml test step and `test: check-hooks # test-hooks` in the justfile
 // each left the scan reading it reporting a recipe that nothing ran, while
-// taking the hook suites out of CI. The justfile spelling leaves the whole
-// package green even now (`just --dump` exits 0 with no error line there, so
-// that is a real parse and not a broken one); the ci.yml spelling no longer
-// does, because TestCITestJobRunsTheTestRecipe arrived from master and pins
-// that step's shape without scanning for a recipe name at all.
+// taking the hook suites out of CI.
 //
-// A `#` inside a quoted string is not a comment to bash, and this truncates
-// there too, so the strip can drop text bash would have run. What that costs
-// depends on how the reader matches, and the three readers here differ.
-//
-// pinStep is a substring scan for `just --evaluate <var>`, and for it the
-// dropping is the direction that refuses. The literal carries no newline and
-// this joins what it keeps with one, so the strip can take the literal away and
-// cannot assemble it; taken away, the cache-key test finds no step id and
-// reddens. Measured: action.yml md5 cbb61e1e to ebdaba17, a quoted `#` put
-// ahead of the read on its own line, and
-// TestGolangciBinaryCacheKeyIsDerivedFromTheJustfilePin goes red.
-//
-// recipeDeps' header regexp is line-anchored, and truncation removes only a
-// line's suffix, so it cannot move or introduce the first `:`: a recipe header
-// is lost, never gained. Where truncation shortens a dependency name instead,
-// it agrees with just, which reads a `#` mid-token on a header line as a
-// comment — `test: check-hooks test-hooks#x` dumps as `test: check-hooks
-// test-hooks`. Where the two part company is a `#` inside a quoted default
-// parameter, which just keeps and this truncates, taking the `:` and the whole
-// header with it.
-//
-// justInvocations is neither of those. It is a regexp over the joined text,
-// where the strip could make a match as well as break one — see the note on
-// that function for the newline that fused two lines into an invocation of a
-// recipe nothing ran, and for the separator class that closes it.
-//
-// For an end-anchored match it is the wrong direction: dropping trailing text
-// turns a non-match into a match. `version=$(just --evaluate
-// golangci_version)"#x" || true` reads as an assignment-only command once
-// truncated, and TestGolangciVersionReadIsAnAssignmentUnderErrexit passes on it
-// (measured). What refuses that line is
+// WHAT WAS WRONG WITH ONE CUT AT THE FIRST `#`. Neither language starts a
+// comment at every `#`. A `#` inside a quoted string is data to bash and data
+// to just, and the naive cut truncated there, so the strip dropped text the
+// artefact runs and every reader downstream saw a line shorter than the one
+// executing. That is the direction that MAKES matches as well as breaking them:
+// `version=$(just --evaluate golangci_version)"#x" || true` reads as an
+// assignment-only command once truncated, and
+// TestGolangciVersionReadIsAnAssignmentUnderErrexit passed on it (measured).
+// The refusal that catches that line regardless is
 // TestGolangciVersionReadFailsTheStepInsteadOfEmptyingTheKey, which runs the
-// block instead of reading it.
-func uncommented(src string) string {
+// block instead of reading it — the quoted-`#` hole is narrowed here, not
+// closed here.
+//
+// WHERE THE TWO RULES PART COMPANY, which is why there are two functions. sh
+// starts a comment at a `#` that begins a WORD; `-X main.p=a#b` unquoted keeps
+// its hash. just does not: it reads a `#` mid-token on a recipe header as a
+// comment, and `test: check-hooks test-hooks#x` dumps as `test: check-hooks
+// test-hooks` (measured with `just --dump`). So the justfile strip is
+// quote-aware and not word-aware, and the shell strip is both — which is
+// liverecipes.StripComment, whose own doc comment states the shapes it still
+// does not model (backslash escapes, command substitution, heredocs,
+// here-strings).
+//
+// The direction each reader fails in is unchanged by the fix and is still
+// worth naming. recipeDeps' header regexp is line-anchored and truncation
+// removes only a suffix, so it cannot move or introduce the first `:`: a recipe
+// header is lost, never gained. pinStep is a substring scan, and dropping text
+// only ever refuses. TestStripsAgreeWithTheLanguagesTheyModel below is where
+// the two rules are held to their artefacts.
+
+// justUncommented models just's comment rule: a `#` outside a single- or
+// double-quoted string opens a comment, wherever in the line it falls.
+func justUncommented(src string) string {
+	return dropBlank(src, func(line string) string {
+		var quote rune
+		for i, r := range line {
+			switch {
+			case quote != 0:
+				if r == quote {
+					quote = 0
+				}
+			case r == '\'' || r == '"':
+				quote = r
+			case r == '#':
+				return line[:i]
+			}
+		}
+		return line
+	})
+}
+
+// shellUncommented models sh's comment rule, via the reader the recipe-parsing
+// package already carries, so a third rule is not invented here.
+func shellUncommented(src string) string {
+	return dropBlank(src, liverecipes.StripComment)
+}
+
+// dropBlank applies strip to every line and drops the lines it empties, so that
+// a comment-only line cannot leave a blank one a `(?m)^\s*$` would match.
+func dropBlank(src string, strip func(string) string) string {
 	var kept []string
 	for _, line := range strings.Split(src, "\n") {
-		if i := strings.IndexByte(line, '#'); i >= 0 {
-			line = line[:i]
-		}
+		line = strip(line)
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -225,7 +249,7 @@ func TestGolangciBinaryCacheTracksTheJustfileInstallPath(t *testing.T) {
 func pinStep(t *testing.T) actionStep {
 	t.Helper()
 	for _, s := range actionSteps(t) {
-		if strings.Contains(uncommented(s.Run), "just --evaluate "+versionVar) {
+		if strings.Contains(shellUncommented(s.Run), "just --evaluate "+versionVar) {
 			return s
 		}
 	}
@@ -406,7 +430,7 @@ func TestGolangciVersionReadFailsTheStepInsteadOfEmptyingTheKey(t *testing.T) {
 // second, where the strip joined two lines into a match until the separator
 // class stopped it.
 func TestGolangciVersionReadIsAnAssignmentUnderErrexit(t *testing.T) {
-	code := uncommented(pinStep(t).Run)
+	code := shellUncommented(pinStep(t).Run)
 
 	require.Regexpf(t, `(?m)^\s*[A-Za-z_][A-Za-z0-9_]*="?\$\(just --evaluate `+versionVar+`\)"?\s*$`,
 		code,
@@ -491,7 +515,7 @@ func recipeDeps(t *testing.T) map[string][]string {
 	t.Helper()
 	header := regexp.MustCompile(`(?m)^([a-zA-Z0-9_-]+)([^:\n]*):([^=\n].*|)$`)
 	deps := map[string][]string{}
-	for _, m := range header.FindAllStringSubmatch(uncommented(readRepoFile(t, justfile)), -1) {
+	for _, m := range header.FindAllStringSubmatch(justUncommented(readRepoFile(t, justfile)), -1) {
 		deps[m[1]] = strings.Fields(m[3])
 	}
 	return deps
@@ -549,45 +573,37 @@ func linterRecipes(t *testing.T) map[string]bool {
 	return reaches
 }
 
-// justInvocations returns the words a step's shell block spells directly after
-// `just`, which both callers read as recipe names.
+// justInvocations is every recipe name a step's shell block invokes `just`
+// with.
 //
-// Read through uncommented, so a commented-out invocation reads as absent
-// rather than as present: `run: |` with `# just test` above `echo skipped`
-// takes the hook suites out of CI, and this scan reported the step healthy
-// (measured — ci.yml md5 83c139ca to f8a82f6e, actionlint rc 0,
-// TestTestHooksIsReachedByARecipeCIRuns green).
-// The strip is here rather than at the two call sites so that a third caller
-// does not inherit the raw scan; that is how this became the third site in the
-// package with the same defect.
+// Delegated to liverecipes.JustRecipes rather than scanned for here, because
+// the scan that was here could not tell a COMMAND from an ARGUMENT: it matched
+// `just` anywhere in the text and took the next word as a recipe name, so
+// `command -v just test` on one line read as an invocation of `test` and a job
+// running no recipe at all satisfied the reachability check (bd gqlc-snzq F1,
+// measured on this branch as ci.yml md5 96f4eeaa). JustRecipes splits the line
+// into commands at `&&`, `||`, `;` and `|` and asks whether the FIRST field of
+// a command is `just`, which is the question the scan was standing in for.
+// TestJustInvocationsReadsCommandPositionNotEveryWord is the row.
 //
-// The separator is space or tab, not `\s`, and there is no `(?m)`: with no `^`
-// or `$` in the pattern that flag was inert, and reading it as line-scoping is
-// what let `\s` stand. `\s` matches `\n`, so once the strip dropped a comment
-// line the `just` above it fused with the next line's first word.
-// `command -v just  # retired` over `test -n x` came back as `just test`, and
-// this scan reported the CI test job running `just test` while it ran no recipe
-// at all (ci.yml md5 83c139ca to 1e4fbc40: that test green under `\s+`, red
-// here). Dropping text added a recipe name rather than losing one.
+// Comments are dropped by JustRecipes' own per-line strip, so a commented-out
+// invocation reads as absent rather than as present: `run: |` with `# just
+// test` above `echo skipped` takes the hook suites out of CI, and the raw scan
+// reported the step healthy (measured — ci.yml md5 83c139ca to f8a82f6e,
+// actionlint rc 0, TestTestHooksIsReachedByARecipeCIRuns green). Per line and
+// after the split, which is what the previous separator class was carrying by
+// hand: a strip that joined the text first fused a `just` at the end of one
+// line with the next line's first word, and `command -v just  # retired` over
+// `test -n x` came back as `just test` (ci.yml md5 83c139ca to 1e4fbc40). A
+// line-scoped reader cannot make that match at all, so the carriage-return and
+// form-feed cases the old character class was chosen to exclude (md5 bca84c62,
+// 764788b7, f822b0a5) are decided by Fields' own whitespace splitting instead.
 //
-// Space and tab are what bash splits words on inside a line. A newline ends the
-// command instead of separating its arguments, and a carriage return or a form
-// feed separates nothing at all — `[^\S\n]` accepts both of those and reads
-// `command -v just` with a CR or an FF before `test` as `just test` (md5
-// bca84c62 and 764788b7: that test green under `[^\S\n]`, red here).
-//
-// Those two rows are the whole difference between the classes rather than a
-// sample of it. Enumerated out of tree over 0..0x10FFFF: Go's `\s` is the five
-// runes {09, 0a, 0c, 0d, 20}, so `[^\S\n]` is {09, 0c, 0d, 20} and `[ \t]` is
-// {09, 20}, and they part company on the form feed and the carriage return and
-// nothing else. A vertical tab is in neither — Go's `\s` does not carry it, and
-// bash does not split on it either, so both classes refuse it (md5 f822b0a5).
-//
-// What this does not do is decide which word is the command. `command -v just
-// test` on one line reads here as an invocation of `test` (md5 96f4eeaa, that
-// test green), so a job that runs no recipe can still satisfy the reachability
-// check. That limit is the scan's rather than the strip's: the same line
-// matches before the strip too.
+// What this returns that the old scan did not: every non-flag word after
+// `just`, not just the first, because `just a b` runs both a and b. So
+// `just lint-hooks .github/scripts` yields the argument as well as the recipe.
+// Both callers ask membership questions over the result, and a name no recipe
+// answers to is inert in each.
 //
 // Every ci.yml md5 named above is a rewrite of the `test` job's step, and
 // TestCITestJobRunsTheTestRecipe reddens on each of them — it pins that step's
@@ -595,12 +611,50 @@ func linterRecipes(t *testing.T) map[string]bool {
 // does not. It holds for that one job. This scan is what covers the others,
 // which is why the greens above are named per test and not per package.
 func justInvocations(run string) []string {
-	var out []string
-	re := regexp.MustCompile(`\bjust[ \t]+([a-zA-Z0-9_-]+)`)
-	for _, m := range re.FindAllStringSubmatch(uncommented(run), -1) {
-		out = append(out, m[1])
+	return liverecipes.JustRecipes(run)
+}
+
+// The scan that finds recipe invocations has to read command position, not
+// every word on the line (bd gqlc-snzq F1).
+//
+// The rows below are the two halves of that: a line that RUNS a recipe, and a
+// line that merely NAMES one as an argument to something else. Under the
+// regexp this replaced the second row returned `test`, so a `test` job whose
+// only mention of the recipe was `command -v just test` satisfied
+// TestEveryHookTestSuiteIsDiscoveredByTestHooks' sibling reachability check
+// while running nothing.
+func TestJustInvocationsReadsCommandPositionNotEveryWord(t *testing.T) {
+	for _, row := range []struct {
+		name string
+		run  string
+		want []string
+	}{
+		{"a bare invocation", "just test\n", []string{"test"}},
+		{"after an operator", "cd x && just lint\n", []string{"lint"}},
+		{
+			"with an argument", "just lint-hooks .github/scripts\n",
+			[]string{"lint-hooks", ".github/scripts"},
+		},
+		{
+			"flags are not recipes", "just --evaluate golangci_version\n",
+			[]string{"golangci_version"},
+		},
+		// The defect. `just` is an argument to `command`, so nothing is run.
+		{"named as an argument", "command -v just test\n", nil},
+		{"printed rather than run", "echo just test\n", nil},
+		{"commented out", "# just test\necho skipped\n", nil},
+		// The line-fusing case the old joined-text strip made: with the comment
+		// dropped, `just` ended one line and `test` began the next.
+		{
+			"a comment between just and the next line",
+			"command -v just  # retired\ntest -n x\n", nil,
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			require.Equalf(t, row.want, justInvocations(row.run),
+				"read of %q", row.run)
+		})
 	}
-	return out
 }
 
 // Every ci.yml job that runs a recipe needing golangci-lint must pull the
@@ -753,5 +807,78 @@ func TestEveryLintingCIJobRestoresTheCachedBinary(t *testing.T) {
 			"job %q runs `uses: %s` at step %d, before its prerequisite `uses: %s` at "+
 				"step %d. The version read needs just on PATH.",
 			name, golangciActionRef, facts.cachedAt, justActionRef, facts.justAt)
+	}
+}
+
+// The two comment strips have to model the two comment rules (bd gqlc-snzq F6).
+//
+// One function cutting at the first `#` of any kind stood in for both, and it
+// was wrong for both in the same direction: it truncated inside a quoted
+// string, where neither language starts a comment, so every reader downstream
+// saw a line shorter than the one the artefact runs.
+//
+// `justWant` and `shellWant` are what each strip must leave. The rows where
+// they DIFFER are the reason the function was split — a `#` that does not begin
+// a word is a comment to just and is not one to sh — and the rows where a naive
+// cut would differ from BOTH are the defect.
+//
+// The two header rows' premises are measured against the real `just`, not
+// asserted: a quoted `#` in a default parameter parses (`just --dump` exits 0
+// on `lint-hooks dir=".#githooks": dep`), and a bare `#` mid-token on a header
+// does not (`dep#x:` is refused with "expected '*', ':', '$', identifier, or
+// '+', but found comment"). Both measured against just 1.58.0 on this branch.
+func TestStripsAgreeWithTheLanguagesTheyModel(t *testing.T) {
+	for _, row := range []struct {
+		name                 string
+		line                 string
+		justWant, shellWant  string
+		naiveCutWouldTruncat bool
+	}{
+		{"no hash at all", "just test", "just test", "just test", false},
+		{"a whole-line comment", "# just test", "", "", false},
+		// The trailing space is the comment's own; neither strip trims, because
+		// every reader downstream is a regexp or a Fields split.
+		{
+			"a trailing comment", "test: check-hooks # test-hooks",
+			"test: check-hooks ", "test: check-hooks ", false,
+		},
+		// The divergence. just reads this as a comment mid-token; sh does not,
+		// because the `#` does not begin a word.
+		{
+			"a hash inside a bare word", "test: check-hooks test-hooks#x",
+			"test: check-hooks test-hooks", "test: check-hooks test-hooks#x", false,
+		},
+		// The defect: neither language cuts here, and the naive cut did.
+		{
+			"a hash inside a double-quoted string", `lint-hooks dir=".#githooks": dep`,
+			`lint-hooks dir=".#githooks": dep`, `lint-hooks dir=".#githooks": dep`, true,
+		},
+		{
+			"a hash inside a single-quoted string", `echo 'a#b' && just test`,
+			`echo 'a#b' && just test`, `echo 'a#b' && just test`, true,
+		},
+		{
+			"a comment after a quoted hash", `echo "a#b" # gone`,
+			`echo "a#b" `, `echo "a#b" `, true,
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			naive := row.line
+			if i := strings.IndexByte(naive, '#'); i >= 0 {
+				naive = naive[:i]
+			}
+			require.Equalf(t, row.naiveCutWouldTruncat, naive != row.justWant && naive != row.shellWant,
+				"this row's premise is that the naive cut at the first `#` %s both "+
+					"languages on %q; it leaves %q",
+				map[bool]string{true: "disagrees with", false: "agrees with at least one of"}[row.naiveCutWouldTruncat],
+				row.line, naive)
+
+			require.Equalf(t, row.justWant, justUncommented(row.line),
+				"the justfile strip on %q. A `#` outside quotes opens a comment to just "+
+					"wherever it falls, and one inside quotes never does.", row.line)
+			require.Equalf(t, row.shellWant, shellUncommented(row.line),
+				"the shell strip on %q. sh starts a comment at a `#` that begins a word, "+
+					"outside quotes.", row.line)
+		})
 	}
 }

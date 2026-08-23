@@ -59,6 +59,7 @@ package ciguard_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -87,9 +88,39 @@ const (
 // Matches the ci.yml step that runs the whole suite.
 var runsTestRecipe = regexp.MustCompile(`(?m)^[ \t]*just ` + testRecipe + `[ \t]*$`)
 
-// justRecipe returns a recipe's dependency list and the lines of its body,
+// recipeHeader is the pattern for one named recipe's header line: the name at
+// column zero, optionally prefixed with just's `@` quiet marker and optionally
+// followed by a parameter list, then the `:` that opens the dependency list.
+//
+// The parameter group and the `@` are there because their absence made an
+// unmodelled SPELLING of an existing recipe read as an ABSENT recipe (bd
+// gqlc-75xi). `^name[ \t]*:` — what this was — matches `test:` and not
+// `test flag="":` or `@test:`, both of which just accepts and runs; the caller
+// then fails with "justfile has no recipe test", which sends a reader looking
+// for a deleted link that is in front of them. A gate that reddens on a
+// spelling it does not model trains its readers to route around it, and that is
+// worse than the missing coverage, because the two other readers of this same
+// file model parameters already: rawRecipe in hooktests_test.go and recipeDeps
+// in golangci_cache_test.go. This one was the outlier.
+//
+// The dependency group refuses a leading `=` so that an ASSIGNMENT named for a
+// recipe — `test := "x"` — is not read as a recipe whose dependency list is
+// `= "x"`. recipeDeps carries the same clause for the same reason; without it
+// the two readers disagree about what a header is.
+//
+// Limits, stated rather than left to be met: a parameter default containing a
+// `:` (`p=":"`) is not matched, because the parameter group refuses a colon so
+// that the FIRST colon on the line is the one that opens the dependency list;
+// and just's `[attribute]` lines sit above the header, so they are neither
+// matched nor needed. No recipe in this justfile spells either today.
+func recipeHeader(name string) *regexp.Regexp {
+	return regexp.MustCompile(`^@?` + regexp.QuoteMeta(name) + `([ \t][^:\n]*)?[ \t]*:([^=\n].*|)$`)
+}
+
+// parseRecipe returns a recipe's dependency list and the lines of its body,
 // comments stripped from both, so that what is returned is what just runs
-// rather than what the justfile spells.
+// rather than what the justfile spells. ok is false when src declares no such
+// recipe.
 //
 // A recipe is a header at column zero and every line under it that is indented
 // or blank, up to the next line that is neither. Those boundaries are decided
@@ -123,23 +154,19 @@ var runsTestRecipe = regexp.MustCompile(`(?m)^[ \t]*just ` + testRecipe + `[ \t]
 // exits non-zero on a parse failure, so a justfile edit that breaks parsing
 // would redden them for a reason unrelated to the wiring, which is the fake
 // RED this repository screens mutations for.
-func justRecipe(t *testing.T, name string) (deps string, body []string) {
-	t.Helper()
-	src, err := os.ReadFile(filepath.Join(repoRoot, justfilePath))
-	require.NoError(t, err, "read %s", justfilePath)
-
-	header := regexp.MustCompile(`^` + regexp.QuoteMeta(name) + `[ \t]*:(.*)$`)
-	lines := strings.Split(string(src), "\n")
+func parseRecipe(src, name string) (deps string, body []string, ok bool) {
+	header := recipeHeader(name)
+	lines := strings.Split(src, "\n")
 	start := -1
 	for i, ln := range lines {
 		if m := header.FindStringSubmatch(liverecipes.StripComment(ln)); m != nil {
-			start, deps = i, strings.TrimSpace(m[1])
+			start, deps = i, strings.TrimSpace(m[2])
 			break
 		}
 	}
-	require.GreaterOrEqualf(t, start, 0,
-		"%s has no recipe %q, so the chain that reaches the shell suites from a "+
-			"required CI context is broken at that link", justfilePath, name)
+	if start < 0 {
+		return "", nil, false
+	}
 
 	for _, raw := range lines[start+1:] {
 		if strings.TrimSpace(raw) == "" {
@@ -152,7 +179,113 @@ func justRecipe(t *testing.T, name string) (deps string, body []string) {
 			body = append(body, ln)
 		}
 	}
+	return deps, body, true
+}
+
+// justRecipe is parseRecipe over the repository's own justfile.
+func justRecipe(t *testing.T, name string) (deps string, body []string) {
+	t.Helper()
+	src, err := os.ReadFile(filepath.Join(repoRoot, justfilePath))
+	require.NoError(t, err, "read %s", justfilePath)
+
+	deps, body, ok := parseRecipe(string(src), name)
+	require.Truef(t, ok,
+		"%s has no recipe %q, so the chain that reaches the shell suites from a "+
+			"required CI context is broken at that link", justfilePath, name)
 	return deps, body
+}
+
+// justDeclaresRecipe asks the real `just` whether src declares a recipe called
+// name. `just --show` answers for a [private] recipe where `--summary` does
+// not, and it distinguishes an assignment from a recipe of the same name.
+//
+// This is the premise oracle for the table below, and it is here because the
+// defect being fixed is a MODEL that disagreed with just. A table of spellings
+// I believe just accepts, checked only against my own reader, would ratify the
+// same mistake in the other direction: a row asserting parseRecipe finds
+// `@test:` is worth nothing unless just agrees that `@test:` declares `test`.
+func justDeclaresRecipe(t *testing.T, src, name string) bool {
+	t.Helper()
+	justBin, err := exec.LookPath("just")
+	require.NoError(t, err, "`just` is not on PATH, and the rows below are premised on "+
+		"what just accepts rather than on what this reader believes")
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "justfile"), []byte(src), 0o600))
+	cmd := exec.CommandContext(t.Context(), justBin, "--show", name)
+	cmd.Dir = dir
+	out, runErr := cmd.CombinedOutput()
+	if runErr == nil {
+		return true
+	}
+	var ee *exec.ExitError
+	require.ErrorAsf(t, runErr, &ee, "could not run `just --show %s` over:\n%s\n%s",
+		name, src, out)
+	// A parse error is neither answer, and taking it as "no recipe" would let a
+	// row whose fixture does not parse stand in for a spelling just refuses.
+	require.NotContainsf(t, string(out), "error: Expected",
+		"the fixture for %q does not parse, so this row measures a syntax error "+
+			"rather than a spelling:\n%s\n%s", name, src, out)
+	return false
+}
+
+// parseRecipe has to find a recipe under every spelling just accepts for it,
+// and under none that just does not (bd gqlc-75xi).
+//
+// The failure this closes is a FAKE RED, which is the mirror image of the usual
+// one here: not a gate that wrongly passes, but a gate that wrongly fails. The
+// old header pattern `^name[ \t]*:` refused `test flag="":` and `@test:`, so
+// adding a parameter to the `test` recipe — a change that keeps every link in
+// the CI chain intact — made TestTestHooksIsADependencyOfTest report that the
+// justfile has no `test` recipe at all.
+//
+// `want` is what parseRecipe must say, and `justSays` is asserted to equal it
+// first: every row's premise is checked against the real `just` before the
+// reader is asked, so a row cannot pass by the two being wrong together.
+func TestParseRecipeAgreesWithJustAboutWhatDeclaresARecipe(t *testing.T) {
+	const body = "    echo ran\n"
+	// Declared so that a fixture naming a dependency still loads: `just --show`
+	// resolves the whole file, and an undeclared dependency is a load error
+	// rather than an answer about the header.
+	const dep = "dep-a:\n" + body + "dep-b:\n" + body
+	for _, row := range []struct {
+		name  string
+		src   string
+		found bool
+		deps  string
+	}{
+		{"bare header", "test:\n" + body, true, ""},
+		{"header with dependencies", dep + "test: dep-a dep-b\n" + body, true, "dep-a dep-b"},
+		{"quiet recipe", "@test:\n" + body, true, ""},
+		{"one parameter", "test flag:\n" + body, true, ""},
+		{"parameter with a default", `test flag="":` + "\n" + body, true, ""},
+		{"parameters and dependencies", dep + `test flag="": dep-a` + "\n" + body, true, "dep-a"},
+		{"attribute above the header", "[private]\ntest:\n" + body, true, ""},
+		// The assignment is the one row in the other direction, and it is the
+		// clause a looser pattern loses: `^test[ \t]*:(.*)$` matches
+		// `test := "x"` and reads `= "x"` as the dependency list, so
+		// TestTestHooksIsADependencyOfTest would then be asking whether a
+		// variable depends on test-hooks.
+		{"an assignment of the same name", `test := "x"` + "\nother:\n" + body, false, ""},
+		{"a longer recipe name", "test-hooks:\n" + body, false, ""},
+		{"an indented header", "other:\n    test:\n", false, ""},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			require.Equalf(t, row.found, justDeclaresRecipe(t, row.src, testRecipe),
+				"this row's premise is that just %s a recipe %q in:\n%s",
+				map[bool]string{true: "declares", false: "does not declare"}[row.found],
+				testRecipe, row.src)
+
+			deps, _, ok := parseRecipe(row.src, testRecipe)
+			require.Equalf(t, row.found, ok,
+				"just and parseRecipe disagree about whether %q declares a recipe %q. "+
+					"Reading a recipe just runs as absent is a fake RED that reports a "+
+					"broken CI chain over a spelling; reading one just does not run as "+
+					"present is a link asserted against nothing.",
+				row.src, testRecipe)
+			require.Equalf(t, row.deps, deps, "dependency list read from %q", row.src)
+		})
+	}
 }
 
 // A suite file no recipe reaches is a suite that never runs. It is the wiring
