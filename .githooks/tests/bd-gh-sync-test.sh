@@ -71,6 +71,18 @@ if [ "$1 ${2:-}" = "github push" ] && [ "${FAKE_PUSH_RC:-0}" != 0 ]; then
     echo "bd: error: connection refused" >&2
     exit "$FAKE_PUSH_RC"
 fi
+if [ "$1 ${2:-}" = "github push" ]; then
+    # What this subcommand DOES is assign external_ref, and the script now reads
+    # the count of mirrored beads back off the ledger rather than off the fact
+    # that this exited 0 (gqlc-mprc). A stub that logs the call and leaves the
+    # ledger alone models a `bd github push` that silently mirrors nothing, so
+    # every push row in this file would have read as a total failure. Recorded
+    # here and synthesised into the second `bd list` below; a fixture that passes
+    # its own beads_after overrides it, which is how the failure is expressed.
+    # Reached only past the FAKE_PUSH_RC arm above: a batch that failed mints
+    # nothing.
+    [ "$#" -gt 2 ] && printf '%s\n' "${@:3}" >>"$STUBTMP/minted.txt"
+fi
 if [ "$1 ${2:-}" = "github push" ] && [ -n "${FAKE_MINT_LOG:-}" ]; then
     # The concurrency fixture. $CALLS is per-run, and what the gqlc-mmej
     # assertion counts is issues minted across both runs together, so the ids
@@ -119,6 +131,22 @@ if [ "$1" = "list" ]; then
     fi
     if [ "$n" -ge 2 ] && [ -n "${FAKE_BEADS_AFTER:-}" ]; then
         cat "$FAKE_BEADS_AFTER"
+    elif [ "$n" -ge 2 ] && [ -s "$STUBTMP/minted.txt" ]; then
+        # $REAL_PYTHON3, not `python3`: the stub on PATH is keyed by call
+        # ordinal, and spending one here would shift every `py_fails` knob.
+        "$REAL_PYTHON3" -c '
+import json, sys
+with open(sys.argv[2], encoding="utf-8") as fh:
+    minted = {ln.strip() for ln in fh if ln.strip()}
+with open(sys.argv[1], encoding="utf-8") as fh:
+    beads = json.load(fh)
+n = 9000
+for b in beads:
+    if b.get("id") in minted and not b.get("external_ref"):
+        n += 1
+        b["external_ref"] = "https://github.com/org/r/issues/%d" % n
+json.dump(beads, sys.stdout)
+' "$FAKE_BEADS" "$STUBTMP/minted.txt"
     else
         cat "$FAKE_BEADS"
     fi
@@ -276,7 +304,7 @@ py_fails()      { printf '%s' "${2:-1}" >"$TMP/py_rc_$1"; }
 # Leaves the invocation log in $TMP/calls and the script's stderr in $TMP/err.
 run_sync() {
     : >"$TMP/calls"
-    rm -f "$TMP/bd_list_count" "$TMP/py_count"
+    rm -f "$TMP/bd_list_count" "$TMP/py_count" "$TMP/minted.txt"
     printf '%s' "$2" >"$TMP/beads.json"
     printf '%s' "$3" >"$TMP/gh.json"
     printf '%s' "${4:-[]}" >"$TMP/gh_open.json"
@@ -2567,6 +2595,14 @@ elif [ "$(push_batches)" -ne 0 ]; then
 else
     ok "a bead whose label is one over GitHub's cap is not offered to GitHub"
 fi
+# RE-MEASURED 2026-08-23, because this verdict was nearly demoted to a
+# non-failing notice on the argument that the condition is permanent: no push can
+# mirror the bead, and the citizen who meets the alarm is not the one who chose
+# the label. Both halves are false. gqlc-njqk, gqlc-a7we and gqlc-to7k did carry
+# the 51-character $LSUBJ below; they now carry `subject:kingdom/brain/playbooks`
+# at 31, which is verbatim the remedy the row after next pins, and all three
+# mirrored (GH #1358, #1359, #1360). Zero beads on the whole board carry an
+# over-cap label. The alarm is clearable, it was cleared, and PUSH FAILED stays.
 if [ "$RC" -eq 0 ]; then
     bad "an unmirrorable label makes the push non-zero and says so on the last line" \
         "exited 0, so pre-push's status reads as a clean mirror: $(last_line)"
@@ -3335,6 +3371,136 @@ else
     ok "a pull takes no push lock"
 fi
 
+# --- gqlc-e9lh: several beads held for one reason are one line, not N --------
+# MEASURED 2026-08-23 over 784 beads and 806 issues: 7 beads whose status agrees
+# with their GH mirror but whose GH body is not a prefix of the bead description.
+# Every one of them is bd AHEAD of GitHub, so the pull is RIGHT to hold them and
+# the push path never updates an existing issue body — neither direction of this
+# script can resolve them. The hold is therefore permanent, and it printed seven
+# stderr lines on every merge, forever, under a script the owner had stopped
+# reading. The divergence is not fixed here; its volume is. One line per distinct
+# reason, naming every bead it holds.
+_e9lh_beads=""
+_e9lh_gh=""
+_e9lh_i=0
+while [ "$_e9lh_i" -lt 7 ]; do
+    _e9lh_i=$((_e9lh_i + 1))
+    _e9lh_n=$((500 + _e9lh_i))
+    _e9lh_beads="${_e9lh_beads:+$_e9lh_beads,}{\"id\":\"b-div$_e9lh_i\",\"status\":\"open\",\"external_ref\":\"$ISSUE/$_e9lh_n\",\"description\":\"body\namendment bd only\"$BD_EARLY}"
+    _e9lh_gh="${_e9lh_gh:+$_e9lh_gh,}{\"number\":$_e9lh_n,\"state\":\"OPEN\",\"body\":\"body\"$GH_LATE}"
+done
+run_sync pull "[$_e9lh_beads]" "[$_e9lh_gh]"
+_e9lh_lines=$(grep -c 'out of the pull' "$TMP/err") || _e9lh_lines=0
+if [ "$_e9lh_lines" -ne 1 ]; then
+    bad "beads held for one reason are reported on one line, not one line each" \
+        "got $_e9lh_lines line(s): $(grep 'out of the pull' "$TMP/err" | tr '\n' '|')"
+elif ! grep -q 'holding 7 beads out of the pull — bd-description-not-a-prefix-of-gh-body: b-div1 (GH #501), b-div2 (GH #502), b-div3 (GH #503), b-div4 (GH #504), b-div5 (GH #505), b-div6 (GH #506), b-div7 (GH #507)$' \
+        "$TMP/err"; then
+    bad "beads held for one reason are reported on one line, not one line each" \
+        "the line does not name all seven: $(grep 'out of the pull' "$TMP/err")"
+else
+    ok "beads held for one reason are reported on one line, not one line each"
+fi
+
+# Grouping is by reason, so two reasons are two lines. A collapse to a single
+# line whatever the reason would lose which rule held which bead — the only
+# thing the notice is for.
+run_sync pull \
+    "[{\"id\":\"b-g1\",\"status\":\"open\",\"external_ref\":\"$ISSUE/601\",\"description\":\"body\nbd only\"$BD_EARLY},
+      {\"id\":\"b-g2\",\"status\":\"open\",\"external_ref\":\"$ISSUE/602\",\"description\":\"body\"$BD_EARLY},
+      {\"id\":\"b-g3\",\"status\":\"blocked\",\"external_ref\":\"$ISSUE/603\",\"description\":\"body bd only\"}]" \
+    "[{\"number\":601,\"state\":\"OPEN\",\"body\":\"body\"$GH_LATE},
+      {\"number\":602,\"state\":\"OPEN\",\"body\":\"body\nadded on GH\",\"updatedAt\":\"$T_EARLY\"},
+      {\"number\":603,\"state\":\"OPEN\",\"body\":\"body\"$GH_LATE}]"
+_e9lh_lines=$(grep -c 'out of the pull' "$TMP/err") || _e9lh_lines=0
+if [ "$_e9lh_lines" -ne 3 ]; then
+    bad "two beads held for two reasons stay on two lines" \
+        "got $_e9lh_lines line(s), wanted one per distinct reason: $(grep 'out of the pull' "$TMP/err" | tr '\n' '|')"
+elif ! grep -q 'holding b-g1 (GH #601) out of the pull — bd-description-not-a-prefix-of-gh-body$' "$TMP/err" ||
+     ! grep -q 'holding b-g2 (GH #602) out of the pull — gh-not-newer-than-bd$' "$TMP/err" ||
+     ! grep -q 'holding b-g3 (GH #603) out of the pull — status-blocked-unrepresentable-on-gh$' "$TMP/err"; then
+    bad "two beads held for two reasons stay on two lines" \
+        "got: $(grep 'out of the pull' "$TMP/err" | tr '\n' '|')"
+else
+    ok "two beads held for two reasons stay on two lines"
+fi
+
+# The enumeration is capped, because the point of this change is that the notice
+# stays readable: a repository-wide divergence would otherwise put every id on
+# one unbounded line, which is the same defect in one line instead of N.
+_e9lh_beads=""
+_e9lh_gh=""
+_e9lh_i=0
+while [ "$_e9lh_i" -lt 15 ]; do
+    _e9lh_i=$((_e9lh_i + 1))
+    _e9lh_n=$((700 + _e9lh_i))
+    _e9lh_beads="${_e9lh_beads:+$_e9lh_beads,}{\"id\":\"b-cap$_e9lh_i\",\"status\":\"open\",\"external_ref\":\"$ISSUE/$_e9lh_n\",\"description\":\"body\nbd only\"$BD_EARLY}"
+    _e9lh_gh="${_e9lh_gh:+$_e9lh_gh,}{\"number\":$_e9lh_n,\"state\":\"OPEN\",\"body\":\"body\"$GH_LATE}"
+done
+run_sync pull "[$_e9lh_beads]" "[$_e9lh_gh]"
+if ! grep -q 'holding 15 beads out of the pull' "$TMP/err"; then
+    bad "a long hold group names the count in full and the ids up to a cap" \
+        "got: $(grep 'out of the pull' "$TMP/err" | tr '\n' '|')"
+elif ! grep -q ' and 3 more$' "$TMP/err"; then
+    bad "a long hold group names the count in full and the ids up to a cap" \
+        "the elision is not declared: $(grep 'out of the pull' "$TMP/err")"
+elif grep -q 'b-cap13' "$TMP/err"; then
+    bad "a long hold group names the count in full and the ids up to a cap" \
+        "the 13th id is past the cap and was printed anyway"
+else
+    ok "a long hold group names the count in full and the ids up to a cap"
+fi
+
+# --- gqlc-mprc: the mirrored count is evidence, not intent -------------------
+# `_pushed` counted ids handed to a batch that exited 0. `bd github push` exits 0
+# even where the GitHub API refuses an individual bead, so a bead left with no
+# mirror arrived under a summary line saying it was pushed. The count is now read
+# back off the post-push ledger: a bead is mirrored iff it gained an
+# external_ref.
+run_sync push \
+    '[{"id":"b-ok","status":"open","external_ref":""},
+      {"id":"b-lost","status":"open","external_ref":""}]' \
+    '[]' '[{"number":1}]' \
+    "[{\"id\":\"b-ok\",\"status\":\"open\",\"external_ref\":\"$ISSUE/801\"},
+      {\"id\":\"b-lost\",\"status\":\"open\",\"external_ref\":\"\"}]"
+_mprc="a bead the push exited 0 over but never mirrored is not counted as pushed"
+if ! pushed_ids | grep -qx 'b-lost'; then
+    bad "$_mprc" "the fixture did not offer b-lost, so nothing was established"
+elif [ "$RC" -eq 0 ]; then
+    bad "$_mprc" "exited 0, so pre-push reads it as a clean mirror: $(last_line)"
+else
+    case "$(last_line)" in
+        *"1 of 2 new bead(s) mirrored"*) ok "$_mprc" ;;
+        *) bad "$_mprc" "got: $(last_line)" ;;
+    esac
+fi
+if grep -q "b-lost was handed to 'bd github push' and came back with no GitHub mirror" "$TMP/err"; then
+    ok "the bead that gained no mirror is named"
+else
+    bad "the bead that gained no mirror is named" \
+        "got: $(grep 'b-lost' "$TMP/err" | tr '\n' '|')"
+fi
+
+# The other half of the same rule: a run whose post-push ledger cannot be read
+# has no evidence either way, and must not report the intent count as though it
+# had been verified.
+bd_list_fails 2
+run_sync push '[{"id":"b-blindv","status":"open","external_ref":""}]' '[]' '[{"number":1}]'
+if [ "$RC" -eq 0 ]; then
+    bad "an unreadable post-push ledger withdraws the mirrored count" \
+        "exited 0: $(last_line)"
+else
+    case "$(last_line)" in
+        *"1 of 1 new bead(s) mirrored"*)
+            bad "an unreadable post-push ledger withdraws the mirrored count" \
+                "claimed a mirror nobody could see: $(last_line)" ;;
+        *"whether the bead(s) offered to GitHub gained a mirror could not be checked"*)
+            ok "an unreadable post-push ledger withdraws the mirrored count" ;;
+        *) bad "an unreadable post-push ledger withdraws the mirrored count" \
+            "got: $(last_line)" ;;
+    esac
+fi
+
 # --- the assertion census ----------------------------------------------------
 # The one property this file cannot get from `set -u`, from shellcheck or from
 # its own exit status: that it still makes every assertion it made yesterday.
@@ -3571,6 +3737,12 @@ the flock stub is transparent when its knob is unset
 a push with nowhere to put the lock mirrors nothing and says so
 no child of the push path inherits the lock fd
 a pull takes no push lock
+beads held for one reason are reported on one line, not one line each
+two beads held for two reasons stay on two lines
+a long hold group names the count in full and the ids up to a cap
+a bead the push exited 0 over but never mirrored is not counted as pushed
+the bead that gained no mirror is named
+an unreadable post-push ledger withdraws the mirrored count
 the assertion census matches the assertions that ran
 CENSUS
 
