@@ -1,6 +1,6 @@
 // The chain that makes .githooks/tests/*.sh block a merge: the ci.yml `test`
 // job runs `just test`, `just test` depends on `test-hooks`, and `test-hooks`
-// names each suite. `test` is a required status check on master.
+// globs the suite directory. `test` is a required status check on master.
 //
 // What is held here is that each link is named, and that the yaml link carries
 // no `if:` condition and no `continue-on-error:` — neither on the `test` job
@@ -22,27 +22,32 @@
 // refused around the PR-body gate in workflow_test.go, where the step runs two
 // commands and leans on the runner's `-e` to stop at the first that fails.
 //
-// What is not held here is that a suite line carries its exit status into the
-// recipe's status. That end is hooktests_test.go's, in two tests:
-// TestEveryHookTestSuiteIsNamedByTestHooks refuses a suite line that is not a
-// bare `bash <suite>`, and TestTestHooksStopsAtTheFirstFailingSuite writes the
-// recipe into a throwaway justfile, stubs the suites it names and runs the
-// real `just`. Measured on the recipe's first suite line: `|| true`, `|| :`,
-// `| tee`, a trailing `&` and just's `-` prefix redden both of them; `@bash`
-// and `>/dev/null` redden the shape rule alone, and neither of those two
-// discards a status; rewriting `test-hooks` as a `#!/usr/bin/env bash` recipe
-// reddens the behavioural one alone, the shape rule being blind to a token its
-// comment strip removes. That is the set that was measured, not the set that
-// exists — `just` accepts spellings no one has tried here.
+// What is not held here is that a suite carries its exit status into the
+// recipe's status. That end is hooktests_test.go's, behaviourally:
+// TestTestHooksStopsAtTheFirstFailingSuite writes the recipe into a throwaway
+// tree, plants stub suites under names the justfile has never heard of, fails
+// the first one and asserts that nothing after it ran; and
+// TestTestHooksFailsWhenItDiscoversNoSuite drives the case discovery added,
+// where the glob matches nothing and a loop over nothing exits 0.
+//
+// The shape rule that used to sit beside them — every suite line a bare
+// `bash <suite>` — is gone with the enumeration it read. There is one suite
+// invocation now, inside a loop, and the spellings that rule caught (`|| true`,
+// `| tee`, a trailing `&`, just's `-` prefix) are caught by the behavioural
+// rows instead, which is where they were already caught: measured on the old
+// recipe's first suite line, each of those reddened both. What the shape rule
+// held alone was `@bash` and `>/dev/null`, neither of which discards a status.
+// In its place hooktests_test.go refuses a body line that names an individual
+// suite path, which is the append point returning.
 //
 // The justfile reads below are comment-stripped, so a link that is spelled and
 // commented out reads as absent rather than as present. `test: check-hooks
 // # test-hooks` is a `test` recipe that does not depend on `test-hooks`, and an
-// indented `# bash .githooks/tests/foo-test.sh` is a suite the recipe does not
-// run; matched against raw bytes, as this file did, both read as the link being
-// there (bd gqlc-sgot). Neither passed the package, though, and not through one
-// test: the commented-out dependency reddened TestTestHooksIsReachedByARecipeCIRuns,
-// the commented-out suite line reddened TestEveryHookTestSuiteIsNamedByTestHooks,
+// indented `# .githooks/tests/*-test.sh` is a discovery the recipe does not
+// perform; matched against raw bytes, as this file did, both read as the link
+// being there (bd gqlc-sgot). Neither passed the package, though, and not through
+// one test: the commented-out dependency reddened TestTestHooksIsReachedByARecipeCIRuns,
+// the commented-out glob reddens TestEveryHookTestSuiteIsDiscoveredByTestHooks,
 // and neither of those two reddened on the other's input. Both read their
 // justfile through a comment strip already. So what was wrong here was narrower
 // than a hole in CI and is still worth fixing: a pin that cannot fail on the
@@ -150,28 +155,47 @@ func justRecipe(t *testing.T, name string) (deps string, body []string) {
 	return deps, body
 }
 
-// A suite file that no recipe names is a suite that never runs. It is the
-// wiring rather than the suite that goes missing: the file stays in the tree,
-// green, and its assertions stop being made.
+// A suite file no recipe reaches is a suite that never runs. It is the wiring
+// rather than the suite that goes missing: the file stays in the tree, green,
+// and its assertions stop being made.
+//
+// The recipe discovers its suites by globbing the directory rather than listing
+// them (bd gqlc-234l), so the wiring is one pattern and the question here is
+// whether that pattern is spelled in the body and reaches everything the
+// directory holds. `hookSuiteGlob` is this file's own copy of the convention
+// and it is used both to enumerate the tree and to build the pattern, so the
+// two cannot disagree here — what holds the pattern against the rule
+// hookSuites enforces is
+// TestTestHooksGlobsExactlyWhatThisPackageAcceptsAsASuite in hooktests_test.go.
+//
+// Kept beside hooktests_test.go's near-twin rather than folded into it: this
+// one reads the justfile through justRecipe, a different parser with different
+// recipe boundaries, and this file's subject is the whole chain from the
+// required check to the shell suites. A hole in either parser leaves the other
+// speaking.
 func TestEveryHookSuiteRunsInTestHooks(t *testing.T) {
 	_, body := justRecipe(t, hookSuiteRecipe)
 	require.NotEmptyf(t, body, "the %q recipe in %s has an empty body",
 		hookSuiteRecipe, justfilePath)
+
+	pattern := hookSuiteDir + "/" + hookSuiteGlob
+	ran := strings.Join(body, "\n")
+	// Excluding the recipe's own `echo`, which prints the pattern in its
+	// emptiness refusal: a Contains over the whole body is satisfied by that
+	// message with the working glob repointed at a pattern matching nothing.
+	// Measured on `*-tests.sh` — this test passed. expandingLines is where that
+	// is argued.
+	require.NotEmptyf(t, expandingLines(ran, pattern),
+		"the %q recipe in %s does not glob %q anywhere it would expand, and it names "+
+			"no suite individually either — so it reaches no suite at all. An absent "+
+			"gate is not a failing one. %q runs:\n%s",
+		hookSuiteRecipe, justfilePath, pattern, hookSuiteRecipe, ran)
 
 	suites, err := filepath.Glob(filepath.Join(repoRoot, hookSuiteDir, hookSuiteGlob))
 	require.NoError(t, err, "glob %s/%s", hookSuiteDir, hookSuiteGlob)
 	require.NotEmptyf(t, suites, "no %s files under %s, so this assertion is "+
 		"holding nothing: either the suites moved or the glob is wrong",
 		hookSuiteGlob, hookSuiteDir)
-
-	ran := strings.Join(body, "\n")
-	for _, s := range suites {
-		rel := hookSuiteDir + "/" + filepath.Base(s)
-		require.Containsf(t, ran, rel,
-			"%s is in the tree but the %q recipe does not run it. Nothing else "+
-				"does, so its rows are not asserted by any CI context. %q runs:\n%s",
-			rel, hookSuiteRecipe, hookSuiteRecipe, ran)
-	}
 }
 
 // ...and the recipe that runs them has to be reached by the one CI invokes.
