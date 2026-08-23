@@ -74,12 +74,27 @@ seat worktree.
    mail but Սեդրակ, so a mailed request leaves the PR asleep. File it
    UNASSIGNED so the dispatcher can route it to whichever judge is free.
    Disputes go to Սեդրակ; what Սեդրակ cannot settle goes to Անդրանիկ.
-5. The Դատաւորներ also patrol merged work on their own judgment. A FAIL on an
-   open PR blocks the merge until answered, and the judge who wrote it answers
-   it — no judge overturns another's verdict, and a PR does not shop for a
-   softer signature. Findings on merged code become defect beads — and
-   postmortems when something broke, blame-free always
-   (`brain/postmortems/`).
+5. The Դատաւորներ also **patrol** merged work. Patrol is the compensating
+   control on rule 4: with most PRs merging unreviewed, it is the only reader
+   much of the tree gets that is not its author. A patrol ROUND is defined
+   (ADR 0004 §2):
+
+   - **Target.** Merges to master since the previous patrol bead closed,
+     restricted to those whose PR was not reviewed. Fresh, not from the
+     founding commit — a patrol that starts at the beginning re-reads what has
+     already been read.
+   - **Output.** Defect beads, and a postmortem when something broke,
+     blame-free always (`brain/postmortems/`). **Never a verdict**: nothing is
+     open to verdict, the code has merged.
+   - **Depth is the judge's own.** A round that reads one merge properly is a
+     round. **A patrol bead carries no completeness claim, and no citizen
+     should read its closure as "the window was clean."**
+   - **Bounded to one.** At most one patrol bead is open at any time, whatever
+     the merge rate, so patrol can never become a queue.
+
+   A FAIL on an open PR blocks the merge until answered, and the judge who
+   wrote it answers it — no judge overturns another's verdict, and a PR does
+   not shop for a softer signature.
 
 ## Runtime
 
