@@ -1092,6 +1092,94 @@ free_worker_of_class() { # asleep, no queued wake
     return 1
 }
 
+# Why no seat of <class> could be given a bead, as a sentence an operator can
+# act on. The lookup above returns 1 for four conditions with four different
+# remedies, and until gqlc-2ve4 all four produced the same output: none. The
+# call site was an `if` with no `else`, one layer below the `elif .cls == null
+# then empty` arm that used to drop unlabelled beads — the same defect twice in
+# one function, a decision taken and not spoken. OBSERVED 2026-08-22T13:12Z: a
+# P0 class:architect bead sat unrouted with all three architect seats occupied,
+# and nothing in the run, the summary or the board said so. Every indicator was
+# green, because every seat was either working or legitimately resting.
+#
+# The CAP is not answered here. It belongs to cmd_dispatch, which is the only
+# scope holding the slot count and the judge exemption, and conflating the two
+# would send an operator to the roster for a throttle or to the throttle for a
+# roster.
+class_roster_reason() { # <class> -> a sentence
+    local class=$1 s total=0 awake=0 queued=0 leaving=0 free=0 parts=""
+    for s in $(worker_seats); do
+        [ "$(seat_class "$s")" = "$class" ] || continue
+        total=$((total + 1))
+        case "$(seat_status "$s")" in
+            asleep-pending) leaving=$((leaving + 1)) ;;
+            asleep) if [ -f "$(seat_home "$s")/wake" ]; then
+                        queued=$((queued + 1))
+                    else
+                        # Unreachable from the call site — the lookup takes
+                        # exactly this seat — so it is counted rather than
+                        # dropped: an enumeration that does not sum to the
+                        # total is how a reader learns to stop trusting it.
+                        free=$((free + 1))
+                    fi ;;
+            *) awake=$((awake + 1)) ;;
+        esac
+    done
+    # The one condition that never self-heals. A retired or never-seated class
+    # swallows its whole queue for as long as the roster stands, so the remedy
+    # is an edit and not a wait, and describing seats that do not exist would
+    # send the operator to watch for a sleep that can never come.
+    if [ "$total" -eq 0 ]; then
+        echo "the roster seats no $class at all, so no $class bead can route until one is seated in kingdom.toml [seats]"
+        return 0
+    fi
+    # Transient by construction: those wakes are already queued, so the next
+    # run has somewhere to put this bead. Named apart from occupancy because
+    # the correct response is to do nothing, and the occupancy response is not.
+    if [ "$queued" -eq "$total" ]; then
+        echo "all $total $class seat(s) are asleep with a wake queued already, so this one waits for a later run"
+        return 0
+    fi
+    [ "$awake" -eq 0 ] || parts="$parts, $awake awake"
+    [ "$queued" -eq 0 ] || parts="$parts, $queued asleep with a wake queued"
+    [ "$leaving" -eq 0 ] || parts="$parts, $leaving asked to sleep and still leaving"
+    [ "$free" -eq 0 ] || parts="$parts, $free free (which contradicts the lookup that just failed)"
+    echo "all $total $class seat(s) are unavailable (${parts#, }); nothing here schedules a wake in response, so it waits for a citizen to sleep"
+}
+
+# The priority at or below which an unroutable bead is named ONE AT A TIME.
+# Above it they are counted instead. Both halves are load-bearing and they fail
+# in opposite directions: a P0 nobody can take is the town's highest work
+# standing still and has to be greppable by id, while the routable queue holds
+# 197 beads and a per-bead line for each of them every two minutes is the
+# volume at which an operator stops reading the journal — which is the same
+# outcome as silence, reached from the other side. A number, not a config key:
+# it tunes how loud a report is, not what the town does.
+DISPATCH_LOUD_PRIORITY=1
+
+# Names a bead the fresh pass could not route, at a volume set by its priority.
+# Reads and updates cmd_dispatch's `unroutable`, `stalled` and `quiet` through
+# bash's dynamic scope, the same way route_owners reads `slots` and `wakes`,
+# and for the same reason: the counting must not exist in two copies. It is
+# only ever called from there.
+report_unroutable() { # <id> <class> <priority> <reason>
+    local rid=$1 rcls=$2 rprio=$3 rwhy=$4
+    # A priority that is not a number sorts with the backlog rather than
+    # aborting the run: this is a report, and a diagnostic that can stop
+    # routing is a worse failure than the one it describes.
+    case "$rprio" in '' | *[!0-9]*) rprio=99 ;; esac
+    unroutable=$((unroutable + 1))
+    if [ "$rprio" -eq 0 ]; then
+        stalled=$((stalled + 1))
+        echo "dispatch: STALLED $rid — P0 $rcls work, ready and unassigned, and no seat can take it: $rwhy"
+    elif [ "$rprio" -le "$DISPATCH_LOUD_PRIORITY" ]; then
+        echo "dispatch: unroutable $rid — P$rprio $rcls work and no seat can take it: $rwhy"
+    else
+        quiet="$quiet$rcls|$rwhy
+"
+    fi
+}
+
 # A JSON payload belongs on a descriptor, never in argv. `--argjson` puts the
 # whole document in ONE command-line argument, and Linux caps a single argument
 # at MAX_ARG_STRLEN — 32 pages, 131072 bytes on a 4 KiB-page machine. That is a
@@ -1433,8 +1521,8 @@ cmd_dispatch() {
         ] | sort_by(.priority) | .[]
           | if .assignee != null           then "owned \(.assignee) \(.id)"
             elif (.priority // 0) > $maxp  then "lowpri \(.id) \(.priority // 0)"
-            elif .cls == null              then "fresh \(.id) warrior inferred"
-            else "fresh \(.id) \(.cls) labelled" end' <<<"$ready"); then
+            elif .cls == null              then "fresh \(.id) warrior inferred \(.priority // 0)"
+            else "fresh \(.id) \(.cls) labelled \(.priority // 0)" end' <<<"$ready"); then
         # Not "nothing routed": the resume pass above may already have queued
         # wakes, and they stand. An operator reading this during an incident has
         # to be able to trust it.
@@ -1443,7 +1531,12 @@ cmd_dispatch() {
         die "dispatch: the ready-queue query failed; neither owned nor fresh beads routed (the resume wakes above stand)"
     fi
     owned=$(echo "$queue" | awk '$1 == "owned" { print $2, $3 }')
-    routed=$(echo "$queue" | awk '$1 == "fresh" { print $2, $3, $4 }')
+    # The fourth field is the bead's priority, carried through so the
+    # unroutable report below can be proportionate to it (gqlc-2ve4). Every
+    # `read` over this list takes it, including the ones that ignore it: with
+    # `read -r id cls origin` the trailing field lands INSIDE `origin`, and the
+    # inferred-class arm's `[ "$origin" = inferred ]` then never matches.
+    routed=$(echo "$queue" | awk '$1 == "fresh" { print $2, $3, $4, $5 }')
     lowpri=$(echo "$queue" | awk '$1 == "lowpri" { print $2, $3 }')
 
     # Said out loud, one line per bead, in the same shape as the hold verdicts
@@ -1462,8 +1555,8 @@ cmd_dispatch() {
     # before routing rather than after, so a bead the hold verdict later
     # withholds is still on the record as unlabelled — the line reports where
     # the class came from, not that a wake happened.
-    local origin inferred=0
-    while IFS=' ' read -r id cls origin; do
+    local origin prio inferred=0
+    while IFS=' ' read -r id cls origin prio; do
         [ -n "$id" ] || continue
         [ "$origin" = inferred ] || continue
         echo "dispatch: class inferred $id — it carries no class: label, so it is routed as class:$cls by default; label it to send it somewhere else, or let the Ռազմիկ escalate it (Constitution III.1)"
@@ -1517,8 +1610,11 @@ cmd_dispatch() {
         fi
     fi
 
+    # report_unroutable's accumulators; see its comment where it is defined.
+    local unroutable=0 stalled=0 quiet=""
+
     local verdict reason how
-    while IFS=' ' read -r id cls origin; do
+    while IFS=' ' read -r id cls origin prio; do
         [ -n "$id" ] || continue
         verdict=$(awk -v i="$id" '$2 == i { $1 = $1; print; exit }' <<<"$verdicts")
         # An explicit ROUTE is the only thing that routes. A hold and a bead the
@@ -1534,8 +1630,13 @@ cmd_dispatch() {
         # `continue`, not `break`: the queue is sorted by priority, not by class,
         # so exhausted slots must skip past capped beads to reach judge work
         # sitting behind them rather than abandoning the rest of the queue.
-        if [ "$cls" != judge ]; then
-            [ "$slots" -gt 0 ] || continue
+        if [ "$cls" != judge ] && [ "$slots" -le 0 ]; then
+            # Not silent any more. The aggregate `no free slot` line above
+            # announces the condition but names nothing it held, so a P0 stuck
+            # behind the cap was indistinguishable from a P0 nobody had filed.
+            report_unroutable "$id" "$cls" "$prio" \
+                "every capped slot is spent ($active/$max awake) and only judge work is exempt from the cap"
+            continue
         fi
         # The seat is told too, not just the operator: a warrior who can see the
         # class was guessed knows escalation is on the table, and one who cannot
@@ -1546,8 +1647,23 @@ cmd_dispatch() {
             cmd_wake "$seat" --bead "$id" --reason "ready ${cls} work${how} — claim it before you begin"
             wakes=$((wakes + 1))
             if [ "$cls" != judge ]; then slots=$((slots - 1)); fi
+        else
+            report_unroutable "$id" "$cls" "$prio" "$(class_roster_reason "$cls")"
         fi
     done <<<"$routed"
+
+    # The counted arm, one line per (class, reason) rather than per bead. The
+    # aggregate is what keeps ordinary backlog visible without drowning the P0
+    # lines above it.
+    if [ -n "$quiet" ]; then
+        local qn qrest qcls qwhy
+        while IFS=' ' read -r qn qrest; do
+            [ -n "$qn" ] || continue
+            qcls=${qrest%%|*}
+            qwhy=${qrest#*|}
+            echo "dispatch: unroutable — $qn $qcls bead(s) of priority $((DISPATCH_LOUD_PRIORITY + 1)) or worse found no seat: $qwhy"
+        done < <(printf '%s' "$quiet" | sort | uniq -c | sed 's/^ *//')
+    fi
 
     # The report the routing cannot make for itself. This run's passes are done;
     # a bead none of them could reach is named here rather than left to be found
@@ -1561,7 +1677,7 @@ cmd_dispatch() {
     elif [ -n "$stranded" ]; then
         echo "dispatch: STRANDED — in progress and assigned to nobody, so no pass can wake anyone for them: $stranded"
     fi
-    echo "dispatch: done ($wakes wake(s) this run, $held held, $skipped below max_priority $maxprio, $inferred class inferred)"
+    echo "dispatch: done ($wakes wake(s) this run, $held held, $skipped below max_priority $maxprio, $inferred class inferred, $unroutable unroutable ($stalled at P0))"
 }
 
 # ---------- the routing hold ----------

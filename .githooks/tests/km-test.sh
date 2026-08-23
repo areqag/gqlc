@@ -1757,6 +1757,242 @@ else
     ok "with KM_CONFIG unset the reader is back on the town's own kingdom.toml"
 fi
 
+# --- no free seat: the fresh pass's own silence (gqlc-2ve4) -------------------
+# OBSERVED 2026-08-22T13:12Z: a P0 labelled class:architect sat unrouted while
+# all three architect seats were asleep-with-work-queued, and NOTHING said so —
+# not the run, not the summary, not the board. `free_worker_of_class` returning
+# 1 was an `if` with no `else`, one layer below the `elif .cls == null then
+# empty` arm that used to drop unlabelled beads. Same defect, same file: a
+# decision taken and not spoken, and the town reading healthy throughout.
+#
+# Four conditions with four different remedies, so the rows below assert the
+# REASON and not merely that something was said. A single "could not route"
+# line would pass a row that only checked for noise.
+#
+# Every row here uses the town's own roster (3 architects, 8 warriors, 3
+# judges) unless it says otherwise, and routes ARCHITECT work while leaving the
+# warriors free — so a run that reported nothing because it reported nothing at
+# all is distinguishable from one that declined the architect bead.
+
+# The bead itself: a P0 whose whole class is occupied is named, loudly, and
+# counted. The warrior control routes in the same run, so "the architect bead
+# reached nobody" cannot be satisfied by a dispatcher that did nothing.
+dispatch_case '[
+  {"id":"gqlc-p0stall","priority":0,"assignee":null,"labels":["class:architect"]},
+  {"id":"gqlc-livew","priority":1,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+fill_cap artur arpine aregak
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "no free seat: a P0 whose class is fully awake is named STALLED" "rc=$RC out=$OUT"
+elif ! grep -rq 'gqlc-livew' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "no free seat: a P0 whose class is fully awake is named STALLED" \
+        "the warrior control reached nobody, so this row proves nothing: $OUT"
+elif grep -rq 'gqlc-p0stall' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "no free seat: a P0 whose class is fully awake is named STALLED" \
+        "an architect bead routed with every architect awake: $(woken_seats)"
+elif ! printf '%s' "$OUT" | grep -q 'gqlc-p0stall'; then
+    bad "no free seat: a P0 whose class is fully awake is named STALLED" \
+        "the highest-priority bead in the town went unrouted and the run never mentions it: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'STALLED.*gqlc-p0stall'; then
+    bad "no free seat: a P0 whose class is fully awake is named STALLED" \
+        "it is mentioned without the P0 marker an operator greps for: $(printf '%s' "$OUT" | grep gqlc-p0stall)"
+# The REASON, not just the fact. 'awake' and the seat count are what tell this
+# apart from a queued-wake backlog or an unseated class, which have different
+# remedies entirely.
+elif ! printf '%s' "$OUT" | grep 'gqlc-p0stall' | grep -q '3 architect seat'; then
+    bad "no free seat: a P0 whose class is fully awake is named STALLED" \
+        "the line does not say how many seats of the class there are: $(printf '%s' "$OUT" | grep gqlc-p0stall)"
+elif ! printf '%s' "$OUT" | grep 'gqlc-p0stall' | grep -q '3 awake'; then
+    bad "no free seat: a P0 whose class is fully awake is named STALLED" \
+        "the line does not say the seats were awake, so it is indistinguishable from a queued-wake or unseated class: $(printf '%s' "$OUT" | grep gqlc-p0stall)"
+elif ! printf '%s' "$OUT" | grep -qF ', 1 unroutable (1 at P0)'; then
+    bad "no free seat: a P0 whose class is fully awake is counted in the done line" \
+        "the summary hides it: $(printf '%s' "$OUT" | grep 'done')"
+else
+    ok "a P0 bead whose class is entirely awake is named STALLED with the seat count and the reason, and counted in the done line"
+fi
+
+# The negative control the row above needs. A line printed on every run tells an
+# operator nothing, and a counter that never reads zero is not a counter.
+dispatch_case '[
+  {"id":"gqlc-quiet1","priority":0,"assignee":null,"labels":["class:architect"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "no free seat: a routable run says nothing about unroutable beads" "rc=$RC out=$OUT"
+elif ! grep -rq 'gqlc-quiet1' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "no free seat: a routable run says nothing about unroutable beads" \
+        "the bead did not route with every architect free (woken: $(woken_seats)) out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'STALLED\|unroutable gqlc-'; then
+    bad "no free seat: a routable run says nothing about unroutable beads" \
+        "it complained about a bead it had just routed: $OUT"
+elif ! printf '%s' "$OUT" | grep -qF ', 0 unroutable (0 at P0)'; then
+    bad "no free seat: a routable run says nothing about unroutable beads" \
+        "the counter does not read zero on a clean run: $(printf '%s' "$OUT" | grep 'done')"
+else
+    ok "with the class free the bead routes, no unroutable line is printed, and the counter reads zero"
+fi
+
+# Proportionate to priority. A P0 that cannot find a seat is an emergency; a P3
+# that cannot find a seat is the ordinary state of a 197-bead queue, and a
+# per-bead line for every one of them on a two-minute tick is the volume that
+# makes an operator stop reading — the same failure as silence, arrived at from
+# the other side. So the low-priority beads are counted, not named, and the
+# count is what makes them visible.
+dispatch_case '[
+  {"id":"gqlc-lo1","priority":2,"assignee":null,"labels":["class:architect"]},
+  {"id":"gqlc-lo2","priority":2,"assignee":null,"labels":["class:architect"]},
+  {"id":"gqlc-lo3","priority":3,"assignee":null,"labels":["class:architect"]}
+]' '[]'
+fill_cap artur arpine aregak
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "no free seat: low-priority beads are counted, not named one by one" "rc=$RC out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'gqlc-lo1\|gqlc-lo2\|gqlc-lo3'; then
+    bad "no free seat: low-priority beads are counted, not named one by one" \
+        "three ordinary backlog beads each got their own line: $(printf '%s' "$OUT" | grep 'gqlc-lo')"
+elif ! printf '%s' "$OUT" | grep -q 'unroutable.*3 architect bead'; then
+    bad "no free seat: low-priority beads are counted, not named one by one" \
+        "they were suppressed entirely, which is the silence this bead is about: $OUT"
+elif ! printf '%s' "$OUT" | grep -qF ', 3 unroutable (0 at P0)'; then
+    bad "no free seat: low-priority beads are counted, not named one by one" \
+        "the done line does not carry all three, or wrongly calls one of them P0: $(printf '%s' "$OUT" | grep 'done')"
+else
+    ok "three unroutable beads above the loud priority are aggregated into one counted line rather than named individually"
+fi
+
+# The middle band, and it is the row the two above cannot stand in for. With
+# only a P0 case and a P2 case, deleting the loud arm entirely leaves the suite
+# green: the P0 falls to the STALLED arm and the P2 to the counted one, and
+# nothing witnesses the priority BETWEEN them (measured — that mutation
+# SURVIVED until this row existed). It also pins the other half of the
+# distinction: STALLED is the P0 marker, so a P1 that wore it too would leave
+# an operator no way to grep the emergency out of the merely important.
+dispatch_case '[
+  {"id":"gqlc-mid1","priority":1,"assignee":null,"labels":["class:architect"]},
+  {"id":"gqlc-mid2","priority":2,"assignee":null,"labels":["class:architect"]}
+]' '[]'
+fill_cap artur arpine aregak
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "no free seat: a P1 is named individually and is not called STALLED" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'unroutable gqlc-mid1'; then
+    bad "no free seat: a P1 is named individually and is not called STALLED" \
+        "a P1 that reached nobody was counted rather than named: $OUT"
+elif printf '%s' "$OUT" | grep -q 'STALLED.*gqlc-mid1'; then
+    bad "no free seat: a P1 is named individually and is not called STALLED" \
+        "it wears the P0 marker, so an operator cannot grep the emergency apart: $(printf '%s' "$OUT" | grep gqlc-mid1)"
+elif ! printf '%s' "$OUT" | grep 'gqlc-mid1' | grep -q 'P1'; then
+    bad "no free seat: a P1 is named individually and is not called STALLED" \
+        "the line does not carry the priority: $(printf '%s' "$OUT" | grep gqlc-mid1)"
+elif printf '%s' "$OUT" | grep -q 'gqlc-mid2'; then
+    bad "no free seat: a P1 is named individually and is not called STALLED" \
+        "the P2 beside it was named too, so the band has no upper edge: $(printf '%s' "$OUT" | grep gqlc-mid2)"
+elif ! printf '%s' "$OUT" | grep -qF ', 2 unroutable (0 at P0)'; then
+    bad "no free seat: a P1 is named individually and is not called STALLED" \
+        "both beads should be counted and neither is a P0: $(printf '%s' "$OUT" | grep 'done')"
+else
+    ok "an unroutable P1 is named on its own line without the P0 marker, while the P2 beside it is only counted"
+fi
+
+# A queued wake is a DIFFERENT condition from an occupied class, and its remedy
+# is to wait one run rather than for a citizen to sleep. It is also the exact
+# state gqlc-2ve4 was observed in.
+dispatch_case '[
+  {"id":"gqlc-qw","priority":0,"assignee":null,"labels":["class:architect"]}
+]' '[]'
+for s in artur arpine aregak; do
+    mkdir -p "$KM_STATE_DIR/seats/$s"
+    echo "already queued" >"$KM_STATE_DIR/seats/$s/wake"
+done
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "no free seat: a class already handed its wakes says so" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'STALLED.*gqlc-qw'; then
+    bad "no free seat: a class already handed its wakes says so" "the P0 was not named at all: $OUT"
+elif printf '%s' "$OUT" | grep 'gqlc-qw' | grep -q 'awake'; then
+    bad "no free seat: a class already handed its wakes says so" \
+        "three ASLEEP seats were reported as awake, which sends the operator looking for work that is not there: $(printf '%s' "$OUT" | grep gqlc-qw)"
+elif ! printf '%s' "$OUT" | grep 'gqlc-qw' | grep -q 'wake queued'; then
+    bad "no free seat: a class already handed its wakes says so" \
+        "the run does not name the queued wakes as the reason: $(printf '%s' "$OUT" | grep gqlc-qw)"
+# The REMEDY, which is what separates this condition from occupancy. Every one
+# of those seats has a wake waiting, so the next run has somewhere to put this
+# bead and the correct response is to do nothing. Told to wait for a citizen to
+# sleep instead, an operator acts on a condition that is already resolving.
+elif ! printf '%s' "$OUT" | grep 'gqlc-qw' | grep -q 'waits for a later run'; then
+    bad "no free seat: a class already handed its wakes says so" \
+        "it describes a transient state with the occupancy remedy: $(printf '%s' "$OUT" | grep gqlc-qw)"
+else
+    ok "a bead whose class is asleep with every wake already queued is named, and the reason distinguishes it from an occupied class"
+fi
+
+# The fourth condition, and the only one that never self-heals: a class with no
+# seat at all. A retired or never-seated class swallows its whole queue for as
+# long as the roster stands, so the remedy is an edit to kingdom.toml and the
+# line has to say so rather than describing seats that do not exist.
+noarch="$TMP/noarch.toml"
+sed '/^artur \|^arpine \|^aregak /d' "$REPO/kingdom/kingdom.toml" >"$noarch"
+if KM_CONFIG="$noarch" "$KM" capped-seats | grep -qx 'artur\|arpine\|aregak'; then
+    bad "no free seat: an unseated class names the roster" "the fixture still seats an architect, so this row proves nothing"
+elif ! grep -q '^aramazd ' "$noarch"; then
+    bad "no free seat: an unseated class names the roster" "the fixture rewrite took the warriors too, so the control below proves nothing"
+else
+    dispatch_case '[
+      {"id":"gqlc-noseat","priority":0,"assignee":null,"labels":["class:architect"]},
+      {"id":"gqlc-noseatw","priority":1,"assignee":null,"labels":["class:warrior"]}
+    ]' '[]'
+    OUT="$(cd "$FIXTURE" && PATH="$BIN:$PATH" KM_CONFIG="$noarch" "$KM" dispatch 2>&1)"
+    RC=$?
+    if [ "$RC" -ne 0 ]; then
+        bad "no free seat: an unseated class names the roster" "rc=$RC out=$OUT"
+    elif ! grep -rq 'gqlc-noseatw' "$KM_STATE_DIR/seats" 2>/dev/null; then
+        bad "no free seat: an unseated class names the roster" \
+            "the warrior control reached nobody, so this row proves nothing: $OUT"
+    elif ! printf '%s' "$OUT" | grep -q 'STALLED.*gqlc-noseat '; then
+        bad "no free seat: an unseated class names the roster" "the P0 was not named at all: $OUT"
+    elif ! printf '%s' "$OUT" | grep 'gqlc-noseat ' | grep -q 'seats no architect'; then
+        bad "no free seat: an unseated class names the roster" \
+            "the reason does not say the class is unseated, so the operator is sent to wait for a seat that will never sleep: $(printf '%s' "$OUT" | grep 'gqlc-noseat ')"
+    else
+        ok "a bead of a class the roster does not seat is named STALLED and the reason points at kingdom.toml rather than at absent seats"
+    fi
+fi
+
+# The cap is its own reason with its own remedy, and it is NOT the roster's.
+# Before this it shared the roster's silence: the `[ "$slots" -gt 0 ] ||
+# continue` arm skipped past a capped bead saying nothing per bead, and the one
+# aggregate cap line above it does not name what it held.
+cap_config 7
+dispatch_case '[
+  {"id":"gqlc-capped","priority":0,"assignee":null,"labels":["class:warrior"]},
+  {"id":"gqlc-jexempt","priority":1,"assignee":null,"labels":["class:judge"]}
+]' '[]'
+fill_cap_leaving 0
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "no free seat: a bead held by the cap is named, and the judge is not" "rc=$RC out=$OUT"
+elif ! wake_of mihr | grep -q 'bead:gqlc-jexempt'; then
+    bad "no free seat: a bead held by the cap is named, and the judge is not" \
+        "the judge's exemption from the cap broke — ready review work did not reach the bench (woken: $(woken_seats)) out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'STALLED.*gqlc-jexempt\|unroutable.*gqlc-jexempt'; then
+    bad "no free seat: a bead held by the cap is named, and the judge is not" \
+        "the judge bead was reported unroutable although it was routed: $(printf '%s' "$OUT" | grep gqlc-jexempt)"
+elif ! printf '%s' "$OUT" | grep -q 'STALLED.*gqlc-capped'; then
+    bad "no free seat: a bead held by the cap is named, and the judge is not" \
+        "a P0 held back by a full cap is still not named: $OUT"
+elif ! printf '%s' "$OUT" | grep 'gqlc-capped' | grep -q 'cap'; then
+    bad "no free seat: a bead held by the cap is named, and the judge is not" \
+        "the reason does not name the cap, so it reads as a roster problem: $(printf '%s' "$OUT" | grep gqlc-capped)"
+elif ! printf '%s' "$OUT" | grep -qF ', 1 unroutable (1 at P0)'; then
+    bad "no free seat: a bead held by the cap is named, and the judge is not" \
+        "the done line does not count the capped bead, or counts the routed judge: $(printf '%s' "$OUT" | grep 'done')"
+else
+    ok "at a full cap the held P0 is named STALLED with the cap as the reason, while the cap-exempt judge bead routes and is reported unroutable nowhere"
+fi
+unset KM_CONFIG
+
 # Fail-closed, the half that made this invisible for the kingdom's whole life:
 # a query that FAILS must not read as a queue with nothing in it.
 dispatch_case 'not json at all' '[]'
