@@ -39,12 +39,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            test/data/codegen/go.sum
+          cache-key-suffix: -${{ hashFiles('test/data/codegen/go.sum') }}
       - uses: ./.github/actions/setup-just
       - run: just test-codegen-live-neo4j
 
@@ -55,12 +52,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            test/data/codegen/go.sum
+          cache-key-suffix: -${{ hashFiles('test/data/codegen/go.sum') }}
       - uses: ./.github/actions/setup-just
       - run: just test-codegen-live-age
 
