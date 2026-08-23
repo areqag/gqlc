@@ -426,12 +426,33 @@ PYEOF
     exit 0
   fi
 
+  # Selected with `sed -n /p` into a file, for the same reason the allowlist
+  # below is, and read back from that file rather than from `< <(...)`. Two
+  # separate properties hold this shape (gqlc-07c6):
+  #
+  # Zero matches. A plan with no HOLD and no ORPHAN records is the healthy
+  # steady state, and `grep` answers it with exit 1. `set -E` hands the ERR trap
+  # to the process-substitution subshell, so an unguarded grep there fired
+  # _abort *inside* that subshell: the whole PULL FAILED block printed, then the
+  # run carried on in the parent and printed its ordinary summary underneath.
+  # Observed on a real `git merge` on 2026-08-22 — "PULL FAILED — aborted at
+  # line 814; the pull is incomplete." directly above "pulled 0 bead(s), held 7"
+  # — and both cannot be true. `sed -n /p` reports no matches as exit 0, which
+  # is the answer these two sections want.
+  #
+  # A section that cannot be read. sed still exits 2 on an unreadable file, and
+  # running it here in the parent shell rather than in a subshell is what lets
+  # that reach the ERR trap and stop the run. That is the half a blanket
+  # `|| true` would have thrown away: a hold nobody could read would go
+  # unreported and the summary would count it as absent.
+  sed -n '/^HOLD /p' "$_tmp/plan.txt" >"$_tmp/holds.txt"
+  sed -n '/^ORPHAN /p' "$_tmp/plan.txt" >"$_tmp/orphans.txt"
   while read -r _ bid n reason; do
     echo "bd-gh-sync: holding $bid (GH #$n) out of the pull — $reason" >&2
-  done < <(grep '^HOLD ' "$_tmp/plan.txt")
+  done <"$_tmp/holds.txt"
   while read -r _ n; do
     echo "bd-gh-sync: GH #$n has no bead; not creating one. Adopt it with 'bd github pull $n'." >&2
-  done < <(grep '^ORPHAN ' "$_tmp/plan.txt")
+  done <"$_tmp/orphans.txt"
 
   # Whole remainder of the line, not `cut -f2`: an id carrying a space would be
   # silently truncated to its first token and a *different* bead would be named
