@@ -635,9 +635,16 @@ func unservedListElement(t resolver.ResolvedType) string {
 		}
 		return ""
 	case resolver.ResolvedScalar:
+		// Exhaustive over resolver.Scalar with no default, so a kind added
+		// to that sum fails this switch rather than falling into whichever
+		// side happened to be the fall-through. The two refused kinds are
+		// spelled out for that reason and not because a default would give
+		// a different answer today.
 		switch et.Kind {
 		case resolver.ScalarBool, resolver.ScalarInt, resolver.ScalarFloat, resolver.ScalarString:
 			return ""
+		case resolver.ScalarNull, resolver.ScalarMap:
+			return et.String()
 		}
 		return et.String()
 	case resolver.ResolvedTemporal:
