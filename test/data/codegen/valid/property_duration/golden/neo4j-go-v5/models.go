@@ -16,8 +16,19 @@ type Span struct {
 }
 
 // decodeSpan decodes a driver dbtype.Node into a Span struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeSpan(node dbtype.Node) (Span, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Span" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Span{}, fmt.Errorf("decode Span: expected a node labelled %q, got labels %q", "Span", node.Labels)
+	}
 	var out Span
 	value0, err := neo4j.GetProperty[dbtype.Duration](node, "elapsed")
 	if err != nil {

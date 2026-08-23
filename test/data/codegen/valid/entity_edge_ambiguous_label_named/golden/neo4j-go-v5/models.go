@@ -15,8 +15,19 @@ type Company struct {
 }
 
 // decodeCompany decodes a driver dbtype.Node into a Company struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeCompany(node dbtype.Node) (Company, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Company" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Company{}, fmt.Errorf("decode Company: expected a node labelled %q, got labels %q", "Company", node.Labels)
+	}
 	var out Company
 	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
@@ -32,8 +43,19 @@ type Person struct {
 }
 
 // decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodePerson(node dbtype.Node) (Person, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Person" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
+	}
 	var out Person
 	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
@@ -49,8 +71,12 @@ type CompanyKnows struct {
 }
 
 // decodeCompanyKnows decodes a driver dbtype.Relationship into a CompanyKnows struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeCompanyKnows(rel dbtype.Relationship) (CompanyKnows, error) {
+	if rel.Type != "KNOWS" {
+		return CompanyKnows{}, fmt.Errorf("decode CompanyKnows: expected a relationship of type %q, got %q", "KNOWS", rel.Type)
+	}
 	var out CompanyKnows
 	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {
@@ -66,8 +92,12 @@ type PersonKnows struct {
 }
 
 // decodePersonKnows decodes a driver dbtype.Relationship into a PersonKnows struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodePersonKnows(rel dbtype.Relationship) (PersonKnows, error) {
+	if rel.Type != "KNOWS" {
+		return PersonKnows{}, fmt.Errorf("decode PersonKnows: expected a relationship of type %q, got %q", "KNOWS", rel.Type)
+	}
 	var out PersonKnows
 	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {

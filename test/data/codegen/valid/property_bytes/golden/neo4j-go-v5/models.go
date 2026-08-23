@@ -18,8 +18,19 @@ type Blob struct {
 }
 
 // decodeBlob decodes a driver dbtype.Node into a Blob struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeBlob(node dbtype.Node) (Blob, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Blob" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Blob{}, fmt.Errorf("decode Blob: expected a node labelled %q, got labels %q", "Blob", node.Labels)
+	}
 	var out Blob
 	value0, err := neo4j.GetProperty[[]any](node, "chunks")
 	if err != nil {

@@ -3,6 +3,8 @@
 package entityzeropropertynode
 
 import (
+	"fmt"
+
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
@@ -11,8 +13,19 @@ type Marker struct {
 }
 
 // decodeMarker decodes a driver dbtype.Node into a Marker struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeMarker(node dbtype.Node) (Marker, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Marker" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Marker{}, fmt.Errorf("decode Marker: expected a node labelled %q, got labels %q", "Marker", node.Labels)
+	}
 	var out Marker
 	return out, nil
 }

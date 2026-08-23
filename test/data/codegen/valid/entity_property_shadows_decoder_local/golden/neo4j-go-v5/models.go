@@ -25,8 +25,19 @@ type Marker struct {
 }
 
 // decodeMarker decodes a driver dbtype.Node into a Marker struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeMarker(node dbtype.Node) (Marker, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Marker" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Marker{}, fmt.Errorf("decode Marker: expected a node labelled %q, got labels %q", "Marker", node.Labels)
+	}
 	var out Marker
 	value0, err := neo4j.GetProperty[string](node, "err")
 	if err != nil {
@@ -98,8 +109,12 @@ type LINKS struct {
 }
 
 // decodeLINKS decodes a driver dbtype.Relationship into a LINKS struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeLINKS(rel dbtype.Relationship) (LINKS, error) {
+	if rel.Type != "LINKS" {
+		return LINKS{}, fmt.Errorf("decode LINKS: expected a relationship of type %q, got %q", "LINKS", rel.Type)
+	}
 	var out LINKS
 	value0, err := neo4j.GetProperty[string](rel, "err")
 	if err != nil {

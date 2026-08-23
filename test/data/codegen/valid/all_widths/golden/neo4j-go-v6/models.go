@@ -29,8 +29,19 @@ type Row struct {
 }
 
 // decodeRow decodes a driver dbtype.Node into a Row struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeRow(node dbtype.Node) (Row, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Row" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Row{}, fmt.Errorf("decode Row: expected a node labelled %q, got labels %q", "Row", node.Labels)
+	}
 	var out Row
 	value0, err := neo4j.GetProperty[bool](node, "b")
 	if err != nil {

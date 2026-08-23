@@ -22,8 +22,19 @@ type Reading struct {
 }
 
 // decodeReading decodes a driver dbtype.Node into a Reading struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeReading(node dbtype.Node) (Reading, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Reading" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Reading{}, fmt.Errorf("decode Reading: expected a node labelled %q, got labels %q", "Reading", node.Labels)
+	}
 	var out Reading
 	value0, err := neo4j.GetProperty[[]any](node, "codes")
 	if err != nil {

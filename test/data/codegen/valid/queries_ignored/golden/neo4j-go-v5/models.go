@@ -17,8 +17,19 @@ type Person struct {
 }
 
 // decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodePerson(node dbtype.Node) (Person, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Person" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
+	}
 	var out Person
 	if v, ok := node.Props["age"]; ok {
 		s, ok := v.(int64)

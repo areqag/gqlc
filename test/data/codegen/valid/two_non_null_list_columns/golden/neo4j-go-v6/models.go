@@ -17,8 +17,19 @@ type Listy struct {
 }
 
 // decodeListy decodes a driver dbtype.Node into a Listy struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeListy(node dbtype.Node) (Listy, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Listy" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Listy{}, fmt.Errorf("decode Listy: expected a node labelled %q, got labels %q", "Listy", node.Labels)
+	}
 	var out Listy
 	value0, err := neo4j.GetProperty[[]any](node, "ranks")
 	if err != nil {

@@ -15,8 +15,19 @@ type Person struct {
 }
 
 // decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodePerson(node dbtype.Node) (Person, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Person" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
+	}
 	var out Person
 	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
@@ -32,8 +43,19 @@ type Post struct {
 }
 
 // decodePost decodes a driver dbtype.Node into a Post struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodePost(node dbtype.Node) (Post, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Post" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Post{}, fmt.Errorf("decode Post: expected a node labelled %q, got labels %q", "Post", node.Labels)
+	}
 	var out Post
 	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
@@ -49,8 +71,12 @@ type AUTHORED struct {
 }
 
 // decodeAUTHORED decodes a driver dbtype.Relationship into a AUTHORED struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeAUTHORED(rel dbtype.Relationship) (AUTHORED, error) {
+	if rel.Type != "AUTHORED" {
+		return AUTHORED{}, fmt.Errorf("decode AUTHORED: expected a relationship of type %q, got %q", "AUTHORED", rel.Type)
+	}
 	var out AUTHORED
 	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {
@@ -65,8 +91,12 @@ type LIKES struct {
 }
 
 // decodeLIKES decodes a driver dbtype.Relationship into a LIKES struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeLIKES(rel dbtype.Relationship) (LIKES, error) {
+	if rel.Type != "LIKES" {
+		return LIKES{}, fmt.Errorf("decode LIKES: expected a relationship of type %q, got %q", "LIKES", rel.Type)
+	}
 	var out LIKES
 	return out, nil
 }
@@ -76,8 +106,12 @@ type SHARED struct {
 }
 
 // decodeSHARED decodes a driver dbtype.Relationship into a SHARED struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeSHARED(rel dbtype.Relationship) (SHARED, error) {
+	if rel.Type != "SHARED" {
+		return SHARED{}, fmt.Errorf("decode SHARED: expected a relationship of type %q, got %q", "SHARED", rel.Type)
+	}
 	var out SHARED
 	return out, nil
 }

@@ -82,14 +82,24 @@ var wireScalarSpellings = map[string]bool{
 // labelGuardingTargets records, per registered target, whether that
 // backend's entity decoders gate on the wire label.
 //
-// apache-age-pgx-v5 does: a vertex and an edge are the same agtype object
-// but for the annotation, so the label is the only thing in the value that
-// says which entity type it is, and every decoder checks it. The neo4j
-// targets do not: their decoders take a dbtype.Node or a
-// dbtype.Relationship and read properties off it without consulting its
-// labels at all. That asymmetry is why the invariant surface cannot be the
-// gate here — it is exactly the encode/decode divergence the corpus exists
-// to permit.
+// Every registered target does, and this map is recorded rather than
+// deleted because "all three" is a state of today's registry, not a rule:
+// a fourth backend joins with a verdict to write down.
+//
+// apache-age-pgx-v5: a vertex and an edge are the same agtype object but
+// for the annotation, so the label is the only thing in the value that
+// says which entity type it is, and every decoder checks it.
+//
+// The neo4j targets did not, and the asymmetry was recorded here — 95 of
+// 95 against 0 of 123 — until bd gqlc-2h9w ruled it a defect and the
+// guard landed (internal/codegen/neo4j's writeLabelGuard). A
+// dbtype.Node arrives from the driver rather than from gqlc, so what the
+// resolver asked for does not bound what comes back, and a decoder
+// reading properties off a value without consulting its labels fills a
+// Person from a Post and reports no error. The two arms differ in what
+// the wire can hold: a node carries a label set, so the check is
+// containment of each key label, and a relationship carries one type, so
+// the check is equality.
 //
 // Both halves are checked. A target recorded true must guard *every*
 // entity decoder it emits anywhere in the corpus, so an emission that
@@ -101,8 +111,8 @@ var wireScalarSpellings = map[string]bool{
 // without a verdict.
 var labelGuardingTargets = map[string]bool{
 	"apache-age-pgx-v5": true,
-	"neo4j-go-v5":       false,
-	"neo4j-go-v6":       false,
+	"neo4j-go-v5":       true,
+	"neo4j-go-v6":       true,
 }
 
 // multiLabelEmittingTargets records, per registered target, whether that
@@ -691,7 +701,9 @@ type labelAlphabet map[codegen.EntityKind]map[string]bool
 //
 // A backend whose write path did stamp complete labels and whose decoders
 // did guard would need this per target as well as per axis. None does:
-// the only target recorded in labelGuardingTargets stamps the key set.
+// every target recorded in labelGuardingTargets stamps the key set —
+// AGE through wireEntity, the neo4j targets through writeLabelGuard,
+// both reading codegen.Entity.Labels, which is NodeType.KeyLabels.
 func schemaLabelAlphabet(sch schema.Schema) labelAlphabet {
 	out := labelAlphabet{}
 	for shape := range entityShapeWords {

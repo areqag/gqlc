@@ -15,8 +15,19 @@ type Person struct {
 }
 
 // decodePerson decodes a driver dbtype.Node into a Person struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodePerson(node dbtype.Node) (Person, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Person" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Person{}, fmt.Errorf("decode Person: expected a node labelled %q, got labels %q", "Person", node.Labels)
+	}
 	var out Person
 	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
@@ -34,8 +45,12 @@ type Likes struct {
 func (Likes) isGetLinkR() {}
 
 // decodeLikes decodes a driver dbtype.Relationship into a Likes struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeLikes(rel dbtype.Relationship) (Likes, error) {
+	if rel.Type != "LIKES" {
+		return Likes{}, fmt.Errorf("decode Likes: expected a relationship of type %q, got %q", "LIKES", rel.Type)
+	}
 	var out Likes
 	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {
@@ -53,8 +68,12 @@ type Wrote struct {
 func (Wrote) isGetLinkR() {}
 
 // decodeWrote decodes a driver dbtype.Relationship into a Wrote struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeWrote(rel dbtype.Relationship) (Wrote, error) {
+	if rel.Type != "WROTE" {
+		return Wrote{}, fmt.Errorf("decode Wrote: expected a relationship of type %q, got %q", "WROTE", rel.Type)
+	}
 	var out Wrote
 	value0, err := neo4j.GetProperty[int64](rel, "written")
 	if err != nil {

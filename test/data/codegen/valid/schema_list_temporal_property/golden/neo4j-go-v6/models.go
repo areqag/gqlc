@@ -19,8 +19,19 @@ type Sample struct {
 }
 
 // decodeSample decodes a driver dbtype.Node into a Sample struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeSample(node dbtype.Node) (Sample, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Sample" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Sample{}, fmt.Errorf("decode Sample: expected a node labelled %q, got labels %q", "Sample", node.Labels)
+	}
 	var out Sample
 	if v, ok := node.Props["days"]; ok {
 		s, ok := v.([]any)

@@ -18,8 +18,19 @@ type Event struct {
 }
 
 // decodeEvent decodes a driver dbtype.Node into a Event struct,
-// enforcing per-property nullability against the schema.
+// enforcing the wire label and the per-property nullability the
+// schema declares.
 func decodeEvent(node dbtype.Node) (Event, error) {
+	has0 := false
+	for _, label := range node.Labels {
+		if label == "Event" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return Event{}, fmt.Errorf("decode Event: expected a node labelled %q, got labels %q", "Event", node.Labels)
+	}
 	var out Event
 	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
