@@ -14,13 +14,20 @@
 # BRANCH NAME. A body that says `Closes #N` and resolves to no bead exits 1.
 # Measured three times on the night of 2026-08-23 — PRs #1382, #1387 and one
 # earlier — each costing about an hour, and one lane died before diagnosing
-# it. Two things compound to make the failure unreadable:
+# it. Two things compounded to make the failure unreadable:
 #
-#   1. `tidy` gates lint, test and codegen-fence, so when it fails those three
-#      report `skipping`. The check table reads like a run in progress, and
-#      both lanes watched went looking at their own diff first.
+#   1. `tidy` then carried `needs:` children, so its failure left lint, test
+#      and codegen-fence reporting `skipping`. The check table read like a run
+#      still in progress and both lanes watched went looking at their own diff
+#      first. THAT HALF IS FIXED: PR #1323 removed the `needs:` edges the same
+#      night, for an unrelated reason (a SKIPPED required context satisfies
+#      branch protection — bd gqlc-yc6x), so today a tidy failure presents as
+#      one red cell among green ones. Named here as history rather than as a
+#      current symptom, because a warning that describes a check table nobody
+#      will see is one a reader learns to distrust.
 #   2. Nothing said anything before the push. The first signal was a red check
-#      twenty seconds into a run the author had stopped watching.
+#      twenty seconds into a run the author had stopped watching. That half is
+#      what this file is for, and it is untouched by #1323.
 #
 # The branch-name fallback exists for exactly this and was not firing, because
 # this repo's own worktree recipe put the bead slug in the DIRECTORY name and
@@ -111,10 +118,11 @@ while read -r local_ref local_sha _remote_ref _remote_sha; do
     echo "" >&2
     echo "          Bead: <bead-id>" >&2
     echo "" >&2
-    echo "      Editing the PR body is enough — no new commit and no new push. Beware" >&2
-    echo "      that when tidy fails, lint/test/codegen-fence report 'skipping', so the" >&2
-    echo "      check table reads like a run still in progress rather than a refusal." >&2
-    echo "      Next time, put the bead id in the branch name and none of this applies." >&2
+    echo "      Editing the PR body is enough — no new commit and no new push; the" >&2
+    echo "      workflow re-runs on an 'edited' event. It fails in the 'tidy' job, whose" >&2
+    echo "      name says nothing about bead ids, so read tidy's log rather than your" >&2
+    echo "      own diff. Next time, put the bead id in the branch name instead:" >&2
+    echo "      <type>/<bead-id>-<slug>, e.g. fix/gqlc-uz3c-prepush-bead-warning." >&2
 done
 
 exit 0

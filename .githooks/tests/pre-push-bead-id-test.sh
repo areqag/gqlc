@@ -170,10 +170,20 @@ if grep -qF -- "$REMEDY" "$sole_err"; then
 else
     bad "warner: the message never names the remedy"
 fi
-if grep -qF -- 'skipping' "$sole_err"; then
-    ok "warner: the message names the 'skipping' shape the failure presents as"
+# The job name is the reader's only route from a red check to this cause, and
+# "tidy" says nothing about bead ids — which is how three lanes ended up
+# reading their own diffs instead.
+if grep -qF -- 'tidy' "$sole_err"; then
+    ok "warner: the message names the job the failure will appear under"
 else
-    bad "warner: the message does not warn about the misleading check table"
+    bad "warner: the message does not name the 'tidy' job"
+fi
+# A body edit is enough. Without this, the reader's cheapest reading of the
+# message is that they must re-cut the branch and force-push.
+if grep -qF -- 'no new commit and no new push' "$sole_err"; then
+    ok "warner: the message says a body edit alone re-runs the gate"
+else
+    bad "warner: the message does not say a body edit is enough"
 fi
 # Advisory, said out loud. A reader who takes this for a refusal goes looking
 # for what blocked a push that in fact succeeded.
