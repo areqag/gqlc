@@ -1363,6 +1363,76 @@ else
     ok "when the hold verdict cannot be computed the fresh pass is skipped out loud and nothing is routed unchecked, while the resume wakes already taken stand"
 fi
 
+# --- the candidate documents are assembled at board scale (gqlc-7918) --------
+# Every row above drives a queue of two or three beads, and at that size the
+# assembly's argv fits comfortably. The live board does not: on 2026-08-22 the
+# fresh pass had been dead since the hour the hold shipped, because `bd ready
+# -n 0 --json` was 1.2MB and reached jq as ONE --argjson string.
+#
+# Linux caps a single argv string at MAX_ARG_STRLEN (32 pages), independently of
+# ARG_MAX — which is why the total-size intuition clears it: ARG_MAX was 4MB and
+# the payload 1.2MB, so the call looked well inside budget and was not.
+#
+# The size is the whole test. A row that pins the assembly on three beads passes
+# on the broken code, which is exactly what every row above did.
+ARGV_ONE_MAX=131072
+
+# Padded through `description`, the field bd really does return and really does
+# let grow without bound. Two beads, so the row still measures ROUTING and not
+# merely that jq survived: the padded one carries the weight, the second is the
+# bead whose arrival is asserted.
+big_ready=$(jq -cn --argjson pad "$ARGV_ONE_MAX" '
+    [ {id: "gqlc-fat", priority: 0, assignee: null, labels: ["class:warrior"],
+       description: ("x" * $pad)},
+      {id: "gqlc-thin", priority: 1, assignee: null, labels: ["class:warrior"]} ]')
+if [ "${#big_ready}" -le "$ARGV_ONE_MAX" ]; then
+    bad "the fresh pass survives a ready queue too large for one argv argument" \
+        "the fixture is ${#big_ready} bytes, at or under the $ARGV_ONE_MAX limit it exists to exceed, so it witnesses nothing"
+else
+    dispatch_case "$big_ready" '[]'
+    run_dispatch
+    if [ "$RC" -ne 0 ]; then
+        bad "the fresh pass survives a ready queue too large for one argv argument" "rc=$RC out=$OUT"
+    elif printf '%s' "$OUT" | grep -q 'could not be assembled'; then
+        bad "the fresh pass survives a ready queue too large for one argv argument" \
+            "the assembly failed on a ${#big_ready}-byte queue and skipped the pass: $OUT"
+    elif ! grep -rq 'gqlc-fat' "$KM_STATE_DIR/seats" 2>/dev/null; then
+        bad "the fresh pass survives a ready queue too large for one argv argument" \
+            "nothing was routed from a ${#big_ready}-byte queue (woken: '$(woken_seats)'): $OUT"
+    else
+        ok "a ready queue larger than one argv argument is still assembled and routed, so the dispatcher does not go silently blind as the board grows"
+    fi
+fi
+
+# The second over-limit argument, and the reason this is two rows rather than
+# one. `parents` is `bd show <ids> --json`, whose rows carry full description and
+# notes; on the same live board it measured 1.6MB, LARGER than the ready queue.
+# Fixing only the argument that happens to fire first moves the same error one
+# argument along, where it reads as a fresh defect.
+big_parents=$(jq -cn --argjson pad "$ARGV_ONE_MAX" '
+    [ {id: "gqlc-dpar", status: "closed", description: ("x" * $pad)} ]')
+if [ "${#big_parents}" -le "$ARGV_ONE_MAX" ]; then
+    bad "the fresh pass survives a parent-status payload too large for one argv argument" \
+        "the fixture is ${#big_parents} bytes, at or under the $ARGV_ONE_MAX limit it exists to exceed, so it witnesses nothing"
+else
+    dispatch_case '[
+      {"id":"gqlc-dres","priority":0,"assignee":null,"labels":["class:warrior"]}
+    ]' '[]' '[{"issue_id":"gqlc-dres","depends_on_id":"gqlc-dpar","type":"discovered-from"}]' \
+       "$big_parents"
+    run_dispatch
+    if [ "$RC" -ne 0 ]; then
+        bad "the fresh pass survives a parent-status payload too large for one argv argument" "rc=$RC out=$OUT"
+    elif printf '%s' "$OUT" | grep -q 'could not be assembled'; then
+        bad "the fresh pass survives a parent-status payload too large for one argv argument" \
+            "the assembly failed on a ${#big_parents}-byte parent payload and skipped the pass: $OUT"
+    elif ! grep -rq 'gqlc-dres' "$KM_STATE_DIR/seats" 2>/dev/null; then
+        bad "the fresh pass survives a parent-status payload too large for one argv argument" \
+            "the residue of a CLOSED parent did not route from a ${#big_parents}-byte payload (woken: '$(woken_seats)'): $OUT"
+    else
+        ok "a parent-status payload larger than one argv argument is still assembled, so the second oversized argument is covered too"
+    fi
+fi
+
 unset KM_HOLD_SKIP_FETCH KM_FAKE_GH
 export KM_STATE_DIR="$TMP/state"
 

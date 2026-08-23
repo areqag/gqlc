@@ -641,14 +641,27 @@ cmd_dispatch() {
                 return 0
             fi
         fi
-        if ! docs=$(jq -c -n --argjson ready "$ready" --argjson deps "$deps" \
-            --argjson parents "$parents" --arg ids "$ids" '
-            ($ready | map({key: .id, value: .}) | from_entries) as $byId
-            | ($parents | map({key: .id, value: .status}) | from_entries) as $status
+        # Every payload arrives on a file descriptor, never in argv. Linux caps a
+        # SINGLE argv string at MAX_ARG_STRLEN (32 pages = 131072 bytes) quite
+        # separately from ARG_MAX, so `--argjson ready "$ready"` began failing
+        # the hour the board's ready queue passed 128KiB — with ARG_MAX at 4MB
+        # and the queue at 1.2MB, which is why it read as comfortably in budget.
+        # Both `ready` and `parents` were over (1.2MB and 1.6MB); `bd show`
+        # returns full descriptions and notes, so parents outgrew the queue.
+        # Projecting the payloads smaller would postpone this, not remove it:
+        # any argv-borne argument is bounded and the board is not.
+        # `--slurpfile` wraps each file's contents in an array, hence the [0].
+        if ! docs=$(jq -c -n \
+            --slurpfile ready <(printf '%s' "$ready") \
+            --slurpfile deps <(printf '%s' "$deps") \
+            --slurpfile parents <(printf '%s' "$parents") \
+            --rawfile ids <(printf '%s' "$ids") '
+            ($ready[0] | map({key: .id, value: .}) | from_entries) as $byId
+            | ($parents[0] | map({key: .id, value: .status}) | from_entries) as $status
             | [ ($ids | split("\n") | .[] | select(length > 0)) as $i
                 | { id: $i,
                     labels: ($byId[$i].labels // []),
-                    deps: [ $deps[]? | select(.issue_id == $i)
+                    deps: [ $deps[0][]? | select(.issue_id == $i)
                             | {depends_on_id, type, status: ($status[.depends_on_id] // "unknown")} ] } ]'); then
             echo "dispatch: the candidate documents could not be assembled; fresh pass skipped this run"
             return 0
