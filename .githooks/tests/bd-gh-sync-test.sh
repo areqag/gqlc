@@ -3501,6 +3501,173 @@ else
     esac
 fi
 
+# --- gqlc-x98l: a non-closed bead under a CLOSED mirror is drift no run fixes -
+# The pull is both the observer and the resolver, so `bd open / GH closed` is
+# indistinguishable from routine traffic: the pull applies the closure and the
+# two sides then agree. What survives that is the class the pull can neither
+# pull nor repair — a bead in a status GitHub cannot represent (in_progress,
+# blocked, deferred) whose mirror is CLOSED. gqlc-23e sat in it for a month.
+#
+# ԱՐ measured 2026-08-22 why it sat unseen: he ran the plan code on live inputs
+# and flipped GH #171 from CLOSED to OPEN, changing nothing else, and the output
+# was byte-identical to the control. Both states emitted
+# `HOLD gqlc-23e 171 status-blocked-unrepresentable-on-gh` — the reason string
+# did not separate the drift from the benign case, so nothing downstream could.
+# The first assertion here is that sweep turned into a row: the same bead under
+# each mirror state, required to differ.
+
+_drift_bead() { # $1=id $2=status $3=gh state $4=gh body
+    printf '[{"id":"%s","status":"%s","external_ref":"%s/171","description":"same"}]|[{"number":171,"state":"%s","body":"%s"}]' \
+        "$1" "$2" "$ISSUE" "$3" "$4"
+}
+_reason_for() { # reads $TMP/err after a run; prints the hold reason for $1
+    sed -n "s/.*holding $1 (GH #171) out of the pull — //p" "$TMP/err"
+}
+
+_x98l_named="a closed mirror is named apart from the benign unrepresentable hold"
+IFS='|' read -r _b _g <<<"$(_drift_bead b-flip blocked CLOSED same)"
+run_sync pull "$_b" "$_g"
+_r_closed=$(_reason_for b-flip)
+IFS='|' read -r _b _g <<<"$(_drift_bead b-flip blocked OPEN 'same and more')"
+run_sync pull "$_b" "$_g"
+_r_open=$(_reason_for b-flip)
+if [ -z "$_r_closed" ] || [ -z "$_r_open" ]; then
+    bad "$_x98l_named" \
+        "one of the two runs printed no hold reason at all (closed='$_r_closed' open='$_r_open')"
+elif [ "$_r_closed" = "$_r_open" ]; then
+    bad "$_x98l_named" \
+        "flipping the mirror's state changed nothing: both say '$_r_closed'"
+else
+    ok "$_x98l_named"
+fi
+
+# ...and the gate itself. `pull` rides on `git pull` and on session start, where
+# a non-zero aborts the operation underneath it, so it can never be the thing
+# that fails: this class was reported on a stderr line under a hook that exits
+# 0, which is why nobody saw it. `drift` is the same read-only classification
+# with the exit status free to carry the verdict.
+_x98l_fails="the drift check fails on a non-closed bead under a closed mirror"
+IFS='|' read -r _b _g <<<"$(_drift_bead b-drift blocked CLOSED same)"
+run_sync drift "$_b" "$_g"
+if [ "$RC" -eq 0 ]; then
+    bad "$_x98l_fails" "exited 0 with the drift present: $(last_line)"
+elif ! grep -q 'b-drift' "$TMP/err"; then
+    bad "$_x98l_fails" "failed without naming the bead: $(last_line)"
+else
+    ok "$_x98l_fails"
+fi
+
+# The row that separates this gate from the one that was measured too wide. A
+# blocked bead under an OPEN mirror is 2 of the live corpus and every one of
+# them is healthy — GitHub has no `blocked`, so an open mirror is the only state
+# it can hold. A gate that counts those fires on a town with nothing wrong.
+# Asserted on the same bead id and status as the row above, so the only thing
+# between a PASS and a FAIL here is the mirror's state.
+_x98l_benign="the drift check passes a non-closed bead under an open mirror"
+IFS='|' read -r _b _g <<<"$(_drift_bead b-drift blocked OPEN 'same and more')"
+run_sync drift "$_b" "$_g"
+if [ "$RC" -ne 0 ]; then
+    bad "$_x98l_benign" "exited $RC on a healthy bead: $(last_line)"
+else
+    ok "$_x98l_benign"
+fi
+
+# The other half of gqlc-x98l's description, and it is deliberately NOT in the
+# gate: a bead closed locally whose mirror is still open is resolved by this
+# script's own push path, which closes stale mirrors with `gh issue close`. So
+# it is transient — it lasts from the `bd close` to the next `git push` — and a
+# gate on it fires on ordinary work. Measured in the censuses on the bead: 1
+# instance on 2026-08-22, 0 on 2026-08-23, with no repair in between. It keeps
+# its own distinct hold reason, which is where it was already visible.
+_x98l_closed="a bead closed locally under an open mirror is reported, not failed"
+run_sync drift \
+    "[{\"id\":\"b-closed-open\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/171\",\"description\":\"same\"}]" \
+    '[{"number":171,"state":"OPEN","body":"same"}]'
+if [ "$RC" -ne 0 ]; then
+    bad "$_x98l_closed" "failed the gate on a state the push path repairs: $(last_line)"
+else
+    run_sync pull \
+        "[{\"id\":\"b-closed-open\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/171\",\"description\":\"same\"}]" \
+        '[{"number":171,"state":"OPEN","body":"same"}]'
+    if grep -q 'closed-locally-still-open-on-gh' "$TMP/err"; then
+        ok "$_x98l_closed"
+    else
+        bad "$_x98l_closed" "and the pull does not report it either: $(last_line)"
+    fi
+fi
+
+# A gate's clean verdict is a claim about a corpus, so the corpus has to have
+# been enumerated. An empty bead list produces zero DRIFT records for the same
+# reason a healthy one does, and only the second is a measurement — the shape
+# this file already refuses on the pull's held and orphan counts.
+_x98l_empty="a drift check over an empty bead list fails closed"
+run_sync drift '[]' '[{"number":171,"state":"CLOSED","body":"x"}]'
+if [ "$RC" -eq 0 ]; then
+    bad "$_x98l_empty" "certified a corpus it never read: $(last_line)"
+else
+    ok "$_x98l_empty"
+fi
+
+# ...and a selection that could not run at all. On the pull this is SKIPPING and
+# exit 0, because the pull rides on `git pull`. A gate has no such caller and
+# nothing to protect by staying quiet.
+_x98l_blind="a drift check whose selection could not run fails closed"
+py_fails 1
+run_sync drift \
+    "[{\"id\":\"b-blind\",\"status\":\"blocked\",\"external_ref\":\"$ISSUE/171\",\"description\":\"same\"}]" \
+    '[{"number":171,"state":"CLOSED","body":"same"}]'
+if [ "$RC" -eq 0 ]; then
+    bad "$_x98l_blind" "exited 0 having decided nothing: $(last_line)"
+else
+    ok "$_x98l_blind"
+fi
+
+# The gate reads two listings and writes nothing. Asserted rather than assumed:
+# it shares its whole selection path with the pull, and the pull's next act is
+# `bd github sync --prefer-github` over the allowlist. A fixture that offers an
+# eligible bead is what makes this row capable of failing.
+_x98l_ro="the drift check mutates nothing, whatever the plan allows"
+run_sync drift \
+    "[{\"id\":\"b-eligible\",\"status\":\"open\",\"external_ref\":\"$ISSUE/171\",\"description\":\"local\"$BD_EARLY}]" \
+    "[{\"number\":171,\"state\":\"OPEN\",\"body\":\"local\nadded on GH\"$GH_LATE}]"
+if pull_ran; then
+    bad "$_x98l_ro" "it issued 'bd github sync'"
+elif grep -q 'gh issue close' "$TMP/calls"; then
+    bad "$_x98l_ro" "it closed a GH issue"
+else
+    ok "$_x98l_ro"
+fi
+
+# ...and an abort inside the gate, sabotaged the same way the pull's is: a
+# directory planted where the drift section writes its file. The default arm of
+# the ERR trap exits 1 as well, so the status alone does not witness that drift
+# has an arm of its own; the wording does, and it is what tells a reader the
+# check decided nothing rather than found nothing.
+_x98l_abort="a drift check that aborts says so in its own words, exit 1"
+MKTEMP_BLOCK=drift.txt
+IFS='|' read -r _b _g <<<"$(_drift_bead b-abort blocked CLOSED same)"
+run_sync drift "$_b" "$_g"
+MKTEMP_BLOCK=
+if [ "$RC" -eq 0 ]; then
+    bad "$_x98l_abort" "exited 0 after aborting: $(last_line)"
+else
+    case "$(last_line)" in
+        *"DRIFT CHECK FAILED — aborted at line "*) ok "$_x98l_abort" ;;
+        *) bad "$_x98l_abort" "got: $(last_line)" ;;
+    esac
+fi
+
+# And the pull's own last line. Both its callers keep only that line, so a
+# notice on any other one is a notice that reaches nobody — which is the whole
+# account of how the live instance sat for a month.
+_x98l_summary="the pull's last line names the durable drift it found"
+IFS='|' read -r _b _g <<<"$(_drift_bead b-summary in_progress CLOSED same)"
+run_sync pull "$_b" "$_g"
+case "$(last_line)" in
+    *"b-summary"*) ok "$_x98l_summary" ;;
+    *) bad "$_x98l_summary" "got: $(last_line)" ;;
+esac
+
 # --- the assertion census ----------------------------------------------------
 # The one property this file cannot get from `set -u`, from shellcheck or from
 # its own exit status: that it still makes every assertion it made yesterday.
@@ -3743,6 +3910,15 @@ a long hold group names the count in full and the ids up to a cap
 a bead the push exited 0 over but never mirrored is not counted as pushed
 the bead that gained no mirror is named
 an unreadable post-push ledger withdraws the mirrored count
+a closed mirror is named apart from the benign unrepresentable hold
+the drift check fails on a non-closed bead under a closed mirror
+the drift check passes a non-closed bead under an open mirror
+a bead closed locally under an open mirror is reported, not failed
+a drift check over an empty bead list fails closed
+a drift check whose selection could not run fails closed
+the drift check mutates nothing, whatever the plan allows
+a drift check that aborts says so in its own words, exit 1
+the pull's last line names the durable drift it found
 the assertion census matches the assertions that ran
 CENSUS
 
