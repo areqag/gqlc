@@ -1474,7 +1474,7 @@ cmd_dispatch() {
     #
     # Captured once rather than piped: the hold verdict below needs each
     # candidate's labels, and re-querying could read a different queue.
-    local queue routed owned lowpri ready id cls prio seat
+    local queue routed owned lowpri epics ready id cls prio seat
     if ! ready=$(bd ready -n 0 --json 2>/dev/null); then
         die "dispatch: the ready-queue query failed; nothing routed beyond the resume wakes above"
     fi
@@ -1508,6 +1508,29 @@ cmd_dispatch() {
     # named by the floor rather than routed. Either order routes the same set;
     # this one reports the more specific reason, and the reason is the point.
     #
+    # The `epic` arm is the third withholding arm and the newest (gqlc-calw). An
+    # epic is a container for months of work under one id: a warrior woken on
+    # one is told to claim it and begin, there is no honest way to do that, and
+    # the slot it spends is one of six. The treatment is an architect
+    # decomposing it into execution beads, which is why the arm sits AFTER the
+    # owned test — an epic that names a seat is exactly the shape that should
+    # route, and Constitution III.3 protects it there as it protects a bead
+    # below the floor.
+    #
+    # It sits AHEAD of `lowpri` for the opposite reason `lowpri` sits ahead of
+    # the class test: the reason printed should be the one an operator can act
+    # on. "Below the floor" invites raising the floor, and raising it would not
+    # make an epic workable. Being an epic is a property of the bead; the floor
+    # is a config line that moved from 2 to 3 the night before this was written.
+    #
+    # `issue_type` and NOT a title convention or a label. MEASURED 2026-08-23
+    # over the whole ledger (`bd list --all -n 0 --json`, 814 beads): 6 carry
+    # `issue_type: epic`, of which 2 are not closed — gqlc-h9n at P1 and
+    # gqlc-35yu at P2, both unassigned, both in `bd ready`, both at or above a
+    # floor of 3, so both routable today. An `[EPIC]` title prefix is carried by
+    # 2 of those 6, a minority convention in prose. An `epic` LABEL is carried
+    # by 0 beads in the ledger. Only the type is bd's own field.
+    #
     # Each fresh row carries a third field, `inferred` or `labelled`, saying
     # where its class came from. Without it a routed-by-default bead and a
     # deliberately-labelled one are indistinguishable at the wake, which is the
@@ -1517,9 +1540,10 @@ cmd_dispatch() {
           | . as $b
           | (["architect", "warrior", "judge"]
              | map(. as $c | select(($b.labels // []) | index("class:" + $c))))[0] as $cls
-          | {id, priority, assignee, cls: $cls}
+          | {id, priority, assignee, cls: $cls, itype: .issue_type}
         ] | sort_by(.priority) | .[]
           | if .assignee != null           then "owned \(.assignee) \(.id)"
+            elif .itype == "epic"          then "epic \(.id)"
             elif (.priority // 0) > $maxp  then "lowpri \(.id) \(.priority // 0)"
             elif .cls == null              then "fresh \(.id) warrior inferred \(.priority // 0)"
             else "fresh \(.id) \(.cls) labelled \(.priority // 0)" end' <<<"$ready"); then
@@ -1538,6 +1562,7 @@ cmd_dispatch() {
     # inferred-class arm's `[ "$origin" = inferred ]` then never matches.
     routed=$(echo "$queue" | awk '$1 == "fresh" { print $2, $3, $4, $5 }')
     lowpri=$(echo "$queue" | awk '$1 == "lowpri" { print $2, $3 }')
+    epics=$(echo "$queue" | awk '$1 == "epic" { print $2 }')
 
     # Said out loud, one line per bead, in the same shape as the hold verdicts
     # below. A pass that declines work silently and then prints a summary that
@@ -1550,6 +1575,19 @@ cmd_dispatch() {
         echo "dispatch: below the floor $id — priority $prio, and [dispatch] max_priority is $maxprio; filed and searchable, routed to nobody"
         skipped=$((skipped + 1))
     done <<<"$lowpri"
+
+    # And the epics, said the same way and for the same reason. Withheld, NEVER
+    # dropped: the arm this one sits beside used to drop unlabelled beads
+    # silently, and that drop is why 25 beads including a P0 were absent from
+    # every dispatch run the town ever made (gqlc-38ye). The line names the
+    # remedy, because a refusal an operator cannot act on is only a quieter
+    # version of the same silence.
+    local epic_n=0
+    while IFS=' ' read -r id; do
+        [ -n "$id" ] || continue
+        echo "dispatch: epic $id — its issue_type is epic, so it is a container for work rather than work; it needs a Ճարտարապետ to decompose it into execution beads (assign it to one and it routes), not a seat to claim it. Routed to nobody."
+        epic_n=$((epic_n + 1))
+    done <<<"$epics"
 
     # And the same courtesy for the beads whose class this pass GUESSED. Said
     # before routing rather than after, so a bead the hold verdict later
@@ -1677,7 +1715,7 @@ cmd_dispatch() {
     elif [ -n "$stranded" ]; then
         echo "dispatch: STRANDED — in progress and assigned to nobody, so no pass can wake anyone for them: $stranded"
     fi
-    echo "dispatch: done ($wakes wake(s) this run, $held held, $skipped below max_priority $maxprio, $inferred class inferred, $unroutable unroutable ($stalled at P0))"
+    echo "dispatch: done ($wakes wake(s) this run, $held held, $epic_n epic, $skipped below max_priority $maxprio, $inferred class inferred, $unroutable unroutable ($stalled at P0))"
 }
 
 # ---------- the routing hold ----------

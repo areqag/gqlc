@@ -1465,6 +1465,120 @@ else
     ok "a ready, unassigned, class-labelled P3 bead is routed rather than reported below the floor"
 fi
 
+# --- epics are containers, not work (gqlc-calw) -------------------------------
+# An epic is months of work under one id. A warrior woken on one is told to
+# claim it and begin, and there is no honest way to do that: the slot is spent,
+# `[concurrency] max_active` is 6, and nothing can be finished as a unit. The
+# right treatment is an architect decomposing it into execution beads.
+#
+# MEASURED 2026-08-23 against the live ledger, read-only. Of 814 beads, 6 carry
+# `issue_type: epic` and 2 of those are not closed — gqlc-h9n (P1) and
+# gqlc-35yu (P2). BOTH sit in `bd ready`, unassigned, at or above the floor of
+# 3, so both are routable today and the fresh pass would wake a warrior for
+# each. The two competing signals were measured and rejected: an `[EPIC]` title
+# prefix is carried by 2 of the 6 typed epics (prose, and a minority
+# convention), and an `epic` LABEL is carried by 0 beads in the whole ledger.
+# `issue_type` is bd's own field, so it is the one guard that cannot rot.
+#
+# "Has non-closed children" was measured too and identifies exactly the same
+# two beads (parents of a non-closed child, ledger-wide: gqlc-h9n, gqlc-35yu,
+# and gqlc-8i0 which is a CLOSED feature). It catches nothing extra, needs a
+# whole-ledger dep query in the reverse direction of the one dispatch already
+# runs, and would over-hold an ordinary feature that happens to have one
+# sub-bead. Rejected on those three grounds, not on principle.
+#
+# The control beside the epic is what stops this row passing against a
+# dispatcher that routed nobody at all.
+dispatch_case '[
+  {"id":"gqlc-epicone","priority":1,"issue_type":"epic","assignee":null,"labels":["class:warrior"]},
+  {"id":"gqlc-notepic","priority":1,"issue_type":"bug","assignee":null,"labels":["class:warrior"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the fresh pass declines an epic" "rc=$RC out=$OUT"
+elif ! grep -rq 'gqlc-notepic' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the fresh pass declines an epic" \
+        "the non-epic control reached nobody, so this row proves nothing: $(woken_seats) out=$OUT"
+elif grep -rq 'gqlc-epicone' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the fresh pass declines an epic" \
+        "an epic was routed to $(grep -rl 'gqlc-epicone' "$KM_STATE_DIR/seats" | sed 's|.*/seats/||; s|/wake$||' | tr '\n' ' ')"
+else
+    ok "the fresh pass routes an ordinary bead and declines the epic beside it"
+fi
+
+# WITHHELD, NOT DROPPED. This is the whole argument of the change and not a
+# nicety: the arm this one sits beside used to DROP unlabelled beads, and the
+# drop is why 25 beads including a P0 were invisible to every dispatch run the
+# town ever made (gqlc-38ye). Both halves are asserted for the same reason the
+# floor asserts both — a count with no id is unactionable, an id with no count
+# is invisible in a long run — and the third clause pins that the line is
+# SPECIFIC to the epic, since a line printed for every bead tells nobody
+# anything.
+if ! printf '%s' "$OUT" | grep -q 'gqlc-epicone'; then
+    bad "a declined epic is named out loud" "the run never mentions it: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'epic gqlc-epicone'; then
+    bad "a declined epic is named out loud" \
+        "it is mentioned without the reason, so an operator cannot tell it from a routing failure: $OUT"
+elif printf '%s' "$OUT" | grep 'epic gqlc' | grep -q 'gqlc-notepic'; then
+    bad "a declined epic is named out loud" \
+        "the ordinary bead was announced as an epic too: $(printf '%s' "$OUT" | grep 'epic gqlc')"
+elif ! printf '%s' "$OUT" | grep -qF ", 1 epic,"; then
+    bad "a declined epic is counted in the summary" "the done line hides it: $(printf '%s' "$OUT" | grep 'done')"
+else
+    ok "the declined epic is named with its reason and counted in the done line, and the ordinary bead beside it is not"
+fi
+
+# Constitution III.3, the half no withholding arm may touch. An epic is exactly
+# the work an architect is SUPPOSED to hold — decomposition is the treatment —
+# so a seat that has claimed one, or been assigned one, must still be reached.
+# Both owner-facing passes run upstream of this arm; a guard applied to the
+# queue as a whole rather than to the fresh branch alone would strand the one
+# citizen who can actually resolve the epic, with nothing said.
+dispatch_case '[
+  {"id":"gqlc-ownepic","priority":1,"issue_type":"epic","assignee":"artur","labels":["class:architect"]}
+]' '[
+  {"id":"gqlc-resepic","priority":1,"issue_type":"epic","assignee":"arpine","labels":["class:architect"]}
+]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "the epic guard does not strand a citizen's own epic" "rc=$RC out=$OUT"
+elif ! wake_of arpine | grep -q 'gqlc-resepic'; then
+    bad "the epic guard does not strand a citizen's own epic" \
+        "an in-progress epic never came back to the seat holding it (woken: $(woken_seats)) out=$OUT"
+elif ! wake_of artur | grep -q 'gqlc-ownepic'; then
+    bad "the epic guard does not strand a citizen's own epic" \
+        "a ready epic naming a seat never reached it (woken: $(woken_seats)) out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'epic gqlc-ownepic\|epic gqlc-resepic'; then
+    bad "the epic guard does not strand a citizen's own epic" "it was applied to an owned bead: $OUT"
+else
+    ok "an epic still resumes to the seat holding it and still reaches the seat it names (III.3)"
+fi
+
+# Arm ORDER, where the epic arm sits relative to the priority floor. Both
+# withhold, so the routed set is the same either way and only the REASON
+# differs — which is the entire point of emitting rather than dropping. An epic
+# is a permanent property of the bead; the floor is a config line that moved
+# from 2 to 3 last night. Reporting "below the floor" for an epic sends an
+# operator to raise the floor, and raising it would not help.
+dispatch_case "[
+  {\"id\":\"gqlc-lowepic\",\"priority\":$OVER,\"issue_type\":\"epic\",\"assignee\":null,\"labels\":[\"class:warrior\"]},
+  {\"id\":\"gqlc-lowbug\",\"priority\":$OVER,\"issue_type\":\"bug\",\"assignee\":null,\"labels\":[\"class:warrior\"]}
+]" '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "an epic below the floor is named as an epic" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'below the floor gqlc-lowbug'; then
+    bad "an epic below the floor is named as an epic" \
+        "the ordinary P$OVER control was not reported by the floor, so this row witnesses no ordering: $OUT"
+elif printf '%s' "$OUT" | grep -q 'below the floor gqlc-lowepic'; then
+    bad "an epic below the floor is named as an epic" \
+        "the floor claimed it first, so the reason an operator reads is a number they could change: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'epic gqlc-lowepic'; then
+    bad "an epic below the floor is named as an epic" "neither arm named it: $OUT"
+else
+    ok "an epic below the floor is withheld as an epic rather than as a low priority"
+fi
+
 # --- the concurrency cap, and the judge's exemption from it (gqlc-dz85) ------
 # The bench is the town's merge gate. Counting judges against max_active
 # schedules them against the eight warriors generating the very PRs they must
