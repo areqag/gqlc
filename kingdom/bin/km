@@ -43,7 +43,8 @@ km — the machinery of the Թագաւորութիւն
   km install-units | uninstall-units
   km deploy                      fast-forward the checkout the timers run from
   km doctor                      health checks
-  km seat-refresh <s>            bring a parked seat's worktree (and its hooks) up to master
+  km seat-refresh <s> [--check]  bring a parked seat's worktree (and its hooks) up to master
+                                 --check reports and moves nothing (status/doctor read it)
   km state-dir | capped-seats | seat-info <s> | seat-worktree <s>
 EOF
 }
@@ -453,8 +454,26 @@ heartbeat_age() { # <seat> -> seconds
 
 # ---------- mail ----------
 
+# mail_box_count <seat> <inbox|read|sent>
+#
+# The directory guard is load-bearing under `set -o pipefail`: find exits 1 on a
+# directory that does not exist, and the whole km run dies mid-table for a box
+# nobody has written to yet (gqlc-6wqw). `read/` is missing far more often than
+# `inbox/` is, so the counter below would hit it constantly.
+mail_box_count() {
+    local d
+    d="$(state_dir)/mail/$1/$2"
+    [ -d "$d" ] || { echo 0; return 0; }
+    find "$d" -type f -name '*.md' 2>/dev/null | wc -l
+}
+
+# A letter leaves inbox/ in exactly ONE way: mail_read's final `mv`. So this
+# number means "unread" only for a reader who drains the box with `km mail read`
+# — which every SEAT does, because a seat is a process running that subcommand.
+# It means nothing of the kind for the king, and cmd_status says so rather than
+# printing the same word over both (gqlc-2abx).
 unread_count() {
-    find "$(state_dir)/mail/$1/inbox" -type f -name '*.md' 2>/dev/null | wc -l
+    mail_box_count "$1" inbox
 }
 
 mail_deliver() { # write one message file into a recipient's box dir
@@ -1434,19 +1453,38 @@ cmd_hold_verdict() {
         --slurpfile prKnown <(printf '%s' "$pr_known") \
         --slurpfile present <(printf '%s' "$present") '
         ($prs[0]) as $prs | ($prKnown[0]) as $prKnown | ($present[0]) as $present |
+        # (.labels // []) at both sites, and it is the same normalisation the
+        # rest of this file already applies at five others (km:601, 609, 650,
+        # and the two ready-queue counters in cmd_status). bd serialises a bead
+        # carrying no labels as `labels: null`, so a bare `.labels[]` aborts jq
+        # on the COMMONEST candidate shape in the town.
         def subjects_of:
-            [ .labels[] | select(type == "string" and startswith("subject:"))
+            [ (.labels // [])[] | select(type == "string" and startswith("subject:"))
               | .[8:] | sub("/+$"; "") | select(length > 0) ];
 
-        def is_judge: any(.labels[]; . == "class:judge");
+        def is_judge: any((.labels // [])[]; . == "class:judge");
 
         # Fail closed per candidate, never a silent drop: gqlc-z1qw was a jq
         # abort that read as a healthy zero, and one bad row must cost one line
         # rather than the whole run.
+        #
+        # `null` is EXCLUDED from this arm on purpose (gqlc-bcir). It used to be
+        # caught, and it is not corruption: measured 2026-08-22 over the ready
+        # queue, 293 beads had an array and 14 had null — every one of those 14
+        # was reported to the operator as "malformed candidate", 14 of the 27
+        # holds the town was issuing. A majority of the hold census was an
+        # unlabelled bead described in the vocabulary of data corruption, and
+        # the residue arm below — the code written for exactly that bead — was
+        # unreachable for all of them.
+        #
+        # The type is NAMED rather than only the type that was wanted, because
+        # "labels is not an array" sends a reader looking for a corrupt record
+        # without telling them what to look for.
         def malformed:
             if type != "object" then "not an object"
             elif (.id | type) != "string" or (.id == "") then "no id"
-            elif (.labels | type) != "array" then "labels is not an array"
+            elif (.labels != null) and ((.labels | type) != "array")
+                then "labels is \(.labels | type), not an array"
             else null end;
 
         # The slash boundary is the whole point of the second clause: a plain
@@ -1602,6 +1640,7 @@ fmt_age() { # <seconds>
 
 cmd_status() {
     local sd s disp class st ctx hb beads unread age hbcol stale frozen="" blind=""
+    local target tree fresh fstate fball fbgates fahead fdetail stalewt="" exposed="" unjudged=""
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
     if session_up; then echo "town: UP (tmux session '$SESSION')"; else echo "town: DOWN"; fi
@@ -1618,7 +1657,11 @@ cmd_status() {
         jq -r '.[] | select(.assignee != null) | "\(.assignee) \(.id)"') || inprog=""
 
     stale=$(status_unresponsive_after)
-    printf '%-10s %-10s %-9s %-6s %-7s %-6s %s\n' SEAT CLASS STATE CTX HB MAIL BEADS
+    # No fetch: see seat_freshness. An absent ref makes every TREE cell "?" and
+    # prints the UNJUDGED line below, rather than letting sixteen unanswered
+    # questions render as sixteen healthy seats.
+    target=$(git_at "$(main_root)" rev-parse --verify --quiet origin/master 2>/dev/null || true)
+    printf '%-10s %-10s %-9s %-6s %-7s %-7s %-6s %s\n' SEAT CLASS STATE CTX HB TREE MAIL BEADS
     for s in $(seats_all); do
         disp=$(seat_display "$s")
         class=$(seat_class "$s")
@@ -1662,12 +1705,48 @@ cmd_status() {
                 fi
                 ;;
         esac
+        # The tree the seat is STANDING IN. Everything else in this table is
+        # read out of the state dir, which is shared, so it is identical for
+        # every seat and identically right — and a seat parked fifteen hours
+        # back renders exactly like one at master (gqlc-d38n). Its own board is
+        # not blank, it is WRONG AND PLAUSIBLE: Րաֆֆի the guard read a roster
+        # with one judge in it, from a detached HEAD 14 commits behind, and
+        # correctly concluded the roster was broken.
+        fresh=$(seat_freshness "$s" "$target")
+        read -r fstate fball fbgates fahead fdetail <<<"$fresh"
+        : "$fahead $fdetail"
+        case "$fstate" in
+            current) tree="ok" ;;
+            parked)
+                tree="-$fball"
+                if [ "$fbgates" -gt 0 ]; then tree="$tree!"; fi
+                if [ "$fball" -gt 0 ]; then stalewt="$stalewt $s(-$fball)"; fi
+                ;;
+            working)
+                if [ "$fball" -eq 0 ]; then tree="wip"; else tree="wip-$fball"; fi
+                if [ "$fbgates" -gt 0 ]; then tree="$tree!"; fi
+                ;;
+            *) tree="?"; unjudged="$unjudged $s" ;;
+        esac
+        if [ "$fbgates" -gt 0 ]; then exposed="$exposed $s($fbgates)"; fi
         unread=$(unread_count "$s")
         beads=$(echo "$inprog" | awk -v s="$s" '$1 == s { printf "%s ", $2 }')
-        printf '%-10s %-10s %-9s %-6s %-7s %-6s %s  (%s)\n' "$s" "$class" "$st" "$ctx" "$hbcol" "$unread" "${beads:-—}" "$disp"
+        printf '%-10s %-10s %-9s %-6s %-7s %-7s %-6s %s  (%s)\n' "$s" "$class" "$st" "$ctx" "$hbcol" "$tree" "$unread" "${beads:-—}" "$disp"
     done
     if [ -n "$frozen" ]; then
         echo "UNRESPONSIVE:$frozen — no heartbeat for over $(fmt_age "$stale"); read the pane before believing the STATE column. A frozen seat holds its slot, answers no mail, and reports as healthy. Do not end the session: a modal is not consent (VI.2)."
+    fi
+    # MARK, never act — Constitution VI.2. Nothing in km consumes any of the
+    # three lines below; they exist so a human or the mayor can decide, exactly
+    # as UNRESPONSIVE above does.
+    if [ -n "$stalewt" ]; then
+        echo "STALE:$stalewt — a PARKED worktree that many commits behind origin/master. Nothing else in this table can show it: the seat reads its own tree correctly, its commands succeed, its tests pass and its own km prints a healthy board — of a town that no longer exists. Measured 2026-08-22: five seats at the founding commit, 14 behind, among them the guard and one of two judges (gqlc-d38n). 'km seat-refresh <seat>' moves a parked worktree to origin/master. A wip- cell is NOT this: a seat mid-PR is legitimately behind."
+    fi
+    if [ -n "$exposed" ]; then
+        echo "EXPOSED:$exposed — (N) commits touching .githooks/.claude that this seat's worktree has NOT got, so those gates do not run for it. core.hooksPath is relative and reads '.githooks' in every one of these seats, which is why no drift check in the town sees it (gqlc-xtre, gqlc-p1ek: 7 of 14 seats held no push guard hours after it merged). The refresh at wake deliberately does not move a seat holding work, so a wip! cell is expected and is still exposed."
+    fi
+    if [ -n "$unjudged" ]; then
+        echo "UNJUDGED:$unjudged — no worktree, or git could not read one, or this checkout has no origin/master ref. The TREE cell is '?' rather than 'ok': a question that was not answered is not a clean answer."
     fi
     if [ -n "$blind" ]; then
         echo "BLIND:$blind — a live seat whose CHECKOUT cannot write a heartbeat: kingdom/bin/km-statusline and the statusLine key in .claude/settings.json are both tracked files, so a worktree parked on a branch that forked before the kingdom landed has neither. The blank HB column above is this instrument's silence, not the seat's, and a seat working all night reads exactly like an idle one. Read the pane, and 'km seat-refresh <seat>' moves a parked worktree back to origin/master."
@@ -1684,7 +1763,28 @@ cmd_status() {
     # his standing labelling chore off this line (gqlc-mlca).
     ready=$(bd ready -n 0 --json 2>/dev/null) || ready="[]"
     echo "ready queue: $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:architect"))] | length') architect, $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:warrior"))] | length') warrior, $(echo "$ready" | jq '[.[] | select((.labels // []) | index("class:judge"))] | length') judge, $(echo "$ready" | jq '[.[] | select([((.labels // []) | index("class:architect")), ((.labels // []) | index("class:warrior")), ((.labels // []) | index("class:judge"))] | all(. == null))] | length') unlabelled (Սեդրակ's chore)"
-    echo "the king's inbox (andranik): $(unread_count andranik) unread"
+    # The king's box is NOT a seat's box, and the old line printed the same word
+    # over both (gqlc-2abx). A letter leaves inbox/ only when someone runs
+    # `km mail read`; every seat is a process that runs it, and Անդրանիկ is a
+    # human who reads the file in an editor. Measured 2026-08-22: inbox 30,
+    # read 0, zero reads since the town was founded — a number that reads
+    # identically whether he has read every word or none of them.
+    #
+    # This is worth a distinction and not just a softer word because the count
+    # had already changed the mayor's conduct twice in one day, both times
+    # toward silence: two digests to the king were withheld with "he has 30
+    # unread" written down as the reason, and the thing withheld was a bench
+    # decision only he could make. A metric that argues for silence toward the
+    # one person who can unblock you is worse than an absent one, because an
+    # absent one sends you to look.
+    local kbox kread
+    kbox=$(unread_count andranik)
+    kread=$(mail_box_count andranik read)
+    if [ "$kbox" -gt 0 ] && [ "$kread" -eq 0 ]; then
+        echo "the king's inbox (andranik): $kbox delivered, UNKNOWN read — this box has never been drained, and it is drained only by 'km mail read', which the king does not run. The number counts DELIVERY. Do not read it as 'unread' and do not withhold a letter on it (gqlc-2abx)."
+    else
+        echo "the king's inbox (andranik): $kbox in box, $kread moved to read/ by 'km mail read'"
+    fi
 }
 
 # ---------- doctor / install ----------
@@ -1735,6 +1835,82 @@ cmd_doctor() {
     else
         echo "ok:   every bead is in some dispatch pass"
     fi
+    # THE IDENTITY ARM (gqlc-0rv9). `.githooks/commit-msg` refuses an
+    # implausible author and `.github/scripts/check-pr-authors.sh` refuses one
+    # in Actions — both gate GIT. Nothing gated BD, and both consume the same
+    # ambient `git config user.email`: when a fixture identity leaks into the
+    # shared repo config, git refuses the commit and bd silently writes the
+    # false address onto every bead created in the window. Measured
+    # 2026-08-22: 15 beads across 5 citizens, in two windows 50 minutes apart
+    # (km@test, then fixture@example.invalid). The human noticed at 03:20Z; the
+    # second window had closed at 03:01Z. The noticing arrives after the window
+    # structurally, every time, which is what makes this worth an arm.
+    #
+    # SOURCED, not copied. This is the predicate's third consumer, and
+    # gqlc-gy3q is the record of what a second copy costs: while that bead was
+    # open two PRs carried independent copies that had ALREADY disagreed on
+    # four inputs. Copying it here would put the divergence between what git
+    # refuses and what bd is audited for — silently, in the direction where
+    # master accepts what commit-msg rejects. That file is read-only to this
+    # one: km defines nothing in it and changes nothing about it.
+    local idsrc
+    idsrc="$(dirname "$KINGDOM_DIR")/.githooks/implausible-identity.sh"
+    if [ ! -r "$idsrc" ]; then
+        echo "FAIL: cannot read $idsrc, so no bead owner can be certified a real address"
+        ok=1
+    else
+        # shellcheck source=/dev/null
+        . "$idsrc"
+        local owners bad_owners="" o why
+        if ! owners=$(bd list --status open -n 0 --json 2>/dev/null |
+            jq -r '[ .[] | .owner // empty | select(. != "") ] | unique | .[]'); then
+            # Fail-closed. gqlc-z1qw: an unanswered query that reads as a clean
+            # board is the failure mode this whole file is organised against.
+            echo "FAIL: could not read the open beads, so no owner can be certified a real address"
+            ok=1
+        else
+            while IFS= read -r o; do
+                [ -n "$o" ] || continue
+                if ! why=$(implausible_email_reason "$o"); then
+                    bad_owners="$bad_owners $o ($why);"
+                fi
+            done <<<"$owners"
+            if [ -n "$bad_owners" ]; then
+                # NAMES the address, and FAILS. A check that prints a complaint
+                # and exits 0 is not a gate (gqlc-z1qw, and `just doctor`
+                # printing ok over a warning at gqlc-bn5r).
+                echo "FAIL: open beads carry an owner that cannot belong to a person:$bad_owners fix 'git config user.email' and reassign them"
+                ok=1
+            else
+                echo "ok:   every open bead's owner is a deliverable address"
+            fi
+        fi
+    fi
+    # THE COVERAGE ARM (gqlc-p1ek). The deployment half is already fixed —
+    # km-seat refreshes a parked seat at wake — but the refresh deliberately
+    # does NOT move a seat holding work, and it tells only that seat, in its
+    # own wake banner. Nobody sweeping the town could see the gap, and the
+    # population it covers is exactly the seats that are working, i.e. the ones
+    # about to push. SOFT, not hard: a worktree that is legitimately mid-PR is
+    # not an operator error, and Constitution VI.2 forbids anything here from
+    # coercing the citizen standing in it. It is a mark.
+    local ctarget cexposed="" cs cf cstate cball cbgates cahead cdetail
+    ctarget=$(git_at "$(main_root)" rev-parse --verify --quiet origin/master 2>/dev/null || true)
+    if [ -z "$ctarget" ]; then
+        echo "warn: no origin/master here, so no seat's gate coverage could be measured"
+    else
+        for cs in $(seats_all); do
+            cf=$(seat_freshness "$cs" "$ctarget")
+            read -r cstate cball cbgates cahead cdetail <<<"$cf"
+            : "$cstate $cball $cahead $cdetail"
+            if [ "$cbgates" -gt 0 ]; then cexposed="$cexposed $cs($cbgates)"; fi
+        done
+        if [ -n "$cexposed" ]; then
+            echo "warn: seats whose worktree is missing merged .githooks/.claude commits, so those gates do not run for them:$cexposed"
+        else
+            echo "ok:   every seat's worktree carries every merged .githooks/.claude commit"
+        fi
+    fi
     check soft "bd mail.delegate points at km" sh -c "bd config get mail.delegate | grep -q 'km mail'"
     check soft "dispatch timer enabled" systemctl --user is-enabled kingdom-dispatch.timer
     check soft "guard timer enabled" systemctl --user is-enabled kingdom-guard.timer
@@ -1759,8 +1935,74 @@ cmd_doctor() {
 #
 # Exit 3 means "still exposed": held for work in flight AND behind on hooks.
 # km-seat turns that into a banner in the citizen's first message.
+
+# seat_freshness <seat> <target-sha> -> "<state> <behind_all> <behind_gates> <ahead> <detail>"
+#
+# ONE derivation, read by seat-refresh (which acts on it), by status and by
+# doctor (which only report it). gqlc-p1ek asks for exactly this and says why:
+# the obvious second derivation is to read `git config --get core.hooksPath`,
+# and that value is '.githooks' in a seat whose .githooks/ predates the gate —
+# measured 2026-08-22, all 14 seats read healthy while 7 held no push guard.
+# Coverage is a question about CONTENT, so it is answered by counting commits
+# the worktree has not got, against the paths that ARE the gates.
+#
+# Deliberately no fetch here. status renders this per seat on every call, and a
+# board that stalls on the network is a board nobody runs; seat-refresh fetches
+# once itself before calling in. The remote-tracking ref is shared by every
+# worktree in the town, so it is as fresh as the last fetch by anybody.
+#
+# States, and the distinction gqlc-d38n turns on — "behind because working" is
+# not "behind because parked", and only the second is a defect:
+#   current  HEAD is origin/master
+#   parked   detached, clean, no commits of its own: nothing here to lose, and
+#            nobody put it here on purpose. THIS is the 14-commit case.
+#   working  a branch, or a dirty tree, or commits of its own. Legitimately
+#            behind; reported, never counted as stale.
+#   unknown  no worktree, or git could not answer. Never rendered as current:
+#            a question that was not answered is not a clean answer.
+seat_freshness() {
+    local seat=$1 target=$2 wt head branch dirty ahead behind_all behind_gates
+    wt=$(seat_worktree "$seat")
+    [ -d "$wt" ] || { echo "unknown 0 0 0 no-worktree-at-$wt"; return 0; }
+    [ -n "$target" ] || { echo "unknown 0 0 0 no-origin-master-to-judge-against"; return 0; }
+    head=$(git_at "$wt" rev-parse HEAD 2>/dev/null) ||
+        { echo "unknown 0 0 0 git-cannot-read-$wt"; return 0; }
+
+    branch=$(git_at "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+    dirty=$(git_at "$wt" status --porcelain 2>/dev/null || echo "?")
+    # Detached and clean is not the same as parked. A citizen who committed
+    # without first cutting a branch leaves both of those signals empty, and
+    # moving that worktree takes the commit off every ref. A genuinely parked
+    # seat is an ancestor of target, so this is 0 for it and holds nobody
+    # who is not carrying something.
+    ahead=$(git_at "$wt" rev-list --count "$target..HEAD" 2>/dev/null) || ahead=0
+    behind_all=$(git_at "$wt" rev-list --count "HEAD..$target" 2>/dev/null) || behind_all=0
+    # Restricted to the paths that ARE the gates, and counted before any move.
+    behind_gates=$(git_at "$wt" rev-list --count "HEAD..$target" -- .githooks .claude 2>/dev/null) || behind_gates=0
+
+    if [ -n "$dirty" ] || [ -n "$branch" ] || [ "$ahead" -gt 0 ]; then
+        local why="$ahead commit(s) of its own, on no branch"
+        [ -n "$branch" ] && why="branch $branch in flight"
+        [ -n "$dirty" ] && why="uncommitted work in the tree"
+        echo "working $behind_all $behind_gates $ahead ${why// /-}"
+        return 0
+    fi
+    if [ "$head" = "$target" ]; then
+        echo "current 0 0 0 at-$(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
+        return 0
+    fi
+    echo "parked $behind_all $behind_gates 0 at-$(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
+}
+
 cmd_seat_refresh() {
-    local seat=${1:-}
+    local seat="" check=0 a
+    for a in "$@"; do
+        case "$a" in
+            --check) check=1 ;;
+            -*) die "seat-refresh: unknown flag $a" ;;
+            *) [ -z "$seat" ] || die "seat-refresh: one seat at a time"; seat=$a ;;
+        esac
+    done
     [ -n "$seat" ] || die "seat-refresh: which seat?"
     is_seat "$seat" || die "seat-refresh: unknown seat: $seat"
 
@@ -1773,46 +2015,50 @@ cmd_seat_refresh() {
     # report a seat current on evidence that is itself behind. Say so rather
     # than reporting a clean result from an unanswered question.
     local stale_note=""
-    git -C "$mr" fetch --quiet origin 2>/dev/null ||
+    git_at "$mr" fetch --quiet origin 2>/dev/null ||
         stale_note=" [fetch failed: judged against the last known origin/master]"
 
     local target
-    target=$(git -C "$mr" rev-parse --verify --quiet origin/master) ||
+    target=$(git_at "$mr" rev-parse --verify --quiet origin/master) ||
         die "seat-refresh: no origin/master to refresh $seat against"
 
-    local head branch dirty behind ahead
-    head=$(git -C "$wt" rev-parse HEAD)
-    branch=$(git -C "$wt" symbolic-ref --quiet --short HEAD || true)
-    dirty=$(git -C "$wt" status --porcelain)
-    # Counted before any move, and restricted to the paths that ARE the gates.
-    behind=$(git -C "$wt" log --oneline "HEAD..$target" -- .githooks .claude | wc -l)
-    # Detached and clean is not the same as parked. A citizen who committed
-    # without first cutting a branch leaves both of those signals empty, and
-    # moving that worktree takes the commit off every ref. A genuinely parked
-    # seat is an ancestor of target, so this is 0 for it and holds nobody
-    # who is not carrying something.
-    ahead=$(git -C "$wt" rev-list --count "$target..HEAD")
+    local f state behind_all behind_gates ahead detail head
+    f=$(seat_freshness "$seat" "$target")
+    read -r state behind_all behind_gates ahead detail <<<"$f"
+    : "$ahead"
 
-    if [ -n "$dirty" ] || [ -n "$branch" ] || [ "$ahead" -gt 0 ]; then
-        local why="$ahead commit(s) of its own, on no branch"
-        [ -n "$branch" ] && why="branch $branch in flight"
-        [ -n "$dirty" ] && why="uncommitted work in the tree"
-        if [ "$behind" -eq 0 ]; then
-            echo "seat-refresh $seat: held ($why); its hooks are current$stale_note"
+    case "$state" in
+        unknown)
+            die "seat-refresh: cannot judge $seat: ${detail//-/ }"
+            ;;
+        working)
+            local why="${detail//-/ }"
+            if [ "$behind_gates" -eq 0 ]; then
+                echo "seat-refresh $seat: held ($why); its hooks are current$stale_note"
+                return 0
+            fi
+            echo "seat-refresh $seat: HELD — $behind_gates hook/settings change(s) behind master and NOT applied ($why)$stale_note"
+            return 3
+            ;;
+        current)
+            echo "seat-refresh $seat: current at $(git_at "$wt" rev-parse --short HEAD)$stale_note"
             return 0
-        fi
-        echo "seat-refresh $seat: HELD — $behind hook/settings change(s) behind master and NOT applied ($why)$stale_note"
-        return 3
-    fi
+            ;;
+    esac
 
-    if [ "$head" = "$target" ]; then
-        echo "seat-refresh $seat: current at $(git -C "$wt" rev-parse --short HEAD)$stale_note"
+    # parked: safe to move, and the only state in which anything moves.
+    head=$(git_at "$wt" rev-parse HEAD)
+    if [ "$check" -eq 1 ]; then
+        # --check never moves, so a parked seat behind on gates is STILL
+        # exposed when this returns, and the exit status has to say so — the
+        # same 3 the acting path uses, for the same condition.
+        echo "seat-refresh $seat: STALE (--check, nothing moved) — $behind_all commit(s) behind origin/master, $behind_gates of them touching .githooks/.claude$stale_note"
+        [ "$behind_gates" -eq 0 ] || return 3
         return 0
     fi
-
-    git -C "$wt" checkout --detach --quiet "$target" ||
+    git_at "$wt" checkout --detach --quiet "$target" ||
         die "seat-refresh: could not move $seat's parked worktree to origin/master"
-    echo "seat-refresh $seat: refreshed $(git -C "$mr" rev-parse --short "$head") -> $(git -C "$wt" rev-parse --short HEAD) ($behind hook/settings change(s) picked up)$stale_note"
+    echo "seat-refresh $seat: refreshed $(git_at "$mr" rev-parse --short "$head") -> $(git_at "$wt" rev-parse --short HEAD) ($behind_gates hook/settings change(s) picked up)$stale_note"
 }
 
 render_unit() { # <src> <dst>
