@@ -402,6 +402,86 @@ func (s *SentinelTaxonomySuite) TestReachableBranchesAreReached() {
 	}
 }
 
+// TestExcludedBranchesAreUnreached is the measurement behind §4, and it
+// closes the last coverage exemption in this fence.
+//
+// §3's tagged branches are measured (TestUnreachedBranchesAreUnreached);
+// every untagged branch carrying a sentinel in allSentinels is measured
+// (TestReachableBranchesAreReached). Until this test, §4's were measured
+// by nothing: a sentinel with a §4 row is skipped by the first, exempted
+// by name from the second, and required by neither to be unreached. §4
+// was therefore a way to make a branch invisible to the whole fence by
+// writing one table row — and a more sanctioned-looking one than §3's,
+// because §3 at least costs a source tag whose claim is checked.
+//
+// What that bought, measured on this tree (bd gqlc-4r01): drop
+// ErrUnrepresentableEdgeUnion from allSentinels, move its §1 and §2 rows
+// to §4, and delete its three invalid fixtures, and the codegen tree goes
+// green while prepare.go still returns that sentinel for
+// MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r. The five edits
+// agree with each other; nothing held any of them against the code. With
+// this test the same edits go red, because the branch still executes.
+//
+// So the obligation §4 carries is §3's: a sentinel documented as
+// deliberately unreachable must actually be unreached. §4 differs from §3
+// only in what the exemption buys — §3 exempts a branch from needing a
+// fixture, §4 exempts a whole sentinel from needing to be in the slice —
+// and neither exempts anything from being measured.
+//
+// The per-sentinel fail-site requirement is the second half. A §4 row for
+// a sentinel no branch returns is prose about nothing, and it would also
+// make this loop vacuous for that row: the site loop would find no site
+// to measure and the row would pass on silence. Requiring at least one
+// site per §4 sentinel is what makes each row's pass mean a measurement
+// happened, rather than only the whole loop's.
+func (s *SentinelTaxonomySuite) TestExcludedBranchesAreUnreached() {
+	counts := s.corpusCoverage()
+
+	sitesFor := make(map[string][]failSite, len(s.excluded))
+	for _, site := range s.failSites {
+		sitesFor[site.sentinel] = append(sitesFor[site.sentinel], site)
+	}
+
+	// An empty §4 is a legitimate state and it makes the loop below range
+	// over nothing, so what it means is measured here rather than assumed.
+	// With no exempt sentinel, every sentinel the package declares has to
+	// be in allSentinels — and each of those is measured by
+	// TestReachableBranchesAreReached. Emptying §4 by deleting its rows
+	// therefore cannot buy silence: it moves the obligation rather than
+	// dropping it, and this says so on every run, including the runs where
+	// §4 is not empty.
+	s.Require().NotEmpty(s.declared, "the source scan found no sentinel declared in package codegen, so nothing below is measured")
+	excluded := make(map[string]bool, len(s.excluded))
+	for _, ident := range s.excluded {
+		excluded[ident] = true
+	}
+	for ident := range s.declared {
+		if excluded[ident] {
+			continue
+		}
+		s.Require().True(s.reachable[ident],
+			"%s is declared in %s, is not in allSentinels, and has no row under %q in %s; a sentinel exempt from the reachable set's obligations must say so in the document that this test measures",
+			ident, errorsFile, excludedHeading, taxonomyDoc)
+	}
+
+	for _, ident := range s.excluded {
+		sites := sitesFor[ident]
+		s.Require().NotEmpty(sites,
+			"%s %s carries a row for %s, but no branch in package codegen returns it; a sentinel nothing fails through is not deliberately unreachable, it is unused — drop the declaration and the row",
+			taxonomyDoc, excludedHeading, ident)
+
+		for _, site := range sites {
+			count, ok := counts.blockFor(codegenPkgPath+"/"+site.file, site.line)
+			s.Require().True(ok,
+				"the corpus coverage profile has no block covering %s:%d, which returns %s, a sentinel %s documents under %q; the fence cannot measure a line the profile does not carry",
+				site.file, site.line, ident, taxonomyDoc, excludedHeading)
+			s.Require().Zero(count,
+				"%s:%d returns %s, which %s %s documents as deliberately unreachable — but %d of the corpus's test binaries execute it. A sentinel an input reaches belongs in allSentinels with a §1 row, a §2 row and a negative fixture; %q is not a place to put a live sentinel",
+				site.file, site.line, ident, taxonomyDoc, excludedHeading, count, excludedHeading)
+		}
+	}
+}
+
 // TestStageSpecsReadAsHistory holds the C0–C6 stage specs' sentinel
 // sections and construct-to-sentinel tables against the note that says
 // they are history. The tables are frozen by design, so nothing else can

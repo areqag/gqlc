@@ -124,6 +124,7 @@ var corpusTests = []string{
 	"TestCypherStmtComposesOneStatement",
 	"TestCypherStmtRefusesAnOverlongName",
 	"TestAgtypeInstantCountsMicrosecondsFromTheEpoch",
+	"TestAgtypeInstantRefusesACountOutsideTheCalendar",
 	"TestAgtypeMicrosEncodesTheInstantAndNotTheWallClock",
 	"TestAgtypeNullableMicrosCarriesAbsence",
 	"TestAgtypeZoneReadsAnOffsetInSeconds",

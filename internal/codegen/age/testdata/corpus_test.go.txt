@@ -867,6 +867,63 @@ func TestAgtypeInstantCountsMicrosecondsFromTheEpoch(t *testing.T) {
 	}
 }
 
+// TestAgtypeInstantRefusesACountOutsideTheCalendar pins the bound on the
+// stored count. gqlc's encode writes the micros, but the property it
+// writes them to is an ordinary agtype integer on a vertex any writer can
+// touch, so the count read back is whatever the graph holds — the same
+// argument that bounds the offset sidecar, one property over.
+//
+// Taken unchecked, math.MaxInt64 microseconds decodes to a year near
+// 294247 and is returned with no error. That is not a date any wire
+// format beside this one spells: RFC 3339 has four year digits, and so
+// does every timestamp text a SQL client prints. A caller who formats it
+// gets a string no other system will read back.
+//
+// The admitted range is therefore the four-digit calendar, year 1 through
+// year 9999 inclusive, which is exactly the range the corpus above spans:
+// its far-end row, 253402300799999999, IS the upper bound, and its
+// pre-epoch row sits well inside the lower one. Both edges are read here
+// so the bound is a range and not a ceiling.
+func TestAgtypeInstantRefusesACountOutsideTheCalendar(t *testing.T) {
+	// The two edges themselves, which are admitted. The upper one is the
+	// year-9999 row above; the lower is midnight at the start of year 1.
+	for _, micros := range []int64{-62135596800000000, 253402300799999999} {
+		raw := strconv.FormatInt(micros, 10)
+		got, err := agtypeInstant([]byte(raw))
+		if err != nil {
+			t.Errorf("agtypeInstant(%s) = error %v, want the instant read", raw, err)
+			continue
+		}
+		if got.UnixMicro() != micros {
+			t.Errorf("agtypeInstant(%s) = %s, whose count is %d", raw, got.Format(time.RFC3339Nano), got.UnixMicro())
+		}
+	}
+
+	// One microsecond outside each edge, and the int64 extremes beyond
+	// them. The one-microsecond rows are what a bound written with the
+	// wrong comparison lets through; the extremes are what an absent
+	// bound lets through.
+	for _, micros := range []int64{
+		-62135596800000001,
+		253402300800000000,
+		math.MaxInt64,
+		math.MinInt64,
+	} {
+		raw := strconv.FormatInt(micros, 10)
+		got, err := agtypeInstant([]byte(raw))
+		if err == nil {
+			t.Errorf("agtypeInstant(%s) = %s, want an error", raw, got.Format(time.RFC3339Nano))
+			continue
+		}
+		// The count is the whole of what went wrong, so it has to be in
+		// the message: a reader looking at a failed row has the property
+		// name from the decoder that called this and nothing else.
+		if !strings.Contains(err.Error(), raw) {
+			t.Errorf("agtypeInstant(%s) = error %v, which does not name the count it read", raw, err)
+		}
+	}
+}
+
 func TestAgtypeMicrosEncodesTheInstantAndNotTheWallClock(t *testing.T) {
 	for _, tc := range instants {
 		if got := agtypeMicros(tc.at); got != tc.micros {

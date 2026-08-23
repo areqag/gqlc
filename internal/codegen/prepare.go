@@ -824,6 +824,26 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 		seenParam := make(map[string]int, len(q.Validated.Parameters))
 		for pi, param := range q.Validated.Parameters {
 			field := paramFieldName(param.Name)
+			// A name of nothing but underscores mangles to the empty
+			// string, which is not a Go field name. Refused only where
+			// the emission spells one: the one-parameter and no-parameter
+			// forms take the bare typed argument and derive no identifier
+			// from the parameter name at all, so $_ is served there and
+			// has to stay served (TestBlankParameterReachesOnlyThe-
+			// SingleParameterForm pins both halves).
+			//
+			// Before this, the two-or-more form emitted a struct field
+			// with no name and a bind expression reading `arg.,`, which
+			// left go/format to refuse the emission as ErrFormatFailure —
+			// a sentinel naming a template bug, handed to an author whose
+			// query is the thing at fault. Deferred rather than
+			// permanent: a future stage that spells Params fields
+			// positionally admits this, which is what puts it under
+			// ErrOutOfC6Scope rather than an unrepresentability.
+			if field == "" && len(q.Validated.Parameters) > 1 {
+				return nil, fmt.Errorf("%w: query %q parameter %d $%s mangles to no Go field name, and a query binding %d parameters spells one per parameter; rename it",
+					ErrOutOfC6Scope, q.Name, pi, param.Name, len(q.Validated.Parameters))
+			}
 			if first, dup := seenParam[field]; dup {
 				return nil, fmt.Errorf("%w: query %q parameters $%s (position %d) and $%s (position %d) both mangle to %q", ErrParamNameCollision, q.Name, q.Validated.Parameters[first].Name, first, param.Name, pi, field)
 			}
