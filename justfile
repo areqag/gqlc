@@ -223,30 +223,39 @@ init: check-push-keepalive
 # repaired. A marker-bearing copy that FAILS the behavioural check below is not:
 # that is tamper or corruption rather than absence, and it refuses.
 #
-# The first arm above stays a hard refusal: self-healing core.hooksPath would
+# The hooksPath arms stay hard refusals: self-healing core.hooksPath would
 # rewrite the very drift this recipe exists to report, and the shared config is
 # where the damage lives.
 [private]
 check-hooks:
     #!/usr/bin/env bash
     [ -n "${CI:-}" ] && exit 0
+    # The behavioural arm, and it runs FIRST (bd gqlc-o13d). It asks git to RUN a
+    # hook, so it answers the two states the value comparison below exits 0 on —
+    # .githooks/ holding only *.sample files, and a hook left non-executable — and
+    # the state where the value is overridden from the ENVIRONMENT rather than
+    # written to a file. Ordering is what that last one costs: `git config --get`
+    # reports an environment override, so the value arm would refuse it and print
+    # "Run 'just init' to fix", which for that shape rewrites a file that was
+    # never wrong and changes nothing. Measured as a red row before this was
+    # reordered. verify-hooks-live reads --show-origin and names the variables
+    # instead.
+    if ! .githooks/verify-hooks-live; then
+        echo "error: git did not run a hook when asked, so local hooks are inactive." >&2
+        echo "       The lines above say what is in the way; repair as they say —" >&2
+        echo "       'just init' is not the answer to every one of these." >&2
+        exit 1
+    fi
+    # Still reached, and not redundant. A hook ran, so the lookup works, but the
+    # value can still be a spelling this repository does not use — an absolute
+    # path at its own .githooks runs every hook and is drift worth naming, and it
+    # is the shape that will not survive the directory being moved. This arm is
+    # also the only one left on a git older than 2.36, where verify-hooks-live has
+    # no `git hook run` to use and says so instead of refusing.
     got="$(git config --get core.hooksPath || true)"
     if [ "$got" != ".githooks" ]; then
         echo "error: core.hooksPath is '${got:-<unset>}', expected '.githooks' — local hooks are inactive." >&2
         echo "       Run 'just init' to fix." >&2
-        exit 1
-    fi
-    # The behavioural arm. Everything above compares a string, and the header
-    # names two states it exits 0 on for that reason — .githooks/ holding only
-    # *.sample files, and a hook left non-executable. This asks git to RUN one, so
-    # it answers both, and it also answers the state where the value is overridden
-    # from the ENVIRONMENT: `git config --get` reports the override, but a value
-    # arriving that way is repaired by clearing a variable and not by `just init`,
-    # and the arm above would send the reader to the wrong repair (bd gqlc-o13d).
-    if ! .githooks/verify-hooks-live; then
-        echo "error: core.hooksPath reads '.githooks' and git still did not run a hook." >&2
-        echo "       The value is a string; the lines above are the behaviour. Repair as" >&2
-        echo "       they say — 'just init' is not the answer to every one of these." >&2
         exit 1
     fi
     dest_dir="$(git rev-parse --git-common-dir)/hooks"

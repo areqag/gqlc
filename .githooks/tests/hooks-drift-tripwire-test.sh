@@ -575,13 +575,56 @@ make_repo "$REPO"
 git -C "$REPO" config core.hooksPath "$(hooks_dir "$REPO")"
 run_check_hooks "$REPO"
 check "check-hooks: a drifted core.hooksPath is REFUSED, not healed" refused "$(verdict $?)"
+# The value, not the sentence carrying it. Two arms can refuse this fixture now
+# and the behavioural one speaks first (bd gqlc-o13d); what is owed to the reader
+# either way is the value they have to repair.
 case "$CH_OUT" in
-    *"core.hooksPath is '$(hooks_dir "$REPO")'"*)
-        check "check-hooks: the refusal quotes the drifted value" yes yes ;;
-    *) check "check-hooks: the refusal quotes the drifted value" yes no ;;
+    *"$(hooks_dir "$REPO")"*)
+        check "check-hooks: the refusal names the drifted value" yes yes ;;
+    *) check "check-hooks: the refusal names the drifted value" yes no ;;
 esac
 check "check-hooks: it did not rewrite core.hooksPath" "$(hooks_dir "$REPO")" \
     "$(git -C "$REPO" config --get core.hooksPath)"
+
+# --- arm 2: the value is right and git still runs nothing --------------------
+#
+# bd gqlc-o13d. The value comparison above answers about a string, and the two
+# states below satisfy it while every gate is absent. Both are refused by
+# `.githooks/verify-hooks-live`, which asks git to run a hook.
+
+# core.hooksPath correct, the hooks left non-executable — git skips them and
+# says so in a hint, and the string is unimpeachable.
+REPO="$TMP/ch-noexec"
+make_repo "$REPO"
+chmod -x "$REPO/.githooks/gqlc-liveness-probe" "$REPO/.githooks/pre-commit"
+run_check_hooks "$REPO"
+check "check-hooks: a correct value over non-executable hooks is REFUSED" refused "$(verdict $?)"
+case "$CH_OUT" in
+    *"git did not run a hook when asked"*)
+        check "check-hooks: the refusal says the value is not the behaviour" yes yes ;;
+    *) check "check-hooks: the refusal says the value is not the behaviour" yes no ;;
+esac
+check "check-hooks: it did not rewrite core.hooksPath to heal that" .githooks \
+    "$(git -C "$REPO" config --get core.hooksPath)"
+
+# The environment shape: .git/config is correct, GIT_CONFIG_PARAMETERS overrides
+# it, and `just init` would write a file that was never wrong. The refusal has to
+# send the reader somewhere other than `just init`, which is the whole reason the
+# origin is read.
+REPO="$TMP/ch-env"
+make_repo "$REPO"
+export GIT_CONFIG_PARAMETERS="'core.hooksPath=/dev/null'"
+run_check_hooks "$REPO"
+CH_RC=$?
+unset GIT_CONFIG_PARAMETERS
+check "check-hooks: an environment override is REFUSED" refused "$(verdict $CH_RC)"
+case "$CH_OUT" in
+    *"'just init' CANNOT repair this"*)
+        check "check-hooks: it does not send an env override to 'just init'" yes yes ;;
+    *) check "check-hooks: it does not send an env override to 'just init'" yes no ;;
+esac
+check "check-hooks: the config FILE was left correct throughout" .githooks \
+    "$(git -C "$REPO" config --file "$REPO/.git/config" --get core.hooksPath)"
 
 # --- a foreign hook squatting a name is the one ambiguous case: REFUSE --------
 
