@@ -49,7 +49,7 @@ func parse(r io.Reader) ([]AnnotatedQuery, error) {
 		out = append(out, AnnotatedQuery{
 			Name:        curName,
 			Cardinality: curCard,
-			Text:        strings.TrimSpace(curBody.String()),
+			Text:        bodyText(curBody.String()),
 		})
 		curBody.Reset()
 	}
@@ -71,7 +71,7 @@ func parse(r io.Reader) ([]AnnotatedQuery, error) {
 			}
 
 			if haveCurrent {
-				if strings.TrimSpace(curBody.String()) == "" {
+				if bodyText(curBody.String()) == "" {
 					return nil, fmt.Errorf("%w: line %d: %q has no body", ErrMissingAnnotation, lineno, curName)
 				}
 				flush()
@@ -105,7 +105,7 @@ func parse(r io.Reader) ([]AnnotatedQuery, error) {
 	}
 
 	if haveCurrent {
-		if strings.TrimSpace(curBody.String()) == "" {
+		if bodyText(curBody.String()) == "" {
 			return nil, fmt.Errorf("%w: %q has no body", ErrMissingAnnotation, curName)
 		}
 		flush()
@@ -125,6 +125,43 @@ func parse(r io.Reader) ([]AnnotatedQuery, error) {
 	}
 
 	return out, nil
+}
+
+// bodyText renders a query's accumulated lines into the statement text handed
+// verbatim to the driver. A run of comment lines separated from the query's
+// last real line by a blank line is free-standing prose — typically written to
+// introduce the NEXT query — and is dropped: Text crosses the wire as part of
+// the statement, and while neo4j reads "//" as a Cypher line comment, the AGE
+// backend composes Text into a SQL literal and nothing establishes it tolerates
+// arbitrary prose (bd gqlc-kc5w).
+//
+// Deliberately NOT dropped: a comment abutting a query line with no blank
+// separator, and a comment between two query lines. Those are the author
+// annotating THAT query, and removing them would change statements that work
+// today.
+func bodyText(raw string) string {
+	lines := strings.Split(raw, "\n")
+
+	// Walk back over the trailing run of blank and comment-only lines. The
+	// first blank line inside that run is the separator; everything from it
+	// onward is free-standing.
+	i := len(lines)
+	for i > 0 && isBlankOrComment(lines[i-1]) {
+		i--
+	}
+	for ; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			lines = lines[:i]
+			break
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func isBlankOrComment(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return trimmed == "" || strings.HasPrefix(trimmed, "//")
 }
 
 // parseCardinality lowers the annotation's raw token into the enum, or

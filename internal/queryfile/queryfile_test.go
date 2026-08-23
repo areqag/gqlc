@@ -139,6 +139,94 @@ func TestSentinelReachability(t *testing.T) {
 	}
 }
 
+// TestFreeStandingCommentBlockDoesNotJoinPrecedingQuery is the falsifier for
+// bd gqlc-kc5w: a query's Text is handed verbatim to the driver, so prose
+// written BETWEEN two named queries must not become part of the first
+// query's statement. The neo4j backend happens to tolerate it (// is a Cypher
+// line comment); the AGE backend composes Text into a SQL literal and nothing
+// establishes it tolerates anything.
+//
+// The second case pins the deliberate limit of the fix: a comment line that
+// abuts the query's last line with no blank separator is the author
+// annotating THAT query, and is preserved.
+func TestFreeStandingCommentBlockDoesNotJoinPrecedingQuery(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "free-standing block between queries is not appended",
+			src: "// name: FindPerson :one\n" +
+				"MATCH (p:Person) RETURN p\n" +
+				"\n" +
+				"// The queries below repeat the ones above one declared\n" +
+				"// width over. Prose, not Cypher.\n" +
+				"\n" +
+				"// name: ListPeople :many\n" +
+				"MATCH (p:Person) RETURN p\n",
+			want: "MATCH (p:Person) RETURN p",
+		},
+		{
+			name: "free-standing block at end of file is not appended",
+			src: "// name: FindPerson :one\n" +
+				"MATCH (p:Person) RETURN p\n" +
+				"\n" +
+				"// Trailing prose after the last query.\n",
+			want: "MATCH (p:Person) RETURN p",
+		},
+		{
+			name: "abutting comment is kept as part of the query",
+			src: "// name: FindPerson :one\n" +
+				"MATCH (p:Person) RETURN p\n" +
+				"// this annotates the line above\n" +
+				"\n" +
+				"// name: ListPeople :many\n" +
+				"MATCH (p:Person) RETURN p\n",
+			want: "MATCH (p:Person) RETURN p\n// this annotates the line above",
+		},
+		{
+			name: "interior comment between query lines is kept",
+			src: "// name: FindPerson :one\n" +
+				"MATCH (p:Person)\n" +
+				"// filter\n" +
+				"WHERE p.age > 30\n" +
+				"RETURN p\n" +
+				"\n" +
+				"// name: ListPeople :many\n" +
+				"MATCH (p:Person) RETURN p\n",
+			want: "MATCH (p:Person)\n// filter\nWHERE p.age > 30\nRETURN p",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := New().Parse(bytes.NewReader([]byte(tc.src)))
+			require.NoError(t, err)
+			require.NotEmpty(t, got)
+			require.Equal(t, tc.want, got[0].Text)
+		})
+	}
+}
+
+// TestCommentOnlyBodyIsNoBody: once a free-standing comment block stops
+// attaching to the preceding query, a query whose entire body is such a block
+// has no statement to run, and must be reported rather than shipped as an
+// empty string.
+func TestCommentOnlyBodyIsNoBody(t *testing.T) {
+	src := "// name: FindPerson :one\n" +
+		"\n" +
+		"// nothing but prose here\n" +
+		"\n" +
+		"// name: ListPeople :many\n" +
+		"MATCH (p:Person) RETURN p\n"
+
+	got, err := New().Parse(bytes.NewReader([]byte(src)))
+	require.Error(t, err)
+	require.Nil(t, got)
+	require.ErrorIs(t, err, ErrMissingAnnotation)
+}
+
 // annotationEnvelope wraps the parse result for stable JSON encoding: an
 // object with a "queries" key beats a bare array at the top level for
 // readability, and gives the golden a clear anchor for future field
