@@ -74,10 +74,31 @@ The status filter has no such notice at any verbosity. Verified: `bd list --json
    sentence the call site is trying to write.
 4. When a query answers "absent", check `--all` before acting on it.
 
+## Rules 1 and 2 are gated
+
+`.githooks/tests/bd-query-flags-test.sh` sweeps tracked shell, just and Go
+sources for scripted `bd list` / `bd ready` invocations and exits non-zero when
+one omits its row cap, or when a `bd list` omits its status set. It runs under
+`just test-hooks`, which the pre-push hook runs. bd `gqlc-qh9z`.
+
+What it can and cannot see, stated so nobody reads a green run as more than it
+is:
+
+- It gates **statedness**, not correctness. `--status open` is explicit, so it
+  passes, whether or not `open` is the status that call site means. The one
+  known wrong-for-its-purpose site (bd `gqlc-c7b5`) is green here for exactly
+  that reason.
+- It does not sweep markdown. The instruction files and this document quote the
+  wrong form deliberately, as the counterexample they teach against.
+- A `bd` invocation whose arguments are split across lines in Go is reported
+  rather than skipped. The gate fails closed; joining the line is the fix.
+
 ## Audit of this repository's call sites
 
-Taken 2026-08-23 at `c129a0a5`. Nine scripted `bd list` / `bd ready`
-invocations exist; eight are correct for their purpose.
+Taken 2026-08-23. Eleven scripted `bd list` / `bd ready` invocations exist; ten
+are correct for their purpose. Line numbers are a reading at `c129a0a5` and have
+drifted since; the gate above enumerates the live set, and its own enumeration
+rows go red if that set collapses.
 
 | Site | Query | Verdict |
 | --- | --- | --- |
@@ -86,6 +107,10 @@ invocations exist; eight are correct for their purpose.
 | `kingdom/bin/km` 1014, 1150, 1656 | `bd list --status in_progress -n 0 --json` | correct — the status is the point of the query |
 | `kingdom/bin/km` 1196, 1764 | `bd ready -n 0 --json` | correct — `bd ready` is open-only by construction |
 | `kingdom/bin/km` 1865 | `bd list --status open -n 0 --json` | **wrong for its purpose** — bd `gqlc-c7b5` |
+
+(The prose above this table said "nine" and "eight" when it shipped, while the
+table itself enumerated eleven sites. The gate's enumeration row now measures
+the count rather than restating it.)
 
 The one wrong site is the `km doctor` IDENTITY arm, which audits bead owners for
 undeliverable addresses and therefore means "every unfinished bead", not "every
