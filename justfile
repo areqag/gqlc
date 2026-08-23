@@ -1076,35 +1076,69 @@ fmt-check: ensure-golangci
 # nothing touches the worktree). The comment said ~1s until that was timed —
 # the suites have grown by an order of magnitude since.
 #
-# Suites live in .githooks/tests/ and are named <subject>-test.sh. Both halves
-# are enforced by internal/tools/ciguard, which reads that directory rather than
-# globbing it: a non-dotfile in there under any other name is refused, and every
-# non-dotfile in there has to be named below. Dotfiles are skipped — a
-# deliberate hole, so that an editor swap file beside a suite does not redden
-# the build; the note on hookSuites in internal/tools/ciguard/hooktests_test.go
-# is where that is argued. A suite written anywhere else is one nothing runs and
-# nothing reports (bd gqlc-l45j).
+# Suites live in .githooks/tests/ and are named <subject>-test.sh. This recipe
+# DISCOVERS them by globbing that directory; it does not enumerate them. Adding
+# a suite is therefore creating one file and nothing else.
 #
-# Plain recipe, not a shebang one, deliberately: just gives each line's exit
-# status to the recipe here, where a shebang recipe hands the whole body to one
-# shell and returns only its last line's status unless that shell sets errexit.
-# ciguard holds this by running the recipe against stubbed suites, not by
-# reading it.
+# It used to enumerate them, one `bash <path>` line per suite, and that list was
+# an append point every new suite had to touch. Two citizens adding a suite in
+# parallel appended at the same location and git could not merge them, though
+# the resolution was always "keep both lines": measured on PR #1247, which
+# conflicted with three other open PRs at this exact hunk (bd gqlc-234l). A
+# glob has no append point, so that class of conflict is gone rather than
+# reduced.
+#
+# WHAT THE LIST WAS FOR, and why the glob does not give it back. gqlc-l45j is
+# "a suite nothing runs and nothing reports", and the list did not close that.
+# The list could only catch a suite sitting in .githooks/tests/ unregistered —
+# a state the glob makes unreachable, because the glob runs whatever is there.
+# What catches a suite written ELSEWHERE is internal/tools/ciguard's walk over
+# .githooks/, which refuses a test-looking file parked beside the hooks and
+# refuses every subdirectory but this one; that walk is untouched and is still
+# the thing holding gqlc-l45j.
+#
+# The glob is only as total as the naming convention, so ciguard enforces the
+# convention rather than assuming it: a non-dotfile in .githooks/tests/ that
+# does not end in -test.sh is REFUSED there, not skipped, and ciguard also pins
+# that the pattern below is the one that matches exactly what it accepts.
+# Dotfiles are skipped by both — a deliberate hole, so that an editor swap file
+# beside a suite does not redden the build; the note on hookSuites in
+# internal/tools/ciguard/hooktests_test.go is where that is argued.
+#
+# The empty case FAILS. A discovery loop that finds nothing otherwise runs zero
+# suites, exits 0, and reads on every dashboard exactly like fourteen suites
+# passing — the fail-open shape this whole surface exists to refuse. So does a
+# glob that did not expand: `shopt -s nullglob` is what makes the empty case
+# reach the refusal below instead of trying to run a file literally named
+# `*-test.sh`, and `failglob` is not used because its message names no cause.
+#
+# A shebang recipe now, where the enumeration was deliberately a plain one so
+# that just gave each line its own exit status. `set -euo pipefail` carries that
+# property here instead, and ciguard holds it by RUNNING this recipe against
+# stubbed suites — one stubbed to fail, asserting that nothing after it ran —
+# rather than by reading the carrier. That behavioural test is why the carrier
+# could change at all.
 test-hooks:
-    bash .githooks/tests/claude-pre-bash-test.sh
-    bash .githooks/tests/claude-pre-ask-test.sh
-    bash .githooks/tests/commit-msg-test.sh
-    bash .githooks/tests/bd-gh-sync-test.sh
-    bash .githooks/tests/lint-hooks-test.sh
-    bash .githooks/tests/check-pr-closes-test.sh
-    bash .githooks/tests/tool-gate-test.sh
-    bash .githooks/tests/km-test.sh
-    bash .githooks/tests/worktree-upstream-test.sh
-    bash .githooks/tests/hooks-drift-tripwire-test.sh
-    bash .githooks/tests/shared-config-drift-test.sh
-    bash .githooks/tests/git-env-sandbox-test.sh
-    bash .githooks/tests/km-overlap-test.sh
-    bash .githooks/tests/repo-purity-test.sh
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The expansion below is sorted by the shell's collation, and that order is
+    # the order the suites run in — so it is pinned rather than left to whatever
+    # locale the caller happens to carry. Not exported: bash applies LC_ALL to
+    # itself on assignment, and the suites should run under the developer's own
+    # locale, not this one.
+    LC_ALL=C
+    shopt -s nullglob
+    suites=(.githooks/tests/*-test.sh)
+    if [ "${#suites[@]}" -eq 0 ]; then
+        echo "error: .githooks/tests/*-test.sh matched nothing, so this recipe would run zero" >&2
+        echo "       suites and exit 0 — indistinguishable from every suite passing. Either" >&2
+        echo "       the suites moved, or this is not the repository root (bd gqlc-234l)." >&2
+        exit 1
+    fi
+    for suite in "${suites[@]}"; do
+        echo "==> ${suite}"
+        bash "${suite}"
+    done
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
