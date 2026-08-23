@@ -2262,29 +2262,34 @@ mkdir -p "$KM_STATE_DIR"
 printf '%s gqlc-surf0 architect all 3 architect seats are awake\n' "$(( $(date +%s) - 4500 ))" \
     >"$KM_STATE_DIR/stalled-p0"
 stall_status
-if ! printf '%s' "$OUT" | grep -q 'STALLED'; then
+if ! printf '%s' "$OUT" | grep -q 'STALLED P0:'; then
     bad "km status carries a stalled P0" \
         "the board is silent about a P0 no seat can take, which is the defect: $OUT"
-elif ! printf '%s' "$OUT" | grep 'STALLED' | grep -q 'gqlc-surf0'; then
+elif ! printf '%s' "$OUT" | grep 'STALLED P0:' | grep -q 'gqlc-surf0'; then
     bad "km status carries a stalled P0" \
-        "it says something is stalled without naming it: $(printf '%s' "$OUT" | grep STALLED)"
-elif ! printf '%s' "$OUT" | grep 'STALLED' | grep -q '1h15m'; then
+        "it says something is stalled without naming it: $(printf '%s' "$OUT" | grep 'STALLED P0:')"
+elif ! printf '%s' "$OUT" | grep 'STALLED P0:' | grep -q '1h15m'; then
     bad "km status carries a stalled P0" \
-        "the line does not carry how long it has been stalled, which is the whole difference between a transient miss and an emergency: $(printf '%s' "$OUT" | grep STALLED)"
-elif ! printf '%s' "$OUT" | grep 'STALLED' | grep -q 'awake'; then
+        "the line does not carry how long it has been stalled, which is the whole difference between a transient miss and an emergency: $(printf '%s' "$OUT" | grep 'STALLED P0:')"
+elif ! printf '%s' "$OUT" | grep 'STALLED P0:' | grep -q 'awake'; then
     bad "km status carries a stalled P0" \
-        "the reason is dropped, so the reader is sent back to the journal: $(printf '%s' "$OUT" | grep STALLED)"
+        "the reason is dropped, so the reader is sent back to the journal: $(printf '%s' "$OUT" | grep 'STALLED P0:')"
 else
     ok "km status names a stalled P0, its age and the reason no seat could take it"
 fi
 
 # A line printed on every board tells an operator nothing.
+#
+# Matched on the whole prefix `STALLED P0:` rather than on `STALLED`, because
+# `km status` also prints "dispatch: NOT INSTALLED" where the systemd units are
+# absent, and INSTALLED CONTAINS the substring STALLED. That row passed on every
+# developer machine, where the units exist, and failed on CI, where they do not.
 export KM_STATE_DIR="$TMP/stall-surface-clean"
 mkdir -p "$KM_STATE_DIR"
 stall_status
-if printf '%s' "$OUT" | grep -q 'STALLED'; then
+if printf '%s' "$OUT" | grep -q 'STALLED P0:'; then
     bad "km status says nothing about stalled P0s when there are none" \
-        "it complained with no marker present: $(printf '%s' "$OUT" | grep STALLED)"
+        "it complained with no marker present: $(printf '%s' "$OUT" | grep 'STALLED P0:')"
 else
     ok "with no marker km status prints no STALLED line at all"
 fi
