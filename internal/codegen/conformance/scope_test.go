@@ -345,13 +345,20 @@ const blankParam = "_"
 // and it is closed because the argument stopped deriving from the query
 // text.
 //
-// The second half is gqlc-2m2v's and is pinned rather than fixed: the
-// two-or-more form still spells the *Params struct's field names from
-// the parameter names, and an empty one emits `arg.,` — a generate-time
-// format failure on all three targets, not a silent capture. Requiring
-// the refusal rather than skipping past it is what stops this being an
-// exclusion that quietly widens: the day 2m2v lands, this test fails and
-// says to fold $_ back into the sweep above.
+// The second half was gqlc-2m2v's and is now fixed rather than pinned:
+// the two-or-more form still spells the *Params struct's field names from
+// the parameter names, so a name with no Go spelling is refused at
+// generate time with ErrOutOfC6Scope naming the parameter. It used to
+// emit `arg.,` and reach gofmt, which refused it as ErrFormatFailure — an
+// error naming a template bug, handed to an author whose query is what
+// went wrong.
+//
+// The sentinel is asserted rather than the bare fact of an error, because
+// those two outcomes differ only in the message and this is the test that
+// distinguishes them. It is also the only place in the corpus that
+// reaches the new branch by both arities at once. The day a stage spells
+// Params fields positionally, this arm fails and says to fold $_ back
+// into the sweep above.
 func TestBlankParameterReachesOnlyTheSingleParameterForm(t *testing.T) {
 	spellable := plansUpToArity(1)
 	require.NotEmpty(t, spellable, "no plan binds fewer than two parameters")
@@ -376,7 +383,11 @@ func TestBlankParameterReachesOnlyTheSingleParameterForm(t *testing.T) {
 			require.NoError(t, err)
 			_, err = probe.tryGenerate(t, target, all)
 			require.Error(t, err,
-				"the two-or-more form now emits for a $_ parameter: gqlc-2m2v is fixed, so drop this arm and sweep $_ with every other candidate in TestEmittedScopeIsGeneratorOwned")
+				"the two-or-more form now emits for a $_ parameter: drop this arm and sweep $_ with every other candidate in TestEmittedScopeIsGeneratorOwned")
+			require.ErrorIs(t, err, codegen.ErrOutOfC6Scope,
+				"the two-or-more form refuses a $_ parameter for some other reason than having no Go field spelling; ErrFormatFailure here means the refusal moved back to gofmt")
+			require.Contains(t, err.Error(), "$"+blankParam,
+				"the refusal does not name the parameter the author has to rename")
 		})
 	}
 }
