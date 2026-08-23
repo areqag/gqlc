@@ -17,6 +17,13 @@
 // It is AGE-only and therefore not a readScenarios row: the sidecar is this
 // backend's encoding of a zone, and a Neo4j arm running the same body would be
 // asserting a zone on a driver-native temporal that never consulted a sidecar.
+//
+// NOT YET ENROLLED, and therefore not yet a gate. test-codegen-live-age selects
+// its tests by an explicit -run allowlist that does not name TestAGEOffsetSidecar,
+// so as of this commit the file compiles, ships, and runs nowhere. Measured, not
+// assumed: under that recipe's flags `-v` prints four `=== RUN` lines and none of
+// them is this test, while `-list '.*'` under the same tag lists it. bd gqlc-zm6k
+// carries the one-line recipe change; gqlc-vs9i stays open until it lands.
 
 package fixtures_test
 

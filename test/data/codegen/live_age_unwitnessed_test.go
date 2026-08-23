@@ -25,6 +25,12 @@
 //
 // Every line it prints is prefixed `osf1:` for exactly that grep.
 //
+// It will print nothing until it is enrolled. test-codegen-live-age selects its
+// tests by an explicit -run allowlist that does not name this test, so the
+// dispatch above currently runs the four tests the allowlist does name and not
+// this one. Measured under that recipe's own flags, not inferred. bd gqlc-zm6k
+// carries the one-line change; gqlc-osf1 stays open until the answers are read.
+//
 // It is in its own file rather than folded into live_age_dialect_test.go
 // because that file's sweep counterpart (TestEveryDialectGapCarriesItsWitness)
 // reads gap witnesses out of the named test's body, and a non-asserting probe
