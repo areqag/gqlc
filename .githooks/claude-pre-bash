@@ -48,7 +48,10 @@
 # Most of the 51 are the guard working: `git merge-base --is-ancestor` agrees no
 # remote ref holds those commits. The rate is the headline behavioural fact
 # about this hook, and it is a snapshot — the corpus grows, and a sha reachable
-# today can be orphaned by a squash-merge tomorrow.
+# today can be orphaned by a squash-merge tomorrow. That replay also predates
+# the all-decimal demotion at CITED_SHA_RE: 3 of the same 309 reasons carry an
+# all-decimal ANCHORED token, so at most 3 rows move, and only out of the
+# refused column.
 #
 # The target is resolved by analysis, not raw pattern-matching:
 #   - a heredoc body whose delimiter HEREDOC_RE recognises is removed before
@@ -87,6 +90,14 @@
 #     unbalanced reason among those 192 is the second direction, not the
 #     first: gqlc-oxne, 6 `(` to 7 `)`, going negative 857 characters in on a
 #     `case " ${a} ${b} " in *" ${x} "*)` pattern
+#   - a heredoc opened INSIDE a `$( )`, including one written inside double
+#     quotes, is a heredoc: the shell parses a command substitution as its own
+#     command list, so `--body "$(cat <<'BODY' ... BODY)"` — how a PR body is
+#     written here — arms and strips like any other. Reading that `<<` as
+#     quoted prose is what refused two agents a `gh pr create` whose BODY
+#     quoted the words `git commit` (bd gqlc-gtxl). Backticks inside double
+#     quotes are NOT given the same reading, so a heredoc opened in one arms
+#     nothing and its body reaches the tokenizer — the fail-closed side
 #   - the rest is shlex-tokenized, so a multi-word quoted run collapses to one
 #     token and stops matching: `echo "git commit -m x"` is silent (measured).
 #     Word-by-word quoting does not collapse, so `echo "git" "commit" -m x`
@@ -94,7 +105,17 @@
 #     is fail-closed, so it is left as is rather than widened into a parser
 #   - `cd` chains and `git -C` options fold into an effective directory,
 #     whose branch is read via git rev-parse / symbolic-ref (the latter
-#     covers unborn HEADs)
+#     covers unborn HEADs). A substitution body folds the cd chain that
+#     PRECEDES its span in its own scope, so `cd <worktree> && echo
+#     "$(git commit)"` is read against the worktree rather than against the
+#     directory this hook was invoked from. It used to be read against the
+#     latter, which in this repo's workflow is the shared checkout parked on
+#     master — a verdict about the wrong repository in BOTH directions, and
+#     the false-negative one was measured too: `cd <master repo> && echo
+#     "$(git commit)"` run from a feature checkout was allowed
+#   - a redirection is not a terminator. The shell accepts one anywhere in a
+#     simple command, so both option walks skip the operator and its target
+#     and carry on; `;`, `&&`, `|` and `)` still end the command
 #
 # Accepted limitations, fail-open unless the entry says otherwise (server-side
 # branch protection and repo pre-commit hooks are the backstop):
@@ -102,6 +123,11 @@
 #     statically -> allow
 #   - cd/pushd with flags (cd -P x) or no argument lose tracking -> allow
 #   - nested interpreters (bash -c '...') are not recursed into
+#   - a substitution's cwd is read from the text before its span, which is
+#     normally an unterminated fragment (`--body "`). One closing quote of each
+#     kind is tried and then the enclosing directory is kept, which is the
+#     pre-existing answer and errs toward naming a directory on master, i.e.
+#     toward refusing. `cd "$WT"` stays unresolvable there as everywhere else
 #   - --git-dir / --work-tree redirection is not resolved -> allow
 #   - inside an unquoted heredoc body this hook has actually stripped, the
 #     substitution extractor is the only thing looking, because the prose
@@ -290,6 +316,19 @@ HEREDOC_RE = re.compile(r"(?<!<)<<(-?)\s*([\"']?)(\w+)\2")
 FALLBACK_RE = re.compile(r"(?:^|[^A-Za-z-])git\s+commit(?:$|\s)")
 OPERATOR_CHARS = set("();<>|&")
 GIT_OPTS_WITH_ARG = ("-c", "--namespace", "--exec-path", "--super-prefix")
+# The shell accepts a redirection ANYWHERE in a simple command, including
+# between the subcommand and its flags, so a redirect does not end the word
+# list the way `;`, `&&`, `|` and `)` do. shlex hands the operator back as its
+# own token and splits an fd prefix off it (`2>&1` tokenizes as `2`, `>&`, `1`),
+# so an option walk that stops at every operator token loses every flag written
+# after the redirect. Both walks in this file did, and both directions were
+# measured before the fix (bd gqlc-vmlp):
+#   bd close gqlc-x > /dev/null -r "Closed at <orphan sha>."  -> allow-no-reason
+#   git >/dev/null commit -m x                                -> ALLOWED on master
+# i.e. it was a bypass of the master guard, not only of the close guard. Listed
+# rather than derived from the operator characters, because `&&`, `|` and `;`
+# share those characters and DO terminate the command.
+REDIRECT_OPS = ("<", ">", ">>", ">&", "<&", "&>", "&>>", ">|", "<>")
 
 # `bd close` arm. BD_OPTS_WITH_ARG exists so a flag VALUE spelled `close` is not
 # read as the subcommand; a LONG flag outside that list is treated as boolean,
@@ -356,8 +395,28 @@ BD_SHORTHANDS_WITH_ARG = {"r": "--reason", "C": "--directory"}
 # the loose tier, which is harmless there — the loose tier promotes a token to a
 # citation only once git resolves it — but within the anchored tier `at EFFACED`
 # would now be refused on the word alone. No corpus reason has that shape.
+#
+# An ALL-DECIMAL token is demoted out of the anchored tier and left to the loose
+# one (bd gqlc-7fn3). The anchored tier refuses without resolving anything, so
+# `at 1048576` — a tmpfs inode budget quoted out of a citizen's own measurement —
+# was refused three times in a row on a close that was otherwise correct, and the
+# only remedy was to make the reason LESS precise. Byte counts, row totals and
+# epoch timestamps are exactly what a close reason built from command output
+# carries, so the guard fired hardest on the closes carrying the most evidence.
+#
+# Demotion, not exclusion: the loose tier promotes a token to a citation once
+# git says it names a commit here, so an all-decimal abbreviated sha that really
+# is an unpushed commit in this checkout is STILL refused — measured, and pinned
+# by a row. What moves is only the token git cannot resolve: `at 1048576` in a
+# repo with no such object is now allow-no-sha rather than deny-absent-object.
+# The residue is a foreign all-decimal sha (a real commit elsewhere, absent
+# here) written after an anchor word, which becomes allowed. About 3.7% of
+# 7-character abbreviations are all-decimal ((10/16)^7), so excluding them from
+# BOTH tiers would have been a real hole; excluding them from the tier that
+# refuses on the anchor alone is not.
 CITED_SHA_RE = re.compile(r"(?i:\bat\s+|@\s*|\bcommits?\s+)([0-9a-fA-F]{7,40})(?![0-9A-Za-z])")
 SHA_RE = re.compile(r"(?<![0-9A-Za-z])([0-9a-fA-F]{7,40})(?![0-9A-Za-z])")
+DECIMAL_TOKEN_RE = re.compile(r"\A[0-9]+\Z")
 # Anything the shell would expand. `$5` is not in it on purpose: a bare digit is
 # a positional parameter no reason ever means, and prices appear in prose.
 UNEXPANDED_RE = re.compile(r"\$[({A-Za-z_]|`")
@@ -367,28 +426,77 @@ def is_op(tok):
     return bool(tok) and all(c in OPERATOR_CHARS for c in tok)
 
 
+def redirect_skip(tokens, j):
+    """Tokens a redirection at tokens[j] consumes, or 0 when it is not one.
+
+    An optional fd prefix, the operator, and its target word. The fd prefix is
+    a separate ORDINARY token to shlex — `2>&1` comes back as `2`, `>&`, `1` —
+    so a walk that keys on operator tokens alone never sees the `2`, and the
+    git walk read it as the subcommand and stopped: `git 2>&1 commit -m x` was
+    allowed onto master (measured, bd gqlc-vmlp). A redirect whose next token
+    is itself an operator — `cmd > ; x`, which the shell rejects — consumes the
+    operator alone, so the terminator stays visible to the caller's walk rather
+    than being swallowed as a filename.
+    """
+    k, n = j, len(tokens)
+    if DECIMAL_TOKEN_RE.match(tokens[k]) and k + 1 < n and tokens[k + 1] in REDIRECT_OPS:
+        k += 1
+    if tokens[k] not in REDIRECT_OPS:
+        return 0
+    k += 1
+    if k < n and not is_op(tokens[k]):
+        k += 1
+    return k - j
+
+
 def unquoted_positions(line, state):
     # Bash quote parity, carried across lines (quoted strings span newlines).
+    #
+    # `state` is a list used as a stack: the innermost quoting context is at the
+    # end and an empty stack means unquoted. A command substitution reopens an
+    # UNQUOTED context even inside double quotes — the shell parses `$( ... )`
+    # as its own command list, so `--body "$(cat <<'EOF' ... EOF)"` arms a real
+    # heredoc that the surrounding double quotes have no say over. Tracking only
+    # the quote character read that `<<` as prose, so the heredoc did not arm,
+    # the body was not stripped, and a `git commit` QUOTED IN A PR BODY was
+    # extracted from it and refused as a commit onto master — twice in one night,
+    # to two different agents (bd gqlc-gtxl). Backticks are not given the same
+    # treatment: inside double quotes their escaping rules differ from `$( )`'s
+    # and no measured incident used that spelling, so a `<<` inside a
+    # double-quoted backtick substitution still reads as quoted -> no heredoc
+    # armed -> its body reaches the tokenizer, which is the fail-CLOSED side.
     outside = set()
     i, n = 0, len(line)
     while i < n:
         c = line[i]
-        if state is None:
+        top = state[-1] if state else None
+        if top is None or top == "(":
             if c == "\\":
                 i += 2
                 continue
             if c in "'\"":
-                state = c
+                state.append(c)
+            elif c == "$" and i + 1 < n and line[i + 1] == "(":
+                outside.add(i)
+                state.append("(")
+                i += 2
+                continue
+            elif c == ")" and top == "(":
+                state.pop()
             else:
                 outside.add(i)
-        elif state == '"':
+        elif top == '"':
             if c == "\\":
                 i += 2
                 continue
             if c == '"':
-                state = None
+                state.pop()
+            elif c == "$" and i + 1 < n and line[i + 1] == "(":
+                state.append("(")
+                i += 2
+                continue
         elif c == "'":
-            state = None
+            state.pop()
         i += 1
     return outside, state
 
@@ -409,7 +517,7 @@ def strip_heredocs(text):
     # forms the regex matches nothing for at all (<<\EOF and friends) arm no
     # heredoc here and are disclosed in the header instead.
     kept, pending, expanded = [], [], []
-    qstate = None
+    qstate = []
     for line in text.split("\n"):
         if pending:
             delim, tab_strip, quoted = pending[0]
@@ -446,13 +554,19 @@ def paren_matches(text):
     was rejected instead: text past the cap would go unanalyzed, which turns a
     slow path into a silent one.
 
-    It does NOT make the scan linear in general. Deep NESTING is still
-    quadratic, because substitution_bodies re-splits each body it pops and each
-    such call maps that body again — `$(` x d then `)` x d measured 21/43/399 ms
-    at d = 200/800/3200 against 23/50/506 ms here, i.e. this map is about a
-    quarter slower on that shape, its cost being a dict build where the
-    restarted count could stop at the first match. Same order, unfixed either
-    way, tracked as bd gqlc-hv81.
+    Deep NESTING used to be quadratic on top of this, because the extractor
+    re-split each body it popped and each such call mapped that body again.
+    substitution_bodies() now walks the text once with a frame stack and never
+    re-reads a body, so this map is built exactly once per git_targets level.
+    End-to-end hook wall time on a heredoc of `$(` x d then `)` x d, both
+    versions run through the same harness on one machine (bd gqlc-hv81):
+
+        d = 200    23 ms -> 20 ms
+        d = 800    53 ms -> 23 ms
+        d = 3200  497 ms -> 36 ms
+
+    The extraction call alone, which is the part that changed, went 1.7/28/454
+    ms -> 0.1/0.5/1.9 ms at those depths; the residue is interpreter start-up.
 
     Dropping a `)` that has nothing open is what makes this identical to the
     restarted count it replaces — verified exhaustively over every string of
@@ -468,53 +582,114 @@ def paren_matches(text):
     return matches
 
 
-def split_substitutions(text):
-    """(text with each closed $( ) and ` ` span blanked, [those spans' bodies]).
+def cd_target(text, cwd):
+    """The directory `text`'s cd/pushd chain leaves the shell in.
 
-    A span whose delimiter never closes is left in the text and contributes no
-    body, so `a $( b` comes back unchanged with nothing extracted (pinned by
-    "a surplus ( leaves the span unclosed and unread"). Blanking a closed span
-    rather than leaving it in place is what stops a nested body being analyzed
-    twice, once on its own and once inside its parent.
+    Used to give a substitution body the directory the shell would run it in,
+    rather than the directory this hook happens to have been invoked from. That
+    mattered because the mandated workflow here writes every command as
+    `cd <sibling worktree> && ...` while the tool's own cwd is the shared
+    checkout, which is parked on master: a body analyzed at the tool's cwd is a
+    verdict about the wrong repository (bd gqlc-gtxl).
+
+    Position is what makes this safe in the other direction. The caller passes
+    the ENCLOSING SCOPE'S KEPT TEXT UP TO THE SPAN — text with earlier sibling
+    spans already blanked, and nothing that follows the span — so a `cd` the
+    shell has not run yet (`$(git commit) && cd /elsewhere`) and a `cd` that ran
+    in an earlier subshell (`$(cd /elsewhere) && $(git commit)`) both leave this
+    answer alone. Either would otherwise resolve a real master commit against
+    some other repo and allow it.
+
+    A prefix normally ends mid-quote, `--body "` being the shape that motivated
+    this, so a failure to tokenize is expected rather than exceptional: one
+    closing quote of each kind is tried, and if none of the three parses the
+    enclosing cwd is kept. That is the pre-fix behaviour, which errs toward
+    naming a directory on master, i.e. toward refusing.
     """
-    kept, bodies = [], []
+    if "cd" not in text and "pushd" not in text:
+        return cwd
+    tokens = None
+    for candidate in (text, text + '"', text + "'"):
+        try:
+            lex = shlex.shlex(candidate, posix=True, punctuation_chars=True)
+            lex.whitespace_split = True
+            tokens = list(lex)
+            break
+        except ValueError:
+            continue
+    if tokens is None:
+        return cwd
+    i, n = 0, len(tokens)
+    while i < n:
+        if tokens[i] in ("cd", "pushd"):
+            arg = tokens[i + 1] if i + 1 < n else None
+            cwd = None if (arg is None or arg.startswith("-")) else resolve(cwd, arg)
+            i += 2
+            continue
+        i += 1
+    return cwd
+
+
+def substitution_bodies(text, cwd=None):
+    """[(body, directory)] for every CLOSED $( ) and ` ` span in text.
+
+    Nesting is flattened: a body comes back with its own nested spans blanked
+    to a single space and those nested bodies listed as further entries, so the
+    caller hands each span to the analyzer exactly once and a nested one lands
+    at the same recursion depth as one written bare. Blanking is what stops a
+    nested body being analyzed twice, once on its own and once inside its
+    parent. Entries are in OPENING order, parents before their children.
+
+    A span whose delimiter never closes is not a span: it contributes no body
+    and its text stays in the enclosing scope, so `a $( b` extracts nothing
+    (pinned by "a surplus ( leaves the span unclosed and unread"). A `$( )`
+    whose closing paren falls outside the enclosing span, and a backtick with
+    no partner inside it, are unclosed by the same rule.
+
+    One pass with a frame stack: every character is appended to exactly one
+    scope's buffer, so the whole extraction is linear in the text rather than
+    O(n*d) in the nesting depth, and no body is ever re-read (bd gqlc-hv81).
+
+    `directory` is where the shell would run that span, per cd_target(); it is
+    the caller's `cwd` when no `cd` precedes the span in its own scope.
+    """
     closes = paren_matches(text)
+    out = []
+    frames = [{"buf": [], "end": len(text), "cwd": cwd, "slot": None}]
     i, n = 0, len(text)
     while i < n:
-        end = None
-        if text[i] == "$" and i + 1 < n and text[i + 1] == "(":
-            end = closes.get(i + 1)
-            if end is not None:
-                bodies.append(text[i + 2 : end])
-        elif text[i] == "`":
-            close = text.find("`", i + 1)
-            if close != -1:
-                bodies.append(text[i + 1 : close])
-                end = close
-        if end is None:
-            kept.append(text[i])
+        frame = frames[-1]
+        if i == frame["end"]:
+            frames.pop()
+            out[frame["slot"]] = ("".join(frame["buf"]), frame["cwd"])
+            frames[-1]["buf"].append(" ")
             i += 1
             continue
-        kept.append(" ")
-        i = end + 1
-    return "".join(kept), bodies
-
-
-def substitution_bodies(text):
-    """The closed substitution bodies in text, with nesting flattened.
-
-    A body comes back with its own nested substitutions blanked out and listed
-    as further entries, so the caller hands each span to the analyzer exactly
-    once and a nested one lands at the same recursion depth as one written
-    bare. Terminates because a body is shorter than the text it came out of by
-    at least its two delimiters, so the queue's total length strictly falls.
-    """
-    bodies, queue = [], list(split_substitutions(text)[1])
-    while queue:
-        stripped, inner = split_substitutions(queue.pop(0))
-        bodies.append(stripped)
-        queue.extend(inner)
-    return bodies
+        char = text[i]
+        end = start = None
+        if char == "$" and i + 1 < n and text[i + 1] == "(":
+            close = closes.get(i + 1)
+            if close is not None and close < frame["end"]:
+                end, start = close, i + 2
+        elif char == "`":
+            close = text.find("`", i + 1)
+            if close != -1 and close < frame["end"]:
+                end, start = close, i + 1
+        if end is None:
+            frame["buf"].append(char)
+            i += 1
+            continue
+        out.append(None)
+        frames.append(
+            {
+                "buf": [],
+                "end": end,
+                "cwd": cd_target("".join(frame["buf"]), frame["cwd"]),
+                "slot": len(out) - 1,
+            }
+        )
+        i = start
+    return out
 
 
 def resolve(base, path):
@@ -561,6 +736,10 @@ def scan_bd(tokens, i, cwd):
     j = i + 1
     while j < n:
         opt = tokens[j]
+        step = redirect_skip(tokens, j)
+        if step:
+            j += step
+            continue
         if is_op(opt):
             break
         name, val, inline = opt, None, False
@@ -619,6 +798,10 @@ def scan_tokens(tokens, cwd, wanted, closes=None):
             sub = None
             while j < n:
                 opt = tokens[j]
+                step = redirect_skip(tokens, j)
+                if step:
+                    j += step
+                    continue
                 if is_op(opt):
                     break
                 if opt == "-C":
@@ -663,10 +846,10 @@ def git_targets(text, cwd, wanted, depth=0, closes=None):
     # $(git commit) is found). substitution_bodies() flattens nesting for the
     # same reason, so the cap counts heredoc and substitution hops rather than
     # how deeply the writer nested their parens.
-    bodies = substitution_bodies(text)
-    bodies.extend(substitution_bodies(expanded))
-    for body in bodies:
-        sub_targets, sub_fallback = git_targets(body, cwd, wanted, depth + 1, closes)
+    bodies = substitution_bodies(text, cwd)
+    bodies.extend(substitution_bodies(expanded, cwd))
+    for body, body_cwd in bodies:
+        sub_targets, sub_fallback = git_targets(body, body_cwd, wanted, depth + 1, closes)
         targets.extend(sub_targets)
         need_fallback = need_fallback or sub_fallback
     try:
@@ -843,10 +1026,25 @@ def hooks_drift(directory):
                     repair = "%s. Repair: just init" % (
                         "from %s" % origin if origin else "origin unreported by git"
                     )
+                # No list of hook names here, and no count of them (bd
+                # gqlc-tr3c). The string this replaces asserted that
+                # "commit-msg, pre-commit, pre-push and post-merge are all
+                # dead", which is a four-way universal stated at the moment of
+                # refusal — and false in exactly the fail-closed case below it,
+                # where the configured path is an absolute spelling of a
+                # directory whose hooks are live and firing. A reader told a
+                # named hook is dead when it is running debugs the wrong thing,
+                # and this string is what a human sees while being refused. A
+                # shorter list would be the same defect with a different number,
+                # so what is stated is the negative that holds under every
+                # value: git is not reading the repo's own hooks directory, and
+                # this hook does not open the configured path to see what is in
+                # it.
                 reason = (
-                    "local git hooks are inactive: core.hooksPath in %s is %s "
-                    "(expected '%s'); commit-msg, pre-commit, pre-push and post-merge "
-                    "are all dead. %s"
+                    "local git hooks are inactive: core.hooksPath in %s is %s, not '%s', "
+                    "so git is not running the hooks this repository ships and what a "
+                    "gated command is screened by is whatever the configured path holds "
+                    "— not read here. %s"
                     % (
                         root,
                         "'%s'" % value if value else "<unset>",
@@ -984,7 +1182,7 @@ def close_verdict(close):
             "literal -r/--reason string, or as a --reason-file with a literal path."
             % unreadable
         )
-    anchored = set(CITED_SHA_RE.findall(text))
+    anchored = {s for s in CITED_SHA_RE.findall(text) if not DECIMAL_TOKEN_RE.match(s)}
     loose = set(SHA_RE.findall(text)) - anchored
     if not anchored and not loose:
         return "allow-no-sha", None

@@ -311,6 +311,74 @@ run_guard_case "<<EOF.txt, bare EOF ends swallow" deny-master "$MASTER_REPO" "$(
 # so its body is tokenized and prose there denies though it expands nothing.
 run_guard_case "<<\\EOF prose denies, fail-closed" deny-master "$MASTER_REPO" "$(printf 'cat <<\\EOF > /dev/null\ngit commit -m x\nEOF\n')"
 
+# --- a heredoc inside "$( )" is a heredoc (bd gqlc-gtxl) --------------------
+# `--body "$(cat <<'BODY' ... BODY)"` is how a PR body is written here, and the
+# quote parity scan used to read that `<<` as being inside the double quotes and
+# therefore as prose. Nothing armed, nothing was stripped, and the substitution
+# extractor then pulled a `git commit` QUOTED IN THE PR BODY out of the
+# unstripped text and refused it as a commit onto master. Measured twice in one
+# night against two different agents, both of whom lost time and worked around
+# it with --body-file.
+# A command substitution reopens an UNQUOTED context, so under the fix the
+# heredoc arms and its body is stripped. Each allow row is paired with the
+# dangerous spelling it must not have loosened: the same shape with a delimiter
+# the shell EXPANDS is still refused, in both its $( ) and backtick forms, and a
+# real commit written after the heredoc is still refused.
+# shellcheck disable=SC2016 # the substitution is the hook's input, not this file's code
+run_guard_case "PR body quotes git commit in <<'BODY'" silent "$MASTER_REPO" \
+  "$(printf 'gh pr create --title t --body "$(cat <<%s\nMutant 2 (`./usr/bin/git commit`, history not config): caught.\nBODY\n)"\n' "'BODY'")"
+# shellcheck disable=SC2016 # the substitution is the hook's input, not this file's code
+run_guard_case "same shape, <<BODY expands \$( )"      deny-master "$MASTER_REPO" \
+  "$(printf 'gh pr create --title t --body "$(cat <<BODY\nx $(git commit -m sneaky) y\nBODY\n)"\n')"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "same shape, <<BODY expands backticks"  deny-master "$MASTER_REPO" \
+  "$(printf 'gh pr create --title t --body "$(cat <<BODY\nx `git commit -m sneaky` y\nBODY\n)"\n')"
+# shellcheck disable=SC2016 # the substitution is the hook's input, not this file's code
+run_guard_case "a real commit after the PR body"       deny-master "$MASTER_REPO" \
+  "$(printf 'gh pr create --title t --body "$(cat <<%s\nprose\nBODY\n)" && git commit -m real\n' "'BODY'")"
+
+# --- a substitution body is analyzed at the command's cwd, not the tool's ---
+# The second half of bd gqlc-gtxl, and the one that made the first bite: the
+# recursion handed every substitution body the directory the HOOK was invoked
+# from. In this repo's mandated workflow that is the shared checkout, parked on
+# master, while the command's own first clause is `cd <sibling worktree>` — so
+# the refusal named a directory the command never touched.
+# The fix walks only the cd chain that textually PRECEDES the span in its own
+# scope, and the three deny rows are what stop that from becoming a hole: a cd
+# that has not run yet, and a cd that ran in an earlier subshell, must not move
+# the answer, or a real commit onto master would be resolved against some other
+# repository and allowed.
+# shellcheck disable=SC2016 # ditto
+run_guard_case "\$( ) body honours a leading cd"      silent      "$MASTER_REPO"  "cd $FEATURE_REPO && echo \"\$(git commit -m x)\""
+# shellcheck disable=SC2016 # ditto
+run_guard_case "\$( ) body, leading cd onto master"   deny-master "$FEATURE_REPO" "cd $MASTER_REPO && echo \"\$(git commit -m x)\""
+# shellcheck disable=SC2016 # ditto
+run_guard_case "a cd AFTER the span does not apply"   deny-master "$MASTER_REPO"  "echo \"\$(git commit -m x)\" && cd $FEATURE_REPO"
+# shellcheck disable=SC2016 # ditto
+run_guard_case "a cd in a sibling span does not leak" deny-master "$MASTER_REPO"  "echo \"\$(cd $FEATURE_REPO)\" && echo \"\$(git commit -m x)\""
+# shellcheck disable=SC2016 # ditto
+run_guard_case "a cd INSIDE the span applies"         silent      "$MASTER_REPO"  "echo \"\$(cd $FEATURE_REPO && git commit -m x)\""
+# The two halves composed, which is the shape that was measured: a PR body
+# quoting `git commit`, written from a sibling worktree.
+# shellcheck disable=SC2016 # the substitution is the hook's input, not this file's code
+run_guard_case "PR body from a sibling worktree"      silent      "$MASTER_REPO" \
+  "$(printf 'cd %s && gh pr create --title t --body "$(cat <<%s\nsee `git commit` in the note\nBODY\n)"\n' "$FEATURE_REPO" "'BODY'")"
+
+# --- a redirect does not end a command (bd gqlc-vmlp) -----------------------
+# The shell accepts a redirection anywhere in a simple command, including
+# before the subcommand. The git walk stopped at the operator token, so it
+# never reached `commit` — a bypass of this guard, not a nuisance. The fd
+# prefix needs its own row because shlex splits it off as an ordinary word
+# (`2>&1` comes back as `2`, `>&`, `1`), and the walk read that `2` as the
+# subcommand and stopped there.
+run_guard_case "redirect before the subcommand"       deny-master "$MASTER_REPO"  'git >/dev/null commit -m x'
+run_guard_case "fd-prefixed redirect before it"       deny-master "$MASTER_REPO"  'git 2>&1 commit -m x'
+run_guard_case "redirect before it, feature cwd"      silent      "$FEATURE_REPO" 'git >/dev/null commit -m x'
+run_guard_case "-C survives a redirect"               deny-master "$FEATURE_REPO" "git -C $MASTER_REPO >/dev/null commit -m x"
+# A terminator must still terminate, or the walk would read the next command's
+# words as this one's: `commit` here belongs to no git invocation.
+run_guard_case "a semicolon still ends the command"   silent      "$MASTER_REPO"  'git ; commit -m x'
+
 # --- core.hooksPath drift (bd gqlc-nzwa) ------------------------------------
 # Four config states, per bd gqlc-5fm. The fourth — a path that exists and is
 # full of executable *.sample files — is the one that actually occurred twice,
@@ -427,6 +495,26 @@ run_drift_case "value ok but hook not executable"    deny-hooks "$NOEXEC_REPO" '
 # conditions, which is why CONTRIBUTING.md defines the word before using it.
 run_drift_case "no .githooks/ in repo: silent"       silent     "$BARE_REPO"   'git commit -m x'
 run_drift_case "non-repo cwd never fires"            silent     "$TMP"         'git commit -m x'
+
+# --- what the refusal SAYS, not just that it refuses (bd gqlc-tr3c) ---------
+# The message used to end "commit-msg, pre-commit, pre-push and post-merge are
+# all dead" — a four-way universal asserted at the moment of refusal, and false
+# in exactly the fail-closed case two blocks down, where core.hooksPath holds an
+# absolute spelling of a directory whose hooks are live and firing. A human
+# being refused is then told not to bother checking a hook that is in fact
+# running, and debugs the wrong thing.
+# Two rows, because either half alone is satisfiable by a bad fix: the first
+# would pass on a message stripped to nothing, the second on one that kept the
+# false list. A SHORTER list of hook names is the same defect with a smaller
+# number, so no hook name may appear at all — that is what the alternation
+# below asserts, rather than the phrase "are all dead".
+DRIFT_MSG="$(run_hook "$UNSET_REPO" 'git commit -m x')"
+record "the drift refusal names no hook as dead" "clean" \
+  "$(printf '%s' "$DRIFT_MSG" | grep -qE 'commit-msg|pre-commit|pre-push|post-merge|all dead' \
+     && echo CLAIMS || echo clean)"
+record "the drift refusal still says what and how to repair" "explains" \
+  "$(printf '%s' "$DRIFT_MSG" | grep -q 'core\.hooksPath' \
+     && printf '%s' "$DRIFT_MSG" | grep -q 'Repair:' && echo explains || echo THIN)"
 
 # --- drift carried by ENV rather than by the config file (bd gqlc-o13d) ------
 #
@@ -615,6 +703,35 @@ git -C "$BD_REPO" branch -q -D doomed
 ABSENT_SHA=deadbeefdeadbeef
 ABSENT_UPPER=DEADBEEFDEADBEEF
 ABSENT_MIXED=deadBEEFdeadBEEF
+# An ALL-DECIMAL abbreviated sha that git really resolves, for bd gqlc-7fn3.
+# It cannot be a literal: it has to name an object in this fixture, and it has
+# to be unpushed, or the row it carries would pass for the wrong reason. About
+# 10% of commits have an all-decimal prefix at some length from 7 to 12
+# ((10/16)^7 and down), so this loop takes ~10 tries; the cap keeps a hostile
+# hash from hanging the suite and the fixture row below turns a miss into a
+# loud failure rather than a skipped assertion. The branch is LOCAL and never
+# pushed, so the sha it holds is the deny-unpushed-sha shape.
+git -C "$BD_REPO" checkout -q -b decimal
+DECIMAL_SHA=""
+for _ in $(seq 400); do
+  git -C "$BD_REPO" -c user.email=t@t.invalid -c user.name=t commit -q --allow-empty -m dec
+  DECIMAL_FULL="$(git -C "$BD_REPO" rev-parse HEAD)"
+  for len in 7 8 9 10 11 12; do
+    cand="${DECIMAL_FULL:0:len}"
+    case "$cand" in
+      *[!0-9]*) continue ;;
+    esac
+    if [ "$(git -C "$BD_REPO" cat-file -t "$cand" 2>/dev/null)" = commit ]; then
+      DECIMAL_SHA="$cand"
+      break
+    fi
+  done
+  if [ -n "$DECIMAL_SHA" ]; then break; fi
+done
+git -C "$BD_REPO" checkout -q master
+# A number no repository will ever hold, and the one that was actually refused:
+# the tmpfs inode budget of /tmp, quoted from a citizen's own incident report.
+DECIMAL_PROSE=1048576
 # Six characters: one under the floor both regexes impose, and a real prefix of
 # a real commit, so a floor that slipped to 5 or 6 would promote it.
 ORPHAN_SHORT6="${ORPHAN_SHA_FULL:0:6}"
@@ -1044,6 +1161,68 @@ run_verdict "-CPATH attached to the shorthand"     deny-unpushed-sha "$TMP" \
 run_verdict "a boolean-only cluster consumes nothing" deny-unpushed-sha "$BD_REPO" \
   "bd -qv close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
 
+# --- a redirect between the subcommand and the flags (bd gqlc-vmlp) ---------
+# The option walk stopped at the first operator token, and the shell accepts a
+# redirection anywhere in a simple command — so a `>` written before the flags
+# hid them, the close verdicted allow-no-reason, and an unpushed close went
+# through. Every row here carries the SAME orphan sha as the trailing-redirect
+# control below it, so what separates them is the position of the operator and
+# nothing else. The `<` and fd-prefixed forms are separate rows because they
+# tokenize differently: `2>&1` comes back as three tokens, the first of them an
+# ordinary word.
+run_verdict "redirect between subcommand and flags" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x > /dev/null -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "attached redirect, no space"           deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x >/dev/null -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "append redirect between them"          deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x >> $TMP/log -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "input redirect between them"           deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x < /dev/null -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "fd-prefixed redirect between them"     deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x 2>&1 -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "trailing redirect control"             deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\" > /dev/null"
+# The other direction, and the reason a redirect is skipped by an explicit list
+# rather than by "any token of operator characters": `|`, `;` and `&&` DO end
+# the command, and the words after them belong to the next one. Both rows would
+# verdict deny-unpushed-sha if the walk ran on through the terminator, because
+# the `-r` after it carries the orphan sha — and neither `-r` is bd's.
+run_verdict "a pipe still ends the command"         allow-no-reason "$BD_REPO" \
+  "bd close gqlc-x | grep -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "a semicolon still ends the command"    allow-no-reason "$BD_REPO" \
+  "bd close gqlc-x ; echo -r \"Closed at $ORPHAN_SHA.\""
+
+# --- an all-decimal token is not a sha citation (bd gqlc-7fn3) --------------
+# The anchored tier refuses on the anchor alone, without resolving anything, so
+# `at 1048576` — an inode count quoted out of a citizen's own measurement — was
+# refused as a close against a commit "this repository has never seen", three
+# times in a row, on a close that was otherwise correct. The remedy on offer was
+# to make the reason less precise, and this town's close discipline is to paste
+# measured output into the reason, so the guard fired hardest on the closes
+# carrying the most evidence.
+# The fix DEMOTES an all-decimal token to the loose tier rather than dropping
+# it, and that is what the second row pins: a decimal token git resolves to an
+# unpushed commit here is still refused. About 3.7% of 7-character abbreviations
+# are all-decimal, so a fix that excluded them from both tiers would have been a
+# real hole rather than a nuisance removed.
+fixture_check "the fixture found an all-decimal sha" \
+  "found" "$([ -n "$DECIMAL_SHA" ] && echo found || echo NONE)"
+fixture_check "the all-decimal sha resolves to a commit" \
+  "commit" "$(git -C "$BD_REPO" cat-file -t "$DECIMAL_SHA" 2>&1)"
+fixture_check "the all-decimal sha is on NO remote ref" \
+  "" "$(git -C "$BD_REPO" branch -r --contains "$DECIMAL_SHA" | tr -d ' \n')"
+fixture_check "the decimal prose token names no object" \
+  "missing" "$(printf '%s\n' "$DECIMAL_PROSE" | git -C "$BD_REPO" cat-file --batch-check | awk '{print $2}')"
+run_verdict "a measured number after an anchor is not a sha" allow-no-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"Refused three times; /tmp holds at $DECIMAL_PROSE inodes.\""
+run_verdict "an all-decimal UNPUSHED sha is still refused" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed at $DECIMAL_SHA.\""
+# The control that keeps the row above from being read as "the anchored tier
+# stopped working": a hex token after the same anchor, naming nothing here, is
+# still refused on the anchor alone.
+run_verdict "a hex token after the same anchor still denies" deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"Refused three times; /tmp holds at $ABSENT_SHA inodes.\""
+
 # --- a close written inside a command substitution --------------------------
 # git_targets threads `closes` into its own $( ) / backtick recursion, and this
 # row is what pins that argument. The spelling is load-bearing: shlex(posix,
@@ -1117,8 +1296,16 @@ loader.exec_module(mod)
 print(mod.substitution_bodies("""echo "$(bd close x -r 'at (12 commits) $(date)')" """))
 PY
 )"
+# Each entry is (body, directory), the directory being where the shell would
+# run that span — None here, no cwd having been passed and no cd preceding
+# either span. Entries are in OPENING order, parents before children: the frame
+# stack that made the extraction linear (bd gqlc-hv81) reserves a slot when it
+# opens a span and fills it when it closes, which is what keeps that order the
+# same as the queue's was. Measured identical to the queue's output, body for
+# body and in order, over all 97656 strings of `$`, `(`, `)`, backtick and `x`
+# up to length 7, and over 200k random strings of shell metacharacters.
 fixture_check "a nested paren-bearing body: counted, blanked, flattened" \
-  "[\"bd close x -r 'at (12 commits)  '\", 'date']" "$SUBST_PROBE"
+  "[(\"bd close x -r 'at (12 commits)  '\", None), ('date', None)]" "$SUBST_PROBE"
 
 # --- object_types' own guards, driven with a stubbed subprocess -------------
 # `git cat-file --batch-check` emits one line per input line and the mapping is
@@ -1255,7 +1442,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=193
+EXPECTED_ROWS=225
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
@@ -1267,7 +1454,7 @@ fi
 # strings — no path, sha or temp dir reaches one — so the digest is the same on
 # every machine. Update it deliberately when a row is added, renamed or
 # reordered; a drift you did not intend is the finding.
-EXPECTED_ROW_DIGEST=d518dce717d07b86
+EXPECTED_ROW_DIGEST=3b76226a048d22be
 ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
   'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
 if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then
