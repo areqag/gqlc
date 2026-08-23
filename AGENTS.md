@@ -51,6 +51,16 @@ is noise; delete it.
   use `gt submit`** — this repo is on the unauthorised tier of graphite, so
   the stack is a local review aid only.
 
+- **The branch name must contain the bead id**, in the form
+  `<type>/<bead-id>-<slug>` — `fix/gqlc-uz3c-prepush-bead-warning`, not
+  `fix/prepush-bead-warning`, and not the bare suffix `fix/prepush-uz3c`. CI's
+  `tidy` job resolves the PR's bead from a `Bead:` line in the body or, failing
+  that, from a `gqlc-`-prefixed id in the branch name; a body that says
+  `Closes #N` and resolves to no bead fails that gate, and the failure presents
+  as `skipping` on lint/test/codegen-fence rather than as a refusal. See
+  CLAUDE.md, "Working directory", for the measurements and for what to do about
+  a branch already cut without one (bd `gqlc-uz3c`).
+
 - **One PR per branch in the stack, pointed at its parent — not master.**
   Each branch becomes its own GitHub PR, opened manually with
   `gh pr create --base <parent-branch>`. The `--base` argument is the
