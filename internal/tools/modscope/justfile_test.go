@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -65,14 +66,95 @@ const (
 	// so matching the path covers the three of them where matching one
 	// command's spelling covers one.
 	//
-	// WHAT THIS DOES NOT REACH: an invocation that never spells the path — a
-	// binary built once under another name and called by that name, or a path
-	// assembled from a justfile variable and interpolated at the site. Not
-	// reachable on this tree, where the four sites are all
-	// `go run ./internal/tools/modscope`; recorded as a limit in bd gqlc-wkio,
-	// the same shape gqlc-lj9s records for the probe sites.
+	// The path is not the whole of what runsModscope reads — see modscopeBin
+	// and expandJustVars below, which reach the two spellings that never write
+	// it (bd gqlc-wkio).
 	modscopePkg = "internal/tools/modscope"
+
+	// modscopeBin is the last element of that path, which is also the name the
+	// go command gives a binary built out of it. A recipe that builds this
+	// program once and then runs it — `.bin/modscope modules`, or a path
+	// assembled in a `$stage` variable — spells the package path nowhere, and
+	// matching the path alone reads such a recipe as running nothing
+	// (bd gqlc-wkio).
+	modscopeBin = "modscope"
 )
+
+// modscopePathCall matches a command token whose final path element is this
+// program's name: `.bin/modscope`, `${stage}/modscope`, and the package path
+// itself. The slash is required, so the many places this repo's justfile says
+// the word in prose — `modscope's grading`, `see internal/tools/modscope,` —
+// are not invocations. So is a terminator, which is why
+// `internal/tools/modscope/main.go` is not one either.
+//
+// modscopeBareCall is the same token in command position, where a binary found
+// on PATH is run by its bare name. Command position rather than anywhere,
+// because the bare word appears in nine comments in this repo's justfile and
+// requiring a sweep edge of each of those recipes would be a gate reporting on
+// prose.
+//
+// Both are syntactic, and neither reaches a recipe that shells out to a script
+// that runs this program — the third shape bd gqlc-wkio names, pinned as still
+// missed by TestASweptSpellingAndAnUnsweepableOne below rather than believed
+// to be covered.
+var (
+	modscopePathCall = regexp.MustCompile(`(?:^|[\s;|&(=` + "`" + `"'])[^\s;|&()"'` + "`" + `]*/` +
+		modscopeBin + `(?:[\s;|&)"'` + "`" + `]|$)`)
+	modscopeBareCall = regexp.MustCompile(`(?m)^[ \t]*(?:[@-]+[ \t]*)?` + modscopeBin +
+		`(?:[ \t;|&]|$)`)
+)
+
+// justInterpolation matches the `{{ name }}` a recipe body writes to
+// interpolate a variable. A leading `.` is not a name, so the `{{{{.Dir}}` this
+// repo's justfile writes to emit a Go template is left alone.
+var justInterpolation = regexp.MustCompile(`\{\{[ \t]*([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\}\}`)
+
+// justAssignment matches a top-level `name := "literal"`. Only a literal: an
+// assignment computed from a function call or a concatenation has no expansion
+// this reader can perform, and guessing at one would be a body neither just nor
+// this file runs.
+var justAssignment = regexp.MustCompile(`(?m)^([A-Za-z_][A-Za-z0-9_-]*)[ \t]*:=[ \t]*(?:"([^"\n]*)"|'([^'\n]*)')[ \t]*$`)
+
+// justVars reads those assignments out of justfile source.
+func justVars(src string) map[string]string {
+	out := map[string]string{}
+	for _, m := range justAssignment.FindAllStringSubmatch(src, -1) {
+		out[m[1]] = m[2] + m[3]
+	}
+	return out
+}
+
+// expandJustVars substitutes the assignments a body interpolates.
+//
+// An interpolation naming something not in the map is left spelled as it was
+// rather than dropped: an unexpandable site is one this reader cannot answer
+// about, and blanking it would turn a caller it could not read into a body that
+// reads as running nothing.
+func expandJustVars(body string, vars map[string]string) string {
+	return justInterpolation.ReplaceAllStringFunc(body, func(m string) string {
+		name := justInterpolation.FindStringSubmatch(m)[1]
+		if v, found := vars[name]; found {
+			return v
+		}
+		return m
+	})
+}
+
+// runsModscope reports whether a recipe body runs this program.
+//
+// Three readings rather than one spelling. The package path covers `go run`,
+// `go build` and `go test`, which all take it. The two command-token patterns
+// cover a binary built once and called by another name. Variable expansion —
+// performed by the callers, on both sides of every comparison — covers a path
+// assembled in a `:=` assignment and interpolated at the site. Before this,
+// matching the path alone was the whole of it, and a recipe rewritten to spell
+// the path zero times while still running the program kept every test in this
+// file green with its sweep edge dropped (bd gqlc-wkio, row J6 of PR #920).
+func runsModscope(body string) bool {
+	return strings.Contains(body, modscopePkg) ||
+		modscopePathCall.MatchString(body) ||
+		modscopeBareCall.MatchString(body)
+}
 
 // justRecipe is one recipe as the justfile spells it: the name, the
 // dependencies just runs before the body, and the body.
@@ -112,6 +194,13 @@ func parseJustfile(src string) ([]justRecipe, []string) {
 		out        []justRecipe
 		complaints []string
 	)
+	// Bodies are returned with their `{{ name }}` interpolations expanded, so
+	// that a path assembled in an assignment and interpolated at the site is
+	// read as the invocation it is (bd gqlc-wkio). recipeBodies performs the
+	// same expansion on just's own reading, off the dump's assignments, so the
+	// comparison between the two is not between an expanded body and a
+	// literal one.
+	vars := justVars(src)
 	lines := strings.Split(src, "\n")
 	for i := 0; i < len(lines); i++ {
 		line, end := joinContinuedHeader(lines, i)
@@ -141,7 +230,7 @@ func parseJustfile(src string) ([]justRecipe, []string) {
 		out = append(out, justRecipe{
 			name: name,
 			deps: deps,
-			body: strings.Join(body, "\n"),
+			body: expandJustVars(strings.Join(body, "\n"), vars),
 		})
 	}
 	return out, complaints
@@ -488,7 +577,7 @@ func unsweptModscopeCallers(recipes []justRecipe) (unswept, complaints []string)
 
 	var callers []string
 	for _, r := range recipes {
-		if strings.Contains(r.body, modscopePkg) {
+		if runsModscope(r.body) {
 			callers = append(callers, r.name)
 		}
 	}
@@ -681,7 +770,7 @@ func TestParseJustfileAgreesWithJustOnThisJustfile(t *testing.T) {
 	// not the other one agreeing.
 	naming := 0
 	for _, body := range bodies {
-		if strings.Contains(body, modscopePkg) {
+		if runsModscope(body) {
 			naming++
 		}
 	}
@@ -734,6 +823,14 @@ func dumpJustfile(t *testing.T, dir, path string) justDump {
 
 // justDump is the part of `just --dump --dump-format json` this file reads.
 type justDump struct {
+	// Assignments are the justfile's variables. A `value` that is a bare JSON
+	// string is a literal assignment; anything else is an expression tree.
+	// dumpVars keeps the literals, which is what an interpolated invocation
+	// can be resolved through (bd gqlc-wkio).
+	Assignments map[string]struct {
+		Value any `json:"value"`
+	} `json:"assignments"`
+
 	Recipes map[string]struct {
 		// Priors counts the dependencies just runs before the body. The rest
 		// are the ones written after `&&`, which parseJustfile drops on
@@ -882,6 +979,7 @@ func priorDependencies(dumped justDump) (map[string][]string, error) {
 // lines opening with '#' and the '#!' of the 11 shebang recipes, as does this
 // reader.
 func recipeBodies(dumped justDump) map[string]string {
+	vars := dumpVars(dumped)
 	out := make(map[string]string, len(dumped.Recipes))
 	for name, r := range dumped.Recipes {
 		lines := make([]string, 0, len(r.Body))
@@ -890,13 +988,74 @@ func recipeBodies(dumped justDump) map[string]string {
 			for _, frag := range line {
 				if s, ok := frag.(string); ok {
 					b.WriteString(s)
+					continue
 				}
+				b.WriteString(resolveFragment(frag, vars))
 			}
 			lines = append(lines, b.String())
 		}
 		out[name] = strings.Join(lines, "\n")
 	}
 	return out
+}
+
+// dumpVars is the literal-valued assignments just reports. A value that is not
+// a bare string is a call or a concatenation, which has no literal expansion
+// and is left out — the same set parseJustfile's own reader takes off the
+// source, so the two sides expand the same names.
+func dumpVars(dumped justDump) map[string]string {
+	out := make(map[string]string, len(dumped.Assignments))
+	for name, a := range dumped.Assignments {
+		if s, ok := a.Value.(string); ok {
+			out[name] = s
+		}
+	}
+	return out
+}
+
+// resolveFragment renders an interpolation's expression tree, so a body running
+// this program through a variable is read as running it (bd gqlc-wkio).
+//
+// Only a variable reference and the concatenations built out of them are
+// rendered. Anything else — a function call, a conditional — renders empty,
+// which is what this reader did with every interpolation before: an expression
+// it cannot evaluate is not one it may guess at, and the interpolated site was
+// already outside what this file answers about.
+func resolveFragment(frag any, vars map[string]string) string {
+	switch v := frag.(type) {
+	case string:
+		return v
+	case []any:
+		if len(v) == 0 {
+			return ""
+		}
+		head, _ := v[0].(string)
+		switch head {
+		case "variable":
+			if len(v) == 2 {
+				if name, ok := v[1].(string); ok {
+					return vars[name]
+				}
+			}
+			return ""
+		case "concatenate":
+			var b strings.Builder
+			for _, part := range v[1:] {
+				b.WriteString(resolveFragment(part, vars))
+			}
+			return b.String()
+		default:
+			// An interpolation dumps as a list wrapping its expression, so a
+			// list whose head is not an operator is that wrapper.
+			var b strings.Builder
+			for _, part := range v {
+				b.WriteString(resolveFragment(part, vars))
+			}
+			return b.String()
+		}
+	default:
+		return ""
+	}
 }
 
 // TestJustDumpCountsPriorsSeparatelyFromLaterDependencies asks just, rather than
@@ -991,6 +1150,77 @@ var submoduleFixture = map[string]string{
 		"vuln: " + probeSweep + "\n    go run ./" + modscopePkg + " modules\n\n" +
 		"mod probe 'probe.just'\n",
 	"probe.just": probeCallerRecipe,
+}
+
+// TestASweptSpellingAndAnUnsweepableOne runs the whole gate over justfiles
+// whose caller never spells the package path.
+//
+// Each row is a shape bd gqlc-wkio names. The first three are closed here and
+// each one alone reddens if its recogniser is removed; the last is the one that
+// is NOT closed, pinned as missed so the limit is a measurement rather than a
+// belief — a recipe that shells out to a script has no invocation in its body
+// at all, and no reading of the justfile can find one.
+//
+// The `swept` recipe in every fixture is there so that the run is measuring the
+// unswept caller and not the gate's own refusal of a justfile in which nothing
+// runs this program.
+func TestASweptSpellingAndAnUnsweepableOne(t *testing.T) {
+	const preamble = probeSweep + ":\n    @true\n\n" +
+		"swept: " + probeSweep + "\n    go run ./" + modscopePkg + " modules\n\n"
+
+	for _, row := range []struct {
+		name    string
+		src     string
+		refused bool
+		why     string
+	}{{
+		name:    "a binary built once and called by another name",
+		src:     preamble + "unswept:\n    .bin/" + modscopeBin + " modules\n",
+		refused: true,
+		why: "the go command names a binary after the package's last path element, so a " +
+			"recipe that builds this program into .bin and runs it there spells the package " +
+			"path nowhere while running the program on every invocation",
+	}, {
+		name: "a path assembled in a variable and interpolated at the site",
+		src: "ms := \"./" + modscopePkg + "\"\n\n" + preamble +
+			"unswept:\n    go run {{ms}} modules\n",
+		refused: true,
+		why: "`just --dump` renders the interpolation as an expression rather than as the " +
+			"path, so neither reading saw this invocation until both were taught to resolve " +
+			"a literal assignment",
+	}, {
+		name:    "the bare name, found on PATH",
+		src:     preamble + "unswept:\n    " + modscopeBin + " modules\n",
+		refused: true,
+		why: "command position rather than anywhere in the body: this repo's justfile says " +
+			"the bare word in nine comments, and requiring a sweep edge of those recipes " +
+			"would be a gate reporting on prose",
+	}, {
+		name:    "a recipe that shells out to a script that runs it",
+		src:     preamble + "unswept:\n    bash scripts/walk.sh\n",
+		refused: false,
+		why: "the invocation is in a file the justfile does not contain, so no reading of " +
+			"the justfile can find it. This is the residue of bd gqlc-wkio, and closing it " +
+			"needs the (b) move that bead proposes — one [private] recipe every invocation " +
+			"goes through, so there is one site to hold rather than a pattern to match",
+	}} {
+		t.Run(row.name, func(t *testing.T) {
+			dir := writeJustfiles(t, map[string]string{"justfile": row.src})
+			var found bool
+			for _, c := range sweepGate(t, dir, "justfile") {
+				if strings.Contains(c, "recipe unswept runs") {
+					found = true
+					continue
+				}
+				t.Errorf("the gate said something this row did not ask about: %s", c)
+			}
+			if found != row.refused {
+				verb := map[bool]string{true: "refused", false: "did not refuse"}
+				t.Errorf("the gate %s the unswept caller in\n%s\nand this row expects it "+
+					"%s (bd gqlc-wkio). %s", verb[found], row.src, verb[row.refused], row.why)
+			}
+		})
+	}
 }
 
 // TestASubmoduleCallerPassesBothReadingsAndIsRefused is the fixture the refusal
@@ -1430,8 +1660,8 @@ func justfileDisagreements(
 		// other recipes naming it do so at line 2, which keeps
 		// unsweptModscopeCallers' "no recipe body names" complaint quiet.
 		// With that cap and without this clause the suite reports ok.
-		justNames := strings.Contains(declaredBodies[name], modscopePkg)
-		readerNames := strings.Contains(got.body, modscopePkg)
+		justNames := runsModscope(declaredBodies[name])
+		readerNames := runsModscope(got.body)
 		switch {
 		case justNames && !readerNames:
 			out = append(out, fmt.Sprintf(
