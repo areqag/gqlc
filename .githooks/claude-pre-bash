@@ -267,14 +267,21 @@ HOOKS_DIRNAME = ".githooks"
 # commit-msg and post-merge (not pre-commit); `push` fires pre-push. In the
 # same fixture `revert`, `cherry-pick` (with and without -e), `rebase` and `am`
 # fired none of the four. merge/pull are refused rather than warned about
-# because post-merge runs bd-gh-sync, NOT because of AI attribution: commit-msg
-# does fire on a merge, but .githooks/commit-msg:15-17 exits 0 whenever
-# MERGE_HEAD is set, ahead of both the identity checks and the Co-Authored-By
-# scan, so a merge commit carrying a Claude trailer is accepted rc=0 with the
-# hooks HEALTHY (measured, against a plain-commit control rejected rc=1 in the
-# same repo). What a drifted merge or pull loses is therefore at most
-# post-merge — the stale bd mirror. Pre-existing and out of scope here: bd
-# gqlc-7y7e.
+# because post-merge runs bd-gh-sync. It used to be the ONLY thing a drifted
+# merge lost: commit-msg fires on a merge, but its MERGE_HEAD guard exited 0
+# ahead of both the identity checks and the Co-Authored-By scan, so a merge
+# commit carrying a Claude trailer was accepted rc=0 with the hooks HEALTHY
+# (measured, against a plain-commit control rejected rc=1 in the same repo).
+# That was bd gqlc-7y7e and it is now fixed: the guard is split, the trailer
+# scan runs on every message and only the identity arms stand down during a
+# merge. A drifted merge or pull therefore loses the AI-attribution gate as well
+# as the bd mirror, which strengthens the case for refusing it.
+#
+# Cited by construct (MERGE_HEAD), not by line number: the line range this
+# comment used to name for that guard went stale the first time a line was
+# inserted above it, and no suite noticed (bd gqlc-m83s). A row in
+# .githooks/tests/commit-msg-test.sh now refuses such a citation anywhere in the
+# tree.
 # What a merge or pull fires varies by shape, and the subcommand this hook keys
 # on does not determine the shape. Measured in the same fixture: a fast-forward
 # `merge` or `pull` writes no commit but still fires post-merge, the bd-gh-sync

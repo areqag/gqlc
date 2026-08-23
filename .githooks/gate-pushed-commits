@@ -46,6 +46,14 @@
 # (`fatal: empty ident name`, measured). The live commit-msg still grades
 # identity at commit time, and `just doctor` still grades the config.
 #
+# MERGE COMMITS ARE SCREENED, and they did not used to be. This loop carried
+# `--no-merges`, justified by commit-msg's blanket MERGE_HEAD exit. That exit was
+# the hole in bd gqlc-7y7e and is now split: commit-msg skips only the identity
+# arms during a merge and runs the trailer scan on every message. `--no-merges`
+# here would have been the surviving half of the same hole — a merge message
+# carrying the trailer, refused at commit time and then waved through at the one
+# chokepoint that covers a commit made while commit-msg was disarmed.
+#
 # WHAT IT DOES NOT CATCH, stated rather than left to be found:
 #   - `git push --no-verify` skips it, exactly as it skips every other hook. This
 #     is a gate on the honest path, not a lock.
@@ -56,9 +64,6 @@
 #     gate covers commits made during a window that has closed, and covers
 #     nothing during a window that is open. That is a real limit and it is why
 #     the value here is retroactive coverage rather than enforcement.
-#   - Merge commits are skipped, matching commit-msg's own MERGE_HEAD arm: git
-#     copies trailers from the merged branch's HEAD into a merge message, those
-#     were screened on the source branch, and refusing here cannot rewrite them.
 #   - It screens what the push PUBLISHES, not all of history. Commits already on
 #     a remote are excluded, so a trailer that landed before this gate existed
 #     does not block every future push from that clone.
@@ -108,9 +113,9 @@ while IFS= read -r line; do
         # commits this clone is actually contributing: without it, a first push
         # of a branch cut from master re-screens all of master's history, which
         # is both slow and a re-litigation of commits that are already published.
-        mapfile -t revs < <(git rev-list --no-merges "$local_sha" --not --remotes)
+        mapfile -t revs < <(git rev-list "$local_sha" --not --remotes)
     else
-        mapfile -t revs < <(git rev-list --no-merges "$remote_sha..$local_sha")
+        mapfile -t revs < <(git rev-list "$remote_sha..$local_sha")
     fi
 
     for rev in ${revs[@]+"${revs[@]}"}; do
