@@ -74,9 +74,17 @@ assert_field() { # <name> <jq path> <expected>
     got="$(field "$2")"
     if [ "$got" = "$3" ]; then ok "$1"; else bad "$1 (expected '$3', got '$got')"; fi
 }
+# ANY witness anywhere under the state dir, not just this seat's path. Measured:
+# a mutant that replaced the not-a-seat guard with `seat = seat or "unknown"`
+# SURVIVED a version of this that checked only $WITNESS, because it wrote to a
+# neighbouring seat directory instead — writing under a made-up name is exactly
+# as wrong as writing under the right one, and the narrow assertion could not
+# see it.
 assert_no_witness() {
-    if [ -e "$WITNESS" ]; then
-        bad "$1 (a witness was written: $(cat "$WITNESS"))"
+    local found
+    found=$(find "$STATE" -name progress.json 2>/dev/null | head -3)
+    if [ -n "$found" ]; then
+        bad "$1 (a witness was written: $found)"
     else
         ok "$1"
     fi
