@@ -117,7 +117,10 @@ type options struct {
 const defaultArchiveMaxFile = 64 << 20
 
 func parseOptions(args []string, errOut io.Writer) (options, error) {
-	o := options{procDir: "/proc", applyAbove: -1}
+	// applyAbove is NOT initialised here: flag.Float64Var writes its own default
+	// over the field as it registers, so a value set here would be dead and would
+	// read as the authority on the default. The default is the -1 below.
+	o := options{procDir: "/proc"}
 	fs := flag.NewFlagSet("tmpreap", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.StringVar(&o.root, "root", "/tmp", "scratch filesystem to report on")
