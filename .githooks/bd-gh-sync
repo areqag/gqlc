@@ -4,9 +4,11 @@
 #   - .githooks/pre-push        (push, on git push)
 #   - .claude/settings.json     (pull, on Claude Code session start)
 #
-# Args: pull | push
+#   - nothing yet                (drift, see below — it has no caller here)
 #
-# Both actions end by writing their verdict to the *last* stderr line, because
+# Args: pull | push | drift
+#
+# pull and push end by writing their verdict to the *last* stderr line, because
 # both callers keep only that one: a summary line on a run that got as far as
 # choosing what to do, a SKIPPING line on one that refused. pull always exits 0:
 # it rides on `git pull` and on session start, where a non-zero aborts the
@@ -17,7 +19,11 @@
 # token): nothing was attempted and nothing is wrong. Every other early exit —
 # no python3, no writable temp directory — is a fault and says so on the line
 # the caller keeps, because a run that produced no line at all is
-# indistinguishable from one that had nothing to do.
+# indistinguishable from one that had nothing to do. drift is the exception and
+# is a gate rather than a hook: it writes nothing anywhere, its whole output is
+# for a reader, and its exit status is the answer — 0 for a corpus it read and
+# found clean, non-zero for drift, for a corpus it could not read, and for a
+# corpus that came back empty.
 # Diagnostics go to stderr, so a caller that wants silence must redirect it.
 #
 # Design: human works through GitHub issues; agents work through bd.
@@ -94,6 +100,20 @@
 #            bead list is read, because step 1 is a read-modify-write and two
 #            unserialised runs minted two issues for one bead. See the lock
 #            below for the measurement.
+#   - drift: the pull's classification with nothing after it — no write to bd,
+#            none to GitHub, no lock. It fails on the one class neither
+#            direction can repair: a bead in a status GitHub cannot represent
+#            (in_progress/blocked/deferred) whose mirror is CLOSED. The pull
+#            cannot take it — the status has no counterpart there — and the push
+#            only ever closes mirrors, never reopens them, so unlike a GH-side
+#            closure of an open bead there is no window in which it resolves
+#            itself. gqlc-23e sat in it for a month behind a stderr line under a
+#            hook that exits 0, which is why the exit status here is the point.
+#            Deliberately NOT gated: `bd open / GH closed`, which the pull
+#            applies and thereby resolves, and `bd closed / GH open`, which the
+#            push closes — both transient, and a gate firing on them fires on
+#            ordinary work. Nothing in this repository calls it yet: it needs
+#            `gh`, so it cannot live in the offline `just test` (gqlc-x98l).
 #
 # Payloads reach python through temp files, never argv or the environment. The
 # bead listing alone is ~1MB, and execve caps any single argument or
@@ -127,8 +147,8 @@
 set -Eeuo pipefail
 
 _action="${1:-}"
-case "$_action" in pull|push) ;; *)
-  echo "usage: $0 pull|push" >&2
+case "$_action" in pull|push|drift) ;; *)
+  echo "usage: $0 pull|push|drift" >&2
   exit 0
 esac
 
@@ -145,6 +165,10 @@ _abort() {
   if [ "$_action" = "pull" ]; then
     echo "bd-gh-sync: PULL FAILED — aborted at line ${1}; the pull is incomplete." >&2
     exit 0
+  fi
+  if [ "$_action" = "drift" ]; then
+    echo "bd-gh-sync: DRIFT CHECK FAILED — aborted at line ${1}; nothing was decided." >&2
+    exit 1
   fi
   echo "bd-gh-sync: PUSH FAILED — aborted at line ${1}; the push is incomplete." >&2
   exit 1
@@ -199,7 +223,12 @@ _batch=100
 _gh_limit_all=1000
 _gh_limit_open=500
 
-if [ "$_action" = "pull" ]; then
+if [ "$_action" = "pull" ] || [ "$_action" = "drift" ]; then
+  # `drift` shares this whole block and stops at the end of it. Everything down
+  # to the plan is two listings and a classification over them — no write to bd
+  # and none to GitHub — and everything after it mutates the ledger, so the two
+  # actions can share the reading without the gate inheriting the writing.
+  #
   # Both statuses are kept rather than thrown away with `|| : >file`. An input
   # that will not load already refuses the run below, on the selection's own
   # JSONDecodeError — but that traceback is the same whether bd never answered
@@ -327,8 +356,33 @@ for b in beads:
         # say. A *closed* mirror is a real disagreement and still reported.
         if desc == gh_body and gh_state == "open":
             continue
+        # The two cases left here are not one case. An OPEN mirror is the only
+        # state GitHub can hold for a bead it has no status for, so that is a
+        # bead whose body is merely behind — ordinary, and 2 of the live corpus.
+        # A CLOSED one is a disagreement no run of this script can resolve: the
+        # pull cannot take it (the status is unrepresentable) and the push only
+        # ever closes mirrors, never reopens them. gqlc-23e sat in that state
+        # for a month.
+        #
+        # Measured 2026-08-22 (gqlc-x98l): the plan code was run on live inputs
+        # with GH #171 flipped from CLOSED to OPEN and nothing else changed, and
+        # the output was BYTE-IDENTICAL to the control — one reason string
+        # covered both, so no reader downstream could separate them. The
+        # separate name is the whole repair; the DRIFT record beside it is what
+        # `drift` gates on.
+        if gh_state == "closed":
+            out.append(f"HOLD {bid} {n} status-{status}-with-mirror-closed-on-gh")
+            out.append(f"DRIFT {bid} {n} status-{status}-with-mirror-closed-on-gh")
+            continue
         out.append(f"HOLD {bid} {n} status-{status}-unrepresentable-on-gh")
         continue
+    # Deliberately no DRIFT record beside this one, though gqlc-x98l names it
+    # alongside the case above. The push path's second arm closes exactly these
+    # mirrors, so the state lasts from a `bd close` to the next `git push` —
+    # transient, and a gate on it fires on ordinary work rather than on a fault.
+    # Its own censuses bear that out: 1 instance on 2026-08-22 and 0 on
+    # 2026-08-23 with no repair between them. It keeps its distinct hold reason,
+    # which is where it was already visible.
     if status == "closed" and gh_state == "open":
         out.append(f"HOLD {bid} {n} closed-locally-still-open-on-gh")
         continue
@@ -420,10 +474,62 @@ PYEOF
     if [ "$_gh_rc" -ne 0 ]; then
       echo "bd-gh-sync: 'gh issue list' exited ${_gh_rc} — GitHub's state could not be read at all." >&2
     fi
+    # A gate has no operation riding on it and nothing to protect by staying
+    # quiet, so where the pull declares itself skipped and exits 0, the drift
+    # check fails. A run that decided nothing must not read as a run that found
+    # nothing.
+    if [ "$_action" = "drift" ]; then
+      echo "bd-gh-sync: selection exited ${_rc}, so no bead was classified at all." >&2
+      echo "bd-gh-sync: DRIFT CHECK FAILED — could not read the two listings it compares." >&2
+      exit 1
+    fi
     echo "bd-gh-sync: selection exited ${_rc}; an unscoped pull would let GitHub" >&2
     echo "bd-gh-sync: overwrite local state it cannot represent. Refusing." >&2
     echo "bd-gh-sync: SKIPPING pull — could not decide which beads are safe to pull." >&2
     exit 0
+  fi
+
+  # The gate. Placed above the hold reporting rather than below it because it
+  # answers one question and the lines below answer another: what a pull chose
+  # not to do is advice to whoever ran `git pull`, and this is a verdict on the
+  # corpus for whoever ran the check.
+  if [ "$_action" = "drift" ]; then
+    # `_count`, not `wc -l` over a grep: zero DRIFT records is the healthy
+    # steady state and the answer this gate exists to give, and grep reports it
+    # as exit 1 under a shell with errexit and an ERR trap.
+    _drift_n=$(_count '^DRIFT ' "$_tmp/plan.txt")
+    _seen=$(sed -n 's/^COUNT //p' "$_tmp/plan.txt")
+    # "No drift" is a claim about a corpus, and an unenumerated corpus emits the
+    # same zero records a clean one does. The pull withdraws its counts here;
+    # a gate has no count to withdraw and only a verdict, so it fails instead.
+    if [ "${_seen:-0}" -eq 0 ]; then
+      echo "bd-gh-sync: the bead list came back empty, so nothing was compared against" >&2
+      echo "bd-gh-sync: GitHub. A clean verdict here would be a claim about a corpus" >&2
+      echo "bd-gh-sync: this run never read." >&2
+      echo "bd-gh-sync: DRIFT CHECK FAILED — no beads were examined." >&2
+      exit 1
+    fi
+    if [ "$_drift_n" -eq 0 ]; then
+      echo "bd-gh-sync: no durable drift over ${_seen} bead(s)." >&2
+      exit 0
+    fi
+    # Named one per line here, where there is no `tail -1` caller to lose them
+    # and the whole point of the run is the list. The remedy rides along because
+    # it is not the obvious one: repairing the bead alone leaves the mirror
+    # closed and the next pull sees the same disagreement, and there is no way
+    # to reopen a GitHub issue from bd at all.
+    # `sed -n /p` rather than grep, and in the parent shell rather than a
+    # process substitution, for the two reasons the hold section below states:
+    # no matches is an answer and not a failure, and a section that cannot be
+    # read still has to reach the ERR trap.
+    sed -n '/^DRIFT /p' "$_tmp/plan.txt" >"$_tmp/drift.txt"
+    while read -r _ _did _dn _dreason; do
+      echo "bd-gh-sync: ${_did} (GH #${_dn}) — ${_dreason}. Reopen GH #${_dn} first," >&2
+      echo "bd-gh-sync: then set the bead's status; neither the pull nor the push repairs this." >&2
+    done <"$_tmp/drift.txt"
+    echo "bd-gh-sync: DRIFT CHECK FAILED — ${_drift_n} of ${_seen} bead(s) disagree with a" >&2
+    echo "bd-gh-sync: GitHub mirror in a way no run of this script can resolve." >&2
+    exit 1
   fi
 
   # Selected with `sed -n /p` into a file, for the same reason the allowlist
@@ -447,6 +553,7 @@ PYEOF
   # unreported and the summary would count it as absent.
   sed -n '/^HOLD /p' "$_tmp/plan.txt" >"$_tmp/holds.txt"
   sed -n '/^ORPHAN /p' "$_tmp/plan.txt" >"$_tmp/orphans.txt"
+  sed -n '/^DRIFT /p' "$_tmp/plan.txt" >"$_tmp/drift.txt"
   # One line per distinct reason, not one per bead. Measured 2026-08-23 over 784
   # beads and 806 issues: 7 beads sit permanently on
   # bd-description-not-a-prefix-of-gh-body, every one of them bd AHEAD of GitHub,
@@ -858,6 +965,18 @@ PYEOF
   fi
   if [ -n "$_blind" ]; then
     _summary="${_summary} WARNING: the held-bead check did not run (${_blind}); a bead reverted behind this script's back would not have been reported."
+  fi
+  # gqlc-x98l. This class was already on stderr, under a hook that exits 0 and
+  # a caller that keeps one line — which is the whole account of how the live
+  # instance sat for a month unseen. Named here, on the line that survives, and
+  # named rather than counted: the remedy is per bead and starts on GitHub.
+  # The count is not withdrawn by an empty bead list the way the held and orphan
+  # arms are, because it is not a count of a set — every id on it was seen.
+  if [ -s "$_tmp/drift.txt" ]; then
+    _drift_n=$(wc -l <"$_tmp/drift.txt")
+    _dnames=$(awk 'NR<=3 { printf "%s%s (GH #%s)", sep, $2, $3; sep=", " }' "$_tmp/drift.txt")
+    [ "$_drift_n" -gt 3 ] && _dnames="${_dnames}, +$((_drift_n - 3)) more"
+    _summary="${_summary} WARNING: ${_drift_n} bead(s) sit in a status GitHub cannot represent under a CLOSED mirror (${_dnames}); no pull or push repairs that — reopen the GH issue first, then set the bead."
   fi
   echo "$_summary" >&2
   exit 0
