@@ -33,13 +33,33 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
 
 ## Working a bead
 
-1. Sync your worktree first: `git fetch origin && git checkout --no-track -b <type>/<slug> origin/master`,
+1. Sync your worktree first: `git fetch origin && git checkout --no-track -b <type>/<bead-id>-<slug> origin/master`,
    then publish with `git push -u origin HEAD`. One branch per bead, created in
    YOUR seat worktree. Never touch another seat's worktree or the shared main
    checkout. `--no-track` is load-bearing: without it the new branch's upstream
    is `origin/master`, so a bare `git push` here resolves to master (bd
    gqlc-tfh1). `git branch --unset-upstream` repairs a branch already in that
    state.
+
+   **`<bead-id>` is the FULL id, spelled in the branch name** —
+   `fix/gqlc-cn49-protocol-branch-recipe`, not `fix/protocol-branch-recipe` and
+   not the bare suffix `fix/protocol-cn49`. Do not shorten it to keep the branch
+   tidy. `.github/scripts/check-pr-closes.py` resolves your PR's bead from a
+   `Bead:` line in the body and, failing that, from the branch name — and its
+   pattern is anchored on the literal `gqlc-` prefix, so a branch carrying only
+   the suffix resolves to nothing at all. When nothing resolves, a body saying
+   `Closes #N` is refused, and the refusal arrives as a red `tidy` job whose
+   name says nothing about bead ids. That is what makes this expensive rather
+   than merely untidy: the failure is read as a test failure or, when `tidy`
+   gates other jobs, as a run still in progress, and the PR then waits for
+   nobody. Three PRs in one night each burned about an hour on it and one lane
+   died before diagnosing it (bd gqlc-uz3c, gqlc-cn49). This is step 5's
+   `Bead:` line seen from the other end; write that line too, and treat the
+   branch name as the belt, not the braces.
+
+   Already on a branch cut without one? Do not re-cut it and do not
+   force-push — put `Bead: <bead-id>` in the PR body. Editing a body re-runs
+   the gate on its own, with no new commit and no new push.
 
    **Your seat worktree is permanent.** Never `git worktree add` and never
    remove it: it is created once and reused at every wake, and the branch you
