@@ -51,6 +51,18 @@ func percent(used, total uint64) float64 {
 	return float64(used) / float64(total) * 100
 }
 
+// worst is the fuller of the two currencies, named. Every threshold decision in
+// this tool is taken against it rather than against bytes or an average, because
+// the currency that ran out was inodes while bytes read green (bd gqlc-osuz).
+// gradePressure and the -apply-above gate share it so the two cannot come to
+// disagree about which number they are grading.
+func (p pressure) worst() (float64, string) {
+	if p.inodesPct() > p.bytesPct() {
+		return p.inodesPct(), "inodes"
+	}
+	return p.bytesPct(), "bytes"
+}
+
 type pressureLevel string
 
 const (
@@ -62,10 +74,7 @@ const (
 // gradePressure grades the WORSE of the two currencies. Grading their average,
 // or bytes alone, is the failure this tool was written after.
 func gradePressure(p pressure, warnPct, failPct float64) (pressureLevel, string) {
-	worst, currency := p.bytesPct(), "bytes"
-	if p.inodesPct() > worst {
-		worst, currency = p.inodesPct(), "inodes"
-	}
+	worst, currency := p.worst()
 	line := fmt.Sprintf("scratch: bytes %.0f%% (%s of %s), inodes %.0f%% (%s of %s)",
 		p.bytesPct(), humanBytes(int64(p.bytesUsed)), humanBytes(int64(p.bytesTotal)),
 		p.inodesPct(), humanCount(int64(p.inodesUsed)), humanCount(int64(p.inodesTotal)))

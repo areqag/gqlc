@@ -148,6 +148,11 @@ mk_clone() { # <bare> <dir>
 mk_origin "$TMP/town.git"
 mk_clone "$TMP/town.git" "$TMP/deployed"
 export KM_DEPLOY_ROOT="$TMP/deployed"
+# The guard sweep's scratch reap shells out to `just` in the deployed root, and
+# declines with a named reason when that root has no justfile. Untracked, so it
+# is invisible to kingdom_drift (which diffs the gate paths only) and the deploy
+# rows below are unaffected.
+printf 'fixture\n' >"$TMP/deployed/justfile"
 
 # --- the hermetic seam: everything below stands on this one ------------------
 
@@ -398,6 +403,21 @@ mkdir -p "$BIN"
 # row that merely happens to make the query.
 export KM_EMPTY_BOARD="$TMP/empty-board.json"
 printf '[]' >"$KM_EMPTY_BOARD"
+
+# `just`, so the guard sweep's scratch reap can be observed without a real
+# filesystem being reaped — the one thing in this suite whose live version
+# deletes another agent's files. It records its argv and answers with the shape
+# the real `tmp-reap-cadence` prints on a quiet tick; $KM_FAKE_JUST_RC is how a
+# row makes it fail. Written to a path a row names, not to $KM_STATE_DIR, so it
+# survives the dispatch_case that re-points that variable.
+export KM_FAKE_JUST_CALLS="$TMP/just-calls"
+cat >"$BIN/just" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${KM_FAKE_JUST_CALLS:-/dev/null}"
+printf 'scratch: bytes 12%% , inodes 9%%\nunder the 75%% reap threshold — nothing was deleted.\n'
+exit "${KM_FAKE_JUST_RC:-0}"
+STUB
+chmod +x "$BIN/just"
 
 cat >"$BIN/tmux" <<'STUB'
 #!/usr/bin/env bash
@@ -1999,6 +2019,118 @@ elif ! printf '%s' "$OUT" | grep -qi 'guard'; then
     bad "the halt message names every wake path it stops" "it promises a quiet town without mentioning the guard sweep: $OUT"
 else
     ok "raising a halt names the guard sweep alongside the dispatcher, so the promise covers both timers it makes"
+fi
+
+# --- the scratch reap runs on EVERY tick, not only the ones that wake (u078) --
+# internal/tools/tmpreap has existed since PR #1057 and was wired to no cadence,
+# so every reclamation of the shared /tmp was a person noticing. The one time
+# nobody did, the tmpfs hit 99% of its 1048576-inode cap and began refusing
+# writes town-wide while `df -h` still showed 5.9G free (bd gqlc-vze6). The guard
+# timer is the cadence it now hangs off.
+#
+# The rows below are all about PLACEMENT, because the reap is one line and the
+# only way to get it wrong is to put it in the wrong place. Scratch is written by
+# AGENTS, not by the town's loop: the halt, the town being down, and Րաֆֆի being
+# already awake each return before the wake, and each of them is a state in which
+# sixteen worktrees are still allocating scratch. The incident happened while the
+# town was halted.
+just_calls() { cat "$KM_FAKE_JUST_CALLS" 2>/dev/null; }
+reset_just() { : >"$KM_FAKE_JUST_CALLS"; }
+
+# The control, first, for the same reason the halt section has one: the rows
+# below assert that a reap happens in states where the sweep does nothing else,
+# and they are worthless if the reap never happens at all.
+dispatch_case '[]' '[]'
+reset_just
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "an ordinary guard tick reaps scratch" "rc=$RC out=$OUT"
+elif ! just_calls | grep -q 'tmp-reap-cadence'; then
+    bad "an ordinary guard tick reaps scratch" "the sweep invoked no reap at all (calls: $(just_calls)) out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'scratch'; then
+    bad "an ordinary guard tick reaps scratch" "it reaped without saying so, and a timer's only reader is the journal: $OUT"
+else
+    ok "a guard tick invokes the scratch reap and reports what it got, on stdout, where the journal keeps it"
+fi
+
+# The placement row. A reap under the halt check is a reap disarmed in exactly
+# the state that produced the incident — and a halt promises a quiet town, not a
+# filling disk. This is what the reap being ABOVE the early returns buys.
+dispatch_case '[]' '[]'
+reset_just
+run halt scratch keeps accumulating under a halt
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "a halted guard tick still reaps scratch" "rc=$RC out=$OUT"
+elif [ -n "$(woken_seats)" ]; then
+    bad "a halted guard tick still reaps scratch" "the halt stopped binding the wake: it woke $(woken_seats)"
+elif ! just_calls | grep -q 'tmp-reap-cadence'; then
+    bad "a halted guard tick still reaps scratch" "the halt disarmed the reap too, so /tmp fills while the town is quiet (calls: $(just_calls)) out=$OUT"
+else
+    ok "a halt stops the wake and not the reap: the filesystem keeps filling while the town is quiet, so the reaper has to keep running"
+fi
+
+# The second placement row. `km down` does not stop the agents: a factory wave
+# and every seat worktree go on writing into /tmp with no tmux session anywhere.
+#
+# Its own bin directory, holding a tmux that answers "no session" rather than
+# no tmux at all. The real tmux on this host would be asked about the REAL
+# town's session, and an answer of yes would carry this row past the down check
+# and into file_patrol_bead, which calls the real bd. A stub that refuses is the
+# only shape of this fixture that cannot reach the live town.
+DOWNBIN="$TMP/bin-town-down"
+mkdir -p "$DOWNBIN"
+cp "$BIN/just" "$DOWNBIN/just"
+printf '#!/usr/bin/env bash\nexit 1\n' >"$DOWNBIN/tmux"
+chmod +x "$DOWNBIN/tmux"
+reset_just
+OUT="$(PATH="$DOWNBIN:$PATH" "$KM" guard-sweep 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "a guard tick over a town that is DOWN still reaps scratch" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'the town is down'; then
+    bad "a guard tick over a town that is DOWN still reaps scratch" "the fixture never reached the down path, so this row witnesses nothing: $OUT"
+elif ! just_calls | grep -q 'tmp-reap-cadence'; then
+    bad "a guard tick over a town that is DOWN still reaps scratch" "no reap ran (calls: $(just_calls)) out=$OUT"
+else
+    ok "a town that is down still has agents writing scratch, and the tick reaps before it notices the town is down"
+fi
+
+# ADVISORY in both directions. The sweep's job is the Պահակ's round; a
+# filesystem tool that could stop it would be a second way for the town to go
+# quiet, and this town has had enough of those.
+dispatch_case '[]' '[]'
+reset_just
+export KM_FAKE_JUST_RC=3
+run_guard
+unset KM_FAKE_JUST_RC
+if [ "$RC" -ne 0 ]; then
+    bad "a failing reap does not stop the sweep" "rc=$RC out=$OUT"
+elif ! wake_of raffi | grep -q 'round'; then
+    bad "a failing reap does not stop the sweep" "the sweep woke nobody after the reap failed (woken: $(woken_seats)) out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'exited 3'; then
+    bad "a failing reap does not stop the sweep" "the failure was swallowed, so a reaper that has stopped working looks identical to one that had nothing to do: $OUT"
+else
+    ok "a reap that fails is named with its exit status and the round goes ahead: advisory, and never silent"
+fi
+
+# The reap needs a justfile in the DEPLOYED root, which is a thing that can be
+# false — a deploy root pointed somewhere else, a checkout mid-rewrite. It
+# declines rather than shelling out into whatever justfile `just` finds by
+# searching upward from there, which on this host is the repository itself.
+dispatch_case '[]' '[]'
+reset_just
+mk_clone "$TMP/town.git" "$TMP/deployed-no-justfile"
+OUT="$(PATH="$BIN:$PATH" KM_DEPLOY_ROOT="$TMP/deployed-no-justfile" "$KM" guard-sweep 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "a deployed root with no justfile declines the reap by name" "rc=$RC out=$OUT"
+elif [ -n "$(just_calls)" ]; then
+    bad "a deployed root with no justfile declines the reap by name" "it ran just anyway, from a root with no justfile: $(just_calls)"
+elif ! printf '%s' "$OUT" | grep -q 'no justfile'; then
+    bad "a deployed root with no justfile declines the reap by name" "it skipped the reap silently: $OUT"
+else
+    ok "a deployed root with no justfile declines the reap and says which root, rather than skipping silently"
 fi
 
 # --- the silent result cap (gqlc-mlca) ---------------------------------------

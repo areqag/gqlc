@@ -60,6 +60,21 @@ func TestGradePressure_Bands(t *testing.T) {
 	}
 }
 
+// The -apply-above gate grades the same number gradePressure does, and this is
+// the case that distinguishes it from a bytes-only reading: the filesystem that
+// stalled this town was 27% bytes and 100% inodes, so a cadence gated on bytes
+// would have sat out the whole incident.
+func TestPressureWorst_TakesTheFullerCurrencyNotBytes(t *testing.T) {
+	inodeBound := pressure{bytesUsed: 27, bytesTotal: 100, inodesUsed: 99, inodesTotal: 100}
+	if worst, currency := inodeBound.worst(); worst != 99 || currency != "inodes" {
+		t.Errorf("worst() = %.0f%% %s, want 99%% inodes", worst, currency)
+	}
+	byteBound := pressure{bytesUsed: 99, bytesTotal: 100, inodesUsed: 1, inodesTotal: 100}
+	if worst, currency := byteBound.worst(); worst != 99 || currency != "bytes" {
+		t.Errorf("worst() = %.0f%% %s, want 99%% bytes", worst, currency)
+	}
+}
+
 func TestReadPressure_ReportsBothCurrencies(t *testing.T) {
 	p, err := readPressure(t.TempDir())
 	if err != nil {

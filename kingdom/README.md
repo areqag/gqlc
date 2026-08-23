@@ -140,9 +140,29 @@ Mail from anyone to the king lands in `kingdom-state/mail/andranik/inbox/`;
 - `claude` CLI, `bd`, `jq`, `python3` — already present
 - One-time: `just kingdom-install`, then `just kingdom-up`
 
+## The guard tick also reaps scratch
+
+`km guard-sweep` runs `just tmp-reap-cadence` before anything else it does —
+before the town-is-down check, before the halt, before Րաֆֆի's wake. The
+shared `/tmp` is a 16 GiB tmpfs with 1048576 inodes, and it is filled by AGENTS
+rather than by the town's loop, so a halted or stopped town accumulates scratch
+at the same rate a running one does; on 2026-08-22 it reached 99% of the inode
+cap and refused writes town-wide while `df -h` still showed 5.9 G free
+(bd `gqlc-vze6`, `gqlc-u078`). The reap is not a wake — no session, no tokens,
+no seat — so the halt does not bind it.
+
+It is advisory: it can neither fail the sweep nor, thanks to a timeout shorter
+than the guard cadence, delay the next tick. It deletes nothing until `/tmp` is
+at or past `reap_threshold` (75%, in whichever of bytes and inodes is fuller),
+and below that it stops at one `statfs` without walking. What it will and will
+not remove, and how it proves abandonment, is `just tmp-reap`'s doc comment and
+`internal/tools/tmpreap`.
+
 ## Knobs
 
 All in `kingdom.toml`: `max_active` (global concurrency cap; mayor and guard
 exempt), dispatch/guard cadences, `handoff_threshold_pct`, `permission_mode`
 (defaults to `bypassPermissions` — the factory runs unattended; the
-constitution, the git hooks, and `claude-pre-bash` remain the guardrails).
+constitution, the git hooks, and `claude-pre-bash` remain the guardrails). The
+scratch reap threshold is the exception, and lives in the justfile beside the
+tool it configures, since nothing on the km side reads it.
