@@ -1695,6 +1695,7 @@ cmd_guard_sweep() {
         return 0
     fi
     file_patrol_bead
+    tell_dirty_authors
     cmd_wake raffi --reason "time for a round of the town (see your soul: rounds)"
 }
 
@@ -1777,6 +1778,137 @@ BOUND: exactly one patrol bead is open at a time, permanently, whatever the merg
         return 0
     fi
     echo "guard-sweep: filed a patrol bead — no open one was on the board"
+}
+
+# ADR 0006 §1, the execution half (bd gqlc-wz47). Nothing told an author their
+# open PR had gone DIRTY. Every case on 2026-08-22 was found by a person
+# happening to look, and Արամազդ's estimate was that three of seven affected
+# authors did not know. A PR goes DIRTY through nothing its author did: a merge
+# that appends to a shared registry invalidates every open PR appending to the
+# same registry, and he found three live registries in one afternoon.
+#
+# The census rides the guard cadence rather than becoming an actor: km already
+# runs on this timer and already carries mail. MAIL, NOT A WAKE — a DIRTY PR is
+# routine, the census expects to find them often, and a wake per conflict would
+# spend concurrency slots on the ordinary case.
+
+# `gh pr view --json mergeable` is the WRONG instrument and its wrongness is
+# part of the decision: GitHub recomputes mergeability lazily after any push
+# and returns UNKNOWN meanwhile, which a naive check reads as "not
+# conflicting". Արամազդ's first pass with it reported 2 DIRTY where there were
+# 7. This asks git instead, locally, against a ref it has just fetched.
+dirty_open_prs() { # -> TSV number, head oid, head branch; rc 1 if gh cannot answer
+    local raw got limit="${KM_DIRTY_PR_LIMIT:-100}"
+    raw=$(timeout 30 gh pr list --state open --limit "$limit" \
+        --json number,headRefOid,headRefName 2>/dev/null) || return 1
+    got=$(jq 'length' <<<"$raw" 2>/dev/null) || return 1
+    # A full-length list is an UNKNOWN list: gh offers no list-level tell, so
+    # the (N+1)th PR is indistinguishable from no PR. Same reasoning as
+    # hold_open_pr_files, and the same degradation.
+    [ "$got" != "$limit" ] || return 1
+    jq -r '.[] | select(.headRefOid != null and .headRefName != null)
+                 | [ (.number | tostring), .headRefOid, .headRefName ] | @tsv' \
+        <<<"$raw" 2>/dev/null
+}
+
+# --name-only is the line to trust, and it is not a preference. Without it
+# `git merge-tree --write-tree` prints `Auto-merging <path>` for files it merged
+# SUCCESSFULLY, on lines adjacent to `CONFLICT (content): <other path>`; read as
+# a block that says the first file conflicted, and it says the opposite.
+# Արամազդ made this error first and caught it against his own count.
+#
+# The head is RESOLVED before it is merged, and that is not belt-and-braces.
+# Measured 2026-08-23 with git 2.55.0: `git merge-tree --write-tree --name-only
+# <base> <an oid this repo does not have>` exits **1** — the same status as a
+# genuine conflict — writing `not something we can merge` to stderr and NOTHING
+# to stdout. So rc is not the three-way answer it looks like: read on rc alone,
+# a head whose branch someone deleted comes back with an empty conflict list
+# and is reported as CLEAN. Unknown is neither clean nor dirty, and the caller
+# says so out loud.
+dirty_conflicted_paths() { # <root> <base ref> <head oid> -> paths; rc 1 = unknown
+    local root=$1 base=$2 head=$3 out rc=0
+    local KM_GIT_TIMEOUT="${KM_GIT_TIMEOUT:-30}"
+    out=$(git_at "$root" merge-tree --write-tree --name-only "$base" "$head" 2>/dev/null) || rc=$?
+    [ "$rc" -ne 0 ] || return 0
+    # Line 1 is the written tree's oid; the conflicted names run to the first
+    # blank line, after which merge-tree's informational messages begin.
+    printf '%s\n' "$out" | awk 'NR == 1 { next } /^$/ { exit } { print }'
+}
+
+# Every PR here is pushed by one GitHub account, so `author.login` names the
+# machine and not the citizen. The bead is what carries a seat, so the branch
+# name is read for bead ids and the first one with a seat assignee is the
+# author. A PR whose branch names no assigned bead is reported to Սեդրակ
+# instead of being dropped: an unattributable DIRTY PR is exactly the case a
+# human has to look at, and the suppression key below bounds it to one message.
+dirty_author_of() { # <head branch> -> seat name
+    local branch=$1 ids show who
+    ids=$(grep -oE 'gqlc-[a-z0-9]+' <<<"$branch" | sort -u | tr '\n' ' ')
+    if [ -n "${ids// /}" ]; then
+        # shellcheck disable=SC2086 # deliberate word split: bd takes ids as separate args
+        show=$(bd show $ids --json 2>/dev/null) || show=""
+        if [ -n "$show" ]; then
+            who=$(jq -r '[ .[]? | select(type == "object") | .assignee // empty ][0] // empty' \
+                <<<"$show" 2>/dev/null)
+            if [ -n "$who" ] && is_seat "$who"; then
+                echo "$who"
+                return 0
+            fi
+        fi
+    fi
+    echo sedrak
+}
+
+tell_dirty_authors() {
+    local prs root sd told n oid branch paths who key
+    if ! prs=$(dirty_open_prs); then
+        echo "guard-sweep: DIRTY census skipped — gh could not answer for the open PRs" >&2
+        return 0
+    fi
+    [ -n "$prs" ] || return 0
+    root=$(main_root)
+    # The census compares against origin/master and against heads it does not
+    # own, so a stale remote would report conflicts that were resolved hours
+    # ago. A failed fetch is NOT fatal — the same over-reporting the hold
+    # verdict accepts — but it is said out loud, because a false DIRTY mail
+    # costs the recipient a rebase they do not need.
+    local KM_GIT_TIMEOUT="${KM_FETCH_TIMEOUT:-60}"
+    git_at "$root" fetch --quiet origin 2>/dev/null \
+        || echo "guard-sweep: DIRTY census could not fetch; reading a possibly-stale origin" >&2
+    sd=$(state_dir)
+    told="$sd/dirty-told"
+    mkdir -p "$told"
+    while IFS=$'\t' read -r n oid branch; do
+        [ -n "$n" ] && [ -n "$oid" ] || continue
+        if ! paths=$(dirty_conflicted_paths "$root" origin/master "$oid"); then
+            echo "guard-sweep: PR #$n — git could not merge-test $oid (a deleted branch?); not reported" >&2
+            continue
+        fi
+        [ -n "$paths" ] || continue
+        who=$(dirty_author_of "$branch")
+        # Keyed on the HEAD, so a rebase or a new push earns a fresh message and
+        # a head that has not moved earns silence. The cadence is minutes; a
+        # tell that arrives every two minutes is a tell nobody reads.
+        key="$told/$n-$oid-$who"
+        [ -e "$key" ] && continue
+        if mail_send "$who" --from sedrak \
+            -s "PR #$n has gone DIRTY" \
+            -m "Your open PR #$n ($branch, head $oid) no longer merges into origin/master.
+
+Conflicted paths:
+  ${paths//$'\n'/$'\n'  }
+
+You almost certainly did not cause this. A merge that appends to a shared registry invalidates every open PR that appends to the same registry (ADR 0006, kingdom/brain/decisions/0006-a-head-that-moves-under-a-reader.md).
+
+Rebase on origin/master, re-run the gates, and force-push. If a judge is reading this PR, warn them BEFORE you push, and state the delta as a merge-base comparison rather than a commit list — a rebase makes 'git log old..new' read as fix work (ADR 0006 section 3).
+
+Measured by km guard-sweep with 'git merge-tree --write-tree --name-only', not with gh's mergeable field, which returns UNKNOWN while GitHub recomputes and reads as clean." 2>/dev/null; then
+            : >"$key"
+            echo "guard-sweep: PR #$n is DIRTY — told $who"
+        else
+            echo "guard-sweep: PR #$n is DIRTY but the message to $who could not be sent" >&2
+        fi
+    done <<<"$prs"
 }
 
 # ---------- unit health ----------

@@ -6243,6 +6243,198 @@ else
 fi
 unset KM_FAKE_ALL
 
+# --- the DIRTY census (ADR 0006 §1, bead gqlc-wz47) --------------------------
+# Nothing told an author their open PR had gone DIRTY. Every case on 2026-08-22
+# was found by a person happening to look, and Արամազդ's estimate was that
+# three of seven affected authors did not know.
+#
+# The fixture is built to the SHAPE that manufactures these conflicts rather
+# than to an arbitrary one: a branch edits a file, master then edits the same
+# file under it, and the branch is DIRTY through nothing its author did. Both
+# heads live in a real bare repo on disk, so `git merge-tree` is asked a real
+# question and no row touches the network.
+DIRTYO="$TMP/dirty-origin.git"
+DIRTYW="$TMP/dirty-work"
+gitf init -q --bare -b master "$DIRTYO"
+gitf init -q -b master "$DIRTYW"
+gitf -C "$DIRTYW" config user.email fixture@example.invalid
+gitf -C "$DIRTYW" config user.name fixture
+gitf -C "$DIRTYW" config commit.gpgsign false
+gitf -C "$DIRTYW" config core.hooksPath /dev/null
+mkdir -p "$DIRTYW/kingdom/bin" "$DIRTYW/.githooks" "$DIRTYW/.claude"
+printf 'a registry\n' >"$DIRTYW/justfile"
+printf 'fixture\n' >"$DIRTYW/kingdom/bin/km"
+printf 'fixture\n' >"$DIRTYW/.githooks/keep"
+printf 'fixture\n' >"$DIRTYW/.claude/keep"
+gitf -C "$DIRTYW" add -A
+gitf -C "$DIRTYW" commit -qm 'fixture: a shared registry two branches will append to'
+gitf -C "$DIRTYW" remote add origin "$DIRTYO"
+gitf -C "$DIRTYW" push -q origin master
+gitf -C "$DIRTYW" checkout -q -b feat/thing-gqlc-dd11
+printf 'a registry\nthe branch line\n' >"$DIRTYW/justfile"
+gitf -C "$DIRTYW" commit -qam 'the branch appends to the registry'
+gitf -C "$DIRTYW" push -q origin feat/thing-gqlc-dd11
+gitf -C "$DIRTYW" checkout -q master
+printf 'a registry\nthe master line\n' >"$DIRTYW/justfile"
+gitf -C "$DIRTYW" commit -qam 'somebody else appends to the same registry, and merges first'
+gitf -C "$DIRTYW" push -q origin master
+# The POSITIVE CONTROL, and it is cut from the NEW master on purpose: a control
+# is sound only at the instant it runs, and #1195 was a clean control that went
+# DIRTY through nothing but another PR merging.
+gitf -C "$DIRTYW" checkout -q -b feat/other-gqlc-cc22
+printf 'untouched by anyone else\n' >"$DIRTYW/unrelated.md"
+gitf -C "$DIRTYW" add -A
+gitf -C "$DIRTYW" commit -qm 'a branch that touches no registry'
+gitf -C "$DIRTYW" push -q origin feat/other-gqlc-cc22
+gitf -C "$DIRTYW" checkout -q master
+DIRTY_OID=$(gitf -C "$DIRTYW" rev-parse feat/thing-gqlc-dd11)
+CLEAN_OID=$(gitf -C "$DIRTYW" rev-parse feat/other-gqlc-cc22)
+
+DIRTYGH="$TMP/dirty-gh.json"
+run_guard_dirty() { # $1 = the PR list gh answers with
+    printf '%s' "$1" >"$DIRTYGH"
+    OUT="$(cd "$DIRTYW" && PATH="$BIN:$PATH" KM_FAKE_GH="$DIRTYGH" "$KM" guard-sweep 2>&1)"
+    RC=$?
+}
+dirty_mail_of() { find "$KM_STATE_DIR/mail/$1/inbox" -type f 2>/dev/null; }
+dirty_pr_json() { # <number> <oid> <branch>
+    jq -cn --arg n "$1" --arg o "$2" --arg b "$3" \
+        '[{number: ($n | tonumber), headRefOid: $o, headRefName: $b}]'
+}
+
+# The POSITIVE CONTROL comes first, and it is not a courtesy row: a census that
+# always cries conflict passes every DIRTY assertion below. Without this one
+# they witness nothing.
+bn="a clean PR is not reported as DIRTY"
+dispatch_case '[]' '[]' '[]' '' '[{"id":"gqlc-cc22","assignee":"tir","dependencies":[]}]'
+run_guard_dirty "$(dirty_pr_json 4242 "$CLEAN_OID" feat/other-gqlc-cc22)"
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ -n "$(dirty_mail_of tir)" ]; then
+    bad "$bn" "the census mailed the author about a branch that merges cleanly: $(cat "$(dirty_mail_of tir)")"
+elif printf '%s' "$OUT" | grep -q 'DIRTY'; then
+    bad "$bn" "it named a clean PR as DIRTY: $OUT"
+else
+    ok "$bn, so the rows below discriminate rather than always crying conflict"
+fi
+
+bn="a DIRTY PR is mailed to the seat its branch names"
+dispatch_case '[]' '[]' '[]' '' '[{"id":"gqlc-dd11","assignee":"tir","dependencies":[]}]'
+run_guard_dirty "$(dirty_pr_json 4243 "$DIRTY_OID" feat/thing-gqlc-dd11)"
+letter="$(dirty_mail_of tir)"
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ -z "$letter" ]; then
+    bad "$bn" "nothing reached Տիր's inbox, which is the whole defect: $OUT"
+elif ! grep -q '4243' "$letter"; then
+    bad "$bn" "the letter does not name the PR: $(cat "$letter")"
+elif ! grep -qxF '  justfile' "$letter"; then
+    # An EXACT line, not a substring. Without --name-only, `git merge-tree
+    # --write-tree` lists conflicts as `<mode> <oid> <stage>\tf` — three lines
+    # per path, each of which CONTAINS the path — so a substring match passes
+    # against the exact output ADR 0006 says not to read. Measured 2026-08-23:
+    # this row survived dropping --name-only until it was pinned this way.
+    bad "$bn" "the conflicted path is not on a line of its own; the letter is carrying merge-tree's raw stage lines rather than the path: $(cat "$letter")"
+elif grep -qE '^  [0-7]{6} ' "$letter"; then
+    bad "$bn" "the letter carries merge-tree's mode/oid/stage rows — --name-only was not used: $(cat "$letter")"
+elif grep -q 'unrelated.md' "$letter"; then
+    bad "$bn" "it named a path that merged cleanly — merge-tree's Auto-merging lines were read as conflicts: $(cat "$letter")"
+elif [ -n "$(find "$KM_STATE_DIR/seats/tir" -name wake 2>/dev/null)" ]; then
+    bad "$bn" "the census WOKE him; a DIRTY PR is routine and a wake per conflict spends a slot on it"
+else
+    ok "$bn, naming the conflicted path and only it, by mail rather than by a wake"
+fi
+
+# The suppression key. The cadence is minutes, so without this the author gets
+# the same letter every tick and stops reading any of them.
+bn="the same head is not reported twice"
+before=$(dirty_mail_of tir | wc -l)
+run_guard_dirty "$(dirty_pr_json 4243 "$DIRTY_OID" feat/thing-gqlc-dd11)"
+after=$(dirty_mail_of tir | wc -l)
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ "$after" != "$before" ]; then
+    bad "$bn" "a second sweep at the same head mailed again ($before then $after letters)"
+else
+    ok "$bn"
+fi
+
+# ...but a NEW head is. The key is the head and not the PR, because an author
+# who pushes again into a conflict that is still there is the case that must
+# not be swallowed by the suppression protecting them from the tick.
+bn="a head that has moved earns a fresh letter"
+gitf -C "$DIRTYW" checkout -q feat/thing-gqlc-dd11
+printf 'a registry\nthe branch line\nand more of it\n' >"$DIRTYW/justfile"
+gitf -C "$DIRTYW" commit -qam 'the author pushes again, still conflicting'
+gitf -C "$DIRTYW" push -q origin feat/thing-gqlc-dd11
+DIRTY_OID2=$(gitf -C "$DIRTYW" rev-parse feat/thing-gqlc-dd11)
+gitf -C "$DIRTYW" checkout -q master
+before=$(dirty_mail_of tir | wc -l)
+run_guard_dirty "$(dirty_pr_json 4243 "$DIRTY_OID2" feat/thing-gqlc-dd11)"
+after=$(dirty_mail_of tir | wc -l)
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ "$after" = "$before" ]; then
+    bad "$bn" "the suppression key outlived the head it was about, so a still-conflicting push went untold: $OUT"
+else
+    ok "$bn, so the key is the head and not the PR"
+fi
+
+# An oid git cannot resolve — most often a branch someone deleted — is UNKNOWN,
+# and unknown is neither clean nor dirty. Reading it as either is a silent
+# answer to a question that was not answered.
+bn="a head git cannot resolve is named, and reported to nobody"
+before=$(dirty_mail_of tir | wc -l)
+run_guard_dirty "$(dirty_pr_json 4243 0000000000000000000000000000000000000000 feat/thing-gqlc-dd11)"
+after=$(dirty_mail_of tir | wc -l)
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'merge-test'; then
+    bad "$bn" "an oid git cannot resolve was passed over silently: $OUT"
+elif [ "$after" != "$before" ]; then
+    bad "$bn" "it mailed about a head it could not measure: $OUT"
+else
+    ok "$bn"
+fi
+
+bn="an unattributable DIRTY PR goes to Սեդրակ rather than nowhere"
+dispatch_case '[]' '[]' '[]' '' '[]'
+run_guard_dirty "$(dirty_pr_json 4244 "$DIRTY_OID" feat/no-bead-in-this-name)"
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ -z "$(dirty_mail_of sedrak)" ]; then
+    bad "$bn" "a PR whose branch names no bead was dropped, which is exactly the case a human has to look at: $OUT"
+else
+    ok "$bn"
+fi
+
+bn="a census gh cannot answer costs neither the sweep nor a false letter"
+dispatch_case '[]' '[]'
+KM_FAKE_GH_RC=1 run_guard_dirty '[]'
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "a gh outage took the whole sweep down: rc=$RC out=$OUT"
+elif [ -n "$(dirty_mail_of tir)" ]; then
+    bad "$bn" "it mailed on an answer it never got: $(dirty_mail_of tir)"
+elif ! printf '%s' "$OUT" | grep -q 'census skipped'; then
+    bad "$bn" "the outage is silent, so a broken census looks like a clean board: $OUT"
+elif ! wake_of raffi | grep -q 'round'; then
+    bad "$bn" "it also stopped the round; the census is an addition to the sweep, not a precondition for it"
+else
+    ok "$bn, and the round still happens"
+fi
+
+bn="a halted sweep runs no DIRTY census"
+dispatch_case '[]' '[]' '[]' '' '[{"id":"gqlc-dd11","assignee":"tir","dependencies":[]}]'
+run halt no census under a halt
+run_guard_dirty "$(dirty_pr_json 4243 "$DIRTY_OID" feat/thing-gqlc-dd11)"
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ -n "$(dirty_mail_of tir)" ]; then
+    bad "$bn" "the halt was raised and the census mailed anyway: $(dirty_mail_of tir)"
+else
+    ok "$bn"
+fi
+
 # This suite builds git repositories, so it must be able to prove it built them
 # somewhere else. On PR #1128 it could not: a leaked GIT_DIR sent the fixture's
 # `git init` and `git commit` into the repo under test, grafting six fixture
