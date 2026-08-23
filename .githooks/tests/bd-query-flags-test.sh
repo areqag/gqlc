@@ -85,9 +85,17 @@ CLASS_PATHSPECS=(
 # capless call site. That line is the reason this is a two-pass strip and not a
 # regex.
 #
-# GO: the exec-args shape, `"bd", "list", ...` on one line. A call whose args are
-# split across lines is reported rather than skipped; a gate that guesses in the
-# permissive direction is the one that goes quietly empty.
+# GO: the exec-args shape — two adjacent quoted arguments — on one line. A call
+# whose args are split across lines is reported rather than skipped; a gate that
+# guesses in the permissive direction is the one that goes quietly empty.
+#
+# Restricted to *.go, with `//` comments cut, for a reason this file measured on
+# itself. The Go arm originally ran over every enumerated file and cut no
+# comments, so the first push after this suite became TRACKED went red on two
+# lines of the suite itself: the header prose describing the Go shape, and the
+# fixture literal it plants to exercise the Go shape. A gate that fails on its
+# own account of itself is one exception away from being allowlisted into
+# uselessness, so the repair was to narrow the arm, not to exempt the file.
 scan() {
     local root="$1"
     (
@@ -98,7 +106,13 @@ scan() {
                 -e 's/"[^"]*"/""/g' -e "s/'[^']*'/''/g" "$f" |
                 grep -nE '(^|[|(&;{}!]|\$\()[[:space:]]*bd[[:space:]]+(list|ready)([[:space:]]|$)' |
                 sed "s|^|$f:|"
-            grep -nE '"bd",[[:space:]]*"(list|ready)"' "$f" 2>/dev/null | sed "s|^|GO:$f:|"
+            case "$f" in
+                *.go)
+                    sed -e 's|//.*$||' "$f" |
+                        grep -nE '"bd",[[:space:]]*"(list|ready)"' |
+                        sed "s|^|GO:$f:|"
+                    ;;
+            esac
         done
     )
 }
@@ -258,11 +272,26 @@ CORRECT=(
 # comment strip is the only thing standing between it and a reported violation.
 plant ".githooks/prose-comment" '# The count is read off a snapshot (bd list --json), so it can be stale.'
 plant "kingdom/bin/prose-echo" 'echo "BEADS: UNAVAILABLE — the query (bd list --status in_progress, or the jq over it) did not answer"'
+# The Go arm's own prose control, and it is here because the arm did not have
+# one and was wrong. It matched raw bytes in every enumerated file, so a `//`
+# comment in a Go source — and the same text in a shell file — read as a call
+# site. That is not hypothetical: it reddened this suite's first push, on this
+# suite's own header. Two fixtures, because the arm needed narrowing in two
+# independent ways: the comment cut, and the *.go path restriction.
+# shellcheck disable=SC2016  # fixture TEXT to be swept, not code to be run
+plant "internal/tools/z/main.go" '// The set is read off `bd list` — run3(ctx, "bd", "list", "--json") — once per run.'
+# Double-quoted here on purpose, so the inner quotes reach the fixture file
+# UNESCAPED. Written with backslashes it would carry `\"bd\",` and match the Go
+# pattern nowhere, and the row below would then pass with the *.go restriction
+# deleted — a control that certifies nothing.
+plant "lib/go-shape-in-shell.sh" "# the Go call site spells it run3(ctx, \"bd\", \"list\", \"--json\")"
 plant "lib/prose-quoted.sh" "echo \"bd-gh-sync: 'bd list' exited \${rc}\" >&2"
 NOT_SITES=(
     ".githooks/prose-comment"
     "kingdom/bin/prose-echo"
     "lib/prose-quoted.sh"
+    "internal/tools/z/main.go"
+    "lib/go-shape-in-shell.sh"
 )
 
 git -C "$MINI" add -A
