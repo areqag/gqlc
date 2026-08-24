@@ -143,6 +143,29 @@ run_hook() {
     last_rc=$?
 }
 
+# $1=directory to run in, $2=hook name, rest=KEY=VALUE overrides for the stub.
+# Unlike run_hook this hands the hook NO BRANCH_OVERRIDE, because the branch
+# detection is what the cases below are about; with the override set they would
+# pass against any implementation of it, including none.
+run_hook_unoverridden() {
+    local dir="$1" hook="$2"
+    shift 2
+    : >"$JUST_LOG"
+    (
+        cd "$dir" \
+            && env PATH="$STUB_JUST_DIR:$PATH" JUST_LOG="$JUST_LOG" \
+                "$@" "$HOOKS/$hook"
+    ) </dev/null >"$OUT" 2>"$ERR"
+    last_rc=$?
+}
+
+# A throwaway repo at $1 with initial branch $2. Identity is passed per-command
+# with `-c` at the call sites rather than written to a config, so nothing here
+# can reach a shared one (bd gqlc-7iea).
+new_repo() {
+    git init -q --initial-branch="$2" "$1"
+}
+
 # --- pre-commit: provisioning healthy ---------------------------------------
 run_hook pre-commit STUB_ENSURE_RC=0 STUB_FMT_RC=0
 assert_rc_zero "pre-commit: formatted tree commits"
@@ -171,6 +194,60 @@ run_hook pre-commit STUB_ENSURE_RC=1 GQLC_ALLOW_MISSING_LINTER=0
 assert_rc_nonzero "pre-commit: GQLC_ALLOW_MISSING_LINTER=0 does not open the hatch"
 run_hook pre-commit STUB_ENSURE_RC=1 GQLC_ALLOW_MISSING_LINTER=yes
 assert_rc_nonzero "pre-commit: GQLC_ALLOW_MISSING_LINTER=yes does not open the hatch"
+
+# --- pre-commit: the branch guard's own input -------------------------------
+# bd gqlc-zxh4. The master/main guard compares one variable, and a failure to
+# determine the branch used to leave that variable holding something that is
+# neither "master" nor "main" -- so the guard fell through and the commit went
+# ahead. Measured directly on git 2.55.0; the three shapes are NOT the same, and
+# the bead's account of them ("leaves BRANCH empty") covers only the first:
+#
+#   not a git repository    rev-parse rc=128 stdout ""      symbolic-ref rc=128
+#   unborn HEAD on master   rev-parse rc=128 stdout "HEAD"  symbolic-ref rc=0 "master"
+#   detached HEAD           rev-parse rc=0   stdout "HEAD"  symbolic-ref rc=128
+#
+# Only the third is a real answer: a detached HEAD genuinely is not master, and
+# committing there is allowed. So it is pinned below as an ACCEPT, and it is
+# what stops the first two cases being satisfied by blocking on "HEAD" -- a fix
+# that did that would turn every rebase into a refusal.
+NOREPO="$TMP/branch-not-a-repo"
+mkdir -p "$NOREPO"
+run_hook_unoverridden "$NOREPO" pre-commit STUB_ENSURE_RC=0 STUB_FMT_RC=0
+assert_rc_nonzero "pre-commit: with no repository the guard refuses instead of passing"
+assert_err_has "pre-commit: a blind branch guard says so" "could not determine the current branch"
+assert_just_not_called "pre-commit: a blind branch guard never reaches fmt-check" fmt-check
+
+UNBORN="$TMP/branch-unborn"
+new_repo "$UNBORN" master
+run_hook_unoverridden "$UNBORN" pre-commit STUB_ENSURE_RC=0 STUB_FMT_RC=0
+assert_rc_nonzero "pre-commit: an unborn HEAD on master is still master"
+assert_err_has "pre-commit: unborn master is refused by the BRANCH guard, not a fallback" \
+    "Direct commits to master are blocked"
+
+DETACHED="$TMP/branch-detached"
+new_repo "$DETACHED" master
+git -C "$DETACHED" -c user.name=fixture -c user.email=fixture@example.invalid \
+    commit -q --allow-empty -m "fixture"
+git -C "$DETACHED" checkout -q --detach HEAD
+run_hook_unoverridden "$DETACHED" pre-commit STUB_ENSURE_RC=0 STUB_FMT_RC=0
+assert_rc_zero "pre-commit: a detached HEAD is not master, and commits"
+assert_just_called "pre-commit: a detached HEAD still reaches the format gate" fmt-check
+
+BORN="$TMP/branch-born-master"
+new_repo "$BORN" master
+git -C "$BORN" -c user.name=fixture -c user.email=fixture@example.invalid \
+    commit -q --allow-empty -m "fixture"
+run_hook_unoverridden "$BORN" pre-commit STUB_ENSURE_RC=0 STUB_FMT_RC=0
+assert_rc_nonzero "pre-commit: an ordinary master branch is blocked"
+assert_err_has "pre-commit: ordinary master names the branch" "Direct commits to master are blocked"
+
+FEATURE="$TMP/branch-feature"
+new_repo "$FEATURE" feature/zxh4
+git -C "$FEATURE" -c user.name=fixture -c user.email=fixture@example.invalid \
+    commit -q --allow-empty -m "fixture"
+run_hook_unoverridden "$FEATURE" pre-commit STUB_ENSURE_RC=0 STUB_FMT_RC=0
+assert_rc_zero "pre-commit: an ordinary feature branch commits"
+assert_just_called "pre-commit: a feature branch reaches the format gate" fmt-check
 
 # --- pre-push: provisioning healthy -----------------------------------------
 run_hook pre-push STUB_ENSURE_RC=0 STUB_LINT_RC=0

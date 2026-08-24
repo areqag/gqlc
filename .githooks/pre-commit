@@ -4,11 +4,36 @@
 # Activated by: git config core.hooksPath .githooks
 # (run `just init` after cloning)
 
+# NOT what closes the gqlc-zxh4 hole, despite that bead's title: deleting this
+# line leaves the suite green at 82/0, because the branch arms below handle
+# their own failure inside `if` conditions, where -e is suspended. Kept for
+# consistency with commit-msg, pre-push and the guard hooks, and for whatever
+# is added below it later.
+set -euo pipefail
+
 # Allow test harness to override the branch name for testing
+#
+# Two commands, because neither answers in every state. Measured on git 2.55.0:
+#
+#   unborn HEAD on master   rev-parse rc=128 "HEAD"   symbolic-ref rc=0 "master"
+#   detached HEAD           rev-parse rc=0   "HEAD"   symbolic-ref rc=128
+#   outside a repository    rev-parse rc=128 ""       symbolic-ref rc=128
+#
+# Their order is not load-bearing — a failure falls through to the other either
+# way — but both are needed. Drop symbolic-ref and the first commit into a fresh
+# repository on master is not recognised as master; drop rev-parse and a
+# detached HEAD resolves to nothing, so commits during a rebase are refused.
+#
+# The refusal arm is the fix for bd gqlc-zxh4. There was no refusal arm before:
+# a failed rev-parse left BRANCH holding "HEAD" or "", neither of which is
+# "master" or "main", so the guard below fell through and the commit proceeded.
 if [ -n "${BRANCH_OVERRIDE:-}" ]; then
   BRANCH="$BRANCH_OVERRIDE"
-else
-  BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+elif ! BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null)" \
+  && ! BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"; then
+  echo "ERROR: could not determine the current branch, so the master/main commit guard did not run." >&2
+  echo "       Refusing the commit rather than skipping the guard." >&2
+  exit 1
 fi
 
 if [ "$BRANCH" = "master" ] || [ "$BRANCH" = "main" ]; then
