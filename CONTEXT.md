@@ -593,6 +593,23 @@ package's *name* — the entry's `gen.go.package` key, related but
 distinct); output target (this directory's old name, retired with the
 `output` key).
 
+**Transaction handle (Tx)**:
+The object the generated repository's `Begin` returns: an open, always
+write-mode transaction finished by exactly one `Commit` or `Rollback`,
+with `Queries()` yielding a repository handle bound to it. Emitted per
+generated package with a byte-identical exported surface on every
+backend (`docs/specs/codegen-tx-object.md`); the driver appears only in
+unexported fields, so swapping targets is an import swap. `Commit` after
+finish returns the package's `ErrTxDone` sentinel; `Rollback` after
+finish returns nil, so a deferred `Rollback` is unconditionally safe.
+Distinct from **`WithTx`**, which binds a repository handle to a
+transaction the *caller* opened and owns — `Begin`/`Tx` is gqlc opening
+and owning one. `Begin` on a handle that is already transaction-bound is
+refused on every backend, even where the driver could nest.
+_Avoid_: transaction wrapper (says closure, the rejected shape); managed
+transaction (the neo4j driver's term for its retrying closure path,
+which this is not).
+
 ## Flagged ambiguities
 
 - **"Parsed"** splits into a syntactic step and a schema-checked invariant.
