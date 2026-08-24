@@ -80,7 +80,17 @@ that set already refused. A collision today produces a Go compile error in
 generated code; membership turns it into a generate-time
 `ErrIdentifierCollision` naming the schema construct.
 
-## The neo4j targets: conversion is backend-private and lossless
+One residue is recorded rather than solved, because it is the one thing only
+a module can give: cross-package type identity. Under a multi-target config
+the same schema generates per-target packages whose carriers are distinct,
+structurally identical types, so passing a value between two targets' code is
+a field copy the caller writes. Nobody has asked for more, and the decision
+is reversible without breakage — a later runtime module can declare the
+canonical types and generated packages can alias them. The Tx design
+(bead `gqlc-h0lw`) reached per-target emission independently, and its ruling
+states the shared posture this ADR adopts: the
+town decides at most once whether gqlc grows a runtime module, and neither
+design creates one.
 
 `typeMap.Property` switches DATE/TIME/LOCALTIME/DURATION to the neutral names;
 decode/encode converts to and from `dbtype.*` inside the generated helpers.
