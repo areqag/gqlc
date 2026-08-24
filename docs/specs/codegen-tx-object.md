@@ -336,6 +336,20 @@ The v5/v6 half of the agreement is already held by the existing
 `driverAgnostic` gate (§4.2 extends it); this test compares v5 against
 AGE and lets transitivity cover v6.
 
+This dedicated gate is load-bearing, not belt-and-braces. The corpus's
+cross-target comparison, `TestBackendInvariantSurface`, deliberately
+excludes `db.go` and `graph.go` via the `connectionSurface` map
+(`internal/codegen/conformance/conformance_test.go:651`, applied at
+:751), because those files hold the backend-specific handle and differ
+by construction. Tx lands in `db.go` (§4), so that gate is blind to it
+by design: without this test, the claim "the Tx surface is identical
+across backends" would be asserted nowhere. Do not delete this test as
+redundant with the conformance gate, and do not "fix" the overlap by
+un-excluding `db.go` there — the rest of db.go differs on purpose.
+(Exclusion confirmed independently by the gqlc-49hu design; its
+temporal.go carriers are NOT excluded, which is why that design needs
+no dedicated gate and this one does.)
+
 ## 8. Witnesses and the mutation battery the execution PR owes
 
 The change adds guards, so the PR records rows per ADR 0005 /
