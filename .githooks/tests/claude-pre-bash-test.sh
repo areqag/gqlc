@@ -1227,6 +1227,19 @@ run_verdict "a relative --reason-file from an unresolvable cwd is refused" \
 run_close_case "an unresolvable relative reason path says so end-to-end" \
   deny-unresolvable-reason-path "$DECOY" \
   "cd \"\$WT\" && bd close gqlc-x --reason-file reason.txt"
+# When the file is merely absent the hook already refused; what it NAMES in that
+# refusal is what a reader has to act on. It names the resolved path, because
+# `--reason-file reason.txt could not be read` cannot tell anyone WHICH
+# reason.txt — and which one gets read is the whole subject of this arm. The
+# pattern is built from the fixture directory, so it fails if the hook falls
+# back to its own cwd as surely as if it echoes the typed spelling back.
+D26R_OUT="$(run_hook "$DECOY" "bd -C $BD_REPO close gqlc-x --reason-file absent.txt")"
+D26R_GOT=other
+if printf '%s' "$D26R_OUT" | grep -qF -- "--reason-file $BD_REPO/absent.txt could not be read"; then
+  D26R_GOT=names-the-resolved-path
+fi
+record "an unreadable reason names the path bd would have read" \
+  names-the-resolved-path "$D26R_GOT"
 
 # --- the joined spelling of a flag, `--reason=VALUE` -------------------------
 # Every row above passes the reason as two tokens. `bd close --help` (v1.0.4)
@@ -1546,7 +1559,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=233
+EXPECTED_ROWS=234
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
@@ -1558,7 +1571,7 @@ fi
 # strings — no path, sha or temp dir reaches one — so the digest is the same on
 # every machine. Update it deliberately when a row is added, renamed or
 # reordered; a drift you did not intend is the finding.
-EXPECTED_ROW_DIGEST=98fbfc259045652b
+EXPECTED_ROW_DIGEST=2a288aca10b76105
 ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
   'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
 if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then
