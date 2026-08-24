@@ -1,0 +1,9 @@
+CREATE PROPERTY GRAPH TYPE TemporalPropertyRoundtrip AS {
+    (:Reading {
+        id      :: INT64                   NOT NULL,
+        onDate  :: DATE                    NOT NULL,
+        atLocal :: LOCAL TIME               NOT NULL,
+        elapsed :: DURATION(DAY TO SECOND) NOT NULL,
+        seenOn  :: DATE
+    })
+}

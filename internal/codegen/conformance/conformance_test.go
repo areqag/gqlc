@@ -1445,3 +1445,87 @@ func TestGeneratedHeaderFormat(t *testing.T) {
 	}
 	require.True(t, sawAny, "walk must encounter at least one golden .go file")
 }
+
+// carrierDeclarationFiles are the two files the temporal carriers and
+// their driver bridge occupy. Excluded from the reference scan below,
+// because a file that declares the carriers naturally names them and
+// would make the trigger read as satisfied by its own presence.
+var carrierDeclarationFiles = map[string]bool{"temporal.go": true, "temporal_neo4j.go": true}
+
+// TestTemporalCarriersAreEmittedExactlyWhenReferenced holds ADR 0033's
+// emission trigger in both directions, per golden package: temporal.go
+// is present when the rest of the package names a carrier, and absent
+// when it does not.
+//
+// Both halves are load-bearing and they fail differently. Omission is a
+// package that does not compile — a Date field with no Date declared.
+// Emission with nothing referencing it is five exported names taken out
+// of the caller's package for no reason, and reservedIdentifiers refuses
+// a schema element of any of those names whether or not the file lands,
+// so the cost is paid by every batch.
+//
+// The trigger is read off the corpus rather than off the predicate, so a
+// predicate rewritten to answer true unconditionally reddens here. A
+// carrier is looked for as an identifier and never as a substring: Date
+// sits inside LocalDateTime and inside entity names a schema chose, and
+// the Sel of a qualified type belongs to another package — time.Time is
+// the TIMESTAMP carrier and would otherwise match Time on every fixture
+// that projects a timestamp.
+func TestTemporalCarriersAreEmittedExactlyWhenReferenced(t *testing.T) {
+	goldens, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden", "*"))
+	require.NoError(t, err)
+	require.NotEmpty(t, goldens, "no golden package was swept, so this test holds nothing")
+
+	carriers := map[string]bool{}
+	for _, name := range codegen.TemporalCarriers {
+		carriers[name] = true
+	}
+
+	withCarrier, without := 0, 0
+	fset := token.NewFileSet()
+	for _, dir := range goldens {
+		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+		require.NoError(t, err)
+		if len(files) == 0 {
+			continue
+		}
+		var referencedBy string
+		for _, path := range files {
+			if carrierDeclarationFiles[filepath.Base(path)] {
+				continue
+			}
+			file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+			require.NoError(t, err, "parsing %s", path)
+			ast.Inspect(file, func(n ast.Node) bool {
+				switch node := n.(type) {
+				case *ast.SelectorExpr:
+					return false
+				case *ast.Ident:
+					if carriers[node.Name] && referencedBy == "" {
+						referencedBy = fmt.Sprintf("%s:%d", path, fset.Position(node.Pos()).Line)
+					}
+				}
+				return true
+			})
+		}
+		_, err = os.Stat(filepath.Join(dir, "temporal.go"))
+		emitted := err == nil
+		if referencedBy != "" {
+			withCarrier++
+			require.True(t, emitted,
+				"%s names a temporal carrier at %s and emits no temporal.go, so the package does not compile",
+				dir, referencedBy)
+			_, err := os.Stat(filepath.Join(dir, "temporal_neo4j.go"))
+			require.NoError(t, err,
+				"%s emits the carrier declarations with no driver bridge beside them, so nothing converts what the driver hands over",
+				dir)
+			continue
+		}
+		without++
+		require.False(t, emitted,
+			"%s emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing",
+			dir)
+	}
+	require.NotZero(t, withCarrier, "no golden package references a carrier, so the emit half of the trigger is unwitnessed")
+	require.NotZero(t, without, "every golden package references a carrier, so the do-not-emit half of the trigger is unwitnessed")
+}
