@@ -573,6 +573,11 @@ var reservedIdentifierRows = []struct {
 	{"SessionInit", scopePackage, ageOnlyTargets},
 	{"EnsureGraph", scopeMethod, ageOnlyTargets},
 	{"DropGraph", scopeMethod, ageOnlyTargets},
+	{"Tx", scopePackage, nil},
+	{"ErrTxDone", scopePackage, nil},
+	{"Begin", scopeMethod, nil},
+	{"Commit", scopeMethod, nil},
+	{"Rollback", scopeMethod, nil},
 }
 
 // TestReservedIdentifiersAreUniformAcrossBackends pins the reserved set
@@ -744,8 +749,8 @@ func eachDecl(file *ast.File, record func(name string, scope identifierScope)) {
 // TestReservedScopeMatchesTheEmittedGoldens holds both table columns to
 // the corpus rather than to a claim about the templates. Three checks:
 //
-//  1. every declaration of a reserved name sits at the scope the table
-//     records;
+//  1. a reserved name is recorded scopePackage exactly when some golden
+//     declares it package-level;
 //  2. the targets declaring it are exactly the ones the table records,
 //     which is what keeps the four Apache AGE-only rows from reading as
 //     symmetric with the other eight;
@@ -762,6 +767,15 @@ func eachDecl(file *ast.File, record func(name string, scope identifierScope)) {
 // receiver type is not consulted. The scope this pins is what
 // sweepIdentifiers reads to seed source 0; a query taking a method-scope
 // name is refused at Phase A on membership, which does not read scope.
+//
+// Check 1 is a biconditional and not an equality over every declaration,
+// because one name can be declared at both scopes: Queries is the handle
+// type and, since the Tx block, an accessor on *Tx. Recording it
+// scopePackage is right, so demanding that no golden declare it at
+// scopeMethod would fail a corpus that is correct. The strict half is
+// preserved whole — a scopeMethod row must have no package-level
+// declaration anywhere, which is the direction that, wrong, would let
+// sources 1-6 take a name the package block holds.
 func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 	paths, err := filepath.Glob(goldenCorpusGlob)
 	require.NoError(t, err)
@@ -806,10 +820,15 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 			require.NotEmpty(t, at,
 				"no golden declares %q, so its columns rest on nothing; either the corpus lost the fixture that emitted it or the name is no longer emitter-fixed and belongs out of reservedIdentifiers",
 				row.name)
-			for scope, path := range at {
-				require.Equal(t, row.scope, scope,
-					"%s declares %q at %s, but the reserved set records %s",
-					path, row.name, scopeName(scope), scopeName(row.scope))
+			pkgPath, atPackage := at[scopePackage]
+			if row.scope == scopePackage {
+				require.True(t, atPackage,
+					"the reserved set records %q at scopePackage, but no golden declares it package-level — %s declares it as a method; seeding source 0 with it reserves the package block against a name that does not hold it",
+					row.name, at[scopeMethod])
+			} else {
+				require.False(t, atPackage,
+					"%s declares %q package-level, but the reserved set records it %s, which lets sources 1-6 take a name the package block already holds",
+					pkgPath, row.name, scopeName(row.scope))
 			}
 
 			wantTargets := row.declaredBy
@@ -866,11 +885,13 @@ const queryFileSuffix = ".cypher.go"
 // above, which covers any name once it is a row. A method is recorded
 // whatever its receiver, and exportedness rather than the receiver is
 // what the filter below applies, so an exported method on a receiver
-// other than *Queries would be forced into reservedIdentifiers, where
-// Phase A refuses a query on membership alone. Every exported method
-// the corpus declares today sits on *Queries; the run methods the neo4j
-// targets' db.go declares on driverDB and on txDB are dropped by that
-// filter for being unexported, not for their receiver.
+// other than *Queries is forced into reservedIdentifiers, where Phase A
+// refuses a query on membership alone. Three are: Commit, Rollback and
+// Queries on *Tx. For Commit and Rollback that reservation is a false
+// refusal — `func (q *Queries) Commit` redeclares nothing — and
+// reservedIdentifiers records why it is kept anyway. The run methods the
+// neo4j targets' db.go declares on driverDB and on txDB are dropped by
+// the filter below for being unexported, not for their receiver.
 //
 // Which side of the partition a file sits on is measured, not only
 // declared. A basename more than one fixture emits, and an exported name

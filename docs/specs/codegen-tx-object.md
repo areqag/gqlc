@@ -243,10 +243,17 @@ func (tx *Tx) Rollback(ctx context.Context) error {
 
 Notes:
 
-- The `pgx.Tx` check MUST precede the capability assertion: `pgx.Tx`
-  itself has `Begin` (savepoints, F6), so the order is what makes the
-  refusal fire at all. This ordering is a guard; its mutation row is in
-  §8.
+- The `pgx.Tx` check MUST precede the **call** to `b.Begin`: `pgx.Tx`
+  itself has `Begin` (savepoints, F6), so it satisfies the capability
+  assertion and the call under it alike, and this check is the only
+  thing that refuses it. Placed after the call, the refusal would first
+  open a savepoint it then has to abandon.
+  Its order against the **assertion alone** is not load-bearing. An
+  earlier draft of this spec claimed it was — that swapping the two made
+  "the refusal never fire" — and that was measured false on 2026-08-24
+  (bd `gqlc-3d0l`, dispatch run `32693045598`): swapped, `pgx.Tx` passes
+  the assertion, falls through to the check, and the refusal still
+  fires. The AGE live row stayed green. §8 carries the row.
 - The refusal covers both a `WithTx`-derived handle and a `pgx.Tx`
   passed directly to `New` as the `DBTX` — the check is on the dynamic
   type, not on how the handle was made.
@@ -360,19 +367,39 @@ citizen-protocol step 3, at minimum:
 | surface gate presence arm | delete the whole Tx block from the AGE renderer | txsurface row "AGE: missing Begin" (per-name assertion, step 3 above) |
 | surface gate equality arm | change AGE's `ErrTxDone` literal by one character | txsurface literal-equality row |
 | surface gate name arm | emit `rollback` (unexported) instead of `Rollback` in neo4j | txsurface row "neo4j: missing Rollback" |
-| done flag (both backends) | drop `if tx.done { return ErrTxDone }` from Commit | live row: double-Commit expects `ErrTxDone` |
-| Rollback idempotence | make late Rollback return `ErrTxDone` instead of nil | live row: Rollback-after-Commit expects nil |
-| Begin refusal (neo4j) | drop the `driverDB` type switch | live row: Begin on `WithTx`-handle expects error |
-| Begin refusal order (AGE) | swap the `pgx.Tx` check after the capability assertion | live row: Begin on tx-bound handle expects error, gets a savepoint tx |
+| done flag (both backends) | drop `if tx.done { return ErrTxDone }` from Commit | live row: double-Commit expects `ErrTxDone`. **MEASURED KILLED** on both neo4j arms, 2026-08-24, run `32692156620`. The AGE arm was left untouched by that mutation and stayed green, which is the run's own blinding control. Every offline gate is blind to this one — it is behaviour, not surface. |
+| Rollback idempotence | make late Rollback return `ErrTxDone` instead of nil | live row: Rollback-after-Commit expects nil. **NOT MEASURED** as written. A weaker variant was: see the row below. |
+| Rollback done-guard | drop `if tx.done { return nil }` from Rollback, both renderers | **MEASURED SPLIT**, 2026-08-24, run `32693045598`. **KILLED** on AGE (`Rollback after Commit is nil` fails, `live_test.go:661`; the other five rows pass, so the kill is scoped). **SURVIVED** on both neo4j arms — mutation confirmed live in the compiled fixture, and the arm printed `ok … 42.375s`, not `(cached)`. It survives because the neo4j driver's `Close` is already idempotent, so the early return changes nothing observable there. The guard is kept as defence-in-depth that makes the surface contract independent of the driver; no black-box row can kill it while the driver keeps that behaviour, and it is the AGE arm that witnesses the guard is needed at all. Recorded as a SURVIVED rather than deleted or claimed as a kill. |
+| Begin refusal (neo4j) | drop the `driverDB` type switch | live row: Begin on `WithTx`-handle expects error. **NOT MEASURED, and not measurable as written**: the refusal doubles as the nil-guard for the two lines under it. `driverDB.driver` is an interface (`target.driverIface`), so with the `if !ok` return gone, `d` is the zero value and `d.driver.NewSession(...)` is a method call on a nil interface — a panic by language rule, not an assertion firing. The row would go red via a crash that also takes the rest of the battery with it, which is a fake RED and would have to be dispatched alone to mean anything. What witnesses this refusal instead is the **blinding** row below: it proves the scenario executes on the neo4j arms. |
+| Begin refusal order (AGE) | swap the `pgx.Tx` check after the capability assertion | **MEASURED NO-OP**, declared as such in advance and against this table's own earlier prediction of a kill. 2026-08-24, run `32693045598`: `tx: Begin inside a transaction is refused` PASSED on the AGE arm with the two swapped. `pgx.Tx` satisfies the capability assertion and falls through to the check, so the refusal still fires. The prediction this row used to carry — "gets a savepoint tx" — was false, and it had been copied into the emitted comment in every generated AGE `db.go`; both are corrected. The order that *is* load-bearing is check-before-`b.Begin`, and that one is **unwitnessed**: placed after the call, the function still returns the error, so the live row stays green and only a savepoint leaks. Bead `gqlc-g8rc` filed. |
+| Begin refusal presence (AGE) | delete the `pgx.Tx` check and its `errors.New` outright | **MEASURED KILLED OFFLINE**, 2026-08-24 — and it never reached CI. `TestTxSurfaceAgreesAcrossBackends` failed at pre-push (`txsurface_test.go:97`): "the backends share no single Begin refusal message". The cheaper kill, in seconds and without Docker. But note what it does *not* witness: the gate matches the refusal **message**, so it fired without the live row ever being consulted. |
+| Begin refusal condition (AGE) | keep the message, assert on `*pgx.Conn` — a dynamic type the bound handle never has | **MEASURED KILLED**, 2026-08-24, run `32695403649`. `TestTxSurfaceAgreesAcrossBackends` was verified PASSING under this mutation before dispatch, so every offline gate is blind to it and the live arm is the only objector. AGE arm: `tx: Begin inside a transaction is refused` FAILS at `live_test.go:679`, "An error is expected but got nil" — the declared failure mode. The other eleven AGE rows pass, so the kill is scoped. neo4j green, as the mutation is AGE-only. Together with the row above, the refusal is guarded in both halves: its message offline, its condition live. Neither gate covers both. |
 | session ownership (neo4j) | drop `session.Close` from Commit | expected **NO-OP**, declared as such: the driver's own `Commit` returns the pooled connection via its `onClosed` hook (`session_with_context.go:389`), and every `BeginTransaction` failure path returns it too (`session_with_context.go:343, 352, 369` — verified, all three arms). So no path the generated code owns holds a connection that `session.Close` would release, and no behavioural row can go red on it. The closes are kept because the session contract demands them, not because a resource is observably freed; a row that reads KILLED here is the surprise, and would mean the driver's lifecycle changed under us. |
 | v5≡v6 gate extension | emit a v6-only comment line in the Tx block | existing `driverAgnostic` equality row |
+| blinding: does the battery run at all | change scenario 1's expected name from "Bob" to "Carol" | **MEASURED KILLED on 3/3 arms**, 2026-08-24, run `32691410054`, victims named per arm. Run **first**, before any real mutation: until `-v` was added to `test-codegen-live-neo4j` that arm printed one package-level `ok`, so a green live-smoke looked identical whether the six scenarios executed or never ran. No verdict below is worth anything without this row. |
+| blinding: the three rows no mutation reached | invert the expectation in scenarios 2, 3 and 6 simultaneously | rows 2, 3, 6 RED on all three arms, rows 1, 4, 5 GREEN — 9 reds and 9 greens declared per row before the run. **MEASURED exactly that**, 2026-08-24, run `32696442170`, no row out of place. Run because M1 blinds only scenario 1, and the real mutations between them reach only 1, 4, 5 and 6-on-AGE; without it, scenarios 2 and 3 and 6-on-neo4j were compiled, listed, green and unproven to execute. This was also the first dispatch carrying the `-v` added to `test-codegen-live-neo4j`, and that arm named all twelve of its rows — the instrumentation fix is itself witnessed. |
 
 Behavioural rows live in the live battery (`test/data/codegen/live_test.go`
 scenario list), which runs every scenario against every arm: the neo4j
 arms are PR-blocking (`codegen-live.yml` live-smoke), the AGE arm is
-nightly/manual — acceptable because pgx itself carries most of the AGE
-behaviour (F6) and the PR-blocking fence still compiles the AGE
-emission. Driver-stub unit tests are NOT available for the neo4j rows:
+nightly/manual.
+
+**That asymmetry costs more than this spec first claimed.** The original
+justification — "acceptable because pgx itself carries most of the AGE
+behaviour (F6) and the PR-blocking fence still compiles the AGE emission" —
+survives only in part. The battery above measured two guards that are killed
+on the AGE arm **alone**: the Rollback done-guard (neo4j's driver `Close` is
+already idempotent, so it survives there) and the AGE Begin refusal's
+condition as distinct from its message. `live-smoke-age` carries
+`if: github.event_name != 'pull_request'`, and `codegen-live.yml` records at
+that line that GitHub counts a *skipped* check as satisfying a required
+context — which is why the id is deliberately kept off master's required
+list. So a change breaking either guard merges green and is caught by the
+nightly, which files an issue rather than blocking. Not silent; not
+PR-blocking either. Stated here so the check table is not read as promising
+more than it does.
+
+Driver-stub unit tests are NOT available for the neo4j rows:
 `ExplicitTransaction` carries the unexported `legacy()` method in v5, so
 it cannot be faked outside the driver package — that is why the rows sit
 in the live battery and not beside the renderer.
@@ -398,6 +425,46 @@ New live scenarios (each runs on v5, v6 and — nightly — AGE):
 | `test/data/codegen/live_test.go` (+ arm files if adapters need a Begin hook) | scenarios §8 |
 | `test/data/codegen/valid/*/golden/*/db.go` | regenerate — every fixture's db.go grows the block; large but mechanical churn, `just test` regolds |
 | `CONTEXT.md` | done in the design PR itself (Transaction handle entry) |
+| `internal/codegen/prepare.go` | reserve the five new exported names — §9.1 |
+| `internal/codegen/prepare_test.go` | the reserved rows, and the scope gate's biconditional — §9.1 |
+| `docs/specs/codegen-sentinel-taxonomy.md` | §6's table and the counts it states in prose; that section is gate-held cell-by-cell, so it cannot be skipped — §9.1 |
+| `internal/codegen/conformance/conformance_test.go`, `internal/codegen/age/age_test.go`, `internal/codegen/neo4j/testdata/driverstub_neo4j.go.txt` | existing assertions over the emitted surface, widened for the block |
+| `.golangci.yml` | the live battery's new interfaces join the per-type `ireturn` allow-list |
+
+### 9.1 Reserved identifiers
+
+This subsection was absent from the design and is written from the
+execution (`gqlc-3d0l`, PR #1489), ruled in by Արթուր rather than
+improvised: the omission was the design's.
+
+The block adds five exported names to `db.go` on all three targets, so
+they must be reserved. They are reserved **at their true scope, with no
+new scope value**: `Tx` and `ErrTxDone` at `scopePackage`; `Begin`,
+`Commit` and `Rollback` at `scopeMethod`. The scope column means
+"occupies the package block or not" and is receiver-agnostic by charter,
+so a `*Tx` method answers it exactly as a `*Queries` method does and a
+third value would encode nothing.
+
+The five do not all stand on the same ground, and §6 must say which is
+which:
+
+- **`Begin` stands on a real collision.** It is declared on `*Queries`,
+  so a query of that name would redeclare it.
+- **`Commit` and `Rollback` stand on call-site ambiguity, not
+  redeclaration.** They are declared on `*Tx`, so `func (q *Queries)
+  Commit` would compile. They are reserved anyway, package-wide and
+  receiver-blind, because `tx.Commit()` and `tx.Queries().Commit(ctx,
+  ...)` sit one selector apart — one ends the transaction, the other
+  runs a user query — and that is the misreading that loses data. The
+  remedy costs the author one rename under a clear diagnostic; the
+  ambiguity costs every later reader.
+
+`Queries` is consequently declared at **both** scopes (the handle type,
+and the accessor on `*Tx`). The scope gate therefore became a
+biconditional — `scopePackage` iff some golden declares the name
+package-level. Only the permissive direction was relaxed; the strict
+direction is preserved whole, and it is the load-bearing one, because it
+is what stops sources 1–6 taking a name the package block already holds.
 
 The Tx block is emitted unconditionally (not gated on the batch having
 queries): it is repository surface, all of it exported, so the emitted-
