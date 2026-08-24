@@ -532,7 +532,7 @@ the property-side rows. C2 extends the *column-shape* set — the
   - `ResolvedScalar`, `ResolvedTemporal`, `ResolvedList`,
     `ResolvedUnknown` — C3 owns (temporals, lists, `any` fallback).
   - `ResolvedProperty` with `DATE` / `TIMESTAMP` — C3 owns
-    (property-side temporals via `dbtype.Date` / `time.Time`).
+    (property-side temporals via `Date` / `time.Time`).
   - `ResolvedProperty` with `INT128` / `INT256` / `UINT128` /
     `UINT256` / `FLOAT16` / `FLOAT128` / `FLOAT256` / `DECIMAL` —
     C3 owns (unrepresentable-width sentinels).
