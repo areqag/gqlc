@@ -878,26 +878,47 @@ func TestGoldenExportedSurfaceIsDriverFree(t *testing.T) {
 
 	var offenders []string
 	scanned := 0
+	witnessed := map[string]int{}
 	fset := token.NewFileSet()
 	for _, path := range paths {
-		if connectionSurface[filepath.Base(path)] {
-			continue
-		}
 		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		require.NoError(t, err, "parsing %s", path)
 		qualifiers := driverQualifiers(t, path, file)
-		where := filepath.Join(filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(path)))),
-			filepath.Base(filepath.Dir(path)), filepath.Base(path))
+		target := filepath.Base(filepath.Dir(path))
+		where := filepath.Join(filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(path)))), target, filepath.Base(path))
+		connection := connectionSurface[filepath.Base(path)]
+		if _, seen := witnessed[target]; !seen {
+			witnessed[target] = 0
+		}
 		for _, decl := range file.Decls {
 			for _, exported := range exportedPositions(decl) {
+				named := namedDrivers(t, fset, qualifiers, where, exported)
+				// The connection surface is where the driver belongs, so
+				// what it names there is the detector's positive control
+				// rather than a finding.
+				if connection {
+					witnessed[target] += len(named)
+					continue
+				}
 				scanned++
-				offenders = append(offenders, namedDrivers(t, fset, qualifiers, where, exported)...)
+				offenders = append(offenders, named...)
 			}
 		}
 	}
 	// A sweep that read no exported declaration would agree with every
 	// corpus, including one whose extractor had stopped seeing them.
 	require.NotZero(t, scanned, "no exported declaration was read, so this sweep holds nothing")
+	// And one that read them all but recognised no driver would agree
+	// with a corpus that leaked in every file. Every target's db.go names
+	// that target's driver in an exported signature by construction, so
+	// each target has to witness at least one — keyed on the targets the
+	// corpus has and not on driverModulePrefixes, because a control the
+	// prefix list indexes is vacuous exactly when that list is what
+	// broke.
+	for target, count := range witnessed {
+		require.NotZero(t, count,
+			"no exported position on %s's connection surface named a driver type, so this sweep would not recognise that backend's driver anywhere", target)
+	}
 	require.Empty(t, offenders,
 		"the emitted public surface names driver types, so a caller cannot swap targets without editing their program:\n%s",
 		strings.Join(offenders, "\n"))
@@ -962,34 +983,60 @@ func receiverBase(recv *ast.FieldList) string {
 }
 
 // namedDrivers is every driver type the caller-writable half of one
-// declaration names. Unexported fields and unexported interface methods
-// are pruned as it walks: they are in the declaration but not in the
-// surface, since no caller outside the package can name either.
+// declaration names. Unexported struct fields and unexported interface
+// methods are pruned as it walks: they are in the declaration but not
+// in the surface, since no caller outside the package can name either.
+//
+// The prune is on those two node kinds and not on *ast.Field generally,
+// because a function's parameters and results are *ast.Field too and
+// their names are lowercase by convention. Pruning by name there hid
+// every exported signature that took a driver value — `func New(driver
+// neo4j.DriverWithContext)` and, the case this gate exists for, a
+// method taking `arg dbtype.Date`. What a caller has to be able to
+// write is the TYPE; the parameter's own name is not theirs to say.
 func namedDrivers(t *testing.T, fset *token.FileSet, qualifiers map[string]string, where string, pos exportedPosition) []string {
 	t.Helper()
 	var found []string
-	ast.Inspect(pos.node, func(n ast.Node) bool {
-		switch f := n.(type) {
-		case *ast.Field:
-			// An embedded field declares no name and is promoted, so
-			// it stays.
-			if len(f.Names) == 0 {
+	var walk func(ast.Node)
+	walk = func(node ast.Node) {
+		ast.Inspect(node, func(n ast.Node) bool {
+			switch f := n.(type) {
+			case *ast.StructType:
+				walkExportedFields(f.Fields, walk)
+				return false
+			case *ast.InterfaceType:
+				walkExportedFields(f.Methods, walk)
+				return false
+			case *ast.SelectorExpr:
+				ident, ok := f.X.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				if path, isDriver := qualifiers[ident.Name]; isDriver {
+					found = append(found, fmt.Sprintf("%s: %s names %s (%s)", where, pos.what, render(t, fset, f), path))
+				}
 				return true
-			}
-			return slices.ContainsFunc(f.Names, func(n *ast.Ident) bool { return ast.IsExported(n.Name) })
-		case *ast.SelectorExpr:
-			ident, ok := f.X.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			if path, isDriver := qualifiers[ident.Name]; isDriver {
-				found = append(found, fmt.Sprintf("%s: %s names %s (%s)", where, pos.what, render(t, fset, f), path))
 			}
 			return true
-		}
-		return true
-	})
+		})
+	}
+	walk(pos.node)
 	return found
+}
+
+// walkExportedFields descends into the members of a struct or interface
+// a caller can reach: the exported ones, plus embedded members, which
+// declare no name and are promoted.
+func walkExportedFields(list *ast.FieldList, walk func(ast.Node)) {
+	if list == nil {
+		return
+	}
+	for _, field := range list.List {
+		if len(field.Names) == 0 ||
+			slices.ContainsFunc(field.Names, func(n *ast.Ident) bool { return ast.IsExported(n.Name) }) {
+			walk(field.Type)
+		}
+	}
 }
 
 // driverQualifiers is the package qualifiers one file binds to driver
@@ -1465,12 +1512,17 @@ var carrierDeclarationFiles = map[string]bool{"temporal.go": true, "temporal_neo
 // so the cost is paid by every batch.
 //
 // The trigger is read off the corpus rather than off the predicate, so a
-// predicate rewritten to answer true unconditionally reddens here. A
-// carrier is looked for as an identifier and never as a substring: Date
-// sits inside LocalDateTime and inside entity names a schema chose, and
-// the Sel of a qualified type belongs to another package — time.Time is
-// the TIMESTAMP carrier and would otherwise match Time on every fixture
-// that projects a timestamp.
+// mutant predicate that answers true unconditionally does not redden
+// here while the committed goldens stand: what kills it first is
+// TestValid's golden comparison (an emitted temporal.go no golden dir
+// holds). This test reddens on the second pass only, after -update has
+// written temporal.go into every carrier-free fixture's goldens and its
+// absent half can see the damage. A carrier is looked for as an
+// identifier and never as a substring: Date sits inside LocalDateTime
+// and inside entity names a schema chose, and the Sel of a qualified
+// type belongs to another package — time.Time is the TIMESTAMP carrier
+// and would otherwise match Time on every fixture that projects a
+// timestamp.
 func TestTemporalCarriersAreEmittedExactlyWhenReferenced(t *testing.T) {
 	goldens, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden", "*"))
 	require.NoError(t, err)
