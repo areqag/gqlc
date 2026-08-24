@@ -112,6 +112,38 @@ type mixedReadWriteBatchQuerier interface {
 	errNoRows() error
 }
 
+// txQuerier is one arm's mixed_read_write_batch handle, bound to no
+// transaction, plus what the Tx scenarios branch on. Every arm's target
+// emits the Tx block, so this rides the write fixture rather than
+// splitting a capability off the arms table.
+type txQuerier interface {
+	begin(ctx context.Context) (liveTx, error)
+	getPersonName(ctx context.Context, id int64) (string, error)
+	errNoRows() error
+	errTxDone() error
+}
+
+// liveTx is one arm's generated *Tx behind an interface. Every arm wraps
+// its own rather than satisfying begin directly: Begin returns a concrete
+// *Tx and Go has no covariant returns.
+//
+// removePerson and getPersonName run through the handle Tx.Queries hands
+// out, so what they see is the transaction's own view and not the graph's
+// — the distinction txReadsOwnUncommitted exists to read.
+type liveTx interface {
+	commit(ctx context.Context) error
+	rollback(ctx context.Context) error
+	removePerson(ctx context.Context, id int64) error
+	getPersonName(ctx context.Context, id int64) (string, error)
+	// beginNested calls Begin on the handle this transaction hands out
+	// and returns Begin's own error verbatim, nil included. A nil is the
+	// refusal not firing, which is the failure the scenario looks for, so
+	// it must not be dressed up as an error. t is for the cleanup on that
+	// path only: an arm whose Begin was served gives the transaction back
+	// before returning, and has nowhere else to report a failure to.
+	beginNested(ctx context.Context, t *testing.T) error
+}
+
 // edgeUnionQuerier is one arm's edge_union_undeclared_relationship_type
 // handle. The label a candidate carries is narrowed away by the adapter, so
 // what the scenario sees is which arm of the emitted dispatch ran.
@@ -196,6 +228,7 @@ type writeBackend interface {
 	backend
 	mixedReadWriteBatch() mixedReadWriteBatchQuerier
 	timestampRoundtrip() timestampRoundtripQuerier
+	tx() txQuerier
 }
 
 // edgeUnionBackend is a scenario's view of an edgeUnionHarness.
@@ -246,6 +279,12 @@ var writeScenarios = []struct {
 }{
 	{name: "mixed_read_write_batch: exec + re-read", run: execWrite},
 	{name: "timestamp_property_roundtrip: instant round trip + ordering", run: timestampRoundTrip},
+	{name: "tx: commit is visible outside", run: txCommitVisible},
+	{name: "tx: rollback leaves the row", run: txRollbackAbsent},
+	{name: "tx: reads its own uncommitted write", run: txReadsOwnUncommitted},
+	{name: "tx: second Commit is ErrTxDone", run: txDoubleCommitIsRefused},
+	{name: "tx: Rollback after Commit is nil", run: txRollbackAfterCommitIsNil},
+	{name: "tx: Begin inside a transaction is refused", run: txBeginIsRefusedInsideATransaction},
 }
 
 // edgeUnionScenarios are the battery an arm runs once its target emits an
@@ -496,6 +535,150 @@ func execWrite(ctx context.Context, t *testing.T, b writeBackend) { //nolint:the
 	survivor, err := q.getPersonName(ctx, 2)
 	require.NoError(t, err, "the delete must be narrowed by its parameter")
 	require.Equal(t, "Bob", survivor)
+}
+
+// txSeed is what every Tx scenario starts from. Two people rather than
+// one, so a write that ignored its parameter and emptied the graph is
+// distinguishable from the narrowed delete each scenario asks for.
+const txSeed = `
+	CREATE (:Person {id: 1, name: 'Alice'})
+	CREATE (:Person {id: 2, name: 'Bob'})
+`
+
+// txNestedRefusal is the message both backends' Begin returns when the
+// handle it is called on is already bound to a transaction. The scenario
+// asserts the text and not merely that an error came back, because Begin
+// has other ways to fail — a driver that cannot open a session returns an
+// error too, and would satisfy a bare require.Error while the refusal
+// under test never fired.
+const txNestedRefusal = "gqlc: Begin on a transaction-bound Queries"
+
+// openTx begins a transaction and registers a rollback, so a scenario
+// that fails an assertion mid-transaction does not also strand the
+// connection the Tx holds. Rollback is nil on a finished transaction, so
+// this is correct beside a later Commit and needs no guard.
+func openTx(ctx context.Context, t *testing.T, q txQuerier) liveTx {
+	t.Helper()
+	tx, err := q.begin(ctx)
+	require.NoError(t, err, "Begin on a handle bound to the driver must open a transaction")
+	t.Cleanup(func() {
+		if err := tx.rollback(ctx); err != nil {
+			t.Logf("rollback open transaction: %v", err)
+		}
+	})
+	return tx
+}
+
+// txCommitVisible drives the committed write out past the transaction
+// that made it. The read is on the outer handle, which is bound to no
+// transaction, so what it sees is the graph rather than the Tx's view.
+//
+// No scenario here reads the outer handle while a transaction is open:
+// the delete holds a write lock on the vertex, and a concurrent read of
+// it would block until the transaction finished rather than report
+// anything.
+func txCommitVisible(ctx context.Context, t *testing.T, b writeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.tx()
+	b.seed(ctx, t, txSeed)
+
+	tx := openTx(ctx, t, q)
+	require.NoError(t, tx.removePerson(ctx, 1))
+	require.NoError(t, tx.commit(ctx))
+
+	_, err := q.getPersonName(ctx, 1)
+	require.ErrorIs(t, err, q.errNoRows(), "a committed delete must be visible to a handle outside the transaction")
+
+	survivor, err := q.getPersonName(ctx, 2)
+	require.NoError(t, err, "the commit must carry the transaction's write and no more")
+	require.Equal(t, "Bob", survivor)
+}
+
+// txRollbackAbsent is the other half: the write reached the transaction,
+// and the rollback kept it from reaching the graph.
+func txRollbackAbsent(ctx context.Context, t *testing.T, b writeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.tx()
+	b.seed(ctx, t, txSeed)
+
+	tx := openTx(ctx, t, q)
+	require.NoError(t, tx.removePerson(ctx, 1))
+	require.NoError(t, tx.rollback(ctx))
+
+	name, err := q.getPersonName(ctx, 1)
+	require.NoError(t, err, "a rolled-back delete must leave the row where it was")
+	require.Equal(t, "Alice", name)
+}
+
+// txReadsOwnUncommitted holds the seam Tx.Queries exists for: a handle
+// that reads inside the transaction rather than beside it.
+//
+// The rollback at the end is not cleanup. It is what makes the read above
+// evidence of uncommitted state: without it, a Tx.Queries that had quietly
+// bound the driver instead of the transaction would answer the same way,
+// because the delete would have landed for real.
+func txReadsOwnUncommitted(ctx context.Context, t *testing.T, b writeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.tx()
+	b.seed(ctx, t, txSeed)
+
+	tx := openTx(ctx, t, q)
+	require.NoError(t, tx.removePerson(ctx, 1))
+
+	_, err := tx.getPersonName(ctx, 1)
+	require.ErrorIs(t, err, q.errNoRows(), "a handle from Tx.Queries must read the transaction's own uncommitted delete")
+
+	require.NoError(t, tx.rollback(ctx))
+	name, err := q.getPersonName(ctx, 1)
+	require.NoError(t, err, "the delete the transaction saw must not have reached the graph")
+	require.Equal(t, "Alice", name)
+}
+
+// txDoubleCommitIsRefused holds the done flag. The second Commit is
+// answered by the generated code, without reaching the driver.
+func txDoubleCommitIsRefused(ctx context.Context, t *testing.T, b writeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.tx()
+	b.seed(ctx, t, txSeed)
+
+	tx := openTx(ctx, t, q)
+	require.NoError(t, tx.removePerson(ctx, 1))
+	require.NoError(t, tx.commit(ctx))
+
+	require.ErrorIs(t, tx.commit(ctx), q.errTxDone(),
+		"a second Commit must be refused with ErrTxDone rather than reaching a driver whose transaction is gone")
+}
+
+// txRollbackAfterCommitIsNil holds the asymmetry between the two
+// finishers: Commit refuses a second call, Rollback answers nil, so a
+// deferred Rollback beside a Commit is correct and needs no guard.
+//
+// The re-read is what separates the nil from a nil that undid the commit.
+func txRollbackAfterCommitIsNil(ctx context.Context, t *testing.T, b writeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.tx()
+	b.seed(ctx, t, txSeed)
+
+	tx := openTx(ctx, t, q)
+	require.NoError(t, tx.removePerson(ctx, 1))
+	require.NoError(t, tx.commit(ctx))
+
+	require.NoError(t, tx.rollback(ctx),
+		"Rollback on a finished transaction must return nil, not ErrTxDone")
+
+	_, err := q.getPersonName(ctx, 1)
+	require.ErrorIs(t, err, q.errNoRows(), "the late Rollback must not have reached the driver")
+}
+
+// txBeginIsRefusedInsideATransaction holds the nesting refusal. Neo4j
+// cannot nest, and a surface that nests on the other backend is the
+// portability failure the Tx object exists to remove, so AGE refuses too
+// rather than opening a savepoint.
+func txBeginIsRefusedInsideATransaction(ctx context.Context, t *testing.T, b writeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.tx()
+	b.seed(ctx, t, txSeed)
+
+	tx := openTx(ctx, t, q)
+
+	err := tx.beginNested(ctx, t)
+	require.Error(t, err, "Begin on a handle already bound to a transaction must be refused, not served")
+	require.ErrorContains(t, err, txNestedRefusal,
+		"the refusal must name itself; another failure of Begin would satisfy the line above while the refusal never fired")
 }
 
 // eventInstants are the instants the timestamp scenario writes, keyed by

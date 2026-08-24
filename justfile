@@ -2326,8 +2326,15 @@ test-codegen-live:
 # TestAGERefusesRelationshipTypeAlternation being a measurement. It rests on the
 # reason given at that recipe instead: nightly and manual are its only runs. The
 # asymmetry errs safe and is left standing.
+#
+# -v is not part of that asymmetry and does not disturb it: it joins the cache
+# key, so the first run after this line misses and every later one replays the
+# stored verbose output. Without it this arm prints one "ok" for the whole
+# package, so a scenario that stops executing is indistinguishable from one
+# that passes -- measured 2026-08-24 on bd gqlc-3d0l, where a mutation that
+# survived here could not be told apart from a mutation whose row never ran.
 test-codegen-live-neo4j:
-    cd test/data/codegen && go test -tags codegen_live -run TestLiveSmoke -skip 'TestLiveSmoke/apache-age' ./...
+    cd test/data/codegen && go test -v -tags codegen_live -run TestLiveSmoke -skip 'TestLiveSmoke/apache-age' ./...
 
 # the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
 # the dialect fact the AGE backend's edge-union refusal rests on, the offset

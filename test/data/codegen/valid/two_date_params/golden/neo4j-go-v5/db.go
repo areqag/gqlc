@@ -4,6 +4,7 @@ package twodateparams
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -69,4 +70,74 @@ func (t txDB) run(ctx context.Context, cypher string, params map[string]any, _ n
 		return nil, err
 	}
 	return result.Collect(ctx)
+}
+
+// ErrTxDone is returned by Commit when the transaction has already
+// been committed or rolled back. Rollback on a finished transaction
+// returns nil instead, so a deferred tx.Rollback(ctx) is always safe.
+var ErrTxDone = errors.New("gqlc: transaction has already been committed or rolled back")
+
+// Tx is an open write transaction and the session that owns it. Begin is
+// the only constructor; the zero value is not usable. Finish it with
+// exactly one Commit or Rollback — a Tx left unfinished holds a pooled
+// connection until the driver's own pool reclaims it, which this package
+// cannot do for you.
+//
+// Generated transactions are always write mode, and they do not retry:
+// the managed ExecuteRead/ExecuteWrite path the other methods use retries
+// transient cluster errors within MaxTransactionRetryTime, and an object
+// with a Commit cannot, because retrying would re-run caller code that
+// has already seen results.
+type Tx struct {
+	session neo4j.SessionWithContext
+	tx      neo4j.ExplicitTransaction
+	done    bool
+}
+
+// Begin opens a write transaction. It is refused on a handle already
+// bound to a transaction, by WithTx or by another Tx's Queries: neo4j
+// allows one explicit transaction per session and cannot nest.
+func (q *Queries) Begin(ctx context.Context) (*Tx, error) {
+	d, ok := q.db.(driverDB)
+	if !ok {
+		return nil, errors.New("gqlc: Begin on a transaction-bound Queries")
+	}
+	session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	tx, err := session.BeginTransaction(ctx)
+	if err != nil {
+		return nil, errors.Join(err, session.Close(ctx))
+	}
+	return &Tx{session: session, tx: tx}, nil
+}
+
+// Queries returns a handle whose every method runs inside this
+// transaction. It reads this transaction's own uncommitted writes.
+func (tx *Tx) Queries() *Queries {
+	return &Queries{db: txDB{tx: tx.tx}}
+}
+
+// Commit commits the transaction and closes the session it owns. It
+// returns ErrTxDone, without reaching the driver, if the transaction has
+// already been committed or rolled back.
+func (tx *Tx) Commit(ctx context.Context) error {
+	if tx.done {
+		return ErrTxDone
+	}
+	tx.done = true
+	return errors.Join(tx.tx.Commit(ctx), tx.session.Close(ctx))
+}
+
+// Rollback rolls the transaction back and closes the session it owns. It
+// returns nil, not ErrTxDone, on a transaction that is already finished,
+// so a deferred Rollback beside a Commit is correct and needs no guard.
+func (tx *Tx) Rollback(ctx context.Context) error {
+	if tx.done {
+		return nil
+	}
+	tx.done = true
+	// Close, not Rollback: the driver's Close is rollback-if-pending and
+	// returns nil on a transaction its own failed Run already tore down,
+	// which is what makes rollback-after-a-failed-statement clean here
+	// without a second state flag.
+	return errors.Join(tx.tx.Close(ctx), tx.session.Close(ctx))
 }

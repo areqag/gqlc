@@ -924,6 +924,35 @@ var driverScalarCarriers = map[string]bool{
 	"dbtype.Path":          false,
 }
 
+// Seam axis: the generator's OWN types, asserted on the generator's own
+// unexported driverOrTx interface. These are not decodes and the Bolt
+// driver never produces them — gqlc constructs every value that reaches
+// such an assertion, in the same db.go that declares the type — so the
+// two ledgers above are the wrong question to ask of them and would
+// answer "false for every value the driver can produce", which is true
+// and irrelevant.
+//
+// This axis exists because the sweep below rests on a premise that was
+// true when it was written and stopped being true when Queries.Begin
+// landed: that every type assertion in an emitted neo4j file is a decode
+// on something Bolt handed back. Begin's `q.db.(driverDB)` is the first
+// that is not. The premise is not restored by excluding db.go from the
+// sweep — that would blind it to any decode a later change emits there —
+// so the assertions are enumerated instead, on the same terms as the
+// other two axes: a witness flag, both halves checked, so an emission
+// that stops asserting driverDB reddens and one that starts asserting
+// txDB reddens too.
+var generatorSeamCarriers = map[string]bool{
+	// Begin refuses a transaction-bound handle by asking whether the
+	// bound seam is the driver arm.
+	"driverDB": true,
+
+	// The other implementation of driverOrTx. Nothing asserts it today:
+	// WithTx and Tx.Queries both construct it directly, and Begin needs
+	// to know only that it is NOT looking at driverDB.
+	"txDB": false,
+}
+
 // witnessedCarriers names the carriers a ledger claims some golden in
 // the corpus asserts.
 func witnessedCarriers(ledger map[string]bool) []string {
@@ -977,6 +1006,7 @@ func TestNeo4jGoldensAssertOnlyDriverCarriers(t *testing.T) {
 
 	var offenders []string
 	sweptSlice, sweptScalar := map[string]bool{}, map[string]bool{}
+	sweptSeam := map[string]bool{}
 	fset := token.NewFileSet()
 	for _, path := range paths {
 		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
@@ -987,6 +1017,12 @@ func TestNeo4jGoldensAssertOnlyDriverCarriers(t *testing.T) {
 				return true
 			}
 			named := render(t, fset, assertion.Type)
+			// The generator's own seam is answered first: it is not a
+			// decode, so neither driver ledger can judge it.
+			if _, isSeam := generatorSeamCarriers[named]; isSeam {
+				sweptSeam[named] = true
+				return true
+			}
 			// A carrier counts as swept only once the assertion is known
 			// to be on its axis and known to be one the ledger admits, so
 			// an offender is never recorded as its own witness.
@@ -1013,6 +1049,7 @@ func TestNeo4jGoldensAssertOnlyDriverCarriers(t *testing.T) {
 	}{
 		{"slice", driverSliceCarriers, sweptSlice},
 		{"scalar", driverScalarCarriers, sweptScalar},
+		{"generator seam", generatorSeamCarriers, sweptSeam},
 	} {
 		want := witnessedCarriers(axis.ledger)
 		require.NotEmpty(t, want,

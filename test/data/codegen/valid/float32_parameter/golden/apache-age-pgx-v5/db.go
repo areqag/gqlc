@@ -4,6 +4,7 @@ package float32parameter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -82,4 +83,79 @@ func (q *Queries) cypherStmt(tag, text, record string) (string, error) {
 	}
 	escaped := strings.ReplaceAll(strings.ReplaceAll(graph, `\`, `\\`), `'`, `\'`)
 	return "SELECT * FROM ag_catalog.cypher(E'" + escaped + "', " + tag + text + tag + ", $1) AS (" + record + ")", nil
+}
+
+// ErrTxDone is returned by Commit when the transaction has already
+// been committed or rolled back. Rollback on a finished transaction
+// returns nil instead, so a deferred tx.Rollback(ctx) is always safe.
+var ErrTxDone = errors.New("gqlc: transaction has already been committed or rolled back")
+
+// Tx is an open write transaction on the graph its Queries was bound to.
+// Begin is the only constructor; the zero value is not usable. Finish it
+// with exactly one Commit or Rollback — a Tx left unfinished holds a
+// pooled connection until the pool's own policies reclaim it, which this
+// package cannot do for you.
+type Tx struct {
+	tx    pgx.Tx
+	graph string
+	done  bool
+}
+
+// Begin opens a write transaction. It is refused on a handle already
+// bound to a transaction, whether by WithTx, by another Tx's Queries, or
+// by a pgx.Tx handed straight to New: the refusal is on the bound
+// handle's dynamic type, not on how the handle was made. Nesting is
+// refused rather than served by a savepoint, because neo4j cannot nest
+// and a surface that nests on one backend is the portability failure the
+// Tx object exists to remove.
+func (q *Queries) Begin(ctx context.Context) (*Tx, error) {
+	// pgx.Tx has a Begin of its own, for savepoints, so it satisfies both
+	// the capability assertion below and the call under it: this check is
+	// the only thing that refuses it. It sits above b.Begin so that the
+	// refusal does not first open a savepoint it would have to abandon.
+	// Its order against the assertion alone is not load-bearing -- swapped
+	// the two, the refusal still fires (measured, bd gqlc-3d0l).
+	if _, ok := q.db.(pgx.Tx); ok {
+		return nil, errors.New("gqlc: Begin on a transaction-bound Queries")
+	}
+	b, ok := q.db.(interface {
+		Begin(ctx context.Context) (pgx.Tx, error)
+	})
+	if !ok {
+		return nil, errors.New("gqlc: the DBTX bound by New cannot begin a transaction")
+	}
+	tx, err := b.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &Tx{tx: tx, graph: q.graph}, nil
+}
+
+// Queries returns a handle whose every method runs inside this
+// transaction, against the same graph. It reads this transaction's own
+// uncommitted writes.
+func (tx *Tx) Queries() *Queries {
+	return &Queries{db: tx.tx, graph: tx.graph}
+}
+
+// Commit commits the transaction. It returns ErrTxDone, without reaching
+// the driver, if the transaction has already been committed or rolled
+// back.
+func (tx *Tx) Commit(ctx context.Context) error {
+	if tx.done {
+		return ErrTxDone
+	}
+	tx.done = true
+	return tx.tx.Commit(ctx)
+}
+
+// Rollback rolls the transaction back. It returns nil, not ErrTxDone, on
+// a transaction that is already finished, so a deferred Rollback beside a
+// Commit is correct and needs no guard.
+func (tx *Tx) Rollback(ctx context.Context) error {
+	if tx.done {
+		return nil
+	}
+	tx.done = true
+	return tx.tx.Rollback(ctx)
 }

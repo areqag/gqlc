@@ -133,12 +133,29 @@ type ManagedTransaction interface {
 	Run(ctx context.Context, cypher string, params map[string]any) (ResultWithContext, error)
 }
 
+// ExplicitTransaction is the unmanaged transaction the emitted Tx holds.
+// The real v5 one additionally carries an unexported legacy(), which is
+// part of why this stub exists at all; nothing here needs it, because the
+// stub's ManagedTransaction is Run alone, so the emitted
+// txDB{tx: tx.tx} assignment asks for no more than Run.
+type ExplicitTransaction interface {
+	Run(ctx context.Context, cypher string, params map[string]any) (ResultWithContext, error)
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
+	Close(ctx context.Context) error
+}
+
 // SessionWithContext keeps its work-runner unexported so that the only
 // way a corpus test can reach an emitted method body is through
 // Queries.WithTx — the path that hands the emission a transaction rather
-// than a driver, and so the one that needs no connection.
+// than a driver, and so the one that needs no connection. BeginTransaction
+// is declared because the emitted Queries.Begin calls it and this file has
+// to compile against that emission. It is not a second way in: reaching it
+// still needs a DriverWithContext to hand out a session, and this
+// interface is still unimplementable from outside the package.
 type SessionWithContext interface {
 	Close(ctx context.Context) error
+	BeginTransaction(ctx context.Context, configurers ...func(*TransactionConfig)) (ExplicitTransaction, error)
 	execute(ctx context.Context, work func(ManagedTransaction) (any, error)) (any, error)
 }
 

@@ -453,10 +453,11 @@ The last two columns answer different questions. *Declared by* is which
 targets emit the declaration, read off the committed goldens by
 `TestReservedScopeMatchesTheEmittedGoldens`. *Breaks on* is where a
 schema element taking that name would emit a package that does not
-compile. They part at method scope: a method on `*Queries` occupies no
-package block, so an entity struct of the same name compiles on every
-target, and those three rows are defensive against entity names on all
-of them. Against query names they are not — see below the table.
+compile. They part at method scope: a method occupies no package block
+whatever its receiver, so an entity struct of the same name compiles on
+every target, and those six rows are defensive against entity names on
+all of them. Against query names most of them are not — see below the
+table.
 
 Both columns take the target as their axis, not the batch. `ErrNoRows`
 and `ErrMultipleResults` are emitted, and so break, only for a batch
@@ -474,32 +475,62 @@ every target emits them for such a batch.
 | `ErrMultipleResults` | `scopePackage` | every target | every target |
 | `DBTX` | `scopePackage` | `apache-age-pgx-v5` | `apache-age-pgx-v5` |
 | `SessionInit` | `scopePackage` | `apache-age-pgx-v5` | `apache-age-pgx-v5` |
+| `Tx` | `scopePackage` | every target | every target |
+| `ErrTxDone` | `scopePackage` | every target | every target |
 | `WithTx` | `scopeMethod` | every target | no target |
+| `Begin` | `scopeMethod` | every target | no target |
+| `Commit` | `scopeMethod` | every target | no target |
+| `Rollback` | `scopeMethod` | every target | no target |
 | `EnsureGraph` | `scopeMethod` | `apache-age-pgx-v5` | no target |
 | `DropGraph` | `scopeMethod` | `apache-age-pgx-v5` | no target |
 
 The set is refused uniformly, so a row is over-broad on a target where
 neither an entity nor a query taking that name would collide. *Breaks
-on* answers the entity half of that, and the three method-scope rows are
-defensive there. On the query half they are load-bearing: a query method
-is emitted on `*Queries` with its name taken verbatim from the query, so
-a query named `WithTx` emits a second `func (q *Queries) WithTx` beside
-the one every target's `db.go` already declares, and the package does
-not compile. The §2 sweep seeds source 0 with the `scopePackage` subset
-alone, so a method-scope name is not among the identifiers it compares;
-Phase A's membership check is what stands between such a query and the
-redeclaration, and `TestReservedIdentifiersAreUniformAcrossBackends`
-requires it for all twelve rows.
+on* answers the entity half of that, and the six method-scope rows are
+defensive there. On the query half four of them are load-bearing: a
+query method is emitted on `*Queries` with its name taken verbatim from
+the query, so a query named `WithTx` emits a second
+`func (q *Queries) WithTx` beside the one every target's `db.go` already
+declares, and the package does not compile. `Begin`, `EnsureGraph` and
+`DropGraph` are on `*Queries` too and collide the same way.
 
-On a neo4j target the over-broad rows are four of the twelve: `DBTX`
-and `SessionInit`, which neo4j never declares, and `EnsureGraph` and
+`Commit` and `Rollback` do not, and they are the one place the set
+over-reaches on a receiver rather than on a target. Both are declared on
+`*Tx`, so a query named `Commit` emits `func (q *Queries) Commit`, which
+redeclares nothing and compiles — on every target.
+
+**Those two rows are reserved for call-site ambiguity with `*Tx`, not for
+redeclaration**, and the distinction is recorded here so that the first
+auditor who notices they compile does not read the gate as violating its
+own charter. `tx.Commit()` and `tx.Queries().Commit(ctx, ...)` sit one
+selector apart; one ends the transaction and the other runs a user query.
+That is the misreading that loses data, and it costs every later reader,
+whereas the remedy costs the author one rename under a clear diagnostic.
+So the reservation is package-wide and receiver-blind by decision, not by
+oversight — ruled by Արթուր on `gqlc-3d0l` after the executing Ռազմիկ
+declined to settle it alone (design `docs/specs/codegen-tx-object.md`
+§9.1). `Begin` is not of this kind: it is on `*Queries`, so its
+reservation stands on a real collision. `reservedIdentifiers` records
+both grounds at its declaration.
+
+The §2 sweep seeds source 0 with the `scopePackage` subset alone, so a
+method-scope name is not among the identifiers it compares; Phase A's
+membership check is what stands between such a query and the
+redeclaration, and `TestReservedIdentifiersAreUniformAcrossBackends`
+requires it for all seventeen rows.
+
+On a neo4j target the over-broad rows are six of the seventeen: `DBTX`
+and `SessionInit`, which neo4j never declares; `EnsureGraph` and
 `DropGraph`, which only `apache-age-pgx-v5` declares — on that target a
-query of either name collides; on neo4j neither name is taken on either
-half. `WithTx` is not among the four: every target declares it, so
-refusing a query of that name is the collision rather than a false
-refusal. Four counts the target axis alone. The batch axis moves it: on
-a batch with no `:one` query nothing declares `ErrNoRows` or
-`ErrMultipleResults`, so a neo4j-only batch of that shape carries six.
-`NODE TYPE DBTX` is refused on a name that target leaves free — taken
-per D2 Resolved, one uniform set rather than a name that generates
-under one target and is refused under another.
+query of either name collides, on neo4j neither name is taken on either
+half; and `Commit` and `Rollback`, which are over-broad on
+`apache-age-pgx-v5` as well, for the receiver reason above rather than
+because the target leaves the name free. `WithTx` and `Begin` are not
+among the six: every target declares them on `*Queries`, so refusing a
+query of either name is the collision rather than a false refusal. Six
+counts the target axis alone. The batch axis moves it: on a batch with
+no `:one` query nothing declares `ErrNoRows` or `ErrMultipleResults`, so
+a neo4j-only batch of that shape carries eight. `NODE TYPE DBTX` is
+refused on a name that target leaves free — taken per D2 Resolved, one
+uniform set rather than a name that generates under one target and is
+refused under another.

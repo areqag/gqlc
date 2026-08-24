@@ -2123,8 +2123,15 @@ var nameBearers = []string{"EnsureGraph", "DropGraph", "cypherStmt"}
 // check separately would be three copies to keep in step; the third
 // reaches it on the read path, where a name that has drifted past a
 // stale copy of the limit returns another graph's rows. So the field is
-// readable from one accessor, that accessor holds the check, and the
-// bearers take what it returns.
+// read by one accessor holding the check, plus the propagators that copy
+// the binding onto a derived handle without carrying it to the server,
+// and the bearers take what the accessor returns.
+//
+// The name lives on two structs, and both are swept. Tx holds its own
+// copy — Begin puts it there and Tx.Queries takes it back off — so a
+// sweep of Queries.graph alone would stop being the whole invariant the
+// moment the Tx object landed, and would say nothing about a future
+// method that carried tx.graph to the server directly.
 func (s *EmissionSuite) TestTheGraphNameReachesTheServerThroughOneCheck() {
 	files := s.emitReadBatch()
 
@@ -2133,13 +2140,16 @@ func (s *EmissionSuite) TestTheGraphNameReachesTheServerThroughOneCheck() {
 	s.Require().Contains(db,
 		"func (q *Queries) boundGraph() (string, error) {\n\tif len(q.graph) > maxGraphNameBytes {")
 
-	var readers, bearers []string
+	var readers, txReaders, bearers []string
 	for path, body := range files {
 		readers = append(readers, s.functionsSelecting(path, body, "q", "graph")...)
+		txReaders = append(txReaders, s.functionsSelecting(path, body, "tx", "graph")...)
 		bearers = append(bearers, s.functionsCalling(path, body, "q", "boundGraph")...)
 	}
-	s.Require().ElementsMatch([]string{"WithTx", "boundGraph"}, readers,
-		"the graph field is readable outside the accessor that checks it")
+	s.Require().ElementsMatch([]string{"WithTx", "Begin", "boundGraph"}, readers,
+		"the graph field is readable outside the accessor that checks it and the propagators that only copy it")
+	s.Require().ElementsMatch([]string{"Queries"}, txReaders,
+		"Tx's copy of the graph name is readable outside the accessor that hands it back to a checking handle")
 	s.Require().ElementsMatch(nameBearers, bearers,
 		"a function carrying the name to the server does not take it from boundGraph")
 }

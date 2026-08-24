@@ -158,6 +158,8 @@ func (s neo4jV5Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { retu
 
 func (s neo4jV5Scenario) timestampRoundtrip() timestampRoundtripQuerier { return s.arm.timestamps }
 
+func (s neo4jV5Scenario) tx() txQuerier { return s.arm.mixed }
+
 // timestampRoundtripV5 binds the TIMESTAMP fixture. The driver carries a
 // datetime natively, so the whole of this arm is the identity — which is
 // what makes the comparison against the AGE arm worth running.
@@ -259,6 +261,53 @@ func (a mixedReadWriteBatchV5) removePerson(ctx context.Context, id int64) error
 }
 
 func (a mixedReadWriteBatchV5) errNoRows() error { return mixedv5.ErrNoRows }
+
+func (a mixedReadWriteBatchV5) errTxDone() error { return mixedv5.ErrTxDone }
+
+func (a mixedReadWriteBatchV5) begin(ctx context.Context) (liveTx, error) {
+	tx, err := a.q.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mixedTxV5{tx: tx}, nil
+}
+
+// mixedTxV5 is the v5 arm's generated *Tx. Every read and write on it
+// goes through Tx.Queries, so the handle under test is the one the
+// transaction hands out rather than the one the arm holds.
+type mixedTxV5 struct{ tx *mixedv5.Tx }
+
+func (a mixedTxV5) commit(ctx context.Context) error { return a.tx.Commit(ctx) }
+
+func (a mixedTxV5) rollback(ctx context.Context) error { return a.tx.Rollback(ctx) }
+
+func (a mixedTxV5) removePerson(ctx context.Context, id int64) error {
+	return a.tx.Queries().RemovePerson(ctx, id)
+}
+
+func (a mixedTxV5) getPersonName(ctx context.Context, id int64) (string, error) {
+	return a.tx.Queries().GetPersonName(ctx, id)
+}
+
+// beginNested returns Begin's own error verbatim, nil included. A nil is
+// the refusal not firing, which is the failure the scenario is looking
+// for, so it must not be dressed up as an error here. The transaction
+// Begin handed back on that path is given up before returning, so a run
+// that fails the row does not also leak a connection per attempt.
+func (a mixedTxV5) beginNested(ctx context.Context, t *testing.T) error {
+	t.Helper()
+	nested, err := a.tx.Queries().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	// Begin was served where it should have been refused. The row is
+	// about to fail on the nil below; give the transaction back first so
+	// that the failing run does not also strand a connection.
+	if rbErr := nested.Rollback(ctx); rbErr != nil {
+		t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
+	}
+	return nil
+}
 
 type manyColManyV5 struct{ q *manycolmanyv5.Queries }
 
@@ -371,6 +420,8 @@ func (s neo4jV6Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { retu
 
 func (s neo4jV6Scenario) timestampRoundtrip() timestampRoundtripQuerier { return s.arm.timestamps }
 
+func (s neo4jV6Scenario) tx() txQuerier { return s.arm.mixed }
+
 // timestampRoundtripV6 binds the TIMESTAMP fixture. The driver carries a
 // datetime natively, so the whole of this arm is the identity — which is
 // what makes the comparison against the AGE arm worth running.
@@ -469,6 +520,48 @@ func (a mixedReadWriteBatchV6) removePerson(ctx context.Context, id int64) error
 }
 
 func (a mixedReadWriteBatchV6) errNoRows() error { return mixedv6.ErrNoRows }
+
+func (a mixedReadWriteBatchV6) errTxDone() error { return mixedv6.ErrTxDone }
+
+func (a mixedReadWriteBatchV6) begin(ctx context.Context) (liveTx, error) {
+	tx, err := a.q.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mixedTxV6{tx: tx}, nil
+}
+
+// mixedTxV6 is mixedTxV5 against the v6 module. The emission the two run
+// is byte-identical but for the session type, which the corpus equality
+// row holds; this pair is here because each arm imports its own package.
+type mixedTxV6 struct{ tx *mixedv6.Tx }
+
+func (a mixedTxV6) commit(ctx context.Context) error { return a.tx.Commit(ctx) }
+
+func (a mixedTxV6) rollback(ctx context.Context) error { return a.tx.Rollback(ctx) }
+
+func (a mixedTxV6) removePerson(ctx context.Context, id int64) error {
+	return a.tx.Queries().RemovePerson(ctx, id)
+}
+
+func (a mixedTxV6) getPersonName(ctx context.Context, id int64) (string, error) {
+	return a.tx.Queries().GetPersonName(ctx, id)
+}
+
+func (a mixedTxV6) beginNested(ctx context.Context, t *testing.T) error {
+	t.Helper()
+	nested, err := a.tx.Queries().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	// Begin was served where it should have been refused. The row is
+	// about to fail on the nil below; give the transaction back first so
+	// that the failing run does not also strand a connection.
+	if rbErr := nested.Rollback(ctx); rbErr != nil {
+		t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
+	}
+	return nil
+}
 
 type manyColManyV6 struct{ q *manycolmanyv6.Queries }
 

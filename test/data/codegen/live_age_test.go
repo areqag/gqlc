@@ -239,6 +239,8 @@ func (s ageScenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s
 
 func (s ageScenario) timestampRoundtrip() timestampRoundtripQuerier { return s.timestamps }
 
+func (s ageScenario) tx() txQuerier { return s.mixed }
+
 // timestampRoundtripAGE binds the TIMESTAMP fixture. Nothing here names
 // the encoding: the emitted methods take and return time.Time, and the
 // microsecond count agtype carries is behind them.
@@ -314,6 +316,52 @@ func (a mixedReadWriteBatchAGE) removePerson(ctx context.Context, id int64) erro
 }
 
 func (a mixedReadWriteBatchAGE) errNoRows() error { return mixedage.ErrNoRows }
+
+func (a mixedReadWriteBatchAGE) errTxDone() error { return mixedage.ErrTxDone }
+
+func (a mixedReadWriteBatchAGE) begin(ctx context.Context) (liveTx, error) {
+	tx, err := a.q.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mixedTxAGE{tx: tx}, nil
+}
+
+// mixedTxAGE is the AGE arm's generated *Tx. The pool this handle was
+// bound to satisfies Begin's capability assertion, so the refusal
+// beginNested reads is the pgx.Tx one and not the DBTX one.
+type mixedTxAGE struct{ tx *mixedage.Tx }
+
+func (a mixedTxAGE) commit(ctx context.Context) error { return a.tx.Commit(ctx) }
+
+func (a mixedTxAGE) rollback(ctx context.Context) error { return a.tx.Rollback(ctx) }
+
+func (a mixedTxAGE) removePerson(ctx context.Context, id int64) error {
+	return a.tx.Queries().RemovePerson(ctx, id)
+}
+
+func (a mixedTxAGE) getPersonName(ctx context.Context, id int64) (string, error) {
+	return a.tx.Queries().GetPersonName(ctx, id)
+}
+
+// beginNested is where the AGE arm earns its row. pgx.Tx carries a Begin
+// of its own, for savepoints, so the capability assertion alone would be
+// satisfied and hand one back; only the pgx.Tx check standing ahead of it
+// produces the refusal. Begin's error is returned verbatim, nil included.
+func (a mixedTxAGE) beginNested(ctx context.Context, t *testing.T) error {
+	t.Helper()
+	nested, err := a.tx.Queries().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	// Begin was served where it should have been refused. The row is
+	// about to fail on the nil below; give the transaction back first so
+	// that the failing run does not also strand a connection.
+	if rbErr := nested.Rollback(ctx); rbErr != nil {
+		t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
+	}
+	return nil
+}
 
 type manyColManyAGE struct{ q *manycolmanyage.Queries }
 
