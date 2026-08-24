@@ -87,18 +87,18 @@ type Tx struct {
 // and a surface that nests on one backend is the portability failure the
 // Tx object exists to remove.
 func (q *Queries) Begin(ctx context.Context) (*Tx, error) {
+	b, ok := q.db.(interface {
+		Begin(ctx context.Context) (pgx.Tx, error)
+	})
+	if !ok {
+		return nil, errors.New("gqlc: the DBTX bound by New cannot begin a transaction")
+	}
 	// This check must precede the capability assertion below: pgx.Tx has
 	// a Begin of its own, for savepoints, so it satisfies that assertion.
 	// Reversed, the refusal never fires and a nested savepoint is handed
 	// back instead of the error.
 	if _, ok := q.db.(pgx.Tx); ok {
 		return nil, errors.New("gqlc: Begin on a transaction-bound Queries")
-	}
-	b, ok := q.db.(interface {
-		Begin(ctx context.Context) (pgx.Tx, error)
-	})
-	if !ok {
-		return nil, errors.New("gqlc: the DBTX bound by New cannot begin a transaction")
 	}
 	tx, err := b.Begin(ctx)
 	if err != nil {
@@ -129,9 +129,6 @@ func (tx *Tx) Commit(ctx context.Context) error {
 // a transaction that is already finished, so a deferred Rollback beside a
 // Commit is correct and needs no guard.
 func (tx *Tx) Rollback(ctx context.Context) error {
-	if tx.done {
-		return nil
-	}
 	tx.done = true
 	return tx.tx.Rollback(ctx)
 }

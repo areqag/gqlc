@@ -139,9 +139,6 @@ func (tx *Tx) Commit(ctx context.Context) error {
 // returns nil, not ErrTxDone, on a transaction that is already finished,
 // so a deferred Rollback beside a Commit is correct and needs no guard.
 func (tx *Tx) Rollback(ctx context.Context) error {
-	if tx.done {
-		return nil
-	}
 	tx.done = true
 	// Close, not Rollback: the driver's Close is rollback-if-pending and
 	// returns nil on a transaction its own failed Run already tore down,
