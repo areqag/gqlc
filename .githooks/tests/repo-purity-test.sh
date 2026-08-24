@@ -67,12 +67,30 @@ make_town() {
 # Runs the guard from inside the seat worktree with GIT_DIR exported exactly as
 # git exports it to a hook, which is the condition every observed damage shape
 # needed. Echoes the guard's exit status.
+#
+# ADVISORY MODE IS SET HERE AND NOWHERE ELSE, via the ADVISORY variable, because
+# the ambient value cannot be trusted: .githooks/pre-push runs the suite as
+# `GQLC_REPO_PURITY_ADVISORY=1 repo-purity just test`, and that export reaches
+# every child — including this file. MEASURED 2026-08-24, on the push of the
+# very commit that added the wiring: eight rows that assert the guard REFUSES
+# went green-side-up (expected 1, got 0) under `git push` while passing every
+# direct run. Inheriting it would make each strict row here silently assert
+# nothing, exactly when the gate is live. Same hazard as the GIT_* leak that
+# git-env-sandbox.sh exists for, one variable along.
 run_guard() {
     local root="$1"; shift
     (
         cd "$root/seat" || exit 99
         export GIT_DIR="$root/shared/.git/worktrees/seat"
-        bash "$GUARD" "$@" >"$root/out" 2>&1
+        # Set on the invocation rather than exported into the subshell: `env -u`
+        # states the removal as the command's own environment, which is both
+        # what shellcheck can see is deliberate (no SC2030) and harder to read
+        # as an accident than an `unset` sitting several lines above the call.
+        if [ -n "${ADVISORY:-}" ]; then
+            GQLC_REPO_PURITY_ADVISORY="$ADVISORY" bash "$GUARD" "$@" >"$root/out" 2>&1
+        else
+            env -u GQLC_REPO_PURITY_ADVISORY bash "$GUARD" "$@" >"$root/out" 2>&1
+        fi
         echo $? >"$root/rc"
     )
     cat "$root/rc"
@@ -257,7 +275,7 @@ check "remote-tracking ref written: guard does not fail on its own account" \
 # advisory mode is what pins that distinction.
 
 T="$TMP/advisory_ok"; mkdir -p "$T"; make_town "$T"
-rc="$(GQLC_REPO_PURITY_ADVISORY=1 run_guard "$T" git branch -q advisorybranch)"
+rc="$(ADVISORY=1 run_guard "$T" git branch -q advisorybranch)"
 check "advisory + damage + inner success: does NOT block the push" 0 "$rc"
 check "advisory + damage: the damage is still reported" yes \
     "$(grep -q 'advisorybranch' "$T/out" && echo yes || echo no)"
@@ -266,7 +284,7 @@ check "advisory + damage: the damage is still reported" yes \
 # ever read 0, `just test` would be disarmed by the very wiring meant to add a
 # guard, and every other row in this file would be beside the point.
 T="$TMP/advisory_fail"; mkdir -p "$T"; make_town "$T"
-rc="$(GQLC_REPO_PURITY_ADVISORY=1 run_guard "$T" sh -c 'git branch -q b2; exit 7')"
+rc="$(ADVISORY=1 run_guard "$T" sh -c 'git branch -q b2; exit 7')"
 check "advisory + damage + inner FAILURE: the inner exit code survives" 7 "$rc"
 
 # Advisory is opt-in. Without this row the flag could default to on and nothing
@@ -274,6 +292,17 @@ check "advisory + damage + inner FAILURE: the inner exit code survives" 7 "$rc"
 T="$TMP/strict_default"; mkdir -p "$T"; make_town "$T"
 rc="$(run_guard "$T" git branch -q strictbranch)"
 check "flag unset: the guard still FAILS the run" 1 "$rc"
+
+# THE REGRESSION ROW for the leak described on run_guard. This suite runs under
+# a pre-push that exports GQLC_REPO_PURITY_ADVISORY=1, so an ambient value is
+# the NORMAL condition when the gate is live, not an exotic one. Reproduced
+# deterministically here rather than left to be rediscovered on a push: if
+# run_guard ever goes back to inheriting, this row reddens in a plain run too.
+export GQLC_REPO_PURITY_ADVISORY=1
+T="$TMP/ambient_leak"; mkdir -p "$T"; make_town "$T"
+rc="$(run_guard "$T" git branch -q ambientbranch)"
+check "an INHERITED advisory flag does not weaken this suite's strict rows" 1 "$rc"
+unset GQLC_REPO_PURITY_ADVISORY
 
 # --- the report does not accuse the pusher -----------------------------------
 # Same ruling. The old wording said the run "changed the repository it ran in",
