@@ -1611,6 +1611,17 @@ label_says() { # $1=needle
 fixture_check "the refusal quotes the offending label" present "$(label_says "$LABEL_OVER")"
 fixture_check "the refusal names the remedy label"     present "$(label_says 'subject:kingdom/brain/playbooks (31')"
 fixture_check "the refusal names the cap"              present "$(label_says "the cap is $LABEL_CAP")"
+# Which spelling carried the label, so an author with several labels on one
+# command line knows which to retype. The two paths word it differently and
+# both are pinned: a flag path names the flag, and `bd label add`, which has no
+# flag, names its subcommand.
+# The backticks are escaped rather than single-quoted: shellcheck reads a
+# backtick inside single quotes as a command substitution the author forgot to
+# expand (SC2016), and `just lint-hooks` is a gate.
+fixture_check "the refusal names the flag that carried it" present "$(label_says "That \`-l\` value")"
+LABEL_DENY_OUT="$(run_hook "$BD_REPO" "bd label add gqlc-x $LABEL_OVER")"
+fixture_check "the positional refusal names its subcommand" present "$(label_says "That \`bd label add\`")"
+LABEL_DENY_OUT="$(run_hook "$BD_REPO" "bd create 'a bead' -l $LABEL_OVER")"
 
 # Boundary, both directions: a `>` written as `>=` must turn exactly one of
 # these red and leave the other green.
@@ -1707,7 +1718,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=260
+EXPECTED_ROWS=262
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
@@ -1719,7 +1730,7 @@ fi
 # strings — no path, sha or temp dir reaches one — so the digest is the same on
 # every machine. Update it deliberately when a row is added, renamed or
 # reordered; a drift you did not intend is the finding.
-EXPECTED_ROW_DIGEST=907ee4a829fa1002
+EXPECTED_ROW_DIGEST=0f935025db5ceacd
 ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
   'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
 if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then

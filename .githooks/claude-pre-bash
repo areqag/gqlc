@@ -1431,7 +1431,10 @@ def label_verdict(write):
     cap, _prefix, remedy = rule
     if len(label) <= cap:
         return "allow-label-fits", None
-    where = "`bd %s`" % flag if flag != "<positional>" else "`bd label add`"
+    # `bd -l` would be a command nobody typed: the subcommand is not carried
+    # this far, so name the flag as a flag. The positional path has no flag to
+    # name, which is why it names its subcommand instead.
+    where = "`%s` value" % flag if flag != "<positional>" else "`bd label add`"
     message = (
         "That %s would create a label GitHub cannot hold: %r is %d characters and "
         "the cap is %d. GitHub refuses the WHOLE issue over one bad label, so the "
