@@ -14,6 +14,23 @@
 # of — the enumeration complaint of gqlc-n8n0 and gqlc-kl2d. The snapshot is
 # therefore every line of `git config --list --local`, diffed.
 #
+# THE BRANCH MOVE NEEDS ITS OWN SNAPSHOT, and for a while it did not have one.
+# The config diff covers the two config-shaped damages above; the third is not
+# config-shaped. A force-moved branch that this worktree does not have checked
+# out changes no config line, does not move this worktree's HEAD, and does not
+# change its symbolic-ref — so with only those three the guard exited 0 on the
+# one damage a citizen had actually noticed by hand (bd gqlc-lekg). Refs are
+# shared across every worktree of a repo, which is both why the damage reaches a
+# seat that is running nothing and why a snapshot taken here can see it.
+#
+# THAT SNAPSHOT IS refs/heads ONLY, and the limit is deliberate. A suite is
+# allowed to `git fetch`, which rewrites refs/remotes/*, and bd's sync moves
+# refs/dolt/* on its own; watching those would fail honest pushes, and a gate
+# that cries wolf gets switched off. Local branches are the namespace where the
+# observed damage landed and where a test run has no business writing. Damage to
+# any other namespace is NOT detected here — say so rather than implying the
+# guard covers every ref.
+#
 # VERIFICATION RUNS IN AN EXIT TRAP, deliberately. The worst run is the one that
 # breaks the repo AND fails: verifying only on the success path would report the
 # test failure and hide the damage.
@@ -35,6 +52,10 @@ snapshot() {
     git config --list --local 2>/dev/null | sort >"$into/config"
     git rev-parse HEAD 2>/dev/null >"$into/head"
     git symbolic-ref -q HEAD 2>/dev/null >"$into/ref"
+    # Not piped through `sort` as the config line above is: `git config --list`
+    # emits in file order, `for-each-ref` sorts by refname already.
+    git for-each-ref --format='%(refname) %(objectname)' refs/heads 2>/dev/null \
+        >"$into/heads"
 }
 
 INNER_RC=0
@@ -69,6 +90,12 @@ verify() {
         damaged=1
         printf 'repo-purity: the checked-out branch changed: %s -> %s\n' \
             "${r_before:-<none>}" "${r_after:-<none>}" >&2
+    fi
+
+    if ! cmp -s "$SNAP/before/heads" "$SNAP/after/heads"; then
+        damaged=1
+        echo "repo-purity: the run moved, created or deleted local branches:" >&2
+        diff "$SNAP/before/heads" "$SNAP/after/heads" | grep -E '^[<>]' >&2
     fi
 
     rm -rf "$SNAP"
