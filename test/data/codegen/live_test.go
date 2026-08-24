@@ -605,7 +605,7 @@ func txRollbackAbsent(ctx context.Context, t *testing.T, b writeBackend) { //nol
 
 	name, err := q.getPersonName(ctx, 1)
 	require.NoError(t, err, "a rolled-back delete must leave the row where it was")
-	require.Equal(t, "Alice", name)
+	require.Equal(t, "BLIND-txRollbackAbsent", name)
 }
 
 // txReadsOwnUncommitted holds the seam Tx.Queries exists for: a handle
@@ -623,7 +623,7 @@ func txReadsOwnUncommitted(ctx context.Context, t *testing.T, b writeBackend) { 
 	require.NoError(t, tx.removePerson(ctx, 1))
 
 	_, err := tx.getPersonName(ctx, 1)
-	require.ErrorIs(t, err, q.errNoRows(), "a handle from Tx.Queries must read the transaction's own uncommitted delete")
+	require.NoError(t, err, "BLIND-txReadsOwnUncommitted") //nolint:testifylint // blinding probe
 
 	require.NoError(t, tx.rollback(ctx))
 	name, err := q.getPersonName(ctx, 1)
@@ -676,7 +676,7 @@ func txBeginIsRefusedInsideATransaction(ctx context.Context, t *testing.T, b wri
 	tx := openTx(ctx, t, q)
 
 	err := tx.beginNested(ctx, t)
-	require.Error(t, err, "Begin on a handle already bound to a transaction must be refused, not served")
+	require.NoError(t, err, "BLIND-txBeginIsRefusedInsideATransaction")
 	require.ErrorContains(t, err, txNestedRefusal,
 		"the refusal must name itself; another failure of Begin would satisfy the line above while the refusal never fired")
 }
