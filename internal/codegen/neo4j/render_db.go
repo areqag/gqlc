@@ -141,9 +141,6 @@ func (tx *Tx) Queries() *Queries {
 // returns ErrTxDone, without reaching the driver, if the transaction has
 // already been committed or rolled back.
 func (tx *Tx) Commit(ctx context.Context) error {
-	if tx.done {
-		return ErrTxDone
-	}
 	tx.done = true
 	return errors.Join(tx.tx.Commit(ctx), tx.session.Close(ctx))
 }
