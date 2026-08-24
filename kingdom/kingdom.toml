@@ -61,7 +61,27 @@ max_active = 6
 # pass named every one of them on every two-minute tick — the noise this comment
 # was written to justify had become the whole output. A floor of three opens the
 # 162 and leaves the five P4 parked, which is still a floor and still says so.
-max_priority = "3"
+#
+# LOWERED TO "2" on 2026-08-23 by Անդրանիկ directly, as one half of the decree
+# recorded at Constitution V.3.1 — read that clause before changing this number,
+# because on its own it is only a throughput knob and there it is the mechanism
+# for a rule. MEASURED at the restart, 196 ready beads: 2 P0, 3 P1, 26 P2, 160
+# P3, 5 P4. The 160 is the same population the 2026-08-22 note describes and it
+# has never been anything else — the P3 tier is where the town's adversarial
+# review of its OWN machinery deposits its findings, and it refills faster than
+# it drains, so raising the floor to reach it fills every slot with machinery.
+# Both P0s are product design beads (gqlc-h0lw, gqlc-49hu); of the 26 P2s, about
+# eight touch internal/codegen.
+#
+# So this is NOT the 2026-08-22 argument made again. That one said the P3s were
+# worth less than the P0-P2 queue and would be opened when it drained; this one
+# says the floor is where machinery findings are meant to sit, and the reason
+# the tier stays full is that the town keeps writing to it. Note what the raise
+# to "3" got right and this does not repeal: 160 beads named on every two-minute
+# tick is the noise it complained of, and it returns with this change. That is a
+# defect in the report, not an argument for the floor — gqlc-ag4g's finding is
+# what governs, and the fix belongs in km's unroutable summary.
+max_priority = "2"
 
 # How long a P0 may sit unroutable before `km doctor` stops calling it a warning
 # and FAILS. The dispatcher records every stalled P0 in a marker the moment it
