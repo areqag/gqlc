@@ -315,6 +315,77 @@ expect_green_saying "an absent id on a Bead line overrides a mirrored branch" \
     "$EXPORT" "$(body 'Bead: gqlc-notinexport')" "fix/gqlc-mirrored-thing" \
     "bead 'gqlc-notinexport' not in export - skipping"
 
+# The other half of bd gqlc-7i3g. The skip above is defensible -- a bead the
+# export has not caught up with cannot be checked -- but it exited 0 saying
+# only that it skipped, and a body reaching it can carry closing keywords
+# GitHub acts on at merge. So the widest hole in this gate was also its
+# quietest: the no-bead path REFUSES a closing keyword it cannot hold (see the
+# no-bead section), while naming any well-formed id the export lacks reached
+# this exit and closed the same issues unexamined.
+#
+# It stays a pass, for the reason the pass above stays one: the export is a
+# committed file that lands after the PR merges, so no author can make their
+# own bead appear in the copy CI reads, and refusing here would block PRs on a
+# condition they cannot clear. What changes is that the numbers are named and
+# the pass is annotated, so the state is legible to a reader of the checks tab
+# and not only to whoever opens the log. Both halves are rowed: the numbers in
+# the summary line, the annotation as its own row below.
+expect_green_saying "the skip names the numbers nothing held" \
+    "$EXPORT" "$(body 'Bead: gqlc-notinexport
+
+Closes #900
+Closes #901')" "some/branch" \
+    "#900, #901 close at merge with no bead holding them"
+
+expect_green_saying "the skip annotates the check run when it holds nothing" \
+    "$EXPORT" "$(body 'Bead: gqlc-notinexport
+
+Closes #900')" "some/branch" \
+    "::warning title=check-pr-closes unverified::"
+
+# One number is the common case, so the line agrees with its count. Rowed
+# because the plural row above cannot see it: a message asking a human to go
+# and check something by hand is read at the moment it is least welcome, and
+# "#900 close at merge" is where the reader starts wondering what else this
+# gate is careless about.
+expect_green_saying "the skip's wording agrees with a single number" \
+    "$EXPORT" "$(body 'Bead: gqlc-notinexport
+
+Closes #900')" "some/branch" \
+    "#900 closes at merge with no bead holding it"
+
+# The annotation is for a body that actually closes something. A PR whose bead
+# the export lacks and which closes nothing has nothing going unheld, so the
+# skip says what it always said and adds no warning -- otherwise the
+# annotation appears on most PRs and stops meaning anything. Asserted as the
+# ABSENCE of the warning, which the two rows above cannot establish.
+run_check "$EXPORT" "$(body 'Bead: gqlc-notinexport')" "some/branch"
+if [ "$RC" -ne 0 ]; then
+    bad "a skip holding nothing back does not annotate" "exited $RC: $OUT"
+elif printf '%s' "$OUT" | grep -qF '::warning'; then
+    bad "a skip holding nothing back does not annotate" "annotated: $OUT"
+else
+    ok "a skip holding nothing back does not annotate"
+fi
+
+# The numbers are read the way every other "would GitHub close this" question
+# in this file is read -- claimable_prose() -- so a PR explaining the gate does
+# not get an annotation for its own examples. This file's own PR is that PR.
+run_check "$EXPORT" "$(body 'Bead: gqlc-notinexport
+
+An earlier revision of this body wrote:
+
+~~~
+Closes #900
+~~~')" "some/branch"
+if [ "$RC" -ne 0 ]; then
+    bad "a quoted keyword does not make the skip annotate" "exited $RC: $OUT"
+elif printf '%s' "$OUT" | grep -qF '::warning'; then
+    bad "a quoted keyword does not make the skip annotate" "annotated: $OUT"
+else
+    ok "a quoted keyword does not make the skip annotate"
+fi
+
 # --- shapes the body is allowed to take -------------------------------------
 
 expect_green "GitHub's other closing keywords count" \
@@ -529,6 +600,26 @@ Closes #900
 Also-closes: #900
 ">z</a>')" "some/branch" \
     "also closes #900"
+
+# The other side of that choice, and the realistic body rather than the exotic
+# one: visible_prose() must not be so pessimistic that it blanks an avowal a
+# reader can reach. GitHub COLLAPSES a <details> block rather than hiding it,
+# so an avowal inside one is visible to anyone who opens it, and it is honoured
+# — the same answer this file already gives the 'Refs:' marker in the same
+# container. Without this row the two rows above are satisfied by a
+# visible_prose() that simply blanked more and more.
+expect_green "an avowal inside a <details> block still avows" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900
+
+<details>
+<summary>why this closes two</summary>
+
+Also-closes: #900
+
+</details>')" "some/branch"
 
 # The refusals point at the avowal, or nobody finds it. Both paths.
 expect_red "the demand-path refusal names the avowal" \

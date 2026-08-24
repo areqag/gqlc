@@ -22,6 +22,20 @@ made, GitHub acts on it at merge, and there is nothing left here to hold the
 number against. A body that closes nothing passes, because a PR making no
 claim has none to check.
 
+Its neighbour does not fail, and the asymmetry is deliberate. A body naming
+a well-formed id the export has not caught up with cannot be checked either,
+but there the author has no remedy -- the export lands in its own chore
+commit after the PR merges -- so it passes, names the numbers going unheld,
+and annotates the check run with them (bd gqlc-7i3g). Refusing is for a claim
+the author can withdraw; naming is for one nobody can currently verify.
+
+A closing keyword the body's own bead does not mirror is refused on both the
+demand and the opt-out path, rather than the bead's own number being looked
+for and the rest of the body left unread. GitHub acts on every one of them at
+merge, so a membership test satisfied by one member is not enough (bd
+gqlc-7i3g). An 'Also-closes: #<issue>' line avows an extra deliberately and
+subtracts it.
+
 Every exit prints. A pass that says nothing is one no reader can tell from
 this gate not having run (bd gqlc-mk7v, bd gqlc-63ao). The suite holds that
 as a property rather than as a habit: its green helper requires output as
@@ -944,6 +958,45 @@ def main():
         # Unknown bead - PASS (don't block on stale export). Reached only by
         # a well-formed id: the export trails the ledger by whole sessions
         # here, so a bead created today is legitimately absent from it.
+        #
+        # The pass stays, and it stays for the reason the no-external_ref one
+        # below stays: the export is a committed file landing in its own chore
+        # commit after the PR merges, so no author can make their own bead
+        # appear in the copy CI reads, and refusing here would block a PR on a
+        # condition nothing the author writes can clear.
+        #
+        # What it may not do is exit like a pass that checked something (bd
+        # gqlc-7i3g). A body reaching here can carry closing keywords, and
+        # nothing above examined them: this is the same claim main()'s no-bead
+        # check REFUSES a few lines up, reaching a silent 0 instead because an
+        # id resolved. So the numbers are named, and named in the annotation
+        # too, which GitHub attaches to the check run where a reader deciding
+        # whether to merge will see it without opening the log.
+        #
+        # No 'Also-closes:' subtraction here, unlike extra_closes(). An avowal
+        # converts an extra from an accident into an assertion, and it is worth
+        # that where the bead's own number was held; here nothing was held, so
+        # every number is equally unexamined and reporting a subset would
+        # overstate what this run did.
+        unheld = list(dict.fromkeys(GH_CLOSES.findall(claimable_prose(pr_body))))
+        if unheld:
+            # One number is the common case here, so the verb agrees with the
+            # count rather than reading "#901 close at merge" at the exact
+            # moment the line is asking someone to act on it.
+            numbers = f"#{', #'.join(unheld)}"
+            verb = "closes" if len(unheld) == 1 else "close"
+            print(
+                "::warning title=check-pr-closes unverified::"
+                f"{bead_id} is not in the export at this commit, so this "
+                f"check held nothing against it. {numbers} {verb} at merge "
+                "unexamined - confirm by hand before merging."
+            )
+            print(
+                f"[check-pr-closes] bead {bead_id!r} not in export - "
+                f"skipping; {numbers} {verb} at merge with no bead holding "
+                + ("it" if len(unheld) == 1 else "them")
+            )
+            sys.exit(0)
         print(f"[check-pr-closes] bead {bead_id!r} not in export - skipping")
         sys.exit(0)
 
