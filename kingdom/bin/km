@@ -2341,6 +2341,44 @@ patrol_open_ids() { # <board json>
              | .id ] | join(" ")' <<<"$1" 2>/dev/null
 }
 
+# The bound above measures the QUEUE and says nothing about whether there is
+# anything to patrol, so a judge who closed an empty-window bead HONESTLY was
+# handed another one four minutes later. Measured 2026-08-24 (bd gqlc-gsr9):
+# gqlc-ot5u closed 03:15:11Z with master at 44ee6224, guard-sweep filed
+# gqlc-z298 at 03:19:33Z, dispatch woke a judge, and at 03:21:30Z after a fetch
+# `git log 44ee6224..origin/master` was EMPTY. The wake produced nothing and
+# could produce nothing. At guard_minutes=15 the effective patrol cadence
+# collapses to the guard interval — an arithmetic ceiling of four judge wakes
+# an hour across any merge-free stretch, and the merge-free stretches are the
+# overnight and quota-walled ones. That is the wake burn ADR 0003 exists to
+# drain, restarted by its own compensating control.
+#
+# THE POSTURE HERE IS INVERTED FROM THE BOUND'S, deliberately. A bound that
+# cannot be measured is not raised, because filing blind queues a bead every
+# cadence for as long as bd is unwell. A WINDOW that cannot be measured is
+# filed anyway, because a patrol that stops is coverage lost silently and one
+# empty wake is the cheaper failure. So only a MEASURED emptiness is silent:
+# an absent origin/master, a git that refuses, and a board with no closed
+# patrol bead to start a window from all file.
+#
+# `--since` is INCLUSIVE at the second (measured, git 2.55.0), so a merge
+# landing in the same second as the close is read by the next round rather
+# than falling between the two.
+patrol_window_is_empty() { # <root> <since> ; rc 0 ONLY when measured empty
+    local root=$1 since=$2 out rc=0
+    local KM_GIT_TIMEOUT="${KM_GIT_TIMEOUT:-30}"
+    if ! git_at "$root" rev-parse --verify -q origin/master >/dev/null 2>&1; then
+        echo "guard-sweep: patrol window could not be measured — origin/master is unknown in $root; filing rather than dropping a round" >&2
+        return 1
+    fi
+    out=$(git_at "$root" log -1 --format=%H --since="$since" origin/master 2>/dev/null) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "guard-sweep: patrol window could not be measured — git exited $rc in $root; filing rather than dropping a round" >&2
+        return 1
+    fi
+    [ -z "$out" ]
+}
+
 file_patrol_bead() {
     local board open since window rc=0
     board=$(bd list --status all -n 0 --json 2>/dev/null) || rc=$?
@@ -2363,6 +2401,10 @@ file_patrol_bead() {
                      | select(.status == "closed")
                      | .closed_at // empty ] | max // empty' <<<"$board" 2>/dev/null)
     if [ -n "$since" ]; then
+        if patrol_window_is_empty "$(deploy_root)" "$since"; then
+            echo "guard-sweep: patrol not filed — no merge to master since the previous patrol bead closed at $since, so the round would have nothing to read"
+            return 0
+        fi
         window="merges to master since the previous patrol bead closed, at $since"
     else
         window="merges to master in the recent window — no previous patrol bead exists to start from, and the founding commit would re-read what has already been read, so take a window you can read properly and name it in your close"

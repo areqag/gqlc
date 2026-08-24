@@ -8543,6 +8543,10 @@ else
     ok "$bn"
 fi
 
+# The window here is non-empty and not by luck: every commit in the deployed
+# fixture is made when the suite RUNS, so all of them postdate a date literal
+# from 2026-08-20, and time only moves one way. The window rows below drive the
+# same input deliberately rather than relying on that.
 bn="a closed patrol bead does not suppress the next round"
 patrol_case '[{"id":"gqlc-pat0","status":"closed","closed_at":"2026-08-20T11:00:00Z","labels":["class:judge","patrol"]}]'
 run_guard
@@ -8554,6 +8558,169 @@ elif ! patrol_created | grep -q '2026-08-20T11:00:00Z'; then
     bad "$bn" "the new bead does not carry the previous one's close time, so the judge re-reads merges already read: $(patrol_created)"
 else
     ok "$bn, and the new one's window starts where the closed one ended"
+fi
+
+# --- the patrol WINDOW (bd gqlc-gsr9) ----------------------------------------
+# The bound above measures the QUEUE — whether a patrol bead is already open —
+# and says nothing about whether there is anything to patrol. So a judge who
+# closed an empty-window bead HONESTLY was handed another one four minutes
+# later. Measured 2026-08-24: gqlc-ot5u closed 03:15:11Z with master at
+# 44ee6224, gqlc-z298 filed 03:19:33Z, and `git log 44ee6224..origin/master`
+# was EMPTY at the moment the woken judge read it. At guard_minutes=15 that is
+# an arithmetic ceiling of four judge wakes an hour for as long as nothing
+# merges — and the merge-free stretches are the overnight and quota-walled
+# ones, which is the wake burn ADR 0003 was written to drain, restarted by its
+# own compensating control.
+#
+# These rows drive origin/master in the DEPLOYED root, because that is the ref
+# kingdom_drift has just fetched by the time file_patrol_bead runs.
+#
+# The stamps are relative to the fixture's own tip rather than to wall-clock
+# arithmetic, so each row states which side of the tip it is on and no row
+# depends on how long the suite takes to reach it.
+patrol_tip_stamp() { # <signed offset in seconds from origin/master's tip>
+    date -u -d "@$(( $(gitf -C "$TMP/deployed" log -1 --format=%ct origin/master) + $1 ))" \
+        +%Y-%m-%dT%H:%M:%SZ
+}
+patrol_closed_at() { # <ISO 8601 Z> -> a board whose only patrol bead closed then
+    printf '[{"id":"gqlc-pat0","status":"closed","closed_at":"%s","labels":["class:judge","patrol"]}]' "$1"
+}
+
+# The row the bead was filed for. A judge closed the last round one second
+# after the newest merge, so nothing has landed since and the round being
+# filed could read nothing.
+bn="no merge since the last patrol close files no bead"
+patrol_case "$(patrol_closed_at "$(patrol_tip_stamp 1)")"
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ -s "$patrol_board" ]; then
+    bad "$bn" "km filed a patrol bead into a window with no merges in it, which is the wake this bead exists to stop: $(patrol_created)"
+elif ! printf '%s' "$OUT" | grep -q 'patrol not filed'; then
+    bad "$bn" "it filed nothing SILENTLY, so an empty window is indistinguishable from a broken sweep: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'no merge to master since'; then
+    bad "$bn" "the sweep declines without saying the window was empty, and the reason is the only thing that tells a reader this was a decision: $OUT"
+elif ! wake_of raffi | grep -q 'round'; then
+    bad "$bn" "it also stopped the round; patrol is an addition to the sweep, not a precondition for it"
+else
+    ok "$bn, and it says the window was empty rather than declining silently"
+fi
+
+# The control for the row above, and it is what makes that row mean anything: a
+# check that never files is a patrol that stopped forever, and the silence
+# would look identical.
+bn="one merge since the last patrol close files exactly one bead"
+patrol_case "$(patrol_closed_at "$(patrol_tip_stamp -1)")"
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ ! -s "$patrol_board" ]; then
+    bad "$bn" "the window holds a merge and km filed nothing — patrol coverage is lost silently (out=$OUT)"
+elif [ "$(wc -l <"$patrol_board")" -ne 1 ]; then
+    bad "$bn" "it filed more than one: $(patrol_created)"
+elif ! printf '%s' "$OUT" | grep -q 'filed a patrol bead'; then
+    bad "$bn" "it filed one without saying so: $OUT"
+else
+    ok "$bn"
+fi
+
+# The boundary, pinned because the code's comment claims it. `--since` is
+# INCLUSIVE at the second (measured, git 2.55.0), so a merge landing in the
+# same second as the close is read by the next round rather than falling
+# between the two — which is the safe side, coverage over quiet.
+bn="a merge in the same second as the last patrol close is still patrolled"
+patrol_case "$(patrol_closed_at "$(patrol_tip_stamp 0)")"
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ ! -s "$patrol_board" ]; then
+    bad "$bn" "a merge at exactly the close instant fell through the boundary and will never be read: $OUT"
+else
+    ok "$bn, so the boundary loses no merge"
+fi
+
+# The bound must survive the window check. These are two independent reasons to
+# stay silent and the new one must not weaken the old one — a window that holds
+# merges is exactly the state in which a second bead beside a claimed one would
+# be filed.
+bn="a non-empty window does not defeat the one-open bound"
+patrol_case "[{\"id\":\"gqlc-pat1\",\"status\":\"in_progress\",\"labels\":[\"class:judge\",\"patrol\"]},{\"id\":\"gqlc-pat0\",\"status\":\"closed\",\"closed_at\":\"$(patrol_tip_stamp -1)\",\"labels\":[\"class:judge\",\"patrol\"]}]"
+run_guard
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ -s "$patrol_board" ]; then
+    bad "$bn" "km filed a second patrol bead beside the claimed one because the window was not empty: $(patrol_created)"
+elif ! printf '%s' "$OUT" | grep -q 'patrol already open (gqlc-pat1)'; then
+    bad "$bn" "it stayed silent for the WINDOW's reason rather than the BOUND's, so the bound is no longer what holds it: $OUT"
+else
+    ok "$bn, and the bound is still the reason it gives"
+fi
+
+# The posture is INVERTED from the bound's, and that inversion is the finding.
+# For the bound, a measurement that cannot be made must not raise, or an unwell
+# bd queues a bead every cadence. For the WINDOW the safe side is the other
+# one: a window that cannot be measured still files, because lost patrol
+# coverage is worse than one empty wake. A root with no origin/master is the
+# cheapest way to be unable to measure, and it is not hypothetical — a fresh
+# deploy root, a failed fetch, and a CI checkout all reach it.
+PATROL_NOREF="$TMP/deployed-no-origin"
+gitf init -q -b master "$PATROL_NOREF"
+gitf -C "$PATROL_NOREF" config user.email km@test
+gitf -C "$PATROL_NOREF" config user.name km-test
+gitf -C "$PATROL_NOREF" config commit.gpgsign false
+gitf -C "$PATROL_NOREF" config core.hooksPath /dev/null
+printf 'fixture\n' >"$PATROL_NOREF/justfile"
+gitf -C "$PATROL_NOREF" add -A
+gitf -C "$PATROL_NOREF" commit -qm 'a root with no origin/master to measure a window against'
+
+bn="a window that cannot be measured files anyway, and says it could not measure"
+patrol_case "$(patrol_closed_at "$(patrol_tip_stamp 1)")"
+OUT="$(PATH="$BIN:$PATH" KM_DEPLOY_ROOT="$PATROL_NOREF" "$KM" guard-sweep 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ ! -s "$patrol_board" ]; then
+    bad "$bn" "km read an unmeasurable window as an empty one and dropped the round — the same stamp files nothing only when the window is MEASURED empty: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'window could not be measured'; then
+    bad "$bn" "it filed blind without saying the window was unmeasured, which renders a guess as a measurement: $OUT"
+else
+    ok "$bn"
+fi
+
+# The OTHER unmeasurable arm, and it needs its own row because the ref being
+# present is what distinguishes it: a repo that answers rev-parse and then
+# refuses the log is a locked or damaged one, not a fresh one. Without this row
+# the arm can be flipped to the fail-silent direction and the suite stays green
+# — an empty stdout from a refused git is indistinguishable from an empty
+# window unless the exit status is read, and reading it is the whole point.
+#
+# The stub delegates everything else to the real git, so kingdom_drift's fetch
+# and diff behave exactly as they do in the row above and only the measurement
+# is driven.
+PATROL_GITSTUB="$TMP/bin-git-log-refuses"
+mkdir -p "$PATROL_GITSTUB"
+PATROL_REAL_GIT="$(command -v git)"
+cat >"$PATROL_GITSTUB/git" <<STUB
+#!/usr/bin/env bash
+for a in "\$@"; do
+    [ "\$a" = log ] && exit 128
+done
+exec "$PATROL_REAL_GIT" "\$@"
+STUB
+chmod +x "$PATROL_GITSTUB/git"
+
+bn="a git that refuses the measurement files anyway rather than reading it as empty"
+patrol_case "$(patrol_closed_at "$(patrol_tip_stamp 1)")"
+OUT="$(PATH="$PATROL_GITSTUB:$BIN:$PATH" "$KM" guard-sweep 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    bad "$bn" "rc=$RC out=$OUT"
+elif [ ! -s "$patrol_board" ]; then
+    bad "$bn" "a refused git was read as an empty window and the round was dropped — this is the same stamp as the measured-empty row, so only the exit status tells them apart: $OUT"
+elif ! printf '%s' "$OUT" | grep -q 'window could not be measured'; then
+    bad "$bn" "it filed blind without saying the measurement had failed: $OUT"
+else
+    ok "$bn"
 fi
 
 # The halt binds this too. Article VI.4 reserves lowering a halt to Սեդրակ or
