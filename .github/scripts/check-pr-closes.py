@@ -22,6 +22,20 @@ made, GitHub acts on it at merge, and there is nothing left here to hold the
 number against. A body that closes nothing passes, because a PR making no
 claim has none to check.
 
+Its neighbour does not fail, and the asymmetry is deliberate. A body naming
+a well-formed id the export has not caught up with cannot be checked either,
+but there the author has no remedy -- the export lands in its own chore
+commit after the PR merges -- so it passes, names the numbers going unheld,
+and annotates the check run with them (bd gqlc-7i3g). Refusing is for a claim
+the author can withdraw; naming is for one nobody can currently verify.
+
+A closing keyword the body's own bead does not mirror is refused on both the
+demand and the opt-out path, rather than the bead's own number being looked
+for and the rest of the body left unread. GitHub acts on every one of them at
+merge, so a membership test satisfied by one member is not enough (bd
+gqlc-7i3g). An 'Also-closes: #<issue>' line avows an extra deliberately and
+subtracts it.
+
 Every exit prints. A pass that says nothing is one no reader can tell from
 this gate not having run (bd gqlc-mk7v, bd gqlc-63ao). The suite holds that
 as a property rather than as a habit: its green helper requires output as
@@ -122,6 +136,17 @@ BEAD_IN_BODY = re.compile(r"(?i)Bead:\s*(\S*gqlc-\S*)")
 # is the marker. group(2) is the rest of the line, which is where the issue
 # number has to be.
 REFS_IN_BODY = re.compile(r"(?im)^Refs:[ \t]*(\S*gqlc-\S*)([^\n]*)")
+# The avowal for a closing keyword this PR's bead does not mirror. Line
+# anchored over visible_prose()'s body, on REFS_IN_BODY's terms and for its
+# reasons: honouring a marker a reader cannot find is the expensive way to be
+# wrong about one, and here it is expensive in this file's own currency,
+# because what an unfindable avowal buys is a closing keyword reaching merge
+# unheld. It buys nothing on its own: the demand for the bead's own number
+# runs before extra_closes() is ever called, so a body whose only closing
+# line is avowed still fails that demand. All it does is convert an extra
+# from an accident into an assertion, which is the same trade the 'Refs:'
+# marker makes for the number it declines to close.
+ALSO_CLOSES = re.compile(r"(?im)^Also-closes:[ \t]*([^\n]*)")
 # A code fence: up to three spaces of indentation, then a run of three or
 # more backticks or tildes, then the info string. Four spaces is markdown's
 # indented-code spelling rather than a fence, and a tab indents by four, so
@@ -740,6 +765,111 @@ def unverified_tail(refs, bead_id, marker_n):
     return "no 'Closes' line was demanded and none was checked"
 
 
+def extra_closes(pr_body, expected_n):
+    """Numbers GitHub would close at merge that this PR's bead does not mirror.
+
+    The demand above is a membership test -- is the bead's own number among
+    the body's closing keywords -- and a membership test is satisfied by one
+    member. Every other number in the body went unread, which is the whole of
+    bd gqlc-7i3g: at merge GitHub acts on those too, and this gate had
+    nothing left to hold them against, which is the harm its own docstring
+    names.
+
+    Asked as GH_CLOSES' question ("would GitHub close this number") rather
+    than CLOSES' ("did the author write the line this gate demanded"),
+    because what makes an extra harmful is the merge-time action, not the
+    spelling. So 'Fixed GH-900' is an extra although the demand would not
+    have recognised it.
+
+    The two scans below read two different bodies, and which one each reads
+    follows from which way it is expensive to be wrong.
+
+    The extras scan reads claimable_prose(), for the reason main()'s no-bead
+    check reads it: a hit here refuses, and a PR *about* this gate quotes
+    closing lines as examples -- gqlc-7i3g's own description does. A quoted
+    extra is not one GitHub acts on, so refusing it would be a false red on
+    exactly the PRs that touch this file.
+
+    The avowal scan reads visible_prose(), which is the opposite trade and
+    the right one for a marker the author writes. An avowal subtracts a
+    refusal, so honouring one no reader can find waves an unheld closing
+    keyword through to merge -- the harm this file exists for -- while
+    blanking one a reader can see costs a refusal cleared by moving the line.
+    That is REFS_IN_BODY's argument, and the avowal is on its terms.
+
+    Deduplicated, because the same number written twice is one assertion and
+    not an extra.
+
+    An 'Also-closes:' line subtracts the numbers it names, because a bare
+    refusal here would be wrong on PRs that exist. Measured 2026-08-22 over
+    all 25 open PRs, asking GitHub itself via closingIssuesReferences rather
+    than reading the bodies: 3 carry two closing references, and 2 of the 3
+    are deliberate -- #1199 closes #1123 and #1157, #1237 closes #1125 and
+    #1218. Both would have been blocked with no remedy but splitting the PR,
+    and the remedy bd gqlc-7i3g proposed instead -- resolve every extra to a
+    bead in the export -- is not available: of the 6 numbers those 3 PRs
+    close, the export mirrors 0, including the one extra that is beyond
+    argument (#1194's own 'Closes #1159'). The third of the three is the
+    accident this check is for, and the same measurement narrows what it
+    was: GitHub links only #1159 from #1194, so its 'Վահագն closed #1184'
+    line is narration GitHub does not act on. The avowal is what separates
+    those two populations, and nothing in the export can.
+    """
+    seen = dict.fromkeys(GH_CLOSES.findall(claimable_prose(pr_body)))
+    avowed = avowed_numbers(visible_prose(pr_body))
+    return [n for n in seen if n != expected_n and n not in avowed]
+
+
+def avowed_numbers(body):
+    """The issue numbers 'Also-closes:' lines name, over whatever body is
+    passed in."""
+    avowed = set()
+    for line in ALSO_CLOSES.findall(body):
+        avowed.update(HASH_N.findall(line))
+    return avowed
+
+
+def avowal_advice(pr_body, extra):
+    """The closing lines of a refusal over `extra`, as detail arguments.
+
+    An author who wrote no avowal needs to be told the marker exists. An
+    author who wrote one into a carrier a reader cannot see needs the
+    opposite: they wrote the line, and following the first instruction
+    reproduces the refusal, because what is wrong is WHERE it is, which the
+    refusal never mentioned. Nothing distinguished the two, since the only
+    body consulted was the one the marker had already been blanked out of.
+
+    So the raw body is asked as well. Asking it is enough on its own -- no
+    second subtraction of the visible avowals is needed, because extra_closes()
+    has already made one, so a number that reaches here is a number no VISIBLE
+    avowal named. A raw-body hit on it is therefore an avowal that exists and
+    cannot be seen.
+
+    Restricted to `extra`, and per number within it: an invisible avowal for
+    some number this body does not close is not what the refusal is about, and
+    avowing one extra visibly and another invisibly must not attract advice
+    about the visible one.
+    """
+    raw = avowed_numbers(pr_body)
+    unseeable = sorted(n for n in extra if n in raw)
+    if unseeable:
+        return (
+            "No reader can see the 'Also-closes:' line for "
+            f"#{', #'.join(unseeable)}.",
+            "It is in the body, but a code block, an HTML comment, or a tag "
+            "left",
+            "open all hide it, and an avowal nobody can read is not one this "
+            "check",
+            "will honour. Move that line into the body's own prose, at the "
+            "start",
+            "of its line.",
+        )
+    return (
+        "If this PR really does resolve it, say so: a line reading",
+        "'Also-closes: #<issue>' avows the extra and this check honours it.",
+    )
+
+
 def check_opt_out(pr_body, bead, bead_id, marker_n, expected_n):
     """Everything an opt-out has to survive before it is honoured."""
     if marker_n != expected_n:
@@ -768,6 +898,31 @@ def check_opt_out(pr_body, bead, bead_id, marker_n, expected_n):
             "check's, so the body would be asserting both that "
             f"#{expected_n}",
             "stays open and that it closes. Drop one of the two.",
+        )
+
+    # The same hole as the demand's, and louder on this path: the exit below
+    # prints "no Closes demanded" over a body carrying a keyword GitHub acts
+    # on. The check above is the self-contradiction only -- the bead's OWN
+    # number -- so before this every other number passed an opt-out unread.
+    extra = extra_closes(pr_body, expected_n)
+    if extra:
+        refuse(
+            f"the PR body leaves {bead_id} open but closes "
+            f"#{', #'.join(extra)}.",
+            "An opt-out declares that this PR resolves no bead, so no "
+            "closing",
+            "keyword is demanded of it and none is checked. A keyword for "
+            "another",
+            "issue is still GitHub's to act on at merge, and this gate has",
+            "nothing to hold that number against.",
+            "Drop the keyword: if that issue is done, close it by hand; if "
+            "it is not,",
+            "give it its own bead and PR. Or drop the 'Refs:' line and "
+            "resolve the",
+            "bead this PR is about.",
+            *avowal_advice(pr_body, extra),
+            "Editing the body re-runs this check on its own; you do",
+            "not need to push a commit or reopen the PR.",
         )
 
 
@@ -849,6 +1004,45 @@ def main():
         # Unknown bead - PASS (don't block on stale export). Reached only by
         # a well-formed id: the export trails the ledger by whole sessions
         # here, so a bead created today is legitimately absent from it.
+        #
+        # The pass stays, and it stays for the reason the no-external_ref one
+        # below stays: the export is a committed file landing in its own chore
+        # commit after the PR merges, so no author can make their own bead
+        # appear in the copy CI reads, and refusing here would block a PR on a
+        # condition nothing the author writes can clear.
+        #
+        # What it may not do is exit like a pass that checked something (bd
+        # gqlc-7i3g). A body reaching here can carry closing keywords, and
+        # nothing above examined them: this is the same claim main()'s no-bead
+        # check REFUSES a few lines up, reaching a silent 0 instead because an
+        # id resolved. So the numbers are named, and named in the annotation
+        # too, which GitHub attaches to the check run where a reader deciding
+        # whether to merge will see it without opening the log.
+        #
+        # No 'Also-closes:' subtraction here, unlike extra_closes(). An avowal
+        # converts an extra from an accident into an assertion, and it is worth
+        # that where the bead's own number was held; here nothing was held, so
+        # every number is equally unexamined and reporting a subset would
+        # overstate what this run did.
+        unheld = list(dict.fromkeys(GH_CLOSES.findall(claimable_prose(pr_body))))
+        if unheld:
+            # One number is the common case here, so the verb agrees with the
+            # count rather than reading "#901 close at merge" at the exact
+            # moment the line is asking someone to act on it.
+            numbers = f"#{', #'.join(unheld)}"
+            verb = "closes" if len(unheld) == 1 else "close"
+            print(
+                "::warning title=check-pr-closes unverified::"
+                f"{bead_id} is not in the export at this commit, so this "
+                f"check held nothing against it. {numbers} {verb} at merge "
+                "unexamined - confirm by hand before merging."
+            )
+            print(
+                f"[check-pr-closes] bead {bead_id!r} not in export - "
+                f"skipping; {numbers} {verb} at merge with no bead holding "
+                + ("it" if len(unheld) == 1 else "them")
+            )
+            sys.exit(0)
         print(f"[check-pr-closes] bead {bead_id!r} not in export - skipping")
         sys.exit(0)
 
@@ -960,7 +1154,33 @@ def main():
             "not need to push a commit or reopen the PR.",
         )
 
-    # Correct number present
+    # The bead's own number is present. That is a membership test, and it is
+    # satisfied by one member, so until bd gqlc-7i3g every other closing
+    # keyword in the body reached merge unexamined.
+    extra = extra_closes(pr_body, expected_n)
+    if extra:
+        refuse(
+            f"the PR body also closes #{', #'.join(extra)}, which "
+            f"{bead_id} does not mirror.",
+            f"{bead_id} mirrors #{expected_n}, the body closes it, and that "
+            "much is",
+            "what this gate demanded. The numbers above are the ones it "
+            "demanded",
+            "nothing of: a closing keyword is GitHub's to act on at merge, "
+            "so each",
+            "of them closes an issue with nothing left here to hold the "
+            "number",
+            "against.",
+            "Drop the keyword for any issue this PR does not resolve.",
+            "If that issue is done, close it by hand; if it is not, give it "
+            "its own",
+            "bead and PR.",
+            *avowal_advice(pr_body, extra),
+            "Editing the body re-runs this check on its own; you do",
+            "not need to push a commit or reopen the PR.",
+        )
+
+    # Correct number present, and it is the only one the body closes
     print(f"[check-pr-closes] {bead_id} -> Closes #{expected_n} (ok)")
     sys.exit(0)
 
