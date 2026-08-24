@@ -243,10 +243,17 @@ func (tx *Tx) Rollback(ctx context.Context) error {
 
 Notes:
 
-- The `pgx.Tx` check MUST precede the capability assertion: `pgx.Tx`
-  itself has `Begin` (savepoints, F6), so the order is what makes the
-  refusal fire at all. This ordering is a guard; its mutation row is in
-  §8.
+- The `pgx.Tx` check MUST precede the **call** to `b.Begin`: `pgx.Tx`
+  itself has `Begin` (savepoints, F6), so it satisfies the capability
+  assertion and the call under it alike, and this check is the only
+  thing that refuses it. Placed after the call, the refusal would first
+  open a savepoint it then has to abandon.
+  Its order against the **assertion alone** is not load-bearing. An
+  earlier draft of this spec claimed it was — that swapping the two made
+  "the refusal never fire" — and that was measured false on 2026-08-24
+  (bd `gqlc-3d0l`, dispatch run `32693045598`): swapped, `pgx.Tx` passes
+  the assertion, falls through to the check, and the refusal still
+  fires. The AGE live row stayed green. §8 carries the row.
 - The refusal covers both a `WithTx`-derived handle and a `pgx.Tx`
   passed directly to `New` as the `DBTX` — the check is on the dynamic
   type, not on how the handle was made.
@@ -360,10 +367,11 @@ citizen-protocol step 3, at minimum:
 | surface gate presence arm | delete the whole Tx block from the AGE renderer | txsurface row "AGE: missing Begin" (per-name assertion, step 3 above) |
 | surface gate equality arm | change AGE's `ErrTxDone` literal by one character | txsurface literal-equality row |
 | surface gate name arm | emit `rollback` (unexported) instead of `Rollback` in neo4j | txsurface row "neo4j: missing Rollback" |
-| done flag (both backends) | drop `if tx.done { return ErrTxDone }` from Commit | live row: double-Commit expects `ErrTxDone` |
-| Rollback idempotence | make late Rollback return `ErrTxDone` instead of nil | live row: Rollback-after-Commit expects nil |
-| Begin refusal (neo4j) | drop the `driverDB` type switch | live row: Begin on `WithTx`-handle expects error |
-| Begin refusal order (AGE) | swap the `pgx.Tx` check after the capability assertion | live row: Begin on tx-bound handle expects error, gets a savepoint tx |
+| done flag (both backends) | drop `if tx.done { return ErrTxDone }` from Commit | live row: double-Commit expects `ErrTxDone`. **MEASURED KILLED** on both neo4j arms, 2026-08-24, run `32692156620`. The AGE arm was left untouched by that mutation and stayed green, which is the run's own blinding control. Every offline gate is blind to this one — it is behaviour, not surface. |
+| Rollback idempotence | make late Rollback return `ErrTxDone` instead of nil | live row: Rollback-after-Commit expects nil. **NOT MEASURED** as written. A weaker variant was: see the row below. |
+| Rollback done-guard | drop `if tx.done { return nil }` from Rollback, both renderers | **MEASURED SPLIT**, 2026-08-24, run `32693045598`. **KILLED** on AGE (`Rollback after Commit is nil` fails, `live_test.go:661`; the other five rows pass, so the kill is scoped). **SURVIVED** on both neo4j arms — mutation confirmed live in the compiled fixture, and the arm printed `ok … 42.375s`, not `(cached)`. It survives because the neo4j driver's `Close` is already idempotent, so the early return changes nothing observable there. The guard is kept as defence-in-depth that makes the surface contract independent of the driver; no black-box row can kill it while the driver keeps that behaviour, and it is the AGE arm that witnesses the guard is needed at all. Recorded as a SURVIVED rather than deleted or claimed as a kill. |
+| Begin refusal (neo4j) | drop the `driverDB` type switch | live row: Begin on `WithTx`-handle expects error. **NOT MEASURED**: dropping it panics rather than returning, which aborts the test binary and takes the rest of the battery with it, so this row has to be dispatched alone. |
+| Begin refusal order (AGE) | swap the `pgx.Tx` check after the capability assertion | **MEASURED NO-OP**, declared as such in advance and against this table's own earlier prediction of a kill. 2026-08-24, run `32693045598`: `tx: Begin inside a transaction is refused` PASSED on the AGE arm with the two swapped. `pgx.Tx` satisfies the capability assertion and falls through to the check, so the refusal still fires. The prediction this row used to carry — "gets a savepoint tx" — was false, and it had been copied into the emitted comment in every generated AGE `db.go`; both are corrected. The order that *is* load-bearing is check-before-`b.Begin`, and that one is **unwitnessed**: placed after the call, the function still returns the error, so the live row stays green and only a savepoint leaks. Bead filed. |
 | session ownership (neo4j) | drop `session.Close` from Commit | expected **NO-OP**, declared as such: the driver's own `Commit` returns the pooled connection via its `onClosed` hook (`session_with_context.go:389`), and every `BeginTransaction` failure path returns it too (`session_with_context.go:343, 352, 369` — verified, all three arms). So no path the generated code owns holds a connection that `session.Close` would release, and no behavioural row can go red on it. The closes are kept because the session contract demands them, not because a resource is observably freed; a row that reads KILLED here is the surprise, and would mean the driver's lifecycle changed under us. |
 | v5≡v6 gate extension | emit a v6-only comment line in the Tx block | existing `driverAgnostic` equality row |
 

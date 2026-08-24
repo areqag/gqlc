@@ -109,10 +109,12 @@ type Tx struct {
 // and a surface that nests on one backend is the portability failure the
 // Tx object exists to remove.
 func (q *Queries) Begin(ctx context.Context) (*Tx, error) {
-	// This check must precede the capability assertion below: pgx.Tx has
-	// a Begin of its own, for savepoints, so it satisfies that assertion.
-	// Reversed, the refusal never fires and a nested savepoint is handed
-	// back instead of the error.
+	// pgx.Tx has a Begin of its own, for savepoints, so it satisfies both
+	// the capability assertion below and the call under it: this check is
+	// the only thing that refuses it. It sits above b.Begin so that the
+	// refusal does not first open a savepoint it would have to abandon.
+	// Its order against the assertion alone is not load-bearing -- swapped
+	// the two, the refusal still fires (measured, bd gqlc-3d0l).
 	if _, ok := q.db.(pgx.Tx); ok {
 		return nil, errors.New("gqlc: Begin on a transaction-bound Queries")
 	}
