@@ -1824,17 +1824,39 @@ cmd_dispatch() {
     lowpri=$(echo "$queue" | awk '$1 == "lowpri" { print $2, $3 }')
     epics=$(echo "$queue" | awk '$1 == "epic" { print $2 }')
 
-    # Said out loud, one line per bead, in the same shape as the hold verdicts
-    # below. A pass that declines work silently and then prints a summary that
-    # reads healthy is this dispatcher's oldest recurring defect, and a priority
-    # floor is a machine for producing exactly that — 158 of the 319 open beads
-    # the morning it was added.
-    local skipped=0
+    # Said out loud, in the same shape as the hold verdicts below. A pass that
+    # declines work silently and then prints a summary that reads healthy is
+    # this dispatcher's oldest recurring defect, and a priority floor is a
+    # machine for producing exactly that — 158 of the 319 open beads the morning
+    # it was added.
+    #
+    # Named individually up to a cap, then counted (gqlc-s4zm). It used to name
+    # every one, which was right at 5 beads and wrong at 165: the floor moved to
+    # 2 for Constitution V.3.1, and P3 is now where machinery beads are FILED
+    # rather than a backlog anyone means to drain, so the withheld set is
+    # permanently large by design. A per-bead line for each of them on a
+    # two-minute tick is the volume that makes an operator stop reading — the
+    # same failure as silence, reached from the other side, which is the
+    # argument the unroutable arm below already settled for the same reason.
+    #
+    # The cap is not silence and the difference is the count: every withheld
+    # bead is in `bd ready`, the total is in the done line, and the line below
+    # says how many it did not name and how to list them. What the cap costs is
+    # the ability to spot ONE unexpected id in the tail by eye, which is why it
+    # is a cap and not an aggregate — a run withholding a handful still names
+    # them all, exactly as before.
+    local skipped=0 floor_cap=10 floor_named=0
     while IFS=' ' read -r id prio; do
         [ -n "$id" ] || continue
-        echo "dispatch: below the floor $id — priority $prio, and [dispatch] max_priority is $maxprio; filed and searchable, routed to nobody"
         skipped=$((skipped + 1))
+        if [ "$floor_named" -lt "$floor_cap" ]; then
+            echo "dispatch: below the floor $id — priority $prio, and [dispatch] max_priority is $maxprio; filed and searchable, routed to nobody"
+            floor_named=$((floor_named + 1))
+        fi
     done <<<"$lowpri"
+    if [ "$skipped" -gt "$floor_named" ]; then
+        echo "dispatch: below the floor — and $((skipped - floor_named)) more, not named here (${skipped} withheld in all by [dispatch] max_priority $maxprio); 'bd ready -n 0' lists every one"
+    fi
 
     # And the epics, said the same way and for the same reason. Withheld, NEVER
     # dropped: the arm this one sits beside used to drop unlabelled beads

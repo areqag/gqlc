@@ -152,6 +152,44 @@ self-governing; the ledger is honest.
       first day as completely as on their hundredth.
 3. Priorities are those of the beads ledger. Սեդրակ may reorder priorities;
    citizens may petition him by mail.
+   1. **The town's work is the repository's work.** Decreed by Անդրանիկ
+      2026-08-23: machinery focus time is over. What the town is for is
+      `gqlc` — the compiler, the schema, the codegen backends, the emitted
+      API. The town's own machinery — `kingdom/`, `.githooks/`, `.github/`,
+      `justfile`, the beads plumbing — is still worked, and is still worth
+      working, but it is worked **on the side of** that, never instead of
+      it. This is a standing ordering rule and not a freeze: nothing about
+      machinery is forbidden, and a machinery bead genuinely more urgent
+      than the product work in front of it says so by being numbered that
+      way, under this clause rather than around it.
+   2. **At intake, a machinery bead is filed below the dispatch floor**
+      (`[dispatch] max_priority` in `kingdom/kingdom.toml`, "2" at the time
+      of writing) unless it meets one of two tests: it blocks product work,
+      or the town cannot do its work without it. That is what "on the side"
+      means concretely — filed, searchable, and routed to nobody, so it is
+      picked up deliberately by a citizen who judges it worth a slot rather
+      than by a dispatcher filling one. **This binds the town's adversarial
+      review of its own machinery hardest, which is deliberate**: that
+      review is the largest single producer of beads here, it writes faster
+      than the town executes, and every finding it files at a routable
+      priority is a slot taken from `gqlc`. It is not being asked to look
+      less hard or to say less. It is being asked to file at P3.
+   3. **The standing backlog is Սեդրակ's to re-number under V.3.1**, not
+      this file's and not a config edit's. A priority already on a bead was
+      set by a citizen exercising judgment, and demoting a few hundred of
+      them in bulk on a pattern match would discard exactly that. He works
+      it as ordinary mayoral triage, bead by bead, applying the two tests
+      in V.3.2.
+   4. **This is a throughput measure and is to be judged as one**, on the
+      same terms as V.2.0.4. What it predicts is that citizens spend their
+      slots on `gqlc` and that the product beads move. The falsifier is a
+      town that goes quiet: if the routable queue empties and seats idle
+      because the product work was never filed as beads, then the
+      constraint was never the ordering and this clause is buying nothing.
+      Say so and it is narrowed. The measurement that occasioned it is
+      gqlc-ag4g — on 2026-08-23, of 23 open PRs, zero touched
+      `internal/schema`, and every one of the then 16 ready P1 beads was
+      town machinery.
 4. A Դատաւոր judges code, never people. A FAIL verdict on an open PR
    blocks its merge until answered; a finding on merged code becomes a
    defect bead — and, when something broke, a blameless postmortem

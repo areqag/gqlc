@@ -308,6 +308,26 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    do not inflate it to get it seen; if it genuinely matters more than P3,
    the argument for that goes to Սեդրակ, who can reprioritise it.
 
+   **A bead about the town's own machinery is filed at P3** — `kingdom/`,
+   `.githooks/`, `.github/`, `justfile`, the beads plumbing — unless it
+   blocks product work or the town cannot work without it. Constitution
+   V.3.1 and V.3.2, decreed by Անդրանիկ 2026-08-23: what the town is FOR is
+   `gqlc`, and machinery is worked on the side of that. This is where that
+   decree is actually enforced, because the dispatcher cannot tell machinery
+   from product — nothing on a bead records which it is, so the only thing
+   standing between a machinery finding and a citizen's slot is the number
+   you type here. It binds hardest on findings from our adversarial review
+   of our own machinery, which is the largest producer of beads in this
+   town. Look just as hard; say just as much; file at P3.
+
+   **A `class:judge` review bead is the one exception, and it is not
+   optional.** It takes the priority of the PR it reviews and never goes
+   below the floor, machinery or not — step 8 above, and for the mechanical
+   reason given there: the fresh pass is the one arm the floor binds, so a
+   review bead at P3 waits forever and the PR it guards never merges. A
+   machinery PR that has to be reviewed is the town being unable to do its
+   work without it, which is V.3.2's second test, met.
+
    A bead may also carry `effort:<level>` — low, medium, high, xhigh, max —
    which wakes its seat at that depth instead of the class default. This is
    how Constitution V.6.2's right is actually delivered, since `/effort`
@@ -501,7 +521,7 @@ display a bead no pass can reach. `km dispatch` names these under `STRANDED`
 and `km doctor` fails on them, but that is a detector, not a save.
 
 **The priority floor binds the fresh pass only** (`[dispatch] max_priority`,
-`3` since gqlc-38ye). It is configuration and it moves, so read it with
+`2` since gqlc-s4zm). It is configuration and it moves, so read it with
 `km cfg` rather than trusting this sentence. Being HANDED a bead below the
 floor stops there; finishing one you already hold does not, because
 Constitution III.3 is your right to finish your own work. A citizen who reads
