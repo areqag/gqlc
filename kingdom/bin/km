@@ -998,6 +998,14 @@ cmd_halt() {
     # live inside ordinary words and a reason has to be able to carry them.
     # Everything after the first word is reason, whatever it looks like.
     case "${1:-}" in
+        -h | --help)
+            # The one spelling in this family a careful person types on purpose,
+            # before running a write verb, to find out what it will do. On
+            # 2026-08-24 a seven-hour outage sat on the board with `--help`
+            # recorded as its cause.
+            usage
+            return 0
+            ;;
         --status | --show)
             if [ -f "$sd/halt" ]; then
                 echo "halt is UP: $(head -1 "$sd/halt")"
