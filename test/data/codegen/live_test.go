@@ -590,7 +590,7 @@ func txCommitVisible(ctx context.Context, t *testing.T, b writeBackend) { //noli
 
 	survivor, err := q.getPersonName(ctx, 2)
 	require.NoError(t, err, "the commit must carry the transaction's write and no more")
-	require.Equal(t, "Bob", survivor)
+	require.Equal(t, "Carol", survivor) // MUTATION M1
 }
 
 // txRollbackAbsent is the other half: the write reached the transaction,
