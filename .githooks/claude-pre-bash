@@ -1155,15 +1155,25 @@ def remote_refs_containing(directory, sha):
 
 def reason_text(close):
     """(text, unreadable_explanation). Exactly one of the two is None."""
-    _, _, reason, reason_file = close
+    directory, _, reason, reason_file = close
     if reason_file is not None:
         if reason_file == "-" or UNEXPANDED_RE.search(reason_file):
             return None, "the reason is read from stdin or a path this hook cannot resolve"
+        # bd opens a relative path from the directory IT runs in, which the
+        # tuple carries as element 0; this hook's own cwd is unrelated to it.
+        # Under a name collision the two are different files, so reading the
+        # hook's copy answers about a file nobody closed against (bd gqlc-d26r).
+        path = resolve(directory, reason_file)
+        if path is None:
+            return None, (
+                "--reason-file %s is not a path this hook can resolve from the directory "
+                "bd will run in" % reason_file
+            )
         try:
-            with open(reason_file, encoding="utf-8", errors="replace") as handle:
+            with open(path, encoding="utf-8", errors="replace") as handle:
                 return handle.read(), None
         except OSError as exc:
-            return None, "--reason-file %s could not be read (%s)" % (reason_file, exc.strerror)
+            return None, "--reason-file %s could not be read (%s)" % (path, exc.strerror)
     if reason is None:
         return None, "the reason flag carries no value on this command line"
     if UNEXPANDED_RE.search(reason):
