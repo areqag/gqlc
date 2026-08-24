@@ -67,12 +67,30 @@ make_town() {
 # Runs the guard from inside the seat worktree with GIT_DIR exported exactly as
 # git exports it to a hook, which is the condition every observed damage shape
 # needed. Echoes the guard's exit status.
+#
+# ADVISORY MODE IS SET HERE AND NOWHERE ELSE, via the ADVISORY variable, because
+# the ambient value cannot be trusted: .githooks/pre-push runs the suite as
+# `GQLC_REPO_PURITY_ADVISORY=1 repo-purity just test`, and that export reaches
+# every child — including this file. MEASURED 2026-08-24, on the push of the
+# very commit that added the wiring: eight rows that assert the guard REFUSES
+# went green-side-up (expected 1, got 0) under `git push` while passing every
+# direct run. Inheriting it would make each strict row here silently assert
+# nothing, exactly when the gate is live. Same hazard as the GIT_* leak that
+# git-env-sandbox.sh exists for, one variable along.
 run_guard() {
     local root="$1"; shift
     (
         cd "$root/seat" || exit 99
         export GIT_DIR="$root/shared/.git/worktrees/seat"
-        bash "$GUARD" "$@" >"$root/out" 2>&1
+        # Set on the invocation rather than exported into the subshell: `env -u`
+        # states the removal as the command's own environment, which is both
+        # what shellcheck can see is deliberate (no SC2030) and harder to read
+        # as an accident than an `unset` sitting several lines above the call.
+        if [ -n "${ADVISORY:-}" ]; then
+            GQLC_REPO_PURITY_ADVISORY="$ADVISORY" bash "$GUARD" "$@" >"$root/out" 2>&1
+        else
+            env -u GQLC_REPO_PURITY_ADVISORY bash "$GUARD" "$@" >"$root/out" 2>&1
+        fi
         echo $? >"$root/rc"
     )
     cat "$root/rc"
@@ -243,6 +261,95 @@ rc="$(run_guard "$T" git update-ref refs/remotes/origin/master "$sha")"
 if [ "$rc" = 0 ]; then remote_got=0; else remote_got="rc=$rc: $(cat "$T/out")"; fi
 check "remote-tracking ref written: guard does not fail on its own account" \
     0 "$remote_got"
+
+# --- ADVISORY MODE, and the one thing it must not soften ---------------------
+# Ruled on gqlc-06y9: in a town where every seat is a linked worktree of ONE
+# repo, a concurrent seat's commit moves refs this guard watches, so a strict
+# gate here refuses pushes over another citizen's work. Advisory is therefore
+# what gets wired — but ONLY the purity verdict is advisory. The inner command's
+# own exit code stays load-bearing, because the inner command is `just test`.
+#
+# This is why the flag lives in the guard and NOT as a `|| true` at the call
+# site: `|| true` cannot tell a purity failure from a failing test suite, so it
+# would disarm the suite. The row below that runs a FAILING command under
+# advisory mode is what pins that distinction.
+
+T="$TMP/advisory_ok"; mkdir -p "$T"; make_town "$T"
+rc="$(ADVISORY=1 run_guard "$T" git branch -q advisorybranch)"
+check "advisory + damage + inner success: does NOT block the push" 0 "$rc"
+check "advisory + damage: the damage is still reported" yes \
+    "$(grep -q 'advisorybranch' "$T/out" && echo yes || echo no)"
+
+# THE LOAD-BEARING ROW. Advisory must not swallow the inner command. If this
+# ever read 0, `just test` would be disarmed by the very wiring meant to add a
+# guard, and every other row in this file would be beside the point.
+T="$TMP/advisory_fail"; mkdir -p "$T"; make_town "$T"
+rc="$(ADVISORY=1 run_guard "$T" sh -c 'git branch -q b2; exit 7')"
+check "advisory + damage + inner FAILURE: the inner exit code survives" 7 "$rc"
+
+# Advisory is opt-in. Without this row the flag could default to on and nothing
+# here would notice.
+T="$TMP/strict_default"; mkdir -p "$T"; make_town "$T"
+rc="$(run_guard "$T" git branch -q strictbranch)"
+check "flag unset: the guard still FAILS the run" 1 "$rc"
+
+# THE REGRESSION ROW for the leak described on run_guard. This suite runs under
+# a pre-push that exports GQLC_REPO_PURITY_ADVISORY=1, so an ambient value is
+# the NORMAL condition when the gate is live, not an exotic one. Reproduced
+# deterministically here rather than left to be rediscovered on a push: if
+# run_guard ever goes back to inheriting, this row reddens in a plain run too.
+export GQLC_REPO_PURITY_ADVISORY=1
+T="$TMP/ambient_leak"; mkdir -p "$T"; make_town "$T"
+rc="$(run_guard "$T" git branch -q ambientbranch)"
+check "an INHERITED advisory flag does not weaken this suite's strict rows" 1 "$rc"
+unset GQLC_REPO_PURITY_ADVISORY
+
+# --- the report does not accuse the pusher -----------------------------------
+# Same ruling. The old wording said the run "changed the repository it ran in",
+# which in this town is routinely false when it prints: the change is usually
+# another seat committing in its own worktree during the window. A gate that is
+# reliably wrong about its own accusation is one citizens learn to scroll past,
+# which is how you get an inert guard that is technically running.
+T="$TMP/wording"; mkdir -p "$T"; make_town "$T"
+run_guard "$T" git branch -q wordingbranch >/dev/null
+check "report says the repo DIFFERS, not that you changed it" yes \
+    "$(grep -qi 'differs' "$T/out" && echo yes || echo no)"
+check "report offers the concurrent-seat explanation" yes \
+    "$(grep -qi 'another seat' "$T/out" && echo yes || echo no)"
+check "report names the reflog as the way to tell them apart" yes \
+    "$(grep -qi 'reflog' "$T/out" && echo yes || echo no)"
+check "report points at the design bead" yes \
+    "$(grep -q 'gqlc-w5bh' "$T/out" && echo yes || echo no)"
+check "report no longer asserts the command changed the repo" no \
+    "$(grep -q 'changed the repository it ran in' "$T/out" && echo yes || echo no)"
+
+# --- THE PIN: pre-push actually invokes the guard ----------------------------
+# gqlc-06y9 is the bead for a guard that was merged, green, and called by
+# nothing. Every row above tests a file the town might never run, so this row is
+# what makes the rest matter: it reads the REAL .githooks/pre-push and reddens if
+# the call site goes. An advisory gate that goes missing is exactly as inert as
+# the one this bead was filed for, and harder to notice — by then nobody is
+# relying on it.
+#
+# READ WITH COMMENTS STRIPPED, deliberately. pre-push's own header now explains
+# the wiring at length, so a grep of the raw bytes would be satisfied by that
+# prose alone — the call site could be deleted and every row below would stay
+# green off the comment that describes it. That is the failure this bead is
+# about, one level up. `code_of` keeps only lines with something before a `#`.
+PREPUSH="$(cd "$(dirname "$0")/.." && pwd)/pre-push"
+code_of() { grep -vE '^[[:space:]]*(#|$)' "$1"; }
+
+check "pre-push invokes repo-purity (in code, not in a comment)" yes \
+    "$(code_of "$PREPUSH" | grep -q 'repo-purity' && echo yes || echo no)"
+check "pre-push runs the test suite THROUGH the guard" yes \
+    "$(code_of "$PREPUSH" | grep -qE 'repo-purity"?[[:space:]]+just[[:space:]]+test' && echo yes || echo no)"
+check "pre-push asks for advisory mode explicitly" yes \
+    "$(code_of "$PREPUSH" | grep -q 'GQLC_REPO_PURITY_ADVISORY' && echo yes || echo no)"
+# The control that proves the stripping works. If code_of ever stopped removing
+# comments, the three rows above would go back to being satisfiable by prose and
+# nothing would say so. pre-push is known to discuss the guard in its header.
+check "control: the header prose about the guard IS being stripped" yes \
+    "$(grep -q '^# ADVISORY' "$PREPUSH" && ! code_of "$PREPUSH" | grep -q '^# ADVISORY' && echo yes || echo no)"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
