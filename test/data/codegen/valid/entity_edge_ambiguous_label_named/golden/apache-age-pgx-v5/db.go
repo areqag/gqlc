@@ -93,7 +93,7 @@ func (q *Queries) Begin(ctx context.Context) (*Tx, error) {
 	// refusal does not first open a savepoint it would have to abandon.
 	// Its order against the assertion alone is not load-bearing -- swapped
 	// the two, the refusal still fires (measured, bd gqlc-3d0l).
-	if _, ok := q.db.(pgx.Tx); ok {
+	if _, ok := q.db.(*pgx.Conn); ok {
 		return nil, errors.New("gqlc: Begin on a transaction-bound Queries")
 	}
 	b, ok := q.db.(interface {
