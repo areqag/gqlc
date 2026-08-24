@@ -98,6 +98,14 @@ run_hook() {
         printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 0\n' >"$dir/hooks/$sibling"
         chmod +x "$dir/hooks/$sibling"
     done
+    # repo-purity is copied REAL, not stubbed like the siblings above. The hook
+    # now runs the suite as `repo-purity just test` (bd gqlc-06y9), so a
+    # passthrough stub would swallow the very `just test` these rows count, and
+    # every lint-new tally here would read 0 for a reason having nothing to do
+    # with the lock. It needs no sandbox of its own: it snapshots whatever
+    # $dir/cwd is, finds it unchanged, and passes the inner status through.
+    cp "$HOOKS_DIR/repo-purity" "$dir/hooks/repo-purity"
+    chmod +x "$dir/hooks/repo-purity"
     printf '%s\n' "$@" >"$dir/state/script"
     local rc=0
     (

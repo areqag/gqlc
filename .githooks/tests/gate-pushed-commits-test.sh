@@ -354,9 +354,14 @@ contains "8b: the refusal says the hook is missing or not executable" "$GATE_OUT
 # the asymmetry that says the two consumers are fed separately. Run.
 
 PREPUSH_SRC="$REAL_HOOKS/pre-push"
+# Matched at the END of the line rather than the whole line: the suite is now
+# invoked through the repo-purity guard (bd gqlc-06y9), so the line carries a
+# prefix. `$` still excludes `just test-hooks`, and the count is asserted to be
+# exactly 1 so that a second spelling reddens here instead of silently moving
+# the truncation point.
 check "pre-push spells a 'just test' line to truncate at" 1 \
-    "$(grep -c '^just test$' "$PREPUSH_SRC")"
-awk '/^just test$/ { exit } { print }' "$PREPUSH_SRC" >"$HOOKS/pre-push"
+    "$(grep -cE 'just test$' "$PREPUSH_SRC")"
+awk '/just test$/ { exit } { print }' "$PREPUSH_SRC" >"$HOOKS/pre-push"
 chmod +x "$HOOKS/pre-push"
 
 run_prepush() {

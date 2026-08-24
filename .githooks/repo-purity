@@ -101,9 +101,21 @@ verify() {
     rm -rf "$SNAP"
 
     if [ "$damaged" -ne 0 ]; then
-        printf 'repo-purity: FAILED — the command changed the repository it ran in (the command itself exited %d).\n' \
+        printf 'repo-purity: the repository DIFFERS across this run (the command itself exited %d).\n' \
             "$INNER_RC" >&2
-        echo "repo-purity: a test run must leave its own repository untouched; see bd gqlc-2zet." >&2
+        echo "repo-purity: this does NOT prove your command did it. Every seat in this town is a" >&2
+        echo "  linked worktree of one repository, so another seat committing in its own tree" >&2
+        echo "  during the window moves the same refs and reads exactly like your damage." >&2
+        echo "  To tell them apart: 'git reflog' the ref named above and look at who wrote it." >&2
+        echo "  A test run should still leave its own repository untouched (bd gqlc-2zet); the" >&2
+        echo "  reason this cannot yet be enforced is bd gqlc-w5bh." >&2
+        # Advisory is what the town wires into pre-push (ruled on gqlc-06y9): a
+        # strict verdict here refuses pushes over a NEIGHBOUR's concurrent work.
+        # Only the purity verdict softens — INNER_RC is passed through untouched,
+        # so a failing `just test` still fails the push. That is the whole reason
+        # this is a flag in here rather than a `|| true` at the call site, which
+        # could not tell the two failures apart.
+        [ "${GQLC_REPO_PURITY_ADVISORY:-0}" = 1 ] && exit "$INNER_RC"
         exit 1
     fi
 

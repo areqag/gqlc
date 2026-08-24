@@ -39,7 +39,23 @@ if [ -n "${_push_refs}" ]; then
   _replay_push_refs | "$(dirname "$0")/gate-pushed-commits" "$@"
 fi
 
-just test
+# Wrapped so that a suite which damages the repository it runs in gets SAID —
+# on 2026-08-22 the km suite flipped core.bare on the shared config, force-moved
+# a seat's branch, and left a fixture identity in user.email, all found by hand
+# days later (bd gqlc-ed2u, gqlc-lekg). The guard shipped in #1225 and nothing
+# called it until this line (bd gqlc-06y9).
+#
+# ADVISORY, and that is a ruling rather than a preference (gqlc-06y9). Seats here
+# are linked worktrees of ONE repository, so a neighbour committing in their own
+# tree during this window moves refs the guard watches and is indistinguishable
+# from damage by this run — measured, on this hook, against three other seats.
+# A strict verdict would refuse pushes over other citizens' work. Making
+# attribution possible at all is a topology question, filed as gqlc-w5bh.
+#
+# The flag softens ONLY the purity verdict; `just test`'s own exit code is passed
+# through and still blocks the push. Deliberately not `|| true` here — that could
+# not tell a purity complaint from a failing suite, and would disarm the suite.
+GQLC_REPO_PURITY_ADVISORY=1 "$(dirname "$0")/repo-purity" just test
 
 # ensure-golangci self-heals the pinned binary in .bin/; a provisioning failure
 # BLOCKS the push. Until bd gqlc-l45j this arm warned and continued, justified
