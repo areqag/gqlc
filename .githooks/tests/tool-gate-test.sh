@@ -98,7 +98,13 @@ cp "$HOOKS_DIR/pre-push" "$HOOKS/pre-push"
 # case it accepts — these tests are about the provisioning arms below it.
 # .githooks/tests/worktree-upstream-test.sh is where it is decided on.
 cp "$HOOKS_DIR/guard-push-destination" "$HOOKS/guard-push-destination"
-chmod +x "$HOOKS/pre-commit" "$HOOKS/pre-push" "$HOOKS/guard-push-destination"
+# Also real, and for a sharper reason: pre-push now runs the suite as
+# `repo-purity just test` (bd gqlc-06y9). A passthrough stub would swallow the
+# `just test` that STUB_TEST_RC drives, so "a failing test suite blocks the
+# push" would go green without the suite ever having been consulted.
+cp "$HOOKS_DIR/repo-purity" "$HOOKS/repo-purity"
+chmod +x "$HOOKS/pre-commit" "$HOOKS/pre-push" "$HOOKS/guard-push-destination" \
+    "$HOOKS/repo-purity"
 
 cat >"$HOOKS/bd-gh-sync" <<'STUB'
 #!/usr/bin/env bash
