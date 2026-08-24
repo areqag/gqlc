@@ -395,6 +395,20 @@ _Avoid_: "datetime type" (colloquial for the whole family; the family is
 `duration.between` are constructor calls in the type interface — the
 namespaced function returns a `duration` — not property lookups).
 
+**Neutral temporal carrier**:
+One of the five gqlc-owned Go types (`Date`, `Time`, `LocalTime`,
+`LocalDateTime`, `Duration`) emitted as `temporal.go` into a generated
+package when its surface references one, plus `time.Time` for TIMESTAMP.
+These are what the emitted public surface names for temporal widths —
+never a driver type; conversion to `dbtype.*` or agtype encodings is
+backend-private inside decode/encode helpers. Representation, placement,
+and the AGE admission policy are ADR 0033. The five names are reserved in
+the generated package whenever `temporal.go` is emitted.
+_Avoid_: "dbtype" in any description of the public surface (that is the
+neo4j driver's package, a private carrier behind the conversion boundary);
+"runtime type" (there is no gqlc runtime module — the carriers are emitted,
+not imported).
+
 **Result type**:
 The **type** a return item's **projection** commits to for the column that
 becomes a generated method result field. Distinct from the schema-side
