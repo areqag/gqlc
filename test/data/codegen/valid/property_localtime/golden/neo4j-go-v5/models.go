@@ -11,7 +11,7 @@ import (
 
 // Event corresponds to the Event node type.
 type Event struct {
-	AtLocal dbtype.LocalTime
+	AtLocal LocalTime
 	Id      int64
 }
 
@@ -34,7 +34,7 @@ func decodeEvent(node dbtype.Node) (Event, error) {
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.AtLocal: %w", err)
 	}
-	out.AtLocal = value0
+	out.AtLocal = toLocalTime(value0)
 	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.Id: %w", err)

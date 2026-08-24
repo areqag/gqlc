@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -842,6 +843,191 @@ func receiverName(t *testing.T, path string, d *ast.FuncDecl) string {
 	ident, ok := expr.(*ast.Ident)
 	require.True(t, ok, "%s: %s hangs off a %T", path, d.Name.Name, expr)
 	return ident.Name
+}
+
+// driverModulePrefixes names the modules whose types are the backend's
+// business and not the caller's. Prefixes rather than exact paths: one
+// module publishes several importable packages (neo4j, dbtype, pgxpool),
+// and a new one appearing is exactly the case this must catch.
+var driverModulePrefixes = []string{
+	"github.com/neo4j/neo4j-go-driver",
+	"github.com/jackc/pgx",
+}
+
+// TestGoldenExportedSurfaceIsDriverFree pins the property ADR 0033 buys:
+// a caller writes against gqlc's vocabulary, so swapping the target
+// recompiles their program untouched. Before this gate nothing failed
+// when a driver type reached the emitted public surface, and the neo4j
+// goldens were the counterexample — `Dob dbtype.Date` on an exported
+// struct in property_date/models.go.
+//
+// Exported positions only, and bodies never. The conversions live in
+// unexported helpers and must name the driver; that is where the
+// dependency belongs. What may not name it is anything a caller can
+// write down: an exported type's exported fields, an exported function
+// or method signature, an exported var or const's declared type.
+//
+// db.go and graph.go are excluded through connectionSurface, the same
+// two files TestBackendInvariantSurface excludes and for the same
+// reason: they hold the handle and what it talks to, so the driver is
+// their subject, not a leak.
+func TestGoldenExportedSurfaceIsDriverFree(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden", "*", "*.go"))
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no golden was swept, so this test holds nothing")
+
+	var offenders []string
+	scanned := 0
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		if connectionSurface[filepath.Base(path)] {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		qualifiers := driverQualifiers(t, path, file)
+		where := filepath.Join(filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(path)))),
+			filepath.Base(filepath.Dir(path)), filepath.Base(path))
+		for _, decl := range file.Decls {
+			for _, exported := range exportedPositions(decl) {
+				scanned++
+				offenders = append(offenders, namedDrivers(t, fset, qualifiers, where, exported)...)
+			}
+		}
+	}
+	// A sweep that read no exported declaration would agree with every
+	// corpus, including one whose extractor had stopped seeing them.
+	require.NotZero(t, scanned, "no exported declaration was read, so this sweep holds nothing")
+	require.Empty(t, offenders,
+		"the emitted public surface names driver types, so a caller cannot swap targets without editing their program:\n%s",
+		strings.Join(offenders, "\n"))
+}
+
+// exportedPosition is one caller-writable declaration: what to call it in
+// a failure, and the syntax that must not name a driver.
+type exportedPosition struct {
+	what string
+	node ast.Node
+}
+
+// exportedPositions is the caller-writable syntax a declaration puts in
+// the package, or nothing when the declaration is unexported. Bodies are
+// never returned: an unexported helper's use of the driver is the point.
+func exportedPositions(decl ast.Decl) []exportedPosition {
+	switch d := decl.(type) {
+	case *ast.FuncDecl:
+		if !ast.IsExported(d.Name.Name) {
+			return nil
+		}
+		// A method on an unexported type is unreachable from outside
+		// the package however exported its own name is.
+		if d.Recv != nil && !ast.IsExported(receiverBase(d.Recv)) {
+			return nil
+		}
+		return []exportedPosition{{"func " + d.Name.Name, d.Type}}
+	case *ast.GenDecl:
+		var out []exportedPosition
+		for _, spec := range d.Specs {
+			switch s := spec.(type) {
+			case *ast.TypeSpec:
+				if !ast.IsExported(s.Name.Name) {
+					continue
+				}
+				out = append(out, []exportedPosition{{"type " + s.Name.Name, s.Type}}...)
+			case *ast.ValueSpec:
+				// The declared type only. An initialiser is a body by
+				// another name, and the compile-time interface
+				// assertions the emission writes are unexported anyway.
+				if s.Type == nil || !slices.ContainsFunc(s.Names, func(n *ast.Ident) bool { return ast.IsExported(n.Name) }) {
+					continue
+				}
+				out = append(out, exportedPosition{"var " + s.Names[0].Name, s.Type})
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// receiverBase is the type a method hangs off, pointer or not.
+func receiverBase(recv *ast.FieldList) string {
+	expr := recv.List[0].Type
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	if ident, ok := expr.(*ast.Ident); ok {
+		return ident.Name
+	}
+	return ""
+}
+
+// namedDrivers is every driver type the caller-writable half of one
+// declaration names. Unexported fields and unexported interface methods
+// are pruned as it walks: they are in the declaration but not in the
+// surface, since no caller outside the package can name either.
+func namedDrivers(t *testing.T, fset *token.FileSet, qualifiers map[string]string, where string, pos exportedPosition) []string {
+	t.Helper()
+	var found []string
+	ast.Inspect(pos.node, func(n ast.Node) bool {
+		switch f := n.(type) {
+		case *ast.Field:
+			// An embedded field declares no name and is promoted, so
+			// it stays.
+			if len(f.Names) == 0 {
+				return true
+			}
+			return slices.ContainsFunc(f.Names, func(n *ast.Ident) bool { return ast.IsExported(n.Name) })
+		case *ast.SelectorExpr:
+			ident, ok := f.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if path, isDriver := qualifiers[ident.Name]; isDriver {
+				found = append(found, fmt.Sprintf("%s: %s names %s (%s)", where, pos.what, render(t, fset, f), path))
+			}
+			return true
+		}
+		return true
+	})
+	return found
+}
+
+// driverQualifiers is the package qualifiers one file binds to driver
+// modules — `dbtype` for the neo4j driver's type package, and so on.
+func driverQualifiers(t *testing.T, path string, file *ast.File) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, imp := range file.Imports {
+		quoted, err := strconv.Unquote(imp.Path.Value)
+		require.NoError(t, err, "%s: import path %s", path, imp.Path.Value)
+		if !slices.ContainsFunc(driverModulePrefixes, func(p string) bool { return strings.HasPrefix(quoted, p) }) {
+			continue
+		}
+		// A dot-import would put driver names into the file's own
+		// namespace as bare identifiers, where a qualifier sweep cannot
+		// see them. The emission writes none; if one ever appears this
+		// stops rather than passing blind.
+		require.False(t, imp.Name != nil && imp.Name.Name == ".",
+			"%s: dot-imports %s, which this sweep cannot follow", path, quoted)
+		out[importQualifier(imp, quoted)] = quoted
+	}
+	return out
+}
+
+// importQualifier is the name a file writes an import under: the alias
+// when it has one, and otherwise the path's last element — stepping over
+// a `/vN` module-version element, which is why `github.com/jackc/pgx/v5`
+// is written `pgx`.
+func importQualifier(imp *ast.ImportSpec, path string) string {
+	if imp.Name != nil {
+		return imp.Name.Name
+	}
+	parts := strings.Split(path, "/")
+	last := parts[len(parts)-1]
+	if len(parts) > 1 && regexp.MustCompile(`^v[0-9]+$`).MatchString(last) {
+		return parts[len(parts)-2]
+	}
+	return last
 }
 
 // The Bolt driver's own carrier vocabulary, split by the shape the

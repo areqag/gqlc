@@ -15,23 +15,23 @@ const nowZonedQueryText = `RETURN time() AS t`
 // NowZoned executes the NowZoned query.
 //
 //	RETURN time() AS t
-func (q *Queries) NowZoned(ctx context.Context) (dbtype.Time, error) {
+func (q *Queries) NowZoned(ctx context.Context) (Time, error) {
 	records, err := q.db.run(ctx, nowZonedQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
-		return dbtype.Time{}, err
+		return Time{}, err
 	}
 	if len(records) == 0 {
-		return dbtype.Time{}, ErrNoRows
+		return Time{}, ErrNoRows
 	}
 	if len(records) > 1 {
-		return dbtype.Time{}, ErrMultipleResults
+		return Time{}, ErrMultipleResults
 	}
 	value, isNil, err := neo4j.GetRecordValue[dbtype.Time](records[0], "t")
 	if err != nil {
-		return dbtype.Time{}, fmt.Errorf("NowZoned: decode column %q: %w", "t", err)
+		return Time{}, fmt.Errorf("NowZoned: decode column %q: %w", "t", err)
 	}
 	if isNil {
-		return dbtype.Time{}, fmt.Errorf("NowZoned: column %q is non-nullable but arrived null", "t")
+		return Time{}, fmt.Errorf("NowZoned: column %q is non-nullable but arrived null", "t")
 	}
-	return value, nil
+	return toTime(value), nil
 }

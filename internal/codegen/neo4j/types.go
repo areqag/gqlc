@@ -14,14 +14,19 @@ type typeMap struct{}
 // widths (INT128 / INT256 / UINT128 / UINT256 / FLOAT16 / FLOAT128 /
 // FLOAT256 / DECIMAL) — caller routes to ErrUnrepresentableWidth naming
 // the width. Callers append a leading '*' for nullable columns and
-// parameters at emission time. DATE / TIMESTAMP are in-scope at C3 and
-// return "dbtype.Date" / "time.Time"; FLOAT32 returns "float32" (the
+// parameters at emission time. FLOAT32 returns "float32" (the
 // carrier-widens-on-encode / narrow-on-decode contract is enforced at
-// the emission sites, spec §5.5 / §5.7). BYTES / TIME / LOCAL TIME /
-// DURATION add four dbtype-carrying arms; DURATION collapses its
-// (YEAR TO MONTH) vs (DAY TO SECOND) qualifier onto a single
-// dbtype.Duration, which the driver represents as one struct with
-// Months / Days / Seconds / Nanos fields (see ADR 0002 Consequences).
+// the emission sites, spec §5.5 / §5.7).
+//
+// DATE / TIME / LOCAL TIME / DURATION return the gqlc-owned neutral
+// carriers "Date" / "Time" / "LocalTime" / "Duration", declared in the
+// generated package's own temporal.go and bridged to dbtype by the
+// unexported helpers in temporal_neo4j.go (ADR 0033). They name no
+// package, because they are declared alongside the code that uses them.
+// TIMESTAMP stays "time.Time": the stdlib type is already neutral and
+// models an instant without residue. DURATION collapses its
+// (YEAR TO MONTH) vs (DAY TO SECOND) qualifier onto a single Duration
+// carrying Months / Days / Seconds / Nanos (see ADR 0002 Consequences).
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
 		elemTy, ok := t.Property(pt.Elem())
@@ -62,15 +67,15 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	case graph.TypeFloat32:
 		return "float32", true
 	case graph.TypeDate:
-		return "dbtype.Date", true
+		return "Date", true
 	case graph.TypeTime:
-		return "dbtype.Time", true
+		return "Time", true
 	case graph.TypeLocalTime:
-		return "dbtype.LocalTime", true
+		return "LocalTime", true
 	case graph.TypeTimestamp:
 		return "time.Time", true
 	case graph.TypeDuration:
-		return "dbtype.Duration", true
+		return "Duration", true
 	case graph.TypeAnyPropertyValue:
 		return "any", true
 	case graph.TypeList:
@@ -90,23 +95,24 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 
 // Temporal maps a resolver Temporal kind to the Go type text C3 emits
 // (spec §5.1 column-shape table). Returns (typeText, ok): ok=false
-// routes the caller to ErrUnrepresentableTemporal naming the kind. The
-// driver ships a temporal carrier for every kind of the enum, so every
-// arm answers ok=true and this backend never takes that channel.
+// routes the caller to ErrUnrepresentableTemporal naming the kind.
+// Every kind of the enum has a carrier — the four neutral ones plus
+// time.Time for the zoned datetime (ADR 0033) — so every arm answers
+// ok=true and this backend never takes that channel.
 func (typeMap) Temporal(k resolver.Temporal) (string, bool) {
 	switch k {
 	case resolver.TemporalDate:
-		return "dbtype.Date", true
+		return "Date", true
 	case resolver.TemporalTime:
-		return "dbtype.Time", true
+		return "Time", true
 	case resolver.TemporalLocalTime:
-		return "dbtype.LocalTime", true
+		return "LocalTime", true
 	case resolver.TemporalDateTime:
 		return "time.Time", true
 	case resolver.TemporalLocalDateTime:
-		return "dbtype.LocalDateTime", true
+		return "LocalDateTime", true
 	case resolver.TemporalDuration:
-		return "dbtype.Duration", true
+		return "Duration", true
 	}
 	// Only a value converted in from outside resolver.Temporal's
 	// vocabulary reaches here; refusing beats guessing a carrier for a
@@ -164,6 +170,14 @@ func driverCarrier(goType string) string {
 		return "int64"
 	case "float32", "float64":
 		return "float64"
+	case "Date", "Time", "LocalTime", "LocalDateTime", "Duration":
+		// The neutral temporal carriers (ADR 0033). The driver still
+		// speaks dbtype on both wires, so the carrier is the dbtype
+		// counterpart — but unlike every other arm here the two are not
+		// conversion-compatible, and narrowExpr / widenExpr route them
+		// through the emitted to<X> / from<X> helpers instead of a Go
+		// conversion.
+		return "dbtype." + goType
 	default:
 		return goType
 	}

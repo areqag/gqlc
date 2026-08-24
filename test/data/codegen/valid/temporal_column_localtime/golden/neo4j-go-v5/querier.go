@@ -2,14 +2,10 @@
 
 package temporalcolumnlocaltime
 
-import (
-	"context"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
-)
+import "context"
 
 type ReadQuerier interface {
-	NowLocalTime(ctx context.Context) (dbtype.LocalTime, error)
+	NowLocalTime(ctx context.Context) (LocalTime, error)
 }
 
 type WriteQuerier interface {

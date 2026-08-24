@@ -2,14 +2,10 @@
 
 package temporalcolumntime
 
-import (
-	"context"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
-)
+import "context"
 
 type ReadQuerier interface {
-	NowZoned(ctx context.Context) (dbtype.Time, error)
+	NowZoned(ctx context.Context) (Time, error)
 }
 
 type WriteQuerier interface {

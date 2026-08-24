@@ -97,7 +97,7 @@ func columnNeedsImports(f codegen.Row) (needDbtype, needTime bool) {
 		// need is declared here.
 		return true, false
 	case codegen.ColumnTemporal, codegen.ColumnProperty:
-		return goTypeNeedsImports(f.GoType)
+		return decodeNeedsImports(f.GoType)
 	case codegen.ColumnScalar, codegen.ColumnScalarNull, codegen.ColumnAny:
 		return false, false
 	case codegen.ColumnList:
@@ -121,7 +121,7 @@ func listElemNeedsImports(e *codegen.ListElem) (needDbtype, needTime bool) {
 	case codegen.ColumnNode, codegen.ColumnEdge, codegen.ColumnEdgeUnion:
 		return true, false
 	case codegen.ColumnProperty, codegen.ColumnTemporal:
-		return goTypeNeedsImports(e.GoType)
+		return decodeNeedsImports(e.GoType)
 	case codegen.ColumnList:
 		return listElemNeedsImports(e.Nested)
 	case codegen.ColumnScalar, codegen.ColumnScalarNull, codegen.ColumnAny:
@@ -141,6 +141,21 @@ func goTypeNeedsImports(ty string) (bool, bool) {
 	needDbtype := strings.HasPrefix(ty, "dbtype.")
 	needTime := ty == "time.Time"
 	return needDbtype, needTime
+}
+
+// decodeNeedsImports is goTypeNeedsImports for a decode position, where
+// the imports follow the carrier the driver hands over rather than the
+// type text the column is emitted as. A neutral temporal carrier (ADR
+// 0033) names no package, and yet the site asserts or requests its
+// dbtype counterpart before converting.
+//
+// A bind position takes the plain test instead: a parameter of a
+// neutral carrier reaches the driver through from<X>, whose dbtype
+// mention lives in temporal_neo4j.go. Answering true for it would put
+// an import in the file that nothing there names.
+func decodeNeedsImports(ty string) (bool, bool) {
+	needDbtype, needTime := goTypeNeedsImports(ty)
+	return needDbtype || isTemporalCarrier(leafType(ty)), needTime
 }
 
 // renderCypherFile emits one <name>.cypher.go file (spec §5.5). Per
@@ -312,8 +327,8 @@ func zeroValueText(p codegen.Query) string {
 			return "nil"
 		case "any":
 			return "nil"
-		case "time.Time", "dbtype.Date", "dbtype.Time", "dbtype.LocalTime",
-			"dbtype.LocalDateTime", "dbtype.Duration":
+		case "time.Time", "Date", "Time", "LocalTime",
+			"LocalDateTime", "Duration":
 			// The six temporal property widths carry a struct, whose zero
 			// is a composite literal and not the numeric zero the default
 			// arm spells. The ColumnTemporal arm above does not cover them:
@@ -425,15 +440,25 @@ func paramsMapText(p codegen.Query) string {
 // parameters pass through unchanged (the driver accepts a nil pointer
 // as SQL null). Non-nullable narrow-integer / float32 widen to their
 // driver carrier via a Go conversion. Every other type binds bare.
+//
+// The neutral temporal carriers (ADR 0033) are the exception on both
+// arms: they are gqlc's own structs, which the driver's reflective
+// parameter marshalling has no encoding for, so each converts to its
+// dbtype counterpart first. That includes the nullable arm, where the
+// pass-the-pointer-through shape does not survive — *Date reaches the
+// same reflective path as Date, one dereference later.
 func paramBindExpr(f codegen.Param, access string) string {
 	if f.Nullable {
+		if isTemporalCarrier(f.GoType) {
+			return fmt.Sprintf("from%sPtr(%s)", f.GoType, access)
+		}
 		// Uniform: pass the pointer through as-is. A nil pointer binds
 		// Cypher null via the driver's parameter marshalling.
 		return access
 	}
 	carrier := driverCarrier(f.GoType)
 	if carrier != f.GoType {
-		return fmt.Sprintf("%s(%s)", carrier, access)
+		return widenExpr(f.GoType, access)
 	}
 	return access
 }
@@ -559,7 +584,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	// Go conversion. Used both in the nullable and non-nullable arms.
 	valueExpr := varName
 	if carrier != f.GoType {
-		valueExpr = fmt.Sprintf("%s(%s)", f.GoType, varName)
+		valueExpr = narrowExpr(f.GoType, varName)
 	}
 	if f.Nullable {
 		// Nullable: nil pointer when null, address of a narrowed local
@@ -755,14 +780,22 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, carrier)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, carrier, f.ColumnName, iterVar, indent)
 		if carrier != e.GoType {
-			fmt.Fprintf(b, "%s%s = append(%s, %s(v))\n", indent, accVar, accVar, e.GoType)
+			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, narrowExpr(e.GoType, "v"))
 		} else {
 			fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
 		}
 	case codegen.ColumnTemporal:
-		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, e.GoType)
-		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, e.GoType, f.ColumnName, iterVar, indent)
-		fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
+		// The element arrives as the driver's carrier, which for the
+		// four neutral temporal widths is not the emitted element type
+		// (ADR 0033): assert against the carrier, then convert.
+		elemCarrier := driverCarrier(e.GoType)
+		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, elemCarrier)
+		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, elemCarrier, f.ColumnName, iterVar, indent)
+		if elemCarrier != e.GoType {
+			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, narrowExpr(e.GoType, "v"))
+		} else {
+			fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
+		}
 	case codegen.ColumnScalar:
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, e.GoType)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, e.GoType, f.ColumnName, iterVar, indent)
