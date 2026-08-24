@@ -621,6 +621,105 @@ Also-closes: #900
 
 </details>')" "some/branch"
 
+# An author who DID write the avowal, into a carrier no reader can see, was
+# told to write the line they had just written. That is the worst shape a gate
+# message can take: following the instruction reproduces the refusal, and the
+# author has no way to learn that WHERE they wrote it is the problem. Nothing
+# about the refusal distinguished them from an author who wrote no avowal at
+# all, because the only body it consulted was the one the marker had already
+# been blanked out of.
+#
+# So when a refused number has an avowal standing in the raw body, the refusal
+# says that instead. Both paths, because both refuse extras.
+#
+# These greps are single-line by construction: refuse() emits each detail
+# argument as its own line, so an expectation spanning two of them can only
+# fail, and it fails identically to the guard being absent.
+expect_red "an unseeable avowal is named as unseeable, not as missing" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900
+
+<a href="
+Also-closes: #900
+">z</a>')" "some/branch" \
+    "No reader can see the 'Also-closes:' line"
+
+expect_red "the same on the opt-out path" \
+    "$EXPORT" "$(body 'Refs: gqlc-mirrored #617
+
+Closes #900
+
+~~~
+Also-closes: #900
+~~~')" "some/branch" \
+    "No reader can see the 'Also-closes:' line"
+
+# And it must not fire for an author who wrote no avowal at all -- they need
+# the original instruction, which is the line that tells them the marker
+# exists. Asserted as an ABSENCE, which the two rows above cannot establish.
+run_check "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900')" "some/branch"
+if [ "$RC" -eq 0 ]; then
+    bad "a body with no avowal is not told to move one" "passed: $OUT"
+elif printf '%s' "$OUT" | grep -qF "No reader can see the"; then
+    bad "a body with no avowal is not told to move one" "wrong advice: $OUT"
+elif ! printf '%s' "$OUT" | grep -qF "'Also-closes: #<issue>'"; then
+    bad "a body with no avowal is not told to move one" "lost the advice: $OUT"
+else
+    ok "a body with no avowal is not told to move one"
+fi
+
+# The advice is per number, not per body. An author who avowed one extra
+# visibly and another invisibly is refused for the second and told the truth
+# about that one only. The trailing '.' is what pins that: a per-body answer
+# would render 'for #900, #901.' and miss this grep.
+expect_red "a visible avowal beside an unseeable one does not confuse the advice" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900
+Closes #901
+
+Also-closes: #900
+
+~~~
+Also-closes: #901
+~~~')" "some/branch" \
+    "No reader can see the 'Also-closes:' line for #901."
+
+# And an unseeable avowal for a number this body does not close is not what
+# the refusal is about. #901 is avowed invisibly but never closed, so nothing
+# is refused for it; #900 is refused, and the author wrote nothing for #900,
+# so they get the instruction that names the marker. Without this row the
+# search may as well run over the whole body, and the author would be told to
+# move a line that has nothing to do with the number they are being refused
+# for. Asserted both ways, because the wrong advice arriving and the right
+# advice leaving are different defects.
+run_check "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Closes #617
+Closes #900
+
+~~~
+Also-closes: #901
+~~~')" "some/branch"
+if [ "$RC" -eq 0 ]; then
+    bad "an unseeable avowal for an unclosed number is not this refusal" \
+        "passed: $OUT"
+elif printf '%s' "$OUT" | grep -qF "No reader can see the"; then
+    bad "an unseeable avowal for an unclosed number is not this refusal" \
+        "advice about #901 while refusing #900: $OUT"
+elif ! printf '%s' "$OUT" | grep -qF "'Also-closes: #<issue>'"; then
+    bad "an unseeable avowal for an unclosed number is not this refusal" \
+        "lost the advice: $OUT"
+else
+    ok "an unseeable avowal for an unclosed number is not this refusal"
+fi
+
 # The refusals point at the avowal, or nobody finds it. Both paths.
 expect_red "the demand-path refusal names the avowal" \
     "$EXPORT" "$(body 'Bead: gqlc-mirrored

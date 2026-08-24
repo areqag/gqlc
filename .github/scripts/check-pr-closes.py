@@ -816,10 +816,58 @@ def extra_closes(pr_body, expected_n):
     those two populations, and nothing in the export can.
     """
     seen = dict.fromkeys(GH_CLOSES.findall(claimable_prose(pr_body)))
-    avowed = set()
-    for line in ALSO_CLOSES.findall(visible_prose(pr_body)):
-        avowed.update(HASH_N.findall(line))
+    avowed = avowed_numbers(visible_prose(pr_body))
     return [n for n in seen if n != expected_n and n not in avowed]
+
+
+def avowed_numbers(body):
+    """The issue numbers 'Also-closes:' lines name, over whatever body is
+    passed in."""
+    avowed = set()
+    for line in ALSO_CLOSES.findall(body):
+        avowed.update(HASH_N.findall(line))
+    return avowed
+
+
+def avowal_advice(pr_body, extra):
+    """The closing lines of a refusal over `extra`, as detail arguments.
+
+    An author who wrote no avowal needs to be told the marker exists. An
+    author who wrote one into a carrier a reader cannot see needs the
+    opposite: they wrote the line, and following the first instruction
+    reproduces the refusal, because what is wrong is WHERE it is, which the
+    refusal never mentioned. Nothing distinguished the two, since the only
+    body consulted was the one the marker had already been blanked out of.
+
+    So the raw body is asked as well. Asking it is enough on its own -- no
+    second subtraction of the visible avowals is needed, because extra_closes()
+    has already made one, so a number that reaches here is a number no VISIBLE
+    avowal named. A raw-body hit on it is therefore an avowal that exists and
+    cannot be seen.
+
+    Restricted to `extra`, and per number within it: an invisible avowal for
+    some number this body does not close is not what the refusal is about, and
+    avowing one extra visibly and another invisibly must not attract advice
+    about the visible one.
+    """
+    raw = avowed_numbers(pr_body)
+    unseeable = sorted(n for n in extra if n in raw)
+    if unseeable:
+        return (
+            "No reader can see the 'Also-closes:' line for "
+            f"#{', #'.join(unseeable)}.",
+            "It is in the body, but a code block, an HTML comment, or a tag "
+            "left",
+            "open all hide it, and an avowal nobody can read is not one this "
+            "check",
+            "will honour. Move that line into the body's own prose, at the "
+            "start",
+            "of its line.",
+        )
+    return (
+        "If this PR really does resolve it, say so: a line reading",
+        "'Also-closes: #<issue>' avows the extra and this check honours it.",
+    )
 
 
 def check_opt_out(pr_body, bead, bead_id, marker_n, expected_n):
@@ -872,9 +920,7 @@ def check_opt_out(pr_body, bead, bead_id, marker_n, expected_n):
             "give it its own bead and PR. Or drop the 'Refs:' line and "
             "resolve the",
             "bead this PR is about.",
-            "If this PR really does resolve it, say so: a line reading",
-            "'Also-closes: #<issue>' avows the extra and this check honours "
-            "it.",
+            *avowal_advice(pr_body, extra),
             "Editing the body re-runs this check on its own; you do",
             "not need to push a commit or reopen the PR.",
         )
@@ -1129,9 +1175,7 @@ def main():
             "If that issue is done, close it by hand; if it is not, give it "
             "its own",
             "bead and PR.",
-            "If this PR really does resolve it, say so: a line reading",
-            "'Also-closes: #<issue>' avows the extra and this check honours "
-            "it.",
+            *avowal_advice(pr_body, extra),
             "Editing the body re-runs this check on its own; you do",
             "not need to push a commit or reopen the PR.",
         )
