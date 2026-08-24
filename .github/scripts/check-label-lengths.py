@@ -32,9 +32,24 @@ The check is over EVERY label, not just `subject:` ones: the 50-char cap is
 GitHub's, and it applies to every label the town mints.
 
 Scope note: this runs over the committed export, so it catches an unmirrorable
-label at PR time rather than at filing time. Refusing at filing time, inside
-.githooks/bd-gh-sync, is the other half and is filed separately -- this gate is
-what stops one reaching master in the meantime.
+label at PR time, which is the LAST of the three chances to catch one. The two
+earlier refusals are named below; this gate is what stops a label reaching
+master when both of them are bypassed.
+
+THIS MODULE OWNS THE CAP AND THE REMEDY for all three gates, which is why
+MAX_LABEL, PREFIX, shorter() and remedy() are module level and why loading this
+file runs nothing (the work is under `if __name__ == "__main__"`). The other two
+import it by path:
+
+  - .githooks/bd-gh-sync, at push time, refusing to offer the bead to GitHub;
+  - .githooks/claude-pre-bash, at CREATION time, refusing the `bd create` /
+    `bd update` / `bd label add` that would mint the label (bd gqlc-uy7j).
+
+The remedy sentence was written three times before that -- once here, once in
+bd-gh-sync's selection, and nearly a third time in the creation-time arm. Two
+spellings of one number disagree exactly when somebody raises one of them, and
+the whole point of refusing early is that the citizen meets the SAME words at
+the keyboard as in CI.
 """
 
 import json
@@ -45,6 +60,43 @@ import sys
 MAX_LABEL = 50
 
 PREFIX = "subject:"
+
+
+def shorter(label, cap=MAX_LABEL, prefix=PREFIX):
+    """The deepest ancestor DIRECTORY of a `subject:` label that fits, or None.
+
+    None covers three different situations on purpose, all of which mean "this
+    function has no suggestion to offer": the label does not carry the prefix,
+    no ancestor is short enough, and the label already fits (`s != tail` is
+    false, so a label needing no shortening is not handed back as advice).
+    """
+    if not label.startswith(prefix):
+        return None
+    budget = cap - len(prefix)
+    tail = label[len(prefix):]
+    s = tail
+    while len(s) > budget and "/" in s:
+        s = s.rsplit("/", 1)[0]
+    return prefix + s if len(s) <= budget and s != tail else None
+
+
+def remedy(label, cap=MAX_LABEL, prefix=PREFIX):
+    """One sentence telling the author what to type instead, or "" when there
+    is nothing useful to say (a label that is not a `subject:` path)."""
+    fits = shorter(label, cap, prefix)
+    if fits:
+        return "Use the deepest ancestor directory that fits: %s (%d characters)." % (
+            fits,
+            len(fits),
+        )
+    # `prefix and` is load-bearing: str.startswith("") is True for everything,
+    # so an empty prefix would otherwise promise a path budget to every label.
+    if prefix and label.startswith(prefix):
+        return (
+            "The budget after '%s' is %d characters, and no ancestor directory "
+            "of this path fits." % (prefix, cap - len(prefix))
+        )
+    return ""
 
 
 def main(argv):
@@ -96,27 +148,19 @@ def main(argv):
         )
         for bead_id, label in offenders:
             print(f"  {bead_id}: {label!r} ({len(label)} chars)", file=sys.stderr)
-            if label.startswith(PREFIX):
-                budget = MAX_LABEL - len(PREFIX)
-                path_part = label[len(PREFIX) :]
-                suggestion = path_part
-                while len(suggestion) > budget and "/" in suggestion:
-                    suggestion = suggestion.rsplit("/", 1)[0]
-                if len(suggestion) <= budget and suggestion != path_part:
-                    print(
-                        f"      use the deepest ancestor directory that fits: "
-                        f"{PREFIX}{suggestion} ({len(PREFIX) + len(suggestion)} chars)",
-                        file=sys.stderr,
-                    )
-                else:
-                    print(
-                        f"      the path budget after '{PREFIX}' is {budget} characters; "
-                        "no ancestor directory of this path fits",
-                        file=sys.stderr,
-                    )
+            advice = remedy(label)
+            if advice:
+                print(f"      {advice}", file=sys.stderr)
+        # What the other two gates do about this, stated so a reader of a red CI
+        # job knows where else it will bite. bd-gh-sync REFUSES the push (it
+        # stopped merely warning in #1330); claude-pre-bash refuses the command
+        # that mints the label. So a label reaching this gate means both earlier
+        # refusals were bypassed -- most often because the label was written
+        # somewhere neither of them can read, such as `bd create --file`.
         print(
-            "      bd-gh-sync only WARNS on this, so an unmirrored bead looks healthy "
-            "on every board (bd gqlc-89vw).",
+            "      .githooks/claude-pre-bash refuses this at creation time and "
+            "bd-gh-sync refuses the push, so reaching CI means it was minted "
+            "somewhere neither reads (bd gqlc-89vw, gqlc-uy7j).",
             file=sys.stderr,
         )
         return 1

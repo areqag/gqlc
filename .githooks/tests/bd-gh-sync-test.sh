@@ -2680,11 +2680,17 @@ fi
 # beside a gate that says 10 must refuse an 11-character label that the real
 # gate — and every row above — accepts. A hard-coded 50 passes every other row
 # in this file and fails only this one.
+#
+# The planted gate also defines remedy(), because since bd gqlc-uy7j the module
+# owns the REMEDY SENTENCE as well as the number — bd-gh-sync used to carry its
+# own copy of the rule. The stub returns a marker no copy of the real rule could
+# produce, so the row below distinguishes "printed the gate's remedy" from
+# "printed a remedy that happens to agree with it".
 GATEREPO="$TMP/gaterepo"
 mkdir -p "$GATEREPO/.githooks" "$GATEREPO/.github/scripts"
 cp "$SYNC" "$GATEREPO/.githooks/bd-gh-sync"
 chmod +x "$GATEREPO/.githooks/bd-gh-sync"
-printf 'MAX_LABEL = 10\nPREFIX = "subject:"\n' \
+printf 'MAX_LABEL = 10\nPREFIX = "subject:"\ndef remedy(label, cap=MAX_LABEL, prefix=PREFIX):\n    return "PLANTED-REMEDY for %%s" %% label\n' \
     >"$GATEREPO/.github/scripts/check-label-lengths.py"
 SYNC_BIN="$GATEREPO/.githooks/bd-gh-sync"
 run_sync push '[{"id":"b-cap","status":"open","external_ref":"","labels":["aaaaaaaaaaa"]}]' \
@@ -2698,6 +2704,15 @@ elif ! grep -q 'is 11 characters and the cap is 10' "$TMP/err"; then
         "the bead was refused but not by the gate's number: $(grep 'b-cap' "$TMP/err" | tr '\n' '|')"
 else
     ok "GitHub's label cap is read from the CI gate, not spelled in bd-gh-sync"
+fi
+
+# The remedy sentence travels with the cap. Reinstate a local copy of the rule
+# in bd-gh-sync and this row goes red while the one above stays green.
+if grep -q 'PLANTED-REMEDY for aaaaaaaaaaa' "$TMP/err"; then
+    ok "the remedy sentence is read from the CI gate too"
+else
+    bad "the remedy sentence is read from the CI gate too" \
+        "the planted gate's remedy never reached the refusal: $(grep 'b-cap' "$TMP/err" | tr '\n' '|')"
 fi
 
 # Importing that gate compiles it, and python's default is to cache the
@@ -3883,6 +3898,7 @@ a bead whose label is exactly at GitHub's cap is mirrored
 the refusal names the deepest ancestor directory that fits
 an unmirrorable bead does not stop the beads beside it being mirrored
 GitHub's label cap is read from the CI gate, not spelled in bd-gh-sync
+the remedy sentence is read from the CI gate too
 reading the label cap leaves no __pycache__ beside the gate
 a label cap that cannot be read screens nothing and says so
 an unhandled write failure aborts the pull with a verdict, exit 0

@@ -218,8 +218,13 @@ run_labels_case "the label GitHub actually refused is refused here" reject \
 run_labels_case "the offending bead and label are named" reject \
     "$(bead_json gqlc-xiri "$overlong")" "gqlc-xiri"
 
+# The substring must reach PAST the offending label. `subject:kingdom/brain/
+# playbooks` alone is a prefix of the label this fixture plants, so the offender
+# line satisfies it and the row passes with no remedy printed at all -- measured,
+# by two mutations that deleted the ancestor walk and both survived.
 run_labels_case "the remedy names the deepest ancestor that fits" reject \
-    "$(bead_json gqlc-xiri "$overlong")" "subject:kingdom/brain/playbooks"
+    "$(bead_json gqlc-xiri "$overlong")" \
+    "fits: subject:kingdom/brain/playbooks (31 characters)"
 
 # Boundary. 50 passes, 51 fails; an off-by-one here is the whole defect.
 fifty="$(printf 'subject:%s' "$(head -c 42 /dev/zero | tr '\0' 'a')")"
@@ -246,6 +251,62 @@ elif [[ "$out" != *"cannot read"* ]]; then
 else
     ok "missing export refused"
 fi
+
+# remedy() directly. Two of its three arms are unreachable from a JSONL fixture
+# -- main() always calls it with the module's own prefix, and only on a label
+# that is already over the cap -- so without these rows they are inert.
+#
+# The probe lives in a file rather than a heredoc: a heredoc inside the `$(...)`
+# that captures its output is a bash warning ("unterminated here-document") on
+# every row.
+cat >"$TMP/remedy.py" <<'PY'
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("labels", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+sys.stdout.write(mod.remedy(sys.argv[2], int(sys.argv[3]), sys.argv[4]))
+PY
+
+# run_remedy_case <name> <label> <cap> <prefix> <expected-substring, or the
+# empty string to demand no advice at all>
+run_remedy_case() {
+    local name="$1" label="$2" cap="$3" prefix="$4" want="$5"
+    local got
+    if ! got="$(python3 "$TMP/remedy.py" "$LABELS" "$label" "$cap" "$prefix" 2>&1)"; then
+        no "$name" "probe failed: $got"
+        return
+    fi
+    if [ -z "$want" ]; then
+        if [ -z "$got" ]; then ok "$name"; else no "$name" "expected no advice, got: $got"; fi
+        return
+    fi
+    if [[ "$got" == *"$want"* ]]; then
+        ok "$name"
+    else
+        no "$name" "expected '$want', got: $got"
+    fi
+}
+
+# An empty prefix must not promise a path budget to every label. str.startswith("")
+# is True for everything, so without the `prefix and` guard this row reports a
+# 50-character budget for a label that has no path in it at all.
+run_remedy_case "an empty prefix offers no advice" "anything" 50 "" ""
+
+# No ancestor fits: a subject label whose FIRST path segment already blows the
+# budget. The advice must still name the budget rather than fall through silent.
+run_remedy_case "a path with no fitting ancestor names the budget" \
+    "subject:$(head -c 60 /dev/zero | tr '\0' 'a')/b" 50 "subject:" \
+    "budget after 'subject:' is 42 characters"
+
+run_remedy_case "a label outside the prefix offers no advice" "class:warrior" 50 "subject:" ""
+
+# A label that already fits must not be handed back to itself as advice. main()
+# never asks about one -- it calls remedy() only on labels already over the cap
+# -- so this is the only row holding shorter()'s `s != tail` clause, without
+# which the answer is "use subject:short", naming the string the caller passed.
+run_remedy_case "a label that already fits is not suggested to itself" \
+    "subject:short" 50 "subject:" "budget after 'subject:' is 42 characters"
 
 # The real board. This is the row that makes the gate's verdict on master a
 # measured fact rather than an expectation: if any bead on the board already

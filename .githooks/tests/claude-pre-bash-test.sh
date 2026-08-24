@@ -1543,6 +1543,154 @@ PY
 )"
 record "an exception in the close arm denies" deny-uncheckable-close "$EXC_PROBE"
 
+# --- the label-cap arm (bd gqlc-uy7j) ---------------------------------------
+# GitHub caps a label name at 50 characters and refuses the WHOLE issue over
+# one bad label, so a bead carrying one is left with no mirror. bd accepts it
+# silently at creation and the complaint surfaces later, from .githooks/bd-gh-sync,
+# in whatever session happens to push next — which is usually not the author's.
+# This arm moves the refusal to the one moment the author is standing there.
+#
+# The cap and the remedy are NOT spelled here: both are read from
+# .github/scripts/check-label-lengths.py, which owns them. That is the point of
+# the arm, so a row hard-coding 50 would stop testing it.
+LABEL_CAP="$(python3 -c 'import importlib.util,sys
+sys.dont_write_bytecode = True
+s = importlib.util.spec_from_file_location("g", sys.argv[1]); m = importlib.util.module_from_spec(s)
+s.loader.exec_module(m); print(m.MAX_LABEL)' "$(dirname "$HOOK")/../.github/scripts/check-label-lengths.py")"
+# The real 51-character instance from the gate's own docstring — the first
+# subject: label the town ever filed, and the one GitHub rejected.
+LABEL_OVER='subject:kingdom/brain/playbooks/citizen-protocol.md'
+# Exactly at the cap and exactly one over it, built FROM the cap just read, so
+# the boundary rows move with it instead of pinning today's number twice.
+LABEL_AT="subject:$(python3 -c 'import sys; print("a" * (int(sys.argv[1]) - len("subject:")))' "$LABEL_CAP")"
+LABEL_ONE_OVER="${LABEL_AT}a"
+
+# Verdict names, not allow/deny: THREE outcomes here are allows, and pinned by
+# allow/deny alone `no-label-write` would be indistinguishable from the arm
+# having silently stopped finding labels at all.
+run_label_verdict() { # $1=name $2=expected-verdict $3=cwd $4=command
+  local got
+  got="$(
+    cd "$3" || exit 1
+    python3 - "$HOOK" "$4" <<'PY'
+import importlib.machinery, importlib.util, os, sys
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+writes = []
+mod.git_targets(sys.argv[2], os.getcwd(), mod.HOOK_GATED, labels=writes)
+print(",".join(mod.label_verdict(w)[0] for w in writes) or "no-label-write")
+PY
+  )"
+  note_row "$1"
+  if [ "$got" = "$2" ]; then
+    pass=$((pass + 1)); printf 'ok   - %s\n' "$1"
+  else
+    fail=$((fail + 1)); printf 'FAIL - %s (expected verdict %s, got %s)\n' "$1" "$2" "$got"
+  fi
+}
+
+# End to end through the shipped hook first. These are the behavioural claim —
+# each one reads `allow` from the hook as it stands, and `deny` is the fix.
+run_case "bd create with an over-cap label is refused" deny "$BD_REPO" \
+  "bd create 'a bead' -l $LABEL_OVER"
+run_case "bd label add with an over-cap label is refused" deny "$BD_REPO" \
+  "bd label add gqlc-x $LABEL_OVER"
+run_case "bd create with a label that fits still runs" allow "$BD_REPO" \
+  "bd create 'a bead' -l subject:kingdom/brain/playbooks"
+
+# The whole value of moving the refusal earlier is that the author is told what
+# to type, so the MESSAGE is asserted, not merely the exit decision. Both the
+# offending label and the remedy the gate ratified must appear.
+LABEL_DENY_OUT="$(run_hook "$BD_REPO" "bd create 'a bead' -l $LABEL_OVER")"
+label_says() { # $1=needle
+  case "$LABEL_DENY_OUT" in (*"$1"*) printf 'present';; (*) printf 'ABSENT';; esac
+}
+fixture_check "the refusal quotes the offending label" present "$(label_says "$LABEL_OVER")"
+fixture_check "the refusal names the remedy label"     present "$(label_says 'subject:kingdom/brain/playbooks (31')"
+fixture_check "the refusal names the cap"              present "$(label_says "the cap is $LABEL_CAP")"
+
+# Boundary, both directions: a `>` written as `>=` must turn exactly one of
+# these red and leave the other green.
+run_label_verdict "a label exactly at the cap is allowed" allow-label-fits "$BD_REPO" \
+  "bd create 'a bead' -l $LABEL_AT"
+run_label_verdict "a label one over the cap is refused" deny-label-over-cap "$BD_REPO" \
+  "bd create 'a bead' -l $LABEL_ONE_OVER"
+
+# pflag spellings, each measured against bd v1.0.4 in the hook's header. A
+# shorthand carrying its value attached or after `=` reaches --labels too, and
+# each of these read no label at all before this arm existed.
+run_label_verdict "--labels long form"        deny-label-over-cap "$BD_REPO" "bd create x --labels $LABEL_OVER"
+run_label_verdict "--labels=value inline"     deny-label-over-cap "$BD_REPO" "bd create x --labels=$LABEL_OVER"
+run_label_verdict "-l with an attached value" deny-label-over-cap "$BD_REPO" "bd create x -l$LABEL_OVER"
+run_label_verdict "-l=value"                  deny-label-over-cap "$BD_REPO" "bd create x -l=$LABEL_OVER"
+run_label_verdict "the new alias of create"   deny-label-over-cap "$BD_REPO" "bd new x -l $LABEL_OVER"
+# cobra splits a `strings` flag on commas, so the offender is not always the
+# whole value. Screening the value whole would read 64 characters here and
+# refuse a legal pair; screening only the first element would miss this one.
+# Both of these expect TWO verdicts, in order: the runner joins every label the
+# invocation writes. That is the stronger assertion — it shows the legal label
+# was seen and passed rather than the pair being screened as one blob.
+run_label_verdict "the second label of a comma list" allow-label-fits,deny-label-over-cap "$BD_REPO" \
+  "bd create x -l class:warrior,$LABEL_OVER"
+run_label_verdict "a repeated -l flag"        allow-label-fits,deny-label-over-cap "$BD_REPO" \
+  "bd create x -l class:warrior -l $LABEL_OVER"
+
+# bd update's three label flags are not one flag. --remove-label cannot mint a
+# label, so it is deliberately NOT screened; if it ever starts denying, that is
+# this row going red rather than a citizen finding out.
+run_label_verdict "update --add-label"    deny-label-over-cap "$BD_REPO" "bd update gqlc-x --add-label $LABEL_OVER"
+run_label_verdict "update --set-labels"   deny-label-over-cap "$BD_REPO" "bd update gqlc-x --set-labels $LABEL_OVER"
+run_label_verdict "update --remove-label is not a write" no-label-write "$BD_REPO" \
+  "bd update gqlc-x --remove-label $LABEL_OVER"
+
+# `bd label add [issue-id...] [label]` takes the label POSITIONALLY — there is
+# no flag to key on, and it was the path that stayed open when this arm keyed
+# on flags alone. The label is the last positional; `bd label remove` is the
+# inverse and is not screened.
+run_label_verdict "label add, id then label" deny-label-over-cap "$BD_REPO" "bd label add gqlc-x $LABEL_OVER"
+run_label_verdict "label add, several ids"   deny-label-over-cap "$BD_REPO" "bd label add gqlc-x gqlc-y $LABEL_OVER"
+run_label_verdict "label remove is not a write" no-label-write "$BD_REPO" "bd label remove gqlc-x $LABEL_OVER"
+
+# THE SCOPING ROW. `-l` is `--labels` on create and `--label` — a FILTER — on
+# list and ready. Same letter, opposite meaning, and a guard that keyed on the
+# flag alone would refuse a read. Nothing is written here, so nothing is
+# screened.
+run_label_verdict "list -l is a filter, not a write"  no-label-write "$BD_REPO" "bd list -l $LABEL_OVER"
+run_label_verdict "ready -l is a filter, not a write" no-label-write "$BD_REPO" "bd ready -l $LABEL_OVER"
+run_label_verdict "an unrelated bd subcommand"        no-label-write "$BD_REPO" "bd show gqlc-x"
+
+# A value the shell has not expanded yet has no length this hook can measure,
+# so it is allowed and named as such. This is a real gap, not a pass: the
+# label lands unscreened and the push-time refusal is what catches it.
+# shellcheck disable=SC2016 # the substitution is the hook's input, not this file's code
+run_label_verdict "an unexpanded label cannot be measured" allow-unexpanded-label "$BD_REPO" \
+  'bd create x -l "subject:$(git rev-parse --show-prefix)"'
+
+# When the cap cannot be read, the arm WARNS and allows. Deliberate, and it
+# mirrors bd-gh-sync's own answer to the same condition (it announces that no
+# bead was screened and carries on): this hook runs ahead of every Bash call in
+# every concurrent session, so an arm that denied on a missing CI script would
+# wedge the session that has to restore it. Two gates still stand behind it.
+CAP_PROBE="$(
+  cd "$BD_REPO" && python3 - "$HOOK" <<'PY'
+import importlib.machinery, importlib.util, os, sys
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+mod.label_rule.cache_clear()
+mod.LABEL_GATE_PATHS = ("/nonexistent/check-label-lengths.py",)
+writes = []
+mod.git_targets("bd create x -l subject:" + "a" * 60, os.getcwd(), mod.HOOK_GATED, labels=writes)
+print(",".join(mod.label_verdict(w)[0] for w in writes) or "no-label-write")
+PY
+)"
+record "an unreadable cap warns rather than denying" warn-cap-unreadable "$CAP_PROBE"
+
 # This test writes nothing into the tree it tests. Asserted rather than
 # assumed: the leak it guards against is silent here and fatal in lint-hooks,
 # which is a different recipe on a different run.
@@ -1559,7 +1707,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=234
+EXPECTED_ROWS=260
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
@@ -1571,7 +1719,7 @@ fi
 # strings — no path, sha or temp dir reaches one — so the digest is the same on
 # every machine. Update it deliberately when a row is added, renamed or
 # reordered; a drift you did not intend is the finding.
-EXPECTED_ROW_DIGEST=2a288aca10b76105
+EXPECTED_ROW_DIGEST=907ee4a829fa1002
 ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
   'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
 if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then
