@@ -188,5 +188,61 @@ if [ "$rc" = 0 ]; then quiet_got=0; else quiet_got="rc=$rc: $(cat "$T/out")"; fi
 check "writes confined to a fixture path: guard does not fail on its own account" \
     0 "$quiet_got"
 
+# --- a force-moved branch this worktree does NOT have checked out ------------
+# The third damage of 2026-08-22, and the one a citizen actually noticed by
+# hand: the km suite force-moved a SEAT'S branch onto a fixture commit. Refs are
+# shared across every worktree of a repo, so the damage lands on a citizen who
+# is not running anything. Nothing else the guard snapshots can see it — no
+# config line changes, this worktree's HEAD does not move, and its symbolic-ref
+# does not change. Before the refs snapshot the guard exited 0 here, so the
+# header cited three damages and detected two (bd gqlc-lekg).
+
+T="$TMP/otherbranch"; mkdir -p "$T"; make_town "$T"
+git -C "$T/shared" branch -q otherseat master
+victim_before="$(git -C "$T/shared" rev-parse otherseat)"
+rc="$(run_guard "$T" sh -c '
+    git commit -q --allow-empty -m fixture
+    git branch -qf otherseat HEAD
+    git reset -q --hard HEAD~1
+')"
+victim_after="$(git -C "$T/shared" rev-parse otherseat)"
+# Without this the whole section could pass on a guard that fired for the two
+# damages already covered — the inner command moves HEAD too, and puts it back.
+check "vector fires: the other seat's branch moved" moved \
+    "$([ "$victim_before" != "$victim_after" ] && echo moved || echo same)"
+check "vector fires: this worktree's HEAD came back unchanged" same \
+    "$([ "$(git -C "$T/seat" rev-parse HEAD)" = "$victim_before" ] && echo same || echo moved)"
+check "force-moved branch: guard FAILS the run" nonzero \
+    "$([ "$rc" != 0 ] && echo nonzero || echo zero)"
+check "force-moved branch: guard names the branch" yes \
+    "$(grep -q 'otherseat' "$T/out" && echo yes || echo no)"
+
+# --- a branch CREATED in the shared repo is caught, not just a moved one ------
+# Same enumeration habit as the unknown-key row: the guard must notice a ref it
+# was never taught the name of.
+
+T="$TMP/newbranch"; mkdir -p "$T"; make_town "$T"
+rc="$(run_guard "$T" git branch -q inventedbranch)"
+check "branch created: guard FAILS the run" nonzero \
+    "$([ "$rc" != 0 ] && echo nonzero || echo zero)"
+check "branch created: guard names it" yes \
+    "$(grep -q 'inventedbranch' "$T/out" && echo yes || echo no)"
+
+# --- and the refs snapshot is DELIBERATELY confined to refs/heads ------------
+# The negative control that pins the scope. A remote-tracking ref is written by
+# any `git fetch`, and a suite is allowed to fetch; refs/dolt/* is bd's sync
+# namespace and moves on its own. Snapshotting every ref would fail pushes for
+# those, and a gate that cries wolf gets switched off. So the guard watches
+# local branches — the namespace where the observed damage landed and where a
+# test run has no business writing — and this row fails if that is widened
+# without the header being widened with it.
+
+T="$TMP/remoteref"; mkdir -p "$T"; make_town "$T"
+sha="$(git -C "$T/shared" rev-parse master)"
+rc="$(run_guard "$T" git update-ref refs/remotes/origin/master "$sha")"
+if [ "$rc" = 0 ]; then remote_got=0; else remote_got="rc=$rc: $(cat "$T/out")"; fi
+check "remote-tracking ref written: guard does not fail on its own account" \
+    0 "$remote_got"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
