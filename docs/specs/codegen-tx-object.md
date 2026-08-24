@@ -398,6 +398,46 @@ New live scenarios (each runs on v5, v6 and — nightly — AGE):
 | `test/data/codegen/live_test.go` (+ arm files if adapters need a Begin hook) | scenarios §8 |
 | `test/data/codegen/valid/*/golden/*/db.go` | regenerate — every fixture's db.go grows the block; large but mechanical churn, `just test` regolds |
 | `CONTEXT.md` | done in the design PR itself (Transaction handle entry) |
+| `internal/codegen/prepare.go` | reserve the five new exported names — §9.1 |
+| `internal/codegen/prepare_test.go` | the reserved rows, and the scope gate's biconditional — §9.1 |
+| `docs/specs/codegen-sentinel-taxonomy.md` | §6's table and the counts it states in prose; that section is gate-held cell-by-cell, so it cannot be skipped — §9.1 |
+| `internal/codegen/conformance/conformance_test.go`, `internal/codegen/age/age_test.go`, `internal/codegen/neo4j/testdata/driverstub_neo4j.go.txt` | existing assertions over the emitted surface, widened for the block |
+| `.golangci.yml` | the live battery's new interfaces join the per-type `ireturn` allow-list |
+
+### 9.1 Reserved identifiers
+
+This subsection was absent from the design and is written from the
+execution (`gqlc-3d0l`, PR #1489), ruled in by Արթուր rather than
+improvised: the omission was the design's.
+
+The block adds five exported names to `db.go` on all three targets, so
+they must be reserved. They are reserved **at their true scope, with no
+new scope value**: `Tx` and `ErrTxDone` at `scopePackage`; `Begin`,
+`Commit` and `Rollback` at `scopeMethod`. The scope column means
+"occupies the package block or not" and is receiver-agnostic by charter,
+so a `*Tx` method answers it exactly as a `*Queries` method does and a
+third value would encode nothing.
+
+The five do not all stand on the same ground, and §6 must say which is
+which:
+
+- **`Begin` stands on a real collision.** It is declared on `*Queries`,
+  so a query of that name would redeclare it.
+- **`Commit` and `Rollback` stand on call-site ambiguity, not
+  redeclaration.** They are declared on `*Tx`, so `func (q *Queries)
+  Commit` would compile. They are reserved anyway, package-wide and
+  receiver-blind, because `tx.Commit()` and `tx.Queries().Commit(ctx,
+  ...)` sit one selector apart — one ends the transaction, the other
+  runs a user query — and that is the misreading that loses data. The
+  remedy costs the author one rename under a clear diagnostic; the
+  ambiguity costs every later reader.
+
+`Queries` is consequently declared at **both** scopes (the handle type,
+and the accessor on `*Tx`). The scope gate therefore became a
+biconditional — `scopePackage` iff some golden declares the name
+package-level. Only the permissive direction was relaxed; the strict
+direction is preserved whole, and it is the load-bearing one, because it
+is what stops sources 1–6 taking a name the package block already holds.
 
 The Tx block is emitted unconditionally (not gated on the batch having
 queries): it is repository surface, all of it exported, so the emitted-

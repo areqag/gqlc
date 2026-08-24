@@ -54,9 +54,12 @@ const (
 // one. Commit and Rollback are declared on *Tx, so a query named Commit
 // would emit `func (q *Queries) Commit` and redeclare nothing; Phase A
 // refuses it anyway, because it reads membership and not the receiver.
-// The refusal is kept rather than narrowed: two Commits one selector
-// apart in one package is a surface this generator should not emit even
-// where the compiler would take it. Begin is not in that category — it is
+// Those two are reserved for call-site ambiguity with *Tx, NOT for
+// redeclaration: tx.Commit() and tx.Queries().Commit(ctx, ...) sit one
+// selector apart, one ending the transaction and the other running a user
+// query. The ground is written here because a reader who checks will find
+// that they compile; ruled by Արթուր on gqlc-3d0l, recorded in
+// docs/specs/codegen-tx-object.md §9.1. Begin is not of this kind — it is
 // declared on *Queries, so its reservation stands on a real collision.
 //
 // Queries occupies both scopes: the handle type at package level, and the

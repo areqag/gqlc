@@ -497,10 +497,21 @@ declares, and the package does not compile. `Begin`, `EnsureGraph` and
 `Commit` and `Rollback` do not, and they are the one place the set
 over-reaches on a receiver rather than on a target. Both are declared on
 `*Tx`, so a query named `Commit` emits `func (q *Queries) Commit`, which
-redeclares nothing and compiles — on every target. The reservation is
-kept anyway: two `Commit`s one selector apart in a single package is a
-surface this generator should not emit even where the compiler accepts
-it. `reservedIdentifiers` records that choice at its declaration.
+redeclares nothing and compiles — on every target.
+
+**Those two rows are reserved for call-site ambiguity with `*Tx`, not for
+redeclaration**, and the distinction is recorded here so that the first
+auditor who notices they compile does not read the gate as violating its
+own charter. `tx.Commit()` and `tx.Queries().Commit(ctx, ...)` sit one
+selector apart; one ends the transaction and the other runs a user query.
+That is the misreading that loses data, and it costs every later reader,
+whereas the remedy costs the author one rename under a clear diagnostic.
+So the reservation is package-wide and receiver-blind by decision, not by
+oversight — ruled by Արթուր on `gqlc-3d0l` after the executing Ռազմիկ
+declined to settle it alone (design `docs/specs/codegen-tx-object.md`
+§9.1). `Begin` is not of this kind: it is on `*Queries`, so its
+reservation stands on a real collision. `reservedIdentifiers` records
+both grounds at its declaration.
 
 The §2 sweep seeds source 0 with the `scopePackage` subset alone, so a
 method-scope name is not among the identifiers it compares; Phase A's
