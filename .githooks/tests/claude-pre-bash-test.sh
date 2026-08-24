@@ -742,6 +742,15 @@ DECIMAL_PROSE=1048576
 ORPHAN_SHORT6="${ORPHAN_SHA_FULL:0:6}"
 printf 'Closed by branch doomed at %s (not yet pushed).\n' "$ORPHAN_SHA" > "$TMP/reason.txt"
 printf 'Closed by branch master at %s.\n' "$PUSHED_SHA" > "$TMP/reason-ok.txt"
+# Two files with the SAME NAME and opposite verdicts, for the relative-path rows
+# (bd gqlc-d26r). The one inside the repo cites the orphan and denies; the decoy
+# outside it cites nothing and allows. A hook that opens the wrong one therefore
+# returns a VERDICT rather than an error, which is what makes the confusion
+# silent — and what makes these rows discriminating.
+DECOY="$TMP/decoy"
+mkdir -p "$DECOY"
+printf 'Closed after review. Nothing to cite.\n' > "$DECOY/reason.txt"
+printf 'Closed by branch doomed at %s (not yet pushed).\n' "$ORPHAN_SHA" > "$BD_REPO/reason.txt"
 
 # The fixture only means something if the three shas really are distinguishable
 # only by the ref set. Asserted, not assumed: without this, a fixture that
@@ -844,6 +853,8 @@ close_refusal() { # $1=hook stdout -> the site's name, else classify()'s verdict
     printf 'deny-unanswerable-objects'
   elif printf '%s' "$1" | grep -q 'gave no answer, so reachability could not be checked'; then
     printf 'deny-unanswerable-reachability'
+  elif printf '%s' "$1" | grep -q 'is not a path this hook can resolve from the directory'; then
+    printf 'deny-unresolvable-reason-path'
   else
     classify "$1"
   fi
@@ -1175,6 +1186,61 @@ run_verdict "--reason-file citing a pushed sha"    allow-reachable "$BD_REPO" \
 run_case    "--reason-file with a literal path"    deny "$BD_REPO" \
   "bd close gqlc-x --reason-file $TMP/reason.txt"
 
+# --- a RELATIVE --reason-file belongs to bd's directory, not this hook's ------
+# bd gqlc-d26r. reason_text() read the tuple as `_, _, reason, reason_file`,
+# discarding element 0 — the effective directory the tuple already carried — so
+# `open(reason_file)` resolved against wherever this hook happened to be
+# invoked. Every row below runs with the hook's cwd at $DECOY and the close
+# aimed at $BD_REPO, so the two disagree and the file the hook opens decides the
+# verdict: the decoy cites nothing (allow-no-sha) while the file bd will read
+# cites an orphan (deny-unpushed-sha). Exploiting it needs a name collision, so
+# the hole is real but not trivially reachable — and without the collision the
+# open simply fails and the hook already fails CLOSED.
+run_verdict "a relative --reason-file follows bd -C, not the hook's cwd" \
+  deny-unpushed-sha "$DECOY" \
+  "bd -C $BD_REPO close gqlc-x --reason-file reason.txt"
+run_verdict "a relative --reason-file follows a preceding cd" \
+  deny-unpushed-sha "$DECOY" \
+  "cd $BD_REPO && bd close gqlc-x --reason-file reason.txt"
+# The other direction, which a fix that joined unconditionally would break: an
+# absolute path names its own file and the effective directory is not a base.
+run_verdict "an absolute --reason-file is not joined onto the effective dir" \
+  allow-reachable "$DECOY" \
+  "bd -C $BD_REPO close gqlc-x --reason-file $TMP/reason-ok.txt"
+# The control the two rows above are read against: same relative spelling, same
+# repo, with the hook standing where bd will run. It verdicted correctly before
+# this fix and must go on doing so.
+run_verdict "a relative --reason-file with the two directories agreeing" \
+  deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x --reason-file reason.txt"
+# And with no effective directory at all there is no base to join onto, so the
+# only answers are refuse or fall back to the hook's cwd. Falling back IS the
+# defect above: here it would read the decoy and report allow-no-sha about a
+# close whose reason this hook never saw.
+run_verdict "a relative --reason-file from an unresolvable cwd is refused" \
+  deny-unreadable-reason "$DECOY" \
+  "cd \"\$WT\" && bd close gqlc-x --reason-file reason.txt"
+# run_verdict above reads the verdict NAME, which survives the explanation being
+# replaced by anything at all — the close is still refused. So the sentence the
+# citizen actually reads is pinned separately, end to end through main(), and by
+# its own words rather than by "some deny happened".
+run_close_case "an unresolvable relative reason path says so end-to-end" \
+  deny-unresolvable-reason-path "$DECOY" \
+  "cd \"\$WT\" && bd close gqlc-x --reason-file reason.txt"
+# When the file is merely absent the hook already refused; what it NAMES in that
+# refusal is what a reader has to act on. It names the resolved path, because
+# `--reason-file reason.txt could not be read` cannot tell anyone WHICH
+# reason.txt — and which one gets read is the whole subject of this arm. The
+# pattern is built from the fixture directory, so it fails if the hook falls
+# back to its own cwd as surely as if it echoes the typed spelling back.
+D26R_OUT="$(run_hook "$DECOY" "bd -C $BD_REPO close gqlc-x --reason-file absent.txt")"
+D26R_GOT=other
+if printf '%s' "$D26R_OUT" | grep -qF -- "--reason-file $BD_REPO/absent.txt could not be read"; then
+  D26R_GOT=names-the-resolved-path
+fi
+record "an unreadable reason names the path bd would have read" \
+  names-the-resolved-path "$D26R_GOT"
+
 # --- the joined spelling of a flag, `--reason=VALUE` -------------------------
 # Every row above passes the reason as two tokens. `bd close --help` (v1.0.4)
 # documents `-r, --reason string`, so the joined form is real usage, and
@@ -1493,7 +1559,7 @@ fixture_check "the suite leaves no bytecode in the hooks tree" \
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
 # Counted at the END of the file rather than after the master-guard block, so
 # the bd-close rows are inside it too.
-EXPECTED_ROWS=227
+EXPECTED_ROWS=234
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
@@ -1505,7 +1571,7 @@ fi
 # strings — no path, sha or temp dir reaches one — so the digest is the same on
 # every machine. Update it deliberately when a row is added, renamed or
 # reordered; a drift you did not intend is the finding.
-EXPECTED_ROW_DIGEST=48199579b64216a3
+EXPECTED_ROW_DIGEST=2a288aca10b76105
 ROW_DIGEST="$(printf '%s' "$ROWS" | python3 -c \
   'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')"
 if [ "$ROW_DIGEST" != "$EXPECTED_ROW_DIGEST" ]; then
