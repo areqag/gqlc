@@ -1454,25 +1454,101 @@ else
     ok "an unassigned bead with no class: label routes to a warrior seat and the run names the class as inferred, distinguishably from the labelled bead beside it"
 fi
 
-# The floor at P3, pinned against the LITERAL number rather than against
+# The floor at P2, pinned against the LITERAL number rather than against
 # whatever cfg returns. Every floor row above derives its fixture from
 # `km cfg`, which is what lets them retune instead of falsifying — and is
-# exactly why none of them can witness the value. MEASURED at the time the
-# floor moved: the board held 162 P3 and 5 P4, so a floor of 2 made 167 ready
-# beads unroutable by configuration while the fresh pass named every one of
-# them on every two-minute tick.
+# exactly why none of them can witness the value. This row is the one that
+# does, so it is rewritten whenever the number moves and that is its job.
+#
+# It takes TWO beads, not one. A single withheld P3 is satisfied by any floor
+# of 2 or lower, including a floor of 0 that routes nothing at all — so the P2
+# beside it is what pins the value from the other side, and neither half may be
+# dropped without the row becoming an inequality.
+#
+# The floor is 2 as of gqlc-s4zm (Անդրանիկ, 2026-08-23), which is Constitution
+# V.3.1: the town's work is the repository's work, and town machinery is worked
+# on the side of it. P3 is where a machinery bead is filed at intake (V.3.2) —
+# filed and searchable, routed to nobody — so what this row witnesses is that
+# decree's mechanism and not only a tuning knob. It was 3 before that, raised
+# for one morning by gqlc-38ye; the argument that raised it is recorded in
+# kingdom/kingdom.toml and is not repealed, and neither is what it got right.
 dispatch_case '[
+  {"id":"gqlc-p2","priority":2,"assignee":null,"labels":["class:warrior"]},
   {"id":"gqlc-p3","priority":3,"assignee":null,"labels":["class:warrior"]}
 ]' '[]'
 run_dispatch
 if [ "$RC" -ne 0 ]; then
-    bad "a P3 bead is routable" "rc=$RC out=$OUT"
-elif printf '%s' "$OUT" | grep -q 'gqlc-p3.*below the floor\|below the floor.*gqlc-p3'; then
-    bad "a P3 bead is routable" "it was withheld by the floor, which is still below 3: $OUT"
-elif ! grep -rq 'gqlc-p3' "$KM_STATE_DIR/seats" 2>/dev/null; then
-    bad "a P3 bead is routable" "it reached nobody (woken: $(woken_seats)) out=$OUT"
+    bad "the floor is literally 2: P3 withheld, P2 routed" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'gqlc-p3.*below the floor\|below the floor.*gqlc-p3'; then
+    bad "the floor is literally 2: P3 withheld, P2 routed" \
+        "the P3 was not reported below the floor, so the floor is above 2: $OUT"
+elif grep -rq 'gqlc-p3' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the floor is literally 2: P3 withheld, P2 routed" \
+        "the P3 reached a seat despite the floor: $(woken_seats) out=$OUT"
+elif printf '%s' "$OUT" | grep -q 'gqlc-p2.*below the floor\|below the floor.*gqlc-p2'; then
+    bad "the floor is literally 2: P3 withheld, P2 routed" \
+        "the P2 was withheld too, so the floor is below 2: $OUT"
+elif ! grep -rq 'gqlc-p2' "$KM_STATE_DIR/seats" 2>/dev/null; then
+    bad "the floor is literally 2: P3 withheld, P2 routed" \
+        "the P2 reached nobody (woken: $(woken_seats)) out=$OUT"
 else
-    ok "a ready, unassigned, class-labelled P3 bead is routed rather than reported below the floor"
+    ok "the floor is literally 2: a ready, unassigned, class-labelled P3 is withheld and named, and the P2 beside it routes"
+fi
+
+# The withheld set is named up to a cap and counted after it (gqlc-s4zm). Under
+# a floor of 2 the withheld set is permanently large — P3 is where Constitution
+# V.3.2 files machinery work, so it is a destination and not a queue anyone
+# means to drain — and naming 165 beads on a two-minute tick is the volume the
+# unroutable arm was already made proportionate to avoid.
+#
+# The negative control is the row ABOVE, which withholds one bead: it asserts
+# the bead is named, and the arm below asserts that run printed no "more" line.
+# Without that pair a cap of zero would pass this row.
+_floorq=''
+for _i in $(seq 1 12); do
+    _floorq="$_floorq{\"id\":\"gqlc-cap$_i\",\"priority\":3,\"assignee\":null,\"labels\":[\"class:warrior\"]},"
+done
+dispatch_case "[${_floorq%,}]" '[]'
+run_dispatch
+_named=$(printf '%s' "$OUT" | grep -c 'below the floor gqlc-cap' || true)
+if [ "$RC" -ne 0 ]; then
+    bad "the withheld set is named up to a cap, then counted" "rc=$RC out=$OUT"
+elif [ "$_named" -eq 12 ]; then
+    bad "the withheld set is named up to a cap, then counted" \
+        "all 12 were named individually, so there is no cap: $OUT"
+elif [ "$_named" -eq 0 ]; then
+    bad "the withheld set is named up to a cap, then counted" \
+        "none was named, which is the silence the floor report exists to prevent: $OUT"
+elif ! printf '%s' "$OUT" | grep -qF "and $((12 - _named)) more, not named here"; then
+    bad "the withheld set is named up to a cap, then counted" \
+        "$_named named and the rest vanished without a count saying so: $OUT"
+elif ! printf '%s' "$OUT" | grep -qF '12 withheld in all'; then
+    bad "the withheld set is named up to a cap, then counted" \
+        "the remainder line does not carry the TOTAL, so a reader cannot tell how big the withheld set is: $OUT"
+elif ! printf '%s' "$OUT" | grep -qF ', 12 below max_priority 2,'; then
+    bad "the withheld set is named up to a cap, then counted" \
+        "the done line's count stopped following the whole set when the naming was capped: $(printf '%s' "$OUT" | grep 'done')"
+else
+    ok "12 beads below the floor are named up to a cap and the remainder is counted, with the total on both the remainder line and the done line"
+fi
+
+# The cap's negative control: a run withholding fewer than the cap names them
+# all and adds no remainder line. A "and 0 more" printed unconditionally would
+# satisfy the row above and tell a reader nothing.
+dispatch_case '[
+  {"id":"gqlc-cap1only","priority":3,"assignee":null,"labels":["class:warrior"]}
+]' '[]'
+run_dispatch
+if [ "$RC" -ne 0 ]; then
+    bad "a small withheld set is named in full with no remainder line" "rc=$RC out=$OUT"
+elif ! printf '%s' "$OUT" | grep -q 'below the floor gqlc-cap1only'; then
+    bad "a small withheld set is named in full with no remainder line" \
+        "the single withheld bead was not named: $OUT"
+elif printf '%s' "$OUT" | grep -q 'more, not named here'; then
+    bad "a small withheld set is named in full with no remainder line" \
+        "a remainder line was printed for a set that was named in full: $OUT"
+else
+    ok "one bead below the floor is named, and no remainder line is printed for a set the run named in full"
 fi
 
 # --- epics are containers, not work (gqlc-calw) -------------------------------
@@ -1964,10 +2040,17 @@ fi
 # makes an operator stop reading — the same failure as silence, arrived at from
 # the other side. So the low-priority beads are counted, not named, and the
 # count is what makes them visible.
+# gqlc-lo3 is P2, not the P3 it was written as. Under a floor of 2 (gqlc-s4zm)
+# a P3 never reaches the arm this row tests: max_priority withholds it first and
+# names it from THAT arm instead, so the row failed on a line it was not written
+# about. Three P2s keep the fixture entirely above the floor and entirely above
+# DISPATCH_LOUD_PRIORITY, which is where the aggregation this row exists to
+# witness actually happens. Same repair the file already made to gqlc-lo and
+# gqlc-unl, and for the same reason.
 dispatch_case '[
   {"id":"gqlc-lo1","priority":2,"assignee":null,"labels":["class:architect"]},
   {"id":"gqlc-lo2","priority":2,"assignee":null,"labels":["class:architect"]},
-  {"id":"gqlc-lo3","priority":3,"assignee":null,"labels":["class:architect"]}
+  {"id":"gqlc-lo3","priority":2,"assignee":null,"labels":["class:architect"]}
 ]' '[]'
 fill_cap artur arpine aregak
 run_dispatch
