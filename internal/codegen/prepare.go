@@ -25,8 +25,11 @@ const (
 	// emission, the three Querier interfaces in querier.go, and the two
 	// :one sentinels.
 	scopePackage identifierScope = iota
-	// scopeMethod is a method on *Queries: WithTx, and the Apache AGE
-	// graph lifecycle pair.
+	// scopeMethod is a method, on whichever receiver: WithTx and Begin on
+	// *Queries, the Apache AGE graph lifecycle pair on *Queries, and
+	// Commit / Rollback / Queries on *Tx. The receiver is not part of the
+	// distinction — what this value says is that the name occupies no
+	// package block, so a package-level declaration may take it.
 	scopeMethod
 )
 
@@ -46,6 +49,20 @@ const (
 // backend with neither a connection seam nor a graph lifecycle. A rename
 // that works in one batch or against one backend but not another is
 // exactly the "renaming scheme" D2 Resolved refused.
+//
+// The Tx block adds a second false refusal, on a different axis from that
+// one. Commit and Rollback are declared on *Tx, so a query named Commit
+// would emit `func (q *Queries) Commit` and redeclare nothing; Phase A
+// refuses it anyway, because it reads membership and not the receiver.
+// The refusal is kept rather than narrowed: two Commits one selector
+// apart in one package is a surface this generator should not emit even
+// where the compiler would take it. Begin is not in that category — it is
+// declared on *Queries, so its reservation stands on a real collision.
+//
+// Queries occupies both scopes: the handle type at package level, and the
+// accessor on *Tx. The row records scopePackage, which is the true and
+// the strict answer — source 0 seeds on it, and the type really is in the
+// package block.
 var reservedIdentifiers = map[string]identifierScope{
 	"Queries":            scopePackage,
 	"New":                scopePackage,
@@ -59,6 +76,11 @@ var reservedIdentifiers = map[string]identifierScope{
 	"SessionInit":        scopePackage,
 	"EnsureGraph":        scopeMethod,
 	"DropGraph":          scopeMethod,
+	"Tx":                 scopePackage,
+	"ErrTxDone":          scopePackage,
+	"Begin":              scopeMethod,
+	"Commit":             scopeMethod,
+	"Rollback":           scopeMethod,
 }
 
 // Prepared is the batch derivation the shared phases commit: the emitted

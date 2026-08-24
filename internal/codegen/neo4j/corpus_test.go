@@ -247,15 +247,24 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 	require.NoError(t, declared.Check(report, "corpus_test.go", driver), report.Log)
 }
 
-// driverAgnostic collapses an emission's two driver-major-specific
-// texts — the module path, and the handle interface v6 renamed
-// DriverWithContext back to Driver — onto a common spelling, so that
-// comparing two emissions asks about the decode arms rather than about
-// the names driverTarget already owns.
+// driverAgnostic collapses an emission's driver-major-specific texts —
+// the module path, the handle interface v6 renamed DriverWithContext back
+// to Driver, and the session interface it renamed SessionWithContext back
+// to Session — onto a common spelling, so that comparing two emissions
+// asks about the decode arms rather than about the names driverTarget
+// already owns.
 func driverAgnostic(files map[string]string) map[string]string {
 	out := make(map[string]string, len(files))
 	for path, body := range files {
 		body = strings.ReplaceAll(body, "neo4j-go-driver/v6", "neo4j-go-driver/v5")
+		// Session before Driver. The two literals do not overlap, so the
+		// order does not in fact matter today — it is fixed here so that
+		// it cannot start mattering silently if either name grows the
+		// other as a substring. Note also that neither replacement may be
+		// written in the opposite direction: "neo4j.Session" is a prefix
+		// of "neo4j.SessionConfig", which both majors spell identically
+		// and which appears in this very emission.
+		body = strings.ReplaceAll(body, "neo4j.SessionWithContext", "neo4j.Session")
 		out[path] = strings.ReplaceAll(body, "neo4j.DriverWithContext", "neo4j.Driver")
 	}
 	return out
