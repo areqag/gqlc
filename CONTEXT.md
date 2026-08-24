@@ -17,7 +17,21 @@ That forward-reference allowance is why endpoint resolution is a post-walk pass
 body must hold at least one element type — the grammar's `elementTypeList` rejects
 an empty `AS {}`, so an empty graph type is not representable and surfaces as a
 syntax error, not a special case.
+A graph type may instead be declared as a copy of another (`CREATE GRAPH TYPE
+<name> COPY OF <reference>`); the reference is resolved against the
+**catalogue** (ADR 0034), and the result is the referenced graph type's body
+under the new declared name.
 _Avoid_: schema (overloaded — reserve for the parsed in-memory model).
+
+**Catalogue**:
+The space of files a graph type reference (`COPY OF /path/Name`) resolves
+against. gqlc's catalogue is the filesystem: a directory tree rooted at the
+directory of the configured schema file, one graph type per `.gql` file, the
+reference's trailing segment naming both the file (plus `.gql`) and the graph
+type declared inside it. The current schema of a file is that file's own
+directory; a reference climbing past the root is refused, not resolved
+elsewhere. Decided in ADR 0034.
+_Avoid_: registry, search path (there is none — one root, no fallback list).
 
 **Node type**:
 A kind of vertex in the graph type, defined by a label set and a set of
