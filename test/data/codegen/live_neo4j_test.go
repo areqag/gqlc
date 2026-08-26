@@ -29,8 +29,12 @@ import (
 	mixedv6 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v6"
 	onecolonev5 "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/neo4j-go-v5"
 	onecolonev6 "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/neo4j-go-v6"
+	temporalv5 "github.com/areqag/gqlc/test/data/codegen/valid/temporal_property_roundtrip/golden/neo4j-go-v5"
+	temporalv6 "github.com/areqag/gqlc/test/data/codegen/valid/temporal_property_roundtrip/golden/neo4j-go-v6"
 	tsv5 "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/neo4j-go-v5"
 	tsv6 "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/neo4j-go-v6"
+	zonedv5 "github.com/areqag/gqlc/test/data/codegen/valid/zoned_time_roundtrip/golden/neo4j-go-v5"
+	zonedv6 "github.com/areqag/gqlc/test/data/codegen/valid/zoned_time_roundtrip/golden/neo4j-go-v6"
 )
 
 const (
@@ -79,6 +83,8 @@ type neo4jV5 struct {
 	entityEdge entityEdgeV5
 	edgeUnion  edgeUnionV5
 	timestamps timestampRoundtripV5
+	temporals  temporalRoundtripV5
+	zonedTimes zonedTimeRoundtripV5
 }
 
 func startNeo4jV5(ctx context.Context, t *testing.T) harness {
@@ -103,6 +109,8 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 		entityEdge: entityEdgeV5{q: entityedgev5.New(driver)},
 		edgeUnion:  edgeUnionV5{q: edgeunionv5.New(driver)},
 		timestamps: timestampRoundtripV5{q: tsv5.New(driver)},
+		temporals:  temporalRoundtripV5{q: temporalv5.New(driver)},
+		zonedTimes: zonedTimeRoundtripV5{q: zonedv5.New(driver)},
 	}
 }
 
@@ -119,6 +127,16 @@ func (h *neo4jV5) writeScenario(ctx context.Context, t *testing.T) writeBackend 
 }
 
 func (h *neo4jV5) edgeUnionScenario(ctx context.Context, t *testing.T) edgeUnionBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV5) temporalScenario(ctx context.Context, t *testing.T) temporalBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV5) zonedTimeScenario(ctx context.Context, t *testing.T) zonedTimeBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
 }
@@ -183,6 +201,129 @@ func (a timestampRoundtripV5) oneEvent(ctx context.Context, id int64) (eventEnti
 		return eventEntity{}, err
 	}
 	return eventEntity{ID: e.Id, OccurredAt: e.OccurredAt, SeenAt: e.SeenAt}, nil
+}
+
+func (s neo4jV5Scenario) temporalRoundtrip() temporalRoundtripQuerier { return s.arm.temporals }
+
+func (s neo4jV5Scenario) zonedTimeRoundtrip() zonedTimeRoundtripQuerier { return s.arm.zonedTimes }
+
+// temporalRoundtripV5 binds the zoneless temporal fixture. Every
+// conversion between the battery's shape and the target's is a field
+// copy: the generated carriers hold components and so does the battery,
+// so an arm that had reached for the driver's dbtype.* on its public
+// surface would not compile here — which is the surface property ADR
+// 0033 establishes, restated where a live value passes through it.
+type temporalRoundtripV5 struct{ q *temporalv5.Queries }
+
+func (a temporalRoundtripV5) addReading(ctx context.Context, id int64, onDate dateValue, atLocal localTimeValue, elapsed durationValue) error {
+	return a.q.AddReading(ctx, temporalv5.AddReadingParams{
+		Id:      id,
+		OnDate:  temporalv5.Date{Year: onDate.Year, Month: onDate.Month, Day: onDate.Day},
+		AtLocal: temporalv5.LocalTime{Hour: atLocal.Hour, Minute: atLocal.Minute, Second: atLocal.Second, Nanosecond: atLocal.Nanosecond},
+		Elapsed: temporalv5.Duration{Months: elapsed.Months, Days: elapsed.Days, Seconds: elapsed.Seconds, Nanos: elapsed.Nanos},
+	})
+}
+
+func (a temporalRoundtripV5) readingsFrom(ctx context.Context, from dateValue) ([]int64, error) {
+	return a.q.ReadingsFrom(ctx, temporalv5.Date{Year: from.Year, Month: from.Month, Day: from.Day})
+}
+
+func (a temporalRoundtripV5) readingsSeenFrom(ctx context.Context, seenFrom *dateValue) ([]int64, error) {
+	if seenFrom == nil {
+		return a.q.ReadingsSeenFrom(ctx, nil)
+	}
+	return a.q.ReadingsSeenFrom(ctx, &temporalv5.Date{Year: seenFrom.Year, Month: seenFrom.Month, Day: seenFrom.Day})
+}
+
+func (a temporalRoundtripV5) readingDate(ctx context.Context, id int64) (dateValue, error) {
+	d, err := a.q.ReadingDate(ctx, id)
+	if err != nil {
+		return dateValue{}, err
+	}
+	return dateValue{Year: d.Year, Month: d.Month, Day: d.Day}, nil
+}
+
+func (a temporalRoundtripV5) readingLocalTime(ctx context.Context, id int64) (localTimeValue, error) {
+	v, err := a.q.ReadingLocalTime(ctx, id)
+	if err != nil {
+		return localTimeValue{}, err
+	}
+	return localTimeValue{Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond}, nil
+}
+
+func (a temporalRoundtripV5) readingElapsed(ctx context.Context, id int64) (durationValue, error) {
+	v, err := a.q.ReadingElapsed(ctx, id)
+	if err != nil {
+		return durationValue{}, err
+	}
+	return durationValue{Months: v.Months, Days: v.Days, Seconds: v.Seconds, Nanos: v.Nanos}, nil
+}
+
+func (a temporalRoundtripV5) oneReading(ctx context.Context, id int64) (readingEntity, error) {
+	r, err := a.q.OneReading(ctx, id)
+	if err != nil {
+		return readingEntity{}, err
+	}
+	out := readingEntity{
+		ID:      r.Id,
+		OnDate:  dateValue{Year: r.OnDate.Year, Month: r.OnDate.Month, Day: r.OnDate.Day},
+		AtLocal: localTimeValue{Hour: r.AtLocal.Hour, Minute: r.AtLocal.Minute, Second: r.AtLocal.Second, Nanosecond: r.AtLocal.Nanosecond},
+		Elapsed: durationValue{Months: r.Elapsed.Months, Days: r.Elapsed.Days, Seconds: r.Elapsed.Seconds, Nanos: r.Elapsed.Nanos},
+	}
+	if r.SeenOn != nil {
+		out.SeenOn = &dateValue{Year: r.SeenOn.Year, Month: r.SeenOn.Month, Day: r.SeenOn.Day}
+	}
+	return out, nil
+}
+
+func (a temporalRoundtripV5) builtLocalDateTime(ctx context.Context) (localDateTimeValue, error) {
+	v, err := a.q.BuiltLocalDateTime(ctx)
+	if err != nil {
+		return localDateTimeValue{}, err
+	}
+	return localDateTimeValue{
+		Year: v.Year, Month: v.Month, Day: v.Day,
+		Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond,
+	}, nil
+}
+
+func (a temporalRoundtripV5) errNoRows() error { return temporalv5.ErrNoRows }
+
+// zonedTimeRoundtripV5 binds the zoned temporal fixture.
+type zonedTimeRoundtripV5 struct{ q *zonedv5.Queries }
+
+func (a zonedTimeRoundtripV5) addSlot(ctx context.Context, id int64, startsAt timeValue) error {
+	return a.q.AddSlot(ctx, zonedv5.AddSlotParams{Id: id, StartsAt: zonedTimeV5(startsAt)})
+}
+
+func (a zonedTimeRoundtripV5) slotsFrom(ctx context.Context, from timeValue) ([]int64, error) {
+	return a.q.SlotsFrom(ctx, zonedTimeV5(from))
+}
+
+func (a zonedTimeRoundtripV5) slotStart(ctx context.Context, id int64) (timeValue, error) {
+	v, err := a.q.SlotStart(ctx, id)
+	if err != nil {
+		return timeValue{}, err
+	}
+	return batteryTimeV5(v), nil
+}
+
+func (a zonedTimeRoundtripV5) oneSlot(ctx context.Context, id int64) (slotEntity, error) {
+	s, err := a.q.OneSlot(ctx, id)
+	if err != nil {
+		return slotEntity{}, err
+	}
+	return slotEntity{ID: s.Id, StartsAt: batteryTimeV5(s.StartsAt)}, nil
+}
+
+func (a zonedTimeRoundtripV5) errNoRows() error { return zonedv5.ErrNoRows }
+
+func zonedTimeV5(v timeValue) zonedv5.Time {
+	return zonedv5.Time{Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond, OffsetSeconds: v.OffsetSeconds}
+}
+
+func batteryTimeV5(v zonedv5.Time) timeValue {
+	return timeValue{Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond, OffsetSeconds: v.OffsetSeconds}
 }
 
 func (s neo4jV5Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
@@ -341,6 +482,8 @@ type neo4jV6 struct {
 	entityEdge entityEdgeV6
 	edgeUnion  edgeUnionV6
 	timestamps timestampRoundtripV6
+	temporals  temporalRoundtripV6
+	zonedTimes zonedTimeRoundtripV6
 }
 
 func startNeo4jV6(ctx context.Context, t *testing.T) harness {
@@ -365,6 +508,8 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 		entityEdge: entityEdgeV6{q: entityedgev6.New(driver)},
 		edgeUnion:  edgeUnionV6{q: edgeunionv6.New(driver)},
 		timestamps: timestampRoundtripV6{q: tsv6.New(driver)},
+		temporals:  temporalRoundtripV6{q: temporalv6.New(driver)},
+		zonedTimes: zonedTimeRoundtripV6{q: zonedv6.New(driver)},
 	}
 }
 
@@ -381,6 +526,16 @@ func (h *neo4jV6) writeScenario(ctx context.Context, t *testing.T) writeBackend 
 }
 
 func (h *neo4jV6) edgeUnionScenario(ctx context.Context, t *testing.T) edgeUnionBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV6) temporalScenario(ctx context.Context, t *testing.T) temporalBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV6) zonedTimeScenario(ctx context.Context, t *testing.T) zonedTimeBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
 }
@@ -445,6 +600,125 @@ func (a timestampRoundtripV6) oneEvent(ctx context.Context, id int64) (eventEnti
 		return eventEntity{}, err
 	}
 	return eventEntity{ID: e.Id, OccurredAt: e.OccurredAt, SeenAt: e.SeenAt}, nil
+}
+
+func (s neo4jV6Scenario) temporalRoundtrip() temporalRoundtripQuerier { return s.arm.temporals }
+
+func (s neo4jV6Scenario) zonedTimeRoundtrip() zonedTimeRoundtripQuerier { return s.arm.zonedTimes }
+
+// temporalRoundtripV6 binds the zoneless temporal fixture on the v6
+// driver, under the same field-copy rule as the v5 adapter.
+type temporalRoundtripV6 struct{ q *temporalv6.Queries }
+
+func (a temporalRoundtripV6) addReading(ctx context.Context, id int64, onDate dateValue, atLocal localTimeValue, elapsed durationValue) error {
+	return a.q.AddReading(ctx, temporalv6.AddReadingParams{
+		Id:      id,
+		OnDate:  temporalv6.Date{Year: onDate.Year, Month: onDate.Month, Day: onDate.Day},
+		AtLocal: temporalv6.LocalTime{Hour: atLocal.Hour, Minute: atLocal.Minute, Second: atLocal.Second, Nanosecond: atLocal.Nanosecond},
+		Elapsed: temporalv6.Duration{Months: elapsed.Months, Days: elapsed.Days, Seconds: elapsed.Seconds, Nanos: elapsed.Nanos},
+	})
+}
+
+func (a temporalRoundtripV6) readingsFrom(ctx context.Context, from dateValue) ([]int64, error) {
+	return a.q.ReadingsFrom(ctx, temporalv6.Date{Year: from.Year, Month: from.Month, Day: from.Day})
+}
+
+func (a temporalRoundtripV6) readingsSeenFrom(ctx context.Context, seenFrom *dateValue) ([]int64, error) {
+	if seenFrom == nil {
+		return a.q.ReadingsSeenFrom(ctx, nil)
+	}
+	return a.q.ReadingsSeenFrom(ctx, &temporalv6.Date{Year: seenFrom.Year, Month: seenFrom.Month, Day: seenFrom.Day})
+}
+
+func (a temporalRoundtripV6) readingDate(ctx context.Context, id int64) (dateValue, error) {
+	d, err := a.q.ReadingDate(ctx, id)
+	if err != nil {
+		return dateValue{}, err
+	}
+	return dateValue{Year: d.Year, Month: d.Month, Day: d.Day}, nil
+}
+
+func (a temporalRoundtripV6) readingLocalTime(ctx context.Context, id int64) (localTimeValue, error) {
+	v, err := a.q.ReadingLocalTime(ctx, id)
+	if err != nil {
+		return localTimeValue{}, err
+	}
+	return localTimeValue{Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond}, nil
+}
+
+func (a temporalRoundtripV6) readingElapsed(ctx context.Context, id int64) (durationValue, error) {
+	v, err := a.q.ReadingElapsed(ctx, id)
+	if err != nil {
+		return durationValue{}, err
+	}
+	return durationValue{Months: v.Months, Days: v.Days, Seconds: v.Seconds, Nanos: v.Nanos}, nil
+}
+
+func (a temporalRoundtripV6) oneReading(ctx context.Context, id int64) (readingEntity, error) {
+	r, err := a.q.OneReading(ctx, id)
+	if err != nil {
+		return readingEntity{}, err
+	}
+	out := readingEntity{
+		ID:      r.Id,
+		OnDate:  dateValue{Year: r.OnDate.Year, Month: r.OnDate.Month, Day: r.OnDate.Day},
+		AtLocal: localTimeValue{Hour: r.AtLocal.Hour, Minute: r.AtLocal.Minute, Second: r.AtLocal.Second, Nanosecond: r.AtLocal.Nanosecond},
+		Elapsed: durationValue{Months: r.Elapsed.Months, Days: r.Elapsed.Days, Seconds: r.Elapsed.Seconds, Nanos: r.Elapsed.Nanos},
+	}
+	if r.SeenOn != nil {
+		out.SeenOn = &dateValue{Year: r.SeenOn.Year, Month: r.SeenOn.Month, Day: r.SeenOn.Day}
+	}
+	return out, nil
+}
+
+func (a temporalRoundtripV6) builtLocalDateTime(ctx context.Context) (localDateTimeValue, error) {
+	v, err := a.q.BuiltLocalDateTime(ctx)
+	if err != nil {
+		return localDateTimeValue{}, err
+	}
+	return localDateTimeValue{
+		Year: v.Year, Month: v.Month, Day: v.Day,
+		Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond,
+	}, nil
+}
+
+func (a temporalRoundtripV6) errNoRows() error { return temporalv6.ErrNoRows }
+
+// zonedTimeRoundtripV6 binds the zoned temporal fixture on the v6 driver.
+type zonedTimeRoundtripV6 struct{ q *zonedv6.Queries }
+
+func (a zonedTimeRoundtripV6) addSlot(ctx context.Context, id int64, startsAt timeValue) error {
+	return a.q.AddSlot(ctx, zonedv6.AddSlotParams{Id: id, StartsAt: zonedTimeV6(startsAt)})
+}
+
+func (a zonedTimeRoundtripV6) slotsFrom(ctx context.Context, from timeValue) ([]int64, error) {
+	return a.q.SlotsFrom(ctx, zonedTimeV6(from))
+}
+
+func (a zonedTimeRoundtripV6) slotStart(ctx context.Context, id int64) (timeValue, error) {
+	v, err := a.q.SlotStart(ctx, id)
+	if err != nil {
+		return timeValue{}, err
+	}
+	return batteryTimeV6(v), nil
+}
+
+func (a zonedTimeRoundtripV6) oneSlot(ctx context.Context, id int64) (slotEntity, error) {
+	s, err := a.q.OneSlot(ctx, id)
+	if err != nil {
+		return slotEntity{}, err
+	}
+	return slotEntity{ID: s.Id, StartsAt: batteryTimeV6(s.StartsAt)}, nil
+}
+
+func (a zonedTimeRoundtripV6) errNoRows() error { return zonedv6.ErrNoRows }
+
+func zonedTimeV6(v timeValue) zonedv6.Time {
+	return zonedv6.Time{Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond, OffsetSeconds: v.OffsetSeconds}
+}
+
+func batteryTimeV6(v zonedv6.Time) timeValue {
+	return timeValue{Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond, OffsetSeconds: v.OffsetSeconds}
 }
 
 func (s neo4jV6Scenario) manyColMany() manyColManyQuerier { return s.arm.many }

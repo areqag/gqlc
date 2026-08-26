@@ -11,7 +11,7 @@ import (
 
 // Event corresponds to the Event node type.
 type Event struct {
-	Created dbtype.Date
+	Created Date
 	Id      int64
 	Name    string
 }
@@ -35,7 +35,7 @@ func decodeEvent(node dbtype.Node) (Event, error) {
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.Created: %w", err)
 	}
-	out.Created = value0
+	out.Created = toDate(value0)
 	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.Id: %w", err)

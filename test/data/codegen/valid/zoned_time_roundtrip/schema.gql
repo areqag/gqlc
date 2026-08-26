@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE ZonedTimeRoundtrip AS {
+    (:Slot {
+        id       :: INT64               NOT NULL,
+        startsAt :: TIME WITH TIME ZONE NOT NULL
+    })
+}

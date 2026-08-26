@@ -175,6 +175,89 @@ type eventEntity struct {
 	SeenAt     *time.Time
 }
 
+// The battery's own spelling of the four neutral temporal carriers
+// (ADR 0033). Each target emits its own Date / LocalTime /
+// LocalDateTime / Duration into its own package, so — as with person
+// and personEntity — the shape has to be restated here for the
+// scenarios to read components off it. Restating it is itself the
+// check that the shape does not vary by arm: an arm whose carrier
+// gained, lost or renamed a component stops compiling against its own
+// adapter.
+//
+// A component count is what these hold and a wire encoding is not. The
+// bolt packer sends a date as epoch-days and a local time as
+// nanoseconds since midnight, and no part of that reaches here.
+type dateValue struct {
+	Year, Month, Day int
+}
+
+type localTimeValue struct {
+	Hour, Minute, Second, Nanosecond int
+}
+
+type localDateTimeValue struct {
+	Year, Month, Day                 int
+	Hour, Minute, Second, Nanosecond int
+}
+
+type durationValue struct {
+	Months, Days, Seconds int64
+	Nanos                 int
+}
+
+// timeValue is the zoned width, carrying the offset the writer chose
+// beside the clock reading. East-positive, matching both the wire and
+// time.Time.Zone.
+type timeValue struct {
+	Hour, Minute, Second, Nanosecond int
+	OffsetSeconds                    int
+}
+
+// readingEntity is a temporal_property_roundtrip vertex and slotEntity
+// a zoned_time_roundtrip one.
+type readingEntity struct {
+	ID      int64
+	OnDate  dateValue
+	AtLocal localTimeValue
+	Elapsed durationValue
+	SeenOn  *dateValue
+}
+
+type slotEntity struct {
+	ID       int64
+	StartsAt timeValue
+}
+
+// temporalRoundtripQuerier is one arm's temporal_property_roundtrip
+// handle: the three zoneless property widths out through bound
+// parameters and back through projected columns and a whole vertex,
+// plus the constructed LOCALDATETIME column — the only way a batch can
+// reach that carrier, since the width has no property spelling.
+//
+// readingsSeenFrom takes a pointer because its parameter compares
+// against a nullable property. A nil there must bind Cypher null and
+// not a zero Date, and the scenario holds it to that.
+type temporalRoundtripQuerier interface {
+	addReading(ctx context.Context, id int64, onDate dateValue, atLocal localTimeValue, elapsed durationValue) error
+	readingsFrom(ctx context.Context, from dateValue) ([]int64, error)
+	readingsSeenFrom(ctx context.Context, seenFrom *dateValue) ([]int64, error)
+	readingDate(ctx context.Context, id int64) (dateValue, error)
+	readingLocalTime(ctx context.Context, id int64) (localTimeValue, error)
+	readingElapsed(ctx context.Context, id int64) (durationValue, error)
+	oneReading(ctx context.Context, id int64) (readingEntity, error)
+	builtLocalDateTime(ctx context.Context) (localDateTimeValue, error)
+	errNoRows() error
+}
+
+// zonedTimeRoundtripQuerier is one arm's zoned_time_roundtrip handle.
+type zonedTimeRoundtripQuerier interface {
+	addSlot(ctx context.Context, id int64, startsAt timeValue) error
+	slotsFrom(ctx context.Context, from timeValue) ([]int64, error)
+	slotStart(ctx context.Context, id int64) (timeValue, error)
+	oneSlot(ctx context.Context, id int64) (slotEntity, error)
+	errNoRows() error
+}
+
 // harness is one arm for the length of the battery: a running container and a
 // connection to it. Handing out scenarios is its whole surface, so a querier
 // is unobtainable outside the isolation it belongs to.
@@ -209,6 +292,23 @@ type edgeUnionHarness interface {
 	edgeUnionScenario(ctx context.Context, t *testing.T) edgeUnionBackend
 }
 
+// temporalHarness is an arm whose target admits the zoneless temporal
+// widths, and zonedTimeHarness one that admits TIME WITH TIME ZONE.
+// Two columns and not one because the two go their own way: Apache AGE
+// has no agtype temporal value at all today and refuses both, and the
+// work that lifts each refusal is separate (gqlc-mv3r for the zoneless
+// widths, gqlc-oeqi for the zoned one), so an arm will hold one and not
+// the other before it holds both.
+type temporalHarness interface {
+	harness
+	temporalScenario(ctx context.Context, t *testing.T) temporalBackend
+}
+
+type zonedTimeHarness interface {
+	harness
+	zonedTimeScenario(ctx context.Context, t *testing.T) zonedTimeBackend
+}
+
 // backend is one scenario's isolated view of an arm: a graph no other
 // scenario observes, and the generated handles bound to it.
 //
@@ -237,23 +337,40 @@ type edgeUnionBackend interface {
 	edgeUnionUndeclared() edgeUnionQuerier
 }
 
+// temporalBackend is a scenario's view of a temporalHarness and
+// zonedTimeBackend of a zonedTimeHarness.
+type temporalBackend interface {
+	backend
+	temporalRoundtrip() temporalRoundtripQuerier
+}
+
+type zonedTimeBackend interface {
+	backend
+	zonedTimeRoundtrip() zonedTimeRoundtripQuerier
+}
+
 // arms are the backends the battery runs against. Each adapter owns its
 // container, its connection, and its isolation strategy.
 //
-// writes records that the arm's target emits the write fixture, and edgeUnions
-// that it emits an edge-union dispatch. TestLiveSmoke holds each harness to its
-// column, so an arm that stops satisfying writeHarness or edgeUnionHarness
-// fails the battery rather than dropping those scenarios unremarked — and an
-// arm that starts satisfying one fails it too, which is what would happen if
-// Apache AGE gained the alternation and the backend's refusal were lifted.
+// writes records that the arm's target emits the write fixture, edgeUnions
+// that it emits an edge-union dispatch, temporals that it admits the zoneless
+// temporal widths, and zonedTime that it admits TIME WITH TIME ZONE.
+// TestLiveSmoke holds each harness to its column, so an arm that stops
+// satisfying writeHarness, edgeUnionHarness, temporalHarness or
+// zonedTimeHarness fails the battery rather than dropping those scenarios
+// unremarked — and an arm that starts satisfying one fails it too, which is
+// what would happen if Apache AGE gained the alternation and the backend's
+// refusal were lifted, or if it gained a temporal encoding.
 var arms = []struct {
 	name       string
 	start      func(ctx context.Context, t *testing.T) harness
 	writes     bool
 	edgeUnions bool
+	temporals  bool
+	zonedTime  bool
 }{
-	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true, edgeUnions: true},
-	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true, edgeUnions: true},
+	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true, edgeUnions: true, temporals: true, zonedTime: true},
+	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true, edgeUnions: true, temporals: true, zonedTime: true},
 	{name: "apache-age-pgx-v5", start: startAGE, writes: true},
 }
 
@@ -285,6 +402,23 @@ var writeScenarios = []struct {
 	{name: "tx: second Commit is ErrTxDone", run: txDoubleCommitIsRefused},
 	{name: "tx: Rollback after Commit is nil", run: txRollbackAfterCommitIsNil},
 	{name: "tx: Begin inside a transaction is refused", run: txBeginIsRefusedInsideATransaction},
+}
+
+// temporalScenarios and zonedTimeScenarios are the batteries an arm runs once
+// its target admits the temporal widths, written against their backends under
+// the same rules.
+var temporalScenarios = []struct {
+	name string
+	run  func(ctx context.Context, t *testing.T, b temporalBackend)
+}{
+	{name: "temporal_property_roundtrip: components round trip + date ordering", run: temporalRoundTrip},
+}
+
+var zonedTimeScenarios = []struct {
+	name string
+	run  func(ctx context.Context, t *testing.T, b zonedTimeBackend)
+}{
+	{name: "zoned_time_roundtrip: offset preserved + instant ordering", run: zonedTimeRoundTrip},
 }
 
 // edgeUnionScenarios are the battery an arm runs once its target emits an
@@ -341,6 +475,34 @@ func TestLiveSmoke(t *testing.T) {
 							t.Parallel()
 						}
 						sc.run(ctx, t, eh.edgeUnionScenario(ctx, t))
+					})
+				}
+			}
+
+			th, servesTemporals := h.(temporalHarness)
+			require.Equal(t, arm.temporals, servesTemporals,
+				"the arm's temporal capability must match the arms table; a target that gained or lost the zoneless temporal widths updates both")
+			if servesTemporals {
+				for _, sc := range temporalScenarios {
+					t.Run(sc.name, func(t *testing.T) {
+						if parallelScenarios {
+							t.Parallel()
+						}
+						sc.run(ctx, t, th.temporalScenario(ctx, t))
+					})
+				}
+			}
+
+			zh, servesZonedTime := h.(zonedTimeHarness)
+			require.Equal(t, arm.zonedTime, servesZonedTime,
+				"the arm's zoned-time capability must match the arms table; a target that gained or lost TIME WITH TIME ZONE updates both")
+			if servesZonedTime {
+				for _, sc := range zonedTimeScenarios {
+					t.Run(sc.name, func(t *testing.T) {
+						if parallelScenarios {
+							t.Parallel()
+						}
+						sc.run(ctx, t, zh.zonedTimeScenario(ctx, t))
 					})
 				}
 			}
@@ -757,4 +919,197 @@ func timestampRoundTrip(ctx context.Context, t *testing.T, b writeBackend) { //n
 	fine, err := q.eventsAfter(ctx, eventInstants[0].at.Add(time.Microsecond))
 	require.NoError(t, err)
 	require.Equal(t, []int64{3}, fine, "the comparison must resolve to the microsecond")
+}
+
+// temporalReadings are the values the temporal scenario writes, keyed by
+// the id it writes them under. As with eventInstants the ids are not in
+// date order, so a projection ordered by anything but the stored date
+// answers the ordering probe differently from the correct answer.
+//
+// The dates are chosen where a conversion breaks rather than where it is
+// comfortable: one before the Unix epoch, because the bolt packer sends
+// a date as a count of epoch-days and a truncating division answers a
+// negative count off by one unless the value was built at exact midnight;
+// a leap day, because a component conversion that went through a
+// day-of-year loses it; and the first of a month, because an off-by-one
+// on the month component is invisible on most other days.
+//
+// The durations stay inside DAY TO SECOND — the schema's declared
+// precision — and carry nanoseconds, because the bolt encoding sends
+// seconds and nanoseconds apart and a conversion that flattened them
+// would lose the sub-second half.
+var temporalReadings = []struct {
+	id      int64
+	onDate  dateValue
+	atLocal localTimeValue
+	elapsed durationValue
+}{
+	{
+		id:      1,
+		onDate:  dateValue{Year: 2024, Month: 2, Day: 29},
+		atLocal: localTimeValue{Hour: 23, Minute: 59, Second: 59, Nanosecond: 999999999},
+		elapsed: durationValue{Days: 3, Seconds: 4, Nanos: 500000000},
+	},
+	{
+		id:      2,
+		onDate:  dateValue{Year: 1969, Month: 7, Day: 20},
+		atLocal: localTimeValue{Hour: 0, Minute: 0, Second: 0, Nanosecond: 0},
+		elapsed: durationValue{Days: 0, Seconds: 0, Nanos: 1},
+	},
+	{
+		id:      3,
+		onDate:  dateValue{Year: 2025, Month: 12, Day: 1},
+		atLocal: localTimeValue{Hour: 6, Minute: 7, Second: 8, Nanosecond: 9},
+		elapsed: durationValue{Days: 400, Seconds: 86399, Nanos: 0},
+	},
+}
+
+// temporalRoundTrip drives the zoneless temporal widths through the
+// neutral carriers of ADR 0033: a date, a local time and a duration
+// written through bound parameters come back the same components, from
+// a projected column and from inside a whole vertex alike, and a range
+// predicate plus an ORDER BY over the stored date answer in date order.
+//
+// This is the witness the unit conversions do not supply. toDate and
+// fromDate are emitted into the generated package and read the
+// components off a time.Time the driver packs and the server stores; a
+// pair that agreed with each other and disagreed with the wire would
+// round-trip through themselves perfectly and still answer the ordering
+// probe wrong, because the ordering is the server's and the server sees
+// only what the packer sent.
+func temporalRoundTrip(ctx context.Context, t *testing.T, b temporalBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.temporalRoundtrip()
+
+	_, err := q.readingDate(ctx, 1)
+	require.ErrorIs(t, err, q.errNoRows(), "empty graph must return ErrNoRows")
+
+	for _, r := range temporalReadings {
+		require.NoError(t, q.addReading(ctx, r.id, r.onDate, r.atLocal, r.elapsed), "write reading %d", r.id)
+	}
+
+	for _, r := range temporalReadings {
+		gotDate, err := q.readingDate(ctx, r.id)
+		require.NoError(t, err, "read reading %d date", r.id)
+		require.Equal(t, r.onDate, gotDate, "reading %d: the date must survive the encoding component for component", r.id)
+
+		gotLocal, err := q.readingLocalTime(ctx, r.id)
+		require.NoError(t, err, "read reading %d local time", r.id)
+		require.Equal(t, r.atLocal, gotLocal, "reading %d: the local time must survive to the nanosecond", r.id)
+
+		gotElapsed, err := q.readingElapsed(ctx, r.id)
+		require.NoError(t, err, "read reading %d duration", r.id)
+		require.Equal(t, r.elapsed, gotElapsed, "reading %d: the duration's components must survive held apart", r.id)
+
+		entity, err := q.oneReading(ctx, r.id)
+		require.NoError(t, err, "read reading %d as a vertex", r.id)
+		require.Equal(t, readingEntity{ID: r.id, OnDate: r.onDate, AtLocal: r.atLocal, Elapsed: r.elapsed}, entity,
+			"reading %d: a whole vertex must carry the same components its columns do, and an unwritten nullable date must be absent rather than a zero Date", r.id)
+	}
+
+	// The whole set, ordered by the author's ORDER BY. In date order, so
+	// the pre-epoch reading leads and the id order 1,2,3 it was written
+	// in does not survive.
+	all, err := q.readingsFrom(ctx, dateValue{Year: 1900, Month: 1, Day: 1})
+	require.NoError(t, err)
+	require.Equal(t, []int64{2, 1, 3}, all, "ORDER BY over the stored date must answer in date order")
+
+	// The bound date is the cutoff and the comparison is inclusive, so the
+	// reading written on exactly this date stays in. A conversion that
+	// built its driver value anywhere but midnight would put the stored
+	// value on either side of this boundary depending on the runner's
+	// clock.
+	from, err := q.readingsFrom(ctx, dateValue{Year: 2024, Month: 2, Day: 29})
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 3}, from, "a range predicate over the stored date must be inclusive and in date order")
+
+	// A nullable date parameter. Nothing has written seenOn yet, so the
+	// predicate has nothing to match either way; what it holds is that a
+	// nil binds Cypher null, under which `>=` is null and no row is
+	// returned. A nil that bound a zero Date would return every row.
+	none, err := q.readingsSeenFrom(ctx, nil)
+	require.NoError(t, err)
+	require.Empty(t, none, "a nil nullable date parameter must bind null, not a zero Date")
+
+	b.seed(ctx, t, "MATCH (r:Reading {id: 1}) SET r.seenOn = date('2024-03-01')")
+	b.seed(ctx, t, "MATCH (r:Reading {id: 3}) SET r.seenOn = date('2023-01-31')")
+
+	seen, err := q.readingsSeenFrom(ctx, &dateValue{Year: 2023, Month: 1, Day: 31})
+	require.NoError(t, err)
+	require.Equal(t, []int64{3, 1}, seen, "a bound nullable date must select and order like a non-nullable one")
+
+	// The nullable property comes back on the whole vertex as a pointer
+	// to the components the seed wrote — through the same conversion the
+	// non-nullable arm uses, reached by a different emitted path.
+	entity, err := q.oneReading(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, &dateValue{Year: 2024, Month: 3, Day: 1}, entity.SeenOn,
+		"a written nullable date must arrive as its components, not as nil")
+
+	// LOCALDATETIME has no property spelling, so the carrier is reached
+	// through a column the server constructs. The literal is in the query
+	// text, so the components are known exactly and a conversion that
+	// dropped one is visible here and nowhere else in the battery.
+	built, err := q.builtLocalDateTime(ctx)
+	require.NoError(t, err)
+	require.Equal(t, localDateTimeValue{Year: 2024, Month: 3, Day: 5, Hour: 6, Minute: 7, Second: 8, Nanosecond: 9}, built,
+		"a constructed LOCALDATETIME column must arrive component for component")
+}
+
+// zonedSlots are the values the zoned-time scenario writes. The offsets
+// are far from any runner's likely local zone and far from each other,
+// and the clock readings are chosen so that the two orderings disagree:
+// by the instant each denotes, slot 1 (03:45Z) precedes slot 2 (16:00Z);
+// by the bare clock reading, 08:00 precedes 09:30 and the order reverses.
+// A conversion that dropped the offset and built its driver value in the
+// process's local zone therefore answers the ordering probe backwards
+// rather than merely imprecisely.
+var zonedSlots = []struct {
+	id       int64
+	startsAt timeValue
+}{
+	{id: 1, startsAt: timeValue{Hour: 9, Minute: 30, Second: 0, Nanosecond: 0, OffsetSeconds: 5*3600 + 45*60}},
+	{id: 2, startsAt: timeValue{Hour: 8, Minute: 0, Second: 0, Nanosecond: 250000000, OffsetSeconds: -8 * 3600}},
+}
+
+// zonedTimeRoundTrip drives TIME WITH TIME ZONE through the neutral Time
+// carrier: the clock reading and the offset the writer chose both come
+// back, from a projected column and from inside a whole vertex alike,
+// and an ORDER BY over the stored property answers by the instant each
+// value denotes rather than by its bare clock reading.
+func zonedTimeRoundTrip(ctx context.Context, t *testing.T, b zonedTimeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.zonedTimeRoundtrip()
+
+	_, err := q.slotStart(ctx, 1)
+	require.ErrorIs(t, err, q.errNoRows(), "empty graph must return ErrNoRows")
+
+	for _, s := range zonedSlots {
+		require.NoError(t, q.addSlot(ctx, s.id, s.startsAt), "write slot %d", s.id)
+	}
+
+	for _, s := range zonedSlots {
+		got, err := q.slotStart(ctx, s.id)
+		require.NoError(t, err, "read slot %d", s.id)
+		require.Equal(t, s.startsAt, got,
+			"slot %d: the clock reading and the offset must both survive the encoding", s.id)
+
+		entity, err := q.oneSlot(ctx, s.id)
+		require.NoError(t, err, "read slot %d as a vertex", s.id)
+		require.Equal(t, slotEntity{ID: s.id, StartsAt: s.startsAt}, entity,
+			"slot %d: a whole vertex must carry the same offset its column does", s.id)
+	}
+
+	// Midnight UTC precedes both instants, so both rows come back — in
+	// the order their offsets put them in, which is the reverse of the
+	// order their clock readings alone would.
+	all, err := q.slotsFrom(ctx, timeValue{Hour: 0, Minute: 0, Second: 0, Nanosecond: 0, OffsetSeconds: 0})
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, all, "ORDER BY over a stored zoned time must answer by the instant, not by the clock reading")
+
+	// A cutoff between the two instants, expressed in a third offset: the
+	// earlier slot drops out. Its own clock reading, 09:30, is later than
+	// this bound's 06:00 — so a comparison that had lost the offsets would
+	// keep it.
+	after, err := q.slotsFrom(ctx, timeValue{Hour: 6, Minute: 0, Second: 0, Nanosecond: 0, OffsetSeconds: 2 * 3600})
+	require.NoError(t, err)
+	require.Equal(t, []int64{2}, after, "a range predicate over a stored zoned time must compare instants")
 }

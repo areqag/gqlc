@@ -483,6 +483,11 @@ every target emits them for such a batch.
 | `Rollback` | `scopeMethod` | every target | no target |
 | `EnsureGraph` | `scopeMethod` | `apache-age-pgx-v5` | no target |
 | `DropGraph` | `scopeMethod` | `apache-age-pgx-v5` | no target |
+| `Date` | `scopePackage` | `neo4j-go-v5`, `neo4j-go-v6` | `neo4j-go-v5`, `neo4j-go-v6` |
+| `Time` | `scopePackage` | `neo4j-go-v5`, `neo4j-go-v6` | `neo4j-go-v5`, `neo4j-go-v6` |
+| `LocalTime` | `scopePackage` | `neo4j-go-v5`, `neo4j-go-v6` | `neo4j-go-v5`, `neo4j-go-v6` |
+| `LocalDateTime` | `scopePackage` | `neo4j-go-v5`, `neo4j-go-v6` | `neo4j-go-v5`, `neo4j-go-v6` |
+| `Duration` | `scopePackage` | `neo4j-go-v5`, `neo4j-go-v6` | `neo4j-go-v5`, `neo4j-go-v6` |
 
 The set is refused uniformly, so a row is over-broad on a target where
 neither an entity nor a query taking that name would collide. *Breaks
@@ -511,26 +516,45 @@ oversight — ruled by Արթուր on `gqlc-3d0l` after the executing Ռազմ�
 declined to settle it alone (design `docs/specs/codegen-tx-object.md`
 §9.1). `Begin` is not of this kind: it is on `*Queries`, so its
 reservation stands on a real collision. `reservedIdentifiers` records
-both grounds at its declaration.
+both grounds at its declaration. Every other row stands on the collision
+ground alone, the five temporal carriers included: on a target whose
+emission declares `temporal.go` the carrier is a package-level type, and
+an entity or query of the same name redeclares it; none of the five is
+ever refused for call-site shape.
 
 The §2 sweep seeds source 0 with the `scopePackage` subset alone, so a
 method-scope name is not among the identifiers it compares; Phase A's
 membership check is what stands between such a query and the
 redeclaration, and `TestReservedIdentifiersAreUniformAcrossBackends`
-requires it for all seventeen rows.
+requires it for all twenty-two rows.
 
-On a neo4j target the over-broad rows are six of the seventeen: `DBTX`
+On a neo4j target the over-broad rows are six of the twenty-two: `DBTX`
 and `SessionInit`, which neo4j never declares; `EnsureGraph` and
 `DropGraph`, which only `apache-age-pgx-v5` declares — on that target a
 query of either name collides, on neo4j neither name is taken on either
 half; and `Commit` and `Rollback`, which are over-broad on
 `apache-age-pgx-v5` as well, for the receiver reason above rather than
-because the target leaves the name free. `WithTx` and `Begin` are not
-among the six: every target declares them on `*Queries`, so refusing a
-query of either name is the collision rather than a false refusal. Six
-counts the target axis alone. The batch axis moves it: on a batch with
-no `:one` query nothing declares `ErrNoRows` or `ErrMultipleResults`, so
-a neo4j-only batch of that shape carries eight. `NODE TYPE DBTX` is
-refused on a name that target leaves free — taken per D2 Resolved, one
-uniform set rather than a name that generates under one target and is
-refused under another.
+because the target leaves the name free. The five temporal carriers are
+not among the six: the neo4j emission declares every one of them, so an
+entity or query of any of those names collides there. `WithTx` and
+`Begin` are not among the six either: every target declares them on
+`*Queries`, so refusing a query of either name is the collision rather
+than a false refusal.
+
+On `apache-age-pgx-v5` the over-broad rows are seven of the twenty-two:
+the same `Commit` and `Rollback`, plus `Date`, `Time`, `LocalTime`,
+`LocalDateTime` and `Duration`, which that target declares none of — the
+neutral carriers (ADR 0033) reached the neo4j emission first, and AGE's
+admission of the widths they cover is a separate change. When that lands,
+the *Declared by* cells the corpus measures move on their own and those
+five stop being over-broad there.
+
+Six and seven count the target axis alone. The batch axis moves them: on
+a batch with no `:one` query nothing declares `ErrNoRows` or
+`ErrMultipleResults`, and on a batch whose surface names no temporal
+width nothing emits `temporal.go` and so nothing declares the five
+carriers. A neo4j-only batch of the first shape carries eight over-broad
+rows; of both shapes together, thirteen. `NODE TYPE DBTX` is refused on a
+name that target leaves free — taken per D2 Resolved, one uniform set
+rather than a name that generates under one target and is refused under
+another.

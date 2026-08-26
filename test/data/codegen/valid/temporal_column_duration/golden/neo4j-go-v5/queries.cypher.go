@@ -15,23 +15,23 @@ const oneWeekQueryText = `RETURN duration({days: 7}) AS d`
 // OneWeek executes the OneWeek query.
 //
 //	RETURN duration({days: 7}) AS d
-func (q *Queries) OneWeek(ctx context.Context) (dbtype.Duration, error) {
+func (q *Queries) OneWeek(ctx context.Context) (Duration, error) {
 	records, err := q.db.run(ctx, oneWeekQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
-		return dbtype.Duration{}, err
+		return Duration{}, err
 	}
 	if len(records) == 0 {
-		return dbtype.Duration{}, ErrNoRows
+		return Duration{}, ErrNoRows
 	}
 	if len(records) > 1 {
-		return dbtype.Duration{}, ErrMultipleResults
+		return Duration{}, ErrMultipleResults
 	}
 	value, isNil, err := neo4j.GetRecordValue[dbtype.Duration](records[0], "d")
 	if err != nil {
-		return dbtype.Duration{}, fmt.Errorf("OneWeek: decode column %q: %w", "d", err)
+		return Duration{}, fmt.Errorf("OneWeek: decode column %q: %w", "d", err)
 	}
 	if isNil {
-		return dbtype.Duration{}, fmt.Errorf("OneWeek: column %q is non-nullable but arrived null", "d")
+		return Duration{}, fmt.Errorf("OneWeek: column %q is non-nullable but arrived null", "d")
 	}
-	return value, nil
+	return toDuration(value), nil
 }

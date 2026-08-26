@@ -7,21 +7,20 @@ import (
 	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 const eventsInRangeQueryText = `MATCH (e:Event) WHERE e.created >= $from AND e.created <= $to RETURN e.name AS name`
 
 type EventsInRangeParams struct {
-	From dbtype.Date
-	To   dbtype.Date
+	From Date
+	To   Date
 }
 
 // EventsInRange executes the EventsInRange query.
 //
 //	MATCH (e:Event) WHERE e.created >= $from AND e.created <= $to RETURN e.name AS name
 func (q *Queries) EventsInRange(ctx context.Context, arg EventsInRangeParams) ([]string, error) {
-	records, err := q.db.run(ctx, eventsInRangeQueryText, map[string]any{"from": arg.From, "to": arg.To}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, eventsInRangeQueryText, map[string]any{"from": fromDate(arg.From), "to": fromDate(arg.To)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}

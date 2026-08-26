@@ -44,11 +44,11 @@ func TestTypeMapProperty(t *testing.T) {
 		{graph.TypeFloat, "float64"},
 		{graph.TypeFloat32, "float32"},
 		{graph.TypeFloat64, "float64"},
-		{graph.TypeDate, "dbtype.Date"},
-		{graph.TypeTime, "dbtype.Time"},
-		{graph.TypeLocalTime, "dbtype.LocalTime"},
+		{graph.TypeDate, "Date"},
+		{graph.TypeTime, "Time"},
+		{graph.TypeLocalTime, "LocalTime"},
 		{graph.TypeTimestamp, "time.Time"},
-		{graph.TypeDuration, "dbtype.Duration"},
+		{graph.TypeDuration, "Duration"},
 		// A property of no declared shape. `any` is the one answer that
 		// rides neither of the driver's constrained generics, which is
 		// what ridesADriverCarrier turns on and what routes the decode
@@ -163,12 +163,12 @@ func TestTypeMapTemporal(t *testing.T) {
 		k    resolver.Temporal
 		want string
 	}{
-		{resolver.TemporalDate, "dbtype.Date"},
-		{resolver.TemporalTime, "dbtype.Time"},
-		{resolver.TemporalLocalTime, "dbtype.LocalTime"},
+		{resolver.TemporalDate, "Date"},
+		{resolver.TemporalTime, "Time"},
+		{resolver.TemporalLocalTime, "LocalTime"},
 		{resolver.TemporalDateTime, "time.Time"},
-		{resolver.TemporalLocalDateTime, "dbtype.LocalDateTime"},
-		{resolver.TemporalDuration, "dbtype.Duration"},
+		{resolver.TemporalLocalDateTime, "LocalDateTime"},
+		{resolver.TemporalDuration, "Duration"},
 	}
 	require.Len(t, tests, resolver.TemporalCount,
 		"the sweep must cover the resolver's whole temporal vocabulary")
@@ -246,10 +246,18 @@ func TestDriverCarrier(t *testing.T) {
 		{"[]byte", "[]byte"},
 		{"any", "any"},
 		{"map[string]any", "map[string]any"},
-		{"dbtype.Date", "dbtype.Date"},
 		{"time.Time", "time.Time"},
+		// The five neutral temporal carriers (ADR 0033). Unlike every
+		// other narrowing row here, the carrier and the emitted type
+		// are not conversion-compatible: narrowExpr / widenExpr route
+		// them through the emitted to<X> / from<X> helpers.
+		{"Date", "dbtype.Date"},
+		{"Time", "dbtype.Time"},
+		{"LocalTime", "dbtype.LocalTime"},
+		{"LocalDateTime", "dbtype.LocalDateTime"},
+		{"Duration", "dbtype.Duration"},
 	}
-	require.Len(t, tests, 19)
+	require.Len(t, tests, 23)
 	for _, tt := range tests {
 		t.Run(tt.goType, func(t *testing.T) {
 			require.Equal(t, tt.want, driverCarrier(tt.goType))

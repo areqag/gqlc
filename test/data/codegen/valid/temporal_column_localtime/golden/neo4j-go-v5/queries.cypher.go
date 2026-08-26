@@ -15,23 +15,23 @@ const nowLocalTimeQueryText = `RETURN localtime() AS t`
 // NowLocalTime executes the NowLocalTime query.
 //
 //	RETURN localtime() AS t
-func (q *Queries) NowLocalTime(ctx context.Context) (dbtype.LocalTime, error) {
+func (q *Queries) NowLocalTime(ctx context.Context) (LocalTime, error) {
 	records, err := q.db.run(ctx, nowLocalTimeQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
-		return dbtype.LocalTime{}, err
+		return LocalTime{}, err
 	}
 	if len(records) == 0 {
-		return dbtype.LocalTime{}, ErrNoRows
+		return LocalTime{}, ErrNoRows
 	}
 	if len(records) > 1 {
-		return dbtype.LocalTime{}, ErrMultipleResults
+		return LocalTime{}, ErrMultipleResults
 	}
 	value, isNil, err := neo4j.GetRecordValue[dbtype.LocalTime](records[0], "t")
 	if err != nil {
-		return dbtype.LocalTime{}, fmt.Errorf("NowLocalTime: decode column %q: %w", "t", err)
+		return LocalTime{}, fmt.Errorf("NowLocalTime: decode column %q: %w", "t", err)
 	}
 	if isNil {
-		return dbtype.LocalTime{}, fmt.Errorf("NowLocalTime: column %q is non-nullable but arrived null", "t")
+		return LocalTime{}, fmt.Errorf("NowLocalTime: column %q is non-nullable but arrived null", "t")
 	}
-	return value, nil
+	return toLocalTime(value), nil
 }

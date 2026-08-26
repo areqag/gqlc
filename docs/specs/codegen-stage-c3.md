@@ -3,8 +3,10 @@
 The implementation brief for Stage C3 of `internal/codegen`, extending
 the merged C2 slice (`docs/specs/codegen-stage-c2.md`) with the four
 capability slices ADR 0010 D7 places at C3: **`ResolvedList<T>`
-recursion into Go `[]T`**, **the six openCypher temporals via
-`dbtype`**, **property-side `DATE` / `TIMESTAMP`** (moved from the
+recursion into Go `[]T`**, **the six openCypher temporals on gqlc's
+own neutral carriers** (ADR 0033; `dbtype` stays the decode carrier
+the emitted conversions read from), **property-side `DATE` /
+`TIMESTAMP`** (moved from the
 C2-owned `ErrOutOfC2Scope` catchment into first-class support),
 **unrepresentable-width sentinels for INT128/256, UINT128/256, FLOAT16,
 FLOAT128/256, DECIMAL** with the **FLOAT32 schema-width contract**
@@ -16,8 +18,10 @@ only the sections C3 touches.
 
 Stage C3 keeps the C2 file set (`db.go` / `querier.go` /
 `models.go` / `<name>.cypher.go`) byte-identical for the parts C3 does
-not touch, extends the C2 property → Go type table with the four
-temporal-property rows and the eight unrepresentable-width rows, adds
+not touch, adds the `temporal.go` / `temporal_neo4j.go` pair for a
+batch whose surface references a neutral carrier (§5.8, §5.9),
+extends the C2 property → Go type table with the four temporal-
+property rows and the eight unrepresentable-width rows, adds
 five new column-shape rows (`ResolvedList`, `ResolvedTemporal`,
 `ResolvedScalar`, `ResolvedUnknown`), promotes the unrepresentable-
 width check from lazy (C1 fail-site on a projected column) to eager
@@ -45,7 +49,10 @@ route through `ErrOutOfC3Scope`; C4 owns them (ADR 0010 D7).
   FLOAT32 encode-widen / decode-narrow pinning (§5.5, §5.7), and
   the Phase Z eager sweep over every schema property's width (§4.8,
   §5.2). The C0 file layout stands (`codegen.go` / `input.go` /
-  `errors.go` / `generate.go`); no new files at C3.
+  `errors.go` / `generate.go`), plus `temporal.go` for the neutral
+  carriers and their emission trigger, and
+  `neo4j/render_temporal.go` for the per-target driver bridge
+  (ADR 0033; §5.8, §5.9).
 - `internal/codegen/errors.go` — extended with one new sentinel and
   one rename (§9): `ErrUnrepresentableWidth`, plus `ErrOutOfC2Scope`
   → `ErrOutOfC3Scope`. No other sentinel additions or retirements.
@@ -105,11 +112,15 @@ each of the four existing phases in-place:
   Phase Z already exists as the natural home for schema-shape
   rejections (`ErrUnnamedMultiLabelType`, `ErrPropertyFieldCollision`).
   Temporal property widths (DATE / TIMESTAMP) are NOT rejected —
-  they now map (§5.1) to `dbtype.Date` and `time.Time`. Phase Z's
-  cache carries the extra bits Phase A needs: `anyTemporalDBType`
-  (`dbtype.Date` in use), `anyTimeTime` (`time.Time` in use), so
-  the emission walk (§5.2) can gate `models.go`'s `dbtype` /
-  `time` imports without a second pass.
+  they now map (§5.1) to `Date` and `time.Time`. `Date` is gqlc's
+  own carrier, emitted into the generated package (ADR 0033); the
+  driver's `dbtype.Date` is what the decode helper reads before
+  converting, so it is still in `models.go`'s import block. Phase
+  Z's cache carries the extra bits Phase A needs:
+  `anyTemporalDBType` (a driver temporal carrier in use),
+  `anyTimeTime` (`time.Time` in use), so the emission walk (§5.2)
+  can gate `models.go`'s `dbtype` / `time` imports without a
+  second pass.
 - **Phase A — batch admission** (unchanged shape, extended admission
   set). Every `NamedQuery` still passes C0's `validateQueries` gate
   and the C1/C2 per-query admission checks. C3 widens the
@@ -139,7 +150,7 @@ each of the four existing phases in-place:
   derivation set). Row-field text-shape analysis is unchanged;
   Params-field mangle is unchanged. C3 extends the Row-field Go-
   type text mapping: a `ResolvedProperty` column with a temporal
-  width renders `dbtype.Date` or `time.Time`; a `ResolvedList<T>`
+  width renders `Date` or `time.Time`; a `ResolvedList<T>`
   column renders `[]<T's Go type>` recursively via the
   `resolvedListGoType(t ResolvedType)` helper (§4.7); a
   `ResolvedTemporal{Kind}` column renders the C3 temporal table
@@ -161,11 +172,15 @@ property that no query projects or on one that many do. This
 eagerness is the load-bearing decision (§4.8's defence).
 
 The cross-query package-level identifier collision sweep (§4.6 of
-C2) runs unchanged after Phase B. C3 introduces no new exported
-identifiers — the temporal cell types (`dbtype.Date` etc.) and the
-`any` fallbacks are library or built-in, not gqlc-emitted. The
-sweep's four identifier sources stay: entity struct names, method
-names, `<Method>Params`, `<Method>Row`.
+C2) runs unchanged after Phase B. The `any` fallbacks are
+built-in and introduce nothing, but the temporal cell types do:
+`Date`, `Time`, `LocalTime`, `LocalDateTime` and `Duration` are
+gqlc-emitted (ADR 0033), so they are package-scope reserved
+identifiers a schema may not take — the reserved set, not the
+collision sweep, is what refuses them, and it reserves them
+whether or not a batch emits `temporal.go`. The sweep's four
+identifier sources stay: entity struct names, method names,
+`<Method>Params`, `<Method>Row`.
 
 ### 2.2 The `resolvedListGoType` recursion — the C3 helper
 
@@ -278,34 +293,38 @@ struct field.
 
 ```go
 // RETURN date('2024-01-01') AS d :one
-func (q *Queries) TodayDate(ctx context.Context) (dbtype.Date, error)
+func (q *Queries) TodayDate(ctx context.Context) (Date, error)
 
 // RETURN datetime() AS now :one
 func (q *Queries) Now(ctx context.Context) (time.Time, error)
 
 // RETURN duration({days: 7}) AS d :one
-func (q *Queries) OneWeek(ctx context.Context) (dbtype.Duration, error)
+func (q *Queries) OneWeek(ctx context.Context) (Duration, error)
 ```
 
-- **`dbtype.Duration` for openCypher DURATION**, uniformly and
-  deliberately (D3 Resolved). The Go `time.Duration` type is
-  monotonic-nanoseconds; openCypher DURATION is calendar-aware
-  (months + days + seconds + nanoseconds — see
+- **A four-component `Duration` for openCypher DURATION**,
+  uniformly and deliberately (D3 Resolved). The Go `time.Duration`
+  type is monotonic-nanoseconds; openCypher DURATION is
+  calendar-aware (months + days + seconds + nanoseconds — see
   `dbtype/temporal.go`). Mapping DURATION to `time.Duration` would
   silently corrupt month/day arithmetic; the schema author who
   wrote `duration({months: 3})` expects three months, not
-  `3 * 30 * 24h`. `dbtype.Duration` faithfully represents the
-  four-component shape.
-- **`time.Time` for zoned DATETIME**, uniformly (D3 Resolved). The
-  driver's v5 `RecordValue` union includes `time.Time` (with a
-  comment `// OffsetTime == Time == dbtype.Time`) as the mapping
-  for zoned datetime — the standard library's `time.Time` carries
-  timezone information natively, so passing through a distinct
-  `dbtype.DateTime` shape would add ceremony with no gain. The
-  driver validated this choice on the write side (the resolver
-  emits DATETIME literals into `time.Time` on decode).
-- **Nullable temporal column** renders `*dbtype.Date`,
-  `*time.Time`, etc. — the uniform pointer rule (D3 Resolved).
+  `3 * 30 * 24h`. The emitted `Duration` holds the four components
+  apart, field for field with the driver's — which is what makes
+  the conversion between them a copy (ADR 0033).
+- **`time.Time` for zoned DATETIME**, uniformly (D3 Resolved), and
+  it is the one temporal width ADR 0033 left on a driver-adjacent
+  carrier. The driver's v5 `RecordValue` union includes
+  `time.Time` (with a comment
+  `// OffsetTime == Time == dbtype.Time`) as the mapping for zoned
+  datetime — the standard library's `time.Time` carries timezone
+  information natively, so a gqlc-owned struct here would add
+  ceremony with no gain, and `time.Time` is not a driver type, so
+  it costs the surface nothing. The driver validated this choice
+  on the write side (the resolver emits DATETIME literals into
+  `time.Time` on decode).
+- **Nullable temporal column** renders `*Date`, `*time.Time`,
+  etc. — the uniform pointer rule (D3 Resolved).
 
 ### 3.2 List-column returns and Row-struct fields
 
@@ -385,12 +404,17 @@ changes (the Q9 gradient from ADR 0010).
 ### 3.4 Property-side DATE / TIMESTAMP on entity structs
 
 A schema property `p :: DATE` on the `Person` node type emits a
-`Person.D dbtype.Date` field; a property `p :: TIMESTAMP NOT NULL`
-emits a `time.Time` field. Nullable → pointer. The `models.go`
-entity decode helper uses `neo4j.GetProperty[dbtype.Date]` /
-`neo4j.GetProperty[time.Time]` on the non-nullable arm; the
-nullable arm still reads `Props` directly with a type assertion
-(§5.2's shape at C2 stands, extended for the new carrier types).
+`Person.D Date` field carrying gqlc's own `Date` (ADR 0033); a
+property `p :: TIMESTAMP NOT NULL` emits a `time.Time` field.
+Nullable → pointer. The driver's carrier is not gone, it has moved
+below the surface: the `models.go` entity decode helper still
+reads `neo4j.GetProperty[dbtype.Date]` /
+`neo4j.GetProperty[time.Time]` on the non-nullable arm and then
+narrows through an unexported conversion the batch emits
+alongside; the nullable arm still reads `Props` directly with a
+type assertion against the driver carrier, and narrows the
+asserted value the same way (§5.2's shape at C2 stands, extended
+for the new carrier types).
 
 - **`neo4j.PropertyValue`'s union** (verified 2026-07-11) includes
   `Date | LocalTime | LocalDateTime | Time | Duration | time.Time`
@@ -399,8 +423,8 @@ nullable arm still reads `Props` directly with a type assertion
   `neo4j.GetProperty[time.Time]` compile against the pinned
   driver.
 - **`Property.Nullable` still governs pointer vs value** (unchanged).
-  A `p :: DATE` (default nullable) renders `*dbtype.Date`; a
-  `p :: DATE NOT NULL` renders `dbtype.Date`.
+  A `p :: DATE` (default nullable) renders `*Date`; a
+  `p :: DATE NOT NULL` renders `Date`.
 
 ### 3.5 The FLOAT32 schema-width contract
 
@@ -458,7 +482,7 @@ the rule as the `resolvedListGoType` helper (§2.2). The base cases
 | Leaf `ResolvedType` | Go type |
 |---|---|
 | `ResolvedProperty{STRING|BOOL|INT*|UINT*|FLOAT*}` | via §5.1 table (property row) |
-| `ResolvedProperty{DATE}` | `dbtype.Date` |
+| `ResolvedProperty{DATE}` | `Date` |
 | `ResolvedProperty{TIMESTAMP}` | `time.Time` |
 | `ResolvedProperty{INT128|INT256|UINT128|UINT256|FLOAT16|FLOAT128|FLOAT256|DECIMAL}` | `ErrUnrepresentableWidth` |
 | `ResolvedNode{Labels}` | Phase Z's entity struct name for those labels |
@@ -574,7 +598,7 @@ adds the five new column-shape rows.
 
 | `ResolvedProperty.Type` | Go type | Import |
 |---|---|---|
-| `DATE` | `dbtype.Date` | `dbtype` |
+| `DATE` | `Date` | `dbtype` (the decode carrier, §5.2) |
 | `TIMESTAMP` | `time.Time` | `time` |
 | `INT128` / `INT256` / `UINT128` / `UINT256` | `ErrUnrepresentableWidth` | — |
 | `FLOAT16` | `ErrUnrepresentableWidth` | — |
@@ -586,12 +610,12 @@ adds the five new column-shape rows.
 
 | `Column.Type` | Go type | Nullable emission |
 |---|---|---|
-| `ResolvedTemporal{Date}` | `dbtype.Date` | `*dbtype.Date` |
-| `ResolvedTemporal{Time}` | `dbtype.Time` | `*dbtype.Time` |
-| `ResolvedTemporal{LocalTime}` | `dbtype.LocalTime` | `*dbtype.LocalTime` |
+| `ResolvedTemporal{Date}` | `Date` | `*Date` |
+| `ResolvedTemporal{Time}` | `Time` | `*Time` |
+| `ResolvedTemporal{LocalTime}` | `LocalTime` | `*LocalTime` |
 | `ResolvedTemporal{DateTime}` | `time.Time` | `*time.Time` |
-| `ResolvedTemporal{LocalDateTime}` | `dbtype.LocalDateTime` | `*dbtype.LocalDateTime` |
-| `ResolvedTemporal{Duration}` | `dbtype.Duration` | `*dbtype.Duration` |
+| `ResolvedTemporal{LocalDateTime}` | `LocalDateTime` | `*LocalDateTime` |
+| `ResolvedTemporal{Duration}` | `Duration` | `*Duration` |
 | `ResolvedScalar{Bool}` | `bool` | `*bool` |
 | `ResolvedScalar{Int}` | `int64` | `*int64` |
 | `ResolvedScalar{Float}` | `float64` | `*float64` |
@@ -612,11 +636,14 @@ adds the five new column-shape rows.
   is "nullable → pointer, uniformly" only where the underlying
   type has no null representation of its own; `any` and `map` do,
   and forcing `*any` would violate the rule's own rationale.
-- **`ResolvedTemporal{Time}` maps to `dbtype.Time`, not `time.Time`**
-  — openCypher TIME is zoned time-of-day (no date), which
-  `dbtype.Time` faithfully represents (an alias for `time.Time`
-  underneath, but distinguishing zoned time-of-day from zoned
-  datetime at the type level).
+- **`ResolvedTemporal{Time}` maps to `Time`, not `time.Time`** —
+  openCypher TIME is zoned time-of-day (no date), which the
+  emitted `Time` represents as a clock reading beside the UTC
+  offset it was read at, distinguishing zoned time-of-day from
+  zoned datetime at the type level. It replaces the driver's
+  `dbtype.Time` on the surface (ADR 0033), which carried the same
+  distinction but named the driver in every signature that
+  projected the width.
   `ResolvedTemporal{DateTime}` is the one that maps to bare
   `time.Time`: the driver's v5 documented behavior for zoned
   DATETIME (see `graph.go` comment
@@ -680,14 +707,23 @@ in three places:
 
    | Emitted Go type | Driver carrier | Narrow expression |
    |---|---|---|
-   | `dbtype.Date` | `dbtype.Date` | none — passthrough |
+   | `Date` (DATE) | `dbtype.Date` | `toDate(local)` |
    | `time.Time` (TIMESTAMP) | `time.Time` | none — passthrough |
    | `float32` (FLOAT32) | `float64` | `float32(local)` |
 
+   The narrow expression is where ADR 0033 lands: the carrier the
+   driver hands over is unchanged, and what changed is that the
+   value no longer reaches the field without passing through a
+   conversion the batch emits. `toDate` is unexported and lives in
+   `temporal_neo4j.go` (§5.9).
+
    The nullable arm still reads `Props` directly with a type
-   assertion. `dbtype.Date` and `time.Time` are legitimate type-
-   assertion targets on the `Props` map (both satisfy
-   `neo4j.PropertyValue`).
+   assertion, against the driver carrier and not the emitted one.
+   `dbtype.Date` and `time.Time` are legitimate type-assertion
+   targets on the `Props` map (both satisfy
+   `neo4j.PropertyValue`); `Date` is not, so the assertion names
+   the driver's type and the narrow expression runs on its
+   result.
 
 3. **The `time.Time` case for TIMESTAMP** — the emitted decode
    helper body for a `p :: TIMESTAMP NOT NULL` property on
@@ -713,8 +749,9 @@ in three places:
    }
    ```
 
-   The `dbtype.Date` cases are structurally identical, substituting
-   the type name.
+   The DATE cases are structurally identical but for the narrow:
+   the assertion target stays `dbtype.Date`, and the value assigned
+   is `toDate(s)` rather than `s`.
 
 4. **The `float32` case for FLOAT32 property** — the emitted decode
    helper body for a `p :: FLOAT32 NOT NULL` property on `Person`:
@@ -773,7 +810,7 @@ if err != nil {
 if isNil {
     return <zero>, fmt.Errorf("<method>: column %q is non-nullable but arrived null", "<column-name>")
 }
-<assign-or-return>
+<assign-or-return>  // narrowed: toDate(value)
 ```
 
 The carrier changes per temporal kind: `dbtype.Date`, `dbtype.Time`,
@@ -782,6 +819,13 @@ The carrier changes per temporal kind: `dbtype.Date`, `dbtype.Time`,
 against v5.28.4 `neo4j/record.go`, 2026-07-11). The property-side
 `ResolvedProperty{DATE}` and `{TIMESTAMP}` arms use the same
 carriers: `dbtype.Date` for DATE, `time.Time` for TIMESTAMP.
+
+The type parameter is the DRIVER's carrier and the value assigned
+is not. Five of the six kinds narrow through the emitted
+conversion named for their carrier — `toDate`, `toTime`,
+`toLocalTime`, `toLocalDateTime`, `toDuration` — and TIMESTAMP,
+which stays `time.Time` on both sides, is assigned straight
+(§5.9).
 
 **Per-column decode block — list column, non-nullable:**
 
@@ -802,7 +846,9 @@ for i, elem := range value {
 
 The element-decode step is one dispatch on the resolved element
 type: a scalar element goes through a type assertion + narrow
-convert; a temporal element goes through a type assertion; an
+convert; a temporal element goes through a type assertion against
+the driver carrier and then the same narrow convert the column arm
+uses; an
 entity element (`ResolvedNode` / `ResolvedEdge` leaf) goes through
 the entity decode helper with a `dbtype.Node` / `dbtype.Relationship`
 type assertion; a nested `ResolvedList` element recurses with an
@@ -815,8 +861,10 @@ recursion depth in `resolvedListGoType` — one loop level per
   `RecordValue` set (bool, int64, float64, string, temporals,
   `dbtype.Node`/`Relationship`, `[]any` for nested lists, etc.).
   The type assertion is `elem.(int64)` / `elem.(dbtype.Date)` /
-  etc. Type-assertion failure → decode error naming the column,
-  element index, and observed Go type.
+  etc. — the driver's type, not the emitted one, which is why a
+  `[]Date` element list still asserts `dbtype.Date` and appends
+  `toDate(v)`. Type-assertion failure → decode error naming the
+  column, element index, and observed Go type.
 - **Element `any` at the leaf** (a `list<unknown>` / `list<scalar
   null>` / `list<scalar map>`) skips the type assertion entirely
   and appends `elem` directly — the loop degenerates to
@@ -899,7 +947,10 @@ FLOAT32 → `float64` narrow. Encode is symmetric (§5.7).
     `dbtype.<Kind>` carrier (entity column, DATE property, or a
     temporal column whose kind is Date / Time / LocalTime /
     LocalDateTime / Duration), OR any list column whose leaf uses
-    `dbtype.<Kind>`.
+    `dbtype.<Kind>`. Decode positions only: a temporal PARAMETER
+    names its emitted `from<Kind>` conversion and no driver type,
+    so a file that binds a DATE and projects none must not import
+    `dbtype`.
   - `time` iff any column in the file decodes as `time.Time`
     (TIMESTAMP property, TemporalDateTime column, or a list column
     whose leaf is either of the two).
@@ -912,25 +963,25 @@ FLOAT32 → `float64` narrow. Encode is symmetric (§5.7).
 **Example — `:one`, single duration column, non-nullable:**
 
 ```go
-func (q *Queries) OneWeek(ctx context.Context) (dbtype.Duration, error) {
+func (q *Queries) OneWeek(ctx context.Context) (Duration, error) {
     records, err := q.db.run(ctx, oneWeekQueryText, nil, neo4j.AccessModeRead)
     if err != nil {
-        return dbtype.Duration{}, err
+        return Duration{}, err
     }
     if len(records) == 0 {
-        return dbtype.Duration{}, ErrNoRows
+        return Duration{}, ErrNoRows
     }
     if len(records) > 1 {
-        return dbtype.Duration{}, ErrMultipleResults
+        return Duration{}, ErrMultipleResults
     }
     value, isNil, err := neo4j.GetRecordValue[dbtype.Duration](records[0], "d")
     if err != nil {
-        return dbtype.Duration{}, fmt.Errorf("OneWeek: decode column %q: %w", "d", err)
+        return Duration{}, fmt.Errorf("OneWeek: decode column %q: %w", "d", err)
     }
     if isNil {
-        return dbtype.Duration{}, fmt.Errorf("OneWeek: column %q is non-nullable but arrived null", "d")
+        return Duration{}, fmt.Errorf("OneWeek: column %q is non-nullable but arrived null", "d")
     }
-    return value, nil
+    return toDuration(value), nil
 }
 ```
 
@@ -1004,21 +1055,34 @@ records, err := q.db.run(ctx, methodQueryText, map[string]any{"x": float64(arg)}
 - **Widening site is the emitted method body**, not a wrapper. The
   C2 `paramsMapText` helper composes the map literal from the
   Params-struct fields; C3 extends it with a per-field carrier
-  cast: FLOAT32 → `float64(x)` widen, temporal / DATE / TIMESTAMP
-  passthrough (the driver accepts `dbtype.Date` / `time.Time` in
-  parameter bindings), every other type unchanged. Same site
+  cast: FLOAT32 → `float64(x)` widen, a neutral temporal carrier →
+  its emitted `from<Kind>(x)` conversion (ADR 0033 — the driver's
+  reflective parameter marshalling has no encoding for a gqlc
+  struct), TIMESTAMP passthrough (the driver accepts `time.Time`
+  in parameter bindings), every other type unchanged. Same site
   covers the single-parameter method form (`arg` directly) and the
   Params-struct multi-parameter form (`arg.X` accessed).
 - **Nullable FLOAT32 parameter** — `*float32` field, bound as the
   pointer itself: `map[string]any{"x": arg}`. C1's uniform nullable
   encoding wins over the widen, and there is no emitted nil-check and
   no dereference. `paramBindExpr` takes the nullable arm before it
-  ever consults `driverCarrier`, so a nullable parameter of any width
-  passes through unconverted; the driver marshals a nil `*float32` to
+  ever consults `driverCarrier`, so a nullable numeric parameter of
+  any width passes through unconverted; the driver marshals a nil
+  `*float32` to
   Cypher `null` and a non-nil one to the `float64` it widens to on
   the wire. An emitted `float64(*arg)` — which is what this bullet
   used to specify — would panic on exactly the nil the nullability is
   there to carry.
+- **Nullable neutral-temporal parameter is the one exception to that
+  uniformity** — a `*Date` field binds `from<Kind>Ptr(arg)`, not the
+  pointer. The pass-the-pointer shape works because the driver can
+  marshal what the pointer points at; it cannot marshal a gqlc struct,
+  so `*Date` fails for the same reason `Date` does, one dereference
+  later. `from<Kind>Ptr` returns `any` — a typed nil pointer would
+  bind as a non-null value — so it returns an untyped `nil` for a nil
+  input and the converted `dbtype` value otherwise. `paramBindExpr`
+  therefore consults `isTemporalCarrier` inside the nullable arm,
+  before the pointer passthrough.
 - **Decode narrow site is the row-assembly** (§5.5). Symmetric
   with encode: `neo4j.GetRecordValue[float64]` + `float32(value)`
   narrow. Both sites use plain Go conversion; no range check
@@ -1027,6 +1091,74 @@ records, err := q.db.run(ctx, methodQueryText, map[string]any{"x": float64(arg)}
   the driver's parameter binding accepts `float64` directly. The
   C2 `paramsMapText` per-field dispatch handles this by leaving
   the field unwrapped.
+
+### 5.8 `temporal.go` — the neutral carriers
+
+ADR 0033's five carriers are emitted as a sixth file in the batch,
+alongside `db.go` / `graph.go` / `models.go` / `querier.go` and the
+per-source files:
+
+- **Content is fixed text**, not derived from the batch:
+  `codegen.RenderTemporal(pkg)` returns the same five declarations
+  for every schema and every target, differing only in the package
+  clause. `Date`, `LocalTime`, `Time`, `LocalDateTime`, `Duration` —
+  flat component structs, so `==` is value equality and the zero
+  value is inspectable. TIMESTAMP is absent by design: `time.Time`
+  is already driver-neutral.
+- **Emission trigger is `codegen.ReferencesTemporalCarrier(prepared)`** —
+  true iff some exported position of the prepared surface names a
+  carrier: an entity field, a query parameter, a row field, or any
+  nesting level of a list row field. A batch whose only temporal is
+  a TIMESTAMP emits no `temporal.go`.
+- **The trigger parses, it does not substring-match.** `Date` is a
+  substring of `LocalDateTime` and of entity names a schema may
+  choose, and a nested text (`[][]Date`) hides its leaf from a
+  prefix strip. Each Go type text goes through `go/parser.ParseExpr`
+  and an `ast.Inspect` for an `*ast.Ident` equal to a carrier name.
+  A `*ast.SelectorExpr` is not descended into — its `Sel` is another
+  package's identifier, and both `time.Time` and `dbtype.Date` would
+  otherwise report every batch as carrier-bearing. A text the parser
+  rejects answers true: emitting a `temporal.go` nothing references
+  still compiles, and omitting one something references does not.
+- **The five names are reserved identifiers** (§2.1), so a schema
+  cannot produce an entity whose struct name equals a carrier — the
+  reserved set refuses the batch before the trigger ever runs. They
+  are reserved whether or not the batch emits `temporal.go`, which
+  is the reserved set's documented posture: the union across
+  backends and batches.
+
+### 5.9 `temporal_neo4j.go` — the driver bridge
+
+The dbtype mentions the carriers displaced off the public surface
+land here, in one per-target file, entirely unexported. Emitted as a
+pair with `temporal.go`, under the same trigger.
+
+- **Per carrier, per direction, only what the batch reaches for.**
+  `temporalUses` walks the prepared batch and records three bits per
+  carrier: `decode` (`to<X>`) for entity properties and row columns,
+  `encode` (`from<X>`) for a non-nullable parameter, `encodePtr`
+  (`from<X>Ptr`) for a nullable one. A batch that only reads DATE
+  emits `toDate` and nothing else; the `property_date` golden is
+  that batch.
+- **The conversions are derived from the bolt codec, not from a
+  `dbtype` constructor** — there are none. `dbtype.Date` / `Time` /
+  `LocalTime` / `LocalDateTime` are `time.Time` newtypes; what a
+  component means is fixed by the packer
+  (`neo4j/internal/bolt/outgoing.go`) and the hydrator
+  (`hydrator.go`), verified at v5.28.4 and unchanged in v6.
+- **Every `from<X>` builds in a fixed zone** — UTC, or the value's
+  own offset for zoned `Time` — never `time.Local`. `time.Date`
+  resolves a wall time a DST transition makes ambiguous or
+  non-existent by MOVING it, so a local-zone construction would
+  silently shift the very components the carrier exists to hold.
+- **`from<X>Ptr` returns `any`, not `*dbtype.<X>`.** A typed nil
+  pointer binds as a non-null value through the driver's reflective
+  marshalling, so the nil arm returns an untyped `nil` and the
+  non-nil arm the converted value (§5.7).
+- **The `time` import is conditional on the conversions emitted**,
+  not on the carriers: a bridge that is only `toDate` still needs
+  `time` (it reads `time.Time(v).Date()`), one that is only
+  `toDuration` does not.
 
 ---
 
@@ -1070,7 +1202,7 @@ a `golden/` subdirectory with the complete generated package:
 | `temporal_column_localdatetime` | `RETURN localdatetime() AS ldt :one` — `ResolvedTemporal{LocalDateTime}` column. |
 | `temporal_column_duration` | `RETURN duration({days: 7}) AS d :one` — `ResolvedTemporal{Duration}` column. Guards against `time.Duration` regression. |
 | `temporal_column_time` | `RETURN time() AS t :one` — `ResolvedTemporal{Time}` column. |
-| `property_date` | `Person.dob :: DATE NOT NULL` schema property with no query — models-only adoption. `Person.Dob dbtype.Date`. |
+| `property_date` | `Person.dob :: DATE NOT NULL` schema property with no query — models-only adoption. `Person.Dob Date` — the neutral carrier, decoded from `dbtype.Date` through the emitted `toDate` (ADR 0033). Emits `temporal.go` + `temporal_neo4j.go`. |
 | `property_timestamp` | `Person.updatedAt :: TIMESTAMP` (nullable) schema property. `Person.UpdatedAt *time.Time`. Exercises the `time` import in `models.go`. |
 | `float32_column` | `Person.height :: FLOAT32 NOT NULL` + `RETURN p.height AS h :one`. Exercises the encode-widen / decode-narrow contract on both entity property and column. |
 | `float32_parameter` | `MATCH (p:Person {height: $h}) RETURN p :one` with `$h :: FLOAT32`. Exercises the parameter-binding `float64(x)` widen. |
@@ -1119,7 +1251,7 @@ Phase A admission: one column, `Column.Type` is
 `ResolvedTemporal{Duration}` — admissible under C3's widened
 column-shape set. Phase B derivation: `d` matches bare-identifier
 shape → `D` field name candidate; single column → bare-value
-return (§3.1 of C1): the method returns `(dbtype.Duration, error)`,
+return (§3.1 of C1): the method returns `(Duration, error)`,
 no Row struct. Emitted method matches §5.5's example above; and
 `models.go` for this fixture carries `Person` with `Id int64` plus
 `decodePerson` (no `time` import — only the entity is affected;
@@ -1368,8 +1500,9 @@ modes:
   of `dbtype.Time`); the fence catches at the version bump. The
   D7 standing instruction directs re-verification at each stage
   spec cycle, honored above (2026-07-11).
-- **Unused imports.** A `models.go` emitting only STRING / BOOL /
-  INT* properties (no DATE / TIMESTAMP) omits `time`; a
+- **Unused imports.** A `models.go` with no TIMESTAMP property omits
+  `time` — a DATE property no longer pulls it in, the field being
+  `Date` and the `time` use having moved to `temporal_neo4j.go`; a
   `<name>.cypher.go` with only property-column queries (no
   temporal / list / entity columns) omits `dbtype`. The compile
   fence's `go vet` catches any drift.

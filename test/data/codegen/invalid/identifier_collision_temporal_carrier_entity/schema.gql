@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE TemporalCarrierEntity AS {
+    (:LocalDateTime {
+        name :: STRING NOT NULL
+    })
+}

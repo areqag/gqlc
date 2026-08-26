@@ -2,14 +2,10 @@
 
 package temporalcolumnduration
 
-import (
-	"context"
-
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
-)
+import "context"
 
 type ReadQuerier interface {
-	OneWeek(ctx context.Context) (dbtype.Duration, error)
+	OneWeek(ctx context.Context) (Duration, error)
 }
 
 type WriteQuerier interface {

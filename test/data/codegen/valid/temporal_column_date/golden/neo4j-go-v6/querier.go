@@ -2,14 +2,10 @@
 
 package temporalcolumndate
 
-import (
-	"context"
-
-	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
-)
+import "context"
 
 type ReadQuerier interface {
-	TodayDate(ctx context.Context) (dbtype.Date, error)
+	TodayDate(ctx context.Context) (Date, error)
 }
 
 type WriteQuerier interface {

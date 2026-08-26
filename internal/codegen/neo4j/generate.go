@@ -29,6 +29,18 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 		{Path: "models.go", Contents: renderModels(pkg, prepared.Entities, prepared.Queries, target)},
 	}
 
+	// The neutral temporal carriers and their driver bridge, emitted as
+	// a pair and only when the prepared surface references a carrier
+	// (ADR 0033). temporal.go is byte-identical across every target;
+	// temporal_neo4j.go is this backend's, and holds every dbtype
+	// mention the carriers displaced off the public surface.
+	if codegen.ReferencesTemporalCarrier(prepared) {
+		files = append(files,
+			codegen.File{Path: "temporal.go", Contents: codegen.RenderTemporal(pkg)},
+			codegen.File{Path: "temporal_neo4j.go", Contents: renderTemporalConversions(pkg, temporalUses(prepared), target)},
+		)
+	}
+
 	// Per-source `<name>.cypher.go` file emission — grouped by
 	// SourceFile basename in first-appearance order (§5.5). Basename
 	// stripped of extension.
