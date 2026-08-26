@@ -14,8 +14,13 @@
 # starts a fresh session with the soul prepended; later wakes resume the
 # recorded session id, so a bead carried across wakes keeps its context
 # without re-reading the soul. The id is recovered by diffing `opencode
-# session list` around a fresh start, which keeps the pane human-readable
-# (--format json would stream event objects at whoever looks in).
+# session list` around a fresh start. That listing answers for the WHOLE
+# TOWN — one store, cwd scopes nothing — so it is filtered to sessions whose
+# directory is this seat's worktree before it may influence continuity, and
+# ordered by creation time: "the id this turn created" is a recency
+# question, and lexicographic order once handed a seat another citizen's
+# morning (bd gqlc-hv6g). The JSON here is a one-shot array from `session
+# list`, not the run pane's event stream; the pane stays human-readable.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -48,9 +53,11 @@ echo asleep >"$home/status"
 trap 'echo asleep >"$home/status"' EXIT
 trap 'exit 0' INT TERM
 
-session_ids() { # -> one session id per line (ses_…), best effort
-    (cd "$wt" && timeout 20 opencode session list 2>/dev/null) |
-        grep -oE 'ses_[A-Za-z0-9]+' | sort -u || true
+session_ids() { # -> this worktree's session ids, newest created first; best effort
+    (cd "$wt" && timeout 20 opencode session list --format json 2>/dev/null) |
+        jq -r --arg d "$wt" '(. // [])[] | select(.directory == $d)
+            | "\(.created)\t\(.id)"' 2>/dev/null |
+        sort -rn | cut -f2 || true
 }
 
 compose() { # $1 = wake reasons, one per line; $2 = a stale-hooks warning, or empty
@@ -194,11 +201,16 @@ $msg"
         rc=$?
 
         # grep -f against an empty pattern file matches nothing, so an empty
-        # baseline (first ever wake) takes the newest id outright.
+        # baseline (first ever wake) takes the newest id outright. Newest is
+        # a created-time question now — session_ids orders for it — and
+        # grep -v exits 1 when the turn created nothing new (a resumed
+        # session keeps its id), which pipefail would otherwise read as a
+        # dead runner.
+        new_id=""
         if [ -s "$prev_ids" ]; then
-            new_id=$(session_ids | grep -Fxvf "$prev_ids" | tail -1)
+            new_id=$(session_ids | grep -Fxvf "$prev_ids" | head -1 || true)
         else
-            new_id=$(session_ids | tail -1)
+            new_id=$(session_ids | head -1 || true)
         fi
         if [ -n "$new_id" ]; then
             printf '%s\n' "$new_id" >"$home/ox-session"
