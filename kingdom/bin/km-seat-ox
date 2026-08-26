@@ -161,7 +161,36 @@ while :; do
 $msg"
         fi
 
-        timeout 3600 opencode run "${args[@]}" "$msg"
+        # A turn can finish speaking and still never exit: three seats hung
+        # this way on night one — goodbye printed, process alive for 40
+        # minutes, no tool call in between. The witness (progress.json, kept
+        # current by the kingdom-witness plugin on every tool event) is the
+        # honest clock: when it stops advancing while opencode lives, the
+        # turn is over in every sense that matters and is killed. 20 minutes
+        # matches [welfare] stalled_after_minutes: twice the longest
+        # legitimate wait measured in this repo.
+        progress="$home/progress.json"
+        last_stamp=""
+        [ -f "$progress" ] && last_stamp=$(stat -c %Y "$progress")
+        timeout 3600 opencode run "${args[@]}" "$msg" &
+        ox_pid=$!
+        while kill -0 "$ox_pid" 2>/dev/null; do
+            sleep 60
+            kill -0 "$ox_pid" 2>/dev/null || break
+            now_stamp=""
+            [ -f "$progress" ] && now_stamp=$(stat -c %Y "$progress")
+            if [ -n "$last_stamp" ] && [ -n "$now_stamp" ] \
+                && [ "$now_stamp" = "$last_stamp" ] \
+                && [ $(( $(date +%s) - now_stamp )) -ge 1200 ]; then
+                echo "km-seat-ox: $seat's turn showed no progress for 20m while alive; killing it"
+                kill "$ox_pid" 2>/dev/null
+                sleep 5
+                kill -9 "$ox_pid" 2>/dev/null
+                break
+            fi
+            [ -n "$now_stamp" ] && last_stamp=$now_stamp
+        done
+        wait "$ox_pid" 2>/dev/null
         rc=$?
 
         # grep -f against an empty pattern file matches nothing, so an empty
