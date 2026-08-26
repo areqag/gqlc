@@ -577,15 +577,19 @@ case "$_tty" in
     *) exec /usr/bin/pgrep "$@" ;;
 esac
 
-# The second query on the same tty: `-f "km-seat <seat>$"`, asking whether the
+# The second query on the same tty: `-f "<runner> <seat>$"`, asking whether the
 # RUNNER is still parked there (gqlc-6ha4). It is a different process from the
 # claude above and the two disagree in the ordinary case — a healthy asleep seat
 # has a runner and no claude — so this arm reads a fixture of its own.
 #
-# A window's command IS km-seat, so the DEFAULT is that a window has a runner;
+# A window's command IS the runner, so the DEFAULT is that a window has one;
 # what a row states is the anomaly, by naming a seat on fake-dead-runners. And
 # the pattern is really matched against a cmdline rather than assumed, so a km
 # that stopped anchoring it does not pass here for free.
+#
+# The synthetic cmdline carries BOTH engine names, because which one km asks
+# about is read from kingdom.toml ([kingdom] seat_runner) and the stub must not
+# pin an engine the config has moved off (2026-08-25 opencode port).
 _pat=""
 _prev=""
 for _a in "$@"; do
@@ -596,7 +600,8 @@ if [ -n "$_pat" ]; then
     _seat="${_tty#fake/}"
     _dead="${KM_STATE_DIR:-}/fake-dead-runners"
     if [ -f "$_dead" ] && grep -qx "$_seat" "$_dead"; then exit 1; fi
-    if printf '%s' "/fake/kingdom/bin/km-seat $_seat" | grep -Eq "$_pat"; then
+    if printf '%s' "/fake/kingdom/bin/km-seat $_seat" | grep -Eq "$_pat" ||
+       printf '%s' "/fake/kingdom/bin/km-seat-ox $_seat" | grep -Eq "$_pat"; then
         echo 4242
         exit 0
     fi
@@ -5162,11 +5167,15 @@ else
     runnerbin="$TMP/runnerbin"
     mkdir -p "$runnerbin"
     # A shell script, deliberately: that is what km-seat is, and the point of
-    # the row is that its comm is not its name.
-    printf '#!/usr/bin/env bash\nsleep 120\n' >"$runnerbin/km-seat"
-    chmod +x "$runnerbin/km-seat"
+    # the row is that its comm is not its name. The NAME comes from the same
+    # config km reads, so the row follows [kingdom] seat_runner instead of
+    # pinning an engine (2026-08-25 opencode port).
+    runner_name=$(PATH="$BIN:$PATH" "$KM" cfg kingdom seat_runner)
+    : "${runner_name:=km-seat}"
+    printf '#!/usr/bin/env bash\nsleep 120\n' >"$runnerbin/$runner_name"
+    chmod +x "$runnerbin/$runner_name"
     export KM_TMUX_SESSION="km-test-runner-$$"
-    tmux new-session -d -s "$KM_TMUX_SESSION" -n artur -x 80 -y 24 "$runnerbin/km-seat artur" 2>/dev/null
+    tmux new-session -d -s "$KM_TMUX_SESSION" -n artur -x 80 -y 24 "$runnerbin/$runner_name artur" 2>/dev/null
     for _ in $(seq 1 50); do
         "$KM" seat-runner artur && break
         sleep 0.1
