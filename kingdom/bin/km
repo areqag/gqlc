@@ -995,10 +995,38 @@ cmd_attach() {
 }
 
 cmd_herratsayn() {
-    if [ "$(seat_status sedrak)" != awake ]; then
-        cmd_wake sedrak --reason "Հեռաձայն from Անդրանիկ — he is calling you now"
+    local sd home wt session queued
+    sd=$(state_dir)
+    home="$sd/seats/sedrak"
+    wt=$(seat_worktree sedrak)
+    if seat_session_live sedrak; then
+        echo "Սեդրակ is mid-turn; attaching read-only — a headless turn takes no input."
+        echo "Leave word instead: km wake sedrak --reason \"...\""
+        cmd_attach sedrak
+        return 0
     fi
-    cmd_attach sedrak
+    # The visit proper: an interactive TUI on his recorded session, with the
+    # runner deferred behind an in-person flag so no mechanical wake starts a
+    # second engine over the conversation (km-seat-ox checks the flag before
+    # consuming a wake and leaves it queued).
+    mkdir -p "$home"
+    : >"$home/in-person"
+    session=""
+    [ -f "$home/ox-session" ] && session=$(cat "$home/ox-session")
+    local tui_args=()
+    if [ -n "$session" ]; then tui_args=(-s "$session"); else tui_args=(-c); fi
+    echo "You are aboard Սեդրակ's seat, interactive. Exit the TUI when you stand up."
+    (
+        cd "$wt" || exit 1
+        unset KM_CONFIG
+        export PATH="$SCRIPT_DIR:$PATH"
+        export KINGDOM_SEAT=sedrak BEADS_ACTOR=sedrak KM_STATE_DIR="$sd"
+        exec opencode "${tui_args[@]}"
+    ) || echo "herratsayn: the TUI ended abnormally" >&2
+    rm -f "$home/in-person"
+    queued=0
+    [ -f "$home/wake" ] && queued=$(wc -l <"$home/wake")
+    echo "Visit over — $queued wake reason(s) queued for his next mechanical pass."
 }
 
 # ---------- halt ----------

@@ -88,6 +88,12 @@ compose() { # $1 = wake reasons, one per line; $2 = a stale-hooks warning, or em
 
 while :; do
     until [ -s "$home/wake" ]; do sleep 5; done
+    # The king may be sitting in this seat in person (km herratsayn drops an
+    # in-person flag and opens a TUI on this session). A wake consumed under
+    # him would run a second engine over the session he is talking to, so a
+    # flagged seat defers: the reason stays queued and is read on the first
+    # mechanical pass after he stands up.
+    if [ -f "$home/in-person" ]; then sleep 15; continue; fi
     reasons=$(cat "$home/wake")
     rm -f "$home/wake"
 
