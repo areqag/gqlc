@@ -46,9 +46,10 @@ ox_model=$("$KM" cfg ox model)
 mkdir -p "$home/handoff/archive"
 # Every runner death so far was silent: the pane it printed to was destroyed
 # by whatever replaced it, and reconcile's respawn left no trace of why the
-# loop exited. This log outlives the window.
-exec >>"$home/runner.log" 2>&1
-echo "=== $(date -u +%FT%TZ) runner started (pid $$) ==="
+# loop exited. This log outlives the window. Lifecycle lines go to it
+# EXPLICITLY: an exec redirect here is what blinded every pane in the town
+# for a morning — the pane is the point of running in tmux.
+echo "=== $(date -u +%FT%TZ) runner started (pid $$) ===" >>"$home/runner.log"
 echo asleep >"$home/status"
 trap 'echo asleep >"$home/status"' EXIT
 trap 'exit 0' INT TERM
@@ -179,7 +180,11 @@ $msg"
         progress="$home/progress.json"
         last_stamp=""
         [ -f "$progress" ] && last_stamp=$(stat -c %Y "$progress")
-        timeout 3600 opencode run "${args[@]}" "$msg" &
+        # The tee keeps the pane live AND leaves the same bytes in the runner
+        # log; process substitution, not a pipe, so $! stays the turn's own
+        # pid and a watchdog kill reaches opencode through timeout.
+        timeout 3600 opencode run "${args[@]}" "$msg" \
+            > >(tee -a "$home/runner.log") 2>&1 &
         ox_pid=$!
         while kill -0 "$ox_pid" 2>/dev/null; do
             sleep 60
