@@ -35,11 +35,15 @@
 // — it leaves entries unread, so the deletion is refused rather than run over
 // an incomplete record. The rest are unrecoverable once the deletion runs, so
 // a run that does not say so is a run that lied. Two things go unreported, and
-// neither loses readable content. A non-regular entry — symlink, FIFO, socket —
-// is skipped by the walk before the archive sees it and deleted with no report
-// line; removing a symlink removes only the link, never its target. And a
-// regular file that vanished between the walk and the read goes unreported
-// because there is nothing left to delete by then.
+// neither loses readable content: both are absences of a report line within
+// what the tool actually removes or attempts. A non-regular entry — symlink,
+// FIFO, socket — inside a directory being removed is skipped by the walk
+// before the archive sees it and deleted with its directory, named by no
+// report line of its own; removing a symlink removes only the link, never its
+// target. A non-regular entry at the top of the scan root is never a candidate
+// for removal at all: the scan retains it outright. And a regular file that
+// vanished between the walk and the read goes unreported because there is
+// nothing left to delete by then.
 //
 // -apply additionally refuses any -root that is not one of the two directories
 // compiled in as scratch (/tmp and /var/tmp — the environment does not get a
