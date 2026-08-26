@@ -520,6 +520,25 @@ Read the result back with `bd ready`, not `bd show` — `bd show` will happily
 display a bead no pass can reach. `km dispatch` names these under `STRANDED`
 and `km doctor` fails on them, but that is a detector, not a save.
 
+That recipe is safe, measured 2026-08-24 on both the deployed bd and the latest
+release: both fields apply, and `--assignee ""` is read as a value rather than
+as a missing one (bd `gqlc-o6kp`). Two things about it are worth knowing before
+you trust what you see, because neither is visible from the command line you
+typed:
+
+- **The `✓ Updated issue` line means the command was accepted, not that a field
+  moved.** An update that changes nothing prints exactly the same line. This is
+  why the read-back above is in the recipe and not left to your judgement.
+- **A refused `bd update` prints NOTHING on stdout.** It exits non-zero and puts
+  the reason on stderr only, and it discards the whole command — so one bad flag
+  takes the valid fields beside it down with it. If you run bd through anything
+  that drops stderr, a refusal and a silent no-op look identical. `-l` is a
+  common way to trigger it: labels on `update` are `--add-label` /
+  `--set-labels`, and `-l` belongs to `bd create`.
+
+The full write-side contract, including why `bd update` may quietly leave one
+bead untouched when you name several, is `docs/bd-ledger-writes.md`.
+
 **The priority floor binds the fresh pass only** (`[dispatch] max_priority`,
 `2` since gqlc-s4zm). It is configuration and it moves, so read it with
 `km cfg` rather than trusting this sentence. Being HANDED a bead below the
