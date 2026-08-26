@@ -3388,10 +3388,10 @@ cmd_doctor() {
 # States, and the distinction gqlc-d38n turns on — "behind because working" is
 # not "behind because parked", and only the second is a defect:
 #   current  HEAD is origin/master
-#   parked   detached, clean, no commits of its own: nothing here to lose, and
-#            nobody put it here on purpose. THIS is the 14-commit case.
-#   working  a branch, or a dirty tree, or commits of its own. Legitimately
-#            behind; reported, never counted as stale.
+#   parked   clean, and holding nothing that some other ref does not already
+#            hold, so moving it can lose nothing. THIS is the 14-commit case.
+#   working  a dirty tree, or commits that live in this checkout and nowhere
+#            else. Legitimately behind; reported, never counted as stale.
 #   unknown  no worktree, or git could not answer. Never rendered as current:
 #            a question that was not answered is not a clean answer.
 seat_freshness() {
@@ -3419,7 +3419,37 @@ seat_freshness() {
     # inside the seat's own checkout.
     behind_gates=$(git_at "$wt" rev-list --count "HEAD..$target" -- .githooks .claude 2>/dev/null) || behind_gates=0
 
-    if [ -n "$dirty" ] || [ -n "$branch" ] || [ "$ahead" -gt 0 ]; then
+    # What makes a move unsafe is not being on a branch; it is holding the ONLY
+    # copy of something. Being on a branch used to be sufficient for `working`,
+    # and `working` never moves, so a seat whose branch had merged was reported
+    # exposed forever and resolved never — measured 2026-08-23, three seats
+    # 63-65 commits behind on the gate paths, every one of them clean with
+    # nothing unpushed (bd gqlc-5t2u).
+    #
+    # Asked as "does any ref elsewhere hold this?", which needs no opinion about
+    # merges. Deliberately NOT `--is-ancestor` and not patch-id: a squash-merged
+    # branch is neither an ancestor of master nor patch-identical to it, so both
+    # refuse such a seat forever, and patch-id said "not on master" for all five
+    # of ayg's merged commits — confidently and wrongly.
+    #
+    #   on a branch   commits its upstream has not got
+    #   detached      commits target has not got, as before
+    #
+    # One question, not two: "no upstream configured" and "git would not answer"
+    # take the same branch and mean the same thing — nothing was shown to hold
+    # this, so it is held. Asking rev-parse first and rev-list second would read
+    # better and would put an unreachable fallback under the second call, which
+    # a mutation duly SURVIVED: rev-list cannot fail for a ref rev-parse has
+    # just verified, so no row could ever reach it.
+    local unique
+    if [ -n "$branch" ]; then
+        unique=$(git_at "$wt" rev-list --count "@{u}..HEAD" 2>/dev/null) || unique=
+        [ -n "$unique" ] || unique=1
+    else
+        unique=$ahead
+    fi
+
+    if [ -n "$dirty" ] || [ "$unique" -gt 0 ]; then
         local why="$ahead commit(s) of its own, on no branch"
         [ -n "$branch" ] && why="branch $branch in flight"
         [ -n "$dirty" ] && why="uncommitted work in the tree"
