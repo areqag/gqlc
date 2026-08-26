@@ -39,6 +39,11 @@ ox_model=$("$KM" cfg ox model)
 [ -d "$wt" ] || { echo "km-seat-ox: no worktree at $wt (km up creates it)" >&2; exit 1; }
 
 mkdir -p "$home/handoff/archive"
+# Every runner death so far was silent: the pane it printed to was destroyed
+# by whatever replaced it, and reconcile's respawn left no trace of why the
+# loop exited. This log outlives the window.
+exec >>"$home/runner.log" 2>&1
+echo "=== $(date -u +%FT%TZ) runner started (pid $$) ==="
 echo asleep >"$home/status"
 trap 'echo asleep >"$home/status"' EXIT
 trap 'exit 0' INT TERM
