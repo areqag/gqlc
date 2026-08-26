@@ -73,6 +73,23 @@ the unfilter and is not one.
 Full measurements, the deployed-bd contract, and an audit of this repository's
 own call sites: [docs/bd-ledger-queries.md](docs/bd-ledger-queries.md).
 
+## Writing to the bd ledger
+
+- **`✓ Updated issue` means accepted, not changed.** An update that moves nothing
+  prints the same line. Read the field back — for routability, with `bd ready`.
+- **A refused `bd update` prints nothing on stdout.** It exits non-zero, puts the
+  reason on stderr alone, and discards the *whole* command, so one bad flag takes
+  the valid fields beside it. Drop stderr and ignore the exit status and a
+  refusal is indistinguishable from a silent no-op. `-l` is the common trigger:
+  labels on `update` are `--add-label` / `--set-labels`; `-l` is `bd create`'s.
+- **Name one bead per `bd update` whose success you check by exit status.** Given
+  several ids it is best-effort — it exits 0 having skipped the ones it could not
+  resolve. `bd close` differs: it refuses the whole command and writes nothing.
+
+Measured 2026-08-24 against bd 1.0.4 and 1.2.2, with the falsifiers and this
+repository's write call-site audit:
+[docs/bd-ledger-writes.md](docs/bd-ledger-writes.md).
+
 ## Working directory
 
 **No session modifies files in the shared repo cwd** (`/home/antranig/Developer/gqlc/gqlc`). It is for read-only research work (grep, read, `bd show`, `git log`) — the moment intent shifts to modification (any `bd create/close/update`, any file write, any branch creation), you work somewhere else. WHERE depends on who you are, and there are two answers.

@@ -47,6 +47,7 @@ on:
       - .githooks/bd-gh-sync
       - .githooks/tests/bd-gh-sync-test.sh
       - .github/workflows/bd-behaviour.yml
+      - docs/bd-ledger-writes.md
 
 permissions:
   contents: read
@@ -162,3 +163,209 @@ jobs:
               exit 1
           fi
           echo "comparator refuses an unchanged timestamp and an absent one; the pass above is a measurement."
+
+  # The write-side contract that docs/bd-ledger-writes.md rests on, and the
+  # release recipe in kingdom/brain/playbooks/citizen-protocol.md with it (bd
+  # gqlc-o6kp). Measured first-party 2026-08-24 against bd 1.0.4 (ce242a879, the
+  # deployed binary) and bd 1.2.2 (6c124203e, then the latest release): every row
+  # below was identical on both.
+  #
+  # A SEPARATE JOB, not more steps on bd-updated-at, because the two claims are
+  # independent — a bd that broke `updated_at` and a bd that went quiet on a
+  # refused write are different upgrades to be warned about, and a shared job
+  # reports only the first to fail. The install step is duplicated rather than
+  # factored into a composite action; fourteen lines twice is cheaper to read
+  # than a second file to open.
+  #
+  # SAME ALARM, NOT A GATE. See this file's header: the claims are about a binary
+  # this repository neither owns nor vendors, so this job's id must stay OFF
+  # master's required-check list.
+  bd-write-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install the latest released bd
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo gastownhall/beads --json tagName --jq .tagName)"
+          version="${tag#v}"
+          url="https://github.com/gastownhall/beads/releases/download/${tag}/beads_${version}_linux_amd64.tar.gz"
+          mkdir -p "$HOME/.local/bin"
+          curl --proto '=https' --tlsv1.2 -sSfL \
+            --retry 5 --retry-all-errors --retry-delay 3 \
+            -o "${RUNNER_TEMP}/beads.tar.gz" "$url"
+          tar -C "${RUNNER_TEMP}" -xzf "${RUNNER_TEMP}/beads.tar.gz" bd
+          install -m 0755 "${RUNNER_TEMP}/bd" "$HOME/.local/bin/bd"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: "a refused bd update is loud, total, and writes nothing"
+        run: |
+          set -uo pipefail
+          # The runner wraps run-steps in `bash -e`, and this step provokes
+          # refusals on purpose: capturing one into out="$(bd update ...)"; rc=$?
+          # is exactly the assignment shape errexit kills. Failures accumulate
+          # through bad() instead, so errexit is turned off here deliberately.
+          set +e
+          bd version
+
+          workspace="$(mktemp -d)"
+          trap 'rm -rf "$workspace"' EXIT
+
+          # git exports GIT_DIR and friends into step environments, and bd
+          # follows them out of the workspace and into whatever repository they
+          # name. Cleared, or the probe writes to the checkout.
+          unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
+          fail=0
+          ok()  { printf 'ok   - %s\n' "$1"; }
+          bad() { fail=1; printf 'FAIL - %s\n' "$1"; }
+
+          # THE COMPARATOR, kept apart from every bd interaction so the falsifier
+          # arm at the end can drive it with values bd never produced. A refusal
+          # must be all three things at once: non-zero, silent on stdout, and
+          # without effect. Any one alone is satisfied by a bd that has gone quiet
+          # in a way this repository's guidance would then be wrong about.
+          assert_refused() {
+              local rc="$1" out="$2" before="$3" after="$4"
+              if [ "$rc" -eq 0 ]; then
+                  echo "exit status was 0 — the refusal is invisible to every caller that checks it" >&2
+                  return 1
+              fi
+              case "$out" in
+                  *"Updated issue"*)
+                      echo "stdout carried a success line on a refused write: $out" >&2
+                      return 1 ;;
+              esac
+              if [ "$before" != "$after" ]; then
+                  echo "the bead moved on a refused write: before=$before after=$after" >&2
+                  return 1
+              fi
+              return 0
+          }
+
+          cd "$workspace"
+          bd init --prefix probe --non-interactive
+          a="$(bd create "write contract probe A" --json | jq -r '.id')"
+          b="$(bd create "write contract probe B" --json | jq -r '.id')"
+          [ -n "$a" ] && [ -n "$b" ] || { echo "probe beads could not be created; the rows below prove nothing"; exit 1; }
+
+          BLOCKED='{"status":"blocked","assignee":"somebody"}'
+          peek()  { bd show "$1" --json | jq -c '.[0]|{status,assignee}'; }
+          reset() { bd update "$a" --status blocked --assignee somebody >/dev/null 2>&1; }
+
+          # --- refusals ---------------------------------------------------------
+          # Each row pairs a VALID intent with a bad one, so a pass means the
+          # valid half was discarded too. A bd that applied the good half and
+          # dropped the bad one would leave a bead half-released, which is the
+          # state this family of incidents is about.
+          #
+          # The unknown flag is deliberately absurd rather than the `-l` of the
+          # originating incident: `-l` is `bd create`'s labels flag, and a future
+          # bd that adds it to `update` would redden this row for a reason that is
+          # not a regression.
+          refusal_row() {
+              local name="$1"; shift
+              local before after out rc
+              reset
+              before="$(peek "$a")"
+              out="$(bd update "$a" "$@" 2>/dev/null)"; rc=$?
+              after="$(peek "$a")"
+              if assert_refused "$rc" "$out" "$before" "$after"; then
+                  ok "$name"
+              else
+                  bad "$name (rc=$rc stdout='$out' before=$before after=$after)"
+              fi
+          }
+
+          refusal_row "an unknown flag discards the valid --status beside it" \
+              --status open --frobnicate-the-widget x
+          refusal_row "an invalid --status value discards the valid --assignee beside it" \
+              --assignee "" --status bogus
+          refusal_row "an out-of-range --priority discards the valid --status beside it" \
+              --status open --priority 9
+
+          # --- the documented two-field release still applies BOTH fields -------
+          # The rule above is only tolerable because the release recipe every
+          # citizen is told to type is not caught by it.
+          reset
+          bd update "$a" --assignee "" --status open >/dev/null 2>&1
+          released="$(peek "$a")"
+          if [ "$released" = '{"status":"open","assignee":null}' ]; then
+              ok 'bd update <id> --assignee "" --status open applies both fields'
+          else
+              bad "the two-field release applied something else: $released — kingdom/brain/playbooks/citizen-protocol.md tells every citizen to type exactly this to make a bead routable again"
+          fi
+
+          # --- a success line is not a write ------------------------------------
+          reset
+          before="$(peek "$a")"
+          out="$(bd update "$a" --status blocked --assignee somebody 2>/dev/null)"; rc=$?
+          after="$(peek "$a")"
+          if [ "$rc" -eq 0 ] && [ "$before" = "$after" ]; then
+              case "$out" in
+                  *"Updated issue"*)
+                      ok "an update that changes nothing still prints a success line — read back, never trust the tick" ;;
+                  *)
+                      bad "a no-op update no longer prints a success line (stdout='$out'). That is an IMPROVEMENT — bd now distinguishes accepted from applied — and docs/bd-ledger-writes.md should stop telling citizens the tick means nothing." ;;
+              esac
+          else
+              bad "the no-op probe did not no-op (rc=$rc before=$before after=$after), so the row it was meant to establish proves nothing"
+          fi
+
+          # --- update is per-id best-effort; close is all-or-nothing -------------
+          # Pinned in both directions because the guidance is asymmetric: name one
+          # bead per `bd update` you intend to verify by exit status, while
+          # `bd close` may be trusted with several.
+          reset
+          out="$(bd update "$a" "no-such-bead-zzz" --status open 2>/dev/null)"; rc=$?
+          after="$(peek "$a")"
+          if [ "$rc" -eq 0 ] && [ "$after" != "$BLOCKED" ]; then
+              ok "bd update with one unresolvable id exits 0 having written the others"
+          else
+              bad "bd update with one unresolvable id now exits rc=$rc (after=$after). If it refuses the whole command, that is an IMPROVEMENT and the one-id-per-update rule in docs/bd-ledger-writes.md can be dropped."
+          fi
+
+          before_b="$(bd show "$b" --json | jq -r '.[0].status')"
+          bd close "$b" "no-such-bead-zzz" >/dev/null 2>&1; rc=$?
+          after_b="$(bd show "$b" --json | jq -r '.[0].status')"
+          if [ "$rc" -ne 0 ] && [ "$before_b" = "$after_b" ]; then
+              ok "bd close with one unresolvable id refuses the whole command and writes nothing"
+          else
+              bad "bd close with one unresolvable id: rc=$rc, $before_b -> $after_b. It no longer resolves every id before writing, so it shares bd update's partial-write shape and the asymmetry section of docs/bd-ledger-writes.md is wrong."
+          fi
+
+          # --- THE FALSIFIER ----------------------------------------------------
+          # Every refusal row above is a call to assert_refused. A comparator that
+          # cannot refuse is a job that cannot fire, so it is driven here with one
+          # input per condition it claims to test — in band, on every run, rather
+          # than performed once by hand and written down.
+          if assert_refused 0 "" '{"x":1}' '{"x":1}' 2>/dev/null; then
+              echo "::error title=This check cannot fail::the comparator accepted rc=0 as a refusal (bd gqlc-o6kp)."
+              fail=1
+          fi
+          if assert_refused 1 "✓ Updated issue: probe-1 — x" '{"x":1}' '{"x":1}' 2>/dev/null; then
+              echo "::error title=This check cannot fail::the comparator accepted a success line on stdout as a refusal (bd gqlc-o6kp)."
+              fail=1
+          fi
+          if assert_refused 1 "" '{"x":1}' '{"x":2}' 2>/dev/null; then
+              echo "::error title=This check cannot fail::the comparator accepted a bead that MOVED as a refusal, so a partial write would read as a pass (bd gqlc-o6kp)."
+              fail=1
+          fi
+          echo "comparator refuses rc=0, a success line, and a moved bead; the rows above are measurements."
+
+          if [ "$fail" -ne 0 ]; then
+              {
+                  echo "### bd's write contract has changed"
+                  echo
+                  echo "\`docs/bd-ledger-writes.md\` and the release recipe in"
+                  echo "\`kingdom/brain/playbooks/citizen-protocol.md\` rest on the rows above."
+                  echo "Read the failing row before fixing anything: some of them fail on an"
+                  echo "IMPROVEMENT in bd and ask for the documentation to be relaxed."
+                  echo
+                  echo "bd version: $(bd version) (bd gqlc-o6kp)"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+          fi
