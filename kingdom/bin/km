@@ -929,10 +929,17 @@ cmd_sleep() {
     # `km reconcile`, which is what makes an undelivered request recoverable.
     echo asleep-pending >"$(seat_home "$seat")/status"
     if window_up "$seat"; then
-        send_line "=$SESSION:$seat" "/exit"
-        echo "sleep: good night, $(seat_display "$seat") — the session ends when this turn does"
+        if [ "$(seat_runner)" = km-seat-ox ]; then
+            # Headless: there is no prompt box to type /exit into, and the
+            # turn ends itself — the runner writes `asleep` when the process
+            # exits. Typing here would only pile debris into the pane.
+            echo "sleep: good night, $(seat_display "$seat") — the turn ends when it ends"
+        else
+            send_line "=$SESSION:$seat" "/exit"
+            echo "sleep: good night, $(seat_display "$seat") — the session ends when this turn does"
+        fi
     else
-        echo "sleep: no tmux window for $seat; end the session normally"
+        echo "sleep: no tmux window for $seat; end your session normally"
     fi
 }
 
@@ -1002,6 +1009,10 @@ cmd_herratsayn() {
     if seat_session_live sedrak; then
         echo "Սեդրակ is mid-turn; attaching read-only — a headless turn takes no input."
         echo "Leave word instead: km wake sedrak --reason \"...\""
+        # Old /exit debris from the claude era litters these panes; reset the
+        # view so what he is doing NOW is what you see.
+        tmux send-keys -R -t "=$SESSION:sedrak" 2>/dev/null
+        tmux clear-pane -t "=$SESSION:sedrak" 2>/dev/null
         cmd_attach sedrak
         return 0
     fi
@@ -1180,9 +1191,18 @@ cmd_reconcile() {
         if seat_session_live "$s"; then
             rm -f "$suspect"
             if [ "$st" = asleep-pending ]; then
-                send_line "=$SESSION:$s" "/exit"
-                echo "reconcile: $s asked to leave and is still here; /exit re-sent"
-                redelivered=$((redelivered + 1))
+                if [ "$(seat_runner)" = km-seat-ox ]; then
+                    # Headless engine: there is no interactive session to
+                    # leave and no prompt to receive an /exit, so re-sending
+                    # one every tick only litters the pane the king may be
+                    # looking at. The runner writes `asleep` itself when the
+                    # turn's process exits; nothing needs delivering.
+                    :
+                else
+                    send_line "=$SESSION:$s" "/exit"
+                    echo "reconcile: $s asked to leave and is still here; /exit re-sent"
+                    redelivered=$((redelivered + 1))
+                fi
             fi
             continue
         fi
