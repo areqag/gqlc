@@ -997,7 +997,9 @@ cmd_attach() {
         tmux select-window -t "=$SESSION:$seat"
     else
         tmux select-window -t "=$SESSION:$seat"
-        exec tmux attach-session -t "=$SESSION"
+        # No exec: callers that treat a failed attach as survivable
+        # (herratsayn) cannot catch one that replaced this process.
+        tmux attach-session -t "=$SESSION"
     fi
 }
 
@@ -1017,9 +1019,10 @@ cmd_herratsayn() {
         [ -z "$msg" ] || echo "Your words are queued for his next pass."
         echo "Leave word anytime: km wake sedrak --reason \"...\""
         # Old /exit debris from the claude era litters these panes; reset the
-        # view so what he is doing NOW is what you see.
+        # view so what he is doing NOW is what you see. (-R resets the
+        # terminal; there is no clear-pane verb in this tmux.)
         tmux send-keys -R -t "=$SESSION:sedrak" 2>/dev/null
-        tmux clear-pane -t "=$SESSION:sedrak" 2>/dev/null
+        tmux clear-history -t "=$SESSION:sedrak" 2>/dev/null
         # An attach that cannot happen (no tty on this terminal, detached
         # client) is a report, not a failure of the call.
         cmd_attach sedrak || echo "attach unavailable here — watch from any terminal with: tmux attach-session -t kingdom \\; select-window -t kingdom:sedrak"
