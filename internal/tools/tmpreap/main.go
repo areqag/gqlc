@@ -26,17 +26,20 @@
 // inodes is fuller. That gate is what lets an unattended cadence run this: see
 // `just tmp-reap-cadence`, which km's guard sweep invokes once per tick.
 //
-// -apply archives text artefacts under
-// -archive-max-file to a tarball outside the scan root first, up to a total of
-// -archive-max-total, then reports what it could not archive: every dropped file
-// is counted, in a category that says why, and the first pathsListed of each
-// category are named with the remainder disclosed as a count. Reaching the total
-// budget is the one drop that is not merely reported — it leaves entries unread,
-// so the deletion is refused rather than run over an incomplete record. The rest
-// are unrecoverable once the deletion runs, so
-// a run that does not say so is a run that lied. One thing goes unreported, and
-// only because there is nothing left to delete by then: a file that vanished
-// between the walk and the read.
+// -apply archives regular text files
+// under -archive-max-file to a tarball outside the scan root first, up to a
+// total of -archive-max-total, then reports what it could not archive: every
+// dropped regular file is counted, in a category that says why, and the first
+// pathsListed of each category are named with the remainder disclosed as a
+// count. Reaching the total budget is the one drop that is not merely reported
+// — it leaves entries unread, so the deletion is refused rather than run over
+// an incomplete record. The rest are unrecoverable once the deletion runs, so
+// a run that does not say so is a run that lied. Two things go unreported, and
+// neither loses readable content. A non-regular entry — symlink, FIFO, socket —
+// is skipped by the walk before the archive sees it and deleted with no report
+// line; removing a symlink removes only the link, never its target. And a
+// regular file that vanished between the walk and the read goes unreported
+// because there is nothing left to delete by then.
 //
 // -apply additionally refuses any -root that is not one of the two directories
 // compiled in as scratch (/tmp and /var/tmp — the environment does not get a
