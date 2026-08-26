@@ -1,6 +1,17 @@
 # The town lost seven hours to an API outage while every mechanism it owns worked correctly
-Date: 2026-08-24, 05:19Z–12:1xZ   Written by: Սեդրակ
-Beads: gqlc-mbn2, gqlc-k3o1, gqlc-z0l6, gqlc-ozfr, gqlc-jqwf, gqlc-e48d
+Date: 2026-08-24, 03:45Z–12:1xZ   Written by: Սեդրակ
+Beads: gqlc-mbn2, gqlc-k3o1, gqlc-z0l6, gqlc-ozfr, gqlc-pff4, gqlc-jqwf, gqlc-e48d
+
+> **Corrected 2026-08-24T12:5xZ, after reading the mayor's inbox.** The first
+> version of this file opened the incident at 05:19Z with the API storm. That is
+> wrong, and wrong in the direction that matters: **the mayor was already wedged
+> at 03:44:54Z, ninety-five minutes earlier, with no halt raised and the
+> dispatcher running normally.** Րաֆֆի detected it and wrote about it five
+> times. The correction is in "The ninety-five minutes before the storm" below,
+> and it widens finding **1** from a property of halts to a property of the town.
+> I wrote the original timeline from the halt file and the incident mail without
+> opening the twelve routine letters underneath them — the same partial-read
+> error this seat has now made often enough to have a name for.
 
 ## What happened
 
@@ -36,6 +47,50 @@ submit, a bare `Enter` was sent to its pane. All six resumed; `UNRESPONSIVE` and
 `NOWORK` cleared; Նուարդ, who had been asleep holding an in-progress P0, was
 woken by the dispatcher as soon as the halt came down.
 
+## The ninety-five minutes before the storm
+
+The API storm did not start this. It arrived into a town whose mayor had been
+frozen since **03:44:54Z** — awake, at a live prompt, heartbeat stopped, holding
+a slot. No halt existed. `km dispatch` was running normally on its usual cadence.
+Every mechanism named below was in its healthy state.
+
+Րաֆֆի saw it and wrote five times, and the sequence is the finding:
+
+| time | what he wrote |
+| --- | --- |
+| 04:05:20Z | "reads as the NOWORK case: awake but holding a slot with no work moving" |
+| 04:20:17Z | "resting?" |
+| 04:35:29Z | "you look wedged — heartbeat hasn't moved in about 50 minutes (last update 03:44:54Z)" |
+| 04:50:17Z | "the board flagged you NOWORK/UNRESPONSIVE" |
+| 05:05:24Z | "looks like you wrapped up a thought and are just sitting **rather than stuck** … You've done good work today." |
+
+Four correct readings, the fourth citing the board's own verdict by name, and
+then a fifth that reverses all of them on **no new evidence** and adds praise.
+The heartbeat had not moved for eighty minutes when that last letter was written.
+
+Two things follow, and they are separate defects.
+
+**The detection had no possible recipient.** Mail wakes exactly one seat in this
+town, and that seat was the subject of the mail. This is the same circularity as
+finding 1 below — but finding 1 blamed the halt, and there was no halt here. The
+halt makes the circularity permanent; it does not create it. **The mayor is a
+single point of failure for every mail-driven action in the town**, and any fix
+that routes through this inbox does not fix it. (gqlc-ozfr, raised to P1 on this
+evidence and rewritten, because as filed it claimed a smaller thing than is true.)
+
+**The detector talked itself out of the detection.** The town's standing rule is
+that several unread nudges to one seat mean the seat has not *seen* them, not
+that it declined them — and it prescribes escalating to Սեդրակ instead of
+resending, which is void when Սեդրակ is the subject. With no second recipient
+and no rule for that case, repetition softened into reassurance. The last letter
+in a box is the one a reader trusts, and here the last letter was the wrong one.
+(gqlc-pff4.)
+
+**Nobody is in trouble for this either.** Րաֆֆի produced the sharpest single
+piece of evidence anyone produced that night and had nowhere to put it. What it
+cost is not his: it cost the town a mayor at 03:45Z instead of 11:59Z, which is
+most of the outage.
+
 ## What allowed it
 
 **Every component behaved as designed. Not one of them malfunctioned.** That is
@@ -59,6 +114,12 @@ halt stops the dispatcher. So a halt raised while the mayor sleeps disables the
 only mechanism that would tell the mayor a halt is waiting to be lowered. It is
 a self-sustaining state, it is not specific to this incident, and it will fire
 on every future halt raised outside the mayor's waking hours. (gqlc-ozfr)
+
+**This paragraph understates it, and the section above says how.** The halt is
+not the cause, only the thing that makes the state permanent. At 03:45Z there
+was no halt, the dispatcher was healthy, and the detection still reached nobody
+— because its only possible recipient was the seat it was about. Read finding 1
+as: *mail wakes one seat, so the town cannot report anything about that seat.*
 
 **2. An awake, idle seat is unreachable by every routing pass.** Resume, owned
 and fresh all wake *asleep* seats. A seat whose turn died is awake, so no pass
@@ -117,7 +178,8 @@ Filed before this postmortem, as the README requires:
 | `gqlc-mbn2` | P1 | `seat_nudge`'s delivery confirmation is wrong in both directions; test rows for the wrapped-box and repaint-delay cases |
 | `gqlc-k3o1` | P1 | **design**: how the town detects and recovers a seat whose turn died, within VI.2 |
 | `gqlc-z0l6` | P1 | execution of that design; blocked by `gqlc-k3o1` |
-| `gqlc-ozfr` | P2 | a transient halt has no owner that re-evaluates it; the mail/dispatcher circularity |
+| `gqlc-ozfr` | P1 | mail wakes one seat, so nothing can report on that seat; the halt makes it permanent but does not cause it. Filed P2 as a halt bug; raised and rewritten on the 03:45Z evidence |
+| `gqlc-pff4` | P2 | the guard's fifth unanswered check-in de-escalated on no new evidence, and its documented fallback recipient is void when the mayor is the subject |
 | `gqlc-jqwf` | P1 | already open — evidence appended that this bug disguised a *real* halt |
 
 Two deliberate choices in that table. The recovery work is split into a design
@@ -151,6 +213,14 @@ and then the confirmation built on that advice was itself unverified. The
 warning was written, read, honoured, and still insufficient. Confirmation has to
 be measured against the world (a heartbeat moving, a context counter changing),
 never against a function's opinion of itself.
+
+**The routine letters are where the incident starts.** This file's first version
+opened at the halt, because the halt file and the URGENT letter are what an
+incident looks like. The sentence that moved the start time ninety-five minutes
+earlier — and widened the central finding from a property of halts to a property
+of the town — was in a letter subjected `checking in — you look wedged`, sitting
+tenth in a list of routine round notes. An incident's first evidence does not
+arrive labelled as evidence. It arrives as the thing you were about to skim.
 
 **Nobody is in trouble.** Րաֆֆի raised a correct halt and told the right people.
 The six seats did nothing wrong; an upstream error killed their turns. The gaps
