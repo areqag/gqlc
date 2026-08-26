@@ -3,6 +3,10 @@
 Design for bead `gqlc-pwly`, unblocking `gqlc-h9n.1` (`COPY OF` support).
 Written 2026-08-24 by Արթուր. Every file:line below was read in a worktree at
 `origin/master` (44ee6224), not recalled.
+Amended 2026-08-26 by Արփինէ for `gqlc-pyc6`: §2's inventory omitted
+`nonReservedWords`, and §3.3's segment rule was stated over one token class;
+both are restated here against the same grammar file, unchanged since
+44ee6224 (line numbers re-read at origin/master, 013a2533).
 
 ## 1. The problem in plain words
 
@@ -44,10 +48,17 @@ share a mechanism.
   bare `/`, relative `../s` with optional further `/..` climbs and a
   directory tail, or predefined `HOME_SCHEMA` / `CURRENT_SCHEMA` / `.`), each
   optionally followed by dotted object names. `s/gt` with no anchor is a
-  syntax error (pinned in `copy_of_qualified.gql`'s header). Every name in
-  these productions is `identifier`, which admits both `REGULAR_IDENTIFIER`
-  (Unicode ID_Start then ID_Continue*, GQL.g4:3591-3620 — never a `/`, a `.`,
-  or empty) and the two delimited spellings.
+   syntax error (pinned in `copy_of_qualified.gql`'s header). Every name in
+   these productions is `identifier` (GQL.g4:2956-2962), which admits three
+   token classes. `regularIdentifier` (GQL.g4:2963-2966) is either
+   `REGULAR_IDENTIFIER` (Unicode ID_Start then ID_Continue*, GQL.g4:3591-3620 —
+   never a `/`, a `.`, or empty) or `nonReservedWords` (GQL.g4:3061-3109 — 47
+   keyword tokens, `ACYCLIC` through `ZONE`, among them `SOURCE`; all pure
+   ASCII letter sequences); the third class is the two delimited spellings.
+   All 47 keyword tokens are defined before `REGULAR_IDENTIFIER`
+   (GQL.g4:3538-3584), and the lexer is case-insensitive (GQL.g4:3), so
+   ANTLR's equal-length tiebreak gives `Source` the `SOURCE` token, never
+   `REGULAR_IDENTIFIER`.
 - **The parse entry point takes a reader, not a path**
   (internal/schema/gql/parser.go:19, `Parse(r io.Reader)`), and the pipeline
   reads the file itself (internal/cli/pipeline/pipeline.go:185-191).
@@ -103,11 +114,18 @@ File lookup is byte-exact through the OS; on a case-insensitive filesystem a
 wrong-case reference may resolve. Noted, not fought — the same is true of
 every path in `gqlc.yaml`, and CI's Linux runners are the arbiter.
 
+The bytes are the ones the user wrote: every name reaches the model through
+`GetText()` unnormalised (the package has no case folding anywhere), so under
+the case-insensitive lexer `COPY OF SOURCE` looks up `SOURCE.gql`, not
+`Source.gql`. No existing test or golden pins what `GetText()` returns for a
+keyword-token name; §5.4's loader tests add the pin.
+
 ### 3.3 Supported and declined spellings
 
 Supported, lowered to `{anchor: absolute|current|climb(n), segs: [...]}`:
 the absolute, current-schema, and relative-climb forms above, with every
-segment a **regular identifier**.
+segment drawn from the `regularIdentifier` production — either token class,
+a plain `REGULAR_IDENTIFIER` or one of `nonReservedWords`' 47 keywords.
 
 Declined permanently, each with its own sentinel and reason (the ADR 0016
 pattern — a rejection carries its own justification), all four wrapping the
@@ -134,9 +152,11 @@ pattern — a rejection carries its own justification), all four wrapping the
   delimited-identifier handling in internal/schema/gql); a quoted segment
   would carry its quote characters into a file name, and a delimited
   identifier may legally contain `/`, `..`, or nothing — the path-injection
-  shapes. Restricting segments to `REGULAR_IDENTIFIER` makes "every segment
-  is one safe path element" a property of the lexer, with no validation
-  code to get wrong. Accepting more later is non-breaking.
+  shapes. Restricting segments to the `regularIdentifier` production makes
+  "every segment is one safe path element" a property of the lexer — both of
+  its token classes are ASCII letter sequences, with no `/`, no `.`, never
+  empty — with no validation code to get wrong. Accepting more later is
+  non-breaking.
 
 These four are spelling judgments, independent of any particular catalogue,
 so they fire in the **lowering** (listener) and are reported identically by
@@ -333,8 +353,12 @@ confirm against the harness, not to trust: 13 new files takes
 - Loader unit tests on `fstest.MapFS`: chain of two, rename via chain
   (result `Name` is the root's), dangling, escape (climb at root; climb
   inside a chain hop succeeding — the climber shape), cycle (self and
-  two-cycle, chain named in the error), name mismatch, and each declined
-  spelling surfacing identically via `Parse` and `Load`.
+  two-cycle, chain named in the error), name mismatch, each declined
+  spelling surfacing identically via `Parse` and `Load`, and a reference
+  whose segment is a `nonReservedWords` keyword (`COPY OF NODE` against a
+  `NODE.gql` fixture) resolving — the only test that distinguishes "both
+  token classes accepted" from "the keyword rows pass by fixture luck",
+  and the pin for §3.2's written-bytes lookup claim.
 
 ### 5.5 Mutation duty (the implementing PR adds or changes guards, so ADR 0005 rows are owed)
 
@@ -343,8 +367,8 @@ escape pop-guard (blind it → the escape rows report `ErrDanglingReference`
 or resolve, both KILLED by sentinel equality), the cycle membership check
 (blind it → `Load` loops; the row's verdict is "hangs, killed by
 `go test -timeout`" — record it as such rather than pretending it fails
-cleanly), the name-match comparison, the regular-identifier segment check,
-and the `Parse`-level `copyRef != nil` refusal. Screen with
+cleanly), the name-match comparison, the delimited-segment refusal, and
+the `Parse`-level `copyRef != nil` refusal. Screen with
 `go test -c -o /dev/null ./internal/schema/gql`.
 
 ## 6. Falsifiability
@@ -360,8 +384,9 @@ alternative, the corpus's declared-sentinel equality catches it at
 implementation time, and `copy_of_qualified.gql`'s pinned claim that bare
 `s/gt` is a syntax error guards the lowering table's premise. The claimed
 negative "no delimited-identifier handling exists in internal/schema/gql"
-was witnessed by grep, and the segment-safety claim rests on
-GQL.g4:3591-3620, quoted in §2.
+was witnessed by grep, and the segment-safety claim rests on both
+`regularIdentifier` arms — GQL.g4:3591-3620 and `nonReservedWords` at
+GQL.g4:3061-3109, quoted in §2.
 
 One correction to the filing bead's scope note, for the record: `COPY OF` is
 **not** an optional Annex D feature — no feature id covers it (verified
