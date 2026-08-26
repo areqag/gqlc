@@ -139,8 +139,9 @@ vuln.yml arms on any `.go` file, any
 `go.mod`/`go.sum` anywhere, the recipe, or itself. Each list this replaces was a
 proxy for the real condition: a module list omits the third module the day it is
 added, and a `go.mod`-only trigger misses a PR that newly imports or newly calls
-an already-required module, which is the state `GO-2026-5841` sits in today
-(bd gqlc-k22l).
+an already-required module — the state `GO-2026-5841` occupied until the
+`moby/go-archive` v0.3.0 bump raised klauspost/compress past its fix
+(gqlc-uiyt); `GO-2026-5932` occupies it still (bd gqlc-k22l).
 
 **A derivation gets a postcondition, because a derivation can also come back
 empty.** Deriving the tags rather than listing them removes one way to be green
@@ -289,17 +290,18 @@ module-level findings* below. The objection there was blocking on advisories
 nothing in the tree imports, one of them with no fix available; the register
 does not block on those, it blocks on the arrival of a new one.
 
-**The three registered advisories are accepted, not bumped, and the reason is a
-version.** `GO-2026-5158` (otel) and `GO-2026-5841` (klauspost/compress) are
-both indirect dependencies of `testcontainers-go`, whose latest published
-release is `v0.43.0` — exactly what `test/data/codegen` already requires. There
-is no upstream release to move to, and pinning an indirect dependency ahead of
-the module that requires it is churn `go mod tidy` can undo, bought with no
-reduction in exposure, since neither is called. `GO-2026-5932`
+**The two registered advisories are accepted, not bumped, and the reason is a
+version.** `GO-2026-5158` (otel) is an indirect dependency of
+`testcontainers-go`, whose latest published release is `v0.43.0` — exactly what
+`test/data/codegen` already requires — and pinning an indirect dependency ahead
+of the module that requires it is churn `go mod tidy` can undo, bought with no
+reduction in exposure, since it is not called. `GO-2026-5932`
 (`x/crypto/openpgp`) has no fix and never will; bumping `x/crypto` cannot clear
-it. Revisit when `testcontainers-go` itself moves; `go list -m -u` inside
-`test/data/codegen` is the check, and the register's stale half will announce it
-anyway the moment an advisory clears.
+it. A third, `GO-2026-5841` (klauspost/compress), left the register when the
+`moby/go-archive` v0.3.0 bump raised the compress floor to its fixed `v1.18.7`
+(gqlc-uiyt). Revisit when `testcontainers-go` itself moves; `go list -m -u`
+inside `test/data/codegen` is the check, and the register's stale half will
+announce it anyway the moment an advisory clears.
 
 ## Considered alternatives
 
