@@ -1019,9 +1019,9 @@ cmd_herratsayn() {
     (
         cd "$wt" || exit 1
         unset KM_CONFIG
-        export PATH="$SCRIPT_DIR:$PATH"
-        export KINGDOM_SEAT=sedrak BEADS_ACTOR=sedrak KM_STATE_DIR="$sd"
-        exec opencode "${tui_args[@]}"
+        PATH="$SCRIPT_DIR:$PATH" \
+            KINGDOM_SEAT=sedrak BEADS_ACTOR=sedrak KM_STATE_DIR="$sd" \
+            exec opencode "${tui_args[@]}"
     ) || echo "herratsayn: the TUI ended abnormally" >&2
     rm -f "$home/in-person"
     queued=0
