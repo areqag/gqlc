@@ -3054,23 +3054,19 @@ vuln: sweep-discovery-probes vuln-root-residual
     # the output format moves and the extraction stops matching, the measured set
     # empties and the second comparison fails rather than the first one passing.
     #
-    # None of the three below is bumped, and the reason is a version rather than
-    # a preference. Both fixable ones are indirect dependencies of
-    # testcontainers-go, whose latest published release is v0.43.0 — exactly what
-    # test/data/codegen already requires. Pinning an indirect dependency ahead of
-    # the module that requires it is churn `go mod tidy` can undo, bought with no
-    # reduction in exposure, since none of the three is reachable. Revisit when
-    # testcontainers-go itself moves; `go list -m -u` in test/data/codegen is the
-    # check.
+    # Neither of the two below is bumped, and the reason is a version rather
+    # than a preference. The fixable one is an indirect dependency of
+    # testcontainers-go, whose latest published release is v0.43.0 — exactly
+    # what test/data/codegen already requires. Pinning an indirect dependency
+    # ahead of the module that requires it is churn `go mod tidy` can undo,
+    # bought with no reduction in exposure, since it is not called. Revisit
+    # when testcontainers-go itself moves; `go list -m -u` in
+    # test/data/codegen is the check.
     accepted="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' -e '/^$/d' <<'ACCEPTED' | sort -u
     # go.opentelemetry.io/otel v1.41.0 in test/data/codegen: baggage parsing no
     # longer caps raw header length. Imported, not called. Fixed in v1.42.0, and
     # v1.45.0 is out, but it is testcontainers-go v0.43.0's indirect.
     GO-2026-5158
-    # github.com/klauspost/compress v1.18.5 in test/data/codegen: OOB read in
-    # .../s2. Required, not imported — nothing in the tree names the package.
-    # Fixed in v1.18.7; again testcontainers-go v0.43.0's indirect.
-    GO-2026-5841
     # golang.org/x/crypto/openpgp: unmaintained and unsafe by design, no fix
     # available and none coming. Required, not imported. This one is permanent
     # unless x/crypto drops the package, and bumping x/crypto cannot clear it.

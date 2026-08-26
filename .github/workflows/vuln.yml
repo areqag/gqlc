@@ -14,9 +14,9 @@
 # the wrong condition: govulncheck answers at symbol level, so a PR that newly
 # *calls* — or merely newly imports — an already-required module changes the
 # answer without touching a manifest, and under the old trigger skipped the scan
-# entirely. test/data/codegen carries GO-2026-5841 in exactly that
-# required-but-not-imported state, so the very next import of it was the case
-# that would have landed unscanned.
+# entirely. test/data/codegen carries GO-2026-5932 in exactly that
+# required-but-not-imported state, so the very next import of x/crypto was the
+# case that would have landed unscanned.
 name: vuln
 
 on:
