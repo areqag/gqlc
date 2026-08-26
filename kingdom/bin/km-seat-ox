@@ -13,9 +13,11 @@
 # Session continuity is per-seat and explicit: the first wake of an episode
 # starts a fresh session with the soul prepended; later wakes resume the
 # recorded session id, so a bead carried across wakes keeps its context
-# without re-reading the soul. The id is recovered by diffing `opencode
-# session list` around a fresh start, which keeps the pane human-readable
-# (--format json would stream event objects at whoever looks in).
+# without re-reading the soul. The listing behind `opencode session list`
+# spans every project on the host, so ids are resolved from its JSON view
+# filtered to THIS seat's worktree and ordered by recency: a neighbour's
+# concurrent session never wins, and a stale or cross-seat record fails the
+# membership check and opens a fresh episode instead (bd gqlc-pykf).
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -48,9 +50,13 @@ echo asleep >"$home/status"
 trap 'echo asleep >"$home/status"' EXIT
 trap 'exit 0' INT TERM
 
-session_ids() { # -> one session id per line (ses_…), best effort
-    (cd "$wt" && timeout 20 opencode session list 2>/dev/null) |
-        grep -oE 'ses_[A-Za-z0-9]+' | sort -u || true
+own_session_ids() { # -> this worktree's session ids, newest first
+    (cd "$wt" && timeout 20 opencode session list --format json 2>/dev/null) |
+        jq -r --arg dir "${wt%/}" '
+            [ .[]
+            | select(((.directory // "") | sub("/$"; "")) == $dir)
+            | [(.updated // .created // 0), .id] ]
+            | sort_by(-.[0])[] | .[1]' 2>/dev/null || true
 }
 
 compose() { # $1 = wake reasons, one per line; $2 = a stale-hooks warning, or empty
@@ -139,12 +145,12 @@ while :; do
         args=(--auto -m "$ox_model")
         [ -z "$effort" ] || args+=(--variant "$effort")
 
-        prev_ids=$(mktemp "${TMPDIR:-/tmp}/ox-ids-$seat-XXXXXX")
-        session_ids >"$prev_ids"
-
         saved=""
         [ -f "$home/ox-session" ] && saved=$(cat "$home/ox-session")
-        if [ -n "$saved" ] && grep -qxF "$saved" "$prev_ids"; then
+        # Resume only an id still scoped to this worktree: a record left by
+        # the cross-seat bug (or by a wiped store) opens a fresh episode
+        # rather than attaching to a stranger's thread.
+        if [ -n "$saved" ] && own_session_ids | grep -qxF "$saved"; then
             args+=(-s "$saved")
         else
             # Fresh episode: the soul opens the session, once.
@@ -158,19 +164,14 @@ $msg"
         timeout 3600 opencode run "${args[@]}" "$msg"
         rc=$?
 
-        # grep -f against an empty pattern file matches nothing, so an empty
-        # baseline (first ever wake) takes the newest id outright.
-        if [ -s "$prev_ids" ]; then
-            new_id=$(session_ids | grep -Fxvf "$prev_ids" | tail -1)
-        else
-            new_id=$(session_ids | tail -1)
-        fi
+        # The turn just ran in this worktree, so its session is the most
+        # recently updated one scoped to $wt; when the listing came back
+        # unusable, keep yesterday's record and let the membership check
+        # arbitrate it next wake.
+        new_id=$(own_session_ids | head -n 1)
         if [ -n "$new_id" ]; then
             printf '%s\n' "$new_id" >"$home/ox-session"
-        elif [ -n "$saved" ]; then
-            : # resumed sessions keep their id; nothing to record
         fi
-        rm -f "$prev_ids"
         exit "$rc"
     ) || echo "km-seat-ox: $seat's session ended abnormally; parking" >&2
     echo asleep >"$home/status"
