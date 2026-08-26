@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# km-seat-ox <seat> — the opencode runner that IS a seat's tmux window.
+#
+# Same contract as km-seat (kingdom/README.md): park until `km wake` queues a
+# reason in $home/wake, compose the first message (wake reasons, unread mail,
+# pending handoff notes), run ONE turn in the seat's own worktree with the
+# soul attached, then park again. The engine is `opencode run` headless rather
+# than an interactive claude: a wake is one process, so liveness is process
+# existence and there is no pane prompt to scrape or nudge — km's wake path
+# falls back to the wake-file queue for every awake seat, which this loop
+# consumes exactly as km-seat did.
+#
+# Session continuity is per-seat and explicit: the first wake of an episode
+# starts a fresh session with the soul prepended; later wakes resume the
+# recorded session id, so a bead carried across wakes keeps its context
+# without re-reading the soul. The id is recovered by diffing `opencode
+# session list` around a fresh start, which keeps the pane human-readable
+# (--format json would stream event objects at whoever looks in).
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+KINGDOM_DIR=$(dirname "$SCRIPT_DIR")
+KM="$SCRIPT_DIR/km"
+
+seat=${1:-}
+[ -n "$seat" ] || { echo "km-seat-ox: which seat?" >&2; exit 1; }
+
+# Only the display name is used here — the engine reads its model from [ox],
+# not from the roster — so class and model are not captured at all.
+display=$("$KM" seat-info "$seat" | awk '{print $3}')
+sd=$("$KM" state-dir)
+home="$sd/seats/$seat"
+wt=$("$KM" seat-worktree "$seat")
+soul="$KINGDOM_DIR/seats/$seat/soul.md"
+ox_model=$("$KM" cfg ox model)
+: "${ox_model:=opencode/x-preview-f-free}"
+
+[ -f "$soul" ] || { echo "km-seat-ox: no soul at $soul" >&2; exit 1; }
+[ -d "$wt" ] || { echo "km-seat-ox: no worktree at $wt (km up creates it)" >&2; exit 1; }
+
+mkdir -p "$home/handoff/archive"
+echo asleep >"$home/status"
+trap 'echo asleep >"$home/status"' EXIT
+trap 'exit 0' INT TERM
+
+session_ids() { # -> one session id per line (ses_…), best effort
+    (cd "$wt" && timeout 20 opencode session list 2>/dev/null) |
+        grep -oE 'ses_[A-Za-z0-9]+' | sort -u || true
+}
+
+compose() { # $1 = wake reasons, one per line; $2 = a stale-hooks warning, or empty
+    printf 'Բարի լոյս, %s։ A new workday begins in your seat (%s).\n\n' "$display" "$seat"
+    printf 'Why you were woken:\n'
+    printf '%s\n' "$1" | sed 's/^/  - /'
+
+    printf '\nYou run under opencode (model %s), not Claude Code: your tools are\n' "$ox_model"
+    printf "opencode's, there is no plan mode and no permission prompt, and skills\n"
+    printf 'live in ~/.agents/skills. Everything else about the town stands.\n'
+
+    if [ -n "$2" ]; then
+        printf '\nBEFORE YOU PUSH — your gates are not master'"'"'s:\n  %s\n' "$2"
+        printf 'You have work in flight here, so nothing was moved for you. The git hooks\n'
+        printf 'in this worktree are the versions your branch was cut from — including the\n'
+        printf 'guard that refuses a push resolving to master. Rebase onto origin/master,\n'
+        printf 'or check your push destination by hand with git branch -vv (bd gqlc-xtre).\n'
+    fi
+
+    local unread
+    unread=$(find "$sd/mail/$seat/inbox" -type f -name '*.md' 2>/dev/null | wc -l)
+    if [ "$unread" -gt 0 ]; then
+        printf '\nYou have %s unread letter(s): bd mail inbox.\n' "$unread"
+    fi
+
+    local notes
+    notes=$(find "$home/handoff" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
+    if [ -n "$notes" ]; then
+        printf '\nYour pending handoff note(s) — your own past self talking to you, read before anything else:\n'
+        printf '%s\n' "$notes" | sed 's/^/  - /'
+    fi
+
+    printf '\nBegin with the wake ritual: kingdom/brain/playbooks/citizen-protocol.md.\n'
+}
+
+while :; do
+    until [ -s "$home/wake" ]; do sleep 5; done
+    reasons=$(cat "$home/wake")
+    rm -f "$home/wake"
+
+    # An effort:<level> label on a woken bead is honoured as far as opencode
+    # goes (--variant), and said out loud where the vocabulary does not map:
+    # silently ignoring an escalation is how V.6.2 dies quietly.
+    effort=""
+    bead_ids=$(printf '%s\n' "$reasons" | sed -n 's/^bead:\([^[:space:]][^[:space:]]*\).*$/\1/p' | tr '\n' ' ')
+    if [ -n "$bead_ids" ]; then
+        # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
+        asks=$(bd show $bead_ids --json 2>/dev/null |
+            jq -r 'if type == "array" then . else [.] end
+                   | .[] | .id as $i | (.labels // [])[]
+                   | select(startswith("effort:")) | "\($i) \(ltrimstr("effort:"))"' 2>/dev/null) || asks=""
+        for b in $bead_ids; do
+            lvl=$(awk -v i="$b" '$1 == i { print $2; exit }' <<<"$asks")
+            [ -n "$lvl" ] || continue
+            case "$lvl" in
+                low | medium | high | max) effort=$lvl ;;
+                xhigh) effort=high ;;
+                *) echo "km-seat-ox: bead $b asks for effort '$lvl', which opencode does not take; launching $seat at its provider default" >&2 ;;
+            esac
+            break # the first bead named wins, as in km-seat
+        done
+    fi
+
+    # A seat runs the gates in its own checkout; wake is the only safe moment
+    # to move it. A seat holding work is never moved — it gets told instead.
+    refresh_out=$("$KM" seat-refresh "$seat" 2>&1) && refresh_rc=0 || refresh_rc=$?
+    stale=""
+    case "$refresh_rc" in
+        0) ;;
+        3) stale=$refresh_out ;;
+        *) echo "km-seat-ox: could not refresh $seat's worktree: $refresh_out" >&2 ;;
+    esac
+
+    msg=$(compose "$reasons" "$stale")
+
+    echo awake >"$home/status"
+    (
+        cd "$wt"
+        unset KM_CONFIG
+        # The protocol speaks of bare `km`; the town's bin dir is not on the
+        # default PATH, and a citizen who cannot run km sleep is unreachable
+        # by every pass that reads her status.
+        export PATH="$SCRIPT_DIR:$PATH"
+        export KINGDOM_SEAT=$seat BEADS_ACTOR=$seat KM_STATE_DIR=$sd
+
+        args=(--auto -m "$ox_model")
+        [ -z "$effort" ] || args+=(--variant "$effort")
+
+        prev_ids=$(mktemp "${TMPDIR:-/tmp}/ox-ids-$seat-XXXXXX")
+        session_ids >"$prev_ids"
+
+        saved=""
+        [ -f "$home/ox-session" ] && saved=$(cat "$home/ox-session")
+        if [ -n "$saved" ] && grep -qxF "$saved" "$prev_ids"; then
+            args+=(-s "$saved")
+        else
+            # Fresh episode: the soul opens the session, once.
+            msg="$(cat "$soul")
+
+---
+
+$msg"
+        fi
+
+        timeout 3600 opencode run "${args[@]}" "$msg"
+        rc=$?
+
+        # grep -f against an empty pattern file matches nothing, so an empty
+        # baseline (first ever wake) takes the newest id outright.
+        if [ -s "$prev_ids" ]; then
+            new_id=$(session_ids | grep -Fxvf "$prev_ids" | tail -1)
+        else
+            new_id=$(session_ids | tail -1)
+        fi
+        if [ -n "$new_id" ]; then
+            printf '%s\n' "$new_id" >"$home/ox-session"
+        elif [ -n "$saved" ]; then
+            : # resumed sessions keep their id; nothing to record
+        fi
+        rm -f "$prev_ids"
+        exit "$rc"
+    ) || echo "km-seat-ox: $seat's session ended abnormally; parking" >&2
+    echo asleep >"$home/status"
+    rm -f "$home/heartbeat.json"
+done
