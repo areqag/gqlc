@@ -250,7 +250,10 @@ jobs:
           bd init --prefix probe --non-interactive
           a="$(bd create "write contract probe A" --json | jq -r '.id')"
           b="$(bd create "write contract probe B" --json | jq -r '.id')"
-          [ -n "$a" ] && [ -n "$b" ] || { echo "probe beads could not be created; the rows below prove nothing"; exit 1; }
+          if [ -z "$a" ] || [ -z "$b" ]; then
+              echo "probe beads could not be created; the rows below prove nothing"
+              exit 1
+          fi
 
           BLOCKED='{"status":"blocked","assignee":"somebody"}'
           peek()  { bd show "$1" --json | jq -c '.[0]|{status,assignee}'; }
