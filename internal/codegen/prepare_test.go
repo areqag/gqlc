@@ -544,6 +544,12 @@ func TestTemporalKindRefusalReachesTheCaller(t *testing.T) {
 // Apache AGE emission declares.
 var ageOnlyTargets = []string{"apache-age-pgx-v5"}
 
+// neo4jTargets is the golden target set for the five temporal carriers
+// (ADR 0033). Only the neo4j emission switched its temporal columns onto
+// them so far; the Apache AGE admission of the four refused widths is a
+// separate bead, and until it lands no AGE golden declares a carrier.
+var neo4jTargets = []string{"neo4j-go-v5", "neo4j-go-v6"}
+
 // reservedIdentifierRows is the reserved set written out longhand, with
 // the scope each name's emitted declaration occupies and the golden
 // targets that declare it. Both columns are read off the committed
@@ -578,6 +584,11 @@ var reservedIdentifierRows = []struct {
 	{"Begin", scopeMethod, nil},
 	{"Commit", scopeMethod, nil},
 	{"Rollback", scopeMethod, nil},
+	{"Date", scopePackage, neo4jTargets},
+	{"Time", scopePackage, neo4jTargets},
+	{"LocalTime", scopePackage, neo4jTargets},
+	{"LocalDateTime", scopePackage, neo4jTargets},
+	{"Duration", scopePackage, neo4jTargets},
 }
 
 // TestReservedIdentifiersAreUniformAcrossBackends pins the reserved set
@@ -854,7 +865,16 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 // ErrNoRows and ErrMultipleResults only for a batch with a `:one` query
 // — which is why the measurement below reads names declared by every
 // fixture and not names declared by some.
-var fixedDeclarationFiles = map[string]bool{"db.go": true, "graph.go": true, "querier.go": true}
+var fixedDeclarationFiles = map[string]bool{
+	"db.go": true, "graph.go": true, "querier.go": true,
+	// The five neutral temporal carriers in temporal.go and the
+	// unexported driver bridge in temporal_neo4j.go (ADR 0033). Both are
+	// emitter-fixed: which of them a batch emits turns on the widths the
+	// surface names, but never on a name the batch chose. The bridge
+	// exports nothing today, and classifying it here rather than as
+	// input-derived is what would force a reserved row if it ever did.
+	"temporal.go": true, "temporal_neo4j.go": true,
+}
 
 // inputDerivedFiles names the emitted files whose exported declarations
 // follow from the batch instead: entity structs and their decode

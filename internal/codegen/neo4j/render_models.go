@@ -284,7 +284,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 			writeSliceNarrow(b, e, f, f.GoType, "s", "narrowed", "\t\t", 0)
 			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
 		case carrier != f.GoType:
-			fmt.Fprintf(b, "\t\tnarrowed := %s(s)\n", f.GoType)
+			fmt.Fprintf(b, "\t\tnarrowed := %s\n", narrowExpr(f.GoType, "s"))
 			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
 		default:
 			fmt.Fprintf(b, "\t\tout.%s = &s\n", f.Field)
@@ -303,7 +303,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		writeSliceNarrow(b, e, f, f.GoType, value, narrowed, "\t", 0)
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowed)
 	case carrier != f.GoType:
-		fmt.Fprintf(b, "\tout.%s = %s(%s)\n", f.Field, f.GoType, value)
+		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowExpr(f.GoType, value))
 	default:
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
 	}
@@ -407,7 +407,7 @@ func writeSliceNarrow(b *strings.Builder, e codegen.Entity, f codegen.EntityFiel
 	fmt.Fprintf(b, "%s\t%s element %%d: expected %s, got %%T\", %q, %s, %s)\n", body, fail, carrier, f.PropName, idx, item)
 	fmt.Fprintf(b, "%s}\n", body)
 	if carrier != elem {
-		fmt.Fprintf(b, "%s%s = append(%s, %s(v%d))\n", body, dst, dst, elem, depth)
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, narrowExpr(elem, fmt.Sprintf("v%d", depth)))
 	} else {
 		fmt.Fprintf(b, "%s%s = append(%s, v%d)\n", body, dst, dst, depth)
 	}

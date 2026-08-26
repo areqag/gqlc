@@ -15,23 +15,23 @@ const todayDateQueryText = `RETURN date() AS d`
 // TodayDate executes the TodayDate query.
 //
 //	RETURN date() AS d
-func (q *Queries) TodayDate(ctx context.Context) (dbtype.Date, error) {
+func (q *Queries) TodayDate(ctx context.Context) (Date, error) {
 	records, err := q.db.run(ctx, todayDateQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
-		return dbtype.Date{}, err
+		return Date{}, err
 	}
 	if len(records) == 0 {
-		return dbtype.Date{}, ErrNoRows
+		return Date{}, ErrNoRows
 	}
 	if len(records) > 1 {
-		return dbtype.Date{}, ErrMultipleResults
+		return Date{}, ErrMultipleResults
 	}
 	value, isNil, err := neo4j.GetRecordValue[dbtype.Date](records[0], "d")
 	if err != nil {
-		return dbtype.Date{}, fmt.Errorf("TodayDate: decode column %q: %w", "d", err)
+		return Date{}, fmt.Errorf("TodayDate: decode column %q: %w", "d", err)
 	}
 	if isNil {
-		return dbtype.Date{}, fmt.Errorf("TodayDate: column %q is non-nullable but arrived null", "d")
+		return Date{}, fmt.Errorf("TodayDate: column %q is non-nullable but arrived null", "d")
 	}
-	return value, nil
+	return toDate(value), nil
 }

@@ -11,7 +11,7 @@ import (
 
 // Span corresponds to the Span node type.
 type Span struct {
-	Elapsed dbtype.Duration
+	Elapsed Duration
 	Id      int64
 }
 
@@ -34,7 +34,7 @@ func decodeSpan(node dbtype.Node) (Span, error) {
 	if err != nil {
 		return Span{}, fmt.Errorf("decode Span.Elapsed: %w", err)
 	}
-	out.Elapsed = value0
+	out.Elapsed = toDuration(value0)
 	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Span{}, fmt.Errorf("decode Span.Id: %w", err)

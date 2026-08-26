@@ -11,7 +11,7 @@ import (
 
 // Person corresponds to the Person node type.
 type Person struct {
-	Dob dbtype.Date
+	Dob Date
 	Id  int64
 }
 
@@ -34,7 +34,7 @@ func decodePerson(node dbtype.Node) (Person, error) {
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Dob: %w", err)
 	}
-	out.Dob = value0
+	out.Dob = toDate(value0)
 	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)

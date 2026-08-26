@@ -12,7 +12,7 @@ import (
 
 // Sample corresponds to the Sample node type.
 type Sample struct {
-	Days    *[]dbtype.Date
+	Days    *[]Date
 	Id      int64
 	Stamps  *[]time.Time
 	Windows *[][]time.Time
@@ -38,13 +38,13 @@ func decodeSample(node dbtype.Node) (Sample, error) {
 		if !ok {
 			return Sample{}, fmt.Errorf("decode Sample.Days: property %q: expected []any, got %T", "days", v)
 		}
-		narrowed := make([]dbtype.Date, 0, len(s))
+		narrowed := make([]Date, 0, len(s))
 		for i0, elem0 := range s {
 			v0, ok := elem0.(dbtype.Date)
 			if !ok {
 				return Sample{}, fmt.Errorf("decode Sample.Days: property %q element %d: expected dbtype.Date, got %T", "days", i0, elem0)
 			}
-			narrowed = append(narrowed, v0)
+			narrowed = append(narrowed, toDate(v0))
 		}
 		out.Days = &narrowed
 	}

@@ -46,9 +46,11 @@ const (
 // The set is the union across backends and batches: ErrNoRows /
 // ErrMultipleResults are reserved in batches that would not emit them,
 // DBTX / SessionInit / EnsureGraph / DropGraph in batches targeting a
-// backend with neither a connection seam nor a graph lifecycle. A rename
-// that works in one batch or against one backend but not another is
-// exactly the "renaming scheme" D2 Resolved refused.
+// backend with neither a connection seam nor a graph lifecycle, and the
+// five temporal carriers (ADR 0033) in batches whose surface names no
+// temporal width and so emits no temporal.go. A rename that works in one
+// batch or against one backend but not another is exactly the "renaming
+// scheme" D2 Resolved refused.
 //
 // The Tx block adds a second false refusal, on a different axis from that
 // one. Commit and Rollback are declared on *Tx, so a query named Commit
@@ -84,6 +86,11 @@ var reservedIdentifiers = map[string]identifierScope{
 	"Begin":              scopeMethod,
 	"Commit":             scopeMethod,
 	"Rollback":           scopeMethod,
+	"Date":               scopePackage,
+	"Time":               scopePackage,
+	"LocalTime":          scopePackage,
+	"LocalDateTime":      scopePackage,
+	"Duration":           scopePackage,
 }
 
 // Prepared is the batch derivation the shared phases commit: the emitted

@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -844,6 +845,238 @@ func receiverName(t *testing.T, path string, d *ast.FuncDecl) string {
 	return ident.Name
 }
 
+// driverModulePrefixes names the modules whose types are the backend's
+// business and not the caller's. Prefixes rather than exact paths: one
+// module publishes several importable packages (neo4j, dbtype, pgxpool),
+// and a new one appearing is exactly the case this must catch.
+var driverModulePrefixes = []string{
+	"github.com/neo4j/neo4j-go-driver",
+	"github.com/jackc/pgx",
+}
+
+// TestGoldenExportedSurfaceIsDriverFree pins the property ADR 0033 buys:
+// a caller writes against gqlc's vocabulary, so swapping the target
+// recompiles their program untouched. Before this gate nothing failed
+// when a driver type reached the emitted public surface, and the neo4j
+// goldens were the counterexample — `Dob dbtype.Date` on an exported
+// struct in property_date/models.go.
+//
+// Exported positions only, and bodies never. The conversions live in
+// unexported helpers and must name the driver; that is where the
+// dependency belongs. What may not name it is anything a caller can
+// write down: an exported type's exported fields, an exported function
+// or method signature, an exported var or const's declared type.
+//
+// db.go and graph.go are excluded through connectionSurface, the same
+// two files TestBackendInvariantSurface excludes and for the same
+// reason: they hold the handle and what it talks to, so the driver is
+// their subject, not a leak.
+func TestGoldenExportedSurfaceIsDriverFree(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden", "*", "*.go"))
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no golden was swept, so this test holds nothing")
+
+	var offenders []string
+	scanned := 0
+	witnessed := map[string]int{}
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		qualifiers := driverQualifiers(t, path, file)
+		target := filepath.Base(filepath.Dir(path))
+		where := filepath.Join(filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(path)))), target, filepath.Base(path))
+		connection := connectionSurface[filepath.Base(path)]
+		if _, seen := witnessed[target]; !seen {
+			witnessed[target] = 0
+		}
+		for _, decl := range file.Decls {
+			for _, exported := range exportedPositions(decl) {
+				named := namedDrivers(t, fset, qualifiers, where, exported)
+				// The connection surface is where the driver belongs, so
+				// what it names there is the detector's positive control
+				// rather than a finding.
+				if connection {
+					witnessed[target] += len(named)
+					continue
+				}
+				scanned++
+				offenders = append(offenders, named...)
+			}
+		}
+	}
+	// A sweep that read no exported declaration would agree with every
+	// corpus, including one whose extractor had stopped seeing them.
+	require.NotZero(t, scanned, "no exported declaration was read, so this sweep holds nothing")
+	// And one that read them all but recognised no driver would agree
+	// with a corpus that leaked in every file. Every target's db.go names
+	// that target's driver in an exported signature by construction, so
+	// each target has to witness at least one — keyed on the targets the
+	// corpus has and not on driverModulePrefixes, because a control the
+	// prefix list indexes is vacuous exactly when that list is what
+	// broke.
+	for target, count := range witnessed {
+		require.NotZero(t, count,
+			"no exported position on %s's connection surface named a driver type, so this sweep would not recognise that backend's driver anywhere", target)
+	}
+	require.Empty(t, offenders,
+		"the emitted public surface names driver types, so a caller cannot swap targets without editing their program:\n%s",
+		strings.Join(offenders, "\n"))
+}
+
+// exportedPosition is one caller-writable declaration: what to call it in
+// a failure, and the syntax that must not name a driver.
+type exportedPosition struct {
+	what string
+	node ast.Node
+}
+
+// exportedPositions is the caller-writable syntax a declaration puts in
+// the package, or nothing when the declaration is unexported. Bodies are
+// never returned: an unexported helper's use of the driver is the point.
+func exportedPositions(decl ast.Decl) []exportedPosition {
+	switch d := decl.(type) {
+	case *ast.FuncDecl:
+		if !ast.IsExported(d.Name.Name) {
+			return nil
+		}
+		// A method on an unexported type is unreachable from outside
+		// the package however exported its own name is.
+		if d.Recv != nil && !ast.IsExported(receiverBase(d.Recv)) {
+			return nil
+		}
+		return []exportedPosition{{"func " + d.Name.Name, d.Type}}
+	case *ast.GenDecl:
+		var out []exportedPosition
+		for _, spec := range d.Specs {
+			switch s := spec.(type) {
+			case *ast.TypeSpec:
+				if !ast.IsExported(s.Name.Name) {
+					continue
+				}
+				out = append(out, []exportedPosition{{"type " + s.Name.Name, s.Type}}...)
+			case *ast.ValueSpec:
+				// The declared type only. An initialiser is a body by
+				// another name, and the compile-time interface
+				// assertions the emission writes are unexported anyway.
+				if s.Type == nil || !slices.ContainsFunc(s.Names, func(n *ast.Ident) bool { return ast.IsExported(n.Name) }) {
+					continue
+				}
+				out = append(out, exportedPosition{"var " + s.Names[0].Name, s.Type})
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// receiverBase is the type a method hangs off, pointer or not.
+func receiverBase(recv *ast.FieldList) string {
+	expr := recv.List[0].Type
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	if ident, ok := expr.(*ast.Ident); ok {
+		return ident.Name
+	}
+	return ""
+}
+
+// namedDrivers is every driver type the caller-writable half of one
+// declaration names. Unexported struct fields and unexported interface
+// methods are pruned as it walks: they are in the declaration but not
+// in the surface, since no caller outside the package can name either.
+//
+// The prune is on those two node kinds and not on *ast.Field generally,
+// because a function's parameters and results are *ast.Field too and
+// their names are lowercase by convention. Pruning by name there hid
+// every exported signature that took a driver value — `func New(driver
+// neo4j.DriverWithContext)` and, the case this gate exists for, a
+// method taking `arg dbtype.Date`. What a caller has to be able to
+// write is the TYPE; the parameter's own name is not theirs to say.
+func namedDrivers(t *testing.T, fset *token.FileSet, qualifiers map[string]string, where string, pos exportedPosition) []string {
+	t.Helper()
+	var found []string
+	var walk func(ast.Node)
+	walk = func(node ast.Node) {
+		ast.Inspect(node, func(n ast.Node) bool {
+			switch f := n.(type) {
+			case *ast.StructType:
+				walkExportedFields(f.Fields, walk)
+				return false
+			case *ast.InterfaceType:
+				walkExportedFields(f.Methods, walk)
+				return false
+			case *ast.SelectorExpr:
+				ident, ok := f.X.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				if path, isDriver := qualifiers[ident.Name]; isDriver {
+					found = append(found, fmt.Sprintf("%s: %s names %s (%s)", where, pos.what, render(t, fset, f), path))
+				}
+				return true
+			}
+			return true
+		})
+	}
+	walk(pos.node)
+	return found
+}
+
+// walkExportedFields descends into the members of a struct or interface
+// a caller can reach: the exported ones, plus embedded members, which
+// declare no name and are promoted.
+func walkExportedFields(list *ast.FieldList, walk func(ast.Node)) {
+	if list == nil {
+		return
+	}
+	for _, field := range list.List {
+		if len(field.Names) == 0 ||
+			slices.ContainsFunc(field.Names, func(n *ast.Ident) bool { return ast.IsExported(n.Name) }) {
+			walk(field.Type)
+		}
+	}
+}
+
+// driverQualifiers is the package qualifiers one file binds to driver
+// modules — `dbtype` for the neo4j driver's type package, and so on.
+func driverQualifiers(t *testing.T, path string, file *ast.File) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, imp := range file.Imports {
+		quoted, err := strconv.Unquote(imp.Path.Value)
+		require.NoError(t, err, "%s: import path %s", path, imp.Path.Value)
+		if !slices.ContainsFunc(driverModulePrefixes, func(p string) bool { return strings.HasPrefix(quoted, p) }) {
+			continue
+		}
+		// A dot-import would put driver names into the file's own
+		// namespace as bare identifiers, where a qualifier sweep cannot
+		// see them. The emission writes none; if one ever appears this
+		// stops rather than passing blind.
+		require.False(t, imp.Name != nil && imp.Name.Name == ".",
+			"%s: dot-imports %s, which this sweep cannot follow", path, quoted)
+		out[importQualifier(imp, quoted)] = quoted
+	}
+	return out
+}
+
+// importQualifier is the name a file writes an import under: the alias
+// when it has one, and otherwise the path's last element — stepping over
+// a `/vN` module-version element, which is why `github.com/jackc/pgx/v5`
+// is written `pgx`.
+func importQualifier(imp *ast.ImportSpec, path string) string {
+	if imp.Name != nil {
+		return imp.Name.Name
+	}
+	parts := strings.Split(path, "/")
+	last := parts[len(parts)-1]
+	if len(parts) > 1 && regexp.MustCompile(`^v[0-9]+$`).MatchString(last) {
+		return parts[len(parts)-2]
+	}
+	return last
+}
+
 // The Bolt driver's own carrier vocabulary, split by the shape the
 // emitted assertion takes. neo4j.PropertyValue is
 //
@@ -1258,4 +1491,93 @@ func TestGeneratedHeaderFormat(t *testing.T) {
 		}
 	}
 	require.True(t, sawAny, "walk must encounter at least one golden .go file")
+}
+
+// carrierDeclarationFiles are the two files the temporal carriers and
+// their driver bridge occupy. Excluded from the reference scan below,
+// because a file that declares the carriers naturally names them and
+// would make the trigger read as satisfied by its own presence.
+var carrierDeclarationFiles = map[string]bool{"temporal.go": true, "temporal_neo4j.go": true}
+
+// TestTemporalCarriersAreEmittedExactlyWhenReferenced holds ADR 0033's
+// emission trigger in both directions, per golden package: temporal.go
+// is present when the rest of the package names a carrier, and absent
+// when it does not.
+//
+// Both halves are load-bearing and they fail differently. Omission is a
+// package that does not compile — a Date field with no Date declared.
+// Emission with nothing referencing it is five exported names taken out
+// of the caller's package for no reason, and reservedIdentifiers refuses
+// a schema element of any of those names whether or not the file lands,
+// so the cost is paid by every batch.
+//
+// The trigger is read off the corpus rather than off the predicate, so a
+// mutant predicate that answers true unconditionally does not redden
+// here while the committed goldens stand: what kills it first is
+// TestValid's golden comparison (an emitted temporal.go no golden dir
+// holds). This test reddens on the second pass only, after -update has
+// written temporal.go into every carrier-free fixture's goldens and its
+// absent half can see the damage. A carrier is looked for as an
+// identifier and never as a substring: Date sits inside LocalDateTime
+// and inside entity names a schema chose, and the Sel of a qualified
+// type belongs to another package — time.Time is the TIMESTAMP carrier
+// and would otherwise match Time on every fixture that projects a
+// timestamp.
+func TestTemporalCarriersAreEmittedExactlyWhenReferenced(t *testing.T) {
+	goldens, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden", "*"))
+	require.NoError(t, err)
+	require.NotEmpty(t, goldens, "no golden package was swept, so this test holds nothing")
+
+	carriers := map[string]bool{}
+	for _, name := range codegen.TemporalCarriers {
+		carriers[name] = true
+	}
+
+	withCarrier, without := 0, 0
+	fset := token.NewFileSet()
+	for _, dir := range goldens {
+		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+		require.NoError(t, err)
+		if len(files) == 0 {
+			continue
+		}
+		var referencedBy string
+		for _, path := range files {
+			if carrierDeclarationFiles[filepath.Base(path)] {
+				continue
+			}
+			file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+			require.NoError(t, err, "parsing %s", path)
+			ast.Inspect(file, func(n ast.Node) bool {
+				switch node := n.(type) {
+				case *ast.SelectorExpr:
+					return false
+				case *ast.Ident:
+					if carriers[node.Name] && referencedBy == "" {
+						referencedBy = fmt.Sprintf("%s:%d", path, fset.Position(node.Pos()).Line)
+					}
+				}
+				return true
+			})
+		}
+		_, err = os.Stat(filepath.Join(dir, "temporal.go"))
+		emitted := err == nil
+		if referencedBy != "" {
+			withCarrier++
+			require.True(t, emitted,
+				"%s names a temporal carrier at %s and emits no temporal.go, so the package does not compile",
+				dir, referencedBy)
+			_, err := os.Stat(filepath.Join(dir, "temporal_neo4j.go"))
+			require.NoError(t, err,
+				"%s emits the carrier declarations with no driver bridge beside them, so nothing converts what the driver hands over",
+				dir)
+			continue
+		}
+		without++
+		require.False(t, emitted,
+			"%s emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing",
+			dir)
+	}
+	require.NotZero(t, withCarrier, "no golden package references a carrier, so the emit half of the trigger is unwitnessed")
+	require.NotZero(t, without, "every golden package references a carrier, so the do-not-emit half of the trigger is unwitnessed")
 }
