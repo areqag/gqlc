@@ -163,6 +163,17 @@ seat_worktree() {
     echo "$(dirname "$mr")/$(basename "$mr")-seat-$1"
 }
 
+# The runner script each seat's tmux window executes, from kingdom/bin/. The
+# default is the claude runner; kingdom.toml's [kingdom] seat_runner retargets
+# the whole town (km-seat-ox runs `opencode run` headless) without touching
+# this file. Whatever it names must honour the km-seat contract: park on the
+# wake file, keep $home/status asleep/awake.
+seat_runner() {
+    local v
+    v=$(cfg kingdom seat_runner)
+    echo "${v:-km-seat}"
+}
+
 # ---------- deploy ----------
 
 # The systemd units execute kingdom/ out of the main checkout, never out of the
@@ -401,15 +412,19 @@ window_up()  { session_up && tmux list-windows -t "=$SESSION" -F '#W' | grep -qx
 # returns artur's pane (measured, tmux 3.7c) — and this roster has `ar` in it.
 # pgrep wants the tty without its /dev/ prefix; the real-tmux row in the suite is
 # what keeps that transform honest end to end.
+#
+# Two engines answer: an interactive claude (pane's own child) or the opencode
+# process a km-seat-ox wake is running. A slot is spent by either.
 seat_session_live() {
     local tty
     window_up "$1" || return 1
     tty=$(tmux list-panes -t "=$SESSION:$1" -F '#{pane_tty}' 2>/dev/null | head -1)
     [ -n "$tty" ] || return 1
-    pgrep -t "${tty#/dev/}" -x claude >/dev/null 2>&1
+    pgrep -t "${tty#/dev/}" -x claude >/dev/null 2>&1 && return 0
+    pgrep -t "${tty#/dev/}" -f '(^|/)opencode([[:space:]]|$)' >/dev/null 2>&1
 }
 
-# Is the seat's RUNNER there — the km-seat loop that IS the pane's command, and
+# Is the seat's RUNNER there — the loop that IS the pane's command, and
 # the only consumer of a wake file anywhere in the system (km-seat:88)? A seat
 # whose loop has exited can never be woken again by any mechanism short of
 # `km up`: cmd_wake appends a reason to a queue with no reader and reports
@@ -427,16 +442,17 @@ seat_session_live() {
 # session probe to accept a runner would break its existing callers, whose whole
 # question is whether a slot is being spent.
 #
-# `-f` and not `-x`: km-seat has an `env bash` shebang, so its comm is the
+# `-f` and not `-x`: the runner has an `env bash` shebang, so its comm is the
 # interpreter's. The `$` anchor is the same prefix hazard window_up guards
 # above — unanchored, `km-seat ar` matches artur's runner. The real-tmux row in
 # the suite is what keeps the pattern and the tty transform honest end to end.
 seat_runner_live() {
-    local tty
+    local tty runner
+    runner=$(seat_runner)
     window_up "$1" || return 1
     tty=$(tmux list-panes -t "=$SESSION:$1" -F '#{pane_tty}' 2>/dev/null | head -1)
     [ -n "$tty" ] || return 1
-    pgrep -t "${tty#/dev/}" -f "km-seat[[:space:]]+$1\$" >/dev/null 2>&1
+    pgrep -t "${tty#/dev/}" -f "${runner}[[:space:]]+$1\$" >/dev/null 2>&1
 }
 
 # Put a runner back, the way cmd_up does — a new window whose command is
@@ -455,7 +471,7 @@ seat_runner_start() { # <seat> -> 1 if a live session made it unsafe
     if window_up "$1"; then
         tmux kill-window -t "=$SESSION:$1" 2>/dev/null
     fi
-    tmux new-window -d -t "=$SESSION" -n "$1" "$SCRIPT_DIR/km-seat $1"
+    tmux new-window -d -t "=$SESSION" -n "$1" "$SCRIPT_DIR/$(seat_runner) $1"
 }
 
 # Text and its Enter as SEPARATE invocations. Bundled, tmux hands both to the
@@ -950,7 +966,7 @@ cmd_up() {
         placeholder=1
     fi
     for s in $(seats_all); do
-        window_up "$s" || tmux new-window -d -t "=$SESSION" -n "$s" "$SCRIPT_DIR/km-seat $s"
+        window_up "$s" ||         tmux new-window -d -t "=$SESSION" -n "$s" "$SCRIPT_DIR/$(seat_runner) $s"
     done
     [ "$placeholder" -eq 1 ] && tmux kill-window -t "=$SESSION:_km" 2>/dev/null
     echo "the town is up: $(seats_all | wc -l) seats, all asleep until woken."

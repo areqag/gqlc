@@ -8,6 +8,16 @@ tmux_session = "kingdom"
 # Runtime state dir name, created beside the main checkout's parent directory
 # (shared by all seat worktrees, never committed).
 state_dirname = "kingdom-state"
+# The engine each seat's tmux window runs, from kingdom/bin/. km-seat = the
+# interactive claude runner; km-seat-ox = headless `opencode run`, one process
+# per wake, same wake-file/status-file contract (2026-08-25 port, at
+# Անդրանիկ's direction, after the claude quota stopped the town dead).
+seat_runner = "km-seat-ox"
+
+[ox]
+# The model every citizen runs under. provider/model format, `opencode models`
+# vocabulary.
+model = "opencode/x-preview-f-free"
 
 [concurrency]
 # Global and work-conserving: any free slot goes to whichever class has ready
