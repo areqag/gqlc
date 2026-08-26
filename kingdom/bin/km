@@ -1023,7 +1023,16 @@ cmd_halt() {
             die "halt: unknown flag $1 — to ask whether a halt is up, km halt --status; a reason may not begin with '-'"
             ;;
     esac
-    printf 'raised by %s at %s: %s\n' "${KINGDOM_SEAT:-andranik}" "$(date -u -Iseconds)" "${*:-no reason given}" \
+    # VI.4 lets two citizens lower a halt; for everyone else the recorded
+    # reason is the whole of what they get, and a blank one forces that read to
+    # be a guess between "stopped on purpose" and "fat-fingered". Whitespace
+    # counts as blank — it is written to the file and reads on the board as
+    # nothing at all (bd gqlc-jqwf).
+    local reason="${*:-}"
+    if [ -z "${reason//[[:space:]]/}" ]; then
+        die "halt: a reason is required — say why the town must stop, so whoever finds it can tell deliberate from accidental"
+    fi
+    printf 'raised by %s at %s: %s\n' "${KINGDOM_SEAT:-andranik}" "$(date -u -Iseconds)" "$reason" \
         >"$sd/halt"
     # Names both timers, and says which paths it does NOT bind. The line used to
     # promise a quiet town while naming only the dispatcher, so an operator had
