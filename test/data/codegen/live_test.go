@@ -612,6 +612,10 @@ var scenarioTables = []struct {
 		why: "the only live witness that a refused nested Begin leaves no savepoint behind; until bd gqlc-8jfj this table carried no emptiness guard at all, so losing all of it was silent",
 	},
 	{
+		name: "localDateTimeColumnScenarios", got: len(localDateTimeColumnScenarios), want: 1,
+		why: "the only live witness for a LOCALDATETIME the server constructs; every other zoneless width is written by the client first, so losing this row leaves the decode half reachable only through a value our own encode produced",
+	},
+	{
 		name: "edgeUnionScenarios", got: len(edgeUnionScenarios), want: 1,
 		why: "the only live witness for the emitted edge-union label dispatch",
 	},
