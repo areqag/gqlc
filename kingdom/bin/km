@@ -867,6 +867,52 @@ seat_runner_start() { # <seat> -> 0 started, 1 declined (live session), 2 no run
     return 2
 }
 
+# claude's TUI draws the input box between the last two horizontal rules of the
+# visible buffer. Empty means what was typed has been submitted; anything else
+# is text still sitting there. Measured 2026-08-29 on a scratch pane, and the
+# render is the same shape while the agent is `working`, which send_line allows
+# (bd gqlc-gh7xj).
+#
+# The bare prompt glyph is the empty box, not content. It is compared as a whole
+# trimmed line rather than stripped by a regex so that the multibyte character
+# never reaches one.
+#
+# Exit 1 means no box was found. That is not the same answer as an empty box and
+# no caller may read it as one.
+seat_box_text() { # <pane> -> what the input box holds, nothing if it is empty
+    herdr pane read "$1" --source visible --lines 60 2>/dev/null | awk '
+        /^─+$/ { edge[++n] = NR }
+        { line[NR] = $0 }
+        END {
+            if (n < 2) exit 1
+            for (i = edge[n - 1] + 1; i < edge[n]; i++) {
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", line[i])
+                if (line[i] != "" && line[i] != "❯" && line[i] != ">") print line[i]
+            }
+        }'
+}
+
+# Both directions of this settle by the second read, 3 of 3 trials, so ten reads
+# is roughly a tenfold margin (bd gqlc-gh7xj). The sleep is the poll interval.
+# It is ordered first because typing takes those same two reads to appear, so a
+# read taken immediately could find the box empty merely because nothing had
+# rendered yet — but that is a cheap guard, not a measured necessity: deleting
+# the sleep outright did not produce a false empty on the same rows, the pane
+# read's own round trip being slower than the render.
+seat_box_emptied() { # <pane> -> 0 emptied, 1 still holds text, 2 no box to read
+    local left=10 box rc=2
+    while [ "$left" -gt 0 ]; do
+        left=$((left - 1))
+        sleep 0.2
+        box=$(seat_box_text "$1")
+        rc=$?
+        [ "$rc" -eq 0 ] || continue
+        [ -n "$box" ] || return 0
+    done
+    [ "$rc" -eq 0 ] && return 1
+    return 2
+}
+
 # `herdr agent send` writes the text and `pane send-keys` writes the Enter, and
 # both go down the pane's pty as ordinary bursts. There is no socket path that
 # bypasses the tty — this comment claimed one until 2026-08-29 — and herdr emits
@@ -884,10 +930,11 @@ seat_runner_start() { # <seat> -> 0 started, 1 declined (live session), 2 no run
 #
 # The failure is therefore a race on the far side's read loop, not a property of
 # a pane or a seat: 26 of 26 back-to-back sends submitted against a live claude,
-# idle and busy alike, so the rate is low and is NOT characterised. A stranded
-# box is submitted by a second lone Enter, 3 of 3. `herdr pane run` submits a
-# 507-character payload atomically, 3 of 3, and is the candidate replacement for
-# the pair (gqlc-gh7xj).
+# idle and busy alike, so the rate is low and is NOT characterised. That rate is
+# why the acks are not merely incomplete but untestable by repetition — a run of
+# uniform successes is what the defect looks like — so the send is witnessed
+# rather than retried: seat_box_emptied reads the box back, and a box that still
+# holds the text gets one lone Enter, which submitted it 3 of 3 (bd gqlc-gh7xj).
 #
 # The signature keeps the `<target>` shape
 # callers used with `send_line "=$SESSION:$seat"`, but the target may just be
@@ -932,11 +979,12 @@ seat_runner_start() { # <seat> -> 0 started, 1 declined (live session), 2 no run
 # sitting on a permission ask. seat_prompt_visible already draws the line the
 # nudge path uses; one guard here covers every caller, including the next one.
 #
-# What it cannot see is the box's CONTENTS. Typing appends, so a citizen's
-# half-written draft would be silently prefixed to this text and submitted with
-# it. agent_status does not report that, and no cheap check does.
+# What it does not look at is what the box held BEFORE the send. Typing appends,
+# so a citizen's half-written draft is silently prefixed to this text and
+# submitted with it. seat_box_text would show that if it were called first, so
+# the check is cheap and merely absent; it is bd gqlc-6bnkw, not this bead.
 send_line() { # <target> <text> -> 0 delivered, 1 not
-    local target=$1 text=$2 seat pane out
+    local target=$1 text=$2 seat pane out witnessed
     seat=${target##*:}
     pane=$(seat_pane_id "$seat") || pane=
     if [ -z "$pane" ]; then
@@ -955,7 +1003,19 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
         echo "km: send to $seat (pane $pane): the text was typed, but the Enter that submits it failed: ${out:-herdr gave no diagnosis on either stream}. It is sitting unsent in her prompt box" >&2
         return 1
     }
-    return 0
+    seat_box_emptied "$pane"
+    witnessed=$?
+    [ "$witnessed" -eq 0 ] && return 0
+    if [ "$witnessed" -eq 2 ]; then
+        echo "km: send to $seat (pane $pane): herdr acked the text and the Enter, but the pane renders no input box, so the submission was not witnessed and is being reported as delivered (bd gqlc-gh7xj)" >&2
+        return 0
+    fi
+    herdr pane send-keys "$pane" Enter >/dev/null 2>&1
+    seat_box_emptied "$pane"
+    witnessed=$?
+    [ "$witnessed" -eq 1 ] || return 0
+    echo "km: send to $seat (pane $pane): herdr acked the text and both Enters, but the box still holds the message, so it was typed and never submitted — claude reads a single burst of 64 or more characters as a paste and renders its trailing CR as a literal newline (bd gqlc-gh7xj). Nothing was delivered" >&2
+    return 1
 }
 
 # Kept as a query name for callers that want to render the pane to a human.
@@ -986,8 +1046,9 @@ seat_prompt_visible() { # <seat>
 
 # Under tmux, "did the nudge land" required scraping the prompt buffer for the
 # typed text, because a tty burst could strand it half-typed with nothing but
-# the buffer to say so. send_line reports a stranded send itself now — that is
-# what its Enter half is for — so this is kept as an alias that always answers
+# the buffer to say so. send_line reports a stranded send itself now — by
+# scraping that same buffer, its Enter half having been the thing that could
+# strand one (bd gqlc-gh7xj) — so this is kept as an alias that always answers
 # "no, nothing stranded", and callers whose logic was "if the nudge was
 # stranded, requeue" take the delivered branch.
 seat_prompt_holds_nudge() { return 1; }
