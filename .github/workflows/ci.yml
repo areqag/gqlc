@@ -71,6 +71,9 @@ jobs:
       - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
       - uses: ./.github/actions/setup-golangci
+      # `just lint` reaches shellcheck through lint-hooks (three times) and
+      # lint-just, so this job downloaded it on every run until bd gqlc-bmmf.
+      - uses: ./.github/actions/setup-shellcheck
       # Ratchets the set of packages govulncheck cannot see through (ADR 0026,
       # bd gqlc-m5rc). It rides the lint job, the root module's always-run static
       # gate, because the vuln job scans only when a go.mod changes — so it would
@@ -153,6 +156,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
+      # Not for tidy-check, which needs no shellcheck: for the `just lint-hooks
+      # .github/scripts` step at the BOTTOM of this job (bd gqlc-bmmf). Must
+      # follow setup-just, which is what puts `just` on PATH for the version
+      # read inside it.
+      - uses: ./.github/actions/setup-shellcheck
       - run: just tidy-check
       # bd gqlc-v2p: fails when a PR's `.beads/issues.jsonl` drops or reopens
       # an issue vs its base. Fetch only the base commit (depth 1) so cost is
@@ -283,4 +291,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
+      # actionlint grades a `run:` block only by handing it to shellcheck, so
+      # here the download was not a dependency of the gate but the gate itself
+      # (bd gqlc-bmmf; see the justfile's actionlint recipe on why a missing
+      # binary must fail loudly rather than silently ungate).
+      - uses: ./.github/actions/setup-shellcheck
       - run: just actionlint
