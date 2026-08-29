@@ -142,7 +142,10 @@ func writeArchive(w io.Writer, root string, entries []entry, lim archiveLimits) 
 		walkErr := filepath.WalkDir(e.path, func(p string, d fs.DirEntry, walkErr error) error {
 			// An unreadable or vanished child is skipped rather than fatal: the
 			// archive is insurance, and abandoning the other 99% of it because
-			// one file went away mid-walk is the worse trade.
+			// one file went away mid-walk is the worse trade. Non-regular
+			// entries — symlinks, FIFOs, sockets — are skipped here too, and
+			// they reach the deletion with no report line; the package doc
+			// carries that bound and why it loses no readable content.
 			if skip := walkErr != nil || d == nil || !d.Type().IsRegular(); skip {
 				return nil
 			}
