@@ -2,6 +2,29 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
+## This repository runs Claude Code in bypassPermissions
+
+The checked-in `.claude/settings.json` sets `permissions.defaultMode` to
+`bypassPermissions`, so a Claude Code session opened here does not ask before
+running a tool. Every clone inherits it — the file is tracked, and it is not
+scoped to this town's seats. An interactive session still meets Claude Code's
+workspace-trust dialog before project settings apply; whether that dialog gates
+this particular setting is undocumented and we have not measured it. A run that
+gets no dialog at all, and so inherits the mode silently, is a wider set than
+just `claude -p`: its `--help` says the dialog is skipped "via -p, or when
+stdout is not a TTY, e.g. piped or redirected output".
+
+It is set because a seat resumed by hand is launched as `claude --resume <uuid>`,
+which replays no `--permission-mode` flag, and an unattended agent that stops on
+a permission prompt waits until someone kills it (bd `gqlc-keaz`). Under this
+mode `PreToolUse` hooks still run and still block on exit 2, so the refusals in
+`.githooks/` are unaffected.
+
+To opt out, set your own `permissions.defaultMode` in `.claude/settings.local.json`,
+which is untracked and outranks the project file, or take the mode away from the
+whole host with `permissions.disableBypassPermissionsMode: "disable"` in managed
+settings, which the shipped binary honours above every file here.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker
 
