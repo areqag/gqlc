@@ -47,41 +47,51 @@ type typeMap struct{}
 // (§1e). The carrier is time.Time, which is what neo4j spells TIMESTAMP
 // with too, so the declared surface does not vary by backend.
 //
-// The other four temporal widths refuse for want of a carrier, not for
-// want of an encoding. DATE, TIME and LOCAL TIME are spelled with a
-// neo4j driver type on every other backend, and a package that reaches
-// Postgres through pgx cannot declare one without making the surface a
-// caller writes against vary by backend; DURATION adds that a calendar
-// duration counts months, which no fixed number of microseconds is. The
-// encodings for them are settled and recorded on gqlc-35yu.11 against
-// the day a backend-invariant carrier exists. DATE is the zero-padded
-// ISO 'YYYY-MM-DD' string, the one temporal spelling whose lexical order
-// is its chronological order — across [0001-01-01, 9999-12-31] and
-// nowhere else, which is the whole of where the encoding is defined.
-// Outside it the width stops being fixed and the ordering goes with it:
-// year 10000 needs a fifth digit and sorts under 2024 because '1' <
-// '2', and a proleptic year before 1 CE needs a sign, which sorts under
-// every digit and so files the whole era at the front, ascending.
-// Whoever admits this width owes the encoder a range check that fails
-// the value rather than storing a string the database will mis-sort;
-// the fixed width is a precondition here, not a property of the type.
-// DURATION is total
-// microseconds in the integer scalar. TIME and LOCAL TIME are
-// microseconds since midnight in the integer scalar, in [0, 86_400e6):
-// same argument as TIMESTAMP, one width down, and the count is
-// non-negative and fixed-range so agtype's integer ordering is
+// DATE, LOCAL TIME and DURATION ride the neutral carriers temporal.go
+// declares — Date, LocalTime and Duration (ADR 0033). That is what
+// admits them here: the obstacle was never the encoding, which has been
+// settled on gqlc-35yu.11 since the spike, but the carrier. Every other
+// backend spells these three with a neo4j driver type, and a package
+// reaching Postgres through pgx cannot declare one without making the
+// surface a caller writes against vary by backend. It can declare the
+// neutral carriers, because the generated package declares them itself.
+//
+// DATE is the zero-padded ISO 'YYYY-MM-DD' string, the one temporal
+// spelling whose lexical order is its chronological order — across
+// [0001-01-01, 9999-12-31] and nowhere else, which is the whole of where
+// the encoding is defined. Outside it the width stops being fixed and
+// the ordering goes with it: year 10000 needs a fifth digit and sorts
+// under 2024 because '1' < '2', and a proleptic year before 1 CE needs a
+// sign, which sorts under every digit and so files the whole era at the
+// front, ascending. The emitted encoder and decoder both range-check to
+// that window rather than store or read a string the database will
+// silently mis-sort; the fixed width is a precondition of the encoding,
+// not a property of the type.
+//
+// LOCAL TIME is microseconds since midnight in the integer scalar, in
+// [0, 86_400e6): the same argument as TIMESTAMP, one width down, and the
+// count is non-negative and fixed-range so agtype's integer ordering is
 // chronological order within the day with nothing for gqlc to rewrite.
-// An offset-bearing TIME normalises to UTC before counting and carries
-// its offset in the same flat <f>Offset sidecar; an offset-preserving
-// count would make two names for the same moment compare unequal, which
-// is the defect that ruled out the string spelling for zoned datetimes
-// (§1e). CALENDAR DURATION has no faithful encoding at all and is a
-// generate-time error wherever it appears.
+//
+// DURATION is total microseconds in the integer scalar. ADR 0002
+// collapsed the (YEAR TO MONTH) and (DAY TO SECOND) qualifiers onto one
+// carrier, so whether a value counts months is not knowable at generate
+// time: the emitted encoder refuses a Duration whose Months is non-zero
+// at run time, naming the field, because no fixed count of microseconds
+// is faithful to a month. Decode fills Seconds and Nanos alone.
+//
+// TIME is the one temporal width still refused for want of a carrier
+// here, and it is refused for the sidecar rather than for the count. Its
+// value carries an offset, which rides the flat <f>Offset sidecar named
+// after the property in the same arrangement TIMESTAMP's does; admitting
+// it is gqlc-oeqi.
 //
 // An instant is admitted as a property and refused as a list element, at
-// every depth: the zone rides a sidecar named after the property, and a
-// list has one name for all of its elements, so a list of instants has
-// nowhere to put the zone of any element but the first.
+// every depth, and so is anything else carrying a zone: the offset rides
+// a sidecar named after the property, and a list has one name for all of
+// its elements, so a list of instants has nowhere to put the zone of any
+// element but the first. The three widths admitted above carry no zone,
+// so they ride a list on the ordinary rule.
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
 		elemTy, ok := t.Property(pt.Elem())
@@ -129,9 +139,14 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		return "[]any", true
 	case graph.TypeTimestamp:
 		return "time.Time", true
+	case graph.TypeDate:
+		return "Date", true
+	case graph.TypeLocalTime:
+		return "LocalTime", true
+	case graph.TypeDuration:
+		return "Duration", true
 	case graph.TypeBytes,
-		graph.TypeDate, graph.TypeTime, graph.TypeLocalTime,
-		graph.TypeDuration,
+		graph.TypeTime,
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,

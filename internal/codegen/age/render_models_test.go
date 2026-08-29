@@ -20,13 +20,15 @@ var propertyWidths = []graph.PropertyType{
 	graph.TypeString, graph.TypeBool, graph.TypeInt32, graph.TypeFloat32,
 	graph.TypeAnyPropertyValue, graph.ListOf(graph.TypeInt64, false),
 	graph.TypeTimestamp,
+	graph.TypeDate, graph.TypeLocalTime, graph.TypeDuration,
+	graph.ListOf(graph.TypeDate, false),
 }
 
-// TestZoneIsMarkedOnlyBesideTheInstant pins the invariant temporal leans
-// on. The sidecar read is marked on an entity field whose Go type is the
-// instant, and that same field marks the instant decode; a zone marked
-// without one would answer temporal false and leave models.go naming
-// time with no import for it.
+// TestZoneIsMarkedOnlyBesideTheInstant pins the invariant importsTime
+// leans on. The sidecar read is marked on an entity field whose Go type
+// is the instant, and that same field marks the instant decode; a zone
+// marked without one would answer importsTime false and leave models.go
+// naming time with no import for it.
 //
 // The rows are every emitted Go type an entity field can carry, taken
 // from the property table rather than written out here, so a width the
@@ -47,9 +49,48 @@ func TestZoneIsMarkedOnlyBesideTheInstant(t *testing.T) {
 			require.True(t, h.instant, "%s marks the sidecar read with no instant beside it", pt)
 			sawInstant = true
 		}
-		require.Equal(t, h.instant, h.temporal(), "%s: temporal disagrees with the instant it was marked from", pt)
 	}
 	require.True(t, sawInstant, "no width in the sweep marked the sidecar read, so the invariant went untested")
+}
+
+// TestImportsTimeAgreesWithTheEmittedFile is the check that keeps the
+// time import honest against the helpers themselves rather than against
+// a list of widths written beside them. models.go is rendered for a batch
+// carrying one width, and the answer importsTime gave is required to
+// match whether the rendered bytes actually spell a time qualifier.
+//
+// Both directions matter and both are cheap to get wrong. A width that
+// marks a helper naming time without marking importsTime emits a file
+// that does not compile; one that marks importsTime without needing it
+// emits an unused import, which does not compile either. LOCAL TIME and
+// DURATION are the widths that make this more than a restatement: they
+// are temporals whose helpers do int64 arithmetic and name no time at
+// all, so a gate written as "the batch carries a temporal" is red here.
+func TestImportsTimeAgreesWithTheEmittedFile(t *testing.T) {
+	for _, pt := range propertyWidths {
+		t.Run(string(pt), func(t *testing.T) {
+			goType, ok := typeMap{}.Property(pt)
+			require.True(t, ok, "%s", pt)
+
+			entities := []wiredEntity{{
+				Entity:     codegen.Entity{Name: "E", Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}}},
+				label:      "E",
+				annotation: vertexAnnotation,
+			}}
+			var h helpers
+			h.forEntities(entities)
+
+			src := string(renderModels("m", entities, h))
+			// The import line itself is what importsTime writes, so the
+			// witness has to be a use of the package and not that line.
+			names := strings.Contains(src, "time.Time") || strings.Contains(src, "time.Parse") ||
+				strings.Contains(src, "time.Date") || strings.Contains(src, "time.UnixMicro") ||
+				strings.Contains(src, "time.FixedZone")
+			require.Equal(t, names, h.importsTime(),
+				"importsTime()=%v but the rendered models.go %s time", h.importsTime(),
+				map[bool]string{true: "names", false: "does not name"}[names])
+		})
+	}
 }
 
 // TestEmittedHelpersAreClosedOverWhatTheyCall renders models.go for a
@@ -102,8 +143,24 @@ func undeclaredAgtypeIdents(t *testing.T, src []byte) []string {
 
 	declared := map[string]struct{}{}
 	for _, d := range file.Decls {
-		if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil {
-			declared[fn.Name.Name] = struct{}{}
+		switch d := d.(type) {
+		case *ast.FuncDecl:
+			if d.Recv == nil {
+				declared[d.Name.Name] = struct{}{}
+			}
+		case *ast.GenDecl:
+			// A helper's constants are declarations the compiler resolves
+			// just as it resolves the helpers — the date layout is one —
+			// so a walk that reads only funcs reports them all missing.
+			for _, spec := range d.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for _, name := range vs.Names {
+					declared[name.Name] = struct{}{}
+				}
+			}
 		}
 	}
 
