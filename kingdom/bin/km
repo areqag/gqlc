@@ -469,13 +469,52 @@ seat_session_live() {
 # Under tmux the runner check was `pgrep km-seat` on the pane's tty. Under
 # herdr, agent_status is `unknown` when claude isn't running — including when
 # km-seat is parked between wakes, which is the HEALTHY asleep state, not a
-# dead runner. So the coarser check is the right one: if the seat's pane
-# exists, cmd_up started km-seat in it and it is either parked or working.
-# A km-seat that has hard-crashed and left the pane at a bare fish prompt is
-# indistinguishable from a parked one here — same shape as tmux, where a
-# runner that segfaulted would leave the window on `remain-on-exit`. The
-# wake queue not draining is the operator-visible tell.
-seat_runner_live() { [ -n "$(seat_pane_id "$1")" ]; }
+# dead runner. So the coarser check WAS the right one for a while, and it is
+# not any more. A pane outlives its command: herdr keeps the pane after any
+# child exits, so once km-seat exits (crash, `exec` under a stale hooks path,
+# or a stray fish command completing while nobody parked afterwards) the
+# pane stays and this check reads alive against nothing. Measured 2026-08-29
+# (gqlc-2vxs): 14 of 16 seats' panes existed with NO km-seat process behind
+# them, dispatch skipped them all as "wake queued already", cmd_wake and
+# cmd_reconcile refused to respawn because both gate on this predicate, and
+# `km reconcile` printed "0 runner(s) respawned" with the corpses in front of
+# it — the town's characteristic 0-over-a-dead-query shape a third time.
+#
+# So we ask what actually distinguishes dead from parked: whether a km-seat
+# process for THIS seat exists at all. `bash km-seat <seat>` sleeping in its
+# `until [ -s wake ]` loop still shows in the process table, so a parked seat
+# still reads alive. Only a seat with no km-seat anywhere in ps reads dead —
+# which is the population cmd_up's respawn was written for. The trailing
+# boundary `([[:space:]]|$)` stops `km-seat ar` from matching `km-seat
+# aramazd`; the leading `/km-seat` stops the pattern from matching
+# `km-seat-ox` or `km-overlap` if either is ever a seat name.
+#
+# `agent_status = unknown` still means "claude is not running", including for
+# a healthily parked seat, so it is not the tell — the tell is process
+# presence, exactly as the tmux era had it. What the herdr migration bought
+# us is that the pane persists across a crashed km-seat, which is the whole
+# reason we need to distinguish presence at all.
+seat_runner_live() { # <seat>
+    pgrep -f "/km-seat[[:space:]]+$1([[:space:]]|\$)" >/dev/null 2>&1
+}
+
+# Age in seconds of a seat's wake file, empty if none. This is the town's
+# fallback tell for the case seat_runner_live gets wrong — a healthy km-seat's
+# `until [ -s wake ]; sleep 5` drains its file within ten seconds, so a wake
+# older than that is evidence something is not reading, and the age keeps
+# climbing until someone acts. Deliberately not gated on the predicate above:
+# the whole point of gqlc-2vxs's second finding is that whatever replaces
+# seat_runner_live will grow its OWN blind spot, and this cell is what catches
+# it. Named at the seat helpers rather than inline in cmd_status because
+# cmd_reconcile is the second natural caller once this bead has a partner —
+# leaving that partner unwritten now, but not putting the helper somewhere it
+# would have to be lifted.
+seat_wake_queue_age() { # <seat> -> seconds since mtime, or empty
+    local f
+    f="$(seat_home "$1")/wake"
+    [ -f "$f" ] || return 0
+    printf '%d' $(( $(date +%s) - $(stat -c %Y "$f") ))
+}
 
 # Bring a fresh km-seat back for a seat. Uses `herdr pane run` to launch the
 # runner as a CHILD of the pane's shell (fish per herdr config) rather than
@@ -2837,7 +2876,7 @@ cmd_status() {
     local sd s disp class st stcol ctx hb beads unread age hbcol stale frozen="" blind="" idle=""
     local target tree fresh fstate fball fbgates fahead fdetail stalewt="" exposed="" unjudged=""
     local workcol wage sage dry wedged="" nowork="" unwitnessed=""
-    local stall stall_age stall_list
+    local stall stall_age stall_list wake_age undrained=""
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
     if session_up; then echo "town: UP (herdr workspace '$WORKSPACE')"; else echo "town: DOWN"; fi
@@ -3039,6 +3078,23 @@ cmd_status() {
             *) tree="?"; unjudged="$unjudged $s" ;;
         esac
         if [ "$fbgates" -gt 0 ]; then exposed="$exposed $s($fbgates)"; fi
+        # 60s is well past the 5s poll interval km-seat sleeps between wake
+        # checks and well short of anything an operator would want to sleep
+        # through. The seven-hour orphans in gqlc-2vxs would have surfaced
+        # here within a minute if this line had existed.
+        #
+        # Gated on state == asleep, because that is the shape 2vxs measures:
+        # a resting citizen with a wake nobody read. The other states have a
+        # legitimate reader — awake/asleep-pending seats keep the wake file
+        # until claude exits and km-seat loops back to consume it, so an old
+        # wake file there is the runner working, not the runner missing. The
+        # IDLE / WEDGED / UNRESPONSIVE lines already speak for those cases.
+        if [ "$st" = asleep ]; then
+            wake_age=$(seat_wake_queue_age "$s")
+            if [ -n "$wake_age" ] && [ "$wake_age" -ge 60 ]; then
+                undrained="$undrained $s($(fmt_age "$wake_age"))"
+            fi
+        fi
         unread=$(unread_count "$s")
         if [ "$inprog_ok" -eq 0 ]; then
             # "?" and never the em dash: the dash is this column's word for
@@ -3082,6 +3138,9 @@ cmd_status() {
     fi
     if [ -n "$blind" ]; then
         echo "BLIND:$blind — a live seat whose CHECKOUT cannot write a heartbeat: kingdom/bin/km-statusline and the statusLine key in .claude/settings.json are both tracked files, so a worktree parked on a branch that forked before the kingdom landed has neither. The blank HB column above is this instrument's silence, not the seat's, and a seat working all night reads exactly like an idle one. Read the pane, and 'km seat-refresh <seat>' moves a parked worktree back to origin/master."
+    fi
+    if [ -n "$undrained" ]; then
+        echo "UNDRAINED:$undrained — a wake file older than a minute, so nothing has parked to read it. km-seat's consume loop is a 5-second poll, so a healthy runner drains its file within ten seconds; if the age keeps climbing, the runner is gone. This is the tell for a dead km-seat when the predicate above misses it — 14 seats sat this way for seven hours because seat_runner_live gated on pane existence and every repair rode that gate (gqlc-2vxs). Report only; the recovery is 'km reconcile' (which now finds them because the predicate looks at the process too), or 'km up' for the whole town."
     fi
 
     echo
