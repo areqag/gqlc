@@ -42,7 +42,19 @@ seat_runner = "km-seat"
 #
 # So: raise this against measured host headroom, not against a long queue. The
 # queue being long is what a backlog looks like, not evidence about this number.
-max_active = 6
+#
+# 6 -> 10 on 2026-08-29 by Սեդրակ (gqlc-v6rqa), against that criterion and not
+# against the queue. What the 2026-08-22 note assumed has been measured and is
+# wrong in the safe direction: a slot costs ~0.41 GiB, not ~2 GiB. Measured with
+# 12 live claude sessions up — 4.5 GiB resident in total, load 1.86 on 24 cores,
+# 19 GiB available. Each of the three numbers the previous raise was sized
+# against has moved the same way (load was 12.5, available was 9 GiB).
+#
+# Budgeting 1 GiB/slot rather than the measured 0.41 to leave room for context
+# growth over a session's life, four added slots cost ~4 GiB of a 19 GiB budget.
+# The OOM the previous note feared is what still bounds this number; it is not
+# near. The next raise wants the same three numbers taken again, not this note.
+max_active = 10
 
 [dispatch]
 # The lowest priority the FRESH pass will wake a citizen for. A ready,
