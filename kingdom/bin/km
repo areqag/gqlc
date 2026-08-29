@@ -671,15 +671,13 @@ cfg_minutes() { # <section> <key> <default minutes> -> seconds
 
 # How many times the idle pass asks ONE seat in a single episode before it stops
 # typing and mails sedrak instead. Fail-open to 3 for the same reason cfg_minutes
-# does. Zero is refused rather than honoured: a cap of 0 escalates before ever
-# asking, which is the one reading of a typo nobody wants — and it is refused
-# AFTER base-10 normalisation, because `00` is all digits and is not the literal
-# `0`, so a case arm listing the bare zero let the padded spelling through to an
-# arithmetic comparison that read it as zero.
+# does. A cap of 0 escalates before ever asking, and the digit guard does not
+# refuse it: `00` is all digits, so it reaches the comparison below, which is what
+# catches it.
 recover_cap() {
     local v
     v=$(cfg welfare recover_attempts)
-    case "$v" in '' | *[!0-9]*) v=3 ;; *) v=$((10#$v)) ;; esac
+    case "$v" in '' | *[!0-9]*) v=3 ;; esac
     [ "$v" -gt 0 ] || v=3
     echo "$v"
 }
