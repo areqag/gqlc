@@ -136,6 +136,20 @@ unresponsive_after_minutes = 30
 # every tick that the slot is still held, so holding off is not going quiet.
 renudge_after_minutes = 30
 
+# How many times the dispatcher asks ONE seat in a single idle episode before it
+# stops typing and mails sedrak instead. The floor above only slows the
+# metronome: without a cap the town asks forever and tells nobody, which is the
+# shape the welfare check-ins reached at 48 unread.
+#
+# 3 at the floor above is an hour and a half of asking. A citizen who has not
+# answered three times in ninety minutes is not being under-asked, and a fourth
+# line spends her quota to repeat what the first three said. Escalation is a
+# mail and never an act: nothing here ends a session (VI.2). A send herdr
+# REFUSED does not count — she was never asked, so it does not spend her budget.
+# The counter and the escalation clear when the agent leaves `idle`: witnessed
+# work, not a pane that merely looks different.
+recover_attempts = 3
+
 # How long a live seat may go without a COMPLETED tool call before `km status`
 # marks it WEDGED (a tool call in flight that long) or NOWORK (nothing in flight
 # and nothing finished that long). Not the same question as the threshold above
