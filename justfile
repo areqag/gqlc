@@ -2468,8 +2468,8 @@ test-codegen-live-neo4j:
 
 # the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
 # the dialect fact the AGE backend's edge-union refusal rests on, the offset
-# sidecar's two live branches, and the probe that prints what AGE answers to the
-# constructors the gap table only suspects — each on its own apache/age
+# sidecar's two live branches, and the two constructs AGE refuses that no gap
+# acts on yet — each on its own apache/age
 # container. Nightly and manual only — these containers are cost this project
 # does not charge to a pull request. -count=1 because this is the AGE arm's only
 # gate and no pull request pays for it, so the run it reports on has to be a real
@@ -2480,19 +2480,18 @@ test-codegen-live-neo4j:
 # TestEveryLiveTestIsRunByARecipeThatNamesIt reads it as names for that reason. A
 # live test added to the codegen module and not added here runs in no job at all.
 #
-# -v because one of those names is an INSTRUMENT, not an assertion:
-# TestAGEAnswersTheConstructorsNobodyRan runs four openCypher constructors the
-# gap table only suspects and t.Logf's what the server said, each line prefixed
-# `osf1:`, asserting only that the server answered at all. Go DISCARDS a passing
-# package's output without -v — not t.Log, not fmt.Println, not a direct write
-# to os.Stdout — so measured on run 32634892211 (success, master, 19.7s) the log
-# held zero `osf1:` lines. The instrument ran green, paid for a container and
-# threw away its only product. -v goes on the whole recipe rather than a second
-# `go test` invocation because a second one would start a second AGE container
-# for one test; this recipe's -run list is already only the live battery, so the
-# added volume is that battery's own RUN/PASS lines (bd gqlc-8cjn).
+# -v because a name list and a container are exactly the pair that hides a test
+# not running. -run is matched, not verified: a name that matches nothing leaves
+# `go test` printing ok and exiting 0, and Go DISCARDS a passing package's
+# output without -v — not t.Log, not fmt.Println, not a direct write to
+# os.Stdout. Measured on run 32634892211 (success, master, 19.7s): the log held
+# ZERO lines from a test the -run list named and that had run green, so a
+# container was paid for and its only product thrown away (bd gqlc-8cjn). With
+# -v the per-test RUN/PASS lines are the evidence that the battery this project
+# runs nowhere else actually executed. It goes on the whole recipe rather than a
+# second `go test` invocation, which would start a second AGE container.
 test-codegen-live-age:
-    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGEOffsetSidecar|TestAGEAnswersTheConstructorsNobodyRan' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGEOffsetSidecar|TestAGEAnswersTheConstructsNoGapRefuses' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than

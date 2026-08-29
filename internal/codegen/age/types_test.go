@@ -307,14 +307,20 @@ func TestTemporalProjectionIsRefusedNamingTheKind(t *testing.T) {
 // kind alone does not say which — the same reason the width refusal
 // carries a backend name.
 //
-// The constructor is localtime() and not date(), because date() is one
-// of the five names the dialect gate refuses on the TEXT (dialect.go),
-// which runs ahead of Prepare and would answer this query before the
-// carrier was ever asked about. localtime() has no witness against the
-// pinned image and so is not refused there — which makes this test the
-// other half of the bound TestRejectsUndefinedFunctions/"a constructor
-// with no witness is not refused" states: an unwitnessed name reaches
-// the carrier question, and this is the answer it gets.
+// The constructor is NAMESPACED, because every bare temporal
+// constructor openCypher spells is a name the dialect gate refuses on
+// the TEXT (dialect.go), which runs ahead of Prepare and would answer
+// this query before the carrier was ever asked about. A namespaced call
+// is a different name (Cypher.g4 §oC_FunctionName is `oC_Namespace
+// oC_SymbolicName`) and cypher.UnqualifiedFunctionCalls drops it, so it
+// is the one temporal spelling that still reaches the carrier question —
+// which makes this test the other half of the bound
+// TestRejectsUndefinedFunctions/"a namespaced call is a different name
+// and is not refused" states: an unrefused name reaches the carrier
+// question, and this is the answer it gets. bd gqlc-dy40s is the bead that would close that
+// gap; see the sibling fixture
+// test/data/codegen/invalid/unrepresentable_temporal_duration_column for
+// what it owes.
 func TestTemporalProjectionNamesThisBackend(t *testing.T) {
 	files, err := generate(codegen.Input{
 		Schema: schemaWithPayload(graph.TypeString),
@@ -322,17 +328,17 @@ func TestTemporalProjectionNamesThisBackend(t *testing.T) {
 			Name:        "When",
 			Cardinality: codegen.CardinalityMany,
 			SourceFile:  "q.cypher",
-			SourceText:  "MATCH (b:Blob) RETURN localtime() AS t\n",
+			SourceText:  "MATCH (b:Blob) RETURN duration.between(b.a, b.z) AS t\n",
 			Validated: resolver.ValidatedQuery{
 				Columns: []resolver.Column{{
-					Name: "t", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalLocalTime},
+					Name: "t", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalDuration},
 				}},
 			},
 		}},
 	}, "age")
 	require.ErrorIs(t, err, codegen.ErrUnrepresentableTemporal)
 	require.EqualError(t, err,
-		`unrepresentable temporal kind: query "When" column 0 "t" projects temporal(localtime), `+
+		`unrepresentable temporal kind: query "When" column 0 "t" projects temporal(duration), `+
 			`which the Apache AGE backend has no carrier for`)
 	require.Nil(t, files)
 }
