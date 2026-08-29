@@ -4121,18 +4121,45 @@ seat_freshness() {
     #   on a branch   commits its upstream has not got
     #   detached      commits target has not got, as before
     #
-    # One question, not two: "no upstream configured" and "git would not answer"
-    # take the same branch and mean the same thing — nothing was shown to hold
-    # this, so it is held. Asking rev-parse first and rev-list second would read
+    # One question, not two, FOR THE HOLD: "no upstream configured" and "git
+    # would not answer" take the same branch and are held for the same reason —
+    # nothing was shown to hold this. They are told apart for the REPORT below,
+    # which is a different question. Asking rev-parse first and rev-list second would read
     # better and would put an unreachable fallback under the second call, which
     # a mutation duly SURVIVED: rev-list cannot fail for a ref rev-parse has
     # just verified, so no row could ever reach it.
-    local unique upstream_known=0
+    #
+    # An unresolvable @{u} has two causes, and they are the SAME hold with
+    # different remedies, so the hold does not move and only the sentence does
+    # (gqlc-guq3). @{u} cannot separate them — it is the one question whose
+    # answer is identical — but the branch's config is untouched by a remote
+    # deletion and by a prune, so it separates them offline, with no network
+    # call and no gh auth. Measured 2026-08-29 in a scratch repo, after
+    # push -u then remote-side delete then fetch --prune:
+    #   never pushed        branch.<n>.remote UNSET, branch.<n>.merge UNSET
+    #   upstream gone       both INTACT, tracking ref absent
+    # Read the config keys, not git's two error strings: those also differ, and
+    # they are human-facing text, unversioned and localisable.
+    #
+    # Published is NOT safe, so this changes no verdict: the branch reached a
+    # remote once, which says nothing about whether the work landed, and a
+    # branch pushed to the wrong upstream (gqlc-tfh1) is held by nothing.
+    local unique upstream_known=0 upstream_gone=""
     if [ -n "$branch" ]; then
         if unique=$(git_at "$wt" rev-list --count "@{u}..HEAD" 2>/dev/null); then
             upstream_known=1
         else
             unique=1
+            # Not `[ … ] && upstream_gone=…`: that is the last command of this
+            # branch, so a false test would be the `if`'s own status and
+            # errexit would abort seat_freshness in exactly the never-pushed
+            # case this is here to name.
+            local cfg_remote cfg_merge
+            cfg_remote=$(git_at "$wt" config --get "branch.$branch.remote" 2>/dev/null || true)
+            cfg_merge=$(git_at "$wt" config --get "branch.$branch.merge" 2>/dev/null || true)
+            if [ -n "$cfg_remote" ] && [ -n "$cfg_merge" ]; then
+                upstream_gone="$cfg_remote/${cfg_merge#refs/heads/}"
+            fi
         fi
     else
         unique=$ahead
@@ -4141,6 +4168,8 @@ seat_freshness() {
     if [ -n "$dirty" ] || [ "$unique" -gt 0 ]; then
         local why="$ahead commit(s) of its own, on no branch"
         [ -n "$branch" ] && why="branch $branch in flight"
+        [ -n "$upstream_gone" ] &&
+            why="branch $branch was published to $upstream_gone, which is gone — whether its work landed is not a question git can answer"
         [ -n "$dirty" ] && why="uncommitted work in the tree"
         echo "working $behind_all $behind_gates $ahead $why"
         return 0
