@@ -46,18 +46,6 @@ func fromLocalTime(v LocalTime) dbtype.LocalTime {
 	return dbtype.LocalTime(time.Date(0, time.January, 1, v.Hour, v.Minute, v.Second, v.Nanosecond, time.UTC))
 }
 
-// toLocalDateTime reads the date and clock components off a driver
-// local date-time.
-func toLocalDateTime(v dbtype.LocalDateTime) LocalDateTime {
-	t := time.Time(v)
-	year, month, day := t.Date()
-	hour, minute, second := t.Clock()
-	return LocalDateTime{
-		Year: year, Month: int(month), Day: day,
-		Hour: hour, Minute: minute, Second: second, Nanosecond: t.Nanosecond(),
-	}
-}
-
 // toDuration copies a driver duration field for field: dbtype.Duration
 // already holds the four components apart.
 func toDuration(v dbtype.Duration) Duration {

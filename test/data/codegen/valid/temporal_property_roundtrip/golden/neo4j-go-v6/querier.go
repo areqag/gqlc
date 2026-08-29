@@ -11,7 +11,6 @@ type ReadQuerier interface {
 	ReadingLocalTime(ctx context.Context, arg int64) (LocalTime, error)
 	ReadingElapsed(ctx context.Context, arg int64) (Duration, error)
 	OneReading(ctx context.Context, arg int64) (Reading, error)
-	BuiltLocalDateTime(ctx context.Context) (LocalDateTime, error)
 }
 
 type WriteQuerier interface {

@@ -28,6 +28,7 @@ import (
 	mixedage "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/apache-age-pgx-v5"
 	onecoloneage "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/apache-age-pgx-v5"
 	anypropage "github.com/areqag/gqlc/test/data/codegen/valid/schema_any_property/golden/apache-age-pgx-v5"
+	temporalage "github.com/areqag/gqlc/test/data/codegen/valid/temporal_property_roundtrip/golden/apache-age-pgx-v5"
 	tsage "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/apache-age-pgx-v5"
 )
 
@@ -213,6 +214,11 @@ func (h *ageArm) savepointScenario(ctx context.Context, t *testing.T) savepointB
 	return h.newScenario(ctx, t)
 }
 
+func (h *ageArm) temporalScenario(ctx context.Context, t *testing.T) temporalBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
 func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 	t.Helper()
 	graph := fmt.Sprintf("gqlc_live_%d", h.graphs.Add(1))
@@ -229,6 +235,7 @@ func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 		anyValue:   anyValueColumnsAGE{q: anypropage.New(h.pool, graph)},
 		mixed:      mixedReadWriteBatchAGE{q: mixedage.New(h.pool, graph)},
 		timestamps: timestampRoundtripAGE{q: tsage.New(h.pool, graph)},
+		temporals:  temporalRoundtripAGE{q: temporalage.New(h.pool, graph)},
 	}
 	// Created through one package's helper and dropped through another's:
 	// each target emits its own lifecycle pair, and both handles have to
@@ -258,6 +265,7 @@ type ageScenario struct {
 	anyValue   anyValueColumnsAGE
 	mixed      mixedReadWriteBatchAGE
 	timestamps timestampRoundtripAGE
+	temporals  temporalRoundtripAGE
 }
 
 func (s ageScenario) seed(ctx context.Context, t *testing.T, cypher string) {
@@ -360,6 +368,40 @@ func (s ageScenario) serveNestedBegin(ctx context.Context, t *testing.T) bool {
 	return holdsNestedSavepoint(ctx, t, tx)
 }
 
+func (s ageScenario) temporalRoundtrip() temporalRoundtripQuerier { return s.temporals }
+
+// seedSeenOn writes the nullable date as the bare ISO string the encoding
+// stores, because AGE has no date() to call: the seed is the one place
+// the battery spells this backend's carrier out, and it does so to keep
+// the writer independent of the emitted encoder under test.
+func (s ageScenario) seedSeenOn(ctx context.Context, t *testing.T, id int64, on dateValue) {
+	t.Helper()
+	s.seed(ctx, t, fmt.Sprintf("MATCH (r:Reading {id: %d}) SET r.seenOn = '%04d-%02d-%02d'", id, on.Year, on.Month, on.Day))
+}
+
+// storedLocalTime and storedDuration are this arm's declaration of what
+// AGE keeps of a written zoneless temporal, restated from ADR 0033's
+// encodings rather than read back out of the generated package: a count
+// of microseconds keeps no finer precision than a microsecond, and a
+// single count of them has nowhere to hold the days a Duration was
+// written with.
+func (s ageScenario) storedLocalTime(v localTimeValue) localTimeValue {
+	v.Nanosecond = v.Nanosecond / 1000 * 1000
+	return v
+}
+
+func (s ageScenario) storedDuration(v durationValue) durationValue {
+	micros := (v.Days*86400+v.Seconds)*1000000 + int64(v.Nanos)/1000
+	// Floor division, so a duration backwards borrows from Seconds and
+	// Nanos stays in [0, 1000000000) — the shape neo4j's own carrier takes,
+	// which is what makes one set of components readable on both arms.
+	seconds := micros / 1000000
+	if micros%1000000 < 0 {
+		seconds--
+	}
+	return durationValue{Seconds: seconds, Nanos: int((micros - seconds*1000000) * 1000)}
+}
+
 // timestampRoundtripAGE binds the TIMESTAMP fixture. Nothing here names
 // the encoding: the emitted methods take and return time.Time, and the
 // microsecond count agtype carries is behind them.
@@ -384,6 +426,76 @@ func (a timestampRoundtripAGE) oneEvent(ctx context.Context, id int64) (eventEnt
 	}
 	return eventEntity{ID: e.Id, OccurredAt: e.OccurredAt, SeenAt: e.SeenAt}, nil
 }
+
+// temporalRoundtripAGE binds the zoneless temporal fixture. As on the
+// neo4j arms every conversion is a field copy, and here that is the whole
+// of ADR 0033's claim: the string a DATE rides on and the microsecond
+// counts a LOCAL TIME and a DURATION ride on appear nowhere on this
+// surface, so the same battery reads both targets.
+type temporalRoundtripAGE struct{ q *temporalage.Queries }
+
+func (a temporalRoundtripAGE) addReading(ctx context.Context, id int64, onDate dateValue, atLocal localTimeValue, elapsed durationValue) error {
+	return a.q.AddReading(ctx, temporalage.AddReadingParams{
+		Id:      id,
+		OnDate:  temporalage.Date{Year: onDate.Year, Month: onDate.Month, Day: onDate.Day},
+		AtLocal: temporalage.LocalTime{Hour: atLocal.Hour, Minute: atLocal.Minute, Second: atLocal.Second, Nanosecond: atLocal.Nanosecond},
+		Elapsed: temporalage.Duration{Months: elapsed.Months, Days: elapsed.Days, Seconds: elapsed.Seconds, Nanos: elapsed.Nanos},
+	})
+}
+
+func (a temporalRoundtripAGE) readingsFrom(ctx context.Context, from dateValue) ([]int64, error) {
+	return a.q.ReadingsFrom(ctx, temporalage.Date{Year: from.Year, Month: from.Month, Day: from.Day})
+}
+
+func (a temporalRoundtripAGE) readingsSeenFrom(ctx context.Context, seenFrom *dateValue) ([]int64, error) {
+	if seenFrom == nil {
+		return a.q.ReadingsSeenFrom(ctx, nil)
+	}
+	return a.q.ReadingsSeenFrom(ctx, &temporalage.Date{Year: seenFrom.Year, Month: seenFrom.Month, Day: seenFrom.Day})
+}
+
+func (a temporalRoundtripAGE) readingDate(ctx context.Context, id int64) (dateValue, error) {
+	d, err := a.q.ReadingDate(ctx, id)
+	if err != nil {
+		return dateValue{}, err
+	}
+	return dateValue{Year: d.Year, Month: d.Month, Day: d.Day}, nil
+}
+
+func (a temporalRoundtripAGE) readingLocalTime(ctx context.Context, id int64) (localTimeValue, error) {
+	v, err := a.q.ReadingLocalTime(ctx, id)
+	if err != nil {
+		return localTimeValue{}, err
+	}
+	return localTimeValue{Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond}, nil
+}
+
+func (a temporalRoundtripAGE) readingElapsed(ctx context.Context, id int64) (durationValue, error) {
+	v, err := a.q.ReadingElapsed(ctx, id)
+	if err != nil {
+		return durationValue{}, err
+	}
+	return durationValue{Months: v.Months, Days: v.Days, Seconds: v.Seconds, Nanos: v.Nanos}, nil
+}
+
+func (a temporalRoundtripAGE) oneReading(ctx context.Context, id int64) (readingEntity, error) {
+	r, err := a.q.OneReading(ctx, id)
+	if err != nil {
+		return readingEntity{}, err
+	}
+	out := readingEntity{
+		ID:      r.Id,
+		OnDate:  dateValue{Year: r.OnDate.Year, Month: r.OnDate.Month, Day: r.OnDate.Day},
+		AtLocal: localTimeValue{Hour: r.AtLocal.Hour, Minute: r.AtLocal.Minute, Second: r.AtLocal.Second, Nanosecond: r.AtLocal.Nanosecond},
+		Elapsed: durationValue{Months: r.Elapsed.Months, Days: r.Elapsed.Days, Seconds: r.Elapsed.Seconds, Nanos: r.Elapsed.Nanos},
+	}
+	if r.SeenOn != nil {
+		out.SeenOn = &dateValue{Year: r.SeenOn.Year, Month: r.SeenOn.Month, Day: r.SeenOn.Day}
+	}
+	return out, nil
+}
+
+func (a temporalRoundtripAGE) errNoRows() error { return temporalage.ErrNoRows }
 
 type oneColOneParamOneAGE struct{ q *onecoloneage.Queries }
 
