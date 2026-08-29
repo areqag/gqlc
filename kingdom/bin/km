@@ -577,6 +577,190 @@ seat_wake_queue_age() { # <seat> -> seconds since mtime, or empty
     printf '%d' $(( $(date +%s) - $(stat -c %Y "$f") ))
 }
 
+# ---------- seat launch conformance ----------
+#
+# Every instrument this town had reported on INTENT. `km cfg claude
+# permission_mode` answered `bypassPermissions` and was telling the truth about
+# kingdom.toml while fifteen of sixteen running sessions contradicted it: bare
+# `claude --resume <uuid>`, no --permission-mode, no --append-system-prompt, no
+# --model. So they froze on modals nobody was there to answer, ran without their
+# souls, and ran as the wrong model — three Ճարտարապետներ and three Դատաւորներ
+# configured as claude-fable-5 were all on the default. `km status` called them
+# awake and healthy for a whole day (bd gqlc-8dsa; the restart that fixed them
+# was ordered by Անդրանիկ).
+#
+# So this reads the PROCESS. It is the only check here that does, and that is
+# the entire point of it: nothing else in km can tell a seat launched by km-seat
+# from one somebody resumed by hand.
+#
+# REPORT ONLY, never remediate. Fixing a mis-launched session means ending it,
+# and a citizen's session is not km's to end on a timer (Constitution VI.2).
+#
+# The seat's claude is FOUND by cwd. km-seat cds to the worktree before exec'ing
+# claude, so the seat's tree is the process's cwd — and, unlike a walk down from
+# the km-seat pid, that still finds a session somebody started by hand in the
+# pane, which IS the population this exists for. herdr knows the pane but
+# reports no pid, so it cannot answer this.
+#
+# Ancestry then does one job only: a claude descended from another claude in the
+# same worktree is that session's own child, not a second session. Claude Code
+# forks before exec'ing its tools, and inside the fork/exec window the child
+# still reads exe=claude and cwd=the worktree while carrying a COPY of the
+# parent's argv — conforming, not merely indistinguishable. Measured over 300s
+# of the live sixteen-seat town on 2026-08-29: 33 such extras across 9 seats (32
+# caught mid-fork on their way to becoming a grep, one a citizen's own
+# `claude --help`), 23510 sightings, every one of them descended from that
+# seat's own session and not one ambiguous. Without this filter km doctor went
+# red at random on a healthy town, and a permanently red gate is one nobody
+# reads. Two INDEPENDENT claudes in one worktree still say '?': that is the
+# two-live-turns-on-one-tree hazard, and it is worth the alarm.
+seat_launch_probe() { # <worktree> <want-model> <want-effort> <want-permission-mode> -> "<code>\t<detail>"
+    KM_LAUNCH_WT=$1 KM_LAUNCH_MODEL=$2 KM_LAUNCH_EFFORT=$3 KM_LAUNCH_PM=$4 python3 -c '
+import os, sys
+
+wt      = os.path.realpath(os.environ["KM_LAUNCH_WT"])
+model   = os.environ["KM_LAUNCH_MODEL"]
+effort  = os.environ["KM_LAUNCH_EFFORT"]
+pm      = os.environ["KM_LAUNCH_PM"]
+LEVELS  = ("low", "medium", "high", "xhigh", "max")
+
+def argv_of(pid):
+    with open("/proc/%s/cmdline" % pid, "rb") as f:
+        raw = f.read()
+    parts = raw.split(b"\0")
+    if parts and parts[-1] == b"":
+        parts.pop()
+    return [p.decode("utf-8", "replace") for p in parts]
+
+def ppid_of(pid):
+    # Field 4 of stat. comm sits in parens and may itself contain one, so the
+    # split starts after the LAST close paren.
+    with open("/proc/%s/stat" % pid) as f:
+        return f.read().rpartition(")")[2].split()[1]
+
+found = []
+try:
+    pids = [d for d in os.listdir("/proc") if d.isdigit()]
+except OSError as e:
+    print("?\tthe process table could not be read (%s), so no seat could be judged" % e)
+    sys.exit(0)
+for pid in pids:
+    try:
+        exe = os.path.basename(os.readlink("/proc/%s/exe" % pid))
+        argv = argv_of(pid)
+        if exe != "claude" and (not argv or os.path.basename(argv[0]) != "claude"):
+            continue
+        if os.path.realpath(os.readlink("/proc/%s/cwd" % pid)) != wt:
+            continue
+        ppid = ppid_of(pid)
+    except OSError:
+        continue          # it exited, or is not ours to read; not this seat s answer
+    found.append((pid, ppid, argv))
+
+if not found:
+    # FAIL LOUD. gqlc-jvlu is one line long: a lookup that cannot read its input
+    # must not answer with the value that means fine. The caller has already
+    # established that herdr reports a live agent in this pane, so an absent
+    # process is a contradiction, not an idle seat.
+    print("?\therdr reports a live agent in this pane but no claude process runs in %s, so nothing could be compared" % wt)
+    sys.exit(0)
+cand = set(pid for pid, _, _ in found)
+roots = []
+for pid, ppid, argv in found:
+    cur, descends = ppid, False
+    for _ in range(64):
+        if cur in cand:
+            descends = True
+            break
+        if cur in ("0", "1"):
+            break
+        try:
+            cur = ppid_of(cur)
+        except OSError:
+            break     # the parent exited mid-walk; this one stays a root
+    if not descends:
+        roots.append((pid, argv))
+
+if len(roots) != 1:
+    # Named rather than resolved by picking one. Two INDEPENDENT claudes in one
+    # worktree is the two-live-turns-on-one-tree hazard and deserves the alarm;
+    # guessing between them would let a conforming stray vouch for a
+    # mis-launched citizen.
+    print("?\t%d claude processes run in %s, %d of them descended from no other (pids %s); which one is the seat is not something this can decide"
+          % (len(found), wt, len(roots), ", ".join(p for p, _ in roots) or "none"))
+    sys.exit(0)
+
+argv = roots[0][1]
+
+def flag(name):
+    """The value of --name, as a space pair or --name=value. None if absent."""
+    for i, a in enumerate(argv):
+        if a == name:
+            return argv[i + 1] if i + 1 < len(argv) else ""
+        if a.startswith(name + "="):
+            return a[len(name) + 1:]
+    return None
+
+codes, says = [], []
+
+got = flag("--permission-mode")
+if got is None:
+    codes.append("P"); says.append("no --permission-mode (want %s), so it prompts and waits for somebody at the pane" % pm)
+elif got != pm:
+    codes.append("P"); says.append("--permission-mode %s, want %s" % (got or "<empty>", pm))
+
+got = flag("--append-system-prompt")
+if got is None:
+    codes.append("S"); says.append("no --append-system-prompt, so this citizen is running with no soul")
+elif not got.strip():
+    codes.append("S"); says.append("--append-system-prompt is empty, so this citizen is running with no soul")
+
+got = flag("--model")
+if got is None:
+    codes.append("M"); says.append("no --model (want %s), so it runs on whatever claude defaults to" % model)
+elif got != model:
+    codes.append("M"); says.append("--model %s, want %s" % (got or "<empty>", model))
+
+# --effort is the one axis where DIFFERENT is legal. A bead carrying an
+# effort:<level> label wakes its seat at that level instead of the class
+# default, and Constitution V.6.2 lets any citizen write one without asking
+# (km-seat honours it; bd gqlc-jmwh). So equality with the class default would
+# go red for a seat launched exactly as the town intends, and a permanently red
+# gate is one nobody reads. What is asserted is what nobody may legitimately
+# do: launch with no level at all, or with one claude does not take. A level
+# that merely DIFFERS from the class default is not reported at all — it is
+# what a legitimate escalation looks like, and V.6.6 records depth on the bead.
+#
+# When the class has no valid level configured, km-seat launches with no
+# --effort by design (valid_effort drops it), so absent is correct there and
+# the whole axis is skipped rather than inverted.
+got = flag("--effort")
+if effort in LEVELS:
+    if got is None:
+        codes.append("E"); says.append("no --effort (the class default is %s)" % effort)
+    elif got not in LEVELS:
+        codes.append("E"); says.append("--effort %s is not a level claude takes" % (got or "<empty>"))
+
+print("%s\t%s" % ("".join(codes) if codes else "ok", "; ".join(says)))
+'
+}
+
+# The per-seat verdict, with the expectations resolved from kingdom.toml — the
+# same file km-seat reads at launch, so this compares the process against the
+# town s own configuration and not against a value spelled twice.
+#
+# A seat with NO live agent is `-` and never a failure: it is asleep, which is
+# legal, and conflating absent with wrong is exactly what gqlc-jvlu was.
+seat_launch_state() { # <seat> -> "<code>\t<detail>"
+    local pm
+    seat_session_live "$1" || { printf -- '-\t\n'; return 0; }
+    pm=$(cfg claude permission_mode)
+    # km-seat's own default when the key is missing, read here rather than
+    # spelled a second time to differ from it later (km-seat:24-25).
+    : "${pm:=bypassPermissions}"
+    seat_launch_probe "$(seat_worktree "$1")" "$(seat_model "$1")" "$(cfg effort "$(seat_class "$1")")" "$pm"
+}
+
 # Bring a fresh km-seat back for a seat. Uses `herdr pane run` to launch the
 # runner as a CHILD of the pane's shell (fish per herdr config) rather than
 # `exec`ing over the shell — if km-seat exits unexpectedly under `exec`, the
@@ -3057,6 +3241,7 @@ cmd_status() {
     local target tree fresh fstate fball fbgates fahead fdetail stalewt="" exposed="" unjudged=""
     local workcol wage sage dry wedged="" nowork="" unwitnessed=""
     local stall stall_age stall_list wake_age undrained=""
+    local launch launchcol launchsay mislaunched=""
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
     if session_up; then echo "town: UP (herdr workspace '$WORKSPACE')"; else echo "town: DOWN"; fi
@@ -3118,7 +3303,7 @@ cmd_status() {
     # prints the UNJUDGED line below, rather than letting sixteen unanswered
     # questions render as sixteen healthy seats.
     target=$(git_at "$(main_root)" rev-parse --verify --quiet origin/master 2>/dev/null || true)
-    printf '%-10s %-10s %-9s %-6s %-7s %-8s %-7s %-6s %s\n' SEAT CLASS STATE CTX HB WORK TREE MAIL BEADS
+    printf '%-10s %-10s %-9s %-6s %-7s %-8s %-7s %-6s %-6s %s\n' SEAT CLASS STATE CTX HB WORK TREE LAUNCH MAIL BEADS
     for s in $(seats_all); do
         disp=$(seat_display "$s")
         class=$(seat_class "$s")
@@ -3275,6 +3460,18 @@ cmd_status() {
                 undrained="$undrained $s($(fmt_age "$wake_age"))"
             fi
         fi
+        # A COLUMN and not only the line below it, so that every seat is
+        # separately judged and none can go silent: an aggregate that prints
+        # nothing reads the same whether sixteen seats conform or sixteen were
+        # never measured, and that equivalence is the one this file is organised
+        # against. The line then NAMES the flag, because "seat X is
+        # misconfigured" sends the next operator back to the process table.
+        launch=$(seat_launch_state "$s")
+        launchcol=${launch%%$'\t'*}
+        launchsay=${launch#*$'\t'}
+        if [ "$launchcol" != "-" ] && [ "$launchcol" != ok ] && [ -n "$launchsay" ]; then
+            mislaunched="$mislaunched $s($launchcol: $launchsay)"
+        fi
         unread=$(unread_count "$s")
         if [ "$inprog_ok" -eq 0 ]; then
             # "?" and never the em dash: the dash is this column's word for
@@ -3284,7 +3481,7 @@ cmd_status() {
         else
             beads=$(echo "$inprog" | awk -v s="$s" '$1 == s { printf "%s ", $2 }')
         fi
-        printf '%-10s %-10s %-9s %-6s %-7s %-8s %-7s %-6s %s  (%s)\n' "$s" "$class" "$stcol" "$ctx" "$hbcol" "$workcol" "$tree" "$unread" "${beads:-—}" "$disp"
+        printf '%-10s %-10s %-9s %-6s %-7s %-8s %-7s %-6s %-6s %s  (%s)\n' "$s" "$class" "$stcol" "$ctx" "$hbcol" "$workcol" "$tree" "$launchcol" "$unread" "${beads:-—}" "$disp"
     done
     if [ -n "$frozen" ]; then
         echo "UNRESPONSIVE:$frozen — no heartbeat for over $(fmt_age "$stale"); read the pane before believing the STATE column. A frozen seat holds its slot, answers no mail, and reports as healthy. Do not end the session: a modal is not consent (VI.2)."
@@ -3318,6 +3515,9 @@ cmd_status() {
     fi
     if [ -n "$blind" ]; then
         echo "BLIND:$blind — a live seat whose CHECKOUT cannot write a heartbeat: kingdom/bin/km-statusline and the statusLine key in .claude/settings.json are both tracked files, so a worktree parked on a branch that forked before the kingdom landed has neither. The blank HB column above is this instrument's silence, not the seat's, and a seat working all night reads exactly like an idle one. Read the pane, and 'km seat-refresh <seat>' moves a parked worktree back to origin/master."
+    fi
+    if [ -n "$mislaunched" ]; then
+        echo "LAUNCH:$mislaunched — a live session whose claude process does not match kingdom.toml. Codes: P permission mode, S soul (--append-system-prompt), M model, E effort; '?' means herdr reports a live agent but the process could not be resolved, which is reported rather than passed. Fifteen of sixteen seats ran a whole day like this as bare 'claude --resume <uuid>' — permission-gated, soulless, and on the wrong model — while every instrument in the town reported on kingdom.toml's INTENT and called them healthy (gqlc-8dsa). Settings are read at LAUNCH, so nothing fixes a running session: it keeps its flags until it ends. Report only — ending a citizen's session is not km's to do on a timer (VI.2); the repair is that seat's next wake through km-seat."
     fi
     if [ -n "$undrained" ]; then
         echo "UNDRAINED:$undrained — a wake file older than a minute, so nothing has parked to read it. km-seat's consume loop is a 5-second poll, so a healthy runner drains its file within ten seconds; if the age keeps climbing, the runner is gone. This is the tell for a dead km-seat when the predicate above misses it — 14 seats sat this way for seven hours because seat_runner_live gated on pane existence and every repair rode that gate (gqlc-2vxs). Report only; the recovery is 'km reconcile' (which now finds them because the predicate looks at the process too), or 'km up' for the whole town."
@@ -3572,6 +3772,41 @@ cmd_doctor() {
         else
             echo "ok:   every seat's worktree carries every merged .githooks/.claude commit"
         fi
+    fi
+    # THE LAUNCH ARM (gqlc-8dsa). Every other row in this file reports on
+    # CONFIGURATION; this one reports on the sixteen processes. That distinction
+    # is the whole finding: `km cfg claude permission_mode` answered
+    # bypassPermissions truthfully while fifteen sessions had no such flag, and
+    # `km status` called them awake and healthy for a day.
+    #
+    # HARD, unlike the coverage arm above it. A worktree legitimately mid-PR is
+    # behind on hooks and that is nobody's error, so coverage is a mark; a
+    # session with no soul or the wrong model is not a state the town has any
+    # legitimate route into. The one axis a citizen may legitimately vary
+    # (--effort, V.6.2) is the one seat_launch_probe deliberately does not fail
+    # on.
+    #
+    # Per seat and never in aggregate: an "all seats ok" over sixteen sources
+    # passes when fifteen go silent, so each seat is judged alone and an
+    # unresolvable process is named rather than skipped.
+    local lseat ls lcode lsay lbad="" lseen=0
+    for lseat in $(seats_all); do
+        ls=$(seat_launch_state "$lseat")
+        lcode=${ls%%$'\t'*}
+        lsay=${ls#*$'\t'}
+        [ "$lcode" = "-" ] && continue
+        lseen=$((lseen + 1))
+        [ "$lcode" = ok ] && continue
+        lbad="$lbad $lseat($lcode: $lsay);"
+    done
+    if [ -n "$lbad" ]; then
+        echo "FAIL: live sessions whose claude process does not match kingdom.toml (P permission mode, S soul, M model, E effort; '?' the process could not be resolved):$lbad settings are read at launch, so a running session keeps its flags until it ends — the repair is that seat's next wake through km-seat, and ending a session is nobody's to do on a timer (VI.2)"
+        ok=1
+    else
+        # The count is here so that silence is falsifiable. "every live session
+        # matches" over a roster where nothing was live is a true sentence that
+        # means nothing, and it is the sentence a reader takes for reassurance.
+        echo "ok:   every live session matches kingdom.toml on permission mode, soul and model ($lseen live, $(($(seats_all | wc -l) - lseen)) asleep and not judged)"
     fi
     check soft "bd mail.delegate points at km" "bd mail.delegate does NOT resolve to 'km mail', so mail bd delegates goes nowhere this town reads" sh -c "bd config get mail.delegate | grep -q 'km mail'"
     check soft "dispatch timer enabled" "the dispatch timer is NOT enabled, so nothing will route a bead until someone runs km dispatch by hand" systemctl --user is-enabled kingdom-dispatch.timer
