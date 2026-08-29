@@ -1,4 +1,4 @@
-package neo4j
+package neo4j_test
 
 import (
 	"testing"
@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/neo4j"
 )
 
 // TestParamBindExprSlices pins the driver-binding expression for every
@@ -61,7 +62,7 @@ func TestParamBindExprSlices(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := codegen.Param{RawName: "p", Field: "P", GoType: tt.goType, Nullable: tt.nullable}
-			require.Equal(t, tt.want, paramBindExpr(f, "arg"))
+			require.Equal(t, tt.want, neo4j.ParamBindExpr(f, "arg"))
 		})
 	}
 }
@@ -93,7 +94,7 @@ func TestParamBindExprTemporalLists(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := codegen.Param{RawName: "p", Field: "P", GoType: tt.goType, Nullable: tt.nullable}
-			require.Equal(t, tt.want, paramBindExpr(f, "arg"))
+			require.Equal(t, tt.want, neo4j.ParamBindExpr(f, "arg"))
 		})
 	}
 }

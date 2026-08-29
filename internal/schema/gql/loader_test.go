@@ -1,4 +1,4 @@
-package gql
+package gql_test
 
 import (
 	"strings"
@@ -6,6 +6,8 @@ import (
 	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
 // body returns a one-node graph type declaration named name, the smallest thing
@@ -127,7 +129,7 @@ func TestLoaderResolvesChains(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := NewLoader(tc.fsys).Load(tc.entry)
+			got, err := gql.NewLoader(tc.fsys).Load(tc.entry)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got.Name)
 			require.NotEmpty(t, got.Nodes, "the tail's element types must reach the model")
@@ -151,7 +153,7 @@ func TestLoaderResolutionFailures(t *testing.T) {
 			name:  "a climb from the root has nowhere to pop to",
 			fsys:  fstest.MapFS{"root.gql": file(copyOf("Copied", "../s/gt"))},
 			entry: "root.gql",
-			want:  ErrReferenceOutsideCatalogue,
+			want:  gql.ErrReferenceOutsideCatalogue,
 		},
 		{
 			// The other half of the climber pair: identical reference text to the
@@ -159,13 +161,13 @@ func TestLoaderResolutionFailures(t *testing.T) {
 			name:  "the climber escapes when it is loaded as the root",
 			fsys:  fstest.MapFS{"climber.gql": file(copyOf("climber", "../s/base"))},
 			entry: "climber.gql",
-			want:  ErrReferenceOutsideCatalogue,
+			want:  gql.ErrReferenceOutsideCatalogue,
 		},
 		{
 			name:  "a reference to no file at all dangles",
 			fsys:  fstest.MapFS{"root.gql": file(copyOf("Copied", "nowhere"))},
 			entry: "root.gql",
-			want:  ErrDanglingReference,
+			want:  gql.ErrDanglingReference,
 			// The diagnostic points at the reference the user wrote, and names
 			// the path it resolved to.
 			message: "nowhere.gql",
@@ -174,7 +176,7 @@ func TestLoaderResolutionFailures(t *testing.T) {
 			name:    "a self-copy is the one-element cycle",
 			fsys:    fstest.MapFS{"self.gql": file(copyOf("self", "self"))},
 			entry:   "self.gql",
-			want:    ErrReferenceCycle,
+			want:    gql.ErrReferenceCycle,
 			message: "self.gql → self.gql",
 		},
 		{
@@ -184,7 +186,7 @@ func TestLoaderResolutionFailures(t *testing.T) {
 				"b.gql": file(copyOf("b", "a")),
 			},
 			entry:   "a.gql",
-			want:    ErrReferenceCycle,
+			want:    gql.ErrReferenceCycle,
 			message: "a.gql → b.gql → a.gql",
 		},
 		{
@@ -194,12 +196,12 @@ func TestLoaderResolutionFailures(t *testing.T) {
 				"liar.gql": file(body("NotLiar")),
 			},
 			entry:   "root.gql",
-			want:    ErrReferenceNameMismatch,
+			want:    gql.ErrReferenceNameMismatch,
 			message: `liar.gql declares "NotLiar"`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := NewLoader(tc.fsys).Load(tc.entry)
+			got, err := gql.NewLoader(tc.fsys).Load(tc.entry)
 			require.ErrorIs(t, err, tc.want)
 			require.Empty(t, got.Name, "the model must be the zero value on error")
 			if tc.message != "" {
@@ -220,7 +222,7 @@ func TestLoaderRootNameIsExempt(t *testing.T) {
 		"Source.gql": file(body("Source")),
 	}
 
-	got, err := NewLoader(fsys).Load("schema.gql")
+	got, err := gql.NewLoader(fsys).Load("schema.gql")
 	require.NoError(t, err)
 	require.Equal(t, "Whatever", got.Name)
 }
@@ -240,36 +242,36 @@ func TestDeclinedSpellingsAgreeAcrossParseAndLoad(t *testing.T) {
 		want error
 		also fstest.MapFS
 	}{
-		{ref: "$$gt", want: ErrReferenceParameter, also: fstest.MapFS{"gt.gql": file(body("gt"))}},
-		{ref: "$$s/gt", want: ErrReferenceParameter, also: fstest.MapFS{"s/gt.gql": file(body("gt"))}},
-		{ref: "HOME_SCHEMA/gt", want: ErrHomeSchemaReference, also: fstest.MapFS{"gt.gql": file(body("gt"))}},
-		{ref: "s.gt", want: ErrObjectParentReference, also: fstest.MapFS{"s/gt.gql": file(body("gt"))}},
-		{ref: "/s/o.gt", want: ErrObjectParentReference, also: fstest.MapFS{"s/o/gt.gql": file(body("gt"))}},
-		{ref: `"gt"`, want: ErrDelimitedReferenceSegment, also: fstest.MapFS{"gt.gql": file(body("gt"))}},
-		{ref: "`gt`", want: ErrDelimitedReferenceSegment, also: fstest.MapFS{"gt.gql": file(body("gt"))}},
+		{ref: "$$gt", want: gql.ErrReferenceParameter, also: fstest.MapFS{"gt.gql": file(body("gt"))}},
+		{ref: "$$s/gt", want: gql.ErrReferenceParameter, also: fstest.MapFS{"s/gt.gql": file(body("gt"))}},
+		{ref: "HOME_SCHEMA/gt", want: gql.ErrHomeSchemaReference, also: fstest.MapFS{"gt.gql": file(body("gt"))}},
+		{ref: "s.gt", want: gql.ErrObjectParentReference, also: fstest.MapFS{"s/gt.gql": file(body("gt"))}},
+		{ref: "/s/o.gt", want: gql.ErrObjectParentReference, also: fstest.MapFS{"s/o/gt.gql": file(body("gt"))}},
+		{ref: `"gt"`, want: gql.ErrDelimitedReferenceSegment, also: fstest.MapFS{"gt.gql": file(body("gt"))}},
+		{ref: "`gt`", want: gql.ErrDelimitedReferenceSegment, also: fstest.MapFS{"gt.gql": file(body("gt"))}},
 		// A directory segment, not the trailing name: simpleDirectoryPath is
 		// reachable only behind a SOLIDUS or a DOUBLE_PERIOD (GQL.g4:1407-1417),
 		// so a bare `dir/gt` is a syntax error and cannot witness this — the
 		// leading solidus is what puts a delimited identifier in a directory
 		// position at all.
-		{ref: `/"dir"/gt`, want: ErrDelimitedReferenceSegment, also: fstest.MapFS{"dir/gt.gql": file(body("gt"))}},
+		{ref: `/"dir"/gt`, want: gql.ErrDelimitedReferenceSegment, also: fstest.MapFS{"dir/gt.gql": file(body("gt"))}},
 	} {
 		t.Run(tc.ref, func(t *testing.T) {
 			src := copyOf("Copied", tc.ref)
 
-			_, parseErr := New().Parse(strings.NewReader(src))
+			_, parseErr := gql.New().Parse(strings.NewReader(src))
 			require.ErrorIs(t, parseErr, tc.want, "Parse")
 
 			fsys := fstest.MapFS{"root.gql": file(src)}
 			for name, f := range tc.also {
 				fsys[name] = f
 			}
-			_, loadErr := NewLoader(fsys).Load("root.gql")
+			_, loadErr := gql.NewLoader(fsys).Load("root.gql")
 			require.ErrorIs(t, loadErr, tc.want, "Load")
 
 			// All four wrap the class, so a caller asking only whether the source
 			// was rejected keeps matching (ADR 0016's pattern).
-			require.ErrorIs(t, parseErr, ErrUnsupportedSource)
+			require.ErrorIs(t, parseErr, gql.ErrUnsupportedSource)
 		})
 	}
 }
@@ -280,8 +282,8 @@ func TestDeclinedSpellingsAgreeAcrossParseAndLoad(t *testing.T) {
 func TestParseRefusesEveryReachableReference(t *testing.T) {
 	for _, ref := range []string{"Source", "/gt", "/a/b/gt", "./gt", "CURRENT_SCHEMA/gt", "../s/gt", "../../s/gt"} {
 		t.Run(ref, func(t *testing.T) {
-			_, err := New().Parse(strings.NewReader(copyOf("Copied", ref)))
-			require.ErrorIs(t, err, ErrCopyOfSource)
+			_, err := gql.New().Parse(strings.NewReader(copyOf("Copied", ref)))
+			require.ErrorIs(t, err, gql.ErrCopyOfSource)
 		})
 	}
 }
@@ -296,6 +298,6 @@ func TestLoaderReportsTheReferencedFilesOwnErrors(t *testing.T) {
 		"Source.gql": file("CREATE GRAPH TYPE Source LIKE g"),
 	}
 
-	_, err := NewLoader(fsys).Load("root.gql")
-	require.ErrorIs(t, err, ErrLikeGraphSource)
+	_, err := gql.NewLoader(fsys).Load("root.gql")
+	require.ErrorIs(t, err, gql.ErrLikeGraphSource)
 }

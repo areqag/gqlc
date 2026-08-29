@@ -1,4 +1,4 @@
-package gql
+package gql_test
 
 import (
 	"crypto/sha256"

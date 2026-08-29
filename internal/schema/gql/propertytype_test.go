@@ -1,4 +1,4 @@
-package gql
+package gql_test
 
 import (
 	"sort"
@@ -11,6 +11,7 @@ import (
 	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
 // parseFirstProperty drives the real grammar to the first propertyType context
@@ -20,7 +21,7 @@ func parseFirstProperty(t *testing.T, valueType string) (schema.Property, error)
 	t.Helper()
 	src := "CREATE PROPERTY GRAPH TYPE T AS { (:A { p :: " + valueType + " }) }"
 
-	errs := &listener{}
+	errs := gql.NewListener(nil)
 	lex := gen.NewGQLLexer(antlr.NewInputStream(src))
 	lex.RemoveErrorListeners()
 	lex.AddErrorListener(errs)
@@ -29,12 +30,12 @@ func parseFirstProperty(t *testing.T, valueType string) (schema.Property, error)
 	gp.RemoveErrorListeners()
 	gp.AddErrorListener(errs)
 	tree := gp.GqlProgram()
-	require.NoError(t, errs.err, "fixture must parse; %q is not grammar-valid", valueType)
+	require.NoError(t, errs.Err(), "fixture must parse; %q is not grammar-valid", valueType)
 
 	c := &propertyCollector{ts: ts}
 	antlr.NewParseTreeWalker().Walk(c, tree)
 	require.NotNil(t, c.ctx, "no propertyType context found")
-	return property(c.ctx, ts)
+	return gql.Property(c.ctx, ts)
 }
 
 type propertyCollector struct {
@@ -320,7 +321,7 @@ func TestCanonicalSpellingCommaSpacingIrrelevant(t *testing.T) {
 		"DECIMAL( 10,2 )",
 	} {
 		t.Run(spaced, func(t *testing.T) {
-			require.Equal(t, canonicalSpelling("DECIMAL(10,2)"), canonicalSpelling(spaced))
+			require.Equal(t, gql.CanonicalSpelling("DECIMAL(10,2)"), gql.CanonicalSpelling(spaced))
 		})
 	}
 }
@@ -469,7 +470,7 @@ func TestPropertyVerboseIntegerSignedness(t *testing.T) {
 // merely that the word "unsupported" is absent.
 func TestPropertyBareDurationRejectedAtParse(t *testing.T) {
 	src := `CREATE PROPERTY GRAPH TYPE T AS { (:A { p :: DURATION }) }`
-	_, err := New().Parse(strings.NewReader(src))
+	_, err := gql.New().Parse(strings.NewReader(src))
 	require.Error(t, err)
 	require.True(t,
 		strings.HasPrefix(err.Error(), "syntax error at "),
@@ -490,7 +491,7 @@ func TestPropertyUnsupportedType(t *testing.T) {
 	} {
 		t.Run(spelling, func(t *testing.T) {
 			_, err := parseFirstProperty(t, spelling)
-			require.ErrorIs(t, err, ErrUnsupportedType)
+			require.ErrorIs(t, err, gql.ErrUnsupportedType)
 		})
 	}
 }
@@ -502,12 +503,12 @@ func TestPropertyUnsupportedType(t *testing.T) {
 // map decides only *which* row a pin covers, never *whether* the pin is right,
 // because every typePin's want is written out by hand.
 func typeSpellingsRowFor(spelling string) (string, bool) {
-	full := canonicalSpelling(spelling)
-	if _, ok := typeSpellings[full]; ok {
+	full := gql.CanonicalSpelling(spelling)
+	if _, ok := gql.TypeSpellings[full]; ok {
 		return full, true
 	}
-	truncated := truncateParenthetical(full)
-	if _, ok := typeSpellings[truncated]; ok {
+	truncated := gql.TruncateParenthetical(full)
+	if _, ok := gql.TypeSpellings[truncated]; ok {
 		return truncated, true
 	}
 	return "", false
@@ -533,7 +534,7 @@ func typeSpellingsRowFor(spelling string) (string, bool) {
 // (TestPropertyBareDurationRejectedAtParse), but DURATION(YEAR TO MONTH) is
 // pinned and reaches the row down the same fallback the production code takes.
 func TestTypeSpellingsEveryRowPinned(t *testing.T) {
-	grounded := make(map[string]bool, len(typeSpellings))
+	grounded := make(map[string]bool, len(gql.TypeSpellings))
 	row := func(spelling string) string {
 		got, ok := typeSpellingsRowFor(spelling)
 		require.True(t, ok, "pinned spelling %q reaches no typeSpellings row, so it grounds nothing", spelling)
@@ -562,8 +563,8 @@ func TestTypeSpellingsEveryRowPinned(t *testing.T) {
 		}
 	}
 
-	ungrounded := make([]string, 0, len(typeSpellings))
-	for key := range typeSpellings {
+	ungrounded := make([]string, 0, len(gql.TypeSpellings))
+	for key := range gql.TypeSpellings {
 		if !grounded[key] {
 			ungrounded = append(ungrounded, key)
 		}

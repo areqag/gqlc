@@ -1,4 +1,4 @@
-package gql
+package gql_test
 
 // corpusAreaD1 holds the corpus entries for predefined scalar value types —
 // booleans, character and byte strings, exact and approximate numerics, temporal

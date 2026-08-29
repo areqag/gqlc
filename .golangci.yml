@@ -104,7 +104,10 @@ linters:
         - github.com/areqag/gqlc/internal/queryfile\.Parser$
         - github.com/areqag/gqlc/internal/resolver\.ResolvedType$
         - github.com/areqag/gqlc/internal/schema\.Parser$
-        - github.com/areqag/gqlc/internal/schema/gql\.ebnf$
+        # `_test` suffix: the corpus harness lives in the external test package,
+        # which is what it has to be to stay inside govulncheck's call graph
+        # (ADR 0026, bd gqlc-m5rc).
+        - github.com/areqag/gqlc/internal/schema/gql_test\.ebnf$
         # ANTLR's Go target generates every grammar-rule context as an
         # interface, so tree-walking helpers have no concrete type to return.
         # depguard already restricts who may import these packages at all.

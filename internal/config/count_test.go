@@ -1,9 +1,11 @@
-package config
+package config_test
 
 import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/areqag/gqlc/internal/config"
 )
 
 // graphSeqOf returns the graph sequence node of body, the same node the
@@ -39,7 +41,7 @@ graph:
 	seq := graphSeqOf(t, body)
 
 	t.Run("names both counts", func(t *testing.T) {
-		err := checkEntryCount(seq, 2)
+		err := config.CheckEntryCount(seq, 2)
 		if err == nil {
 			t.Fatal("expected a mismatch to be reported")
 		}
@@ -50,15 +52,15 @@ graph:
 	})
 
 	t.Run("agreement is silent", func(t *testing.T) {
-		if err := checkEntryCount(seq, 3); err != nil {
-			t.Fatalf("checkEntryCount(3, 3) = %v; want nil", err)
+		if err := config.CheckEntryCount(seq, 3); err != nil {
+			t.Fatalf("config.CheckEntryCount(3, 3) = %v; want nil", err)
 		}
 	})
 
 	// The canonical fixture runs the check for real; a load that trips it
 	// fails here rather than only in the message test above.
 	t.Run("does not fire for an accepted document", func(t *testing.T) {
-		cfg, err := Load("testdata/canonical.gqlc.yaml")
+		cfg, err := config.Load("testdata/canonical.gqlc.yaml")
 		if err != nil {
 			t.Fatalf("load fixture: %v", err)
 		}

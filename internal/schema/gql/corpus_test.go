@@ -1,4 +1,4 @@
-package gql
+package gql_test
 
 import (
 	"fmt"
@@ -17,6 +17,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/schema/gql"
 	"github.com/areqag/gqlc/internal/schema/gql/annexd"
 )
 
@@ -665,7 +666,7 @@ func TestSemanticCaseCollisions(t *testing.T) {
 			require.NoError(t, err)
 			src := uncommented(string(raw))
 
-			want, err := New().Parse(strings.NewReader(src))
+			want, err := gql.New().Parse(strings.NewReader(src))
 			require.NoError(t, err, "a semantic case is a file that resolves")
 
 			for _, sibling := range sc.siblings {
@@ -674,7 +675,7 @@ func TestSemanticCaseCollisions(t *testing.T) {
 					require.NotEqual(t, src, variant,
 						"the spelling is not in the file's GQL, so this compares the file with itself")
 
-					got, err := New().Parse(strings.NewReader(variant))
+					got, err := gql.New().Parse(strings.NewReader(variant))
 					require.NoError(t, err, "the sibling spelling must resolve for there to be a collision")
 					require.Equal(t, want, got,
 						"%s still resolves differently from %s, so the model can tell them apart and %s has closed this blind spot",
@@ -839,7 +840,7 @@ func TestNoUndeclaredLossiness(t *testing.T) {
 func discardedArguments(t *testing.T, src string) []string {
 	t.Helper()
 
-	want, err := New().Parse(strings.NewReader(src))
+	want, err := gql.New().Parse(strings.NewReader(src))
 	require.NoError(t, err, "only a source that resolves has a model to compare against")
 
 	var discarded []string
@@ -860,7 +861,7 @@ func discardedArguments(t *testing.T, src string) []string {
 		}
 
 		variant := rewriteArguments(src, spelling, keyword+"("+rewritten+")")
-		if got, err := New().Parse(strings.NewReader(variant)); err == nil && reflect.DeepEqual(want, got) {
+		if got, err := gql.New().Parse(strings.NewReader(variant)); err == nil && reflect.DeepEqual(want, got) {
 			discarded = append(discarded, spelling)
 		}
 	}

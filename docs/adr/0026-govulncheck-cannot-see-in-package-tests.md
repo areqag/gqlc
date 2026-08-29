@@ -313,9 +313,17 @@ announce it anyway the moment an advisory clears.
 ## Considered alternatives
 
 **Convert every root in-package test to an external test package.** The correct
-fix, and the reason gqlc-m5rc exists. Not done here: it touches every package,
-and some of those tests want unexported state for good reasons. The goal is to
-shrink the residual and know its size, not to reach zero by exporting things
+fix, and the reason gqlc-m5rc exists. Not done in this ADR's own change, because
+it touches every package and some of those tests want unexported state for good
+reasons. gqlc-m5rc has since done it for eight of the ten packages that were
+blind, leaving `internal/codegen/age` (gqlc-5utdh, held only until PR #1797
+merges) and `internal/resolver` (gqlc-mwohz). The resolver is the case this
+paragraph anticipated: its tests build three types from composite literals
+naming unexported fields typed by `internal/schema`, so a bridge that
+constructs them has to import a package whose closure reaches antlr and the
+package goes straight back in the blind set. Exporting the fields instead
+measures at ~285 production references. It stays blind on purpose. The goal is
+to shrink the residual and know its size, not to reach zero by exporting things
 that should stay private.
 
 **Report a module-level metric instead of packages and files.** Rejected: the

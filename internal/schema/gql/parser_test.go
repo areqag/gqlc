@@ -1,4 +1,4 @@
-package gql
+package gql_test
 
 import (
 	"bytes"
@@ -21,6 +21,7 @@ import (
 	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/schema/gql"
 	"github.com/areqag/gqlc/internal/schema/gql/isobnf"
 )
 
@@ -41,7 +42,7 @@ func TestParserSuite(t *testing.T) {
 func (s *ParserSuite) parseFixture(path string) (schema.Schema, error) {
 	src, err := os.ReadFile(path)
 	s.Require().NoError(err)
-	return New().Parse(bytes.NewReader(src))
+	return gql.New().Parse(bytes.NewReader(src))
 }
 
 // TestValid parses every valid fixture and compares its model against the
@@ -95,7 +96,7 @@ func (s *ParserSuite) TestGraphTypeName() {
 
 	for _, tt := range cases {
 		s.Run(tt.name, func() {
-			got, err := New().Parse(strings.NewReader(tt.src))
+			got, err := gql.New().Parse(strings.NewReader(tt.src))
 			s.Require().NoError(err)
 			s.Equal(tt.want, got.Name)
 		})
@@ -110,7 +111,7 @@ func (s *ParserSuite) TestNodeTypeAssembly() {
 		(:Person { id :: INT NOT NULL, name :: STRING })
 	}`
 
-	got, err := New().Parse(strings.NewReader(src))
+	got, err := gql.New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 	s.Require().Len(got.Nodes, 1)
 
@@ -130,7 +131,7 @@ func (s *ParserSuite) TestNodeTypeAssembly() {
 func (s *ParserSuite) TestNodeTypeName() {
 	src := `CREATE PROPERTY GRAPH TYPE T AS { NODE TYPE PersonType (p :Person { id :: INT }) }`
 
-	got, err := New().Parse(strings.NewReader(src))
+	got, err := gql.New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 
 	n, ok := got.Nodes[graph.LabelSet{"Person"}.Key()]
@@ -143,7 +144,7 @@ func (s *ParserSuite) TestNodeTypeName() {
 func (s *ParserSuite) TestNodeMultiLabelIdentity() {
 	src := `CREATE PROPERTY GRAPH TYPE T AS { (:Employee&Person { id :: INT }) }`
 
-	got, err := New().Parse(strings.NewReader(src))
+	got, err := gql.New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 
 	_, ok := got.Nodes[graph.LabelSet{"Person", "Employee"}.Key()]
@@ -160,7 +161,7 @@ func (s *ParserSuite) TestEdgeTypeAssembly() {
 		(a) -[:AUTHORED { publishedAt :: TIMESTAMP }]-> (b)
 	}`
 
-	got, err := New().Parse(strings.NewReader(src))
+	got, err := gql.New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 	s.Require().Len(got.Edges, 1)
 
@@ -187,7 +188,7 @@ func (s *ParserSuite) TestEdgeInlineEndpoints() {
 		(:Person) -[:KNOWS]-> (:Person)
 	}`
 
-	got, err := New().Parse(strings.NewReader(src))
+	got, err := gql.New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 
 	key := schema.EdgeKey{
@@ -210,7 +211,7 @@ func (s *ParserSuite) TestEndpointFillerEmptyBraceAllowed() {
 		(:Post),
 		(:Person) -[:AUTHORED]-> (:Post {})
 	}`
-	got, err := New().Parse(strings.NewReader(src))
+	got, err := gql.New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 	key := schema.EdgeKey{
 		Source:    graph.LabelSet{"Person"}.Key(),
@@ -266,8 +267,8 @@ func (s *ParserSuite) TestEndpointFillerRejectsProperties() {
 	}
 	for _, tt := range cases {
 		s.Run(tt.name, func() {
-			got, err := New().Parse(strings.NewReader(graphType(tt.src)))
-			s.Require().ErrorIs(err, ErrEndpointFillerHasProperties)
+			got, err := gql.New().Parse(strings.NewReader(graphType(tt.src)))
+			s.Require().ErrorIs(err, gql.ErrEndpointFillerHasProperties)
 			s.Equal(schema.Schema{}, got, "model must be the zero value on error")
 		})
 	}
@@ -306,37 +307,37 @@ func (s *ParserSuite) TestEndpointFillerMixedRejectionsReportTheSource() {
 			src: `(:Person),
 				(:Post),
 				(:Person => :Employee) -[:AUTHORED]-> (:Post { extra :: STRING })`,
-			want:    ErrEndpointFillerImpliesLabels,
-			notWant: ErrEndpointFillerHasProperties,
+			want:    gql.ErrEndpointFillerImpliesLabels,
+			notWant: gql.ErrEndpointFillerHasProperties,
 		},
 		{
 			name: "right arc, source carries properties and destination implies labels",
 			src: `(:Person),
 				(:Post),
 				(:Person { extra :: STRING }) -[:AUTHORED]-> (:Post => :Article)`,
-			want:    ErrEndpointFillerHasProperties,
-			notWant: ErrEndpointFillerImpliesLabels,
+			want:    gql.ErrEndpointFillerHasProperties,
+			notWant: gql.ErrEndpointFillerImpliesLabels,
 		},
 		{
 			name: "left arc, source is written on the right and still wins",
 			src: `(:Post { extra :: STRING }) <-[:AUTHORED]- (:Person => :Employee),
 				(:Person),
 				(:Post)`,
-			want:    ErrEndpointFillerImpliesLabels,
-			notWant: ErrEndpointFillerHasProperties,
+			want:    gql.ErrEndpointFillerImpliesLabels,
+			notWant: gql.ErrEndpointFillerHasProperties,
 		},
 		{
 			name: "left arc, the other pairing of the same two defects",
 			src: `(:Post => :Article) <-[:AUTHORED]- (:Person { extra :: STRING }),
 				(:Person),
 				(:Post)`,
-			want:    ErrEndpointFillerHasProperties,
-			notWant: ErrEndpointFillerImpliesLabels,
+			want:    gql.ErrEndpointFillerHasProperties,
+			notWant: gql.ErrEndpointFillerImpliesLabels,
 		},
 	}
 	for _, tt := range cases {
 		s.Run(tt.name, func() {
-			got, err := New().Parse(strings.NewReader(graphType(tt.src)))
+			got, err := gql.New().Parse(strings.NewReader(graphType(tt.src)))
 			s.Require().ErrorIs(err, tt.want)
 			s.Require().NotErrorIs(err, tt.notWant,
 				"the destination's rejection must not be reported alongside the source's")
@@ -355,7 +356,7 @@ func (s *ParserSuite) TestEdgeLeftPointingCanonicalised() {
 		(a) <-[:WRITTEN_BY]- (b)
 	}`
 
-	got, err := New().Parse(strings.NewReader(src))
+	got, err := gql.New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 
 	key := schema.EdgeKey{
@@ -375,7 +376,7 @@ func (s *ParserSuite) TestEdgeTypeName() {
 		DIRECTED EDGE TYPE Authorship (:Person) -[:AUTHORED]-> (:Post)
 	}`
 
-	got, err := New().Parse(strings.NewReader(src))
+	got, err := gql.New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 
 	key := schema.EdgeKey{
@@ -485,12 +486,12 @@ func (s *ParserSuite) TestPhraseFormEquivalence() {
 
 	for _, tt := range cases {
 		s.Run(tt.name, func() {
-			pattern, err := New().Parse(strings.NewReader(graphType(tt.pattern)))
+			pattern, err := gql.New().Parse(strings.NewReader(graphType(tt.pattern)))
 			s.Require().NoError(err)
 			s.Require().Len(pattern.Nodes, tt.nodes)
 			s.Require().Len(pattern.Edges, tt.edges)
 
-			phrase, err := New().Parse(strings.NewReader(graphType(tt.phrase)))
+			phrase, err := gql.New().Parse(strings.NewReader(graphType(tt.phrase)))
 			s.Require().NoError(err)
 
 			s.Require().Equal(pattern, phrase)
@@ -515,25 +516,25 @@ func (s *ParserSuite) TestEndpointAliasDiagnostics() {
 			name: "phrase endpoint names a node type that binds no alias",
 			src: `NODE TYPE Person :Person { id :: INT },
 				DIRECTED EDGE :KNOWS CONNECTING (Person TO Person)`,
-			want: ErrEndpointNotAlias,
+			want: gql.ErrEndpointNotAlias,
 		},
 		{
 			name: "phrase endpoint names the node type name rather than its label",
 			src: `NODE TYPE PersonType :Person { id :: INT },
 				DIRECTED EDGE :KNOWS CONNECTING (PersonType TO PersonType)`,
-			want: ErrEndpointNotAlias,
+			want: gql.ErrEndpointNotAlias,
 		},
 		{
 			name: "phrase endpoint names a node type aliased under another name",
 			src: `NODE TYPE :Person { id :: INT } AS p,
 				DIRECTED EDGE :KNOWS CONNECTING (Person TO Person)`,
-			want: ErrEndpointNotAlias,
+			want: gql.ErrEndpointNotAlias,
 		},
 		{
 			name: "pattern endpoint names a node type that binds no alias",
 			src: `(:Person { id :: INT }),
 				(Person) -[:KNOWS]-> (Person)`,
-			want: ErrEndpointNotAlias,
+			want: gql.ErrEndpointNotAlias,
 		},
 		{
 			// idx.declared carries the complete label set, not just the key
@@ -541,13 +542,13 @@ func (s *ParserSuite) TestEndpointAliasDiagnostics() {
 			name: "pattern endpoint names a label the node type only implies",
 			src: `(:Engineer => :Staff { level :: INT }),
 				(Staff) -[:KNOWS]-> (Staff)`,
-			want: ErrEndpointNotAlias,
+			want: gql.ErrEndpointNotAlias,
 		},
 		{
 			name: "phrase endpoint names nothing declared",
 			src: `NODE TYPE :Person { id :: INT } AS p,
 				DIRECTED EDGE :KNOWS CONNECTING (p TO Ghost)`,
-			want: ErrUnknownEndpoint,
+			want: gql.ErrUnknownEndpoint,
 		},
 		{
 			// The target arm and the source arm forward their failures
@@ -556,13 +557,13 @@ func (s *ParserSuite) TestEndpointAliasDiagnostics() {
 			name: "phrase endpoint names nothing declared on the source side",
 			src: `NODE TYPE :Person { id :: INT } AS p,
 				DIRECTED EDGE :KNOWS CONNECTING (Ghost TO p)`,
-			want: ErrUnknownEndpoint,
+			want: gql.ErrUnknownEndpoint,
 		},
 	}
 
 	for _, tt := range cases {
 		s.Run(tt.name, func() {
-			got, err := New().Parse(strings.NewReader(graphType(tt.src)))
+			got, err := gql.New().Parse(strings.NewReader(graphType(tt.src)))
 			s.Require().ErrorIs(err, tt.want)
 			s.Equal(schema.Schema{}, got, "model must be the zero value on error")
 		})
@@ -610,7 +611,7 @@ func TestEdgeKindArcConsistency(t *testing.T) {
 			// Bare undirected arc still hits the accepted-subset rejection.
 			name: "bare undirected arc with no kind stays ErrUndirectedEdge",
 			src:  `(a) ~[:E]~ (b)`,
-			want: ErrUndirectedEdge,
+			want: gql.ErrUndirectedEdge,
 		},
 		{
 			// Kind agrees with arc, redundant but consistent — accept.
@@ -630,26 +631,26 @@ func TestEdgeKindArcConsistency(t *testing.T) {
 			// send this to ErrUndirectedEdge, which names the wrong mistake.
 			name: "DIRECTED with undirected arc is the mismatch, not the undirected-arc gap",
 			src:  `DIRECTED EDGE TYPE E (a) ~[:E]~ (b)`,
-			want: ErrEdgeKindArcMismatch,
+			want: gql.ErrEdgeKindArcMismatch,
 		},
 		{
 			// The headline defect from the bead — silent reinterpretation today.
 			name: "UNDIRECTED with right arrow is a mismatch",
 			src:  `UNDIRECTED EDGE TYPE E (a) -[:E]-> (b)`,
-			want: ErrEdgeKindArcMismatch,
+			want: gql.ErrEdgeKindArcMismatch,
 		},
 		{
 			// Left arrow, same mismatch — canonicalisation must not launder it.
 			name: "UNDIRECTED with left arrow is a mismatch",
 			src:  `UNDIRECTED EDGE TYPE E (a) <-[:E]- (b)`,
-			want: ErrEdgeKindArcMismatch,
+			want: gql.ErrEdgeKindArcMismatch,
 		},
 		{
 			// Kind agrees with arc (both say undirected), so *not* a mismatch —
 			// falls through to the accepted-subset rejection.
 			name: "UNDIRECTED with undirected arc is not a mismatch, stays ErrUndirectedEdge",
 			src:  `UNDIRECTED EDGE TYPE E (a) ~[:E]~ (b)`,
-			want: ErrUndirectedEdge,
+			want: gql.ErrUndirectedEdge,
 		},
 	}
 
@@ -660,7 +661,7 @@ func TestEdgeKindArcConsistency(t *testing.T) {
 				(b :B { id :: INT }),
 				` + tc.src + `
 			}`
-			got, err := New().Parse(strings.NewReader(src))
+			got, err := gql.New().Parse(strings.NewReader(src))
 			if tc.want == nil {
 				require.NoError(t, err)
 				require.Len(t, got.Edges, 1, "consistent kind/arc must yield exactly one edge")
@@ -686,23 +687,23 @@ func TestEdgeKindArcConsistency(t *testing.T) {
 		{"DIRECTED CONNECTING TO accepted", `DIRECTED EDGE :E CONNECTING (a TO b)`, nil},
 		{
 			"DIRECTED CONNECTING ~ is the mismatch, not ErrUndirectedEdge",
-			`DIRECTED EDGE :E CONNECTING (a ~ b)`, ErrEdgeKindArcMismatch,
+			`DIRECTED EDGE :E CONNECTING (a ~ b)`, gql.ErrEdgeKindArcMismatch,
 		},
 		{
 			"UNDIRECTED CONNECTING right arrow is a mismatch",
-			`UNDIRECTED EDGE :E CONNECTING (a -> b)`, ErrEdgeKindArcMismatch,
+			`UNDIRECTED EDGE :E CONNECTING (a -> b)`, gql.ErrEdgeKindArcMismatch,
 		},
 		{
 			"UNDIRECTED CONNECTING left arrow is a mismatch",
-			`UNDIRECTED EDGE :E CONNECTING (a <- b)`, ErrEdgeKindArcMismatch,
+			`UNDIRECTED EDGE :E CONNECTING (a <- b)`, gql.ErrEdgeKindArcMismatch,
 		},
 		{
 			"UNDIRECTED CONNECTING TO is a mismatch",
-			`UNDIRECTED EDGE :E CONNECTING (a TO b)`, ErrEdgeKindArcMismatch,
+			`UNDIRECTED EDGE :E CONNECTING (a TO b)`, gql.ErrEdgeKindArcMismatch,
 		},
 		{
 			"UNDIRECTED CONNECTING ~ is not a mismatch, stays ErrUndirectedEdge",
-			`UNDIRECTED EDGE :E CONNECTING (a ~ b)`, ErrUndirectedEdge,
+			`UNDIRECTED EDGE :E CONNECTING (a ~ b)`, gql.ErrUndirectedEdge,
 		},
 	}
 
@@ -713,7 +714,7 @@ func TestEdgeKindArcConsistency(t *testing.T) {
 				(b :B { id :: INT }),
 				` + tc.src + `
 			}`
-			got, err := New().Parse(strings.NewReader(src))
+			got, err := gql.New().Parse(strings.NewReader(src))
 			if tc.want == nil {
 				require.NoError(t, err)
 				require.Len(t, got.Edges, 1, "consistent kind/connector must yield exactly one edge")
@@ -746,7 +747,7 @@ func TestConnectorToResolvesPointingRight(t *testing.T) {
 		(b :B { id :: INT }),
 		DIRECTED EDGE TYPE E LABEL E CONNECTING (a TO b)
 	}`
-	got, err := New().Parse(strings.NewReader(src))
+	got, err := gql.New().Parse(strings.NewReader(src))
 	require.NoError(t, err)
 	require.Len(t, got.Edges, 1)
 
@@ -755,7 +756,7 @@ func TestConnectorToResolvesPointingRight(t *testing.T) {
 		(b :B { id :: INT }),
 		DIRECTED EDGE TYPE E LABEL E CONNECTING (a -> b)
 	}`
-	viaArrow, err := New().Parse(strings.NewReader(arrow))
+	viaArrow, err := gql.New().Parse(strings.NewReader(arrow))
 	require.NoError(t, err)
 	require.Equal(t, viaArrow, got, "TO and -> are the same alternative and must resolve identically")
 
@@ -773,14 +774,14 @@ func TestConnectorToResolvesPointingRight(t *testing.T) {
 // a catalogue entry and is resolvable in principle (ADR 0016). Telling "never"
 // from "not yet" apart requires the two errors not to be each other.
 func TestGraphTypeSourceRejectionsAreDistinguishable(t *testing.T) {
-	like, likeErr := New().Parse(strings.NewReader(`CREATE PROPERTY GRAPH TYPE T LIKE SomeGraph`))
-	require.ErrorIs(t, likeErr, ErrLikeGraphSource)
-	require.NotErrorIs(t, likeErr, ErrCopyOfSource)
+	like, likeErr := gql.New().Parse(strings.NewReader(`CREATE PROPERTY GRAPH TYPE T LIKE SomeGraph`))
+	require.ErrorIs(t, likeErr, gql.ErrLikeGraphSource)
+	require.NotErrorIs(t, likeErr, gql.ErrCopyOfSource)
 	require.Equal(t, schema.Schema{}, like, "model must be the zero value on error")
 
-	copied, copyErr := New().Parse(strings.NewReader(`CREATE PROPERTY GRAPH TYPE T COPY OF SomeType`))
-	require.ErrorIs(t, copyErr, ErrCopyOfSource)
-	require.NotErrorIs(t, copyErr, ErrLikeGraphSource)
+	copied, copyErr := gql.New().Parse(strings.NewReader(`CREATE PROPERTY GRAPH TYPE T COPY OF SomeType`))
+	require.ErrorIs(t, copyErr, gql.ErrCopyOfSource)
+	require.NotErrorIs(t, copyErr, gql.ErrLikeGraphSource)
 	require.Equal(t, schema.Schema{}, copied, "model must be the zero value on error")
 }
 
@@ -791,8 +792,8 @@ func TestGraphTypeSourceRejectionsAreDistinguishable(t *testing.T) {
 // source rejected" keeps matching every rejection, so the split widened the
 // public surface rather than narrowing it.
 func TestGraphTypeSourceErrorsWrapTheClass(t *testing.T) {
-	for _, leaf := range []error{ErrLikeGraphSource, ErrCopyOfSource} {
-		require.ErrorIs(t, leaf, ErrUnsupportedSource)
+	for _, leaf := range []error{gql.ErrLikeGraphSource, gql.ErrCopyOfSource} {
+		require.ErrorIs(t, leaf, gql.ErrUnsupportedSource)
 	}
 }
 
@@ -805,11 +806,11 @@ var valueTypeFamilies = []struct {
 	production string
 	spelling   string
 }{
-	{ErrPathValueType, "path value type", "PATH"},
-	{ErrReferenceValueType, "reference value type", "ANY NODE"},
-	{ErrImmaterialValueType, "immaterial value type", "NOTHING"},
-	{ErrRecordValueType, "record type", "RECORD"},
-	{ErrDynamicUnionType, "dynamic union type", "ANY VALUE<STRING | INT>"},
+	{gql.ErrPathValueType, "path value type", "PATH"},
+	{gql.ErrReferenceValueType, "reference value type", "ANY NODE"},
+	{gql.ErrImmaterialValueType, "immaterial value type", "NOTHING"},
+	{gql.ErrRecordValueType, "record type", "RECORD"},
+	{gql.ErrDynamicUnionType, "dynamic union type", "ANY VALUE<STRING | INT>"},
 }
 
 // TestValueTypeFamiliesAreIsoProductions is what entitles errors.go to say the
@@ -833,7 +834,7 @@ func TestValueTypeFamiliesAreIsoProductions(t *testing.T) {
 // surface rather than narrowing it, so no existing errors.Is stopped working.
 func TestValueTypeFamilyErrorsWrapTheClass(t *testing.T) {
 	for _, family := range valueTypeFamilies {
-		require.ErrorIs(t, family.sentinel, ErrUnsupportedType)
+		require.ErrorIs(t, family.sentinel, gql.ErrUnsupportedType)
 	}
 }
 
@@ -854,7 +855,7 @@ func TestValueTypeFamilyDeclines(t *testing.T) {
 			src := fmt.Sprintf(`CREATE PROPERTY GRAPH TYPE T AS {
 				(:N { p :: %s })
 			}`, family.spelling)
-			_, err := New().Parse(strings.NewReader(src))
+			_, err := gql.New().Parse(strings.NewReader(src))
 			require.ErrorIs(t, err, family.sentinel)
 		})
 	}
@@ -870,7 +871,7 @@ func TestListPropertyResolves(t *testing.T) {
 		`CREATE PROPERTY GRAPH TYPE T AS { (:N { tags :: INT LIST }) }`,
 		`CREATE PROPERTY GRAPH TYPE T AS { (:N { tags :: LIST }) }`,
 	} {
-		_, err := New().Parse(strings.NewReader(src))
+		_, err := gql.New().Parse(strings.NewReader(src))
 		require.NoError(t, err)
 	}
 }
@@ -941,7 +942,7 @@ func TestNestedGraphTypeSpecificationElementsNotCollected(t *testing.T) {
 			lex := gen.NewGQLLexer(antlr.NewInputStream(tc.src))
 			ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
 			p := gen.NewGQLParser(ts)
-			l := &listener{ts: ts}
+			l := gql.NewListener(ts)
 			lex.RemoveErrorListeners()
 			lex.AddErrorListener(l)
 			p.RemoveErrorListeners()
@@ -950,12 +951,49 @@ func TestNestedGraphTypeSpecificationElementsNotCollected(t *testing.T) {
 			// The walk errors on the outer property's unsupported value type;
 			// pinning that here means a future bead lifting the type rejection
 			// has to update this test rather than silently uncover the leak.
-			require.ErrorIs(t, l.walk(p.GqlProgram()), ErrUnsupportedType)
+			require.ErrorIs(t, gql.ListenerWalk(l, p.GqlProgram()), gql.ErrUnsupportedType)
 
-			require.Empty(t, l.raw.nodes, "nested-body nodes must not be collected as elements of the outer graph type")
-			require.Empty(t, l.raw.edges, "nested-body edges must not be collected as elements of the outer graph type")
+			require.Empty(t, l.RawNodes(), "nested-body nodes must not be collected as elements of the outer graph type")
+			require.Empty(t, l.RawEdges(), "nested-body edges must not be collected as elements of the outer graph type")
 		})
 	}
+}
+
+// The positive control for the three listener accessors the test above reads
+// through. Every assertion up there is an emptiness or a NoError, so an accessor
+// that returned the zero value unconditionally would satisfy all of them and the
+// nested-body guard would be pinned by nothing. Measured: without the rows
+// below, mutating Err, RawNodes and RawEdges each to `return nil` SURVIVES the
+// whole package (bd gqlc-m5rc).
+func TestListenerAccessorsReportWhatTheyName(t *testing.T) {
+	walk := func(t *testing.T, src string) (*gql.Listener, error) {
+		t.Helper()
+		lex := gen.NewGQLLexer(antlr.NewInputStream(src))
+		ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
+		p := gen.NewGQLParser(ts)
+		l := gql.NewListener(ts)
+		lex.RemoveErrorListeners()
+		lex.AddErrorListener(l)
+		p.RemoveErrorListeners()
+		p.AddErrorListener(l)
+		return l, gql.ListenerWalk(l, p.GqlProgram())
+	}
+
+	t.Run("a clean walk collects the outer graph type's own elements", func(t *testing.T) {
+		l, err := walk(t, `CREATE PROPERTY GRAPH TYPE T AS {
+			(:A), (:B), (:A)-[:R]->(:B)
+		}`)
+		require.NoError(t, err)
+		require.NoError(t, l.Err())
+		require.Len(t, l.RawNodes(), 2)
+		require.Len(t, l.RawEdges(), 1)
+	})
+
+	t.Run("a syntax error reaches Err", func(t *testing.T) {
+		l, err := walk(t, `CREATE PROPERTY GRAPH TYPE T AS { (:A`)
+		require.Error(t, err)
+		require.Error(t, l.Err())
+	})
 }
 
 // TestSyntaxErrorNamesTheOffendingToken pins the branch of listener.SyntaxError
@@ -986,7 +1024,7 @@ func TestSyntaxErrorNamesTheOffendingToken(t *testing.T) {
 		{name: "bare DURATION", src: `CREATE PROPERTY GRAPH TYPE T AS { (:A { p :: DURATION }) }`, token: "}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := New().Parse(strings.NewReader(tc.src))
+			_, err := gql.New().Parse(strings.NewReader(tc.src))
 			require.Error(t, err)
 			require.Contains(t, err.Error(), fmt.Sprintf("near %q", tc.token),
 				"a syntax error must name the offending token, not only its line and column; got: %v", err)
@@ -1013,14 +1051,14 @@ func TestSyntaxErrorNamesTheOffendingToken(t *testing.T) {
 func TestLexerErrorsAreNotDropped(t *testing.T) {
 	const clean = `CREATE PROPERTY GRAPH TYPE T AS { (:A { p :: INT }) }`
 
-	got, err := New().Parse(strings.NewReader(clean))
+	got, err := gql.New().Parse(strings.NewReader(clean))
 	require.NoError(t, err)
 	require.Len(t, got.Nodes, 1, "the source without the offending token must be valid")
 
 	fixture, err := os.ReadFile(filepath.Join(fixtureDir, "invalid", "lexer_error.gql"))
 	require.NoError(t, err)
 
-	_, err = New().Parse(strings.NewReader(string(fixture)))
+	_, err = gql.New().Parse(strings.NewReader(string(fixture)))
 	require.Error(t, err, "a token the lexer cannot recognise must be rejected even where the parser is content")
 	require.Contains(t, err.Error(), "syntax error at ")
 }
@@ -1055,17 +1093,17 @@ func (s *ParserSuite) TestInvalid() {
 var invalidFixtures = map[string]error{
 	"syntax_error.gql":         nil,
 	"lexer_error.gql":          nil,
-	"undirected_edge.gql":      ErrUndirectedEdge,
-	"unknown_endpoint.gql":     ErrUnknownEndpoint,
-	"endpoint_not_alias.gql":   ErrEndpointNotAlias,
-	"path_value_type.gql":      ErrPathValueType,
-	"unnamed_node.gql":         ErrUnnamedNodeType,
-	"unnamed_edge.gql":         ErrUnnamedEdgeType,
-	"duplicate_node.gql":       ErrDuplicateNodeType,
-	"duplicate_edge.gql":       ErrDuplicateEdgeType,
-	"no_graph_type.gql":        ErrNoGraphType,
-	"multiple_graph_types.gql": ErrMultipleGraphTypes,
-	"like_graph_source.gql":    ErrLikeGraphSource,
+	"undirected_edge.gql":      gql.ErrUndirectedEdge,
+	"unknown_endpoint.gql":     gql.ErrUnknownEndpoint,
+	"endpoint_not_alias.gql":   gql.ErrEndpointNotAlias,
+	"path_value_type.gql":      gql.ErrPathValueType,
+	"unnamed_node.gql":         gql.ErrUnnamedNodeType,
+	"unnamed_edge.gql":         gql.ErrUnnamedEdgeType,
+	"duplicate_node.gql":       gql.ErrDuplicateNodeType,
+	"duplicate_edge.gql":       gql.ErrDuplicateEdgeType,
+	"no_graph_type.gql":        gql.ErrNoGraphType,
+	"multiple_graph_types.gql": gql.ErrMultipleGraphTypes,
+	"like_graph_source.gql":    gql.ErrLikeGraphSource,
 
 	// An invalid/ fixture rather than a corpus entry, unlike its sibling
 	// ErrEndpointFillerImpliesLabels. The corpus half is argued below for sentinels
@@ -1075,8 +1113,8 @@ var invalidFixtures = map[string]error{
 	// flip it to resolves and leave the fixture behind. It also spares the entry an
 	// Annex D claim about a construct nobody has researched, which isValidFeature
 	// cannot check and which the manifest records being got wrong three times.
-	"endpoint_filler_properties.gql": ErrEndpointFillerHasProperties,
-	"multi_label_edge.gql":           ErrMultiLabelEdgeType,
+	"endpoint_filler_properties.gql": gql.ErrEndpointFillerHasProperties,
+	"multi_label_edge.gql":           gql.ErrMultiLabelEdgeType,
 }
 
 // allSentinels is the canonical list of every Parse sentinel — the single source
@@ -1092,35 +1130,35 @@ var invalidFixtures = map[string]error{
 // against the names errors.go declares. It also makes this test's failures name the
 // sentinel instead of quoting its whole message.
 var allSentinels = map[string]error{
-	"ErrUndirectedEdge":              ErrUndirectedEdge,
-	"ErrEdgeKindArcMismatch":         ErrEdgeKindArcMismatch,
-	"ErrUnknownEndpoint":             ErrUnknownEndpoint,
-	"ErrEndpointNotAlias":            ErrEndpointNotAlias,
-	"ErrEndpointFillerHasProperties": ErrEndpointFillerHasProperties,
-	"ErrEndpointFillerImpliesLabels": ErrEndpointFillerImpliesLabels,
-	"ErrImpliedLabelIsKeyLabel":      ErrImpliedLabelIsKeyLabel,
-	"ErrUnnamedNodeType":             ErrUnnamedNodeType,
-	"ErrUnnamedEdgeType":             ErrUnnamedEdgeType,
-	"ErrMultiLabelEdgeType":          ErrMultiLabelEdgeType,
-	"ErrDuplicateNodeType":           ErrDuplicateNodeType,
-	"ErrDuplicateEdgeType":           ErrDuplicateEdgeType,
-	"ErrDuplicatePropertyName":       ErrDuplicatePropertyName,
-	"ErrNoGraphType":                 ErrNoGraphType,
-	"ErrMultipleGraphTypes":          ErrMultipleGraphTypes,
-	"ErrLikeGraphSource":             ErrLikeGraphSource,
-	"ErrReferenceParameter":          ErrReferenceParameter,
-	"ErrHomeSchemaReference":         ErrHomeSchemaReference,
-	"ErrObjectParentReference":       ErrObjectParentReference,
-	"ErrDelimitedReferenceSegment":   ErrDelimitedReferenceSegment,
-	"ErrReferenceOutsideCatalogue":   ErrReferenceOutsideCatalogue,
-	"ErrDanglingReference":           ErrDanglingReference,
-	"ErrReferenceCycle":              ErrReferenceCycle,
-	"ErrReferenceNameMismatch":       ErrReferenceNameMismatch,
-	"ErrPathValueType":               ErrPathValueType,
-	"ErrReferenceValueType":          ErrReferenceValueType,
-	"ErrImmaterialValueType":         ErrImmaterialValueType,
-	"ErrRecordValueType":             ErrRecordValueType,
-	"ErrDynamicUnionType":            ErrDynamicUnionType,
+	"ErrUndirectedEdge":              gql.ErrUndirectedEdge,
+	"ErrEdgeKindArcMismatch":         gql.ErrEdgeKindArcMismatch,
+	"ErrUnknownEndpoint":             gql.ErrUnknownEndpoint,
+	"ErrEndpointNotAlias":            gql.ErrEndpointNotAlias,
+	"ErrEndpointFillerHasProperties": gql.ErrEndpointFillerHasProperties,
+	"ErrEndpointFillerImpliesLabels": gql.ErrEndpointFillerImpliesLabels,
+	"ErrImpliedLabelIsKeyLabel":      gql.ErrImpliedLabelIsKeyLabel,
+	"ErrUnnamedNodeType":             gql.ErrUnnamedNodeType,
+	"ErrUnnamedEdgeType":             gql.ErrUnnamedEdgeType,
+	"ErrMultiLabelEdgeType":          gql.ErrMultiLabelEdgeType,
+	"ErrDuplicateNodeType":           gql.ErrDuplicateNodeType,
+	"ErrDuplicateEdgeType":           gql.ErrDuplicateEdgeType,
+	"ErrDuplicatePropertyName":       gql.ErrDuplicatePropertyName,
+	"ErrNoGraphType":                 gql.ErrNoGraphType,
+	"ErrMultipleGraphTypes":          gql.ErrMultipleGraphTypes,
+	"ErrLikeGraphSource":             gql.ErrLikeGraphSource,
+	"ErrReferenceParameter":          gql.ErrReferenceParameter,
+	"ErrHomeSchemaReference":         gql.ErrHomeSchemaReference,
+	"ErrObjectParentReference":       gql.ErrObjectParentReference,
+	"ErrDelimitedReferenceSegment":   gql.ErrDelimitedReferenceSegment,
+	"ErrReferenceOutsideCatalogue":   gql.ErrReferenceOutsideCatalogue,
+	"ErrDanglingReference":           gql.ErrDanglingReference,
+	"ErrReferenceCycle":              gql.ErrReferenceCycle,
+	"ErrReferenceNameMismatch":       gql.ErrReferenceNameMismatch,
+	"ErrPathValueType":               gql.ErrPathValueType,
+	"ErrReferenceValueType":          gql.ErrReferenceValueType,
+	"ErrImmaterialValueType":         gql.ErrImmaterialValueType,
+	"ErrRecordValueType":             gql.ErrRecordValueType,
+	"ErrDynamicUnionType":            gql.ErrDynamicUnionType,
 }
 
 // sentinelsWithoutAFile are the package's error values allSentinels deliberately
@@ -1301,8 +1339,8 @@ func TestRepeatedPropertyNameIsRejected(t *testing.T) {
 
 	for label, tc := range cases {
 		t.Run(label, func(t *testing.T) {
-			got, err := New().Parse(strings.NewReader(tc.src))
-			require.ErrorIs(t, err, ErrDuplicatePropertyName)
+			got, err := gql.New().Parse(strings.NewReader(tc.src))
+			require.ErrorIs(t, err, gql.ErrDuplicatePropertyName)
 			require.Contains(t, err.Error(), tc.name,
 				"the diagnostic must name the property that collided; that is what the rejection is for")
 			require.Equal(t, schema.Schema{}, got, "model must be the zero value on error")
@@ -1319,7 +1357,7 @@ func TestDistinctPropertyNamesStillResolve(t *testing.T) {
 		(:Person { id :: INT NOT NULL, name :: STRING })
 	}`
 
-	got, err := New().Parse(strings.NewReader(src))
+	got, err := gql.New().Parse(strings.NewReader(src))
 	require.NoError(t, err)
 	require.Len(t, got.Nodes, 1)
 	for _, nt := range got.Nodes {

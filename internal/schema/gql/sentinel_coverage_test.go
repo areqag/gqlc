@@ -1,4 +1,4 @@
-package gql
+package gql_test
 
 import (
 	"errors"
@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
 // TestAllSentinelsAreReachable loads every file in invalid/ and every corpus
@@ -72,5 +73,5 @@ func TestAllSentinelsAreReachable(t *testing.T) {
 // outcomes, and it is shared with TestCorpusOutcomes so the two cannot disagree
 // about what a file means.
 func loadFixture(path string) (schema.Schema, error) {
-	return NewLoader(os.DirFS(filepath.Dir(path))).Load(filepath.Base(path))
+	return gql.NewLoader(os.DirFS(filepath.Dir(path))).Load(filepath.Base(path))
 }

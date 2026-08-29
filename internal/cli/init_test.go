@@ -1,4 +1,4 @@
-package cli
+package cli_test
 
 import (
 	"os"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/cli"
 	"github.com/areqag/gqlc/internal/config"
 )
 
@@ -123,7 +124,7 @@ func wizardScript(t config.Target, confirm string) string {
 func runWizard(t *testing.T, script, cfgPath string) (string, error) {
 	t.Helper()
 	var out strings.Builder
-	err := runInitWizard(iotest.OneByteReader(strings.NewReader(script)), &out, true, cfgPath)
+	err := cli.RunInitWizard(iotest.OneByteReader(strings.NewReader(script)), &out, true, cfgPath)
 	return out.String(), err
 }
 
@@ -132,24 +133,24 @@ func runWizard(t *testing.T, script, cfgPath string) (string, error) {
 func runAdd(t *testing.T, script, cfgPath string) (string, error) {
 	t.Helper()
 	var out strings.Builder
-	err := runInitAdd(iotest.OneByteReader(strings.NewReader(script)), &out, true, cfgPath)
+	err := cli.RunInitAdd(iotest.OneByteReader(strings.NewReader(script)), &out, true, cfgPath)
 	return out.String(), err
 }
 
 func TestInitClassifyConfig(t *testing.T) {
 	t.Run("absent file is fresh with defaults", func(t *testing.T) {
-		flow, cfg, loadErr := classifyConfig(filepath.Join(t.TempDir(), config.DefaultFilename))
-		require.Equal(t, flowFresh, flow)
+		flow, cfg, loadErr := cli.ClassifyConfig(filepath.Join(t.TempDir(), config.DefaultFilename))
+		require.Equal(t, cli.FlowFresh, flow)
 		require.NoError(t, loadErr)
-		require.Equal(t, initDefaults(), cfg)
+		require.Equal(t, cli.InitDefaults(), cfg)
 	})
 
 	t.Run("loadable file is edit with its values", func(t *testing.T) {
 		cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 		want := editFixtureConfig()
 		require.NoError(t, want.Save(cfgPath))
-		flow, cfg, loadErr := classifyConfig(cfgPath)
-		require.Equal(t, flowEdit, flow)
+		flow, cfg, loadErr := cli.ClassifyConfig(cfgPath)
+		require.Equal(t, cli.FlowEdit, flow)
 		require.NoError(t, loadErr)
 		require.Equal(t, want, cfg)
 	})
@@ -166,17 +167,17 @@ func TestInitClassifyConfig(t *testing.T) {
 			_, wantErr := config.Load(cfgPath)
 			require.Error(t, wantErr)
 
-			flow, cfg, loadErr := classifyConfig(cfgPath)
-			require.Equal(t, flowBroken, flow)
+			flow, cfg, loadErr := cli.ClassifyConfig(cfgPath)
+			require.Equal(t, cli.FlowBroken, flow)
 			require.EqualError(t, loadErr, wantErr.Error())
-			require.Equal(t, initDefaults(), cfg)
+			require.Equal(t, cli.InitDefaults(), cfg)
 		})
 	}
 
 	t.Run("directory at path is broken", func(t *testing.T) {
 		dir := t.TempDir()
-		flow, _, loadErr := classifyConfig(dir)
-		require.Equal(t, flowBroken, flow)
+		flow, _, loadErr := cli.ClassifyConfig(dir)
+		require.Equal(t, cli.FlowBroken, flow)
 		require.Error(t, loadErr)
 		require.Contains(t, loadErr.Error(), dir)
 	})
@@ -196,9 +197,9 @@ func TestInitDefaults(t *testing.T) {
 			Out:     "internal/db",
 			Driver:  config.DriverNeo4jGoV5,
 		},
-	}}}, initDefaults())
+	}}}, cli.InitDefaults())
 
-	got := initDefaults().Targets[0]
+	got := cli.InitDefaults().Targets[0]
 	require.Equal(t, config.SchemaLangValues()[0], got.SchemaLang)
 	require.Equal(t, config.QueryLangValues()[0], got.QueryLang)
 	require.Equal(t, config.DriverValues()[0], got.Go.Driver)
@@ -224,7 +225,7 @@ func TestInitPackageValidator(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run("package "+tc.pkg, func(t *testing.T) {
-			err := validatePackage(tc.pkg)
+			err := cli.ValidatePackage(tc.pkg)
 			if tc.wantErr == "" {
 				require.NoError(t, err)
 				return
@@ -247,7 +248,7 @@ func TestInitOutValidator(t *testing.T) {
 		{out: "   ", wantErr: "must not be empty"},
 		{out: "gen/newdir", wantErr: ""},
 	}
-	validate := validateOut(prior)
+	validate := cli.ValidateOut(prior)
 	for _, tc := range cases {
 		t.Run("out "+tc.out, func(t *testing.T) {
 			err := validate(tc.out)
@@ -277,7 +278,7 @@ func TestInitCommentDetection(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out := previewBlock("gqlc.yaml", []byte("version: 1\n"), []byte(tc.raw))
+			out := cli.PreviewBlock("gqlc.yaml", []byte("version: 1\n"), []byte(tc.raw))
 			if tc.want {
 				require.Contains(t, out, notice)
 			} else {
@@ -291,18 +292,18 @@ func TestInitCommentDetection(t *testing.T) {
 // line, the canonical bytes verbatim (ending in the encoder's own
 // trailing newline), and the notice line iff flagged.
 func TestInitPreviewBlock(t *testing.T) {
-	canonical, err := initDefaults().Canonical()
+	canonical, err := cli.InitDefaults().Canonical()
 	require.NoError(t, err)
 
 	t.Run("without notice", func(t *testing.T) {
 		want := "gqlc init will write gqlc.yaml:\n\n" + string(canonical)
-		require.Equal(t, want, previewBlock("gqlc.yaml", canonical, nil))
+		require.Equal(t, want, cli.PreviewBlock("gqlc.yaml", canonical, nil))
 	})
 
 	t.Run("with notice", func(t *testing.T) {
 		want := "gqlc init will write gqlc.yaml:\n\n" + string(canonical) +
 			"note: comments in gqlc.yaml will not survive; gqlc init writes the canonical form\n"
-		require.Equal(t, want, previewBlock("gqlc.yaml", canonical, []byte("# c\n")))
+		require.Equal(t, want, cli.PreviewBlock("gqlc.yaml", canonical, []byte("# c\n")))
 	})
 }
 
@@ -313,26 +314,26 @@ func TestInitWarningsAndEpilogue(t *testing.T) {
 	proj := filepath.Join(t.TempDir(), "proj")
 	require.NoError(t, os.MkdirAll(proj, 0o755))
 	cfgPath := filepath.Join(proj, config.DefaultFilename)
-	cfg := initDefaults().Targets[0]
+	cfg := cli.InitDefaults().Targets[0]
 
 	t.Run("both inputs missing", func(t *testing.T) {
 		want := "warning: schema file " + filepath.Join(proj, "schema.gql") +
 			" does not exist yet; create it before running gqlc generate\n" +
 			"warning: query directory " + filepath.Join(proj, "queries") +
 			" does not exist yet; create it before running gqlc generate\n"
-		require.Equal(t, want, warningsText(cfgPath, cfg))
+		require.Equal(t, want, cli.WarningsText(cfgPath, cfg))
 	})
 
 	t.Run("query directory missing only", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(proj, "schema.gql"), []byte("x"), 0o644))
 		want := "warning: query directory " + filepath.Join(proj, "queries") +
 			" does not exist yet; create it before running gqlc generate\n"
-		require.Equal(t, want, warningsText(cfgPath, cfg))
+		require.Equal(t, want, cli.WarningsText(cfgPath, cfg))
 	})
 
 	t.Run("both present warn nothing", func(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(proj, "queries"), 0o755))
-		require.Empty(t, warningsText(cfgPath, cfg))
+		require.Empty(t, cli.WarningsText(cfgPath, cfg))
 	})
 
 	t.Run("epilogue", func(t *testing.T) {
@@ -341,7 +342,7 @@ func TestInitWarningsAndEpilogue(t *testing.T) {
 			"  1. put your schema at schema.gql\n" +
 			"  2. add *.cypher query files under queries\n" +
 			"  3. run gqlc generate\n"
-		require.Equal(t, want, epilogueText(cfgPath, cfg))
+		require.Equal(t, want, cli.EpilogueText(cfgPath, cfg))
 	})
 }
 
@@ -362,7 +363,7 @@ func TestInitNonTTY(t *testing.T) {
 // path: runInitWizard returns nil).
 func TestInitFreshWritesCanonical(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
-	want := initDefaults()
+	want := cli.InitDefaults()
 
 	out, err := runWizard(t, wizardScript(want.Targets[0], "y"), cfgPath)
 	require.NoError(t, err)
@@ -394,7 +395,7 @@ func TestInitFreshDecline(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
-			_, err := runWizard(t, wizardScript(initDefaults().Targets[0], answer), cfgPath)
+			_, err := runWizard(t, wizardScript(cli.InitDefaults().Targets[0], answer), cfgPath)
 			require.EqualError(t, err, abortedMsg)
 			require.NoFileExists(t, cfgPath)
 		})
@@ -460,7 +461,7 @@ func TestInitRefusalNamesAddFlag(t *testing.T) {
 // cobra parses it at all — an unregistered flag fails earlier, at parse
 // time, with a different message.
 func TestInitAddFlag(t *testing.T) {
-	f := newInitCmd().Flags().Lookup("add")
+	f := cli.NewInitCmd().Flags().Lookup("add")
 	require.NotNil(t, f)
 	require.Equal(t, "false", f.DefValue)
 	require.Equal(t, "append a generation target to the existing config file", f.Usage)
@@ -479,13 +480,13 @@ func TestInitAdd(t *testing.T) {
 			QueryLang:   config.QueryLangOpenCypher,
 			ProcsigPath: "order.procsig.json",
 			Go:          config.GoGen{Driver: config.DriverNeo4jGoV6},
-		}, addPrefill(addFixtureConfig().Targets))
+		}, cli.AddPrefill(addFixtureConfig().Targets))
 	})
 
 	t.Run("nothing to carry from falls back to the fresh defaults", func(t *testing.T) {
-		want := initDefaults().Targets[0]
+		want := cli.InitDefaults().Targets[0]
 		want.QueryDir, want.Go.Out, want.Go.Package = "", "", ""
-		require.Equal(t, want, addPrefill(nil))
+		require.Equal(t, want, cli.AddPrefill(nil))
 	})
 
 	t.Run("appends to a two-entry file", func(t *testing.T) {
@@ -553,11 +554,11 @@ func TestInitAdd(t *testing.T) {
 		script := wizardScript(addedTarget(), "y")
 
 		var bare strings.Builder
-		err := runInit(iotest.OneByteReader(strings.NewReader(script)), &bare, true, false, cfgPath)
+		err := cli.RunInit(iotest.OneByteReader(strings.NewReader(script)), &bare, true, false, cfgPath)
 		require.ErrorContains(t, err, "init edits only a single-target config")
 
 		var added strings.Builder
-		require.NoError(t, runInit(iotest.OneByteReader(strings.NewReader(script)), &added, true, true, cfgPath))
+		require.NoError(t, cli.RunInit(iotest.OneByteReader(strings.NewReader(script)), &added, true, true, cfgPath))
 		loaded, err := config.Load(cfgPath)
 		require.NoError(t, err)
 		require.Len(t, loaded.Targets, 3)
@@ -698,7 +699,7 @@ func TestInitEditVocabularyPrefill(t *testing.T) {
 				name := string(sl) + "/" + string(ql) + "/" + string(dr)
 				t.Run(name, func(t *testing.T) {
 					cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
-					cfg := initDefaults()
+					cfg := cli.InitDefaults()
 					cfg.Targets[0].SchemaLang = sl
 					cfg.Targets[0].QueryLang = ql
 					cfg.Targets[0].Go.Driver = dr
@@ -789,7 +790,7 @@ func TestInitBrokenAbort(t *testing.T) {
 func TestInitBrokenFresh(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 	require.NoError(t, os.WriteFile(cfgPath, []byte(brokenBody), 0o644))
-	want := initDefaults()
+	want := cli.InitDefaults()
 
 	_, err := runWizard(t, "2\n"+wizardScript(want.Targets[0], "y"), cfgPath)
 	require.NoError(t, err)
@@ -808,7 +809,7 @@ func TestInitBrokenFresh(t *testing.T) {
 func TestInitInputStarvation(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 	var out strings.Builder
-	err := runInitWizard(iotest.OneByteReader(strings.NewReader("")), &out, true, cfgPath)
+	err := cli.RunInitWizard(iotest.OneByteReader(strings.NewReader("")), &out, true, cfgPath)
 	require.EqualError(t, err, abortedMsg)
 	require.NoFileExists(t, cfgPath)
 }
@@ -819,7 +820,7 @@ func TestInitInputStarvation(t *testing.T) {
 // the vocabulary whole and that is the one call whose result can be
 // empty.
 func TestAppendedTargetHasADriverToFallBackOn(t *testing.T) {
-	require.NotEmpty(t, offerableDrivers(noCurrentDriver))
+	require.NotEmpty(t, cli.OfferableDrivers(cli.NoCurrentDriver))
 }
 
 // TestWizardWithholdsOnlyDriversThatCannotGenerate ties the picker's
@@ -831,7 +832,7 @@ func TestAppendedTargetHasADriverToFallBackOn(t *testing.T) {
 func TestWizardWithholdsOnlyDriversThatCannotGenerate(t *testing.T) {
 	// A fresh target carries the default driver, so this is the
 	// vocabulary a first-time init is offered.
-	offered := offerableDrivers(initDefaults().Targets[0].Go.Driver)
+	offered := cli.OfferableDrivers(cli.InitDefaults().Targets[0].Go.Driver)
 	require.NotEmpty(t, offered, "the picker must offer something")
 	require.Subset(t, config.DriverValues(), offered)
 
@@ -850,7 +851,7 @@ func TestWizardWithholdsOnlyDriversThatCannotGenerate(t *testing.T) {
 			// A stored driver is never withheld from its own edit: huh
 			// resolves a value absent from the options to index 0, so
 			// withholding one would rewrite it on an accepted default.
-			require.Contains(t, offerableDrivers(d), d,
+			require.Contains(t, cli.OfferableDrivers(d), d,
 				"an edit of a config already on %q must still offer it", d)
 		})
 	}

@@ -1,4 +1,4 @@
-package cli
+package cli_test
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/cli"
 	"github.com/areqag/gqlc/internal/version"
 )
 
@@ -22,7 +23,7 @@ func executeRoot(t *testing.T, args ...string) (string, string, error) {
 	if args == nil {
 		args = []string{}
 	}
-	root := newRootCmd()
+	root := cli.NewRootCmd()
 	var stdout, stderr bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&stderr)

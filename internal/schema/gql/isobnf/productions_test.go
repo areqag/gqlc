@@ -1,20 +1,22 @@
-package isobnf
+package isobnf_test
 
 import (
 	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/areqag/gqlc/internal/schema/gql/isobnf"
 )
 
 // TestDDLClosureSortedAndUnique pins what extract_ddl_closure.py produces. The
 // value of a vendored list is that a re-vendor shows up as a readable diff; two
 // authors regenerating with different orderings would make that diff useless.
 func TestDDLClosureSortedAndUnique(t *testing.T) {
-	require.True(t, sort.StringsAreSorted(DDLClosure), "isobnf.DDLClosure is not sorted")
+	require.True(t, sort.StringsAreSorted(isobnf.DDLClosure), "isobnf.DDLClosure is not sorted")
 
-	seen := make(map[string]struct{}, len(DDLClosure))
-	for _, p := range DDLClosure {
+	seen := make(map[string]struct{}, len(isobnf.DDLClosure))
+	for _, p := range isobnf.DDLClosure {
 		_, dup := seen[p]
 		require.False(t, dup, "isobnf.DDLClosure has duplicate %q", p)
 		seen[p] = struct{}{}
@@ -25,9 +27,9 @@ func TestDDLClosureSortedAndUnique(t *testing.T) {
 // only when ISO publishes a new edition, and moving them is the deliberate act
 // SOURCE.md's drift-check section describes — not something a refactor does.
 func TestSnapshotCardinality(t *testing.T) {
-	require.Len(t, DDLClosure, 200, "DDL closure size changed; re-read SOURCE.md before updating")
-	require.Equal(t, 814, TotalProductions, "artefact production count changed; ISO published a new edition?")
-	require.Len(t, SourceSHA256, 64, "SourceSHA256 is not a sha256 hex digest")
+	require.Len(t, isobnf.DDLClosure, 200, "DDL closure size changed; re-read SOURCE.md before updating")
+	require.Equal(t, 814, isobnf.TotalProductions, "artefact production count changed; ISO published a new edition?")
+	require.Len(t, isobnf.SourceSHA256, 64, "SourceSHA256 is not a sha256 hex digest")
 }
 
 // TestRootsAreInTheClosure guards the failure mode where a regeneration silently
@@ -39,7 +41,7 @@ func TestRootsAreInTheClosure(t *testing.T) {
 		"drop graph type statement",
 		"nested graph type specification",
 	} {
-		require.Contains(t, DDLClosure, root, "root production missing from closure")
+		require.Contains(t, isobnf.DDLClosure, root, "root production missing from closure")
 	}
 }
 
@@ -50,7 +52,7 @@ func TestRootsAreInTheClosure(t *testing.T) {
 // cut stopped applying, so the load-bearing half is the absence of the 538
 // query-language productions reachable through it.
 func TestGraphExpressionIsAFrontierNotAMember(t *testing.T) {
-	require.Contains(t, DDLClosure, "graph expression",
+	require.Contains(t, isobnf.DDLClosure, "graph expression",
 		"the frontier production itself belongs in the closure")
 
 	for _, beyond := range []string{
@@ -58,7 +60,7 @@ func TestGraphExpressionIsAFrontierNotAMember(t *testing.T) {
 		"all shortest path search",
 		"ambient linear query statement",
 	} {
-		require.NotContains(t, DDLClosure, beyond,
+		require.NotContains(t, isobnf.DDLClosure, beyond,
 			"the <graph expression> cut stopped applying; the denominator has grown into the query language, see SOURCE.md")
 	}
 }

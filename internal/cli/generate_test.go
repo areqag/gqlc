@@ -1,4 +1,4 @@
-package cli
+package cli_test
 
 import (
 	"os"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/cli"
 	"github.com/areqag/gqlc/internal/cli/pipeline"
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/config"
@@ -604,14 +605,14 @@ func TestGenerateWipeListIsPhaseAs(t *testing.T) {
 		Files:  []codegen.File{{Path: "db.go", Contents: []byte(markedStale)}},
 	}}
 
-	plans, err := inspectOutputs(targets)
+	plans, err := cli.InspectOutputs(targets)
 	require.NoError(t, err)
-	require.Equal(t, []targetPlan{{dir: out, wipe: []string{"stale.go"}}}, plans)
+	require.Equal(t, []cli.TargetPlan{cli.NewTargetPlan(out, false, []string{"stale.go"})}, plans)
 
 	// Between the phases, a file lands in the inspected directory.
 	writeFixtureFile(t, filepath.Join(out, "latecomer.go"), markedStale)
 
-	require.NoError(t, commitOutputs(targets, plans))
+	require.NoError(t, cli.CommitOutputs(targets, plans))
 	require.Equal(t, []string{"db.go", "latecomer.go"}, listDir(t, out))
 }
 
@@ -628,13 +629,13 @@ func TestCommitToleratesVanishedEntry(t *testing.T) {
 		Files:  []codegen.File{{Path: "db.go", Contents: []byte(markedStale)}},
 	}}
 
-	plans, err := inspectOutputs(targets)
+	plans, err := cli.InspectOutputs(targets)
 	require.NoError(t, err)
-	require.Equal(t, []string{"stale.go"}, plans[0].wipe)
+	require.Equal(t, []string{"stale.go"}, plans[0].Wipe())
 
 	require.NoError(t, os.Remove(filepath.Join(out, "stale.go")))
 
-	require.NoError(t, commitOutputs(targets, plans))
+	require.NoError(t, cli.CommitOutputs(targets, plans))
 	require.Equal(t, []string{"db.go"}, listDir(t, out))
 }
 
@@ -654,13 +655,13 @@ func TestCommitOutputsNamesFailingTarget(t *testing.T) {
 		{OutDir: out2, Files: []codegen.File{file}},
 	}
 
-	plans, err := inspectOutputs(targets)
+	plans, err := cli.InspectOutputs(targets)
 	require.NoError(t, err)
 
 	require.NoError(t, os.Remove(out2))
 	writeFixtureFile(t, out2, "not a directory\n")
 
-	err = commitOutputs(targets, plans)
+	err = cli.CommitOutputs(targets, plans)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "graph[1]: output: ")
 }
@@ -680,13 +681,13 @@ func TestCommitOutputsWritesInTargetOrder(t *testing.T) {
 		{OutDir: out2, Files: []codegen.File{file}},
 	}
 
-	plans, err := inspectOutputs(targets)
+	plans, err := cli.InspectOutputs(targets)
 	require.NoError(t, err)
 
 	require.NoError(t, os.Remove(out2))
 	writeFixtureFile(t, out2, "not a directory\n")
 
-	require.Error(t, commitOutputs(targets, plans))
+	require.Error(t, cli.CommitOutputs(targets, plans))
 	require.Equal(t, []string{"db.go"}, listDir(t, out),
 		"target 0 commits before target 1, so its write survives target 1's failure")
 }
