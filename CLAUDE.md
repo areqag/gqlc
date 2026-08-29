@@ -179,6 +179,16 @@ Beads IDs alone don't auto-close linked GitHub issues on merge — GitHub only r
 
 - **Direct 1:1 bd↔GH issue:** put `Closes #N` in the PR body. Find N via `bd show <id>` (External link).
 - **Umbrella / epic GH issues** (multi-stage tracking): child PRs must NOT `Close` them. Either the final PR of the epic writes `Closes #N`, or run `gh issue close N` manually when the beads mirror closes.
+- **A `Bead: <id>` line does not satisfy this.** It answers a different question
+  (which bead holds the PR) and CI's `tidy` gate reads it only to find the bead —
+  then, if that bead has a GH mirror, `.github/scripts/check-pr-closes.py` still
+  demands `Closes #N` with the mirror's number. A body carrying `Bead:` alone
+  fails `tidy` (measured 2026-08-29, PR #1614).
+- **The mirror lives in JSON field `external_ref`, not `external_link`.**
+  `jq '.[0].external_link'` on a misnamed key prints `null` with exit 0, which
+  reads exactly like "no mirror, so no Closes needed" — the same probe that
+  should catch the miss confirms it instead. The plain renderer's `External:`
+  line and `jq '.[0].external_ref'` agree; trust those.
 
 See `bd memories pr-body-closes-gh-issue` for the full note and the incidents that motivated it.
 
