@@ -465,23 +465,44 @@ seat_session_live() {
     esac
 }
 
-# Under tmux the runner was km-seat parked on the wake file. Under herdr the
-# supervisor owns the lifecycle: if the agent exists, the wake queue will be
-# consumed on the next `agent send` or restart. So the two predicates collapse.
-seat_runner_live() { seat_session_live "$1"; }
+# Under tmux the runner check was `pgrep km-seat` on the pane's tty. Under
+# herdr, agent_status is `unknown` when claude isn't running — including when
+# km-seat is parked between wakes, which is the HEALTHY asleep state, not a
+# dead runner. So the coarser check is the right one: if the seat's pane
+# exists, cmd_up started km-seat in it and it is either parked or working.
+# A km-seat that has hard-crashed and left the pane at a bare fish prompt is
+# indistinguishable from a parked one here — same shape as tmux, where a
+# runner that segfaulted would leave the window on `remain-on-exit`. The
+# wake queue not draining is the operator-visible tell.
+seat_runner_live() { [ -n "$(seat_pane_id "$1")" ]; }
 
-# Bring a fresh claude session back for a seat whose agent has exited. `herdr
-# agent start` accepts a name (we reuse the seat name), a workspace and tab to
-# land in, a cwd, and the argv to exec. On refusal (herdr server down, agent
-# already live and we didn't check first) the exit is non-zero.
+# Bring a fresh km-seat back for a seat. Uses `herdr pane run` to launch the
+# runner as a CHILD of the pane's shell (fish per herdr config) rather than
+# `exec`ing over the shell — if km-seat exits unexpectedly under `exec`, the
+# pane closes with it, and herdr reaps the workspace when its last pane is
+# gone. As a child, a failure leaves the shell at its prompt, with the error
+# visible, and the pane still exists to be repaired.
+#
+# `herdr agent start` was tempting but creates a NEW pane in the tab even
+# when one exists, so each cmd_up left two panes per tab (measured
+# 2026-08-29). Reusing the pane herdr already made for the tab is what keeps
+# the "one pane per seat" invariant this town's roster and status expect.
 seat_runner_start() { # <seat> -> 1 if a live session made it unsafe
     seat_session_live "$1" && return 1
-    local ws tab wt
+    local ws pane wt sd
     ws=$(workspace_id); [ -n "$ws" ] || return 1
-    tab=$(seat_tab_id "$1"); [ -n "$tab" ] || return 1
     wt=$(seat_worktree "$1")
-    herdr agent start "$1" --workspace "$ws" --tab "$tab" --cwd "$wt" --no-focus \
-        -- "$SCRIPT_DIR/km-seat" "$1" >/dev/null 2>&1
+    if [ -z "$(seat_tab_id "$1")" ]; then
+        herdr tab create --workspace "$ws" --label "$1" --cwd "$wt" --no-focus >/dev/null 2>&1 || return 1
+    fi
+    pane=$(seat_pane_id "$1"); [ -n "$pane" ] || return 1
+    # Thread km's KM_STATE_DIR into the pane's env so km-seat agrees with km
+    # about which state to work with. Without this, km-seat re-derives it from
+    # the pane's cwd (a seat worktree → main_root → the shared kingdom-state)
+    # and diverges from a test override, which reproduces the 2026-08-29
+    # incident where a test workspace's km-seats claimed real wakes.
+    sd=$(state_dir)
+    herdr pane run "$pane" "KM_STATE_DIR=$sd $SCRIPT_DIR/km-seat $1" >/dev/null 2>&1
 }
 
 # `herdr agent send` writes text to the agent atomically over the socket. No
@@ -927,23 +948,28 @@ cmd_up() {
     done
     ws=$(workspace_id)
     if [ -z "$ws" ]; then
-        ws=$(herdr workspace create --label "$WORKSPACE" --no-focus 2>/dev/null |
-            python3 -c "import json,sys; print(json.load(sys.stdin)['result']['workspace']['workspace_id'])")
-        # herdr creates a default tab named "1"; rename it to the first seat
-        # rather than leave a bare number sitting beside the roster.
-        local first
-        first=$(seats_all | head -1)
-        local first_tab
-        first_tab=$(herdr tab list --workspace "$ws" 2>/dev/null |
-            python3 -c "import json,sys; d=json.load(sys.stdin); print(next(iter(d['result']['tabs']),{}).get('tab_id',''))")
-        [ -n "$first_tab" ] && herdr tab rename "$first_tab" "$first" >/dev/null 2>&1
+        # herdr workspace create returns a workspace with a default root tab
+        # whose pane has herdr's own cwd (typically $HOME). The seat loop
+        # below wants each tab's pane to start in the SEAT's worktree, so
+        # the auto-tab is not reused — the loop creates one tab per seat
+        # with --cwd correct. The auto-tab is closed after the loop so the
+        # roster does not carry an unlabelled placeholder.
+        local created
+        created=$(herdr workspace create --label "$WORKSPACE" --no-focus 2>/dev/null)
+        ws=$(printf '%s' "$created" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['workspace']['workspace_id'])")
+        local auto_tab
+        auto_tab=$(printf '%s' "$created" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['tab']['tab_id'])")
+        for s in $(seats_all); do
+            seat_runner_start "$s" >/dev/null 2>&1 || true
+        done
+        # Close the placeholder AFTER the seats are up, so herdr doesn't
+        # reap the workspace between "no seats yet" and "seats added".
+        [ -n "$auto_tab" ] && herdr tab close "$auto_tab" >/dev/null 2>&1 || true
+    else
+        for s in $(seats_all); do
+            seat_runner_start "$s" >/dev/null 2>&1 || true
+        done
     fi
-    for s in $(seats_all); do
-        if [ -z "$(seat_tab_id "$s")" ]; then
-            herdr tab create --workspace "$ws" --label "$s" --no-focus >/dev/null 2>&1 || true
-        fi
-        seat_runner_start "$s" >/dev/null 2>&1 || true
-    done
     echo "the town is up: $(seats_all | wc -l) seats, all asleep until woken."
     echo "  herdr              — open the town's TUI (every citizen is a tab in the '$WORKSPACE' workspace)"
 }
