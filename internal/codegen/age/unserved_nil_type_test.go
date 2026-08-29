@@ -51,10 +51,19 @@ type nilEmbeddedNode struct{ *resolver.ResolvedNode }
 // is one of the two rows in the ALLOW half below.
 type answeringEmbedder struct{ resolver.ResolvedNode }
 
+// silentEmbedder answers and says nothing: it shadows the promoted String()
+// with one returning the empty string. It is neither of the halves above —
+// it does not fault, so the faulting rows do not reach it, and it supplies
+// no tag, so the ALLOW rows do not either.
+type silentEmbedder struct{ resolver.ResolvedNode }
+
+func (silentEmbedder) String() string { return "" }
+
 var (
 	_ resolver.ResolvedType = nilEmbeddedIface{}
 	_ resolver.ResolvedType = nilEmbeddedNode{}
 	_ resolver.ResolvedType = answeringEmbedder{}
+	_ resolver.ResolvedType = silentEmbedder{}
 )
 
 // unservedProbeInput wraps one query in the batch a consumer hands a backend.
@@ -227,4 +236,34 @@ func TestUnservedRefusalKeepsTheTagWhereThereIsOne(t *testing.T) {
 			require.ErrorContains(t, paramErr, `1 query would be dropped: Bind (parameter $p is node)`)
 		})
 	}
+}
+
+// TestUnservedRefusalNamesATypeThatAnswersWithNothing is the third case, and
+// the one both halves above step over: a String() that neither faults nor
+// supplies a tag. The faulting rows never reach it, and the ALLOW rows assert
+// a tag it does not have.
+//
+// It is measured HERE and not only in internal/codegen because these two
+// renders are what bd gqlc-sv61 actually quoted, ending mid-sentence:
+//
+//	column "n" projects
+//	parameter $p is
+//
+// and because this gate runs ahead of codegen.Prepare (generate.go), so it is
+// the first render of the arriving type rather than the second. The repair is
+// a single one in codegen.ResolvedTypeName — PR #991's export exists so that
+// this package and internal/codegen move together — and these rows are how
+// this side of that pair says it moved. A repair made in unservedColumn and
+// unservedParam instead would pass these rows and leave internal/codegen's
+// own fail-sites unrepaired; the counterpart test there is what catches that.
+func TestUnservedRefusalNamesATypeThatAnswersWithNothing(t *testing.T) {
+	t.Parallel()
+
+	colErr := generateUnserved(t, unservedColumnProbe(silentEmbedder{}))
+	require.ErrorIs(t, colErr, age.ErrUnsupportedQuery)
+	require.ErrorContains(t, colErr, `1 query would be dropped: Fetch (column "n" projects age_test.silentEmbedder)`)
+
+	paramErr := generateUnserved(t, unservedParamProbe(silentEmbedder{}))
+	require.ErrorIs(t, paramErr, age.ErrUnsupportedQuery)
+	require.ErrorContains(t, paramErr, `1 query would be dropped: Bind (parameter $p is age_test.silentEmbedder)`)
 }
