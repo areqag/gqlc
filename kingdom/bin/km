@@ -1052,9 +1052,11 @@ unread_count() {
 # no body is read. The caveat on unread_count above applies with full force
 # here: for a SEAT this counts letters that outlived at least one of the
 # recipient's wakes, and for the king it counts deliveries to a box nobody
-# drains (gqlc-2abx). One caller walks seats_all, which excludes him; the other
-# is the idle escalation, which counts SEDRAK's box on purpose, and so reads a
-# growth of one as "andranik's letter landed" and not as "it is still unread".
+# drains (gqlc-2abx). Neither caller passes him as the RECIPIENT: one walks
+# seats_all, which excludes him, and the idle escalation names the seat sedrak.
+# That pass compares two counts inside a single tick, so the staleness above
+# cannot reach it — only a letter arriving in the window can, which is the
+# point. (Wording Վահագն's, from the branch this duplicated.)
 mail_unread_from() { # <recipient> <sender> -> count
     local d
     d="$(state_dir)/mail/$1/inbox"
