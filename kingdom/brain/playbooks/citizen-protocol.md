@@ -373,9 +373,14 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    produces wants that are not blockers files them as residue beads BEFORE
    closing — step 9's `discovered-from` shape — and the close reason may point
    at them: `PASS — verdict of record: <link>; residue: gqlc-xxxx`. **A close
-   reason may not carry an obligation in prose alone**, because nothing reads
-   it: `close_reason` appears in no dispatch pass, no doctor row and no sweep,
-   so a condition written there is machine-invisible the moment it is written.
+   reason may not carry an obligation in prose alone**, because nothing reads it
+   FOR ONE. Three things do read `close_reason`, and not one of them can route
+   an obligation: `bdguard` parses it for a cited sha and judges whether a close
+   was earned; `bd-gh-sync` takes its first line as a mirror tag; and ADR 0009's
+   own doctor row, added alongside this rule, greps it for the word and warns
+   after the fact, naming ids but assigning nobody. A condition written there
+   reaches no dispatch pass and no assignee, so it is machine-invisible for the
+   one purpose it was written to serve.
    PR #1712 merged with neither condition of its PASS landed, and nothing
    anywhere was red — the bead was closed, the gates were green.
 

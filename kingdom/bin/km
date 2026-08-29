@@ -2458,9 +2458,11 @@ unreachable_owner_rows() { # -> lines of "<assignee> <id> <id> ..."
 }
 
 # ADR 0009: a verdict is PASS or FAIL, and a PASS is unconditional. A condition
-# written into a close reason is machine-invisible the moment it is written —
-# `close_reason` is read by no dispatch pass and no sweep — so this row is the
-# only thing that looks at it. The match can be this blunt because ruling 2
+# written into a close reason reaches no dispatch pass and no assignee. Other
+# things do read `close_reason` — bdguard parses it for a cited sha, bd-gh-sync
+# takes its first line as a mirror tag — but neither can route an obligation,
+# and nor can this row: it names ids and assigns nobody, which is why it warns
+# rather than fails. The match can be this blunt because ruling 2
 # leaves a compliant close reason no reason to contain the word at all, down to
 # forbidding "no conditions" as a disclaimer.
 #
@@ -2470,15 +2472,22 @@ unreachable_owner_rows() { # -> lines of "<assignee> <id> <id> ..."
 # this row ringing on all seven from its first run, which is how a warn row
 # teaches the town to scroll past it.
 conditioned_verdict_ids() { # -> ids of judge beads closed with a condition in prose since ADR 0009
-    local cutoff=2026-08-29T18:31:01Z
-    bd list --all --json -n 0 2>/dev/null |
-        jq -r --arg cutoff "$cutoff" \
-            '[ .[]
-               | select((.labels // []) | index("class:judge"))
-               | select(.status == "closed")
-               | select((.closed_at // "") > $cutoff)
-               | select((.close_reason // "") | test("conditio"; "i"))
-               | .id ] | join(" ")'
+    local cutoff=2026-08-29T18:31:01Z board
+    board=$(bd list --all --json -n 0 2>/dev/null) || return 1
+    # A `bd` that exits 0 having printed a non-array is the one shape the
+    # pipeline's own errors cannot catch: `{}` is valid JSON and `.[]` over it
+    # iterates nothing rather than failing, so the row certifies every verdict
+    # unconditional over a query that returned no beads at all. Same feed, same
+    # idiom, as unreachable_owner_rows forty lines up — which guarded it and
+    # this one did not.
+    jq -e 'type == "array"' >/dev/null 2>&1 <<<"$board" || return 1
+    jq -r --arg cutoff "$cutoff" \
+        '[ .[]
+           | select((.labels // []) | index("class:judge"))
+           | select(.status == "closed")
+           | select((.closed_at // "") > $cutoff)
+           | select((.close_reason // "") | test("conditio"; "i"))
+           | .id ] | join(" ")' <<<"$board"
 }
 
 cmd_dispatch() {
