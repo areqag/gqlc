@@ -24,11 +24,18 @@
 #   bash -eo pipefail -c 'v="$(false)"; echo "$v" >> f' # rc 1, f untouched
 # The step sets errexit and nounset itself, on the first line of the run block
 # below, rather than relying on the runner's default flags for `shell: bash`, so
-# the argument above is checkable from this file. internal/tools/ciguard runs
-# that run block against a stubbed `just` and asserts both halves — the version
-# it emits, and that a failed read writes nothing — refuses an `if:` or a
-# `continue-on-error:` on either step, and pins the path below against the path
-# the justfile installs to.
+# the argument above is checkable from this file.
+#
+# NOT GUARDED BY A TEST, and this paragraph claimed the opposite until bd
+# gqlc-chep. It named internal/tools/ciguard as running that run block against a
+# stubbed `just` and asserting both halves, refusing an `if:` or a
+# `continue-on-error:` on either step, and pinning the path below against the
+# path the justfile installs to. That tool was deleted with the rest of the CI
+# scaffolding in PR #1595 and all four clauses went false with it — while the
+# sentence went on reading as the reason to trust the careful `version="$(...)"`
+# spelling to STAY correct. Nothing in this tree does any of the four today. The
+# witness above is a measurement taken once, and a measurement is not a guard.
+# gqlc-chep is where the decision about a real one lives.
 name: setup-golangci
 description: restore the pinned golangci-lint binary into .bin/ from cache
 runs:

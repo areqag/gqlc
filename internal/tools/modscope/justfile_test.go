@@ -729,11 +729,13 @@ func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 //   - A divergence both readings share. just is the reference, so a recipe just
 //     itself reads differently from the way it runs it is outside this.
 //
-// `just` is required rather than skipped over, for the reason
-// internal/tools/ciguard/hooktests_test.go gives for the same choice: the CI
-// test job installs it immediately before running the tests through it, so an
-// absent just is a broken environment, and a skip here would be the fail-open
-// this file exists to close.
+// `just` is required rather than skipped over: the CI test job installs it
+// immediately before running the tests through it, so an absent just is a
+// broken environment, and a skip here would be the fail-open this file exists
+// to close. That reason was cited to internal/tools/ciguard/hooktests_test.go,
+// which made the same choice; the citation is dropped rather than repointed
+// because that file was deleted with the CI scaffolding in PR #1595 and the
+// argument never needed it (bd gqlc-chep).
 //
 // Both readings are asserted non-empty before they are compared. Two empty sets
 // agree, and an agreement reached that way would pass over any justfile at all

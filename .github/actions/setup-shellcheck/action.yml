@@ -34,11 +34,11 @@
 # The step sets errexit and nounset itself, on the first line of the run block,
 # so that argument is checkable from this file alone.
 #
-# NOT GUARDED BY A TEST. The sibling setup-golangci/action.yml says a tool at
-# internal/tools/ciguard asserts this shape; that tool was deleted with the rest
-# of the CI scaffolding in PR #1595 and the sentence is now false. bd gqlc-chep
-# carries both the stale references and the lost coverage. So nothing IN THIS
-# TREE holds the path below in agreement with the justfile's `shellcheck`
+# NOT GUARDED BY A TEST. The sibling setup-golangci/action.yml used to say a
+# tool at internal/tools/ciguard asserts this shape; that tool was deleted with
+# the rest of the CI scaffolding in PR #1595, and the sibling now says so too
+# (bd gqlc-chep). So nothing IN THIS TREE holds the path below in agreement
+# with the justfile's `shellcheck`
 # variable, catches the errexit-spelling regression described above, or refuses
 # an `if:`/`continue-on-error:` on either step. The first two were measured once,
 # out of tree, on the branch that added this file; the third was not measured at
