@@ -29,7 +29,11 @@ package fixtures_test
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -563,6 +567,53 @@ func TestEveryScenarioTableIsTheDeclaredSize(t *testing.T) {
 				tc.name, tc.got, tc.want, tc.why)
 		})
 	}
+}
+
+// TestEveryScenarioTableIsDeclared holds scenarioTables to the batteries that
+// actually exist in this file.
+//
+// scenarioTables is itself a written-down list, so it has the failure it was
+// added to catch: a battery it does not name is a battery nothing counts, and
+// nothing about adding one would say so. That is not hypothetical — a new
+// battery arrives with each capability the targets grow.
+//
+// The names are read off the parse rather than off a registry the tables
+// would have to join, because a registry is something an author can forget in
+// exactly the same way. Nothing has to be remembered here: declaring
+// `var somethingScenarios = ...` is what enrols it, and this test is what
+// tells you so.
+//
+// Where it stops: it reads THIS file only, which is where every battery lives
+// today and where the loop that runs them lives. A battery declared in a
+// sibling file of this package would not be seen, and would run unheld.
+func TestEveryScenarioTableIsDeclared(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "live_test.go", nil, 0)
+	require.NoError(t, err, "the battery has to be able to read its own source to know what to hold")
+
+	var found []string
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			for _, name := range spec.(*ast.ValueSpec).Names {
+				if strings.HasSuffix(name.Name, "Scenarios") {
+					found = append(found, name.Name)
+				}
+			}
+		}
+	}
+	require.NotEmpty(t, found,
+		"no battery was found in the parse at all, so this test would hold scenarioTables to nothing")
+
+	var declared []string
+	for _, tc := range scenarioTables {
+		declared = append(declared, tc.name)
+	}
+	require.ElementsMatch(t, found, declared,
+		"scenarioTables must name every battery in this file and no others. A battery declared here and missing from scenarioTables runs unheld, which is the gap bd gqlc-8jfj closed one level down.")
 }
 
 // TestLiveSmoke runs every scenario against every arm. Arms call t.Parallel()
