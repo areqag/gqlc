@@ -1,6 +1,10 @@
 # Rendered by `km install-units`: @TOKENS@ come from kingdom.toml + git.
 [Unit]
 Description=Kingdom dispatcher — route ready beads to free seats
+# A failing tick means the town routes nothing, so it must never be silent.
+# Measured 2026-08-29: 19 consecutive ticks exited 1 with no output on either
+# stream and no board showed it (bd gqlc-87al).
+OnFailure=kingdom-dispatch-alarm.service
 
 [Service]
 Type=oneshot
