@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -151,7 +150,7 @@ func decodedSidecarKey(t *testing.T, f codegen.EntityField) (string, string, boo
 	// The emitted text names its zoning helper, so a helper missing from
 	// zoningHelpers is caught here rather than silently widening the set
 	// of widths that read no sidecar.
-	require.NotRegexp(t, regexp.MustCompile(`agtype\w*Zone\w*\(props, `),
+	require.NotRegexp(t, `agtype\w*Zone\w*\(props, `,
 		stripKnown(emitted), "the decode re-zones through a helper zoningHelpers does not list:\n%s", emitted)
 
 	found, helper, reads := "", "", false
