@@ -391,11 +391,12 @@ runs no body.
 
 ## What is refused today
 
-Two gaps, each carrying its own refused probes and served texts — read off
+Three gaps, each carrying its own refused probes and served texts — read off
 `dialectGaps` itself rather than restated here, so adding a probe moves the
 totals without touching this sentence. The alternation gap holds the
 relationship-type alternation spellings `.14` measured; the undefined-function
-gap holds the constructor names a live session was measured on. Both carry
+gap holds the temporal constructor names a live session was measured on; the
+spatial gap holds the one constructor a later live run measured. Each carries
 served texts alongside. The numbers belong at the pin, not in prose.
 
 1. **Relationship-type alternation** (`ErrRelationshipTypeAlternation`, from
@@ -431,6 +432,22 @@ served texts alongside. The numbers belong at the pin, not in prose.
    wrong about the server reddens the live run, where a refused probe that is
    wrong would refuse an author with no way round it.
 
+3. **Undefined spatial constructor** (`ErrUndefinedSpatialFunction`, bd
+   `gqlc-l8e2n`): `point({x: 1, y: 2})`, answered `function point does not
+   exist`, SQLSTATE 42883. Measured by the `live-smoke-age` job of `codegen-live`
+   run `33268424367` — the same run that closed item 2's set, dispatched by bd
+   `gqlc-osf1` against the same digest-pinned image. `p.point` is its served
+   text, and it has no served *call*: nothing spatial on that image answers.
+
+   It is a gap of its own rather than a name added to the one above, for the
+   reason that bullet already gave — the temporal diagnostic's prose is false of
+   a spatial name — and because the two remedies differ. A temporal refusal can
+   send the author to a backend that models the type; this project models no
+   spatial type on any target, so the spatial refusal names the only action that
+   is certainly available: store the coordinates as ordinary properties and
+   compute the geometry in Go. A sentinel here is chosen by the fix, not by the
+   SQLSTATE, which is why one 42883 answers to two.
+
 Matching is case-insensitive, which is what openCypher function resolution is;
 the name is quoted back in the author's own case, because that is what they have
 to find in their file. A namespaced call is a different name
@@ -448,15 +465,10 @@ pinned, at the unit level and at the CLI seam.
 
 The list that stood here was of constructs suspected and never run. All of them
 have now been run, on `codegen-live` run `33268424367` against the pinned digest
-(bd `gqlc-osf1`), and two of them are refused by the server while still being
-refused by no gap here. Neither is an oversight, and the reason differs:
-
-- **`point({x: 1, y: 2})`.** Refused, SQLSTATE 42883, `function point does not
-  exist` — the same channel and the same words as the seven above. It stays out
-  because it is not a temporal, and this gap's diagnostic tells the author that
-  AGE "defines no temporal constructor this project has measured". Refusing
-  `point()` there would print an answer about temporals over a name that is not
-  one. It is a third gap with its own sentinel and message: bd `gqlc-l8e2n`.
+(bd `gqlc-osf1`), and two of them were refused by the server while still being
+refused by no gap here. `point({x: 1, y: 2})` was one, and is one no longer: it
+is item 3 above as of bd `gqlc-l8e2n`, a gap of its own for the reason this
+section gave. One is left, and it is not an oversight:
 
 - **`duration.between(null, null)`.** Refused under a different error *class*:
   SQLSTATE 3F000, `schema "duration" does not exist`. Postgres reads the
@@ -467,10 +479,10 @@ refused by no gap here. Neither is an oversight, and the reason differs:
   it. It cannot join this gap even with a namespaced scanner, and needs its own:
   bd `gqlc-dy40s`.
 
-Both are held to those answers by `TestAGEAnswersTheConstructsNoGapRefuses`, so
-each bead inherits a witness rather than a suspicion, and the pinned image
-changing its answer reds the nightly rather than surfacing when someone finally
-builds the gap.
+It is held to that answer by `TestAGEAnswersTheConstructsNoGapRefuses`, so the
+bead inherits a witness rather than a suspicion, and the pinned image changing
+its answer reds the nightly rather than surfacing when someone finally builds
+the gap.
 
 The AGE live half remains nightly-and-manual (`codegen-live.yml`, job
 `live-smoke-age`, skipped on pull requests), so a refusal here ships verified by

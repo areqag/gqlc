@@ -42,6 +42,19 @@ var ErrRelationshipTypeAlternation = errors.New("relationship type alternation")
 // is decided by the probe table in dialect.go, and only by it.
 var ErrUndefinedFunction = errors.New("undefined function")
 
+// ErrUndefinedSpatialFunction is returned when a batch carries a query
+// whose TEXT calls a spatial constructor Apache AGE 1.7.0 does not
+// define. The server answers it in the same error class as the names
+// behind ErrUndefinedFunction — SQLSTATE 42883 — and it is a separate
+// sentinel all the same, because a sentinel here is chosen by the FIX
+// and not by the SQLSTATE. The temporal gap's remedy is to compute the
+// value in Go and bind it, or to generate against a neo4j target, and
+// neither answers a spatial call; a caller branching on
+// ErrUndefinedFunction would be handed a remedy for a question it did
+// not ask. Which names are refused is decided by the probe table in
+// dialect.go, and only by it.
+var ErrUndefinedSpatialFunction = errors.New("undefined spatial function")
+
 // wireEntities pairs every entity with the form it takes on the wire,
 // failing a schema that declares a node or edge type under more than one
 // label. The refusal is over the whole entity table rather than over the
