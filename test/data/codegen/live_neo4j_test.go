@@ -23,6 +23,8 @@ import (
 	entityedgev6 "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/neo4j-go-v6"
 	entitynodev5 "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/neo4j-go-v5"
 	entitynodev6 "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/neo4j-go-v6"
+	listlistv5 "github.com/areqag/gqlc/test/data/codegen/valid/list_list_int/golden/neo4j-go-v5"
+	listlistv6 "github.com/areqag/gqlc/test/data/codegen/valid/list_list_int/golden/neo4j-go-v6"
 	manycolmanyv5 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v5"
 	manycolmanyv6 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v6"
 	mixedv5 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v5"
@@ -81,6 +83,7 @@ type neo4jV5 struct {
 	one        oneColOneParamOneV5
 	mixed      mixedReadWriteBatchV5
 	many       manyColManyV5
+	nestedList nestedListV5
 	entityNode entityNodeV5
 	entityEdge entityEdgeV5
 	anyValue   anyValueColumnsV5
@@ -108,6 +111,7 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 		one:        oneColOneParamOneV5{q: onecolonev5.New(driver)},
 		mixed:      mixedReadWriteBatchV5{q: mixedv5.New(driver)},
 		many:       manyColManyV5{q: manycolmanyv5.New(driver)},
+		nestedList: nestedListV5{q: listlistv5.New(driver)},
 		entityNode: entityNodeV5{q: entitynodev5.New(driver)},
 		entityEdge: entityEdgeV5{q: entityedgev5.New(driver)},
 		anyValue:   anyValueColumnsV5{q: anypropv5.New(driver)},
@@ -332,6 +336,8 @@ func batteryTimeV5(v zonedv5.Time) timeValue {
 
 func (s neo4jV5Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 
+func (s neo4jV5Scenario) nestedList() nestedListQuerier { return s.arm.nestedList }
+
 func (s neo4jV5Scenario) entityNodeProjectedOne() entityNodeQuerier { return s.arm.entityNode }
 
 func (s neo4jV5Scenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.arm.entityEdge }
@@ -470,6 +476,16 @@ func (a mixedTxV5) beginNested(ctx context.Context, t *testing.T) error {
 	return nil
 }
 
+// nestedListV5 binds the list_list_int fixture. The generated method already
+// returns the battery's shape, so unlike the entity adapters there is nothing
+// to convert — which is the point: [][]int64 is what the emitted decoder
+// built out of the driver's []any of []any.
+type nestedListV5 struct{ q *listlistv5.Queries }
+
+func (a nestedListV5) nestedList(ctx context.Context) ([][]int64, error) {
+	return a.q.NestedList(ctx)
+}
+
 type manyColManyV5 struct{ q *manycolmanyv5.Queries }
 
 func (a manyColManyV5) peopleByAgeAndLocale(ctx context.Context, minAge int64, locale string) ([]person, error) {
@@ -498,6 +514,7 @@ type neo4jV6 struct {
 	one        oneColOneParamOneV6
 	mixed      mixedReadWriteBatchV6
 	many       manyColManyV6
+	nestedList nestedListV6
 	entityNode entityNodeV6
 	entityEdge entityEdgeV6
 	anyValue   anyValueColumnsV6
@@ -525,6 +542,7 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 		one:        oneColOneParamOneV6{q: onecolonev6.New(driver)},
 		mixed:      mixedReadWriteBatchV6{q: mixedv6.New(driver)},
 		many:       manyColManyV6{q: manycolmanyv6.New(driver)},
+		nestedList: nestedListV6{q: listlistv6.New(driver)},
 		entityNode: entityNodeV6{q: entitynodev6.New(driver)},
 		entityEdge: entityEdgeV6{q: entityedgev6.New(driver)},
 		anyValue:   anyValueColumnsV6{q: anypropv6.New(driver)},
@@ -745,6 +763,8 @@ func batteryTimeV6(v zonedv6.Time) timeValue {
 
 func (s neo4jV6Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 
+func (s neo4jV6Scenario) nestedList() nestedListQuerier { return s.arm.nestedList }
+
 func (s neo4jV6Scenario) entityNodeProjectedOne() entityNodeQuerier { return s.arm.entityNode }
 
 func (s neo4jV6Scenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.arm.entityEdge }
@@ -873,6 +893,12 @@ func (a mixedTxV6) beginNested(ctx context.Context, t *testing.T) error {
 		t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
 	}
 	return nil
+}
+
+type nestedListV6 struct{ q *listlistv6.Queries }
+
+func (a nestedListV6) nestedList(ctx context.Context) ([][]int64, error) {
+	return a.q.NestedList(ctx)
 }
 
 type manyColManyV6 struct{ q *manycolmanyv6.Queries }

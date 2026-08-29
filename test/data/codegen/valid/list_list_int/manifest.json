@@ -1,5 +1,5 @@
 {
   "package": "listlistint",
   "queryFiles": ["queries.cypher"],
-  "targets": ["neo4j-go-v5", "apache-age-pgx-v5"]
+  "targets": ["neo4j-go-v5", "neo4j-go-v6", "apache-age-pgx-v5"]
 }
