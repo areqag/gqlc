@@ -416,8 +416,10 @@ package when its surface references one, plus `time.Time` for TIMESTAMP.
 These are what the emitted public surface names for temporal widths —
 never a driver type; conversion to `dbtype.*` or agtype encodings is
 backend-private inside decode/encode helpers. Representation, placement,
-and the AGE admission policy are ADR 0033. The five names are reserved in
-the generated package whenever `temporal.go` is emitted.
+and the AGE admission policy are ADR 0033. The five names are reserved
+in every generated package, even one that emits no `temporal.go` — a
+name that works in one batch but not another is the renaming scheme
+`reservedIdentifiers` already refused (ADR 0033).
 _Avoid_: "dbtype" in any description of the public surface (that is the
 neo4j driver's package, a private carrier behind the conversion boundary);
 "runtime type" (there is no gqlc runtime module — the carriers are emitted,
