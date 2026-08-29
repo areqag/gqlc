@@ -3263,26 +3263,27 @@ iso-drift-check:
     exit "$fail"
 
 # ---------- Թագաւորութիւն — the software factory (kingdom/README.md) ----------
+#
+# Herdr is the observation surface: `herdr` opens the town's TUI, with every
+# citizen a tab in the "kingdom" workspace. `just kingdom`, `just herratsayn`
+# and `just kingdom-attach` were tmux-era wrappers around `tmux
+# attach-session`; they were deleted when herdr became HQ (bd gqlc-98br).
+# Mechanical readout (mail counts, unroutable beads, unit health) still lives
+# in `km status`.
 
-# status of the Թագաւորութիւն: seats, beads, mail, cap
-kingdom:
-    kingdom/bin/km status
-
-# Հեռաձայն to Սեդրակ: wake him if needed and attach to his window
-herratsayn:
-    kingdom/bin/km herratsayn
-
-# attach to any seat's window
-kingdom-attach seat:
-    kingdom/bin/km attach {{seat}}
-
-# create state dir, seat worktrees, tmux session, and runners (all asleep)
+# create state dir, seat worktrees, and the herdr workspace with its per-seat
+# agents (all asleep). Requires the herdr server to be running.
 kingdom-up:
     kingdom/bin/km up
 
-# graceful stop: notice by mail, then kill the tmux session
+# graceful stop: notice by mail, then close the herdr workspace
 kingdom-down:
     kingdom/bin/km down
+
+# mechanical readout: mail counts, unroutable beads, stalled P0s, unit health.
+# For the pane view, open `herdr`.
+kingdom-status:
+    kingdom/bin/km status
 
 # check deps, install+enable the systemd user timers, point bd mail at km
 kingdom-install:
