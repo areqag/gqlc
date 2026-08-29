@@ -1176,7 +1176,11 @@ unread_count() {
 # no body is read. The caveat on unread_count above applies with full force
 # here: for a SEAT this counts letters that outlived at least one of the
 # recipient's wakes, and for the king it counts deliveries to a box nobody
-# drains (gqlc-2abx). The only caller walks seats_all, which excludes him.
+# drains (gqlc-2abx). Neither caller passes him as the RECIPIENT: one walks
+# seats_all, which excludes him, and the idle escalation names the seat sedrak.
+# That pass compares two counts inside a single tick, so the staleness above
+# cannot reach it — only a letter arriving in the window can, which is the
+# point.
 mail_unread_from() { # <recipient> <sender> -> count
     local d
     d="$(state_dir)/mail/$1/inbox"
@@ -2342,10 +2346,15 @@ cmd_dispatch() {
             # to reach the inbox still returns 0. So the inbox is counted before
             # and after, with km's own reader.
             #
+            # Counted from andranik alone, not over the whole box: any letter
+            # landing in that window — another seat's, a concurrent km's —
+            # confirms a delivery that failed, and a false confirm writes the
+            # marker and restores the permanent silence this code exists to end.
+            #
             # A read by Սեդրակ racing between the two counts reports UNDELIVERED
             # for a mail that did land; the cost is one retried escalation on the
             # next pass, which is the direction to be wrong in.
-            before_unread=$(unread_count sedrak)
+            before_unread=$(mail_unread_from sedrak andranik)
             if mail_send sedrak --from andranik \
                 -s "$s is awake and idle after $cap unanswered asks" \
                 -m "km dispatch asked $s to pick up work or run 'km sleep' $cap times in one idle episode. Nothing changed, so it has stopped typing at her and is telling you instead. It will not mail you about this episode again.
@@ -2358,11 +2367,11 @@ Last ask: $(fmt_age "$(($(date +%s) - $(stat -c %Y "$nudged_marker" 2>/dev/null 
 Nothing here ends a session and nothing should: a seat that has not asked to leave has not consented (VI.2). Read her pane before deciding. 'km sleep --seat $s' frees the slot if she is genuinely done; if her turn died mid-work, she needs a person, not another line of text.
 
 This counter clears by itself the moment her agent leaves 'idle' — witnessed work, not a pane that merely looks different." \
-                && [ "$(unread_count sedrak)" -gt "$before_unread" ]; then
+                && [ "$(mail_unread_from sedrak andranik)" -gt "$before_unread" ]; then
                 : >"$escalated_marker"
                 echo "dispatch: ESCALATED $s to sedrak — $cap asks in this episode changed nothing; not typing at her again this episode"
             else
-                echo "dispatch: ESCALATION UNDELIVERED for $s — sedrak's inbox did not grow, so nothing was recorded and the next pass will try again; $s is at her $cap-ask cap and is not being typed at meanwhile"
+                echo "dispatch: ESCALATION UNDELIVERED for $s — no new letter from andranik reached sedrak's inbox, so nothing was recorded and the next pass will try again; $s is at her $cap-ask cap and is not being typed at meanwhile"
             fi
             continue
         fi
