@@ -657,9 +657,20 @@ func valueName(i int) string { return fmt.Sprintf("value%d", i) }
 // {Null}, or a schema property whose declared width is ANY VALUE (spec
 // §5.5). The driver's Get returns (any, bool) where bool is "found"
 // (not "null"). The "not-found" branch is a decode error (the resolver
-// committed the column, so the driver must produce it); the "found"
-// branch assigns the value verbatim (a nil value satisfies the `any`
-// field's zero — no pointer wrap per §5.1's table).
+// committed the column, so the driver must produce it).
+//
+// Found-but-null is the second gate, and it is a separate question from
+// found: Get reports a key the record holds, and a record holds a key
+// for every column the query projected whatever the value under it is.
+// A non-nullable column therefore reaches this arm with a nil value
+// whenever the graph had none, and the gate is what stops that becoming
+// the caller's problem. This lane went without one until bd gqlc-tez0,
+// which is why the width needs the reminder its siblings do not: for
+// every other width, a non-nullable column's Go type has no nil to
+// return, so the gate merely improves an error message. `any` is
+// inhabited by nil, so here the gate carries the whole promise — without
+// it a broken NOT NULL is delivered as a value, indistinguishable from
+// one the graph holds, beside a nil error.
 //
 // A nullable one carries the graph's null in its pointer, the way every
 // other nullable column on this path carries isNil. That is where this
@@ -680,6 +691,10 @@ func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.R
 		b.WriteString(assignSuffix)
 		return
 	}
+	// Non-nullable: a nil value is a decode error, the same refusal in the
+	// same words every other column lane on this backend emits and Apache
+	// AGE emits for every kind it serves.
+	fmt.Fprintf(b, "%sif %s == nil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, varName, indent, zero, p.MethodName, f.ColumnName, indent)
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(varName)

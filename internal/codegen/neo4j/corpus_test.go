@@ -159,8 +159,8 @@ var corpusSubtests = map[string]int{
 // Dynamic each refuse. When a deliberate fixture edit moves a number, the
 // failure prints the fixture's current census as a Go literal to paste.
 var corpusTables = map[string]corpusrun.Table{
-	"TestAnyPropertyValueColumnsReadWhatTheGraphHolds": {Rows: 7},
-	"TestAnythingColumnsReadWhatTheGraphHolds":         {Rows: 7},
+	"TestAnyPropertyValueColumnsReadWhatTheGraphHolds": {Rows: 6},
+	"TestAnythingColumnsReadWhatTheGraphHolds":         {Rows: 6},
 	"TestAnythingReadsWhatTheGraphHolds":               {Rows: 7},
 	"TestDecodersRefuseAValueOfAnotherType":            {Rows: 4},
 	"TestEdgeUnionColumnDispatchesOnTheWireLabel":      {Rows: 2},
