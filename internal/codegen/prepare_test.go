@@ -1,4 +1,4 @@
-package codegen
+package codegen_test
 
 import (
 	"go/ast"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
@@ -76,7 +77,7 @@ type unknownVariant struct {
 // (Person -[:KNOWS]-> Person, for ResolvedEdge and one edgeUnion
 // candidate), and one LIKES edge (Person -[:LIKES]-> Person, second
 // edgeUnion candidate). Runs Phase Z to derive the entity cache.
-func listPlanTestFixture(t *testing.T) ([]Entity, map[entityLookupKey]int) {
+func listPlanTestFixture(t *testing.T) ([]codegen.Entity, map[codegen.EntityLookupKey]int) {
 	t.Helper()
 	person := graph.LabelSetKey("Person")
 	knows := schema.EdgeKey{Source: person, KeyLabels: graph.LabelSetKey("KNOWS"), Target: person}
@@ -91,28 +92,28 @@ func listPlanTestFixture(t *testing.T) ([]Entity, map[entityLookupKey]int) {
 			likes: {EdgeKey: likes, Properties: map[string]schema.Property{}},
 		},
 	}
-	entities, index, err := phaseZAdmit(sch, stubTypeMap{})
+	entities, index, err := codegen.PhaseZAdmit(sch, stubTypeMap{})
 	require.NoError(t, err)
 	return entities, index
 }
 
 // listPlanPersonKey returns the Person node's entityLookupKey.
-func listPlanPersonKey() entityLookupKey {
-	return entityLookupKey{Kind: EntityNode, Labels: graph.LabelSetKey("Person")}
+func listPlanPersonKey() codegen.EntityLookupKey {
+	return codegen.EntityLookupKey{Kind: codegen.EntityNode, Labels: graph.LabelSetKey("Person")}
 }
 
 // listPlanKnowsKey / listPlanLikesKey mirror the two edgeUnion
 // candidates.
-func listPlanKnowsKey() entityLookupKey {
-	return entityLookupKey{Kind: EntityEdge, EdgeKey: schema.EdgeKey{
+func listPlanKnowsKey() codegen.EntityLookupKey {
+	return codegen.EntityLookupKey{Kind: codegen.EntityEdge, EdgeKey: schema.EdgeKey{
 		Source:    graph.LabelSetKey("Person"),
 		KeyLabels: graph.LabelSetKey("KNOWS"),
 		Target:    graph.LabelSetKey("Person"),
 	}}
 }
 
-func listPlanLikesKey() entityLookupKey {
-	return entityLookupKey{Kind: EntityEdge, EdgeKey: schema.EdgeKey{
+func listPlanLikesKey() codegen.EntityLookupKey {
+	return codegen.EntityLookupKey{Kind: codegen.EntityEdge, EdgeKey: schema.EdgeKey{
 		Source:    graph.LabelSetKey("Person"),
 		KeyLabels: graph.LabelSetKey("LIKES"),
 		Target:    graph.LabelSetKey("Person"),
@@ -147,11 +148,11 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 	tm := stubTypeMap{}
 
 	type wantPlan struct {
-		Kind       ColumnKind
+		Kind       codegen.ColumnKind
 		GoType     string
 		EntityName string
 		UnionIdx   int
-		NestedKind ColumnKind // zero if Nested nil expected
+		NestedKind codegen.ColumnKind // zero if Nested nil expected
 		NestedGoTy string
 	}
 
@@ -173,14 +174,14 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 		name string
 		k    resolver.Scalar
 		gt   string
-		kind ColumnKind
+		kind codegen.ColumnKind
 	}{
-		{"scalar bool", resolver.ScalarBool, tm.Scalar(resolver.ScalarBool), ColumnScalar},
-		{"scalar int", resolver.ScalarInt, tm.Scalar(resolver.ScalarInt), ColumnScalar},
-		{"scalar float", resolver.ScalarFloat, tm.Scalar(resolver.ScalarFloat), ColumnScalar},
-		{"scalar string", resolver.ScalarString, tm.Scalar(resolver.ScalarString), ColumnScalar},
-		{"scalar null", resolver.ScalarNull, "any", ColumnScalarNull},
-		{"scalar map", resolver.ScalarMap, tm.Scalar(resolver.ScalarMap), ColumnScalar},
+		{"scalar bool", resolver.ScalarBool, tm.Scalar(resolver.ScalarBool), codegen.ColumnScalar},
+		{"scalar int", resolver.ScalarInt, tm.Scalar(resolver.ScalarInt), codegen.ColumnScalar},
+		{"scalar float", resolver.ScalarFloat, tm.Scalar(resolver.ScalarFloat), codegen.ColumnScalar},
+		{"scalar string", resolver.ScalarString, tm.Scalar(resolver.ScalarString), codegen.ColumnScalar},
+		{"scalar null", resolver.ScalarNull, "any", codegen.ColumnScalarNull},
+		{"scalar map", resolver.ScalarMap, tm.Scalar(resolver.ScalarMap), codegen.ColumnScalar},
 	}
 
 	type positiveRow struct {
@@ -191,7 +192,7 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 	positive := []positiveRow{{
 		name: "property",
 		in:   resolver.ResolvedProperty{Type: graph.TypeInt32},
-		want: wantPlan{Kind: ColumnProperty, GoType: "property:INT32"},
+		want: wantPlan{Kind: codegen.ColumnProperty, GoType: "property:INT32"},
 	}}
 	for _, r := range temporalRows {
 		goType, ok := tm.Temporal(r.k)
@@ -199,7 +200,7 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 		positive = append(positive, positiveRow{
 			name: r.name,
 			in:   resolver.ResolvedTemporal{Kind: r.k},
-			want: wantPlan{Kind: ColumnTemporal, GoType: goType},
+			want: wantPlan{Kind: codegen.ColumnTemporal, GoType: goType},
 		})
 	}
 	for _, r := range scalarRows {
@@ -212,27 +213,27 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 	positive = append(positive,
 		positiveRow{
 			name: "unknown", in: resolver.ResolvedUnknown{},
-			want: wantPlan{Kind: ColumnAny, GoType: "any"},
+			want: wantPlan{Kind: codegen.ColumnAny, GoType: "any"},
 		},
 		positiveRow{
 			name: "node", in: resolver.ResolvedNode{Labels: graph.LabelSetKey("Person")},
-			want: wantPlan{Kind: ColumnNode, GoType: personName, EntityName: personName},
+			want: wantPlan{Kind: codegen.ColumnNode, GoType: personName, EntityName: personName},
 		},
 		positiveRow{
 			name: "edge", in: resolver.ResolvedEdge{EdgeKey: knowsKey},
-			want: wantPlan{Kind: ColumnEdge, GoType: knowsName, EntityName: knowsName},
+			want: wantPlan{Kind: codegen.ColumnEdge, GoType: knowsName, EntityName: knowsName},
 		},
 		positiveRow{
 			name: "edgeUnion", in: resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{knowsKey, likesKey}},
-			want: wantPlan{Kind: ColumnEdgeUnion, GoType: "PathActionsUnion", UnionIdx: 42},
+			want: wantPlan{Kind: codegen.ColumnEdgeUnion, GoType: "PathActionsUnion", UnionIdx: 42},
 		},
 		positiveRow{
 			name: "nested list of scalar",
 			in:   resolver.ResolvedList{Element: resolver.ResolvedList{Element: resolver.ResolvedScalar{Kind: resolver.ScalarInt}}},
 			want: wantPlan{
-				Kind:       ColumnList,
+				Kind:       codegen.ColumnList,
 				GoType:     "[][]" + tm.Scalar(resolver.ScalarInt),
-				NestedKind: ColumnList,
+				NestedKind: codegen.ColumnList,
 				NestedGoTy: "[]" + tm.Scalar(resolver.ScalarInt),
 			},
 		},
@@ -242,13 +243,13 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 
 	for _, tt := range positive {
 		t.Run("positive/"+tt.name, func(t *testing.T) {
-			plan, err := buildListElemPlan(tt.in, entities, index, tm, tt.want.UnionIdx, tt.want.GoType)
+			plan, err := codegen.BuildListElemPlan(tt.in, entities, index, tm, tt.want.UnionIdx, tt.want.GoType)
 			require.NoError(t, err)
 			require.NotNil(t, plan)
 			require.Equal(t, tt.want.Kind, plan.Kind, "Kind")
 			require.Equal(t, tt.want.GoType, plan.GoType, "GoType")
 			require.Equal(t, tt.want.EntityName, plan.EntityName, "EntityName")
-			if tt.want.Kind == ColumnEdgeUnion {
+			if tt.want.Kind == codegen.ColumnEdgeUnion {
 				require.Equal(t, tt.want.UnionIdx, plan.UnionIdx, "UnionIdx")
 			}
 			if tt.want.NestedKind != 0 || tt.want.NestedGoTy != "" {
@@ -260,8 +261,8 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 	}
 
 	t.Run("negative/unrepresentable_width", func(t *testing.T) {
-		_, err := buildListElemPlan(resolver.ResolvedProperty{Type: graph.TypeDecimal}, entities, index, tm, -1, "")
-		require.ErrorIs(t, err, ErrUnrepresentableWidth)
+		_, err := codegen.BuildListElemPlan(resolver.ResolvedProperty{Type: graph.TypeDecimal}, entities, index, tm, -1, "")
+		require.ErrorIs(t, err, codegen.ErrUnrepresentableWidth)
 	})
 
 	t.Run("negative/synthetic_malformed_variant", func(t *testing.T) {
@@ -269,8 +270,8 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 		// the builder's type-switch cases each match a concrete
 		// ResolvedType struct by name, so the outer unknownVariant
 		// matches none and falls to the default arm.
-		_, err := buildListElemPlan(unknownVariant{ResolvedType: resolver.ResolvedUnknown{}}, entities, index, tm, -1, "")
-		require.ErrorIs(t, err, ErrOutOfC6Scope)
+		_, err := codegen.BuildListElemPlan(unknownVariant{ResolvedType: resolver.ResolvedUnknown{}}, entities, index, tm, -1, "")
+		require.ErrorIs(t, err, codegen.ErrOutOfC6Scope)
 	})
 }
 
@@ -285,16 +286,16 @@ func TestPreparedListElemMapsToColumnKind(t *testing.T) {
 	// ColumnScalarNull, ColumnAny are the arms whose emission-side
 	// dispatch is single-value; every other arm shares its top-level
 	// meaning.
-	allowed := map[ColumnKind]string{
-		ColumnProperty:   "ColumnProperty",
-		ColumnNode:       "ColumnNode",
-		ColumnEdge:       "ColumnEdge",
-		ColumnTemporal:   "ColumnTemporal",
-		ColumnScalar:     "ColumnScalar",
-		ColumnScalarNull: "ColumnScalarNull",
-		ColumnList:       "ColumnList",
-		ColumnAny:        "ColumnAny",
-		ColumnEdgeUnion:  "ColumnEdgeUnion",
+	allowed := map[codegen.ColumnKind]string{
+		codegen.ColumnProperty:   "ColumnProperty",
+		codegen.ColumnNode:       "ColumnNode",
+		codegen.ColumnEdge:       "ColumnEdge",
+		codegen.ColumnTemporal:   "ColumnTemporal",
+		codegen.ColumnScalar:     "ColumnScalar",
+		codegen.ColumnScalarNull: "ColumnScalarNull",
+		codegen.ColumnList:       "ColumnList",
+		codegen.ColumnAny:        "ColumnAny",
+		codegen.ColumnEdgeUnion:  "ColumnEdgeUnion",
 	}
 	require.Len(t, allowed, 9)
 
@@ -321,9 +322,9 @@ func TestPreparedListElemMapsToColumnKind(t *testing.T) {
 		resolver.ResolvedUnknown{},
 		resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{knowsKey, likesKey}},
 	}
-	seen := map[ColumnKind]struct{}{}
+	seen := map[codegen.ColumnKind]struct{}{}
 	for _, s := range samples {
-		plan, err := buildListElemPlan(s, entities, index, stubTypeMap{}, 0, "PathActionsUnion")
+		plan, err := codegen.BuildListElemPlan(s, entities, index, stubTypeMap{}, 0, "PathActionsUnion")
 		require.NoError(t, err)
 		require.NotNil(t, plan)
 		_, ok := allowed[plan.Kind]
@@ -347,15 +348,15 @@ func TestPhaseBCommitsIsWrite(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			q := NamedQuery{
+			q := codegen.NamedQuery{
 				Name:        "Q",
-				Cardinality: CardinalityExec,
+				Cardinality: codegen.CardinalityExec,
 				SourceText:  "MATCH (n) DELETE n",
 				Validated: resolver.ValidatedQuery{
 					Statement: tt.statement,
 				},
 			}
-			out, err := phaseBDerive([]NamedQuery{q}, nil, nil, stubTypeMap{})
+			out, err := codegen.PhaseBDerive([]codegen.NamedQuery{q}, nil, nil, stubTypeMap{})
 			require.NoError(t, err)
 			require.Len(t, out, 1)
 			require.Equal(t, tt.want, out[0].IsWrite)
@@ -430,21 +431,21 @@ func TestEdgeUnionCandidatesMustCarryDistinctLabels(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			in := Input{
+			in := codegen.Input{
 				Schema: sch,
-				Queries: []NamedQuery{{
+				Queries: []codegen.NamedQuery{{
 					Name:        "GetAction",
-					Cardinality: CardinalityOne,
+					Cardinality: codegen.CardinalityOne,
 					SourceText:  "MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r",
 					Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "r", Type: tt.column}}},
 				}},
 			}
-			_, err := Prepare(in, stubTypeMap{}, "")
+			_, err := codegen.Prepare(in, stubTypeMap{}, "")
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 				return
 			}
-			require.ErrorIs(t, err, ErrUnrepresentableEdgeUnion)
+			require.ErrorIs(t, err, codegen.ErrUnrepresentableEdgeUnion)
 			require.EqualError(t, err, tt.wantErr)
 		})
 	}
@@ -464,26 +465,26 @@ func TestEdgeUnionInterfaceNamesMustNotCoincideAcrossQueries(t *testing.T) {
 	sch, fwd, wrote, _ := sharedEdgeLabelFixture()
 	column := resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{fwd, wrote}}
 
-	in := Input{
+	in := codegen.Input{
 		Schema: sch,
-		Queries: []NamedQuery{
+		Queries: []codegen.NamedQuery{
 			{
 				Name:        "Get",
-				Cardinality: CardinalityOne,
+				Cardinality: codegen.CardinalityOne,
 				SourceText:  "MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r AS userName",
 				Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "userName", Type: column}}},
 			},
 			{
 				Name:        "GetUser",
-				Cardinality: CardinalityOne,
+				Cardinality: codegen.CardinalityOne,
 				SourceText:  "MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r AS name",
 				Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "name", Type: column}}},
 			},
 		},
 	}
 
-	_, err := Prepare(in, stubTypeMap{}, "")
-	require.ErrorIs(t, err, ErrIdentifierCollision)
+	_, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.ErrorIs(t, err, codegen.ErrIdentifierCollision)
 	// One ordered substring, not two independent ones: source 6 inserts
 	// in Input.Queries order, so which query lands on the message's
 	// "first" side is part of the contract. Two unordered contains would
@@ -561,23 +562,23 @@ func TestTemporalKindRefusalReachesTheCaller(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			in := Input{
+			in := codegen.Input{
 				Schema: schema.Schema{Name: "Test"},
-				Queries: []NamedQuery{{
+				Queries: []codegen.NamedQuery{{
 					Name:        "GetWhen",
-					Cardinality: CardinalityOne,
+					Cardinality: codegen.CardinalityOne,
 					SourceText:  "MATCH (n) RETURN duration({days: 1}) AS t",
 					Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "t", Type: tt.column}}},
 				}},
 			}
 			tm := partialTemporalTypeMap{refuse: refused}
-			prepared, err := Prepare(in, tm, "")
+			prepared, err := codegen.Prepare(in, tm, "")
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 				require.NotEmpty(t, prepared.Queries[0].RowFields[0].GoType)
 				return
 			}
-			require.ErrorIs(t, err, ErrUnrepresentableTemporal)
+			require.ErrorIs(t, err, codegen.ErrUnrepresentableTemporal)
 			require.EqualError(t, err, tt.wantErr)
 		})
 	}
@@ -607,31 +608,31 @@ var ageOnlyTargets = []string{"apache-age-pgx-v5"}
 // what reserves the name is the emission, not the admission.
 var reservedIdentifierRows = []struct {
 	name       string
-	scope      identifierScope
+	scope      codegen.IdentifierScope
 	declaredBy []string // nil means every target the corpus emits
 }{
-	{"Queries", scopePackage, nil},
-	{"New", scopePackage, nil},
-	{"WithTx", scopeMethod, nil},
-	{"ReadQuerier", scopePackage, nil},
-	{"WriteQuerier", scopePackage, nil},
-	{"Querier", scopePackage, nil},
-	{"ErrNoRows", scopePackage, nil},
-	{"ErrMultipleResults", scopePackage, nil},
-	{"DBTX", scopePackage, ageOnlyTargets},
-	{"SessionInit", scopePackage, ageOnlyTargets},
-	{"EnsureGraph", scopeMethod, ageOnlyTargets},
-	{"DropGraph", scopeMethod, ageOnlyTargets},
-	{"Tx", scopePackage, nil},
-	{"ErrTxDone", scopePackage, nil},
-	{"Begin", scopeMethod, nil},
-	{"Commit", scopeMethod, nil},
-	{"Rollback", scopeMethod, nil},
-	{"Date", scopePackage, nil},
-	{"Time", scopePackage, nil},
-	{"LocalTime", scopePackage, nil},
-	{"LocalDateTime", scopePackage, nil},
-	{"Duration", scopePackage, nil},
+	{"Queries", codegen.ScopePackage, nil},
+	{"New", codegen.ScopePackage, nil},
+	{"WithTx", codegen.ScopeMethod, nil},
+	{"ReadQuerier", codegen.ScopePackage, nil},
+	{"WriteQuerier", codegen.ScopePackage, nil},
+	{"Querier", codegen.ScopePackage, nil},
+	{"ErrNoRows", codegen.ScopePackage, nil},
+	{"ErrMultipleResults", codegen.ScopePackage, nil},
+	{"DBTX", codegen.ScopePackage, ageOnlyTargets},
+	{"SessionInit", codegen.ScopePackage, ageOnlyTargets},
+	{"EnsureGraph", codegen.ScopeMethod, ageOnlyTargets},
+	{"DropGraph", codegen.ScopeMethod, ageOnlyTargets},
+	{"Tx", codegen.ScopePackage, nil},
+	{"ErrTxDone", codegen.ScopePackage, nil},
+	{"Begin", codegen.ScopeMethod, nil},
+	{"Commit", codegen.ScopeMethod, nil},
+	{"Rollback", codegen.ScopeMethod, nil},
+	{"Date", codegen.ScopePackage, nil},
+	{"Time", codegen.ScopePackage, nil},
+	{"LocalTime", codegen.ScopePackage, nil},
+	{"LocalDateTime", codegen.ScopePackage, nil},
+	{"Duration", codegen.ScopePackage, nil},
 }
 
 // TestReservedIdentifiersAreUniformAcrossBackends pins the reserved set
@@ -649,22 +650,22 @@ func TestReservedIdentifiersAreUniformAcrossBackends(t *testing.T) {
 	for _, row := range reservedIdentifierRows {
 		want = append(want, row.name)
 	}
-	got := make([]string, 0, len(reservedIdentifiers))
-	for name := range reservedIdentifiers {
+	got := make([]string, 0, len(codegen.ReservedIdentifiers))
+	for name := range codegen.ReservedIdentifiers {
 		got = append(got, name)
 	}
 	require.ElementsMatch(t, want, got)
 
 	for _, row := range reservedIdentifierRows {
 		t.Run(row.name, func(t *testing.T) {
-			require.Equal(t, row.scope, reservedIdentifiers[row.name])
+			require.Equal(t, row.scope, codegen.ReservedIdentifiers[row.name])
 
-			in := Input{
+			in := codegen.Input{
 				Schema:  schema.Schema{Name: "Test"},
-				Queries: []NamedQuery{{Name: row.name, Cardinality: CardinalityExec, SourceText: "MATCH (n) DELETE n"}},
+				Queries: []codegen.NamedQuery{{Name: row.name, Cardinality: codegen.CardinalityExec, SourceText: "MATCH (n) DELETE n"}},
 			}
-			_, err := Prepare(in, stubTypeMap{}, "")
-			require.ErrorIs(t, err, ErrIdentifierCollision)
+			_, err := codegen.Prepare(in, stubTypeMap{}, "")
+			require.ErrorIs(t, err, codegen.ErrIdentifierCollision)
 			require.ErrorContains(t, err, `query "`+row.name+`" at position 0`)
 		})
 	}
@@ -712,8 +713,8 @@ func TestReservedScopeDecidesWhichEntityNamesCollide(t *testing.T) {
 	for _, src := range sources {
 		for _, row := range reservedIdentifierRows {
 			t.Run(src.axis+"/"+row.name, func(t *testing.T) {
-				prepared, err := Prepare(Input{Schema: src.schema(row.name)}, stubTypeMap{}, "")
-				if row.scope == scopeMethod {
+				prepared, err := codegen.Prepare(codegen.Input{Schema: src.schema(row.name)}, stubTypeMap{}, "")
+				if row.scope == codegen.ScopeMethod {
 					require.NoError(t, err)
 					names := make([]string, 0, len(prepared.Entities))
 					for _, e := range prepared.Entities {
@@ -722,7 +723,7 @@ func TestReservedScopeDecidesWhichEntityNamesCollide(t *testing.T) {
 					require.Contains(t, names, row.name)
 					return
 				}
-				require.ErrorIs(t, err, ErrIdentifierCollision)
+				require.ErrorIs(t, err, codegen.ErrIdentifierCollision)
 				// One ordered substring, not two independent ones: the
 				// seed exists so the fixed declaration lands on the
 				// message's "first" side, and two unordered contains
@@ -753,8 +754,8 @@ func goldenTarget(t *testing.T, path string) string {
 
 // scopeName renders an identifierScope for a fail message, so that a
 // reader does not have to know which iota is which.
-func scopeName(s identifierScope) string {
-	if s == scopeMethod {
+func scopeName(s codegen.IdentifierScope) string {
+	if s == codegen.ScopeMethod {
 		return "scopeMethod"
 	}
 	return "scopePackage"
@@ -776,24 +777,24 @@ func goldenFixture(t *testing.T, path string) string {
 // eachDecl calls record for every named declaration of file with the
 // scope it occupies. A func with a receiver is scopeMethod; a type, a
 // var, a const and a plain func are all package-level.
-func eachDecl(file *ast.File, record func(name string, scope identifierScope)) {
+func eachDecl(file *ast.File, record func(name string, scope codegen.IdentifierScope)) {
 	for _, decl := range file.Decls {
 		switch d := decl.(type) {
 		case *ast.GenDecl:
 			for _, spec := range d.Specs {
 				switch s := spec.(type) {
 				case *ast.TypeSpec:
-					record(s.Name.Name, scopePackage)
+					record(s.Name.Name, codegen.ScopePackage)
 				case *ast.ValueSpec:
 					for _, n := range s.Names {
-						record(n.Name, scopePackage)
+						record(n.Name, codegen.ScopePackage)
 					}
 				}
 			}
 		case *ast.FuncDecl:
-			scope := scopeMethod
+			scope := codegen.ScopeMethod
 			if d.Recv == nil {
-				scope = scopePackage
+				scope = codegen.ScopePackage
 			}
 			record(d.Name.Name, scope)
 		}
@@ -837,15 +838,15 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 
 	corpusTargets := map[string]struct{}{}
 	// name -> scope -> one path declaring it that way, for the fail message.
-	declared := make(map[string]map[identifierScope]string)
+	declared := make(map[string]map[codegen.IdentifierScope]string)
 	// name -> set of targets declaring it.
 	declaredBy := make(map[string]map[string]struct{})
-	record := func(name, path string, scope identifierScope) {
-		if _, reserved := reservedIdentifiers[name]; !reserved {
+	record := func(name, path string, scope codegen.IdentifierScope) {
+		if _, reserved := codegen.ReservedIdentifiers[name]; !reserved {
 			return
 		}
 		if declared[name] == nil {
-			declared[name] = make(map[identifierScope]string)
+			declared[name] = make(map[codegen.IdentifierScope]string)
 			declaredBy[name] = make(map[string]struct{})
 		}
 		if _, seen := declared[name][scope]; !seen {
@@ -859,7 +860,7 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 		corpusTargets[goldenTarget(t, path)] = struct{}{}
 		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		require.NoError(t, err, "parsing %s", path)
-		eachDecl(file, func(name string, scope identifierScope) { record(name, path, scope) })
+		eachDecl(file, func(name string, scope codegen.IdentifierScope) { record(name, path, scope) })
 	}
 
 	everyTarget := make([]string, 0, len(corpusTargets))
@@ -874,11 +875,11 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 			require.NotEmpty(t, at,
 				"no golden declares %q, so its columns rest on nothing; either the corpus lost the fixture that emitted it or the name is no longer emitter-fixed and belongs out of reservedIdentifiers",
 				row.name)
-			pkgPath, atPackage := at[scopePackage]
-			if row.scope == scopePackage {
+			pkgPath, atPackage := at[codegen.ScopePackage]
+			if row.scope == codegen.ScopePackage {
 				require.True(t, atPackage,
 					"the reserved set records %q at scopePackage, but no golden declares it package-level — %s declares it as a method; seeding source 0 with it reserves the package block against a name that does not hold it",
-					row.name, at[scopeMethod])
+					row.name, at[codegen.ScopeMethod])
 			} else {
 				require.False(t, atPackage,
 					"%s declares %q package-level, but the reserved set records it %s, which lets sources 1-6 take a name the package block already holds",
@@ -994,7 +995,7 @@ func TestFixedDeclarationSweepEqualsTheReservedSet(t *testing.T) {
 			declaredBy[base] = map[string]map[string]bool{}
 		}
 		emittedBy[base][fixture] = true
-		eachDecl(file, func(name string, _ identifierScope) {
+		eachDecl(file, func(name string, _ codegen.IdentifierScope) {
 			if !ast.IsExported(name) {
 				return
 			}
@@ -1052,12 +1053,12 @@ func TestFixedDeclarationSweepEqualsTheReservedSet(t *testing.T) {
 	}
 
 	for name, path := range found {
-		_, reserved := reservedIdentifiers[name]
+		_, reserved := codegen.ReservedIdentifiers[name]
 		require.True(t, reserved,
 			"%s declares exported %q, which reservedIdentifiers does not hold; a schema element deriving that name would redeclare it and the emitted package would not compile",
 			path, name)
 	}
-	for _, name := range slices.Sorted(maps.Keys(reservedIdentifiers)) {
+	for _, name := range slices.Sorted(maps.Keys(codegen.ReservedIdentifiers)) {
 		_, swept := found[name]
 		require.True(t, swept,
 			"no golden this sweep read declares reserved %q, so the file declaring it is classified out of fixedDeclarationFiles and owes nothing here",
