@@ -15,7 +15,7 @@ const getLinkQueryText = `MATCH (x:Person)-[r:LIKES|WROTE]-(y:Person) RETURN r`
 // GetLink executes the GetLink query.
 //
 //	MATCH (x:Person)-[r:LIKES|WROTE]-(y:Person) RETURN r
-func (q *Queries) GetLink(ctx context.Context) (GetLinkR, error) {
+func (q *queries) GetLink(ctx context.Context) (GetLinkR, error) {
 	records, err := q.db.run(ctx, getLinkQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

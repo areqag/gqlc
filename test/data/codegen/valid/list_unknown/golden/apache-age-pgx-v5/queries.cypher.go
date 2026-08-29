@@ -12,7 +12,7 @@ const oneUnknownListQueryText = `MATCH (p:Person) RETURN [foo(p.id)] AS xs`
 // OneUnknownList executes the OneUnknownList query.
 //
 //	MATCH (p:Person) RETURN [foo(p.id)] AS xs
-func (q *Queries) OneUnknownList(ctx context.Context) ([]any, error) {
+func (q *queries) OneUnknownList(ctx context.Context) ([]any, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneUnknownListQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

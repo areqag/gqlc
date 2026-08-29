@@ -34,3 +34,4 @@ type Querier interface {
 }
 
 var _ Querier = (*Queries)(nil)
+var _ Querier = (*Tx)(nil)

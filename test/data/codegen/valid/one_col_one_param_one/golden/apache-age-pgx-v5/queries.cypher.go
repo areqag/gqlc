@@ -12,7 +12,7 @@ const personNameQueryText = `MATCH (p:Person) WHERE p.id = $id RETURN p.name`
 // PersonName executes the PersonName query.
 //
 //	MATCH (p:Person) WHERE p.id = $id RETURN p.name
-func (q *Queries) PersonName(ctx context.Context, arg int64) (string, error) {
+func (q *queries) PersonName(ctx context.Context, arg int64) (string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", personNameQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return "", err

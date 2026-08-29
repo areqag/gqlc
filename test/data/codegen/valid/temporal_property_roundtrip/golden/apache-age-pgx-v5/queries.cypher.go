@@ -19,7 +19,7 @@ type AddReadingParams struct {
 // AddReading executes the AddReading query.
 //
 //	CREATE (r:Reading {id: $id, onDate: $onDate, atLocal: $atLocal, elapsed: $elapsed})
-func (q *Queries) AddReading(ctx context.Context, arg AddReadingParams) error {
+func (q *queries) AddReading(ctx context.Context, arg AddReadingParams) error {
 	stmt, err := q.cypherStmt("$gqlc$", addReadingQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err
@@ -51,7 +51,7 @@ const readingsFromQueryText = `MATCH (r:Reading) WHERE r.onDate >= $from RETURN 
 // ReadingsFrom executes the ReadingsFrom query.
 //
 //	MATCH (r:Reading) WHERE r.onDate >= $from RETURN r.id AS id ORDER BY r.onDate
-func (q *Queries) ReadingsFrom(ctx context.Context, arg Date) ([]int64, error) {
+func (q *queries) ReadingsFrom(ctx context.Context, arg Date) ([]int64, error) {
 	stmt, err := q.cypherStmt("$gqlc$", readingsFromQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ const readingsSeenFromQueryText = `MATCH (r:Reading) WHERE r.seenOn >= $seenFrom
 // ReadingsSeenFrom executes the ReadingsSeenFrom query.
 //
 //	MATCH (r:Reading) WHERE r.seenOn >= $seenFrom RETURN r.id AS id ORDER BY r.seenOn
-func (q *Queries) ReadingsSeenFrom(ctx context.Context, arg *Date) ([]int64, error) {
+func (q *queries) ReadingsSeenFrom(ctx context.Context, arg *Date) ([]int64, error) {
 	stmt, err := q.cypherStmt("$gqlc$", readingsSeenFromQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -139,7 +139,7 @@ const readingDateQueryText = `MATCH (r:Reading) WHERE r.id = $id RETURN r.onDate
 // ReadingDate executes the ReadingDate query.
 //
 //	MATCH (r:Reading) WHERE r.id = $id RETURN r.onDate AS onDate
-func (q *Queries) ReadingDate(ctx context.Context, arg int64) (Date, error) {
+func (q *queries) ReadingDate(ctx context.Context, arg int64) (Date, error) {
 	stmt, err := q.cypherStmt("$gqlc$", readingDateQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Date{}, err
@@ -184,7 +184,7 @@ const readingLocalTimeQueryText = `MATCH (r:Reading) WHERE r.id = $id RETURN r.a
 // ReadingLocalTime executes the ReadingLocalTime query.
 //
 //	MATCH (r:Reading) WHERE r.id = $id RETURN r.atLocal AS atLocal
-func (q *Queries) ReadingLocalTime(ctx context.Context, arg int64) (LocalTime, error) {
+func (q *queries) ReadingLocalTime(ctx context.Context, arg int64) (LocalTime, error) {
 	stmt, err := q.cypherStmt("$gqlc$", readingLocalTimeQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return LocalTime{}, err
@@ -229,7 +229,7 @@ const readingElapsedQueryText = `MATCH (r:Reading) WHERE r.id = $id RETURN r.ela
 // ReadingElapsed executes the ReadingElapsed query.
 //
 //	MATCH (r:Reading) WHERE r.id = $id RETURN r.elapsed AS elapsed
-func (q *Queries) ReadingElapsed(ctx context.Context, arg int64) (Duration, error) {
+func (q *queries) ReadingElapsed(ctx context.Context, arg int64) (Duration, error) {
 	stmt, err := q.cypherStmt("$gqlc$", readingElapsedQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Duration{}, err
@@ -274,7 +274,7 @@ const oneReadingQueryText = `MATCH (r:Reading) WHERE r.id = $id RETURN r`
 // OneReading executes the OneReading query.
 //
 //	MATCH (r:Reading) WHERE r.id = $id RETURN r
-func (q *Queries) OneReading(ctx context.Context, arg int64) (Reading, error) {
+func (q *queries) OneReading(ctx context.Context, arg int64) (Reading, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneReadingQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Reading{}, err

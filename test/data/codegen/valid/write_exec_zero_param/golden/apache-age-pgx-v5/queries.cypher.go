@@ -12,7 +12,7 @@ const truncatePeopleQueryText = `MATCH (p:Person) DELETE p`
 // TruncatePeople executes the TruncatePeople query.
 //
 //	MATCH (p:Person) DELETE p
-func (q *Queries) TruncatePeople(ctx context.Context) error {
+func (q *queries) TruncatePeople(ctx context.Context) error {
 	stmt, err := q.cypherStmt("$gqlc$", truncatePeopleQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err

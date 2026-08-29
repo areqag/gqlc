@@ -12,7 +12,7 @@ const allPersonNamesQueryText = `MATCH (p:Person) RETURN p.name`
 // AllPersonNames executes the AllPersonNames query.
 //
 //	MATCH (p:Person) RETURN p.name
-func (q *Queries) AllPersonNames(ctx context.Context) ([]string, error) {
+func (q *queries) AllPersonNames(ctx context.Context) ([]string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", allPersonNamesQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

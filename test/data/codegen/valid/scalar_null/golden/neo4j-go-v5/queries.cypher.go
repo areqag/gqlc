@@ -14,7 +14,7 @@ const oneNullQueryText = `RETURN null AS n`
 // OneNull executes the OneNull query.
 //
 //	RETURN null AS n
-func (q *Queries) OneNull(ctx context.Context) (any, error) {
+func (q *queries) OneNull(ctx context.Context) (any, error) {
 	records, err := q.db.run(ctx, oneNullQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

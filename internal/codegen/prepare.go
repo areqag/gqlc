@@ -52,22 +52,28 @@ const (
 // batch or against one backend but not another is exactly the "renaming
 // scheme" D2 Resolved refused.
 //
-// The Tx block adds a second false refusal, on a different axis from that
-// one. Commit and Rollback are declared on *Tx, so a query named Commit
-// would emit `func (q *Queries) Commit` and redeclare nothing; Phase A
-// refuses it anyway, because it reads membership and not the receiver.
-// Those two are reserved for call-site ambiguity with *Tx, NOT for
-// redeclaration: tx.Commit() and tx.Queries().Commit(ctx, ...) sit one
-// selector apart, one ending the transaction and the other running a user
-// query. The ground is written here because a reader who checks will find
-// that they compile; ruled by Արթուր on gqlc-3d0l, recorded in
-// docs/specs/codegen-tx-object.md §9.1. Begin is not of this kind — it is
-// declared on *Queries, so its reservation stands on a real collision.
+// Every scopeMethod row stands on promotion, not on redeclaration
+// (docs/specs/codegen-tx-embedded-querier.md §5, superseding
+// docs/specs/codegen-tx-object.md §9.1, which read them as collisions).
+// Query methods are emitted on the unexported core `*queries`; the fixed
+// methods are on *Queries or on *Tx, both of which embed the core. So no
+// query name redeclares anything — measured: a package declaring both
+// `func (q *queries) Commit` and `func (tx *Tx) Commit` builds and vets
+// clean. What Phase A prevents is not a collision but a SUCCESS.
 //
-// Queries occupies both scopes: the handle type at package level, and the
-// accessor on *Tx. The row records scopePackage, which is the true and
-// the strict answer — source 0 seeds on it, and the type really is in the
-// package block.
+// The outcome is the same shape at either receiver, and it is silent both
+// ways. A query taking a name fixed on *Queries — WithTx, Begin,
+// EnsureGraph, DropGraph — is shadowed at depth 0 on the root handle and
+// promotes into *Tx unshadowed, so tx.Begin(ctx) compiles again and runs
+// a user query inside the open transaction. A query taking a name fixed
+// on *Tx — Commit, Rollback — is the mirror: reachable on a *Queries,
+// shadowed on a *Tx. Either way one of the two is silently unreachable,
+// with no diagnostic from the compiler or from vet, which is why the
+// refusal reads membership and not the receiver.
+//
+// Queries occupies the package block alone: the handle type, and since
+// gqlc-f4hf no accessor on *Tx. The row records scopePackage, which is
+// where source 0 seeds.
 var reservedIdentifiers = map[string]identifierScope{
 	"Queries":            scopePackage,
 	"New":                scopePackage,

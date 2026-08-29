@@ -14,7 +14,7 @@ const personHeightQueryText = `MATCH (p:Person) RETURN p.height AS h`
 // PersonHeight executes the PersonHeight query.
 //
 //	MATCH (p:Person) RETURN p.height AS h
-func (q *Queries) PersonHeight(ctx context.Context) (float32, error) {
+func (q *queries) PersonHeight(ctx context.Context) (float32, error) {
 	records, err := q.db.run(ctx, personHeightQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return 0, err

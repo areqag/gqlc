@@ -17,7 +17,7 @@ type CreatePersonNameParams struct {
 // CreatePersonName executes the CreatePersonName query.
 //
 //	CREATE (p:Person {id: $id, name: $name}) RETURN p.name AS name
-func (q *Queries) CreatePersonName(ctx context.Context, arg CreatePersonNameParams) (string, error) {
+func (q *queries) CreatePersonName(ctx context.Context, arg CreatePersonNameParams) (string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", createPersonNameQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return "", err

@@ -15,7 +15,7 @@ const todayDateQueryText = `RETURN date() AS d`
 // TodayDate executes the TodayDate query.
 //
 //	RETURN date() AS d
-func (q *Queries) TodayDate(ctx context.Context) (Date, error) {
+func (q *queries) TodayDate(ctx context.Context) (Date, error) {
 	records, err := q.db.run(ctx, todayDateQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return Date{}, err

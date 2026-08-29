@@ -14,7 +14,7 @@ const oneNameListQueryText = `RETURN ['a', 'b', 'c'] AS xs`
 // OneNameList executes the OneNameList query.
 //
 //	RETURN ['a', 'b', 'c'] AS xs
-func (q *Queries) OneNameList(ctx context.Context) ([]string, error) {
+func (q *queries) OneNameList(ctx context.Context) ([]string, error) {
 	records, err := q.db.run(ctx, oneNameListQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

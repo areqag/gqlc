@@ -14,7 +14,7 @@ const oneMapQueryText = `RETURN {a: 1} AS m`
 // OneMap executes the OneMap query.
 //
 //	RETURN {a: 1} AS m
-func (q *Queries) OneMap(ctx context.Context) (map[string]any, error) {
+func (q *queries) OneMap(ctx context.Context) (map[string]any, error) {
 	records, err := q.db.run(ctx, oneMapQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

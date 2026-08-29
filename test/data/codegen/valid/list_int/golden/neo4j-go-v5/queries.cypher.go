@@ -14,7 +14,7 @@ const oneListIntQueryText = `RETURN [1, 2, 3] AS xs`
 // OneListInt executes the OneListInt query.
 //
 //	RETURN [1, 2, 3] AS xs
-func (q *Queries) OneListInt(ctx context.Context) ([]int64, error) {
+func (q *queries) OneListInt(ctx context.Context) ([]int64, error) {
 	records, err := q.db.run(ctx, oneListIntQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

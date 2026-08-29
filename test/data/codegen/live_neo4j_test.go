@@ -219,6 +219,43 @@ func (s neo4jV5Scenario) timestampRoundtrip() timestampRoundtripQuerier { return
 
 func (s neo4jV5Scenario) tx() txQuerier { return s.arm.mixed }
 
+// refuseBeginOnBoundHandle drives Begin on a handle WithTx has bound to
+// a managed transaction. The driver only hands a ManagedTransaction out
+// inside ExecuteWrite's closure, so the call has to happen there and the
+// closure carries Begin's error back out — verbatim, nil included.
+//
+// Without this row neo4j's runtime refusal would be live-unwitnessed:
+// deleting the Tx.Queries accessor removed the only other way to reach
+// it, and tx.Begin is now a compile error rather than a refusal.
+func (s neo4jV5Scenario) refuseBeginOnBoundHandle(ctx context.Context, t *testing.T) error {
+	t.Helper()
+	session := s.arm.driver.NewSession(ctx, neo4jv5.SessionConfig{AccessMode: neo4jv5.AccessModeWrite})
+	defer func() {
+		if err := session.Close(ctx); err != nil {
+			t.Logf("close the session the refusal ran in: %v", err)
+		}
+	}()
+
+	// The refusal is the closure's RESULT, not its error: returned as an
+	// error it would be indistinguishable from a driver failure, and
+	// ExecuteWrite would retry it.
+	refusal, err := neo4jv5.ExecuteWrite(ctx, session, func(mt neo4jv5.ManagedTransaction) (error, error) {
+		nested, beginErr := s.arm.mixed.q.WithTx(mt).Begin(ctx)
+		if beginErr != nil {
+			return beginErr, nil
+		}
+		// Begin was served where it should have been refused. The row is
+		// about to fail on the nil; give the transaction back first so
+		// that the failing run does not also strand a connection.
+		if rbErr := nested.Rollback(ctx); rbErr != nil {
+			t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
+		}
+		return nil, nil
+	})
+	require.NoError(t, err, "open the managed transaction the refusal is asked in")
+	return refusal
+}
+
 // timestampRoundtripV5 binds the TIMESTAMP fixture. The driver carries a
 // datetime natively, so the whole of this arm is the identity — which is
 // what makes the comparison against the AGE arm worth running.
@@ -482,9 +519,9 @@ func (a mixedReadWriteBatchV5) begin(ctx context.Context) (liveTx, error) {
 	return mixedTxV5{tx: tx}, nil
 }
 
-// mixedTxV5 is the v5 arm's generated *Tx. Every read and write on it
-// goes through Tx.Queries, so the handle under test is the one the
-// transaction hands out rather than the one the arm holds.
+// mixedTxV5 is the v5 arm's generated *Tx. Every read and write on it is
+// a query method promoted from the embedded core, so the handle under
+// test is the transaction itself.
 type mixedTxV5 struct{ tx *mixedv5.Tx }
 
 func (a mixedTxV5) commit(ctx context.Context) error { return a.tx.Commit(ctx) }
@@ -492,31 +529,11 @@ func (a mixedTxV5) commit(ctx context.Context) error { return a.tx.Commit(ctx) }
 func (a mixedTxV5) rollback(ctx context.Context) error { return a.tx.Rollback(ctx) }
 
 func (a mixedTxV5) removePerson(ctx context.Context, id int64) error {
-	return a.tx.Queries().RemovePerson(ctx, id)
+	return a.tx.RemovePerson(ctx, id)
 }
 
 func (a mixedTxV5) getPersonName(ctx context.Context, id int64) (string, error) {
-	return a.tx.Queries().GetPersonName(ctx, id)
-}
-
-// beginNested returns Begin's own error verbatim, nil included. A nil is
-// the refusal not firing, which is the failure the scenario is looking
-// for, so it must not be dressed up as an error here. The transaction
-// Begin handed back on that path is given up before returning, so a run
-// that fails the row does not also leak a connection per attempt.
-func (a mixedTxV5) beginNested(ctx context.Context, t *testing.T) error {
-	t.Helper()
-	nested, err := a.tx.Queries().Begin(ctx)
-	if err != nil {
-		return err
-	}
-	// Begin was served where it should have been refused. The row is
-	// about to fail on the nil below; give the transaction back first so
-	// that the failing run does not also strand a connection.
-	if rbErr := nested.Rollback(ctx); rbErr != nil {
-		t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
-	}
-	return nil
+	return a.tx.GetPersonName(ctx, id)
 }
 
 // nestedListV5 binds the list_list_int fixture. The generated method already
@@ -669,6 +686,31 @@ func (s neo4jV6Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { retu
 func (s neo4jV6Scenario) timestampRoundtrip() timestampRoundtripQuerier { return s.arm.timestamps }
 
 func (s neo4jV6Scenario) tx() txQuerier { return s.arm.mixed }
+
+// refuseBeginOnBoundHandle is the v5 method against the v6 module; see
+// that one for why the refusal travels as the closure's result.
+func (s neo4jV6Scenario) refuseBeginOnBoundHandle(ctx context.Context, t *testing.T) error {
+	t.Helper()
+	session := s.arm.driver.NewSession(ctx, neo4jv6.SessionConfig{AccessMode: neo4jv6.AccessModeWrite})
+	defer func() {
+		if err := session.Close(ctx); err != nil {
+			t.Logf("close the session the refusal ran in: %v", err)
+		}
+	}()
+
+	refusal, err := neo4jv6.ExecuteWrite(ctx, session, func(mt neo4jv6.ManagedTransaction) (error, error) {
+		nested, beginErr := s.arm.mixed.q.WithTx(mt).Begin(ctx)
+		if beginErr != nil {
+			return beginErr, nil
+		}
+		if rbErr := nested.Rollback(ctx); rbErr != nil {
+			t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
+		}
+		return nil, nil
+	})
+	require.NoError(t, err, "open the managed transaction the refusal is asked in")
+	return refusal
+}
 
 // timestampRoundtripV6 binds the TIMESTAMP fixture. The driver carries a
 // datetime natively, so the whole of this arm is the identity — which is
@@ -937,26 +979,11 @@ func (a mixedTxV6) commit(ctx context.Context) error { return a.tx.Commit(ctx) }
 func (a mixedTxV6) rollback(ctx context.Context) error { return a.tx.Rollback(ctx) }
 
 func (a mixedTxV6) removePerson(ctx context.Context, id int64) error {
-	return a.tx.Queries().RemovePerson(ctx, id)
+	return a.tx.RemovePerson(ctx, id)
 }
 
 func (a mixedTxV6) getPersonName(ctx context.Context, id int64) (string, error) {
-	return a.tx.Queries().GetPersonName(ctx, id)
-}
-
-func (a mixedTxV6) beginNested(ctx context.Context, t *testing.T) error {
-	t.Helper()
-	nested, err := a.tx.Queries().Begin(ctx)
-	if err != nil {
-		return err
-	}
-	// Begin was served where it should have been refused. The row is
-	// about to fail on the nil below; give the transaction back first so
-	// that the failing run does not also strand a connection.
-	if rbErr := nested.Rollback(ctx); rbErr != nil {
-		t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
-	}
-	return nil
+	return a.tx.GetPersonName(ctx, id)
 }
 
 type nestedListV6 struct{ q *listlistv6.Queries }

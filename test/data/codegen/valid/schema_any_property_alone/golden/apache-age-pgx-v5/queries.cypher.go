@@ -12,7 +12,7 @@ const blobsQueryText = `MATCH (b:Blob) RETURN b`
 // Blobs executes the Blobs query.
 //
 //	MATCH (b:Blob) RETURN b
-func (q *Queries) Blobs(ctx context.Context) ([]Blob, error) {
+func (q *queries) Blobs(ctx context.Context) ([]Blob, error) {
 	stmt, err := q.cypherStmt("$gqlc$", blobsQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

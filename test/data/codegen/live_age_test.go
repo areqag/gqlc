@@ -336,9 +336,8 @@ func holdsNestedSavepoint(ctx context.Context, t *testing.T, tx pgx.Tx) bool {
 }
 
 // refuseNestedBegin binds a generated handle to a driver transaction the
-// way New's contract allows — a pgx.Tx handed straight to it — which is the
-// same q.db a Tx.Queries() handle carries, and calls the generated Begin on
-// it.
+// way New's contract allows — a pgx.Tx handed straight to it — and calls
+// the generated Begin on it.
 func (s ageScenario) refuseNestedBegin(ctx context.Context, t *testing.T) (bool, error) {
 	t.Helper()
 	tx, err := s.pool.Begin(ctx)
@@ -355,6 +354,35 @@ func (s ageScenario) refuseNestedBegin(ctx context.Context, t *testing.T) (bool,
 		}
 	}
 	return holdsNestedSavepoint(ctx, t, tx), err
+}
+
+// refuseBeginOnBoundHandle is where the AGE arm earns its row. pgx.Tx
+// carries a Begin of its own, for savepoints, so the capability
+// assertion alone would be satisfied and hand one back; only the pgx.Tx
+// check standing ahead of it produces the refusal. Begin's error is
+// returned verbatim, nil included.
+//
+// The binding here is WithTx, which is the path New's row above does not
+// cover: that one hands the pgx.Tx to New, this one derives the bound
+// handle from a root handle the way a caller with an existing
+// transaction would.
+func (s ageScenario) refuseBeginOnBoundHandle(ctx context.Context, t *testing.T) error {
+	t.Helper()
+	tx, err := s.pool.Begin(ctx)
+	require.NoError(t, err, "open a driver transaction on the pool")
+	rollbackAtCleanup(ctx, t, tx)
+
+	nested, err := s.mixed.q.WithTx(tx).Begin(ctx)
+	if err != nil {
+		return err
+	}
+	// Begin was served where it should have been refused. The row is
+	// about to fail on the nil below; give the transaction back first so
+	// that the failing run does not also strand a connection.
+	if rbErr := nested.Rollback(ctx); rbErr != nil {
+		t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
+	}
+	return nil
 }
 
 func (s ageScenario) serveNestedBegin(ctx context.Context, t *testing.T) bool {
@@ -584,30 +612,11 @@ func (a mixedTxAGE) commit(ctx context.Context) error { return a.tx.Commit(ctx) 
 func (a mixedTxAGE) rollback(ctx context.Context) error { return a.tx.Rollback(ctx) }
 
 func (a mixedTxAGE) removePerson(ctx context.Context, id int64) error {
-	return a.tx.Queries().RemovePerson(ctx, id)
+	return a.tx.RemovePerson(ctx, id)
 }
 
 func (a mixedTxAGE) getPersonName(ctx context.Context, id int64) (string, error) {
-	return a.tx.Queries().GetPersonName(ctx, id)
-}
-
-// beginNested is where the AGE arm earns its row. pgx.Tx carries a Begin
-// of its own, for savepoints, so the capability assertion alone would be
-// satisfied and hand one back; only the pgx.Tx check standing ahead of it
-// produces the refusal. Begin's error is returned verbatim, nil included.
-func (a mixedTxAGE) beginNested(ctx context.Context, t *testing.T) error {
-	t.Helper()
-	nested, err := a.tx.Queries().Begin(ctx)
-	if err != nil {
-		return err
-	}
-	// Begin was served where it should have been refused. The row is
-	// about to fail on the nil below; give the transaction back first so
-	// that the failing run does not also strand a connection.
-	if rbErr := nested.Rollback(ctx); rbErr != nil {
-		t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
-	}
-	return nil
+	return a.tx.GetPersonName(ctx, id)
 }
 
 // nestedListAGE binds the list_list_int fixture. AGE reaches [][]int64 by a

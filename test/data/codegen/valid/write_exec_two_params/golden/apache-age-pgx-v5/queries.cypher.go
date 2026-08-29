@@ -17,7 +17,7 @@ type RemoveRelationParams struct {
 // RemoveRelation executes the RemoveRelation query.
 //
 //	MATCH (a:Person)-[r:KNOWS]->(b:Person) WHERE a.id = $srcId AND b.id = $tgtId DELETE r
-func (q *Queries) RemoveRelation(ctx context.Context, arg RemoveRelationParams) error {
+func (q *queries) RemoveRelation(ctx context.Context, arg RemoveRelationParams) error {
 	stmt, err := q.cypherStmt("$gqlc$", removeRelationQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err

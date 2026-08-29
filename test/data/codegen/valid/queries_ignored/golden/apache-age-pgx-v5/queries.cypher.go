@@ -12,7 +12,7 @@ const peopleOverAgeQueryText = `MATCH (p:Person) WHERE p.age > $minAge RETURN p.
 // PeopleOverAge executes the PeopleOverAge query.
 //
 //	MATCH (p:Person) WHERE p.age > $minAge RETURN p.name AS name
-func (q *Queries) PeopleOverAge(ctx context.Context, arg *int) ([]string, error) {
+func (q *queries) PeopleOverAge(ctx context.Context, arg *int) ([]string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", peopleOverAgeQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

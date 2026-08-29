@@ -15,7 +15,7 @@ const nowQueryText = `RETURN datetime() AS now`
 // Now executes the Now query.
 //
 //	RETURN datetime() AS now
-func (q *Queries) Now(ctx context.Context) (time.Time, error) {
+func (q *queries) Now(ctx context.Context) (time.Time, error) {
 	records, err := q.db.run(ctx, nowQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return time.Time{}, err

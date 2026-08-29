@@ -12,7 +12,7 @@ const maybePersonQueryText = `OPTIONAL MATCH (p:Person) RETURN p`
 // MaybePerson executes the MaybePerson query.
 //
 //	OPTIONAL MATCH (p:Person) RETURN p
-func (q *Queries) MaybePerson(ctx context.Context) (*Person, error) {
+func (q *queries) MaybePerson(ctx context.Context) (*Person, error) {
 	stmt, err := q.cypherStmt("$gqlc$", maybePersonQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

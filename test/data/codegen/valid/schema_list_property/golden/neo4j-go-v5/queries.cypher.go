@@ -14,7 +14,7 @@ const getEventTagsQueryText = `MATCH (e:Event) RETURN e.tags AS tags`
 // GetEventTags executes the GetEventTags query.
 //
 //	MATCH (e:Event) RETURN e.tags AS tags
-func (q *Queries) GetEventTags(ctx context.Context) (*[]string, error) {
+func (q *queries) GetEventTags(ctx context.Context) (*[]string, error) {
 	records, err := q.db.run(ctx, getEventTagsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

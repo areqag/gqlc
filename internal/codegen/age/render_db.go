@@ -50,9 +50,16 @@ type DBTX interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-type Queries struct {
+// queries is the core every generated query method hangs off. Queries
+// and Tx both embed it, which is what lets one emission of each method
+// serve both handles; it is unexported so a Tx cannot hand it out.
+type queries struct {
 	db    DBTX
 	graph string
+}
+
+type Queries struct {
+	queries
 }
 
 // New returns a Queries bound to db and to one AGE graph. The binding is
@@ -62,11 +69,11 @@ type Queries struct {
 // The name is not judged here. AGE's verdict on it arrives from the
 // server, at EnsureGraph.
 func New(db DBTX, graph string) *Queries {
-	return &Queries{db: db, graph: graph}
+	return &Queries{queries: queries{db: db, graph: graph}}
 }
 
 func (q *Queries) WithTx(tx pgx.Tx) *Queries {
-	return &Queries{db: tx, graph: q.graph}
+	return &Queries{queries: queries{db: tx, graph: q.graph}}
 }
 
 // maxGraphNameBytes is the capacity of PostgreSQL's name type,
@@ -86,7 +93,7 @@ const maxGraphNameBytes = 63
 // Every statement carrying the name is built from this return value, so
 // the length is established once and no call site holds a name that has
 // not been through it.
-func (q *Queries) boundGraph() (string, error) {
+func (q *queries) boundGraph() (string, error) {
 	if len(q.graph) > maxGraphNameBytes {
 		return "", fmt.Errorf("gqlc: graph name %q is %d bytes, over the %d that PostgreSQL's name type holds: the rest would be dropped silently and this handle could address another graph",
 			q.graph, len(q.graph), maxGraphNameBytes)
@@ -109,7 +116,7 @@ func (q *Queries) boundGraph() (string, error) {
 // one literal at the SQL layer; AGE refuses both characters in a graph
 // name at create_graph, so the two barriers stand independently. Query
 // arguments never travel this way: they bind to $1.
-func (q *Queries) cypherStmt(tag, text, record string) (string, error) {
+func (q *queries) cypherStmt(tag, text, record string) (string, error) {
 	graph, err := q.boundGraph()
 	if err != nil {
 		return "", err
@@ -131,15 +138,20 @@ var ErrTxDone = errors.New("gqlc: transaction has already been committed or roll
 // with exactly one Commit or Rollback — a Tx left unfinished holds a
 // pooled connection until the pool's own policies reclaim it, which this
 // package cannot do for you.
+//
+// The query methods are promoted from the embedded core and run inside
+// this transaction, against the same graph, reading its own uncommitted
+// writes.
 type Tx struct {
-	tx    pgx.Tx
-	graph string
-	done  bool
+	queries
+	tx   pgx.Tx
+	done bool
 }
 
 // Begin opens a write transaction. It is refused on a handle already
-// bound to a transaction, whether by WithTx, by another Tx's Queries, or
-// by a pgx.Tx handed straight to New: the refusal is on the bound
+// bound to a transaction, whether by WithTx — with the querier embedded
+// on Tx there is no other transaction-bound handle to hold — or by a
+// pgx.Tx handed straight to New: the refusal is on the bound
 // handle's dynamic type, not on how the handle was made. Nesting is
 // refused rather than served by a savepoint, because neo4j cannot nest
 // and a surface that nests on one backend is the portability failure the
@@ -164,14 +176,7 @@ func (q *Queries) Begin(ctx context.Context) (*Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Tx{tx: tx, graph: q.graph}, nil
-}
-
-// Queries returns a handle whose every method runs inside this
-// transaction, against the same graph. It reads this transaction's own
-// uncommitted writes.
-func (tx *Tx) Queries() *Queries {
-	return &Queries{db: tx.tx, graph: tx.graph}
+	return &Tx{queries: queries{db: tx, graph: q.graph}, tx: tx}, nil
 }
 
 // Commit commits the transaction. It returns ErrTxDone, without reaching

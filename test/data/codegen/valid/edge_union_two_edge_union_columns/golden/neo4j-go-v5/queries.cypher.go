@@ -20,7 +20,7 @@ type PairActionsRow struct {
 // PairActions executes the PairActions query.
 //
 //	MATCH (:Person)-[r1:AUTHORED|LIKES]->(:Post), (:Person)-[r2:AUTHORED|LIKES]->(:Post) RETURN r1, r2
-func (q *Queries) PairActions(ctx context.Context) (PairActionsRow, error) {
+func (q *queries) PairActions(ctx context.Context) (PairActionsRow, error) {
 	records, err := q.db.run(ctx, pairActionsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return PairActionsRow{}, err

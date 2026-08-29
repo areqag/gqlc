@@ -18,7 +18,7 @@ type PersonProfileRow struct {
 // PersonProfile executes the PersonProfile query.
 //
 //	MATCH (p:Person) WHERE p.id = $id RETURN p.name, p.nickname, p.age
-func (q *Queries) PersonProfile(ctx context.Context, arg int64) (PersonProfileRow, error) {
+func (q *queries) PersonProfile(ctx context.Context, arg int64) (PersonProfileRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", personProfileQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype, v2 ag_catalog.agtype")
 	if err != nil {
 		return PersonProfileRow{}, err

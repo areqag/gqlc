@@ -20,7 +20,7 @@ type OnePersonWithAgeRow struct {
 // OnePersonWithAge executes the OnePersonWithAge query.
 //
 //	MATCH (p:Person) RETURN p, p.age AS age
-func (q *Queries) OnePersonWithAge(ctx context.Context) (OnePersonWithAgeRow, error) {
+func (q *queries) OnePersonWithAge(ctx context.Context) (OnePersonWithAgeRow, error) {
 	records, err := q.db.run(ctx, onePersonWithAgeQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return OnePersonWithAgeRow{}, err

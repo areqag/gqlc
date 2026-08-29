@@ -18,7 +18,7 @@ type AddEventParams struct {
 // AddEvent executes the AddEvent query.
 //
 //	CREATE (e:Event {id: $id, occurredAt: $occurredAt})
-func (q *Queries) AddEvent(ctx context.Context, arg AddEventParams) error {
+func (q *queries) AddEvent(ctx context.Context, arg AddEventParams) error {
 	stmt, err := q.cypherStmt("$gqlc$", addEventQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err
@@ -38,7 +38,7 @@ const eventsAfterQueryText = `MATCH (e:Event) WHERE e.occurredAt > $since RETURN
 // EventsAfter executes the EventsAfter query.
 //
 //	MATCH (e:Event) WHERE e.occurredAt > $since RETURN e.id AS id ORDER BY e.occurredAt
-func (q *Queries) EventsAfter(ctx context.Context, arg time.Time) ([]int64, error) {
+func (q *queries) EventsAfter(ctx context.Context, arg time.Time) ([]int64, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventsAfterQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ const eventsSeenAfterQueryText = `MATCH (e:Event) WHERE e.seenAt > $seenAfter RE
 // EventsSeenAfter executes the EventsSeenAfter query.
 //
 //	MATCH (e:Event) WHERE e.seenAt > $seenAfter RETURN e.id AS id ORDER BY e.seenAt
-func (q *Queries) EventsSeenAfter(ctx context.Context, arg *time.Time) ([]int64, error) {
+func (q *queries) EventsSeenAfter(ctx context.Context, arg *time.Time) ([]int64, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventsSeenAfterQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ const eventAtQueryText = `MATCH (e:Event) WHERE e.id = $id RETURN e.occurredAt A
 // EventAt executes the EventAt query.
 //
 //	MATCH (e:Event) WHERE e.id = $id RETURN e.occurredAt AS occurredAt
-func (q *Queries) EventAt(ctx context.Context, arg int64) (time.Time, error) {
+func (q *queries) EventAt(ctx context.Context, arg int64) (time.Time, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventAtQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return time.Time{}, err
@@ -163,7 +163,7 @@ const eventSeenAtQueryText = `MATCH (e:Event) WHERE e.id = $id RETURN e.seenAt A
 // EventSeenAt executes the EventSeenAt query.
 //
 //	MATCH (e:Event) WHERE e.id = $id RETURN e.seenAt AS seenAt
-func (q *Queries) EventSeenAt(ctx context.Context, arg int64) (*time.Time, error) {
+func (q *queries) EventSeenAt(ctx context.Context, arg int64) (*time.Time, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventSeenAtQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -209,7 +209,7 @@ const oneEventQueryText = `MATCH (e:Event) WHERE e.id = $id RETURN e`
 // OneEvent executes the OneEvent query.
 //
 //	MATCH (e:Event) WHERE e.id = $id RETURN e
-func (q *Queries) OneEvent(ctx context.Context, arg int64) (Event, error) {
+func (q *queries) OneEvent(ctx context.Context, arg int64) (Event, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneEventQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Event{}, err

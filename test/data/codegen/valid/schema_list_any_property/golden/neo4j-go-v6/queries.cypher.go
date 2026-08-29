@@ -15,7 +15,7 @@ const binsQueryText = `MATCH (b:Bin) RETURN b`
 // Bins executes the Bins query.
 //
 //	MATCH (b:Bin) RETURN b
-func (q *Queries) Bins(ctx context.Context) ([]Bin, error) {
+func (q *queries) Bins(ctx context.Context) ([]Bin, error) {
 	records, err := q.db.run(ctx, binsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ const binByIdQueryText = `MATCH (b:Bin {id: $id}) RETURN b`
 // BinById executes the BinById query.
 //
 //	MATCH (b:Bin {id: $id}) RETURN b
-func (q *Queries) BinById(ctx context.Context, arg int64) (Bin, error) {
+func (q *queries) BinById(ctx context.Context, arg int64) (Bin, error) {
 	records, err := q.db.run(ctx, binByIdQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return Bin{}, err
@@ -79,7 +79,7 @@ type BinColumnsRow struct {
 // BinColumns executes the BinColumns query.
 //
 //	MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose, b.piles AS piles
-func (q *Queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
+func (q *queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
 	records, err := q.db.run(ctx, binColumnsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

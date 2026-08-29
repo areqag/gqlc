@@ -10,16 +10,23 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
-type Queries struct {
+// queries is the core every generated query method hangs off. Queries
+// and Tx both embed it, which is what lets one emission of each method
+// serve both handles; it is unexported so a Tx cannot hand it out.
+type queries struct {
 	db driverOrTx
 }
 
+type Queries struct {
+	queries
+}
+
 func New(driver neo4j.Driver) *Queries {
-	return &Queries{db: driverDB{driver: driver}}
+	return &Queries{queries: queries{db: driverDB{driver: driver}}}
 }
 
 func (q *Queries) WithTx(tx neo4j.ManagedTransaction) *Queries {
-	return &Queries{db: txDB{tx: tx}}
+	return &Queries{queries: queries{db: txDB{tx: tx}}}
 }
 
 // driverOrTx is the unexported run indirection: every generated query
@@ -88,15 +95,20 @@ var ErrTxDone = errors.New("gqlc: transaction has already been committed or roll
 // transient cluster errors within MaxTransactionRetryTime, and an object
 // with a Commit cannot, because retrying would re-run caller code that
 // has already seen results.
+//
+// The query methods are promoted from the embedded core and run inside
+// this transaction, reading its own uncommitted writes.
 type Tx struct {
+	queries
 	session neo4j.Session
 	tx      neo4j.ExplicitTransaction
 	done    bool
 }
 
 // Begin opens a write transaction. It is refused on a handle already
-// bound to a transaction, by WithTx or by another Tx's Queries: neo4j
-// allows one explicit transaction per session and cannot nest.
+// bound to a transaction by WithTx: with the querier embedded on Tx
+// there is no other transaction-bound handle to hold. neo4j allows one
+// explicit transaction per session and cannot nest.
 func (q *Queries) Begin(ctx context.Context) (*Tx, error) {
 	d, ok := q.db.(driverDB)
 	if !ok {
@@ -107,13 +119,7 @@ func (q *Queries) Begin(ctx context.Context) (*Tx, error) {
 	if err != nil {
 		return nil, errors.Join(err, session.Close(ctx))
 	}
-	return &Tx{session: session, tx: tx}, nil
-}
-
-// Queries returns a handle whose every method runs inside this
-// transaction. It reads this transaction's own uncommitted writes.
-func (tx *Tx) Queries() *Queries {
-	return &Queries{db: txDB{tx: tx.tx}}
+	return &Tx{queries: queries{db: txDB{tx: tx}}, session: session, tx: tx}, nil
 }
 
 // Commit commits the transaction and closes the session it owns. It

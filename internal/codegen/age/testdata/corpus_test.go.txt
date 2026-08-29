@@ -798,7 +798,7 @@ func TestCypherStmtComposesOneStatement(t *testing.T) {
 		"escalated tag": {"people", "$gqlc1$", `E'people'`},
 	}
 	for name, tc := range cases {
-		got, err := (&Queries{graph: tc.graph}).cypherStmt(tc.tag, text, record)
+		got, err := (&Queries{queries{graph: tc.graph}}).cypherStmt(tc.tag, text, record)
 		if err != nil {
 			t.Errorf("%s: cypherStmt = error %v", name, err)
 			continue
@@ -814,7 +814,7 @@ func TestCypherStmtComposesOneStatement(t *testing.T) {
 // is nothing for a caller to run against whichever graph the truncation
 // would have landed on.
 func TestCypherStmtRefusesAnOverlongName(t *testing.T) {
-	got, err := (&Queries{graph: strings.Repeat("g", 64)}).cypherStmt("$gqlc$", "RETURN 1", "v0 ag_catalog.agtype")
+	got, err := (&Queries{queries{graph: strings.Repeat("g", 64)}}).cypherStmt("$gqlc$", "RETURN 1", "v0 ag_catalog.agtype")
 	if err == nil {
 		t.Errorf("cypherStmt = %s, want an error", got)
 	}
@@ -1200,7 +1200,7 @@ func TestEmittedMethodBindsAnInstantAsMicroseconds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		db := &recordingDB{}
-		if err := (&Queries{db: db, graph: "corpus"}).WriteEvent(context.Background(), tc.arg); err != nil {
+		if err := (&Queries{queries{db: db, graph: "corpus"}}).WriteEvent(context.Background(), tc.arg); err != nil {
 			t.Errorf("%s: WriteEvent = error %v", tc.name, err)
 			continue
 		}
@@ -1592,7 +1592,7 @@ func TestEmittedMethodBindsTheCarriersAsTheirScalars(t *testing.T) {
 	}
 	for _, tc := range cases {
 		db := &recordingDB{}
-		if err := (&Queries{db: db, graph: "corpus"}).WriteSpan(context.Background(), tc.arg); err != nil {
+		if err := (&Queries{queries{db: db, graph: "corpus"}}).WriteSpan(context.Background(), tc.arg); err != nil {
 			t.Errorf("%s: WriteSpan = error %v", tc.name, err)
 			continue
 		}
@@ -1639,7 +1639,7 @@ func TestEmittedMethodBindsTheCarriersAsTheirScalars(t *testing.T) {
 	}
 	for _, tc := range refusals {
 		db := &recordingDB{}
-		err := (&Queries{db: db, graph: "corpus"}).WriteSpan(context.Background(), tc.arg)
+		err := (&Queries{queries{db: db, graph: "corpus"}}).WriteSpan(context.Background(), tc.arg)
 		if err == nil {
 			t.Errorf("%s: WriteSpan = nil, want an error", tc.name)
 			continue
@@ -1674,7 +1674,7 @@ func TestBoundGraphCountsBytes(t *testing.T) {
 		"three-byte over":      {strings.Repeat("中", 22), false},
 	}
 	for name, tc := range cases {
-		got, err := (&Queries{graph: tc.graph}).boundGraph()
+		got, err := (&Queries{queries{graph: tc.graph}}).boundGraph()
 		if tc.want {
 			if err != nil {
 				t.Errorf("%s: boundGraph() = error %v, want the name back", name, err)

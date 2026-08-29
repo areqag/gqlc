@@ -12,7 +12,7 @@ const markTallQueryText = `MATCH (p:Person) WHERE p.height >= $minHeight SET p.t
 // MarkTall executes the MarkTall query.
 //
 //	MATCH (p:Person) WHERE p.height >= $minHeight SET p.tall = true
-func (q *Queries) MarkTall(ctx context.Context, arg float32) error {
+func (q *queries) MarkTall(ctx context.Context, arg float32) error {
 	stmt, err := q.cypherStmt("$gqlc$", markTallQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err

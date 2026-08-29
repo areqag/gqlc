@@ -24,7 +24,7 @@ type ReadingColumnsRow struct {
 // ReadingColumns executes the ReadingColumns query.
 //
 //	MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.matrix AS matrix, r.marks AS marks, r.grid AS grid
-func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, error) {
+func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, error) {
 	records, err := q.db.run(ctx, readingColumnsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ const readingWholeQueryText = `MATCH (r:Reading) RETURN r`
 // ReadingWhole executes the ReadingWhole query.
 //
 //	MATCH (r:Reading) RETURN r
-func (q *Queries) ReadingWhole(ctx context.Context) (Reading, error) {
+func (q *queries) ReadingWhole(ctx context.Context) (Reading, error) {
 	records, err := q.db.run(ctx, readingWholeQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return Reading{}, err
@@ -190,7 +190,7 @@ const dropTaggedQueryText = `MATCH (r:Reading {tags: $tags}) DELETE r`
 // DropTagged executes the DropTagged query.
 //
 //	MATCH (r:Reading {tags: $tags}) DELETE r
-func (q *Queries) DropTagged(ctx context.Context, arg *[]string) error {
+func (q *queries) DropTagged(ctx context.Context, arg *[]string) error {
 	_, err := q.db.run(ctx, dropTaggedQueryText, map[string]any{"tags": arg}, neo4j.AccessModeWrite)
 	return err
 }

@@ -12,7 +12,7 @@ const oneListIntQueryText = `RETURN [1, 2, 3] AS xs`
 // OneListInt executes the OneListInt query.
 //
 //	RETURN [1, 2, 3] AS xs
-func (q *Queries) OneListInt(ctx context.Context) ([]int64, error) {
+func (q *queries) OneListInt(ctx context.Context) ([]int64, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneListIntQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

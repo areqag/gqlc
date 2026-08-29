@@ -611,17 +611,24 @@ distinct); output target (this directory's old name, retired with the
 
 **Transaction handle (Tx)**:
 The object the generated repository's `Begin` returns: an open, always
-write-mode transaction finished by exactly one `Commit` or `Rollback`,
-with `Queries()` yielding a repository handle bound to it. Emitted per
-generated package with a byte-identical exported surface on every
-backend (`docs/specs/codegen-tx-object.md`); the driver appears only in
-unexported fields, so swapping targets is an import swap. `Commit` after
-finish returns the package's `ErrTxDone` sentinel; `Rollback` after
-finish returns nil, so a deferred `Rollback` is unconditionally safe.
+write-mode transaction finished by exactly one `Commit` or `Rollback`.
+The query methods are called on it directly — `tx.GetPerson(ctx, id)` —
+because they are promoted from an unexported core the `Tx` embeds, which
+the root handle embeds too (`docs/specs/codegen-tx-embedded-querier.md`).
+Emitted per generated package with a byte-identical exported surface on
+every backend; the driver appears only in unexported fields, so swapping
+targets is an import swap. `Commit` after finish returns the package's
+`ErrTxDone` sentinel; `Rollback` after finish returns nil, so a deferred
+`Rollback` is unconditionally safe.
 Distinct from **`WithTx`**, which binds a repository handle to a
 transaction the *caller* opened and owns — `Begin`/`Tx` is gqlc opening
-and owning one. `Begin` on a handle that is already transaction-bound is
-refused on every backend, even where the driver could nest.
+and owning one. Nesting is closed off in two different ways, and the
+difference matters. `Begin` and `WithTx` are not in a `Tx`'s method set
+at all, so `tx.Begin(ctx)` does not compile. On a handle that is
+transaction-bound some *other* way — by `WithTx`, or on AGE by a
+`pgx.Tx` handed straight to `New` — `Begin` is refused at runtime on
+every backend, even where the driver could nest, because that boundness
+is a dynamic-type fact the compiler cannot see.
 _Avoid_: transaction wrapper (says closure, the rejected shape); managed
 transaction (the neo4j driver's term for its retrying closure path,
 which this is not).

@@ -15,7 +15,7 @@ const sampleWholeQueryText = `MATCH (s:Sample) RETURN s`
 // SampleWhole executes the SampleWhole query.
 //
 //	MATCH (s:Sample) RETURN s
-func (q *Queries) SampleWhole(ctx context.Context) (Sample, error) {
+func (q *queries) SampleWhole(ctx context.Context) (Sample, error) {
 	records, err := q.db.run(ctx, sampleWholeQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return Sample{}, err

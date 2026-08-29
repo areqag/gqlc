@@ -15,7 +15,7 @@ const maybePersonQueryText = `OPTIONAL MATCH (p:Person) RETURN p`
 // MaybePerson executes the MaybePerson query.
 //
 //	OPTIONAL MATCH (p:Person) RETURN p
-func (q *Queries) MaybePerson(ctx context.Context) (*Person, error) {
+func (q *queries) MaybePerson(ctx context.Context) (*Person, error) {
 	records, err := q.db.run(ctx, maybePersonQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

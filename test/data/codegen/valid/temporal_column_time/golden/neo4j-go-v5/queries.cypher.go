@@ -15,7 +15,7 @@ const nowZonedQueryText = `RETURN time() AS t`
 // NowZoned executes the NowZoned query.
 //
 //	RETURN time() AS t
-func (q *Queries) NowZoned(ctx context.Context) (Time, error) {
+func (q *queries) NowZoned(ctx context.Context) (Time, error) {
 	records, err := q.db.run(ctx, nowZonedQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return Time{}, err

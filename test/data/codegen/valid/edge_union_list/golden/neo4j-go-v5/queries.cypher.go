@@ -15,7 +15,7 @@ const pathActionsQueryText = `MATCH (:Person)-[r:AUTHORED|LIKES*]->(:Post) RETUR
 // PathActions executes the PathActions query.
 //
 //	MATCH (:Person)-[r:AUTHORED|LIKES*]->(:Post) RETURN r
-func (q *Queries) PathActions(ctx context.Context) ([]PathActionsR, error) {
+func (q *queries) PathActions(ctx context.Context) ([]PathActionsR, error) {
 	records, err := q.db.run(ctx, pathActionsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

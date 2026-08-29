@@ -12,7 +12,7 @@ const nestedListQueryText = `RETURN [[1], [2, 3]] AS xss`
 // NestedList executes the NestedList query.
 //
 //	RETURN [[1], [2, 3]] AS xss
-func (q *Queries) NestedList(ctx context.Context) ([][]int64, error) {
+func (q *queries) NestedList(ctx context.Context) ([][]int64, error) {
 	stmt, err := q.cypherStmt("$gqlc$", nestedListQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

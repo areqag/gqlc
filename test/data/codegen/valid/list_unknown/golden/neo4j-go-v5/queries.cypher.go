@@ -14,7 +14,7 @@ const oneUnknownListQueryText = `MATCH (p:Person) RETURN [foo(p.id)] AS xs`
 // OneUnknownList executes the OneUnknownList query.
 //
 //	MATCH (p:Person) RETURN [foo(p.id)] AS xs
-func (q *Queries) OneUnknownList(ctx context.Context) ([]any, error) {
+func (q *queries) OneUnknownList(ctx context.Context) ([]any, error) {
 	records, err := q.db.run(ctx, oneUnknownListQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

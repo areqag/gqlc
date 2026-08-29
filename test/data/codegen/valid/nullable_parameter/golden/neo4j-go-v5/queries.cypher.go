@@ -14,7 +14,7 @@ const peopleOverAgeQueryText = `MATCH (p:Person) WHERE p.age > $minAge RETURN p.
 // PeopleOverAge executes the PeopleOverAge query.
 //
 //	MATCH (p:Person) WHERE p.age > $minAge RETURN p.name
-func (q *Queries) PeopleOverAge(ctx context.Context, arg *int64) ([]string, error) {
+func (q *queries) PeopleOverAge(ctx context.Context, arg *int64) ([]string, error) {
 	records, err := q.db.run(ctx, peopleOverAgeQueryText, map[string]any{"minAge": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

@@ -12,7 +12,7 @@ const oneMarkerQueryText = `MATCH (m:Marker) RETURN m`
 // OneMarker executes the OneMarker query.
 //
 //	MATCH (m:Marker) RETURN m
-func (q *Queries) OneMarker(ctx context.Context) (Marker, error) {
+func (q *queries) OneMarker(ctx context.Context) (Marker, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneMarkerQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Marker{}, err

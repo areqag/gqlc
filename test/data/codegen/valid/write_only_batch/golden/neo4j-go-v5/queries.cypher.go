@@ -13,7 +13,7 @@ const removePersonQueryText = `MATCH (p:Person) WHERE p.id = $id DELETE p`
 // RemovePerson executes the RemovePerson query.
 //
 //	MATCH (p:Person) WHERE p.id = $id DELETE p
-func (q *Queries) RemovePerson(ctx context.Context, arg int64) error {
+func (q *queries) RemovePerson(ctx context.Context, arg int64) error {
 	_, err := q.db.run(ctx, removePersonQueryText, map[string]any{"id": arg}, neo4j.AccessModeWrite)
 	return err
 }
@@ -28,7 +28,7 @@ type CreatePersonParams struct {
 // CreatePerson executes the CreatePerson query.
 //
 //	CREATE (p:Person {id: $id, name: $name})
-func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) error {
+func (q *queries) CreatePerson(ctx context.Context, arg CreatePersonParams) error {
 	_, err := q.db.run(ctx, createPersonQueryText, map[string]any{"id": arg.Id, "name": arg.Name}, neo4j.AccessModeWrite)
 	return err
 }

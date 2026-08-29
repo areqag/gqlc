@@ -19,7 +19,7 @@ type PersonByIdRow struct {
 // PersonById executes the PersonById query.
 //
 //	MATCH (p:Person) WHERE p.id = $id RETURN p.name, p.age
-func (q *Queries) PersonById(ctx context.Context, arg int64) (PersonByIdRow, error) {
+func (q *queries) PersonById(ctx context.Context, arg int64) (PersonByIdRow, error) {
 	records, err := q.db.run(ctx, personByIdQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return PersonByIdRow{}, err

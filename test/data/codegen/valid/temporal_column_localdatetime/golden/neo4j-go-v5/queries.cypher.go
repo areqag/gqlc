@@ -15,7 +15,7 @@ const nowLocalQueryText = `RETURN localdatetime() AS ldt`
 // NowLocal executes the NowLocal query.
 //
 //	RETURN localdatetime() AS ldt
-func (q *Queries) NowLocal(ctx context.Context) (LocalDateTime, error) {
+func (q *queries) NowLocal(ctx context.Context) (LocalDateTime, error) {
 	records, err := q.db.run(ctx, nowLocalQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return LocalDateTime{}, err

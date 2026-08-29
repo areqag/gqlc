@@ -21,7 +21,7 @@ type OneOfEachScalarRow struct {
 // OneOfEachScalar executes the OneOfEachScalar query.
 //
 //	RETURN true AS b, 1 AS i, 1.5 AS f, 'x' AS s
-func (q *Queries) OneOfEachScalar(ctx context.Context) (OneOfEachScalarRow, error) {
+func (q *queries) OneOfEachScalar(ctx context.Context) (OneOfEachScalarRow, error) {
 	records, err := q.db.run(ctx, oneOfEachScalarQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return OneOfEachScalarRow{}, err

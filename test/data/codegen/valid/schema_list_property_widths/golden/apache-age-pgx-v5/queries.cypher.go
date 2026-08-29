@@ -21,7 +21,7 @@ type ReadingColumnsRow struct {
 // ReadingColumns executes the ReadingColumns query.
 //
 //	MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.matrix AS matrix, r.marks AS marks, r.grid AS grid
-func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, error) {
+func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", readingColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype, v2 ag_catalog.agtype, v3 ag_catalog.agtype, v4 ag_catalog.agtype, v5 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -110,7 +110,7 @@ const readingWholeQueryText = `MATCH (r:Reading) RETURN r`
 // ReadingWhole executes the ReadingWhole query.
 //
 //	MATCH (r:Reading) RETURN r
-func (q *Queries) ReadingWhole(ctx context.Context) (Reading, error) {
+func (q *queries) ReadingWhole(ctx context.Context) (Reading, error) {
 	stmt, err := q.cypherStmt("$gqlc$", readingWholeQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Reading{}, err
@@ -151,7 +151,7 @@ const dropTaggedQueryText = `MATCH (r:Reading {tags: $tags}) DELETE r`
 // DropTagged executes the DropTagged query.
 //
 //	MATCH (r:Reading {tags: $tags}) DELETE r
-func (q *Queries) DropTagged(ctx context.Context, arg *[]string) error {
+func (q *queries) DropTagged(ctx context.Context, arg *[]string) error {
 	stmt, err := q.cypherStmt("$gqlc$", dropTaggedQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err

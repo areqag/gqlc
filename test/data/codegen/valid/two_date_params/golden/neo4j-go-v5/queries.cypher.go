@@ -19,7 +19,7 @@ type EventsInRangeParams struct {
 // EventsInRange executes the EventsInRange query.
 //
 //	MATCH (e:Event) WHERE e.created >= $from AND e.created <= $to RETURN e.name AS name
-func (q *Queries) EventsInRange(ctx context.Context, arg EventsInRangeParams) ([]string, error) {
+func (q *queries) EventsInRange(ctx context.Context, arg EventsInRangeParams) ([]string, error) {
 	records, err := q.db.run(ctx, eventsInRangeQueryText, map[string]any{"from": fromDate(arg.From), "to": fromDate(arg.To)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
