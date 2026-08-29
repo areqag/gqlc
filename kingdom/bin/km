@@ -610,10 +610,23 @@ seat_runner_start() { # <seat> -> 1 if a live session made it unsafe
 # tty burst, no split, no reconfirm. The signature keeps the `<target>` shape
 # callers used with `send_line "=$SESSION:$seat"`, but the target may just be
 # the seat name; the wrapper accepts either.
-send_line() { # <target> <text>
-    local target=$1 text=$2 seat
+# The diagnosis is no longer discarded. herdr signals failure by exit status but
+# names WHICH failure only in a JSON payload on stdout, so a caller reading the
+# status alone can tell "not delivered" from "delivered" and nothing finer —
+# and a dispatch tick that died on this call spent forty minutes saying nothing
+# at all (bd gqlc-87al).
+#
+# The ADDRESS is deliberately not changed here. It is wrong — a seat name is not
+# a target herdr resolves, so this fails for every seat in every state — and the
+# fix for that is gqlc-nq78 / PR #1685, which is under revision because
+# `herdr agent send` types into the prompt box without submitting. This bead
+# fixes only the abort. After it the send still fails; it stops killing the pass.
+send_line() { # <target> <text> -> 0 delivered, 1 not
+    local target=$1 text=$2 seat out
     seat=${target##*:}
-    herdr agent send "$seat" "$text" >/dev/null 2>&1
+    out=$(herdr agent send "$seat" "$text" 2>&1) && return 0
+    echo "km: send to $seat failed: ${out:-herdr gave no diagnosis on either stream}" >&2
+    return 1
 }
 
 # Kept as a query name for callers that want to render the pane to a human.
@@ -1044,11 +1057,16 @@ cmd_sleep() {
     # command has already returned. Confirmation therefore belongs to
     # `km reconcile`, which is what makes an undelivered request recoverable.
     echo asleep-pending >"$(seat_home "$seat")/status"
-    if window_up "$seat"; then
-        send_line "$seat" "/exit"
+    # The guard was `window_up`, which asks whether the seat's TAB exists, while
+    # the action it guards needs an agent the send can reach. Different objects:
+    # the guard passed, the send failed, and `set -e` took the success echo on
+    # the next line with it — exit 1 and a blank screen, with the accurate
+    # message unreachable in the else branch (bd gqlc-7bps). The send's own
+    # status is the only thing that knows.
+    if send_line "$seat" "/exit"; then
         echo "sleep: good night, $(seat_display "$seat") — the session ends when this turn does"
     else
-        echo "sleep: no herdr agent for $seat; end your session normally"
+        echo "sleep: $(seat_display "$seat") is recorded asleep-pending, but the /exit was NOT delivered (diagnosis above) — end your session normally; km reconcile settles the ledger"
     fi
 }
 
@@ -1316,9 +1334,21 @@ cmd_reconcile() {
         if seat_session_live "$s"; then
             rm -f "$suspect"
             if [ "$st" = asleep-pending ]; then
-                send_line "$s" "/exit"
-                echo "reconcile: $s asked to leave and is still here; /exit re-sent"
-                redelivered=$((redelivered + 1))
+                # Reported, never fatal, and never tallied without the send
+                # saying so. This ran bare under `set -euo pipefail`, so a
+                # refused send aborted the whole reconcile pass HERE, at the
+                # first asleep-pending seat, and every seat after it went
+                # unexamined — while the next line announced a re-send that had
+                # not happened and the tally counted it. Since cmd_dispatch
+                # calls this pass before it routes anything, that killed the
+                # tick outright: 19 consecutive ticks routed nothing, silently,
+                # because one citizen ran `km sleep` (bd gqlc-87al).
+                if send_line "$s" "/exit"; then
+                    echo "reconcile: $s asked to leave and is still here; /exit re-sent"
+                    redelivered=$((redelivered + 1))
+                else
+                    echo "reconcile: $s asked to leave and is still here, but the /exit could NOT be delivered (diagnosis above); the seat stays asleep-pending"
+                fi
             fi
             continue
         fi
@@ -1752,7 +1782,19 @@ cmd_dispatch() {
     # Before anything is counted or chosen. Every decision below reads the
     # status files, and a stale one both spends a slot and hides the seat from
     # free_worker_of_class, so the same record costs the town twice.
-    cmd_reconcile | sed 's/^reconcile: /dispatch: reconcile: /'
+    # Hygiene must not cost the town its routing. This ran bare, and km sets
+    # `pipefail`, so ANY failure anywhere in the reconcile pass became the exit
+    # status of the pipeline and aborted cmd_dispatch before a single bead was
+    # considered. That is how one refused `herdr agent send` stopped the whole
+    # factory for forty minutes (bd gqlc-87al).
+    #
+    # The specific refusal underneath is fixed above, but the containment is the
+    # part that generalises: reconcile is a pre-pass that repairs the ledger, and
+    # a repair that cannot be made is a reason to route on a slightly stale
+    # ledger, never a reason to route nothing at all.
+    if ! cmd_reconcile | sed 's/^reconcile: /dispatch: reconcile: /'; then
+        echo "dispatch: the reconcile pass failed (diagnosis above); routing continues on a possibly stale ledger, because a failed repair must not cost the town its routing" >&2
+    fi
 
     # And so does everyone else, once they are idle. Until now this dispatcher's
     # ONLY mail-driven wake was the four lines above, for one seat: every other
@@ -3915,7 +3957,7 @@ render_unit() { # <src> <dst>
 cmd_install_units() {
     local unitdir="$HOME/.config/systemd/user" u
     mkdir -p "$unitdir"
-    for u in kingdom-dispatch.service kingdom-dispatch.timer kingdom-guard.service kingdom-guard.timer; do
+    for u in kingdom-dispatch.service kingdom-dispatch-alarm.service kingdom-dispatch.timer kingdom-guard.service kingdom-guard.timer; do
         render_unit "$KINGDOM_DIR/systemd/$u" "$unitdir/$u"
     done
     systemctl --user daemon-reload
@@ -3927,7 +3969,8 @@ cmd_install_units() {
 
 cmd_uninstall_units() {
     systemctl --user disable --now kingdom-dispatch.timer kingdom-guard.timer 2>/dev/null || true
-    rm -f "$HOME/.config/systemd/user"/kingdom-{dispatch,guard}.{service,timer}
+    rm -f "$HOME/.config/systemd/user"/kingdom-{dispatch,guard}.{service,timer} \
+        "$HOME/.config/systemd/user/kingdom-dispatch-alarm.service"
     systemctl --user daemon-reload
     echo "units removed; state, mail, and worktrees untouched"
 }
