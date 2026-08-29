@@ -12,9 +12,9 @@
 #      (bd gqlc-uy7j).
 #
 # On (4): GitHub caps a label name at 50 characters and refuses the WHOLE issue
-# over one bad label, so the bead ends up with no mirror. bd accepts such a label
-# silently at `bd create`, and the complaint is raised much later by
-# .githooks/bd-gh-sync, at `git push`. Those are not the same session: measured
+# over one bad label, so a bead OFFERED with one ends up with no mirror. bd
+# accepts such a label silently at `bd create`, and the complaint is raised much
+# later by .githooks/bd-gh-sync, at `git push`. Those are not the same session: measured
 # 2026-08-24, gqlc-pyc6 carried a 79-character subject: label and EVERY push in
 # town printed the refusal, while its author — the one person who knew what the
 # label was for — never saw it and no reader had standing to edit someone else's
@@ -24,8 +24,16 @@
 # So this arm does not add a check; it moves an existing one to the boundary
 # where the author is standing. The cap, and the remedy sentence it prints, are
 # imported from .github/scripts/check-label-lengths.py rather than spelled again
-# here — see label_rule(). Three gates now read that one file, and the citizen
-# meets the same words at the keyboard, at the push and in CI.
+# here — see label_rule(). Three gates now read that one file, so wherever a
+# citizen meets this cap they meet the same words: always at the keyboard and in
+# CI, and at the push for a bead that is not yet mirrored.
+#
+# The paragraph above is the CREATE path. A label added to a bead that ALREADY
+# has a mirror never reaches GitHub at all — bd-gh-sync's screen skips any bead
+# carrying an external_ref, and no pass in it offers a mirrored bead's labels
+# again — so it draws no 422, no push-time NOTE, and CI is the first and only
+# thing that objects. This arm covers both arrivals, which is why it keys on the
+# subcommand rather than on `bd create` alone.
 #
 # What it does NOT reach, because a command line is all it sees: labels
 # inherited from `--parent`, and labels written in a file by `bd create --file`
@@ -1415,9 +1423,11 @@ def label_verdict(write):
         return "no-label-write", None
     # A value the shell has not expanded has no length to measure — `$(...)`
     # could resolve to anything. Allowed, and named so the gap is legible: the
-    # label lands unscreened and bd-gh-sync's push-time refusal is what catches
-    # it. Refusing on the unexpanded text's own length would refuse a command
-    # whose real label fits.
+    # label lands unscreened, and WHAT catches it then depends on the bead. One
+    # with no mirror yet meets bd-gh-sync's push-time refusal; one that already
+    # has a mirror is skipped by that screen entirely, so nothing looks at the
+    # label until the CI gate. Refusing on the unexpanded text's own length
+    # would refuse a command whose real label fits.
     if UNEXPANDED_RE.search(label):
         return "allow-unexpanded-label", None
     rule = label_rule()
@@ -1425,8 +1435,10 @@ def label_verdict(write):
         return "warn-cap-unreadable", (
             "A label GitHub can hold could not be checked: the cap lives in "
             ".github/scripts/check-label-lengths.py and that file could not be read, "
-            "so this label was NOT screened. A label over the cap makes GitHub refuse "
-            "the whole issue, leaving the bead with no mirror (bd gqlc-uy7j)."
+            "so this label was NOT screened. If this bead has no mirror yet, a label "
+            "over the cap makes GitHub refuse the whole issue and leaves it without "
+            "one; if it is already mirrored, the label never reaches GitHub at all "
+            "and CI is the only thing that will object (bd gqlc-uy7j)."
         )
     cap, _prefix, remedy = rule
     if len(label) <= cap:
@@ -1437,10 +1449,11 @@ def label_verdict(write):
     where = "`%s` value" % flag if flag != "<positional>" else "`bd label add`"
     message = (
         "That %s would create a label GitHub cannot hold: %r is %d characters and "
-        "the cap is %d. GitHub refuses the WHOLE issue over one bad label, so the "
-        "bead would be created here and then left with no GitHub mirror at all — "
-        "and you would not find out, because the complaint surfaces later, at "
-        "`git push`, in whoever's session pushes next (bd gqlc-uy7j)."
+        "the cap is %d. On a bead with no mirror yet, GitHub refuses the WHOLE issue "
+        "over one bad label, so the bead would be left without one and you would not "
+        "find out here: the complaint surfaces at `git push`, in whoever's session "
+        "pushes next. On a bead that is ALREADY mirrored, bd-gh-sync skips it, so the "
+        "label reaches nobody and nothing objects until CI (bd gqlc-uy7j)."
         % (where, label, len(label), cap)
     )
     advice = remedy(label)
