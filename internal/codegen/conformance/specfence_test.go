@@ -1827,9 +1827,12 @@ func gradeParams(list string) (name string, exempt, gradable bool) {
 //     read here while a renderer shows it as the literal contents of an
 //     indented code block.
 //
-// Closing either spelling would leave the other, because the gap is
-// between scanning bytes and parsing markdown rather than between this
-// rule and a better one.
+// Neither divergence is closed here: this rule is a byte test rather
+// than a markdown parse, so a better byte test cannot distinguish either
+// spelling from what it already accepts or skips. A parse-based rule
+// would close both; the trade-off (pulling a CommonMark parser into the
+// sweep) is why the byte rule stands, not proof that no parse rule
+// could.
 func scanBareSigs(file, text string) (sigs, unclosed []specSig) {
 	for _, loc := range tickAnchorRe.FindAllStringIndex(text, -1) {
 		open := loc[0]

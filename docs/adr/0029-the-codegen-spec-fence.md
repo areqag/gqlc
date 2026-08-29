@@ -242,8 +242,10 @@ rather than claims about the emitted surface.
 The exemption is per list rather than per document, so a claim this document
 makes about the emitted parameter list is read on the same terms as any other
 document's, and each entry covers one site, so a second list spelled the same
-way is graded. It is a written census reconciled in the `lost` direction, so an
-entry the document has stopped printing is red by its text. What that leaves
+way is graded — it is red in the `undeclared` direction, because the entry
+exempted the first occurrence and no entry covers the second. It is a written
+census reconciled in both directions: an entry the document has stopped
+printing is red in the `lost` direction by its text. What that leaves
 open is a claim put in an exhibit's place and spelled the way the exhibit was:
 it takes the entry (`gqlc-x2sg`).
 
