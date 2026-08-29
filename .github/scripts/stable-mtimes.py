@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Give every tracked file an mtime that is a pure function of its blob hash.
+"""Stamp deterministic mtimes: tracked files get a pure function of their
+blob hash, directories containing them get a constant.
 
 Go's test cache records stat info (including mtime) for every file a test
 opens, so a test result only replays when those mtimes match the cached run.
@@ -20,6 +21,7 @@ Future mtimes are what some tools warn or misbehave on; past ones are inert.
 """
 
 import os
+import posixpath
 import subprocess
 
 out = subprocess.run(
@@ -27,6 +29,7 @@ out = subprocess.run(
 ).stdout
 
 count = 0
+dirs = {"."}
 for entry in out.split(b"\0"):
     if not entry:
         continue
@@ -35,5 +38,20 @@ for entry in out.split(b"\0"):
     mtime = 1_500_000_000 + int(sha[:7], 16)
     os.utime(path, (mtime, mtime), follow_symlinks=False)
     count += 1
+    d = posixpath.dirname(path.decode())
+    while d and d not in dirs:
+        dirs.add(d)
+        d = posixpath.dirname(d)
 
-print(f"stable-mtimes: stamped {count} tracked files")
+# Directories too: hashOpen on a directory records the directory's OWN stat
+# before walking its entries, and directories are not tracked by git, so a
+# fresh clone mints new mtimes for all of them. Probed on
+# internal/codegen/age: touching only the package dir and its testdata dir,
+# no file changed, forces a full re-run. A constant is enough — the entry
+# list is hashed per-entry anyway, so the dir mtime carries no signal and
+# only needs to be identical across checkouts.
+DIR_MTIME = 1_500_000_000
+for d in sorted(dirs):
+    os.utime(d, (DIR_MTIME, DIR_MTIME))
+
+print(f"stable-mtimes: stamped {count} tracked files, {len(dirs)} directories")

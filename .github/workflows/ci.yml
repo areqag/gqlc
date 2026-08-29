@@ -124,7 +124,15 @@ jobs:
       # Fresh-checkout mtimes are part of Go's test-cache key, so without this
       # stamp no testdata-reading package ever replays `(cached)` here, however
       # warm ~/.cache/go-build is. Mechanism and probes: the script's docstring.
-      - run: python3 .github/scripts/stable-mtimes.py
+      #
+      # /dev/null is in the same key for any test that execs with nil stdio
+      # (os/exec opens os.DevNull in the test process, and cmd/go's hashOpen
+      # has no special case for device files — it records the bare stat). On a
+      # fresh runner VM its mtime is boot time, new every run; locally it is
+      # stable between reboots, which is why this only ever missed on CI.
+      - run: |
+          python3 .github/scripts/stable-mtimes.py
+          sudo touch -d @1500000000 /dev/null
       - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
       - run: just test
