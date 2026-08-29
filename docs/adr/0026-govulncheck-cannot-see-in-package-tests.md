@@ -239,7 +239,11 @@ standard-library section would fail the good state rather than the bad one.
 
 The header is what separates them. `SemverToGoTag("")` walks to
 `fmt.Sprintf("go%s", "")` and yields the bare string `go`, so
-`...and the go standard library:` is exactly and only the unplaced rendering.
+`...and the go standard library:` is exactly and only the unplaced rendering
+— on x/vuln v1.7.0, whose `SemverToGoTag` emits only `go`, `go1`, or `go`
+plus a canonical version; this is a property of that version, not of the
+pattern, and `just vuln` runs `govulncheck@latest` (see the trade-off note
+at line 433 below).
 The grading asks whether anything follows that prefix. An **absent** header is
 refused for its own reason and with its own message: the line being renamed is
 the grading going quiet, and a quiet grading accepts everything.
@@ -255,7 +259,10 @@ the call, which both of those edits left green — the same
 conditional-gate-omission shape recorded elsewhere in this ADR, one level up.
 
 **Both refusing directions and a positive control run on every invocation,
-against fabricated headers, before any scan.** On a released toolchain the
+against fabricated headers, before any scan.** "Every invocation" means every
+run of `just vuln`; how often that is in CI is the `vuln` job's own path
+filter (see `justfile:1526-1530` for the site-declaration shape), not this
+line. On a released toolchain the
 grading otherwise only ever runs in the negative. The two refusals are asserted
 *by reason*, because they send a reader to different repairs — a toolchain to
 point elsewhere, or this recipe's own match to fix — and the positive control

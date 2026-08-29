@@ -760,7 +760,9 @@ At least two things exempt the first shape, and that count is a floor
 for a structural reason rather than a tally waiting to be completed:
 the sweeps match byte patterns and do not parse markdown, so the set
 of runs they treat as a code span and the set a renderer treats as one
-overlap on every spelling measured without being the same set.
+overlap on every spelling measured so far (the two divergences
+enumerated in `TestSpecBareSigScannerDetectsDrift`) without being the
+same set — a new spelling can enter either symmetric difference.
 
 The first exemption is written down: the handful of
 parenthesis-less parameter lists ADR 0029 prints as exhibits of what
@@ -1478,10 +1480,16 @@ Added under `test/data/codegen/invalid/`:
 | `alias_required_expression`    | `ErrAliasRequired`     | `RETURN p.age + 1` — arithmetic expression column with no alias. |
 | `identifier_collision_reserved`| `ErrIdentifierCollision`| `// name: New :one ...` — method name collides with C0's `New` constructor. |
 
-Eight invalid fixtures — one per new sentinel. Each maps to its
+Eight invalid fixtures at C1's initial cut — a floor, not a closed
+count: the sweep asserts *at least one* fixture per sentinel, and the
+exported-vs-exported collision axis called out below is one place a
+future fixture lands without altering the sweep. Each maps to its
 sentinel in the C0 `sentinelByName` map. The reachability sweep
 asserts every C1 sentinel has at least one fixture; the map
-assertion asserts every declared fixture maps to a known sentinel.
+assertion asserts every declared fixture maps to a known sentinel;
+and the per-column decode template pinned at §5.5 (the
+`fmt.Errorf("<method>: decode column %q: %w", ...)` line pinned at
+:1094 above) is a third pin the same reachability grid reads.
 `ErrIdentifierCollision` is exercised solely by
 `identifier_collision_reserved` at C1; the additional exported-vs-
 exported collision axis (two user-defined identifiers, e.g. a method
