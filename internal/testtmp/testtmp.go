@@ -35,8 +35,16 @@ func Main(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "testtmp: %v\n", err)
 		os.Exit(1)
 	}
-	os.Setenv("TMPDIR", base)
+	if err := os.Setenv("TMPDIR", base); err != nil {
+		fmt.Fprintf(os.Stderr, "testtmp: %v\n", err)
+		os.Exit(1)
+	}
 	code := m.Run()
-	os.RemoveAll(base)
+	// A failed removal only costs the replay (the base is present at save
+	// time, so the saved hash never matches a later check); the results
+	// themselves stay valid, so report it without failing the run.
+	if err := os.RemoveAll(base); err != nil {
+		fmt.Fprintf(os.Stderr, "testtmp: %v\n", err)
+	}
 	os.Exit(code)
 }

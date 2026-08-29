@@ -22,11 +22,11 @@ const selfPath = "github.com/areqag/gqlc/internal/testtmp"
 // log; only the parsed files' own opens are, and tracked files are
 // mtime-stamped on CI.
 func TestEveryTempUsingPackageRoutesTMPDIRThroughThisPackage(t *testing.T) {
-	root, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}").Output()
+	root, err := exec.CommandContext(t.Context(), "go", "list", "-m", "-f", "{{.Dir}}").Output()
 	if err != nil {
 		t.Fatalf("go list -m: %v", err)
 	}
-	cmd := exec.Command("go", "list", "-json=ImportPath,Dir,TestGoFiles,XTestGoFiles", "./...")
+	cmd := exec.CommandContext(t.Context(), "go", "list", "-json=ImportPath,Dir,TestGoFiles,XTestGoFiles", "./...")
 	cmd.Dir = strings.TrimSpace(string(root))
 	out, err := cmd.Output()
 	if err != nil {
@@ -34,10 +34,10 @@ func TestEveryTempUsingPackageRoutesTMPDIRThroughThisPackage(t *testing.T) {
 	}
 
 	type pkg struct {
-		ImportPath   string
-		Dir          string
-		TestGoFiles  []string
-		XTestGoFiles []string
+		ImportPath   string   `json:"ImportPath"`
+		Dir          string   `json:"Dir"`
+		TestGoFiles  []string `json:"TestGoFiles"`
+		XTestGoFiles []string `json:"XTestGoFiles"`
 	}
 	dec := json.NewDecoder(strings.NewReader(string(out)))
 	var violations []string
@@ -83,7 +83,7 @@ func TestEveryTempUsingPackageRoutesTMPDIRThroughThisPackage(t *testing.T) {
 
 // findTempUse reports the first call that makes the test binary's log record
 // a path under the shared temp base: any X.TempDir() (testing.T, testing.B,
-// suite helpers), or os.MkdirTemp / os.CreateTemp, whose leaked artifacts
+// suite helpers), or os.MkdirTemp / os.CreateTemp, whose leaked artefacts
 // have the same effect. Returns "file:line: expr" or "".
 func findTempUse(fset *token.FileSet, f *ast.File) string {
 	var found string
