@@ -1816,17 +1816,27 @@ fmt-check: ensure-golangci
 # `set -e` is therefore deliberately absent below.
 #
 # It is NOT a merge predicate and green here does not entitle anyone to skip CI.
-# Two required contexts are not reachable from a developer's machine, and the
+# Some of what CI requires is not reachable from a developer's machine, and the
 # summary says so on every run rather than leaving it to this comment:
 #
 #   live-smoke   `just test-codegen-live-neo4j` — needs Docker and pulls
 #                container images. Runnable here (bd gqlc-tez0 measured the
 #                live battery at ~30s), just not at the price the other arms
 #                are; run it by hand when you touch the live battery.
-#   tidy (part)  `.github/scripts/check-pr-closes.py` reads the PR BODY, which
-#                does not exist before the PR. Unrunnable here by construction,
-#                not by choice. `just tidy-check` and bd-export-monotonic-local
-#                below are that job's other two halves and DO run.
+#   tidy (part)  three of that job's seven steps read state that does not exist
+#                before the PR: check-pr-closes.py wants the body,
+#                check-pr-authors.sh the commit list, check-cron-freshness.sh
+#                the Actions API. Unrunnable here by construction, not by
+#                choice. The other four DO run — tidy-check and
+#                bd-export-monotonic-local and check-label-lengths.py as their
+#                own arms, and `just lint-hooks .github/scripts` because `just
+#                lint` already depends on it.
+#
+# `just fmt-check` is an arm but is NOT a CI job: no workflow calls it. It is
+# here because it prints a diff where `golangci-lint run` prints issues, and it
+# costs a second. The enforcement of gofumpt and gci is `just lint` — which is
+# a claim this repository gates rather than assumes, in
+# check-golangci-formatters-report (bd gqlc-sh4j).
 #
 # On the town's own machine one arm is red on a clean master: `just vuln`
 # refuses because this box's default Go is a distro build (`go1.27.0-X:nodwarf5`)
@@ -1839,38 +1849,50 @@ gates:
     #!/usr/bin/env bash
     set -uo pipefail
     failed=()
+    contexts=()
     ran=0
 
+    # $1 is the required CI context this arm stands for; the rest is the command.
+    # The context is COLLECTED rather than restated in the summary below, because
+    # a hardcoded coverage sentence is the same silent drift one level down: with
+    # it, deleting the test-codegen-fence arm left this recipe green and still
+    # claiming to cover codegen-fence (measured, bd gqlc-jq50).
     run() {
+        local ctx="$1"; shift
         ran=$((ran + 1))
+        contexts+=("${ctx}")
         echo ""
-        echo "=== gates: just $*"
-        if ! just "$@"; then
-            failed+=("just $*")
+        echo "=== gates[${ctx}]: $*"
+        if ! "$@"; then
+            failed+=("$*")
         fi
     }
 
-    run fmt-check
-    run lint
-    run lint-cache-check
-    run vuln-root-residual
-    run test
-    run test-codegen-fence
-    run actionlint
-    run tidy-check
-    run bd-export-monotonic-local
-    run vuln
+    run lint           just fmt-check
+    run lint           just lint
+    run lint           just lint-cache-check
+    run lint           just vuln-root-residual
+    run test           just test
+    run codegen-fence  just test-codegen-fence
+    run actionlint     just actionlint
+    run tidy           just tidy-check
+    run tidy           just bd-export-monotonic-local
+    run tidy           python3 .github/scripts/check-label-lengths.py .beads/issues.jsonl
+    run govulncheck    just vuln
 
     echo ""
-    echo "gates: ran ${ran} recipe(s) covering required contexts lint, test, tidy,"
-    echo "       actionlint, govulncheck and codegen-fence."
-    echo "gates: NOT covered — live-smoke (needs Docker: just test-codegen-live-neo4j)"
-    echo "       and the PR-body half of tidy (no PR body exists yet). CI still decides."
+    echo "gates: ran ${ran} arm(s) over required context(s):" \
+         "$(printf '%s\n' "${contexts[@]}" | sort -u | tr '\n' ' ')"
+    echo "gates: NOT covered, and CI still decides —"
+    echo "       live-smoke        needs Docker: just test-codegen-live-neo4j"
+    echo "       tidy (3 steps)    check-pr-closes.py, check-pr-authors.sh and"
+    echo "                         check-cron-freshness.sh read a PR body, a PR's"
+    echo "                         commit list and the Actions API. None exist here."
 
     # An empty arm list would report success having graded nothing, which is the
     # failure this whole recipe is about one level up.
     if [ "${ran}" -eq 0 ]; then
-        echo "error: gates ran no recipe at all, so it is green over nothing (bd gqlc-jq50)." >&2
+        echo "error: gates ran no arm at all, so it is green over nothing (bd gqlc-jq50)." >&2
         exit 1
     fi
 
