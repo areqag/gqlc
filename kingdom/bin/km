@@ -610,22 +610,34 @@ seat_runner_start() { # <seat> -> 1 if a live session made it unsafe
 # tty burst, no split, no reconfirm. The signature keeps the `<target>` shape
 # callers used with `send_line "=$SESSION:$seat"`, but the target may just be
 # the seat name; the wrapper accepts either.
-# The diagnosis is no longer discarded. herdr signals failure by exit status but
-# names WHICH failure only in a JSON payload on stdout, so a caller reading the
-# status alone can tell "not delivered" from "delivered" and nothing finer —
-# and a dispatch tick that died on this call spent forty minutes saying nothing
-# at all (bd gqlc-87al).
 #
-# The ADDRESS is deliberately not changed here. It is wrong — a seat name is not
-# a target herdr resolves, so this fails for every seat in every state — and the
-# fix for that is gqlc-nq78 / PR #1685, which is under revision because
-# `herdr agent send` types into the prompt box without submitting. This bead
-# fixes only the abort. After it the send still fails; it stops killing the pass.
+# It is addressed by PANE, not by seat name. `herdr agent send <target>` takes
+# terminal ids, unique agent names, agent labels and pane ids — and a seat name
+# is none of those. km labels TABS with the seat name, in seat_runner_start,
+# and never once calls `herdr agent rename`, so no agent in this town has ever
+# carried a seat name. Measured 2026-08-29 (bd gqlc-nq78): all 16 agents are
+# named the literal `claude`, `agent get aramazd` and `agent get sedrak` both answer
+# agent_not_found, `agent get claude` answers agent_target_ambiguous, and the
+# pane id for that same seat resolves. So this call failed for every seat, in
+# every state, from the herdr migration until that date — and its three callers
+# each reported success anyway.
+#
+# The diagnosis is no longer discarded. herdr signals the failure by exit
+# status, but it puts WHICH failure in a JSON payload on stdout, so a caller
+# that only reads the status can distinguish "not delivered" from "delivered"
+# and nothing finer — and a dispatch tick that died on this call spent forty
+# minutes saying nothing at all (bd gqlc-87al). Both streams are captured and
+# re-emitted on stderr.
 send_line() { # <target> <text> -> 0 delivered, 1 not
-    local target=$1 text=$2 seat out
+    local target=$1 text=$2 seat pane out
     seat=${target##*:}
-    out=$(herdr agent send "$seat" "$text" 2>&1) && return 0
-    echo "km: send to $seat failed: ${out:-herdr gave no diagnosis on either stream}" >&2
+    pane=$(seat_pane_id "$seat") || pane=
+    if [ -z "$pane" ]; then
+        echo "km: send to $seat: no pane in the workspace; nothing was sent" >&2
+        return 1
+    fi
+    out=$(herdr agent send "$pane" "$text" 2>&1) && return 0
+    echo "km: send to $seat (pane $pane) failed: ${out:-herdr gave no diagnosis on either stream}" >&2
     return 1
 }
 
