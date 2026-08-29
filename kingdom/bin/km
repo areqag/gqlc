@@ -4168,12 +4168,22 @@ seat_freshness() {
 # separating it from the printing:
 #
 #   0  covered — current, refreshed, or held with its hooks already current
-#   3  still exposed: a gate has merged that this seat does not run
+#   3  still exposed, and the tree is holding work: a branch or uncommitted
+#      changes stand in the way of the move
 #   4  unjudged — no worktree, or git could not answer, or the move failed
+#   5  still exposed, but only because --check declined to move it; the tree
+#      is parked and nothing is in the way
 #
-# 3 and 4 are distinct because the remedies are: 3 wants the citizen standing
-# in that tree to rebase, 4 wants `km up` or a human with a shell. Collapsing
-# them would send an unseated seat's operator to a citizen who does not exist.
+# All three non-zero statuses are distinct because their remedies are addressed
+# to different people: 3 wants the citizen standing in that tree to rebase, 4
+# wants `km up` or a human with a shell, 5 wants the operator who typed --check
+# to type it again without. Collapsing 3 and 4 would send an unseated seat's
+# operator to a citizen who does not exist; collapsing 3 and 5 did send one to
+# ask three citizens to rebase trees with nothing in them (gqlc-jjcj).
+#
+# 5 is reachable only under --check. km-seat is the only caller that branches
+# on this status and it never passes --check (km-seat:183), so no existing
+# reader of 3 can be handed a 5.
 #
 # SHARED by the single-seat path and the sweep, not copied into each. The two
 # differ only in whether an unjudged seat aborts, and gqlc-gy3q is the record
@@ -4262,10 +4272,20 @@ seat_refresh_step() {
     head=$(git_at "$wt" rev-parse HEAD)
     if [ "$check" -eq 1 ]; then
         # --check never moves, so a parked seat behind on gates is STILL
-        # exposed when this returns, and the exit status has to say so — the
-        # same 3 the acting path uses, for the same condition.
+        # exposed when this returns, and the exit status has to say so. It says
+        # so as 5 rather than 3, because the two exposures want different
+        # people: 3 wants the citizen standing in that tree to rebase, 5 wants
+        # the operator who just typed --check to type it again without. Both
+        # were 3 until gqlc-jjcj, and the sweep's summary — the only reader
+        # that buckets by status — attributed the merged bucket to the one
+        # cause that fits 3, sending an operator to ask three citizens to
+        # rebase trees with nothing in them.
+        #
+        # Reachable only under --check, and km-seat (the sole caller that
+        # branches on this status, km-seat:183) never passes it, so nothing
+        # that reads 3 today can be handed a 5.
         echo "$seat: STALE (--check, nothing moved) — $behind_all commit(s) behind origin/master, $behind_gates of them touching .githooks/.claude$stale_note"
-        [ "$behind_gates" -eq 0 ] || return 3
+        [ "$behind_gates" -eq 0 ] || return 5
         return 0
     fi
     if ! git_at "$wt" checkout --detach --quiet "$target" 2>/dev/null; then
@@ -4290,7 +4310,7 @@ seat_refresh_step() {
 # is the convenient one: a sweep that treats "held" as "skip the guard".
 cmd_seat_refresh_all() {
     local check=$1 mr target stale_note="" s line rc
-    local refreshed=0 current=0 held=0 exposed="" unjudged=""
+    local refreshed=0 current=0 held=0 exposed="" declined="" unjudged=""
     mr=$(main_root)
     git_at "$mr" fetch --quiet origin 2>/dev/null ||
         stale_note=" [fetch failed: judged against the last known origin/master]"
@@ -4303,6 +4323,7 @@ cmd_seat_refresh_all() {
         printf '  %s\n' "$line"
         case "$rc" in
             3) exposed="$exposed $s" ;;
+            5) declined="$declined $s" ;;
             # NOT fatal, and this is the property the sweep turns on: tir is
             # last in roster order and has no worktree at all, so a loop that
             # died here would print most of the table and silently never visit
@@ -4320,13 +4341,20 @@ cmd_seat_refresh_all() {
     if [ -n "$exposed" ]; then
         summary="$summary; STILL EXPOSED:$exposed — each is holding work, so nothing here will move it; its citizen must rebase"
     fi
+    # Deliberately not phrased as an alarm. Under --check this is the ordinary
+    # outcome for every parked seat behind on gates, and the remedy is one
+    # command the operator already has, addressed to the operator (gqlc-jjcj).
+    if [ -n "$declined" ]; then
+        summary="$summary; NOT MOVED because --check:$declined — parked and safe to move; re-run without --check"
+    fi
     if [ -n "$unjudged" ]; then
         summary="$summary; UNJUDGED:$unjudged — no worktree or git could not read one, so a bead routed there goes nowhere ('km up' seats it)"
     fi
     echo "$summary$stale_note"
     # Non-zero while anything is uncovered. The exit status is all a morning
     # script reads, and "it ran" must not be readable as "the town is covered".
-    [ -z "$exposed$unjudged" ] || return 3
+    # A --check-declined seat is uncovered too: nothing moved, so it counts.
+    [ -z "$exposed$declined$unjudged" ] || return 3
     return 0
 }
 
