@@ -14,6 +14,14 @@ type temporalUse struct {
 	decode    bool // to<X>: a driver value read into the neutral carrier
 	encode    bool // from<X>: a carrier bound as a non-nullable parameter
 	encodePtr bool // from<X>Ptr: a carrier bound as a nullable parameter
+	// listDepth is the deepest list nesting the carrier is bound at as a
+	// parameter, 0 for none. A helper at depth d calls the one at d-1, so
+	// a depth of N owes every helper from 1 to N.
+	listDepth int
+	// listPtr holds the depths that are ALSO bound nullable, and is a set
+	// rather than a maximum because nullability does not nest: a schema
+	// may bind []Date nullable and [][]Date not, or the reverse.
+	listPtr map[int]bool
 }
 
 // temporalUses walks the prepared batch and answers, per carrier, which
@@ -46,6 +54,23 @@ func temporalUses(prepared codegen.Prepared) map[string]temporalUse {
 			}
 		}
 		for _, f := range q.ParamFields {
+			// A list parameter converts per element, so what it needs is
+			// the plain from<X> at the leaf plus the list helpers that
+			// call it — never from<X>Ptr, whose nil-to-Cypher-null job
+			// belongs to the outermost list helper instead.
+			if depth := sliceDepth(f.GoType); depth > 0 {
+				mark(f.GoType, func(u *temporalUse) {
+					u.encode = true
+					u.listDepth = max(u.listDepth, depth)
+					if f.Nullable {
+						if u.listPtr == nil {
+							u.listPtr = make(map[int]bool)
+						}
+						u.listPtr[depth] = true
+					}
+				})
+				continue
+			}
 			if f.Nullable {
 				mark(f.GoType, func(u *temporalUse) { u.encodePtr = true })
 				continue
@@ -78,6 +103,30 @@ func leafType(goType string) string {
 		}
 		goType = elem
 	}
+}
+
+// sliceDepth counts the slice prefixes on an emitted Go type text: 0 for
+// a scalar, 1 for []Date, 2 for [][]Date.
+func sliceDepth(goType string) int {
+	depth := 0
+	for {
+		elem := strings.TrimPrefix(goType, "[]")
+		if elem == goType {
+			return depth
+		}
+		depth++
+		goType = elem
+	}
+}
+
+// temporalListHelper names the from<X>List helper for one carrier at one
+// nesting depth. Depth 1 is unsuffixed, so the common case reads
+// fromDateList and the suffix appears only where a schema nests.
+func temporalListHelper(leaf string, depth int) string {
+	if depth == 1 {
+		return "from" + leaf + "List"
+	}
+	return fmt.Sprintf("from%sList%d", leaf, depth)
 }
 
 // narrowExpr renders the expression that turns a value of the driver
@@ -164,8 +213,67 @@ func from%[1]sPtr(v *%[1]s) any {
 }
 `, name)
 		}
+		for depth := 1; depth <= use.listDepth; depth++ {
+			b.WriteString("\n")
+			b.WriteString(temporalListEncodeBody(name, depth))
+			if use.listPtr[depth] {
+				b.WriteString("\n")
+				b.WriteString(temporalListEncodePtrBody(name, depth))
+			}
+		}
 	}
 	return []byte(b.String())
+}
+
+// temporalListEncodeBody returns the from<X>List helper for one carrier
+// at one nesting depth.
+//
+// The result is []any rather than a slice of the dbtype counterpart
+// because dbtype has no list type to build: []any is the driver's own
+// array carrier, the one its hydrator produces on the way back, and the
+// one packX packs element by element on the way out. Each depth defers to
+// the depth below it, so the leaf conversion is written once per carrier
+// however deeply a schema nests.
+func temporalListEncodeBody(name string, depth int) string {
+	elemType := name
+	for i := 1; i < depth; i++ {
+		elemType = "[]" + elemType
+	}
+	inner := "from" + name
+	if depth > 1 {
+		inner = temporalListHelper(name, depth-1)
+	}
+	return fmt.Sprintf(`// %[1]s widens a list of %[2]s parameters element by element. The
+// driver marshals no gqlc struct, so each element converts before the
+// list reaches the wire.
+func %[1]s(v []%[3]s) []any {
+	out := make([]any, len(v))
+	for i := range v {
+		out[i] = %[4]s(v[i])
+	}
+	return out
+}
+`, temporalListHelper(name, depth), name, elemType, inner)
+}
+
+// temporalListEncodePtrBody returns the nullable wrapper for one
+// from<X>List helper. A nil pointer is the schema's declared null; an
+// empty non-nil list is an empty array, which is a different value.
+func temporalListEncodePtrBody(name string, depth int) string {
+	listType := name
+	for i := 0; i < depth; i++ {
+		listType = "[]" + listType
+	}
+	helper := temporalListHelper(name, depth)
+	return fmt.Sprintf(`// %[1]sPtr binds a nullable list of %[2]s: a nil pointer is the
+// Cypher null the schema's nullability declared, not an empty list.
+func %[1]sPtr(v *%[3]s) any {
+	if v == nil {
+		return nil
+	}
+	return %[1]s(*v)
+}
+`, helper, name, listType)
 }
 
 // needsTimePackage reports whether any emitted conversion body names the
