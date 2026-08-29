@@ -401,14 +401,24 @@ served texts alongside. The numbers belong at the pin, not in prose.
    `syntax error at or near "|"`, SQLSTATE 42601.
 
 2. **Undefined function** (`ErrUndefinedFunction`, this decision):
-   `datetime()`, `date()`, `localdatetime()`, `duration({days:1})` and
-   `toTimestamp('2024-01-01')`, each answered `function <name> does not exist`.
-   Every one was run by hand against
+   `datetime()`, `date()`, `localdatetime()`, `duration({days:1})`,
+   `toTimestamp('2024-01-01')`, `time()` and `localtime()`, each answered
+   `function <name> does not exist` under SQLSTATE 42883. All but the last two
+   were run by hand against
    `apache/age@sha256:4241e2d8…` (PostgreSQL 18.1, AGE 1.7.0) during the spike
    `gqlc-35yu.5`, and each probe is the byte sequence that session ran —
    `duration({days:1})` carries no space after the colon for that reason, and
    the refusal is of the *name*, so the argument spelling is not what is being
    measured.
+
+   `time()` and `localtime()` came later, from `codegen-live` run
+   `33268424367` against the same pinned digest (bd `gqlc-osf1`), which is also
+   where the SQLSTATE above was first read: the spike captured the message and
+   not the code, so until that run the live test pinned the message alone. With
+   those two the set of temporal constructors openCypher spells is closed by
+   measurement rather than left short on suspicion — and closing it is what put
+   the carrier refusal out of reach of a bare constructor, which is the
+   consequence recorded below.
 
    `timestamp()` is a **served** text from the same session; it returns epoch
    milliseconds as an integer. The other served text — `p.datetime`, the
@@ -432,52 +442,64 @@ which is in it — and the author is refused a call to a function they defined, 
 the strength of a probe that measured a different name. Both spellings are
 pinned, at the unit level and at the CLI seam.
 
-## Suspected and unverified
+## Measured but not refused
 
-Everything below is suspected on the same grounds as the five refusals above and
-**has no witness**, so none of it is refused. Docker is not available to the
-author of this decision; verifying any of it needs the `live-smoke-age` CI job.
-That work is bd `gqlc-osf1`.
+The list that stood here was of constructs suspected and never run. All of them
+have now been run, on `codegen-live` run `33268424367` against the pinned digest
+(bd `gqlc-osf1`), and two of them are refused by the server while still being
+refused by no gap here. Neither is an oversight, and the reason differs:
 
-- **`time()`, `localtime()` and `point(…)`.** Never run against any AGE image by
-  anyone in this repo's record. `time()` and `localtime()` are almost certainly
-  undefined; `point()` is a separate question, since it is not temporal and the
-  present diagnostic's prose ("defines no temporal constructor this project has
-  measured") would be false of it — it would be a third gap, not a name added to
-  the second.
+- **`point({x: 1, y: 2})`.** Refused, SQLSTATE 42883, `function point does not
+  exist` — the same channel and the same words as the seven above. It stays out
+  because it is not a temporal, and this gap's diagnostic tells the author that
+  AGE "defines no temporal constructor this project has measured". Refusing
+  `point()` there would print an answer about temporals over a name that is not
+  one. It is a third gap with its own sentinel and message: bd `gqlc-l8e2n`.
 
-- **`duration.between(a, b)`.** Namespaced, so a different name from `duration`
-  and not covered by that probe. `cypher.UnqualifiedFunctionCalls` drops
-  namespaced calls by design, so refusing it needs a second scanner as well as a
-  witness.
+- **`duration.between(null, null)`.** Refused under a different error *class*:
+  SQLSTATE 3F000, `schema "duration" does not exist`. Postgres reads the
+  openCypher namespace as a schema qualifier and fails on the qualifier before
+  looking for a function, so the answer names no function at all — which is
+  precisely what the gap's own guard
+  (`TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer`) requires of a row in
+  it. It cannot join this gap even with a namespaced scanner, and needs its own:
+  bd `gqlc-dy40s`.
 
-- **The SQLSTATE of every undefined-function refusal.** The spike recorded the
-  server's *message* and not its code, so the live test asserts the message
-  alone — unlike the alternation gap, which pins 42601. PostgreSQL's
-  `undefined_function` is 42883 and AGE plausibly reports through the same
-  channel; plausibly is not measured.
+Both are held to those answers by `TestAGEAnswersTheConstructsNoGapRefuses`, so
+each bead inherits a witness rather than a suspicion, and the pinned image
+changing its answer reds the nightly rather than surfacing when someone finally
+builds the gap.
 
-- **The first run of `TestAGERefusesTheFunctionsItDoesNotDefine`.** The AGE live
-  half is nightly-and-manual (`codegen-live.yml`, job `live-smoke-age`, skipped
-  on pull requests), so these five refusals ship verified by a hand-run spike
-  and then by a dispatched CI run — `codegen-live` run `31996378339` on branch
-  `feat/age-dialect-gap-admission` finished green with `live-smoke-age` a
-  green job, its recipe naming both AGE witnesses as whole `-run` alternatives
-  and its log carrying no `[no tests to run]` line. That the two witnesses
-  executed is an inference from the whole-alternative names plus the absence of
-  that marker, not an observed per-test PASS line: the recipe carries no `-v`,
-  so no such line is emitted. `codegen-live.yml` accepts `workflow_dispatch`,
-  which is what lets the AGE arm be witnessed off the nightly clock at all;
-  "Docker is not available to the author of this decision" (below) is a limit
-  on local iteration, not on witnessing. The lag on CI verification is one
-  cycle and the subject is an image pinned by digest, which no pull request can
-  alter except by editing that digest.
+The AGE live half remains nightly-and-manual (`codegen-live.yml`, job
+`live-smoke-age`, skipped on pull requests), so a refusal here ships verified by
+a dispatched run rather than by the pull request that adds it.
+`codegen-live.yml` accepts `workflow_dispatch`, which is what lets the arm be
+witnessed off the nightly clock at all; Docker being unavailable locally is a
+limit on iteration, not on witnessing. The lag is one cycle, against an image
+pinned by digest that no pull request can alter except by editing that digest.
 
-`localtime()` being unwitnessed is load-bearing, not incidental. It is what
-`test/data/codegen/invalid/unrepresentable_temporal_localtime_column` and
-`TestTemporalProjectionNamesThisBackend` now use, precisely because an
-unwitnessed constructor reaches the carrier question this gate would otherwise
-answer first. Give `localtime()` a witness and both have to move.
+### What closing the temporal set cost
+
+`localtime()` being unwitnessed used to be load-bearing: the corpus's
+unrepresentable-temporal fixture and `TestTemporalProjectionNamesThisBackend`
+both called it, precisely because an unwitnessed constructor reaches the carrier
+question this gate would otherwise answer first. Giving it a witness moved both,
+and the move is worth recording because the room it left is small.
+
+Every route to a temporal column runs through a temporal constructor
+(`internal/query/cypher/shape.go §temporalConstructorType`; an aggregate over a
+temporal *property* types as unknown at that layer, so it does not reach one).
+With the bare set closed, the only spelling that still reaches
+`codegen.ErrUnrepresentableTemporal` on this backend is the namespaced
+`duration.between`. Both moved onto it, and
+`test/data/codegen/invalid/unrepresentable_temporal_duration_column` is now the
+only fixture in the corpus naming that sentinel — which
+`TestSentinelReachability` requires one of.
+
+So building `gqlc-dy40s` closes the last route, and whoever takes it owes that
+question an answer before deleting the fixture: a sentinel this backend can no
+longer reach from any query text is either a sentinel to retire or a gate whose
+ordering should change.
 
 ## Considered options
 

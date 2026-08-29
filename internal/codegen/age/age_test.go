@@ -880,10 +880,10 @@ func wantUndefinedFunctionRefusal(count int, noun, dropped string) string {
 //
 // The refused set is DERIVED from the probe texts a live session was
 // measured on (internal/codegen/age/dialect.go), so what this test
-// really pins is that the derivation reaches the gate. The row that
-// matters most is the one asserting a name is NOT refused: localtime()
-// is every bit as suspect as datetime() and has no witness, and a
-// refusal list that grows on suspicion is a guess wearing a test suite.
+// really pins is that the derivation reaches the gate. The rows that
+// matter most are the ones asserting a name is NOT refused: a refusal
+// list that grows on suspicion, or on a measurement made for a
+// different gap, is a guess wearing a test suite.
 func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
 
@@ -971,21 +971,24 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 		s.Require().NotEmpty(files)
 	})
 
-	s.Run("a constructor with no witness is not refused", func() {
+	s.Run("a name witnessed for a different gap is not refused by this one", func() {
 		// The bound on the whole gate, and the reason it is a table and
-		// not a list of names someone believed. localtime() is as
-		// suspect as datetime() — AGE has no temporal type for either —
-		// and no session in this repo's record has ever run it. Adding
-		// it here means adding its probe and its answer, which means a
-		// live session; until then the author gets the portable
-		// temporal refusal when they project it and no refusal at all
-		// when they do not.
+		// not a list of names someone believed. point() is REFUSED by
+		// the pinned image — SQLSTATE 42883, `function point does not
+		// exist`, measured 2026-08-29 (bd gqlc-osf1) — and is still not
+		// refused here, because this gap's refused set is derived from
+		// its own probes and its message scopes itself to temporal
+		// constructors. Refusing point() on the strength of a
+		// measurement made elsewhere would print an answer about
+		// temporals over a name that is not one. It is a third gap with
+		// its own sentinel and its own message (bd gqlc-l8e2n), and
+		// until that lands the author gets no refusal here.
 		batch := in
-		batch.Queries = []codegen.NamedQuery{textQuery("Clock",
-			"MATCH (p:Person) WHERE p.at < localtime() RETURN p.id\n",
+		batch.Queries = []codegen.NamedQuery{textQuery("Near",
+			"MATCH (p:Person) WHERE p.at < point({x: 1, y: 2}) RETURN p.id\n",
 			scalarColumn("p.id", graph.TypeInt))}
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
-		s.Require().NoError(err, "a suspicion is not a witness and must not be refused")
+		s.Require().NoError(err, "a witness for another gap does not add a name to this one")
 		s.Require().NotEmpty(files)
 	})
 

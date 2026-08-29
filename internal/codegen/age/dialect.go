@@ -211,20 +211,34 @@ var dialectGaps = []dialectGap{
 // TestAGERefusesTheFunctionsItDoesNotDefine re-measures all of them on
 // every AGE live run.
 //
-// openCypher spells three more constructors this list does NOT hold —
-// time(), localtime() and point() — and a namespaced duration.between().
-// Every one of them is suspect for the same reason as the five here and
-// none was ever run, so none is refused: a false positive costs the
-// author a query that would have worked and ADR 0005 leaves them no way
-// around it, while a false negative costs a runtime error they were
-// going to get anyway. Verifying them needs a container, which needs CI
-// (bd gqlc-osf1).
+// time() and localtime() were the last two temporal constructors
+// openCypher spells that this list did not hold. Both were run against
+// the pinned image on 2026-08-29 (bd gqlc-osf1, workflow run
+// 33268424367) and both are refused, so the temporal constructor set is
+// now closed by measurement rather than left short on suspicion.
+//
+// Two constructs measured in that same run are still NOT here, and each
+// is absent for a reason rather than an oversight:
+//
+//   - point({x: 1, y: 2}) is refused, SQLSTATE 42883, but it is not a
+//     temporal, and this gap's prose scopes itself to temporals. It is a
+//     third gap with its own sentinel and its own message (bd gqlc-l8e2n).
+//   - duration.between(null, null) is refused under a DIFFERENT error
+//     class: SQLSTATE 3F000, `schema "duration" does not exist`. Postgres
+//     reads the openCypher namespace as a schema qualifier and fails on
+//     the qualifier before looking for any function, so the answer names
+//     no function at all — which is precisely what
+//     TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer requires of a
+//     row here. It cannot join this gap even with a namespaced scanner
+//     (bd gqlc-dy40s).
 var undefinedFunctionProbes = []dialectProbe{
 	{text: "RETURN datetime()", answer: "function datetime does not exist"},
 	{text: "RETURN date()", answer: "function date does not exist"},
 	{text: "RETURN localdatetime()", answer: "function localdatetime does not exist"},
 	{text: "RETURN duration({days:1})", answer: "function duration does not exist"},
 	{text: "RETURN toTimestamp('2024-01-01')", answer: "function toTimestamp does not exist"},
+	{text: "RETURN time()", answer: "function time does not exist"},
+	{text: "RETURN localtime()", answer: "function localtime does not exist"},
 }
 
 // undefinedFunctions is the lowercased name of every function the probes

@@ -221,9 +221,14 @@ const (
 	// 0005 leaves them no rewrite, so what this gate does NOT refuse is
 	// the half worth asserting at the seam.
 	//
-	//   unwitnessed — localtime() is every bit as suspect as datetime()
-	//                 and no session has run it, so it is not in the
-	//                 table and must generate (bd gqlc-osf1).
+	//   other gap   — point() IS refused by the pinned image, under the
+	//                 same SQLSTATE and the same words as datetime()
+	//                 (42883, measured bd gqlc-osf1). It must still
+	//                 generate here: this gap's refused set is derived
+	//                 from its own probes, and its message tells the
+	//                 author about temporal constructors, which point()
+	//                 is not. It earns a third gap, not a row in this
+	//                 one (bd gqlc-l8e2n).
 	//   namespaced  — Cypher.g4 §oC_FunctionName is `oC_Namespace
 	//                 oC_SymbolicName`, so duration.between is a
 	//                 different name from the probed `duration`. Two
@@ -240,8 +245,8 @@ const (
 	//                 word and no schema can declare a property with it;
 	//                 `toTimestamp` is a catalogue name the schema
 	//                 grammar does admit.
-	unwitnessedConstructorQuery = "// name: Clock :one\n" +
-		"MATCH (p:Person) WHERE p.seenAt < localtime() RETURN p.id AS id\n"
+	otherGapConstructorQuery = "// name: Near :one\n" +
+		"MATCH (p:Person) WHERE p.seenAt < point({x: 1, y: 2}) RETURN p.id AS id\n"
 	namespacedConstructorQuery = "// name: Between :one\n" +
 		"MATCH (p:Person) WHERE duration.between(p.seenAt, p.seenAt) > 0 RETURN p.id AS id\n"
 	namespacedRefusedNameQuery = "// name: Recent :one\n" +
@@ -815,7 +820,7 @@ func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
 		name  string
 		query string
 	}{
-		{"an unwitnessed constructor is not refused", unwitnessedConstructorQuery},
+		{"a name witnessed for another gap is not refused by this one", otherGapConstructorQuery},
 		{"a namespaced call whose namespace is a refused name", namespacedConstructorQuery},
 		{"a namespaced call whose symbolic name is a refused name", namespacedRefusedNameQuery},
 		{"a property named like a constructor is not a call", constructorNamedPropertyQuery},
@@ -827,7 +832,7 @@ func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
 			writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
 
 			res, err := pipeline.Run(cfgPath, backendRegistry(t))
-			require.NoError(t, err, "a suspicion is not a witness, and this backend must not refuse on one")
+			require.NoError(t, err, "this gap refuses the names its own probes measured, and no others")
 			require.Empty(t, res.Diagnostics)
 		})
 	}
