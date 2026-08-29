@@ -2192,6 +2192,37 @@ hold_open_pr_files() { # -> [{number, files:[path], truncated}]; rc 1 if gh cann
     } ]' 2>/dev/null || return 1
 }
 
+# branch_pr_state <branch-name> -> open | finished | none | unanswered
+#
+# The one place seat_refresh_step asks GitHub what the branch's PR record says
+# (0008). Fail-closed in the same shape as hold_open_pr_files above: a timeout
+# and an exit-status check, with an empty answer distinct from no answer —
+# jq-null over a failed query is the known trap (gqlc-z1qw), which is why the
+# helper reports `unanswered` on non-zero exit rather than folding it into
+# `none`. Two paths to one HOLD must stay tellable apart (0008 §3): the words
+# `open` / `none` / `unanswered` name the reason so seat_refresh_step's verdict
+# lines can carry it through to the journal.
+#
+# headRefOid is in the field list although this consumer ignores it: gqlc-guq3's
+# consumer needs it, and the contract should not reshape under her.
+branch_pr_state() {
+    local name=$1 raw count open
+    [ -n "$name" ] || { echo unanswered; return 0; }
+    raw=$(timeout 30 gh pr list --head "$name" --state all \
+        --json state,headRefOid --limit 50 2>/dev/null) || { echo unanswered; return 0; }
+    count=$(printf '%s' "$raw" | jq 'length' 2>/dev/null) || { echo unanswered; return 0; }
+    if [ "$count" -eq 0 ]; then
+        echo none
+        return 0
+    fi
+    open=$(printf '%s' "$raw" | jq '[.[] | select(.state=="OPEN")] | length' 2>/dev/null) || { echo unanswered; return 0; }
+    if [ "$open" -gt 0 ]; then
+        echo open
+        return 0
+    fi
+    echo finished
+}
+
 hold_paths_on_master() { # subjects on stdin, one per line -> {"<path>": true|false}
     local mr s present out='{}'
     mr=$(main_root)
@@ -2996,6 +3027,15 @@ cmd_status() {
                 if [ "$fball" -eq 0 ]; then tree="wip"; else tree="wip-$fball"; fi
                 if [ "$fbgates" -gt 0 ]; then tree="$tree!"; fi
                 ;;
+            published)
+                # Reported in working's shape rather than parked's — a
+                # published branch is legitimately behind, not stale. The
+                # finished-ness question is not asked here: 0008 keeps the
+                # board offline; seat_refresh_step consults gh in the acting
+                # path and prints its verdict there.
+                if [ "$fball" -eq 0 ]; then tree="pub"; else tree="pub-$fball"; fi
+                if [ "$fbgates" -gt 0 ]; then tree="$tree!"; fi
+                ;;
             *) tree="?"; unjudged="$unjudged $s" ;;
         esac
         if [ "$fbgates" -gt 0 ]; then exposed="$exposed $s($fbgates)"; fi
@@ -3386,14 +3426,20 @@ cmd_doctor() {
 # worktree in the town, so it is as fresh as the last fetch by anybody.
 #
 # States, and the distinction gqlc-d38n turns on — "behind because working" is
-# not "behind because parked", and only the second is a defect:
-#   current  HEAD is origin/master
-#   parked   clean, and holding nothing that some other ref does not already
-#            hold, so moving it can lose nothing. THIS is the 14-commit case.
-#   working  a dirty tree, or commits that live in this checkout and nowhere
-#            else. Legitimately behind; reported, never counted as stale.
-#   unknown  no worktree, or git could not answer. Never rendered as current:
-#            a question that was not answered is not a clean answer.
+# not "behind because parked", and only the second is a defect. Extended by
+# decision 0008 to name a fourth state git alone cannot judge:
+#   current   HEAD is origin/master
+#   parked    clean, and holding nothing that some other ref does not already
+#             hold, so moving it can lose nothing. THIS is the 14-commit case.
+#   working   a dirty tree, or commits that live in this checkout and nowhere
+#             else. Legitimately behind; reported, never counted as stale.
+#   published on a branch, clean, every commit held by its upstream. Nothing
+#             is lost by moving, but "on a branch" is not "finished" — that
+#             question lives in the PR record, which the board cannot ask
+#             without a network call, so it is deferred to seat_refresh_step
+#             (0008). Legitimately behind; reported, never counted as stale.
+#   unknown   no worktree, or git could not answer. Never rendered as current:
+#             a question that was not answered is not a clean answer.
 seat_freshness() {
     local seat=$1 target=$2 wt head branch dirty ahead behind_all behind_gates
     wt=$(seat_worktree "$seat")
@@ -3441,10 +3487,13 @@ seat_freshness() {
     # better and would put an unreachable fallback under the second call, which
     # a mutation duly SURVIVED: rev-list cannot fail for a ref rev-parse has
     # just verified, so no row could ever reach it.
-    local unique
+    local unique upstream_known=0
     if [ -n "$branch" ]; then
-        unique=$(git_at "$wt" rev-list --count "@{u}..HEAD" 2>/dev/null) || unique=
-        [ -n "$unique" ] || unique=1
+        if unique=$(git_at "$wt" rev-list --count "@{u}..HEAD" 2>/dev/null); then
+            upstream_known=1
+        else
+            unique=1
+        fi
     else
         unique=$ahead
     fi
@@ -3458,6 +3507,15 @@ seat_freshness() {
     fi
     if [ "$head" = "$target" ]; then
         echo "current 0 0 0 at $(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
+        return 0
+    fi
+    # On a branch, clean, upstream resolved, everything held by that upstream:
+    # published. Nothing here is at risk from git's point of view, but nothing
+    # here tells us the branch is FINISHED — an open PR looks identical to a
+    # merged one. The word deliberately refuses to say `parked`; the PR record
+    # is the authority (0008) and seat_refresh_step is where it is consulted.
+    if [ -n "$branch" ] && [ "$upstream_known" -eq 1 ]; then
+        echo "published $behind_all $behind_gates 0 branch $branch fully held by its upstream"
         return 0
     fi
     echo "parked $behind_all $behind_gates 0 at $(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
@@ -3505,6 +3563,57 @@ seat_refresh_step() {
             ;;
         current)
             echo "$seat: current at $(git_at "$wt" rev-parse --short HEAD)$stale_note"
+            return 0
+            ;;
+        published)
+            # git says safe; ask the PR record whether the work is finished
+            # (0008). branch_pr_state answers on stdout with one of four words,
+            # each of which becomes a reason-naming verdict below — two paths
+            # to one HOLD must stay tellable apart.
+            local pr_branch pr_state pr_reason
+            pr_branch=$(git_at "$wt" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+            # Strip the remote prefix; a PR's head is a remote branch and the
+            # local name can differ (a same-named local branch is not the PR
+            # head — town law, measured).
+            pr_branch=${pr_branch#*/}
+            pr_state=$(branch_pr_state "$pr_branch")
+            case "$pr_state" in
+                open)     pr_reason="open PR for $pr_branch — mid-work" ;;
+                none)     pr_reason="published but not shown finished (no PR for $pr_branch)" ;;
+                unanswered) pr_reason="GitHub did not answer; refusing to guess" ;;
+                finished) pr_reason="" ;;
+            esac
+            if [ "$pr_state" != "finished" ]; then
+                if [ "$behind_gates" -eq 0 ]; then
+                    echo "$seat: held ($pr_reason); its hooks are current$stale_note"
+                    return 0
+                fi
+                echo "$seat: HELD — $behind_gates hook/settings change(s) behind master and NOT applied ($pr_reason)$stale_note"
+                return 3
+            fi
+            # finished: safe AND finished. One more conjunct before moving —
+            # km-seat's own wake comment ("no checkout happens under a live
+            # claude") generalised to the sweep and the manual path. Reads the
+            # world (herdr's report), not the status file: a dead-turn seat is
+            # held either way, but a seat whose record says `awake` over a
+            # crashed session is movable, which the record would wrongly
+            # strand. At the wake path the session is never live (km-seat
+            # refreshes before claude starts), so the guard cannot starve the
+            # main clearing route.
+            if seat_session_live "$seat"; then
+                echo "$seat: held (branch $pr_branch finished, but a live session stands in it; its wake-path refresh will take it)$stale_note"
+                return 0
+            fi
+            head=$(git_at "$wt" rev-parse HEAD)
+            if [ "$check" -eq 1 ]; then
+                echo "$seat: would refresh (branch $pr_branch finished: every PR for it is closed) — --check, nothing moved$stale_note"
+                return 0
+            fi
+            if ! git_at "$wt" checkout --detach --quiet "$target" 2>/dev/null; then
+                echo "$seat: could not move its published worktree to origin/master"
+                return 4
+            fi
+            echo "$seat: refreshed $(git_at "$mr" rev-parse --short "$head") -> $(git_at "$wt" rev-parse --short HEAD) (branch $pr_branch finished: every PR for it is closed)$stale_note"
             return 0
             ;;
     esac
