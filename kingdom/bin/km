@@ -1423,20 +1423,29 @@ cmd_down() {
 # lowering to two citizens, and until this file existed a halt that was raised
 # and lowered left nothing behind at all.
 #
-# The detail field is last because it is free text from argv, and newlines and
-# tabs are squashed out of it: one embedded newline in a reason would otherwise
-# append a second event that nobody performed.
+# The detail field is last because it is free text from argv. Newlines and tabs
+# are squashed out of EVERY interpolated field, not only that one: any field
+# that keeps them appends a second, fully-formed event that nobody performed.
+# The actor is the field that makes this matter rather than merely untidy. It
+# came from $KINGDOM_SEAT unsquashed until gqlc-tq83, so one `km halt` could
+# write a backdated `lower` by `andranik` beneath its own raise — and VI.4
+# reserves lowering to two citizens, which is the reservation this file exists
+# to make auditable. That is accident-resistance, not a security boundary: the
+# file has none, and anyone who can set KINGDOM_SEAT can also append directly.
 halt_log() { # <raise|lower> <actor> <detail> — appends one event
-    local f
+    local f verb actor detail
     f="$(state_dir)/halt-history"
+    verb=$(printf '%s' "$1" | tr '\n\t' '  ')
+    actor=$(printf '%s' "$2" | tr '\n\t' '  ')
+    detail=$(printf '%s' "$3" | tr '\n\t' '  ')
     # Never abort the act being recorded. Under `set -e` a failed append would
     # exit cmd_resume BEFORE the rm, wedging the town halted because a log file
     # could not be written — the record is worth less than the brake. Losing the
     # line SILENTLY is this bead's defect, so the failure is loud instead.
     if ! printf '%s\t%s\t%s\t%s\n' \
-        "$(date -u -Iseconds)" "$1" "$2" "$(printf '%s' "$3" | tr '\n\t' '  ')" \
+        "$(date -u -Iseconds)" "$verb" "$actor" "$detail" \
         >>"$f"; then
-        echo "km: WARNING — could not append to $f; this $1 goes unrecorded" >&2
+        echo "km: WARNING — could not append to $f; this $verb goes unrecorded" >&2
     fi
 }
 
@@ -1472,6 +1481,11 @@ cmd_halt() {
             case "$n" in
                 '' | *[!0-9]*) die "halt --history: count must be a number, got '$n'" ;;
             esac
+            # Force base 10 before the count is used twice. `$((...))` reads a
+            # leading zero as octal and `tail -n` does not, so `--history 010`
+            # printed a header saying 8 above a body of 10 rows — the record
+            # disagreeing with its own count (gqlc-tq83, from Միհր's F3).
+            n=$((10#$n))
             if [ ! -s "$hist" ]; then
                 echo "halt history is empty: no halt has been raised or lowered since $hist was first written"
                 return 0
