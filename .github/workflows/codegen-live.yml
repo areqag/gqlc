@@ -21,6 +21,10 @@ name: codegen-live
 
 on:
   pull_request:
+  # live-smoke is required, so it must run on the merge group too or the
+  # queue would land a merge result it never smoked (ADR 0010). live-smoke-age
+  # stays off it, by the positive enumeration on that job below.
+  merge_group:
   workflow_dispatch:
   schedule:
     - cron: "17 4 * * *"
@@ -45,10 +49,15 @@ jobs:
       - uses: ./.github/actions/setup-just
       - run: just test-codegen-live-neo4j
 
-  # Skipped on pull requests, and GitHub counts a skipped check as satisfying a
-  # required context, so this id must stay off master's required-check list.
+  # Runs only on the nightly cron and manual dispatch; skipped on pull requests
+  # and on merge groups. GitHub counts a skipped check as satisfying a required
+  # context, so this id must stay off master's required-check list.
+  #
+  # Enumerated positively rather than as `!= 'pull_request'`: that negative went
+  # TRUE on a merge group, charging every queued merge the AGE container
+  # wall-time a PR is deliberately not charged (ADR 0010).
   live-smoke-age:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
