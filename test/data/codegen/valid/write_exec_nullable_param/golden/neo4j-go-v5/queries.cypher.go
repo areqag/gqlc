@@ -13,7 +13,7 @@ const removeByTagQueryText = `MATCH (p:Person {optionalTag: $tag}) DELETE p`
 // RemoveByTag executes the RemoveByTag query.
 //
 //	MATCH (p:Person {optionalTag: $tag}) DELETE p
-func (q *Queries) RemoveByTag(ctx context.Context, arg *string) error {
+func (q *queries) RemoveByTag(ctx context.Context, arg *string) error {
 	_, err := q.db.run(ctx, removeByTagQueryText, map[string]any{"tag": arg}, neo4j.AccessModeWrite)
 	return err
 }

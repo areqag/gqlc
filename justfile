@@ -2449,8 +2449,17 @@ test-codegen-live:
 # about neo4j and neither starts a container. They belong to whichever half a
 # PR blocks on, because what they catch is a scenario deleted by the PR in
 # front of you: caught nightly it is caught after the merge (bd gqlc-8jfj).
+# TestTxMethodSet is here for the same reason and is untagged too -- it reflects
+# over the generated packages' method sets, so it needs no container. It is
+# deliberately NOT added to the AGE recipe, which no pull request pays for and
+# whose full battery already covers it.
+#
+# The alternation is a NAME LIST, not a pattern, for the reason the AGE recipe
+# below spells out: -run is unanchored, so a name here silently claims every
+# test that extends it. No name below is a prefix of another test in the module
+# (grepped 2026-08-29).
 test-codegen-live-neo4j:
-    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables' -skip 'TestLiveSmoke/apache-age' ./...
+    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet' -skip 'TestLiveSmoke/apache-age' ./...
 
 # the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
 # the dialect fact the AGE backend's edge-union refusal rests on, the offset

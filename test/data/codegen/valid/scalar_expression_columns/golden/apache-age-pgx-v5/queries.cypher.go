@@ -19,7 +19,7 @@ type OneOfEachScalarRow struct {
 // OneOfEachScalar executes the OneOfEachScalar query.
 //
 //	RETURN true AS b, 1 AS i, 1.5 AS f, 'x' AS s
-func (q *Queries) OneOfEachScalar(ctx context.Context) (OneOfEachScalarRow, error) {
+func (q *queries) OneOfEachScalar(ctx context.Context) (OneOfEachScalarRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneOfEachScalarQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype, v2 ag_catalog.agtype, v3 ag_catalog.agtype")
 	if err != nil {
 		return OneOfEachScalarRow{}, err

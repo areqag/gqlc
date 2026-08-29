@@ -17,7 +17,7 @@ type EventsInRangeParams struct {
 // EventsInRange executes the EventsInRange query.
 //
 //	MATCH (e:Event) WHERE e.created >= $from AND e.created <= $to RETURN e.name AS name
-func (q *Queries) EventsInRange(ctx context.Context, arg EventsInRangeParams) ([]string, error) {
+func (q *queries) EventsInRange(ctx context.Context, arg EventsInRangeParams) ([]string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventsInRangeQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

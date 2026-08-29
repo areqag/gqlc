@@ -22,7 +22,7 @@ type PeopleByAgeAndLocaleRow struct {
 // PeopleByAgeAndLocale executes the PeopleByAgeAndLocale query.
 //
 //	MATCH (p:Person) WHERE p.age > $minAge AND p.locale = $locale RETURN p.name, p.age
-func (q *Queries) PeopleByAgeAndLocale(ctx context.Context, arg PeopleByAgeAndLocaleParams) ([]PeopleByAgeAndLocaleRow, error) {
+func (q *queries) PeopleByAgeAndLocale(ctx context.Context, arg PeopleByAgeAndLocaleParams) ([]PeopleByAgeAndLocaleRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", peopleByAgeAndLocaleQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

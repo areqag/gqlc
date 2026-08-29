@@ -17,7 +17,7 @@ type ListyColumnsRow struct {
 // ListyColumns executes the ListyColumns query.
 //
 //	MATCH (l:Listy) RETURN l.tags AS tags, l.ranks AS ranks
-func (q *Queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
+func (q *queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", listyColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -69,7 +69,7 @@ type ListyRowRow struct {
 // ListyRow executes the ListyRow query.
 //
 //	MATCH (l:Listy) RETURN l.tags AS tags, l.ranks AS ranks
-func (q *Queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
+func (q *queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", listyRowQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return ListyRowRow{}, err
@@ -127,7 +127,7 @@ type ListyMixedRow struct {
 // ListyMixed executes the ListyMixed query.
 //
 //	MATCH (l:Listy) RETURN l.tags AS tags, l.spare AS spare, l.ranks AS ranks
-func (q *Queries) ListyMixed(ctx context.Context) ([]ListyMixedRow, error) {
+func (q *queries) ListyMixed(ctx context.Context) ([]ListyMixedRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", listyMixedQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype, v2 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

@@ -15,7 +15,7 @@ const oneActorQueryText = `MATCH (p:Person) RETURN p`
 // OneActor executes the OneActor query.
 //
 //	MATCH (p:Person) RETURN p
-func (q *Queries) OneActor(ctx context.Context) (Actor, error) {
+func (q *queries) OneActor(ctx context.Context) (Actor, error) {
 	records, err := q.db.run(ctx, oneActorQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return Actor{}, err

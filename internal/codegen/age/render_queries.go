@@ -242,7 +242,7 @@ func zeroLiteral(goType string) string {
 // writeMethod writes the method definition + body (spec §5.3 / §5.5).
 func writeMethod(b *strings.Builder, p codegen.Query) {
 	writeDocComment(b, p)
-	b.WriteString("func (q *Queries) ")
+	b.WriteString("func (q *queries) ")
 	writeMethodSignature(b, p)
 	b.WriteString(" {\n")
 	switch p.Cardinality {

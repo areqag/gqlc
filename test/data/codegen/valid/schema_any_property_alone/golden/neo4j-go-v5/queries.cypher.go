@@ -15,7 +15,7 @@ const blobsQueryText = `MATCH (b:Blob) RETURN b`
 // Blobs executes the Blobs query.
 //
 //	MATCH (b:Blob) RETURN b
-func (q *Queries) Blobs(ctx context.Context) ([]Blob, error) {
+func (q *queries) Blobs(ctx context.Context) ([]Blob, error) {
 	records, err := q.db.run(ctx, blobsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

@@ -15,7 +15,7 @@ const oneMarkerQueryText = `MATCH (m:Marker) RETURN m`
 // OneMarker executes the OneMarker query.
 //
 //	MATCH (m:Marker) RETURN m
-func (q *Queries) OneMarker(ctx context.Context) (Marker, error) {
+func (q *queries) OneMarker(ctx context.Context) (Marker, error) {
 	records, err := q.db.run(ctx, oneMarkerQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return Marker{}, err

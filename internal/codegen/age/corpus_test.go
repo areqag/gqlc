@@ -36,10 +36,14 @@ const corpusModule = "module " + corpusPackage + "\n\ngo 1.26.2\n"
 // the pgx row surface this module has no dependency on.
 const temporalSource = "temporal.cypher"
 
-// graphStub stands in for the emitted Queries, which carries a pgx
-// handle this module has no dependency on. The field name and the method
-// bodies under test are the emitted ones; only the surrounding struct
-// and the handle it holds are written here.
+// graphStub stands in for the emitted core and root handle, which carry
+// a pgx handle this module has no dependency on. The field names and the
+// method bodies under test are the emitted ones; only the surrounding
+// structs and the handle they hold are written here.
+//
+// The embed is not decoration: the helpers below are emitted on *queries
+// and the driver calls them on a *Queries, so the corpus compiles only
+// if promotion reaches them.
 //
 // The handle records the one argument a query binds instead of sending
 // it. Everything an instant parameter is encoded through is on that
@@ -53,9 +57,13 @@ import (
 	"strings"
 )
 
-type Queries struct {
+type queries struct {
 	db    *recordingDB
 	graph string
+}
+
+type Queries struct {
+	queries
 }
 
 type recordingDB struct{ args string }

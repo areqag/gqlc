@@ -12,7 +12,7 @@ const eventIdsQueryText = `MATCH (e:Event) RETURN e.id AS id`
 // EventIds executes the EventIds query.
 //
 //	MATCH (e:Event) RETURN e.id AS id
-func (q *Queries) EventIds(ctx context.Context) ([]int64, error) {
+func (q *queries) EventIds(ctx context.Context) ([]int64, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventIdsQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ type EventColumnsRow struct {
 // EventColumns executes the EventColumns query.
 //
 //	MATCH (e:Event) RETURN e.marker AS marker, e.payload AS payload
-func (q *Queries) EventColumns(ctx context.Context) ([]EventColumnsRow, error) {
+func (q *queries) EventColumns(ctx context.Context) ([]EventColumnsRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ const eventMarkerQueryText = `MATCH (e:Event) RETURN e.marker AS marker`
 // EventMarker executes the EventMarker query.
 //
 //	MATCH (e:Event) RETURN e.marker AS marker
-func (q *Queries) EventMarker(ctx context.Context) (any, error) {
+func (q *queries) EventMarker(ctx context.Context) (any, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventMarkerQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -142,7 +142,7 @@ const eventPayloadQueryText = `MATCH (e:Event) RETURN e.payload AS payload`
 // EventPayload executes the EventPayload query.
 //
 //	MATCH (e:Event) RETURN e.payload AS payload
-func (q *Queries) EventPayload(ctx context.Context) (*any, error) {
+func (q *queries) EventPayload(ctx context.Context) (*any, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventPayloadQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ type EventPropertyColumnsRow struct {
 // EventPropertyColumns executes the EventPropertyColumns query.
 //
 //	MATCH (e:Event) RETURN e.badge AS badge, e.tag AS tag
-func (q *Queries) EventPropertyColumns(ctx context.Context) ([]EventPropertyColumnsRow, error) {
+func (q *queries) EventPropertyColumns(ctx context.Context) ([]EventPropertyColumnsRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventPropertyColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -237,7 +237,7 @@ const eventBadgeQueryText = `MATCH (e:Event) RETURN e.badge AS badge`
 // EventBadge executes the EventBadge query.
 //
 //	MATCH (e:Event) RETURN e.badge AS badge
-func (q *Queries) EventBadge(ctx context.Context) (any, error) {
+func (q *queries) EventBadge(ctx context.Context) (any, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventBadgeQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -278,7 +278,7 @@ const eventTagQueryText = `MATCH (e:Event) RETURN e.tag AS tag`
 // EventTag executes the EventTag query.
 //
 //	MATCH (e:Event) RETURN e.tag AS tag
-func (q *Queries) EventTag(ctx context.Context) (*any, error) {
+func (q *queries) EventTag(ctx context.Context) (*any, error) {
 	stmt, err := q.cypherStmt("$gqlc$", eventTagQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

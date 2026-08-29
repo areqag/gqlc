@@ -20,7 +20,7 @@ type AddSlotParams struct {
 // AddSlot executes the AddSlot query.
 //
 //	CREATE (s:Slot {id: $id, startsAt: $startsAt})
-func (q *Queries) AddSlot(ctx context.Context, arg AddSlotParams) error {
+func (q *queries) AddSlot(ctx context.Context, arg AddSlotParams) error {
 	_, err := q.db.run(ctx, addSlotQueryText, map[string]any{"id": arg.Id, "startsAt": fromTime(arg.StartsAt)}, neo4j.AccessModeWrite)
 	return err
 }
@@ -30,7 +30,7 @@ const slotsFromQueryText = `MATCH (s:Slot) WHERE s.startsAt >= $from RETURN s.id
 // SlotsFrom executes the SlotsFrom query.
 //
 //	MATCH (s:Slot) WHERE s.startsAt >= $from RETURN s.id AS id ORDER BY s.startsAt
-func (q *Queries) SlotsFrom(ctx context.Context, arg Time) ([]int64, error) {
+func (q *queries) SlotsFrom(ctx context.Context, arg Time) ([]int64, error) {
 	records, err := q.db.run(ctx, slotsFromQueryText, map[string]any{"from": fromTime(arg)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ const slotStartQueryText = `MATCH (s:Slot) WHERE s.id = $id RETURN s.startsAt AS
 // SlotStart executes the SlotStart query.
 //
 //	MATCH (s:Slot) WHERE s.id = $id RETURN s.startsAt AS startsAt
-func (q *Queries) SlotStart(ctx context.Context, arg int64) (Time, error) {
+func (q *queries) SlotStart(ctx context.Context, arg int64) (Time, error) {
 	records, err := q.db.run(ctx, slotStartQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return Time{}, err
@@ -80,7 +80,7 @@ const oneSlotQueryText = `MATCH (s:Slot) WHERE s.id = $id RETURN s`
 // OneSlot executes the OneSlot query.
 //
 //	MATCH (s:Slot) WHERE s.id = $id RETURN s
-func (q *Queries) OneSlot(ctx context.Context, arg int64) (Slot, error) {
+func (q *queries) OneSlot(ctx context.Context, arg int64) (Slot, error) {
 	records, err := q.db.run(ctx, oneSlotQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return Slot{}, err

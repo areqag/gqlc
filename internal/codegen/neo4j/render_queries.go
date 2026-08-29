@@ -350,7 +350,7 @@ func zeroValueText(p codegen.Query) string {
 func writeMethod(b *strings.Builder, p codegen.Query) {
 	// Doc comment: first 3 lines of query text, prefixed "//   ".
 	writeDocComment(b, p)
-	b.WriteString("func (q *Queries) ")
+	b.WriteString("func (q *queries) ")
 	writeMethodSignature(b, p)
 	b.WriteString(" {\n")
 

@@ -19,7 +19,7 @@ type ListyColumnsRow struct {
 // ListyColumns executes the ListyColumns query.
 //
 //	MATCH (l:Listy) RETURN l.tags AS tags, l.ranks AS ranks
-func (q *Queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
+func (q *queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
 	records, err := q.db.run(ctx, listyColumnsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ type ListyRowRow struct {
 // ListyRow executes the ListyRow query.
 //
 //	MATCH (l:Listy) RETURN l.tags AS tags, l.ranks AS ranks
-func (q *Queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
+func (q *queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
 	records, err := q.db.run(ctx, listyRowQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return ListyRowRow{}, err
@@ -132,7 +132,7 @@ type ListyMixedRow struct {
 // ListyMixed executes the ListyMixed query.
 //
 //	MATCH (l:Listy) RETURN l.tags AS tags, l.spare AS spare, l.ranks AS ranks
-func (q *Queries) ListyMixed(ctx context.Context) ([]ListyMixedRow, error) {
+func (q *queries) ListyMixed(ctx context.Context) ([]ListyMixedRow, error) {
 	records, err := q.db.run(ctx, listyMixedQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

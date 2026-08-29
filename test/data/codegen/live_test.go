@@ -158,21 +158,15 @@ type txQuerier interface {
 // its own rather than satisfying begin directly: Begin returns a concrete
 // *Tx and Go has no covariant returns.
 //
-// removePerson and getPersonName run through the handle Tx.Queries hands
-// out, so what they see is the transaction's own view and not the graph's
-// — the distinction txReadsOwnUncommitted exists to read.
+// removePerson and getPersonName are the query methods promoted onto the
+// generated *Tx from its embedded core, so what they see is the
+// transaction's own view and not the graph's — the distinction
+// txReadsOwnUncommitted exists to read.
 type liveTx interface {
 	commit(ctx context.Context) error
 	rollback(ctx context.Context) error
 	removePerson(ctx context.Context, id int64) error
 	getPersonName(ctx context.Context, id int64) (string, error)
-	// beginNested calls Begin on the handle this transaction hands out
-	// and returns Begin's own error verbatim, nil included. A nil is the
-	// refusal not firing, which is the failure the scenario looks for, so
-	// it must not be dressed up as an error. t is for the cleanup on that
-	// path only: an arm whose Begin was served gives the transaction back
-	// before returning, and has nowhere else to report a failure to.
-	beginNested(ctx context.Context, t *testing.T) error
 }
 
 // edgeUnionQuerier is one arm's edge_union_undeclared_relationship_type
@@ -389,6 +383,18 @@ type writeBackend interface {
 	mixedReadWriteBatch() mixedReadWriteBatchQuerier
 	timestampRoundtrip() timestampRoundtripQuerier
 	tx() txQuerier
+
+	// refuseBeginOnBoundHandle binds a generated handle to a driver
+	// transaction through WithTx and calls the generated Begin on it,
+	// returning Begin's own error verbatim, nil included. A nil is the
+	// refusal not firing, which is the failure the scenario looks for, so
+	// it must not be dressed up as an error.
+	//
+	// It lives on the backend and not on liveTx because with the querier
+	// embedded there is no longer any transaction-bound handle reachable
+	// from a *Tx — the arm has to reach the driver itself, and the
+	// backend is what owns the pool or driver.
+	refuseBeginOnBoundHandle(ctx context.Context, t *testing.T) error
 }
 
 // edgeUnionBackend is a scenario's view of an edgeUnionHarness.
@@ -525,7 +531,7 @@ var writeScenarios = []struct {
 	{name: "tx: reads its own uncommitted write", run: txReadsOwnUncommitted},
 	{name: "tx: second Commit is ErrTxDone", run: txDoubleCommitIsRefused},
 	{name: "tx: Rollback after Commit is nil", run: txRollbackAfterCommitIsNil},
-	{name: "tx: Begin inside a transaction is refused", run: txBeginIsRefusedInsideATransaction},
+	{name: "tx: Begin on a transaction-bound handle is refused", run: txBeginIsRefusedOnATransactionBoundHandle},
 }
 
 // temporalScenarios and zonedTimeScenarios are the batteries an arm runs once
@@ -1219,17 +1225,18 @@ func txRollbackAfterCommitIsNil(ctx context.Context, t *testing.T, b writeBacken
 	require.ErrorIs(t, err, q.errNoRows(), "the late Rollback must not have reached the driver")
 }
 
-// txBeginIsRefusedInsideATransaction holds the nesting refusal. Neo4j
-// cannot nest, and a surface that nests on the other backend is the
+// txBeginIsRefusedOnATransactionBoundHandle holds the nesting refusal.
+// Neo4j cannot nest, and a surface that nests on the other backend is the
 // portability failure the Tx object exists to remove, so AGE refuses too
 // rather than opening a savepoint.
-func txBeginIsRefusedInsideATransaction(ctx context.Context, t *testing.T, b writeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
-	q := b.tx()
-	b.seed(ctx, t, txSeed)
-
-	tx := openTx(ctx, t, q)
-
-	err := tx.beginNested(ctx, t)
+//
+// The generated *Tx cannot reach this refusal at all: with the querier
+// embedded, tx.Begin does not compile, and TestTxMethodSet is what
+// witnesses that. What remains reachable — and so still needs a live
+// witness — is the handle bound to a caller-owned transaction by WithTx,
+// whose boundness is a dynamic-type fact the compiler cannot see.
+func txBeginIsRefusedOnATransactionBoundHandle(ctx context.Context, t *testing.T, b writeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	err := b.refuseBeginOnBoundHandle(ctx, t)
 	require.Error(t, err, "Begin on a handle already bound to a transaction must be refused, not served")
 	require.ErrorContains(t, err, txNestedRefusal,
 		"the refusal must name itself; another failure of Begin would satisfy the line above while the refusal never fired")
