@@ -149,12 +149,22 @@ while :; do
     effort=$class_effort
     bead_ids=$(printf '%s\n' "$reasons" | sed -n 's/^bead:\([^[:space:]][^[:space:]]*\).*$/\1/p' | tr '\n' ' ')
     asked=""
+    beads_json='[]'
+    beads_read=1
     if [ -n "$bead_ids" ]; then
+        # bd's exit code is not the health signal: it is 1 both when the ledger
+        # is unreachable and when every id named simply does not exist, and
+        # those owe opposite lines. Its stdout does separate them — a miss
+        # prints an error OBJECT, an unreachable ledger prints nothing — so bd
+        # is run on its own, out of the pipeline, where pipefail cannot fold
+        # the two together, and `|| true` swallows the code without discarding
+        # the payload that tells them apart.
         # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
-        asks=$(bd show $bead_ids --json 2>/dev/null |
-            jq -r 'if type == "array" then . else [.] end
-                   | .[] | .id as $i | (.labels // [])[]
-                   | select(startswith("effort:")) | "\($i) \(ltrimstr("effort:"))"' 2>/dev/null) || asks=""
+        raw=$(bd show $bead_ids --json 2>/dev/null) || true
+        beads_json=$(jq -c 'if type == "array" then . else [.] end' <<<"$raw" 2>/dev/null) || beads_json=""
+        [ -n "$beads_json" ] || { beads_json='[]'; beads_read=0; }
+        asks=$(jq -r '.[] | .id as $i | (.labels // [])[]
+                   | select(startswith("effort:")) | "\($i) \(ltrimstr("effort:"))"' <<<"$beads_json" 2>/dev/null) || asks=""
         for b in $bead_ids; do
             # Wake order, not bd's: `bd show a b` does not promise to answer in
             # the order it was asked, and "the first bead named" is a claim
@@ -174,6 +184,58 @@ while :; do
     fi
     effort_args=()
     [ -z "$effort" ] || effort_args=(--effort "$effort")
+
+    # A wake reason is derived when the wake is QUEUED and read here, and until
+    # now nothing between the two re-checked its premise (bd gqlc-oqu5). Three
+    # instances measured 2026-08-29, each falsifying a DIFFERENT field of the
+    # same sentence: a bead that had since closed, a bead whose class label
+    # contradicted the reason's "carries no class: label", and a bead claimed by
+    # another seat 21 seconds after dispatch composed "ready warrior work —
+    # claim it before you begin".
+    #
+    # Those 21 seconds are why this re-derives unconditionally instead of
+    # rejecting a reason for being old: no freshness threshold worth having
+    # would have caught the third, and the town was healthy when it happened.
+    # Staleness here is a race inherent to deriving early and consuming late,
+    # not a symptom of a slow queue.
+    #
+    # The reason itself is never edited or dropped. It is provenance — it says
+    # what the town believed when it woke you, and a citizen shown only the
+    # corrected state cannot tell a race from a bug. What is added is the bead's
+    # state read HERE, which corrects an arbitrary stale field without anyone
+    # having to predict which fields rot; that enumeration was already short by
+    # one twice in one day. Only the two mechanical contradictions are called
+    # out on top, and dispatch's wording is deliberately not pattern-matched:
+    # the facts line states the labels, and that IS the correction.
+    for b in $bead_ids; do
+        row=$(jq -r --arg i "$b" '.[] | select(.id == $i)
+                | [ .id, (.status // "-"),
+                    (if (.assignee // "") == "" then "-" else .assignee end),
+                    ((.labels // []) | join(",") | if . == "" then "-" else . end) ]
+                | join(" ")' <<<"$beads_json" 2>/dev/null) || row=""
+        if [ -z "$row" ]; then
+            [ "$beads_read" -eq 1 ] || continue
+            reasons="$reasons
+STALE: $b does not resolve on the ledger at wake time, so nothing said about it above can be acted on."
+            continue
+        fi
+        read -r _ b_status b_assignee b_labels <<<"$row"
+        reasons="$reasons
+$b now, re-derived at wake: status=$b_status assignee=$b_assignee labels=$b_labels"
+        if [ "$b_status" = closed ]; then
+            reasons="$reasons
+STALE: $b is closed, so that reason is spent — do not act on it."
+        elif [ "$b_assignee" != "-" ] && [ "$b_assignee" != "$seat" ]; then
+            reasons="$reasons
+STALE: $b is held by $b_assignee, not you — do not claim it. If it was meant to be yours, say so rather than taking it."
+        fi
+    done
+    # Fail loud. A silent fall-back to the old behaviour would retire this guard
+    # exactly when the ledger is sick, which is when a reason is least trustworthy.
+    if [ "$beads_read" -eq 0 ]; then
+        reasons="$reasons
+The bead(s) named above could not be re-derived — the ledger query failed — so treat every claim in those lines as unverified."
+    fi
 
     # A seat runs the hooks in its own checkout, so a parked one keeps running
     # the gates it was created with however many have merged since (bd
