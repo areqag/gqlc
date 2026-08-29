@@ -722,7 +722,7 @@ elif got != model:
     codes.append("M"); says.append("--model %s, want %s" % (got or "<empty>", model))
 
 # --effort is the one axis where DIFFERENT is legal. A bead carrying an
-# `effort:<level>` label wakes its seat at that level instead of the class
+# effort:<level> label wakes its seat at that level instead of the class
 # default, and Constitution V.6.2 lets any citizen write one without asking
 # (km-seat honours it; bd gqlc-jmwh). So equality with the class default would
 # go red for a seat launched exactly as the town intends, and a permanently red
