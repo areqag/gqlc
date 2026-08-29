@@ -59,7 +59,7 @@
       {
         "hooks": [
           {
-            "command": ".githooks/bd-gh-sync pull 2>&1 | tail -1",
+            "command": "out=\"$(.githooks/bd-gh-sync pull 2>&1)\"; rc=$?; printf '%s\\n' \"${out}\" | tail -1; exit \"${rc}\"",
             "type": "command"
           },
           {
