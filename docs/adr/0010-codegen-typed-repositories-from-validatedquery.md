@@ -13,9 +13,13 @@ consumer, not by protocol.
 
 - Parser Stages 1–15 and resolver R0–R7 are complete. `resolver.Resolve`
   yields `ValidatedQuery{Columns, Parameters, Statement, Distinct}` with the
-  sealed `ResolvedType` sum: `node`, `edge`, `edgeUnion`, `property`
-  (bit-width families, ADR 0002), `scalar` (6 kinds), `temporal` (6 kinds),
-  `list<T>`, `unknown`.
+  `ResolvedType` sum whose eight arms — `node`, `edge`, `edgeUnion`,
+  `property` (bit-width families, ADR 0002), `scalar` (6 kinds),
+  `temporal` (6 kinds), `list<T>`, `unknown` — are the whole set of
+  types that DECLARE the unexported `isResolvedType` marker (sealed for
+  compile-time exhaustiveness); pointer forms and structs embedding a
+  variant satisfy the interface too, so the set of concrete inhabitants
+  is unbounded (see `internal/resolver/validated.go` on `ResolvedType`).
 - ADR 0005: generated code executes the **original query text verbatim**,
   `$param` placeholders intact, values bound by name. The model shapes
   signatures only; it never reconstructs the query. Original text must be

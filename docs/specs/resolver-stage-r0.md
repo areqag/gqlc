@@ -242,8 +242,15 @@ either way, it is not an R0 fixture.
 
 ### 3.4 `ResolvedType` — the resolved-type sum
 
-`ResolvedType` is the sealed sum the columns and parameters carry. It is
-the resolver's vocabulary, distinct from `query.Type`: it may add
+`ResolvedType` is the resolved-type sum the columns and parameters
+carry — sealed for compile-time exhaustiveness in that the eight
+variants are the whole set of types that DECLARE the unexported
+`isResolvedType` marker, but not a closed set of concrete inhabitants:
+pointer forms and structs embedding a variant satisfy the interface
+without declaring the marker, so an out-of-package caller can write
+one no arm names (see `internal/resolver/validated.go` on
+`ResolvedType`). It is the resolver's vocabulary, distinct from
+`query.Type`: it may add
 variants `query.Type` does not carry (`ResolvedProperty` with a
 `graph.PropertyType` payload), it may collapse variants `query.Type`
 distinguishes but the resolver does not use, and it evolves per stage
