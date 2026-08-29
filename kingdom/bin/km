@@ -596,11 +596,24 @@ seat_wake_queue_age() { # <seat> -> seconds since mtime, or empty
 # REPORT ONLY, never remediate. Fixing a mis-launched session means ending it,
 # and a citizen's session is not km's to end on a timer (Constitution VI.2).
 #
-# The seat's claude is resolved by CWD, not by process ancestry. km-seat cds to
-# the worktree before exec'ing claude, so the seat's tree is the process's cwd —
-# and, unlike a walk from the km-seat pid, that still finds a session somebody
-# started by hand in the pane, which IS the population this exists for. herdr
-# knows the pane but reports no pid, so it cannot answer this.
+# The seat's claude is FOUND by cwd. km-seat cds to the worktree before exec'ing
+# claude, so the seat's tree is the process's cwd — and, unlike a walk down from
+# the km-seat pid, that still finds a session somebody started by hand in the
+# pane, which IS the population this exists for. herdr knows the pane but
+# reports no pid, so it cannot answer this.
+#
+# Ancestry then does one job only: a claude descended from another claude in the
+# same worktree is that session's own child, not a second session. Claude Code
+# forks before exec'ing its tools, and inside the fork/exec window the child
+# still reads exe=claude and cwd=the worktree while carrying a COPY of the
+# parent's argv — conforming, not merely indistinguishable. Measured over 300s
+# of the live sixteen-seat town on 2026-08-29: 33 such extras across 9 seats (32
+# caught mid-fork on their way to becoming a grep, one a citizen's own
+# `claude --help`), 23510 sightings, every one of them descended from that
+# seat's own session and not one ambiguous. Without this filter km doctor went
+# red at random on a healthy town, and a permanently red gate is one nobody
+# reads. Two INDEPENDENT claudes in one worktree still say '?': that is the
+# two-live-turns-on-one-tree hazard, and it is worth the alarm.
 seat_launch_probe() { # <worktree> <want-model> <want-effort> <want-permission-mode> -> "<code>\t<detail>"
     KM_LAUNCH_WT=$1 KM_LAUNCH_MODEL=$2 KM_LAUNCH_EFFORT=$3 KM_LAUNCH_PM=$4 python3 -c '
 import os, sys
@@ -619,6 +632,12 @@ def argv_of(pid):
         parts.pop()
     return [p.decode("utf-8", "replace") for p in parts]
 
+def ppid_of(pid):
+    # Field 4 of stat. comm sits in parens and may itself contain one, so the
+    # split starts after the LAST close paren.
+    with open("/proc/%s/stat" % pid) as f:
+        return f.read().rpartition(")")[2].split()[1]
+
 found = []
 try:
     pids = [d for d in os.listdir("/proc") if d.isdigit()]
@@ -633,9 +652,10 @@ for pid in pids:
             continue
         if os.path.realpath(os.readlink("/proc/%s/cwd" % pid)) != wt:
             continue
+        ppid = ppid_of(pid)
     except OSError:
         continue          # it exited, or is not ours to read; not this seat s answer
-    found.append((pid, argv))
+    found.append((pid, ppid, argv))
 
 if not found:
     # FAIL LOUD. gqlc-jvlu is one line long: a lookup that cannot read its input
@@ -644,15 +664,33 @@ if not found:
     # process is a contradiction, not an idle seat.
     print("?\therdr reports a live agent in this pane but no claude process runs in %s, so nothing could be compared" % wt)
     sys.exit(0)
-if len(found) > 1:
-    # Named rather than resolved by picking one. Which of two is THE seat s
-    # session is not a question this can answer, and guessing would let a
-    # conforming stray vouch for a mis-launched citizen.
-    print("?\t%d claude processes run in %s (pids %s); which one is the seat is not something this can decide"
-          % (len(found), wt, ", ".join(p for p, _ in found)))
+cand = set(pid for pid, _, _ in found)
+roots = []
+for pid, ppid, argv in found:
+    cur, descends = ppid, False
+    for _ in range(64):
+        if cur in cand:
+            descends = True
+            break
+        if cur in ("0", "1"):
+            break
+        try:
+            cur = ppid_of(cur)
+        except OSError:
+            break     # the parent exited mid-walk; this one stays a root
+    if not descends:
+        roots.append((pid, argv))
+
+if len(roots) != 1:
+    # Named rather than resolved by picking one. Two INDEPENDENT claudes in one
+    # worktree is the two-live-turns-on-one-tree hazard and deserves the alarm;
+    # guessing between them would let a conforming stray vouch for a
+    # mis-launched citizen.
+    print("?\t%d claude processes run in %s, %d of them descended from no other (pids %s); which one is the seat is not something this can decide"
+          % (len(found), wt, len(roots), ", ".join(p for p, _ in roots) or "none"))
     sys.exit(0)
 
-argv = found[0][1]
+argv = roots[0][1]
 
 def flag(name):
     """The value of --name, as a space pair or --name=value. None if absent."""
@@ -3673,15 +3711,15 @@ cmd_doctor() {
     # Per seat and never in aggregate: an "all seats ok" over sixteen sources
     # passes when fifteen go silent, so each seat is judged alone and an
     # unresolvable process is named rather than skipped.
-    local ls lcode lsay lbad="" lseen=0
-    for cs in $(seats_all); do
-        ls=$(seat_launch_state "$cs")
+    local lseat ls lcode lsay lbad="" lseen=0
+    for lseat in $(seats_all); do
+        ls=$(seat_launch_state "$lseat")
         lcode=${ls%%$'\t'*}
         lsay=${ls#*$'\t'}
         [ "$lcode" = "-" ] && continue
         lseen=$((lseen + 1))
         [ "$lcode" = ok ] && continue
-        lbad="$lbad $cs($lcode: $lsay);"
+        lbad="$lbad $lseat($lcode: $lsay);"
     done
     if [ -n "$lbad" ]; then
         echo "FAIL: live sessions whose claude process does not match kingdom.toml (P permission mode, S soul, M model, E effort; '?' the process could not be resolved):$lbad settings are read at launch, so a running session keeps its flags until it ends — the repair is that seat's next wake through km-seat, and ending a session is nobody's to do on a timer (VI.2)"
