@@ -67,8 +67,8 @@ km — the machinery of the Թագաւորութիւն
   km seat-runner <seat>          exit 0 if the seat has an active herdr agent
   km seat-idle <seat>            exit 0 if the seat's agent_status is `idle`
   km guard-sweep                 wake Րաֆֆի for a round (timer)
-  km halt [reason] | halt --status | resume
-                                 raise / ask about / lower the town halt
+  km halt [reason] | halt --status | halt --history [N] | resume
+                                 raise / ask about / replay / lower the town halt
   km install-units | uninstall-units
   km deploy                      fast-forward the checkout the timers run from
   km doctor                      health checks
@@ -1126,6 +1126,30 @@ cmd_down() {
 
 # ---------- halt ----------
 
+# The flag file answers "is the town stopped now"; this answers "was it ever,
+# and by whom". They are two files because the flag's ABSENCE is the lowered
+# state, so a log that doubled as the flag would have to be deleted to lower a
+# halt — which is the erasure this exists to stop (bd gqlc-nlc1). VI.4 reserves
+# lowering to two citizens, and until this file existed a halt that was raised
+# and lowered left nothing behind at all.
+#
+# The detail field is last because it is free text from argv, and newlines and
+# tabs are squashed out of it: one embedded newline in a reason would otherwise
+# append a second event that nobody performed.
+halt_log() { # <raise|lower> <actor> <detail> — appends one event
+    local f
+    f="$(state_dir)/halt-history"
+    # Never abort the act being recorded. Under `set -e` a failed append would
+    # exit cmd_resume BEFORE the rm, wedging the town halted because a log file
+    # could not be written — the record is worth less than the brake. Losing the
+    # line SILENTLY is this bead's defect, so the failure is loud instead.
+    if ! printf '%s\t%s\t%s\t%s\n' \
+        "$(date -u -Iseconds)" "$1" "$2" "$(printf '%s' "$3" | tr '\n\t' '  ')" \
+        >>"$f"; then
+        echo "km: WARNING — could not append to $f; this $1 goes unrecorded" >&2
+    fi
+}
+
 cmd_halt() {
     ensure_state_tree
     local sd
@@ -1151,6 +1175,23 @@ cmd_halt() {
             fi
             return 0
             ;;
+        --history)
+            shift
+            local n="${1:-10}" hist total shown
+            hist="$sd/halt-history"
+            case "$n" in
+                '' | *[!0-9]*) die "halt --history: count must be a number, got '$n'" ;;
+            esac
+            if [ ! -s "$hist" ]; then
+                echo "halt history is empty: no halt has been raised or lowered since $hist was first written"
+                return 0
+            fi
+            total=$(wc -l <"$hist")
+            shown=$((total < n ? total : n))
+            echo "halt history — last $shown of $total events ($hist)"
+            tail -n "$n" "$hist" | awk -F'\t' '{ printf "  %s  %-5s  %-10s  %s\n", $1, $2, $3, $4 }'
+            return 0
+            ;;
         -*)
             # This verb used to take its whole argv as the reason, so a flag it
             # did not know became one and stopped the town — exit 0, and the same
@@ -1171,6 +1212,9 @@ cmd_halt() {
     require_identity halt
     printf 'raised by %s at %s: %s\n' "$KINGDOM_SEAT" "$(date -u -Iseconds)" "$reason" \
         >"$sd/halt"
+    # After the flag, not before: if the truncating write above fails, `set -e`
+    # stops here and the history does not claim a halt that was never raised.
+    halt_log raise "$KINGDOM_SEAT" "$reason"
     # Names both timers, and says which paths it does NOT bind. The line used to
     # promise a quiet town while naming only the dispatcher, so an operator had
     # no reason to suspect the guard sweep was still launching sessions behind
@@ -1209,9 +1253,15 @@ cmd_resume() {
             ;;
     esac
     if [ -f "$(state_dir)/halt" ]; then
+        # The detail is the raise line verbatim, so a lower event is readable on
+        # its own without scanning backwards for the raise it answers — and so
+        # that nothing here has to parse the flag's prose for a reason.
+        halt_log lower "$seat" "$(head -1 "$(state_dir)/halt")"
         rm -f "$(state_dir)/halt"
         echo "halt lowered by $seat: the dispatcher may wake seats again"
     else
+        # Recorded nowhere: nothing came down, so no reserved power was
+        # exercised. The history is a log of state changes, not of attempts.
         echo "no halt was raised"
     fi
 }
