@@ -310,6 +310,14 @@ type zonedTimeHarness interface {
 	zonedTimeScenario(ctx context.Context, t *testing.T) zonedTimeBackend
 }
 
+// savepointHarness is an arm whose driver serves a nested Begin with a
+// savepoint instead of refusing it. Only such an arm can be left holding
+// one, so only such an arm is asked to prove it is not.
+type savepointHarness interface {
+	harness
+	savepointScenario(ctx context.Context, t *testing.T) savepointBackend
+}
+
 // backend is one scenario's isolated view of an arm: a graph no other
 // scenario observes, and the generated handles bound to it.
 //
@@ -350,18 +358,40 @@ type zonedTimeBackend interface {
 	zonedTimeRoundtrip() zonedTimeRoundtripQuerier
 }
 
+// savepointBackend is a scenario's view of a savepointHarness: the two
+// nested Begins its driver can be given, each reporting whether the
+// transaction it ran in was left holding a savepoint afterwards.
+//
+// Each call opens a driver transaction of its own and neither shares one
+// with the other, because on at least one arm the probe that finds no
+// savepoint is itself an error and aborts the transaction it asked in.
+type savepointBackend interface {
+	// refuseNestedBegin calls the GENERATED Begin on a handle bound to a
+	// driver transaction and returns the probe's answer alongside that
+	// Begin's error verbatim, nil included.
+	refuseNestedBegin(ctx context.Context, t *testing.T) (savepoint bool, refusal error)
+
+	// serveNestedBegin opens a savepoint through the DRIVER's own nested
+	// Begin and returns the same probe's answer. The probe names a
+	// savepoint the driver chooses the name of, so this is what holds the
+	// name: without it a driver that renamed its savepoints would make
+	// refuseNestedBegin report "none" for a transaction holding one.
+	serveNestedBegin(ctx context.Context, t *testing.T) (savepoint bool)
+}
+
 // arms are the backends the battery runs against. Each adapter owns its
 // container, its connection, and its isolation strategy.
 //
 // writes records that the arm's target emits the write fixture, edgeUnions
 // that it emits an edge-union dispatch, temporals that it admits the zoneless
-// temporal widths, and zonedTime that it admits TIME WITH TIME ZONE.
+// temporal widths, zonedTime that it admits TIME WITH TIME ZONE, and
+// savepoints that its driver serves a nested Begin with one.
 // TestLiveSmoke holds each harness to its column, so an arm that stops
-// satisfying writeHarness, edgeUnionHarness, temporalHarness or
-// zonedTimeHarness fails the battery rather than dropping those scenarios
-// unremarked — and an arm that starts satisfying one fails it too, which is
-// what would happen if Apache AGE gained the alternation and the backend's
-// refusal were lifted, or if it gained a temporal encoding.
+// satisfying writeHarness, edgeUnionHarness, temporalHarness,
+// zonedTimeHarness or savepointHarness fails the battery rather than dropping
+// those scenarios unremarked — and an arm that starts satisfying one fails it
+// too, which is what would happen if Apache AGE gained the alternation and the
+// backend's refusal were lifted, or if it gained a temporal encoding.
 var arms = []struct {
 	name       string
 	start      func(ctx context.Context, t *testing.T) harness
@@ -369,10 +399,11 @@ var arms = []struct {
 	edgeUnions bool
 	temporals  bool
 	zonedTime  bool
+	savepoints bool
 }{
 	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true, edgeUnions: true, temporals: true, zonedTime: true},
 	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true, edgeUnions: true, temporals: true, zonedTime: true},
-	{name: "apache-age-pgx-v5", start: startAGE, writes: true},
+	{name: "apache-age-pgx-v5", start: startAGE, writes: true, savepoints: true},
 }
 
 // readScenarios are the battery every arm runs. Each body is written once
@@ -420,6 +451,16 @@ var zonedTimeScenarios = []struct {
 	run  func(ctx context.Context, t *testing.T, b zonedTimeBackend)
 }{
 	{name: "zoned_time_roundtrip: offset preserved + instant ordering", run: zonedTimeRoundTrip},
+}
+
+// savepointScenarios are the battery an arm runs once its driver serves a
+// nested Begin with a savepoint, written against savepointBackend under the
+// same rules.
+var savepointScenarios = []struct {
+	name string
+	run  func(ctx context.Context, t *testing.T, b savepointBackend)
+}{
+	{name: "tx: the refused nested Begin opens no savepoint", run: txRefusedNestedBeginOpensNoSavepoint},
 }
 
 // edgeUnionScenarios are the battery an arm runs once its target emits an
@@ -518,6 +559,20 @@ func TestLiveSmoke(t *testing.T) {
 							t.Parallel()
 						}
 						sc.run(ctx, t, zh.zonedTimeScenario(ctx, t))
+					})
+				}
+			}
+
+			sph, servesSavepoints := h.(savepointHarness)
+			require.Equal(t, arm.savepoints, servesSavepoints,
+				"the arm's savepoint capability must match the arms table; a driver that gained or lost the savepoint-backed nested Begin updates both")
+			if servesSavepoints {
+				for _, sc := range savepointScenarios {
+					t.Run(sc.name, func(t *testing.T) {
+						if parallelScenarios {
+							t.Parallel()
+						}
+						sc.run(ctx, t, sph.savepointScenario(ctx, t))
 					})
 				}
 			}
@@ -858,6 +913,27 @@ func txBeginIsRefusedInsideATransaction(ctx context.Context, t *testing.T, b wri
 	require.Error(t, err, "Begin on a handle already bound to a transaction must be refused, not served")
 	require.ErrorContains(t, err, txNestedRefusal,
 		"the refusal must name itself; another failure of Begin would satisfy the line above while the refusal never fired")
+}
+
+// txRefusedNestedBeginOpensNoSavepoint holds the one thing about the
+// refusal the row above cannot see: where it stands relative to the
+// driver call it guards.
+//
+// Begin's refusal sits above the b.Begin that would open a savepoint.
+// Below it, the function opens one, abandons it, and returns the same
+// error to the same caller — so the row above stays green over a
+// transaction left holding a savepoint nobody will ever release. Only a
+// probe of the transaction itself can tell the two placements apart.
+func txRefusedNestedBeginOpensNoSavepoint(ctx context.Context, t *testing.T, b savepointBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	savepoint, refusal := b.refuseNestedBegin(ctx, t)
+	require.ErrorContains(t, refusal, txNestedRefusal,
+		"Begin on a transaction-bound handle must be refused by name; this row is about what that refusal did on its way out")
+	require.False(t, savepoint,
+		"the refusal must precede the driver's Begin: placed after it, it hands back the same error over a transaction now holding an abandoned savepoint")
+
+	// Without this the row above passes on a probe that can find nothing.
+	require.True(t, b.serveNestedBegin(ctx, t),
+		"control: the probe must find the savepoint the driver's own nested Begin opens, or its silence above witnesses nothing")
 }
 
 // eventInstants are the instants the timestamp scenario writes, keyed by

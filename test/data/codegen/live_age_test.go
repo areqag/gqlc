@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -179,6 +180,11 @@ func (h *ageArm) writeScenario(ctx context.Context, t *testing.T) writeBackend {
 	return h.newScenario(ctx, t)
 }
 
+func (h *ageArm) savepointScenario(ctx context.Context, t *testing.T) savepointBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
 func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 	t.Helper()
 	graph := fmt.Sprintf("gqlc_live_%d", h.graphs.Add(1))
@@ -240,6 +246,78 @@ func (s ageScenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s
 func (s ageScenario) timestampRoundtrip() timestampRoundtripQuerier { return s.timestamps }
 
 func (s ageScenario) tx() txQuerier { return s.mixed }
+
+// ageNestedSavepoint is the savepoint pgx opens for the first nested Begin
+// on an outer transaction: dbTx.Begin executes `savepoint sp_<n>` off a
+// counter it increments from zero per outer transaction (pgx v5.10.0
+// tx.go:170-171), and pgxpool.Tx.Begin delegates straight to it
+// (pgxpool/tx.go:17-19). serveNestedBegin is what holds this constant to
+// the driver rather than to this comment.
+const ageNestedSavepoint = "sp_1"
+
+// rollbackAtCleanup gives a probe transaction back when the scenario ends, so
+// one that fails mid-probe does not also strand the connection it holds.
+func rollbackAtCleanup(ctx context.Context, t *testing.T, tx pgx.Tx) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := tx.Rollback(ctx); err != nil {
+			t.Logf("rollback probe transaction: %v", err)
+		}
+	})
+}
+
+// holdsNestedSavepoint asks the server to release ageNestedSavepoint and
+// reads the answer: released means it was there, and 3B001 means it was
+// not. Any other failure is a probe that measured something else — an
+// aborted transaction answers 25P02 to every statement, and taken as a
+// bare error it would read exactly like the absence this looks for.
+//
+// The release is destructive, so a caller gets one question per
+// transaction. That is why savepointBackend's two methods do not share one.
+func holdsNestedSavepoint(ctx context.Context, t *testing.T, tx pgx.Tx) bool {
+	t.Helper()
+	if _, err := tx.Exec(ctx, "RELEASE SAVEPOINT "+ageNestedSavepoint); err != nil {
+		var pgErr *pgconn.PgError
+		require.ErrorAs(t, err, &pgErr, "the server's answer to the release must survive the driver")
+		require.Equal(t, "3B001", pgErr.Code,
+			"invalid_savepoint_specification: the only failure that means the savepoint is absent")
+		return false
+	}
+	return true
+}
+
+// refuseNestedBegin binds a generated handle to a driver transaction the
+// way New's contract allows — a pgx.Tx handed straight to it — which is the
+// same q.db a Tx.Queries() handle carries, and calls the generated Begin on
+// it.
+func (s ageScenario) refuseNestedBegin(ctx context.Context, t *testing.T) (bool, error) {
+	t.Helper()
+	tx, err := s.pool.Begin(ctx)
+	require.NoError(t, err, "open a driver transaction on the pool")
+	rollbackAtCleanup(ctx, t, tx)
+
+	nested, err := mixedage.New(tx, s.graph).Begin(ctx)
+	if err == nil {
+		// Begin was served where it should have been refused. The row is
+		// about to fail on that; give the transaction back first so the
+		// failing run does not also strand a connection.
+		if rbErr := nested.Rollback(ctx); rbErr != nil {
+			t.Logf("rollback the transaction Begin should have refused: %v", rbErr)
+		}
+	}
+	return holdsNestedSavepoint(ctx, t, tx), err
+}
+
+func (s ageScenario) serveNestedBegin(ctx context.Context, t *testing.T) bool {
+	t.Helper()
+	tx, err := s.pool.Begin(ctx)
+	require.NoError(t, err, "open a driver transaction on the pool")
+	rollbackAtCleanup(ctx, t, tx)
+
+	_, err = tx.Begin(ctx)
+	require.NoError(t, err, "the driver's own nested Begin must open a savepoint")
+	return holdsNestedSavepoint(ctx, t, tx)
+}
 
 // timestampRoundtripAGE binds the TIMESTAMP fixture. Nothing here names
 // the encoding: the emitted methods take and return time.Time, and the
