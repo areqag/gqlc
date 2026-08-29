@@ -37,7 +37,8 @@ km — the machinery of the Թագաւորութիւն
   km seat-runner <seat>          exit 0 if the seat has an active herdr agent
   km seat-idle <seat>            exit 0 if the seat's agent_status is `idle`
   km guard-sweep                 wake Րաֆֆի for a round (timer)
-  km halt [reason] | resume      raise / lower the town halt
+  km halt [reason] | halt --status | resume
+                                 raise / ask about / lower the town halt
   km install-units | uninstall-units
   km deploy                      fast-forward the checkout the timers run from
   km doctor                      health checks
@@ -991,8 +992,48 @@ cmd_down() {
 
 cmd_halt() {
     ensure_state_tree
-    printf 'raised by %s at %s: %s\n' "${KINGDOM_SEAT:-andranik}" "$(date -u -Iseconds)" "${*:-no reason given}" \
-        >"$(state_dir)/halt"
+    local sd
+    sd="$(state_dir)"
+    # The reason is free text, so only a LEADING dash is read as a flag: dashes
+    # live inside ordinary words and a reason has to be able to carry them.
+    # Everything after the first word is reason, whatever it looks like.
+    case "${1:-}" in
+        -h | --help)
+            # The one spelling in this family a careful person types on purpose,
+            # before running a write verb, to find out what it will do. On
+            # 2026-08-24 a seven-hour outage sat on the board with `--help`
+            # recorded as its cause.
+            usage
+            return 0
+            ;;
+        --status | --show)
+            if [ -f "$sd/halt" ]; then
+                echo "halt is UP: $(head -1 "$sd/halt")"
+                echo "  the dispatcher and the guard sweep wake nobody until it is lowered (km resume)."
+            else
+                echo "no halt is raised: the dispatcher and the guard sweep are routing normally."
+            fi
+            return 0
+            ;;
+        -*)
+            # This verb used to take its whole argv as the reason, so a flag it
+            # did not know became one and stopped the town — exit 0, and the same
+            # success line a deliberate halt prints. Twice in fourteen minutes by
+            # two citizens asking a question (bd gqlc-jqwf).
+            die "halt: unknown flag $1 — to ask whether a halt is up, km halt --status; a reason may not begin with '-'"
+            ;;
+    esac
+    # VI.4 lets two citizens lower a halt; for everyone else the recorded
+    # reason is the whole of what they get, and a blank one forces that read to
+    # be a guess between "stopped on purpose" and "fat-fingered". Whitespace
+    # counts as blank — it is written to the file and reads on the board as
+    # nothing at all (bd gqlc-jqwf).
+    local reason="${*:-}"
+    if [ -z "${reason//[[:space:]]/}" ]; then
+        die "halt: a reason is required — say why the town must stop, so whoever finds it can tell deliberate from accidental"
+    fi
+    printf 'raised by %s at %s: %s\n' "${KINGDOM_SEAT:-andranik}" "$(date -u -Iseconds)" "$reason" \
+        >"$sd/halt"
     # Names both timers, and says which paths it does NOT bind. The line used to
     # promise a quiet town while naming only the dispatcher, so an operator had
     # no reason to suspect the guard sweep was still launching sessions behind
