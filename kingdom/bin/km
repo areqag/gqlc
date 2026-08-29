@@ -289,6 +289,33 @@ deploy_root() { echo "${KM_DEPLOY_ROOT:-$(main_root)}"; }
 # neither, so the two travel together.
 KM_GATE_PATHS=(kingdom/ .githooks/ .claude/)
 
+# Names why the deployed root could not be fast-forwarded; silence means it can.
+#
+# CAPABILITY, which is a different question from kingdom_drift's CONTENT, and
+# the reason both are asked: a root parked off master has zero drift for as long
+# as master does not move, so the content row reads ok while the deploy path is
+# already refusing. Measured 2026-08-29 (bd gqlc-ssfqj): the deploy root sat on
+# a detached HEAD at exactly master's tip, `km doctor` printed "ok: ... match
+# origin/master", and `km deploy` on the same root died "parked on 'a detached
+# HEAD'". Two verdicts from one tree. The defect is invisible until master
+# moves, and what master moving does is start the town running stale machinery.
+#
+# cmd_deploy refuses on this and doctor reports it, from here, so the two cannot
+# come to disagree about which roots are deployable.
+#
+# The git-dir probe is not redundant with symbolic-ref: on a directory that is
+# not a repository at all, symbolic-ref also exits non-zero with empty stdout,
+# so without it every non-repo root is reported as "a detached HEAD" — a
+# measured-sounding sentence about a measurement that never happened.
+deploy_blocker() {
+    local root branch
+    root=$(deploy_root)
+    git_at "$root" rev-parse --git-dir >/dev/null 2>&1 \
+        || { echo "$root is not a git checkout, so nothing can be deployed into it"; return 0; }
+    branch=$(git_at "$root" symbolic-ref --quiet --short HEAD || true)
+    [ "$branch" = master ] || echo "$root is parked on '${branch:-a detached HEAD}', not master"
+}
+
 # Names the deployed paths where the tree differs from origin/master; silence
 # means no drift. It diffs the WORKING TREE, not HEAD, because that is what the
 # units execute: a file edited or staged in place is drift at the right commit.
@@ -451,13 +478,13 @@ set_aside_bd_exports() { # <root>
 
 cmd_deploy() {
     no_args deploy "$@"
-    local root branch drift
+    local root blocker drift
     # The fetch and the merge reach the network and the disk from inside a
     # systemd tick; see git_at. A caller may raise or lower it.
     local KM_GIT_TIMEOUT="${KM_FETCH_TIMEOUT:-60}"
     root=$(deploy_root)
-    branch=$(git_at "$root" symbolic-ref --quiet --short HEAD || true)
-    [ "$branch" = master ] || die "deploy: $root is parked on '${branch:-a detached HEAD}', not master"
+    blocker=$(deploy_blocker)
+    [ -z "$blocker" ] || die "deploy: $blocker"
     git_at "$root" fetch --quiet origin master || die "deploy: cannot reach origin from $root"
     set_aside_bd_exports "$root"
     # --ff-only is still the safety argument for everything except bd's own
@@ -4022,6 +4049,15 @@ cmd_doctor() {
     # "matches origin/master" reports a measured mismatch, so on a root that
     # could not be measured at all it sends the reader to `km deploy` for a
     # difference that was never observed.
+    # Asked BEFORE the content row and independently of it, because a root that
+    # cannot be deployed reads clean on content until master moves — and the
+    # content row is silent for exactly that window (bd gqlc-ssfqj).
+    local deployblocked
+    deployblocked=$(deploy_blocker)
+    if [ -n "$deployblocked" ]; then
+        echo "FAIL: the deploy root cannot be fast-forwarded, so the next drift will not be repaired and the timers will keep running this tree: $deployblocked"
+        ok=1
+    fi
     local drift
     drift=$(kingdom_drift)
     if [ -z "$drift" ]; then
