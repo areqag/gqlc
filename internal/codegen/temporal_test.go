@@ -1,9 +1,11 @@
-package codegen
+package codegen_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/areqag/gqlc/internal/codegen"
 )
 
 func TestTypeTextNamesCarrier(t *testing.T) {
@@ -27,7 +29,7 @@ func TestTypeTextNamesCarrier(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
-			require.Equal(t, row.want, typeTextNamesCarrier(row.text))
+			require.Equal(t, row.want, codegen.TypeTextNamesCarrier(row.text))
 		})
 	}
 }

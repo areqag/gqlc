@@ -1,4 +1,4 @@
-package codegen
+package codegen_test
 
 import (
 	"errors"
@@ -16,6 +16,8 @@ import (
 	"unicode"
 
 	"github.com/stretchr/testify/suite"
+
+	"github.com/areqag/gqlc/internal/codegen"
 )
 
 // taxonomyDoc is the live index of this package's sentinels. The stage
@@ -213,9 +215,10 @@ func (s *SentinelTaxonomySuite) SetupSuite() {
 		byMessage[msg] = ident
 	}
 
-	s.identOf = make(map[error]string, len(allSentinels))
-	s.reachable = make(map[string]bool, len(allSentinels))
-	for _, sentinel := range allSentinels {
+	sentinels := codegen.AllSentinels()
+	s.identOf = make(map[error]string, len(sentinels))
+	s.reachable = make(map[string]bool, len(sentinels))
+	for _, sentinel := range sentinels {
 		ident, ok := byMessage[sentinel.Error()]
 		s.Require().True(ok,
 			"allSentinels holds a value with message %q that no Err* declaration in package codegen constructs; the fence reads those declarations to name the slice's members, so a member must be an Err-named errors.New with a message no other member shares",
@@ -260,7 +263,7 @@ func (s *SentinelTaxonomySuite) TestIndexMatchesReachableSet() {
 		indexed[ident] = true
 	}
 
-	for _, sentinel := range allSentinels {
+	for _, sentinel := range codegen.AllSentinels() {
 		ident := s.identOf[sentinel]
 		s.Require().True(indexed[ident],
 			"%s is in allSentinels but has no row in %s under %q; add one there naming what it refuses and what introduced it, plus a row per refused construct under %q",
@@ -284,7 +287,7 @@ func (s *SentinelTaxonomySuite) TestTaxonomyCoversTheIndex() {
 			taxonomyDoc, taxonomyHeading, ident)
 		covered[ident] = true
 	}
-	for _, sentinel := range allSentinels {
+	for _, sentinel := range codegen.AllSentinels() {
 		ident := s.identOf[sentinel]
 		s.Require().True(covered[ident],
 			"%s is in allSentinels but no row under %q in %s names a construct that reaches it; a sentinel nothing routes to cannot be chosen from the table, and a sentinel whose every branch belongs under %q does not belong in the slice",
@@ -907,14 +910,14 @@ func (s *SentinelTaxonomySuite) TestReservedSetSectionMatchesTheReservedRows() {
 		documented[m[1]] = row[1:]
 	}
 
-	for name := range reservedIdentifiers {
+	for name := range codegen.ReservedIdentifiers {
 		_, ok := documented[name]
 		s.Require().True(ok,
 			"reservedIdentifiers reserves %s, which %s %s does not list; a reader of the document alone then cannot say which targets that name breaks",
 			name, taxonomyDoc, reservedHeading)
 	}
 	for name := range documented {
-		_, ok := reservedIdentifiers[name]
+		_, ok := codegen.ReservedIdentifiers[name]
 		s.Require().True(ok,
 			"%s %s lists %s, which reservedIdentifiers does not hold; the section documents the reserved set, not the emitter's exported surface",
 			taxonomyDoc, reservedHeading, name)
@@ -933,7 +936,7 @@ func (s *SentinelTaxonomySuite) TestReservedSetSectionMatchesTheReservedRows() {
 		// that promotes past it or is silently shadowed by it, which Phase
 		// A refuses on membership alone (prepare.go's declaration).
 		breaksOn := declaredBy
-		if row.scope == scopeMethod {
+		if row.scope == codegen.ScopeMethod {
 			breaksOn = "no target"
 		}
 		s.Require().Equal([]string{"`" + scopeName(row.scope) + "`", declaredBy, breaksOn}, documented[row.name],
