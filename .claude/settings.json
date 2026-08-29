@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
   "statusLine": {
     "type": "command",
     "command": "kingdom/bin/km-statusline"

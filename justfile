@@ -438,6 +438,78 @@ check-shared-config dir=".":
     done
     exit "$rc"
 
+# the checked-in project settings must carry permissions.defaultMode, because a
+# seat resumed by hand gets no launch flags: `claude --resume <uuid>` replays
+# none of them, and a running session's permission mode cannot be changed by any
+# means. Settings FILES are re-read at every launch, so the project file is the
+# only carrier that reaches a launch nobody configured (bd gqlc-keaz).
+#
+# MEASURED 2026-08-29 over four throwaway trees, each asked for one Write:
+#   A  no permissions key                          → DENIED, no file
+#   B  permissions.defaultMode=bypassPermissions   → allowed
+#   C  B plus a settings.local.json of the shape every seat here has (an
+#      allow list, no defaultMode)                 → allowed
+#   D  C's local file, project key removed         → DENIED
+# B against A is that project scope carries the mode at all; C against D is that
+# the per-seat settings.local.json MERGES field-wise rather than replacing the
+# permissions object. Without C this fix would have been inert in the only trees
+# it exists for, and green here regardless.
+#
+# It does not weaken the hooks: under bypassPermissions a PreToolUse hook still
+# runs and still blocks on exit 2 (measured the same day — the model issued the
+# Write, the hook fired, the tool_result read `PreToolUse:Write hook error`, no
+# file appeared). claude-pre-ask's refusal of interactive tools in an unattended
+# seat stands.
+#
+# A PARSE FAILURE IS REFUSED, NOT SKIPPED. `claude -p` silently ignores a
+# settings file that fails validation — no error and no dialog, as its own
+# --help says. A malformed file is therefore indistinguishable at launch from an
+# absent key, so treating it as anything but a failure would hide exactly the
+# regression this guard is for.
+#
+# Its limit: it judges the CHECKED-IN file. A settings.local.json is untracked
+# and per-seat, so a citizen who sets a weaker defaultMode in theirs is not seen
+# here, and deliberately — that file is where a local choice belongs.
+#
+# The directory is an argument so a mutation can be run over a throwaway copy
+# rather than the tree under test.
+[private]
+check-claude-permission-mode dir=".":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    settings="{{ dir }}/.claude/settings.json"
+    want="bypassPermissions"
+    if [ ! -f "$settings" ]; then
+        echo "error: $settings does not exist, so no seat launched without an explicit" >&2
+        echo "       --permission-mode gets one at all (bd gqlc-keaz)." >&2
+        exit 1
+    fi
+    # one line because an unindented continuation is parsed as justfile syntax,
+    # not as recipe body. A parse failure arrives as a non-zero exit with the
+    # traceback on stdout, which is the branch below.
+    if ! got="$(python3 -c 'import json,sys;v=json.load(open(sys.argv[1])).get("permissions",{}).get("defaultMode");print("ABSENT" if v is None else v)' "$settings" 2>&1)"; then
+        echo "error: $settings is not valid JSON, so Claude Code ignores it in full and" >&2
+        echo "       silently — a seat then comes up permission-gated with no diagnostic" >&2
+        echo "       anywhere (bd gqlc-keaz). python said:" >&2
+        printf '%s\n' "$got" | sed 's/^/       /' >&2
+        exit 1
+    fi
+    case "$got" in
+        "$want") exit 0 ;;
+        ABSENT)
+            echo "error: $settings carries no permissions.defaultMode (bd gqlc-keaz)." >&2
+            echo "       A seat resumed by hand — 'claude --resume <uuid>', which replays no" >&2
+            echo "       launch flags — then comes up gated on a human who is not there, and" >&2
+            echo "       waits until someone kills the session." >&2
+            echo "       Repair: set permissions.defaultMode to \"${want}\" in that file." >&2
+            exit 1 ;;
+        *)
+            echo "error: $settings sets permissions.defaultMode to '${got}', not '${want}'" >&2
+            echo "       (bd gqlc-keaz). Only bypassPermissions leaves an unattended seat able" >&2
+            echo "       to act; every other mode prompts for a human at some tool." >&2
+            exit 1 ;;
+    esac
+
 # puts ssh keepalives in the repository's own git config, so an ordinary
 # `git push` survives .githooks/pre-push — bd gqlc-ehgg / GH #1414.
 #
@@ -1916,7 +1988,7 @@ gates:
 # test-binary args, so every run misses), and inter-test coupling in a codegen
 # dev tool is a low-value gate relative to a ~2m40s tax on every push. Revisit
 # if ordering coupling actually bites us.
-test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp check-push-keepalive
+test: check-hooks check-worktree-upstream check-shared-config check-claude-permission-mode check-beads-export check-tmp check-push-keepalive
     go build ./...
     go test ./...
 
