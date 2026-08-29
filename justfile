@@ -3387,11 +3387,8 @@ vuln-root-residual:
     internal/codegen/age
     internal/codegen/neo4j
     internal/config
-    internal/queryfile
     internal/resolver
     internal/schema/gql
-    internal/schema/gql/annexd
-    internal/schema/gql/isobnf
     BLIND
     )"
     grew="$(comm -23 <(lines "${blind}") <(lines "${baseline}") || true)"
