@@ -340,17 +340,31 @@ reads, because reading flags per invocation drops it before the comment strip
 would have. Only a comment sharing a line with the `go test` still reaches the
 flags.
 
-**What the sweep does not check: that the answer is asserted.** It requires the
-recorded answer to appear in the witness's body, not to be the subject of an
-assertion. Gutting `TestAGERefusesTheFunctionsItDoesNotDefine`'s
-`require.Contains(t, pgErr.Message, tc.wantMessage, …)` to `_ = pgErr` leaves the
-`wantMessage:` literals standing as real code, so the sweep stays green over a
-witness that runs five statements and asserts nothing about the answers (review
-mutation M18, reproduced and still open at the time of writing). This is a
-weaker hole than M15 — it removes the assertion and leaves the measurement, where
-M15 removed the measurement — and closing it needs the sweep to read the
-witness's control flow rather than its text, which is a different tool from the
-one this decision builds. It is stated here rather than fixed.
+**What the sweep did not check: that the answer is asserted.** As shipped it
+required the recorded answer to appear in the witness's body, not to be the
+subject of an assertion. Gutting `TestAGERefusesTheFunctionsItDoesNotDefine`'s
+`require.Contains(t, pgErr.Message, tc.wantMessage, …)` to `_ = pgErr` left the
+`wantMessage:` literals standing as real code, so the sweep stayed green over a
+witness that ran five statements and asserted nothing about the answers (review
+mutation M18). This was a weaker hole than M15 — it removes the assertion and
+leaves the measurement, where M15 removed the measurement — and it was stated
+here rather than fixed.
+
+**CLOSED (bd gqlc-35yu.17).** The answer half of the sweep now reads
+`assertedText` rather than the whole body: every assertion call's arguments,
+plus the values bound to any name those arguments read. The prediction above —
+that closing it needed the sweep to read the witness's *control flow*, a
+different tool from the one this decision builds — was wrong, and wrong in the
+direction that mattered, since it is what made the hole look expensive enough to
+leave open. One hop over the same AST this decision already parses is enough,
+because both shapes a witness here uses are name-mediated: a literal handed
+straight to `require.Contains`, and a table column reached as `tc.wantMessage`.
+A range variable is deliberately not resolved back to the table it ranges over —
+that would pull every unasserted column back in and make the narrowing a slower
+spelling of the body. `TestAnUnassertedAnswerReddensTheSweep` is M18 at the unit
+level and `TestAssertedTextIsWhatAnAssertionReads` guards the reader itself.
+What the narrowing costs: a witness asserting through the testify suite form or
+a hand-rolled helper reports its answers unasserted, which is a false red.
 
 Neither hole is inherited. `f4fb1a19`, the commit this work branches from, has no
 `internal/codegen/age/dialect.go` and no witness sweep anywhere in the tree
