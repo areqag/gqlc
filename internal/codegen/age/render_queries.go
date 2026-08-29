@@ -230,9 +230,9 @@ func zeroLiteral(goType string) string {
 		return "false"
 	case "any", "map[string]any":
 		return "nil"
-	case goInstant, goDate, goLocalTime, goDuration:
-		// The instant and the three neutral carriers are all structs, so
-		// their zero is the composite literal and not a numeric one.
+	case goInstant, goDate, goLocalTime, goTime, goDuration:
+		// The instant and the neutral carriers are all structs, so their
+		// zero is the composite literal and not a numeric one.
 		return goType + "{}"
 	default:
 		return "0"
@@ -408,6 +408,7 @@ func encodeParam(f codegen.Param, access string) string {
 var encodedParamText = map[string]string{
 	goDate:      "string",
 	goLocalTime: "int64",
+	goTime:      "int64",
 	goDuration:  "int64",
 }
 
@@ -428,6 +429,8 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 		encoder = "agtypeDateText"
 	case goLocalTime:
 		encoder = "agtypeLocalTimeMicros"
+	case goTime:
+		encoder = "agtypeTimeMicros"
 	case goDuration:
 		encoder = "agtypeDurationMicros"
 	default:
@@ -657,6 +660,8 @@ func decodeFunc(goType string) string {
 		return "agtypeDate"
 	case goLocalTime:
 		return "agtypeLocalTime"
+	case goTime:
+		return "agtypeTime"
 	case goDuration:
 		return "agtypeDuration"
 	}

@@ -55,7 +55,7 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 	}
 	require.NotEmpty(t, carried, "no width in the domain has a carrier, so nothing was compared")
 
-	compared, zoned := make([]graph.PropertyType, 0, len(carried)), 0
+	compared, zoned := make([]graph.PropertyType, 0, len(carried)), []graph.PropertyType{}
 	for _, pt := range widths {
 		goType, ok := typeMap{}.Property(pt)
 		if !ok {
@@ -67,9 +67,11 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 		for _, nullable := range []bool{false, true} {
 			f := codegen.EntityField{PropName: "at", Field: "At", GoType: goType, Nullable: nullable}
 
-			key, reads := decodedSidecarKey(t, f)
+			key, helper, reads := decodedSidecarKey(t, f)
 			if reads {
-				zoned++
+				if !nullable {
+					zoned = append(zoned, pt)
+				}
 				require.Error(t, rejectOffsetSidecarCollisions([]codegen.Entity{entityDeclaring(f, key)}),
 					"%s (nullable=%t): the decode reads property %q, and the gate serves a schema whose author declares it",
 					pt, nullable, key)
@@ -90,46 +92,97 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 			}
 
 			// The helper the decode names has to be one the emission
-			// declares, and h.zone is what declares agtypeZone.
+			// declares, so the flag checked is the one belonging to the
+			// helper the emitted text actually named. A width reading no
+			// sidecar must leave every zoning helper unmarked, which is
+			// what the loop over the whole map answers.
 			var h helpers
 			h.forEntities([]wiredEntity{{Entity: entityDeclaring(f, "")}})
-			require.Equal(t, reads, h.zone,
-				"%s (nullable=%t): the decode reads a sidecar=%t and the emission marks agtypeZone for declaration=%t",
-				pt, nullable, reads, h.zone)
+			for name, marked := range zoningHelpers {
+				require.Equal(t, reads && name == helper, marked(h),
+					"%s (nullable=%t): the decode re-zones through %q and the emission marks %s for declaration=%t",
+					pt, nullable, helper, name, marked(h))
+			}
 		}
 	}
 	require.ElementsMatch(t, carried, compared,
 		"the sweep did not run over every width the type table gives a carrier")
-	require.NotZero(t, zoned, "no width in the domain reads a sidecar, so the agreement held vacuously")
+	// Which widths zone, named rather than counted. A count is satisfied
+	// by TIMESTAMP alone, so it would stay green through a TIME that
+	// quietly stopped reading its sidecar — the agreement above holds
+	// vacuously for a width nothing zones, and both sides would move
+	// together. Naming them makes the loss of one a red row here, and
+	// makes admitting a zoned width a deliberate edit to this list.
+	require.ElementsMatch(t, []graph.PropertyType{graph.TypeTimestamp, graph.TypeTime}, zoned,
+		"the widths whose decode reads an offset sidecar are not the ones this pins")
+}
+
+// zoningHelpers is every helper an entity decode re-zones a value
+// through, against the flag on helpers that declares it. A carrier
+// re-zones by exactly one of them: the instant moves its Location, a TIME
+// rebuilds its clock reading, and the two are separate helpers because
+// the arithmetic differs.
+//
+// Listed here rather than derived so the sweep below fails on a helper it
+// has never heard of instead of reporting the width as unzoned. A third
+// zoning helper added without a row here reads as "the decode reads no
+// sidecar", which is the quiet direction: the gate would then look
+// over-eager rather than blind, and the row asserting agreement would
+// pass on the wrong side.
+var zoningHelpers = map[string]func(helpers) bool{
+	"agtypeZone":     func(h helpers) bool { return h.zone },
+	"agtypeTimeZone": func(h helpers) bool { return h.timeZone },
 }
 
 // decodedSidecarKey is the property key one field's emitted decode reads
-// its offset from, with ok=false for a decode that reads none. Read back
-// out of the emitted text rather than from offsetSidecar, so what it
-// reports is what the generated package will do.
-func decodedSidecarKey(t *testing.T, f codegen.EntityField) (string, bool) {
+// its offset from and the helper it reads it through, with ok=false for a
+// decode that reads none. Read back out of the emitted text rather than
+// from offsetSidecar, so what it reports is what the generated package
+// will do.
+func decodedSidecarKey(t *testing.T, f codegen.EntityField) (string, string, bool) {
 	t.Helper()
 
 	var b strings.Builder
 	writeEntityFieldDecode(&b, codegen.Entity{Name: "E", Kind: codegen.EntityNode, Fields: []codegen.EntityField{f}}, 0, f)
+	emitted := b.String()
 
-	const call = "agtypeZone(props, "
-	rest := b.String()
-	found, reads := "", false
-	for {
-		_, after, ok := strings.Cut(rest, call)
-		if !ok {
-			return found, reads
+	// A call this walk does not recognise is a defect and not an absence.
+	// The emitted text names its zoning helper, so a helper missing from
+	// zoningHelpers is caught here rather than silently widening the set
+	// of widths that read no sidecar.
+	require.NotRegexp(t, `agtype\w*Zone\w*\(props, `,
+		stripKnown(emitted), "the decode re-zones through a helper zoningHelpers does not list:\n%s", emitted)
+
+	found, helper, reads := "", "", false
+	for name := range zoningHelpers {
+		call := name + "(props, "
+		rest := emitted
+		for {
+			_, after, ok := strings.Cut(rest, call)
+			if !ok {
+				break
+			}
+			end := strings.Index(after, ",")
+			require.NotEqual(t, -1, end, "the emitted call to %s has no second argument:\n%s", name, emitted)
+			key, err := strconv.Unquote(after[:end])
+			require.NoError(t, err, "the key the emitted decode reads is not a Go string literal:\n%s", emitted)
+			if reads {
+				require.Equal(t, found, key, "one field's decode reads two different offset keys:\n%s", emitted)
+				require.Equal(t, helper, name, "one field's decode re-zones through two different helpers:\n%s", emitted)
+			}
+			found, helper, reads, rest = key, name, true, after[end:]
 		}
-		end := strings.Index(after, ",")
-		require.NotEqual(t, -1, end, "the emitted call to agtypeZone has no second argument:\n%s", b.String())
-		key, err := strconv.Unquote(after[:end])
-		require.NoError(t, err, "the key the emitted decode reads is not a Go string literal:\n%s", b.String())
-		if reads {
-			require.Equal(t, found, key, "one field's decode reads two different offset keys:\n%s", b.String())
-		}
-		found, reads, rest = key, true, after[end:]
 	}
+	return found, helper, reads
+}
+
+// stripKnown removes every call to a listed zoning helper from emitted
+// text, so what is left holds only the calls the walk cannot account for.
+func stripKnown(emitted string) string {
+	for name := range zoningHelpers {
+		emitted = strings.ReplaceAll(emitted, name+"(props, ", "")
+	}
+	return emitted
 }
 
 // entityDeclaring is an entity carrying f and a second INT64 property of

@@ -191,7 +191,7 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 		}
 	}
 
-	require.Len(t, byMethod["Property"], 20, "typeMap.Property named %v", byMethod["Property"])
+	require.Len(t, byMethod["Property"], 21, "typeMap.Property named %v", byMethod["Property"])
 	require.Len(t, byMethod["Scalar"], 6, "typeMap.Scalar named %v", byMethod["Scalar"])
 	require.Empty(t, byMethod["Temporal"], "typeMap.Temporal named %v, so this backend now carries a temporal "+
 		"width: read it against decodeFunc before moving this number", byMethod["Temporal"])
