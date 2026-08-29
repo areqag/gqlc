@@ -164,6 +164,15 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
      coverage that is not there. Say what the sandbox held.
    - **A battery over a directory, a glob, or "every caller of X" has a green
      that expires**, because master owns the tree it ran on. Name the tree.
+   - **A guard that reads persistent state needs a two-run row.** Mutating only
+     the condition — the threshold constant, the comparison direction — screens
+     the guard's arithmetic against a fresh state file that no run has aged, so
+     a guard that never re-reads its state at all reads KILLED for the same
+     reason a correct one does. The row that catches it runs the operation
+     twice with an idle gap past the guard's threshold, and mutates the
+     persisted-state freshness by backdating the state file between runs rather
+     than the guard condition. The second run is where the guard fires or does
+     not; the mutation is what makes silence a finding.
 
    The PR body, not a commit message: `squash_merge_commit_message` is BLANK on
    this repo (measured 2026-08-23), so a squash lands the title and the number
