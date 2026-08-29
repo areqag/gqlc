@@ -27,7 +27,10 @@ km — the machinery of the Թագաւորութիւն
   km status                      the town at a glance
   km up | down                   start / stop the tmux town
   km attach <seat>               attach to a seat's window
-  km herratsayn                  Հեռաձայն: wake Սեդրակ if asleep, attach
+  km herratsayn                  Հեռաձայն: sit with Սեդրակ (see km call)
+  km call <seat> [words]         sit with any citizen: words are queued if
+                                 they are mid-turn, otherwise an interactive
+                                 TUI opens on their session until you exit
   km wake <seat> [--bead ID] [--reason TEXT]
   km sleep [--seat NAME]         end the current seat's workday
   km mail send <to> -s SUBJ [-m BODY]   (body on stdin if no -m)
@@ -1003,53 +1006,65 @@ cmd_attach() {
     fi
 }
 
-cmd_herratsayn() {
+# km call <seat> [words] — sit down with a citizen.
+#
+#   mid-turn  your words (if any) are queued for their next pass, then you are
+#             attached read-only: a headless turn takes no input
+#   parked    an interactive TUI on their recorded session; the runner defers
+#             wake consumption behind an in-person flag until you stand up
+cmd_call() {
+    local seat=${1:-}
+    shift || true
     local sd home wt session queued msg="${*:-}"
+    is_seat "$seat" || die "call: unknown seat ${seat:-<none>}"
+    [ "$(seat_runner)" = km-seat-ox ] || die "call: the interactive seat visit runs on the ox engine ([kingdom] seat_runner)"
     sd=$(state_dir)
-    home="$sd/seats/sedrak"
-    wt=$(seat_worktree sedrak)
-    if seat_session_live sedrak; then
-        # He is already speaking. A headless turn takes no input, so the call
-        # cannot interrupt — but a message given WITH the call is delivered to
-        # his next pass instead of dropped.
+    home="$sd/seats/$seat"
+    wt=$(seat_worktree "$seat")
+    local display who
+    display=$(seat_display "$seat")
+    if seat_session_live "$seat"; then
+        # They are already speaking. A headless turn takes no input, so the
+        # call cannot interrupt — but words given WITH the call are delivered
+        # to their next pass instead of dropped.
         if [ -n "$msg" ]; then
-            cmd_wake sedrak --reason "Հեռաձայն from Անդրանիկ: $msg"
+            cmd_wake "$seat" --reason "Հեռաձայն from Անդրանիկ: $msg"
         fi
-        echo "Սեդրակ is mid-turn; attaching read-only — a headless turn takes no input."
-        [ -z "$msg" ] || echo "Your words are queued for his next pass."
-        echo "Leave word anytime: km wake sedrak --reason \"...\""
+        echo "$display is mid-turn; attaching read-only — a headless turn takes no input."
+        [ -z "$msg" ] || echo "Your words are queued for their next pass."
+        echo "Leave word anytime: km wake $seat --reason \"...\""
         # Old /exit debris from the claude era litters these panes; reset the
-        # view so what he is doing NOW is what you see. (-R resets the
+        # view so what they are doing NOW is what you see. (-R resets the
         # terminal; there is no clear-pane verb in this tmux.)
-        tmux send-keys -R -t "=$SESSION:sedrak" 2>/dev/null
-        tmux clear-history -t "=$SESSION:sedrak" 2>/dev/null
+        tmux send-keys -R -t "=$SESSION:$seat" 2>/dev/null
+        tmux clear-history -t "=$SESSION:$seat" 2>/dev/null
         # An attach that cannot happen (no tty on this terminal, detached
         # client) is a report, not a failure of the call.
-        cmd_attach sedrak || echo "attach unavailable here — watch from any terminal with: tmux attach-session -t kingdom \\; select-window -t kingdom:sedrak"
+        cmd_attach "$seat" || echo "attach unavailable here — watch from any terminal with: tmux attach-session -t kingdom \\; select-window -t kingdom:$seat"
         return 0
     fi
-    # The visit proper: an interactive TUI on his recorded session, with the
-    # runner deferred behind an in-person flag so no mechanical wake starts a
-    # second engine over the conversation (km-seat-ox checks the flag before
-    # consuming a wake and leaves it queued).
     mkdir -p "$home"
     : >"$home/in-person"
     session=""
     [ -f "$home/ox-session" ] && session=$(cat "$home/ox-session")
     local tui_args=()
     if [ -n "$session" ]; then tui_args=(-s "$session"); else tui_args=(-c); fi
-    echo "You are aboard Սեդրակ's seat, interactive. Exit the TUI when you stand up."
+    echo "You are aboard $display's seat, interactive. Exit the TUI when you stand up."
     (
         cd "$wt" || exit 1
         unset KM_CONFIG
         PATH="$SCRIPT_DIR:$PATH" \
-            KINGDOM_SEAT=sedrak BEADS_ACTOR=sedrak KM_STATE_DIR="$sd" \
+            KINGDOM_SEAT="$seat" BEADS_ACTOR="$seat" KM_STATE_DIR="$sd" \
             exec opencode "${tui_args[@]}"
-    ) || echo "herratsayn: the TUI ended abnormally" >&2
+    ) || echo "call: the TUI ended abnormally" >&2
     rm -f "$home/in-person"
     queued=0
     [ -f "$home/wake" ] && queued=$(wc -l <"$home/wake")
-    echo "Visit over — $queued wake reason(s) queued for his next mechanical pass."
+    echo "Visit over — $queued wake reason(s) queued for their next mechanical pass."
+}
+
+cmd_herratsayn() {
+    cmd_call sedrak "$@"
 }
 
 # ---------- halt ----------
@@ -3561,7 +3576,8 @@ case "$cmd" in
     up)              cmd_up "$@" ;;
     down)            cmd_down "$@" ;;
     attach)          cmd_attach "$@" ;;
-    herratsayn)      cmd_herratsayn "$@" ;;
+    herratsayn)      cmd_call sedrak "$@" ;;
+    call)            cmd_call "$@" ;;
     wake)            cmd_wake "$@" ;;
     sleep)           cmd_sleep "$@" ;;
     mail)            cmd_mail "$@" ;;
