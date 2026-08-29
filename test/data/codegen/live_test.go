@@ -619,7 +619,7 @@ var scenarioTables = []struct {
 	},
 	{
 		name: "localDateTimeColumnScenarios", got: len(localDateTimeColumnScenarios), want: 1,
-		why: "the only live witness for a LOCALDATETIME the server constructs; every other zoneless width is written by the client first, so losing this row leaves the decode half reachable only through a value our own encode produced",
+		why: "the only live witness for a LOCALDATETIME the server constructs; every other zoneless width is written by the client first, so without this row EVERY zoneless width is asserted against a value our own encode produced, and an encode and a decode wrong in agreement would pass all of them",
 	},
 	{
 		name: "edgeUnionScenarios", got: len(edgeUnionScenarios), want: 1,
