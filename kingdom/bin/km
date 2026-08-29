@@ -1680,7 +1680,7 @@ cmd_halt() {
     # multi-line reason whose remainder was prose, and refused it (F2).
     read -r -d '' -a reason_words <<<"$reason" || true
     local reason_is_question=0 reason_word
-    case "$(printf '%s' "${reason_words[0]:-}" | tr '[:upper:]' '[:lower:]')" in
+    case "$(printf '%s' "${reason_words[0]}" | tr '[:upper:]' '[:lower:]')" in
     show | status | history | help | state | info | list) reason_is_question=1 ;;
     esac
     for reason_word in "${reason_words[@]:1}"; do
