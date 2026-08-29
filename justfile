@@ -926,8 +926,21 @@ ensure-shellcheck:
     mkdir -p {{quote(justfile_directory() + "/.bin")}}
     stage="$(mktemp -d)"
     trap 'rm -rf "$stage"' EXIT
+    # Upstream releases name the OS with the kernel's own spelling lowercased —
+    # `linux`, `darwin`. Deriving it from `uname -s` rather than hardcoding
+    # `linux` lets macOS provision the same way; an unsupported kernel is named
+    # and refused rather than downloaded blindly to fail on extract.
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    case "$os" in
+        linux|darwin) ;;
+        *)
+            echo "error: ensure-shellcheck has no release mapping for kernel '$os'." >&2
+            echo "       Supported: linux, darwin. Install shellcheck $want by hand or extend this recipe." >&2
+            exit 1
+            ;;
+    esac
     curl --proto '=https' --tlsv1.2 -sSfL --retry 5 --retry-all-errors --retry-delay 2 \
-        "https://github.com/koalaman/shellcheck/releases/download/$want/shellcheck-$want.linux.$(uname -m).tar.xz" \
+        "https://github.com/koalaman/shellcheck/releases/download/$want/shellcheck-$want.$os.$(uname -m).tar.xz" \
         | tar -xJ -C "$stage"
     install -m 0755 "$stage/shellcheck-$want/shellcheck" {{quote(shellcheck)}}
 
@@ -2386,9 +2399,9 @@ vuln: sweep-discovery-probes vuln-root-residual
     # takes a file argument, which has no producer to lose.
     # What decides a piped site is a race: whether the producer still has a write
     # to make when `grep` exits. What settles it is the producer having none left
-    # once `grep` can first match. The readable instance is a single write() of
-    # at most the pipe capacity: a match needs data, so that write lands with the
-    # reader alive and nothing remains to take the signal (measured: match on
+    # once `grep` can first match. The readable instance is a single write():
+    # a match needs data, so that write lands with the reader alive and nothing
+    # remains to take the signal (measured: match on
     # line 1, 50ms linger, rc 0 in 200 of 200; the same bytes in two writes with
     # the match in the FIRST fail 40 of 40 — the position matters, since two
     # writes with the match confined to the last pass 200 of 200, so single-write
@@ -2408,7 +2421,7 @@ vuln: sweep-discovery-probes vuln-root-residual
     # sufficient nor necessary. A 1262-byte listing, 52x INSIDE a 65536-byte
     # pipe buffer, returned 141 in 20 of 20 runs when emitted a line at a time
     # with a 20ms pause between lines; a 189019-byte payload, 2.9x OVER the
-    # capacity, returned 0 in 60 of 60 when the match was on the last line.
+    # capacity, returned 0 in 60 of 60 when the match was on the last write.
     # Emission shape: that same
     # producer without the pause returned 0 in 200 of 200, so it is not
     # line-at-a-time that loses the race but slowness relative to grep's startup,
