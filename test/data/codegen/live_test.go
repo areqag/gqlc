@@ -24,6 +24,7 @@
 // The same defect is still open in the root module — 34 in-package test files
 // there, so a called vulnerability reachable only from one of them exits 0.
 // `just vuln` prints the current number; bd gqlc-m5rc closes it.
+
 package fixtures_test
 
 import (
