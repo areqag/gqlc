@@ -552,14 +552,14 @@ var scenarioTables = []struct {
 	},
 }
 
-// TestEveryScenarioTableIsTheDeclaredSize holds each battery to its declared
+// TestEveryBatteryIsTheDeclaredSize holds each battery to its declared
 // size.
 //
 // It deliberately does NOT honour GQLC_SKIP_LIVE. Every other test here skips
 // without a container, which is how this module is usually run, so a battery
 // could be emptied and nothing in the module would say a word. This guard
 // needs no container, so it runs whenever the package is tested at all.
-func TestEveryScenarioTableIsTheDeclaredSize(t *testing.T) {
+func TestEveryBatteryIsTheDeclaredSize(t *testing.T) {
 	for _, tc := range scenarioTables {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, tc.got,
@@ -569,8 +569,8 @@ func TestEveryScenarioTableIsTheDeclaredSize(t *testing.T) {
 	}
 }
 
-// TestEveryScenarioTableIsDeclared holds scenarioTables to the batteries that
-// actually exist in this file.
+// TestEveryBatteryIsNamedInScenarioTables holds scenarioTables to the
+// batteries that actually exist in this file.
 //
 // scenarioTables is itself a written-down list, so it has the failure it was
 // added to catch: a battery it does not name is a battery nothing counts, and
@@ -586,7 +586,7 @@ func TestEveryScenarioTableIsTheDeclaredSize(t *testing.T) {
 // Where it stops: it reads THIS file only, which is where every battery lives
 // today and where the loop that runs them lives. A battery declared in a
 // sibling file of this package would not be seen, and would run unheld.
-func TestEveryScenarioTableIsDeclared(t *testing.T) {
+func TestEveryBatteryIsNamedInScenarioTables(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "live_test.go", nil, 0)
 	require.NoError(t, err, "the battery has to be able to read its own source to know what to hold")
@@ -598,7 +598,11 @@ func TestEveryScenarioTableIsDeclared(t *testing.T) {
 			continue
 		}
 		for _, spec := range gen.Specs {
-			for _, name := range spec.(*ast.ValueSpec).Names {
+			value, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, name := range value.Names {
 				if strings.HasSuffix(name.Name, "Scenarios") {
 					found = append(found, name.Name)
 				}
