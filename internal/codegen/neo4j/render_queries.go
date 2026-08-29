@@ -447,7 +447,17 @@ func paramsMapText(p codegen.Query) string {
 // dbtype counterpart first. That includes the nullable arm, where the
 // pass-the-pointer-through shape does not survive — *Date reaches the
 // same reflective path as Date, one dereference later.
+//
+// Slices are asked separately, and must not be routed through
+// driverCarrier: that function answers which neo4j.GetRecordValue[T] the
+// driver hands a value back in, which is a decode question. Its answer
+// for a list is []any, and rendering that as a widen produced
+// `[]any(arg)` — not a Go conversion at all, so any query with a list
+// parameter emitted a package that did not compile (bd gqlc-hrls).
 func paramBindExpr(f codegen.Param, access string) string {
+	if isSliceType(f.GoType) {
+		return sliceParamBindExpr(f.GoType, f.Nullable, access)
+	}
 	if f.Nullable {
 		if isTemporalCarrier(f.GoType) {
 			return fmt.Sprintf("from%sPtr(%s)", f.GoType, access)
@@ -461,6 +471,37 @@ func paramBindExpr(f codegen.Param, access string) string {
 		return widenExpr(f.GoType, access)
 	}
 	return access
+}
+
+// sliceParamBindExpr renders the binding for a list parameter.
+//
+// Read off the driver's packer at v5.28.4 and v6.2.0
+// (neo4j/internal/bolt/outgoing.go), which both have this shape: packX's
+// reflect.Slice arm names five slice types it packs directly and ends in
+// a default that walks ANY other slice element by element through packV,
+// and packV handles bool, every int and uint width, both float widths,
+// string, pointers and nested slices. So the widening the scalar arms
+// here do per value, the packer already does per element, and a list
+// reaches the wire needing no conversion at all. That covers the nullable
+// case too: packX's reflect.Ptr arm indirects to the slice and packs it,
+// and a nil pointer packs as the Cypher null the schema declared.
+//
+// The one value packV cannot reach is a struct the driver does not know.
+// packStruct's cases are dbtype.Point2D/3D, time.Time and the five dbtype
+// temporals, and its default raises UnsupportedTypeError. gqlc's neutral
+// carriers are not among them, so a list whose leaf is one of those five
+// is the sole list shape still owing a conversion — per element, into the
+// driver's own array carrier, mirroring the per-element narrow the decode
+// side has had since walkListElemBody.
+func sliceParamBindExpr(goType string, nullable bool, access string) string {
+	if !isTemporalCarrier(leafType(goType)) {
+		return access
+	}
+	helper := temporalListHelper(leafType(goType), sliceDepth(goType))
+	if nullable {
+		helper += "Ptr"
+	}
+	return fmt.Sprintf("%s(%s)", helper, access)
 }
 
 // writeOneBody emits the :one arity-check + per-column decode + return.

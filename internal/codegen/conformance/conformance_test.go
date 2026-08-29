@@ -1135,8 +1135,10 @@ var driverSliceCarriers = map[string]bool{
 // are only ever named by an assertion inside a list walk — a scalar
 // column of the same width decodes through neo4j.GetRecordValue[T],
 // whose constraint the compiler checks — so their flags flip the day a
-// fixture declares LIST<POINT>, LIST<DURATION> or a projected list of
-// nodes, and not before.
+// fixture declares LIST<POINT> or a projected list of nodes, and not
+// before. dbtype.Duration flipped that way: temporal_list_param declares
+// LIST<DURATION> for its nullable list parameter, and the property side
+// of that declaration walks the list and asserts the element.
 var driverScalarCarriers = map[string]bool{
 	"bool":                true,
 	"int64":               true,
@@ -1144,6 +1146,7 @@ var driverScalarCarriers = map[string]bool{
 	"string":              true,
 	"time.Time":           true,
 	"dbtype.Date":         true,
+	"dbtype.Duration":     true,
 	"dbtype.Relationship": true,
 
 	"map[string]any":       false,
@@ -1152,7 +1155,6 @@ var driverScalarCarriers = map[string]bool{
 	"dbtype.LocalTime":     false,
 	"dbtype.LocalDateTime": false,
 	"dbtype.Time":          false,
-	"dbtype.Duration":      false,
 	"dbtype.Node":          false,
 	"dbtype.Path":          false,
 }
