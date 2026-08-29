@@ -569,6 +569,17 @@ cfg_minutes() { # <section> <key> <default minutes> -> seconds
     echo $((v * 60))
 }
 
+# How many times the idle pass asks ONE seat in a single episode before it stops
+# typing and mails sedrak instead. Fail-open to 3 for the same reason cfg_minutes
+# does. Zero is refused rather than honoured: a cap of 0 escalates before ever
+# asking, which is the one reading of a typo nobody wants.
+recover_cap() {
+    local v
+    v=$(cfg welfare recover_attempts)
+    case "$v" in '' | *[!0-9]* | 0) v=3 ;; esac
+    echo "$v"
+}
+
 # Seconds since the statusLine hook last wrote this seat's heartbeat, from the
 # file's own `updated` field rather than its mtime — the field is what the
 # writer states, and a copied or restored state dir would give an mtime that
@@ -1607,17 +1618,33 @@ cmd_dispatch() {
     # what makes the second sighting a different moment rather than the same
     # one. The marker is cleared by a nudge as well as by any sign of life, so
     # the floor between two nudges is two full passes rather than every tick.
-    local s idle_marker nudged_marker pending ask floor since
+    local s idle_marker nudged_marker attempts_file escalated_marker pending ask floor since cap tries
     floor=$(cfg_minutes welfare renudge_after_minutes 30)
+    cap=$(recover_cap)
     for s in $(seats_all); do
         [ "$(seat_status "$s")" = awake ] || continue
         idle_marker="$(seat_home "$s")/idle"
         nudged_marker="$(seat_home "$s")/idle-nudged"
-        # Any sign of life ends the episode, and BOTH markers go with it. The
-        # floor below is per episode and not per seat: keyed to the seat it
+        attempts_file="$(seat_home "$s")/idle-attempts"
+        escalated_marker="$(seat_home "$s")/idle-escalated"
+        # Any sign of life ends the episode, and ALL of its markers go with it.
+        # The floor below is per episode and not per seat: keyed to the seat it
         # would silence the town's only channel to a citizen who came back,
         # worked, and went idle again, for its whole window.
-        if ! seat_pane_idle "$s"; then rm -f "$idle_marker" "$nudged_marker"; continue; fi
+        if ! seat_pane_idle "$s"; then
+            rm -f "$idle_marker" "$nudged_marker" "$attempts_file" "$escalated_marker"
+            continue
+        fi
+        # Escalated: the mayor has been told, so this pass says nothing further
+        # INTO the seat for the rest of the episode. It keeps reporting, because
+        # the slot is still held and going quiet here is how eleven hours passed
+        # with every board reading healthy. Only witnessed work clears it — the
+        # branch above, which needs the agent to leave `idle`, not merely for the
+        # pane to look different.
+        if [ -f "$escalated_marker" ]; then
+            echo "dispatch: $s is awake and idle, ESCALATED to sedrak $(fmt_age "$(($(date +%s) - $(stat -c %Y "$escalated_marker")))") ago after $cap unanswered asks; not typing at her again this episode — read the pane"
+            continue
+        fi
         pending=$(unread_count "$s")
         # An empty inbox is no longer a reason to say nothing, and that was the
         # residual hole rather than a corner of one. The six seats of gqlc-5vp7
@@ -1650,14 +1677,43 @@ cmd_dispatch() {
                 continue
             fi
         fi
-        : >"$nudged_marker"
+        # The ladder ends. Without a cap the floor above only slows the
+        # metronome: a seat that answers nothing is asked every half hour for as
+        # long as it stays awake and idle, and nobody is ever told — the shape
+        # the welfare check-ins already reached at 48 unread. At the cap the pass
+        # stops typing and says it once, to the one seat whose job is deciding.
+        tries=$(cat "$attempts_file" 2>/dev/null)
+        case "$tries" in '' | *[!0-9]*) tries=0 ;; esac
+        if [ "$tries" -ge "$cap" ]; then
+            : >"$escalated_marker"
+            mail_send sedrak --from andranik \
+                -s "$s is awake and idle after $cap unanswered asks" \
+                -m "km dispatch asked $s to pick up work or run 'km sleep' $cap times in one idle episode. Nothing changed, so it has stopped typing at her and is telling you instead. It will not mail you about this episode again.
+
+She is awake, her agent reports idle, and she is holding one of $(cfg concurrency max_active) slots while answering no dispatch pass — every pass wakes ASLEEP seats only.
+
+Unread mail: $pending
+Last ask: $(fmt_age "$(($(date +%s) - $(stat -c %Y "$nudged_marker" 2>/dev/null || date +%s)))") ago
+
+Nothing here ends a session and nothing should: a seat that has not asked to leave has not consented (VI.2). Read her pane before deciding. 'km sleep --seat $s' frees the slot if she is genuinely done; if her turn died mid-work, she needs a person, not another line of text.
+
+This counter clears by itself the moment her agent leaves 'idle' — witnessed work, not a pane that merely looks different." || true
+            echo "dispatch: ESCALATED $s to sedrak — $cap asks in this episode changed nothing; not typing at her again this episode"
+            continue
+        fi
         if seat_nudge "$s" "$ask"; then
-            echo "dispatch: nudged $s — awake, idle, $pending unread; the prompt cleared, so it was delivered"
+            tries=$((tries + 1))
+            echo "$tries" >"$attempts_file"
+            : >"$nudged_marker"
+            echo "dispatch: nudged $s (ask $tries of $cap) — awake, idle, $pending unread; herdr acked the send"
             wakes=$((wakes + 1))
         else
-            # Reported, not counted. km's own success message was what let an
-            # operator believe the town unblocked while nothing moved.
-            echo "dispatch: NUDGE UNDELIVERED to $s — the line is still sitting unsent in the prompt box after a re-sent Enter; read the pane by hand"
+            # Reported, not counted, and no floor set. km's own success message
+            # was what let an operator believe the town unblocked while nothing
+            # moved. A refused send means the citizen was never asked, so it
+            # neither spends her escalation budget nor earns the half-hour
+            # silence: the next pass tries again after one more confirm cycle.
+            echo "dispatch: NUDGE UNDELIVERED to $s — herdr refused the send (its server is down, or the seat's pane holds no agent). Nothing was typed and the slot is still held; retrying next confirm rather than counting it against her $cap asks"
         fi
     done
 
@@ -2919,7 +2975,7 @@ cmd_status() {
         echo "WEDGED:$wedged — a tool call that STARTED and has not come back, for longer than $(fmt_age "$dry"). This is the signal the heartbeat cannot carry: km-statusline keeps writing all through a wedged turn, so these seats' HB cells are as fresh as a seat doing real work (gqlc-n97e, 13+ minutes; gqlc-eier, 80 and 152 while every board read healthy). The named tool is the newest one started, not necessarily the one that hung. Read the pane. Do not end the session: a modal is not consent (VI.2)."
     fi
     if [ -n "$nowork" ]; then
-        echo "NOWORK:$nowork — awake, nothing in flight, and no tool call has FINISHED for that long. Two seats look like this: one wedged between turns (a usage-limit modal eats the turn, so no tool ever starts) and one that finished its work and never ran 'km sleep' — which is the LEAST available state there is, because it holds a slot against max_active and answers no dispatch. Both want a human at the pane; neither is a working citizen."
+        echo "NOWORK:$nowork — awake, nothing in flight, and no tool call has FINISHED for that long. Two seats look like this: one wedged between turns (a usage-limit modal eats the turn, so no tool ever starts) and one that finished its work and never ran 'km sleep' — which is the LEAST available state there is, because it holds a slot against max_active and answers no dispatch. Neither is a working citizen, and neither is waiting on you: km dispatch's idle pass confirms the state over two passes, asks the seat to pick up work or run 'km sleep', and repeats no sooner than every $(cfg welfare renudge_after_minutes) minutes. After $(recover_cap) unanswered asks in one episode it stops typing and mails sedrak, and says ESCALATED here on every later pass. The counter clears when the agent leaves 'idle' — witnessed work, not a pane that merely looks different. Reading the pane is still the fastest way to tell the two apart, and it is the only way to tell a dead turn from a finished day."
     fi
     # MARK, never act — Constitution VI.2. Nothing in km consumes any of the
     # lines below; they exist so a human or the mayor can decide, exactly
