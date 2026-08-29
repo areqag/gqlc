@@ -32,11 +32,22 @@ The check is over EVERY label, not just `subject:` ones: the 50-char cap is
 GitHub's, and it applies to every label the town mints.
 
 Scope note: this runs over the committed export, so it catches an unmirrorable
-label at PR time, which is the LAST of the three chances to catch one -- and the
-only one of the three that withholds anything from master. The two earlier
-refusals are named below, and neither stops a commit: the creation-time one
-refuses the command that would mint the label, and bd-gh-sync withholds the
-bead's MIRROR while the push carrying the label proceeds.
+label at PR time -- the LAST chance to catch one, and the only refusal in the
+chain that withholds anything from master. The earlier ones are named below and
+neither stops a commit: the creation-time one refuses the command that would
+mint the label, and bd-gh-sync withholds the bead's MIRROR while the push
+carrying the label proceeds.
+
+HOW MANY EARLIER REFUSALS THERE WERE DEPENDS ON THE BEAD, and the difference is
+the whole reason to name the chain rather than count it. bd-gh-sync screens only
+the beads it is about to mirror: its selection opens with `if
+b.get("external_ref"): continue`, so a bead that already HAS its mirror is never
+screened and never NOTEd at push time. This gate has no such filter and screens
+every bead in the export. So for a label added to an existing bead -- `bd label
+add` on a mirrored bead, the common case, since mirrors are the norm -- there is
+no push-time notice at all, and no pass in bd-gh-sync offers that bead's labels
+to GitHub again, so no 422 is coming either. For that bead this is not the last
+of several warnings; it is the only one that is ever printed.
 
 THIS MODULE OWNS THE CAP AND THE REMEDY for all three gates, which is why
 MAX_LABEL, PREFIX, shorter() and remedy() are module level and why loading this
@@ -156,18 +167,27 @@ def main(argv):
         # What the other two gates do about this, stated so a reader of a red CI
         # job looks in the right place. bd-gh-sync does not refuse the push:
         # .githooks/pre-push discards its exit status, and what it withholds is
-        # the bead's MIRROR, under a NOTE naming this label. It also screens the
-        # ledger `bd list` returns rather than the command line, so no spelling
-        # hides a label from it. That leaves the creation-time refusal as the one
-        # that can have been absent here, and it sees only commands issued
-        # through Claude Code's bash hook (bd gqlc-uy7j).
+        # the bead's MIRROR. It screens the ledger `bd list` returns rather than
+        # the command line, so no spelling hides a label from it -- but it
+        # screens only beads it is about to mirror, skipping any that already
+        # carries an external_ref, so a label put on a mirrored bead is not seen
+        # there at all. TWO earlier refusals can therefore have been absent, and
+        # the message says which for which: the push-time NOTE, absent for every
+        # already-mirrored bead, and the creation-time one, which reads only
+        # commands issued through Claude Code's bash hook (bd gqlc-uy7j).
         print(
-            "      bd-gh-sync withholds the MIRROR, not the push, so the label "
-            "reaches master with the bead unmirrored; where hooks were live it "
-            "named this label in a NOTE at push time. The creation-time refusal "
-            "in .githooks/claude-pre-bash reads only commands issued through "
-            "Claude Code's bash hook, so a plain terminal, disabled hooks, or a "
-            "spelling it does not parse arrives here (bd gqlc-89vw, gqlc-uy7j).",
+            "      What came before this depends on whether the bead already had "
+            "a GitHub mirror. If it did NOT, bd-gh-sync withheld the MIRROR "
+            "rather than the push, so the label reached master with the bead "
+            "unmirrored, and where hooks were live it named this label in a NOTE "
+            "at push time. If it DID, bd-gh-sync skipped the bead -- it screens "
+            "only beads it is about to mirror -- so there was no NOTE to find, "
+            "and no pass in it offers a mirrored bead's labels to GitHub again, "
+            "so this message is the only notice the label gets. Either way the "
+            "creation-time refusal in .githooks/claude-pre-bash reads only "
+            "commands issued through Claude Code's bash hook, so a plain "
+            "terminal, disabled hooks, or a spelling it does not parse arrives "
+            "here (bd gqlc-89vw, gqlc-uy7j).",
             file=sys.stderr,
         )
         return 1
