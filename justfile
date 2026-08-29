@@ -3301,7 +3301,9 @@ kingdom-install:
 # alone, so kingdom-install puts it back.
 #
 # kingdom-halt is the SOFT stop — the timers keep firing, they just wake
-# nobody, and any citizen's `km resume` lowers it. This is the hard one, and it
+# nobody, and Սեդրակ or Անդրանիկ can lower it (Constitution VI.4; twelve of
+# the other citizens can raise a halt but none of them may resume). This is
+# the hard one, and it
 # is the half that had no recipe: turning the town on was a documented
 # one-liner and turning it off was not (bd gqlc-yxnf).
 kingdom-uninstall:
