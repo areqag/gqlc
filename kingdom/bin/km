@@ -9,6 +9,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+KM_SELF=$SCRIPT_DIR/${BASH_SOURCE[0]##*/}
 KINGDOM_DIR=$(dirname "$SCRIPT_DIR")
 # KM_CONFIG overrides for tests, as KM_STATE_DIR does for state; the town
 # itself never sets it. Without it a test that exercises a tuning parameter has
@@ -19,6 +20,44 @@ KINGDOM_DIR=$(dirname "$SCRIPT_DIR")
 CONFIG="${KM_CONFIG:-$KINGDOM_DIR/kingdom.toml}"
 
 die() { echo "km: $*" >&2; exit 1; }
+
+# The verb a message advertises an operator run is free text at the print site;
+# the verbs km HAS are case labels in the dispatch table at the foot of this
+# file. Nothing joined the two, so `km halt` spent its life telling whoever had
+# just stopped the town to run `km herratsayn`, which km has never dispatched
+# (gqlc-cw7h). This reads the labels out of that table, so a print site is
+# answered by km's own routing rather than by whatever the author typed.
+#
+# It warns and carries on rather than dying, and prints the name either way: the
+# operator reaching for the emergency brake must not be stopped by a defect in
+# the sentence that describes it. A caller that wants the refusal fatal assigns
+# it (`v=$(verb resume)`), which `set -e` does abort on. So this does not make a
+# phantom verb unwritable — it makes it announce itself on stderr the first time
+# the path runs, to the developer who just edited it.
+#
+# It does not see past the first word. Flags and subcommands after it — the
+# `send town -s ...` in `$(verb mail) send town` — are still free text. Nor does
+# a matched label prove the arm behind it works: it proves km ROUTES the name,
+# not that the route arrives.
+verb() { # <name> — echoes "km <name>"; warns, rc 1, if km dispatches no <name>
+    # Recomputed per call rather than cached in a global, because a global is a
+    # name an inherited environment can preload — and so answer on km's behalf
+    # about what km dispatches. Three awk passes over one file costs nothing.
+    local v dispatched
+    dispatched=$(
+        awk '/^case "\$cmd" in$/{d=1;next} d&&/^esac$/{exit}
+             d&&/^[[:space:]]*[-a-z"|[:space:]]+\)/{
+                 sub(/\).*/,""); gsub(/[[:space:]"]/,"")
+                 n=split($0,a,"|"); for(i=1;i<=n;i++) if(a[i]!="") print a[i]}' \
+            "$KM_SELF"
+    )
+    printf 'km %s' "$1"
+    for v in $dispatched; do
+        [ "$v" != "$1" ] || return 0
+    done
+    echo "km: INTERNAL — '$1' was just advertised to an operator, but km's dispatch table has no such verb" >&2
+    return 1
+}
 
 # The crown is not a default. `mail send`, the mail box selectors and `halt`
 # each resolved their caller by defaulting an unset KINGDOM_SEAT to the crown —
@@ -1477,7 +1516,7 @@ cmd_halt() {
         --status | --show)
             if [ -f "$sd/halt" ]; then
                 echo "halt is UP: $(head -1 "$sd/halt")"
-                echo "  the dispatcher and the guard sweep wake nobody until it is lowered (km resume)."
+                echo "  the dispatcher and the guard sweep wake nobody until it is lowered ($(verb resume))."
             else
                 echo "no halt is raised: the dispatcher and the guard sweep are routing normally."
             fi
@@ -1510,7 +1549,7 @@ cmd_halt() {
             # did not know became one and stopped the town — exit 0, and the same
             # success line a deliberate halt prints. Twice in fourteen minutes by
             # two citizens asking a question (bd gqlc-jqwf).
-            die "halt: unknown flag $1 — to ask whether a halt is up, km halt --status; a reason may not begin with '-'"
+            die "halt: unknown flag $1 — to ask whether a halt is up, $(verb halt) --status; a reason may not begin with '-'"
             ;;
     esac
     # VI.4 lets two citizens lower a halt; for everyone else the recorded
@@ -1532,14 +1571,14 @@ cmd_halt() {
     # promise a quiet town while naming only the dispatcher, so an operator had
     # no reason to suspect the guard sweep was still launching sessions behind
     # the flag — and this line is the whole report he gets (gqlc-6dzi).
-    echo "halt raised: the dispatcher and the guard sweep will wake nobody until it is lowered (km resume)"
+    echo "halt raised: the dispatcher and the guard sweep will wake nobody until it is lowered ($(verb resume))"
     # Spell the broadcast in full. This line is read at one moment — by whoever
     # has just stopped the town and now has to say why — and it used to name
     # `km herratsayn`, which km has never dispatched (bd gqlc-cw7h). The reader
     # in a hurry runs it, gets the usage dump, and concludes a halted town has
     # no way to talk to itself.
-    echo "  to tell the town why: km mail send town -s '<subject>' -m '<body>'"
-    echo "  km wake <seat> still reaches one seat; neither is bound by the halt."
+    echo "  to tell the town why: $(verb mail) send town -s '<subject>' -m '<body>'"
+    echo "  $(verb wake) <seat> still reaches one seat; neither is bound by the halt."
 }
 
 # Constitution VI.4, in full: "A halt (kingdom-state/halt) stops new wakes;
@@ -1559,7 +1598,7 @@ cmd_resume() {
     if [ -z "$seat" ]; then
         echo "resume: refused — this session has no identity (KINGDOM_SEAT is unset)." >&2
         echo "  Constitution VI.4 reserves lowering a halt to Սեդրակ or Անդրանիկ." >&2
-        echo "  If you are the crown, say so: KINGDOM_SEAT=andranik km resume" >&2
+        echo "  If you are the crown, say so: KINGDOM_SEAT=andranik $(verb resume)" >&2
         return 1
     fi
     case " $HALT_LOWERERS " in
@@ -1567,7 +1606,7 @@ cmd_resume() {
         *)
             echo "resume: refused — $seat may not lower a halt." >&2
             echo "  Constitution VI.4 reserves that to Սեդրակ (sedrak) or Անդրանիկ (andranik);" >&2
-            echo "  anyone may RAISE one. Ask sedrak to lower it: km mail send sedrak -s ..." >&2
+            echo "  anyone may RAISE one. Ask sedrak to lower it: $(verb mail) send sedrak -s ..." >&2
             return 1
             ;;
     esac
