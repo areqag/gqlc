@@ -1,0 +1,20 @@
+# Rendered by `km install-units`: @TOKENS@ come from kingdom.toml + git.
+#
+# Fired by OnFailure= on kingdom-dispatch.service. The dispatcher is a oneshot
+# on a two-minute timer, so a failing tick leaves nothing behind but a journal
+# line nobody reads: on 2026-08-29 it exited 1 with no output on either stream
+# for forty minutes while `km status` cheerfully printed a healthy board, and
+# the outage was found by hand (bd gqlc-87al).
+#
+# This wakes Սեդրակ, and it is deliberately `km wake` rather than `km mail`.
+# Mail wakes a seat only when the DISPATCHER notices it — so a letter about a
+# dead dispatcher is delivered by the thing that is dead, and would sit unread
+# for exactly as long as the fault it reports. `km wake` writes the seat's wake
+# file, which the parked km-seat reads on its own, with no dispatcher involved.
+[Unit]
+Description=Kingdom dispatch alarm — wake Սեդրակ when a dispatch tick fails
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+ExecStart=@REPO@/kingdom/bin/km wake sedrak --reason "kingdom-dispatch.service FAILED — the town is not routing. Read 'journalctl --user -u kingdom-dispatch.service -n 50' before anything else; a failing tick is a town-wide outage, not one seat's problem."
