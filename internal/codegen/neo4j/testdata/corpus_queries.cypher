@@ -64,3 +64,23 @@ MATCH (s:Scalar)-[e:Edgy|Edgier*1..3]->(l:Listy) RETURN e AS e
 
 // name: TwoEdgeUnionColumns :many
 MATCH (s:Scalar)-[e:Edgy|Edgier]->(l:Listy) MATCH (s)-[f:Edgy|Edgier]->(l) RETURN e AS e, f AS f
+
+// The only parameterised query here, and the only one whose subject is
+// what the emission SENDS rather than what it reads back. Every query
+// above is parameterless, so before this one nothing the corpus ran
+// reached paramBindExpr or the from<X>List helpers at all — they were
+// held by byte goldens, which pin text and not behaviour, and by the
+// compiler, which accepts both of the mistakes that matter here: binding
+// a temporal list bare compiles and then raises UnsupportedTypeError on
+// the wire, and dropping from<X>ListPtr's nil guard compiles and then
+// panics on the null the schema declared (bd gqlc-rw0m).
+//
+// $windows precedes $days deliberately. The emitter keeps one list depth
+// per carrier and must keep the DEEPEST, because the depth-2 helper is
+// written in terms of the depth-1 one. Declared shallow-first, a
+// last-one-wins emitter reaches the same depth by accident.
+//
+// name: SlotsMatching :many
+MATCH (s:Slot)
+WHERE s.tags = $tags AND s.windows = $windows AND s.days = $days AND s.spans = $spans
+RETURN s.id AS id
