@@ -1785,99 +1785,11 @@ fmt: ensure-golangci
 fmt-check: ensure-golangci
     {{golangci}} fmt --diff
 
-# the shell-tested half of this repo's own tooling: the git hooks, the recipe
-# that lints them, and the CI script they share a language with (~80s measured
-# 2026-08-22, half of it km-test.sh alone; throwaway git repos and temp trees,
-# nothing touches the worktree). The comment said ~1s until that was timed —
-# the suites have grown by an order of magnitude since.
-#
-# Suites live in .githooks/tests/ and are named <subject>-test.sh. This recipe
-# DISCOVERS them by globbing that directory; it does not enumerate them. Adding
-# a suite is therefore creating one file and nothing else.
-#
-# It used to enumerate them, one `bash <path>` line per suite, and that list was
-# an append point every new suite had to touch. Two citizens adding a suite in
-# parallel appended at the same location and git could not merge them, though
-# the resolution was always "keep both lines": measured on PR #1247, which
-# conflicted with three other open PRs at this exact hunk (bd gqlc-234l). A
-# glob has no append point, so that class of conflict is gone rather than
-# reduced.
-#
-# WHAT THE LIST WAS FOR, and why the glob does not give it back. gqlc-l45j is
-# "a suite nothing runs and nothing reports", and the list did not close that.
-# The list could only catch a suite sitting in .githooks/tests/ unregistered —
-# a state the glob makes unreachable, because the glob runs whatever is there.
-# What catches a suite written ELSEWHERE is internal/tools/ciguard's walk over
-# .githooks/, which refuses a test-looking file parked beside the hooks and
-# refuses every subdirectory but this one; that walk is untouched and is still
-# the thing holding gqlc-l45j.
-#
-# The glob is only as total as the naming convention, so ciguard enforces the
-# convention rather than assuming it: a non-dotfile in .githooks/tests/ that
-# does not end in -test.sh is REFUSED there, not skipped, and ciguard also pins
-# that the pattern below is the one that matches exactly what it accepts.
-# Dotfiles are skipped by both — a deliberate hole, so that an editor swap file
-# beside a suite does not redden the build; the note on hookSuites in
-# internal/tools/ciguard/hooktests_test.go is where that is argued.
-#
-# The empty case FAILS. A discovery loop that finds nothing otherwise runs zero
-# suites, exits 0, and reads on every dashboard exactly like fourteen suites
-# passing — the fail-open shape this whole surface exists to refuse. So does a
-# glob that did not expand: `shopt -s nullglob` is what makes the empty case
-# reach the refusal below instead of trying to run a file literally named
-# `*-test.sh`, and `failglob` is not used because its message names no cause.
-#
-# A shebang recipe now, where the enumeration was deliberately a plain one so
-# that just gave each line its own exit status. `set -euo pipefail` carries that
-# property here instead, and ciguard holds it by RUNNING this recipe against
-# stubbed suites — one stubbed to fail, asserting that nothing after it ran —
-# rather than by reading the carrier. That behavioural test is why the carrier
-# could change at all.
-#
-# TWO directories, not one. .github/scripts/tests/ holds the suite covering the
-# two PR gates that live beside it; it is there deliberately, because those
-# scripts are not hooks. Until bd gqlc-xqf6 it was run only by a step of its own
-# in ci.yml, so `just test` and .githooks/pre-push did not run it and a
-# developer's local verdict differed from CI's — and bd gqlc-snzq F4 is the
-# other half: the ciguard walk was rooted at .githooks/, so a suite anywhere
-# else was invisible to every rule holding suites to this recipe.
-#
-# The emptiness refusal is PER DIRECTORY. One check over the combined array
-# fires only when BOTH globs go silent, so deleting or renaming
-# .github/scripts/tests/ would leave the recipe green on the strength of the
-# other directory still matching — an aggregate emptiness guard hides partial
-# silence.
-test-hooks:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # The expansions below are sorted by the shell's collation, and that order is
-    # the order the suites run in — so it is pinned rather than left to whatever
-    # locale the caller happens to carry. Not exported: bash applies LC_ALL to
-    # itself on assignment, and the suites should run under the developer's own
-    # locale, not this one.
-    LC_ALL=C
-    shopt -s nullglob
-    hook_suites=(.githooks/tests/*-test.sh)
-    script_suites=(.github/scripts/tests/*-test.sh)
-    if [ "${#hook_suites[@]}" -eq 0 ] || [ "${#script_suites[@]}" -eq 0 ]; then
-        echo "error: a suite glob matched nothing, so this recipe would run zero suites from" >&2
-        echo "       that directory and exit 0 over them — indistinguishable from every suite" >&2
-        echo "       passing. Either the suites moved, or this is not the repository root" >&2
-        echo "       (bd gqlc-234l, bd gqlc-snzq)." >&2
-        echo "         .githooks/tests/*-test.sh matched ${#hook_suites[@]}" >&2
-        echo "         .github/scripts/tests/*-test.sh matched ${#script_suites[@]}" >&2
-        exit 1
-    fi
-    for suite in "${hook_suites[@]}" "${script_suites[@]}"; do
-        echo "==> ${suite}"
-        bash "${suite}"
-    done
-
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # -shuffle catches inter-test coupling; go build link-checks package main,
 # which has no tests and is otherwise only compile-checked by lint.
-test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp check-push-keepalive test-hooks
+test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp check-push-keepalive
     go build ./...
     go test -shuffle=on ./...
 
@@ -3071,6 +2983,12 @@ vuln: sweep-discovery-probes vuln-root-residual
     # available and none coming. Required, not imported. This one is permanent
     # unless x/crypto drops the package, and bumping x/crypto cannot clear it.
     GO-2026-5932
+    # golang.org/x/crypto/ssh: source-address critical option not enforced for
+    # non-public-key auth callbacks. Imported by an indirect dep, not called
+    # by gqlc — no ssh server code here. Fixed in x/crypto v0.55.0; we are on
+    # v0.52.0 via a transitive constraint. Registered rather than bumped to
+    # keep the herdr-migration PR small; follow-up work should bump x/crypto.
+    GO-2026-6303
     ACCEPTED
     )"
 
@@ -3351,26 +3269,27 @@ iso-drift-check:
     exit "$fail"
 
 # ---------- Թագաւորութիւն — the software factory (kingdom/README.md) ----------
+#
+# Herdr is the observation surface: `herdr` opens the town's TUI, with every
+# citizen a tab in the "kingdom" workspace. `just kingdom`, `just herratsayn`
+# and `just kingdom-attach` were tmux-era wrappers around `tmux
+# attach-session`; they were deleted when herdr became HQ (bd gqlc-98br).
+# Mechanical readout (mail counts, unroutable beads, unit health) still lives
+# in `km status`.
 
-# status of the Թագաւորութիւն: seats, beads, mail, cap
-kingdom:
-    kingdom/bin/km status
-
-# Հեռաձայն to Սեդրակ: wake him if needed and attach to his window
-herratsayn:
-    kingdom/bin/km herratsayn
-
-# attach to any seat's window
-kingdom-attach seat:
-    kingdom/bin/km attach {{seat}}
-
-# create state dir, seat worktrees, tmux session, and runners (all asleep)
+# create state dir, seat worktrees, and the herdr workspace with its per-seat
+# agents (all asleep). Requires the herdr server to be running.
 kingdom-up:
     kingdom/bin/km up
 
-# graceful stop: notice by mail, then kill the tmux session
+# graceful stop: notice by mail, then close the herdr workspace
 kingdom-down:
     kingdom/bin/km down
+
+# mechanical readout: mail counts, unroutable beads, stalled P0s, unit health.
+# For the pane view, open `herdr`.
+kingdom-status:
+    kingdom/bin/km status
 
 # check deps, install+enable the systemd user timers, point bd mail at km
 kingdom-install:

@@ -4,19 +4,20 @@
 # using any of those here.
 
 [kingdom]
+# The herdr workspace name the town lives in. Every seat is a tab in it.
+# Keyed `tmux_session` for backwards-compat with `cfg kingdom tmux_session`
+# call sites; the value is a herdr workspace label now, not a tmux session.
 tmux_session = "kingdom"
 # Runtime state dir name, created beside the main checkout's parent directory
 # (shared by all seat worktrees, never committed).
 state_dirname = "kingdom-state"
-# The engine each seat's tmux window runs, from kingdom/bin/. km-seat is the
-# interactive claude runner: one persistent TUI per seat pane, `km wake` types
-# into its input box or drops a reason on its wake file when the reader has
-# not returned to read() between writes. The town briefly ran a headless
-# opencode variant (km-seat-ox, 2026-08-25 → 2026-08-28) whose
-# process-per-wake shape broke pane-scoped invariants — cross-seat session-id
-# injection, duplicate-resume in one worktree, silent runner death, blinded
-# panes. Reverted by direct decree (bd gqlc-zp37); the seat engine is
-# interactive claude again.
+# The engine each seat's herdr pane runs, from kingdom/bin/. km-seat is the
+# runner that IS the pane's command: parks on the seat's wake file, composes
+# the first message (wake reasons + unread mail + handoff notes), execs
+# claude with it, and re-parks when claude exits. Herdr owns the pane; km
+# owns which command runs in it. The town briefly ran a headless opencode
+# variant (km-seat-ox, 2026-08-25 → 2026-08-28) whose process-per-wake shape
+# broke pane-scoped invariants — reverted by direct decree (bd gqlc-zp37).
 seat_runner = "km-seat"
 
 [concurrency]
