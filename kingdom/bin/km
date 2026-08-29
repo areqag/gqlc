@@ -20,6 +20,36 @@ CONFIG="${KM_CONFIG:-$KINGDOM_DIR/kingdom.toml}"
 
 die() { echo "km: $*" >&2; exit 1; }
 
+# The crown is not a default. `mail send`, the mail box selectors and `halt`
+# each resolved their caller by defaulting an unset KINGDOM_SEAT to the crown —
+# not spelled literally here, so a grep for the defect finds sites and not this
+# account of it (bd gqlc-ujw7). Any session
+# started outside km-seat — every ephemeral agent in the shared checkout, and
+# anyone running km from a plain shell — sent letters headed by the king, read
+# the king's inbox instead of its own, and stamped a Constitution VI.4 halt
+# with his name. Measured 2026-08-29: three of four letters in Սեդրակ's inbox
+# were misattributed this way, and only the human signature inside the body
+# disagreed. The fallback names the one identity holding powers nobody else
+# does, so it errs toward MORE authority than the caller has, never less.
+#
+# cmd_sleep and cmd_resume already refused this condition. These sites did not,
+# and the refusal below is the shape cmd_resume uses — including the escape
+# hatch, because the crown asserts itself the way anyone else does.
+# CALL THIS BARE, never as "$(require_identity …)". It refuses by exiting, and
+# `exit` inside a command substitution leaves only the subshell: the first cut
+# of this fix echoed the seat, and `halt` went on to raise the town's brake with
+# a blank actor while returning 0 — the same fail-open in the same reserved
+# power, one layer down. `set -e` does not cover it either, because the status
+# of a substitution used as an ARGUMENT is discarded outright. So the check runs
+# in the caller's own shell and the caller reads $KINGDOM_SEAT itself.
+require_identity() { # <command> — returns only if this session has an identity
+    [ -n "${KINGDOM_SEAT:-}" ] && return 0
+    echo "km $1: refused — this session has no identity (KINGDOM_SEAT is unset)." >&2
+    echo "  Acting anyway would record this as Անդրանիկ, the crown." >&2
+    echo "  If you are the crown, say so: KINGDOM_SEAT=andranik km $1" >&2
+    exit 1
+}
+
 usage() {
     cat <<'EOF'
 km — the machinery of the Թագաւորութիւն
@@ -774,7 +804,7 @@ mail_deliver() { # write one message file into a recipient's box dir
 }
 
 mail_send() {
-    local to="" subj="" body="" from="${KINGDOM_SEAT:-andranik}"
+    local to="" subj="" body="" from=""
     while [ $# -gt 0 ]; do
         case "$1" in
             -s) subj=$2; shift 2 ;;
@@ -785,6 +815,7 @@ mail_send() {
                to=${1%/}; shift ;;
         esac
     done
+    [ -n "$from" ] || { require_identity "mail send"; from=$KINGDOM_SEAT; }
     [ -n "$to" ] || die "mail send: no recipient"
     [ -n "$subj" ] || die "mail send: -s SUBJECT is required"
     case "$from" in andranik) ;; *) is_seat "$from" || die "mail send: unknown sender $from" ;; esac
@@ -819,8 +850,11 @@ mail_send() {
     echo "mail: $from → $to ($delivered box(es)): $subj"
 }
 
-mail_box_owner() { # --seat override, else caller identity
-    local seat="${KINGDOM_SEAT:-andranik}"
+# The --seat override, or empty for "this session's own box". Resolving the
+# empty case is the CALLER's job: this runs inside a command substitution, where
+# require_identity's exit would be swallowed.
+mail_box_owner() {
+    local seat=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --seat) seat=$2; shift 2 ;;
@@ -833,6 +867,7 @@ mail_box_owner() { # --seat override, else caller identity
 mail_inbox() {
     local seat sd n f
     seat=$(mail_box_owner "$@")
+    [ -n "$seat" ] || { require_identity "mail inbox"; seat=$KINGDOM_SEAT; }
     sd=$(state_dir)
     n=$(unread_count "$seat")
     echo "inbox of $seat — $n unread"
@@ -843,13 +878,14 @@ mail_inbox() {
 }
 
 mail_read() {
-    local id="" seat="${KINGDOM_SEAT:-andranik}" sd inbox readdir matches
+    local id="" seat="" sd inbox readdir matches
     while [ $# -gt 0 ]; do
         case "$1" in
             --seat) seat=$2; shift 2 ;;
             *) id=$1; shift ;;
         esac
     done
+    [ -n "$seat" ] || { require_identity "mail read"; seat=$KINGDOM_SEAT; }
     [ -n "$id" ] || die "mail read: which message? (filename or unique prefix)"
     sd=$(state_dir)
     inbox="$sd/mail/$seat/inbox"
@@ -872,6 +908,7 @@ mail_read() {
 mail_sent() {
     local seat sd f
     seat=$(mail_box_owner "$@")
+    [ -n "$seat" ] || { require_identity "mail sent"; seat=$KINGDOM_SEAT; }
     sd=$(state_dir)
     echo "sent by $seat:"
     for f in "$sd/mail/$seat/sent/"*.md; do
@@ -1042,7 +1079,12 @@ cmd_up() {
 
 cmd_down() {
     session_up || { echo "the town is already down"; return 0; }
-    mail_send town -s "town going down" -m "The herdr workspace is being closed. Sessions end; seats, mail, and handoffs persist." || true
+    # Declared, not inherited. This is a machine notice with no citizen behind
+    # it — `km down` is an operator command — and require_identity would
+    # otherwise refuse it from the plain shell it is normally run in, losing the
+    # broadcast to the `|| true`. Naming the sender here keeps the fallback out
+    # of mail_send, where it applied to every letter in the town.
+    mail_send town --from andranik -s "town going down" -m "The herdr workspace is being closed. Sessions end; seats, mail, and handoffs persist." || true
     local ws
     ws=$(workspace_id)
     if [ -n "$ws" ]; then
@@ -1095,7 +1137,8 @@ cmd_halt() {
     if [ -z "${reason//[[:space:]]/}" ]; then
         die "halt: a reason is required — say why the town must stop, so whoever finds it can tell deliberate from accidental"
     fi
-    printf 'raised by %s at %s: %s\n' "${KINGDOM_SEAT:-andranik}" "$(date -u -Iseconds)" "$reason" \
+    require_identity halt
+    printf 'raised by %s at %s: %s\n' "$KINGDOM_SEAT" "$(date -u -Iseconds)" "$reason" \
         >"$sd/halt"
     # Names both timers, and says which paths it does NOT bind. The line used to
     # promise a quiet town while naming only the dispatcher, so an operator had
