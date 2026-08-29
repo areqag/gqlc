@@ -92,6 +92,20 @@ type manyColManyQuerier interface {
 	peopleByAgeAndLocale(ctx context.Context, minAge int64, locale string) ([]person, error)
 }
 
+// nestedListQuerier is one arm's list_list_int handle: a LIST<LIST<INT64>>
+// column, which is the shape that makes the emitted decoder nest one element
+// loop inside another.
+//
+// A column and not a property, because on neo4j there is no other route. The
+// server refuses a nested list as a stored property value outright — "Collections
+// containing collections can not be stored in properties" — so a seeded
+// nested-list property is unavailable on this arm at any depth, and the fixture's
+// list-of-list literal is evaluated by the server and packed into a real Bolt
+// LIST of LISTs like any other value (bd gqlc-nrao, gqlc-v0gk).
+type nestedListQuerier interface {
+	nestedList(ctx context.Context) ([][]int64, error)
+}
+
 // entityNodeQuerier is one arm's entity_node_projected_one handle and
 // entityEdgeQuerier its entity_edge_projected_one one. Each declares
 // errNoRows for the same reason the scalar handle does: the sentinel
@@ -340,6 +354,7 @@ type backend interface {
 	seed(ctx context.Context, t *testing.T, cypher string)
 	oneColOneParamOne() oneColOneParamOneQuerier
 	manyColMany() manyColManyQuerier
+	nestedList() nestedListQuerier
 	entityNodeProjectedOne() entityNodeQuerier
 	entityEdgeProjectedOne() entityEdgeQuerier
 	anyValueColumns() anyValueColumnQuerier
@@ -429,6 +444,7 @@ var readScenarios = []struct {
 }{
 	{name: "one_col_one_param_one: one + sentinels", run: oneAndSentinels},
 	{name: "many_col_many: many + params", run: manyWithParams},
+	{name: "list_list_int: nested list off the wire", run: nestedListDecode},
 	{name: "entity_node_projected_one: whole vertex", run: nodeEntityRead},
 	{name: "entity_edge_projected_one: whole edge", run: edgeEntityRead},
 	{name: "schema_any_property: ANY VALUE columns agree on null", run: anyValueColumnsAgreeOnNull},
@@ -657,6 +673,40 @@ func manyWithParams(ctx context.Context, t *testing.T, b backend) { //nolint:the
 	require.NoError(t, err)
 	require.NotNil(t, rows, "empty :many result must be an empty slice, not nil")
 	require.Empty(t, rows)
+}
+
+// nestedListDecode drives the nested-list contract: a LIST<LIST<INT64>> the
+// server sends is decoded by the loop the emitter nests inside another loop.
+//
+// What this adds to the coverage the shape already has, since it is not
+// obvious: the emitted decoder was covered on golden text, on compilation
+// against the real driver, and by TestEmittedDecodersRunOnDriverValues, which
+// runs it over hand-built values like []any{[]any{int64(7)}, []any{}}. That
+// battery drives a stubbed driver, so those values are what we BELIEVE a Bolt
+// server hands back for a nested list. Nothing until this row had asked a
+// server. A driver that delivered the inner lists as anything but []any, or
+// their elements as anything but int64, would satisfy every one of those
+// checks and fail here — the emitted assertions are elem.([]any) and
+// elem1.(int64) (bd gqlc-nrao).
+//
+// The inner lists are deliberately ragged, one element then two, so a decoder
+// that carried one accumulator across the outer iterations rather than making
+// a fresh one per element returns three values in the first row.
+//
+// The two backends reach this through different emissions: neo4j nests the
+// element loops, and Apache AGE calls a single agtypeListOfListOfInt64 helper
+// over the raw agtype bytes. One row witnesses both.
+//
+// No seed, and the graph it runs against is irrelevant: the fixture's query
+// is a bare RETURN of a list-of-list literal with no MATCH, so the server
+// evaluates and packs it whatever the graph holds. That is not a weakening —
+// see nestedListQuerier for why a stored nested-list property is not
+// available on neo4j to seed instead.
+func nestedListDecode(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	got, err := b.nestedList().nestedList(ctx)
+	require.NoError(t, err)
+	require.Equal(t, [][]int64{{1}, {2, 3}}, got,
+		"a nested list off the wire must decode element for element, with each inner list its own length")
 }
 
 // nodeEntityRead drives the node-entity contract — a whole vertex arrives
