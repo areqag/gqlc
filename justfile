@@ -2444,8 +2444,13 @@ test-codegen-live:
 # package, so a scenario that stops executing is indistinguishable from one
 # that passes -- measured 2026-08-24 on bd gqlc-3d0l, where a mutation that
 # survived here could not be told apart from a mutation whose row never ran.
+#
+# The two battery guards run here and not in the AGE half, though neither is
+# about neo4j and neither starts a container. They belong to whichever half a
+# PR blocks on, because what they catch is a scenario deleted by the PR in
+# front of you: caught nightly it is caught after the merge (bd gqlc-8jfj).
 test-codegen-live-neo4j:
-    cd test/data/codegen && go test -v -tags codegen_live -run TestLiveSmoke -skip 'TestLiveSmoke/apache-age' ./...
+    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables' -skip 'TestLiveSmoke/apache-age' ./...
 
 # the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
 # the dialect fact the AGE backend's edge-union refusal rests on, the offset
