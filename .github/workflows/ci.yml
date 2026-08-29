@@ -121,6 +121,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Fresh-checkout mtimes are part of Go's test-cache key, so without this
+      # stamp no testdata-reading package ever replays `(cached)` here, however
+      # warm ~/.cache/go-build is. Mechanism and probes: the script's docstring.
+      - run: python3 .github/scripts/stable-mtimes.py
       - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
       - run: just test
