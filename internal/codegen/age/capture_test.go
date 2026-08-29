@@ -683,7 +683,10 @@ func (s *EmissionSuite) methodScopes(body string) map[string][]string {
 // and so the column is refused at generation (errors.go, edgeUnionReason)
 // rather than decoded. Every package-level name the emitter now declares
 // is generator-owned, and the residue gqlc-vac9 holds is a neo4j-only
-// residue.
+// residue — one that is itself collision-refused there by the shared
+// identifier sweep (source 6), witnessed by the invalid fixture
+// identifier_collision_edge_union_interface_pair. The bead is closed, not
+// pending.
 //
 // The assertion is still written against a substitution rather than as a
 // plain equality, and the census then requires the substitution to be

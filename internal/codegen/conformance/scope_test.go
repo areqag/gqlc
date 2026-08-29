@@ -482,11 +482,18 @@ const probeColumnPrefix = "renamed"
 // targets: Phase B builds an edge-union sum type as
 // `q.Name + rowFieldName(col.Name)`, so `RETURN r` yields a package-level
 // interface whose name is half method and half author-chosen column,
-// along with a marker method named after it. That residue is not silent —
-// it can only produce a duplicate package-level declaration, which the Go
-// compiler rejects — and closing it means renaming a generated public
-// type, which is an API change and so is scheduled as gqlc-vac9 rather
-// than done here. Apache AGE has no such residue, because an edge-union
+// along with a marker method named after it. That derivation stays, by
+// design: method names, <Method>Params, <Method>Row and entity structs all
+// derive from author text too, and a type name is the API. What closes the
+// scope is refusal, not generator ownership — sweepIdentifiers inserts
+// every edge-union interface name as its source 6 (internal/codegen
+// prepare.go, spec §4.6) and refuses the batch when two coincide, naming
+// both queries and both columns. The compiler never sees the duplicate.
+// Witnessed by the invalid fixture
+// identifier_collision_edge_union_interface_pair and by
+// TestEdgeUnionInterfaceNamesMustNotCoincideAcrossQueries in
+// internal/codegen (bd gqlc-vac9, closed by refusal plus those
+// witnesses). Apache AGE has no such residue, because an edge-union
 // column is only reachable through a relationship-type alternation its
 // server will not parse and the backend refuses the column at generation;
 // internal/codegen/age's TestOnlyPackageLevelNamesFollowAColumnName
@@ -1052,10 +1059,13 @@ func requireParameterReachesTheWire(t *testing.T, files []codegen.File, param st
 // the whole question — a parameter is a binding, and capture is one
 // binding displacing another — but it means a package-level name that
 // started following author-chosen text is invisible here and visible
-// there. That is exactly the residue class gqlc-vac9 holds, and it is
-// bounded on the AGE side by TestOnlyPackageLevelNamesFollowAColumnName —
-// to empty, since that backend refuses the column the sum type came from
-// — rather than here. Widening this to resolved identifiers would make
+// there. That is exactly the residue class gqlc-vac9 holds. It is bounded
+// on the AGE side by TestOnlyPackageLevelNamesFollowAColumnName — to
+// empty, since that backend refuses the column the sum type came from —
+// and on neo4j by sweepIdentifiers refusing a coinciding pair at
+// generation, rather than here. The names still MOVE under a column
+// rename on neo4j; only the collision is closed, not the derivation.
+// Widening this to resolved identifiers would make
 // the column axis fail on the neo4j targets, which still carry the
 // residue, and that is the trade being made.
 func boundScopes(t *testing.T, files []codegen.File) map[string][]string {

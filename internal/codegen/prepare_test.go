@@ -450,6 +450,49 @@ func TestEdgeUnionCandidatesMustCarryDistinctLabels(t *testing.T) {
 	}
 }
 
+// TestEdgeUnionInterfaceNamesMustNotCoincideAcrossQueries pins source 6
+// of the identifier sweep in the words the caller reads. The interface
+// name derives from author text on both halves — the query's method name
+// and the column's row field — so two queries whose mangles meet emit one
+// package-level name twice, and the refusal is what closes the scope.
+//
+// The pair here is a boundary shift: Get + "userName" and GetUser +
+// "name" both mangle to GetUserName. What makes the message worth pinning
+// is that neither query is at fault alone, so a message naming one of
+// them leaves the reader without the rename to make.
+func TestEdgeUnionInterfaceNamesMustNotCoincideAcrossQueries(t *testing.T) {
+	sch, fwd, wrote, _ := sharedEdgeLabelFixture()
+	column := resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{fwd, wrote}}
+
+	in := Input{
+		Schema: sch,
+		Queries: []NamedQuery{
+			{
+				Name:        "Get",
+				Cardinality: CardinalityOne,
+				SourceText:  "MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r AS userName",
+				Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "userName", Type: column}}},
+			},
+			{
+				Name:        "GetUser",
+				Cardinality: CardinalityOne,
+				SourceText:  "MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r AS name",
+				Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "name", Type: column}}},
+			},
+		},
+	}
+
+	_, err := Prepare(in, stubTypeMap{}, "")
+	require.ErrorIs(t, err, ErrIdentifierCollision)
+	// One ordered substring, not two independent ones: source 6 inserts
+	// in Input.Queries order, so which query lands on the message's
+	// "first" side is part of the contract. Two unordered contains would
+	// read the same either way round.
+	require.ErrorContains(t, err,
+		`emitted by both edgeUnion interface "GetUserName" for query "Get" column 0 "userName" `+
+			`and edgeUnion interface "GetUserName" for query "GetUser" column 0 "name"`)
+}
+
 // TestTemporalKindRefusalReachesTheCaller pins the contract the ok=false
 // half of the temporal row exists for, at both fail-sites and in the
 // words the caller reads. Without it the phase has no way to be told
