@@ -77,6 +77,37 @@ func queriesOver(keys []string, rows ...[]any) *Queries {
 	return new(Queries).WithTx(recordTx{records: records})
 }
 
+// paramTx is recordTx that keeps the parameter map it was handed.
+//
+// It is a distinct type rather than a field on recordTx because the two
+// answer opposite questions and only this one has an observation to make:
+// every other test here reads a value the driver built, and a bind
+// expression is never visible on that side. Run is the only seam it can
+// be seen at — after this the map is the driver's, and in the corpus the
+// driver is a stub that ignores it.
+//
+// The map is reached through a pointer because Queries.WithTx takes the
+// transaction by value, so a copy is what Run is called on.
+type paramTx struct {
+	recordTx
+	bound *map[string]any
+}
+
+func (t paramTx) Run(ctx context.Context, cypher string, params map[string]any) (neo4j.ResultWithContext, error) {
+	*t.bound = params
+	return t.recordTx.Run(ctx, cypher, params)
+}
+
+// queriesRecordingParams binds a Queries that answers with one row of the
+// given columns and writes whatever the method bound into *bound.
+func queriesRecordingParams(bound *map[string]any, keys []string, values []any) *Queries {
+	tx := paramTx{
+		recordTx: recordTx{records: []*neo4j.Record{{Keys: keys, Values: values}}},
+		bound:    bound,
+	}
+	return new(Queries).WithTx(tx)
+}
+
 // driverRefusal is what neo4j.GetRecordValue says about a record and a key
 // it will not read, obtained by asking it rather than by spelling its
 // wording out here. A column decode reporting this text has carried the
@@ -1693,6 +1724,163 @@ func TestTwoEdgeUnionColumnsDoNotShareLocals(t *testing.T) {
 	for _, want := range []string{`"f"`, `"Nope"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("TwoEdgeUnionColumns(f: Nope) = %q, want it to mention %s", err, want)
+		}
+	}
+}
+
+// unpackableCarriers walks a bound parameter value and names every struct
+// in it the Bolt packer cannot reach.
+//
+// The rule is packStruct's own (neo4j/internal/bolt/outgoing.go, v5.28.4
+// and v6.2.0): its cases are dbtype.Point2D, dbtype.Point3D, time.Time
+// and the five dbtype temporals, and its default raises
+// UnsupportedTypeError. So a struct of any other named type — every gqlc
+// neutral carrier among them — is a value the wire refuses.
+//
+// Slices and pointers are walked because packX walks them: its
+// reflect.Slice arm ends in a default that packs any slice element by
+// element through packV, and its reflect.Ptr arm indirects and packs what
+// it finds. A carrier hidden at any depth is therefore as fatal as one at
+// the top, which is why this returns every offender rather than the first.
+//
+// Named rather than counted, and asserted per parameter rather than over
+// the whole map: a count says something was examined and an emptiness
+// check over the map fires only when EVERY parameter is clean, so one
+// parameter losing its widen would pass under either.
+func unpackableCarriers(v any) []string {
+	var found []string
+	var walk func(reflect.Value)
+	walk = func(rv reflect.Value) {
+		if !rv.IsValid() {
+			return
+		}
+		switch rv.Kind() {
+		case reflect.Interface, reflect.Ptr:
+			if !rv.IsNil() {
+				walk(rv.Elem())
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < rv.Len(); i++ {
+				walk(rv.Index(i))
+			}
+		case reflect.Struct:
+			switch rv.Interface().(type) {
+			case dbtype.Point2D, dbtype.Point3D, time.Time,
+				dbtype.Date, dbtype.Time, dbtype.LocalTime, dbtype.LocalDateTime, dbtype.Duration:
+			default:
+				found = append(found, rv.Type().String())
+			}
+		}
+	}
+	walk(reflect.ValueOf(v))
+	return found
+}
+
+// TestListParametersReachTheDriverPackable runs the emitted bind
+// expressions and asks what the driver was actually handed.
+//
+// Nothing above this line reaches them. Every other query in the corpus
+// is parameterless, so the whole encode direction was held by the byte
+// goldens and by the compiler, and neither can see the two mistakes that
+// matter: binding a temporal list bare compiles, and then the packer
+// raises UnsupportedTypeError on a struct it does not know; dropping
+// from<X>ListPtr's nil guard compiles, and then panics on the null the
+// schema declared the parameter able to hold (bd gqlc-rw0m).
+func TestListParametersReachTheDriverPackable(t *testing.T) {
+	days := []Date{{Year: 2026, Month: 8, Day: 29}, {Year: 1969, Month: 12, Day: 31}}
+	windows := [][]Date{{{Year: 2026, Month: 1, Day: 2}}, {}}
+	spans := []Duration{{Months: 1, Days: 2, Seconds: 3, Nanos: 4}}
+	arg := SlotsMatchingParams{
+		Tags:    []string{"a", "b"},
+		Windows: windows,
+		Days:    days,
+		Spans:   &spans,
+	}
+
+	var bound map[string]any
+	q := queriesRecordingParams(&bound, []string{"id"}, []any{int64(7)})
+	if _, err := q.SlotsMatching(t.Context(), arg); err != nil {
+		t.Fatalf("SlotsMatching = error %v", err)
+	}
+	for _, key := range []string{"tags", "windows", "days", "spans"} {
+		if _, ok := bound[key]; !ok {
+			t.Fatalf("SlotsMatching bound %#v, which holds no %q — the rest of this test would pass vacuously", bound, key)
+		}
+		if offenders := unpackableCarriers(bound[key]); len(offenders) != 0 {
+			t.Errorf("SlotsMatching bound %q as %#v, holding %v, which packStruct's default refuses", key, bound[key], offenders)
+		}
+	}
+
+	// A list the packer walks itself is bound unconverted. This is the
+	// half that is a claim about the driver rather than about gqlc: packX's
+	// reflect.Slice default walks any slice through packV, and packV
+	// handles every scalar kind the type map emits, so a widen here would
+	// be work the wire does not ask for.
+	if want := []string{"a", "b"}; !reflect.DeepEqual(bound["tags"], want) {
+		t.Errorf("SlotsMatching bound tags as %#v, want %#v unconverted", bound["tags"], want)
+	}
+
+	// The temporal lists are widened per element, into the driver's own
+	// array carrier, at every depth. Spelled out rather than asserted
+	// shapelessly: a widen that produced the right TYPES from the wrong
+	// VALUES would satisfy unpackableCarriers above.
+	wantDays := []any{
+		dbtype.Date(time.Date(2026, time.August, 29, 0, 0, 0, 0, time.UTC)),
+		dbtype.Date(time.Date(1969, time.December, 31, 0, 0, 0, 0, time.UTC)),
+	}
+	if !reflect.DeepEqual(bound["days"], wantDays) {
+		t.Errorf("SlotsMatching bound days as %#v, want %#v", bound["days"], wantDays)
+	}
+	wantWindows := []any{
+		[]any{dbtype.Date(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC))},
+		[]any{},
+	}
+	if !reflect.DeepEqual(bound["windows"], wantWindows) {
+		t.Errorf("SlotsMatching bound windows as %#v, want %#v", bound["windows"], wantWindows)
+	}
+	wantSpans := []any{dbtype.Duration{Months: 1, Days: 2, Seconds: 3, Nanos: 4}}
+	if !reflect.DeepEqual(bound["spans"], wantSpans) {
+		t.Errorf("SlotsMatching bound spans as %#v, want %#v", bound["spans"], wantSpans)
+	}
+}
+
+// TestNullableListParameterBindsCypherNull pins the one thing the pointer
+// in a nullable list parameter is for. A nil *[]Duration is the null the
+// schema declared, and it has to arrive as an untyped nil — not as an
+// empty list, which Cypher tells apart from null, and not by way of a
+// dereference, which panics.
+//
+// Its own test rather than a row in the one above, because a nil here
+// crashes the method: a table sharing a call would report the panic
+// against whichever row ran first.
+func TestNullableListParameterBindsCypherNull(t *testing.T) {
+	arg := SlotsMatchingParams{
+		Tags:    []string{},
+		Windows: [][]Date{},
+		Days:    []Date{},
+		Spans:   nil,
+	}
+
+	var bound map[string]any
+	q := queriesRecordingParams(&bound, []string{"id"}, []any{int64(7)})
+	if _, err := q.SlotsMatching(t.Context(), arg); err != nil {
+		t.Fatalf("SlotsMatching(spans: nil) = error %v", err)
+	}
+	value, ok := bound["spans"]
+	if !ok {
+		t.Fatalf("SlotsMatching(spans: nil) bound %#v, which holds no spans at all", bound)
+	}
+	if value != nil {
+		t.Errorf("SlotsMatching(spans: nil) bound spans as %#v, want nil — a null the schema declared, not a list", value)
+	}
+
+	// The non-nullable lists are empty here, and empty is not null: a
+	// caller who sent no elements sent a list of none. This is what stops
+	// the assertion above from being satisfied by an emission that binds
+	// every empty list as nil.
+	for _, key := range []string{"tags", "windows", "days"} {
+		if bound[key] == nil {
+			t.Errorf("SlotsMatching bound %q as nil, want an empty list — the schema declares it non-nullable", key)
 		}
 	}
 }
