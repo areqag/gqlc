@@ -1850,16 +1850,18 @@ gates:
     set -uo pipefail
     failed=()
     contexts=()
-    ran=0
 
     # $1 is the required CI context this arm stands for; the rest is the command.
     # The context is COLLECTED rather than restated in the summary below, because
     # a hardcoded coverage sentence is the same silent drift one level down: with
     # it, deleting the test-codegen-fence arm left this recipe green and still
     # claiming to cover codegen-fence (measured, bd gqlc-jq50).
+    #
+    # contexts is also the arm COUNT, rather than a second variable incremented
+    # beside it. Two counters of one thing can disagree, and the disagreement is
+    # exactly a run that grades fewer arms than it claims.
     run() {
         local ctx="$1"; shift
-        ran=$((ran + 1))
         contexts+=("${ctx}")
         echo ""
         echo "=== gates[${ctx}]: $*"
@@ -1880,7 +1882,15 @@ gates:
     run tidy           python3 .github/scripts/check-label-lengths.py .beads/issues.jsonl
     run govulncheck    just vuln
 
+    # Refuse BEFORE the summary, not after: the summary is a coverage claim, and
+    # a run that graded nothing must not get to make one at all.
+    ran="${#contexts[@]}"
     echo ""
+    if [ "${ran}" -eq 0 ]; then
+        echo "error: gates ran no arm at all, so it is green over nothing (bd gqlc-jq50)." >&2
+        exit 1
+    fi
+
     echo "gates: ran ${ran} arm(s) over required context(s):" \
          "$(printf '%s\n' "${contexts[@]}" | sort -u | tr '\n' ' ')"
     echo "gates: NOT covered, and CI still decides —"
@@ -1888,13 +1898,6 @@ gates:
     echo "       tidy (3 steps)    check-pr-closes.py, check-pr-authors.sh and"
     echo "                         check-cron-freshness.sh read a PR body, a PR's"
     echo "                         commit list and the Actions API. None exist here."
-
-    # An empty arm list would report success having graded nothing, which is the
-    # failure this whole recipe is about one level up.
-    if [ "${ran}" -eq 0 ]; then
-        echo "error: gates ran no arm at all, so it is green over nothing (bd gqlc-jq50)." >&2
-        exit 1
-    fi
 
     if [ "${#failed[@]}" -ne 0 ]; then
         echo ""
