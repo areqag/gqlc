@@ -400,6 +400,14 @@ const syntheticProbeRow = "\tprobe := \"" + syntheticProbeText + "\"\n" +
 	"\trequire.Contains(t, err.Message, \"" + syntheticProbeAns + "\")\n" +
 	"\t_ = probe\n"
 
+// syntheticColumnRow is the answer as a table column an assertion selects,
+// which is the shape both AGE witnesses actually use — the answer reaches
+// require.Contains as tc.wantMessage and never as a literal. Named because
+// the reader has to be shown reading it, and shown not reading it out of a
+// comment, and those are two rows.
+const syntheticColumnRow = "\tfor _, tc := range []struct{ want string }{{want: \"" + syntheticProbeAns + "\"}} {\n" +
+	"\t\trequire.Contains(t, msg, tc.want)\n\t}\n"
+
 // syntheticUnassertedRow is the same row with the answer moved out of the
 // assertion and left standing as a local nothing reads. That is mutation
 // M18 spelled as code, and every byte the sweep read before this bead is
@@ -561,9 +569,8 @@ func TestAssertedTextIsWhatAnAssertionReads(t *testing.T) {
 			spelled:  true,
 		},
 		{
-			name: "a table column the assertion selects is read through the column's name",
-			row: "\tfor _, tc := range []struct{ want string }{{want: \"" + syntheticProbeAns + "\"}} {\n" +
-				"\t\trequire.Contains(t, msg, tc.want)\n\t}\n",
+			name:     "a table column the assertion selects is read through the column's name",
+			row:      syntheticColumnRow,
 			asserted: true,
 			spelled:  true,
 		},
@@ -593,6 +600,14 @@ func TestAssertedTextIsWhatAnAssertionReads(t *testing.T) {
 		{
 			name: "a commented-out assertion reads nothing",
 			row:  commentOut(syntheticProbeRow),
+		},
+		{
+			// The column shape is the one both AGE witnesses use, so it
+			// owes the commented-out row too: a table left standing in a
+			// comment must reach the reader as nothing, exactly as a
+			// commented-out literal does.
+			name: "a commented-out table column reads nothing",
+			row:  commentOut(syntheticColumnRow),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
