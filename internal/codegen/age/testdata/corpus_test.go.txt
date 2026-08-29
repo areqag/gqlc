@@ -1260,30 +1260,47 @@ func TestAgtypeDateReadsTheStoredText(t *testing.T) {
 // outside in the other direction never reach it — the layout reads four
 // year digits and refuses a fifth, and refuses a sign — and they are here
 // so that what refuses them is measured rather than assumed.
+//
+// Each row declares WHICH of the three refused it, not merely that
+// something did. Three paths lead to the one verdict, so a row asserting
+// only that an error came back stays green with any one of them blinded:
+// the next path down catches the same input and answers with a different
+// reason.
 func TestAgtypeDateRefusesTextThatWouldNotSortChronologically(t *testing.T) {
-	for _, raw := range []string{
-		`"0000-01-01"`,
-		`"0000-12-31"`,
-		`"10000-01-01"`,
-		`"-0001-01-01"`,
-		`"2024-1-2"`,
-		`"2024-01-2"`,
-		`"24-01-02"`,
-		`"2024-02-30"`,
-		`"2024-13-01"`,
-		`""`,
-		`"not a date"`,
-		`20240102`,
-		`null`,
-		`"2024-01-02T00:00:00Z"`,
+	const (
+		notAString = "is not an agtype string"
+		notTheForm = "is not a date in zero-padded ISO YYYY-MM-DD form"
+		outOfRange = "is outside the year 1 to year 9999 range"
+	)
+	for _, tc := range []struct {
+		raw    string
+		reason string
+	}{
+		{`"0000-01-01"`, outOfRange},
+		{`"0000-12-31"`, outOfRange},
+		{`"10000-01-01"`, notTheForm},
+		{`"-0001-01-01"`, notTheForm},
+		{`"2024-1-2"`, notTheForm},
+		{`"2024-01-2"`, notTheForm},
+		{`"24-01-02"`, notTheForm},
+		{`"2024-02-30"`, notTheForm},
+		{`"2024-13-01"`, notTheForm},
+		{`""`, notTheForm},
+		{`"not a date"`, notTheForm},
+		{`20240102`, notAString},
+		{`null`, notAString},
+		{`"2024-01-02T00:00:00Z"`, notTheForm},
 	} {
-		got, err := agtypeDate([]byte(raw))
+		got, err := agtypeDate([]byte(tc.raw))
 		if err == nil {
-			t.Errorf("agtypeDate(%s) = %+v, want an error", raw, got)
+			t.Errorf("agtypeDate(%s) = %+v, want an error", tc.raw, got)
 			continue
 		}
+		if !strings.Contains(err.Error(), tc.reason) {
+			t.Errorf("agtypeDate(%s) = %v, want an error mentioning %q", tc.raw, err, tc.reason)
+		}
 		if got != (Date{}) {
-			t.Errorf("agtypeDate(%s) returned %+v alongside its error", raw, got)
+			t.Errorf("agtypeDate(%s) returned %+v alongside its error", tc.raw, got)
 		}
 	}
 }
@@ -1344,6 +1361,25 @@ func TestAgtypeLocalTimeCountsMicrosecondsFromMidnight(t *testing.T) {
 		back, err := agtypeLocalTimeMicros(got)
 		if err != nil || back != tc.micros {
 			t.Errorf("agtypeLocalTimeMicros(%+v) = %d, %v, want %d", got, back, err, tc.micros)
+		}
+	}
+
+	// A count is the whole encoding, so every other spelling of a clock
+	// reading — the ISO text an author might expect, a float, a quoted
+	// count — is a value this column cannot hold. Without these rows the
+	// integer read is a bare pass-through: taken unchecked, none of them
+	// yields a count, and midnight is returned for all of them.
+	for _, raw := range []string{
+		``,
+		`1.5`,
+		`"43200000000"`,
+		`"12:00:00"`,
+		`null`,
+		`true`,
+		`[43200000000]`,
+	} {
+		if got, err := agtypeLocalTime([]byte(raw)); err == nil {
+			t.Errorf("agtypeLocalTime(%s) = %+v, want an error", raw, got)
 		}
 	}
 }
@@ -1429,6 +1465,24 @@ func TestAgtypeDurationCountsTotalMicroseconds(t *testing.T) {
 		back, err := agtypeDurationMicros(got)
 		if err != nil || back != tc.micros {
 			t.Errorf("agtypeDurationMicros(%+v) = %d, %v, want %d", got, back, err, tc.micros)
+		}
+	}
+
+	// As with the clock reading one width up: the count is the whole
+	// encoding, and an ISO 8601 interval text is the spelling an author is
+	// likeliest to try. Taken unchecked, every row here decodes to the zero
+	// duration and no error.
+	for _, raw := range []string{
+		``,
+		`1.5`,
+		`"90000000"`,
+		`"PT1M30S"`,
+		`null`,
+		`true`,
+		`[90000000]`,
+	} {
+		if got, err := agtypeDuration([]byte(raw)); err == nil {
+			t.Errorf("agtypeDuration(%s) = %+v, want an error", raw, got)
 		}
 	}
 }

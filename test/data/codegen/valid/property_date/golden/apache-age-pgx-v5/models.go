@@ -95,17 +95,17 @@ const agtypeDateLayout = "2006-01-02"
 // it writes to an ordinary agtype string property on a vertex any writer
 // can touch, so what is read back is whatever the graph holds.
 //
-// Only the lower end of that range is bounded below, and the asymmetry is
-// measured rather than an oversight: the layout reads exactly four year
-// digits, so '10000-01-01' fails the parse at the separator it does not
-// find, and every signed spelling fails it at the sign. Year 0 is the one
-// out-of-range year that survives — it is unsigned and four digits, so it
-// parses and re-renders to itself — and it is what the bound is for.
+// The padding is enforced by the layout and not by a check beside it.
+// time.Parse reads each field at a fixed width, so '2024-1-2' fails at
+// the month, '24-01-02' at the year, and a signed or five-digit year at
+// the first byte that is not a digit where one belongs — every spelling
+// that would sort in the wrong place is refused before a Date is built.
 //
-// A text that parses but does not re-render to itself is refused for the
-// same reason the range is: '2024-1-2' names a real day and sorts in the
-// wrong place, so accepting it would put a value in the column that
-// breaks the column's only guarantee.
+// That leaves the range bounded at one end only, which is measured
+// rather than an oversight. A year over 9999 needs a fifth digit and a
+// year before 1 CE needs a sign, and the layout refuses both; year 0 is
+// the one out-of-range year spelled with four unsigned digits, so it is
+// the only one that reaches here, and it is what this bound is for.
 func agtypeDate(raw []byte) (Date, error) {
 	text, err := agtypeString(raw)
 	if err != nil {
@@ -114,9 +114,6 @@ func agtypeDate(raw []byte) (Date, error) {
 	at, err := time.Parse(agtypeDateLayout, text)
 	if err != nil {
 		return Date{}, fmt.Errorf("gqlc: %q is not a date in zero-padded ISO YYYY-MM-DD form: %w", text, err)
-	}
-	if at.Format(agtypeDateLayout) != text {
-		return Date{}, fmt.Errorf("gqlc: %q is not a date in zero-padded ISO YYYY-MM-DD form", text)
 	}
 	if at.Year() < 1 {
 		return Date{}, fmt.Errorf("gqlc: %q is outside the year 1 to year 9999 range this encoding admits", text)
