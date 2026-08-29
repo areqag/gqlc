@@ -14,7 +14,7 @@
 // refusal list with nothing added here reddens that sweep. The
 // refusals may therefore lag what AGE cannot do, and may not run ahead of it.
 //
-// The two gaps:
+// The gaps:
 //
 // An edge column whose candidates carry DISTINCT labels is reachable in
 // openCypher only through a relationship-type alternation — oC_RelationshipTypes
@@ -33,7 +33,13 @@
 // compiles and fails on every call, and the only place to answer is generate
 // time.
 //
-// Both refusals are claims about a server this repo pins by digest, so they are
+// AGE does not define point() either, which is the third gap rather than a name
+// in the second: 42883 is the same code the undefined temporal names come back
+// under, but the second gap's message is a claim about TEMPORAL constructors and
+// its remedy is to compute the value in Go or generate against a neo4j target,
+// neither of which answers a spatial call.
+//
+// Every refusal here is a claim about a server this repo pins by digest, so they are
 // measured here on every live run instead of asserted in a comment. If AGE ever
 // learns the alternation or grows a constructor, the test for it goes red and
 // the refusal is what should be reconsidered (gqlc-35yu.14, gqlc-35yu.12).
@@ -92,6 +98,10 @@ const alternationSQLSTATE = "42601"
 // schema qualifier and fails on the qualifier before looking for a function at
 // all. That answer names no function, which is why it cannot join this gap (bd
 // gqlc-dy40s).
+//
+// point() answers under it too, measured on the same run, and the spatial gap's
+// message quotes the code back to the author — so this one constant is read by
+// two witnesses (bd gqlc-l8e2n).
 const undefinedFunctionSQLSTATE = "42883"
 
 // TestAGERefusesRelationshipTypeAlternation measures, against the pinned AGE
@@ -312,6 +322,76 @@ func TestAGERefusesTheFunctionsItDoesNotDefine(t *testing.T) {
 			require.Len(t, values, 1, "a bare RETURN yields one row")
 			require.Regexp(t, `^-?[0-9]+$`, values[0],
 				"timestamp() must answer a bare integer — the refusal tells the author it is epoch millis")
+		})
+	}
+}
+
+// TestAGERefusesTheSpatialConstructor measures, against the pinned AGE image,
+// the third gap the text gate reads: the one spatial constructor this project
+// has run.
+//
+// It is a gap of its own and not a row in the one above, and the reason is the
+// message rather than the server. AGE answers point() in the SAME error class
+// as the temporal names — 42883, undefined_function — but the temporal gap
+// tells the author to compute the value in Go and bind it, or to generate
+// against a neo4j target, and neither of those answers a spatial call. So the
+// two carry different sentinels and different prose, and this test is where the
+// spatial one's evidence lives.
+//
+// The SQLSTATE is asserted here, unlike the temporal witness, because this
+// gap's refusal quotes it: it was measured for this probe on workflow run
+// 33268424367 (bd gqlc-l8e2n) rather than inferred from the temporal rows, and
+// a code quoted to an author is a claim about the server that has to be
+// re-measured like any other.
+//
+// The served row is a property lookup and there is no served CALL beside it.
+// The one spatial name this project has run is refused, so the accepting half
+// of this gap's bound is `p.point` alone — which is also the false positive a
+// scan for `point(` would take, and the reason the gate reads the grammar.
+func TestAGERefusesTheSpatialConstructor(t *testing.T) {
+	ctx, pool, shipped := ageDialectHarness(t, "gqlc_dialect_spatial")
+
+	for _, tc := range []struct {
+		name string
+		// text replaces the author's query text inside the shipped envelope.
+		text string
+		// wantMessage is the substring the server's error must carry. Empty
+		// means the statement must parse.
+		wantMessage string
+	}{
+		{
+			name:        "point",
+			text:        "RETURN point({x: 1, y: 2})",
+			wantMessage: "function point does not exist",
+		},
+		{
+			// A property lookup spells the name and calls nothing.
+			name: "a property named like the constructor",
+			text: "MATCH (p:Person) RETURN p.point",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stmt := substituteQueryText(t, shipped, tc.text)
+			rows, err := pool.Query(ctx, stmt, "{}")
+			if tc.wantMessage != "" {
+				require.Error(t, err, "AGE must refuse this call")
+				var pgErr *pgconn.PgError
+				require.ErrorAs(t, err, &pgErr, "the refusal must be the server's")
+				require.Equal(t, undefinedFunctionSQLSTATE, pgErr.Code,
+					"the refusal quotes this code back to the author")
+				require.Contains(t, pgErr.Message, tc.wantMessage,
+					"the missing function is what the server must name")
+				return
+			}
+			require.NoError(t, err, "AGE must accept this call")
+			defer rows.Close()
+
+			for rows.Next() {
+				var raw []byte
+				require.NoError(t, rows.Scan(&raw), "scan value")
+			}
+			require.NoError(t, rows.Err())
 		})
 	}
 }
