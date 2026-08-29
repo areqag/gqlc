@@ -230,8 +230,10 @@ func zeroLiteral(goType string) string {
 		return "false"
 	case "any", "map[string]any":
 		return "nil"
-	case goInstant:
-		return goInstant + "{}"
+	case goInstant, goDate, goLocalTime, goDuration:
+		// The instant and the three neutral carriers are all structs, so
+		// their zero is the composite literal and not a numeric one.
+		return goType + "{}"
 	default:
 		return "0"
 	}
@@ -291,6 +293,20 @@ func writeStatement(b *strings.Builder, p codegen.Query) string {
 	fmt.Fprintf(b, "\tstmt, err := q.cypherStmt(%q, %s, %q)\n", dollarTag(p.SourceText), codegen.QueryTextConst(p), recordShape(p))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %serr\n\t}\n", fail)
 
+	// A parameter whose encoding can fail is bound to a local first: an
+	// expression that returns an error has no form inside the map literal
+	// agtypeArgs takes. The failure names the parameter the author wrote,
+	// because the helper it comes out of sees only a value.
+	for i, f := range p.ParamFields {
+		encode, ok := fallibleParamEncoder(f, paramAccess(p, f))
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(b, "\t%s, err := %s\n", boundParamName(i), encode)
+		fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %sfmt.Errorf(%q, err)\n\t}\n",
+			fail, p.MethodName+": parameter $"+f.RawName+": %w")
+	}
+
 	argsExpr := `"{}"`
 	if len(p.ParamFields) > 0 {
 		fmt.Fprintf(b, "\targs, err := agtypeArgs(%s)\n", argsMapText(p))
@@ -299,6 +315,12 @@ func writeStatement(b *strings.Builder, p codegen.Query) string {
 	}
 	return argsExpr
 }
+
+// boundParamName is the local one fallibly-encoded parameter's result is
+// bound to. Indexed rather than derived from the parameter name, which is
+// the author's and could mangle to a Go keyword or to another local's
+// name; nothing else in an emitted method body is spelled this way.
+func boundParamName(i int) string { return fmt.Sprintf("param%d", i) }
 
 // writeQueryCall emits the statement composition, the parameter
 // encoding, and the q.db.Query call every decoding body opens with.
@@ -336,21 +358,39 @@ func argsMapText(p codegen.Query) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		access := codegen.ParamArg
-		if len(p.ParamFields) > 1 {
-			access = codegen.ParamArg + "." + f.Field
+		value := encodeParam(f, paramAccess(p, f))
+		if _, fallible := fallibleParamEncoder(f, ""); fallible {
+			// Already encoded, into the local writeStatement bound it to.
+			value = boundParamName(i)
 		}
-		fmt.Fprintf(&b, "%q: %s", f.RawName, encodeParam(f, access))
+		fmt.Fprintf(&b, "%q: %s", f.RawName, value)
 	}
 	b.WriteString("}")
 	return b.String()
 }
 
+// paramAccess is the expression reading one bound parameter out of the
+// method's argument. A query binding one parameter takes it bare; two or
+// more arrive in a Params struct.
+func paramAccess(p codegen.Query, f codegen.Param) string {
+	if len(p.ParamFields) > 1 {
+		return codegen.ParamArg + "." + f.Field
+	}
+	return codegen.ParamArg
+}
+
 // encodeParam wraps one parameter's access in the encoder its Go type
-// crosses the wire through. Every emitted type but the instant is
-// already a shape the JSON encoder writes as the agtype scalar it rides;
-// an instant is not, and left alone would cross as a formatted string
-// agtype orders by collation rather than by time.
+// crosses the wire through, for the encodings that cannot fail. Every
+// emitted type but a temporal is already a shape the JSON encoder writes
+// as the agtype scalar it rides; an instant is not, and left alone would
+// cross as a formatted string agtype orders by collation rather than by
+// time. The three neutral carriers are not either, and left alone would
+// cross as the JSON object their fields spell — which no decode in the
+// emitted package reads and no ORDER BY sorts.
+//
+// Those three are encoded by fallibleParamEncoder instead, and reach the
+// args map through a local. This answers for the instant and for
+// everything that needs no encoder at all.
 func encodeParam(f codegen.Param, access string) string {
 	if f.GoType != goInstant {
 		return access
@@ -359,6 +399,51 @@ func encodeParam(f codegen.Param, access string) string {
 		return "agtypeNullableMicros(" + access + ")"
 	}
 	return "agtypeMicros(" + access + ")"
+}
+
+// encodedParamText is the agtype-side Go type one carrier encodes to: the
+// string a DATE is stored as, and the microsecond count the other two
+// are. Named because the nullable-list composition below has to spell the
+// inner encoder's signature.
+var encodedParamText = map[string]string{
+	goDate:      "string",
+	goLocalTime: "int64",
+	goDuration:  "int64",
+}
+
+// fallibleParamEncoder composes the encode expression for one parameter
+// whose carrier's encoding can fail, with ok=false for every parameter
+// that crosses as an expression inside the args map — which is what the
+// call site in argsMapText reads it for, so access may be empty there.
+//
+// The encoder is chosen by the carrier at the leaf, and nullability and
+// list nesting are carried by the two combinators wrapped around it, so
+// the four shapes a parameter of one of these widths can take are four
+// compositions of the same three names rather than four emitted helpers.
+func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
+	elem, list := strings.CutPrefix(f.GoType, "[]")
+	var encoder string
+	switch elem {
+	case goDate:
+		encoder = "agtypeDateText"
+	case goLocalTime:
+		encoder = "agtypeLocalTimeMicros"
+	case goDuration:
+		encoder = "agtypeDurationMicros"
+	default:
+		return "", false
+	}
+	switch {
+	case list && f.Nullable:
+		return fmt.Sprintf("agtypeEncodedNullable(%s, func(in []%s) ([]%s, error) {\n\t\treturn agtypeEncodedList(in, %s)\n\t})",
+			access, elem, encodedParamText[elem], encoder), true
+	case list:
+		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, encoder), true
+	case f.Nullable:
+		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, encoder), true
+	default:
+		return fmt.Sprintf("%s(%s)", encoder, access), true
+	}
 }
 
 // writeOneBody emits the :one arity check, the single row's decode, and
@@ -568,6 +653,12 @@ func decodeFunc(goType string) string {
 		return "agtypeString"
 	case goInstant:
 		return "agtypeInstant"
+	case goDate:
+		return "agtypeDate"
+	case goLocalTime:
+		return "agtypeLocalTime"
+	case goDuration:
+		return "agtypeDuration"
 	}
 	panic(fmt.Sprintf("age codegen bug: Go type %q carries as %q, which decodeFunc has no arm for", goType, carrier))
 }

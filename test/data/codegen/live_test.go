@@ -261,9 +261,7 @@ type slotEntity struct {
 
 // temporalRoundtripQuerier is one arm's temporal_property_roundtrip
 // handle: the three zoneless property widths out through bound
-// parameters and back through projected columns and a whole vertex,
-// plus the constructed LOCALDATETIME column — the only way a batch can
-// reach that carrier, since the width has no property spelling.
+// parameters and back through projected columns and a whole vertex.
 //
 // readingsSeenFrom takes a pointer because its parameter compares
 // against a nullable property. A nil there must bind Cypher null and
@@ -276,8 +274,17 @@ type temporalRoundtripQuerier interface {
 	readingLocalTime(ctx context.Context, id int64) (localTimeValue, error)
 	readingElapsed(ctx context.Context, id int64) (durationValue, error)
 	oneReading(ctx context.Context, id int64) (readingEntity, error)
-	builtLocalDateTime(ctx context.Context) (localDateTimeValue, error)
 	errNoRows() error
+}
+
+// localDateTimeColumnQuerier is one arm's
+// local_datetime_constructed_column handle. LOCALDATETIME has no
+// property spelling, so a constructed column is the only way a batch
+// reaches that carrier — and a constructed temporal is what Apache AGE
+// refuses permanently, which is why this is a handle of its own rather
+// than a method on temporalRoundtripQuerier.
+type localDateTimeColumnQuerier interface {
+	builtLocalDateTime(ctx context.Context) (localDateTimeValue, error)
 }
 
 // zonedTimeRoundtripQuerier is one arm's zoned_time_roundtrip handle.
@@ -348,6 +355,18 @@ type savepointHarness interface {
 	savepointScenario(ctx context.Context, t *testing.T) savepointBackend
 }
 
+// localDateTimeColumnHarness is an arm whose target admits a constructed
+// temporal column. Apache AGE defines no temporal constructor at all —
+// measured on the pinned image by
+// TestAGERefusesTheFunctionsItDoesNotDefine — and no bead lifts that:
+// the backend refuses such a column at generation, so this column stays
+// false for that arm permanently rather than until some later width
+// lands.
+type localDateTimeColumnHarness interface {
+	harness
+	localDateTimeColumnScenario(ctx context.Context, t *testing.T) localDateTimeColumnBackend
+}
+
 // backend is one scenario's isolated view of an arm: a graph no other
 // scenario observes, and the generated handles bound to it.
 //
@@ -380,9 +399,31 @@ type edgeUnionBackend interface {
 
 // temporalBackend is a scenario's view of a temporalHarness and
 // zonedTimeBackend of a zonedTimeHarness.
+//
+// The three extra methods are where the arms are allowed to differ, and
+// each one is a claim this battery makes about its arm rather than a
+// question it asks the generated code.
+//
+// seedSeenOn writes the nullable date without going through the surface
+// under test, the way backend.seed does for every other scenario. It
+// takes components instead of cypher because a date literal is outside
+// the dialect intersection backend.seed's contract rests on: neo4j
+// spells one date('YYYY-MM-DD') and Apache AGE, having no such function,
+// stores the same value as the ISO string its encoding rides on.
+//
+// storedLocalTime and storedDuration answer what the arm's target keeps
+// of a written value. They are the arm's declaration of its own
+// resolution and normalisation — neo4j the identity, AGE the
+// microsecond truncation and the collapse of days into seconds that ADR
+// 0033's encodings settle — so a target that silently coarsened beyond
+// what its arm declares fails here. They read nothing from the emitted
+// code, so they cannot agree with a defect in it.
 type temporalBackend interface {
 	backend
 	temporalRoundtrip() temporalRoundtripQuerier
+	seedSeenOn(ctx context.Context, t *testing.T, id int64, on dateValue)
+	storedLocalTime(v localTimeValue) localTimeValue
+	storedDuration(v durationValue) durationValue
 }
 
 type zonedTimeBackend interface {
@@ -411,31 +452,48 @@ type savepointBackend interface {
 	serveNestedBegin(ctx context.Context, t *testing.T) (savepoint bool)
 }
 
+// localDateTimeColumnBackend is a scenario's view of a
+// localDateTimeColumnHarness.
+type localDateTimeColumnBackend interface {
+	backend
+	localDateTimeColumn() localDateTimeColumnQuerier
+}
+
 // arms are the backends the battery runs against. Each adapter owns its
 // container, its connection, and its isolation strategy.
 //
 // writes records that the arm's target emits the write fixture, edgeUnions
 // that it emits an edge-union dispatch, temporals that it admits the zoneless
 // temporal widths, zonedTime that it admits TIME WITH TIME ZONE, and
-// savepoints that its driver serves a nested Begin with one.
+// savepoints that its driver serves a nested Begin with one, and
+// constructedTemporal that it admits a column the server builds by calling a
+// temporal constructor.
 // TestLiveSmoke holds each harness to its column, so an arm that stops
 // satisfying writeHarness, edgeUnionHarness, temporalHarness,
-// zonedTimeHarness or savepointHarness fails the battery rather than dropping
-// those scenarios unremarked — and an arm that starts satisfying one fails it
-// too, which is what would happen if Apache AGE gained the alternation and the
-// backend's refusal were lifted, or if it gained a temporal encoding.
+// zonedTimeHarness, savepointHarness or localDateTimeColumnHarness fails the
+// battery rather than dropping those scenarios unremarked — and an arm that
+// starts satisfying one fails it too, which is what would happen if Apache AGE
+// gained the alternation and the backend's refusal were lifted, or if it
+// gained a temporal constructor.
+//
+// Apache AGE holds temporals without constructedTemporal, and that pair is
+// permanent rather than a stage. gqlc-mv3r gave the three zoneless widths an
+// agtype encoding the backend owns, which needs nothing of the server but
+// string and integer comparison; a constructed column needs a function AGE
+// does not define, and no encoding gqlc chooses can supply one.
 var arms = []struct {
-	name       string
-	start      func(ctx context.Context, t *testing.T) harness
-	writes     bool
-	edgeUnions bool
-	temporals  bool
-	zonedTime  bool
-	savepoints bool
+	name                string
+	start               func(ctx context.Context, t *testing.T) harness
+	writes              bool
+	edgeUnions          bool
+	temporals           bool
+	zonedTime           bool
+	savepoints          bool
+	constructedTemporal bool
 }{
-	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true, edgeUnions: true, temporals: true, zonedTime: true},
-	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true, edgeUnions: true, temporals: true, zonedTime: true},
-	{name: "apache-age-pgx-v5", start: startAGE, writes: true, savepoints: true},
+	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true, edgeUnions: true, temporals: true, zonedTime: true, constructedTemporal: true},
+	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true, edgeUnions: true, temporals: true, zonedTime: true, constructedTemporal: true},
+	{name: "apache-age-pgx-v5", start: startAGE, writes: true, temporals: true, savepoints: true},
 }
 
 // readScenarios are the battery every arm runs. Each body is written once
@@ -495,6 +553,13 @@ var savepointScenarios = []struct {
 	run  func(ctx context.Context, t *testing.T, b savepointBackend)
 }{
 	{name: "tx: the refused nested Begin opens no savepoint", run: txRefusedNestedBeginOpensNoSavepoint},
+}
+
+var localDateTimeColumnScenarios = []struct {
+	name string
+	run  func(ctx context.Context, t *testing.T, b localDateTimeColumnBackend)
+}{
+	{name: "local_datetime_constructed_column: components arrive whole", run: constructedLocalDateTime},
 }
 
 // edgeUnionScenarios are the battery an arm runs once its target emits an
@@ -687,6 +752,20 @@ func TestLiveSmoke(t *testing.T) {
 							t.Parallel()
 						}
 						sc.run(ctx, t, th.temporalScenario(ctx, t))
+					})
+				}
+			}
+
+			lh, servesConstructedTemporal := h.(localDateTimeColumnHarness)
+			require.Equal(t, arm.constructedTemporal, servesConstructedTemporal,
+				"the arm's constructed-temporal capability must match the arms table; a target that gained or lost a temporal constructor updates both")
+			if servesConstructedTemporal {
+				for _, sc := range localDateTimeColumnScenarios {
+					t.Run(sc.name, func(t *testing.T) {
+						if parallelScenarios {
+							t.Parallel()
+						}
+						sc.run(ctx, t, lh.localDateTimeColumnScenario(ctx, t))
 					})
 				}
 			}
@@ -1264,10 +1343,28 @@ func timestampRoundTrip(ctx context.Context, t *testing.T, b writeBackend) { //n
 // day-of-year loses it; and the first of a month, because an off-by-one
 // on the month component is invisible on most other days.
 //
+// Three more dates are here for the AGE arm, whose encoding is a
+// zero-padded ISO string ordered by the server's string comparison
+// (ADR 0033). That order is the calendar's only inside [0001, 9999] and
+// only while every component is padded, so the two ends of the window
+// are rows, and a pair of adjacent days across a year boundary is a
+// third: 2023-12-31 and 2024-01-01 differ in every component, so a
+// padding or component defect that survives the round trip still puts
+// them the wrong way round under ORDER BY.
+//
 // The durations stay inside DAY TO SECOND — the schema's declared
 // precision — and carry nanoseconds, because the bolt encoding sends
 // seconds and nanoseconds apart and a conversion that flattened them
-// would lose the sub-second half.
+// would lose the sub-second half. They sit either side of zero because
+// AGE stores a signed count of microseconds, where the sign is the one
+// place its decode has to divide the way neo4j's components read: a
+// duration backwards borrows from Seconds, and a division truncating
+// toward zero answers with a negative Nanos no neo4j value takes.
+//
+// Sub-microsecond components are deliberate too. AGE's encodings hold
+// microseconds and truncate below that silently, so reading 9ns back as
+// 0 is the arm's declared resolution being witnessed rather than a value
+// going missing — see temporalBackend.storedLocalTime.
 var temporalReadings = []struct {
 	id      int64
 	onDate  dateValue
@@ -1292,7 +1389,36 @@ var temporalReadings = []struct {
 		atLocal: localTimeValue{Hour: 6, Minute: 7, Second: 8, Nanosecond: 9},
 		elapsed: durationValue{Days: 400, Seconds: 86399, Nanos: 0},
 	},
+	{
+		id:      4,
+		onDate:  dateValue{Year: 1, Month: 1, Day: 1},
+		atLocal: localTimeValue{Hour: 12, Minute: 0, Second: 0, Nanosecond: 0},
+		elapsed: durationValue{Seconds: -2, Nanos: 500000000},
+	},
+	{
+		id:      5,
+		onDate:  dateValue{Year: 9999, Month: 12, Day: 31},
+		atLocal: localTimeValue{Hour: 23, Minute: 59, Second: 59, Nanosecond: 999999000},
+		elapsed: durationValue{},
+	},
+	{
+		id:      6,
+		onDate:  dateValue{Year: 2023, Month: 12, Day: 31},
+		atLocal: localTimeValue{Hour: 1, Minute: 2, Second: 3, Nanosecond: 4000},
+		elapsed: durationValue{Seconds: -90},
+	},
+	{
+		id:      7,
+		onDate:  dateValue{Year: 2024, Month: 1, Day: 1},
+		atLocal: localTimeValue{Hour: 0, Minute: 0, Second: 0, Nanosecond: 1000},
+		elapsed: durationValue{Days: 1, Seconds: 1, Nanos: 1000},
+	},
 }
+
+// temporalReadingsInDateOrder is temporalReadings by onDate, which is
+// the order every ORDER BY in the scenario answers in and no arm's
+// insertion order.
+var temporalReadingsInDateOrder = []int64{4, 2, 6, 7, 1, 3, 5}
 
 // temporalRoundTrip drives the zoneless temporal widths through the
 // neutral carriers of ADR 0033: a date, a local time and a duration
@@ -1318,30 +1444,34 @@ func temporalRoundTrip(ctx context.Context, t *testing.T, b temporalBackend) { /
 	}
 
 	for _, r := range temporalReadings {
+		wantLocal := b.storedLocalTime(r.atLocal)
+		wantElapsed := b.storedDuration(r.elapsed)
+
 		gotDate, err := q.readingDate(ctx, r.id)
 		require.NoError(t, err, "read reading %d date", r.id)
 		require.Equal(t, r.onDate, gotDate, "reading %d: the date must survive the encoding component for component", r.id)
 
 		gotLocal, err := q.readingLocalTime(ctx, r.id)
 		require.NoError(t, err, "read reading %d local time", r.id)
-		require.Equal(t, r.atLocal, gotLocal, "reading %d: the local time must survive to the nanosecond", r.id)
+		require.Equal(t, wantLocal, gotLocal, "reading %d: the local time must survive to the resolution this arm declares", r.id)
 
 		gotElapsed, err := q.readingElapsed(ctx, r.id)
 		require.NoError(t, err, "read reading %d duration", r.id)
-		require.Equal(t, r.elapsed, gotElapsed, "reading %d: the duration's components must survive held apart", r.id)
+		require.Equal(t, wantElapsed, gotElapsed, "reading %d: the duration must survive as this arm declares it stores one", r.id)
 
 		entity, err := q.oneReading(ctx, r.id)
 		require.NoError(t, err, "read reading %d as a vertex", r.id)
-		require.Equal(t, readingEntity{ID: r.id, OnDate: r.onDate, AtLocal: r.atLocal, Elapsed: r.elapsed}, entity,
+		require.Equal(t, readingEntity{ID: r.id, OnDate: r.onDate, AtLocal: wantLocal, Elapsed: wantElapsed}, entity,
 			"reading %d: a whole vertex must carry the same components its columns do, and an unwritten nullable date must be absent rather than a zero Date", r.id)
 	}
 
 	// The whole set, ordered by the author's ORDER BY. In date order, so
-	// the pre-epoch reading leads and the id order 1,2,3 it was written
-	// in does not survive.
-	all, err := q.readingsFrom(ctx, dateValue{Year: 1900, Month: 1, Day: 1})
+	// the pre-epoch reading leads and the id order it was written in does
+	// not survive. The cutoff is the first date the encoding admits, so
+	// this probe also holds that lower bound bindable and inclusive.
+	all, err := q.readingsFrom(ctx, dateValue{Year: 1, Month: 1, Day: 1})
 	require.NoError(t, err)
-	require.Equal(t, []int64{2, 1, 3}, all, "ORDER BY over the stored date must answer in date order")
+	require.Equal(t, temporalReadingsInDateOrder, all, "ORDER BY over the stored date must answer in date order")
 
 	// The bound date is the cutoff and the comparison is inclusive, so the
 	// reading written on exactly this date stays in. A conversion that
@@ -1350,7 +1480,17 @@ func temporalRoundTrip(ctx context.Context, t *testing.T, b temporalBackend) { /
 	// clock.
 	from, err := q.readingsFrom(ctx, dateValue{Year: 2024, Month: 2, Day: 29})
 	require.NoError(t, err)
-	require.Equal(t, []int64{1, 3}, from, "a range predicate over the stored date must be inclusive and in date order")
+	require.Equal(t, []int64{1, 3, 5}, from, "a range predicate over the stored date must be inclusive and in date order")
+
+	// Adjacent days across a year boundary. Every component differs, so a
+	// stored form that ordered on anything but the whole date — the day
+	// alone, an unpadded year, the text a locale would render — keeps
+	// 2023-12-31 on the wrong side of this cutoff or answers the two the
+	// wrong way round.
+	acrossYear, err := q.readingsFrom(ctx, dateValue{Year: 2024, Month: 1, Day: 1})
+	require.NoError(t, err)
+	require.Equal(t, []int64{7, 1, 3, 5}, acrossYear,
+		"a cutoff on January 1st must exclude the December 31st before it")
 
 	// A nullable date parameter. Nothing has written seenOn yet, so the
 	// predicate has nothing to match either way; what it holds is that a
@@ -1360,8 +1500,8 @@ func temporalRoundTrip(ctx context.Context, t *testing.T, b temporalBackend) { /
 	require.NoError(t, err)
 	require.Empty(t, none, "a nil nullable date parameter must bind null, not a zero Date")
 
-	b.seed(ctx, t, "MATCH (r:Reading {id: 1}) SET r.seenOn = date('2024-03-01')")
-	b.seed(ctx, t, "MATCH (r:Reading {id: 3}) SET r.seenOn = date('2023-01-31')")
+	b.seedSeenOn(ctx, t, 1, dateValue{Year: 2024, Month: 3, Day: 1})
+	b.seedSeenOn(ctx, t, 3, dateValue{Year: 2023, Month: 1, Day: 31})
 
 	seen, err := q.readingsSeenFrom(ctx, &dateValue{Year: 2023, Month: 1, Day: 31})
 	require.NoError(t, err)
@@ -1374,12 +1514,16 @@ func temporalRoundTrip(ctx context.Context, t *testing.T, b temporalBackend) { /
 	require.NoError(t, err)
 	require.Equal(t, &dateValue{Year: 2024, Month: 3, Day: 1}, entity.SeenOn,
 		"a written nullable date must arrive as its components, not as nil")
+}
 
-	// LOCALDATETIME has no property spelling, so the carrier is reached
-	// through a column the server constructs. The literal is in the query
-	// text, so the components are known exactly and a conversion that
-	// dropped one is visible here and nowhere else in the battery.
-	built, err := q.builtLocalDateTime(ctx)
+// constructedLocalDateTime reads the fourth neutral carrier. LOCALDATETIME
+// has no property spelling in either target, so it is reached through a
+// column the server builds by calling a temporal constructor. The literal
+// is in the query text, so the components are known exactly and a
+// conversion that dropped one is visible here and nowhere else in the
+// battery.
+func constructedLocalDateTime(ctx context.Context, t *testing.T, b localDateTimeColumnBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	built, err := b.localDateTimeColumn().builtLocalDateTime(ctx)
 	require.NoError(t, err)
 	require.Equal(t, localDateTimeValue{Year: 2024, Month: 3, Day: 5, Hour: 6, Minute: 7, Second: 8, Nanosecond: 9}, built,
 		"a constructed LOCALDATETIME column must arrive component for component")

@@ -10,11 +10,24 @@
 // emission. agtype has no temporal value, so what a TIMESTAMP means on
 // the wire is decided entirely by those helpers and by nothing the Go
 // type checker can see.
+//
+// Span carries the other three temporal widths for the same reason, and
+// DATE in both nullabilities. They ride the neutral carriers, so a Go
+// compiler that sees a Date where a LocalTime belongs is the whole of
+// what it can catch: which bytes each width means on the wire, and which
+// of them are refused, is decided entirely by the helpers this schema
+// puts into the emission.
 CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
     (:Event {
         id         :: INT64     NOT NULL,
         occurredAt :: TIMESTAMP NOT NULL,
         seenAt     :: TIMESTAMP
+    }),
+    (:Span {
+        startsOn :: DATE       NOT NULL,
+        endsOn   :: DATE,
+        opensAt  :: LOCAL TIME NOT NULL,
+        lasts    :: DURATION(DAY TO SECOND) NOT NULL
     }),
     (:Person {
         id         :: INT64 NOT NULL,

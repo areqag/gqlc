@@ -107,6 +107,15 @@ var corpusTests = []string{
 	"TestAgtypeZoneRefusesAnOffsetOutsideADay",
 	"TestDecodeVertexReadsTheOffsetSidecarBesideItsInstant",
 	"TestEmittedMethodBindsAnInstantAsMicroseconds",
+	"TestAgtypeDateReadsTheStoredText",
+	"TestAgtypeDateRefusesTextThatWouldNotSortChronologically",
+	"TestAgtypeDateTextRefusesADayOffTheCalendar",
+	"TestAgtypeLocalTimeCountsMicrosecondsFromMidnight",
+	"TestAgtypeLocalTimeRefusesACountOutsideTheDay",
+	"TestAgtypeLocalTimeMicrosRefusesAReadingOffTheClock",
+	"TestAgtypeDurationCountsTotalMicroseconds",
+	"TestAgtypeDurationMicrosFoldsDaysAndRefusesMonths",
+	"TestEmittedMethodBindsTheCarriersAsTheirScalars",
 	"TestBoundGraphCountsBytes",
 }
 
@@ -138,7 +147,7 @@ var corpusSubtests = map[string]int{
 // This is the third census because the first two cannot see the fixture's
 // commonest shape. corpusTests names top-level tests and a top-level test
 // passes whether or not anything ran inside it; corpusSubtests counts
-// subtest passes and this fixture has exactly one t.Run in 30 top-level
+// subtest passes and this fixture has exactly one t.Run in 39 top-level
 // tests, so a test whose table goes empty has no key on either side,
 // which is equality. Measured: emptying the five-entry table in
 // TestAgtypeListRefusesAnElementOfTheWrongScalar reddens this census and
@@ -150,14 +159,22 @@ var corpusSubtests = map[string]int{
 // Dynamic each refuse. When a deliberate fixture edit moves a number, the
 // failure prints the fixture's current census as a Go literal to paste.
 var corpusTables = map[string]corpusrun.Table{
-	"TestAgtypeArgs":    {Rows: 7},
-	"TestAgtypeBool":    {Rows: 17},
+	"TestAgtypeArgs":                   {Rows: 7},
+	"TestAgtypeBool":                   {Rows: 17},
+	"TestAgtypeDateReadsTheStoredText": {Rows: 5},
+	"TestAgtypeDateRefusesTextThatWouldNotSortChronologically": {Rows: 14},
+	"TestAgtypeDateTextRefusesADayOffTheCalendar":              {Rows: 10},
+	"TestAgtypeDurationCountsTotalMicroseconds":                {Rows: 16},
+	"TestAgtypeDurationMicrosFoldsDaysAndRefusesMonths":        {Rows: 9},
 	"TestAgtypeFloat64": {Rows: 21},
 	"TestAgtypeInstantCountsMicrosecondsFromTheEpoch":  {Rows: 11},
 	"TestAgtypeInstantRefusesACountOutsideTheCalendar": {Rows: 6},
 	"TestAgtypeInt64":                                     {Rows: 27},
 	"TestAgtypeListOfString":                              {Rows: 15},
 	"TestAgtypeListRefusesAnElementOfTheWrongScalar":      {Rows: 14},
+	"TestAgtypeLocalTimeCountsMicrosecondsFromMidnight":   {Rows: 11},
+	"TestAgtypeLocalTimeMicrosRefusesAReadingOffTheClock": {Rows: 9},
+	"TestAgtypeLocalTimeRefusesACountOutsideTheDay":       {Rows: 5},
 	"TestAgtypeMicrosEncodesTheInstantAndNotTheWallClock": {Rows: 8},
 	"TestAgtypeNestedList":                                {Rows: 5},
 	"TestAgtypeNullableMicrosCarriesAbsence":              {Rows: 4},
@@ -169,6 +186,7 @@ var corpusTables = map[string]corpusrun.Table{
 	"TestCypherStmtComposesOneStatement":                  {Rows: 6},
 	"TestDecodeVertexRefusesMisshapenText":                {Rows: 16},
 	"TestEmittedMethodBindsAnInstantAsMicroseconds":       {Rows: 4},
+	"TestEmittedMethodBindsTheCarriersAsTheirScalars":     {Rows: 6},
 }
 
 // TestEmittedHelpersDecodeTheAgtypeCorpus runs the emitted agtype
@@ -188,7 +206,7 @@ var corpusTables = map[string]corpusrun.Table{
 // composition bug agree with itself.
 func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
-	in.Queries = []codegen.NamedQuery{servedQuery, instantParamQuery}
+	in.Queries = []codegen.NamedQuery{servedQuery, instantParamQuery, carrierParamQuery}
 	emitted, err := age.New(age.WithPackageName(corpusPackage)).Generate(in)
 	s.Require().NoError(err)
 	files := make(map[string]string, len(emitted))
@@ -201,8 +219,13 @@ func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 
 	dir := s.T().TempDir()
 	for name, body := range map[string]string{
-		"go.mod":         corpusModule,
-		"models.go":      files["models.go"],
+		"go.mod":    corpusModule,
+		"models.go": files["models.go"],
+		// The neutral carriers the three widths decode into. Emitted
+		// rather than written here for the same reason models.go is: a
+		// driver holding its own copy of Date would compile against a
+		// shape the emission had stopped producing.
+		"temporal.go":    files["temporal.go"],
 		"boundgraph.go":  graphStub + s.declarations(files["db.go"], "maxGraphNameBytes", "boundGraph", "cypherStmt"),
 		"writeevent.go":  files[temporalSource+".go"],
 		"corpus_test.go": string(driver),

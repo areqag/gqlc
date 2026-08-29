@@ -483,11 +483,11 @@ every target emits them for such a batch.
 | `Rollback` | `scopeMethod` | every target | no target |
 | `EnsureGraph` | `scopeMethod` | `apache-age-pgx-v5` | no target |
 | `DropGraph` | `scopeMethod` | `apache-age-pgx-v5` | no target |
-| `Date` | `scopePackage` | `neo4j-go-v5`, `neo4j-go-v6` | `neo4j-go-v5`, `neo4j-go-v6` |
-| `Time` | `scopePackage` | `neo4j-go-v5`, `neo4j-go-v6` | `neo4j-go-v5`, `neo4j-go-v6` |
-| `LocalTime` | `scopePackage` | `neo4j-go-v5`, `neo4j-go-v6` | `neo4j-go-v5`, `neo4j-go-v6` |
-| `LocalDateTime` | `scopePackage` | `neo4j-go-v5`, `neo4j-go-v6` | `neo4j-go-v5`, `neo4j-go-v6` |
-| `Duration` | `scopePackage` | `neo4j-go-v5`, `neo4j-go-v6` | `neo4j-go-v5`, `neo4j-go-v6` |
+| `Date` | `scopePackage` | every target | every target |
+| `Time` | `scopePackage` | every target | every target |
+| `LocalTime` | `scopePackage` | every target | every target |
+| `LocalDateTime` | `scopePackage` | every target | every target |
+| `Duration` | `scopePackage` | every target | every target |
 
 The set is refused uniformly, so a row is over-broad on a target where
 neither an entity nor a query taking that name would collide. *Breaks
@@ -541,20 +541,24 @@ entity or query of any of those names collides there. `WithTx` and
 `*Queries`, so refusing a query of either name is the collision rather
 than a false refusal.
 
-On `apache-age-pgx-v5` the over-broad rows are seven of the twenty-two:
-the same `Commit` and `Rollback`, plus `Date`, `Time`, `LocalTime`,
-`LocalDateTime` and `Duration`, which that target declares none of — the
-neutral carriers (ADR 0033) reached the neo4j emission first, and AGE's
-admission of the widths they cover is a separate change. When that lands,
-the *Declared by* cells the corpus measures move on their own and those
-five stop being over-broad there.
+On `apache-age-pgx-v5` the over-broad rows are two of the twenty-two: the
+same `Commit` and `Rollback`, over-broad for the receiver reason above
+rather than because the target leaves the name free. The five temporal
+carriers sat here too until that backend admitted `DATE`, `LOCAL TIME`
+and `DURATION`; it now emits `temporal.go` on the same trigger every
+target does, so the *Declared by* cells the corpus measures moved on
+their own. Zoned `TIME` is still refused there and the carrier `Time` is
+declared all the same: `temporal.go` declares the five together whichever
+width triggered it, so what reserves a name is the emission and not the
+admission.
 
-Six and seven count the target axis alone. The batch axis moves them: on
-a batch with no `:one` query nothing declares `ErrNoRows` or
+Six and two count the target axis alone. The batch axis moves them: on a
+batch with no `:one` query nothing declares `ErrNoRows` or
 `ErrMultipleResults`, and on a batch whose surface names no temporal
 width nothing emits `temporal.go` and so nothing declares the five
-carriers. A neo4j-only batch of the first shape carries eight over-broad
-rows; of both shapes together, thirteen. `NODE TYPE DBTX` is refused on a
-name that target leaves free — taken per D2 Resolved, one uniform set
+carriers. Either target gains two over-broad rows on a batch of the first
+shape and five more again on one of both shapes — thirteen for a
+neo4j-only batch, nine for an AGE-only one. `NODE TYPE DBTX` is refused
+on a name neo4j leaves free — taken per D2 Resolved, one uniform set
 rather than a name that generates under one target and is refused under
 another.
