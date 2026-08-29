@@ -152,9 +152,16 @@ while :; do
     beads_json='[]'
     beads_read=1
     if [ -n "$bead_ids" ]; then
+        # bd's exit code is not the health signal: it is 1 both when the ledger
+        # is unreachable and when every id named simply does not exist, and
+        # those owe opposite lines. Its stdout does separate them — a miss
+        # prints an error OBJECT, an unreachable ledger prints nothing — so bd
+        # is run on its own, out of the pipeline, where pipefail cannot fold
+        # the two together, and `|| true` swallows the code without discarding
+        # the payload that tells them apart.
         # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
-        beads_json=$(bd show $bead_ids --json 2>/dev/null |
-            jq -c 'if type == "array" then . else [.] end' 2>/dev/null) || beads_json=""
+        raw=$(bd show $bead_ids --json 2>/dev/null) || true
+        beads_json=$(jq -c 'if type == "array" then . else [.] end' <<<"$raw" 2>/dev/null) || beads_json=""
         [ -n "$beads_json" ] || { beads_json='[]'; beads_read=0; }
         asks=$(jq -r '.[] | .id as $i | (.labels // [])[]
                    | select(startswith("effort:")) | "\($i) \(ltrimstr("effort:"))"' <<<"$beads_json" 2>/dev/null) || asks=""
