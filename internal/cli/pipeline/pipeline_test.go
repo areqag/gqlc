@@ -794,11 +794,11 @@ func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
 					"the carrier is not yet the obstacle: the statement never parses on this server")
 			}
 			require.EqualError(t, err, "graph[0]: undefined function: generated code runs the author's "+
-				"query text verbatim (ADR 0005) and Apache AGE 1.7.0 defines no temporal constructor at "+
-				`all, so every call on 1 query would answer "function <name> does not exist" — AGE's `+
-				"whole temporal surface is timestamp(), which returns epoch milliseconds as an integer, "+
-				"so compute the value in Go and bind it as a parameter, or generate against a neo4j "+
-				"target: "+tc.dropped)
+				"query text verbatim (ADR 0005) and Apache AGE 1.7.0 defines no temporal constructor "+
+				`this project has measured, so every call on 1 query would answer "function <name> `+
+				`does not exist" — timestamp() is the one that answered, returning epoch milliseconds `+
+				"as an integer, so compute the value in Go and bind it as a parameter, or generate "+
+				"against a neo4j target: "+tc.dropped)
 			require.Equal(t, pipeline.Result{}, res)
 
 			// The same project on a driver whose server defines the
