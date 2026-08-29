@@ -120,6 +120,34 @@ km — the machinery of the Թագաւորութիւն
 EOF
 }
 
+# The dispatcher hands every verb the rest of argv, and a verb that never reads
+# it acts for ANY argument — including the one a careful person types FIRST.
+# Measured 2026-08-29 (bd gqlc-akp4w): `km deploy --help` fast-forwarded the
+# deployed checkout and printed no help, and `km resume --help` reached the
+# Constitution VI.4 identity refusal rather than the help it asked for. Ten
+# dispatched verbs read no argv at all, so --help was the one spelling
+# guaranteed to perform the action instead of explaining it. `km down --help`
+# closes the town; that row is a static reading, not a first-party run.
+#
+# The refusal is `die`, not a silent skip. A verb that quietly ignored the
+# argument would still leave whoever typed it believing km had understood it —
+# which is the sibling defect (bd gqlc-wguoq), where a message reported the
+# state instead of the act and its own raiser read his halt as someone else's.
+no_args() { # <verb> "$@" — for a verb that takes none; --help prints usage
+    local na_verb=$1
+    shift
+    [ "$#" -gt 0 ] || return 0
+    case "$1" in
+    -h | --help | help)
+        usage
+        exit 0
+        ;;
+    esac
+    die "$na_verb takes no arguments, and it did NOT run — got: $*
+  to ask what it does:  $(verb "$na_verb") --help
+  to run it:            $(verb "$na_verb")"
+}
+
 # ---------- config ----------
 
 cfg() { # cfg <section> <key> -> value with quotes and inline comment stripped
@@ -422,6 +450,7 @@ set_aside_bd_exports() { # <root>
 }
 
 cmd_deploy() {
+    no_args deploy "$@"
     local root branch drift
     # The fetch and the merge reach the network and the disk from inside a
     # systemd tick; see git_at. A caller may raise or lower it.
@@ -1500,6 +1529,7 @@ ensure_state_tree() {
 }
 
 cmd_up() {
+    no_args up "$@"
     have_herdr || die "herdr is not installed, so there is no town to raise (https://herdr.dev)"
     herdr_server_up || die "herdr server is not running — start it and retry (herdr status server)"
     ensure_state_tree
@@ -1549,6 +1579,7 @@ cmd_up() {
 }
 
 cmd_down() {
+    no_args down "$@"
     session_up || { echo "the town is already down"; return 0; }
     # Declared, not inherited. This is a machine notice with no citizen behind
     # it — `km down` is an operator command — and require_identity would
@@ -1735,6 +1766,7 @@ cmd_halt() {
 HALT_LOWERERS="sedrak andranik"
 
 cmd_resume() {
+    no_args resume "$@"
     local seat="${KINGDOM_SEAT:-}"
     # Fail closed on an absent identity rather than defaulting to andranik the
     # way the rest of km does. Everywhere else that default is a convenience for
@@ -1837,6 +1869,7 @@ capped_seats() {
 # ending a session against a citizen's will is VI.2. The dispatcher NUDGES such
 # a seat instead (seat_idle), which asks rather than forces.
 cmd_reconcile() {
+    no_args reconcile "$@"
     session_up || { echo "reconcile: the town is down; nothing to reconcile"; return 0; }
     local s st suspect rc repaired=0 redelivered=0 suspected=0 respawned=0 corrected=0
     for s in $(seats_all); do
@@ -3002,6 +3035,7 @@ hold_paths_on_master() { # subjects on stdin, one per line -> {"<path>": true|fa
 }
 
 cmd_hold_verdict() {
+    no_args hold-verdict "$@"
     local input
     input=$(cat)
     if ! printf '%s' "$input" | jq -e 'type == "array"' >/dev/null 2>&1; then
@@ -4643,6 +4677,7 @@ render_unit() { # <src> <dst>
 }
 
 cmd_install_units() {
+    no_args install-units "$@"
     local unitdir="$HOME/.config/systemd/user" u
     mkdir -p "$unitdir"
     for u in kingdom-dispatch.service kingdom-dispatch-alarm.service kingdom-dispatch.timer kingdom-guard.service kingdom-guard.timer; do
@@ -4656,6 +4691,7 @@ cmd_install_units() {
 }
 
 cmd_uninstall_units() {
+    no_args uninstall-units "$@"
     systemctl --user disable --now kingdom-dispatch.timer kingdom-guard.timer 2>/dev/null || true
     rm -f "$HOME/.config/systemd/user"/kingdom-{dispatch,guard}.{service,timer} \
         "$HOME/.config/systemd/user/kingdom-dispatch-alarm.service"
@@ -4687,8 +4723,14 @@ case "$cmd" in
     deploy)          cmd_deploy "$@" ;;
     install-units)   cmd_install_units "$@" ;;
     uninstall-units) cmd_uninstall_units "$@" ;;
-    state-dir)       state_dir ;;
-    capped-seats)    capped_seats ;;
+    # Guarded here rather than inside the function, as the eight verbs above
+    # are: state_dir and capped_seats are ordinary helpers with 25 and 4
+    # internal callers, so a refusal inside them would answer for every one of
+    # those and not for the verb. The dispatch site is the only place that
+    # holds this verb's argv. Neither is a write, so what they cost is the
+    # help someone asked for, not the town.
+    state-dir)       no_args state-dir "$@"; state_dir ;;
+    capped-seats)    no_args capped-seats "$@"; capped_seats ;;
     cfg)             cfg "${1:?km cfg <section> <key>}" "${2:?km cfg <section> <key>}" ;;
     seat-info)       is_seat "${1:-}" || die "seat-info: unknown seat ${1:-<none>}"
                      echo "$(seat_class "$1") $(seat_model "$1") $(seat_display "$1")" ;;
