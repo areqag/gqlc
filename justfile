@@ -1798,6 +1798,90 @@ fmt: ensure-golangci
 fmt-check: ensure-golangci
     {{golangci}} fmt --diff
 
+# THE PRE-PR GATE SET: every required CI context that can run on this machine.
+#
+# It exists because a hand-written list of gates drifts and nothing tells you.
+# citizen-protocol.md step 4 named three recipes — fmt-check, lint, test — while
+# master required seven contexts standing on ten recipes. A citizen who ran the
+# documented three and pushed then learned the rest one CI round trip at a time:
+# measured on PR #1643, where all three were green and codegen-fence failed on
+# three ireturn findings the root lint cannot reach by construction (bd
+# gqlc-jq50, gqlc-s9bx). Naming ONE recipe in the playbook moves that drift here,
+# next to the recipes it is about and in front of everyone who edits them.
+#
+# EVERY ARM RUNS EVEN AFTER ONE FAILS, and the failures are reported together at
+# the end. Stopping at the first is precisely what a pre-PR check must not do:
+# the cost this recipe exists to remove is the round trip, and three failures
+# found one at a time are three round trips whether they are CI's or your own.
+# `set -e` is therefore deliberately absent below.
+#
+# It is NOT a merge predicate and green here does not entitle anyone to skip CI.
+# Two required contexts are not reachable from a developer's machine, and the
+# summary says so on every run rather than leaving it to this comment:
+#
+#   live-smoke   `just test-codegen-live-neo4j` — needs Docker and pulls
+#                container images. Runnable here (bd gqlc-tez0 measured the
+#                live battery at ~30s), just not at the price the other arms
+#                are; run it by hand when you touch the live battery.
+#   tidy (part)  `.github/scripts/check-pr-closes.py` reads the PR BODY, which
+#                does not exist before the PR. Unrunnable here by construction,
+#                not by choice. `just tidy-check` and bd-export-monotonic-local
+#                below are that job's other two halves and DO run.
+#
+# On the town's own machine one arm is red on a clean master: `just vuln`
+# refuses because this box's default Go is a distro build (`go1.27.0-X:nodwarf5`)
+# that govulncheck cannot place a stdlib version on, so it would scan the
+# largest attack surface in the binary and report nothing (bd gqlc-u91z). CI does
+# not hit it because .github/actions/setup-go exports GOTOOLCHAIN from go.mod's
+# own directive. Nothing here papers over that: the arm runs as CI runs it, the
+# refusal names its own remedy, and the gap between the two is bd gqlc-irvs.
+gates:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    failed=()
+    ran=0
+
+    run() {
+        ran=$((ran + 1))
+        echo ""
+        echo "=== gates: just $*"
+        if ! just "$@"; then
+            failed+=("just $*")
+        fi
+    }
+
+    run fmt-check
+    run lint
+    run lint-cache-check
+    run vuln-root-residual
+    run test
+    run test-codegen-fence
+    run actionlint
+    run tidy-check
+    run bd-export-monotonic-local
+    run vuln
+
+    echo ""
+    echo "gates: ran ${ran} recipe(s) covering required contexts lint, test, tidy,"
+    echo "       actionlint, govulncheck and codegen-fence."
+    echo "gates: NOT covered — live-smoke (needs Docker: just test-codegen-live-neo4j)"
+    echo "       and the PR-body half of tidy (no PR body exists yet). CI still decides."
+
+    # An empty arm list would report success having graded nothing, which is the
+    # failure this whole recipe is about one level up.
+    if [ "${ran}" -eq 0 ]; then
+        echo "error: gates ran no recipe at all, so it is green over nothing (bd gqlc-jq50)." >&2
+        exit 1
+    fi
+
+    if [ "${#failed[@]}" -ne 0 ]; then
+        echo ""
+        echo "gates: ${#failed[@]} of ${ran} FAILED — their output is above, in order:" >&2
+        printf '  %s\n' "${failed[@]}" >&2
+        exit 1
+    fi
+    echo "gates: all ${ran} passed."
+
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # go build link-checks package main, which has no tests and is otherwise
