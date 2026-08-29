@@ -112,31 +112,30 @@ runs:
       run: |
         set -euo pipefail
 
-        # PINNED ABSOLUTELY, and this is load-bearing rather than tidy.
-        # GOMODCACHE and GOCACHE default to paths under $HOME, and $HOME is not
-        # a constant in this repository's own suite: the hook-purity harness in
-        # `just test-hooks` runs every suite with HOME redirected to a scratch
-        # directory. A toolchain switch under that redirected HOME re-downloads
-        # go${GO_VERSION} into the scratch tree, where the module cache's
-        # read-only bits then defeat the harness's own cleanup.
+        # GOMODCACHE and GOCACHE are PINNED ABSOLUTELY, and this is load-bearing
+        # rather than tidy: they must stay equal to the actions/cache `path:`
+        # above, and go's own defaults do not deliver that equality. `~` in that
+        # `path:` is a home-directory expansion, but an unset GOCACHE resolves
+        # through os.UserCacheDir(), so $XDG_CACHE_HOME decides it; and a
+        # `go env -w` file at $GOENV (default ~/.config/go/env) moves both, an
+        # environment variable being what outranks it. Measured 2026-08-29 under
+        # go1.26.6, the version go.mod names:
+        #   XDG_CACHE_HOME=$s go env GOCACHE  unpinned -> $s/go-build
+        #                                     pinned   -> $HOME/.cache/go-build
+        #   $GOENV setting both               unpinned -> the config's paths
+        #                                     pinned   -> the paths below
+        # Divergence here is silent rather than red: the job restores a cache
+        # and then builds into a directory nothing saves, so it stays green
+        # while every run is cold. Not measured, so not claimed: whether the
+        # runner image sets either of those today.
         #
-        # Measured 2026-08-23, PR #1379 run 32633318532: `test-hooks` failed
-        # with several hundred lines of
-        #   rm: cannot remove '.../fake-home/go/pkg/mod/golang.org/toolchain@
-        #       v0.0.1-go1.26.6.linux-amd64/...': Permission denied
-        # and no test row failed — the recipe died in teardown. actions/setup-go
-        # never hit this because it installs a GOROOT and leaves the go command
-        # with nothing to switch to.
-        #
-        # GOPATH is pinned as well as GOMODCACHE, and it is not redundant: the
-        # checksum-database cache lives at $GOPATH/pkg/sumdb, which GOMODCACHE
-        # does not cover. With only the two cache variables pinned, run
-        # 32634083142 moved the teardown failure into an honest test row —
-        #   FAIL - tool-gate-test.sh writes nothing into HOME: it created
-        #          .../fake-home/go/pkg/sumdb/sum.golang.org/latest
-        # — which is the same defect one directory over.
-        #
-        # These paths must stay equal to the actions/cache `path:` above.
+        # GOPATH is pinned too and is NOT carrying that requirement — it looks
+        # vestigial (bd gqlc-spgv3). $GOPATH/pkg/sumdb is not in the `path:`
+        # list, and nothing here does `go install`; GOMODCACHE is spelled
+        # through it below, but that is spelling, since $GOPATH is $HOME/go.
+        # Its original reason was a HOME-redirecting test harness that PR #1595
+        # deleted. Do not read its presence as evidence that it is required, and
+        # do not read this paragraph as licence to drop the two above it.
         export GOPATH="$HOME/go"
         export GOMODCACHE="$GOPATH/pkg/mod"
         export GOCACHE="$HOME/.cache/go-build"
