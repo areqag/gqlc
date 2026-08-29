@@ -172,7 +172,7 @@ bd close <id>         # Complete work
    git push
    git status  # MUST show "up to date with origin"
    ```
-5. **Clean up** - Clear stashes, prune remote branches
+5. **Clean up** - Prune remote branches. Do NOT run `git stash clear`: every worktree of this repo shares ONE stash namespace, so it deletes other sessions' uncommitted work
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
 
