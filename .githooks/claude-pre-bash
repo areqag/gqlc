@@ -306,8 +306,10 @@ HOOKS_DIRNAME = ".githooks"
 # Cited by construct (MERGE_HEAD), not by line number: the line range this
 # comment used to name for that guard went stale the first time a line was
 # inserted above it, and no suite noticed (bd gqlc-m83s). A row in
-# .githooks/tests/commit-msg-test.sh now refuses such a citation anywhere in the
-# tree.
+# .githooks/tests/commit-msg-test.sh refused such a citation anywhere in the
+# tree until PR #1595 deleted that suite. Nothing refuses one now, so citing by
+# construct is a convention this comment asks you to keep, not a rule anything
+# enforces (bd gqlc-u2nim).
 # What a merge or pull fires varies by shape, and the subcommand this hook keys
 # on does not determine the shape. Measured in the same fixture: a fast-forward
 # `merge` or `pull` writes no commit but still fires post-merge, the bd-gh-sync

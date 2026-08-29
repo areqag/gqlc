@@ -296,8 +296,10 @@ def one_line(s):
 # is not disciplined at all. Both directions cost something and the costs are
 # not the same shape, so err upwards: too large holds beads a pull would have
 # taken, which prints on stderr and a human undoes, and too small pulls beads a
-# hold would have kept, which is the silent one. Mirrored in
-# .githooks/tests/bd-gh-sync-test.sh, which pins both sides of the boundary.
+# hold would have kept, which is the silent one. This was mirrored in
+# .githooks/tests/bd-gh-sync-test.sh, which pinned both sides of the boundary;
+# PR #1595 deleted that suite and nothing replaced it, so no test now holds
+# SKEW_S in agreement with this paragraph (bd gqlc-u2nim).
 SKEW_S = 60
 
 # Both listings report RFC 3339 with an explicit zone (measured 2026-08-17 over
@@ -1025,9 +1027,13 @@ _unusable=0
 # one that no `git clean` reaches and that a stale holder can wedge for every
 # checkout on the machine. The measured incident was sibling worktrees of one
 # clone (18 unreachable issues), which this covers. Cross-clone is out of scope
-# until somebody measures it happening. .githooks/tests/bd-gh-sync-test.sh pins
-# both halves — that two clones mint twice, and that this paragraph still says
-# so — so the limit cannot be widened into a claim by editing either one alone.
+# until somebody measures it happening. .githooks/tests/bd-gh-sync-test.sh used
+# to pin both halves — that two clones mint twice, and that this paragraph still
+# said so — so that the limit could not be widened into a claim by editing
+# either one alone. PR #1595 deleted that suite and nothing replaced it. Editing
+# this paragraph alone now DOES widen the limit, and silently: read it as a
+# statement of scope somebody must re-measure, not as a pinned one
+# (bd gqlc-u2nim).
 #
 # fd 9 carries the lock for the rest of this process; closing that fd is what
 # releases the lock, and the kernel closes it however the process ends. bash

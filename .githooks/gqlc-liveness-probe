@@ -10,10 +10,12 @@
 # rules — with none of the cost or side effects of running a real gate.
 #
 # .githooks/verify-hooks-live is the reader. The token is spelled there too and
-# the two have to agree; that is a fact spelled twice, and what holds them
-# together is .githooks/tests/verify-hooks-live-test.sh, which fails if a run of
-# the real verifier against a fixture carrying the real probe does not come back
-# live.
+# the two have to agree; that is a fact spelled twice. What held them together
+# was .githooks/tests/verify-hooks-live-test.sh, which failed if a run of the
+# real verifier against a fixture carrying the real probe did not come back
+# live. PR #1595 deleted it and nothing replaced it, so the two spellings are
+# now held in agreement by nothing: change the token in one file and the
+# verifier reports every hook dead (bd gqlc-u2nim).
 #
 # It writes to stdout rather than to a file. `git hook run` redirects a hook's
 # stdout to ITS stderr, so the reader captures both streams and looks for the

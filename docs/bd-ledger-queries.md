@@ -74,31 +74,37 @@ The status filter has no such notice at any verbosity. Verified: `bd list --json
    sentence the call site is trying to write.
 4. When a query answers "absent", check `--all` before acting on it.
 
-## Rules 1 and 2 are gated
+## Rules 1 and 2 were gated, and are not any more
 
-`.githooks/tests/bd-query-flags-test.sh` sweeps tracked shell, just and Go
-sources for scripted `bd list` / `bd ready` invocations and exits non-zero when
-one omits its row cap, or when a `bd list` omits its status set. It runs under
-`just test-hooks`, which the pre-push hook runs. bd `gqlc-qh9z`.
+**Nothing checks a new call site today. Check yours by hand.**
 
-What it can and cannot see, stated so nobody reads a green run as more than it
-is:
+`.githooks/tests/bd-query-flags-test.sh` swept tracked shell, just and Go sources
+for scripted `bd list` / `bd ready` invocations and exited non-zero when one
+omitted its row cap, or when a `bd list` omitted its status set. It ran under a
+`test-hooks` recipe, which the pre-push hook ran. bd `gqlc-qh9z`. PR #1595
+(f6dc4c7b) deleted the suite, the directory and the recipe together, and nothing
+replaced them (bd `gqlc-u2nim`).
 
-- It gates **statedness**, not correctness. `--status open` is explicit, so it
-  passes, whether or not `open` is the status that call site means. The one
-  known wrong-for-its-purpose site (bd `gqlc-c7b5`) is green here for exactly
-  that reason.
-- It does not sweep markdown. The instruction files and this document quote the
+The bounds it was written with are kept below, because they are still the shape
+of what a hand check has to cover — and the first of them is now the whole
+picture rather than a caveat:
+
+- It gated **statedness**, not correctness. `--status open` is explicit, so it
+  passed, whether or not `open` is the status that call site means. The one
+  known wrong-for-its-purpose site (bd `gqlc-c7b5`) was green there for exactly
+  that reason. Correctness was never covered and still is not.
+- It did not sweep markdown. The instruction files and this document quote the
   wrong form deliberately, as the counterexample they teach against.
-- A `bd` invocation whose arguments are split across lines in Go is reported
-  rather than skipped. The gate fails closed; joining the line is the fix.
+- A `bd` invocation whose arguments were split across lines in Go was reported
+  rather than skipped: it failed closed, and joining the line was the fix.
 
 ## Audit of this repository's call sites
 
 Taken 2026-08-23. Eleven scripted `bd list` / `bd ready` invocations exist; ten
 are correct for their purpose. Line numbers are a reading at `c129a0a5` and have
-drifted since; the gate above enumerates the live set, and its own enumeration
-rows go red if that set collapses.
+drifted since. The gate above used to enumerate the live set, so this table had
+something keeping it honest; since PR #1595 removed it, **this table is a dated
+reading and nothing re-derives it**. Re-grep before trusting the count.
 
 | Site | Query | Verdict |
 | --- | --- | --- |

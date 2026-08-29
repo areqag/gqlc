@@ -55,8 +55,11 @@ set -uo pipefail
 # .github/scripts/check-pr-closes.py. Drift in either direction is a defect:
 # a narrower pattern here warns about branches the gate accepts, a wider one
 # stays silent on branches it refuses. .githooks/tests/pre-push-bead-id-test.sh
-# extracts both and compares them, so this comment is not the only thing
-# holding them together.
+# extracted both and compared them, so this comment was not the only thing
+# holding them together. PR #1595 deleted that suite and nothing replaced it, so
+# it IS the only thing now. Measured 2026-08-29: the two still agree on
+# `gqlc-[a-z0-9.]+`. Re-check the Python by hand when you change the line below
+# (bd gqlc-u2nim).
 BEAD_IN_BRANCH_ERE='gqlc-[a-z0-9.]+'
 
 ZERO='^0\{40,\}$'
