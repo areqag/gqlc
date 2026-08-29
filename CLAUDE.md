@@ -62,7 +62,7 @@ bd close <id>         # Complete work
    git push
    git status  # MUST show "up to date with origin"
    ```
-5. **Clean up** - Clear stashes, prune remote branches
+5. **Clean up** - Prune remote branches. Do NOT run `git stash clear`: every worktree of this repo shares ONE stash namespace, so it deletes other sessions' uncommitted work
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
 
@@ -195,6 +195,44 @@ it can prove is abandoned. Neither is a substitute for cleaning up your own.
 
 Both rules still hold the older one they replace: scratch goes outside the tree
 you are working on or judging, never a transient file dropped into it.
+
+## The shared stash namespace
+
+The worktree rule isolates the tree, and the section above says `/tmp` is not
+isolated either. Neither is the stash. It lives in the common git dir, so it is
+ONE namespace shared by the main checkout and every seat worktree at once.
+
+- `git stash list` in your worktree lists **every** worktree's stashes. It is a
+  read and it is safe; read it freely.
+- `git stash clear` from any worktree deletes **all** of them, with no
+  confirmation and nothing to recover from.
+
+So: **do not stash.** Commit to your own branch instead — there is nothing the
+shared stash namespace does for you that a commit does not do more safely. If
+you must drop an entry, read its subject first and drop it by index only once
+the branch it names carries your own bead id. A bare `git stash drop` takes
+`stash@{0}`, which is whoever stashed most recently.
+
+Measured 2026-08-29, both halves. Անահիտ found the hazard: `git rev-parse
+--git-common-dir` returns the shared `.git` from every seat, and in her own list
+`stash@{0}` read `WIP on fix/gqlc-m5rc-root-in-package-tests` — another seat's
+branch, on a bead that was in progress — then vanished as its owner popped it,
+which is how she knew it was live work rather than an abandoned entry. Anyone
+running the cleanup step in that window would have destroyed it silently, with a
+green cleanup conscience. Confirmed from seat `ayg` by writing rather than
+watching: one stash pushed in `../gqlc-seat-ayg` was then listed verbatim by
+`git -C ../gqlc stash list` and by `git -C ../gqlc-seat-anahit stash list`, and
+`refs/stash` with its reflog exists only under the common `.git` — the
+per-worktree `refs/` directory is empty (bd `gqlc-96lf0`).
+
+The other half of that cleanup sentence, `prune remote branches`, is over a
+shared namespace too, since remote-tracking refs also live in the common dir. It
+is kept because what it deletes is a cache of the remote rather than work: all
+16 refs `git remote prune --dry-run origin` offered to drop that day were head
+branches of merged PRs. Do not reach for `git merge-base --is-ancestor` to check
+that yourself — it called all 16 unmerged, because a squash merge leaves no
+branch tip on master. `gh pr list --head <branch> --state all` is the test that
+answers.
 
 ## PR & GitHub issue hygiene
 
