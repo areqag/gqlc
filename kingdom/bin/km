@@ -964,7 +964,9 @@ cmd_up() {
         done
         # Close the placeholder AFTER the seats are up, so herdr doesn't
         # reap the workspace between "no seats yet" and "seats added".
-        [ -n "$auto_tab" ] && herdr tab close "$auto_tab" >/dev/null 2>&1 || true
+        if [ -n "$auto_tab" ]; then
+            herdr tab close "$auto_tab" >/dev/null 2>&1 || true
+        fi
     else
         for s in $(seats_all); do
             seat_runner_start "$s" >/dev/null 2>&1 || true

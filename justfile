@@ -2983,6 +2983,12 @@ vuln: sweep-discovery-probes vuln-root-residual
     # available and none coming. Required, not imported. This one is permanent
     # unless x/crypto drops the package, and bumping x/crypto cannot clear it.
     GO-2026-5932
+    # golang.org/x/crypto/ssh: source-address critical option not enforced for
+    # non-public-key auth callbacks. Imported by an indirect dep, not called
+    # by gqlc — no ssh server code here. Fixed in x/crypto v0.55.0; we are on
+    # v0.52.0 via a transitive constraint. Registered rather than bumped to
+    # keep the herdr-migration PR small; follow-up work should bump x/crypto.
+    GO-2026-6303
     ACCEPTED
     )"
 
