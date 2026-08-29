@@ -55,6 +55,9 @@ func (q *Queries) EventColumns(ctx context.Context) ([]EventColumnsRow, error) {
 		if !ok {
 			return nil, fmt.Errorf("EventColumns: decode column %q: key not found", "marker")
 		}
+		if value0 == nil {
+			return nil, fmt.Errorf("EventColumns: column %q is non-nullable but arrived null", "marker")
+		}
 		row.Marker = value0
 		value1, ok := record.Get("payload")
 		if !ok {
@@ -89,6 +92,9 @@ func (q *Queries) EventMarker(ctx context.Context) (any, error) {
 	value, ok := records[0].Get("marker")
 	if !ok {
 		return nil, fmt.Errorf("EventMarker: decode column %q: key not found", "marker")
+	}
+	if value == nil {
+		return nil, fmt.Errorf("EventMarker: column %q is non-nullable but arrived null", "marker")
 	}
 	return value, nil
 }
@@ -142,6 +148,9 @@ func (q *Queries) EventPropertyColumns(ctx context.Context) ([]EventPropertyColu
 		if !ok {
 			return nil, fmt.Errorf("EventPropertyColumns: decode column %q: key not found", "badge")
 		}
+		if value0 == nil {
+			return nil, fmt.Errorf("EventPropertyColumns: column %q is non-nullable but arrived null", "badge")
+		}
 		row.Badge = value0
 		value1, ok := record.Get("tag")
 		if !ok {
@@ -176,6 +185,9 @@ func (q *Queries) EventBadge(ctx context.Context) (any, error) {
 	value, ok := records[0].Get("badge")
 	if !ok {
 		return nil, fmt.Errorf("EventBadge: decode column %q: key not found", "badge")
+	}
+	if value == nil {
+		return nil, fmt.Errorf("EventBadge: column %q is non-nullable but arrived null", "badge")
 	}
 	return value, nil
 }

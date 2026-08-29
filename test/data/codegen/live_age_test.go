@@ -25,6 +25,7 @@ import (
 	manycolmanyage "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/apache-age-pgx-v5"
 	mixedage "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/apache-age-pgx-v5"
 	onecoloneage "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/apache-age-pgx-v5"
+	anypropage "github.com/areqag/gqlc/test/data/codegen/valid/schema_any_property/golden/apache-age-pgx-v5"
 	tsage "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/apache-age-pgx-v5"
 )
 
@@ -197,6 +198,7 @@ func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 		many:       manyColManyAGE{q: manycolmanyage.New(h.pool, graph)},
 		entityNode: entityNodeAGE{q: entitynodeage.New(h.pool, graph)},
 		entityEdge: entityEdgeAGE{q: entityedgeage.New(h.pool, graph)},
+		anyValue:   anyValueColumnsAGE{q: anypropage.New(h.pool, graph)},
 		mixed:      mixedReadWriteBatchAGE{q: mixedage.New(h.pool, graph)},
 		timestamps: timestampRoundtripAGE{q: tsage.New(h.pool, graph)},
 	}
@@ -219,6 +221,7 @@ type ageScenario struct {
 	many       manyColManyAGE
 	entityNode entityNodeAGE
 	entityEdge entityEdgeAGE
+	anyValue   anyValueColumnsAGE
 	mixed      mixedReadWriteBatchAGE
 	timestamps timestampRoundtripAGE
 }
@@ -240,6 +243,8 @@ func (s ageScenario) manyColMany() manyColManyQuerier { return s.many }
 func (s ageScenario) entityNodeProjectedOne() entityNodeQuerier { return s.entityNode }
 
 func (s ageScenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.entityEdge }
+
+func (s ageScenario) anyValueColumns() anyValueColumnQuerier { return s.anyValue }
 
 func (s ageScenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.mixed }
 
@@ -365,6 +370,22 @@ func (a entityNodeAGE) onePerson(ctx context.Context) (personEntity, error) {
 }
 
 func (a entityNodeAGE) errNoRows() error { return entitynodeage.ErrNoRows }
+
+// anyValueColumnsAGE binds the ANY VALUE column fixture. The adapter passes
+// both columns through untouched: `any` and `*any` are what the target emits
+// and what the battery asserts on, so there is no narrowing here to hide a
+// difference in.
+type anyValueColumnsAGE struct{ q *anypropage.Queries }
+
+func (a anyValueColumnsAGE) eventMarker(ctx context.Context) (any, error) {
+	return a.q.EventMarker(ctx)
+}
+
+func (a anyValueColumnsAGE) eventPayload(ctx context.Context) (*any, error) {
+	return a.q.EventPayload(ctx)
+}
+
+func (a anyValueColumnsAGE) errNoRows() error { return anypropage.ErrNoRows }
 
 type entityEdgeAGE struct{ q *entityedgeage.Queries }
 

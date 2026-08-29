@@ -29,6 +29,8 @@ import (
 	mixedv6 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v6"
 	onecolonev5 "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/neo4j-go-v5"
 	onecolonev6 "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/neo4j-go-v6"
+	anypropv5 "github.com/areqag/gqlc/test/data/codegen/valid/schema_any_property/golden/neo4j-go-v5"
+	anypropv6 "github.com/areqag/gqlc/test/data/codegen/valid/schema_any_property/golden/neo4j-go-v6"
 	temporalv5 "github.com/areqag/gqlc/test/data/codegen/valid/temporal_property_roundtrip/golden/neo4j-go-v5"
 	temporalv6 "github.com/areqag/gqlc/test/data/codegen/valid/temporal_property_roundtrip/golden/neo4j-go-v6"
 	tsv5 "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/neo4j-go-v5"
@@ -81,6 +83,7 @@ type neo4jV5 struct {
 	many       manyColManyV5
 	entityNode entityNodeV5
 	entityEdge entityEdgeV5
+	anyValue   anyValueColumnsV5
 	edgeUnion  edgeUnionV5
 	timestamps timestampRoundtripV5
 	temporals  temporalRoundtripV5
@@ -107,6 +110,7 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 		many:       manyColManyV5{q: manycolmanyv5.New(driver)},
 		entityNode: entityNodeV5{q: entitynodev5.New(driver)},
 		entityEdge: entityEdgeV5{q: entityedgev5.New(driver)},
+		anyValue:   anyValueColumnsV5{q: anypropv5.New(driver)},
 		edgeUnion:  edgeUnionV5{q: edgeunionv5.New(driver)},
 		timestamps: timestampRoundtripV5{q: tsv5.New(driver)},
 		temporals:  temporalRoundtripV5{q: temporalv5.New(driver)},
@@ -332,6 +336,22 @@ func (s neo4jV5Scenario) entityNodeProjectedOne() entityNodeQuerier { return s.a
 
 func (s neo4jV5Scenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.arm.entityEdge }
 
+func (s neo4jV5Scenario) anyValueColumns() anyValueColumnQuerier { return s.arm.anyValue }
+
+// anyValueColumnsV5 binds the ANY VALUE column fixture, passing both columns
+// through untouched for the reason its AGE twin gives.
+type anyValueColumnsV5 struct{ q *anypropv5.Queries }
+
+func (a anyValueColumnsV5) eventMarker(ctx context.Context) (any, error) {
+	return a.q.EventMarker(ctx)
+}
+
+func (a anyValueColumnsV5) eventPayload(ctx context.Context) (*any, error) {
+	return a.q.EventPayload(ctx)
+}
+
+func (a anyValueColumnsV5) errNoRows() error { return anypropv5.ErrNoRows }
+
 func (s neo4jV5Scenario) edgeUnionUndeclared() edgeUnionQuerier { return s.arm.edgeUnion }
 
 type edgeUnionV5 struct{ q *edgeunionv5.Queries }
@@ -480,6 +500,7 @@ type neo4jV6 struct {
 	many       manyColManyV6
 	entityNode entityNodeV6
 	entityEdge entityEdgeV6
+	anyValue   anyValueColumnsV6
 	edgeUnion  edgeUnionV6
 	timestamps timestampRoundtripV6
 	temporals  temporalRoundtripV6
@@ -506,6 +527,7 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 		many:       manyColManyV6{q: manycolmanyv6.New(driver)},
 		entityNode: entityNodeV6{q: entitynodev6.New(driver)},
 		entityEdge: entityEdgeV6{q: entityedgev6.New(driver)},
+		anyValue:   anyValueColumnsV6{q: anypropv6.New(driver)},
 		edgeUnion:  edgeUnionV6{q: edgeunionv6.New(driver)},
 		timestamps: timestampRoundtripV6{q: tsv6.New(driver)},
 		temporals:  temporalRoundtripV6{q: temporalv6.New(driver)},
@@ -726,6 +748,22 @@ func (s neo4jV6Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 func (s neo4jV6Scenario) entityNodeProjectedOne() entityNodeQuerier { return s.arm.entityNode }
 
 func (s neo4jV6Scenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.arm.entityEdge }
+
+func (s neo4jV6Scenario) anyValueColumns() anyValueColumnQuerier { return s.arm.anyValue }
+
+// anyValueColumnsV6 binds the ANY VALUE column fixture, passing both columns
+// through untouched for the reason its AGE twin gives.
+type anyValueColumnsV6 struct{ q *anypropv6.Queries }
+
+func (a anyValueColumnsV6) eventMarker(ctx context.Context) (any, error) {
+	return a.q.EventMarker(ctx)
+}
+
+func (a anyValueColumnsV6) eventPayload(ctx context.Context) (*any, error) {
+	return a.q.EventPayload(ctx)
+}
+
+func (a anyValueColumnsV6) errNoRows() error { return anypropv6.ErrNoRows }
 
 func (s neo4jV6Scenario) edgeUnionUndeclared() edgeUnionQuerier { return s.arm.edgeUnion }
 

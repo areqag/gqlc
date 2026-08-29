@@ -106,6 +106,18 @@ type entityEdgeQuerier interface {
 	errNoRows() error
 }
 
+// anyValueColumnQuerier is one arm's schema_any_property handle, narrowed to
+// the two columns whose declared width is ANY VALUE: one NOT NULL, one not.
+// A width of no declared shape is the one place where the emitted Go type
+// cannot carry the schema's nullability — every other width arrives as T or
+// *T, and `any` is already inhabited by nil — so the promise survives only as
+// a gate the emitter writes, and only a live null can say whether it did.
+type anyValueColumnQuerier interface {
+	eventMarker(ctx context.Context) (any, error)
+	eventPayload(ctx context.Context) (*any, error)
+	errNoRows() error
+}
+
 // mixedReadWriteBatchQuerier is one arm's mixed_read_write_batch handle.
 type mixedReadWriteBatchQuerier interface {
 	getPersonName(ctx context.Context, id int64) (string, error)
@@ -330,6 +342,7 @@ type backend interface {
 	manyColMany() manyColManyQuerier
 	entityNodeProjectedOne() entityNodeQuerier
 	entityEdgeProjectedOne() entityEdgeQuerier
+	anyValueColumns() anyValueColumnQuerier
 }
 
 // writeBackend is a scenario's view of a writeHarness.
@@ -418,6 +431,7 @@ var readScenarios = []struct {
 	{name: "many_col_many: many + params", run: manyWithParams},
 	{name: "entity_node_projected_one: whole vertex", run: nodeEntityRead},
 	{name: "entity_edge_projected_one: whole edge", run: edgeEntityRead},
+	{name: "schema_any_property: ANY VALUE columns agree on null", run: anyValueColumnsAgreeOnNull},
 }
 
 // writeScenarios are the battery an arm runs once its target emits :exec
@@ -674,6 +688,69 @@ func nodeEntityRead(ctx context.Context, t *testing.T, b backend) { //nolint:the
 	got, err = q.onePerson(ctx)
 	require.NoError(t, err)
 	require.Equal(t, personEntity{ID: 7, Name: "Alice", MiddleName: &middleName}, got)
+}
+
+// anyValueColumnsAgreeOnNull drives the ANY VALUE column contract on the null
+// path, where the two backends were measured to disagree (bd gqlc-tez0).
+//
+// The disagreement was one-sided and its shape is worth stating, because it is
+// what this scenario is pointed at. Every other column lane on neo4j — scalar,
+// list, entity, edge-union — fails the row when a column the schema declared
+// NOT NULL arrives null, and Apache AGE does it for every column kind it
+// serves. The record.Get lane that ANY VALUE rides emitted no such gate, so a
+// null came back as a nil `any` beside a nil error: a caller reading a field
+// its schema promised was present got Go's zero for "absent" with nothing
+// distinguishing it from a value the graph actually holds.
+//
+// A declaration test cannot see this and never could. Both arms declare
+// `EventMarker(ctx) (any, error)`, identically, whichever way they behave —
+// TestBackendInvariantSurface compares declarations and is green across the
+// divergence. Only a live null separates them.
+//
+// The nullable half is here as the other side of the same claim rather than
+// because it was ever suspected: an ANY VALUE column that MAY be null must
+// still come back as a nil pointer and not an error, so a gate added to the
+// non-nullable arm cannot pay for itself by refusing the nullable one too.
+func anyValueColumnsAgreeOnNull(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.anyValueColumns()
+
+	// A vertex carrying neither ANY VALUE property. Both columns project, and
+	// both project null: absence and an explicit null are the same vertex on
+	// both backends, which nodeEntityRead measures directly.
+	b.seed(ctx, t, "CREATE (:Event {id: 1})")
+
+	_, err := q.eventMarker(ctx)
+	require.Error(t, err,
+		"a column declared ANY VALUE NOT NULL that arrives null must fail the row; `any` is inhabited by nil, so a caller cannot tell the schema's promise was broken from a value the graph holds")
+	// The reason and not merely the verdict: the row is present and it is the
+	// value that is null, so an arm that errored because it found nothing at
+	// all has not witnessed this claim. Both backends spell the refusal the
+	// same way, and that identical spelling IS the agreement being asserted.
+	require.NotErrorIs(t, err, q.errNoRows(),
+		"the vertex was seeded, so a no-rows error means the scenario stopped testing what it names")
+	require.ErrorContains(t, err, "non-nullable but arrived null")
+	require.ErrorContains(t, err, "marker")
+
+	payload, err := q.eventPayload(ctx)
+	require.NoError(t, err,
+		"a nullable ANY VALUE column arriving null is the schema's own case and must not be an error")
+	require.Nil(t, payload,
+		"a nullable ANY VALUE column arriving null must be a nil pointer, not a pointer to a nil")
+
+	// Both columns carrying values. Without this the scenario would pass on an
+	// arm that refused every ANY VALUE column outright, which is the shape a
+	// gate written one line too wide would produce.
+	b.seed(ctx, t, "MATCH (e:Event {id: 1}) SET e.marker = 'here', e.payload = 'also here'")
+
+	marker, err := q.eventMarker(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "here", marker,
+		"a value the graph holds must reach the caller through the same lane the gate guards")
+
+	payload, err = q.eventPayload(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, payload)
+	require.Equal(t, "also here", *payload)
 }
 
 // edgeEntityRead drives the edge-entity contract — a whole edge arrives as
