@@ -2492,7 +2492,7 @@ test-codegen-live-neo4j:
 # for one test; this recipe's -run list is already only the live battery, so the
 # added volume is that battery's own RUN/PASS lines (bd gqlc-8cjn).
 test-codegen-live-age:
-    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGEOffsetSidecar|TestAGEAnswersTheConstructorsNobodyRan' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEAnswersTheConstructorsNobodyRan' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than

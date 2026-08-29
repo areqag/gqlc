@@ -554,12 +554,14 @@ On `apache-age-pgx-v5` the over-broad rows are two of the twenty-two: the
 same `Commit` and `Rollback`, over-broad for the receiver reason above
 rather than because the target leaves the name free. The five temporal
 carriers sat here too until that backend admitted `DATE`, `LOCAL TIME`
-and `DURATION`; it now emits `temporal.go` on the same trigger every
-target does, so the *Declared by* cells the corpus measures moved on
-their own. Zoned `TIME` is still refused there and the carrier `Time` is
-declared all the same: `temporal.go` declares the five together whichever
-width triggered it, so what reserves a name is the emission and not the
-admission.
+and `DURATION`, and then zoned `TIME`; it now emits `temporal.go` on the
+same trigger every target does, so the *Declared by* cells the corpus
+measures moved on their own. `LocalDateTime` is the carrier that still
+shows what reserves a name is the emission and not the admission: nothing
+on this target reaches it, since `internal/graph` has no LOCALDATETIME
+property width at all and `typeMap.Temporal` refuses every expression
+kind, and it is declared anyway, because `temporal.go` declares the five
+together whichever width triggered the file.
 
 Six and two count the target axis alone. The batch axis moves them: on a
 batch with no `:one` query nothing declares `ErrNoRows` or
