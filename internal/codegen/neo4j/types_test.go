@@ -1,10 +1,11 @@
-package neo4j
+package neo4j_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/codegen/neo4j"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
 )
@@ -65,7 +66,7 @@ func TestTypeMapProperty(t *testing.T) {
 	}
 	for _, tt := range representable {
 		t.Run("representable/"+string(tt.pt), func(t *testing.T) {
-			got, ok := typeMap{}.Property(tt.pt)
+			got, ok := neo4j.TypeMap{}.Property(tt.pt)
 			require.True(t, ok)
 			require.Equal(t, tt.want, got)
 		})
@@ -79,7 +80,7 @@ func TestTypeMapProperty(t *testing.T) {
 	}
 	for _, pt := range unrepresentable {
 		t.Run("unrepresentable/"+string(pt), func(t *testing.T) {
-			got, ok := typeMap{}.Property(pt)
+			got, ok := neo4j.TypeMap{}.Property(pt)
 			require.False(t, ok)
 			require.Empty(t, got)
 		})
@@ -121,13 +122,13 @@ func TestTypeMapProperty(t *testing.T) {
 	}
 
 	t.Run("list recurses element-wise", func(t *testing.T) {
-		got, ok := typeMap{}.Property(graph.ListOf(graph.TypeInt32, false))
+		got, ok := neo4j.TypeMap{}.Property(graph.ListOf(graph.TypeInt32, false))
 		require.True(t, ok)
 		require.Equal(t, "[]int32", got)
 	})
 
 	t.Run("list of unrepresentable element fails", func(t *testing.T) {
-		_, ok := typeMap{}.Property(graph.ListOf(graph.TypeDecimal, false))
+		_, ok := neo4j.TypeMap{}.Property(graph.ListOf(graph.TypeDecimal, false))
 		require.False(t, ok)
 	})
 }
@@ -174,7 +175,7 @@ func TestTypeMapTemporal(t *testing.T) {
 		"the sweep must cover the resolver's whole temporal vocabulary")
 	for _, tt := range tests {
 		t.Run(tt.k.String(), func(t *testing.T) {
-			got, ok := typeMap{}.Temporal(tt.k)
+			got, ok := neo4j.TypeMap{}.Temporal(tt.k)
 			require.True(t, ok)
 			require.Equal(t, tt.want, got)
 		})
@@ -185,7 +186,7 @@ func TestTypeMapTemporal(t *testing.T) {
 	// upstream and left without an arm here fails generation instead of
 	// arriving as some other kind's dbtype.
 	t.Run("kind outside the vocabulary is refused", func(t *testing.T) {
-		got, ok := typeMap{}.Temporal(resolver.Temporal(resolver.TemporalCount))
+		got, ok := neo4j.TypeMap{}.Temporal(resolver.Temporal(resolver.TemporalCount))
 		require.False(t, ok)
 		require.Empty(t, got)
 	})
@@ -208,7 +209,7 @@ func TestTypeMapScalar(t *testing.T) {
 	require.Len(t, tests, 6)
 	for _, tt := range tests {
 		t.Run(tt.k.String(), func(t *testing.T) {
-			require.Equal(t, tt.want, typeMap{}.Scalar(tt.k))
+			require.Equal(t, tt.want, neo4j.TypeMap{}.Scalar(tt.k))
 		})
 	}
 
@@ -216,7 +217,7 @@ func TestTypeMapScalar(t *testing.T) {
 	// switch, so the backstop exists whether or not the resolver can
 	// reach it. Pinned so its value is a decision and not an accident.
 	t.Run("kind outside the vocabulary projects undecoded", func(t *testing.T) {
-		require.Equal(t, "any", typeMap{}.Scalar(resolver.ScalarMap+1))
+		require.Equal(t, "any", neo4j.TypeMap{}.Scalar(resolver.ScalarMap+1))
 	})
 }
 
@@ -260,7 +261,7 @@ func TestDriverCarrier(t *testing.T) {
 	require.Len(t, tests, 23)
 	for _, tt := range tests {
 		t.Run(tt.goType, func(t *testing.T) {
-			require.Equal(t, tt.want, driverCarrier(tt.goType))
+			require.Equal(t, tt.want, neo4j.DriverCarrier(tt.goType))
 		})
 	}
 }
@@ -279,7 +280,7 @@ func TestAccessModeText(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, accessModeText(tt.isWrite))
+			require.Equal(t, tt.want, neo4j.AccessModeText(tt.isWrite))
 		})
 	}
 }

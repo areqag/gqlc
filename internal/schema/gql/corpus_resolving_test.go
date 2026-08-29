@@ -1,4 +1,4 @@
-package gql
+package gql_test
 
 import (
 	"errors"
@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
 // TestCorpusResolvingCarriers gates the second carriage class, the one
@@ -160,7 +162,7 @@ type declinedCarriage struct {
 // the fact about the grammar that a per-family filing would suppress.
 var declinedCarriers = []declinedCarriage{
 	{
-		sentinel: ErrUndirectedEdge,
+		sentinel: gql.ErrUndirectedEdge,
 		bead:     "gqlc-0ri",
 		why:      "graph.EdgeType has no undirectedness field, so an undirected arc cannot resolve to anything but a lie. ADR 0016 declined it permanently rather than deferring it: an undirected edge is a distinct element kind and the distinction is observable through IS DIRECTED, so a canonical direction would answer those queries wrongly rather than imprecisely. No retirement path.",
 		names: []declinedName{
@@ -171,7 +173,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrEdgeKindArcMismatch,
+		sentinel: gql.ErrEdgeKindArcMismatch,
 		bead:     "gqlc-0ri",
 		why:      "The undirected connector spellings are reachable only through an edge type whose declared kind contradicts the arc, or through ErrUndirectedEdge above; either way the listener rejects before a model exists. Inherits that group's permanence — these names have no resolving path while undirectedness is unmodelled, and ADR 0016 settled that it stays so.",
 		names: []declinedName{
@@ -182,7 +184,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrUnnamedNodeType,
+		sentinel: gql.ErrUnnamedNodeType,
 		bead:     "gqlc-0ri",
 		why:      "Same shape as the edge case below - a node type with no key label has no identity to record. The alternative below is reached in endpoint position too, where the same missing identity surfaces as ErrUnknownEndpoint instead; see declinedAlso.",
 		names: []declinedName{
@@ -190,7 +192,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrUnnamedEdgeType,
+		sentinel: gql.ErrUnnamedEdgeType,
 		bead:     "gqlc-0ri",
 		why:      "The implied-content alternative with no label set cannot resolve: an edge type with no key label has no identity to record. The decline is the model's identity rule, not a gap.",
 		names: []declinedName{
@@ -198,7 +200,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrLikeGraphSource,
+		sentinel: gql.ErrLikeGraphSource,
 		bead:     "gqlc-0ri",
 		why:      "LIKE reaches session state a static generator cannot see, so it is declined permanently (ADR 0016). No retirement path - this group is expected to stay.",
 		names: []declinedName{
@@ -215,7 +217,7 @@ var declinedCarriers = []declinedCarriage{
 	// what makes that legible — and no name here spans two of them, so none needs
 	// declinedAlso.
 	{
-		sentinel: ErrReferenceParameter,
+		sentinel: gql.ErrReferenceParameter,
 		bead:     "gqlc-0ri",
 		why:      "A substituted parameter is bound at execution time and a build-time catalogue has no parameter values, so no catalogue reaches these. The two alternatives are one character of position apart — the parameter where the graph type goes, and where the schema goes — and neither discharges the other. No retirement path; this group is expected to stay.",
 		names: []declinedName{
@@ -226,7 +228,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrObjectParentReference,
+		sentinel: gql.ErrObjectParentReference,
 		bead:     "gqlc-0ri",
 		why:      "An object parent is a catalogue object containing other objects, and a directory-backed catalogue has no container between a directory and a file. The rule catalogObjectParentReference itself left this register — it resolves whenever its (objectName PERIOD)* repetition is taken zero times — so what is declined is the repetition and the name it introduces, not the parent. No retirement path without a catalogue model richer than a filesystem.",
 		names: []declinedName{
@@ -235,7 +237,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrHomeSchemaReference,
+		sentinel: gql.ErrHomeSchemaReference,
 		bead:     "gqlc-0ri",
 		why:      "HOME_SCHEMA is a property of a session and gqlc has none. Its sibling CURRENT_SCHEMA left this register in the same commit, which is the whole distinction: CURRENT_SCHEMA has a static referent to translate to — the referencing file's own directory — and HOME_SCHEMA has none. No retirement path.",
 		names: []declinedName{
@@ -243,7 +245,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrReferenceOutsideCatalogue,
+		sentinel: gql.ErrReferenceOutsideCatalogue,
 		bead:     "gqlc-0ri",
 		why:      "A climb is supported and resolves inside a chain; what it cannot do is leave the catalogue root. Carriage is measured per entry file and every entry spelling a climb is loaded as its own root, so the three here escape — while the same ../s/base resolves when copy_of_chain_climb.gql reaches sub/climber.gql as a hop. So this group records where the corpus can witness the climb from, not that the construct is unimplemented. It retires if an entry ever resolves while spelling a climb, which no single file can do.",
 		names: []declinedName{
@@ -252,7 +254,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrPathValueType,
+		sentinel: gql.ErrPathValueType,
 		bead:     "gqlc-0ri",
 		why:      "A path is a traversal a query produces, not a value an element stores, so no model or backend change reaches it (ADR 0019). No retirement path - this group is expected to stay.",
 		names: []declinedName{
@@ -261,7 +263,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrReferenceValueType,
+		sentinel: gql.ErrReferenceValueType,
 		bead:     "gqlc-0ri",
 		why:      "A reference is a handle into a graph rather than a value, and a property holding one would be a relationship no traversal can follow - graph.EdgeType is where gqlc keeps those. The binding table is here because it is ISO's fourth referenceValueType alternative, and a query result rather than stored data either way. Permanent (ADR 0019).",
 		names: []declinedName{
@@ -282,7 +284,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrImmaterialValueType,
+		sentinel: gql.ErrImmaterialValueType,
 		bead:     "gqlc-0ri",
 		why:      "NULL admits only null, which schema.Property.Nullable already records, and the empty type admits nothing at all - a property of it could never be written or read. Permanent on the shape of the types themselves (ADR 0019).",
 		names: []declinedName{
@@ -294,7 +296,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrRecordValueType,
+		sentinel: gql.ErrRecordValueType,
 		bead:     "gqlc-h9n.33",
 		why:      "A record is structured and graph.PropertyType is a flat enum, so there is nowhere to put the fields. Unimplemented rather than declined: gqlc-h9n.33 retires this group, and would retire the closed unions with it.",
 		names: []declinedName{
@@ -305,7 +307,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrDynamicUnionType,
+		sentinel: gql.ErrDynamicUnionType,
 		bead:     "gqlc-h9n.33",
 		why:      "The closed unions (#9, #10) need the enum to carry members and are gqlc-h9n.33's. The open ones (#7, #8) are now implemented (ADR 0020), so valueType#7, valueType#8 and VALUE gained resolving carriers and left this group.",
 		names: []declinedName{
@@ -315,7 +317,7 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrUnsupportedType,
+		sentinel: gql.ErrUnsupportedType,
 		bead:     "gqlc-h9n.33",
 		why:      "The four field-type grammar rules are carried by two declined families at once — RECORD (ErrRecordValueType) and binding-table references (ErrReferenceValueType) — so no leaf accounts for all of their carriers and the class is the most specific sentinel that does. LIST/ARRAY names moved out when gqlc-h9n.5 gave them resolving carriers; the angle and square brackets left with them for the same reason.",
 		names: []declinedName{
@@ -348,7 +350,7 @@ var declinedCarriers = []declinedCarriage{
 // requireDeclinedCarriers demands every sentinel here be exercised by a carrier,
 // so a row cannot launder a filing that is simply wrong.
 var declinedAlso = map[string][]error{
-	"nodeTypeImpliedContent#2": {ErrUnknownEndpoint},
+	"nodeTypeImpliedContent#2": {gql.ErrUnknownEndpoint},
 }
 
 // requireDeclinedCarriers checks the register against what was measured, in both

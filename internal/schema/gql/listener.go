@@ -37,6 +37,10 @@ type listener struct {
 	err error
 }
 
+func newListener(ts *antlr.CommonTokenStream) *listener {
+	return &listener{ts: ts}
+}
+
 // fail records the first error and is idempotent thereafter: the error found
 // first in walk order is the one Parse returns, and later failures are dropped.
 func (l *listener) fail(err error) {

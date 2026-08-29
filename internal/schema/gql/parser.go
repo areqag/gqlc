@@ -43,7 +43,7 @@ func parse(r io.Reader) (rawSchema, error) {
 	// errors (SyntaxError) and the collection errors raised during the walk, all
 	// on l.err. walk then surfaces the first of them — including "no graph type"
 	// via ExitGqlProgram — and resolution runs only on a clean walk.
-	l := &listener{ts: ts}
+	l := newListener(ts)
 	lex.RemoveErrorListeners()
 	lex.AddErrorListener(l)
 	gp.RemoveErrorListeners()

@@ -1,4 +1,4 @@
-package queryfile
+package queryfile_test
 
 import (
 	"bytes"
@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/areqag/gqlc/internal/queryfile"
 )
 
 var update = flag.Bool("update", false, "regenerate queryfile .golden.json files")
@@ -20,13 +22,13 @@ const fixtureDir = "testdata"
 // produce. Totality against invalid/*.cypher is asserted in TestInvalid so
 // a stray fixture or missing map entry fails the suite.
 var invalidFixtures = map[string]error{
-	"missing_annotation.cypher":     ErrMissingAnnotation,
-	"unknown_cardinality.cypher":    ErrUnknownCardinality,
-	"invalid_query_name.cypher":     ErrInvalidQueryName,
-	"duplicate_query_name.cypher":   ErrDuplicateQueryName,
-	"malformed_annotation.cypher":   ErrMalformedAnnotation,
-	"text_before_annotation.cypher": ErrTextBeforeAnnotation,
-	"no_queries.cypher":             ErrNoQueries,
+	"missing_annotation.cypher":     queryfile.ErrMissingAnnotation,
+	"unknown_cardinality.cypher":    queryfile.ErrUnknownCardinality,
+	"invalid_query_name.cypher":     queryfile.ErrInvalidQueryName,
+	"duplicate_query_name.cypher":   queryfile.ErrDuplicateQueryName,
+	"malformed_annotation.cypher":   queryfile.ErrMalformedAnnotation,
+	"text_before_annotation.cypher": queryfile.ErrTextBeforeAnnotation,
+	"no_queries.cypher":             queryfile.ErrNoQueries,
 }
 
 type QueryfileSuite struct {
@@ -51,7 +53,7 @@ func (s *QueryfileSuite) TestValid() {
 			src, err := os.ReadFile(path)
 			s.Require().NoError(err)
 
-			got, err := New().Parse(bytes.NewReader(src))
+			got, err := queryfile.New().Parse(bytes.NewReader(src))
 			s.Require().NoError(err)
 
 			// Serialised as JSON with the Text field's embedded newlines
@@ -93,7 +95,7 @@ func (s *QueryfileSuite) TestInvalid() {
 			src, err := os.ReadFile(path)
 			s.Require().NoError(err)
 
-			got, err := New().Parse(bytes.NewReader(src))
+			got, err := queryfile.New().Parse(bytes.NewReader(src))
 			s.Require().Error(err)
 			s.Require().Nil(got, "queries must be nil on error")
 			s.Require().ErrorIs(err, wantErr)
@@ -101,20 +103,26 @@ func (s *QueryfileSuite) TestInvalid() {
 	}
 }
 
-// TestSentinelReachability is the bidirectional sweep: every allSentinels
+// TestSentinelReachability is the bidirectional sweep: every AllSentinels
 // member must have at least one invalid fixture; every mapped sentinel must
-// be in allSentinels.
+// be in AllSentinels.
+//
+// It reads the canonical set through the exported accessor rather than the
+// package's `allSentinels` var, because this file moved out of package
+// queryfile (bd gqlc-m5rc). AllSentinels copies that var, so the mutation
+// recorded below still reaches this test.
 //
 // Both directions are quantified over a set, so on empty inputs each holds
 // vacuously and the sweep reconciles nothing against nothing. Measured
-// (bd gqlc-v1w8): gut invalidFixtures to `map[string]error{}` AND allSentinels
-// to `[]error{}` and this test passed, rc=0, no "[no tests to run]" — it was
-// green exactly when what it guards had vanished.
+// (bd gqlc-v1w8): gut invalidFixtures to `map[string]error{}` AND the
+// package's allSentinels to `[]error{}` and this test passed, rc=0, no
+// "[no tests to run]" — it was green exactly when what it guards had
+// vanished.
 //
 // The census guard below closes that, and it is deliberately ONE guard and not
 // two. The canonical list going empty on its own is already caught: the second
 // direction then finds a covered sentinel that is not canonical. Adding a
-// matching guard on allSentinels would make BOTH read non-load-bearing under
+// matching guard on AllSentinels would make BOTH read non-load-bearing under
 // mutation, because either alone still kills the row. The composition is:
 // census empty -> this guard; canonical empty -> the covered/canonical
 // direction; both empty -> this guard.
@@ -127,11 +135,12 @@ func TestSentinelReachability(t *testing.T) {
 	}
 	require.NotEmpty(t, covered,
 		"no invalid fixture maps to a sentinel, so both directions below hold vacuously and this sweep reconciles nothing against nothing")
-	canonical := make(map[error]bool, len(allSentinels))
-	for _, sentinel := range allSentinels {
+	sentinels := queryfile.AllSentinels()
+	canonical := make(map[error]bool, len(sentinels))
+	for _, sentinel := range sentinels {
 		canonical[sentinel] = true
 	}
-	for _, sentinel := range allSentinels {
+	for _, sentinel := range sentinels {
 		require.True(t, covered[sentinel], "sentinel %q has no negative fixture", sentinel)
 	}
 	for sentinel := range covered {
@@ -201,7 +210,7 @@ func TestFreeStandingCommentBlockDoesNotJoinPrecedingQuery(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := New().Parse(bytes.NewReader([]byte(tc.src)))
+			got, err := queryfile.New().Parse(bytes.NewReader([]byte(tc.src)))
 			require.NoError(t, err)
 			require.NotEmpty(t, got)
 			require.Equal(t, tc.want, got[0].Text)
@@ -221,10 +230,10 @@ func TestCommentOnlyBodyIsNoBody(t *testing.T) {
 		"// name: ListPeople :many\n" +
 		"MATCH (p:Person) RETURN p\n"
 
-	got, err := New().Parse(bytes.NewReader([]byte(src)))
+	got, err := queryfile.New().Parse(bytes.NewReader([]byte(src)))
 	require.Error(t, err)
 	require.Nil(t, got)
-	require.ErrorIs(t, err, ErrMissingAnnotation)
+	require.ErrorIs(t, err, queryfile.ErrMissingAnnotation)
 }
 
 // annotationEnvelope wraps the parse result for stable JSON encoding: an
@@ -232,14 +241,5 @@ func TestCommentOnlyBodyIsNoBody(t *testing.T) {
 // readability, and gives the golden a clear anchor for future field
 // additions without churning every fixture at once.
 type annotationEnvelope struct {
-	Queries []AnnotatedQuery `json:"queries"`
-}
-
-// Ensure Cardinality serialises as its wire tag so goldens read naturally
-// (":one" / ":many" / ":exec" via the enum's String()). This lives in the
-// test file rather than production code because JSON encoding is a
-// test-only concern for queryfile — the codegen consumer passes
-// AnnotatedQuery directly, no wire.
-func (c Cardinality) MarshalJSON() ([]byte, error) {
-	return json.Marshal(c.String())
+	Queries []queryfile.AnnotatedQuery `json:"queries"`
 }

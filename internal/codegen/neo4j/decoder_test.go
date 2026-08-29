@@ -1,4 +1,4 @@
-package neo4j
+package neo4j_test
 
 import (
 	"fmt"
@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/neo4j"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
 	"github.com/areqag/gqlc/internal/schema/gql"
@@ -199,14 +200,14 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 
 	covered := make(map[graph.PropertyType]bool)
 	for _, w := range decoderProbeWidths() {
-		_, ok := typeMap{}.Property(w.pt)
+		_, ok := neo4j.TypeMap{}.Property(w.pt)
 		require.True(t, ok, "the probe declares %s, which this backend has no carrier for", w.pt)
 		require.False(t, covered[w.pt], "the probe declares %s twice", w.pt)
 		covered[w.pt] = true
 	}
 
 	for pt, name := range declared {
-		if _, ok := (typeMap{}).Property(pt); !ok {
+		if _, ok := (neo4j.TypeMap{}).Property(pt); !ok {
 			continue
 		}
 		require.True(t, covered[pt],
@@ -473,7 +474,7 @@ func (s *DecoderSuite) declareArm(into map[string]decoderArm, name, carrier stri
 
 	fields := make(map[string]string, len(props))
 	for _, p := range props {
-		goType, ok := typeMap{}.Property(p.Type)
+		goType, ok := neo4j.TypeMap{}.Property(p.Type)
 		s.Require().True(ok, "%s declares %s at %s, which this backend has no carrier for", name, p.Name, p.Type)
 		if p.Nullable {
 			goType = "*" + goType
@@ -775,7 +776,7 @@ func (s *DecoderSuite) emitClosureModels(prop string, depth int) (string, error)
 	if err != nil {
 		return "", err
 	}
-	files, err := New().Generate(codegen.Input{Schema: sch})
+	files, err := neo4j.New().Generate(codegen.Input{Schema: sch})
 	s.Require().NoError(err)
 	for _, f := range files {
 		if f.Path == "models.go" {
@@ -795,7 +796,7 @@ func (s *DecoderSuite) emitModels(prop string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	files, err := New().Generate(codegen.Input{Schema: sch})
+	files, err := neo4j.New().Generate(codegen.Input{Schema: sch})
 	s.Require().NoError(err)
 	for _, f := range files {
 		if f.Path == "models.go" {

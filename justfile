@@ -3381,16 +3381,8 @@ vuln-root-residual:
     # already import third-party code; the list shrinks as bd gqlc-m5rc converts
     # them and must never grow.
     baseline="$(sort <<'BLIND'
-    internal/cli
-    internal/codegen
     internal/codegen/age
-    internal/codegen/neo4j
-    internal/config
-    internal/queryfile
     internal/resolver
-    internal/schema/gql
-    internal/schema/gql/annexd
-    internal/schema/gql/isobnf
     BLIND
     )"
     grew="$(comm -23 <(lines "${blind}") <(lines "${baseline}") || true)"
