@@ -1056,7 +1056,7 @@ unread_count() {
 # seats_all, which excludes him, and the idle escalation names the seat sedrak.
 # That pass compares two counts inside a single tick, so the staleness above
 # cannot reach it — only a letter arriving in the window can, which is the
-# point. (Wording Վահագն's, from the branch this duplicated.)
+# point.
 mail_unread_from() { # <recipient> <sender> -> count
     local d
     d="$(state_dir)/mail/$1/inbox"
