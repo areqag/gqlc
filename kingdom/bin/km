@@ -475,24 +475,55 @@ window_up() { # kept as a name for callers; asks "does the seat's tab exist?"
 }
 
 # Herdr's agent_status is the answer km used to derive from pgrep + pane
-# grep. Values: idle | working | blocked | done | unknown. Absent (no agent
-# reporting) reads as unknown.
-seat_agent_status() { # <seat> -> agent_status string
-    local pane
+# grep. Values: idle | working | blocked | done | unknown. A pane with no
+# agent reporting carries the literal string `unknown`.
+#
+# It lives at result.pane.agent_status. This read was one level too shallow,
+# at result.agent_status, from the herdr migration until 2026-08-29 — and a
+# missing key is not a parse error, so the `.get(...,'unknown')` default that
+# stood here answered `unknown` for every pane in the town and never once
+# said so. Measured on the live workspace that day (bd gqlc-jvlu): km read
+# `unknown` for all 16 seats while herdr reported idle, working or done for
+# all 16. seat_session_live therefore never returned true in its life, and
+# seat_runner_start's trample guard never fired, so `herdr pane run` typed
+# km-seat's command line into working citizens' prompt boxes and they obeyed
+# it. So there is no default here any more: a payload this does not
+# understand is `unreadable`.
+#
+# `unreadable` is not `unknown`, and the gap between them is a safety
+# direction. `unknown` is a positive report that no agent is running, which
+# seat_runner_start reads as permission to launch on top of the pane.
+# Answering that for a payload we failed to read is exactly how the next
+# herdr shape change re-arms this defect silently.
+seat_agent_status() { # <seat> -> idle|working|blocked|done|unknown|unreadable
+    local pane status
     pane=$(seat_pane_id "$1") || { echo unknown; return 0; }
+    # An absent pane is not an unreadable one: there is no session because
+    # there is nowhere for one to be, and seat_runner_start makes the pane.
     [ -n "$pane" ] || { echo unknown; return 0; }
-    herdr pane get "$pane" 2>/dev/null |
-        python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('result',{}).get('agent_status','unknown'))" 2>/dev/null || echo unknown
+    status=$(herdr pane get "$pane" 2>/dev/null |
+        python3 -c "import json,sys; print(json.load(sys.stdin)['result']['pane']['agent_status'])" 2>/dev/null) || {
+        echo "km: seat $1: cannot read agent_status from herdr (pane $pane) — server unreachable, or its payload no longer carries result.pane.agent_status. Treating the seat as occupied." >&2
+        echo unreadable
+        return 0
+    }
+    echo "$status"
 }
 
-# A live SESSION is claude actually running in the pane. Under herdr that is
-# any non-unknown status, because the status is set BY claude's hook only when
-# claude is up. A `done` state means the last turn finished but the process is
-# still around ready for more input.
+# A live SESSION is claude actually running in the pane. The status is set BY
+# claude's hook, so any status at all means claude is up; `done` means the
+# last turn finished with the process still around for more input.
+#
+# Written as "everything but the one value that positively denies a session"
+# rather than as a list of the four live states, because this predicate's two
+# errors do not cost the same. A false live holds a respawn or a worktree
+# refresh, which the next pass retries and a human can see. A false dead ends
+# a citizen's session under her. So `unreadable` reads live, and so does any
+# status herdr adds after this was written.
 seat_session_live() {
     case "$(seat_agent_status "$1")" in
-        idle | working | blocked | done) return 0 ;;
-        *) return 1 ;;
+        unknown) return 1 ;;
+        *) return 0 ;;
     esac
 }
 
