@@ -87,11 +87,17 @@ already runs, and bounded so it can never become a queue:
   is not. It inherits that command's existing early returns, which is correct:
   a halted town (Article VI.4) files no patrol bead, and a sweep that skips
   because Րաֆֆի is already awake simply files none that tick.
-- **Bounded to one.** The sweep files a patrol bead only if no open patrol bead
-  exists. Patrol therefore has a queue depth of one, permanently, whatever the
-  merge rate. This is the clause that keeps this ADR inside ADR 0003's
-  constraint, and any later change that removes it reintroduces the queue ADR
-  0003 was written to drain.
+- **Bounded to one, and only when the window is non-empty.** The sweep files a
+  patrol bead only if BOTH (1) no open patrol bead exists, AND (2) at least one
+  merge to master postdates the previous patrol bead's close — or that window
+  could not be measured. The QUEUE guard (1) is fail-closed: a bd that cannot
+  answer must not raise, or an unwell ledger queues a bead every cadence. The
+  WINDOW guard (2) is fail-open: anything short of a measured emptiness files,
+  because lost patrol coverage is worse than one empty wake. The two guards
+  fail in opposite directions and a later reader will "tidy" them into
+  consistency if the reason is not on the record. Patrol therefore has a queue
+  depth of one, permanently — and pays one wake per cadence rather than per PR,
+  which is the trade this ADR was written to make.
 - **Target.** Merges to master since the last patrol bead closed, restricted to
   those whose PR was not reviewed. Fresh; a patrol that starts at the founding
   commit re-reads what has already been read.
