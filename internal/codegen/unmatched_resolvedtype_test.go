@@ -399,8 +399,8 @@ var _ resolver.ResolvedType = panicNilString{}
 // name would then produce the empty string: `resolved as ` with nothing
 // after it.
 //
-// So the fallback is decided by a flag set after String() returns, not
-// by recover()'s value. Measured: with the guard written as
+// So the fallback is decided by whether a name came back, not by
+// recover()'s value. Measured: with the guard written as
 // `if recover() != nil`, this case renders `resolved as ` and reddens.
 //
 // t.Setenv is why this test is not parallel. Go re-reads GODEBUG on
@@ -412,4 +412,49 @@ func TestUnmatchedResolvedTypeNamesATypeThatPanickedWithNil(t *testing.T) {
 	err := generateUnmatched(t, unmatchedColumnQuery(resolver.Column{Name: "n", Type: panicNilString{}}))
 	require.ErrorIs(t, err, codegen.ErrOutOfC6Scope)
 	require.EqualError(t, err, `out of C6 scope: query "Fetch" column 0 "n" resolved as codegen_test.panicNilString`)
+}
+
+// emptyNameString shadows the promoted String() with one that returns the
+// empty string. It is the sibling of panicNilString above: each is named
+// after what its String() does, and each reaches a case the other cannot.
+type emptyNameString struct{ resolver.ResolvedNode }
+
+func (emptyNameString) String() string { return "" }
+
+var _ resolver.ResolvedType = emptyNameString{}
+
+// TestUnmatchedResolvedTypeNamesATypeWhoseStringIsEmpty pins the case every
+// guard above lets through. All of them bound a FAULT; this String() does
+// not fault, so it is answered, and an answer is taken at its word.
+//
+// The distinction that matters is between the two ways of producing no name.
+// A fault announces itself and the recover renders %T instead. An empty
+// answer announces nothing: it satisfies the interface, returns normally,
+// and leaves a refusal ending mid-sentence —
+//
+//	out of C6 scope: query "Fetch" column 0 "n" resolved as
+//
+// which is the measurement on this bead, and reads to whoever hits it as a
+// truncated log line rather than as a type that declined to name itself.
+// So a name that is empty is treated as no name and falls back with the
+// faults, on the ground that the helper's contract is to always produce one.
+//
+// Nothing here says the empty string is the only unhelpful answer. A
+// String() returning " " or "???" is passed through, and deliberately: this
+// package cannot referee whether another package's tag is meaningful, only
+// whether it said anything at all.
+func TestUnmatchedResolvedTypeNamesATypeWhoseStringIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	err := generateUnmatched(t, unmatchedColumnQuery(resolver.Column{Name: "n", Type: emptyNameString{}}))
+	require.ErrorIs(t, err, codegen.ErrOutOfC6Scope)
+	require.EqualError(t, err, `out of C6 scope: query "Fetch" column 0 "n" resolved as codegen_test.emptyNameString`)
+
+	// The same value through the list-element fail-site, which renders by a
+	// different call site in prepare.go. One helper serves both, so a repair
+	// confined to the column arm would leave this one ending mid-sentence.
+	listCol := resolver.Column{Name: "xs", Type: resolver.ResolvedList{Element: emptyNameString{}}}
+	listErr := generateUnmatched(t, unmatchedColumnQuery(listCol))
+	require.ErrorIs(t, listErr, codegen.ErrOutOfC6Scope)
+	require.EqualError(t, listErr, `query "Fetch" column 0 "xs": out of C6 scope: list element has unknown resolved type codegen_test.emptyNameString`)
 }

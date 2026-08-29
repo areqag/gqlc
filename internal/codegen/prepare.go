@@ -770,6 +770,17 @@ func columnSite(queryName string, pos int, columnName string) string {
 // contract and the conformance suite asserts them: an implementation
 // that can name itself is still named by its own answer.
 //
+// An empty answer is treated as no answer, and falls back the same way.
+// A String() returning "" does not fault, so the recover does not see it,
+// and the refusal it produced ended mid-sentence — `resolved as ` with
+// nothing after it, or AGE's `column "n" projects ` (bd gqlc-sv61). That
+// is worse than the fault it sits beside: a panic announces itself, while
+// this reaches the reader as a truncated log line rather than as a type
+// that declined to name itself. Emptiness is the whole of the test, and
+// deliberately so — a String() answering " " or "???" is passed through,
+// since this package can tell whether another package's tag said
+// anything, but not whether what it said was any use.
+//
 // The recover is not how the refusal travels. AGENTS.md's Errors
 // convention asks for package-level sentinels matched with errors.Is,
 // and names one channel it rules panic/recover out of: syntax errors,
@@ -785,25 +796,28 @@ func columnSite(queryName string, pos int, columnName string) string {
 // implementations admits an unbounded set of ways to misbehave, and this
 // addresses the one the sum's own inhabitants exhibit.
 func ResolvedTypeName(t resolver.ResolvedType) (name string) {
-	answered := false
 	defer func() {
 		// recover() is called for its effect and not its value: it stops
 		// the panic either way, but under GODEBUG=panicnil=1 a panic(nil)
 		// makes it return nil, so a `recover() != nil` test would read a
-		// faulted call as an answered one and this helper would hand its
-		// callers an empty type name. answered is set only where String()
-		// returned, so it is what decides the fallback.
+		// faulted call as an answered one, and this helper would hand its
+		// callers the empty name it exists to prevent.
+		//
+		// The emptiness of name is what decides the fallback, and it needs
+		// no flag beside it to say whether String() returned: a call that
+		// faults never reaches its assignment, so name is still "" here.
+		// One test therefore covers both ways of arriving without a name,
+		// and it is this function's postcondition stated where it is
+		// enforced rather than a second thing to keep in step with it.
 		recover() //nolint:errcheck // called for its effect; the value is deliberately unread, per the comment above.
-		if !answered {
+		if name == "" {
 			// %T reads the dynamic type through reflection and never
 			// dispatches a method, so it answers for the values whose
 			// String() just did not. A nil interface renders "<nil>".
 			name = fmt.Sprintf("%T", t)
 		}
 	}()
-	name = t.String()
-	answered = true
-	return name
+	return t.String()
 }
 
 // admitEdgeUnionCandidates gates one resolved edge-union candidate set,
