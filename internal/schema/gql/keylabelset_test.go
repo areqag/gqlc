@@ -1,4 +1,4 @@
-package gql
+package gql_test
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
 // gg21Fixtures names the valid fixtures that declare a key label set explicitly
@@ -134,7 +135,7 @@ func TestLabelSetsDoesNotWriteThroughItsInput(t *testing.T) {
 	key := backing[:1]
 	require.Equal(t, 2, cap(key), "the test needs spare capacity to write into")
 
-	keyKey, complete, ok := labelSets(true, key, graph.LabelSet{"Employee"})
+	keyKey, complete, ok := gql.LabelSets(true, key, graph.LabelSet{"Employee"})
 
 	require.True(t, ok)
 	require.Equal(t, graph.LabelSetKey("Person"), keyKey)
@@ -176,7 +177,7 @@ func parseValidFixtures(t *testing.T) []validFixture {
 	for _, path := range files {
 		src, err := os.ReadFile(path)
 		require.NoError(t, err)
-		s, err := New().Parse(bytes.NewReader(src))
+		s, err := gql.New().Parse(bytes.NewReader(src))
 		require.NoError(t, err)
 		out = append(out, validFixture{name: filepath.Base(path), schema: s})
 	}

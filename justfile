@@ -3384,7 +3384,6 @@ vuln-root-residual:
     baseline="$(sort <<'BLIND'
     internal/codegen/age
     internal/resolver
-    internal/schema/gql
     BLIND
     )"
     grew="$(comm -23 <(lines "${blind}") <(lines "${baseline}") || true)"
