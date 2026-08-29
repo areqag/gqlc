@@ -1,0 +1,5 @@
+-- The file exists and declares a different graph type than the name that found
+-- it. This is the drift a rename leaves behind: liar.gql was found as `liar`
+-- and calls itself NotLiar, so the catalogue identity the reference used and
+-- the one the file asserts disagree.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF liar

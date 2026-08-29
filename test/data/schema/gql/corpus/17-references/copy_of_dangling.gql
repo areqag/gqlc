@@ -1,0 +1,6 @@
+-- A reference whose spelling is supported and whose file is absent. It is the
+-- one failure a reader is most likely to hit — a typo, or a file not yet
+-- written — and it is a different answer from the climb that leaves the
+-- catalogue, which the same reader would otherwise have to tell apart from
+-- this by guessing.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF nowhere

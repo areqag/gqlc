@@ -1,0 +1,6 @@
+-- A delimited identifier where a path segment goes. It is declined for what it
+-- could spell rather than for what it spells here: a delimited identifier may
+-- contain a solidus, a full stop, or nothing at all, so it is not one safe path
+-- element. Restricting segments to the regularIdentifier production makes that
+-- a property of the lexer, with no validation code to get wrong.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF "gt"
