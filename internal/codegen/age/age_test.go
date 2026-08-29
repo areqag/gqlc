@@ -260,6 +260,34 @@ var carrierParamQuery = codegen.NamedQuery{
 	},
 }
 
+// listCarrierParamQuery binds a list of each carrier the three fallible
+// encoders serve, plus a nullable list, and projects nothing. It shares
+// instantParamQuery's source file for the same reason carrierParamQuery
+// does.
+//
+// It is a third query rather than four more parameters on that one
+// because a list is where the encoders COMPOSE: fallibleParamEncoder
+// wraps agtypeEncodedList around the leaf encoder, and agtypeEncodedNullable
+// around that again for a nullable list, so these four parameters are the
+// only shapes that reach either combinator. Without them the emission
+// never sets encList, agtypeEncodedList is never written into the module
+// under test, and nothing in the tree compiles or runs it (bd gqlc-t0dp).
+var listCarrierParamQuery = codegen.NamedQuery{
+	Name:        "WriteSpans",
+	Cardinality: codegen.CardinalityExec,
+	SourceFile:  temporalSource,
+	SourceText:  "CREATE (s:Spans {startsOn: $startsOn, opensAt: $opensAt, lasts: $lasts, mayLast: $mayLast})\n",
+	Validated: resolver.ValidatedQuery{
+		Statement: resolver.StatementWrite,
+		Parameters: []resolver.ResolvedParameter{
+			{Name: "startsOn", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeDate, true)}},
+			{Name: "opensAt", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeLocalTime, true)}},
+			{Name: "lasts", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeDuration, true)}},
+			{Name: "mayLast", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeDuration, true), Nullable: true}},
+		},
+	},
+}
+
 // corpusEdgeKey is the one edge type testdata/corpus_schema.gql declares.
 var corpusEdgeKey = schema.EdgeKey{Source: personLabel, KeyLabels: "ACTED_IN", Target: personLabel}
 

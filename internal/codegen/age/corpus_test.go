@@ -124,6 +124,7 @@ var corpusTests = []string{
 	"TestAgtypeDurationCountsTotalMicroseconds",
 	"TestAgtypeDurationMicrosFoldsDaysAndRefusesMonths",
 	"TestEmittedMethodBindsTheCarriersAsTheirScalars",
+	"TestEmittedMethodBindsListsOfCarriers",
 	"TestBoundGraphCountsBytes",
 }
 
@@ -194,6 +195,7 @@ var corpusTables = map[string]corpusrun.Table{
 	"TestCypherStmtComposesOneStatement":                  {Rows: 6},
 	"TestDecodeVertexRefusesMisshapenText":                {Rows: 16},
 	"TestEmittedMethodBindsAnInstantAsMicroseconds":       {Rows: 4},
+	"TestEmittedMethodBindsListsOfCarriers":               {Rows: 7},
 	"TestEmittedMethodBindsTheCarriersAsTheirScalars":     {Rows: 6},
 }
 
@@ -214,7 +216,7 @@ var corpusTables = map[string]corpusrun.Table{
 // composition bug agree with itself.
 func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
-	in.Queries = []codegen.NamedQuery{servedQuery, instantParamQuery, carrierParamQuery}
+	in.Queries = []codegen.NamedQuery{servedQuery, instantParamQuery, carrierParamQuery, listCarrierParamQuery}
 	emitted, err := age.New(age.WithPackageName(corpusPackage)).Generate(in)
 	s.Require().NoError(err)
 	files := make(map[string]string, len(emitted))
