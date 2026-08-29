@@ -3319,9 +3319,47 @@ vuln-root-residual:
         exit 1
     fi
 
-# lints the GitHub Actions workflow files
-actionlint:
-    go run github.com/rhysd/actionlint/cmd/actionlint@{{actionlint_version}}
+# lints the GitHub Actions workflow files.
+#
+# -shellcheck IS THE GATE, not a refinement of it. actionlint checks a `run:`
+# block's shell only by handing it to shellcheck, and its default for this flag
+# is the bare word `shellcheck` — a PATH lookup. With no shellcheck on PATH the
+# integration is not weakened, it is DISABLED, and actionlint says nothing about
+# having skipped it. Measured 2026-08-29 on a workflow whose only fault was
+# inside a run block: bare actionlint exited 0 in silence; the same actionlint
+# with this flag exited 1 and named the finding (bd gqlc-68g9). It had already
+# cost a red CI job on PR #1533, where the local gate passed over the very file
+# CI then refused.
+#
+# So the binary is a DEPENDENCY of this recipe rather than something the machine
+# is assumed to have — the self-healing shape ensure-golangci already has.
+#
+# AND ITS PRESENCE IS THEN ASSERTED, because pointing the flag somewhere is not
+# the same as pointing it at something. Measured 2026-08-29 over a workflow that
+# the working binary reddens: `-shellcheck <path that does not exist>` exits 0 in
+# silence, byte-identical in behaviour to `-shellcheck ''`, which is the spelling
+# that means "disabled". actionlint offers no backstop and no complaint, so a
+# provisioning step that half-succeeded would restore the exact silence this bead
+# is about while the recipe still read as gated. ensure-shellcheck failing loudly
+# is the first line of defence; this is the second, and it is here because the
+# first one cannot see a binary that vanishes after it returns.
+#
+# Passing the path also pins the VERSION on both sides. CI runs this recipe, and
+# a runner image shipping its own shellcheck would otherwise grade these
+# workflows against whatever version it happened to carry, drifting from the
+# v0.10.0 that `just lint` holds every other shell script in this repo to.
+actionlint: ensure-shellcheck
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sc={{quote(shellcheck)}}
+    if [ ! -x "${sc}" ]; then
+        echo "error: actionlint's shellcheck is missing or not executable at ${sc}." >&2
+        echo "       Refusing rather than running: actionlint would silently skip every" >&2
+        echo "       run-block check and exit 0, which is indistinguishable from a pass" >&2
+        echo "       (bd gqlc-68g9). Provision it with:  just ensure-shellcheck" >&2
+        exit 1
+    fi
+    go run github.com/rhysd/actionlint/cmd/actionlint@{{actionlint_version}} -shellcheck "${sc}"
 
 # pinned openCypher release tag the TCK is vendored from; never "master" so the
 # corpus is reproducible. Bump deliberately, then re-run fetch-tck and commit.
