@@ -375,9 +375,12 @@ runs no body.
 
 ## What is refused today
 
-Two gaps carrying eight refused probes and four served texts — twelve query
-texts, counted off `dialectGaps` itself: three refused and two served for the
-alternation, five refused and two served for the undefined function.
+Two gaps, each carrying its own refused probes and served texts — read off
+`dialectGaps` itself rather than restated here, so adding a probe moves the
+totals without touching this sentence. The alternation gap holds the
+relationship-type alternation spellings `.14` measured; the undefined-function
+gap holds the constructor names a live session was measured on. Both carry
+served texts alongside. The numbers belong at the pin, not in prose.
 
 1. **Relationship-type alternation** (`ErrRelationshipTypeAlternation`, from
    `gqlc-35yu.14`): `-[r:A|B]->` in any of three spellings, answered
@@ -441,9 +444,19 @@ That work is bd `gqlc-osf1`.
 
 - **The first run of `TestAGERefusesTheFunctionsItDoesNotDefine`.** The AGE live
   half is nightly-and-manual (`codegen-live.yml`, job `live-smoke-age`, skipped
-  on pull requests), so these five refusals ship verified by a hand-run spike and
-  not yet by CI. The lag is one cycle and the subject is an image pinned by
-  digest, which no pull request can alter except by editing that digest.
+  on pull requests), so these five refusals ship verified by a hand-run spike
+  and then by a dispatched CI run — `codegen-live` run `31996378339` on branch
+  `feat/age-dialect-gap-admission` finished green with `live-smoke-age` a
+  green job, its recipe naming both AGE witnesses as whole `-run` alternatives
+  and its log carrying no `[no tests to run]` line. That the two witnesses
+  executed is an inference from the whole-alternative names plus the absence of
+  that marker, not an observed per-test PASS line: the recipe carries no `-v`,
+  so no such line is emitted. `codegen-live.yml` accepts `workflow_dispatch`,
+  which is what lets the AGE arm be witnessed off the nightly clock at all;
+  "Docker is not available to the author of this decision" (below) is a limit
+  on local iteration, not on witnessing. The lag on CI verification is one
+  cycle and the subject is an image pinned by digest, which no pull request can
+  alter except by editing that digest.
 
 `localtime()` being unwitnessed is load-bearing, not incidental. It is what
 `test/data/codegen/invalid/unrepresentable_temporal_localtime_column` and
@@ -498,9 +511,13 @@ valid emission is one it cannot account for.
 
 - A projected `date()` is now answered by this gate rather than by
   `codegen.ErrUnrepresentableTemporal`. That reordering is deliberate and is the
-  same argument `.14` made: no projection of `date()` will ever parse on this
-  server, whatever carrier AGE later grows, so the text has to be rewritten
-  before any column question can be put to it. It is pinned by the answer it
+  same argument `.14` made: against the pinned image (AGE 1.7.0 on PostgreSQL
+  18.1, `apache/age@sha256:4241e2d8…`) the probe `RETURN date()` was answered
+  `function date does not exist`, so a projection of `date()` does not parse
+  and the text has to be rewritten before any column question can be put to it.
+  A later AGE that grows a `date` function would move that measurement, and the
+  reordering would need re-examining on that image; the argument does not
+  extend past what this repo can witness. It is pinned by the answer it
   produces, not left to the reading order of `generate.go`.
 
 - `test/data/codegen/invalid/unrepresentable_temporal_date_column` is renamed to
