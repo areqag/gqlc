@@ -200,7 +200,7 @@ every check has passed.
 |---|----------------------|-------------------------------------------------------------------|---------------|
 | 1 | load config          | `config.Load(cfgPath)`                                            | singular      |
 | 2 | resolve paths        | `filepath.Dir(cfgPath)` + `filepath.Join`                         | —             |
-| 3 | parse schema         | per `SchemaLang` (§3.2): `gql.New().Parse(bytes.NewReader(b))`    | singular      |
+| 3 | load schema          | per `SchemaLang` (§3.2): `gql.NewLoader(os.DirFS(dir(SchemaPath))).Load(base(SchemaPath))` | singular |
 | 4 | load procsig         | iff `ProcsigPath != ""`: `procsig.Load(resolved)`                 | singular      |
 | 5 | construct front end  | `cypher.New(cypher.WithRegistry(reg))`, `resolver.New(sch, resolver.WithRegistry(reg))` | — |
 | 6 | discover query files | `os.ReadDir(resolved QueryDir)` + filter (§4)                     | singular      |
@@ -218,6 +218,12 @@ become `filepath.Join(dir(cfgPath), p)` (Join cleans). No existence
 checks here; each consuming stage owns its own open failure. Amended:
 stages 2–8 run once per generation target, against that target's
 fields; stage 1 and stage 9 run once for the whole config.
+
+Stage 3: a GQL graph type may take its element types from another by
+reference (`COPY OF`, ADR 0034), so the unit read is the directory
+holding `SchemaPath` as a catalogue, not the one configured file. Files
+the reference chain names are read from that root; nothing outside it is
+reachable. No config key says so — the catalogue root is derived.
 
 Stage 4: when the `procsig` key is absent the pipeline runs with the
 zero `procsig.Registry` — documented to miss on every `Lookup` — so a
@@ -265,7 +271,7 @@ key:
 
 | config value                  | pipeline binding                       |
 |-------------------------------|----------------------------------------|
-| `config.SchemaLangGQL`        | `gql.New()`                            |
+| `config.SchemaLangGQL`        | `gql.NewLoader(os.DirFS(…))`           |
 | `config.QueryLangOpenCypher`  | `cypher.New(cypher.WithRegistry(reg))` |
 | `config.DriverNeo4jGoV5`      | registry entry `neo4j-go-v5`           |
 | `config.DriverNeo4jGoV6`      | registry entry `neo4j-go-v6`           |
