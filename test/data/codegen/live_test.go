@@ -457,6 +457,14 @@ func TestLiveSmoke(t *testing.T) {
 
 			h := arm.start(ctx, t)
 			parallelScenarios := h.parallelScenarios()
+			// Each battery is held non-empty where it is ranged over, and never
+			// as a total: one assertion over the sum of the five fires only when
+			// all five are empty, so emptying four would still read green. An
+			// emptied table runs its loop zero times while every capability
+			// assertion below still passes, and the arm boots its container and
+			// reports ok having witnessed nothing (bd gqlc-wu5y).
+			require.NotEmpty(t, readScenarios,
+				"readScenarios is empty, so this arm ran no reads and passed anyway")
 			for _, sc := range readScenarios {
 				t.Run(sc.name, func(t *testing.T) {
 					if parallelScenarios {
@@ -470,6 +478,8 @@ func TestLiveSmoke(t *testing.T) {
 			require.Equal(t, arm.edgeUnions, servesEdgeUnions,
 				"the arm's edge-union capability must match the arms table; a target that gained or lost the dispatch updates both")
 			if servesEdgeUnions {
+				require.NotEmpty(t, edgeUnionScenarios,
+					"edgeUnionScenarios is empty, so this arm serves the edge-union dispatch and exercised none of it")
 				for _, sc := range edgeUnionScenarios {
 					t.Run(sc.name, func(t *testing.T) {
 						if parallelScenarios {
@@ -484,6 +494,8 @@ func TestLiveSmoke(t *testing.T) {
 			require.Equal(t, arm.temporals, servesTemporals,
 				"the arm's temporal capability must match the arms table; a target that gained or lost the zoneless temporal widths updates both")
 			if servesTemporals {
+				require.NotEmpty(t, temporalScenarios,
+					"temporalScenarios is empty, so this arm admits the zoneless temporal widths and exercised none of them; it is the only live witness for the ADR 0033 round trip")
 				for _, sc := range temporalScenarios {
 					t.Run(sc.name, func(t *testing.T) {
 						if parallelScenarios {
@@ -498,6 +510,8 @@ func TestLiveSmoke(t *testing.T) {
 			require.Equal(t, arm.zonedTime, servesZonedTime,
 				"the arm's zoned-time capability must match the arms table; a target that gained or lost TIME WITH TIME ZONE updates both")
 			if servesZonedTime {
+				require.NotEmpty(t, zonedTimeScenarios,
+					"zonedTimeScenarios is empty, so this arm admits TIME WITH TIME ZONE and exercised none of it")
 				for _, sc := range zonedTimeScenarios {
 					t.Run(sc.name, func(t *testing.T) {
 						if parallelScenarios {
@@ -514,6 +528,8 @@ func TestLiveSmoke(t *testing.T) {
 			if !servesWrites {
 				return
 			}
+			require.NotEmpty(t, writeScenarios,
+				"writeScenarios is empty, so this arm emits :exec methods and exercised none of them")
 			for _, sc := range writeScenarios {
 				t.Run(sc.name, func(t *testing.T) {
 					if parallelScenarios {
