@@ -1118,11 +1118,28 @@ seat_can_witness() { # <seat> -> 1 if its checkout cannot write a progress witne
 # directory that does not exist, and the whole km run dies mid-table for a box
 # nobody has written to yet (gqlc-6wqw). `read/` is missing far more often than
 # `inbox/` is, so the counter below would hit it constantly.
+#
+# That guard answers the cause that was hitting us, not the whole failure. find
+# still exits 1 on a directory that EXISTS and cannot be walked — an unreadable
+# entry inside it, or the box removed between the test and the walk — and with
+# its stderr discarded under `set -o pipefail` that killed the dispatch tick
+# with nothing in the journal to read. This is the last instance on a tick path
+# of the shape that caused gqlc-w3wb and gqlc-5ybu (gqlc-w375); it is repaired
+# here in the fail-loud form km:113 argues for, rather than left as the one the
+# third outage comes from.
+#
+# The partial count is kept rather than replaced with 0. `wc -l` has already
+# counted whatever find reached before it stopped, and that number is a FLOOR.
+# Zero is the one answer that must not be invented here: "0 unread" is how a
+# seat's waiting mail disappears from every board that reads this.
 mail_box_count() {
-    local d
+    local d n
     d="$(state_dir)/mail/$1/$2"
     [ -d "$d" ] || { echo 0; return 0; }
-    find "$d" -type f -name '*.md' 2>/dev/null | wc -l
+    if ! n=$(find "$d" -type f -name '*.md' 2>/dev/null | wc -l); then
+        echo "km: WARNING — $d could not be walked in full, so $n is a floor and not a total" >&2
+    fi
+    echo "$n"
 }
 
 # A letter leaves inbox/ in exactly ONE way: mail_read's final `mv`. So this
