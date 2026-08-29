@@ -90,7 +90,8 @@ func TestAGEAnswersTheConstructorsNobodyRan(t *testing.T) {
 			name: "point",
 			text: "RETURN point({x: 1, y: 2})",
 			why: "osf1 (3): not a temporal, so a refusal would be a THIRD gap rather than a name added " +
-				"to the second — the present message says AGE 'defines no temporal constructor at all'",
+				"to the second — the present message scopes itself to 'no temporal constructor this " +
+				"project has measured', which is still a claim about temporals only",
 		},
 		{
 			name: "duration.between",

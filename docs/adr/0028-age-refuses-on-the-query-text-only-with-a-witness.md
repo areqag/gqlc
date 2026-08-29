@@ -428,8 +428,9 @@ That work is bd `gqlc-osf1`.
 - **`time()`, `localtime()` and `point(…)`.** Never run against any AGE image by
   anyone in this repo's record. `time()` and `localtime()` are almost certainly
   undefined; `point()` is a separate question, since it is not temporal and the
-  present diagnostic's prose ("defines no temporal constructor at all") would be
-  false of it — it would be a third gap, not a name added to the second.
+  present diagnostic's prose ("defines no temporal constructor this project has
+  measured") would be false of it — it would be a third gap, not a name added to
+  the second.
 
 - **`duration.between(a, b)`.** Namespaced, so a different name from `duration`
   and not covered by that probe. `cypher.UnqualifiedFunctionCalls` drops

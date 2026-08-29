@@ -153,12 +153,15 @@ var dialectGaps = []dialectGap{
 		},
 	},
 	{
-		// Apache AGE 1.7.0 defines no temporal constructor. agtype has
-		// no temporal value type, there is no cast to or from one in
-		// either direction, and of 348 functions in ag_catalog exactly
-		// one has a temporal name: age_timestamp, reached from cypher
-		// as timestamp(), which returns epoch MILLISECONDS as an
-		// integer (gqlc-35yu.5).
+		// No temporal constructor this project has measured is defined
+		// on Apache AGE 1.7.0. The hand-run spike behind that
+		// (gqlc-35yu.5) found agtype with no temporal value type, no
+		// cast to or from one in either direction, and one temporal
+		// name among the 348 functions then in ag_catalog:
+		// age_timestamp, reached from cypher as timestamp(), which
+		// returns epoch MILLISECONDS as an integer. No test re-measures
+		// the catalogue, so the refused set is the probes below and the
+		// spike is provenance rather than a closed set.
 		//
 		// So this is not the temporal refusal ADR 0025 already makes.
 		// That one is about the carrier: a projected temporal column
@@ -178,10 +181,11 @@ var dialectGaps = []dialectGap{
 		find:     findUndefinedFunctions,
 		diagnose: func(count int, noun, dropped string) string {
 			return fmt.Sprintf("generated code runs the author's query text verbatim "+
-				"(ADR 0005) and Apache AGE 1.7.0 defines no temporal constructor at all, so every call on "+
-				"%d %s would answer \"function <name> does not exist\" — AGE's whole temporal surface is "+
-				"timestamp(), which returns epoch milliseconds as an integer, so compute the value in Go "+
-				"and bind it as a parameter, or generate against a neo4j target: %s", count, noun, dropped)
+				"(ADR 0005) and Apache AGE 1.7.0 defines no temporal constructor this project has "+
+				"measured, so every call on %d %s would answer \"function <name> does not exist\" — "+
+				"timestamp() is the one that answered, returning epoch milliseconds as an integer, so "+
+				"compute the value in Go and bind it as a parameter, or generate against a neo4j "+
+				"target: %s", count, noun, dropped)
 		},
 		witness: "TestAGERefusesTheFunctionsItDoesNotDefine",
 		refused: undefinedFunctionProbes,
