@@ -32,9 +32,11 @@ The check is over EVERY label, not just `subject:` ones: the 50-char cap is
 GitHub's, and it applies to every label the town mints.
 
 Scope note: this runs over the committed export, so it catches an unmirrorable
-label at PR time, which is the LAST of the three chances to catch one. The two
-earlier refusals are named below; this gate is what stops a label reaching
-master when both of them are bypassed.
+label at PR time, which is the LAST of the three chances to catch one -- and the
+only one of the three that withholds anything from master. The two earlier
+refusals are named below, and neither stops a commit: the creation-time one
+refuses the command that would mint the label, and bd-gh-sync withholds the
+bead's MIRROR while the push carrying the label proceeds.
 
 THIS MODULE OWNS THE CAP AND THE REMEDY for all three gates, which is why
 MAX_LABEL, PREFIX, shorter() and remedy() are module level and why loading this
@@ -152,15 +154,20 @@ def main(argv):
             if advice:
                 print(f"      {advice}", file=sys.stderr)
         # What the other two gates do about this, stated so a reader of a red CI
-        # job knows where else it will bite. bd-gh-sync REFUSES the push (it
-        # stopped merely warning in #1330); claude-pre-bash refuses the command
-        # that mints the label. So a label reaching this gate means both earlier
-        # refusals were bypassed -- most often because the label was written
-        # somewhere neither of them can read, such as `bd create --file`.
+        # job looks in the right place. bd-gh-sync does not refuse the push:
+        # .githooks/pre-push discards its exit status, and what it withholds is
+        # the bead's MIRROR, under a NOTE naming this label. It also screens the
+        # ledger `bd list` returns rather than the command line, so no spelling
+        # hides a label from it. That leaves the creation-time refusal as the one
+        # that can have been absent here, and it sees only commands issued
+        # through Claude Code's bash hook (bd gqlc-uy7j).
         print(
-            "      .githooks/claude-pre-bash refuses this at creation time and "
-            "bd-gh-sync refuses the push, so reaching CI means it was minted "
-            "somewhere neither reads (bd gqlc-89vw, gqlc-uy7j).",
+            "      bd-gh-sync withholds the MIRROR, not the push, so the label "
+            "reaches master with the bead unmirrored; where hooks were live it "
+            "named this label in a NOTE at push time. The creation-time refusal "
+            "in .githooks/claude-pre-bash reads only commands issued through "
+            "Claude Code's bash hook, so a plain terminal, disabled hooks, or a "
+            "spelling it does not parse arrives here (bd gqlc-89vw, gqlc-uy7j).",
             file=sys.stderr,
         )
         return 1
