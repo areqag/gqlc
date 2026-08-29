@@ -1194,8 +1194,13 @@ lint-hooks dir=".githooks": ensure-shellcheck
 # retired the exclusion with it (bd gqlc-4seg).
 #
 # The justfile read is an argument so the recipe can be exercised over a
-# throwaway one (internal/tools/ciguard/justbodies_test.go), the same way
-# lint-hooks takes its directory; CI and developers take the default.
+# throwaway one, the same way lint-hooks takes its directory. The half about
+# lint-hooks still holds — `lint` calls it three times with three directories.
+# This parameter's own exerciser was internal/tools/ciguard/justbodies_test.go,
+# deleted with the CI scaffolding in PR #1595, and nothing passes an argument
+# here today: `lint` is the only caller and it takes the default. So the
+# parameter is vestigial rather than load-bearing, and whether it goes or gains
+# an exerciser is bd gqlc-gu7ao.
 [private]
 lint-just file=justfile(): ensure-shellcheck
     #!/usr/bin/env bash
