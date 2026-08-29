@@ -4150,10 +4150,6 @@ seat_freshness() {
             upstream_known=1
         else
             unique=1
-            # Not `[ … ] && upstream_gone=…`: that is the last command of this
-            # branch, so a false test would be the `if`'s own status and
-            # errexit would abort seat_freshness in exactly the never-pushed
-            # case this is here to name.
             local cfg_remote cfg_merge
             cfg_remote=$(git_at "$wt" config --get "branch.$branch.remote" 2>/dev/null || true)
             cfg_merge=$(git_at "$wt" config --get "branch.$branch.merge" 2>/dev/null || true)
