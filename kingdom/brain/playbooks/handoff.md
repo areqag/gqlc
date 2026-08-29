@@ -60,9 +60,9 @@ simply be the wrong one, and your next wake cannot tell.
 
     BAD   NEXT WAKE: check #1122. If merged, rebase.
 
-    GOOD  BLOCKED UNTIL: .githooks/tests/km-test.sh contains
+    GOOD  BLOCKED UNTIL: .githooks/git-env-sandbox.sh contains
                          `unset "${!GIT_@}"`.
-          CHECK:  git show origin/master:.githooks/tests/km-test.sh \
+          CHECK:  git show origin/master:.githooks/git-env-sandbox.sh \
                     | grep -nF 'unset "${!GIT_@}"'
           Expected via #1122 — UNVERIFIED, a pointer only. Check the file.
 
@@ -71,10 +71,24 @@ which PR delivers the line. Naming the PR you expect is still useful — it just
 must be marked as a guess, and must never be the thing the condition tests.
 
 **Run your own CHECK line before you write it down**, on a tree where you know
-the answer. That `-F` is load-bearing: without it grep reads `${!GIT_@}` as a
-pattern, matches nothing, and exits 1 — measured 2026-08-22 on master, where
-the line is present five times in that file. A check that silently answers "not
-there yet" is worse than no check, because your next wake will believe it.
+the answer. This example is its own argument for that, twice over.
+
+The file it named until 2026-08-29 was `.githooks/tests/km-test.sh`, deleted by
+PR #1595 (f6dc4c7b), so the town's model of a durable check was an instance
+whose CHECK line exits non-zero forever.
+
+And the reason it gave was wrong before that. It said the `-F` was load-bearing
+because without it grep reads `${!GIT_@}` as a pattern, matches nothing and
+exits 1. Re-measured 2026-08-29, GNU grep 3.12: both forms match. Every
+character in that string is literal in a basic regular expression, so `-F`
+changes nothing here — including against the deleted file the original claim
+was measured on, where both forms return the same five hits. Keep the `-F`
+anyway; it costs nothing and it makes the check test the string you wrote
+rather than a pattern that happens to agree today. Just do not keep the reason.
+
+A check that silently answers "not there yet" is worse than no check, because
+your next wake will believe it — and so is a remembered fact about your own
+tools, which is the one this paragraph got wrong for a week.
 
 Stronger still, when you have it: if one of your own gates already tests the
 condition, say so and let the next wake just run it. A gate that refused and

@@ -160,7 +160,7 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    | # | edit (file:line, before → after) | expected victim (literal assertion) | command | expected | verdict |
    |---|---|---|---|---|---|
    | 1 | internal/x/y.go:88 `n > 0` → `n >= 0` | `require.EqualError(t, err, "empty batch")`, TestY/empty | `go test -run '^TestY$/^empty$' ./internal/x` | KILLED | KILLED (collateral: TestZ/zero) |
-   | 2 | .githooks/foo:40 drop the `exit 1` | `bad "foo: accepted a bare id"` | `bash .githooks/tests/foo-test.sh` | KILLED | SURVIVED — <what that says about the guard> |
+   | 2 | .githooks/foo:40 drop the `exit 1` | `foo: refusing a bare id` on stderr, rc 1 | `bash .githooks/foo <crafted-input>` | KILLED | SURVIVED — <what that says about the guard> |
 
    blinding pass: <the row that killed everything> blinded → <second-pass rows>, or `n/a`
    ```
@@ -459,11 +459,17 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
 A judge reads a SHA, not a branch. Moving the head while they read strands the
 read, and this is not rare: #1127, #1225, #1172, #1237 and #1195 all needed a
 rebase on 2026-08-22, none of them optional, several forced by another PR
-merging into a shared registry — the `EXPECTED_ROWS` pin in
-`.githooks/tests/km-test.sh`, the usage/case pair in `kingdom/bin/km`, the
-`test-hooks` recipe in the `justfile`. A merge that appends to a registry
-invalidates every open PR that appends to the same registry (ADR 0006). Nothing
-tells you it happened, so check before you push.
+merging into a shared registry — the usage/case pair in `kingdom/bin/km` being
+the one still standing. A merge that appends to a registry invalidates every
+open PR that appends to the same registry (ADR 0006). Nothing tells you it
+happened, so check before you push.
+
+ADR 0006 names two further examples, the `EXPECTED_ROWS` pin in
+`.githooks/tests/km-test.sh` and the `test-hooks` recipe in the `justfile`. PR
+#1595 (f6dc4c7b) deleted both, so do not go looking for them; the ADR is the
+dated record of when it was written and is correct as such. The rule is
+unchanged — it is about the shape, not about those three files, and a registry
+added tomorrow is covered without anyone editing this list.
 
 A **forced** move — a rebase you did not choose, carrying no content change —
 is cheap for the reader, and stays cheap only if all four of these hold.

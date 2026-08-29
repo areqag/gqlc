@@ -155,9 +155,11 @@ init: check-push-keepalive
 # else, so with core.hooksPath = .githooks but .githooks/ holding only *.sample
 # files, or a hook file left non-executable, it exited 0 without a word (and
 # `doctor`, which depends on it, printed "ok") where claude-pre-bash refuses.
-# Both states are fixtures in .githooks/tests/claude-pre-bash-test.sh. The
-# verify-hooks-live arm below closes them by running a hook rather than reading
-# about one, and closes the environment-override state neither of them had.
+# Both states were fixtures in .githooks/tests/claude-pre-bash-test.sh, deleted
+# with the rest of .githooks/tests/ by PR #1595 (f6dc4c7b). The verify-hooks-live
+# arm below still closes them by running a hook rather than reading about one,
+# and closes the environment-override state neither of them had — so here the
+# coverage outlived the suite.
 #
 # Skipped under CI, which has no local hooks by design and runs the equivalent
 # gates as workflow jobs; without the skip this would fail every CI `just test`.
@@ -323,8 +325,9 @@ check-hooks:
 # the same reason check-hooks is: a check nobody invokes is not a check.
 #
 # The directory is an argument so the recipe can be exercised over a throwaway
-# tree (.githooks/tests/worktree-upstream-test.sh); developers and CI take the
-# default.
+# tree; developers and CI take the default. The caller that did so was
+# .githooks/tests/worktree-upstream-test.sh, deleted by PR #1595 (f6dc4c7b), so
+# the parameter is live and currently has no caller but a human.
 #
 # Not skipped under CI, unlike check-hooks. actions/checkout leaves a
 # pull_request run on a detached HEAD (no upstream, nothing to say) and a
@@ -397,7 +400,9 @@ check-worktree-upstream dir=".":
 # core.worktree are wrong in CI too, so this recipe runs there.
 #
 # The directory is an argument so the recipe can be exercised over a throwaway
-# tree (.githooks/tests/shared-config-drift-test.sh).
+# tree. The caller that did so was .githooks/tests/shared-config-drift-test.sh,
+# deleted by PR #1595 (f6dc4c7b), so the parameter is live and currently has no
+# caller but a human.
 [private]
 check-shared-config dir=".":
     #!/usr/bin/env bash
@@ -893,10 +898,12 @@ tmp-reap-cadence root=scratch_root threshold=reap_threshold:
 # read. The failure message names provisioning rather than lint so a reader can
 # tell a setup death from a real finding without opening the log.
 #
-# GQLC_PROVISION_ATTEMPTS / GQLC_PROVISION_DELAY size the budget; the retry
-# tests in .githooks/tests/tool-gate-test.sh set them to keep the failing case
-# fast. An attempts value below 1 runs the loop zero times and falls through to
-# the error, so a malformed budget blocks rather than passes.
+# GQLC_PROVISION_ATTEMPTS / GQLC_PROVISION_DELAY size the budget. The retry
+# tests that set them to keep the failing case fast lived in
+# .githooks/tests/tool-gate-test.sh, deleted by PR #1595 (f6dc4c7b); the two
+# variables are still read here, and nothing exercises them now. An attempts
+# value below 1 runs the loop zero times and falls through to the error, so a
+# malformed budget blocks rather than passes.
 #
 # AND THEN REFUSES A LINTER OLDER THAN THE TOOLCHAIN, by name (bd gqlc-6rf3).
 # just reads the pin from the justfile of the tree you are standing in, so a
@@ -1072,9 +1079,12 @@ ensure-ruff:
 # second Python directory can be linted without this recipe learning its name,
 # and so the empty case below can be reached from a test.
 #
+# test-hooks made the same fail-open refusal until PR #1595 (f6dc4c7b) deleted
+# that recipe with the suites it ran, so lint-hooks is the only peer left.
+#
 # The empty case FAILS. A glob that matches nothing lints nothing and exits 0,
 # which on every dashboard is the shape of a clean tree — the same fail-open
-# refusal test-hooks and lint-hooks make.
+# refusal lint-hooks makes.
 lint-python dir=".github/scripts": ensure-ruff
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1113,8 +1123,11 @@ lint-python dir=".github/scripts": ensure-ruff
 # recognise. Skipping the latter is how a gate ends up green over a set nobody
 # looked at, which is the defect this recipe exists to close.
 #
-# The directory is an argument so the recipe can be exercised over a throwaway
-# tree (.githooks/tests/lint-hooks-test.sh); CI and developers take the default.
+# The caller that exercised this over a throwaway tree was
+# .githooks/tests/lint-hooks-test.sh, deleted by PR #1595 (f6dc4c7b); the
+# parameter is live and currently has no caller but a human.
+#
+# shellcheck every hook, selected by shebang; CI and developers take the default.
 lint-hooks dir=".githooks": ensure-shellcheck
     #!/usr/bin/env bash
     set -euo pipefail
