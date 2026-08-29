@@ -22,11 +22,11 @@ func scratchWorld(t *testing.T) (root, repo, archive string) {
 	base := t.TempDir()
 	// -apply is refused outside a designated temporary directory and inside the
 	// home directory (refuseNonScratchRoot), and t.TempDir() answers neither
-	// question the same way twice: `just test` sets GOTMPDIR to .bin/gotmp
-	// inside the repository, which puts every fixture under $HOME and outside
-	// every scratch directory, while a bare `go test` puts it under /tmp.
-	// Declaring both here makes the apply fixtures deterministic under either,
-	// and stops these tests depending on the developer's real home directory.
+	// question the same way twice: ambient GOTMPDIR/TMPDIR move it wherever
+	// they point, and only an environment with both unset puts it under /tmp.
+	// Declaring both here makes the apply fixtures deterministic under any
+	// environment, and stops these tests depending on where the toolchain puts
+	// its temporaries.
 	useScratchRoot(t, base)
 	t.Setenv("HOME", mkdir(t, filepath.Join(base, "home")))
 	repo = newRepo(t, filepath.Join(base, "repo"))
@@ -324,12 +324,14 @@ func TestRun_ApplyNamesTheFilesItCouldNotRead(t *testing.T) {
 	}
 }
 
-// The mirror of the row above, and the reason the report cannot simply count
-// every failure: a file that vanished between the walk and the read is not a
-// loss, because there is nothing left to delete. Reporting it would put a
-// permanent scary line on a run that lost nothing, and a warning printed on
-// every clean run is one nobody reads on the run that matters.
-func TestRun_ApplyIsSilentAboutAFileThatVanished(t *testing.T) {
+// A reap that dropped nothing prints no "NOT archived" heading. The heading
+// exists so a loss is read before the deletion runs; printed over a clean run
+// it is the alarm nobody reads on the run that matters. This row pins the
+// absence over an ordinary clean world, not any particular drop's routing —
+// which verdicts stay silent and where they go inside account is pinned by
+// TestClassifyFailure_OnlyAVanishedFileIsSilent and
+// TestAccount_AVanishedFileIsRecordedNowhere.
+func TestRun_ApplyOnACleanReapPrintsNoUnarchivedHeading(t *testing.T) {
 	root, repo, archive := scratchWorld(t)
 	ageTree(t, filepath.Join(root, "factory"), time.Now().Add(-72*time.Hour))
 

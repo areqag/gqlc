@@ -41,10 +41,10 @@ func isolateGit(t *testing.T) {
 
 // useScratchRoot points the -apply guard at a fixture directory for the duration
 // of one test. The guard's list is two absolute literals and reads nothing from
-// the environment, so without this a fixture is scratch only when the toolchain
-// happens to put t.TempDir() under /tmp: `just test` sets GOTMPDIR inside the
-// repository, and every -apply row then measures the machine rather than the
-// fixture. Measured — with GOTMPDIR set, five rows that pass here fail.
+// the environment, so without this a fixture is scratch only when ambient
+// GOTMPDIR/TMPDIR happen to put t.TempDir() under /tmp; any exported value
+// moves every fixture, and each -apply row then measures the machine rather
+// than the fixture. Measured — with GOTMPDIR set, five rows that pass here fail.
 func useScratchRoot(t *testing.T, dir string) {
 	t.Helper()
 	saved := scratchCandidates

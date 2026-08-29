@@ -247,6 +247,30 @@ func TestClassifyFailure_OnlyAVanishedFileIsSilent(t *testing.T) {
 	}
 }
 
+// Silence on a vanished file is routing inside account, not a fall-through:
+// the verdict reaches account and records nothing, because there is nothing
+// left to delete and so no loss to disclose. Deleting the early return shipped
+// green through the whole suite once (verdict-nkkk-r3, survivor N3) — the
+// categories below are each asserted separately, so a mutant that reroutes the
+// verdict cannot hide behind a sibling category staying zero.
+func TestAccount_AVanishedFileIsRecordedNowhere(t *testing.T) {
+	var s archiveStats
+	s.account("/tmp/agent/ghost.log", nil, takeVanished)
+
+	if s.large.files != 0 || s.large.bytes != 0 || len(s.large.paths) != 0 {
+		t.Errorf("large = %+v, want untouched", s.large)
+	}
+	if s.binary.files != 0 || s.binary.bytes != 0 || len(s.binary.paths) != 0 {
+		t.Errorf("binary = %+v, want untouched", s.binary)
+	}
+	if s.unreadable.files != 0 || s.unreadable.bytes != 0 || len(s.unreadable.paths) != 0 {
+		t.Errorf("unreadable = %+v, want untouched: a vanished file is no loss at all", s.unreadable)
+	}
+	if s.files != 0 || s.bytes != 0 || s.truncated {
+		t.Errorf("totals = %d/%d/%t, want untouched", s.files, s.bytes, s.truncated)
+	}
+}
+
 // A file whose head cannot be read is classified by neither heuristic: claiming
 // it as text would promise a copy that is not in the tarball, and writing it off
 // as binary would file a lost transcript under "by design". Nothing reddened
