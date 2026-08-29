@@ -1495,16 +1495,111 @@ func TestGeneratedHeaderFormat(t *testing.T) {
 	require.True(t, sawAny, "walk must encounter at least one golden .go file")
 }
 
-// carrierDeclarationFiles are the two files the temporal carriers and
-// their driver bridge occupy. Excluded from the reference scan below,
-// because a file that declares the carriers naturally names them and
-// would make the trigger read as satisfied by its own presence.
-var carrierDeclarationFiles = map[string]bool{"temporal.go": true, "temporal_neo4j.go": true}
+// carrierFile is the neutral half of ADR 0033's pair, byte-identical
+// across every target.
+const carrierFile = "temporal.go"
+
+// isCarrierBridge reports whether a golden package's file is the driver
+// bridge a target emits beside temporal.go. Matched by shape, because
+// the filename is the target's: neo4j's is temporal_neo4j.go, and a
+// target that gains temporal support later brings its own.
+func isCarrierBridge(base string) bool {
+	return strings.HasPrefix(base, "temporal_") && strings.HasSuffix(base, ".go")
+}
+
+// isCarrierDeclaration reports whether a file declares the temporal
+// carriers or bridges them. Excluded from the reference scan below,
+// because such a file naturally names them and would make the trigger
+// read as satisfied by its own presence.
+func isCarrierDeclaration(base string) bool {
+	return base == carrierFile || isCarrierBridge(base)
+}
+
+// temporalEmission is what one golden package says about ADR 0033's
+// emission trigger: where the package first names a carrier outside the
+// declaration files, whether it emitted the carriers, and which driver
+// bridges stand beside them.
+type temporalEmission struct {
+	referencedBy string
+	carriers     bool
+	bridges      []string
+}
+
+// breach reports how a golden package violates ADR 0033's emission
+// trigger, or "" when it holds. A string rather than an assertion so
+// that the requirement itself, and not only the classification it reads,
+// can be run over package shapes the committed corpus does not hold —
+// every golden in the corpus satisfies all three arms, so an assertion
+// written against the corpus alone is one nothing can redden.
+func (e temporalEmission) breach() string {
+	if e.referencedBy != "" {
+		switch {
+		case !e.carriers:
+			return fmt.Sprintf("names a temporal carrier at %s and emits no temporal.go, so the package does not compile", e.referencedBy)
+		case len(e.bridges) == 0:
+			return "emits the carrier declarations with no driver bridge beside them, so nothing converts what the driver hands over"
+		}
+		return ""
+	}
+	if e.carriers {
+		return "emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing"
+	}
+	return ""
+}
+
+// readTemporalEmission classifies one golden package directory. It
+// asserts nothing; the requirements are held by the caller, so the
+// classification can be witnessed on package shapes the committed corpus
+// does not yet hold.
+//
+// A carrier is looked for as an identifier and never as a substring:
+// Date sits inside LocalDateTime and inside entity names a schema chose,
+// and the Sel of a qualified type belongs to another package — time.Time
+// is the TIMESTAMP carrier and would otherwise match Time on every
+// fixture that projects a timestamp.
+func readTemporalEmission(dir string, carriers map[string]bool) (temporalEmission, error) {
+	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return temporalEmission{}, err
+	}
+
+	var out temporalEmission
+	fset := token.NewFileSet()
+	for _, path := range files {
+		base := filepath.Base(path)
+		if isCarrierBridge(base) {
+			out.bridges = append(out.bridges, base)
+		}
+		if base == carrierFile {
+			out.carriers = true
+		}
+		if isCarrierDeclaration(base) {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return temporalEmission{}, fmt.Errorf("parsing %s: %w", path, err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch node := n.(type) {
+			case *ast.SelectorExpr:
+				return false
+			case *ast.Ident:
+				if carriers[node.Name] && out.referencedBy == "" {
+					out.referencedBy = fmt.Sprintf("%s:%d", path, fset.Position(node.Pos()).Line)
+				}
+			}
+			return true
+		})
+	}
+	return out, nil
+}
 
 // TestTemporalCarriersAreEmittedExactlyWhenReferenced holds ADR 0033's
 // emission trigger in both directions, per golden package: temporal.go
-// is present when the rest of the package names a carrier, and absent
-// when it does not.
+// is present when the rest of the package names a carrier, absent when
+// it does not, and never alone — a package that emits the carriers emits
+// the target's driver bridge beside them.
 //
 // Both halves are load-bearing and they fail differently. Omission is a
 // package that does not compile — a Date field with no Date declared.
@@ -1519,12 +1614,12 @@ var carrierDeclarationFiles = map[string]bool{"temporal.go": true, "temporal_neo
 // TestValid's golden comparison (an emitted temporal.go no golden dir
 // holds). This test reddens on the second pass only, after -update has
 // written temporal.go into every carrier-free fixture's goldens and its
-// absent half can see the damage. A carrier is looked for as an
-// identifier and never as a substring: Date sits inside LocalDateTime
-// and inside entity names a schema chose, and the Sel of a qualified
-// type belongs to another package — time.Time is the TIMESTAMP carrier
-// and would otherwise match Time on every fixture that projects a
-// timestamp.
+// absent half can see the damage.
+//
+// Every golden that bears a carrier today is a neo4j one, so the bridge
+// half of the requirement is reached for one target only. What holds it
+// for the others is TestTemporalEmissionIsReadPerTarget, which runs the
+// classification over shapes this corpus does not hold.
 func TestTemporalCarriersAreEmittedExactlyWhenReferenced(t *testing.T) {
 	goldens, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden", "*"))
 	require.NoError(t, err)
@@ -1536,50 +1631,137 @@ func TestTemporalCarriersAreEmittedExactlyWhenReferenced(t *testing.T) {
 	}
 
 	withCarrier, without := 0, 0
-	fset := token.NewFileSet()
 	for _, dir := range goldens {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		require.NoError(t, err)
 		if len(files) == 0 {
 			continue
 		}
-		var referencedBy string
-		for _, path := range files {
-			if carrierDeclarationFiles[filepath.Base(path)] {
-				continue
-			}
-			file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-			require.NoError(t, err, "parsing %s", path)
-			ast.Inspect(file, func(n ast.Node) bool {
-				switch node := n.(type) {
-				case *ast.SelectorExpr:
-					return false
-				case *ast.Ident:
-					if carriers[node.Name] && referencedBy == "" {
-						referencedBy = fmt.Sprintf("%s:%d", path, fset.Position(node.Pos()).Line)
-					}
-				}
-				return true
-			})
-		}
-		_, err = os.Stat(filepath.Join(dir, "temporal.go"))
-		emitted := err == nil
-		if referencedBy != "" {
+		emission, err := readTemporalEmission(dir, carriers)
+		require.NoError(t, err)
+		require.Empty(t, emission.breach(), "%s %s", dir, emission.breach())
+		if emission.referencedBy != "" {
 			withCarrier++
-			require.True(t, emitted,
-				"%s names a temporal carrier at %s and emits no temporal.go, so the package does not compile",
-				dir, referencedBy)
-			_, err := os.Stat(filepath.Join(dir, "temporal_neo4j.go"))
-			require.NoError(t, err,
-				"%s emits the carrier declarations with no driver bridge beside them, so nothing converts what the driver hands over",
-				dir)
 			continue
 		}
 		without++
-		require.False(t, emitted,
-			"%s emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing",
-			dir)
 	}
 	require.NotZero(t, withCarrier, "no golden package references a carrier, so the emit half of the trigger is unwitnessed")
 	require.NotZero(t, without, "every golden package references a carrier, so the do-not-emit half of the trigger is unwitnessed")
+}
+
+// TestTemporalEmissionIsReadPerTarget holds the classification above
+// against package shapes the committed corpus cannot hold, because every
+// golden that bears a carrier today is a neo4j one: apache-age-pgx-v5 has
+// no temporal support, so the bridge half of the requirement has only
+// ever been reached for the target whose bridge is temporal_neo4j.go.
+//
+// The bridge is therefore read by shape and not by that one name. What
+// the requirement wants is that the target emitted ITS bridge — a target
+// naming its own temporal_<driver>.go satisfies it, and a package that
+// emits the neutral carriers with nothing beside them does not, whoever
+// generated it. The rows below are the two an AGE target with temporals
+// would be the first to run (bd gqlc-fg0r).
+func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
+	carriers := map[string]bool{}
+	for _, name := range codegen.TemporalCarriers {
+		carriers[name] = true
+	}
+
+	const namesCarrier = "package p\n\ntype Row struct{ At Date }\n"
+	const namesNothing = "package p\n\ntype Row struct{ ID string }\n"
+	const declaresCarriers = "package p\n\ntype Date struct{ Year int }\n"
+	const bridgesCarriers = "package p\n\nfunc toDate(v any) Date { return Date{} }\n"
+
+	rows := []struct {
+		name         string
+		files        map[string]string
+		wantRef      bool
+		wantCarriers bool
+		wantBridges  []string
+		wantBreach   string
+	}{
+		{
+			name: "neo4j bridge",
+			files: map[string]string{
+				"models.go":         namesCarrier,
+				"temporal.go":       declaresCarriers,
+				"temporal_neo4j.go": bridgesCarriers,
+			},
+			wantRef: true, wantCarriers: true, wantBridges: []string{"temporal_neo4j.go"},
+		},
+		{
+			name: "another target's bridge",
+			files: map[string]string{
+				"models.go":       namesCarrier,
+				"temporal.go":     declaresCarriers,
+				"temporal_age.go": bridgesCarriers,
+			},
+			wantRef: true, wantCarriers: true, wantBridges: []string{"temporal_age.go"},
+		},
+		{
+			// The exclusion, read for a bridge that is not neo4j's: a
+			// bridge names the carriers it converts, so a scan that read
+			// it would report the trigger satisfied by its own presence
+			// and the do-not-emit half would never fire. Here it does
+			// fire, which is what says the bridge was excluded.
+			name: "another target's bridge does not satisfy the trigger itself",
+			files: map[string]string{
+				"models.go":       namesNothing,
+				"temporal.go":     declaresCarriers,
+				"temporal_age.go": bridgesCarriers,
+			},
+			wantRef: false, wantCarriers: true, wantBridges: []string{"temporal_age.go"},
+			wantBreach: "emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing",
+		},
+		{
+			name: "carriers with no bridge beside them",
+			files: map[string]string{
+				"models.go":   namesCarrier,
+				"temporal.go": declaresCarriers,
+			},
+			wantRef: true, wantCarriers: true, wantBridges: nil,
+			wantBreach: "emits the carrier declarations with no driver bridge beside them, so nothing converts what the driver hands over",
+		},
+		{
+			name: "a carrier named with nothing declaring it",
+			files: map[string]string{
+				"models.go":       namesCarrier,
+				"temporal_age.go": bridgesCarriers,
+			},
+			wantRef: true, wantBridges: []string{"temporal_age.go"},
+			wantBreach: "names a temporal carrier at %s and emits no temporal.go, so the package does not compile",
+		},
+		{
+			name:  "no temporals at all",
+			files: map[string]string{"models.go": namesNothing},
+		},
+	}
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for base, contents := range row.files {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, base), []byte(contents), 0o644))
+			}
+
+			emission, err := readTemporalEmission(dir, carriers)
+			require.NoError(t, err)
+
+			reference := filepath.Join(dir, "models.go") + ":3"
+			if row.wantRef {
+				require.Equal(t, reference, emission.referencedBy)
+			} else {
+				require.Empty(t, emission.referencedBy)
+			}
+			require.Equal(t, row.wantCarriers, emission.carriers)
+			require.Equal(t, row.wantBridges, emission.bridges)
+
+			wantBreach := row.wantBreach
+			if strings.Contains(wantBreach, "%s") {
+				wantBreach = fmt.Sprintf(wantBreach, reference)
+			}
+			require.Equal(t, wantBreach, emission.breach())
+		})
+	}
 }
