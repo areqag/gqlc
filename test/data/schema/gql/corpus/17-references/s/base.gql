@@ -1,0 +1,4 @@
+-- Where the climb in sub/climber.gql lands when that file is a hop rather than
+-- a root. It is an ordinary declaration; all the interest is in the path taken
+-- to reach it.
+CREATE GRAPH TYPE base { (:Root { name :: STRING NOT NULL }) }

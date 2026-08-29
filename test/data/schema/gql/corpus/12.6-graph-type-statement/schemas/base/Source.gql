@@ -1,0 +1,8 @@
+-- The target of copy_of_source.gql's `/schemas/base/Source`. An absolute
+-- reference anchors at the catalogue root, which for a corpus entry is the
+-- directory its own file sits in — so this path is 12.6-graph-type-statement/
+-- plus the reference verbatim, and moving this file breaks that entry rather
+-- than this one.
+CREATE PROPERTY GRAPH TYPE Source AS {
+    (:Account { id :: INT NOT NULL })
+}

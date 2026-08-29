@@ -1,0 +1,5 @@
+-- The other half of the climber pair. Reached from copy_of_chain_climb.gql the
+-- climb pops sub/ and lands on s/base.gql; reached as a corpus entry in its own
+-- right this directory is the catalogue root, there is nothing to pop to, and
+-- the answer is ErrReferenceOutsideCatalogue. Same bytes, two outcomes.
+CREATE PROPERTY GRAPH TYPE climber COPY OF ../s/base
