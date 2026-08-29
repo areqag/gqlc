@@ -475,12 +475,37 @@ herdr_server_up() {
     have_herdr && herdr status server 2>/dev/null | grep -q '^status: running$'
 }
 
+# The three id lookups below all answer EMPTY for "not there", and all three
+# feed a caller that reads "not there" as permission to create it. So the
+# `unreadable` direction seat_agent_status was given (above) is owed here too,
+# and it is carried by the EXIT STATUS rather than by a sentinel string,
+# because these values are passed back to herdr as ids: rc 0 with empty stdout
+# is a payload we read that does not hold the thing, rc 1 is a payload we could
+# not read. A caller that collapses the two by testing only for emptiness —
+# `[ -z "$(seat_tab_id ...)" ]` — re-arms the defect, because a herdr shape
+# change then mints one tab per seat per wake and reconcile pass, unbounded.
+# Verified against live herdr 0.6.10 / protocol 13 on 2026-08-29 (bd
+# gqlc-jvlu): every key read here is present today, so the rc is about the
+# NEXT shape change, not this one.
+#
+# The diagnosis is on stderr because nothing else carries it: the parse's own
+# traceback is discarded by the `2>/dev/null` that keeps a python stack trace
+# out of an operator's console.
+
 # The workspace exists as long as the town has been raised at least once and
 # not torn down. Lookup by label; herdr assigns numeric IDs we don't hold.
-workspace_id() { # -> id on stdout, empty if absent
-    have_herdr || return 1
-    herdr workspace list 2>/dev/null |
-        python3 -c "import json,sys; d=json.load(sys.stdin); print(next((w['workspace_id'] for w in d['result']['workspaces'] if w['label']==sys.argv[1]),''))" "$WORKSPACE" 2>/dev/null
+workspace_id() { # -> id on stdout; rc 0 + empty = absent, rc 1 = unreadable
+    # No herdr is a readable answer, not an unreadable one — there is no
+    # workspace. It has to stay on the rc-0 side or every seat reads
+    # `unreadable` (below) on a machine that simply has no herdr, such as CI.
+    have_herdr || { echo ""; return 0; }
+    local out
+    out=$(herdr workspace list 2>/dev/null |
+        python3 -c "import json,sys; d=json.load(sys.stdin); print(next((w['workspace_id'] for w in d['result']['workspaces'] if w['label']==sys.argv[1]),''))" "$WORKSPACE" 2>/dev/null) || {
+        echo "km: cannot read the workspace list from herdr — server unreachable, or its payload no longer carries result.workspaces[].workspace_id/label. Not answering 'absent', because absent authorizes creating a second workspace under this label." >&2
+        return 1
+    }
+    printf '%s\n' "$out"
 }
 
 session_up() {
@@ -490,23 +515,36 @@ session_up() {
 
 # The seat's tab exists inside the workspace. Herdr tabs carry a label; the
 # label IS the seat name. Returns tab_id on stdout.
-seat_tab_id() { # <seat> -> tab_id on stdout, empty if absent
-    local ws
+seat_tab_id() { # <seat> -> tab_id on stdout; rc 0 + empty = absent, rc 1 = unreadable
+    local ws out
     ws=$(workspace_id) || return 1
-    [ -n "$ws" ] || return 1
-    herdr tab list --workspace "$ws" 2>/dev/null |
-        python3 -c "import json,sys; d=json.load(sys.stdin); print(next((t['tab_id'] for t in d['result']['tabs'] if t.get('label','')==sys.argv[1]),''))" "$1" 2>/dev/null
+    # A readably-absent workspace holds no tabs, so this is an absent tab and
+    # not an unreadable one. `km up` creates the workspace and the tabs in one
+    # pass, and seat_runner_start's caller has already refused on the empty ws.
+    [ -n "$ws" ] || { echo ""; return 0; }
+    out=$(herdr tab list --workspace "$ws" 2>/dev/null |
+        python3 -c "import json,sys; d=json.load(sys.stdin); print(next((t['tab_id'] for t in d['result']['tabs'] if t.get('label','')==sys.argv[1]),''))" "$1" 2>/dev/null) || {
+        echo "km: seat $1: cannot read the tab list from herdr (workspace $ws) — server unreachable, or its payload no longer carries result.tabs[].tab_id/label. Not answering 'absent', because absent authorizes creating a tab." >&2
+        return 1
+    }
+    printf '%s\n' "$out"
 }
 
 # The seat's primary pane inside its tab. One pane per tab in this town; if
 # splits ever get introduced, this returns the first.
-seat_pane_id() { # <seat> -> pane_id on stdout, empty if absent
-    local tab ws
+seat_pane_id() { # <seat> -> pane_id on stdout; rc 0 + empty = absent, rc 1 = unreadable
+    local tab ws out
     tab=$(seat_tab_id "$1") || return 1
-    [ -n "$tab" ] || return 1
-    ws=$(workspace_id)
-    herdr pane list --workspace "$ws" 2>/dev/null |
-        python3 -c "import json,sys; d=json.load(sys.stdin); print(next((p['pane_id'] for p in d['result']['panes'] if p.get('tab_id')==sys.argv[1]),''))" "$tab" 2>/dev/null
+    # No tab is an absent pane, which is the state seat_runner_start is about
+    # to fix by creating the tab — not a read that failed.
+    [ -n "$tab" ] || { echo ""; return 0; }
+    ws=$(workspace_id) || return 1
+    out=$(herdr pane list --workspace "$ws" 2>/dev/null |
+        python3 -c "import json,sys; d=json.load(sys.stdin); print(next((p['pane_id'] for p in d['result']['panes'] if p.get('tab_id')==sys.argv[1]),''))" "$tab" 2>/dev/null) || {
+        echo "km: seat $1: cannot read the pane list from herdr (workspace $ws, tab $tab) — server unreachable, or its payload no longer carries result.panes[].pane_id/tab_id." >&2
+        return 1
+    }
+    printf '%s\n' "$out"
 }
 
 window_up() { # kept as a name for callers; asks "does the seat's tab exist?"
@@ -536,7 +574,17 @@ window_up() { # kept as a name for callers; asks "does the seat's tab exist?"
 # herdr shape change re-arms this defect silently.
 seat_agent_status() { # <seat> -> idle|working|blocked|done|unknown|unreadable
     local pane status
-    pane=$(seat_pane_id "$1") || { echo unknown; return 0; }
+    # The same direction as the pane-get read below, for the same reason: a
+    # pane id we could not look up is not a seat with no session. This arm
+    # answered `unknown` until 2026-08-29, so the paragraph above ("unreadable
+    # reads live") held only when the unreadable payload was pane-get's — an
+    # unreadable tab or pane LIST reached the callers as a false dead, which is
+    # the error that ends a citizen's session under her (bd gqlc-cp40).
+    pane=$(seat_pane_id "$1") || {
+        echo "km: seat $1: no pane id could be resolved, so km cannot tell whether a session is running. Treating the seat as occupied." >&2
+        echo unreadable
+        return 0
+    }
     # An absent pane is not an unreadable one: there is no session because
     # there is nowhere for one to be, and seat_runner_start makes the pane.
     [ -n "$pane" ] || { echo unknown; return 0; }
@@ -843,10 +891,15 @@ seat_launch_state() { # <seat> -> "<code>\t<detail>"
 # already failed.
 seat_runner_start() { # <seat> -> 0 started, 1 declined (live session), 2 no runner appeared
     seat_session_live "$1" && return 1
-    local ws pane wt sd waited
+    local ws pane tab wt sd waited
     ws=$(workspace_id); [ -n "$ws" ] || return 2
     wt=$(seat_worktree "$1")
-    if [ -z "$(seat_tab_id "$1")" ]; then
+    # The rc, not the emptiness. `[ -z "$(seat_tab_id "$1")" ]` stood here and
+    # read an unreadable tab list as "this seat has no tab", so a herdr shape
+    # change would have minted one tab per seat on every wake, reconcile and
+    # dispatch pass, unbounded, with the parse's diagnosis eaten (gqlc-cp40).
+    tab=$(seat_tab_id "$1") || return 2
+    if [ -z "$tab" ]; then
         herdr tab create --workspace "$ws" --label "$1" --cwd "$wt" --no-focus >/dev/null 2>&1 || return 2
     fi
     pane=$(seat_pane_id "$1"); [ -n "$pane" ] || return 2
@@ -1391,7 +1444,7 @@ cmd_wake() {
             seat_runner_start "$seat" && rc=0 || rc=$?
             case "$rc" in
                 0) echo "wake: queued for $seat — $reason (nothing was parked on that queue to read it; km-seat respawned — gqlc-6ha4)" ;;
-                1) echo "wake: QUEUED UNREAD for $seat — $reason: no km-seat is parked on that queue and a live session in the window means it cannot be replaced without ending one; nobody will read this until that session ends" ;;
+                1) echo "wake: QUEUED UNREAD for $seat — $reason: no km-seat is parked on that queue and the respawn was declined because herdr reports a live session in the window, which cannot be replaced without ending one — or because herdr could not be read, which is declined the same way (see stderr); nobody will read this until that is resolved" ;;
                 *) echo "wake: QUEUED UNREAD for $seat — $reason: no km-seat is parked on that queue and the respawn did not take — the command line was accepted and no runner appeared, so nobody will read this until that pane is repaired by hand (gqlc-c48e)" ;;
             esac
         fi
@@ -1458,7 +1511,10 @@ cmd_up() {
             git -C "$mr" worktree add --detach "$wt" origin/master
         fi
     done
-    ws=$(workspace_id)
+    # The tab-level hazard's workspace-level twin: an unreadable list reads as
+    # "no workspace", and this arm answers that by creating a SECOND workspace
+    # under the same label, with sixteen tabs in it. Refuse instead.
+    ws=$(workspace_id) || die "cannot read the herdr workspace list, so km cannot tell whether the town is already up — refusing to raise it rather than create a second '$WORKSPACE' workspace on top of the first. The parse's diagnosis is on stderr above."
     if [ -z "$ws" ]; then
         # herdr workspace create returns a workspace with a default root tab
         # whose pane has herdr's own cwd (typically $HOME). The seat loop
@@ -1472,7 +1528,11 @@ cmd_up() {
         local auto_tab
         auto_tab=$(printf '%s' "$created" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['tab']['tab_id'])")
         for s in $(seats_all); do
-            seat_runner_start "$s" >/dev/null 2>&1 || true
+            # stdout only. These were the town's only two call sites that also
+            # dropped stderr, so `km up` printed "the town is up: 16 seats"
+            # while every runner spawn was silently refused; the recurring
+            # paths (wake, reconcile, dispatch) have always passed it through.
+            seat_runner_start "$s" >/dev/null || true
         done
         # Close the placeholder AFTER the seats are up, so herdr doesn't
         # reap the workspace between "no seats yet" and "seats added".
@@ -1481,7 +1541,7 @@ cmd_up() {
         fi
     else
         for s in $(seats_all); do
-            seat_runner_start "$s" >/dev/null 2>&1 || true
+            seat_runner_start "$s" >/dev/null || true
         done
     fi
     echo "the town is up: $(seats_all | wc -l) seats, all asleep until woken."
@@ -1795,7 +1855,7 @@ cmd_reconcile() {
                     # not acted on: replacing the window would end it (VI.2). It
                     # heals itself when the session does end — the next pass finds
                     # an empty window and replaces it then.
-                    echo "reconcile: $s has a live session but no km-seat runner behind it, so it will not park again when that session ends; nothing was replaced under a live citizen" ;;
+                    echo "reconcile: $s has no km-seat runner behind it and herdr reports a live session — or could not be read, which is declined the same way (see stderr). Nothing was replaced under what may be a live citizen; if the session is real it will not park again when that session ends" ;;
                 *)
                     # Counted nowhere on purpose. This pass repaired nothing, and
                     # the whole defect being fixed here was a repair counter that
@@ -1808,7 +1868,7 @@ cmd_reconcile() {
             asleep)
                 if seat_session_live "$s"; then
                     echo awake >"$(seat_home "$s")/status"
-                    echo "reconcile: $s is recorded asleep with a live session; recorded awake so no pass hands her a second bead on top of the one she is working"
+                    echo "reconcile: $s is recorded asleep and herdr reports a live session (or could not be read, which is treated as live); recorded awake so no pass hands her a second bead on top of the one she is working"
                     corrected=$((corrected + 1))
                 fi
                 rm -f "$suspect"; continue ;;
@@ -4419,7 +4479,7 @@ seat_refresh_step() {
             # refreshes before claude starts), so the guard cannot starve the
             # main clearing route.
             if seat_session_live "$seat"; then
-                echo "$seat: held (branch $pr_branch finished, but a live session stands in it; its wake-path refresh will take it)$stale_note"
+                echo "$seat: held (branch $pr_branch finished, but herdr reports a live session in it — or could not be read at all, which is held the same way; its wake-path refresh will take it)$stale_note"
                 return 0
             fi
             head=$(git_at "$wt" rev-parse HEAD)
