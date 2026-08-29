@@ -1210,6 +1210,384 @@ func TestEmittedMethodBindsAnInstantAsMicroseconds(t *testing.T) {
 	}
 }
 
+// dates are the stored texts and the readings they mean, spanning the
+// admitted range end to end. The two edges are the range itself: year 1
+// day 1, and the last day of year 9999.
+var dates = []struct {
+	text string
+	date Date
+}{
+	{"0001-01-01", Date{Year: 1, Month: 1, Day: 1}},
+	{"1969-07-20", Date{Year: 1969, Month: 7, Day: 20}},
+	{"2024-01-02", Date{Year: 2024, Month: 1, Day: 2}},
+	{"2024-02-29", Date{Year: 2024, Month: 2, Day: 29}},
+	{"9999-12-31", Date{Year: 9999, Month: 12, Day: 31}},
+}
+
+// TestAgtypeDateReadsTheStoredText reads each admitted text back, then
+// re-encodes it. Encode and decode are one encoding read from either
+// end, so a value surviving one and not the other is a defect neither
+// direction sees alone.
+func TestAgtypeDateReadsTheStoredText(t *testing.T) {
+	for _, tc := range dates {
+		raw := []byte(`"` + tc.text + `"`)
+		got, err := agtypeDate(raw)
+		if err != nil {
+			t.Errorf("agtypeDate(%s) = error %v, want %+v", raw, err, tc.date)
+			continue
+		}
+		if got != tc.date {
+			t.Errorf("agtypeDate(%s) = %+v, want %+v", raw, got, tc.date)
+			continue
+		}
+		back, err := agtypeDateText(got)
+		if err != nil || back != tc.text {
+			t.Errorf("agtypeDateText(%+v) = %q, %v, want %q", got, back, err, tc.text)
+		}
+	}
+}
+
+// TestAgtypeDateRefusesTextThatWouldNotSortChronologically covers the
+// three ways the stored text can be wrong, because they fail at three
+// different places and a guard could be missing at any one of them: the
+// text is not a date at all, or it is a real day spelled so that it sorts
+// in the wrong place, or it is spelled correctly and lies outside the
+// range the spelling orders.
+//
+// Year 0 is the row that makes the range check more than decoration. It
+// is unsigned and four digits, so it parses and re-renders to itself and
+// reaches the bound with both earlier guards satisfied. The rows one
+// outside in the other direction never reach it — the layout reads four
+// year digits and refuses a fifth, and refuses a sign — and they are here
+// so that what refuses them is measured rather than assumed.
+func TestAgtypeDateRefusesTextThatWouldNotSortChronologically(t *testing.T) {
+	for _, raw := range []string{
+		`"0000-01-01"`,
+		`"0000-12-31"`,
+		`"10000-01-01"`,
+		`"-0001-01-01"`,
+		`"2024-1-2"`,
+		`"2024-01-2"`,
+		`"24-01-02"`,
+		`"2024-02-30"`,
+		`"2024-13-01"`,
+		`""`,
+		`"not a date"`,
+		`20240102`,
+		`null`,
+		`"2024-01-02T00:00:00Z"`,
+	} {
+		got, err := agtypeDate([]byte(raw))
+		if err == nil {
+			t.Errorf("agtypeDate(%s) = %+v, want an error", raw, got)
+			continue
+		}
+		if got != (Date{}) {
+			t.Errorf("agtypeDate(%s) returned %+v alongside its error", raw, got)
+		}
+	}
+}
+
+// TestAgtypeDateTextRefusesADayOffTheCalendar is the encode half. The
+// carrier is a plain struct of three ints, so nothing between the caller
+// and the wire rejects February 30th but this: time.Date rolls it forward
+// to March 2nd, and storing a different day than the caller wrote is the
+// one failure the round trip above cannot catch.
+func TestAgtypeDateTextRefusesADayOffTheCalendar(t *testing.T) {
+	for _, d := range []Date{
+		{Year: 0, Month: 1, Day: 1},
+		{Year: -1, Month: 1, Day: 1},
+		{Year: 10000, Month: 1, Day: 1},
+		{Year: 2024, Month: 2, Day: 30},
+		{Year: 2023, Month: 2, Day: 29},
+		{Year: 2024, Month: 13, Day: 1},
+		{Year: 2024, Month: 0, Day: 1},
+		{Year: 2024, Month: 1, Day: 0},
+		{Year: 2024, Month: 1, Day: 32},
+		{},
+	} {
+		got, err := agtypeDateText(d)
+		if err == nil {
+			t.Errorf("agtypeDateText(%+v) = %q, want an error", d, got)
+			continue
+		}
+		if got != "" {
+			t.Errorf("agtypeDateText(%+v) returned %q alongside its error", d, got)
+		}
+	}
+}
+
+// localTimes are the stored counts and the readings they mean. The edges
+// are midnight and the last microsecond before the next one.
+var localTimes = []struct {
+	micros int64
+	at     LocalTime
+}{
+	{0, LocalTime{}},
+	{3661000001, LocalTime{Hour: 1, Minute: 1, Second: 1, Nanosecond: 1000}},
+	{43200000000, LocalTime{Hour: 12}},
+	{86399999999, LocalTime{Hour: 23, Minute: 59, Second: 59, Nanosecond: 999999000}},
+}
+
+func TestAgtypeLocalTimeCountsMicrosecondsFromMidnight(t *testing.T) {
+	for _, tc := range localTimes {
+		raw := strconv.FormatInt(tc.micros, 10)
+		got, err := agtypeLocalTime([]byte(raw))
+		if err != nil {
+			t.Errorf("agtypeLocalTime(%s) = error %v, want %+v", raw, err, tc.at)
+			continue
+		}
+		if got != tc.at {
+			t.Errorf("agtypeLocalTime(%s) = %+v, want %+v", raw, got, tc.at)
+			continue
+		}
+		back, err := agtypeLocalTimeMicros(got)
+		if err != nil || back != tc.micros {
+			t.Errorf("agtypeLocalTimeMicros(%+v) = %d, %v, want %d", got, back, err, tc.micros)
+		}
+	}
+}
+
+// TestAgtypeLocalTimeRefusesACountOutsideTheDay bounds the stored count
+// at both ends. The one-microsecond rows are what a bound written with
+// the wrong comparison lets through — 86400000000 is midnight tomorrow,
+// which is a reading of the day after the one the column holds — and the
+// int64 extremes are what an absent bound lets through.
+func TestAgtypeLocalTimeRefusesACountOutsideTheDay(t *testing.T) {
+	for _, micros := range []int64{-1, 86400000000, 86400000001, math.MaxInt64, math.MinInt64} {
+		raw := strconv.FormatInt(micros, 10)
+		got, err := agtypeLocalTime([]byte(raw))
+		if err == nil {
+			t.Errorf("agtypeLocalTime(%s) = %+v, want an error", raw, got)
+			continue
+		}
+		// The count is the whole of what went wrong, so it has to be in
+		// the message: a reader looking at a failed row has the property
+		// name from the decoder that called this and nothing else.
+		if !strings.Contains(err.Error(), raw) {
+			t.Errorf("agtypeLocalTime(%s) = error %v, which does not name the count it read", raw, err)
+		}
+	}
+}
+
+// TestAgtypeLocalTimeMicrosRefusesAReadingOffTheClock is the encode half,
+// and it is not the same check read backwards. Each component is bounded
+// on its own, so an hour of -1 beside a minute of 60 is refused even
+// though the two sum to midnight, which is inside the interval the decode
+// enforces. That row is the one a single interval check lets through.
+func TestAgtypeLocalTimeMicrosRefusesAReadingOffTheClock(t *testing.T) {
+	for _, at := range []LocalTime{
+		{Hour: -1, Minute: 60},
+		{Hour: 24},
+		{Hour: -1},
+		{Minute: 60},
+		{Minute: -1},
+		{Second: 60},
+		{Second: -1},
+		{Nanosecond: 1000000000},
+		{Nanosecond: -1},
+	} {
+		got, err := agtypeLocalTimeMicros(at)
+		if err == nil {
+			t.Errorf("agtypeLocalTimeMicros(%+v) = %d, want an error", at, got)
+			continue
+		}
+		if got != 0 {
+			t.Errorf("agtypeLocalTimeMicros(%+v) returned %d alongside its error", at, got)
+		}
+	}
+}
+
+// durations are the stored counts and the durations they mean. What the
+// decode returns is normalised — one stored number cannot fill Months and
+// Days as well — so these are the encodings of the NORMALISED value, and
+// the round trip below starts from that rather than from what a caller
+// might have written.
+var durations = []struct {
+	micros int64
+	d      Duration
+}{
+	{0, Duration{}},
+	{1, Duration{Nanos: 1000}},
+	{90000000, Duration{Seconds: 90}},
+	{-90000000, Duration{Seconds: -90}},
+	{7776000000000, Duration{Seconds: 7776000}},
+}
+
+func TestAgtypeDurationCountsTotalMicroseconds(t *testing.T) {
+	for _, tc := range durations {
+		raw := strconv.FormatInt(tc.micros, 10)
+		got, err := agtypeDuration([]byte(raw))
+		if err != nil {
+			t.Errorf("agtypeDuration(%s) = error %v, want %+v", raw, err, tc.d)
+			continue
+		}
+		if got != tc.d {
+			t.Errorf("agtypeDuration(%s) = %+v, want %+v", raw, got, tc.d)
+			continue
+		}
+		back, err := agtypeDurationMicros(got)
+		if err != nil || back != tc.micros {
+			t.Errorf("agtypeDurationMicros(%+v) = %d, %v, want %d", got, back, err, tc.micros)
+		}
+	}
+}
+
+// TestAgtypeDurationMicrosFoldsDaysAndRefusesMonths pins the one place
+// the two calendar fields are treated differently, which is the whole of
+// what makes this encoding lossless where it is admitted.
+//
+// A day folds: it is 86400 seconds here, in an encoding that carries no
+// zone and so has no daylight-saving transition to land on. A month does
+// not: it is 28, 29, 30 or 31 days depending on where it falls, so every
+// count this could return is one the caller did not write, and a
+// comparison against it would be answered wrongly rather than refused.
+func TestAgtypeDurationMicrosFoldsDaysAndRefusesMonths(t *testing.T) {
+	folds := []struct {
+		d    Duration
+		want int64
+	}{
+		{Duration{Days: 1}, 86400000000},
+		{Duration{Days: 90}, 7776000000000},
+		{Duration{Days: -1}, -86400000000},
+		{Duration{Days: 1, Seconds: 1, Nanos: 1000}, 86401000001},
+		{Duration{Nanos: 999}, 0},
+	}
+	for _, tc := range folds {
+		got, err := agtypeDurationMicros(tc.d)
+		if err != nil {
+			t.Errorf("agtypeDurationMicros(%+v) = error %v, want %d", tc.d, err, tc.want)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("agtypeDurationMicros(%+v) = %d, want %d", tc.d, got, tc.want)
+		}
+	}
+
+	for _, d := range []Duration{
+		{Months: 1},
+		{Months: -1},
+		{Months: 12},
+		{Months: 1, Days: 1, Seconds: 1},
+	} {
+		got, err := agtypeDurationMicros(d)
+		if err == nil {
+			t.Errorf("agtypeDurationMicros(%+v) = %d, want an error", d, got)
+			continue
+		}
+		if !strings.Contains(err.Error(), "month") {
+			t.Errorf("agtypeDurationMicros(%+v) = error %v, which does not say months are what it refused", d, err)
+		}
+		if got != 0 {
+			t.Errorf("agtypeDurationMicros(%+v) returned %d alongside its error", d, got)
+		}
+	}
+}
+
+// TestEmittedMethodBindsTheCarriersAsTheirScalars runs the emitted query
+// method, which is the only place a bound DATE, LOCAL TIME or DURATION is
+// encoded. Nothing about any of the three encodings is visible in the
+// method's Go signature: it takes the same neutral carriers every backend
+// takes, and what separates them is entirely in the bytes below.
+//
+// The refusal rows are the half a golden comparison cannot reach. These
+// encoders fail, unlike the instant's, so the emission has to run them
+// before it builds the argument map and return what they say — and a
+// method that swallowed the error would still emit a plausible statement.
+func TestEmittedMethodBindsTheCarriersAsTheirScalars(t *testing.T) {
+	ends := Date{Year: 9999, Month: 12, Day: 31}
+
+	cases := []struct {
+		name string
+		arg  WriteSpanParams
+		want string
+	}{
+		{
+			name: "an absent nullable date is the agtype null",
+			arg: WriteSpanParams{
+				StartsOn: Date{Year: 2024, Month: 1, Day: 2},
+				OpensAt:  LocalTime{Hour: 1},
+				Lasts:    Duration{Seconds: 90},
+			},
+			want: `{"endsOn":null,"lasts":90000000,"opensAt":3600000000,"startsOn":"2024-01-02"}`,
+		},
+		{
+			name: "each carrier crosses as its own scalar",
+			arg: WriteSpanParams{
+				StartsOn: Date{Year: 1, Month: 1, Day: 1},
+				EndsOn:   &ends,
+				OpensAt:  LocalTime{Hour: 23, Minute: 59, Second: 59, Nanosecond: 999999000},
+				Lasts:    Duration{Days: 1, Seconds: 1},
+			},
+			want: `{"endsOn":"9999-12-31","lasts":86401000000,"opensAt":86399999999,"startsOn":"0001-01-01"}`,
+		},
+	}
+	for _, tc := range cases {
+		db := &recordingDB{}
+		if err := (&Queries{db: db, graph: "corpus"}).WriteSpan(context.Background(), tc.arg); err != nil {
+			t.Errorf("%s: WriteSpan = error %v", tc.name, err)
+			continue
+		}
+		if db.args != tc.want {
+			t.Errorf("%s: bound arguments =\n\t%s\nwant\n\t%s", tc.name, db.args, tc.want)
+		}
+	}
+
+	// One refusal per encoder, plus one reached through the nullable
+	// combinator, because each is a separate call site in the emitted
+	// method and one of them could be missing its error check.
+	badEnds := Date{Year: 10000, Month: 1, Day: 1}
+	refusals := []struct {
+		name  string
+		arg   WriteSpanParams
+		names string
+	}{
+		{
+			name:  "a date off the calendar",
+			arg:   WriteSpanParams{StartsOn: Date{Year: 2024, Month: 2, Day: 30}},
+			names: "startsOn",
+		},
+		{
+			name:  "a present nullable date off the calendar",
+			arg:   WriteSpanParams{StartsOn: Date{Year: 2024, Month: 1, Day: 2}, EndsOn: &badEnds},
+			names: "endsOn",
+		},
+		{
+			name: "a reading off the clock",
+			arg: WriteSpanParams{
+				StartsOn: Date{Year: 2024, Month: 1, Day: 2},
+				OpensAt:  LocalTime{Hour: 24},
+			},
+			names: "opensAt",
+		},
+		{
+			name: "a duration carrying months",
+			arg: WriteSpanParams{
+				StartsOn: Date{Year: 2024, Month: 1, Day: 2},
+				Lasts:    Duration{Months: 1},
+			},
+			names: "lasts",
+		},
+	}
+	for _, tc := range refusals {
+		db := &recordingDB{}
+		err := (&Queries{db: db, graph: "corpus"}).WriteSpan(context.Background(), tc.arg)
+		if err == nil {
+			t.Errorf("%s: WriteSpan = nil, want an error", tc.name)
+			continue
+		}
+		// The parameter name is what tells the caller which of four
+		// arguments to fix; without it the message names an encoding they
+		// did not write and cannot locate.
+		if !strings.Contains(err.Error(), tc.names) {
+			t.Errorf("%s: WriteSpan = error %v, which does not name parameter $%s", tc.name, err, tc.names)
+		}
+		if db.args != "" {
+			t.Errorf("%s: WriteSpan sent %s despite refusing the argument", tc.name, db.args)
+		}
+	}
+}
+
 func TestBoundGraphCountsBytes(t *testing.T) {
 	// 63 is PostgreSQL's name capacity in BYTES, so the boundary a
 	// multi-byte name crosses is not the one its character count

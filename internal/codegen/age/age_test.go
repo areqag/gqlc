@@ -235,6 +235,31 @@ var instantParamQuery = codegen.NamedQuery{
 	},
 }
 
+// carrierParamQuery binds the three widths that ride the neutral
+// carriers, DATE in both nullabilities, and projects nothing. It shares
+// instantParamQuery's source file so that both land in the one query file
+// the corpus module compiles.
+//
+// It is a second query rather than four more parameters on that one
+// because these encode fallibly and the instant does not: what it puts
+// into the emission is the encoder-error path, which has no expression
+// form inside the args map and so is emitted as statements ahead of it.
+var carrierParamQuery = codegen.NamedQuery{
+	Name:        "WriteSpan",
+	Cardinality: codegen.CardinalityExec,
+	SourceFile:  temporalSource,
+	SourceText:  "CREATE (s:Span {startsOn: $startsOn, endsOn: $endsOn, opensAt: $opensAt, lasts: $lasts})\n",
+	Validated: resolver.ValidatedQuery{
+		Statement: resolver.StatementWrite,
+		Parameters: []resolver.ResolvedParameter{
+			{Name: "startsOn", Type: resolver.ResolvedProperty{Type: graph.TypeDate}},
+			{Name: "endsOn", Type: resolver.ResolvedProperty{Type: graph.TypeDate, Nullable: true}},
+			{Name: "opensAt", Type: resolver.ResolvedProperty{Type: graph.TypeLocalTime}},
+			{Name: "lasts", Type: resolver.ResolvedProperty{Type: graph.TypeDuration}},
+		},
+	},
+}
+
 // corpusEdgeKey is the one edge type testdata/corpus_schema.gql declares.
 var corpusEdgeKey = schema.EdgeKey{Source: personLabel, KeyLabels: "ACTED_IN", Target: personLabel}
 

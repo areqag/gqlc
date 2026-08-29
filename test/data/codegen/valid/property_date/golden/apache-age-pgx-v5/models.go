@@ -87,19 +87,25 @@ const agtypeDateLayout = "2006-01-02"
 // string comparison with nothing for gqlc to rewrite.
 //
 // That ordering holds across [0001-01-01, 9999-12-31] and nowhere else,
-// which is why both the padding and the bound are read back here rather
-// than assumed. A year needing a fifth digit sorts under every
-// four-digit year because '1' < '2', and a proleptic year before 1 CE
-// needs a sign, which sorts under every digit and files the whole era at
-// the front, ascending. gqlc's own encode cannot produce either — it
-// refuses them — but it writes to an ordinary agtype string property on
-// a vertex any writer can touch, so what is read back is whatever the
-// graph holds.
+// which is why the padding and the bound are read back here rather than
+// assumed. A year needing a fifth digit sorts under every four-digit year
+// because '1' < '2', and a proleptic year before 1 CE needs a sign, which
+// sorts under every digit and files the whole era at the front,
+// ascending. gqlc's own encode produces neither — it refuses them — but
+// it writes to an ordinary agtype string property on a vertex any writer
+// can touch, so what is read back is whatever the graph holds.
+//
+// Only the lower end of that range is bounded below, and the asymmetry is
+// measured rather than an oversight: the layout reads exactly four year
+// digits, so '10000-01-01' fails the parse at the separator it does not
+// find, and every signed spelling fails it at the sign. Year 0 is the one
+// out-of-range year that survives — it is unsigned and four digits, so it
+// parses and re-renders to itself — and it is what the bound is for.
 //
 // A text that parses but does not re-render to itself is refused for the
-// same reason: '2024-1-2' names a real day and sorts in the wrong place,
-// so accepting it would put a value in the column that breaks the
-// column's only guarantee.
+// same reason the range is: '2024-1-2' names a real day and sorts in the
+// wrong place, so accepting it would put a value in the column that
+// breaks the column's only guarantee.
 func agtypeDate(raw []byte) (Date, error) {
 	text, err := agtypeString(raw)
 	if err != nil {
@@ -112,7 +118,7 @@ func agtypeDate(raw []byte) (Date, error) {
 	if at.Format(agtypeDateLayout) != text {
 		return Date{}, fmt.Errorf("gqlc: %q is not a date in zero-padded ISO YYYY-MM-DD form", text)
 	}
-	if at.Year() < 1 || at.Year() > 9999 {
+	if at.Year() < 1 {
 		return Date{}, fmt.Errorf("gqlc: %q is outside the year 1 to year 9999 range this encoding admits", text)
 	}
 	return Date{Year: at.Year(), Month: int(at.Month()), Day: at.Day()}, nil
