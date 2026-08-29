@@ -1610,23 +1610,51 @@ dispatch_candidate_docs() { # ready deps parents ids -> candidate documents
 # exist in two copies, because a divergence between them overspends the cap
 # silently, and the cap is what keeps the town inside its quota.
 #
-# It reads and updates cmd_dispatch's `slots` and `wakes` through bash's dynamic
-# scope, which is why it is only ever called from there.
+# It reads and updates cmd_dispatch's `slots`, `wakes` and `withheld` through
+# bash's dynamic scope, and reads its `active` and `max` for the cap's reason
+# string, which is why it is only ever called from there.
 route_owners() { # <"seat id" lines> <reason prefix>
-    local list=$1 prefix=$2 s capped mine
+    local list=$1 prefix=$2 s capped mine st why b
     for s in $(worker_seats); do
-        [ "$(seat_status "$s")" = asleep ] || continue
+        # Asked FIRST, and it is the one withholding here that stays silent: a
+        # seat owning nothing in this list is the overwhelmingly common case and
+        # says nothing about the town. Every other skip below now names the bead
+        # it withheld, which is only possible in this order — the seat-state
+        # tests used to run before `mine` existed, so there was nothing to name
+        # (gqlc-wq9x).
+        mine=$(echo "$list" | awk -v s="$s" '$1 == s { print $2 }')
+        [ -n "$mine" ] || continue
+        why=""
+        st=$(seat_status "$s")
+        if [ "$st" != asleep ]; then
+            why="$s, who is $st rather than asleep — every dispatch pass wakes asleep seats only, so this routes when they next sleep"
         # A seat with a wake already queued is skipped rather than woken twice.
         # A seat holding in-progress work AND assigned an unclaimed bead is
         # therefore told about the in-progress half only, and hears about the
         # other when it next sleeps — a delay, not a strand, and the order
         # Constitution III.3 asks for.
-        [ ! -f "$(seat_home "$s")/wake" ] || continue
+        elif [ -f "$(seat_home "$s")/wake" ]; then
+            why="$s, who already has a wake queued and is told one thing at a time — this routes on the next run (Constitution III.3)"
+        fi
         capped=1
         if [ "$(seat_class "$s")" = judge ]; then capped=0; fi
-        [ "$capped" -eq 0 ] || [ "$slots" -gt 0 ] || continue
-        mine=$(echo "$list" | awk -v s="$s" '$1 == s { print $2 }')
-        [ -n "$mine" ] || continue
+        if [ -z "$why" ] && [ "$capped" -eq 1 ] && [ "$slots" -le 0 ]; then
+            why="$s, who is asleep but every capped slot is spent ($active/$max awake) and only judge work is exempt from the cap"
+        fi
+        if [ -n "$why" ]; then
+            # One line per bead, like every other arm, because the operator's
+            # question is about a bead. The cap case is the one that made this
+            # a bead: it is a normal steady state, so the dispatcher's own
+            # advice — "assign it to a Ճարտարապետ and it routes" — moved beads
+            # off the loudly-reported epic arm onto this silent one, and the
+            # withheld line going away read as the assignment having worked.
+            while IFS= read -r b; do
+                [ -n "$b" ] || continue
+                echo "dispatch: owner-withheld $b — assigned to $why"
+                withheld=$((withheld + 1))
+            done <<<"$mine"
+            continue
+        fi
         cmd_wake "$s" --reason "$prefix: $(echo "$mine" | tr '\n' ' ')"
         wakes=$((wakes + 1))
         if [ "$capped" -eq 1 ]; then slots=$((slots - 1)); fi
@@ -1701,7 +1729,7 @@ unreachable_owner_rows() { # -> lines of "<assignee> <id> <id> ..."
 cmd_dispatch() {
     ensure_deployed dispatch "$@" || return 1
     session_up || { echo "dispatch: the town is down; nothing to do"; return 0; }
-    local sd wakes=0
+    local sd wakes=0 withheld=0
     sd=$(state_dir)
 
     # Սեդրակ answers his mail regardless of the cap — and regardless of the
@@ -2244,7 +2272,7 @@ This counter clears by itself the moment her agent leaves 'idle' — witnessed w
     # The escalation, after every pass has had its chance at the queue, so the
     # marker describes the run's final state and not an intermediate one.
     record_stalled_p0 "$stalled_beads"
-    echo "dispatch: done ($wakes wake(s) this run, $held held, $epic_n epic, $skipped below max_priority $maxprio, $inferred class inferred, $unroutable unroutable ($stalled at P0))"
+    echo "dispatch: done ($wakes wake(s) this run, $held held, $epic_n epic, $skipped below max_priority $maxprio, $inferred class inferred, $withheld owner-withheld, $unroutable unroutable ($stalled at P0))"
 }
 
 # ---------- the routing hold ----------
