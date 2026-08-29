@@ -741,8 +741,16 @@ every existing row. C5 extends the *column-shape* set — the
 
 - **Interface, not struct.** The Go type text is the synthesised
   interface name. Consumers type-switch on the interface at the
-  call site; the sealed sum guarantees exhaustive coverage under
-  `gochecksumtype`.
+  call site. The interface is sealed the same way `resolver.ResolvedType`
+  is — by an unexported marker method — and carries the same limit: the
+  declared variants are the whole set of types that declare the marker,
+  but pointer forms and structs embedding a variant satisfy the
+  interface without declaring it, so exhaustive coverage of the DECLARED
+  arms is what a switch buys, not exhaustive coverage of concrete
+  inhabitants (see `internal/resolver/validated.go` on `ResolvedType`
+  for the general form). `gochecksumtype` would report a switch that
+  misses a declared arm, but it is not in `.golangci.yml`'s enabled
+  linters at C5, so whatever it would enforce is not currently run.
 - **Nullable emission is bare interface, not `*<Interface>`.** The
   ADR 0010 D3 Resolved (lines 343–345) rule: pointer-to-interface
   is anti-pattern; nil is the natural absence value for an
