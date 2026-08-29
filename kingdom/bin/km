@@ -1603,17 +1603,61 @@ cmd_halt() {
     if [ -z "${reason//[[:space:]]/}" ]; then
         die "halt: a reason is required — say why the town must stop, so whoever finds it can tell deliberate from accidental"
     fi
+    # Every accidental halt this town has recorded was a citizen asking a
+    # question with the write verb. The `-*` arm above closed the flag
+    # spellings; `km halt show` carries no dash, so it is well-formed reason
+    # text, reaches here legitimately, and stopped the town for 46 minutes on
+    # 2026-08-29 (bd gqlc-wguoq). One bare word naming a read is the signature
+    # of the question — a reason someone means is prose, so two words pass.
+    local -a reason_words=()
+    read -r -a reason_words <<<"$reason" || true
+    if [ "${#reason_words[@]}" -eq 1 ]; then
+        case "$(printf '%s' "${reason_words[0]}" | tr '[:upper:]' '[:lower:]')" in
+        show | status | history | help | state | info | list)
+            die "halt: '$reason' reads as a question, not a reason — refusing to stop the town on one word.
+  is a halt up?          $(verb halt) --status
+  who raised or lowered? $(verb halt) --history
+  if you did mean to halt the town, say why in a sentence: $(verb halt) '<reason>'"
+            ;;
+        esac
+    fi
+    # Read BEFORE the truncating write below, because afterwards nothing can
+    # tell the two cases apart. A raise over a standing halt replaces another
+    # citizen's reason, and until this was captured both printed the same line.
+    local was_up=''
+    if [ -f "$sd/halt" ]; then
+        was_up=$(head -1 "$sd/halt")
+    fi
     require_identity halt
     printf 'raised by %s at %s: %s\n' "$KINGDOM_SEAT" "$(date -u -Iseconds)" "$reason" \
         >"$sd/halt"
     # After the flag, not before: if the truncating write above fails, `set -e`
     # stops here and the history does not claim a halt that was never raised.
     halt_log raise "$KINGDOM_SEAT" "$reason"
+    # Reports the ACT and its actor, not the resulting state. "halt raised" was
+    # a true sentence about the world and said nothing about what the command
+    # had just done, so on 2026-08-29 the guard raised a halt by typing
+    # `km halt show`, read this line, concluded it described a standing halt
+    # someone else was tracking, mailed the mayor "town healthy under the halt,
+    # nothing new", and slept. The town stayed stopped 46 minutes (bd
+    # gqlc-wguoq). The three earlier accidental halts were each caught by a
+    # human who knew what they had just typed; an agent on a sweep does not,
+    # and is now a routine reader of this line.
+    if [ -n "$was_up" ]; then
+        # Raising over a standing halt is a truncating overwrite, so someone
+        # else's recorded reason is gone. Both cases used to print one line.
+        echo "halt RE-RAISED by you ($KINGDOM_SEAT) just now — this REPLACED a halt that was already up:"
+        echo "    was: $was_up"
+        echo "    now: $reason"
+    else
+        echo "halt RAISED by you ($KINGDOM_SEAT) just now — reason: $reason"
+        echo "  the town was NOT halted before this command."
+    fi
     # Names both timers, and says which paths it does NOT bind. The line used to
     # promise a quiet town while naming only the dispatcher, so an operator had
     # no reason to suspect the guard sweep was still launching sessions behind
     # the flag — and this line is the whole report he gets (gqlc-6dzi).
-    echo "halt raised: the dispatcher and the guard sweep will wake nobody until it is lowered ($(verb resume))"
+    echo "  the dispatcher and the guard sweep will wake nobody until it is lowered ($(verb resume))"
     # Spell the broadcast in full. This line is read at one moment — by whoever
     # has just stopped the town and now has to say why — and it used to name
     # `km herratsayn`, which km has never dispatched (bd gqlc-cw7h). The reader
