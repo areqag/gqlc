@@ -1564,8 +1564,21 @@ unreachable_owner_rows() { # -> lines of "<assignee> <id> <id> ..."
 cmd_dispatch() {
     ensure_deployed dispatch "$@" || return 1
     session_up || { echo "dispatch: the town is down; nothing to do"; return 0; }
-    local sd
+    local sd wakes=0
     sd=$(state_dir)
+
+    # Սեդրակ answers his mail regardless of the cap — and regardless of the
+    # halt (bd gqlc-ozfr): the halt's cause being over is exactly the kind of
+    # news that travels by mail, so a halt that suppressed this wake could
+    # never hear that it had outlived its purpose (one such halt held ~6.5h).
+    # VI.4 is untouched — this hands Sedrak the DECISION about lowering; it
+    # lowers nothing.
+    if [ "$(seat_status sedrak)" != awake ] && [ ! -f "$(seat_home sedrak)/wake" ] \
+        && [ "$(unread_count sedrak)" -gt 0 ]; then
+        cmd_wake sedrak --reason "you have unread mail"
+        wakes=$((wakes + 1))
+    fi
+
     if [ -f "$sd/halt" ]; then
         echo "dispatch: halted — $(head -1 "$sd/halt")"
         return 0
@@ -1575,15 +1588,6 @@ cmd_dispatch() {
     # status files, and a stale one both spends a slot and hides the seat from
     # free_worker_of_class, so the same record costs the town twice.
     cmd_reconcile | sed 's/^reconcile: /dispatch: reconcile: /'
-
-    local wakes=0
-
-    # Սեդրակ answers his mail regardless of the cap.
-    if [ "$(seat_status sedrak)" != awake ] && [ ! -f "$(seat_home sedrak)/wake" ] \
-        && [ "$(unread_count sedrak)" -gt 0 ]; then
-        cmd_wake sedrak --reason "you have unread mail"
-        wakes=$((wakes + 1))
-    fi
 
     # And so does everyone else, once they are idle. Until now this dispatcher's
     # ONLY mail-driven wake was the four lines above, for one seat: every other
@@ -2705,7 +2709,20 @@ cmd_status() {
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
     if session_up; then echo "town: UP (herdr workspace '$WORKSPACE')"; else echo "town: DOWN"; fi
-    if [ -f "$sd/halt" ]; then echo "HALT: $(head -1 "$sd/halt")"; fi
+    if [ -f "$sd/halt" ]; then
+        # The age rides the line because a transient halt outliving its cause
+        # is invisible behind any timestamp subtraction (bd gqlc-ozfr: one ran
+        # ~6.5h past its cause). mtime is the raise moment; km never edits it.
+        local hage=$(( $(date +%s) - $(stat -c %Y "$sd/halt") )) htxt
+        if [ "$hage" -ge 3600 ]; then
+            htxt="$(printf '%dh%02dm' $((hage / 3600)) $(((hage % 3600) / 60)))"
+        elif [ "$hage" -ge 60 ]; then
+            htxt="$((hage / 60))m"
+        else
+            htxt="under a minute"
+        fi
+        echo "HALT: $(head -1 "$sd/halt") — up $htxt"
+    fi
     # A dispatcher refusing on drift is otherwise visible only in the journal
     # (bd gqlc-vzpn), so the town's one glance carries it.
     if ! deployed_ok; then
