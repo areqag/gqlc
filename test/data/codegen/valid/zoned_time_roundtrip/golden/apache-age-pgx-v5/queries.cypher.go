@@ -17,7 +17,7 @@ type AddSlotParams struct {
 // AddSlot executes the AddSlot query.
 //
 //	CREATE (s:Slot {id: $id, startsAt: $startsAt})
-func (q *Queries) AddSlot(ctx context.Context, arg AddSlotParams) error {
+func (q *queries) AddSlot(ctx context.Context, arg AddSlotParams) error {
 	stmt, err := q.cypherStmt("$gqlc$", addSlotQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err
@@ -41,7 +41,7 @@ const slotsFromQueryText = `MATCH (s:Slot) WHERE s.startsAt >= $from RETURN s.id
 // SlotsFrom executes the SlotsFrom query.
 //
 //	MATCH (s:Slot) WHERE s.startsAt >= $from RETURN s.id AS id ORDER BY s.startsAt
-func (q *Queries) SlotsFrom(ctx context.Context, arg Time) ([]int64, error) {
+func (q *queries) SlotsFrom(ctx context.Context, arg Time) ([]int64, error) {
 	stmt, err := q.cypherStmt("$gqlc$", slotsFromQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -85,7 +85,7 @@ const slotStartQueryText = `MATCH (s:Slot) WHERE s.id = $id RETURN s.startsAt AS
 // SlotStart executes the SlotStart query.
 //
 //	MATCH (s:Slot) WHERE s.id = $id RETURN s.startsAt AS startsAt
-func (q *Queries) SlotStart(ctx context.Context, arg int64) (Time, error) {
+func (q *queries) SlotStart(ctx context.Context, arg int64) (Time, error) {
 	stmt, err := q.cypherStmt("$gqlc$", slotStartQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Time{}, err
@@ -130,7 +130,7 @@ const oneSlotQueryText = `MATCH (s:Slot) WHERE s.id = $id RETURN s`
 // OneSlot executes the OneSlot query.
 //
 //	MATCH (s:Slot) WHERE s.id = $id RETURN s
-func (q *Queries) OneSlot(ctx context.Context, arg int64) (Slot, error) {
+func (q *queries) OneSlot(ctx context.Context, arg int64) (Slot, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneSlotQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Slot{}, err

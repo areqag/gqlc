@@ -1762,7 +1762,7 @@ func TestEmittedMethodBindsATimeAsNormalisedMicroseconds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		db := &recordingDB{}
-		if err := (&Queries{db: db, graph: "corpus"}).WriteMeeting(context.Background(), tc.arg); err != nil {
+		if err := (&Queries{queries{db: db, graph: "corpus"}}).WriteMeeting(context.Background(), tc.arg); err != nil {
 			t.Errorf("%s: WriteMeeting = error %v", tc.name, err)
 			continue
 		}
@@ -1793,7 +1793,7 @@ func TestEmittedMethodBindsATimeAsNormalisedMicroseconds(t *testing.T) {
 	}
 	for _, tc := range refusals {
 		db := &recordingDB{}
-		err := (&Queries{db: db, graph: "corpus"}).WriteMeeting(context.Background(), tc.arg)
+		err := (&Queries{queries{db: db, graph: "corpus"}}).WriteMeeting(context.Background(), tc.arg)
 		if err == nil {
 			t.Errorf("%s: WriteMeeting = nil, want an error", tc.name)
 			continue
