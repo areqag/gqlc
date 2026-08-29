@@ -61,6 +61,28 @@ func SessionInit(ctx context.Context, conn *pgx.Conn) error {
 // name AGE will not have arrives here as its own "graph name is
 // invalid". The wrap names the value and where it was bound, because
 // AGE's message says neither.
+//
+// Call this once, before the pool serves traffic — not per request, and
+// not while other sessions are querying. AGE's create_graph and
+// drop_graph are not safe to run alongside other AGE activity in the
+// same database, and a graph of one's own is not isolation: the
+// sessions still meet in the ag_graph and ag_label catalogues, where a
+// backend can resolve a label to the wrong relation. Measured
+// 2026-08-29 against the image this repo pins (AGE 1.7.0 on PostgreSQL
+// 18.1), 6 of 21 runs of its live battery failed, in two shapes: an
+// edge table's end_id read off a two-column vertex table ("invalid
+// attribute number 3"), and a "relation does not exist" naming a label
+// that belongs to a DIFFERENT graph, qualified with this one's name.
+// Dropping create_graph from the concurrent window gave 0 of 10. gqlc cannot hold a lock across your processes, so the
+// interlock is yours to arrange.
+//
+// Two limits on that, so it is read for what it is. Whether
+// label-creating DML alone carries the hazard — the first CREATE of a
+// label is DDL inside DML — is NOT established: every configuration
+// measured that cleared the failures also removed one of the two
+// lifecycle calls. And a search of apache/age's issue tracker the same
+// day turned up no report matching those two signatures, which is a
+// search and not a statement about what AGE does or does not fix.
 func (q *Queries) EnsureGraph(ctx context.Context) error {
 	graph, err := q.boundGraph()
 	if err != nil {
@@ -75,6 +97,12 @@ func (q *Queries) EnsureGraph(ctx context.Context) error {
 
 // DropGraph removes the bound graph and every label in it. An absent
 // graph is not an error, so teardown is repeatable.
+//
+// EnsureGraph's concurrency warning covers this call too: quiesce the
+// database's other AGE sessions before tearing a graph down. What was
+// measured names both calls together, and removing create_graph alone
+// was enough to clear the failures — so drop_graph's own contribution
+// was never isolated. That makes it unproven, not proven safe.
 func (q *Queries) DropGraph(ctx context.Context) error {
 	graph, err := q.boundGraph()
 	if err != nil {
