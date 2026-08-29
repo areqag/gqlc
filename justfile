@@ -3383,7 +3383,6 @@ vuln-root-residual:
     # them and must never grow.
     baseline="$(sort <<'BLIND'
     internal/codegen/age
-    internal/codegen/neo4j
     internal/resolver
     internal/schema/gql
     BLIND

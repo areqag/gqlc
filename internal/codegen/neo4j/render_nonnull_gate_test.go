@@ -1,4 +1,4 @@
-package neo4j
+package neo4j_test
 
 import (
 	"go/ast"
@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/neo4j"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -137,7 +138,7 @@ func sweepQuery(f codegen.Row) codegen.Query {
 // the emitted Go source.
 func renderColumn(f codegen.Row) string {
 	var b strings.Builder
-	writeSingleColumnDecodeIndent(&b, sweepQuery(f), f, "rec", "zeroValue", "\tout.Col = ", "\n", "\t")
+	neo4j.WriteSingleColumnDecodeIndent(&b, sweepQuery(f), f, "rec", "zeroValue", "\tout.Col = ", "\n", "\t")
 	return b.String()
 }
 
