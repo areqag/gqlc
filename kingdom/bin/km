@@ -1196,7 +1196,13 @@ cmd_halt() {
     # no reason to suspect the guard sweep was still launching sessions behind
     # the flag — and this line is the whole report he gets (gqlc-6dzi).
     echo "halt raised: the dispatcher and the guard sweep will wake nobody until it is lowered (km resume)"
-    echo "  km wake and km herratsayn still reach a seat, so the town stays workable by hand."
+    # Spell the broadcast in full. This line is read at one moment — by whoever
+    # has just stopped the town and now has to say why — and it used to name
+    # `km herratsayn`, which km has never dispatched (bd gqlc-cw7h). The reader
+    # in a hurry runs it, gets the usage dump, and concludes a halted town has
+    # no way to talk to itself.
+    echo "  to tell the town why: km mail send town -s '<subject>' -m '<body>'"
+    echo "  km wake <seat> still reaches one seat; neither is bound by the halt."
 }
 
 # Constitution VI.4, in full: "A halt (kingdom-state/halt) stops new wakes;
@@ -2681,8 +2687,9 @@ cmd_guard_sweep() {
     # that missed it went on spending tokens once per guard cadence — and since
     # Article VI.4 reserves lowering a halt to Սեդրակ or Անդրանիկ, whoever
     # raised it had no way to find that out (gqlc-6dzi). `km wake` and
-    # `km herratsayn` are deliberately NOT bound: a halted town still has to be
-    # workable by the operator who is going to lower the halt.
+    # `km mail` are deliberately NOT bound: a halted town still has to be
+    # workable by the operator who is going to lower the halt. This named
+    # `km herratsayn` until gqlc-cw7h; there has never been such a verb.
     local sd
     sd=$(state_dir)
     if [ -f "$sd/halt" ]; then
