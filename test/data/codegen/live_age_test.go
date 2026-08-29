@@ -9,6 +9,7 @@ package fixtures_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -156,11 +157,36 @@ func openAGEPool(ctx context.Context, t *testing.T, dsn string, init func(contex
 // ageArm is the apache-age-pgx-v5 arm: one container, one pool logged in as
 // ageAppRole, and a graph per scenario. AGE addresses graphs by name, so
 // isolation is a name no other scenario holds rather than a wipe, and
-// scenarios run concurrently.
+// scenario bodies run concurrently. Their graph lifecycle does not, for the
+// reason ageGraphDDL gives.
 type ageArm struct {
 	pool   *pgxpool.Pool
 	graphs atomic.Uint64
 }
+
+// ageGraphDDL serialises create_graph and drop_graph across scenarios.
+//
+// A name of one's own is not isolation on AGE. Two scenarios addressing
+// different graphs still meet in the ag_graph and ag_label catalogues, and
+// concurrent lifecycle DDL there leaves a backend resolving a label to the
+// wrong relation: a query fails with `invalid attribute number 3` — attribute
+// 3 is an edge table's end_id, read off a two-column vertex table — or with
+// `relation "<this scenario's graph>.<another scenario's label>" does not
+// exist`. The second names a label the failing scenario's own fixture never
+// declares, which is what identifies this as cross-graph rather than a defect
+// in the scenario.
+//
+// Measured 2026-08-29 (bd gqlc-734l): 6 of 21 runs of this arm failed on
+// unmodified master, 0 of 20 with this lock. Pre-creating every graph serially
+// before the scenarios start, while leaving scenario starts unstaggered, was
+// also green, so the trigger is the lifecycle DDL and not concurrency as such.
+// That is why the lock is here and not around the scenario bodies: every
+// generated query the battery exists to witness still runs concurrently.
+//
+// The hazard belongs to AGE, not to the emitted code, and gqlc cannot lock on
+// a caller's behalf across processes. bd gqlc-souo carries the user-facing
+// half.
+var ageGraphDDL sync.Mutex
 
 func startAGE(ctx context.Context, t *testing.T) harness {
 	t.Helper()
@@ -207,8 +233,13 @@ func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 	// Created through one package's helper and dropped through another's:
 	// each target emits its own lifecycle pair, and both handles have to
 	// reach the same graph for the scenario to see its own seed.
-	require.NoError(t, s.many.q.EnsureGraph(ctx), "ensure graph %s", graph)
+	ageGraphDDL.Lock()
+	err := s.many.q.EnsureGraph(ctx)
+	ageGraphDDL.Unlock()
+	require.NoError(t, err, "ensure graph %s", graph)
 	t.Cleanup(func() {
+		ageGraphDDL.Lock()
+		defer ageGraphDDL.Unlock()
 		require.NoError(t, s.one.q.DropGraph(ctx), "drop graph %s", graph)
 	})
 	return s
