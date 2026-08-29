@@ -224,7 +224,9 @@ a slice that may be empty, and an empty slice of `-run` values genuinely does me
 "selects everything" — which made "there are no flags here" indistinguishable from
 "the flags select the witness". Three mutations reached that state and stayed
 green: a recipe body that shells out to a script and never invokes `go test` at
-all (V1 — this justfile already has recipes that run `bash .githooks/tests/*.sh`);
+all (V1 — when this was written the justfile already had recipes that ran
+`bash .githooks/tests/*.sh`; PR #1595 has since deleted them, so the shape V1
+imitates is no longer present in the tree, bd `gqlc-u2nim`);
 a quoted `#` in an `-ldflags` value, which the comment strip took as a comment and
 which carried the `-run` away with it while leaving `-count=1` standing (V3); and
 dropping `-tags codegen_live`, which compiles none of the live battery, so `go

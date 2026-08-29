@@ -45,7 +45,10 @@ IMPLAUSIBLE_RESERVED_DOMAINS=(invalid test example localhost example.com example
 #
 # A domain that merely CONTAINS a reserved name is a real domain and must be
 # accepted: ops@example-corp.io and ops@invalid-arguments.io are the falsifiers
-# this function is held to (.github/scripts/tests/ci-identity-gate-test.sh).
+# this function was held to, by .github/scripts/tests/ci-identity-gate-test.sh.
+# PR #1595 deleted that suite and nothing replaced it, so the two addresses are
+# now worked examples rather than rows: check them by hand against any change to
+# the matching below (bd gqlc-u2nim).
 implausible_email_reason() {
     local email="$1"
     # Domains are case-insensitive; FIXTURE@EXAMPLE.INVALID is the same address.

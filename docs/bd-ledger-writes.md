@@ -127,8 +127,16 @@ quoted spans blanked, command position required).
 | --- | --- | --- |
 | `kingdom/bin/km` 2370 | `bd create ... >/dev/null 2>&1` inside `if !` | correct — exit status checked, and the failure branch prints its own diagnostic, so the discarded stderr costs the reason rather than the detection |
 
-Every other match is fixture text in `.githooks/tests/claude-pre-bash-test.sh` —
-`bd close` command strings handed to a hook as data and never executed.
+Every other match, when this was taken, was fixture text in
+`.githooks/tests/claude-pre-bash-test.sh` — `bd close` command strings handed to
+a hook as data and never executed. PR #1595 deleted that file, so those matches
+are gone from the tree rather than reclassified.
+
+Re-measured 2026-08-29 (bd `gqlc-u2nim`): the row above is still the only write
+call site discarding stderr, and it has moved to `kingdom/bin/km` 3246 — which is
+what the drift warning in the query-side audit is about. That re-measure was a
+grep, not the scanner: the scanner shape described above cuts comments and blanks
+quoted spans, and no such tool survives in this tree to re-run.
 
 The exposure this document addresses is therefore in the **recipes citizens type
 by hand**, not in the scripts. See `kingdom/brain/playbooks/citizen-protocol.md`.
