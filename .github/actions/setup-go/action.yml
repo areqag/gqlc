@@ -72,14 +72,33 @@ runs:
 
     # Both caches under one key. The toolchain lives in the module cache, so a
     # hit here is what makes provisioning below a no-op offline.
+    #
+    # The key must roll per run, or ~/.cache/go-build fossilises:
+    # actions/cache@v4 saves only when the primary key did NOT restore, and a
+    # key made purely of toolchain-version + hashFiles('go.sum') changes only
+    # on those rare bumps. Measured 2026-08-28 (bd gqlc-308x): the cache was
+    # created 2026-08-23 (the day this key prefix landed) and never rewritten
+    # across five days of merges — every job restored that snapshot, rebuilt
+    # today's test binaries from scratch, and skipped save ("Cache hit occurred
+    # on the primary key ... not saving cache", run 33230929053). Result: `go
+    # test` printed zero `(cached)` packages on CI while a warmed local cache
+    # prints them fine. Same rolling pattern as the golangci analysis cache in
+    # ci.yml.
+    #
+    # github.job is in the rolling half because several jobs of one workflow
+    # run share a run_id: with run_id alone they race to save one key, the
+    # fastest (least-built) job wins the reservation, and the test job's cache
+    # — the one worth keeping — is the one that gets refused. Per-job lineages
+    # cost more storage; GitHub's 10GB LRU evicts the dead run-id tails first.
     - name: restore the Go toolchain, module and build caches
       uses: actions/cache@v4
       with:
         path: |
           ~/go/pkg/mod
           ~/.cache/go-build
-        key: gotoolchain-${{ runner.os }}-${{ steps.pin.outputs.version }}-${{ hashFiles('go.sum') }}${{ inputs.cache-key-suffix }}
+        key: gotoolchain-${{ runner.os }}-${{ steps.pin.outputs.version }}-${{ hashFiles('go.sum') }}${{ inputs.cache-key-suffix }}-${{ github.job }}-${{ github.run_id }}
         restore-keys: |
+          gotoolchain-${{ runner.os }}-${{ steps.pin.outputs.version }}-${{ hashFiles('go.sum') }}${{ inputs.cache-key-suffix }}-${{ github.job }}-
           gotoolchain-${{ runner.os }}-${{ steps.pin.outputs.version }}-
 
     # Provisioning is EAGER and asserted. A lazy toolchain switch would happen
