@@ -1787,11 +1787,15 @@ fmt-check: ensure-golangci
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
-# -shuffle catches inter-test coupling; go build link-checks package main,
-# which has no tests and is otherwise only compile-checked by lint.
+# go build link-checks package main, which has no tests and is otherwise
+# only compile-checked by lint. -shuffle=on is deliberately absent: it defeats
+# the test cache (the seed is regenerated per invocation and forms part of the
+# test-binary args, so every run misses), and inter-test coupling in a codegen
+# dev tool is a low-value gate relative to a ~2m40s tax on every push. Revisit
+# if ordering coupling actually bites us.
 test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp check-push-keepalive
     go build ./...
-    go test -shuffle=on ./...
+    go test ./...
 
 # fails when go.mod/go.sum are not tidy
 tidy-check:
