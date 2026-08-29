@@ -115,6 +115,8 @@ var corpusTests = []string{
 	"TestVarLengthEdgeUnionColumnDispatchesPerElement",
 	"TestEdgySpareSeparatesAbsentFromNullOverARelationship",
 	"TestTwoEdgeUnionColumnsDoNotShareLocals",
+	"TestListParametersReachTheDriverPackable",
+	"TestNullableListParameterBindsCypherNull",
 }
 
 // corpusSubtests names, per top-level test, how many subtest passes the
@@ -166,8 +168,10 @@ var corpusTables = map[string]corpusrun.Table{
 	"TestEntityColumnRefusalsCarryTheDriversError":     {Rows: 2},
 	"TestEntityColumnsDecodeWholeEntities":             {Rows: 4},
 	"TestListColumnRefusalsCarryTheDriversError":       {Rows: 4},
+	"TestListParametersReachTheDriverPackable":         {Rows: 4},
 	"TestListyEmptyIsNotAbsent":                        {Rows: 5},
 	"TestListyRefusesAMisTypedElement":                 {Rows: 4},
+	"TestNullableListParameterBindsCypherNull":         {Rows: 3},
 	"TestOptionalEdgeUnionColumnCarriesItsNull":        {Rows: 2, Dynamic: 1},
 	"TestOptionalEntityColumnsCarryTheirNull":          {Rows: 2},
 	"TestScalarColumnsNarrowTheirCarriers":             {Rows: 2},

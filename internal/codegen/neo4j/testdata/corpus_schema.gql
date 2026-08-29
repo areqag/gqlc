@@ -50,7 +50,30 @@
 // Its one property is a non-nullable STRING, whose driver carrier is
 // its own Go type, so decodeEdgier is where the plain assign named
 // above runs off a relationship.
+// Slot is declared for the ENCODE direction and for nothing else. Every
+// other type here is read: its widths pick a decode arm, and the tests
+// hand the emission a driver value and ask what the caller gets back.
+// Slot's widths are never decoded — no query projects it — they exist to
+// be the thing a parameter is compared against, because a parameter's Go
+// type is derived from the property it is compared to and there is no
+// other way to ask for one.
+//
+// Four list widths for the four bind expressions a list parameter can
+// take: one the driver's own packer walks element by element and so needs
+// no conversion (tags), one whose leaf is a gqlc neutral carrier and so
+// owes a per-element widen (days), the same at a second nesting depth
+// (windows), and a nullable one whose helper carries the pointer through
+// (spans). LIST<DURATION> rather than a second LIST<DATE> because the
+// helpers are emitted per carrier, so a nullable list helper shown to
+// work for one carrier has not been run for another.
 CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
+    (:Slot {
+        id      :: INT64 NOT NULL,
+        tags    :: LIST<STRING NOT NULL> NOT NULL,
+        days    :: LIST<DATE NOT NULL> NOT NULL,
+        windows :: LIST<LIST<DATE>> NOT NULL,
+        spans   :: LIST<DURATION(DAY TO SECOND) NOT NULL>
+    }),
     (:Scalar {
         id     :: INT64 NOT NULL,
         rank   :: INT32 NOT NULL,
