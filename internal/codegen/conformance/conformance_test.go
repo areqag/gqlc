@@ -1499,13 +1499,26 @@ func TestGeneratedHeaderFormat(t *testing.T) {
 // across every target.
 const carrierFile = "temporal.go"
 
-// isCarrierBridge reports whether a golden package's file is the driver
-// bridge a target emits beside temporal.go. Matched by shape, because
-// the filename is the target's: neo4j's is temporal_neo4j.go, and a
-// target that gains temporal support later brings its own.
+// isCarrierBridge reports whether a golden package's file is a driver
+// bridge of its own. Matched by shape, because the filename is the
+// target's: neo4j's is temporal_neo4j.go. A target need not bring one —
+// see inPlaceCarrierBridges.
 func isCarrierBridge(base string) bool {
 	return strings.HasPrefix(base, "temporal_") && strings.HasSuffix(base, ".go")
 }
+
+// inPlaceCarrierBridges names, per target, the file a backend converts in
+// when its bridge is not a file of its own. agtype has no temporal value
+// at all, so AGE's conversions are the encode and decode helpers in
+// models.go, beside every other encoding it emits — ADR 0033 puts the
+// conversions in unexported positions and does not place them in a file,
+// and gqlc-fg0r left the name to whatever the AGE renderer chose.
+//
+// The limit this carries: for such a target the bridge arm confirms the
+// named file references a carrier, and cannot tell a conversion from a
+// struct field. What holds AGE's conversions themselves is the encode and
+// decode tests in internal/codegen/age.
+var inPlaceCarrierBridges = map[string]string{"apache-age-pgx-v5": "models.go"}
 
 // isCarrierDeclaration reports whether a file declares the temporal
 // carriers or bridges them. Excluded from the reference scan below,
@@ -1564,6 +1577,8 @@ func readTemporalEmission(dir string, carriers map[string]bool) (temporalEmissio
 	}
 
 	var out temporalEmission
+	inPlace := inPlaceCarrierBridges[filepath.Base(dir)]
+	inPlaceNamesCarrier := false
 	fset := token.NewFileSet()
 	for _, path := range files {
 		base := filepath.Base(path)
@@ -1585,12 +1600,20 @@ func readTemporalEmission(dir string, carriers map[string]bool) (temporalEmissio
 			case *ast.SelectorExpr:
 				return false
 			case *ast.Ident:
-				if carriers[node.Name] && out.referencedBy == "" {
-					out.referencedBy = fmt.Sprintf("%s:%d", path, fset.Position(node.Pos()).Line)
+				if carriers[node.Name] {
+					if out.referencedBy == "" {
+						out.referencedBy = fmt.Sprintf("%s:%d", path, fset.Position(node.Pos()).Line)
+					}
+					if base == inPlace {
+						inPlaceNamesCarrier = true
+					}
 				}
 			}
 			return true
 		})
+	}
+	if inPlaceNamesCarrier {
+		out.bridges = append(out.bridges, inPlace)
 	}
 	return out, nil
 }
@@ -1651,17 +1674,17 @@ func TestTemporalCarriersAreEmittedExactlyWhenReferenced(t *testing.T) {
 }
 
 // TestTemporalEmissionIsReadPerTarget holds the classification above
-// against package shapes the committed corpus cannot hold, because every
-// golden that bears a carrier today is a neo4j one: apache-age-pgx-v5 has
-// no temporal support, so the bridge half of the requirement has only
-// ever been reached for the target whose bridge is temporal_neo4j.go.
+// against package shapes the committed corpus does not hold, so the
+// bridge arm is witnessed for more than the one target whose bridge is
+// temporal_neo4j.go.
 //
-// The bridge is therefore read by shape and not by that one name. What
-// the requirement wants is that the target emitted ITS bridge — a target
+// What the requirement wants is that the target emitted ITS bridge, so
+// the bridge is read by shape rather than by that one name: a target
 // naming its own temporal_<driver>.go satisfies it, and a package that
 // emits the neutral carriers with nothing beside them does not, whoever
-// generated it. The rows below are the two an AGE target with temporals
-// would be the first to run (bd gqlc-fg0r).
+// generated it. Shape alone is not the whole rule — a target may bridge
+// in a file it already emits, which the last two rows hold and which is
+// what AGE does (bd gqlc-fg0r, gqlc-mv3r).
 func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 	carriers := map[string]bool{}
 	for _, name := range codegen.TemporalCarriers {
@@ -1674,7 +1697,11 @@ func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 	const bridgesCarriers = "package p\n\nfunc toDate(v any) Date { return Date{} }\n"
 
 	rows := []struct {
-		name         string
+		name string
+		// target names the directory the row's package is written to,
+		// for the rows that turn on which target it is. Empty means the
+		// temp directory itself, whose random name matches no target.
+		target       string
 		files        map[string]string
 		wantRef      bool
 		wantCarriers bool
@@ -1736,11 +1763,41 @@ func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 			name:  "no temporals at all",
 			files: map[string]string{"models.go": namesNothing},
 		},
+		{
+			// AGE's bridge is not a file of its own, so the shape rule
+			// alone reads this package as carriers with nothing beside
+			// them. This is the shape every AGE golden bearing a temporal
+			// width actually has (gqlc-mv3r).
+			name:   "a target that bridges in place",
+			target: "apache-age-pgx-v5",
+			files: map[string]string{
+				"models.go":   namesCarrier,
+				"temporal.go": declaresCarriers,
+			},
+			wantRef: true, wantCarriers: true, wantBridges: []string{"models.go"},
+		},
+		{
+			// The in-place bridge is not free: it counts only when the
+			// named file references a carrier. Here models.go does not,
+			// so the do-not-emit half still fires against the same target.
+			name:   "a target that bridges in place, in a package that names no carrier",
+			target: "apache-age-pgx-v5",
+			files: map[string]string{
+				"models.go":   namesNothing,
+				"temporal.go": declaresCarriers,
+			},
+			wantRef: false, wantCarriers: true, wantBridges: nil,
+			wantBreach: "emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing",
+		},
 	}
 
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			dir := t.TempDir()
+			if row.target != "" {
+				dir = filepath.Join(dir, row.target)
+				require.NoError(t, os.Mkdir(dir, 0o755))
+			}
 			for base, contents := range row.files {
 				require.NoError(t, os.WriteFile(filepath.Join(dir, base), []byte(contents), 0o644))
 			}

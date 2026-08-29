@@ -25,6 +25,8 @@ import (
 	entitynodev6 "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/neo4j-go-v6"
 	listlistv5 "github.com/areqag/gqlc/test/data/codegen/valid/list_list_int/golden/neo4j-go-v5"
 	listlistv6 "github.com/areqag/gqlc/test/data/codegen/valid/list_list_int/golden/neo4j-go-v6"
+	ldtv5 "github.com/areqag/gqlc/test/data/codegen/valid/local_datetime_constructed_column/golden/neo4j-go-v5"
+	ldtv6 "github.com/areqag/gqlc/test/data/codegen/valid/local_datetime_constructed_column/golden/neo4j-go-v6"
 	manycolmanyv5 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v5"
 	manycolmanyv6 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v6"
 	mixedv5 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v5"
@@ -90,7 +92,29 @@ type neo4jV5 struct {
 	edgeUnion  edgeUnionV5
 	timestamps timestampRoundtripV5
 	temporals  temporalRoundtripV5
+	builtLDT   localDateTimeColumnV5
 	zonedTimes zonedTimeRoundtripV5
+}
+
+// neo4jStoredTemporal is both neo4j arms' declaration of what their target
+// keeps of a written zoneless temporal: all of it. The driver carries a
+// LocalTime and a Duration natively, at nanosecond resolution and with the
+// Months, Days and Seconds of a duration held apart, so nothing is
+// truncated and nothing is folded. The identity here is that claim, not
+// the absence of one — an arm that coarsened a value would have to change
+// this to stay green.
+type neo4jStoredTemporal struct{}
+
+func (neo4jStoredTemporal) storedLocalTime(v localTimeValue) localTimeValue { return v }
+
+func (neo4jStoredTemporal) storedDuration(v durationValue) durationValue { return v }
+
+// neo4jSeenOnCypher spells the nullable-date seed for both neo4j arms.
+// date() is neo4j's constructor for the width, which is what makes this
+// outside the dialect intersection backend.seed serves and the reason the
+// seed is a method on the arm at all.
+func neo4jSeenOnCypher(id int64, on dateValue) string {
+	return fmt.Sprintf("MATCH (r:Reading {id: %d}) SET r.seenOn = date('%04d-%02d-%02d')", id, on.Year, on.Month, on.Day)
 }
 
 func startNeo4jV5(ctx context.Context, t *testing.T) harness {
@@ -118,6 +142,7 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 		edgeUnion:  edgeUnionV5{q: edgeunionv5.New(driver)},
 		timestamps: timestampRoundtripV5{q: tsv5.New(driver)},
 		temporals:  temporalRoundtripV5{q: temporalv5.New(driver)},
+		builtLDT:   localDateTimeColumnV5{q: ldtv5.New(driver)},
 		zonedTimes: zonedTimeRoundtripV5{q: zonedv5.New(driver)},
 	}
 }
@@ -144,6 +169,11 @@ func (h *neo4jV5) temporalScenario(ctx context.Context, t *testing.T) temporalBa
 	return h.newScenario(ctx, t)
 }
 
+func (h *neo4jV5) localDateTimeColumnScenario(ctx context.Context, t *testing.T) localDateTimeColumnBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
 func (h *neo4jV5) zonedTimeScenario(ctx context.Context, t *testing.T) zonedTimeBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
@@ -158,7 +188,10 @@ func (h *neo4jV5) newScenario(ctx context.Context, t *testing.T) neo4jV5Scenario
 
 // neo4jV5Scenario is one scenario's view of the neo4jV5 arm: the server's
 // single graph, wiped as the scenario opened.
-type neo4jV5Scenario struct{ arm *neo4jV5 }
+type neo4jV5Scenario struct {
+	neo4jStoredTemporal
+	arm *neo4jV5
+}
 
 func (s neo4jV5Scenario) seed(ctx context.Context, t *testing.T, cypher string) {
 	t.Helper()
@@ -212,6 +245,13 @@ func (a timestampRoundtripV5) oneEvent(ctx context.Context, id int64) (eventEnti
 }
 
 func (s neo4jV5Scenario) temporalRoundtrip() temporalRoundtripQuerier { return s.arm.temporals }
+
+func (s neo4jV5Scenario) seedSeenOn(ctx context.Context, t *testing.T, id int64, on dateValue) {
+	t.Helper()
+	s.seed(ctx, t, neo4jSeenOnCypher(id, on))
+}
+
+func (s neo4jV5Scenario) localDateTimeColumn() localDateTimeColumnQuerier { return s.arm.builtLDT }
 
 func (s neo4jV5Scenario) zonedTimeRoundtrip() zonedTimeRoundtripQuerier { return s.arm.zonedTimes }
 
@@ -284,7 +324,12 @@ func (a temporalRoundtripV5) oneReading(ctx context.Context, id int64) (readingE
 	return out, nil
 }
 
-func (a temporalRoundtripV5) builtLocalDateTime(ctx context.Context) (localDateTimeValue, error) {
+func (a temporalRoundtripV5) errNoRows() error { return temporalv5.ErrNoRows }
+
+// localDateTimeColumnV5 binds the constructed-LOCALDATETIME fixture.
+type localDateTimeColumnV5 struct{ q *ldtv5.Queries }
+
+func (a localDateTimeColumnV5) builtLocalDateTime(ctx context.Context) (localDateTimeValue, error) {
 	v, err := a.q.BuiltLocalDateTime(ctx)
 	if err != nil {
 		return localDateTimeValue{}, err
@@ -294,8 +339,6 @@ func (a temporalRoundtripV5) builtLocalDateTime(ctx context.Context) (localDateT
 		Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond,
 	}, nil
 }
-
-func (a temporalRoundtripV5) errNoRows() error { return temporalv5.ErrNoRows }
 
 // zonedTimeRoundtripV5 binds the zoned temporal fixture.
 type zonedTimeRoundtripV5 struct{ q *zonedv5.Queries }
@@ -521,6 +564,7 @@ type neo4jV6 struct {
 	edgeUnion  edgeUnionV6
 	timestamps timestampRoundtripV6
 	temporals  temporalRoundtripV6
+	builtLDT   localDateTimeColumnV6
 	zonedTimes zonedTimeRoundtripV6
 }
 
@@ -549,6 +593,7 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 		edgeUnion:  edgeUnionV6{q: edgeunionv6.New(driver)},
 		timestamps: timestampRoundtripV6{q: tsv6.New(driver)},
 		temporals:  temporalRoundtripV6{q: temporalv6.New(driver)},
+		builtLDT:   localDateTimeColumnV6{q: ldtv6.New(driver)},
 		zonedTimes: zonedTimeRoundtripV6{q: zonedv6.New(driver)},
 	}
 }
@@ -575,6 +620,11 @@ func (h *neo4jV6) temporalScenario(ctx context.Context, t *testing.T) temporalBa
 	return h.newScenario(ctx, t)
 }
 
+func (h *neo4jV6) localDateTimeColumnScenario(ctx context.Context, t *testing.T) localDateTimeColumnBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
 func (h *neo4jV6) zonedTimeScenario(ctx context.Context, t *testing.T) zonedTimeBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
@@ -589,7 +639,10 @@ func (h *neo4jV6) newScenario(ctx context.Context, t *testing.T) neo4jV6Scenario
 
 // neo4jV6Scenario is one scenario's view of the neo4jV6 arm: the server's
 // single graph, wiped as the scenario opened.
-type neo4jV6Scenario struct{ arm *neo4jV6 }
+type neo4jV6Scenario struct {
+	neo4jStoredTemporal
+	arm *neo4jV6
+}
 
 func (s neo4jV6Scenario) seed(ctx context.Context, t *testing.T, cypher string) {
 	t.Helper()
@@ -643,6 +696,13 @@ func (a timestampRoundtripV6) oneEvent(ctx context.Context, id int64) (eventEnti
 }
 
 func (s neo4jV6Scenario) temporalRoundtrip() temporalRoundtripQuerier { return s.arm.temporals }
+
+func (s neo4jV6Scenario) seedSeenOn(ctx context.Context, t *testing.T, id int64, on dateValue) {
+	t.Helper()
+	s.seed(ctx, t, neo4jSeenOnCypher(id, on))
+}
+
+func (s neo4jV6Scenario) localDateTimeColumn() localDateTimeColumnQuerier { return s.arm.builtLDT }
 
 func (s neo4jV6Scenario) zonedTimeRoundtrip() zonedTimeRoundtripQuerier { return s.arm.zonedTimes }
 
@@ -711,7 +771,13 @@ func (a temporalRoundtripV6) oneReading(ctx context.Context, id int64) (readingE
 	return out, nil
 }
 
-func (a temporalRoundtripV6) builtLocalDateTime(ctx context.Context) (localDateTimeValue, error) {
+func (a temporalRoundtripV6) errNoRows() error { return temporalv6.ErrNoRows }
+
+// localDateTimeColumnV6 binds the constructed-LOCALDATETIME fixture on the
+// v6 driver.
+type localDateTimeColumnV6 struct{ q *ldtv6.Queries }
+
+func (a localDateTimeColumnV6) builtLocalDateTime(ctx context.Context) (localDateTimeValue, error) {
 	v, err := a.q.BuiltLocalDateTime(ctx)
 	if err != nil {
 		return localDateTimeValue{}, err
@@ -721,8 +787,6 @@ func (a temporalRoundtripV6) builtLocalDateTime(ctx context.Context) (localDateT
 		Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond,
 	}, nil
 }
-
-func (a temporalRoundtripV6) errNoRows() error { return temporalv6.ErrNoRows }
 
 // zonedTimeRoundtripV6 binds the zoned temporal fixture on the v6 driver.
 type zonedTimeRoundtripV6 struct{ q *zonedv6.Queries }

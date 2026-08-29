@@ -18,11 +18,21 @@ const (
 	edgeAnnotation   = "::edge"
 )
 
-// goInstant is the Go type text every temporal this backend carries is
-// emitted as, and the token the render layer dispatches the encoding on
-// — the type table is the only thing that decides which resolved types
-// reach it (ADR 0025).
-const goInstant = "time.Time"
+// The Go type texts this backend's temporals are emitted as, and the
+// tokens the render layer dispatches each encoding on — the type table
+// is the only thing that decides which resolved types reach them (ADR
+// 0025).
+//
+// goInstant is the standard library's, which is already neutral.
+// The other three name the carriers temporal.go declares in the
+// generated package itself (ADR 0033), so they are unqualified and cost
+// no import.
+const (
+	goInstant   = "time.Time"
+	goDate      = "Date"
+	goLocalTime = "LocalTime"
+	goDuration  = "Duration"
+)
 
 // offsetSidecar names the property one field's UTC offset in seconds
 // rides in, with ok=false for a field whose stored value carries no
@@ -90,6 +100,23 @@ type helpers struct {
 	micros     bool // agtypeMicros — some query binds a non-nullable instant parameter
 	nullMicros bool // agtypeNullableMicros — some query binds a nullable one
 
+	date      bool // agtypeDate — something decodes a stored DATE
+	localTime bool // agtypeLocalTime — something decodes a stored LOCAL TIME
+	duration  bool // agtypeDuration — something decodes a stored DURATION
+
+	// The encode direction of the same three widths. Each is one helper
+	// whatever nullability or nesting the parameter has, because the two
+	// combinators below carry those: an encoder that can fail has no
+	// expression form inside the args map literal, so the emission binds
+	// its result to a local either way and there is nothing for a
+	// per-nullability variant to save.
+	dateText        bool // agtypeDateText — some query binds a DATE parameter
+	localTimeMicros bool // agtypeLocalTimeMicros — some query binds a LOCAL TIME parameter
+	durationMicros  bool // agtypeDurationMicros — some query binds a DURATION parameter
+
+	encNullable bool // agtypeEncodedNullable — one of those parameters is nullable
+	encList     bool // agtypeEncodedList — one of those parameters is a list
+
 	// lists holds every Go slice type the batch decodes into, each of
 	// which takes a named wrapper around the generic walk. A nested list
 	// registers its element type too, because the outer wrapper's element
@@ -97,15 +124,21 @@ type helpers struct {
 	lists []string
 }
 
-// temporal reports whether the batch encodes a temporal at all, which is
-// what puts the encoding's description in the package doc and the time
-// import in models.go.
+// importsTime reports whether models.go names the time package, which
+// is the whole of what it decides.
+//
+// It is not "the batch carries a temporal": LOCAL TIME and DURATION both
+// ride the integer scalar in either direction and their helpers do
+// arithmetic on an int64, so a batch carrying nothing but those two
+// spells no time at all. DATE is on the list because both directions of
+// its encoding go through the calendar — time.Parse to read the ISO
+// string, time.Date to reject a day the calendar does not have.
 //
 // zone is not a disjunct. It is marked on an entity field whose Go type
 // is the instant, which is the same condition that marks instant, so a
 // batch reaching the sidecar read has already answered true here.
-func (h helpers) temporal() bool {
-	return h.instant || h.micros || h.nullMicros
+func (h helpers) importsTime() bool {
+	return h.instant || h.micros || h.nullMicros || h.date || h.dateText
 }
 
 // forEntities marks the helpers an entity emission reaches beyond the
@@ -129,17 +162,51 @@ func (h *helpers) forEntities(entities []wiredEntity) {
 }
 
 // forParams marks the helpers one query's bound parameters encode
-// through. Only an instant needs one: every other emitted Go type is
-// already a shape the JSON encoder writes as the agtype scalar it rides.
+// through. Only a temporal needs one: every other emitted Go type is
+// already a shape the JSON encoder writes as the agtype scalar it rides,
+// and a carrier left alone would cross as the JSON object its fields
+// spell rather than as the scalar the encoding stores.
+//
+// Nullability and list nesting are marked on the two combinators rather
+// than on a variant of each encoder, and the leaf carrier is what the
+// encoder itself is chosen by, so a []Date and a *Date mark the same
+// agtypeDateText.
 func (h *helpers) forParams(params []codegen.Param) {
 	for _, p := range params {
-		if p.GoType != goInstant {
+		leaf, list := p.GoType, false
+		if elem, ok := strings.CutPrefix(leaf, "[]"); ok {
+			leaf, list = elem, true
+		}
+		if leaf == goInstant {
+			// The instant predates the combinators and keeps its own
+			// pair: its encode cannot fail, so it stays an expression
+			// inside the args map and needs no local bound to it.
+			if p.Nullable {
+				h.nullMicros = true
+			} else {
+				h.micros = true
+			}
+			continue
+		}
+		fallible := true
+		switch leaf {
+		case goDate:
+			h.dateText = true
+		case goLocalTime:
+			h.localTimeMicros = true
+		case goDuration:
+			h.durationMicros = true
+		default:
+			fallible = false
+		}
+		if !fallible {
 			continue
 		}
 		if p.Nullable {
-			h.nullMicros = true
-		} else {
-			h.micros = true
+			h.encNullable = true
+		}
+		if list {
+			h.encList = true
 		}
 	}
 }
@@ -174,6 +241,16 @@ func (h *helpers) need(goType string) {
 		// The instant rides the integer scalar, so its helper is built
 		// on the integer one.
 		h.instant = true
+		h.integer = true
+	case goDate:
+		// The date rides the string scalar, which every emission
+		// declares, so there is no second helper to mark here.
+		h.date = true
+	case goLocalTime:
+		h.localTime = true
+		h.integer = true
+	case goDuration:
+		h.duration = true
 		h.integer = true
 	}
 }
@@ -268,7 +345,7 @@ func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	if h.integer || h.float {
 		b.WriteString("\t\"strconv\"\n\t\"strings\"\n")
 	}
-	if h.temporal() {
+	if h.importsTime() {
 		b.WriteString("\t\"time\"\n")
 	}
 	b.WriteString(")\n")
@@ -403,6 +480,129 @@ func agtypeInstant(raw []byte) (time.Time, error) {
 }
 `)
 	}
+	if h.date || h.dateText {
+		b.WriteString(`
+// agtypeDateLayout is the stored form of a DATE, in the reference time
+// every Go layout is written in. Zero-padded and four-digit: both halves
+// are load-bearing, because they are the whole of why the stored strings
+// sort chronologically.
+const agtypeDateLayout = "2006-01-02"
+`)
+	}
+	if h.date {
+		b.WriteString(`
+// agtypeDate decodes a stored DATE. agtype has no temporal value, so
+// gqlc stores one as the string scalar in zero-padded ISO YYYY-MM-DD:
+// the one temporal spelling whose lexical order is its chronological
+// order, so an author's ORDER BY n.dob is answered by the database's own
+// string comparison with nothing for gqlc to rewrite.
+//
+// That ordering holds across [0001-01-01, 9999-12-31] and nowhere else,
+// which is why the padding and the bound are read back here rather than
+// assumed. A year needing a fifth digit sorts under every four-digit year
+// because '1' < '2', and a proleptic year before 1 CE needs a sign, which
+// sorts under every digit and files the whole era at the front,
+// ascending. gqlc's own encode produces neither — it refuses them — but
+// it writes to an ordinary agtype string property on a vertex any writer
+// can touch, so what is read back is whatever the graph holds.
+//
+// The padding is enforced by the layout and not by a check beside it.
+// time.Parse reads each field at a fixed width, so '2024-1-2' fails at
+// the month, '24-01-02' at the year, and a signed or five-digit year at
+// the first byte that is not a digit where one belongs — every spelling
+// that would sort in the wrong place is refused before a Date is built.
+//
+// That leaves the range bounded at one end only, which is measured
+// rather than an oversight. A year over 9999 needs a fifth digit and a
+// year before 1 CE needs a sign, and the layout refuses both; year 0 is
+// the one out-of-range year spelled with four unsigned digits, so it is
+// the only one that reaches here, and it is what this bound is for.
+func agtypeDate(raw []byte) (Date, error) {
+	text, err := agtypeString(raw)
+	if err != nil {
+		return Date{}, err
+	}
+	at, err := time.Parse(agtypeDateLayout, text)
+	if err != nil {
+		return Date{}, fmt.Errorf("gqlc: %q is not a date in zero-padded ISO YYYY-MM-DD form: %w", text, err)
+	}
+	if at.Year() < 1 {
+		return Date{}, fmt.Errorf("gqlc: %q is outside the year 1 to year 9999 range this encoding admits", text)
+	}
+	return Date{Year: at.Year(), Month: int(at.Month()), Day: at.Day()}, nil
+}
+`)
+	}
+	if h.localTime {
+		b.WriteString(`
+// agtypeLocalTime decodes a stored LOCAL TIME: the integer scalar,
+// counting microseconds since midnight. The same argument as the
+// instant, one width down — the count is non-negative and fixed-range,
+// so agtype's integer ordering is chronological order within the day and
+// an author's ORDER BY needs no rewriting.
+//
+// The count is bounded to [0, 86400000000) before the reading is built,
+// because a count outside it names no clock reading at all and gqlc's
+// encode is not the only writer of the property. Sub-microsecond
+// precision is not in the count: it truncated at encode, which is this
+// backend's one policy for every temporal it stores.
+func agtypeLocalTime(raw []byte) (LocalTime, error) {
+	micros, err := agtypeInt64(raw)
+	if err != nil {
+		return LocalTime{}, err
+	}
+	if micros < 0 || micros >= 86400000000 {
+		return LocalTime{}, fmt.Errorf(
+			"gqlc: %d microseconds since midnight is outside the [0, 86400000000) interval a clock reading occupies", micros)
+	}
+	return LocalTime{
+		Hour:       int(micros / 3600000000),
+		Minute:     int(micros / 60000000 % 60),
+		Second:     int(micros / 1000000 % 60),
+		Nanosecond: int(micros % 1000000 * 1000),
+	}, nil
+}
+`)
+	}
+	if h.duration {
+		b.WriteString(`
+// agtypeDuration decodes a stored DURATION: the integer scalar, counting
+// total microseconds. Signed, so a negative count is a duration
+// backwards and orders below every positive one.
+//
+// What comes back is normalised, and cannot be otherwise: the stored
+// count is one number, so the Months and Days a Duration can hold have
+// nothing to be filled from and stay zero. A value written as 90 days
+// reads back as 7776000 seconds. Months is zero rather than derived
+// because no fixed count of microseconds is faithful to a month — which
+// is the same reason the encode direction refuses a Duration carrying
+// one instead of storing an approximation of it.
+//
+// The division floors rather than truncating, so Nanos is never
+// negative and a duration backwards borrows from Seconds: -1500000
+// microseconds is Seconds -2 and Nanos 500000000, not Seconds -1 and
+// Nanos -500000000. Go's / and % truncate toward zero and would
+// produce the second, which no neo4j value ever takes — the driver
+// renders a Duration by borrowing from a negative Seconds against a
+// positive Nanos, so a negative Nanos is a shape its own String method
+// has no reading for. The two are the same amount of time either way;
+// what floor division buys is that the components a caller reads off
+// this carrier do not change meaning when the target does.
+func agtypeDuration(raw []byte) (Duration, error) {
+	micros, err := agtypeInt64(raw)
+	if err != nil {
+		return Duration{}, err
+	}
+	seconds := micros / 1000000
+	rem := micros % 1000000
+	if rem < 0 {
+		seconds--
+		rem += 1000000
+	}
+	return Duration{Seconds: seconds, Nanos: int(rem * 1000)}, nil
+}
+`)
+	}
 	if h.zone {
 		b.WriteString(`
 // agtypeZone puts a decoded instant back in the zone it was written in,
@@ -468,6 +668,123 @@ func agtypeNullableMicros(at *time.Time) *int64 {
 	}
 	micros := at.UnixMicro()
 	return &micros
+}
+`)
+	}
+	if h.dateText {
+		b.WriteString(`
+// agtypeDateText encodes a DATE into the string a query binds it as, the
+// same text agtypeDate reads back.
+//
+// It fails rather than encodes twice over. A year outside
+// [0001, 9999] has no zero-padded four-digit spelling, and the string it
+// would get instead sorts in the wrong place — which is the one property
+// the whole encoding rests on, so storing it would put a value in the
+// column that silently breaks every ORDER BY over it. A Year, Month and
+// Day naming no day on the calendar fails for the narrower reason that
+// agtypeDate would refuse to read it back: time.Date rolls February 30th
+// forward to March 2nd, and a round trip that returns a different date
+// than it stored is not one.
+func agtypeDateText(d Date) (string, error) {
+	if d.Year < 1 || d.Year > 9999 {
+		return "", fmt.Errorf(
+			"gqlc: year %d is outside the year 1 to year 9999 range this encoding admits", d.Year)
+	}
+	at := time.Date(d.Year, time.Month(d.Month), d.Day, 0, 0, 0, 0, time.UTC)
+	if (Date{Year: at.Year(), Month: int(at.Month()), Day: at.Day()}) != d {
+		return "", fmt.Errorf(
+			"gqlc: year %d month %d day %d is not a date on the calendar", d.Year, d.Month, d.Day)
+	}
+	return at.Format(agtypeDateLayout), nil
+}
+`)
+	}
+	if h.localTimeMicros {
+		b.WriteString(`
+// agtypeLocalTimeMicros encodes a LOCAL TIME into the integer a query
+// binds it as, the same count agtypeLocalTime reads back.
+//
+// Each component is bounded on its own rather than the sum being bounded
+// once. The two are not the same check: an Hour of -1 beside a Minute of
+// 60 sums into the interval and would encode as midnight, which is a
+// reading the caller never wrote. Bounding the components refuses it and
+// makes the [0, 86400000000) interval the decode enforces a consequence
+// rather than a second rule.
+//
+// Sub-microsecond precision truncates, which is this backend's policy for
+// every temporal it stores and not a decision taken here.
+func agtypeLocalTimeMicros(t LocalTime) (int64, error) {
+	if t.Hour < 0 || t.Hour > 23 || t.Minute < 0 || t.Minute > 59 ||
+		t.Second < 0 || t.Second > 59 || t.Nanosecond < 0 || t.Nanosecond > 999999999 {
+		return 0, fmt.Errorf(
+			"gqlc: hour %d minute %d second %d nanosecond %d is not a clock reading",
+			t.Hour, t.Minute, t.Second, t.Nanosecond)
+	}
+	return int64(t.Hour)*3600000000 + int64(t.Minute)*60000000 +
+		int64(t.Second)*1000000 + int64(t.Nanosecond)/1000, nil
+}
+`)
+	}
+	if h.durationMicros {
+		b.WriteString(`
+// agtypeDurationMicros encodes a DURATION into the integer a query binds
+// it as, the same count agtypeDuration reads back.
+//
+// A Duration carrying months is refused rather than approximated. A month
+// is not a fixed count of microseconds — it is 28, 29, 30 or 31 days
+// depending on where it lands — so any count this could return would be
+// one the caller did not write, and a comparison against it would be
+// answered wrongly rather than refused. ADR 0002 collapsed the
+// (YEAR TO MONTH) and (DAY TO SECOND) qualifiers onto one carrier, so
+// which of the two a value holds is not knowable until it is in hand:
+// this is a run-time refusal because there is no generate-time question
+// to ask.
+//
+// Days are not months. A day is fixed at 86400 seconds in this encoding,
+// which carries no zone and so has no daylight-saving transition to fall
+// on, and it folds into the count.
+//
+// Sub-microsecond precision truncates, as everywhere else here.
+func agtypeDurationMicros(d Duration) (int64, error) {
+	if d.Months != 0 {
+		return 0, fmt.Errorf(
+			"gqlc: a duration of %d months has no faithful encoding here, because a month is not a fixed count of microseconds", d.Months)
+	}
+	return (d.Days*86400+d.Seconds)*1000000 + int64(d.Nanos)/1000, nil
+}
+`)
+	}
+	if h.encNullable {
+		b.WriteString(`
+// agtypeEncodedNullable runs a fallible encoder over an absent value,
+// which crosses as the agtype null a nullable parameter holds.
+func agtypeEncodedNullable[T, E any](in *T, encode func(T) (E, error)) (*E, error) {
+	if in == nil {
+		return nil, nil
+	}
+	out, err := encode(*in)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+`)
+	}
+	if h.encList {
+		b.WriteString(`
+// agtypeEncodedList runs a fallible encoder over every element of a bound
+// list. The index is named on failure: the elements share one parameter
+// name, so it is the only thing that says which value was refused.
+func agtypeEncodedList[T, E any](in []T, encode func(T) (E, error)) ([]E, error) {
+	out := make([]E, len(in))
+	for i, v := range in {
+		encoded, err := encode(v)
+		if err != nil {
+			return nil, fmt.Errorf("gqlc: element %d: %w", i, err)
+		}
+		out[i] = encoded
+	}
+	return out, nil
 }
 `)
 	}

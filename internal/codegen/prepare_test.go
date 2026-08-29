@@ -587,12 +587,6 @@ func TestTemporalKindRefusalReachesTheCaller(t *testing.T) {
 // Apache AGE emission declares.
 var ageOnlyTargets = []string{"apache-age-pgx-v5"}
 
-// neo4jTargets is the golden target set for the five temporal carriers
-// (ADR 0033). Only the neo4j emission switched its temporal columns onto
-// them so far; the Apache AGE admission of the four refused widths is a
-// separate bead, and until it lands no AGE golden declares a carrier.
-var neo4jTargets = []string{"neo4j-go-v5", "neo4j-go-v6"}
-
 // reservedIdentifierRows is the reserved set written out longhand, with
 // the scope each name's emitted declaration occupies and the golden
 // targets that declare it. Both columns are read off the committed
@@ -605,6 +599,12 @@ var neo4jTargets = []string{"neo4j-go-v5", "neo4j-go-v6"}
 // AGE alone, so refusing `NODE TYPE DBTX` on a neo4j-only batch refuses
 // a name neo4j's emission leaves free — a false refusal on that target.
 // The set is uniform anyway, per D2 Resolved.
+//
+// The five temporal carriers are not among the asymmetric rows even
+// though the backends admit different temporal widths. temporal.go
+// declares all five together whichever width triggered it, so Apache AGE
+// declares Time while still refusing a zoned TIME column (gqlc-oeqi):
+// what reserves the name is the emission, not the admission.
 var reservedIdentifierRows = []struct {
 	name       string
 	scope      identifierScope
@@ -627,11 +627,11 @@ var reservedIdentifierRows = []struct {
 	{"Begin", scopeMethod, nil},
 	{"Commit", scopeMethod, nil},
 	{"Rollback", scopeMethod, nil},
-	{"Date", scopePackage, neo4jTargets},
-	{"Time", scopePackage, neo4jTargets},
-	{"LocalTime", scopePackage, neo4jTargets},
-	{"LocalDateTime", scopePackage, neo4jTargets},
-	{"Duration", scopePackage, neo4jTargets},
+	{"Date", scopePackage, nil},
+	{"Time", scopePackage, nil},
+	{"LocalTime", scopePackage, nil},
+	{"LocalDateTime", scopePackage, nil},
+	{"Duration", scopePackage, nil},
 }
 
 // TestReservedIdentifiersAreUniformAcrossBackends pins the reserved set

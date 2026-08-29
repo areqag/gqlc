@@ -49,6 +49,12 @@ func TestTypeMapProperty(t *testing.T) {
 		{graph.TypeAnyPropertyValue, "any"},
 		{graph.TypeList, "[]any"},
 		{graph.TypeTimestamp, "time.Time"},
+		// The three widths that ride the neutral carriers temporal.go
+		// declares, which is what a Postgres-through-pgx backend can
+		// spell where it cannot spell a neo4j driver type.
+		{graph.TypeDate, "Date"},
+		{graph.TypeLocalTime, "LocalTime"},
+		{graph.TypeDuration, "Duration"},
 	}
 	for _, tt := range representable {
 		t.Run("representable/"+string(tt.pt), func(t *testing.T) {
@@ -61,12 +67,10 @@ func TestTypeMapProperty(t *testing.T) {
 	unrepresentable := []graph.PropertyType{
 		// agtype has no byte-string scalar.
 		graph.TypeBytes,
-		// The three widths neo4j spells with a driver type, which a
-		// Postgres backend cannot declare without varying the caller-facing
-		// surface by backend, and the calendar duration no fixed count of
-		// microseconds is faithful to.
-		graph.TypeDate, graph.TypeTime, graph.TypeLocalTime,
-		graph.TypeDuration,
+		// The one temporal width still without a carrier here. Its value
+		// carries an offset, which rides a sidecar named after the
+		// property; admitting it is gqlc-oeqi.
+		graph.TypeTime,
 		// No faithful Go carrier on any backend (§9).
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
@@ -96,6 +100,12 @@ func TestTypeMapProperty(t *testing.T) {
 			graph.ListOf(graph.TypeAnyPropertyValue, false):                             "[]any",
 			graph.ListOf(graph.ListOf(graph.TypeInt64, false), false):                   "[][]int64",
 			graph.ListOf(graph.ListOf(graph.ListOf(graph.TypeBool, true), false), true): "[][][]bool",
+			// The three admitted temporal widths carry no zone, so unlike
+			// the instant they have nothing that a list's single name
+			// would have to hold once per element.
+			graph.ListOf(graph.TypeDate, false):      "[]Date",
+			graph.ListOf(graph.TypeLocalTime, false): "[]LocalTime",
+			graph.ListOf(graph.TypeDuration, true):   "[]Duration",
 		}
 		for pt, want := range cases {
 			got, ok := typeMap{}.Property(pt)
@@ -107,9 +117,10 @@ func TestTypeMapProperty(t *testing.T) {
 	// A width with no carrier does not acquire one by being wrapped in a
 	// list: the elements would reach a slice no helper can fill. TIMESTAMP
 	// is here despite carrying as a property, because the zone sidecar is
-	// named after the property and a list has one name for every element.
+	// named after the property and a list has one name for every element;
+	// TIME would be there for the same reason if it had a carrier at all.
 	t.Run("a list of an uncarried element width is rejected", func(t *testing.T) {
-		for _, elem := range []graph.PropertyType{graph.TypeDecimal, graph.TypeDuration, graph.TypeBytes, graph.TypeTimestamp} {
+		for _, elem := range []graph.PropertyType{graph.TypeDecimal, graph.TypeTime, graph.TypeBytes, graph.TypeTimestamp} {
 			for _, pt := range []graph.PropertyType{
 				graph.ListOf(elem, false),
 				graph.ListOf(graph.ListOf(elem, false), false),
@@ -145,10 +156,10 @@ func TestTypeMapProperty(t *testing.T) {
 // accepts, so a config declaring both targets fails on one of them and
 // the backend name is what says which. The list row is what says the
 // report names the property's declared width and not the element's:
-// LIST<DURATION> is what the author wrote, and DURATION alone is not
+// LIST<TIME> is what the author wrote, and TIME alone is not
 // a line they could go and find.
 func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
-	for _, pt := range []graph.PropertyType{graph.TypeBytes, graph.TypeDuration, graph.ListOf(graph.TypeDuration, false)} {
+	for _, pt := range []graph.PropertyType{graph.TypeBytes, graph.TypeTime, graph.ListOf(graph.TypeTime, false)} {
 		t.Run(string(pt), func(t *testing.T) {
 			files, err := generate(codegen.Input{Schema: schemaWithPayload(pt)}, "age")
 			require.ErrorIs(t, err, codegen.ErrUnrepresentableWidth)
@@ -167,7 +178,7 @@ func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
 // where it was. Only the query rejection says so.
 func TestUnservedQueriesOutrankUnrepresentableWidths(t *testing.T) {
 	files, err := generate(codegen.Input{
-		Schema: schemaWithPayload(graph.TypeDuration),
+		Schema: schemaWithPayload(graph.TypeTime),
 		Queries: []codegen.NamedQuery{{
 			Name: "Wipe",
 			Validated: resolver.ValidatedQuery{

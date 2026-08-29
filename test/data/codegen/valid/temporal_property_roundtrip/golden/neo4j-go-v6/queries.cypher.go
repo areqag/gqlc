@@ -182,29 +182,3 @@ func (q *Queries) OneReading(ctx context.Context, arg int64) (Reading, error) {
 	}
 	return value, nil
 }
-
-const builtLocalDateTimeQueryText = `RETURN localdatetime({year: 2024, month: 3, day: 5, hour: 6, minute: 7, second: 8, nanosecond: 9}) AS built`
-
-// BuiltLocalDateTime executes the BuiltLocalDateTime query.
-//
-//	RETURN localdatetime({year: 2024, month: 3, day: 5, hour: 6, minute: 7, second: 8, nanosecond: 9}) AS built
-func (q *Queries) BuiltLocalDateTime(ctx context.Context) (LocalDateTime, error) {
-	records, err := q.db.run(ctx, builtLocalDateTimeQueryText, nil, neo4j.AccessModeRead)
-	if err != nil {
-		return LocalDateTime{}, err
-	}
-	if len(records) == 0 {
-		return LocalDateTime{}, ErrNoRows
-	}
-	if len(records) > 1 {
-		return LocalDateTime{}, ErrMultipleResults
-	}
-	value, isNil, err := neo4j.GetRecordValue[dbtype.LocalDateTime](records[0], "built")
-	if err != nil {
-		return LocalDateTime{}, fmt.Errorf("BuiltLocalDateTime: decode column %q: %w", "built", err)
-	}
-	if isNil {
-		return LocalDateTime{}, fmt.Errorf("BuiltLocalDateTime: column %q is non-nullable but arrived null", "built")
-	}
-	return toLocalDateTime(value), nil
-}

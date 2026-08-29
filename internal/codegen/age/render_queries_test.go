@@ -158,12 +158,15 @@ func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
 // pin, one per Go type text.
 //
 // Temporal's zero is an assertion about this backend, not a category
-// that happens to be empty. Every arm of typeMap.Temporal answers
-// ok=false, which is why Prepare refuses a temporal column with
-// ErrUnrepresentableTemporal and no temporal carrier reaches decodeFunc
-// at all. The number is pinned so that a temporal width gaining a
-// carrier cannot pass through here silently: it fails that line, and a
-// carrier with no arm fails at its subtest first.
+// that happens to be empty, and it is narrower than it reads. It ranges
+// over temporal EXPRESSION kinds — the `date()` and `duration()`
+// constructors — every arm of which answers ok=false, so Prepare refuses
+// such a column with ErrUnrepresentableTemporal and none reaches
+// decodeFunc. Temporal PROPERTY widths are a separate question answered
+// by Property, and three of them do reach decodeFunc: DATE, LOCAL TIME
+// and DURATION ride the neutral carriers. The number is pinned so that a
+// constructor gaining a carrier cannot pass through here silently: it
+// fails that line, and a carrier with no arm fails at its subtest first.
 //
 // The counts come after the subtests deliberately. require aborts the
 // test at the first failure, so a count read ahead of the loop would
@@ -188,7 +191,7 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 		}
 	}
 
-	require.Len(t, byMethod["Property"], 17, "typeMap.Property named %v", byMethod["Property"])
+	require.Len(t, byMethod["Property"], 20, "typeMap.Property named %v", byMethod["Property"])
 	require.Len(t, byMethod["Scalar"], 6, "typeMap.Scalar named %v", byMethod["Scalar"])
 	require.Empty(t, byMethod["Temporal"], "typeMap.Temporal named %v, so this backend now carries a temporal "+
 		"width: read it against decodeFunc before moving this number", byMethod["Temporal"])

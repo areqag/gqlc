@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE LocalDatetimeConstructedColumn AS {
+    (:Reading {
+        id :: INT64 NOT NULL
+    })
+}
