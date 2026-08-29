@@ -84,8 +84,9 @@ func queriesOver(keys []string, rows ...[]any) *Queries {
 // either worded a refusal of its own or gone on to a later stage holding
 // the zero carrier the driver hands back with the error.
 //
-// The nil check is not defensive: it is what stops a caller from asserting
-// that a message contains the empty string, which every message does.
+// The nil check is not defensive: it is what stops the design alternative
+// (returning the empty string on an err-less call) from letting a caller
+// assert that a message contains the empty string, which every message does.
 func driverRefusal[T neo4j.RecordValue](t *testing.T, keys []string, values []any, key string) string {
 	t.Helper()
 	_, _, err := neo4j.GetRecordValue[T](&neo4j.Record{Keys: keys, Values: values}, key)
