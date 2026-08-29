@@ -255,19 +255,15 @@ func (s ageScenario) tx() txQuerier { return s.mixed }
 // the driver rather than to this comment.
 const ageNestedSavepoint = "sp_1"
 
-// beginDriverTx opens a transaction on the pool and registers its rollback,
-// so a scenario that fails mid-probe does not also strand the connection it
-// holds.
-func (s ageScenario) beginDriverTx(ctx context.Context, t *testing.T) pgx.Tx {
+// rollbackAtCleanup gives a probe transaction back when the scenario ends, so
+// one that fails mid-probe does not also strand the connection it holds.
+func rollbackAtCleanup(ctx context.Context, t *testing.T, tx pgx.Tx) {
 	t.Helper()
-	tx, err := s.pool.Begin(ctx)
-	require.NoError(t, err, "open a driver transaction on the pool")
 	t.Cleanup(func() {
 		if err := tx.Rollback(ctx); err != nil {
 			t.Logf("rollback probe transaction: %v", err)
 		}
 	})
-	return tx
 }
 
 // holdsNestedSavepoint asks the server to release ageNestedSavepoint and
@@ -296,7 +292,10 @@ func holdsNestedSavepoint(ctx context.Context, t *testing.T, tx pgx.Tx) bool {
 // it.
 func (s ageScenario) refuseNestedBegin(ctx context.Context, t *testing.T) (bool, error) {
 	t.Helper()
-	tx := s.beginDriverTx(ctx, t)
+	tx, err := s.pool.Begin(ctx)
+	require.NoError(t, err, "open a driver transaction on the pool")
+	rollbackAtCleanup(ctx, t, tx)
+
 	nested, err := mixedage.New(tx, s.graph).Begin(ctx)
 	if err == nil {
 		// Begin was served where it should have been refused. The row is
@@ -311,8 +310,11 @@ func (s ageScenario) refuseNestedBegin(ctx context.Context, t *testing.T) (bool,
 
 func (s ageScenario) serveNestedBegin(ctx context.Context, t *testing.T) bool {
 	t.Helper()
-	tx := s.beginDriverTx(ctx, t)
-	_, err := tx.Begin(ctx)
+	tx, err := s.pool.Begin(ctx)
+	require.NoError(t, err, "open a driver transaction on the pool")
+	rollbackAtCleanup(ctx, t, tx)
+
+	_, err = tx.Begin(ctx)
 	require.NoError(t, err, "the driver's own nested Begin must open a savepoint")
 	return holdsNestedSavepoint(ctx, t, tx)
 }
