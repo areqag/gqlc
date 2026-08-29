@@ -80,22 +80,28 @@ type typeMap struct{}
 // at run time, naming the field, because no fixed count of microseconds
 // is faithful to a month. Decode fills Seconds and Nanos alone.
 //
-// TIME is the one temporal width still refused for want of a carrier
-// here, and it is refused for the sidecar rather than for the count. Its
-// value carries an offset, which rides the flat <f>Offset sidecar named
-// after the property in the same arrangement TIMESTAMP's does; admitting
-// it is gqlc-oeqi.
+// TIME is microseconds since midnight in the integer scalar too, but
+// UTC-NORMALISED — the clock reading minus its offset, wrapped back into
+// [0, 86_400e6) — with the offset itself in the flat <f>Offset sidecar
+// named after the property, the same arrangement TIMESTAMP's uses.
+// Normalising is what makes the stored count comparable across offsets:
+// storage order is instant order, so agtype's integer ordering answers an
+// author's ORDER BY without gqlc rewriting it, which a raw local reading
+// would not. Decode adds the offset back, wrapping the other way, and
+// fills OffsetSeconds so the reading comes back in the zone it was
+// written in.
 //
-// An instant is admitted as a property and refused as a list element, at
-// every depth, and so is anything else carrying a zone: the offset rides
-// a sidecar named after the property, and a list has one name for all of
-// its elements, so a list of instants has nowhere to put the zone of any
-// element but the first. The three widths admitted above carry no zone,
-// so they ride a list on the ordinary rule.
+// A zoned width is admitted as a property and refused as a list element,
+// at every depth: the offset rides a sidecar named after the property,
+// and a list has one name for all of its elements, so a list of them has
+// nowhere to put the zone of any element but the first. carriesZone is
+// the one answer to which widths those are, and the same predicate
+// offsetSidecar derives a name from. The widths admitted above carry no
+// zone, so they ride a list on the ordinary rule.
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
 		elemTy, ok := t.Property(pt.Elem())
-		if !ok || elemTy == goInstant {
+		if !ok || carriesZone(elemTy) {
 			return "", false
 		}
 		return "[]" + elemTy, true
@@ -143,10 +149,11 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		return "Date", true
 	case graph.TypeLocalTime:
 		return "LocalTime", true
+	case graph.TypeTime:
+		return "Time", true
 	case graph.TypeDuration:
 		return "Duration", true
 	case graph.TypeBytes,
-		graph.TypeTime,
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,

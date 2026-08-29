@@ -121,6 +121,13 @@ var corpusTests = []string{
 	"TestAgtypeLocalTimeCountsMicrosecondsFromMidnight",
 	"TestAgtypeLocalTimeRefusesACountOutsideTheDay",
 	"TestAgtypeLocalTimeMicrosRefusesAReadingOffTheClock",
+	"TestAgtypeTimeMicrosNormalisesTheReadingAndWrapsTheDay",
+	"TestAgtypeTimeRefusesACountOutsideTheDay",
+	"TestAgtypeTimeMicrosRefusesAReadingOffTheClock",
+	"TestStoredTimesSortByTheirInstantAndNotTheirLocalClock",
+	"TestAgtypeTimeZoneRebuildsTheReadingItWasWrittenAt",
+	"TestDecodeVertexReadsTheOffsetSidecarBesideItsTime",
+	"TestEmittedMethodBindsATimeAsNormalisedMicroseconds",
 	"TestAgtypeDurationCountsTotalMicroseconds",
 	"TestAgtypeDurationMicrosFoldsDaysAndRefusesMonths",
 	"TestEmittedMethodBindsTheCarriersAsTheirScalars",
@@ -156,7 +163,7 @@ var corpusSubtests = map[string]int{
 // This is the third census because the first two cannot see the fixture's
 // commonest shape. corpusTests names top-level tests and a top-level test
 // passes whether or not anything ran inside it; corpusSubtests counts
-// subtest passes and this fixture has exactly one t.Run in 39 top-level
+// subtest passes and this fixture has exactly one t.Run in 46 top-level
 // tests, so a test whose table goes empty has no key on either side,
 // which is equality. Measured: emptying the five-entry table in
 // TestAgtypeListRefusesAnElementOfTheWrongScalar reddens this census and
@@ -178,25 +185,30 @@ var corpusTables = map[string]corpusrun.Table{
 	"TestAgtypeFloat64": {Rows: 21},
 	"TestAgtypeInstantCountsMicrosecondsFromTheEpoch":  {Rows: 11},
 	"TestAgtypeInstantRefusesACountOutsideTheCalendar": {Rows: 6},
-	"TestAgtypeInt64":                                     {Rows: 27},
-	"TestAgtypeListOfString":                              {Rows: 15},
-	"TestAgtypeListRefusesAnElementOfTheWrongScalar":      {Rows: 14},
-	"TestAgtypeLocalTimeCountsMicrosecondsFromMidnight":   {Rows: 11},
-	"TestAgtypeLocalTimeMicrosRefusesAReadingOffTheClock": {Rows: 9},
-	"TestAgtypeLocalTimeRefusesACountOutsideTheDay":       {Rows: 5},
-	"TestAgtypeMicrosEncodesTheInstantAndNotTheWallClock": {Rows: 8},
-	"TestAgtypeNestedList":                                {Rows: 5},
-	"TestAgtypeNullableMicrosCarriesAbsence":              {Rows: 4},
-	"TestAgtypeString":                                    {Rows: 26},
-	"TestAgtypeValue":                                     {Rows: 21},
-	"TestAgtypeZoneReadsAnOffsetInSeconds":                {Rows: 8},
-	"TestAgtypeZoneRefusesAnOffsetOutsideADay":            {Rows: 8},
-	"TestBoundGraphCountsBytes":                           {Rows: 7},
-	"TestCypherStmtComposesOneStatement":                  {Rows: 6},
-	"TestDecodeVertexRefusesMisshapenText":                {Rows: 16},
-	"TestEmittedMethodBindsAnInstantAsMicroseconds":       {Rows: 4},
-	"TestEmittedMethodBindsListsOfCarriers":               {Rows: 7},
-	"TestEmittedMethodBindsTheCarriersAsTheirScalars":     {Rows: 6},
+	"TestAgtypeInt64":                                        {Rows: 27},
+	"TestAgtypeListOfString":                                 {Rows: 15},
+	"TestAgtypeListRefusesAnElementOfTheWrongScalar":         {Rows: 14},
+	"TestAgtypeLocalTimeCountsMicrosecondsFromMidnight":      {Rows: 11},
+	"TestAgtypeLocalTimeMicrosRefusesAReadingOffTheClock":    {Rows: 9},
+	"TestAgtypeLocalTimeRefusesACountOutsideTheDay":          {Rows: 5},
+	"TestAgtypeMicrosEncodesTheInstantAndNotTheWallClock":    {Rows: 8},
+	"TestAgtypeNestedList":                                   {Rows: 5},
+	"TestAgtypeNullableMicrosCarriesAbsence":                 {Rows: 4},
+	"TestAgtypeString":                                       {Rows: 26},
+	"TestAgtypeTimeMicrosNormalisesTheReadingAndWrapsTheDay": {Rows: 9},
+	"TestAgtypeTimeMicrosRefusesAReadingOffTheClock":         {Rows: 15},
+	"TestAgtypeTimeRefusesACountOutsideTheDay":               {Rows: 12},
+	"TestAgtypeTimeZoneRebuildsTheReadingItWasWrittenAt":     {Rows: 8},
+	"TestAgtypeValue":                                        {Rows: 21},
+	"TestAgtypeZoneReadsAnOffsetInSeconds":                   {Rows: 8},
+	"TestAgtypeZoneRefusesAnOffsetOutsideADay":               {Rows: 8},
+	"TestBoundGraphCountsBytes":                              {Rows: 7},
+	"TestCypherStmtComposesOneStatement":                     {Rows: 6},
+	"TestDecodeVertexRefusesMisshapenText":                   {Rows: 16},
+	"TestEmittedMethodBindsATimeAsNormalisedMicroseconds":    {Rows: 4},
+	"TestEmittedMethodBindsAnInstantAsMicroseconds":          {Rows: 4},
+	"TestEmittedMethodBindsListsOfCarriers":                  {Rows: 7},
+	"TestEmittedMethodBindsTheCarriersAsTheirScalars":        {Rows: 6},
 }
 
 // TestEmittedHelpersDecodeTheAgtypeCorpus runs the emitted agtype
@@ -216,7 +228,7 @@ var corpusTables = map[string]corpusrun.Table{
 // composition bug agree with itself.
 func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
-	in.Queries = []codegen.NamedQuery{servedQuery, instantParamQuery, carrierParamQuery, listCarrierParamQuery}
+	in.Queries = []codegen.NamedQuery{servedQuery, instantParamQuery, carrierParamQuery, zonedParamQuery, listCarrierParamQuery}
 	emitted, err := age.New(age.WithPackageName(corpusPackage)).Generate(in)
 	s.Require().NoError(err)
 	files := make(map[string]string, len(emitted))

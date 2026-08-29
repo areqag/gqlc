@@ -1434,6 +1434,379 @@ func TestAgtypeLocalTimeMicrosRefusesAReadingOffTheClock(t *testing.T) {
 	}
 }
 
+// zonedTimes are clock readings and the UTC-normalised counts they store.
+// A TIME is stored as the reading minus its offset, wrapped into the day,
+// so the count is on one scale whatever zone the writer was in and
+// agtype's integer ordering over the column is instant ordering.
+//
+// The wrap is what these rows are for, and the first two are the whole of
+// why it is written out rather than left to Go's %. A reading east of UTC
+// subtracts past midnight and lands negative; Go's % follows the sign of
+// its left operand, so -5400000000 % 86400000000 is -5400000000 and not
+// the 81000000000 that count is. Taken as-is it stores a number no decode
+// accepts, or builds a reading with negative components. The row after it
+// is the same defect mirrored: a reading west of UTC subtracts to past
+// the end of the day and needs the correction in the other direction.
+//
+// The two rows either side of them are one instant read in two zones —
+// 23:00+02:00 and 22:30+00:00 are 21:00Z and 22:30Z — so the later local
+// clock stores the smaller count. Stored unnormalised they would sort the
+// other way round, which is the claim
+// TestStoredTimesSortByTheirInstantAndNotTheirLocalClock makes on its own.
+//
+// The offsets are seconds, and +03:30 is the row that says so: read as
+// minutes 12600 is 210 hours and out of the bound entirely, so a unit
+// confusion cannot land on a plausible zone. +13:45 is past the twelve
+// hours a reader might assume the bound to be and is a zone Chatham
+// keeps.
+var zonedTimes = []struct {
+	name   string
+	at     Time
+	micros int64
+}{
+	{"east of UTC, wrapping back into yesterday", Time{Minute: 30, OffsetSeconds: 7200}, 81000000000},
+	{"west of UTC, wrapping on into tomorrow", Time{Hour: 23, Minute: 30, OffsetSeconds: -7200}, 5400000000},
+	{"the later local reading is the earlier instant", Time{Hour: 23, OffsetSeconds: 7200}, 75600000000},
+	{"and the earlier local reading the later instant", Time{Hour: 22, Minute: 30}, 81000000000},
+	{"UTC, with no correction to make", Time{Hour: 12}, 43200000000},
+	{"midnight itself, reached from the east", Time{Hour: 2, OffsetSeconds: 7200}, 0},
+	{"the last microsecond of the day", Time{Hour: 23, Minute: 59, Second: 59, Nanosecond: 999999000}, 86399999999},
+	{"an offset counted in seconds and not minutes", Time{Hour: 10, OffsetSeconds: 12600}, 23400000000},
+	{"an offset past the twelve hours east of UTC", Time{Hour: 1, OffsetSeconds: 49500}, 40500000000},
+}
+
+// TestAgtypeTimeMicrosNormalisesTheReadingAndWrapsTheDay runs each row in
+// both directions. The decode is two helpers rather than one: agtypeTime
+// reads the count as the UTC reading it is, and agtypeTimeZone puts it
+// back in the zone the sidecar names. Only the pair returns the reading
+// the writer had, and only the round trip catches a wrap correction
+// applied in one direction and not the other — which is exactly what
+// leaving % to itself is.
+func TestAgtypeTimeMicrosNormalisesTheReadingAndWrapsTheDay(t *testing.T) {
+	for _, tc := range zonedTimes {
+		micros, err := agtypeTimeMicros(tc.at)
+		if err != nil {
+			t.Errorf("%s: agtypeTimeMicros(%+v) = error %v, want %d", tc.name, tc.at, err, tc.micros)
+			continue
+		}
+		if micros != tc.micros {
+			t.Errorf("%s: agtypeTimeMicros(%+v) = %d, want %d", tc.name, tc.at, micros, tc.micros)
+			continue
+		}
+
+		raw := strconv.FormatInt(tc.micros, 10)
+		utc, err := agtypeTime([]byte(raw))
+		if err != nil {
+			t.Errorf("%s: agtypeTime(%s) = error %v", tc.name, raw, err)
+			continue
+		}
+		// The count alone carries no zone, so what the first half returns
+		// is the UTC reading whatever the writer's offset was.
+		if utc.OffsetSeconds != 0 {
+			t.Errorf("%s: agtypeTime(%s) = %+v, want OffsetSeconds 0", tc.name, raw, utc)
+		}
+
+		props := map[string][]byte{"startsAtOffset": []byte(strconv.Itoa(tc.at.OffsetSeconds))}
+		back, err := agtypeTimeZone(props, "startsAtOffset", utc)
+		if err != nil {
+			t.Errorf("%s: agtypeTimeZone = error %v", tc.name, err)
+			continue
+		}
+		if back != tc.at {
+			t.Errorf("%s: agtypeTimeZone(%+v at offset %d) = %+v, want %+v",
+				tc.name, utc, tc.at.OffsetSeconds, back, tc.at)
+		}
+	}
+
+	// Sub-microsecond precision truncates on the way in, this backend's
+	// policy for every temporal it stores, so the reading that comes back
+	// is the truncated one and not the one written. Without this row the
+	// nanosecond component is only ever exercised at values the count
+	// happens to hold exactly.
+	fine := Time{Hour: 6, Minute: 15, Second: 30, Nanosecond: 123456789, OffsetSeconds: 20700}
+	micros, err := agtypeTimeMicros(fine)
+	if err != nil {
+		t.Fatalf("agtypeTimeMicros(%+v) = error %v", fine, err)
+	}
+	if micros != 1830123456 {
+		t.Errorf("agtypeTimeMicros(%+v) = %d, want 1830123456", fine, micros)
+	}
+}
+
+// TestAgtypeTimeRefusesACountOutsideTheDay bounds the stored count at both
+// ends. gqlc's encode is not the only writer of the property — an author's
+// own query text can put any integer there — so the count is checked
+// before a reading is built from it rather than trusted.
+func TestAgtypeTimeRefusesACountOutsideTheDay(t *testing.T) {
+	for _, micros := range []int64{-1, 86400000000, 86400000001, math.MaxInt64, math.MinInt64} {
+		raw := strconv.FormatInt(micros, 10)
+		got, err := agtypeTime([]byte(raw))
+		if err == nil {
+			t.Errorf("agtypeTime(%s) = %+v, want an error", raw, got)
+			continue
+		}
+		if !strings.Contains(err.Error(), raw) {
+			t.Errorf("agtypeTime(%s) = error %v, which does not name the count it read", raw, err)
+		}
+	}
+
+	// A count is the whole encoding, so every other spelling of a reading
+	// is a value this column cannot hold.
+	for _, raw := range []string{``, `1.5`, `"43200000000"`, `"12:00:00+02:00"`, `null`, `true`, `[43200000000]`} {
+		if got, err := agtypeTime([]byte(raw)); err == nil {
+			t.Errorf("agtypeTime(%s) = %+v, want an error", raw, got)
+		}
+	}
+}
+
+// TestAgtypeTimeMicrosRefusesAReadingOffTheClock is the encode half.
+// Each component is bounded on its own, so an hour of -1 beside a minute
+// of 60 is refused even though the two sum to midnight — the row a single
+// interval check on the total lets through, and one the day wrap would
+// then hide by folding whatever it summed to back inside the day.
+//
+// The offset carries the same bound agtypeOffset applies on the way out,
+// because a value stored under an offset outside it comes back through a
+// sidecar this package would then refuse to read.
+func TestAgtypeTimeMicrosRefusesAReadingOffTheClock(t *testing.T) {
+	for _, at := range []Time{
+		{Hour: -1, Minute: 60},
+		{Hour: 24},
+		{Hour: -1},
+		{Minute: 60},
+		{Minute: -1},
+		{Second: 60},
+		{Second: -1},
+		{Nanosecond: 1000000000},
+		{Nanosecond: -1},
+		{Hour: 12, OffsetSeconds: 86400},
+		{Hour: 12, OffsetSeconds: -86400},
+		{Hour: 12, OffsetSeconds: 1000000000},
+		{Hour: 12, OffsetSeconds: -1000000000},
+	} {
+		got, err := agtypeTimeMicros(at)
+		if err == nil {
+			t.Errorf("agtypeTimeMicros(%+v) = %d, want an error", at, got)
+			continue
+		}
+		if got != 0 {
+			t.Errorf("agtypeTimeMicros(%+v) returned %d alongside its error", at, got)
+		}
+	}
+
+	// One second inside the offset bound at each edge, so the refusals
+	// above are a bound and not a blanket. +23:59:59 belongs to no zone a
+	// database keeps today and is taken here anyway, the same admitted
+	// range the sidecar read applies.
+	for _, offset := range []int{86399, -86399} {
+		if _, err := agtypeTimeMicros(Time{Hour: 12, OffsetSeconds: offset}); err != nil {
+			t.Errorf("agtypeTimeMicros at offset %d = error %v, want the count", offset, err)
+		}
+	}
+}
+
+// TestStoredTimesSortByTheirInstantAndNotTheirLocalClock is the claim the
+// normalisation exists for, and it is the only row that fails when the
+// offset subtraction is dropped: every round trip above still holds if
+// encode stores the local reading and decode hands it straight back, and
+// so does every golden. What breaks is the database's own ordering, which
+// no Go assertion about a single value can see.
+//
+// 23:00+02:00 is 21:00Z and 22:30+00:00 is 22:30Z, so the reading whose
+// clock reads later is the earlier instant. ORDER BY over the stored
+// column has to put it first, and does only because both counts were put
+// on one scale before they were stored.
+func TestStoredTimesSortByTheirInstantAndNotTheirLocalClock(t *testing.T) {
+	laterClock := Time{Hour: 23, OffsetSeconds: 7200}
+	earlierClock := Time{Hour: 22, Minute: 30}
+
+	if laterClock.Hour < earlierClock.Hour {
+		t.Fatalf("the fixture is wrong: %+v does not read later on the clock than %+v", laterClock, earlierClock)
+	}
+
+	later, err := agtypeTimeMicros(laterClock)
+	if err != nil {
+		t.Fatalf("agtypeTimeMicros(%+v) = error %v", laterClock, err)
+	}
+	earlier, err := agtypeTimeMicros(earlierClock)
+	if err != nil {
+		t.Fatalf("agtypeTimeMicros(%+v) = error %v", earlierClock, err)
+	}
+	if later >= earlier {
+		t.Errorf("%+v stores %d and %+v stores %d, so agtype's integer ordering puts the later instant first",
+			laterClock, later, earlierClock, earlier)
+	}
+}
+
+// TestAgtypeTimeZoneRebuildsTheReadingItWasWrittenAt covers what the round
+// trip above cannot reach: a sidecar that is absent, malformed, or outside
+// the bound. Where the instant's re-zoning moves a Location and leaves the
+// moment alone, this one rebuilds the components, so a failure here is a
+// wrong wall clock rather than a wrong label on a right one.
+func TestAgtypeTimeZoneRebuildsTheReadingItWasWrittenAt(t *testing.T) {
+	utc, err := agtypeTime([]byte("81000000000"))
+	if err != nil {
+		t.Fatalf("agtypeTime = error %v", err)
+	}
+
+	// An absent sidecar is not a failure. The count is complete without
+	// one, and gqlc's own write path never writes one — the sidecar is
+	// there so a zone some other writer put in the graph survives a read.
+	plain, err := agtypeTimeZone(map[string][]byte{}, "startsAtOffset", utc)
+	if err != nil {
+		t.Errorf("agtypeTimeZone with no sidecar = error %v", err)
+	} else if plain != utc {
+		t.Errorf("agtypeTimeZone with no sidecar = %+v, want the UTC reading %+v", plain, utc)
+	}
+
+	// A sidecar of any other shape fails the read rather than being taken
+	// as no offset at all, which would hand back a plausible reading.
+	for _, raw := range []string{`"+02:00"`, `1.5`, `null`, `"7200"`} {
+		if got, err := agtypeTimeZone(map[string][]byte{"startsAtOffset": []byte(raw)}, "startsAtOffset", utc); err == nil {
+			t.Errorf("agtypeTimeZone(%s) = %+v, want an error", raw, got)
+		}
+	}
+
+	// A day either way, exclusive, and the property name in the message:
+	// a schema carries one sidecar per zoned property, so the number alone
+	// does not say which of them the graph holds wrongly.
+	for _, raw := range []string{"86400", "-86400", "1000000000", "-9223372036854775808"} {
+		got, err := agtypeTimeZone(map[string][]byte{"startsAtOffset": []byte(raw)}, "startsAtOffset", utc)
+		if err == nil {
+			t.Errorf("agtypeTimeZone(%s) = %+v, want an error", raw, got)
+			continue
+		}
+		if !strings.Contains(err.Error(), "startsAtOffset") {
+			t.Errorf("agtypeTimeZone(%s) = error %v, which does not name the property it read", raw, err)
+		}
+	}
+}
+
+// Meeting vertices in the wire shape the captured texts establish. The
+// first two hold the SAME stored count and mean different wall clocks:
+// 81000000000 is 22:30Z, and read through a +02:00 sidecar it is 00:30 the
+// next day. That pair is the whole of what the sidecar does, and a decode
+// that dropped it would return the first reading for both.
+const (
+	meetingPlain = `{"id": 2251799813685249, "label": "Meeting", "properties": {"id": 1, "startsAt": 81000000000}}::vertex`
+	meetingZoned = `{"id": 2251799813685250, "label": "Meeting", "properties": {"id": 2, "startsAt": 81000000000, "startsAtOffset": 7200}}::vertex`
+	meetingEnds  = `{"id": 2251799813685251, "label": "Meeting", "properties": {"id": 3, "endsAt": 5400000000, "startsAt": 81000000000, "endsAtOffset": -7200}}::vertex`
+)
+
+func TestDecodeVertexReadsTheOffsetSidecarBesideItsTime(t *testing.T) {
+	plain, err := decodeMeeting([]byte(meetingPlain))
+	if err != nil {
+		t.Fatalf("decodeMeeting(meetingPlain) = error %v", err)
+	}
+	if want := (Time{Hour: 22, Minute: 30}); plain.StartsAt != want {
+		t.Errorf("decodeMeeting(meetingPlain).StartsAt = %+v, want %+v — no sidecar was stored", plain.StartsAt, want)
+	}
+	if plain.EndsAt != nil {
+		t.Errorf("decodeMeeting(meetingPlain).EndsAt = %+v, want nil", plain.EndsAt)
+	}
+
+	// The sidecar is read from the vertex the count came out of, under the
+	// name the property's own name derives.
+	zoned, err := decodeMeeting([]byte(meetingZoned))
+	if err != nil {
+		t.Fatalf("decodeMeeting(meetingZoned) = error %v", err)
+	}
+	if want := (Time{Minute: 30, OffsetSeconds: 7200}); zoned.StartsAt != want {
+		t.Errorf("decodeMeeting(meetingZoned).StartsAt = %+v, want %+v", zoned.StartsAt, want)
+	}
+
+	// The nullable arm zones too, and does it without disturbing the
+	// absence a nil pointer carries. -02:00 wraps the other way.
+	ends, err := decodeMeeting([]byte(meetingEnds))
+	if err != nil {
+		t.Fatalf("decodeMeeting(meetingEnds) = error %v", err)
+	}
+	if ends.EndsAt == nil {
+		t.Fatalf("decodeMeeting(meetingEnds).EndsAt = nil, want a reading")
+	}
+	if want := (Time{Hour: 23, Minute: 30, OffsetSeconds: -7200}); *ends.EndsAt != want {
+		t.Errorf("decodeMeeting(meetingEnds).EndsAt = %+v, want %+v", *ends.EndsAt, want)
+	}
+
+	// A sidecar the vertex holds under a shape no offset takes fails the
+	// whole decode rather than yielding a vertex zoned by a guess.
+	broken := strings.Replace(meetingZoned, `"startsAtOffset": 7200`, `"startsAtOffset": "+02:00"`, 1)
+	if got, err := decodeMeeting([]byte(broken)); err == nil {
+		t.Errorf("decodeMeeting(broken sidecar) = %+v, want an error", got)
+	}
+}
+
+// TestEmittedMethodBindsATimeAsNormalisedMicroseconds is the parameter
+// path, and the offset does not cross beside the value: gqlc adds no
+// parameter to the author's query, so what the driver is handed is one
+// integer per reading and the zone is the author's to store if they want
+// it back.
+func TestEmittedMethodBindsATimeAsNormalisedMicroseconds(t *testing.T) {
+	ends := Time{Hour: 23, Minute: 30, OffsetSeconds: -7200}
+
+	cases := []struct {
+		name string
+		arg  WriteMeetingParams
+		want string
+	}{
+		{
+			name: "an absent nullable reading is the agtype null",
+			arg:  WriteMeetingParams{StartsAt: Time{Minute: 30, OffsetSeconds: 7200}},
+			want: `{"endsAt":null,"startsAt":81000000000}`,
+		},
+		{
+			name: "both readings cross normalised, each wrapping its own way",
+			arg:  WriteMeetingParams{StartsAt: Time{Hour: 23, OffsetSeconds: 7200}, EndsAt: &ends},
+			want: `{"endsAt":5400000000,"startsAt":75600000000}`,
+		},
+	}
+	for _, tc := range cases {
+		db := &recordingDB{}
+		if err := (&Queries{queries{db: db, graph: "corpus"}}).WriteMeeting(context.Background(), tc.arg); err != nil {
+			t.Errorf("%s: WriteMeeting = error %v", tc.name, err)
+			continue
+		}
+		if db.args != tc.want {
+			t.Errorf("%s: bound arguments =\n\t%s\nwant\n\t%s", tc.name, db.args, tc.want)
+		}
+	}
+
+	// One refusal per call site, the nullable combinator included, because
+	// each is a separate place the emitted method could be missing its
+	// error check.
+	badEnds := Time{Hour: 12, OffsetSeconds: 86400}
+	refusals := []struct {
+		name  string
+		arg   WriteMeetingParams
+		names string
+	}{
+		{
+			name:  "a reading off the clock",
+			arg:   WriteMeetingParams{StartsAt: Time{Hour: 24}},
+			names: "startsAt",
+		},
+		{
+			name:  "a present nullable reading at an offset outside a day",
+			arg:   WriteMeetingParams{StartsAt: Time{Hour: 12}, EndsAt: &badEnds},
+			names: "endsAt",
+		},
+	}
+	for _, tc := range refusals {
+		db := &recordingDB{}
+		err := (&Queries{queries{db: db, graph: "corpus"}}).WriteMeeting(context.Background(), tc.arg)
+		if err == nil {
+			t.Errorf("%s: WriteMeeting = nil, want an error", tc.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.names) {
+			t.Errorf("%s: WriteMeeting = error %v, which does not name parameter $%s", tc.name, err, tc.names)
+		}
+		if db.args != "" {
+			t.Errorf("%s: WriteMeeting sent %s despite refusing the argument", tc.name, db.args)
+		}
+	}
+}
+
 // durations are the stored counts and the durations they mean. What the
 // decode returns is normalised — one stored number cannot fill Months and
 // Days as well — so these are the encodings of the NORMALISED value, and
