@@ -260,6 +260,28 @@ var carrierParamQuery = codegen.NamedQuery{
 	},
 }
 
+// zonedParamQuery binds the second zoned width in both nullabilities and
+// projects nothing. It shares the source file above for the same reason
+// carrierParamQuery does.
+//
+// TIME needs its own query rather than a parameter on either of theirs:
+// it encodes fallibly, as the neutral carriers do and the instant does
+// not, and it is the one parameter width whose encoder does day-wrapping
+// arithmetic, which nothing on those two queries reaches.
+var zonedParamQuery = codegen.NamedQuery{
+	Name:        "WriteMeeting",
+	Cardinality: codegen.CardinalityExec,
+	SourceFile:  temporalSource,
+	SourceText:  "CREATE (m:Meeting {startsAt: $startsAt, endsAt: $endsAt})\n",
+	Validated: resolver.ValidatedQuery{
+		Statement: resolver.StatementWrite,
+		Parameters: []resolver.ResolvedParameter{
+			{Name: "startsAt", Type: resolver.ResolvedProperty{Type: graph.TypeTime}},
+			{Name: "endsAt", Type: resolver.ResolvedProperty{Type: graph.TypeTime, Nullable: true}},
+		},
+	},
+}
+
 // corpusEdgeKey is the one edge type testdata/corpus_schema.gql declares.
 var corpusEdgeKey = schema.EdgeKey{Source: personLabel, KeyLabels: "ACTED_IN", Target: personLabel}
 
@@ -1123,7 +1145,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	execUncarriedParam := func() codegen.NamedQuery {
 		q := execQuery("Batch")
 		q.Validated.Parameters = []resolver.ResolvedParameter{{
-			Name: "for", Type: resolver.ResolvedProperty{Type: graph.TypeTime},
+			Name: "for", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
 		}}
 		return q
 	}()
@@ -1275,7 +1297,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		{
 			name:      "an exec binding an uncarried parameter width is dropped",
 			queries:   []codegen.NamedQuery{execUncarriedParam},
-			wantSub:   `1 query would be dropped: Batch (parameter $for is property:TIME)`,
+			wantSub:   `1 query would be dropped: Batch (parameter $for is property:BYTES)`,
 			wantError: true,
 		},
 		{
@@ -1365,7 +1387,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		{
 			name:      "every dropped query is named, in batch order",
 			queries:   []codegen.NamedQuery{execUncarriedParam, mapCol, list},
-			wantSub:   "3 queries would be dropped: Batch (parameter $for is property:TIME), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects a list of node)",
+			wantSub:   "3 queries would be dropped: Batch (parameter $for is property:BYTES), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects a list of node)",
 			wantError: true,
 		},
 		{

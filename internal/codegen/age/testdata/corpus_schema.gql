@@ -17,11 +17,23 @@
 // what it can catch: which bytes each width means on the wire, and which
 // of them are refused, is decided entirely by the helpers this schema
 // puts into the emission.
+//
+// Meeting carries the second zoned width, TIME, in both nullabilities.
+// It is a label of its own rather than a fourth property of Span because
+// a zoned width derives an offset sidecar and the zoneless three do not,
+// so what Meeting puts into the emission is the day-wrapping arithmetic
+// and a second re-zoning helper — neither of which any other label here
+// reaches.
 CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
     (:Event {
         id         :: INT64     NOT NULL,
         occurredAt :: TIMESTAMP NOT NULL,
         seenAt     :: TIMESTAMP
+    }),
+    (:Meeting {
+        id       :: INT64                NOT NULL,
+        startsAt :: TIME WITH TIME ZONE  NOT NULL,
+        endsAt   :: TIME WITH TIME ZONE
     }),
     (:Span {
         startsOn :: DATE       NOT NULL,

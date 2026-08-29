@@ -24,13 +24,13 @@ const (
 // 0025).
 //
 // goInstant is the standard library's, which is already neutral.
-// The other three name the carriers temporal.go declares in the
-// generated package itself (ADR 0033), so they are unqualified and cost
-// no import.
+// The rest name the carriers temporal.go declares in the generated
+// package itself (ADR 0033), so they are unqualified and cost no import.
 const (
 	goInstant   = "time.Time"
 	goDate      = "Date"
 	goLocalTime = "LocalTime"
+	goTime      = "Time"
 	goDuration  = "Duration"
 )
 
@@ -44,10 +44,16 @@ const (
 //
 // A prepared field carries the Go type it is emitted as and not the
 // width that was declared, so the carrier text is what the answer is
-// keyed on. time.Time is TIMESTAMP's, and TIMESTAMP is the only admitted
-// width whose value keeps an offset beside it (ADR 0025; the encoding
-// table on gqlc-35yu.11 gives an offset-bearing TIME the same sidecar,
-// against the day a carrier for it exists).
+// keyed on. time.Time is TIMESTAMP's and Time is TIME's — the two
+// admitted widths whose value keeps an offset beside it (ADR 0025, and
+// the encoding table on gqlc-35yu.11 which gives both the same sidecar).
+//
+// What the two do with the offset differs and this does not care: the
+// instant is stored as an absolute count and re-zoned by moving its
+// Location, whereas a TIME is stored UTC-normalised and re-zoned by
+// adding the offset back into the clock reading. Both need the same
+// property beside them under the same name, which is the whole of what
+// this answers.
 //
 // Flat rather than a member of a map so the instant stays the property
 // itself and an author's ORDER BY over it needs no rewriting.
@@ -62,10 +68,22 @@ const (
 // beside the instant it derives from — where one key would have two
 // readers — and not the schemas that declare it anywhere else.
 func offsetSidecar(f codegen.EntityField) (string, bool) {
-	if f.GoType != goInstant {
+	if !carriesZone(f.GoType) {
 		return "", false
 	}
 	return f.PropName + "Offset", true
+}
+
+// carriesZone reports whether one emitted carrier keeps a UTC offset
+// beside its value, and so needs the sidecar property. It is the single
+// answer to that question: offsetSidecar derives a name from it, and
+// typeMap.Property refuses a list of one of these because a list has one
+// name for all of its elements and so has nowhere to put the second and
+// later offsets. Those two are the same rule read in opposite
+// directions, and splitting them is how a width gets admitted into a list
+// it has no room to be decoded out of.
+func carriesZone(goType string) bool {
+	return goType == goInstant || goType == goTime
 }
 
 // helpers records which agtype encode / decode helpers a batch reaches
@@ -96,15 +114,27 @@ type helpers struct {
 	nullProp bool // agtypeNullableProperty — some entity declares a nullable property
 
 	instant    bool // agtypeInstant — some column or property decodes an encoded instant
-	zone       bool // agtypeZone — one of those is an entity property, so the offset sidecar is beside it
+	zone       bool // agtypeZone — an instant property, so the offset sidecar is beside it
 	micros     bool // agtypeMicros — some query binds a non-nullable instant parameter
 	nullMicros bool // agtypeNullableMicros — some query binds a nullable one
 
+	// agtypeOffset — the sidecar read the two zoned widths share. Marked
+	// by either of them, since it is the one place the bound lives.
+	offset bool
+
 	date      bool // agtypeDate — something decodes a stored DATE
 	localTime bool // agtypeLocalTime — something decodes a stored LOCAL TIME
-	duration  bool // agtypeDuration — something decodes a stored DURATION
+	zonedTime bool // agtypeTime / agtypeTimeAt — something decodes a stored TIME
+	timeZone  bool // agtypeTimeZone — one of those is an entity property
 
-	// The encode direction of the same three widths. Each is one helper
+	// agtypeWrapDay — the day-interval correction both directions of the
+	// TIME encoding take. Marked by decode and by encode independently,
+	// because a query binding a TIME parameter reaches it with nothing
+	// decoding one, and a helper called but not declared does not compile.
+	wrapDay  bool
+	duration bool // agtypeDuration — something decodes a stored DURATION
+
+	// The encode direction of the same widths. Each is one helper
 	// whatever nullability or nesting the parameter has, because the two
 	// combinators below carry those: an encoder that can fail has no
 	// expression form inside the args map literal, so the emission binds
@@ -112,6 +142,7 @@ type helpers struct {
 	// per-nullability variant to save.
 	dateText        bool // agtypeDateText — some query binds a DATE parameter
 	localTimeMicros bool // agtypeLocalTimeMicros — some query binds a LOCAL TIME parameter
+	timeMicros      bool // agtypeTimeMicros — some query binds a TIME parameter
 	durationMicros  bool // agtypeDurationMicros — some query binds a DURATION parameter
 
 	encNullable bool // agtypeEncodedNullable — one of those parameters is nullable
@@ -148,9 +179,17 @@ func (h *helpers) forEntities(entities []wiredEntity) {
 		for _, f := range e.Fields {
 			h.need(f.GoType)
 			// The offset sidecar is a second property of the same
-			// vertex, so only an entity decode has it in hand.
+			// vertex, so only an entity decode has it in hand. Which
+			// re-zoning helper reads it depends on the carrier: an
+			// instant moves its Location, a TIME adds the offset back
+			// into the clock reading.
 			if _, ok := offsetSidecar(f); ok {
-				h.zone = true
+				h.offset = true
+				if f.GoType == goTime {
+					h.timeZone = true
+				} else {
+					h.zone = true
+				}
 			}
 			if f.Nullable {
 				h.nullProp = true
@@ -194,6 +233,9 @@ func (h *helpers) forParams(params []codegen.Param) {
 			h.dateText = true
 		case goLocalTime:
 			h.localTimeMicros = true
+		case goTime:
+			h.timeMicros = true
+			h.wrapDay = true
 		case goDuration:
 			h.durationMicros = true
 		default:
@@ -248,6 +290,10 @@ func (h *helpers) need(goType string) {
 		h.date = true
 	case goLocalTime:
 		h.localTime = true
+		h.integer = true
+	case goTime:
+		h.zonedTime = true
+		h.wrapDay = true
 		h.integer = true
 	case goDuration:
 		h.duration = true
@@ -564,6 +610,102 @@ func agtypeLocalTime(raw []byte) (LocalTime, error) {
 }
 `)
 	}
+	if h.zonedTime {
+		b.WriteString(`
+// agtypeTime decodes a stored TIME: the integer scalar, counting
+// microseconds since midnight UTC-NORMALISED — the reading the writer saw
+// minus the offset it was read at, wrapped into the day. Normalising is
+// what makes the count comparable across offsets, so agtype's integer
+// ordering is instant order and an author's ORDER BY needs no rewriting;
+// a raw local reading would sort 23:00+02:00 after 22:30+00:00 when the
+// first is the earlier instant.
+//
+// What comes back here is therefore the UTC reading, with OffsetSeconds
+// left zero. Where the value is an entity property, agtypeTimeZone reads
+// the sidecar beside it and puts the reading back in its own zone; where
+// it is a projected column there is no sidecar to read, and UTC is the
+// whole of what the count carries.
+//
+// The count is bounded to [0, 86400000000) before the reading is built,
+// because a count outside it names no clock reading at all and gqlc's
+// encode is not the only writer of the property. Sub-microsecond
+// precision is not in the count: it truncated at encode, which is this
+// backend's one policy for every temporal it stores.
+func agtypeTime(raw []byte) (Time, error) {
+	micros, err := agtypeInt64(raw)
+	if err != nil {
+		return Time{}, err
+	}
+	if micros < 0 || micros >= 86400000000 {
+		return Time{}, fmt.Errorf(
+			"gqlc: %d microseconds since midnight is outside the [0, 86400000000) interval a clock reading occupies", micros)
+	}
+	return agtypeTimeAt(micros, 0), nil
+}
+
+// agtypeTimeAt builds a clock reading from a microsecond count already
+// known to be in [0, 86400000000), recording the offset it is a reading
+// at. The component arithmetic is here rather than at its two call sites
+// so decode and re-zoning cannot drift apart in it.
+func agtypeTimeAt(micros int64, offset int) Time {
+	return Time{
+		Hour:          int(micros / 3600000000),
+		Minute:        int(micros / 60000000 % 60),
+		Second:        int(micros / 1000000 % 60),
+		Nanosecond:    int(micros % 1000000 * 1000),
+		OffsetSeconds: offset,
+	}
+}
+
+`)
+	}
+	if h.wrapDay {
+		b.WriteString(`
+// agtypeWrapDay reduces a microsecond count into the [0, 86400000000)
+// interval a clock reading occupies, which shifting a reading by an
+// offset can leave it outside in either direction. Both directions of the
+// TIME encoding go through it: encode subtracts the offset, decode adds
+// it back.
+//
+// The explicit correction is load-bearing. Go's % follows the sign of its
+// left operand, so -1 % 86400000000 is -1 and not the 86399999999 the
+// day-before reading actually is: taking the remainder alone leaves a
+// negative count that then builds a reading with negative components, or
+// stores one no decode will accept.
+func agtypeWrapDay(micros int64) int64 {
+	micros %= 86400000000
+	if micros < 0 {
+		micros += 86400000000
+	}
+	return micros
+}
+`)
+	}
+	if h.timeZone {
+		b.WriteString(`
+// agtypeTimeZone puts a decoded TIME back in the zone it was written in,
+// reading the offset-seconds sidecar stored beside it. Where the instant
+// re-zones by moving a Location and leaving the moment alone, this one
+// rebuilds the clock reading: the stored count is UTC-normalised, so the
+// reading the writer saw is that count plus the offset, wrapped back into
+// the day.
+//
+// An absent sidecar leaves the UTC reading as it is, which is the same
+// instant with OffsetSeconds zero.
+func agtypeTimeZone(props map[string][]byte, key string, t Time) (Time, error) {
+	offset, ok, err := agtypeOffset(props, key)
+	if err != nil {
+		return Time{}, err
+	}
+	if !ok {
+		return t, nil
+	}
+	micros := int64(t.Hour)*3600000000 + int64(t.Minute)*60000000 +
+		int64(t.Second)*1000000 + int64(t.Nanosecond)/1000
+	return agtypeTimeAt(agtypeWrapDay(micros+int64(offset)*1000000), offset), nil
+}
+`)
+	}
 	if h.duration {
 		b.WriteString(`
 // agtypeDuration decodes a stored DURATION: the integer scalar, counting
@@ -603,41 +745,62 @@ func agtypeDuration(raw []byte) (Duration, error) {
 }
 `)
 	}
-	if h.zone {
+	if h.offset {
 		b.WriteString(`
-// agtypeZone puts a decoded instant back in the zone it was written in,
-// reading the offset-seconds sidecar stored beside it. An absent sidecar
-// leaves the instant in UTC: the count is complete without it, so the
-// property is readable by anything that never wrote one — including this
-// package, which binds the instant alone. Where the sidecar goes is the
-// author's query text, and gqlc runs that text as written.
+// agtypeOffset reads the offset-seconds sidecar stored beside a zoned
+// value, with ok=false where the graph holds no such property. An absent
+// sidecar is not an error: the stored count is complete without it, so
+// the property stays readable by anything that never wrote one —
+// including this package, which binds the value alone. Where a sidecar
+// goes is the author's query text, and gqlc runs that text as written.
 //
-// Flat rather than a member of a map so the instant stays the property
+// Flat rather than a member of a map so the value stays the property
 // itself: ORDER BY n.at and WHERE n.at > $since are then answered by
 // agtype's integer ordering, with nothing for gqlc to rewrite.
 //
 // The offset is bounded at a day either way, exclusive, before it is
 // taken. gqlc derives no sidecar to bind — a parameter crosses as the
-// instant alone — so the integer read here is whatever the graph holds:
-// a query that names the key binds it like any other property, whether
-// or not gqlc generated that query. Unbounded it names a zone no clock
+// value alone — so the integer read here is whatever the graph holds: a
+// query that names the key binds it like any other property, whether or
+// not gqlc generated that query. Unbounded it names a zone no clock
 // keeps, and the wall clock the caller then reads is arbitrarily far
-// from the instant stored beside it. The bound is a day rather than the
+// from the value stored beside it. The bound is a day rather than the
 // narrower range zone databases populate today, so a graph a future zone
 // database would accept is not refused here.
-func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, error) {
+//
+// Both zoned widths read their sidecar through this, so the bound is one
+// policy and not two agreeing by inspection.
+func agtypeOffset(props map[string][]byte, key string) (int, bool, error) {
 	raw, ok := props[key]
 	if !ok {
-		return at, nil
+		return 0, false, nil
 	}
 	offset, err := agtypeInt64(raw)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("gqlc: offset %q: %w", key, err)
+		return 0, false, fmt.Errorf("gqlc: offset %q: %w", key, err)
 	}
 	if offset <= -86400 || offset >= 86400 {
-		return time.Time{}, fmt.Errorf("gqlc: offset %q is %d seconds, which is not within a day of UTC", key, offset)
+		return 0, false, fmt.Errorf("gqlc: offset %q is %d seconds, which is not within a day of UTC", key, offset)
 	}
-	return at.In(time.FixedZone("", int(offset))), nil
+	return int(offset), true, nil
+}
+`)
+	}
+	if h.zone {
+		b.WriteString(`
+// agtypeZone puts a decoded instant back in the zone it was written in.
+// An absent sidecar leaves it in UTC, which is the instant it was stored
+// at either way: the count is absolute, so the zone moves the wall clock
+// the caller reads and never the moment it names.
+func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, error) {
+	offset, ok, err := agtypeOffset(props, key)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !ok {
+		return at, nil
+	}
+	return at.In(time.FixedZone("", offset)), nil
 }
 `)
 	}
@@ -722,6 +885,44 @@ func agtypeLocalTimeMicros(t LocalTime) (int64, error) {
 	}
 	return int64(t.Hour)*3600000000 + int64(t.Minute)*60000000 +
 		int64(t.Second)*1000000 + int64(t.Nanosecond)/1000, nil
+}
+`)
+	}
+	if h.timeMicros {
+		b.WriteString(`
+// agtypeTimeMicros encodes a TIME into the integer a query binds it as,
+// the same count agtypeTime reads back: the clock reading UTC-NORMALISED,
+// which is the reading minus its offset wrapped into the day.
+//
+// Normalising here is what the stored ordering rests on. Two readings at
+// different offsets compare as instants because both counts are on one
+// scale; storing the local reading instead would sort 23:00+02:00 after
+// 22:30+00:00 when it is the earlier instant by half an hour.
+//
+// The offset does not cross beside it. gqlc adds no parameter to the
+// author's query (ADR 0005), so a value bound here and read back through
+// this package returns at the same instant with OffsetSeconds zero — the
+// original zone comes back only from a sidecar the author's own query
+// text writes. That is the instant's arrangement exactly, one width down.
+//
+// Each component is bounded on its own, and the offset with the bound
+// agtypeOffset applies on the way in, so what is stored is a count some
+// clock somewhere actually read. Sub-microsecond precision truncates,
+// this backend's policy for every temporal it stores.
+func agtypeTimeMicros(t Time) (int64, error) {
+	if t.Hour < 0 || t.Hour > 23 || t.Minute < 0 || t.Minute > 59 ||
+		t.Second < 0 || t.Second > 59 || t.Nanosecond < 0 || t.Nanosecond > 999999999 {
+		return 0, fmt.Errorf(
+			"gqlc: hour %d minute %d second %d nanosecond %d is not a clock reading",
+			t.Hour, t.Minute, t.Second, t.Nanosecond)
+	}
+	if t.OffsetSeconds <= -86400 || t.OffsetSeconds >= 86400 {
+		return 0, fmt.Errorf(
+			"gqlc: offset %d seconds is not within a day of UTC", t.OffsetSeconds)
+	}
+	local := int64(t.Hour)*3600000000 + int64(t.Minute)*60000000 +
+		int64(t.Second)*1000000 + int64(t.Nanosecond)/1000
+	return agtypeWrapDay(local - int64(t.OffsetSeconds)*1000000), nil
 }
 `)
 	}
@@ -1155,7 +1356,14 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s{}, fmt.Errorf(%q, err)\n\t}\n",
 		e.Name, "decode "+e.Name+"."+f.Field+": %w")
 	if sidecar, ok := offsetSidecar(f); ok {
-		writeInstantZoning(b, e, i, f, sidecar)
+		// Both zoned carriers read the same property; which helper reads
+		// it is the carrier's, since an instant re-zones by moving its
+		// Location and a TIME by rebuilding its clock reading.
+		zoner := "agtypeZone"
+		if f.GoType == goTime {
+			zoner = "agtypeTimeZone"
+		}
+		writeZoning(b, e, i, f, sidecar, zoner)
 		return
 	}
 	switch {
@@ -1169,23 +1377,26 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	}
 }
 
-// writeInstantZoning emits the read of one instant property's offset
-// sidecar and the assignment of the zoned value. It runs only inside an
-// entity decoder: the sidecar is a second property of the same vertex,
-// which a projection of the instant alone does not carry.
+// writeZoning emits the read of one zoned property's offset sidecar and
+// the assignment of the zoned value. It runs only inside an entity
+// decoder: the sidecar is a second property of the same vertex, which a
+// projection of the value alone does not carry.
 //
 // sidecar is offsetSidecar's answer for f: the key this reads is the key
-// the collision gate refuses.
-func writeInstantZoning(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, sidecar string) {
+// the collision gate refuses. zoner is the helper that takes the offset,
+// which differs by carrier while the shape of the call does not — both
+// take (props, key, value) and answer (value, error), so the nullable
+// composition below is written once.
+func writeZoning(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, sidecar, zoner string) {
 	value := valueName(i)
 	fail := fmt.Sprintf("\t\treturn %s{}, fmt.Errorf(%q, err)\n", e.Name, "decode "+e.Name+"."+f.Field+": %w")
 	if !f.Nullable {
-		fmt.Fprintf(b, "\tout.%s, err = agtypeZone(props, %q, %s)\n", f.Field, sidecar, value)
+		fmt.Fprintf(b, "\tout.%s, err = %s(props, %q, %s)\n", f.Field, zoner, sidecar, value)
 		fmt.Fprintf(b, "\tif err != nil {\n%s\t}\n", fail)
 		return
 	}
 	fmt.Fprintf(b, "\tif %s != nil {\n", value)
-	fmt.Fprintf(b, "\t\tzoned, err := agtypeZone(props, %q, *%s)\n", sidecar, value)
+	fmt.Fprintf(b, "\t\tzoned, err := %s(props, %q, *%s)\n", zoner, sidecar, value)
 	fmt.Fprintf(b, "\t\tif err != nil {\n\t%s\t\t}\n", fail)
 	fmt.Fprintf(b, "\t\t%s = &zoned\n\t}\n", value)
 	fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)

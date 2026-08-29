@@ -128,39 +128,57 @@ func agtypeInstant(raw []byte) (time.Time, error) {
 	return time.UnixMicro(micros).UTC(), nil
 }
 
-// agtypeZone puts a decoded instant back in the zone it was written in,
-// reading the offset-seconds sidecar stored beside it. An absent sidecar
-// leaves the instant in UTC: the count is complete without it, so the
-// property is readable by anything that never wrote one — including this
-// package, which binds the instant alone. Where the sidecar goes is the
-// author's query text, and gqlc runs that text as written.
+// agtypeOffset reads the offset-seconds sidecar stored beside a zoned
+// value, with ok=false where the graph holds no such property. An absent
+// sidecar is not an error: the stored count is complete without it, so
+// the property stays readable by anything that never wrote one —
+// including this package, which binds the value alone. Where a sidecar
+// goes is the author's query text, and gqlc runs that text as written.
 //
-// Flat rather than a member of a map so the instant stays the property
+// Flat rather than a member of a map so the value stays the property
 // itself: ORDER BY n.at and WHERE n.at > $since are then answered by
 // agtype's integer ordering, with nothing for gqlc to rewrite.
 //
 // The offset is bounded at a day either way, exclusive, before it is
 // taken. gqlc derives no sidecar to bind — a parameter crosses as the
-// instant alone — so the integer read here is whatever the graph holds:
-// a query that names the key binds it like any other property, whether
-// or not gqlc generated that query. Unbounded it names a zone no clock
+// value alone — so the integer read here is whatever the graph holds: a
+// query that names the key binds it like any other property, whether or
+// not gqlc generated that query. Unbounded it names a zone no clock
 // keeps, and the wall clock the caller then reads is arbitrarily far
-// from the instant stored beside it. The bound is a day rather than the
+// from the value stored beside it. The bound is a day rather than the
 // narrower range zone databases populate today, so a graph a future zone
 // database would accept is not refused here.
-func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, error) {
+//
+// Both zoned widths read their sidecar through this, so the bound is one
+// policy and not two agreeing by inspection.
+func agtypeOffset(props map[string][]byte, key string) (int, bool, error) {
 	raw, ok := props[key]
 	if !ok {
-		return at, nil
+		return 0, false, nil
 	}
 	offset, err := agtypeInt64(raw)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("gqlc: offset %q: %w", key, err)
+		return 0, false, fmt.Errorf("gqlc: offset %q: %w", key, err)
 	}
 	if offset <= -86400 || offset >= 86400 {
-		return time.Time{}, fmt.Errorf("gqlc: offset %q is %d seconds, which is not within a day of UTC", key, offset)
+		return 0, false, fmt.Errorf("gqlc: offset %q is %d seconds, which is not within a day of UTC", key, offset)
 	}
-	return at.In(time.FixedZone("", int(offset))), nil
+	return int(offset), true, nil
+}
+
+// agtypeZone puts a decoded instant back in the zone it was written in.
+// An absent sidecar leaves it in UTC, which is the instant it was stored
+// at either way: the count is absolute, so the zone moves the wall clock
+// the caller reads and never the moment it names.
+func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, error) {
+	offset, ok, err := agtypeOffset(props, key)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !ok {
+		return at, nil
+	}
+	return at.In(time.FixedZone("", offset)), nil
 }
 
 // agtypeSpan reports where the value at the front of b ends: the offset

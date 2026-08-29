@@ -54,6 +54,7 @@ func TestTypeMapProperty(t *testing.T) {
 		// spell where it cannot spell a neo4j driver type.
 		{graph.TypeDate, "Date"},
 		{graph.TypeLocalTime, "LocalTime"},
+		{graph.TypeTime, "Time"},
 		{graph.TypeDuration, "Duration"},
 	}
 	for _, tt := range representable {
@@ -67,10 +68,6 @@ func TestTypeMapProperty(t *testing.T) {
 	unrepresentable := []graph.PropertyType{
 		// agtype has no byte-string scalar.
 		graph.TypeBytes,
-		// The one temporal width still without a carrier here. Its value
-		// carries an offset, which rides a sidecar named after the
-		// property; admitting it is gqlc-oeqi.
-		graph.TypeTime,
 		// No faithful Go carrier on any backend (§9).
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
@@ -100,9 +97,9 @@ func TestTypeMapProperty(t *testing.T) {
 			graph.ListOf(graph.TypeAnyPropertyValue, false):                             "[]any",
 			graph.ListOf(graph.ListOf(graph.TypeInt64, false), false):                   "[][]int64",
 			graph.ListOf(graph.ListOf(graph.ListOf(graph.TypeBool, true), false), true): "[][][]bool",
-			// The three admitted temporal widths carry no zone, so unlike
-			// the instant they have nothing that a list's single name
-			// would have to hold once per element.
+			// These three admitted temporal widths carry no zone, so unlike
+			// the instant and TIME they have nothing that a list's single
+			// name would have to hold once per element.
 			graph.ListOf(graph.TypeDate, false):      "[]Date",
 			graph.ListOf(graph.TypeLocalTime, false): "[]LocalTime",
 			graph.ListOf(graph.TypeDuration, true):   "[]Duration",
@@ -116,9 +113,11 @@ func TestTypeMapProperty(t *testing.T) {
 
 	// A width with no carrier does not acquire one by being wrapped in a
 	// list: the elements would reach a slice no helper can fill. TIMESTAMP
-	// is here despite carrying as a property, because the zone sidecar is
-	// named after the property and a list has one name for every element;
-	// TIME would be there for the same reason if it had a carrier at all.
+	// and TIME are here despite carrying as properties, because the zone
+	// sidecar is named after the property and a list has one name for every
+	// element — carriesZone is the one predicate that says so, and these
+	// rows are what stops admitting a zoned width from admitting a list of
+	// it in the same edit.
 	t.Run("a list of an uncarried element width is rejected", func(t *testing.T) {
 		for _, elem := range []graph.PropertyType{graph.TypeDecimal, graph.TypeTime, graph.TypeBytes, graph.TypeTimestamp} {
 			for _, pt := range []graph.PropertyType{
@@ -157,9 +156,10 @@ func TestTypeMapProperty(t *testing.T) {
 // the backend name is what says which. The list row is what says the
 // report names the property's declared width and not the element's:
 // LIST<TIME> is what the author wrote, and TIME alone is not
-// a line they could go and find.
+// a line they could go and find — the more so now that TIME carries on
+// its own, so the element width names a row that would have succeeded.
 func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
-	for _, pt := range []graph.PropertyType{graph.TypeBytes, graph.TypeTime, graph.ListOf(graph.TypeTime, false)} {
+	for _, pt := range []graph.PropertyType{graph.TypeBytes, graph.ListOf(graph.TypeTime, false)} {
 		t.Run(string(pt), func(t *testing.T) {
 			files, err := generate(codegen.Input{Schema: schemaWithPayload(pt)}, "age")
 			require.ErrorIs(t, err, codegen.ErrUnrepresentableWidth)
@@ -178,7 +178,7 @@ func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
 // where it was. Only the query rejection says so.
 func TestUnservedQueriesOutrankUnrepresentableWidths(t *testing.T) {
 	files, err := generate(codegen.Input{
-		Schema: schemaWithPayload(graph.TypeTime),
+		Schema: schemaWithPayload(graph.TypeBytes),
 		Queries: []codegen.NamedQuery{{
 			Name: "Wipe",
 			Validated: resolver.ValidatedQuery{
