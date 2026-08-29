@@ -1802,7 +1802,8 @@ fmt-check: ensure-golangci
 #
 # It exists because a hand-written list of gates drifts and nothing tells you.
 # citizen-protocol.md step 4 named three recipes — fmt-check, lint, test — while
-# master required seven contexts standing on ten recipes. A citizen who ran the
+# master required seven contexts, six of them reachable here across eleven arms.
+# A citizen who ran the
 # documented three and pushed then learned the rest one CI round trip at a time:
 # measured on PR #1643, where all three were green and codegen-fence failed on
 # three ireturn findings the root lint cannot reach by construction (bd

@@ -193,7 +193,7 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
 
    ONE NAME, DELIBERATELY. This line used to list `just fmt-check`, `just
    lint`, `just test`, and that list was wrong: master requires seven
-   contexts, and running them locally takes ten recipes. Nothing told the
+   contexts, and reaching six of them locally takes eleven arms. Nothing told the
    citizen who ran the documented three — they were green on PR #1643 while
    `codegen-fence` failed on three `ireturn` findings in `test/data/codegen`,
    a nested module the root lint cannot reach by construction (bd
@@ -204,16 +204,16 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
 
    `just gates` runs every arm even after one fails and reports the failures
    together, so three problems cost one round trip rather than three.
-   Measured 2026-08-29 on this machine: 146s on the first run of a session
-   and 24s warm immediately after. Budget for the cold one — the gap is the
-   Go build and govulncheck caches, so the first run after a rebase or a
-   toolchain change pays it again.
+   Measured 2026-08-29 on this machine: 146s on the first run of a session,
+   then 23s/25s/25s over three consecutive warm runs. Budget for the cold
+   one — the gap is the Go build and govulncheck caches, so the first run
+   after a rebase or a toolchain change pays it again.
 
-   IT IS NOT A MERGE PREDICATE. Two required contexts do not run on a
-   citizen's machine — `live-smoke` wants Docker, and `tidy`'s
-   `check-pr-closes.py` reads a PR body that does not exist yet — and the
-   recipe says so on every run rather than leaving you to remember it. CI
-   still decides.
+   IT IS NOT A MERGE PREDICATE. One required context and part of another do
+   not run on a citizen's machine — `live-smoke` wants Docker, and three of
+   `tidy`'s seven steps read a PR body, a PR's commit list and the Actions
+   API, none of which exist before the PR. The recipe names them on every
+   run rather than leaving you to remember it. CI still decides.
 
    On this town's machine `just vuln` is red on a clean master and the
    failure is not yours: the box's default Go is a distro build govulncheck
