@@ -699,6 +699,19 @@ unread_count() {
     mail_box_count "$1" inbox
 }
 
+# How many of <sender>'s letters are still sitting in <recipient>'s inbox.
+# mail_send writes "<ts>--<from>--<slug>.md", so the sender is in the name and
+# no body is read. The caveat on unread_count above applies with full force
+# here: for a SEAT this counts letters that outlived at least one of the
+# recipient's wakes, and for the king it counts deliveries to a box nobody
+# drains (gqlc-2abx). The only caller walks seats_all, which excludes him.
+mail_unread_from() { # <recipient> <sender> -> count
+    local d
+    d="$(state_dir)/mail/$1/inbox"
+    [ -d "$d" ] || { echo 0; return 0; }
+    find "$d" -maxdepth 1 -type f -name "*--$2--*.md" 2>/dev/null | wc -l
+}
+
 mail_deliver() { # write one message file into a recipient's box dir
     local dir=$1 fname=$2 content=$3 tmp
     mkdir -p "$dir"
@@ -2313,6 +2326,33 @@ reap_scratch() {
     echo "guard-sweep: scratch — ${out//$'\n'/ }"
 }
 
+# Which seats are holding letters of Րաֆֆի's that they have not read, with how
+# many and what state they are in.
+#
+# He wakes into a FRESH session every round — km-seat execs claude with no
+# --continue — so nothing he wrote last round is in front of him unless
+# something puts it there. On 2026-08-24 he wrote to the mayor five times
+# between 04:05Z and 05:05Z about a heartbeat frozen at 03:44:54Z, and the fifth
+# letter withdrew the first four ("just sitting rather than STUCK … You've done
+# good work today") on no new evidence at all. That is not a guard overruling
+# his own record; it is a guard who could not see it, and the last letter in a
+# box is the one a reader trusts (bd gqlc-pff4).
+#
+# Two is the threshold: one letter is not yet a repetition. The seat's STATUS
+# rides along because it is what distinguishes the two readings the count alone
+# cannot — a seat that is asleep may simply not have been woken since, while an
+# awake one has had the letter in front of it and left it there.
+guard_unanswered() { # -> "seat(n, status) …", empty when nobody is holding two
+    local s n out=""
+    for s in $(seats_all); do
+        [ "$s" = raffi ] && continue
+        n=$(mail_unread_from "$s" raffi)
+        [ "$n" -ge 2 ] || continue
+        out="$out $s($n, $(seat_status "$s"))"
+    done
+    printf '%s' "${out# }"
+}
+
 cmd_guard_sweep() {
     ensure_deployed guard-sweep "$@" || return 1
     # ABOVE every early return below, and that placement is the design
@@ -2349,7 +2389,12 @@ cmd_guard_sweep() {
     fi
     file_patrol_bead
     tell_dirty_authors
-    cmd_wake raffi --reason "time for a round of the town (see your soul: rounds)"
+    local reason="time for a round of the town (see your soul: rounds)" unanswered
+    unanswered=$(guard_unanswered)
+    if [ -n "$unanswered" ]; then
+        reason="$reason. Letters of yours nobody has read: $unanswered. Unread is evidence of UNSEEN, not of declined, so do not write a gentler version of a letter that was never in front of anyone — escalate instead, and read kingdom/brain/playbooks/mail.md ('When a letter goes unanswered') for the ladder, including the case where the seat you would escalate TO is the seat you are writing ABOUT"
+    fi
+    cmd_wake raffi --reason "$reason"
 }
 
 # ADR 0004 §2, the execution half. ADR 0003 change 2 names the judges' PATROL
