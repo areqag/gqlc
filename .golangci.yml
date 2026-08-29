@@ -118,7 +118,7 @@ linters:
         # The `_test` suffix is the package path of an external test package,
         # which is what the battery has to be to stay inside govulncheck's call
         # graph (ADR 0026) — not a typo.
-        - github.com/areqag/gqlc/test/data/codegen_test\.(harness|backend|writeBackend|edgeUnionBackend|temporalBackend|zonedTimeBackend|savepointBackend|oneColOneParamOneQuerier|manyColManyQuerier|mixedReadWriteBatchQuerier|entityNodeQuerier|entityEdgeQuerier|edgeUnionQuerier|anyValueColumnQuerier|timestampRoundtripQuerier|temporalRoundtripQuerier|zonedTimeRoundtripQuerier|txQuerier|liveTx)$
+        - github.com/areqag/gqlc/test/data/codegen_test\.(harness|backend|writeBackend|edgeUnionBackend|temporalBackend|zonedTimeBackend|savepointBackend|oneColOneParamOneQuerier|manyColManyQuerier|nestedListQuerier|mixedReadWriteBatchQuerier|entityNodeQuerier|entityEdgeQuerier|edgeUnionQuerier|anyValueColumnQuerier|timestampRoundtripQuerier|temporalRoundtripQuerier|zonedTimeRoundtripQuerier|txQuerier|liveTx)$
     misspell:
       # the codebase is written in British English (see CONTEXT.md: canonicalised,
       # modelled, serialise); UK locale enforces that consistently
