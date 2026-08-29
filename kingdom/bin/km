@@ -3004,8 +3004,23 @@ This counter clears by itself the moment her agent leaves 'idle' — witnessed w
         # has to assume the bead was aimed at them deliberately.
         how=""
         [ "$origin" != inferred ] || how=" (class inferred — this bead carries no class: label; escalate if it is not warrior work)"
+        # Both branches, and the losing one worded as ordinary. This bead is
+        # ready and unassigned as THIS pass reads it, and a wake is composed
+        # before it is delivered, so another seat may hold it by the time the
+        # citizen reads the banner — twice on 2026-08-29 (gqlc-wguoq, 21s;
+        # gqlc-96lf0). Naming only the claim left the loser with one
+        # instruction, and it was the harmful one.
+        #
+        # Deliberately does NOT restate that the bead is held or that claiming
+        # it is the damage: since gqlc-oqu5 km-seat re-derives every bead named
+        # here at delivery and appends the assignee as fact, plus a STALE line
+        # saying not to claim. Repeating that here would say it twice in four
+        # lines, on facts this pass is too early to know. What no other line
+        # carries is the second half of Սեդրակ's standing rule — take other
+        # work rather than sleeping — so that is what this adds, with the
+        # protocol named for the rest of it.
         if seat=$(free_worker_of_class "$cls"); then
-            cmd_wake "$seat" --bead "$id" --reason "ready ${cls} work${how} — claim it before you begin"
+            cmd_wake "$seat" --bead "$id" --reason "ready ${cls} work${how} — claim it once you have checked its assignee. If another seat already holds it that is an ordinary lost race, not a failure: take another ready bead rather than going back to sleep (citizen-protocol, Waking step 4)"
             wakes=$((wakes + 1))
             if [ "$cls" != judge ]; then slots=$((slots - 1)); fi
         else

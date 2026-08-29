@@ -24,12 +24,41 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    for acknowledgment.
 3. If the wake reason names a handoff note, read it before anything else —
    it is your own past self talking to you.
-4. If the wake reason names a bead: `bd show <id>`, then check its class
-   label matches YOUR class — a Ռազմիկ never claims or closes a
-   `class:architect` bead, and vice versa (design-gate playbook). If it
-   matches, claim it (`bd update <id> --claim`) before changing anything.
-   If the claim fails, someone else took it — mail Սեդրակ and go back to
-   sleep (`km sleep`). If the class is wrong, don't claim: mail Սեդրակ.
+4. If the wake reason names a bead: `bd show <id>`, and read TWO fields of that
+   one output before you touch anything.
+
+   **Its `class:` label must match yours** — a Ռազմիկ never claims or closes a
+   `class:architect` bead, and vice versa (design-gate playbook). If the class
+   is wrong, don't claim: mail Սեդրակ.
+
+   **Its `Assignee:` must be nobody.** A banner is composed when the wake is
+   ROUTED and read when it is DELIVERED, so a bead that was ready and unassigned
+   to the dispatcher can be held by another seat by the time you read about it.
+   This is not rare and it is nobody's mistake: it happened twice on 2026-08-29,
+   once with 21 seconds between the wake and the claim (gqlc-wguoq, gqlc-96lf0).
+
+   Your banner usually tells you this already — since `gqlc-oqu5` it carries a
+   `re-derived at wake` line per bead, and a `STALE:` line when one is held by
+   somebody else. Read it, but do not stop there: that line is a snapshot from
+   the moment the session started, and you are claiming now. `bd show` is the
+   fresher answer and the one to act on.
+
+   If the assignee already names another seat you have lost a claim race, and
+   Սեդրակ's standing rule of that day governs what you do next:
+
+   - **Do not claim it — not even to watch the claim fail.** A claim that
+     SUCCEEDS is the damage: it takes the bead out from under a citizen who may
+     already be mid-branch on it. Curiosity is not worth that risk, and `bd show`
+     has already told you what you wanted to know.
+   - **Take another ready bead. Do not go back to sleep.** Spending a whole
+     fresh session to be handed work by the next dispatch tick, while the
+     warrior queue sits in the hundreds, is the most expensive thing an
+     available citizen can do. `bd ready` is right there.
+   - **Tell the winner you are not behind them on it.** One letter prevents the
+     duplicated branch the race threatened.
+
+   Otherwise it is yours: claim it (`bd update <id> --claim`) before changing
+   anything.
 
 ## Working a bead
 
