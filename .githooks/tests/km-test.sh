@@ -586,10 +586,6 @@ esac
 # what a row states is the anomaly, by naming a seat on fake-dead-runners. And
 # the pattern is really matched against a cmdline rather than assumed, so a km
 # that stopped anchoring it does not pass here for free.
-#
-# The synthetic cmdline carries BOTH engine names, because which one km asks
-# about is read from kingdom.toml ([kingdom] seat_runner) and the stub must not
-# pin an engine the config has moved off (2026-08-25 opencode port).
 _pat=""
 _prev=""
 for _a in "$@"; do
@@ -600,8 +596,7 @@ if [ -n "$_pat" ]; then
     _seat="${_tty#fake/}"
     _dead="${KM_STATE_DIR:-}/fake-dead-runners"
     if [ -f "$_dead" ] && grep -qx "$_seat" "$_dead"; then exit 1; fi
-    if printf '%s' "/fake/kingdom/bin/km-seat $_seat" | grep -Eq "$_pat" ||
-       printf '%s' "/fake/kingdom/bin/km-seat-ox $_seat" | grep -Eq "$_pat"; then
+    if printf '%s' "/fake/kingdom/bin/km-seat $_seat" | grep -Eq "$_pat"; then
         echo 4242
         exit 0
     fi
@@ -3973,17 +3968,7 @@ seat_claude ayg
 export KM_SENDKEYS_LOG="$KM_STATE_DIR/sendkeys.log"
 : >"$KM_SENDKEYS_LOG"
 PATH="$BIN:$PATH" "$KM" sleep --seat ayg >/dev/null 2>&1
-# The delivery contract belongs to the interactive engine only: under
-# km-seat-ox there is no prompt box, and a /exit typed there is debris.
-if [ "$(PATH="$BIN:$PATH" "$KM" cfg kingdom seat_runner)" = km-seat-ox ]; then
-    if [ -s "$KM_SENDKEYS_LOG" ]; then
-        bad "km sleep under the headless engine types nothing" "keys reached the pane: $(cat "$KM_SENDKEYS_LOG")"
-    else
-        ok "km sleep under the ox engine marks asleep-pending and types nothing — the turn ends itself"
-    fi
-else
-    assert_delivery_shape "km sleep clears the line, then sends /exit, then Enter — three invocations" "$KM_SENDKEYS_LOG"
-fi
+assert_delivery_shape "km sleep clears the line, then sends /exit, then Enter — three invocations" "$KM_SENDKEYS_LOG"
 
 # The nudge path has the same shape and the same failure — a wake reason typed
 # at an already-awake seat, stranded in its input box, wakes nobody.
@@ -4095,13 +4080,6 @@ OUT="$(PATH="$BIN:$PATH" "$KM" reconcile 2>&1)"
 RC=$?
 if [ "$RC" -ne 0 ]; then
     bad "an undelivered departure is re-delivered" "rc=$RC out=$OUT"
-elif [ "$(PATH="$BIN:$PATH" "$KM" cfg kingdom seat_runner)" = km-seat-ox ]; then
-    # Headless: nothing to deliver, ever — the runner writes asleep itself.
-    if grep -q '/exit' "$KM_SENDKEYS_LOG" 2>/dev/null; then
-        bad "an undelivered departure is re-delivered" "the ox engine typed /exit into a promptless pane"
-    else
-        ok "the ox engine leaves asleep-pending alone; the runner ends the turn itself"
-    fi
 elif ! grep -q '/exit' "$KM_SENDKEYS_LOG" 2>/dev/null; then
     bad "an undelivered departure is re-delivered" "no /exit was re-sent: $(cat "$KM_SENDKEYS_LOG" 2>/dev/null)"
 else
@@ -5185,8 +5163,8 @@ else
     mkdir -p "$runnerbin"
     # A shell script, deliberately: that is what km-seat is, and the point of
     # the row is that its comm is not its name. The NAME comes from the same
-    # config km reads, so the row follows [kingdom] seat_runner instead of
-    # pinning an engine (2026-08-25 opencode port).
+    # config km reads, so the row follows [kingdom] seat_runner rather than
+    # pinning a literal.
     runner_name=$(PATH="$BIN:$PATH" "$KM" cfg kingdom seat_runner)
     : "${runner_name:=km-seat}"
     printf '#!/usr/bin/env bash\nsleep 120\n' >"$runnerbin/$runner_name"

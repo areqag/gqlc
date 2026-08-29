@@ -163,11 +163,11 @@ seat_worktree() {
     echo "$(dirname "$mr")/$(basename "$mr")-seat-$1"
 }
 
-# The runner script each seat's tmux window executes, from kingdom/bin/. The
-# default is the claude runner; kingdom.toml's [kingdom] seat_runner retargets
-# the whole town (km-seat-ox runs `opencode run` headless) without touching
-# this file. Whatever it names must honour the km-seat contract: park on the
-# wake file, keep $home/status asleep/awake.
+# The runner script each seat's tmux window executes, from kingdom/bin/. Only
+# km-seat is in-tree today; the config knob is kept so a future alternative can
+# be swapped in without touching every call site here. Whatever it names must
+# honour the km-seat contract: park on the wake file, keep $home/status
+# asleep/awake.
 seat_runner() {
     local v
     v=$(cfg kingdom seat_runner)
@@ -413,15 +413,12 @@ window_up()  { session_up && tmux list-windows -t "=$SESSION" -F '#W' | grep -qx
 # pgrep wants the tty without its /dev/ prefix; the real-tmux row in the suite is
 # what keeps that transform honest end to end.
 #
-# Two engines answer: an interactive claude (pane's own child) or the opencode
-# process a km-seat-ox wake is running. A slot is spent by either.
 seat_session_live() {
     local tty
     window_up "$1" || return 1
     tty=$(tmux list-panes -t "=$SESSION:$1" -F '#{pane_tty}' 2>/dev/null | head -1)
     [ -n "$tty" ] || return 1
-    pgrep -t "${tty#/dev/}" -x claude >/dev/null 2>&1 && return 0
-    pgrep -t "${tty#/dev/}" -f '(^|/)opencode([[:space:]]|$)' >/dev/null 2>&1
+    pgrep -t "${tty#/dev/}" -x claude >/dev/null 2>&1
 }
 
 # Is the seat's RUNNER there — the loop that IS the pane's command, and
@@ -929,15 +926,8 @@ cmd_sleep() {
     # `km reconcile`, which is what makes an undelivered request recoverable.
     echo asleep-pending >"$(seat_home "$seat")/status"
     if window_up "$seat"; then
-        if [ "$(seat_runner)" = km-seat-ox ]; then
-            # Headless: there is no prompt box to type /exit into, and the
-            # turn ends itself — the runner writes `asleep` when the process
-            # exits. Typing here would only pile debris into the pane.
-            echo "sleep: good night, $(seat_display "$seat") — the turn ends when it ends"
-        else
-            send_line "=$SESSION:$seat" "/exit"
-            echo "sleep: good night, $(seat_display "$seat") — the session ends when this turn does"
-        fi
+        send_line "=$SESSION:$seat" "/exit"
+        echo "sleep: good night, $(seat_display "$seat") — the session ends when this turn does"
     else
         echo "sleep: no tmux window for $seat; end your session normally"
     fi
@@ -1004,52 +994,10 @@ cmd_attach() {
 }
 
 cmd_herratsayn() {
-    local sd home wt session queued msg="${*:-}"
-    sd=$(state_dir)
-    home="$sd/seats/sedrak"
-    wt=$(seat_worktree sedrak)
-    if seat_session_live sedrak; then
-        # He is already speaking. A headless turn takes no input, so the call
-        # cannot interrupt — but a message given WITH the call is delivered to
-        # his next pass instead of dropped.
-        if [ -n "$msg" ]; then
-            cmd_wake sedrak --reason "Հեռաձայն from Անդրանիկ: $msg"
-        fi
-        echo "Սեդրակ is mid-turn; attaching read-only — a headless turn takes no input."
-        [ -z "$msg" ] || echo "Your words are queued for his next pass."
-        echo "Leave word anytime: km wake sedrak --reason \"...\""
-        # Old /exit debris from the claude era litters these panes; reset the
-        # view so what he is doing NOW is what you see. (-R resets the
-        # terminal; there is no clear-pane verb in this tmux.)
-        tmux send-keys -R -t "=$SESSION:sedrak" 2>/dev/null
-        tmux clear-history -t "=$SESSION:sedrak" 2>/dev/null
-        # An attach that cannot happen (no tty on this terminal, detached
-        # client) is a report, not a failure of the call.
-        cmd_attach sedrak || echo "attach unavailable here — watch from any terminal with: tmux attach-session -t kingdom \\; select-window -t kingdom:sedrak"
-        return 0
+    if [ "$(seat_status sedrak)" != awake ]; then
+        cmd_wake sedrak --reason "Հեռաձայն from Անդրանիկ — he is calling you now"
     fi
-    # The visit proper: an interactive TUI on his recorded session, with the
-    # runner deferred behind an in-person flag so no mechanical wake starts a
-    # second engine over the conversation (km-seat-ox checks the flag before
-    # consuming a wake and leaves it queued).
-    mkdir -p "$home"
-    : >"$home/in-person"
-    session=""
-    [ -f "$home/ox-session" ] && session=$(cat "$home/ox-session")
-    local tui_args=()
-    if [ -n "$session" ]; then tui_args=(-s "$session"); else tui_args=(-c); fi
-    echo "You are aboard Սեդրակ's seat, interactive. Exit the TUI when you stand up."
-    (
-        cd "$wt" || exit 1
-        unset KM_CONFIG
-        PATH="$SCRIPT_DIR:$PATH" \
-            KINGDOM_SEAT=sedrak BEADS_ACTOR=sedrak KM_STATE_DIR="$sd" \
-            exec opencode "${tui_args[@]}"
-    ) || echo "herratsayn: the TUI ended abnormally" >&2
-    rm -f "$home/in-person"
-    queued=0
-    [ -f "$home/wake" ] && queued=$(wc -l <"$home/wake")
-    echo "Visit over — $queued wake reason(s) queued for his next mechanical pass."
+    cmd_attach sedrak
 }
 
 # ---------- halt ----------
@@ -1203,18 +1151,9 @@ cmd_reconcile() {
         if seat_session_live "$s"; then
             rm -f "$suspect"
             if [ "$st" = asleep-pending ]; then
-                if [ "$(seat_runner)" = km-seat-ox ]; then
-                    # Headless engine: there is no interactive session to
-                    # leave and no prompt to receive an /exit, so re-sending
-                    # one every tick only litters the pane the king may be
-                    # looking at. The runner writes `asleep` itself when the
-                    # turn's process exits; nothing needs delivering.
-                    :
-                else
-                    send_line "=$SESSION:$s" "/exit"
-                    echo "reconcile: $s asked to leave and is still here; /exit re-sent"
-                    redelivered=$((redelivered + 1))
-                fi
+                send_line "=$SESSION:$s" "/exit"
+                echo "reconcile: $s asked to leave and is still here; /exit re-sent"
+                redelivered=$((redelivered + 1))
             fi
             continue
         fi
