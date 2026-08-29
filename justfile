@@ -4,6 +4,11 @@
 # installs or upgrades the linter by hand.
 golangci_version := "v2.13.1"
 golangci := justfile_directory() + "/.bin/golangci-lint"
+# Wraps a `golangci-lint run` in a bounded wait on the machine-wide lock the
+# linter takes (bd gqlc-49pc). Only `run` takes it — `fmt` was measured under a
+# held lock and proceeds — so `fmt` and `fmt-check` below call the binary
+# directly and this prefix appears on the `run` sites alone.
+lint_lock := justfile_directory() + "/.githooks/lint-lock.sh"
 # Per-worktree cache. golangci-lint caches analyzer facts and per-package issue
 # records keyed on module path + relative file path + content hash — the absolute
 # worktree path is NOT in the key. A shared default cache at ~/.cache/golangci-lint
@@ -1347,7 +1352,7 @@ check-golangci-formatters-report: ensure-golangci
     # repository's cache, and so the directory is removed with the trap.
     run_probe() {
         ( cd "${probe}" && GOLANGCI_LINT_CACHE="${probe}/cache" \
-            {{quote(golangci)}} run ./... 2>&1 ) || return $?
+            {{quote(lint_lock)}} {{quote(golangci)}} run ./... 2>&1 ) || return $?
     }
 
     if ! control="$(run_probe)"; then
@@ -1850,7 +1855,7 @@ sweep-discovery-probes:
 # and gci. Ahead of the lint, so a tree whose formatter enforcement has gone
 # quiet says so before spending eighty seconds.
 lint: ensure-golangci lint-hooks (lint-hooks "kingdom/bin") (lint-hooks ".github/scripts") lint-python lint-just check-golangci-formatters-report check-golangci-build-tags
-    {{golangci}} run
+    {{lint_lock}} {{golangci}} run
 
 # Guard: the golangci-lint analysis cache must be non-empty after lint.
 # Fails if GOLANGCI_LINT_CACHE in the justfile diverges from the path: in ci.yml (gqlc-b63).
@@ -1860,7 +1865,7 @@ lint-cache-check:
 
 # lints only lines changed since the given rev — the fast pre-push variant
 lint-new rev="origin/master": ensure-golangci
-    {{golangci}} run --new-from-rev {{rev}}
+    {{lint_lock}} {{golangci}} run --new-from-rev {{rev}}
 
 # rewrites formatting in place (gofumpt + gci, both bundled in golangci-lint)
 fmt: ensure-golangci
@@ -2183,7 +2188,7 @@ test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-externa
         echo "fence: ${m}, tags [${taglist:-none}]"
         (cd "${m}" && go build "${tagflag[@]}" ./... && go vet "${tagflag[@]}" ./...)
         (cd "${m}" && go mod tidy -diff)
-        (cd "${m}" && {{golangci}} run)
+        (cd "${m}" && {{lint_lock}} {{golangci}} run)
     done
 
 # Holds every nested module to the packaging that keeps it inside govulncheck's
