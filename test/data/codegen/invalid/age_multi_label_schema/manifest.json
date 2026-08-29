@@ -1,0 +1,6 @@
+{
+  "package": "agemultilabelschema",
+  "queryFiles": [],
+  "targets": ["apache-age-pgx-v5"],
+  "expectedError": "age.ErrUnsupportedSchema"
+}
