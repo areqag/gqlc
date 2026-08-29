@@ -682,16 +682,16 @@ func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 // of whatever the file says today, so a header spelling no row here covers is
 // still compared, and one that costs a recipe or a dependency edge is named.
 //
-// That is not a hypothetical benefit. Measured on the commit before
-// joinContinuedHeader existed, with a backslash-continued header written into
-// this justfile in place of vuln's: the reader lost vuln, this comparison named
-// vuln, and every other test in the package passed. The shape had been live in
-// the reader for as long as the reader had existed, and it was found by
-// inventing a case rather than by working through just's grammar. It never
-// reached the list below: the shape was found under review, joinContinuedHeader
-// fixed it, and the list carries no bullet for it. A list can be silent about
-// a shape that is live, which is the argument for not treating this one as
-// finished.
+// That is not a hypothetical benefit. Measured by transplanting this
+// comparison onto the pre-fix tree — joinContinuedHeader removed — with a
+// backslash-continued header written into this justfile in place of vuln's:
+// the reader lost vuln, this comparison named vuln, and every other test in
+// the package passed. The shape had been live in the reader for as long as
+// the reader had existed, and it was found by inventing a case rather than by
+// working through just's grammar. It never reached the list below: the shape
+// was found under review, joinContinuedHeader fixed it, and the list carries
+// no bullet for it. A list can be silent about a shape that is live, which is
+// the argument for not treating this one as finished.
 //
 // WHAT THIS DOES NOT REACH:
 //
