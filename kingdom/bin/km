@@ -772,22 +772,60 @@ seat_launch_state() { # <seat> -> "<code>\t<detail>"
 # when one exists, so each cmd_up left two panes per tab (measured
 # 2026-08-29). Reusing the pane herdr already made for the tab is what keeps
 # the "one pane per seat" invariant this town's roster and status expect.
-seat_runner_start() { # <seat> -> 1 if a live session made it unsafe
+#
+# THE RETURN IS WITNESSED, not acked. `herdr pane run` TYPES a command line at
+# the pane and reports on the typing; it cannot report on what ran, because
+# whatever has the pane's foreground reads those bytes. So its exit status was
+# the wrong thing to return, and returning it made a repair that had done
+# nothing indistinguishable from one that worked. Measured 2026-08-29 (bd
+# gqlc-c48e): 14 seats had been resumed by hand with `claude --resume` typed at
+# their panes, so the pane's foreground was claude, and every respawn's command
+# line went into claude's prompt box. cmd_reconcile printed "14 runner(s)
+# respawned" and did so again two minutes later, and again, across 77 dispatch
+# runs over 2h48m, while nothing was parked on any wake file. The town's
+# 0-over-a-dead-query shape inverted: 14 over a dead repair, which is worse,
+# because a counter climbing is read as recovery in progress.
+#
+# The trample guard above cannot cover that population and is not being asked
+# to. A hand-run claude carries no herdr agent record, so agent_status reads
+# `unknown` and seat_session_live reads that as "no session" — the guard is
+# blind to exactly the case that creates the hazard. The witness below is what
+# holds regardless of why the command line failed to become a process.
+#
+# THREE outcomes, because two callers report the refusal in words: 0 the runner
+# is there, 1 declined without trying (a live session, VI.2), 2 tried and no
+# runner appeared. Collapsing 2 into 1 is what would put "$s has a live
+# session" in front of an operator whose seat has none.
+#
+# 3 seconds is a witness budget, not a timeout to tune: on 2026-08-29T15:52Z
+# fifteen runners went from `herdr pane run` to visible in ps within 2 seconds
+# of each other (sequential pids, `ps -o lstart`), so a runner that is coming
+# is here at once. The cost of the budget is paid only when the respawn has
+# already failed.
+seat_runner_start() { # <seat> -> 0 started, 1 declined (live session), 2 no runner appeared
     seat_session_live "$1" && return 1
-    local ws pane wt sd
-    ws=$(workspace_id); [ -n "$ws" ] || return 1
+    local ws pane wt sd waited
+    ws=$(workspace_id); [ -n "$ws" ] || return 2
     wt=$(seat_worktree "$1")
     if [ -z "$(seat_tab_id "$1")" ]; then
-        herdr tab create --workspace "$ws" --label "$1" --cwd "$wt" --no-focus >/dev/null 2>&1 || return 1
+        herdr tab create --workspace "$ws" --label "$1" --cwd "$wt" --no-focus >/dev/null 2>&1 || return 2
     fi
-    pane=$(seat_pane_id "$1"); [ -n "$pane" ] || return 1
+    pane=$(seat_pane_id "$1"); [ -n "$pane" ] || return 2
     # Thread km's KM_STATE_DIR into the pane's env so km-seat agrees with km
     # about which state to work with. Without this, km-seat re-derives it from
     # the pane's cwd (a seat worktree → main_root → the shared kingdom-state)
     # and diverges from a test override, which reproduces the 2026-08-29
     # incident where a test workspace's km-seats claimed real wakes.
     sd=$(state_dir)
-    herdr pane run "$pane" "KM_STATE_DIR=$sd $SCRIPT_DIR/km-seat $1" >/dev/null 2>&1
+    herdr pane run "$pane" "KM_STATE_DIR=$sd $SCRIPT_DIR/km-seat $1" >/dev/null 2>&1 || return 2
+    waited=0
+    while [ "$waited" -lt 15 ]; do
+        seat_runner_live "$1" && return 0
+        sleep 0.2
+        waited=$((waited + 1))
+    done
+    echo "km: $1: herdr accepted the km-seat command line for pane $pane, but no km-seat process appeared within 3s. The pane's foreground is something other than a shell, so it read those bytes instead — a claude started by hand is the known case, and it is invisible to agent_status, so the live-session guard could not decline. Read the pane and start the runner there (bd gqlc-c48e)." >&2
+    return 2
 }
 
 # `herdr agent send` writes text to the agent atomically over the socket. No
@@ -1162,7 +1200,7 @@ cmd_mail() {
 # ---------- wake / sleep ----------
 
 cmd_wake() {
-    local seat=${1:-}
+    local seat=${1:-} rc
     shift || true
     is_seat "$seat" || die "wake: unknown seat ${seat:-<none>}"
     local reason=""
@@ -1214,10 +1252,13 @@ cmd_wake() {
             # queue is read then. Saying so keeps the operator from reading the
             # line below as an incident.
             echo "wake: queued for $seat — $reason"
-        elif seat_runner_start "$seat"; then
-            echo "wake: queued for $seat — $reason (nothing was parked on that queue to read it; km-seat respawned — gqlc-6ha4)"
         else
-            echo "wake: QUEUED UNREAD for $seat — $reason: no km-seat is parked on that queue and a live session in the window means it cannot be replaced without ending one; nobody will read this until that session ends"
+            seat_runner_start "$seat" && rc=0 || rc=$?
+            case "$rc" in
+                0) echo "wake: queued for $seat — $reason (nothing was parked on that queue to read it; km-seat respawned — gqlc-6ha4)" ;;
+                1) echo "wake: QUEUED UNREAD for $seat — $reason: no km-seat is parked on that queue and a live session in the window means it cannot be replaced without ending one; nobody will read this until that session ends" ;;
+                *) echo "wake: QUEUED UNREAD for $seat — $reason: no km-seat is parked on that queue and the respawn did not take — the command line was accepted and no runner appeared, so nobody will read this until that pane is repaired by hand (gqlc-c48e)" ;;
+            esac
         fi
     fi
 }
@@ -1544,23 +1585,30 @@ capped_seats() {
 # a seat instead (seat_idle), which asks rather than forces.
 cmd_reconcile() {
     session_up || { echo "reconcile: the town is down; nothing to reconcile"; return 0; }
-    local s st suspect repaired=0 redelivered=0 suspected=0 respawned=0 corrected=0
+    local s st suspect rc repaired=0 redelivered=0 suspected=0 respawned=0 corrected=0
     for s in $(seats_all); do
         st=$(seat_status "$s")
         suspect="$(seat_home "$s")/suspect"
         # Before the status arms, and unconditional on status: this is the
         # polarity that was missing (gqlc-6ha4).
         if ! seat_runner_live "$s"; then
-            if seat_runner_start "$s"; then
-                echo "reconcile: $s had no km-seat parked on its wake file, so no wake could ever have reached it; runner respawned"
-                respawned=$((respawned + 1))
-            else
-                # Refused because a session is live in that window. Reported and
-                # not acted on: replacing the window would end it (VI.2). It
-                # heals itself when the session does end — the next pass finds
-                # an empty window and replaces it then.
-                echo "reconcile: $s has a live session but no km-seat runner behind it, so it will not park again when that session ends; nothing was replaced under a live citizen"
-            fi
+            seat_runner_start "$s" && rc=0 || rc=$?
+            case "$rc" in
+                0)
+                    echo "reconcile: $s had no km-seat parked on its wake file, so no wake could ever have reached it; runner respawned"
+                    respawned=$((respawned + 1)) ;;
+                1)
+                    # Refused because a session is live in that window. Reported and
+                    # not acted on: replacing the window would end it (VI.2). It
+                    # heals itself when the session does end — the next pass finds
+                    # an empty window and replaces it then.
+                    echo "reconcile: $s has a live session but no km-seat runner behind it, so it will not park again when that session ends; nothing was replaced under a live citizen" ;;
+                *)
+                    # Counted nowhere on purpose. This pass repaired nothing, and
+                    # the whole defect being fixed here was a repair counter that
+                    # climbed while the town stayed down (gqlc-c48e).
+                    echo "reconcile: $s had no km-seat parked on its wake file and the respawn DID NOT TAKE — the command line was accepted and no runner appeared. Nothing here will repair it and every pass will say this again until someone reads that pane; km's own diagnosis is on stderr above" ;;
+            esac
         fi
         case "$st" in
             awake | asleep-pending) ;;
