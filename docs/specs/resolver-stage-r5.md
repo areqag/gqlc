@@ -960,8 +960,13 @@ named %q; branch 0 column %d named %q`.
 
 **Rule 3 — column types.** For each column index i,
 `Columns[b][i].Type` must equal `Columns[0][i].Type` for every branch b.
-Type equality is Go-value equality of the `ResolvedType` (the sealed sum
-carries a stable representation per variant). If any disagrees at index
+Type equality is Go-value equality of the `ResolvedType` (each variant
+carries a stable representation, and the eight arms are the whole set
+of types that declare the `isResolvedType` marker — pointer forms and
+embedders satisfy the interface without declaring it, so the check is
+Go-value equality against a specific arm, not membership in a closed
+set; see `internal/resolver/validated.go` on `ResolvedType`). If any
+disagrees at index
 i, fail: `ErrUnionColumnMismatch: branch %d column %q has type %s;
 branch 0 has type %s`.
 

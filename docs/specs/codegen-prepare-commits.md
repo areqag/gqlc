@@ -382,12 +382,15 @@ width sweep:
   `ErrUnrepresentableWidth` naming the width.
 - **1 synthetic-variant negative row** (per B6's malformed-variant fence):
   a test-file-local stub `ResolvedType` implementation that satisfies the
-  sealed interface via `isResolvedType()` but is neither in the sum's
-  known arms nor rejected by Phase A. Passed directly to the plan-builder
-  (bypassing Phase A), asserts the builder returns a sentinel error — not
-  silent success. This is the fence for the specific failure mode this
-  bead exists to close: an unknown variant reaching plan construction
-  must yield a loud error, never a default arm.
+  interface via an in-package `isResolvedType()` declaration (the marker
+  is unexported, so an out-of-package caller obtains it by embedding a
+  variant instead — see `internal/resolver/validated.go` on
+  `ResolvedType`) but is neither in the sum's known arms nor rejected
+  by Phase A. Passed directly to the plan-builder (bypassing Phase A),
+  asserts the builder returns a sentinel error — not silent success.
+  This is the fence for the specific failure mode this bead exists to
+  close: an unknown variant reaching plan construction must yield a
+  loud error, never a default arm.
 
 Table total: 34 positive + 9 negative = **43 rows** on
 `TestPhaseBCommitsListElemPlan`. Row count named so the reviewer can hold
