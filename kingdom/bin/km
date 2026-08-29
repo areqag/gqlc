@@ -672,11 +672,15 @@ cfg_minutes() { # <section> <key> <default minutes> -> seconds
 # How many times the idle pass asks ONE seat in a single episode before it stops
 # typing and mails sedrak instead. Fail-open to 3 for the same reason cfg_minutes
 # does. Zero is refused rather than honoured: a cap of 0 escalates before ever
-# asking, which is the one reading of a typo nobody wants.
+# asking, which is the one reading of a typo nobody wants — and it is refused
+# AFTER base-10 normalisation, because `00` is all digits and is not the literal
+# `0`, so a case arm listing the bare zero let the padded spelling through to an
+# arithmetic comparison that read it as zero.
 recover_cap() {
     local v
     v=$(cfg welfare recover_attempts)
-    case "$v" in '' | *[!0-9]* | 0) v=3 ;; esac
+    case "$v" in '' | *[!0-9]*) v=3 ;; *) v=$((10#$v)) ;; esac
+    [ "$v" -gt 0 ] || v=3
     echo "$v"
 }
 
@@ -1772,11 +1776,10 @@ cmd_dispatch() {
     # what makes the second sighting a different moment rather than the same
     # one. The marker is cleared by a nudge as well as by any sign of life, so
     # the floor between two nudges is two full passes rather than every tick.
-    local s idle_marker nudged_marker attempts_file escalated_marker pending ask floor since cap tries
+    local s idle_marker nudged_marker attempts_file escalated_marker pending ask floor since cap tries before_unread
     floor=$(cfg_minutes welfare renudge_after_minutes 30)
     cap=$(recover_cap)
     for s in $(seats_all); do
-        [ "$(seat_status "$s")" = awake ] || continue
         idle_marker="$(seat_home "$s")/idle"
         nudged_marker="$(seat_home "$s")/idle-nudged"
         attempts_file="$(seat_home "$s")/idle-attempts"
@@ -1785,7 +1788,17 @@ cmd_dispatch() {
         # The floor below is per episode and not per seat: keyed to the seat it
         # would silence the town's only channel to a citizen who came back,
         # worked, and went idle again, for its whole window.
-        if ! seat_pane_idle "$s"; then
+        #
+        # Going to sleep ends the episode too, which is why the awake test is
+        # folded in here rather than sitting above as an early `continue`.
+        # Neither `km sleep` nor reconcile's freed arm removes any of these four
+        # files, so a seat that was escalated, slept, and woke again met a pass
+        # that read a stale idle-escalated and reported ESCALATED against an
+        # episode in which nobody had asked her anything — permanent silence on
+        # the town's only automatic channel to her, which is the worst failure
+        # this ladder can have. `||` short-circuits, so seat_pane_idle is still
+        # not called for a seat that is not awake.
+        if [ "$(seat_status "$s")" != awake ] || ! seat_pane_idle "$s"; then
             rm -f "$idle_marker" "$nudged_marker" "$attempts_file" "$escalated_marker"
             continue
         fi
@@ -1844,8 +1857,23 @@ cmd_dispatch() {
         tries=$(cat "$attempts_file" 2>/dev/null || true)
         case "$tries" in '' | *[!0-9]*) tries=0 ;; esac
         if [ "$tries" -ge "$cap" ]; then
-            : >"$escalated_marker"
-            mail_send sedrak --from andranik \
+            # The marker records a DELIVERY, not an attempt. Set before the send
+            # with the send's failure swallowed, a mail that never arrived still
+            # suppresses every later retry: the mayor is never told and this pass
+            # reports ESCALATED for the rest of the episode, which fails more
+            # quietly than doing nothing at all. ENOSPC has emptied this town's
+            # scratch before (gqlc-vze6), so a failing send is not hypothetical.
+            #
+            # mail_send's own return code will not carry it either: its last
+            # statement writes the SENDER's sent box, so a delivery that failed
+            # to reach the inbox still returns 0. So the inbox is counted before
+            # and after, with km's own reader.
+            #
+            # A read by Սեդրակ racing between the two counts reports UNDELIVERED
+            # for a mail that did land; the cost is one retried escalation on the
+            # next pass, which is the direction to be wrong in.
+            before_unread=$(unread_count sedrak)
+            if mail_send sedrak --from andranik \
                 -s "$s is awake and idle after $cap unanswered asks" \
                 -m "km dispatch asked $s to pick up work or run 'km sleep' $cap times in one idle episode. Nothing changed, so it has stopped typing at her and is telling you instead. It will not mail you about this episode again.
 
@@ -1856,8 +1884,13 @@ Last ask: $(fmt_age "$(($(date +%s) - $(stat -c %Y "$nudged_marker" 2>/dev/null 
 
 Nothing here ends a session and nothing should: a seat that has not asked to leave has not consented (VI.2). Read her pane before deciding. 'km sleep --seat $s' frees the slot if she is genuinely done; if her turn died mid-work, she needs a person, not another line of text.
 
-This counter clears by itself the moment her agent leaves 'idle' — witnessed work, not a pane that merely looks different." || true
-            echo "dispatch: ESCALATED $s to sedrak — $cap asks in this episode changed nothing; not typing at her again this episode"
+This counter clears by itself the moment her agent leaves 'idle' — witnessed work, not a pane that merely looks different." \
+                && [ "$(unread_count sedrak)" -gt "$before_unread" ]; then
+                : >"$escalated_marker"
+                echo "dispatch: ESCALATED $s to sedrak — $cap asks in this episode changed nothing; not typing at her again this episode"
+            else
+                echo "dispatch: ESCALATION UNDELIVERED for $s — sedrak's inbox did not grow, so nothing was recorded and the next pass will try again; $s is at her $cap-ask cap and is not being typed at meanwhile"
+            fi
             continue
         fi
         if seat_nudge "$s" "$ask"; then
