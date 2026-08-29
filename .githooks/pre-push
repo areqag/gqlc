@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Pre-push hook: run the full test suite (<1s — the TCK is vendored, no
-# network) and lint only the lines that differ from origin/master. The full
-# repo-wide lint is CI's job; this catches what the push is about to break.
+# network), lint only the lines that differ from origin/master, and fence the
+# nested modules. The full repo-wide lint is CI's job; this catches what the
+# push is about to break. Of the seven required contexts it mirrors three —
+# test, codegen-fence, and lint only in its --new-from-rev form; actionlint,
+# govulncheck, live-smoke and tidy still run nowhere but CI (bd gqlc-n54t).
 # Activated by: git config core.hooksPath .githooks
 # (run `just init` after cloning)
 set -euo pipefail
@@ -129,37 +132,49 @@ if just ensure-golangci >/dev/null 2>&1; then
   #     the pusher's own diff is therefore never retried, whatever it prints.
   # On exhaustion the push is still REFUSED. A gate that yields under load is
   # not a gate.
-  lint_attempts=$((1 + ${GQLC_LINT_LOCK_RETRIES:-12}))
-  lint_delay="${GQLC_LINT_LOCK_DELAY:-10}"
-  lint_attempt=0
-  while :; do
-    lint_attempt=$((lint_attempt + 1))
-    lint_rc=0
-    # tee, not capture-then-echo: lint-new streams, and a developer watching a
-    # slow lint should not be given a blank terminal so that this hook can grep
-    # the output afterwards. `set -o pipefail` at the top is what makes this
-    # read lint-new's status rather than tee's.
-    just lint-new 2>&1 | tee "${lint_log}" || lint_rc=$?
-    if [ "${lint_rc}" -eq 0 ] || [ "${lint_rc}" -eq 1 ] \
-      || ! grep -qF 'parallel golangci-lint is running' "${lint_log}"; then
-      break
-    fi
-    if [ "${lint_attempt}" -ge "${lint_attempts}" ]; then
-      echo "ERROR: golangci-lint never got its lock: another worker on this machine held" >&2
-      echo "       it for all ${lint_attempts} attempts (${lint_delay}s apart)." >&2
-      echo "       THIS IS ALMOST CERTAINLY NOT YOUR BRANCH. The linter refused to START;" >&2
-      echo "       it did not grade your diff and found nothing wrong with it. Do not go" >&2
-      echo "       debugging a branch this hook never looked at." >&2
-      echo "       Correct response: wait for the other lint to finish and push again." >&2
-      echo "       Who holds it:  ps -eo pid,etimes,args= | grep '[g]olangci-lint'" >&2
-      echo "       Do NOT push with --no-verify (Constitution IV.4) and do NOT sleep with" >&2
-      echo "       this branch unpushed — unpushed work here is lost work (bd gqlc-hg61)." >&2
-      break
-    fi
-    echo "NOTE: another worker holds the golangci-lint lock; this is not your branch." >&2
-    echo "      Waiting ${lint_delay}s and retrying (attempt ${lint_attempt} of ${lint_attempts}) — bd gqlc-hg61." >&2
-    sleep "${lint_delay}"
-  done
+  #
+  # A function rather than a straight line, because TWO recipes run under this
+  # wait now and both take that one process-wide lock — so they also have to run
+  # one after the other rather than beside each other. Sets ${lint_rc}; the run's
+  # output is in ${lint_log}. It returns 0 on every path, exhaustion included:
+  # the verdict is ${lint_rc}, and each caller decides what its own failure
+  # means.
+  run_under_lint_lock() {
+    local recipe="$1" lint_attempts lint_delay lint_attempt
+    lint_attempts=$((1 + ${GQLC_LINT_LOCK_RETRIES:-12}))
+    lint_delay="${GQLC_LINT_LOCK_DELAY:-10}"
+    lint_attempt=0
+    while :; do
+      lint_attempt=$((lint_attempt + 1))
+      lint_rc=0
+      # tee, not capture-then-echo: these recipes stream, and a developer
+      # watching a slow lint should not be given a blank terminal so that this
+      # hook can grep the output afterwards. `set -o pipefail` at the top is
+      # what makes this read the recipe's status rather than tee's.
+      just "${recipe}" 2>&1 | tee "${lint_log}" || lint_rc=$?
+      if [ "${lint_rc}" -eq 0 ] || [ "${lint_rc}" -eq 1 ] \
+        || ! grep -qF 'parallel golangci-lint is running' "${lint_log}"; then
+        return 0
+      fi
+      if [ "${lint_attempt}" -ge "${lint_attempts}" ]; then
+        echo "ERROR: golangci-lint never got its lock: another worker on this machine held" >&2
+        echo "       it for all ${lint_attempts} attempts (${lint_delay}s apart) while running ${recipe}." >&2
+        echo "       THIS IS ALMOST CERTAINLY NOT YOUR BRANCH. The linter refused to START;" >&2
+        echo "       it did not grade your diff and found nothing wrong with it. Do not go" >&2
+        echo "       debugging a branch this hook never looked at." >&2
+        echo "       Correct response: wait for the other lint to finish and push again." >&2
+        echo "       Who holds it:  ps -eo pid,etimes,args= | grep '[g]olangci-lint'" >&2
+        echo "       Do NOT push with --no-verify (Constitution IV.4) and do NOT sleep with" >&2
+        echo "       this branch unpushed — unpushed work here is lost work (bd gqlc-hg61)." >&2
+        return 0
+      fi
+      echo "NOTE: another worker holds the golangci-lint lock; this is not your branch." >&2
+      echo "      Waiting ${lint_delay}s and retrying (attempt ${lint_attempt} of ${lint_attempts}) — bd gqlc-hg61." >&2
+      sleep "${lint_delay}"
+    done
+  }
+
+  run_under_lint_lock lint-new
   if [ "${lint_rc}" -ne 0 ]; then
     # TWO TELLS, because the same cause has two presentations. Both were
     # produced on this repo on 2026-08-22 by the same command, minutes apart,
@@ -225,10 +240,44 @@ if just ensure-golangci >/dev/null 2>&1; then
     fi
     exit "${lint_rc}"
   fi
+
+  # THE NESTED MODULES, which nothing above this line reads. `just test` is
+  # `go build ./... && go test ./...` and `just lint-new` is a golangci run:
+  # all three stop at the root module, and test/data/codegen is a module of its
+  # own. Until this call, CI's codegen-fence — one of the seven required
+  # contexts — had no local counterpart at all, so it was discovered the only
+  # way a gate with no local counterpart can be: by pushing and waiting. On PR
+  # #1633 fmt-check, lint and test were green, this hook printed "every gate
+  # PASSED", and codegen-fence then reddened on two ireturn findings that had
+  # been in the tree throughout (bd gqlc-s9bx).
+  #
+  # The whole recipe, not just its golangci run: the fenced module's build, vet
+  # and `go mod tidy -diff` are unreached by the root gates for the same reason
+  # its lint is, and CI runs the recipe entire. Measured warm on 2026-08-29 at
+  # 2.1s, which is what makes running it unconditionally the cheaper answer than
+  # deciding from the diff which pushes could redden it — that set is the module
+  # plus .golangci.yml plus internal/tools/modscope plus the recipe itself, and
+  # a conditional gate that omits is silent about having omitted.
+  #
+  # After lint-new rather than before it, and under the same wait: golangci-lint
+  # holds one lock per machine, so these two cannot overlap, and a fence that
+  # lost a race with a neighbour would refuse the push for a reason that is not
+  # this branch's.
+  run_under_lint_lock test-codegen-fence
+  if [ "${lint_rc}" -ne 0 ]; then
+    echo "ERROR: the nested-module fence failed, so CI's codegen-fence would redden." >&2
+    echo "       That is a required context, and this is the only local gate that reads" >&2
+    echo "       a module other than the root one — 'just test', 'just lint' and" >&2
+    echo "       'just lint-new' all stop at the repository root (bd gqlc-s9bx)." >&2
+    echo "       The findings are above. Re-run on their own with:  just test-codegen-fence" >&2
+    exit "${lint_rc}"
+  fi
 elif [ "${GQLC_ALLOW_MISSING_LINTER:-}" = "1" ]; then
-  echo "WARN: golangci-lint unavailable; lint SKIPPED by GQLC_ALLOW_MISSING_LINTER=1" >&2
+  echo "WARN: golangci-lint unavailable; lint and the nested-module fence SKIPPED by" >&2
+  echo "      GQLC_ALLOW_MISSING_LINTER=1" >&2
 else
-  echo "ERROR: could not provision golangci-lint, so lint-new did not run." >&2
+  echo "ERROR: could not provision golangci-lint, so neither lint-new nor" >&2
+  echo "       test-codegen-fence ran." >&2
   echo "       Diagnose with: just ensure-golangci" >&2
   echo "       Push anyway (skips the lint): GQLC_ALLOW_MISSING_LINTER=1 git push ..." >&2
   exit 1
