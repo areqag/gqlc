@@ -24,10 +24,8 @@ usage() {
     cat <<'EOF'
 km — the machinery of the Թագաւորութիւն
 
-  km status                      the town at a glance
-  km up | down                   start / stop the tmux town
-  km attach <seat>               attach to a seat's window
-  km herratsayn                  Հեռաձայն: wake Սեդրակ if asleep, attach
+  km status                      the town's mechanical readout (open `herdr` for the pane view)
+  km up | down                   raise / close the town's herdr workspace and its per-seat agents
   km wake <seat> [--bead ID] [--reason TEXT]
   km sleep [--seat NAME]         end the current seat's workday
   km mail send <to> -s SUBJ [-m BODY]   (body on stdin if no -m)
@@ -35,9 +33,9 @@ km — the machinery of the Թագաւորութիւն
   km dispatch                    route ready beads to free seats (timer)
   km hold-verdict                ROUTE/HOLD per candidate bead, docs on stdin
   km reconcile                   match seat status to the sessions that exist
-  km seat-live <seat>            exit 0 if a session actually exists there
-  km seat-runner <seat>          exit 0 if a km-seat loop is parked on its wake file
-  km seat-idle <seat>            exit 0 if the pane shows an empty prompt, nothing running
+  km seat-live <seat>            exit 0 if a claude session exists there (herdr reports it)
+  km seat-runner <seat>          exit 0 if the seat has an active herdr agent
+  km seat-idle <seat>            exit 0 if the seat's agent_status is `idle`
   km guard-sweep                 wake Րաֆֆի for a round (timer)
   km halt [reason] | resume      raise / lower the town halt
   km install-units | uninstall-units
@@ -386,187 +384,176 @@ seat_status() {
     if [ -f "$f" ]; then cat "$f"; else echo asleep; fi
 }
 
-# ---------- tmux ----------
+# ---------- herdr ----------
 
-SESSION="${KM_TMUX_SESSION:-$(cfg kingdom tmux_session)}"
+# Herdr owns the pane lifecycle: one workspace per town, one agent per seat.
+# The socket API answers every question km used to derive from tmux + pgrep +
+# pane grepping, so this section is thin wrappers, not a state machine.
+# Kingdom-state (heartbeats, wake queues, mail) stays on disk as before.
+#
+# WORKSPACE is the herdr workspace name; the seats are agents inside it named
+# by their seat id (sedrak, artur, ...). The env override is for tests.
+WORKSPACE="${KM_HERDR_WORKSPACE:-$(cfg kingdom tmux_session)}"
 
-have_tmux()  { command -v tmux >/dev/null 2>&1; }
+have_herdr() { command -v herdr >/dev/null 2>&1; }
 have_just()  { command -v just >/dev/null 2>&1; }
-session_up() { have_tmux && tmux has-session -t "=$SESSION" 2>/dev/null; }
-window_up()  { session_up && tmux list-windows -t "=$SESSION" -F '#W' | grep -qx "$1"; }
 
-# Does a session actually EXIST for this seat? The status file cannot answer
-# that: it holds a claim written either side of a session by something that is
-# not the session, and when the two disagree the town spends slots on nothing
-# (gqlc-s16s). The pane's tty can answer it, because km-seat runs claude as the
-# pane's own child.
-#
-# Deliberately no heartbeat here. heartbeat.json is written by the statusLine
-# hook, which fires at TURN BOUNDARIES: measured in-seat, a 53s tool call left
-# it untouched for the whole 53s and the age simply tracked the call. So it
-# separates mid-turn from between-turns, not working from abandoned, and any
-# threshold over it would reap a seat for being busy.
-#
-# window_up first, and it is not redundant with the pane lookup. tmux resolves a
-# bare window target by PREFIX when nothing matches exactly, so `-t "=$SESSION:ar"`
-# returns artur's pane (measured, tmux 3.7c) — and this roster has `ar` in it.
-# pgrep wants the tty without its /dev/ prefix; the real-tmux row in the suite is
-# what keeps that transform honest end to end.
-#
+# The herdr server is the successor to `tmux has-session` here: if it is not
+# running there is no town to reach. `herdr status server --json` returns a
+# `running` string or errors; the wrapper collapses both into a rc.
+herdr_server_up() {
+    have_herdr && herdr status server 2>/dev/null | grep -q '^status: running$'
+}
+
+# The workspace exists as long as the town has been raised at least once and
+# not torn down. Lookup by label; herdr assigns numeric IDs we don't hold.
+workspace_id() { # -> id on stdout, empty if absent
+    have_herdr || return 1
+    herdr workspace list 2>/dev/null |
+        python3 -c "import json,sys; d=json.load(sys.stdin); print(next((w['workspace_id'] for w in d['result']['workspaces'] if w['label']==sys.argv[1]),''))" "$WORKSPACE" 2>/dev/null
+}
+
+session_up() {
+    herdr_server_up || return 1
+    [ -n "$(workspace_id)" ]
+}
+
+# The seat's tab exists inside the workspace. Herdr tabs carry a label; the
+# label IS the seat name. Returns tab_id on stdout.
+seat_tab_id() { # <seat> -> tab_id on stdout, empty if absent
+    local ws
+    ws=$(workspace_id) || return 1
+    [ -n "$ws" ] || return 1
+    herdr tab list --workspace "$ws" 2>/dev/null |
+        python3 -c "import json,sys; d=json.load(sys.stdin); print(next((t['tab_id'] for t in d['result']['tabs'] if t.get('label','')==sys.argv[1]),''))" "$1" 2>/dev/null
+}
+
+# The seat's primary pane inside its tab. One pane per tab in this town; if
+# splits ever get introduced, this returns the first.
+seat_pane_id() { # <seat> -> pane_id on stdout, empty if absent
+    local tab ws
+    tab=$(seat_tab_id "$1") || return 1
+    [ -n "$tab" ] || return 1
+    ws=$(workspace_id)
+    herdr pane list --workspace "$ws" 2>/dev/null |
+        python3 -c "import json,sys; d=json.load(sys.stdin); print(next((p['pane_id'] for p in d['result']['panes'] if p.get('tab_id')==sys.argv[1]),''))" "$tab" 2>/dev/null
+}
+
+window_up() { # kept as a name for callers; asks "does the seat's tab exist?"
+    [ -n "$(seat_tab_id "$1")" ]
+}
+
+# Herdr's agent_status is the answer km used to derive from pgrep + pane
+# grep. Values: idle | working | blocked | done | unknown. Absent (no agent
+# reporting) reads as unknown.
+seat_agent_status() { # <seat> -> agent_status string
+    local pane
+    pane=$(seat_pane_id "$1") || { echo unknown; return 0; }
+    [ -n "$pane" ] || { echo unknown; return 0; }
+    herdr pane get "$pane" 2>/dev/null |
+        python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('result',{}).get('agent_status','unknown'))" 2>/dev/null || echo unknown
+}
+
+# A live SESSION is claude actually running in the pane. Under herdr that is
+# any non-unknown status, because the status is set BY claude's hook only when
+# claude is up. A `done` state means the last turn finished but the process is
+# still around ready for more input.
 seat_session_live() {
-    local tty
-    window_up "$1" || return 1
-    tty=$(tmux list-panes -t "=$SESSION:$1" -F '#{pane_tty}' 2>/dev/null | head -1)
-    [ -n "$tty" ] || return 1
-    pgrep -t "${tty#/dev/}" -x claude >/dev/null 2>&1
+    case "$(seat_agent_status "$1")" in
+        idle | working | blocked | done) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
-# Is the seat's RUNNER there — the loop that IS the pane's command, and
-# the only consumer of a wake file anywhere in the system (km-seat:88)? A seat
-# whose loop has exited can never be woken again by any mechanism short of
-# `km up`: cmd_wake appends a reason to a queue with no reader and reports
-# success, and both dispatch passes then SKIP the seat because it has a wake
-# file pending. The undelivered wake is what removes the seat from dispatch, so
-# the state is anti-self-healing and the more work is routed at it the more
-# certainly it stays gone. Measured 2026-08-22T18:3xZ: 7 of 15 seats, all three
-# architects and one of two judges; Անահիտ's wake had sat unread since 14:28
-# while she held three in-progress P0 review beads (gqlc-6ha4).
-#
-# A SEPARATE predicate from seat_session_live rather than a flag on it, because
-# the two ask about different processes and disagree in the ordinary case: a
-# HEALTHY asleep seat has no claude at all, only this parked loop. Reusing the
-# session probe here would call every resting citizen dead, and bending the
-# session probe to accept a runner would break its existing callers, whose whole
-# question is whether a slot is being spent.
-#
-# `-f` and not `-x`: the runner has an `env bash` shebang, so its comm is the
-# interpreter's. The `$` anchor is the same prefix hazard window_up guards
-# above — unanchored, `km-seat ar` matches artur's runner. The real-tmux row in
-# the suite is what keeps the pattern and the tty transform honest end to end.
-seat_runner_live() {
-    local tty runner
-    runner=$(seat_runner)
-    window_up "$1" || return 1
-    tty=$(tmux list-panes -t "=$SESSION:$1" -F '#{pane_tty}' 2>/dev/null | head -1)
-    [ -n "$tty" ] || return 1
-    pgrep -t "${tty#/dev/}" -f "${runner}[[:space:]]+$1\$" >/dev/null 2>&1
-}
+# Under tmux the runner check was `pgrep km-seat` on the pane's tty. Under
+# herdr, agent_status is `unknown` when claude isn't running — including when
+# km-seat is parked between wakes, which is the HEALTHY asleep state, not a
+# dead runner. So the coarser check is the right one: if the seat's pane
+# exists, cmd_up started km-seat in it and it is either parked or working.
+# A km-seat that has hard-crashed and left the pane at a bare fish prompt is
+# indistinguishable from a parked one here — same shape as tmux, where a
+# runner that segfaulted would leave the window on `remain-on-exit`. The
+# wake queue not draining is the operator-visible tell.
+seat_runner_live() { [ -n "$(seat_pane_id "$1")" ]; }
 
-# Put a runner back, the way cmd_up does — a new window whose command is
-# km-seat, which parks on the wake file within a second and consumes whatever
-# has piled up in it. Idempotent by the same `window_up ||` guard cmd_up uses.
+# Bring a fresh km-seat back for a seat. Uses `herdr pane run` to launch the
+# runner as a CHILD of the pane's shell (fish per herdr config) rather than
+# `exec`ing over the shell — if km-seat exits unexpectedly under `exec`, the
+# pane closes with it, and herdr reaps the workspace when its last pane is
+# gone. As a child, a failure leaves the shell at its prompt, with the error
+# visible, and the pane still exists to be repaired.
 #
-# The window-present-but-empty arm is the one that needs an argument. Replacing
-# a window is not forcing anything (VI.2) ONLY because nothing lives in it: no
-# claude, no runner, nothing but a dead shell that `remain-on-exit` kept on
-# screen. The live-session refusal is here rather than left to each caller
-# because getting it wrong ends a citizen's session, which is the one mistake
-# this file must not be able to make: a window holding a LIVE claude and no
-# runner is reported by cmd_reconcile and acted on by nobody.
+# `herdr agent start` was tempting but creates a NEW pane in the tab even
+# when one exists, so each cmd_up left two panes per tab (measured
+# 2026-08-29). Reusing the pane herdr already made for the tab is what keeps
+# the "one pane per seat" invariant this town's roster and status expect.
 seat_runner_start() { # <seat> -> 1 if a live session made it unsafe
     seat_session_live "$1" && return 1
-    if window_up "$1"; then
-        tmux kill-window -t "=$SESSION:$1" 2>/dev/null
+    local ws pane wt sd
+    ws=$(workspace_id); [ -n "$ws" ] || return 1
+    wt=$(seat_worktree "$1")
+    if [ -z "$(seat_tab_id "$1")" ]; then
+        herdr tab create --workspace "$ws" --label "$1" --cwd "$wt" --no-focus >/dev/null 2>&1 || return 1
     fi
-    tmux new-window -d -t "=$SESSION" -n "$1" "$SCRIPT_DIR/$(seat_runner) $1"
+    pane=$(seat_pane_id "$1"); [ -n "$pane" ] || return 1
+    # Thread km's KM_STATE_DIR into the pane's env so km-seat agrees with km
+    # about which state to work with. Without this, km-seat re-derives it from
+    # the pane's cwd (a seat worktree → main_root → the shared kingdom-state)
+    # and diverges from a test override, which reproduces the 2026-08-29
+    # incident where a test workspace's km-seats claimed real wakes.
+    sd=$(state_dir)
+    herdr pane run "$pane" "KM_STATE_DIR=$sd $SCRIPT_DIR/km-seat $1" >/dev/null 2>&1
 }
 
-# Text and its Enter as SEPARATE invocations. Bundled, tmux hands both to the
-# pane in one read() burst and a TUI that reads a burst as a paste takes the CR
-# as literal text — the keystroke is typed and never submitted (measured, tmux
-# 3.7c, raw-tty reader). C-u first clears whatever a previous stranded attempt
-# left in the box, which is what makes a re-send idempotent.
-#
-# This is necessary and NOT sufficient: if the reader is not in read() between
-# the two writes the tty buffer re-coalesces them regardless of any delay, so
-# no caller may treat a return from here as proof of delivery. Confirm instead.
+# `herdr agent send` writes text to the agent atomically over the socket. No
+# tty burst, no split, no reconfirm. The signature keeps the `<target>` shape
+# callers used with `send_line "=$SESSION:$seat"`, but the target may just be
+# the seat name; the wrapper accepts either.
 send_line() { # <target> <text>
-    tmux send-keys -t "$1" C-u
-    tmux send-keys -t "$1" "$2"
-    tmux send-keys -t "$1" Enter
+    local target=$1 text=$2 seat
+    seat=${target##*:}
+    herdr agent send "$seat" "$text" >/dev/null 2>&1
 }
 
-# The last 40 lines of a seat's pane. 40 and not 1, because the prompt line
-# ALONE is not an idle test: a seat mid-tool-call and a seat finished for the
-# day present the same empty prompt, and the difference is in the body above it.
-# Սեդրակ nearly filed Նուարդ idle off a single empty prompt while she was
-# mid-`git push` (gqlc-5vp7, method note).
-seat_pane() { # <seat> -> the pane's tail; rc 1 if there is no pane to read
+# Kept as a query name for callers that want to render the pane to a human.
+# Under herdr the pane's visible buffer is what the operator sees in the TUI.
+seat_pane() { # <seat> -> the pane's visible buffer
     local pane
-    window_up "$1" || return 1
-    pane=$(tmux capture-pane -p -t "=$SESSION:$1" 2>/dev/null | tail -n 40) || return 1
+    pane=$(seat_pane_id "$1") || return 1
     [ -n "$pane" ] || return 1
-    printf '%s\n' "$pane"
+    herdr pane read "$pane" --source visible --lines 40 2>/dev/null
 }
 
-# Is a live seat sitting at an EMPTY prompt with nothing running? Two markers,
-# both required:
-#
-#   no "esc to interrupt" — claude prints it for the whole of any turn, so this
-#     is what separates finished-for-the-day from mid-tool-call. It is the body
-#     above the prompt that the method note above says to read.
-#   a prompt line with nothing after it — and this one is load-bearing in a
-#     second way that is easy to lose. A seat frozen on a MODAL has no prompt
-#     line at all, because the modal covers the box (gqlc-eier, two judges).
-#     Requiring the prompt is therefore what keeps the nudge away from a frozen
-#     seat — and it must, because a nudge ends in Enter and Enter on a
-#     usage-limit modal CHOOSES whichever option is highlighted. An idle test
-#     that merely looked for "no spinner" would answer yes on a modal and press
-#     a button nobody consented to (VI.2).
-#
-# Deliberately NOT part of this test: the heartbeat. km:227-231 has the reason —
-# it is written at turn boundaries, so its age tracks the length of the current
-# tool call rather than the seat's health. It is also not established that a
-# statusline stops firing on an idle seat, and a conjunct that may never be true
-# would make this a nudge that never nudges: fail-silent, which is the defect
-# family all three of these beads are in.
+# Idle == the agent's own report says so. No pane scraping, no reconciling
+# "esc to interrupt" strings, no false-idle on a mid-tool-call — herdr's
+# hook fires at the states claude passes through.
 seat_pane_idle() { # <seat>
-    local pane
-    seat_session_live "$1" || return 1
-    pane=$(seat_pane "$1") || return 1
-    if grep -qi 'esc to interrupt' <<<"$pane"; then return 1; fi
-    grep -qE '❯[[:space:]│]*$' <<<"$pane"
+    [ "$(seat_agent_status "$1")" = idle ]
 }
 
-# Is a nudge sitting typed and unsent at the prompt? The nudge is the only
-# channel the town has to a seat that is awake, and on 2026-08-22 it dropped six
-# messages in a row while reporting success on every one (gqlc-5vp7 addendum,
-# Հայկ). send_line's own contract says a return from it is not delivery, so
-# this is how a caller obeys that instead of restating it.
-seat_prompt_holds_nudge() { # <seat>
-    local pane
-    pane=$(seat_pane "$1") || return 1
-    grep -qE '❯[[:space:]]*\[km\]' <<<"$pane"
-}
-
-# Is there an input box to type into at all? Weaker than seat_pane_idle on
-# purpose: a seat mid-turn still renders its prompt below the spinner and
-# type-ahead there is harmless, so this does NOT ask whether the seat is idle.
-# What it excludes is the one shape where typing is not an ask but an action —
-# a modal covers the input box, so no prompt line means the next Enter CHOOSES
-# whichever option is highlighted (gqlc-eier: "Stop and wait / Switch to extra
-# usage / Upgrade", two judges, 80 and 152 minutes). A pane that cannot be read
-# is excluded too: an unreadable pane is not evidence that a prompt is there,
-# and this is the guard, so it fails closed.
+# Whether the agent is available to receive text. `blocked` means the agent
+# is on a modal (permission ask, usage-limit); `unknown` means claude isn't
+# reporting, which includes the "no agent at all" case. Both refuse the send.
 seat_prompt_visible() { # <seat>
-    local pane
-    pane=$(seat_pane "$1") || return 1
-    grep -qF '❯' <<<"$pane"
+    case "$(seat_agent_status "$1")" in
+        idle | working | done) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
-# Send, then CONFIRM, then repair with the bare Enter that repaired it by hand.
-# The two waits are the reader's chance to come back to read(): the tty
-# re-coalesces at any delay if it is not in read() between the writes, which is
-# why this cannot be made reliable by sending harder and has to be checked
-# instead.
-seat_nudge() { # <seat> <text> -> 1 if the text is still unsent after the repair
-    send_line "=$SESSION:$1" "$2"
-    sleep 1
-    seat_prompt_holds_nudge "$1" || return 0
-    tmux send-keys -t "=$SESSION:$1" Enter
-    sleep 1
-    if seat_prompt_holds_nudge "$1"; then return 1; fi
-    return 0
+# Under tmux, "did the nudge land" required scraping the prompt buffer for
+# the typed text. Herdr's socket delivery is atomic — an ack from `agent
+# send` IS delivery. The old predicate is kept as an alias that always
+# reports "no" (nothing stranded), so callers whose logic was "if the nudge
+# was stranded, requeue" now naturally take the delivered branch.
+seat_prompt_holds_nudge() { return 1; }
+
+# Send + confirm was the tty-workaround shape. Under herdr the send itself
+# is the confirmation: if `herdr agent send` returned 0, the text is queued
+# for the agent. If it returned non-zero (server down, agent gone), the
+# caller queues to the wake file — same as the pre-herdr fall-through.
+seat_nudge() { # <seat> <text> -> 0 delivered, 1 refused
+    send_line "$1" "$2"
 }
 
 # Minutes from the config, in seconds, with a default that survives a missing or
@@ -926,10 +913,10 @@ cmd_sleep() {
     # `km reconcile`, which is what makes an undelivered request recoverable.
     echo asleep-pending >"$(seat_home "$seat")/status"
     if window_up "$seat"; then
-        send_line "=$SESSION:$seat" "/exit"
+        send_line "$seat" "/exit"
         echo "sleep: good night, $(seat_display "$seat") — the session ends when this turn does"
     else
-        echo "sleep: no tmux window for $seat; end your session normally"
+        echo "sleep: no herdr agent for $seat; end your session normally"
     fi
 }
 
@@ -948,9 +935,10 @@ ensure_state_tree() {
 }
 
 cmd_up() {
-    have_tmux || die "tmux is not installed (sudo pacman -S tmux), so there is no town to raise"
+    have_herdr || die "herdr is not installed, so there is no town to raise (https://herdr.dev)"
+    herdr_server_up || die "herdr server is not running — start it and retry (herdr status server)"
     ensure_state_tree
-    local mr s wt placeholder=0
+    local mr s wt ws
     mr=$(main_root)
     for s in $(seats_all); do
         wt=$(seat_worktree "$s")
@@ -958,46 +946,45 @@ cmd_up() {
             git -C "$mr" worktree add --detach "$wt" origin/master
         fi
     done
-    if ! session_up; then
-        tmux new-session -d -s "$SESSION" -n _km 'sleep 5'
-        placeholder=1
+    ws=$(workspace_id)
+    if [ -z "$ws" ]; then
+        # herdr workspace create returns a workspace with a default root tab
+        # whose pane has herdr's own cwd (typically $HOME). The seat loop
+        # below wants each tab's pane to start in the SEAT's worktree, so
+        # the auto-tab is not reused — the loop creates one tab per seat
+        # with --cwd correct. The auto-tab is closed after the loop so the
+        # roster does not carry an unlabelled placeholder.
+        local created
+        created=$(herdr workspace create --label "$WORKSPACE" --no-focus 2>/dev/null)
+        ws=$(printf '%s' "$created" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['workspace']['workspace_id'])")
+        local auto_tab
+        auto_tab=$(printf '%s' "$created" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['tab']['tab_id'])")
+        for s in $(seats_all); do
+            seat_runner_start "$s" >/dev/null 2>&1 || true
+        done
+        # Close the placeholder AFTER the seats are up, so herdr doesn't
+        # reap the workspace between "no seats yet" and "seats added".
+        if [ -n "$auto_tab" ]; then
+            herdr tab close "$auto_tab" >/dev/null 2>&1 || true
+        fi
+    else
+        for s in $(seats_all); do
+            seat_runner_start "$s" >/dev/null 2>&1 || true
+        done
     fi
-    for s in $(seats_all); do
-        window_up "$s" ||         tmux new-window -d -t "=$SESSION" -n "$s" "$SCRIPT_DIR/$(seat_runner) $s"
-    done
-    [ "$placeholder" -eq 1 ] && tmux kill-window -t "=$SESSION:_km" 2>/dev/null
     echo "the town is up: $(seats_all | wc -l) seats, all asleep until woken."
-    echo "  just kingdom       — status"
-    echo "  just herratsayn    — call Սեդրակ"
+    echo "  herdr              — open the town's TUI (every citizen is a tab in the '$WORKSPACE' workspace)"
 }
 
 cmd_down() {
     session_up || { echo "the town is already down"; return 0; }
-    mail_send town -s "town going down" -m "The tmux session is being stopped. Sessions end; seats, mail, and handoffs persist." || true
-    tmux kill-session -t "=$SESSION"
+    mail_send town -s "town going down" -m "The herdr workspace is being closed. Sessions end; seats, mail, and handoffs persist." || true
+    local ws
+    ws=$(workspace_id)
+    if [ -n "$ws" ]; then
+        herdr workspace close "$ws" >/dev/null 2>&1 || true
+    fi
     echo "the town is down. State, mail, and handoffs persist in $(state_dir)"
-}
-
-cmd_attach() {
-    local seat=${1:-}
-    is_seat "$seat" || die "attach: unknown seat ${seat:-<none>}"
-    window_up "$seat" || die "attach: no window for $seat — is the town up? (just kingdom-up)"
-    if [ -n "${TMUX:-}" ]; then
-        tmux switch-client -t "=$SESSION"
-        tmux select-window -t "=$SESSION:$seat"
-    else
-        tmux select-window -t "=$SESSION:$seat"
-        # No exec: callers that treat a failed attach as survivable
-        # (herratsayn) cannot catch one that replaced this process.
-        tmux attach-session -t "=$SESSION"
-    fi
-}
-
-cmd_herratsayn() {
-    if [ "$(seat_status sedrak)" != awake ]; then
-        cmd_wake sedrak --reason "Հեռաձայն from Անդրանիկ — he is calling you now"
-    fi
-    cmd_attach sedrak
 }
 
 # ---------- halt ----------
@@ -1151,7 +1138,7 @@ cmd_reconcile() {
         if seat_session_live "$s"; then
             rm -f "$suspect"
             if [ "$st" = asleep-pending ]; then
-                send_line "=$SESSION:$s" "/exit"
+                send_line "$s" "/exit"
                 echo "reconcile: $s asked to leave and is still here; /exit re-sent"
                 redelivered=$((redelivered + 1))
             fi
@@ -2676,7 +2663,7 @@ cmd_status() {
     local stall stall_age stall_list
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
-    if session_up; then echo "town: UP (tmux session '$SESSION')"; else echo "town: DOWN"; fi
+    if session_up; then echo "town: UP (herdr workspace '$WORKSPACE')"; else echo "town: DOWN"; fi
     if [ -f "$sd/halt" ]; then echo "HALT: $(head -1 "$sd/halt")"; fi
     # A dispatcher refusing on drift is otherwise visible only in the journal
     # (bd gqlc-vzpn), so the town's one glance carries it.
@@ -2973,7 +2960,8 @@ cmd_doctor() {
             echo "warn: $negative"
         fi
     }
-    check hard "tmux installed" "tmux is NOT installed, and the town's panes are tmux windows" command -v tmux
+    check hard "herdr installed" "herdr is NOT installed, and the town's panes are herdr agents (https://herdr.dev)" command -v herdr
+    check hard "herdr server running" "the herdr server is not running (herdr status server)" herdr_server_up
     check hard "claude installed" "claude is NOT installed, so no seat can be woken" command -v claude
     check hard "bd installed" "bd is NOT installed, so there is no ledger to dispatch from" command -v bd
     check hard "jq installed" "jq is NOT installed, and every ledger query here is parsed with it" command -v jq
@@ -3198,26 +3186,15 @@ cmd_doctor() {
     else
         echo "ok:   lingering is off, so the timers fire only while a login session is open — a headless town needs 'loginctl enable-linger'"
     fi
-    # THE TOWN ROW (gqlc-67ml), and it gets the linger arm's three outcomes
-    # rather than a negated label, because there are genuinely three. This
-    # printed 'warn: town is up' with the town down, and it is the row an
-    # operator reads first on a restart morning.
-    #
-    # `has-session` exits 1 both for "no such session" and for "no server
-    # running", and both of those mean the town is down, so 1 is a measurement.
-    # Anything else is not: 127 is an absent tmux, and other codes are a tmux
-    # that could not be run or could not reach its socket. Rendering those as
-    # DOWN is the same fail-open pointed the other way — the reader would go and
-    # start a town that may already be running.
-    local tmuxout tmuxrc=0
-    tmuxout=$(tmux has-session -t "=$SESSION" 2>&1) || tmuxrc=$?
-    : "$tmuxout"
-    if [ "$tmuxrc" -eq 0 ]; then
-        echo "ok:   the town is up — tmux session '$SESSION' exists"
-    elif [ "$tmuxrc" -eq 1 ]; then
-        echo "warn: the town is DOWN — there is no tmux session '$SESSION' ('km up' starts it)"
+    # THE TOWN ROW: is the herdr workspace present? Server-down and
+    # workspace-absent both mean the town is down; render each with its own
+    # message so an operator knows whether to start herdr or run `km up`.
+    if ! herdr_server_up; then
+        echo "warn: the town is DOWN — the herdr server is not running (herdr status server)"
+    elif [ -z "$(workspace_id)" ]; then
+        echo "warn: the town is DOWN — no herdr workspace '$WORKSPACE' ('km up' creates it)"
     else
-        echo "warn: whether the town is up is UNKNOWN — tmux exited $tmuxrc rather than answering about session '$SESSION' (${tmuxout:-no output}), so this was not measured"
+        echo "ok:   the town is up — herdr workspace '$WORKSPACE' exists"
     fi
     return "$ok"
 }
@@ -3499,8 +3476,6 @@ case "$cmd" in
     status)          cmd_status "$@" ;;
     up)              cmd_up "$@" ;;
     down)            cmd_down "$@" ;;
-    attach)          cmd_attach "$@" ;;
-    herratsayn)      cmd_herratsayn "$@" ;;
     wake)            cmd_wake "$@" ;;
     sleep)           cmd_sleep "$@" ;;
     mail)            cmd_mail "$@" ;;
