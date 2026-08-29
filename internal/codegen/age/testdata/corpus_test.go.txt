@@ -1656,6 +1656,132 @@ func TestEmittedMethodBindsTheCarriersAsTheirScalars(t *testing.T) {
 	}
 }
 
+// TestEmittedMethodBindsListsOfCarriers runs the emitted method for the
+// one query that binds a LIST of each carrier, which is the only thing in
+// the tree that reaches agtypeEncodedList — and, through a nullable list,
+// the composition of agtypeEncodedNullable around it.
+//
+// Before this, `agtypeEncodedList` appeared in no emitted artefact
+// anywhere: not in a golden, not in this corpus, not in a fixture. The
+// helper and the composition that wraps it were written, gated behind
+// encList, and then reached by nothing, so they were never compiled and
+// never run. Measured (bd gqlc-t0dp): dropping the element index from the
+// helper's message — `element %d` to `element 0` — left the whole
+// internal/codegen/age suite green.
+//
+// The index is what the refusal rows below exist for. Elements share one
+// parameter name, so the index is the only thing in the message that says
+// WHICH value was refused; an author handed "parameter $startsOn" for a
+// forty-element list has been told nothing they did not know.
+func TestEmittedMethodBindsListsOfCarriers(t *testing.T) {
+	mayLast := []Duration{{Seconds: 1}, {Days: 1}}
+
+	cases := []struct {
+		name string
+		arg  WriteSpansParams
+		want string
+	}{
+		{
+			name: "each list crosses as an array of its element's scalar",
+			arg: WriteSpansParams{
+				StartsOn: []Date{{Year: 2024, Month: 1, Day: 2}, {Year: 1, Month: 1, Day: 1}},
+				OpensAt:  []LocalTime{{Hour: 1}, {Hour: 23, Minute: 59, Second: 59, Nanosecond: 999999000}},
+				Lasts:    []Duration{{Seconds: 90}, {Days: 1, Seconds: 1}},
+				MayLast:  &mayLast,
+			},
+			want: `{"lasts":[90000000,86401000000],"mayLast":[1000000,86400000000],"opensAt":[3600000000,86399999999],"startsOn":["2024-01-02","0001-01-01"]}`,
+		},
+		{
+			name: "an absent nullable list is the agtype null",
+			arg: WriteSpansParams{
+				StartsOn: []Date{{Year: 2024, Month: 1, Day: 2}},
+				OpensAt:  []LocalTime{{Hour: 1}},
+				Lasts:    []Duration{{Seconds: 90}},
+			},
+			want: `{"lasts":[90000000],"mayLast":null,"opensAt":[3600000000],"startsOn":["2024-01-02"]}`,
+		},
+		{
+			// A bound list of no elements and an unbound nullable list are
+			// different arguments, and the encoder walk is what keeps them
+			// apart: it returns an allocated empty slice where a pass-through
+			// of the nil would have marshalled as null.
+			name: "an empty list is an empty array and not a null",
+			arg:  WriteSpansParams{},
+			want: `{"lasts":[],"mayLast":null,"opensAt":[],"startsOn":[]}`,
+		},
+	}
+	for _, tc := range cases {
+		db := &recordingDB{}
+		if err := (&Queries{queries{db: db, graph: "corpus"}}).WriteSpans(context.Background(), tc.arg); err != nil {
+			t.Errorf("%s: WriteSpans = error %v", tc.name, err)
+			continue
+		}
+		if db.args != tc.want {
+			t.Errorf("%s: bound arguments =\n\t%s\nwant\n\t%s", tc.name, db.args, tc.want)
+		}
+	}
+
+	// Each refusal is placed at an index other than 0, so a message that
+	// hard-codes the first element fails the row rather than passing on a
+	// coincidence. One row per encoder because each is its own call site in
+	// the emitted method, plus one reached through the nullable combinator.
+	badLast := []Duration{{Seconds: 1}, {Seconds: 2}, {Months: 1}}
+	refusals := []struct {
+		name  string
+		arg   WriteSpansParams
+		names string
+		index string
+	}{
+		{
+			name: "a date off the calendar, at the third element",
+			arg: WriteSpansParams{
+				StartsOn: []Date{{Year: 2024, Month: 1, Day: 2}, {Year: 2024, Month: 1, Day: 3}, {Year: 2024, Month: 2, Day: 30}},
+			},
+			names: "startsOn",
+			index: "element 2",
+		},
+		{
+			name: "a reading off the clock, at the second element",
+			arg: WriteSpansParams{
+				OpensAt: []LocalTime{{Hour: 1}, {Hour: 24}},
+			},
+			names: "opensAt",
+			index: "element 1",
+		},
+		{
+			name: "a duration carrying months, at the second element",
+			arg: WriteSpansParams{
+				Lasts: []Duration{{Seconds: 1}, {Months: 1}},
+			},
+			names: "lasts",
+			index: "element 1",
+		},
+		{
+			name:  "a refusal inside a nullable list reaches the caller",
+			arg:   WriteSpansParams{MayLast: &badLast},
+			names: "mayLast",
+			index: "element 2",
+		},
+	}
+	for _, tc := range refusals {
+		db := &recordingDB{}
+		err := (&Queries{queries{db: db, graph: "corpus"}}).WriteSpans(context.Background(), tc.arg)
+		if err == nil {
+			t.Errorf("%s: WriteSpans = nil, want an error", tc.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.names) {
+			t.Errorf("%s: WriteSpans = error %v, which does not name parameter $%s", tc.name, err, tc.names)
+		}
+		if !strings.Contains(err.Error(), tc.index) {
+			t.Errorf("%s: WriteSpans = error %v, which does not say %q", tc.name, err, tc.index)
+		}
+		if db.args != "" {
+			t.Errorf("%s: WriteSpans sent %s despite refusing the argument", tc.name, db.args)
+		}
+	}
+}
+
 func TestBoundGraphCountsBytes(t *testing.T) {
 	// 63 is PostgreSQL's name capacity in BYTES, so the boundary a
 	// multi-byte name crosses is not the one its character count
