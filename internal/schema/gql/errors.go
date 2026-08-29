@@ -66,9 +66,39 @@ var ErrUnsupportedSource = errors.New("unsupported graph type source")
 // They were one error until gqlc-h9n.12, which is why the deviation record had
 // to carry two incompatible justifications against a single sentinel and could
 // not say which applied. See ADR 0016.
+//
+// ErrCopyOfSource narrowed under ADR 0034: a catalogue exists now, but only a
+// Loader holds one. So it is what Parse alone reports, and its message is
+// literally true of the io.Reader Parse is handed — a reader has no directory to
+// resolve against. Load reports it never.
 var (
 	ErrLikeGraphSource = fmt.Errorf("%w: LIKE derives the graph type from a graph expression, which can name session state", ErrUnsupportedSource)
 	ErrCopyOfSource    = fmt.Errorf("%w: COPY OF names a graph type this parser cannot reach, having no catalogue", ErrUnsupportedSource)
+)
+
+// The four graph type reference spellings gqlc declines permanently, each
+// wrapping ErrUnsupportedSource so a caller asking only "was the source
+// rejected" keeps matching (the ADR 0016 pattern: a rejection carries its own
+// justification). They are judgments about the spelling and not about any
+// particular catalogue, so they fire in the lowering and Parse and Load report
+// them identically. ADR 0034 §3.3 argues each.
+var (
+	ErrReferenceParameter        = fmt.Errorf("%w: a substituted parameter reference is bound at execution time, and a build-time catalogue has no parameter values", ErrUnsupportedSource)
+	ErrHomeSchemaReference       = fmt.Errorf("%w: HOME_SCHEMA is a property of a session, and gqlc has none; unlike CURRENT_SCHEMA it has no static referent to translate to", ErrUnsupportedSource)
+	ErrObjectParentReference     = fmt.Errorf("%w: an object parent is a catalogue object containing other objects, and a directory-backed catalogue has no container between a directory and a file", ErrUnsupportedSource)
+	ErrDelimitedReferenceSegment = fmt.Errorf("%w: a delimited identifier may contain a solidus, a full stop, or nothing at all, so it is not one safe path element", ErrUnsupportedSource)
+)
+
+// The four ways resolving a SUPPORTED reference spelling fails. They stand alone
+// rather than wrapping ErrUnsupportedSource: the source was accepted and the
+// catalogue could not honour it, which is a different question from whether gqlc
+// reads the construct at all. No class is minted over four leaves — ADR 0034
+// §3.6.
+var (
+	ErrReferenceOutsideCatalogue = errors.New("graph type reference climbs above the catalogue root")
+	ErrDanglingReference         = errors.New("graph type reference names no file in the catalogue")
+	ErrReferenceCycle            = errors.New("graph type references form a cycle")
+	ErrReferenceNameMismatch     = errors.New("referenced file declares a different graph type name than the reference that found it")
 )
 
 // The value-type families gqlc declines, each wrapping ErrUnsupportedType so a

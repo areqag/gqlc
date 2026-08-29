@@ -16,7 +16,25 @@ func New() schema.Parser {
 	return parser{}
 }
 
+// Parse reads one schema file with no catalogue behind it, so a COPY OF source
+// is lowered and then refused: ErrCopyOfSource says the reference names a graph
+// type this call cannot reach, which is literally true of an io.Reader. Load is
+// the entry point that has somewhere to look (ADR 0034 §3.6).
 func (parser) Parse(r io.Reader) (schema.Schema, error) {
+	raw, err := parse(r)
+	if err != nil {
+		return schema.Schema{}, err
+	}
+	if raw.copyRef != nil {
+		return schema.Schema{}, ErrCopyOfSource
+	}
+	return raw.resolve()
+}
+
+// parse runs the walk and returns the unresolved schema, so that Parse and the
+// Loader share one reading of a file and differ only in what they do with a
+// reference.
+func parse(r io.Reader) (rawSchema, error) {
 	lex := gen.NewGQLLexer(antlr.NewIoStream(r))
 	ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
 	gp := gen.NewGQLParser(ts)
@@ -33,8 +51,8 @@ func (parser) Parse(r io.Reader) (schema.Schema, error) {
 
 	tree := gp.GqlProgram()
 	if err := l.walk(tree); err != nil {
-		return schema.Schema{}, err
+		return rawSchema{}, err
 	}
 
-	return l.raw.resolve()
+	return l.raw, nil
 }

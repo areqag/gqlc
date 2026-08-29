@@ -1,0 +1,4 @@
+-- The one-element cycle, and the shortest way a chain fails to terminate. A
+-- graph type source is one reference and a declaration has one source, so the
+-- chain is linear and a cycle is the only non-termination there is.
+CREATE PROPERTY GRAPH TYPE cycle_self COPY OF cycle_self

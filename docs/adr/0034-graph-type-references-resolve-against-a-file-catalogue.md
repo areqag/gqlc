@@ -3,6 +3,9 @@
 Design for bead `gqlc-pwly`, unblocking `gqlc-h9n.1` (`COPY OF` support).
 Written 2026-08-24 by Արթուր. Every file:line below was read in a worktree at
 `origin/master` (44ee6224), not recalled.
+Amended 2026-08-24 (`gqlc-pyc6`): §2's identifier inventory omitted
+`nonReservedWords`, and §3.3 named the `REGULAR_IDENTIFIER` token where it
+means the `regularIdentifier` production; both restated below.
 
 ## 1. The problem in plain words
 
@@ -45,9 +48,15 @@ share a mechanism.
   directory tail, or predefined `HOME_SCHEMA` / `CURRENT_SCHEMA` / `.`), each
   optionally followed by dotted object names. `s/gt` with no anchor is a
   syntax error (pinned in `copy_of_qualified.gql`'s header). Every name in
-  these productions is `identifier`, which admits both `REGULAR_IDENTIFIER`
-  (Unicode ID_Start then ID_Continue*, GQL.g4:3591-3620 — never a `/`, a `.`,
-  or empty) and the two delimited spellings.
+  these productions is `identifier` (GQL.g4:2956-2961), which admits three
+  classes: `REGULAR_IDENTIFIER` (Unicode ID_Start then ID_Continue*,
+  GQL.g4:3591-3620 — never a `/`, a `.`, or empty); the 47 keyword tokens of
+  `nonReservedWords` (GQL.g4:3061-3109 — SOURCE, NODE, EDGE, GRAPH, TYPE among
+  them; plain ASCII words, so likewise never a `/`, a `.`, or empty); and the
+  two delimited spellings. The first two classes together are the parser rule
+  `regularIdentifier` (GQL.g4:2963-2966), and `caseInsensitive` lexing
+  (GQL.g4:3) matches either in any case, so `Source` arrives as the SOURCE
+  token.
 - **The parse entry point takes a reader, not a path**
   (internal/schema/gql/parser.go:19, `Parse(r io.Reader)`), and the pipeline
   reads the file itself (internal/cli/pipeline/pipeline.go:185-191).
@@ -101,13 +110,17 @@ falls out of the existing `schema:` key.
 
 File lookup is byte-exact through the OS; on a case-insensitive filesystem a
 wrong-case reference may resolve. Noted, not fought — the same is true of
-every path in `gqlc.yaml`, and CI's Linux runners are the arbiter.
+every path in `gqlc.yaml`, and CI's Linux runners are the arbiter. Byte-exact
+reaches into the spelling too: reference names are read with `GetText()`,
+which returns the source bytes even when case-insensitive lexing matched them
+as keyword tokens — `COPY OF SOURCE` looks up `SOURCE.gql`, not `Source.gql`.
+Nothing canonicalises a segment.
 
 ### 3.3 Supported and declined spellings
 
 Supported, lowered to `{anchor: absolute|current|climb(n), segs: [...]}`:
 the absolute, current-schema, and relative-climb forms above, with every
-segment a **regular identifier**.
+segment a **`regularIdentifier`** (either non-delimited token class).
 
 Declined permanently, each with its own sentinel and reason (the ADR 0016
 pattern — a rejection carries its own justification), all four wrapping the
@@ -134,9 +147,10 @@ pattern — a rejection carries its own justification), all four wrapping the
   delimited-identifier handling in internal/schema/gql); a quoted segment
   would carry its quote characters into a file name, and a delimited
   identifier may legally contain `/`, `..`, or nothing — the path-injection
-  shapes. Restricting segments to `REGULAR_IDENTIFIER` makes "every segment
-  is one safe path element" a property of the lexer, with no validation
-  code to get wrong. Accepting more later is non-breaking.
+  shapes. Restricting segments to the `regularIdentifier` production makes
+  "every segment is one safe path element" a property of the lexer — neither
+  non-delimited token class can carry `/` or `.`, or be empty — with no
+  validation code to get wrong. Accepting more later is non-breaking.
 
 These four are spelling judgments, independent of any particular catalogue,
 so they fire in the **lowering** (listener) and are reported identically by
@@ -343,8 +357,10 @@ escape pop-guard (blind it → the escape rows report `ErrDanglingReference`
 or resolve, both KILLED by sentinel equality), the cycle membership check
 (blind it → `Load` loops; the row's verdict is "hangs, killed by
 `go test -timeout`" — record it as such rather than pretending it fails
-cleanly), the name-match comparison, the regular-identifier segment check,
-and the `Parse`-level `copyRef != nil` refusal. Screen with
+cleanly), the name-match comparison, the segment guard's delimited refusal
+(drop it → `copy_of_delimited.gql` stops reporting
+`ErrDelimitedReferenceSegment`), and the `Parse`-level `copyRef != nil`
+refusal. Screen with
 `go test -c -o /dev/null ./internal/schema/gql`.
 
 ## 6. Falsifiability
@@ -360,8 +376,9 @@ alternative, the corpus's declared-sentinel equality catches it at
 implementation time, and `copy_of_qualified.gql`'s pinned claim that bare
 `s/gt` is a syntax error guards the lowering table's premise. The claimed
 negative "no delimited-identifier handling exists in internal/schema/gql"
-was witnessed by grep, and the segment-safety claim rests on
-GQL.g4:3591-3620, quoted in §2.
+was witnessed by grep, and the segment-safety claim rests on the productions
+quoted in §2 (`identifier` GQL.g4:2956-2961, `regularIdentifier` :2963-2966,
+`nonReservedWords` :3061-3109, `REGULAR_IDENTIFIER` :3591-3620).
 
 One correction to the filing bead's scope note, for the record: `COPY OF` is
 **not** an optional Annex D feature — no feature id covers it (verified

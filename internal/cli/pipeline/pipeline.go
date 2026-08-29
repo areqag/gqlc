@@ -174,21 +174,21 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 	queryDir := resolvePath(baseDir, tgt.QueryDir)
 	outDir := resolvePath(baseDir, tgt.Go.Out)
 
-	// Stage 3 — parse schema per the SchemaLang axis (spec §3.2).
-	var schemaParser schema.Parser
+	// Stage 3 — load the schema per the SchemaLang axis (spec §3.2). A GQL graph
+	// type may take its element types from another by reference, resolved against
+	// the directory holding the schema file (ADR 0034) — so the unit read here is
+	// that directory as a catalogue rather than the one configured file, and no
+	// config key had to change to say so.
+	var sch schema.Schema
 	switch tgt.SchemaLang {
 	case config.SchemaLangGQL:
-		schemaParser = gql.New()
+		var err error
+		sch, err = gql.NewLoader(os.DirFS(filepath.Dir(schemaPath))).Load(filepath.Base(schemaPath))
+		if err != nil {
+			return TargetResult{}, nil, nil, fmt.Errorf("schema %s: %w", schemaPath, err)
+		}
 	default:
 		return TargetResult{}, nil, nil, fmt.Errorf("internal: no pipeline mapping for schema_language %q", string(tgt.SchemaLang))
-	}
-	schemaBytes, err := os.ReadFile(schemaPath)
-	if err != nil {
-		return TargetResult{}, nil, nil, fmt.Errorf("schema: %w", err)
-	}
-	sch, err := schemaParser.Parse(bytes.NewReader(schemaBytes))
-	if err != nil {
-		return TargetResult{}, nil, nil, fmt.Errorf("schema %s: %w", schemaPath, err)
 	}
 
 	// Stage 4 — load procsig. When the key is absent the zero
@@ -197,6 +197,7 @@ func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, gen
 	// the correct diagnosis (spec §3.1).
 	var reg procsig.Registry
 	if tgt.ProcsigPath != "" {
+		var err error
 		reg, err = procsig.Load(resolvePath(baseDir, tgt.ProcsigPath))
 		if err != nil {
 			return TargetResult{}, nil, nil, err

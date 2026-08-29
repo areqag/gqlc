@@ -1108,7 +1108,14 @@ var allSentinels = map[string]error{
 	"ErrNoGraphType":                 ErrNoGraphType,
 	"ErrMultipleGraphTypes":          ErrMultipleGraphTypes,
 	"ErrLikeGraphSource":             ErrLikeGraphSource,
-	"ErrCopyOfSource":                ErrCopyOfSource,
+	"ErrReferenceParameter":          ErrReferenceParameter,
+	"ErrHomeSchemaReference":         ErrHomeSchemaReference,
+	"ErrObjectParentReference":       ErrObjectParentReference,
+	"ErrDelimitedReferenceSegment":   ErrDelimitedReferenceSegment,
+	"ErrReferenceOutsideCatalogue":   ErrReferenceOutsideCatalogue,
+	"ErrDanglingReference":           ErrDanglingReference,
+	"ErrReferenceCycle":              ErrReferenceCycle,
+	"ErrReferenceNameMismatch":       ErrReferenceNameMismatch,
 	"ErrPathValueType":               ErrPathValueType,
 	"ErrReferenceValueType":          ErrReferenceValueType,
 	"ErrImmaterialValueType":         ErrImmaterialValueType,
@@ -1121,7 +1128,8 @@ var allSentinels = map[string]error{
 // subtraction: an omission with nowhere to write the reason is how
 // ErrEndpointFillerHasProperties went missing for as long as it did.
 var sentinelsWithoutAFile = map[string]string{
-	"ErrUnsupportedSource": "a class the two graph-type-source leaves wrap rather than a leaf; nothing produces it bare, so no file could pin it without first making one that does. TestGraphTypeSourceErrorsWrapTheClass is the pin it gets instead",
+	"ErrUnsupportedSource": "a class the graph-type-source leaves wrap rather than a leaf; nothing produces it bare, so no file could pin it without first making one that does. TestGraphTypeSourceErrorsWrapTheClass is the pin it gets instead",
+	"ErrCopyOfSource":      "reported by Parse alone, and every corpus file is read through the Loader now — which resolves a reference or names the reason it could not, and reports this never. So no fixture can pin it: a file that did would have to be parsed with no catalogue behind it, which is a property of the call and not of the file. TestParseRefusesEveryReachableReference in loader_test.go is the pin it gets instead, sweeping every reachable spelling rather than one",
 	"ErrUnsupportedType":   "a class the five value-type families wrap; after gqlc-h9n.5 nothing produces it bare (LIST/ARRAY was the only bare source, and it now resolves). Same posture as ErrUnsupportedSource",
 }
 

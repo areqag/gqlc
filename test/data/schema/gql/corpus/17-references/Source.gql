@@ -1,0 +1,5 @@
+-- The target of copy_of_graph_type_bare.gql's bare `Source`. The capital is
+-- load-bearing: segments are read with GetText(), which returns the source
+-- bytes even though case-insensitive lexing matches `Source` as the SOURCE
+-- keyword token, so a lowercase file here would dangle.
+CREATE GRAPH TYPE Source { (:Ledger { entry :: STRING NOT NULL }) }

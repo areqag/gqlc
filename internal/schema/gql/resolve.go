@@ -14,9 +14,14 @@ import (
 // from the parse tree, then resolve() turns it into the final schema.Schema — so
 // resolution stays pure Go, independent of ANTLR and testable on its own.
 type rawSchema struct {
-	name  string
-	nodes []rawNode
-	edges []rawEdge
+	name string
+	// copyRef is the lowered COPY OF source, nil when the declaration carried an
+	// inline body instead. A file with one declares no element types of its own,
+	// so resolve() is never called on it — the Loader follows the reference and
+	// resolves the file at the end of the chain (ADR 0034 §3.6).
+	copyRef *reference
+	nodes   []rawNode
+	edges   []rawEdge
 }
 
 // resolve turns the collected rawSchema into the final schema.Schema, in plain Go.

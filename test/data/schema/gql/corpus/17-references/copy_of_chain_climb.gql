@@ -1,0 +1,7 @@
+-- A two-hop chain whose second hop climbs, and half of the design's sharpest
+-- witness: sub/climber.gql carries the very same `../s/base`, and reports
+-- ErrReferenceOutsideCatalogue as its own entry because there it is the root.
+-- The reference text is identical in both files; only the directory the climb
+-- pops from differs. A loader that anchored every climb at the catalogue root,
+-- or that re-rooted at each file it opened, fails one of the two.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF /sub/climber

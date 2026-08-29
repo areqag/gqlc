@@ -1,0 +1,6 @@
+-- Named liar.gql and declaring NotLiar, which is the whole content of the file:
+-- it is what copy_of_name_mismatch.gql reaches. On its own it resolves — the
+-- root of a load is reached by a configured path rather than by a reference, so
+-- it promises nothing about its own name, and only a file found BY a reference
+-- owes that promise.
+CREATE GRAPH TYPE NotLiar { (:Claim { text :: STRING NOT NULL }) }

@@ -1,0 +1,3 @@
+-- The other half. It is its own corpus entry as well as cycle_a.gql's target,
+-- so the cycle is reported whichever of the two a reader starts from.
+CREATE PROPERTY GRAPH TYPE cycle_b COPY OF cycle_a

@@ -1,7 +1,6 @@
 package gql
 
 import (
-	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
@@ -94,12 +93,18 @@ import (
 // be wrong — and TestSemanticCaseCollisions asserts those. Neither reads its
 // expectations off the map under test, which is what keeps them evidence.
 const (
-	wantCorpusEntries = 123
+	// 123 → 136 under gqlc-h9n.1: thirteen files, of which six are the targets
+	// references now reach rather than spellings of their own (ADR 0034 §5.3).
+	wantCorpusEntries = 136
 	// 68 → 67 under gqlc-4np: 18.2-node-type/property_name_repeated.gql was
 	// demoted from resolves to unsupported, ADR 0030 having decided that a
 	// repeated property name is rejected rather than silently resolved to one
 	// of the two declarations. The file stayed; only its declared outcome moved.
-	wantCorpusResolving = 67
+	//
+	// 67 → 78 under gqlc-h9n.1, the largest move this pin has recorded: five
+	// COPY OF entries flip from unsupported to resolves now that a reference
+	// names a file, and six of the new files resolve on their own.
+	wantCorpusResolving = 78
 	// 18 → 17 under gqlc-4np, the legitimate once-per-case drop this pin exists
 	// to make an author account for: the property_name_repeated case is closed
 	// by ErrDuplicatePropertyName, so it is an unsupported entry now rather than
@@ -120,15 +125,21 @@ func isValidFeature(v string) bool {
 
 const corpusDir = fixtureDir + "/corpus"
 
-// outcome is what Parse does with a corpus file. It has exactly two values, and
+// outcome is what the Loader does with a corpus file, read with the file's own
+// directory as the catalogue root (loadFixture). It has exactly two values, and
 // the zero value is neither, so an entry that omits it fails the manifest check
 // rather than defaulting into the weaker assertion.
+//
+// It was what Parse does until the file catalogue landed (ADR 0034). Parse can
+// only ever decline a reference, having no catalogue to resolve one against, so
+// under Parse every COPY OF file in the corpus was unsupported and the outcome
+// said nothing about whether resolution works.
 type outcome int
 
 const (
-	// resolves: Parse returns a model and a nil error.
+	// resolves: Load returns a model and a nil error.
 	resolves outcome = iota + 1
-	// unsupported: Parse returns the entry's sentinel.
+	// unsupported: Load returns the entry's sentinel.
 	unsupported
 )
 
@@ -244,8 +255,10 @@ type semanticCase struct {
 //
 // Prefixes rather than whole directories because an oversized clause has to be split
 // between two authors, and a prefix set can be checked for disjointness where a
-// convention on filenames cannot. Nothing in the corpus nests, so the extra reach of
-// HasPrefix over path.Dir equality costs nothing.
+// convention on filenames cannot. Three files nest a level deeper than their area
+// prefix — the referenced files a COPY OF chain climbs to and from — and HasPrefix
+// is what puts them in an area at all, where path.Dir equality would leave them
+// unowned.
 //
 // The prefixes do a second job, and it runs through a different file, which is what
 // makes it easy to miss: areaPrefixNumbers reduces each prefix to its ISO section
@@ -586,7 +599,7 @@ func TestCorpusManifest(t *testing.T) {
 				wrongModel = append(wrongModel, entry.file)
 			}
 		case unsupported:
-			require.Error(t, entry.sentinel, "%s: an unsupported entry must name the sentinel Parse returns", entry.file)
+			require.Error(t, entry.sentinel, "%s: an unsupported entry must name the sentinel Load returns", entry.file)
 			require.True(t, isSentinel(entry.sentinel), "%s: sentinel is not one of the parser's sentinels", entry.file)
 			require.NotEmpty(t, entry.bead, "%s: an unsupported entry needs the bead that will fix it, or gqlc-0ri if it is declined permanently", entry.file)
 			require.NotEmpty(t, entry.reason, "%s: an unsupported entry needs a reason", entry.file)
@@ -800,6 +813,16 @@ func TestNoUndeclaredLossiness(t *testing.T) {
 			raw, err := os.ReadFile(filepath.Join(corpusDir, entry.file))
 			require.NoError(t, err)
 
+			// A file whose source is a reference declares no element types of its
+			// own, so it holds no type argument for a model to discard and there is
+			// nothing here to sweep. The arguments live in the file at the end of the
+			// chain, which the corpus carries as an entry in its own right and sweeps
+			// there. Read off the parse tree rather than declared, so an entry cannot
+			// opt itself out.
+			if !measureCoverage(t, string(raw)).declaresElements {
+				return
+			}
+
 			require.Empty(t, discardedArguments(t, uncommented(string(raw))),
 				"the model is the same with these arguments spelled differently, so it discards what they say. Give the entry the bead that will carry them and a reason, and add a semanticCases row for each")
 		})
@@ -912,15 +935,22 @@ func radixPrefix(literal string) string {
 // TestCorpusOutcomes asserts each entry's outcome, and for resolving entries that the
 // element types the source declared all reached the model. It is a count, not a model
 // comparison: what a property type discards is TestNoUndeclaredLossiness' subject.
+//
+// Each file is loaded with its OWN directory as the catalogue root, which is what
+// gives the reference fixtures their outcomes: `/gt` in 17-references/ means
+// 17-references/gt.gql, and `../s/base` in 17-references/sub/climber.gql escapes
+// when that file is the entry and resolves when copy_of_chain_climb.gql reaches it
+// as a hop. Anchoring every entry at corpusDir instead would collapse that pair.
 func TestCorpusOutcomes(t *testing.T) {
 	for _, entry := range corpusManifest(t) {
 		t.Run(entry.file, func(t *testing.T) {
-			src, err := os.ReadFile(filepath.Join(corpusDir, entry.file))
+			full := filepath.Join(corpusDir, entry.file)
+			src, err := os.ReadFile(full)
 			require.NoError(t, err)
 
 			cov := measureCoverage(t, string(src))
 
-			got, parseErr := New().Parse(bytes.NewReader(src))
+			got, parseErr := loadFixture(full)
 
 			switch entry.outcome {
 			case resolves:

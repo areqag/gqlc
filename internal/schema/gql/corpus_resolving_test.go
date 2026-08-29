@@ -207,40 +207,48 @@ var declinedCarriers = []declinedCarriage{
 			{"LIKE", "token"},
 		},
 	},
+	// These four were one 29-name group keyed to ErrCopyOfSource until gqlc-h9n.1
+	// gave COPY OF a catalogue to resolve against (ADR 0034). Twenty of the
+	// twenty-nine gained resolving carriers in that commit and left; the nine that
+	// remain are the spellings gqlc declines rather than the construct it had not
+	// built, and they no longer share a reason. Keying each to its own sentinel is
+	// what makes that legible — and no name here spans two of them, so none needs
+	// declinedAlso.
 	{
-		sentinel: ErrCopyOfSource,
-		bead:     "gqlc-h9n.1",
-		why:      "The whole schema-reference and directory-path grammar hangs off COPY OF, which needs a catalogue this parser does not have. The largest group, and its size is the argument for keying the excuse to the sentinel: 29 names is what one unimplemented construct costs. Retire when catalogue/multi-file scoping lands.",
+		sentinel: ErrReferenceParameter,
+		bead:     "gqlc-0ri",
+		why:      "A substituted parameter is bound at execution time and a build-time catalogue has no parameter values, so no catalogue reaches these. The two alternatives are one character of position apart — the parameter where the graph type goes, and where the schema goes — and neither discharges the other. No retirement path; this group is expected to stay.",
 		names: []declinedName{
-			{"absoluteCatalogSchemaReference#1", "alt"},
-			{"catalogObjectParentReference#2", "alt"},
-			{"graphTypeReference#1", "alt"},
 			{"graphTypeReference#2", "alt"},
-			{"predefinedSchemaReference#3", "alt"},
 			{"schemaReference#3", "alt"},
-			{"absoluteCatalogSchemaReference", "rule"},
-			{"absoluteDirectoryPath", "rule"},
-			{"catalogObjectParentReference", "rule"},
-			{"copyOfGraphType", "rule"},
-			{"directoryName", "rule"},
-			{"graphTypeReference", "rule"},
-			{"nonReservedWords", "rule"},
-			{"objectName", "rule"},
-			{"predefinedSchemaReference", "rule"},
 			{"referenceParameterSpecification", "rule"},
-			{"relativeCatalogSchemaReference", "rule"},
-			{"relativeDirectoryPath", "rule"},
-			{"schemaName", "rule"},
-			{"schemaReference", "rule"},
-			{"simpleDirectoryPath", "rule"},
-			{"COPY", "token"},
-			{"CURRENT_SCHEMA", "token"},
-			{"DOUBLE_PERIOD", "token"},
-			{"HOME_SCHEMA", "token"},
-			{"OF", "token"},
-			{"PERIOD", "token"},
-			{"SOLIDUS", "token"},
 			{"SUBSTITUTED_PARAMETER_REFERENCE", "token"},
+		},
+	},
+	{
+		sentinel: ErrObjectParentReference,
+		bead:     "gqlc-0ri",
+		why:      "An object parent is a catalogue object containing other objects, and a directory-backed catalogue has no container between a directory and a file. The rule catalogObjectParentReference itself left this register — it resolves whenever its (objectName PERIOD)* repetition is taken zero times — so what is declined is the repetition and the name it introduces, not the parent. No retirement path without a catalogue model richer than a filesystem.",
+		names: []declinedName{
+			{"catalogObjectParentReference#2", "alt"},
+			{"objectName", "rule"},
+		},
+	},
+	{
+		sentinel: ErrHomeSchemaReference,
+		bead:     "gqlc-0ri",
+		why:      "HOME_SCHEMA is a property of a session and gqlc has none. Its sibling CURRENT_SCHEMA left this register in the same commit, which is the whole distinction: CURRENT_SCHEMA has a static referent to translate to — the referencing file's own directory — and HOME_SCHEMA has none. No retirement path.",
+		names: []declinedName{
+			{"HOME_SCHEMA", "token"},
+		},
+	},
+	{
+		sentinel: ErrReferenceOutsideCatalogue,
+		bead:     "gqlc-0ri",
+		why:      "A climb is supported and resolves inside a chain; what it cannot do is leave the catalogue root. Carriage is measured per entry file and every entry spelling a climb is loaded as its own root, so the three here escape — while the same ../s/base resolves when copy_of_chain_climb.gql reaches sub/climber.gql as a hop. So this group records where the corpus can witness the climb from, not that the construct is unimplemented. It retires if an entry ever resolves while spelling a climb, which no single file can do.",
+		names: []declinedName{
+			{"relativeDirectoryPath", "rule"},
+			{"DOUBLE_PERIOD", "token"},
 		},
 	},
 	{

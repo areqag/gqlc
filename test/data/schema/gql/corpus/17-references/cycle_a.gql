@@ -1,0 +1,4 @@
+-- Half of the two-element cycle. The self-copy is caught by the first hop
+-- landing on the file it started from; this one is only caught by remembering
+-- every file already visited, so the two are not the same test.
+CREATE PROPERTY GRAPH TYPE cycle_a COPY OF cycle_b

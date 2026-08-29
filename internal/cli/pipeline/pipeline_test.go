@@ -14,6 +14,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/config"
+	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
 // backendRegistry is the composed backend table a config file's driver
@@ -1179,7 +1180,11 @@ func TestRunSetupFailureFailsFast(t *testing.T) {
 
 		res, err := pipeline.Run(cfgPath, backendRegistry(t))
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "graph[1]: schema: "), "err: %q", err)
+		// "schema <path>: " rather than the bare "schema: " this asserted before
+		// gqlc-h9n.1. Reading the schema and parsing it were two steps with two
+		// error shapes; loading a catalogue is one step, and the shape that names
+		// the file is the one worth keeping — the other named no path at all.
+		require.True(t, strings.HasPrefix(err.Error(), "graph[1]: schema "), "err: %q", err)
 		require.ErrorIs(t, err, fs.ErrNotExist)
 		require.Equal(t, pipeline.Result{}, res)
 	})
@@ -1192,7 +1197,7 @@ func TestRunSetupFailureFailsFast(t *testing.T) {
 
 		res, err := pipeline.Run(cfgPath, backendRegistry(t))
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "graph[1]: schema: "), "err: %q", err)
+		require.True(t, strings.HasPrefix(err.Error(), "graph[1]: schema "), "err: %q", err)
 		require.Equal(t, pipeline.Result{}, res)
 	})
 }
@@ -1254,7 +1259,50 @@ func TestRunSkipsCodegenAfterDiagnostic(t *testing.T) {
 	}, res.Diagnostics)
 }
 
-// TestRunStateIsPerTarget: every front-end value the loop builds —
+// TestRunResolvesGraphTypeReferences is the end-to-end claim of ADR 0034: the
+// configured schema file need not hold the element types, and a query resolves
+// against the ones its COPY OF chain reaches. Nothing else here would notice the
+// pipeline still reading one file — the loader's own tests run on an in-memory
+// filesystem, and every other project fixture is self-contained.
+//
+// The catalogue root is the directory holding the configured file, which is why
+// supporting this needed no config key: `base` below is found because it sits
+// beside schema.gql, and generation succeeds only if Person came with it.
+func TestRunResolvesGraphTypeReferences(t *testing.T) {
+	dir, cfgPath := writeProject(t)
+	// Named `base` because the reference that finds it spells `base`; the
+	// configured file is the one name exempt from that, being reached by a config
+	// path rather than by a reference.
+	writeFixtureFile(t, filepath.Join(dir, "base.gql"), `CREATE PROPERTY GRAPH TYPE base AS {
+    (:Person {
+        id   :: INT64 NOT NULL,
+        name :: STRING NOT NULL
+    })
+}
+`)
+	writeFixtureFile(t, filepath.Join(dir, "schema.gql"),
+		"CREATE PROPERTY GRAPH TYPE People COPY OF base\n")
+
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
+	require.NoError(t, err)
+	require.Contains(t, string(findFile(t, only(t, res), "people.cypher.go")), "AllPersonNames",
+		"the query resolved against element types the configured file does not declare")
+}
+
+// TestRunReportsAnUnresolvableReference: the diagnosis a reader gets when the
+// chain does not terminate names the reference rather than the schema being
+// empty, which is the failure this would otherwise degrade into.
+func TestRunReportsAnUnresolvableReference(t *testing.T) {
+	dir, cfgPath := writeProject(t)
+	writeFixtureFile(t, filepath.Join(dir, "schema.gql"),
+		"CREATE PROPERTY GRAPH TYPE People COPY OF nowhere\n")
+
+	_, err := pipeline.Run(cfgPath, backendRegistry(t))
+	require.ErrorIs(t, err, gql.ErrDanglingReference)
+	require.Contains(t, err.Error(), "nowhere.gql")
+}
+
+// TestRunStateIsPerTarget asserts that everything built per target —
 // the parsed schema, the procsig registry, the query parser and the
 // resolver — belongs to one target. Both sub-tests fail if any of
 // them is hoisted out of the loop, because each target's queries are

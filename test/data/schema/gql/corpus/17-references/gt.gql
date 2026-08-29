@@ -1,0 +1,5 @@
+-- The target three references in this directory share: `/gt` (absolute),
+-- `CURRENT_SCHEMA/gt` and `./gt` (both the referencing file's own directory).
+-- All three spell the same file from a different anchor, which is the point —
+-- one target keeps the three entries about the anchoring and nothing else.
+CREATE GRAPH TYPE gt { (:Widget { sku :: STRING NOT NULL }) }

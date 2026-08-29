@@ -81,15 +81,34 @@ func (l *listener) EnterCreateGraphTypeStatement(c *gen.CreateGraphTypeStatement
 	}
 	l.seenGraphType = true
 
-	// An inline `AS { ... }` body (nestedGraphTypeSpecification) is the only
-	// supported source. Testing for it rather than enumerating LIKE and COPY OF
-	// means a source alternative added to the grammar later is rejected rather
-	// than silently dropped. Both LIKE and the AS-less `COPY OF` spelling reach
-	// this rule and are rejected here. Of the two COPY OF spellings only the
+	// An inline `AS { ... }` body and the AS-less `COPY OF` spelling are the
+	// supported sources. Switching on them rather than enumerating what is
+	// rejected means a source alternative added to the grammar later falls to
+	// the default and is rejected rather than silently dropped. LIKE reaches
+	// this rule and is rejected here. Of the two COPY OF spellings only the
 	// AS-less one gets this far: `AS COPY OF` matches createGraphStatement
 	// instead, so it surfaces as ErrNoGraphType (both spellings are pinned by
 	// TestCorpusSpellingTraps).
-	if src := c.GraphTypeSource(); src == nil || src.NestedGraphTypeSpecification() == nil {
+	//
+	// Lowering a reference is not resolving it: the listener records where the
+	// reference points, and only a Loader has a catalogue to follow it into.
+	// Parse refuses what is recorded here (ErrCopyOfSource). The four spelling
+	// declines of ADR 0034 §3.3 fire in the lowering, so Parse and Load report
+	// them identically.
+	src := c.GraphTypeSource()
+	switch {
+	case src == nil:
+		l.fail(ErrUnsupportedSource)
+		return
+	case src.NestedGraphTypeSpecification() != nil:
+	case src.CopyOfGraphType() != nil:
+		ref, err := lowerCopyOf(src.CopyOfGraphType())
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.raw.copyRef = &ref
+	default:
 		l.fail(unsupportedSource(src))
 		return
 	}
@@ -103,21 +122,17 @@ func (l *listener) EnterCreateGraphTypeStatement(c *gen.CreateGraphTypeStatement
 }
 
 // unsupportedSource names which rejected graphTypeSource alternative was written.
-// The guard above still tests for the supported one, so which error this returns
-// never decides whether to reject — only what the rejection is called.
+// The switch above still tests for the supported ones, so which error this
+// returns never decides whether to reject — only what the rejection is called.
 //
-// src is nil only under error recovery, and an alternative matching neither LIKE
-// nor COPY OF is one added to the grammar since this was written; both get the
-// bare class error, because neither of the two justifications is theirs.
+// It is reached only from that switch's default, where the supported
+// alternatives are already ruled out, so LIKE is the one rejection it can name
+// today. An alternative matching neither is one added to the grammar since this
+// was written, and gets the bare class error because no justification here is
+// its.
 func unsupportedSource(src gen.IGraphTypeSourceContext) error {
-	if src == nil {
-		return ErrUnsupportedSource
-	}
-	switch {
-	case src.GraphTypeLikeGraph() != nil:
+	if src.GraphTypeLikeGraph() != nil {
 		return ErrLikeGraphSource
-	case src.CopyOfGraphType() != nil:
-		return ErrCopyOfSource
 	}
 	return ErrUnsupportedSource
 }
