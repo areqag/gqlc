@@ -846,11 +846,14 @@ seat_runner_start() { # <seat> -> 0 started, 1 declined (live session), 2 no run
 # each reported success anyway.
 #
 # The diagnosis is no longer discarded. herdr signals the failure by exit
-# status, but it puts WHICH failure in a JSON payload on stdout, so a caller
-# that only reads the status can distinguish "not delivered" from "delivered"
-# and nothing finer — and a dispatch tick that died on this call spent forty
-# minutes saying nothing at all (bd gqlc-87al). Both streams are captured and
-# re-emitted on stderr.
+# status and puts WHICH failure in a JSON payload on STDERR — measured against
+# the deployed binary 2026-08-29 with an unresolvable target: rc=1, stdout 0
+# bytes, stderr the {"error":{"code":"agent_not_found",...}} object. A caller
+# reading only the status can distinguish "not delivered" from "delivered" and
+# nothing finer, and a dispatch tick that died on this call spent forty minutes
+# saying nothing at all (bd gqlc-87al). Both streams are captured anyway and
+# re-emitted on stderr: which stream carries a diagnosis is herdr's to change,
+# and 2>&1 costs nothing to be wrong about.
 #
 # And `agent send` TYPES; it does not SUBMIT. It returns ok with the text left
 # sitting in the agent's input box, where it stays until something presses
@@ -1264,9 +1267,15 @@ cmd_wake() {
         # send was a clear/text/Enter tty burst that could re-coalesce and
         # strand itself, and this path had the split without the confirmation,
         # so it printed its cheerful success line while six nudges in a row sat
-        # typed and unsent (gqlc-01ev). send_line answers that question itself
-        # now: it types, presses Enter, and returns non-zero if either half
-        # failed.
+        # typed and unsent (gqlc-01ev). send_line now types AND presses Enter
+        # and returns non-zero if either call fails, which is not the same as
+        # delivery. Measured on a consenting pane 2026-08-29 (bd gqlc-bi7n):
+        # after a ~500-character message the first Enter was swallowed, the
+        # text sat in the box unsubmitted, a second Enter submitted it, and
+        # BOTH returned rc=0. Dispatch wake text is not short, so this path can
+        # still report a nudge it did not deliver — the gqlc-01ev shape one
+        # layer down. Reading the box back is the answer and waits on
+        # gqlc-bi7n's characterisation.
         #
         # Reported, never fatal: route_owners and the mayor's wake both call
         # this from inside cmd_dispatch under `set -e`, so a non-zero return
