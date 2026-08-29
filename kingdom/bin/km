@@ -307,13 +307,36 @@ KM_GATE_PATHS=(kingdom/ .githooks/ .claude/)
 # not a repository at all, symbolic-ref also exits non-zero with empty stdout,
 # so without it every non-repo root is reported as "a detached HEAD" — a
 # measured-sounding sentence about a measurement that never happened.
+# Names the worktree that holds the local `master` branch, if one does;
+# silence means the ref is free. Read only when the deploy root is NOT on
+# master, so the root can never be its own answer.
+master_holder() { # <root>
+    git_at "$1" worktree list --porcelain 2>/dev/null |
+        awk '/^worktree /{wt=substr($0, 10)} /^branch refs\/heads\/master$/{print wt; exit}'
+}
+
 deploy_blocker() {
-    local root branch
+    local root branch holder msg
     root=$(deploy_root)
     git_at "$root" rev-parse --git-dir >/dev/null 2>&1 \
         || { echo "$root is not a git checkout, so nothing can be deployed into it"; return 0; }
     branch=$(git_at "$root" symbolic-ref --quiet --short HEAD || true)
-    [ "$branch" = master ] || echo "$root is parked on '${branch:-a detached HEAD}', not master"
+    if [ "$branch" != master ]; then
+        msg="$root is parked on '${branch:-a detached HEAD}', not master"
+        # Git checks a branch ref out in at most one worktree, and the town
+        # shares one repo across many (33 of them, measured 2026-08-29). So a
+        # seat that ran `git checkout master` to read master takes the ref the
+        # deploy root needs, and the operator's obvious repair dies
+        # "fatal: 'master' is already used by worktree at ...". That refusal is
+        # knowable HERE; making them find it by hand is the avoidable half of
+        # the diagnosis, and it is the half that reads as "the repair is a
+        # one-liner" right up until it is not (bd gqlc-59n70). Measured
+        # 2026-08-29 on gqlc-ssfqj: Աստղիկ hit exactly that refusal and could
+        # only conclude "something in the town does contend for it".
+        holder=$(master_holder "$root")
+        [ -z "$holder" ] || msg="$msg, and 'git checkout master' there will refuse because $holder holds that branch"
+        echo "$msg"
+    fi
 }
 
 # Names the deployed paths where the tree differs from origin/master; silence
