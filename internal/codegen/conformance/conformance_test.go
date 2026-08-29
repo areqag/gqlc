@@ -1525,6 +1525,28 @@ type temporalEmission struct {
 	bridges      []string
 }
 
+// breach reports how a golden package violates ADR 0033's emission
+// trigger, or "" when it holds. A string rather than an assertion so
+// that the requirement itself, and not only the classification it reads,
+// can be run over package shapes the committed corpus does not hold —
+// every golden in the corpus satisfies all three arms, so an assertion
+// written against the corpus alone is one nothing can redden.
+func (e temporalEmission) breach() string {
+	if e.referencedBy != "" {
+		switch {
+		case !e.carriers:
+			return fmt.Sprintf("names a temporal carrier at %s and emits no temporal.go, so the package does not compile", e.referencedBy)
+		case len(e.bridges) == 0:
+			return "emits the carrier declarations with no driver bridge beside them, so nothing converts what the driver hands over"
+		}
+		return ""
+	}
+	if e.carriers {
+		return "emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing"
+	}
+	return ""
+}
+
 // readTemporalEmission classifies one golden package directory. It
 // asserts nothing; the requirements are held by the caller, so the
 // classification can be witnessed on package shapes the committed corpus
@@ -1617,20 +1639,12 @@ func TestTemporalCarriersAreEmittedExactlyWhenReferenced(t *testing.T) {
 		}
 		emission, err := readTemporalEmission(dir, carriers)
 		require.NoError(t, err)
+		require.Empty(t, emission.breach(), "%s %s", dir, emission.breach())
 		if emission.referencedBy != "" {
 			withCarrier++
-			require.True(t, emission.carriers,
-				"%s names a temporal carrier at %s and emits no temporal.go, so the package does not compile",
-				dir, emission.referencedBy)
-			require.NotEmpty(t, emission.bridges,
-				"%s emits the carrier declarations with no driver bridge beside them, so nothing converts what the driver hands over",
-				dir)
 			continue
 		}
 		without++
-		require.False(t, emission.carriers,
-			"%s emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing",
-			dir)
 	}
 	require.NotZero(t, withCarrier, "no golden package references a carrier, so the emit half of the trigger is unwitnessed")
 	require.NotZero(t, without, "every golden package references a carrier, so the do-not-emit half of the trigger is unwitnessed")
@@ -1665,6 +1679,7 @@ func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 		wantRef      bool
 		wantCarriers bool
 		wantBridges  []string
+		wantBreach   string
 	}{
 		{
 			name: "neo4j bridge",
@@ -1688,7 +1703,8 @@ func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 			// The exclusion, read for a bridge that is not neo4j's: a
 			// bridge names the carriers it converts, so a scan that read
 			// it would report the trigger satisfied by its own presence
-			// and the do-not-emit half would never fire.
+			// and the do-not-emit half would never fire. Here it does
+			// fire, which is what says the bridge was excluded.
 			name: "another target's bridge does not satisfy the trigger itself",
 			files: map[string]string{
 				"models.go":       namesNothing,
@@ -1696,6 +1712,7 @@ func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 				"temporal_age.go": bridgesCarriers,
 			},
 			wantRef: false, wantCarriers: true, wantBridges: []string{"temporal_age.go"},
+			wantBreach: "emits temporal.go and names no carrier anywhere else, so five exported names are taken out of the caller's package for nothing",
 		},
 		{
 			name: "carriers with no bridge beside them",
@@ -1704,6 +1721,16 @@ func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 				"temporal.go": declaresCarriers,
 			},
 			wantRef: true, wantCarriers: true, wantBridges: nil,
+			wantBreach: "emits the carrier declarations with no driver bridge beside them, so nothing converts what the driver hands over",
+		},
+		{
+			name: "a carrier named with nothing declaring it",
+			files: map[string]string{
+				"models.go":       namesCarrier,
+				"temporal_age.go": bridgesCarriers,
+			},
+			wantRef: true, wantBridges: []string{"temporal_age.go"},
+			wantBreach: "names a temporal carrier at %s and emits no temporal.go, so the package does not compile",
 		},
 		{
 			name:  "no temporals at all",
@@ -1721,13 +1748,20 @@ func TestTemporalEmissionIsReadPerTarget(t *testing.T) {
 			emission, err := readTemporalEmission(dir, carriers)
 			require.NoError(t, err)
 
+			reference := filepath.Join(dir, "models.go") + ":3"
 			if row.wantRef {
-				require.Equal(t, filepath.Join(dir, "models.go")+":3", emission.referencedBy)
+				require.Equal(t, reference, emission.referencedBy)
 			} else {
 				require.Empty(t, emission.referencedBy)
 			}
 			require.Equal(t, row.wantCarriers, emission.carriers)
 			require.Equal(t, row.wantBridges, emission.bridges)
+
+			wantBreach := row.wantBreach
+			if strings.Contains(wantBreach, "%s") {
+				wantBreach = fmt.Sprintf(wantBreach, reference)
+			}
+			require.Equal(t, wantBreach, emission.breach())
 		})
 	}
 }
