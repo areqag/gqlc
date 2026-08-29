@@ -1798,6 +1798,116 @@ fmt: ensure-golangci
 fmt-check: ensure-golangci
     {{golangci}} fmt --diff
 
+# THE PRE-PR GATE SET: every required CI context that can run on this machine.
+#
+# It exists because a hand-written list of gates drifts and nothing tells you.
+# citizen-protocol.md step 4 named three recipes — fmt-check, lint, test — while
+# master required seven contexts, six of them reachable here across eleven arms.
+# A citizen who ran the
+# documented three and pushed then learned the rest one CI round trip at a time:
+# measured on PR #1643, where all three were green and codegen-fence failed on
+# three ireturn findings the root lint cannot reach by construction (bd
+# gqlc-jq50, gqlc-s9bx). Naming ONE recipe in the playbook moves that drift here,
+# next to the recipes it is about and in front of everyone who edits them.
+#
+# EVERY ARM RUNS EVEN AFTER ONE FAILS, and the failures are reported together at
+# the end. Stopping at the first is precisely what a pre-PR check must not do:
+# the cost this recipe exists to remove is the round trip, and three failures
+# found one at a time are three round trips whether they are CI's or your own.
+# `set -e` is therefore deliberately absent below.
+#
+# It is NOT a merge predicate and green here does not entitle anyone to skip CI.
+# Some of what CI requires is not reachable from a developer's machine, and the
+# summary says so on every run rather than leaving it to this comment:
+#
+#   live-smoke   `just test-codegen-live-neo4j` — needs Docker and pulls
+#                container images. Runnable here (bd gqlc-tez0 measured the
+#                live battery at ~30s), just not at the price the other arms
+#                are; run it by hand when you touch the live battery.
+#   tidy (part)  three of that job's seven steps read state that does not exist
+#                before the PR: check-pr-closes.py wants the body,
+#                check-pr-authors.sh the commit list, check-cron-freshness.sh
+#                the Actions API. Unrunnable here by construction, not by
+#                choice. The other four DO run — tidy-check and
+#                bd-export-monotonic-local and check-label-lengths.py as their
+#                own arms, and `just lint-hooks .github/scripts` because `just
+#                lint` already depends on it.
+#
+# `just fmt-check` is an arm but is NOT a CI job: no workflow calls it. It is
+# here because it prints a diff where `golangci-lint run` prints issues, and it
+# costs a second. The enforcement of gofumpt and gci is `just lint` — which is
+# a claim this repository gates rather than assumes, in
+# check-golangci-formatters-report (bd gqlc-sh4j).
+#
+# On the town's own machine one arm is red on a clean master: `just vuln`
+# refuses because this box's default Go is a distro build (`go1.27.0-X:nodwarf5`)
+# that govulncheck cannot place a stdlib version on, so it would scan the
+# largest attack surface in the binary and report nothing (bd gqlc-u91z). CI does
+# not hit it because .github/actions/setup-go exports GOTOOLCHAIN from go.mod's
+# own directive. Nothing here papers over that: the arm runs as CI runs it, the
+# refusal names its own remedy, and the gap between the two is bd gqlc-irvs.
+gates:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    failed=()
+    contexts=()
+
+    # $1 is the required CI context this arm stands for; the rest is the command.
+    # The context is COLLECTED rather than restated in the summary below, because
+    # a hardcoded coverage sentence is the same silent drift one level down: with
+    # it, deleting the test-codegen-fence arm left this recipe green and still
+    # claiming to cover codegen-fence (measured, bd gqlc-jq50).
+    #
+    # contexts is also the arm COUNT, rather than a second variable incremented
+    # beside it. Two counters of one thing can disagree, and the disagreement is
+    # exactly a run that grades fewer arms than it claims.
+    run() {
+        local ctx="$1"; shift
+        contexts+=("${ctx}")
+        echo ""
+        echo "=== gates[${ctx}]: $*"
+        if ! "$@"; then
+            failed+=("$*")
+        fi
+    }
+
+    run lint           just fmt-check
+    run lint           just lint
+    run lint           just lint-cache-check
+    run lint           just vuln-root-residual
+    run test           just test
+    run codegen-fence  just test-codegen-fence
+    run actionlint     just actionlint
+    run tidy           just tidy-check
+    run tidy           just bd-export-monotonic-local
+    run tidy           python3 .github/scripts/check-label-lengths.py .beads/issues.jsonl
+    run govulncheck    just vuln
+
+    # Refuse BEFORE the summary, not after: the summary is a coverage claim, and
+    # a run that graded nothing must not get to make one at all.
+    ran="${#contexts[@]}"
+    echo ""
+    if [ "${ran}" -eq 0 ]; then
+        echo "error: gates ran no arm at all, so it is green over nothing (bd gqlc-jq50)." >&2
+        exit 1
+    fi
+
+    echo "gates: ran ${ran} arm(s) over required context(s):" \
+         "$(printf '%s\n' "${contexts[@]}" | sort -u | tr '\n' ' ')"
+    echo "gates: NOT covered, and CI still decides —"
+    echo "       live-smoke        needs Docker: just test-codegen-live-neo4j"
+    echo "       tidy (3 steps)    check-pr-closes.py, check-pr-authors.sh and"
+    echo "                         check-cron-freshness.sh read a PR body, a PR's"
+    echo "                         commit list and the Actions API. None exist here."
+
+    if [ "${#failed[@]}" -ne 0 ]; then
+        echo ""
+        echo "gates: ${#failed[@]} of ${ran} FAILED — their output is above, in order:" >&2
+        printf '  %s\n' "${failed[@]}" >&2
+        exit 1
+    fi
+    echo "gates: all ${ran} passed."
+
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # go build link-checks package main, which has no tests and is otherwise
