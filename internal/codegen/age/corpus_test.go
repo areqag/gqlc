@@ -164,7 +164,7 @@ var corpusTables = map[string]corpusrun.Table{
 	"TestAgtypeDateReadsTheStoredText": {Rows: 5},
 	"TestAgtypeDateRefusesTextThatWouldNotSortChronologically": {Rows: 14},
 	"TestAgtypeDateTextRefusesADayOffTheCalendar":              {Rows: 10},
-	"TestAgtypeDurationCountsTotalMicroseconds":                {Rows: 12},
+	"TestAgtypeDurationCountsTotalMicroseconds":                {Rows: 16},
 	"TestAgtypeDurationMicrosFoldsDaysAndRefusesMonths":        {Rows: 9},
 	"TestAgtypeFloat64": {Rows: 21},
 	"TestAgtypeInstantCountsMicrosecondsFromTheEpoch":  {Rows: 11},

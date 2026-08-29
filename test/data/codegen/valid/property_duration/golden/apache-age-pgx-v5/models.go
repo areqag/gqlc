@@ -84,12 +84,29 @@ func agtypeInt64(raw []byte) (int64, error) {
 // because no fixed count of microseconds is faithful to a month — which
 // is the same reason the encode direction refuses a Duration carrying
 // one instead of storing an approximation of it.
+//
+// The division floors rather than truncating, so Nanos is never
+// negative and a duration backwards borrows from Seconds: -1500000
+// microseconds is Seconds -2 and Nanos 500000000, not Seconds -1 and
+// Nanos -500000000. Go's / and % truncate toward zero and would
+// produce the second, which no neo4j value ever takes — the driver
+// renders a Duration by borrowing from a negative Seconds against a
+// positive Nanos, so a negative Nanos is a shape its own String method
+// has no reading for. The two are the same amount of time either way;
+// what floor division buys is that the components a caller reads off
+// this carrier do not change meaning when the target does.
 func agtypeDuration(raw []byte) (Duration, error) {
 	micros, err := agtypeInt64(raw)
 	if err != nil {
 		return Duration{}, err
 	}
-	return Duration{Seconds: micros / 1000000, Nanos: int(micros % 1000000 * 1000)}, nil
+	seconds := micros / 1000000
+	rem := micros % 1000000
+	if rem < 0 {
+		seconds--
+		rem += 1000000
+	}
+	return Duration{Seconds: seconds, Nanos: int(rem * 1000)}, nil
 }
 
 // agtypeSpan reports where the value at the front of b ends: the offset

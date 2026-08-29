@@ -1439,6 +1439,16 @@ func TestAgtypeLocalTimeMicrosRefusesAReadingOffTheClock(t *testing.T) {
 // Days as well — so these are the encodings of the NORMALISED value, and
 // the round trip below starts from that rather than from what a caller
 // might have written.
+//
+// The rows either side of zero are where the decode's division has to
+// floor rather than truncate, and only the ones carrying a sub-second
+// remainder can tell the two apart: a negative count of whole seconds
+// divides exactly, so -90000000 reads the same under both and witnesses
+// nothing about the borrow. -1500000 is the smallest shape that does.
+// Under truncation it decodes to Seconds -1 and Nanos -500000000, which
+// is the same amount of time and a component pair no neo4j value takes
+// — the neutral carrier is only neutral if both targets spell one value
+// one way.
 var durations = []struct {
 	micros int64
 	d      Duration
@@ -1448,6 +1458,10 @@ var durations = []struct {
 	{90000000, Duration{Seconds: 90}},
 	{-90000000, Duration{Seconds: -90}},
 	{7776000000000, Duration{Seconds: 7776000}},
+	{-1, Duration{Seconds: -1, Nanos: 999999000}},
+	{-1500000, Duration{Seconds: -2, Nanos: 500000000}},
+	{-999999, Duration{Seconds: -1, Nanos: 1000}},
+	{1500000, Duration{Seconds: 1, Nanos: 500000000}},
 }
 
 func TestAgtypeDurationCountsTotalMicroseconds(t *testing.T) {
