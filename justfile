@@ -3386,7 +3386,6 @@ vuln-root-residual:
     internal/codegen
     internal/codegen/age
     internal/codegen/neo4j
-    internal/config
     internal/resolver
     internal/schema/gql
     BLIND
