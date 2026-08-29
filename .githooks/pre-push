@@ -4,7 +4,7 @@
 # nested modules. The full repo-wide lint is CI's job; this catches what the
 # push is about to break. Of the seven required contexts it mirrors three —
 # test, codegen-fence, and lint only in its --new-from-rev form; actionlint,
-# govulncheck, live-smoke and tidy still run nowhere but CI (bd gqlc-s9bx).
+# govulncheck, live-smoke and tidy still run nowhere but CI (bd gqlc-n54t).
 # Activated by: git config core.hooksPath .githooks
 # (run `just init` after cloning)
 set -euo pipefail
