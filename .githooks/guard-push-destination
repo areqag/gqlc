@@ -2,7 +2,10 @@
 # Refuses a push whose RESOLVED destination is master (or main) unless the ref
 # being pushed IS that branch. Invoked from .githooks/pre-push with the hook's
 # own arguments and stdin; runnable standalone, which is how
-# .githooks/tests/worktree-upstream-test.sh exercises it.
+# .githooks/tests/worktree-upstream-test.sh used to exercise it. PR #1595
+# deleted that suite and nothing replaced it, so this hook is exercised only by
+# real pushes now (bd gqlc-u2nim). Standalone runnability is still true and
+# still the way to try a change by hand.
 #
 # Why this exists (bd gqlc-tfh1 / GH #1042). CLAUDE.md's sibling-worktree
 # recipe used to be
@@ -41,13 +44,17 @@
 # neither this hook's argv (remote name, remote URL) nor its stdin: git hands
 # over the same four fields for a rewrite as for a fast-forward, measured
 # 2026-08-20 over all three spellings. So `+master:master` is allowed here for
-# the same reason `master:master` is, and two rows in
-# .githooks/tests/worktree-upstream-test.sh record that as a decision. What
-# refuses a rewrite of master is the remote: repository ruleset `protect-master`
-# (active, ~DEFAULT_BRANCH, bypass_actors empty) carries `non_fast_forward`,
-# `deletion` and `pull_request` rules, and classic branch protection has
-# allow_force_pushes and allow_deletions both false with enforce_admins on, read
-# 2026-08-20. The only local substitute would be an ancestry test, and a poor
+# the same reason `master:master` is. Two rows in
+# .githooks/tests/worktree-upstream-test.sh used to record that as a decision
+# rather than an oversight; PR #1595 deleted them, so this paragraph is now the
+# only place it is written down (bd gqlc-u2nim).
+#
+# What refuses a rewrite of master is the remote: repository ruleset
+# `protect-master` (active, ~DEFAULT_BRANCH, bypass_actors empty) carries
+# `non_fast_forward`, `deletion` and `pull_request` rules, and classic branch
+# protection has allow_force_pushes and allow_deletions both false with
+# enforce_admins on, read 2026-08-20. The only local substitute would be an
+# ancestry test, and a poor
 # one: it needs the remote sha present locally, and a `--force` that happens to
 # fast-forward passes it.
 set -euo pipefail

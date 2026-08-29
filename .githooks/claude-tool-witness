@@ -36,8 +36,13 @@
 # tool, so a bug here would wedge the very session it exists to watch: every
 # path exits 0 and prints nothing.
 #
-# Tests: .githooks/tests/claude-tool-witness-test.sh, and the km half in
-# .githooks/tests/km-test.sh (run via `just test-hooks`).
+# NOT GUARDED BY A TEST. This hook was covered by
+# .githooks/tests/claude-tool-witness-test.sh and its km half by
+# .githooks/tests/km-test.sh, run by a `test-hooks` recipe, until PR #1595
+# deleted the directory and the recipe together. Nothing replaced them, by
+# standing direction — and note what that costs here specifically: the
+# never-block promise above is now held by reading the code, not by a row
+# (bd gqlc-u2nim).
 
 import fcntl
 import json
