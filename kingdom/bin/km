@@ -606,8 +606,9 @@ seat_runner_start() { # <seat> -> 1 if a live session made it unsafe
     herdr pane run "$pane" "KM_STATE_DIR=$sd $SCRIPT_DIR/km-seat $1" >/dev/null 2>&1
 }
 
-# `herdr agent send` writes text to the agent atomically over the socket. No
-# tty burst, no split, no reconfirm. The signature keeps the `<target>` shape
+# `herdr agent send` writes text to the agent atomically over the socket: no
+# tty burst and no split, so the text arrives whole or not at all. The
+# submitting Enter is a second call, below. The signature keeps the `<target>` shape
 # callers used with `send_line "=$SESSION:$seat"`, but the target may just be
 # the seat name; the wrapper accepts either.
 #
@@ -628,6 +629,28 @@ seat_runner_start() { # <seat> -> 1 if a live session made it unsafe
 # and nothing finer — and a dispatch tick that died on this call spent forty
 # minutes saying nothing at all (bd gqlc-87al). Both streams are captured and
 # re-emitted on stderr.
+#
+# And `agent send` TYPES; it does not SUBMIT. It returns ok with the text left
+# sitting in the agent's input box, where it stays until something presses
+# Enter. Both halves witnessed first-party on this seat's own pane, 2026-08-29
+# (bd gqlc-nq78, verdict-qo4s-r2): `agent send <pane> <marker>` answered
+# {"type":"ok"} and a following `pane read` showed the marker after the prompt,
+# unsubmitted; then `pane send-keys <pane> Enter` submitted it and it arrived
+# as a message in this session. `agent send` takes no flags on the deployed
+# binary, so there is no submit option to ask for instead. An ack is delivery
+# of TEXT, and every caller here wants delivery of an EFFECT — a seat asked to
+# /exit that does not leave is the account-vs-work defect a second time.
+#
+# The Enter is guarded, and the guard sits in the primitive rather than in the
+# callers because the hazard belongs to the mechanism: Enter on a modal presses
+# a button nobody consented to (Constitution VI.2), and cmd_reconcile — the one
+# caller with no status check in front of it — sends to seats that may be
+# sitting on a permission ask. seat_prompt_visible already draws the line the
+# nudge path uses; one guard here covers every caller, including the next one.
+#
+# What it cannot see is the box's CONTENTS. Typing appends, so a citizen's
+# half-written draft would be silently prefixed to this text and submitted with
+# it. agent_status does not report that, and no cheap check does.
 send_line() { # <target> <text> -> 0 delivered, 1 not
     local target=$1 text=$2 seat pane out
     seat=${target##*:}
@@ -636,9 +659,19 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
         echo "km: send to $seat: no pane in the workspace; nothing was sent" >&2
         return 1
     fi
-    out=$(herdr agent send "$pane" "$text" 2>&1) && return 0
-    echo "km: send to $seat (pane $pane) failed: ${out:-herdr gave no diagnosis on either stream}" >&2
-    return 1
+    if ! seat_prompt_visible "$seat"; then
+        echo "km: send to $seat: agent_status is $(seat_agent_status "$seat"), so the Enter would answer a modal nobody read; nothing was sent" >&2
+        return 1
+    fi
+    out=$(herdr agent send "$pane" "$text" 2>&1) || {
+        echo "km: send to $seat (pane $pane) failed: ${out:-herdr gave no diagnosis on either stream}" >&2
+        return 1
+    }
+    out=$(herdr pane send-keys "$pane" Enter 2>&1) || {
+        echo "km: send to $seat (pane $pane): the text was typed, but the Enter that submits it failed: ${out:-herdr gave no diagnosis on either stream}. It is sitting unsent in her prompt box" >&2
+        return 1
+    }
+    return 0
 }
 
 # Kept as a query name for callers that want to render the pane to a human.
@@ -667,17 +700,17 @@ seat_prompt_visible() { # <seat>
     esac
 }
 
-# Under tmux, "did the nudge land" required scraping the prompt buffer for
-# the typed text. Herdr's socket delivery is atomic — an ack from `agent
-# send` IS delivery. The old predicate is kept as an alias that always
-# reports "no" (nothing stranded), so callers whose logic was "if the nudge
-# was stranded, requeue" now naturally take the delivered branch.
+# Under tmux, "did the nudge land" required scraping the prompt buffer for the
+# typed text, because a tty burst could strand it half-typed with nothing but
+# the buffer to say so. send_line reports a stranded send itself now — that is
+# what its Enter half is for — so this is kept as an alias that always answers
+# "no, nothing stranded", and callers whose logic was "if the nudge was
+# stranded, requeue" take the delivered branch.
 seat_prompt_holds_nudge() { return 1; }
 
-# Send + confirm was the tty-workaround shape. Under herdr the send itself
-# is the confirmation: if `herdr agent send` returned 0, the text is queued
-# for the agent. If it returned non-zero (server down, agent gone), the
-# caller queues to the wake file — same as the pre-herdr fall-through.
+# Send + confirm was the tty-workaround shape. The confirmation lives inside
+# send_line now: it types, submits, and says which of the two failed. This is a
+# naming wrapper over that and nothing more.
 seat_nudge() { # <seat> <text> -> 0 delivered, 1 refused
     send_line "$1" "$2"
 }
@@ -1002,14 +1035,14 @@ cmd_wake() {
     [ -n "$reason" ] || reason="a new day"
     mkdir -p "$(seat_home "$seat")"
     if [ "$(seat_status "$seat")" = awake ] && window_up "$seat"; then
-        # Through seat_nudge, never bare send_line. send_line's own contract
-        # says a return from it is not delivery — the split into clear/text/
-        # Enter is necessary and NOT sufficient, because the tty re-coalesces
-        # at any delay if the reader is not in read() between the writes. This
-        # path had the split and not the confirmation, so it went on printing
-        # its cheerful success line while six nudges in a row sat typed and
-        # unsent (gqlc-01ev; the dispatcher's mail nudge was given the
-        # confirming helper on 2026-08-22 and this one was not).
+        # Through seat_nudge, never bare send_line — the wrapper is the name
+        # this path's queue-on-refusal logic is written against. Under tmux the
+        # send was a clear/text/Enter tty burst that could re-coalesce and
+        # strand itself, and this path had the split without the confirmation,
+        # so it printed its cheerful success line while six nudges in a row sat
+        # typed and unsent (gqlc-01ev). send_line answers that question itself
+        # now: it types, presses Enter, and returns non-zero if either half
+        # failed.
         #
         # Reported, never fatal: route_owners and the mayor's wake both call
         # this from inside cmd_dispatch under `set -e`, so a non-zero return
@@ -1022,10 +1055,10 @@ cmd_wake() {
             printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
             echo "wake: $seat is awake but its pane shows no prompt to type at — a modal covers the input box, or the pane cannot be read. NOT nudged: Enter there would choose whichever option is highlighted, and a modal is not consent (VI.2). Queued instead — $reason"
         elif seat_nudge "$seat" "[km] $reason — check bd mail inbox when convenient"; then
-            echo "wake: $seat is already awake; nudged instead — the prompt cleared, so it was delivered"
+            echo "wake: $seat is already awake; nudged instead — typed and submitted"
         else
             printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
-            echo "wake: NUDGE UNDELIVERED to $seat — the line is still sitting unsent in its prompt box after a re-sent Enter; read the pane by hand. Queued to the wake file so the reason outlives the failed send — $reason"
+            echo "wake: NUDGE UNDELIVERED to $seat — see the diagnosis above for which half failed, and read the pane by hand. Queued to the wake file so the reason outlives the failed send — $reason"
         fi
     else
         printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
@@ -1918,15 +1951,17 @@ This counter clears by itself the moment her agent leaves 'idle' — witnessed w
             tries=$((tries + 1))
             echo "$tries" >"$attempts_file"
             : >"$nudged_marker"
-            echo "dispatch: nudged $s (ask $tries of $cap) — awake, idle, $pending unread; herdr acked the send"
+            echo "dispatch: nudged $s (ask $tries of $cap) — awake, idle, $pending unread; the ask was typed and submitted"
             wakes=$((wakes + 1))
         else
             # Reported, not counted, and no floor set. km's own success message
             # was what let an operator believe the town unblocked while nothing
-            # moved. A refused send means the citizen was never asked, so it
-            # neither spends her escalation budget nor earns the half-hour
-            # silence: the next pass tries again after one more confirm cycle.
-            echo "dispatch: NUDGE UNDELIVERED to $s — herdr refused the send (its server is down, or the seat's pane holds no agent). Nothing was typed and the slot is still held; retrying next confirm rather than counting it against her $cap asks"
+            # moved. A failed send means she has not been asked — or, in the
+            # one case where the text was typed and the Enter failed, has not
+            # been asked YET — so it neither spends her escalation budget nor
+            # earns the half-hour silence: the next pass tries again after one
+            # more confirm cycle.
+            echo "dispatch: NUDGE UNDELIVERED to $s — the diagnosis above says which half failed. The slot is still held; retrying next confirm rather than counting it against her $cap asks"
         fi
     done
 
