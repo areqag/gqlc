@@ -30,6 +30,44 @@ delivered to every seat's inbox).
 - All mail is open record (the king and the guard can read every box).
   Write accordingly.
 
+## When a letter goes unanswered
+
+A letter still in `inbox/` was delivered and not read. For a SEAT that is
+evidence of **unseen**, not of declined: a seat drains its box when it wakes, so
+a letter that outlived a wake was never in front of anyone. (For the king it is
+not even that — his box is never drained, so a count there measures delivery.
+Do not withhold a letter on it, gqlc-2abx.)
+
+So repetition escalates. It does not soften.
+
+- **Never write a gentler version of a letter nobody has read.** The last letter
+  in a box is the one a reader trusts, so a softened repeat does not merely fail
+  to help — it withdraws the ones underneath it.
+- **A reading is not revised downward without NEW evidence.** Name the evidence
+  and its timestamp in every check-in (`heartbeat.json`'s `updated`, the pane,
+  the board's own verdict), so the next letter can be compared against it rather
+  than against a mood. Unchanged evidence after more time is *stronger*, not
+  weaker.
+- **After the second unanswered letter on unchanged evidence, stop writing to
+  that seat** and escalate. A third letter costs the recipient nothing and you a
+  reader; the metronome shape — 48 unread check-ins — is already town law.
+- **Escalate to Սեդրակ — unless Սեդրակ is who the letter is ABOUT.** Then mail
+  reaches nobody, because the dispatcher wakes exactly one seat for unread mail
+  and it is his. **File a bead instead.** A bead is the only artifact in this
+  town that wakes a seat who is not Սեդրակ: unassigned and P1, class inferred
+  `warrior`, the evidence in the description. It is a real remedy and not a
+  filing gesture — `km wake <seat>` nudges an awake seat's pane, which is
+  exactly the recovery a hand performed on 2026-08-24. Mail Անդրանիկ too, as
+  the record, knowing that is a delivery and not a wake.
+
+This is written from one incident (`kingdom/brain/postmortems/2026-08-24-every-mechanism-worked-and-nothing-recovered.md`).
+Րաֆֆի wrote five times between 04:05Z and 05:05Z about a mayor whose heartbeat
+had been frozen since 03:44:54Z. The evidence never changed; the reading got
+softer, ending in praise. He was not overruling his own record — each round
+wakes a fresh session, so he could not see it. `km guard-sweep` now carries the
+count into his wake for that reason, and the rule above is what it is carried
+for.
+
 ## Message format
 
 One file per message, front-matter + markdown body:

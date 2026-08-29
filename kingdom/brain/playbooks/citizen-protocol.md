@@ -635,6 +635,15 @@ cc Սեդրակ if urgent. Something feels wrong (unsafe change, falsified recor
 scope explosion) → you have the right to stop and escalate (Constitution
 Article III.1), all the way to Անդրանիկ.
 
+**Every sentence above routes through one inbox, so none of them works when
+Սեդրակ is what you are escalating ABOUT.** Mail wakes exactly one seat in this
+town and it is his; a letter to Անդրանիկ is a delivery and not a wake. File a
+bead — unassigned, P1, class inferred `warrior` — because a bead is the only
+artifact here that wakes a seat who is not Սեդրակ. `mail.md`, "When a letter
+goes unanswered", carries this and the rule that repetition escalates rather
+than softens; it is written from the morning the town had a wedged mayor, five
+correct letters about him, and nobody they could reach (bd gqlc-pff4).
+
 ## When something goes wrong
 
 There is always a postmortem — and it is always blame-free. Every mistake
