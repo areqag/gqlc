@@ -23,13 +23,19 @@ import (
 // impossible: dialectGaps may only grow alongside the live measurements
 // that justify it, and the sweep below is what says so.
 //
-// Where that stops: the sweep reads a witness's code for the probe text
-// and the recorded answer. It does not read the witness's control flow,
-// so it can say the answer is spelled in the test and cannot say the test
-// asserts it — gutting the assertion and leaving the wantMessage literals
-// standing leaves this file green (review mutation M18, stated in ADR
-// 0028). Reading the code rather than the source bytes is itself a fix
-// and not a given; see witnessBodies.
+// The sweep reads a witness's code, and reads it at two scopes: a probe
+// text and a served text have to be RUN, so containment in the body is
+// the evidence; a recorded answer has to be CHECKED, so it is looked for
+// only in what an assertion reads (assertedText). Neither is a given —
+// reading the code rather than the source bytes took a fix (review
+// mutation M15, see witnessBodies), and narrowing the answer to the
+// assertions took another (M18, bd gqlc-35yu.17).
+//
+// Where it still stops: assertedText follows a name one hop and knows
+// require and assert alone, so a witness asserting through the testify
+// suite form or a helper of its own reports its answers unasserted. That
+// is a false red, which is the safe direction here — see the hazard
+// argument below.
 //
 // The hazard is asymmetric, which is why the binding is worth its cost.
 // A missing refusal costs the author a runtime error they were going to
@@ -141,22 +147,32 @@ func TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer(t *testing.T) {
 // a complaint below can only have come from the mutation named in the
 // row.
 func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
-	const witness = "TestSomethingLive"
-	measured := "probe := \"MATCH (:A)-[r:X|Y]->(:B) RETURN r\"\n" +
-		"served := \"MATCH (:A)-[r:X]->(:B) RETURN r\"\n" +
-		"require.Contains(t, err.Message, `syntax error at or near \"|\"`)\n"
-	bodies := map[string]string{
-		witness: measured,
-		// Declared and never run, carrying what the witness carries plus
-		// three bindings of its own. The recipe row needs a witness the
+	const (
+		witness = "TestSomethingLive"
+		// The probe and the served text are code the witness runs; the
+		// answer is code an assertion reads. Split because witnessBody's
+		// two scopes are, and hand-built here rather than parsed: a row
+		// below cuts a binding in the GAP, so what it needs from the
+		// bodies map is that the map be sound, not that it be read off a
+		// file. The reader is driven over real source by
+		// TestACommentedProbeReddensTheSweep and
+		// TestAnUnassertedAnswerReddensTheSweep.
+		measuredCode   = "probe := \"MATCH (:A)-[r:X|Y]->(:B) RETURN r\"\nserved := \"MATCH (:A)-[r:X]->(:B) RETURN r\"\n"
+		measuredAssert = "`syntax error at or near \"|\"`\n"
+		// Three bindings of another test's own, which is what the "some
+		// other live test" rows point a gap at.
+		elsewhereCode   = "elsewhere := \"MATCH (:A)-[r:M|N]->(:B) RETURN r\"\nacceptedElsewhere := \"MATCH (:A)-[r:W]->(:B) RETURN r\"\n"
+		elsewhereAssert = "`no relationship type by that name`\n"
+	)
+	bodies := map[string]witnessBody{
+		witness: {code: measuredCode + measuredAssert, asserted: measuredAssert},
+		// Declared and never run. The recipe row needs a witness the
 		// live source DOES declare, or the declaration complaint fires
-		// too and the row would pass without the recipe check existing;
-		// the three extra bindings are what the "some other live test"
-		// rows point a gap at.
-		witness + "ButUnrun": measured +
-			"elsewhere := \"MATCH (:A)-[r:M|N]->(:B) RETURN r\"\n" +
-			"require.Contains(t, err.Message, `no relationship type by that name`)\n" +
-			"acceptedElsewhere := \"MATCH (:A)-[r:W]->(:B) RETURN r\"\n",
+		// too and the row would pass without the recipe check existing.
+		witness + "ButUnrun": {
+			code:     measuredCode + measuredAssert + elsewhereCode + elsewhereAssert,
+			asserted: measuredAssert + elsewhereAssert,
+		},
 	}
 	// Anchored, and the row below is why: -run is an unanchored regexp,
 	// so a bare `-run TestSomethingLive` selects TestSomethingLiveButUnrun
@@ -356,7 +372,7 @@ func TestWitnessBodiesAreScopedToTheirOwnTest(t *testing.T) {
 			}
 			for _, p := range other.refused {
 				compared++
-				require.NotContains(t, body, p.text,
+				require.NotContains(t, body.code, p.text,
 					"%s carries %s's probe %q, so the reader is not scoped to one test's body",
 					g.witness, other.witness, p.text)
 			}
@@ -383,6 +399,24 @@ const (
 const syntheticProbeRow = "\tprobe := \"" + syntheticProbeText + "\"\n" +
 	"\trequire.Contains(t, err.Message, \"" + syntheticProbeAns + "\")\n" +
 	"\t_ = probe\n"
+
+// syntheticColumnRow is the answer as a table column an assertion selects,
+// which is the shape both AGE witnesses actually use — the answer reaches
+// require.Contains as tc.wantMessage and never as a literal. Named because
+// the reader has to be shown reading it, and shown not reading it out of a
+// comment, and those are two rows.
+const syntheticColumnRow = "\tfor _, tc := range []struct{ want string }{{want: \"" + syntheticProbeAns + "\"}} {\n" +
+	"\t\trequire.Contains(t, msg, tc.want)\n\t}\n"
+
+// syntheticUnassertedRow is the same row with the answer moved out of the
+// assertion and left standing as a local nothing reads. That is mutation
+// M18 spelled as code, and every byte the sweep read before this bead is
+// still there: the probe text is in the body and so is the answer.
+const syntheticUnassertedRow = "\tprobe := \"" + syntheticProbeText + "\"\n" +
+	"\tanswer := \"" + syntheticProbeAns + "\"\n" +
+	"\trequire.Error(t, err)\n" +
+	"\t_ = probe\n" +
+	"\t_ = answer\n"
 
 // liveWitnessSource is a live test file declaring one witness, with the
 // served text always in code and the refused probe wherever row puts it.
@@ -412,9 +446,26 @@ func commentOut(block string) string {
 	return out.String()
 }
 
+// syntheticGap is a sound gap over the synthetic witness, with the recipe
+// that runs it. Shared by the two tests that run the reader into the
+// sweep, so a difference between them can only be the source each writes
+// — two hand-built gaps that drifted apart would pass for the wrong
+// reason, which is the argument commentOut is derived for.
+func syntheticGap() (dialectGap, map[string]string) {
+	return dialectGap{
+			sentinel: ErrUndefinedFunction,
+			find:     findUndefinedFunctions,
+			diagnose: func(int, string, string) string { return "" },
+			witness:  syntheticWitness,
+			refused:  []dialectProbe{{text: syntheticProbeText, answer: syntheticProbeAns}},
+			served:   []string{syntheticServedText},
+		},
+		map[string]string{"run-it": "go test -count=1 -tags " + liveBuildTag + " -run " + syntheticWitness}
+}
+
 // readSyntheticWitness is witnessBodies over one hand-written file, with
 // the parse failure surfaced as a test failure.
-func readSyntheticWitness(t *testing.T, src []byte) map[string]string {
+func readSyntheticWitness(t *testing.T, src []byte) map[string]witnessBody {
 	t.Helper()
 	bodies, err := witnessBodies(token.NewFileSet(), "live_synthetic_test.go", src)
 	require.NoError(t, err, "the source this test writes has to parse")
@@ -466,7 +517,7 @@ func TestWitnessBodyIsCodeAndNotCommentary(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := readSyntheticWitness(t, liveWitnessSource(tc.doc, tc.row))[syntheticWitness]
+			body := readSyntheticWitness(t, liveWitnessSource(tc.doc, tc.row))[syntheticWitness].code
 			require.Contains(t, body, syntheticServedText,
 				"the body's own code must be read back, or every assertion below passes on an empty string")
 			if tc.carried {
@@ -478,6 +529,97 @@ func TestWitnessBodyIsCodeAndNotCommentary(t *testing.T) {
 				"a commented-out probe is spelled, not run, and a body carrying it lets the gap table grow on prose")
 			require.NotContains(t, body, syntheticProbeAns,
 				"the answer half too: a comment quoting the server is not a test asserting it")
+		})
+	}
+}
+
+// TestAssertedTextIsWhatAnAssertionReads guards the reader's third axis.
+// The other two are about the body's EXTENT — too wide across tests
+// (TestWitnessBodiesAreScopedToTheirOwnTest) and too generous about
+// comments (TestWitnessBodyIsCodeAndNotCommentary). This one is about
+// what the code inside it does with the string.
+//
+// The first three rows are the load-bearing ones: a reader returning the
+// whole body would fail the last three, and one returning "" would fail
+// these. Both directions are how the sweep goes wrong — too wide and
+// mutation M18 lives, too narrow and a real witness is refused.
+//
+// Rows one, four and six reuse the shared synthetic rows rather than
+// respelling them, so the shape this test calls asserted is the same
+// shape TestAnUnassertedAnswerReddensTheSweep runs into the sweep.
+func TestAssertedTextIsWhatAnAssertionReads(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		doc  string
+		row  string
+		// asserted is whether the answer must be found in the part of
+		// the body an assertion reads.
+		asserted bool
+		// spelled is whether the answer is in the body's code at all.
+		// False only where the row hides it in a comment; every other
+		// row has it in the code and differs solely in what reads it,
+		// which is what makes this test about assertedText and not about
+		// the body reader underneath it.
+		spelled bool
+	}{
+		{
+			name:     "a literal argument is read by the assertion it is an argument of",
+			row:      syntheticProbeRow,
+			asserted: true,
+			spelled:  true,
+		},
+		{
+			name:     "a table column the assertion selects is read through the column's name",
+			row:      syntheticColumnRow,
+			asserted: true,
+			spelled:  true,
+		},
+		{
+			name: "a local the assertion names is read through the name",
+			row: "\tanswer := \"" + syntheticProbeAns + "\"\n" +
+				"\trequire.Contains(t, msg, answer)\n",
+			asserted: true,
+			spelled:  true,
+		},
+		{
+			// Mutation M18 itself. The answer is in the body, the body
+			// asserts something, and nothing connects the two.
+			name:    "a local no assertion names is read by nothing",
+			row:     syntheticUnassertedRow,
+			spelled: true,
+		},
+		{
+			// The decay path bd gqlc-35yu.17 names: a witness rewritten
+			// to assert on a code instead of a message, with the message
+			// column left standing in the table.
+			name: "a table column no assertion selects is read by nothing",
+			row: "\tfor _, tc := range []struct{ note string }{{note: \"" + syntheticProbeAns + "\"}} {\n" +
+				"\t\trequire.NotNil(t, tc)\n\t}\n",
+			spelled: true,
+		},
+		{
+			name: "a commented-out assertion reads nothing",
+			row:  commentOut(syntheticProbeRow),
+		},
+		{
+			// The column shape is the one both AGE witnesses use, so it
+			// owes the commented-out row too: a table left standing in a
+			// comment must reach the reader as nothing, exactly as a
+			// commented-out literal does.
+			name: "a commented-out table column reads nothing",
+			row:  commentOut(syntheticColumnRow),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := readSyntheticWitness(t, liveWitnessSource(tc.doc, tc.row))[syntheticWitness]
+			require.Equal(t, tc.spelled, strings.Contains(body.code, syntheticProbeAns),
+				"this row is about what reads the answer, so whether the code spells it at all must be the stated one")
+			if tc.asserted {
+				require.Contains(t, body.asserted, syntheticProbeAns)
+				return
+			}
+			require.NotContains(t, body.asserted, syntheticProbeAns,
+				"an answer nothing reads is a string in a test, not a measurement the test checks")
 		})
 	}
 }
@@ -497,15 +639,7 @@ func TestWitnessBodyIsCodeAndNotCommentary(t *testing.T) {
 // comment spelling the same probe text and the same server answer, and
 // TestEveryDialectGapCarriesItsWitness stayed green.
 func TestACommentedProbeReddensTheSweep(t *testing.T) {
-	gap := dialectGap{
-		sentinel: ErrUndefinedFunction,
-		find:     findUndefinedFunctions,
-		diagnose: func(int, string, string) string { return "" },
-		witness:  syntheticWitness,
-		refused:  []dialectProbe{{text: syntheticProbeText, answer: syntheticProbeAns}},
-		served:   []string{syntheticServedText},
-	}
-	recipes := map[string]string{"run-it": "go test -count=1 -tags " + liveBuildTag + " -run " + syntheticWitness}
+	gap, recipes := syntheticGap()
 
 	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow))
 	require.Empty(t, witnessGaps([]dialectGap{gap}, run, recipes),
@@ -517,6 +651,38 @@ func TestACommentedProbeReddensTheSweep(t *testing.T) {
 		"a probe only a comment spells is measured by nothing")
 	require.Contains(t, got, "is not asserted by",
 		"and neither is the answer the comment quotes")
+}
+
+// TestAnUnassertedAnswerReddensTheSweep is the other half of the same
+// composition, one axis over: TestACommentedProbeReddensTheSweep asks
+// whether the answer is CODE, this asks whether the code does anything
+// with it.
+//
+// This is mutation M18 at the unit level, and it is the mutation the
+// branch that shipped this table disclosed rather than fixed. In the tree
+// it read: move a recorded answer out of its assertion in
+// TestAGERefusesTheFunctionsItDoesNotDefine and leave the string standing
+// in the same body, and TestEveryDialectGapCarriesItsWitness stayed
+// green. The realistic way there is not vandalism — it is rewriting the
+// witness to assert on the SQLSTATE instead of the message (bd gqlc-osf1
+// is that rewrite) and leaving the message rows behind.
+//
+// The second assertion is what scopes the row. The probe text is still
+// carried and still has to be, so a "not carried by" complaint would mean
+// the answer's binding was cut by breaking something else.
+func TestAnUnassertedAnswerReddensTheSweep(t *testing.T) {
+	gap, recipes := syntheticGap()
+
+	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow))
+	require.Empty(t, witnessGaps([]dialectGap{gap}, run, recipes),
+		"the template must pass, or the complaints below could come from the template")
+
+	spelled := readSyntheticWitness(t, liveWitnessSource("", syntheticUnassertedRow))
+	got := strings.Join(witnessGaps([]dialectGap{gap}, spelled, recipes), "\n")
+	require.Contains(t, got, "is not asserted by",
+		"an answer no assertion reads is a claim about the server that nothing re-measures")
+	require.NotContains(t, got, "is not carried by",
+		"only the answer's binding is cut here — a complaint about the probe means this row measured something else")
 }
 
 // findUndefinedFunctionsOrAlternations is the test template's find: it
@@ -550,7 +716,7 @@ func findUndefinedFunctionsOrAlternations(src string) []string {
 // an AGE test no recipe runs, is never run against the pinned image —
 // and a sweep reading every file at once cannot tell those apart from
 // the real thing.
-func witnessGaps(gaps []dialectGap, bodies, recipes map[string]string) []string {
+func witnessGaps(gaps []dialectGap, bodies map[string]witnessBody, recipes map[string]string) []string {
 	var complaints []string
 	say := func(format string, args ...any) {
 		complaints = append(complaints, fmt.Sprintf(format, args...))
@@ -614,13 +780,18 @@ func witnessGaps(gaps []dialectGap, bodies, recipes map[string]string) []string 
 				say("%s carries probe %q, which is not read by this gap — "+
 					"so the measurement is of something the gate does not refuse", id, p.text)
 			}
-			if !strings.Contains(body, p.text) {
+			if !strings.Contains(body.code, p.text) {
 				say("%s carries probe %q, which is not carried by %s", id, p.text, g.witness)
 			}
 			switch {
 			case p.answer == "":
 				say("%s carries probe %q with no recorded answer", id, p.text)
-			case !strings.Contains(body, p.answer):
+			case !strings.Contains(body.asserted, p.answer):
+				// The narrow scope, and the one binding of the four that
+				// is not containment in the body: an answer spelled in
+				// the witness and read by nothing is a claim about the
+				// server nothing re-measures (assertedText, mutation
+				// M18).
 				say("%s records answer %q, which is not asserted by %s", id, p.answer, g.witness)
 			}
 		}
@@ -632,12 +803,24 @@ func witnessGaps(gaps []dialectGap, bodies, recipes map[string]string) []string 
 			if len(g.find(s)) > 0 {
 				say("%s records %q as served and its find refuses it", id, s)
 			}
-			if !strings.Contains(body, s) {
+			if !strings.Contains(body.code, s) {
 				say("%s records served text %q, which is not carried by %s", id, s, g.witness)
 			}
 		}
 	}
 	return complaints
+}
+
+// witnessBody is one live test's code, in the two scopes the sweep reads
+// it at. Two and not one because the bindings differ in what they need:
+// a probe text and a served text have to be RUN by the witness, which
+// containment in its code is the available evidence for, while a recorded
+// answer has to be CHECKED, which containment cannot see.
+type witnessBody struct {
+	// code is the whole body rendered from the parse — see witnessBodies.
+	code string
+	// asserted is the part of code an assertion reads — see assertedText.
+	asserted string
 }
 
 // witnessBodies is every top-level test one live file declares, paired
@@ -679,24 +862,129 @@ func witnessGaps(gaps []dialectGap, bodies, recipes map[string]string) []string 
 // from readRecipes: a reader that only ever runs over the repo's own
 // files cannot be shown to tell code from commentary, because the repo's
 // files comment nothing out. This one takes source a test can write.
-func witnessBodies(fset *token.FileSet, path string, src []byte) (map[string]string, error) {
+func witnessBodies(fset *token.FileSet, path string, src []byte) (map[string]witnessBody, error) {
 	file, err := parser.ParseFile(fset, path, src, 0)
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	bodies := make(map[string]string)
+	bodies := make(map[string]witnessBody)
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Recv != nil || fn.Body == nil {
 			continue
 		}
-		var body strings.Builder
-		if err := format.Node(&body, fset, fn.Body); err != nil {
+		var code strings.Builder
+		if err := format.Node(&code, fset, fn.Body); err != nil {
 			return nil, fmt.Errorf("render %s's body in %s: %w", fn.Name.Name, path, err)
 		}
-		bodies[fn.Name.Name] = body.String()
+		asserted, err := assertedText(fset, fn.Body)
+		if err != nil {
+			return nil, fmt.Errorf("render %s's assertions in %s: %w", fn.Name.Name, path, err)
+		}
+		bodies[fn.Name.Name] = witnessBody{code: code.String(), asserted: asserted}
 	}
 	return bodies, nil
+}
+
+// assertionPackages are the identifiers a call has to be rooted at to
+// count as an assertion here. Narrow on purpose: the suite form
+// (s.Require().Equal) and any hand-rolled helper are not recognised, so a
+// witness written that way reports its answer unasserted. That is a false
+// RED and not a false green — the sweep would refuse a real measurement
+// and say which one, which is the direction this table's whole hazard
+// argument runs in (a wrong refusal is the expensive one, so the guard
+// that polices refusals is allowed to be strict about itself).
+var assertionPackages = map[string]bool{"require": true, "assert": true}
+
+// assertedText is the part of a witness's body an assertion reads, and
+// the answer half of the sweep is checked against this rather than
+// against the whole body.
+//
+// Why it is not the whole body: a body carrying the server's answer as a
+// dead local, a log line or a table column nothing looks at satisfies a
+// containment check exactly as well as one asserting it, so the sweep
+// could say the answer is spelled in the witness and could not say the
+// witness checks it. Measured as review mutation M18 on the branch that
+// shipped this table, which disclosed it rather than fixing it; bd
+// gqlc-35yu.17 is the fix, and TestAnUnassertedAnswerReddensTheSweep is
+// the row that would have caught it.
+//
+// It is ONE HOP and not a dataflow analysis. The corpus is every
+// assertion call's arguments, plus the values bound to any name those
+// arguments read — an assignment, a var declaration, or a keyed field in
+// a composite literal. That is enough for the two shapes this repo's
+// witnesses use: a literal passed straight to require.Contains, and a
+// table column reached as tc.wantMessage.
+//
+// A range variable is deliberately NOT resolved back to the slice it
+// ranges over. Doing so would pull every field of every row of the table
+// into the corpus the moment any assertion mentioned tc at all, which
+// puts the unasserted columns back in and makes this function a slower
+// spelling of the body it replaced.
+func assertedText(fset *token.FileSet, body *ast.BlockStmt) (string, error) {
+	var out strings.Builder
+	var failed error
+	render := func(n ast.Node) {
+		var buf strings.Builder
+		if err := format.Node(&buf, fset, n); err != nil {
+			failed = err
+			return
+		}
+		out.WriteString(buf.String())
+		out.WriteByte('\n')
+	}
+
+	// The names an assertion reads, which is what makes the second pass
+	// a hop rather than a second copy of the body.
+	read := make(map[string]bool)
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok || !assertionPackages[pkg.Name] {
+			return true
+		}
+		for _, arg := range call.Args {
+			render(arg)
+			ast.Inspect(arg, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok {
+					read[id.Name] = true
+				}
+				return true
+			})
+		}
+		return true
+	})
+
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.KeyValueExpr:
+			if key, ok := v.Key.(*ast.Ident); ok && read[key.Name] {
+				render(v.Value)
+			}
+		case *ast.AssignStmt:
+			for i, lhs := range v.Lhs {
+				id, ok := lhs.(*ast.Ident)
+				if ok && read[id.Name] && i < len(v.Rhs) {
+					render(v.Rhs[i])
+				}
+			}
+		case *ast.ValueSpec:
+			for i, id := range v.Names {
+				if read[id.Name] && i < len(v.Values) {
+					render(v.Values[i])
+				}
+			}
+		}
+		return true
+	})
+	return out.String(), failed
 }
 
 // readLiveWitnessBodies is witnessBodies over every live test file. Read
@@ -711,14 +999,14 @@ func witnessBodies(fset *token.FileSet, path string, src []byte) (map[string]str
 // across the whole set, not merely within one file. The guard is for a
 // live file that later lands outside that package — liveGlob matches by
 // path and says nothing about a package clause.
-func readLiveWitnessBodies(t *testing.T) map[string]string {
+func readLiveWitnessBodies(t *testing.T) map[string]witnessBody {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join(repoRoot, liveGlob))
 	require.NoError(t, err)
 	require.NotEmpty(t, paths, "no live test files found at %s — the sweep would pass by reading nothing", liveGlob)
 
 	fset := token.NewFileSet()
-	bodies := make(map[string]string)
+	bodies := make(map[string]witnessBody)
 	for _, p := range paths {
 		src, err := os.ReadFile(p) //nolint:gosec // a repo-relative path this test builds itself
 		require.NoError(t, err, "read %s", p)
