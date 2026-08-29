@@ -29,7 +29,11 @@ package fixtures_test
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -502,6 +506,120 @@ var edgeUnionScenarios = []struct {
 	{name: "edge_union_undeclared_relationship_type: label dispatch", run: edgeUnionDispatch},
 }
 
+// scenarioTables declares how large each battery is. The sizes are written
+// down here rather than measured off the tables, because a number taken from
+// the table cannot notice the table shrinking — it shrinks with it.
+//
+// A count is a size and not a membership: renaming a scenario, or swapping
+// one for another, leaves the count where it was. What it refuses is a
+// battery that lost a row or gained one without anybody saying so, which is
+// the failure the batteries themselves cannot report. A scenario that is gone
+// runs zero times while every capability assertion around it still passes, so
+// the arm boots its container and reports ok having witnessed one thing less
+// than it did yesterday.
+//
+// why is the sentence a red row should leave behind: it says what stops being
+// witnessed, which is the part a count alone cannot tell you.
+var scenarioTables = []struct {
+	name string
+	got  int
+	want int
+	why  string
+}{
+	{
+		name: "readScenarios", got: len(readScenarios), want: 6,
+		why: "the battery every arm runs; a lost row is a read contract no target is checked against",
+	},
+	{
+		name: "writeScenarios", got: len(writeScenarios), want: 8,
+		why: "the only live witness for the :exec path and for the transaction contract, most of which a method set cannot express",
+	},
+	{
+		name: "temporalScenarios", got: len(temporalScenarios), want: 1,
+		why: "the only live witness for the ADR 0033 zoneless temporal round trip",
+	},
+	{
+		name: "zonedTimeScenarios", got: len(zonedTimeScenarios), want: 1,
+		why: "the only live witness for TIME WITH TIME ZONE keeping its offset",
+	},
+	{
+		name: "savepointScenarios", got: len(savepointScenarios), want: 1,
+		why: "the only live witness that a refused nested Begin leaves no savepoint behind; until bd gqlc-8jfj this table carried no emptiness guard at all, so losing all of it was silent",
+	},
+	{
+		name: "edgeUnionScenarios", got: len(edgeUnionScenarios), want: 1,
+		why: "the only live witness for the emitted edge-union label dispatch",
+	},
+}
+
+// TestEveryBatteryIsTheDeclaredSize holds each battery to its declared
+// size.
+//
+// It deliberately does NOT honour GQLC_SKIP_LIVE. Every other test here skips
+// without a container, which is how this module is usually run, so a battery
+// could be emptied and nothing in the module would say a word. This guard
+// needs no container, so it runs whenever the package is tested at all.
+func TestEveryBatteryIsTheDeclaredSize(t *testing.T) {
+	for _, tc := range scenarioTables {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.got,
+				"%s holds %d scenarios and this file declares %d. If the change was meant, move the number in the same commit and say so in the message; %s",
+				tc.name, tc.got, tc.want, tc.why)
+		})
+	}
+}
+
+// TestEveryBatteryIsNamedInScenarioTables holds scenarioTables to the
+// batteries that actually exist in this file.
+//
+// scenarioTables is itself a written-down list, so it has the failure it was
+// added to catch: a battery it does not name is a battery nothing counts, and
+// nothing about adding one would say so. That is not hypothetical — a new
+// battery arrives with each capability the targets grow.
+//
+// The names are read off the parse rather than off a registry the tables
+// would have to join, because a registry is something an author can forget in
+// exactly the same way. Nothing has to be remembered here: declaring
+// `var somethingScenarios = ...` is what enrols it, and this test is what
+// tells you so.
+//
+// Where it stops: it reads THIS file only, which is where every battery lives
+// today and where the loop that runs them lives. A battery declared in a
+// sibling file of this package would not be seen, and would run unheld.
+func TestEveryBatteryIsNamedInScenarioTables(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "live_test.go", nil, 0)
+	require.NoError(t, err, "the battery has to be able to read its own source to know what to hold")
+
+	var found []string
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			value, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, name := range value.Names {
+				if strings.HasSuffix(name.Name, "Scenarios") {
+					found = append(found, name.Name)
+				}
+			}
+		}
+	}
+	require.NotEmpty(t, found,
+		"no battery was found in the parse at all, so this test would hold scenarioTables to nothing")
+
+	var declared []string
+	for _, tc := range scenarioTables {
+		declared = append(declared, tc.name)
+	}
+	require.ElementsMatch(t, found, declared,
+		"scenarioTables must name every battery in this file and no others. A battery declared here and missing from scenarioTables runs unheld, which is the gap bd gqlc-8jfj closed one level down.")
+}
+
 // TestLiveSmoke runs every scenario against every arm. Arms call t.Parallel()
 // so their container boots overlap: three containers, ~4GB peak, well within
 // a standard CI runner. Scenarios share their arm's container, amortising the
@@ -528,14 +646,14 @@ func TestLiveSmoke(t *testing.T) {
 
 			h := arm.start(ctx, t)
 			parallelScenarios := h.parallelScenarios()
-			// Each battery is held non-empty where it is ranged over, and never
-			// as a total: one assertion over the sum of the five fires only when
-			// all five are empty, so emptying four would still read green. An
-			// emptied table runs its loop zero times while every capability
-			// assertion below still passes, and the arm boots its container and
-			// reports ok having witnessed nothing (bd gqlc-wu5y).
-			require.NotEmpty(t, readScenarios,
-				"readScenarios is empty, so this arm ran no reads and passed anyway")
+			// The batteries are held to a size by scenarioTables, not to
+			// non-emptiness here. The per-table NotEmpty guards that used to sit
+			// in this loop said only that a battery had not been emptied
+			// ENTIRELY, so deleting one row of eight read green (bd gqlc-8jfj);
+			// and they sat inside this test, which skips without a container, so
+			// in the way this module is usually run they said nothing at all.
+			// Emptying a table is still a red under the counts, which is the
+			// claim bd gqlc-wu5y asked for.
 			for _, sc := range readScenarios {
 				t.Run(sc.name, func(t *testing.T) {
 					if parallelScenarios {
@@ -549,8 +667,6 @@ func TestLiveSmoke(t *testing.T) {
 			require.Equal(t, arm.edgeUnions, servesEdgeUnions,
 				"the arm's edge-union capability must match the arms table; a target that gained or lost the dispatch updates both")
 			if servesEdgeUnions {
-				require.NotEmpty(t, edgeUnionScenarios,
-					"edgeUnionScenarios is empty, so this arm serves the edge-union dispatch and exercised none of it")
 				for _, sc := range edgeUnionScenarios {
 					t.Run(sc.name, func(t *testing.T) {
 						if parallelScenarios {
@@ -565,8 +681,6 @@ func TestLiveSmoke(t *testing.T) {
 			require.Equal(t, arm.temporals, servesTemporals,
 				"the arm's temporal capability must match the arms table; a target that gained or lost the zoneless temporal widths updates both")
 			if servesTemporals {
-				require.NotEmpty(t, temporalScenarios,
-					"temporalScenarios is empty, so this arm admits the zoneless temporal widths and exercised none of them; it is the only live witness for the ADR 0033 round trip")
 				for _, sc := range temporalScenarios {
 					t.Run(sc.name, func(t *testing.T) {
 						if parallelScenarios {
@@ -581,8 +695,6 @@ func TestLiveSmoke(t *testing.T) {
 			require.Equal(t, arm.zonedTime, servesZonedTime,
 				"the arm's zoned-time capability must match the arms table; a target that gained or lost TIME WITH TIME ZONE updates both")
 			if servesZonedTime {
-				require.NotEmpty(t, zonedTimeScenarios,
-					"zonedTimeScenarios is empty, so this arm admits TIME WITH TIME ZONE and exercised none of it")
 				for _, sc := range zonedTimeScenarios {
 					t.Run(sc.name, func(t *testing.T) {
 						if parallelScenarios {
@@ -613,8 +725,6 @@ func TestLiveSmoke(t *testing.T) {
 			if !servesWrites {
 				return
 			}
-			require.NotEmpty(t, writeScenarios,
-				"writeScenarios is empty, so this arm emits :exec methods and exercised none of them")
 			for _, sc := range writeScenarios {
 				t.Run(sc.name, func(t *testing.T) {
 					if parallelScenarios {
