@@ -2457,6 +2457,30 @@ unreachable_owner_rows() { # -> lines of "<assignee> <id> <id> ..."
     done <<<"$rows"
 }
 
+# ADR 0009: a verdict is PASS or FAIL, and a PASS is unconditional. A condition
+# written into a close reason is machine-invisible the moment it is written —
+# `close_reason` is read by no dispatch pass and no sweep — so this row is the
+# only thing that looks at it. The match can be this blunt because ruling 2
+# leaves a compliant close reason no reason to contain the word at all, down to
+# forbidding "no conditions" as a disclaimer.
+#
+# The cutoff is the ADR's own merge (3c5a9988), to the SECOND and not to the
+# day. Fifteen close reasons already on the ledger carry the word, and seven of
+# them closed on the ADR's own date — a bare `2026-08-29` would have shipped
+# this row ringing on all seven from its first run, which is how a warn row
+# teaches the town to scroll past it.
+conditioned_verdict_ids() { # -> ids of judge beads closed with a condition in prose since ADR 0009
+    local cutoff=2026-08-29T18:31:01Z
+    bd list --all --json -n 0 2>/dev/null |
+        jq -r --arg cutoff "$cutoff" \
+            '[ .[]
+               | select((.labels // []) | index("class:judge"))
+               | select(.status == "closed")
+               | select((.closed_at // "") > $cutoff)
+               | select((.close_reason // "") | test("conditio"; "i"))
+               | .id ] | join(" ")'
+}
+
 cmd_dispatch() {
     ensure_deployed dispatch "$@" || return 1
     session_up || { echo "dispatch: the town is down; nothing to do"; return 0; }
@@ -4198,6 +4222,20 @@ cmd_doctor() {
         done <<<"$urows"
     else
         echo "ok:   every assignee on the board is a seat or a known person"
+    fi
+
+    # ADR 0009's detector, and a WARN for the same reason the arm above is one:
+    # it rests on the wording of a sentence a judge typed, not on the
+    # dispatcher's arithmetic. Three outcomes, and the finding NAMES the beads —
+    # the whole complaint ADR 0009 makes about a conditioned PASS is that its
+    # content reaches nobody, so a row reporting a count would repeat the defect.
+    local conditioned
+    if ! conditioned=$(conditioned_verdict_ids); then
+        echo "warn: the conditioned-verdict query failed, so no close reason can be certified unconditional"
+    elif [ -n "$conditioned" ]; then
+        echo "warn: closed with a condition in the close reason, which carries it to nobody — a verdict is PASS or FAIL, a PASS is unconditional, and binding content travels in bead ids (ADR 0009): $conditioned"
+    else
+        echo "ok:   every judge verdict closed since ADR 0009 is unconditional"
     fi
 
     # The stranded arm above answers "can any pass reach this bead"; this one
