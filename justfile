@@ -3326,7 +3326,9 @@ kingdom-install:
 kingdom-uninstall:
     kingdom/bin/km uninstall-units
 
-# raise the halt flag: the dispatcher wakes nobody until kingdom-resume
+# raise the halt flag: the dispatcher wakes nobody until kingdom-resume. The
+# raise is recorded against whoever made it, so like kingdom-resume it needs an
+# identity: KINGDOM_SEAT=andranik just kingdom-halt "reason"
 kingdom-halt reason="":
     kingdom/bin/km halt {{reason}}
 
