@@ -3296,10 +3296,10 @@ cmd_doctor() {
 seat_freshness() {
     local seat=$1 target=$2 wt head branch dirty ahead behind_all behind_gates
     wt=$(seat_worktree "$seat")
-    [ -d "$wt" ] || { echo "unknown 0 0 0 no-worktree-at-$wt"; return 0; }
-    [ -n "$target" ] || { echo "unknown 0 0 0 no-origin-master-to-judge-against"; return 0; }
+    [ -d "$wt" ] || { echo "unknown 0 0 0 no worktree at $wt"; return 0; }
+    [ -n "$target" ] || { echo "unknown 0 0 0 no origin/master to judge against"; return 0; }
     head=$(git_at "$wt" rev-parse HEAD 2>/dev/null) ||
-        { echo "unknown 0 0 0 git-cannot-read-$wt"; return 0; }
+        { echo "unknown 0 0 0 git cannot read $wt"; return 0; }
 
     branch=$(git_at "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
     dirty=$(git_at "$wt" status --porcelain 2>/dev/null || echo "?")
@@ -3322,14 +3322,14 @@ seat_freshness() {
         local why="$ahead commit(s) of its own, on no branch"
         [ -n "$branch" ] && why="branch $branch in flight"
         [ -n "$dirty" ] && why="uncommitted work in the tree"
-        echo "working $behind_all $behind_gates $ahead ${why// /-}"
+        echo "working $behind_all $behind_gates $ahead $why"
         return 0
     fi
     if [ "$head" = "$target" ]; then
-        echo "current 0 0 0 at-$(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
+        echo "current 0 0 0 at $(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
         return 0
     fi
-    echo "parked $behind_all $behind_gates 0 at-$(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
+    echo "parked $behind_all $behind_gates 0 at $(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
 }
 
 # seat_refresh_step <seat> <check> <target> <mr> <stale_note>
@@ -3360,11 +3360,11 @@ seat_refresh_step() {
 
     case "$state" in
         unknown)
-            echo "$seat: cannot judge — ${detail//-/ }"
+            echo "$seat: cannot judge — $detail"
             return 4
             ;;
         working)
-            local why="${detail//-/ }"
+            local why="$detail"
             if [ "$behind_gates" -eq 0 ]; then
                 echo "$seat: held ($why); its hooks are current$stale_note"
                 return 0
