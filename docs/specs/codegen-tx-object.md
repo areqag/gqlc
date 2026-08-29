@@ -7,6 +7,14 @@ the module cache, not out of documentation or memory. The corpus pins are
 `pgx/v5 v5.10.0` (`test/data/codegen/go.mod`), and the file:line
 references below are into those versions.
 
+> **Superseded in part** (gqlc-jwfm, 2026-08-29): §4's emitted shape and
+> §9.1's reservation grounds are overturned by
+> [codegen-tx-embedded-querier.md](codegen-tx-embedded-querier.md) — the
+> querier is embedded on `Tx` and the `(*Tx).Queries()` accessor is
+> removed. Until the execution bead gqlc-f4hf lands, this spec describes
+> the shipped emission; the measured history below (§8) records the
+> shape it measured and is not disturbed.
+
 ## 1. The problem in plain words
 
 gqlc knows the target driver at generation time, yet a user who wants an
@@ -102,6 +110,11 @@ closed on every path the generated code controls.
 180-182, 209-212`); a query on a closed tx fails with the same sentinel.
 
 ## 4. The emitted surface
+
+> Superseded by [codegen-tx-embedded-querier.md](codegen-tx-embedded-querier.md)
+> §4 once gqlc-f4hf lands: the query methods move to an unexported
+> embedded core, `(*Tx).Queries()` is removed, and query calls promote
+> onto `Tx` directly.
 
 Identical exported surface in both generated packages; driver names
 appear only in unexported struct fields and bodies. Doc comments on the
@@ -433,6 +446,13 @@ New live scenarios (each runs on v5, v6 and — nightly — AGE):
 | `.golangci.yml` | the live battery's new interfaces join the per-type `ireturn` allow-list |
 
 ### 9.1 Reserved identifiers
+
+> Grounds superseded by
+> [codegen-tx-embedded-querier.md](codegen-tx-embedded-querier.md) §5
+> once gqlc-f4hf lands: membership and scopes stay exactly as below, but
+> `Begin`/`Commit`/`Rollback` come to stand on promotion-shadowing
+> rather than redeclaration and call-site ambiguity, and `Queries`
+> occupies the package scope alone (the accessor is removed).
 
 This subsection was absent from the design and is written from the
 execution (`gqlc-3d0l`, PR #1489), ruled in by Արթուր rather than
