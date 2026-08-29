@@ -610,10 +610,16 @@ seat_runner_start() { # <seat> -> 1 if a live session made it unsafe
 # tty burst, no split, no reconfirm. The signature keeps the `<target>` shape
 # callers used with `send_line "=$SESSION:$seat"`, but the target may just be
 # the seat name; the wrapper accepts either.
-send_line() { # <target> <text>
-    local target=$1 text=$2 seat
+send_line() { # <target> <text> -> 0 delivered, 1 refused
+    local target=$1 text=$2 seat err rc=0
     seat=${target##*:}
-    herdr agent send "$seat" "$text" >/dev/null 2>&1
+    # herdr's stdout is discarded as before; its stderr is kept and printed only
+    # when the send is refused. Discarding both is what left a dead dispatcher
+    # with nothing in the journal to read for half an hour (gqlc-5ybu).
+    err=$(herdr agent send "$seat" "$text" 2>&1 >/dev/null) || rc=$?
+    [ "$rc" -eq 0 ] || printf 'send_line: herdr refused the send to %s: %s\n' \
+        "$seat" "${err//$'\n'/ }" >&2
+    return "$rc"
 }
 
 # Kept as a query name for callers that want to render the pane to a human.
@@ -1045,8 +1051,11 @@ cmd_sleep() {
     # `km reconcile`, which is what makes an undelivered request recoverable.
     echo asleep-pending >"$(seat_home "$seat")/status"
     if window_up "$seat"; then
-        send_line "$seat" "/exit"
-        echo "sleep: good night, $(seat_display "$seat") — the session ends when this turn does"
+        if send_line "$seat" "/exit"; then
+            echo "sleep: good night, $(seat_display "$seat") — the session ends when this turn does"
+        else
+            echo "sleep: herdr refused the /exit for $(seat_display "$seat") — the status now reads asleep-pending but nothing was delivered. End your session normally; km reconcile re-sends."
+        fi
     else
         echo "sleep: no herdr agent for $seat; end your session normally"
     fi
@@ -1316,9 +1325,16 @@ cmd_reconcile() {
         if seat_session_live "$s"; then
             rm -f "$suspect"
             if [ "$st" = asleep-pending ]; then
-                send_line "$s" "/exit"
-                echo "reconcile: $s asked to leave and is still here; /exit re-sent"
-                redelivered=$((redelivered + 1))
+                # Reported, never fatal — the rule stated at cmd_wake. This runs
+                # inside cmd_dispatch under `set -e`, and every asleep-pending
+                # seat with a live session reaches it, so one refused send used
+                # to end the whole tick before a single bead was routed.
+                if send_line "$s" "/exit"; then
+                    echo "reconcile: $s asked to leave and is still here; /exit re-sent"
+                    redelivered=$((redelivered + 1))
+                else
+                    echo "reconcile: $s asked to leave and is still here, and herdr refused the /exit; she keeps her slot until she leaves or a citizen reads the pane"
+                fi
             fi
             continue
         fi
