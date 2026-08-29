@@ -867,9 +867,29 @@ seat_runner_start() { # <seat> -> 0 started, 1 declined (live session), 2 no run
     return 2
 }
 
-# `herdr agent send` writes text to the agent atomically over the socket: no
-# tty burst and no split, so the text arrives whole or not at all. The
-# submitting Enter is a second call, below. The signature keeps the `<target>` shape
+# `herdr agent send` writes the text and `pane send-keys` writes the Enter, and
+# both go down the pane's pty as ordinary bursts. There is no socket path that
+# bypasses the tty — this comment claimed one until 2026-08-29 — and herdr emits
+# no bracketed-paste markers even when the application has enabled DECSET 2004,
+# so claude cannot tell either call from a human typing and falls back to
+# guessing by burst size. Measured against herdr 0.6.10 with a raw-tty reader in
+# a scratch pane (bd gqlc-bi7n): the two writes arrive as SEPARATE bursts while
+# the far side is sitting in read(), and coalesce into ONE when it is not.
+#
+# That matters because claude takes a single burst of 64 characters or more as a
+# paste and renders its trailing CR as a literal newline. So a coalesced pair
+# carrying a long message is typed and never submitted, while both calls return
+# rc=0. On a live pane, one burst of 63 characters submits and one of 64 strands,
+# 6 of 6 trials. The nudge text every caller here sends is well over 64.
+#
+# The failure is therefore a race on the far side's read loop, not a property of
+# a pane or a seat: 26 of 26 back-to-back sends submitted against a live claude,
+# idle and busy alike, so the rate is low and is NOT characterised. A stranded
+# box is submitted by a second lone Enter, 3 of 3. `herdr pane run` submits a
+# 507-character payload atomically, 3 of 3, and is the candidate replacement for
+# the pair (gqlc-gh7xj).
+#
+# The signature keeps the `<target>` shape
 # callers used with `send_line "=$SESSION:$seat"`, but the target may just be
 # the seat name; the wrapper accepts either.
 #
@@ -1308,13 +1328,14 @@ cmd_wake() {
         # so it printed its cheerful success line while six nudges in a row sat
         # typed and unsent (gqlc-01ev). send_line now types AND presses Enter
         # and returns non-zero if either call fails, which is not the same as
-        # delivery. Measured on a consenting pane 2026-08-29 (bd gqlc-bi7n):
-        # after a ~500-character message the first Enter was swallowed, the
-        # text sat in the box unsubmitted, a second Enter submitted it, and
-        # BOTH returned rc=0. Dispatch wake text is not short, so this path can
-        # still report a nudge it did not deliver — the gqlc-01ev shape one
-        # layer down. Reading the box back is the answer and waits on
-        # gqlc-bi7n's characterisation.
+        # delivery. Characterised 2026-08-29 on a consenting pane (bd gqlc-bi7n,
+        # and see send_line's own comment): the two writes coalesce into one pty
+        # burst whenever the far side is not sitting in read(), and a single
+        # burst of 64 characters or more is taken as a paste, so its trailing CR
+        # types a newline instead of submitting. Dispatch wake text is not short,
+        # so this path can still report a nudge it did not deliver — the
+        # gqlc-01ev shape one layer down — while both calls return rc=0. Reading
+        # the box back is the answer; it is gqlc-gh7xj and is not done here.
         #
         # Reported, never fatal: route_owners and the mayor's wake both call
         # this from inside cmd_dispatch under `set -e`, so a non-zero return
