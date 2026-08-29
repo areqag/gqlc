@@ -15,7 +15,7 @@ const builtLocalDateTimeQueryText = `RETURN localdatetime({year: 2024, month: 3,
 // BuiltLocalDateTime executes the BuiltLocalDateTime query.
 //
 //	RETURN localdatetime({year: 2024, month: 3, day: 5, hour: 6, minute: 7, second: 8, nanosecond: 9}) AS built
-func (q *Queries) BuiltLocalDateTime(ctx context.Context) (LocalDateTime, error) {
+func (q *queries) BuiltLocalDateTime(ctx context.Context) (LocalDateTime, error) {
 	records, err := q.db.run(ctx, builtLocalDateTimeQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return LocalDateTime{}, err

@@ -12,7 +12,7 @@ const oneNameListQueryText = `RETURN ['a', 'b', 'c'] AS xs`
 // OneNameList executes the OneNameList query.
 //
 //	RETURN ['a', 'b', 'c'] AS xs
-func (q *Queries) OneNameList(ctx context.Context) ([]string, error) {
+func (q *queries) OneNameList(ctx context.Context) ([]string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneNameListQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

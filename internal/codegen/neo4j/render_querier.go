@@ -60,6 +60,7 @@ func renderQuerier(pkg string, prepared []codegen.Query, target driverTarget) []
 	b.WriteString("}\n\n")
 	b.WriteString("type Querier interface {\n\tReadQuerier\n\tWriteQuerier\n}\n\n")
 	b.WriteString("var _ Querier = (*Queries)(nil)\n")
+	b.WriteString("var _ Querier = (*Tx)(nil)\n")
 	return []byte(b.String())
 }
 

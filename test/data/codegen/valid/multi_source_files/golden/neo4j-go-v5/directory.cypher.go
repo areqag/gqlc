@@ -14,7 +14,7 @@ const allPersonIdsQueryText = `MATCH (p:Person) RETURN p.id`
 // AllPersonIds executes the AllPersonIds query.
 //
 //	MATCH (p:Person) RETURN p.id
-func (q *Queries) AllPersonIds(ctx context.Context) ([]int64, error) {
+func (q *queries) AllPersonIds(ctx context.Context) ([]int64, error) {
 	records, err := q.db.run(ctx, allPersonIdsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

@@ -20,7 +20,7 @@ type MergeActionParams struct {
 // MergeAction executes the MergeAction query.
 //
 //	MERGE (p:Person {id: $personId})-[r:AUTHORED|LIKES]->(post:Post {id: $postId}) RETURN r
-func (q *Queries) MergeAction(ctx context.Context, arg MergeActionParams) (MergeActionR, error) {
+func (q *queries) MergeAction(ctx context.Context, arg MergeActionParams) (MergeActionR, error) {
 	records, err := q.db.run(ctx, mergeActionQueryText, map[string]any{"personId": arg.PersonId, "postId": arg.PostId}, neo4j.AccessModeWrite)
 	if err != nil {
 		return nil, err

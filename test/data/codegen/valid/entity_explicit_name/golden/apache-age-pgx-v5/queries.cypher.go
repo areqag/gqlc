@@ -12,7 +12,7 @@ const oneActorQueryText = `MATCH (p:Person) RETURN p`
 // OneActor executes the OneActor query.
 //
 //	MATCH (p:Person) RETURN p
-func (q *Queries) OneActor(ctx context.Context) (Actor, error) {
+func (q *queries) OneActor(ctx context.Context) (Actor, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneActorQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Actor{}, err

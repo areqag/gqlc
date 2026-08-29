@@ -12,7 +12,7 @@ const removePersonQueryText = `MATCH (p:Person) WHERE p.id = $id DELETE p`
 // RemovePerson executes the RemovePerson query.
 //
 //	MATCH (p:Person) WHERE p.id = $id DELETE p
-func (q *Queries) RemovePerson(ctx context.Context, arg int64) error {
+func (q *queries) RemovePerson(ctx context.Context, arg int64) error {
 	stmt, err := q.cypherStmt("$gqlc$", removePersonQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err
@@ -37,7 +37,7 @@ type CreatePersonParams struct {
 // CreatePerson executes the CreatePerson query.
 //
 //	CREATE (p:Person {id: $id, name: $name})
-func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) error {
+func (q *queries) CreatePerson(ctx context.Context, arg CreatePersonParams) error {
 	stmt, err := q.cypherStmt("$gqlc$", createPersonQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err

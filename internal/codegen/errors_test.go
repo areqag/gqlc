@@ -929,8 +929,9 @@ func (s *SentinelTaxonomySuite) TestReservedSetSectionMatchesTheReservedRows() {
 		// block, so no entity struct of that name can redeclare it and the
 		// cell reads no target. The query axis is not in that cell —
 		// MethodName is the query name verbatim, so on a target declaring
-		// the method a query of that name emits a second one beside it,
-		// which Phase A refuses on membership alone.
+		// the method a query of that name emits one on the embedded core
+		// that promotes past it or is silently shadowed by it, which Phase
+		// A refuses on membership alone (prepare.go's declaration).
 		breaksOn := declaredBy
 		if row.scope == scopeMethod {
 			breaksOn = "no target"

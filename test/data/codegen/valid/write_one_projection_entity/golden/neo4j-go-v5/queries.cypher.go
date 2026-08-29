@@ -20,7 +20,7 @@ type CreatePersonParams struct {
 // CreatePerson executes the CreatePerson query.
 //
 //	CREATE (p:Person {id: $id, name: $name}) RETURN p
-func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Person, error) {
+func (q *queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Person, error) {
 	records, err := q.db.run(ctx, createPersonQueryText, map[string]any{"id": arg.Id, "name": arg.Name}, neo4j.AccessModeWrite)
 	if err != nil {
 		return Person{}, err

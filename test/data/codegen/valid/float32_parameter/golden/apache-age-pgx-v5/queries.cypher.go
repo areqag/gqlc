@@ -12,7 +12,7 @@ const peopleAtHeightQueryText = `MATCH (p:Person) WHERE p.height = $h RETURN p.n
 // PeopleAtHeight executes the PeopleAtHeight query.
 //
 //	MATCH (p:Person) WHERE p.height = $h RETURN p.name
-func (q *Queries) PeopleAtHeight(ctx context.Context, arg float32) ([]string, error) {
+func (q *queries) PeopleAtHeight(ctx context.Context, arg float32) ([]string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", peopleAtHeightQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

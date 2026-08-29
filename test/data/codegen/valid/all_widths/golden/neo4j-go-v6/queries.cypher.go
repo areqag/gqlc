@@ -32,7 +32,7 @@ type AllWidthsRow struct {
 // AllWidths executes the AllWidths query.
 //
 //	MATCH (r:Row) RETURN r.s, r.b, r.i, r.i8, r.i16, r.i32, r.i64, r.u, r.u8, r.u16, r.u32, r.u64, r.f, r.f32, r.f64
-func (q *Queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
+func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	records, err := q.db.run(ctx, allWidthsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return AllWidthsRow{}, err

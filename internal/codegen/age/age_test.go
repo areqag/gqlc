@@ -2098,10 +2098,10 @@ func (s *EmissionSuite) TestNewBindsTheGraph() {
 	db := s.files["db.go"]
 	s.Require().Contains(db, "func New(db DBTX, graph string) *Queries {")
 	s.Require().Contains(db, "graph string\n}")
-	s.Require().Contains(db, "return &Queries{db: db, graph: graph}")
+	s.Require().Contains(db, "return &Queries{queries: queries{db: db, graph: graph}}")
 	// WithTx must carry the binding across, or the transactional handle
 	// would silently address a different graph.
-	s.Require().Contains(db, "return &Queries{db: tx, graph: q.graph}")
+	s.Require().Contains(db, "return &Queries{queries: queries{db: tx, graph: q.graph}}")
 
 	graph := s.files["graph.go"]
 	for _, name := range []string{"EnsureGraph", "DropGraph"} {
@@ -2126,7 +2126,7 @@ func (s *EmissionSuite) TestNewBindsTheGraph() {
 // message carries neither.
 func (s *EmissionSuite) TestGraphNameIsAgesToJudge() {
 	db := s.files["db.go"]
-	s.Require().Contains(db, "func New(db DBTX, graph string) *Queries {\n\treturn &Queries{db: db, graph: graph}\n}")
+	s.Require().Contains(db, "func New(db DBTX, graph string) *Queries {\n\treturn &Queries{queries: queries{db: db, graph: graph}}\n}")
 	s.Require().NotContains(db, "panic(")
 
 	s.Require().Contains(s.files["graph.go"],
@@ -2153,18 +2153,18 @@ var nameBearers = []string{"EnsureGraph", "DropGraph", "cypherStmt"}
 // the binding onto a derived handle without carrying it to the server,
 // and the bearers take what the accessor returns.
 //
-// The name lives on two structs, and both are swept. Tx holds its own
-// copy — Begin puts it there and Tx.Queries takes it back off — so a
-// sweep of Queries.graph alone would stop being the whole invariant the
-// moment the Tx object landed, and would say nothing about a future
-// method that carried tx.graph to the server directly.
+// The name lives on one struct now — the core both handles embed — but
+// both receivers are still swept. Tx no longer copies it, yet tx.graph
+// stays a legal selector by promotion, so a future method that carried
+// it to the server off a *Tx receiver would compile; the tx sweep is
+// what says none does.
 func (s *EmissionSuite) TestTheGraphNameReachesTheServerThroughOneCheck() {
 	files := s.emitReadBatch()
 
 	db := files["db.go"]
 	s.Require().Contains(db, "const maxGraphNameBytes = 63")
 	s.Require().Contains(db,
-		"func (q *Queries) boundGraph() (string, error) {\n\tif len(q.graph) > maxGraphNameBytes {")
+		"func (q *queries) boundGraph() (string, error) {\n\tif len(q.graph) > maxGraphNameBytes {")
 
 	var readers, txReaders, bearers []string
 	for path, body := range files {
@@ -2174,8 +2174,8 @@ func (s *EmissionSuite) TestTheGraphNameReachesTheServerThroughOneCheck() {
 	}
 	s.Require().ElementsMatch([]string{"WithTx", "Begin", "boundGraph"}, readers,
 		"the graph field is readable outside the accessor that checks it and the propagators that only copy it")
-	s.Require().ElementsMatch([]string{"Queries"}, txReaders,
-		"Tx's copy of the graph name is readable outside the accessor that hands it back to a checking handle")
+	s.Require().Empty(txReaders,
+		"a *Tx method reads the promoted graph name directly instead of taking it from boundGraph")
 	s.Require().ElementsMatch(nameBearers, bearers,
 		"a function carrying the name to the server does not take it from boundGraph")
 }

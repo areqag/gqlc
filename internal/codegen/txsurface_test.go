@@ -27,26 +27,33 @@ import (
 var txTargets = []string{"neo4j-go-v5", "apache-age-pgx-v5"}
 
 // txSurfaceNames is the exported Tx surface both backends owe, spelled
-// with receivers because two of the six names collide otherwise: db.go
-// declares a `Queries` type as well as a `(*Tx).Queries` method, and
-// `Begin` hangs off `*Queries` while `Commit` and `Rollback` hang off
-// `*Tx`. A bare name set cannot tell those apart, and a gate that cannot
-// tell them apart would pass on an emission that moved a method to the
-// wrong receiver.
+// with receivers because `Begin` hangs off `*Queries` while `Commit` and
+// `Rollback` hang off `*Tx`. A bare name set cannot tell those apart, and
+// a gate that cannot tell them apart would pass on an emission that moved
+// a method to the wrong receiver.
 //
 // The set is closed — the gate refuses an emission carrying MORE exported
-// Tx surface than this, not only one carrying less. A `(*Tx).Close` is the
-// concrete case: docs/specs/codegen-tx-object.md §10 declines it because
-// Rollback's nil-after-done already covers the defer idiom, and a decline
-// that nothing enforces is re-proposed by the next author to want one.
+// Tx surface than this, not only one carrying less. Two concrete cases it
+// holds. A `(*Tx).Close` is declined by docs/specs/codegen-tx-object.md
+// §10 because Rollback's nil-after-done already covers the defer idiom,
+// and a decline that nothing enforces is re-proposed by the next author
+// to want one. A `(*Tx).Queries` is the accessor
+// docs/specs/codegen-tx-embedded-querier.md removes: because the
+// comparison is equality, an emission that still carries it FAILS here,
+// so this gate enforces the removal rather than merely tolerating it.
 var txSurfaceNames = []string{
 	"func (*Queries) Begin",
 	"func (*Tx) Commit",
-	"func (*Tx) Queries",
 	"func (*Tx) Rollback",
 	"type Tx",
 	"var ErrTxDone",
 }
+
+// txCoreLifecycleNames are the names that must not hang off the embedded
+// core. Each would promote into `*Tx`'s method set: `Begin` and `WithTx`
+// would make nesting expressible again, and `Commit`/`Rollback`/`Queries`
+// would either collide with the real ones or hand the core back out.
+var txCoreLifecycleNames = []string{"Begin", "Commit", "Rollback", "Queries", "WithTx"}
 
 // txPrivateBeginErrors are the errors.New literals inside Begin that one
 // backend emits and the other does not. AGE's `DBTX` seam admits a caller
@@ -118,6 +125,155 @@ func TestTxSurfaceAgreesAcrossBackends(t *testing.T) {
 	}
 }
 
+// TestTxPromotionPreconditions holds the structure that makes the
+// promoted surface true, on both backends. The closed set above says
+// which exported names exist; none of it says that `tx.GetPerson`
+// resolves, and that is a fact about embedding and receivers rather than
+// about names.
+//
+// Each assertion here is a precondition of promotion, and each is
+// falsifiable on its own: change the embed, or move a query method's
+// receiver, or drop the emitted interface pin, and exactly one of these
+// reddens by name.
+func TestTxPromotionPreconditions(t *testing.T) {
+	for _, target := range txTargets {
+		t.Run(target, func(t *testing.T) {
+			files := probeFiles(t, target)
+			_, dbGo := parseProbeFile(t, target, "db.go", files)
+
+			// Tx must embed the unexported core and nothing else. Embedding
+			// `Queries` would promote Begin and WithTx back onto Tx, which
+			// is the whole nesting door this shape closes; embedding
+			// `*queries` would buy nothing and change the zero value.
+			requireEmbedsCore(t, target, "Tx", dbGo)
+			requireEmbedsCore(t, target, "Queries", dbGo)
+
+			for _, d := range dbGo.Decls {
+				fn, ok := d.(*ast.FuncDecl)
+				if !ok || fn.Recv == nil || len(fn.Recv.List) != 1 {
+					continue
+				}
+				recv, ok := receiverIdent(fn.Recv.List[0].Type)
+				if !ok || recv != "queries" {
+					continue
+				}
+				require.NotContains(t, txCoreLifecycleNames, fn.Name.Name,
+					"%s: %q is declared on the embedded core, so it promotes into *Tx's method set",
+					target, fn.Name.Name)
+			}
+
+			// Every generated query method hangs off the core. A renderer
+			// regressed to *Queries reddens here by name, and the promoted
+			// calls in the live adapters stop compiling.
+			_, queryFile := parseProbeFile(t, target, "txprobe.cypher.go", files)
+			methods := 0
+			for _, d := range queryFile.Decls {
+				fn, ok := d.(*ast.FuncDecl)
+				if !ok || fn.Recv == nil {
+					continue
+				}
+				methods++
+				star, isStar := fn.Recv.List[0].Type.(*ast.StarExpr)
+				require.True(t, isStar,
+					"%s: query method %s has a value receiver", target, fn.Name.Name)
+				ident, isIdent := star.X.(*ast.Ident)
+				require.True(t, isIdent,
+					"%s: query method %s has an unreadable receiver", target, fn.Name.Name)
+				require.Equal(t, "queries", ident.Name,
+					"%s: query method %s hangs off %q, so it does not promote onto Tx",
+					target, fn.Name.Name, ident.Name)
+			}
+			// Without this the loop above is vacuous on an emission that
+			// produced no query methods at all.
+			require.Equal(t, len(txProbeInput().Queries), methods,
+				"%s: the probe batch's query methods are not all emitted", target)
+
+			// The emitted pins are the generated package's own compile-time
+			// claim that both handles satisfy Querier. Asserting them here
+			// rather than only in a test file's private copy is what makes a
+			// renderer that drops one fail.
+			_, querier := parseProbeFile(t, target, "querier.go", files)
+			pins := interfacePins(querier)
+			require.Contains(t, pins, "Querier = (*Queries)(nil)",
+				"%s: querier.go does not pin *Queries to Querier", target)
+			require.Contains(t, pins, "Querier = (*Tx)(nil)",
+				"%s: querier.go does not pin *Tx to Querier, so nothing emitted claims the promoted surface satisfies the interface", target)
+		})
+	}
+}
+
+// requireEmbedsCore asserts that typeName is a struct whose only embedded
+// field is the plain ident `queries`.
+func requireEmbedsCore(t *testing.T, target, typeName string, file *ast.File) {
+	t.Helper()
+
+	var st *ast.StructType
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok || ts.Name.Name != typeName {
+				continue
+			}
+			st, ok = ts.Type.(*ast.StructType)
+			require.True(t, ok, "%s: %s is not a struct type", target, typeName)
+		}
+	}
+	require.NotNil(t, st, "%s: no %s type declared", target, typeName)
+
+	var embedded []ast.Expr
+	for _, f := range st.Fields.List {
+		if len(f.Names) == 0 {
+			embedded = append(embedded, f.Type)
+		}
+	}
+	require.Len(t, embedded, 1,
+		"%s: %s must embed exactly one type, the core", target, typeName)
+
+	ident, ok := embedded[0].(*ast.Ident)
+	require.True(t, ok,
+		"%s: %s embeds a %T, not the plain ident `queries` — a pointer embed changes the zero value and buys nothing",
+		target, typeName, embedded[0])
+	require.Equal(t, "queries", ident.Name,
+		"%s: %s embeds %q; embedding the exported handle would promote Begin and WithTx",
+		target, typeName, ident.Name)
+}
+
+// interfacePins renders every `var _ X = (*Y)(nil)` declaration in a
+// file, as the source spells it.
+func interfacePins(file *ast.File) []string {
+	var out []string
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok || len(vs.Names) != 1 || vs.Names[0].Name != "_" || vs.Type == nil {
+				continue
+			}
+			if len(vs.Values) != 1 {
+				continue
+			}
+			var b strings.Builder
+			if err := printer.Fprint(&b, token.NewFileSet(), vs.Type); err != nil {
+				continue
+			}
+			b.WriteString(" = ")
+			var v strings.Builder
+			if err := printer.Fprint(&v, token.NewFileSet(), vs.Values[0]); err != nil {
+				continue
+			}
+			out = append(out, b.String()+v.String())
+		}
+	}
+	return out
+}
+
 // txSurface is one backend's emitted Tx surface, read out of the AST of
 // its db.go. Source bytes are deliberately not consulted: a commented-out
 // declaration is source bytes that satisfy a grep and satisfy no caller.
@@ -134,7 +290,9 @@ type txSurface struct {
 	beginErrors []string
 }
 
-func extractTxSurface(t *testing.T, target string) txSurface {
+// probeFiles generates the probe batch for one target and returns the
+// emitted files by path.
+func probeFiles(t *testing.T, target string) map[string][]byte {
 	t.Helper()
 
 	registry, err := backends.Registry()
@@ -145,17 +303,32 @@ func extractTxSurface(t *testing.T, target string) txSurface {
 	files, err := newGen("txprobe").Generate(txProbeInput())
 	require.NoError(t, err, "%s: generating the probe batch", target)
 
-	var dbGo []byte
+	out := make(map[string][]byte, len(files))
 	for _, f := range files {
-		if f.Path == "db.go" {
-			dbGo = f.Contents
-		}
+		out[f.Path] = f.Contents
 	}
-	require.NotNil(t, dbGo, "%s: emitted no db.go", target)
+	return out
+}
+
+// parseProbeFile parses one emitted file by path. An absent path is a
+// failure, not an empty parse: every assertion below reads a file that
+// must have been emitted, and a silent zero AST would satisfy every walk
+// over it.
+func parseProbeFile(t *testing.T, target, path string, files map[string][]byte) (*token.FileSet, *ast.File) {
+	t.Helper()
+	src, ok := files[path]
+	require.True(t, ok, "%s: emitted no %s", target, path)
 
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "db.go", dbGo, parser.SkipObjectResolution)
-	require.NoError(t, err, "%s: parsing the emitted db.go", target)
+	file, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
+	require.NoError(t, err, "%s: parsing the emitted %s", target, path)
+	return fset, file
+}
+
+func extractTxSurface(t *testing.T, target string) txSurface {
+	t.Helper()
+
+	fset, file := parseProbeFile(t, target, "db.go", probeFiles(t, target))
 
 	out := txSurface{signatures: map[string]string{}}
 	for _, decl := range file.Decls {
@@ -202,28 +375,44 @@ func extractTxSurface(t *testing.T, target string) txSurface {
 	return out
 }
 
-// txReceiver names the receiver type of a method on *Queries or *Tx, and
-// reports whether it was *Tx. A non-method or any other receiver yields
-// "", which the caller skips.
+// txReceiver names the receiver type of a method on *Queries, *Tx or the
+// embedded core, and reports whether it was *Tx. A non-method or any
+// other receiver yields "", which the caller skips.
+//
+// The core is here so that a lifecycle method moved onto it is VISIBLE to
+// the closed set rather than silently dropped: `func (q *queries) Begin`
+// promotes into `*Tx` and would otherwise leave the set merely missing
+// `func (*Queries) Begin`, which reads as a deletion rather than a move.
 func txReceiver(d *ast.FuncDecl) (name string, isTx bool) {
 	if d.Recv == nil || len(d.Recv.List) != 1 {
 		return "", false
 	}
-	star, ok := d.Recv.List[0].Type.(*ast.StarExpr)
+	ident, ok := receiverIdent(d.Recv.List[0].Type)
 	if !ok {
 		return "", false
 	}
-	ident, ok := star.X.(*ast.Ident)
-	if !ok {
-		return "", false
-	}
-	switch ident.Name {
+	switch ident {
 	case "Tx":
 		return "Tx", true
-	case "Queries":
-		return "Queries", false
+	case "Queries", "queries":
+		return ident, false
 	}
 	return "", false
+}
+
+// receiverIdent names the type a receiver is written against, through a
+// pointer or not. Both forms are read because a value receiver promotes
+// into the embedding type's method set exactly as a pointer one does, so
+// a gate that saw only `*queries` would miss `queries`.
+func receiverIdent(expr ast.Expr) (string, bool) {
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return "", false
+	}
+	return ident.Name, true
 }
 
 // renderSignature prints the declaration a caller writes against: the

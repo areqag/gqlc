@@ -12,7 +12,7 @@ const onePersonQueryText = `MATCH (p:Person) RETURN p`
 // OnePerson executes the OnePerson query.
 //
 //	MATCH (p:Person) RETURN p
-func (q *Queries) OnePerson(ctx context.Context) (Person, error) {
+func (q *queries) OnePerson(ctx context.Context) (Person, error) {
 	stmt, err := q.cypherStmt("$gqlc$", onePersonQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Person{}, err

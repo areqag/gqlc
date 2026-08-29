@@ -14,7 +14,7 @@ const eventIdsQueryText = `MATCH (e:Event) RETURN e.id AS id`
 // EventIds executes the EventIds query.
 //
 //	MATCH (e:Event) RETURN e.id AS id
-func (q *Queries) EventIds(ctx context.Context) ([]int64, error) {
+func (q *queries) EventIds(ctx context.Context) ([]int64, error) {
 	records, err := q.db.run(ctx, eventIdsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

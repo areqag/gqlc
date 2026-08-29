@@ -17,7 +17,7 @@ type PeopleBareRow struct {
 // PeopleBare executes the PeopleBare query.
 //
 //	MATCH (p:Person) RETURN p.name, p.age
-func (q *Queries) PeopleBare(ctx context.Context) ([]PeopleBareRow, error) {
+func (q *queries) PeopleBare(ctx context.Context) ([]PeopleBareRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", peopleBareQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -69,7 +69,7 @@ type PeopleAliasedRow struct {
 // PeopleAliased executes the PeopleAliased query.
 //
 //	MATCH (p:Person) RETURN p.name AS name, p.age
-func (q *Queries) PeopleAliased(ctx context.Context) ([]PeopleAliasedRow, error) {
+func (q *queries) PeopleAliased(ctx context.Context) ([]PeopleAliasedRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", peopleAliasedQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return nil, err

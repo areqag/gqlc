@@ -22,7 +22,7 @@ type PersonAtNowRow struct {
 // PersonAtNow executes the PersonAtNow query.
 //
 //	MATCH (p:Person) RETURN p, datetime() AS now, [1, 2, 3] AS xs
-func (q *Queries) PersonAtNow(ctx context.Context) (PersonAtNowRow, error) {
+func (q *queries) PersonAtNow(ctx context.Context) (PersonAtNowRow, error) {
 	records, err := q.db.run(ctx, personAtNowQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return PersonAtNowRow{}, err

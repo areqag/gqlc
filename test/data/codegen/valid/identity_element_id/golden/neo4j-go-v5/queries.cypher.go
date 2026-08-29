@@ -20,7 +20,7 @@ type OnePersonWithIdRow struct {
 // OnePersonWithId executes the OnePersonWithId query.
 //
 //	MATCH (p:Person) RETURN p, elementId(p) AS id
-func (q *Queries) OnePersonWithId(ctx context.Context) (OnePersonWithIdRow, error) {
+func (q *queries) OnePersonWithId(ctx context.Context) (OnePersonWithIdRow, error) {
 	records, err := q.db.run(ctx, onePersonWithIdQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return OnePersonWithIdRow{}, err

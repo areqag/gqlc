@@ -17,7 +17,7 @@ type OnePersonWithAgeRow struct {
 // OnePersonWithAge executes the OnePersonWithAge query.
 //
 //	MATCH (p:Person) RETURN p, p.age AS age
-func (q *Queries) OnePersonWithAge(ctx context.Context) (OnePersonWithAgeRow, error) {
+func (q *queries) OnePersonWithAge(ctx context.Context) (OnePersonWithAgeRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", onePersonWithAgeQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return OnePersonWithAgeRow{}, err

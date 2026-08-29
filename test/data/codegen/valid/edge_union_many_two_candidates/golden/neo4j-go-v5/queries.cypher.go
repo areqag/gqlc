@@ -15,7 +15,7 @@ const listActionsQueryText = `MATCH (:Person)-[r:AUTHORED|LIKES]->(:Post) RETURN
 // ListActions executes the ListActions query.
 //
 //	MATCH (:Person)-[r:AUTHORED|LIKES]->(:Post) RETURN r
-func (q *Queries) ListActions(ctx context.Context) ([]ListActionsR, error) {
+func (q *queries) ListActions(ctx context.Context) ([]ListActionsR, error) {
 	records, err := q.db.run(ctx, listActionsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

@@ -14,7 +14,7 @@ const markStaleQueryText = `MATCH (p:Person) WHERE p.updatedAt < $since SET p.st
 // MarkStale executes the MarkStale query.
 //
 //	MATCH (p:Person) WHERE p.updatedAt < $since SET p.stale = true
-func (q *Queries) MarkStale(ctx context.Context, arg time.Time) error {
+func (q *queries) MarkStale(ctx context.Context, arg time.Time) error {
 	_, err := q.db.run(ctx, markStaleQueryText, map[string]any{"since": arg}, neo4j.AccessModeWrite)
 	return err
 }

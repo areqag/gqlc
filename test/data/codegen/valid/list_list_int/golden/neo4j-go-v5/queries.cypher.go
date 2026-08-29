@@ -14,7 +14,7 @@ const nestedListQueryText = `RETURN [[1], [2, 3]] AS xss`
 // NestedList executes the NestedList query.
 //
 //	RETURN [[1], [2, 3]] AS xss
-func (q *Queries) NestedList(ctx context.Context) ([][]int64, error) {
+func (q *queries) NestedList(ctx context.Context) ([][]int64, error) {
 	records, err := q.db.run(ctx, nestedListQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err

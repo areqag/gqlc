@@ -492,32 +492,41 @@ every target emits them for such a batch.
 The set is refused uniformly, so a row is over-broad on a target where
 neither an entity nor a query taking that name would collide. *Breaks
 on* answers the entity half of that, and the six method-scope rows are
-defensive there. On the query half four of them are load-bearing: a
-query method is emitted on `*Queries` with its name taken verbatim from
-the query, so a query named `WithTx` emits a second
-`func (q *Queries) WithTx` beside the one every target's `db.go` already
-declares, and the package does not compile. `Begin`, `EnsureGraph` and
-`DropGraph` are on `*Queries` too and collide the same way.
+defensive there. On the query half **none of the six is a collision**,
+and the first auditor who checks will find that all six compile. That is
+not the gate violating its own charter; it is what the reservations are
+for.
 
-`Commit` and `Rollback` do not, and they are the one place the set
-over-reaches on a receiver rather than on a target. Both are declared on
-`*Tx`, so a query named `Commit` emits `func (q *Queries) Commit`, which
-redeclares nothing and compiles — on every target.
+Since `gqlc-f4hf` a query method is emitted on the unexported core,
+`func (q *queries) <Name>`, and the fixed methods sit on `*Queries` or on
+`*Tx` — both of which embed that core. Different receiver base types, so
+a query named `Commit` redeclares nothing. Measured against a package
+declaring `func (q *queries) Commit` beside `func (tx *Tx) Commit`: it
+builds, and `go vet` is clean.
 
-**Those two rows are reserved for call-site ambiguity with `*Tx`, not for
-redeclaration**, and the distinction is recorded here so that the first
-auditor who notices they compile does not read the gate as violating its
-own charter. `tx.Commit()` and `tx.Queries().Commit(ctx, ...)` sit one
-selector apart; one ends the transaction and the other runs a user query.
-That is the misreading that loses data, and it costs every later reader,
-whereas the remedy costs the author one rename under a clear diagnostic.
-So the reservation is package-wide and receiver-blind by decision, not by
-oversight — ruled by Արթուր on `gqlc-3d0l` after the executing Ռազմիկ
-declined to settle it alone (design `docs/specs/codegen-tx-object.md`
-§9.1). `Begin` is not of this kind: it is on `*Queries`, so its
-reservation stands on a real collision. `reservedIdentifiers` records
-both grounds at its declaration. Every other row stands on the collision
-ground alone, the five temporal carriers included: on a target whose
+What the emission does instead is **succeed and land on the wrong
+handle**, silently, in one of two mirror-image ways. A query taking a
+name fixed on `*Queries` — `WithTx`, `Begin`, `EnsureGraph`, `DropGraph`
+— is shadowed at depth 0 on the root handle and promotes into `*Tx`
+unshadowed. A query taking a name fixed on `*Tx` — `Commit`, `Rollback`
+— is the mirror: promoted unshadowed onto `*Queries`, shadowed on `*Tx`.
+
+Either way loses something. The first re-opens what the embedded-core
+shape exists to close: `tx.Begin(ctx)` compiles again and runs a user
+query inside the open transaction, and on `apache-age-pgx-v5`
+`tx.EnsureGraph(ctx)` reaches graph lifecycle from a transaction
+(`docs/specs/codegen-tx-embedded-querier.md` §6). The second makes the
+author's own query callable on `q` and unreachable on `tx`. In both the
+compiler says nothing, and neither does vet, so the author
+learns which they got at a call site or not at all — whereas the remedy
+costs one rename under a clear diagnostic. So the reservation is
+package-wide and receiver-blind by decision, not by oversight
+(`docs/specs/codegen-tx-embedded-querier.md` §5, superseding the
+call-site-ambiguity grounds Արթուր ruled on `gqlc-3d0l` for the shipped
+accessor shape, `docs/specs/codegen-tx-object.md` §9.1).
+`reservedIdentifiers` records this at its declaration. Every
+`scopePackage` row stands on the collision ground instead, the five
+temporal carriers included: on a target whose
 emission declares `temporal.go` the carrier is a package-level type, and
 an entity or query of the same name redeclares it; none of the five is
 ever refused for call-site shape.

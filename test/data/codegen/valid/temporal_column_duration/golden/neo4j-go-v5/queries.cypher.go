@@ -15,7 +15,7 @@ const oneWeekQueryText = `RETURN duration({days: 7}) AS d`
 // OneWeek executes the OneWeek query.
 //
 //	RETURN duration({days: 7}) AS d
-func (q *Queries) OneWeek(ctx context.Context) (Duration, error) {
+func (q *queries) OneWeek(ctx context.Context) (Duration, error) {
 	records, err := q.db.run(ctx, oneWeekQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return Duration{}, err
