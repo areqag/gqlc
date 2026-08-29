@@ -1836,7 +1836,12 @@ cmd_dispatch() {
         # long as it stays awake and idle, and nobody is ever told — the shape
         # the welfare check-ins already reached at 48 unread. At the cap the pass
         # stops typing and says it once, to the one seat whose job is deciding.
-        tries=$(cat "$attempts_file" 2>/dev/null)
+        # `|| true` is load-bearing under `set -e`: the file is created below,
+        # after the first successful nudge, and removed on any sign of life, so
+        # it is ABSENT on ask one of every episode. Without it the failing
+        # substitution takes the whole dispatch tick down before the routing
+        # passes run — the ladder died on its own first rung (gqlc-w3wb).
+        tries=$(cat "$attempts_file" 2>/dev/null || true)
         case "$tries" in '' | *[!0-9]*) tries=0 ;; esac
         if [ "$tries" -ge "$cap" ]; then
             : >"$escalated_marker"
