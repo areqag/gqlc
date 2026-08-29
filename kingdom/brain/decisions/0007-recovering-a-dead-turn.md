@@ -2,12 +2,23 @@
 
 Date: 2026-08-24. Designed against bd gqlc-k3o1, under Անդրանիկ's decree of the
 same day: the town must recover from this shape using itself, with no human at
-a terminal and without ending any citizen's session. Executed by bd gqlc-z0l6.
-The incident's full record is the postmortem at
+a terminal and without ending any citizen's session. Execution: see the
+amendment note below. The incident's full record is the postmortem at
 `kingdom/brain/postmortems/2026-08-24-every-mechanism-worked-and-nothing-recovered.md`;
 its closing lesson — *"confirmation has to be measured against the world (a
 heartbeat moving, a context counter changing), never against a function's
 opinion of itself"* — is §4 of this design, made binding.
+
+> **Amended 2026-08-29 (bd gqlc-gj2m).** Two days after this design landed,
+> PR #1595 (f6dc4c7b) replaced the tmux pane machinery with **herdr** — a
+> socket engine whose `agent_status` comes from claude's own hook, and whose
+> `agent send` is an atomic write that is acknowledged or refused — and
+> deleted every suite under `.githooks/tests/`, including the km-test.sh
+> harness §8.6 built on; kingdom machinery now ships without tests, by
+> standing direction. §1's mechanism, §4, and §8 are restated below against
+> that world, and §7's evidential example with them. §§2, 3, 5 and 6 are
+> policy, not mechanism, and stand unchanged. Execution: gqlc-z0l6 closed
+> overtaken without shipping; the surviving remainder is gqlc-kwpt.
 
 ## The shape of the problem, in plain words
 
@@ -35,8 +46,9 @@ confirmed.
 The dispatcher already carries an idle-nudge pass, built after the previous
 eleven-hour version of this incident (gqlc-5vp7; `cmd_dispatch`, the block
 after the mayor's mail wake). It detects exactly the right condition —
-`awake` status, live session, empty `❯` prompt, no "esc to interrupt",
-confirmed over two passes — and types an ask. It failed to matter on
+`awake` status, live session, no turn running (then read by pane scraping;
+now herdr's `agent_status`, §1), confirmed over two passes — and types an
+ask. It failed to matter on
 2026-08-24 for two reasons, neither of them a defect in its detection:
 
 1. **A halt gated it for the whole seven hours.** Րաֆֆի halted the town at
@@ -59,27 +71,26 @@ arm, or a step in Րաֆֆի's rounds — are rejected below (§2).
 candidate iff all of:
 
 - its status file reads `awake`;
-- `seat_pane_idle` holds: the session is live (a `claude` process on the
-  pane's tty), the last 40 pane lines contain no "esc to interrupt" (claude
-  prints it for the whole of any turn), and there is a prompt line with
-  nothing typed after it;
+- `seat_pane_idle` holds — since #1595 that is one question to the engine:
+  herdr's `agent_status`, set by claude's own hook at the states claude
+  passes through, reads `idle`. There is no pane scraping left to tune;
 - the sighting is confirmed by a second pass ≥60s later (the existing `idle`
-  marker), because one capture of a TUI is one photograph.
+  marker), because one sample of a status is one photograph.
 
 This is fail-closed in the one direction that must never fail open: a seat
-covered by a **modal has no prompt line at all**, so `seat_pane_idle` is false
-and nothing is ever typed at it — an Enter there would press whichever button
-is highlighted, and a modal is not consent (VI.2, gqlc-eier). An unreadable
-pane is likewise not evidence of a prompt.
+covered by a **modal reads `blocked`, never `idle`**, so nothing is ever sent
+to it — a modal is not consent (VI.2, gqlc-eier). An agent that is not
+reporting reads `unknown`, and `unknown` is likewise not evidence of
+idleness. Under tmux these refusals were a pane heuristic; under herdr they
+are the engine's own state model, which is a strictly better witness.
 
 The false-positive cost is bounded and small. A seat wrongly read as idle
-receives one line of type-ahead (harmless below a running turn's spinner, and
-the next send's `C-u` clears a stranded one) or, at worst, one spurious turn's
-quota — and the attempt cap and re-nudge floor (§5) bound how often that can
-recur. The deliberate non-conjuncts stay non-conjuncts for the reasons already
-written at `seat_pane_idle`: the heartbeat's age tracks the current tool
-call's length, not health, and a conjunct that may never be true makes a nudge
-that never nudges.
+receives one queued message — at worst one spurious turn's quota — and the
+attempt cap and re-nudge floor (§5) bound how often that can recur. The
+heartbeat's age remains a deliberate non-conjunct for the reason originally
+written into the predicate: it tracks the current tool call's length, not
+health, and a conjunct that may never be true makes a nudge that never
+nudges.
 
 **A dead turn and a finished workday are not distinguished, on purpose.** The
 bead is right that they present identically and want opposite remedies. But
@@ -152,41 +163,29 @@ genuinely cannot take another turn, its attempts exhaust and it escalates
 mail cites `heartbeat.json`'s `context_pct` so Սեդրակ sees the exhaustion
 case coming.
 
-## 4. The delivery confirmation contract
+## 4. The delivery confirmation contract (restated 2026-08-29)
 
-**Decision: this design does not depend on gqlc-mbn2 landing first, and it
-does not use prompt-emptiness as a success signal even after mbn2 fixes it.**
-An emptied box proves the box emptied; "recovered" means a turn began, and
-only evidence of the turn itself can ground that word.
+**PR #1595 replaced the channel this section was written against, and retired
+most of its machinery with it.** `send_line` is now `herdr agent send`: an
+atomic write to the agent over the socket, acknowledged with exit 0 or
+refused with non-zero. There is no prompt box for text to strand in, so the
+failure this section's three-signal poll was built to detect — "delivered"
+said over text sitting unsubmitted in the box — can no longer occur, and the
+burst-split and bare-Enter-repair machinery is void. gqlc-mbn2, whose lying
+confirmations motivated the contract, closed with the migration. The poll is
+not being rebuilt; gqlc-kwpt deliberately drops it.
 
-A nudge is **DELIVERED** iff, within a poll window after the send (poll ~2s,
-window ~20s, configurable), at least one of:
-
-- the pane shows **"esc to interrupt"** — a turn is running. This is the same
-  marker `seat_pane_idle` already trusts, read in the opposite direction;
-- **`heartbeat.json`'s `updated`** is newer than the send. The statusline
-  fires when the TUI processes a turn; gqlc-mbn2 measured that text merely
-  sitting in the box does *not* advance it (five seats, heartbeats pinned at
-  ~7h with full input boxes), so an advance witnesses a turn, not typing;
-- **`progress.json`'s `last_start`** is newer than the send — a tool call
-  began.
-
-The first covers the common case within seconds (the incident measured a
-spinner ~8s after a hand-delivered Enter); the other two cover a turn so short
-the poll never saw its spinner. Polling over a window is also what retires
-mbn2's false-negative shape: a single 1-second check raced the repaint.
-
-If no signal arrives: **re-send a bare Enter** — the repair that recovered
-five seats by hand in the incident — and poll the window once more. Still
-nothing: the attempt is recorded **UNDELIVERED**, reported truthfully, and
-retried per §5. A confirmation that returns a cheerful string it did not
-verify is the one thing this section exists to forbid.
-
-Relation to gqlc-mbn2: that bead remains open and real — `seat_nudge`'s other
-callers (the mayor's mail wake, `cmd_wake`'s manual path) still lie until it
-lands. Its fix should converge on this contract (a note on the bead says so);
-whichever lands second rebases, and both touch `kingdom/bin/km` and the
-`km-test.sh` row registry, so ADR 0006's append-both discipline applies.
+What survives is the principle the section existed to hold, and it is
+narrower now: **an ack proves delivery, and delivery still does not mean
+recovered — recovered means a turn began.** That principle now lives in two
+places. First, §5's witnessed-work reset: the attempt counter clears only
+when `progress.json`'s `last_progress` advances past the newest attempt,
+never on delivery alone. Second, the honesty of the attempt record (§§5, 7):
+a verdict records what the engine acknowledged, not what the seat did with
+it. **UNDELIVERED** still exists, but it now means the send itself was
+refused — server down, agent gone — a mechanical failure that wants repair,
+not patience; §5's two retry cadences keep their meanings under that
+reading.
 
 ## 5. Attempts, intervals, serialisation, escalation
 
@@ -244,16 +243,18 @@ whichever lands second rebases, and both touch `kingdom/bin/km` and the
   seat resuming its work or the seat running `km sleep` itself; both are the
   citizen's act.
 - **It never ends, replaces, or types slash commands at a session** (§3), and
-  it never types at a pane without a visible prompt (§1).
+  it never sends to a seat whose `agent_status` reads `blocked` or `unknown`
+  (§1).
 
 ## 7. Observability: recovered, not "reported recovering"
 
 Three surfaces, none of them new instruments:
 
 - **The attempt record is durable and cites its evidence.** Each line:
-  timestamp, verdict, and for DELIVERED the signal that grounded it and its
-  latency ("esc-to-interrupt at +6s"). "Recovered" is only ever claimed on
-  effect evidence, so the claim and the proof are the same bytes.
+  timestamp, verdict, and its evidence — under herdr, the send's ack for
+  DELIVERED, the refusal for UNDELIVERED, and the witnessed-work advance (§5)
+  when an episode closes. "Recovered" is only ever claimed on effect
+  evidence, so the claim and the proof are the same bytes.
 - **The journal says what the record says**, per attempt, in the dispatch
   run's output.
 - **`km status` tells the truth about the automatic path.** The IDLE/NOWORK
@@ -270,51 +271,44 @@ columns freshen through instruments (`km-statusline`, the tool witness) that
 the recovery pass does not write, so a lying recovery report would disagree
 with the rest of its own board.
 
-## 8. What ships (the implementation plan, for gqlc-z0l6)
+## 8. What ships — overtaken (amended 2026-08-29)
 
-All in `kingdom/bin/km` unless said otherwise:
+The plan that stood here was written for the tmux engine and the
+`.githooks/tests/km-test.sh` harness, and PR #1595 (f6dc4c7b) removed both
+two days after this design landed. gqlc-z0l6 closed overtaken without
+executing it; its close reason carries the measurement. **The original plan
+is void as written — do not rebuild it.** What survives is gqlc-kwpt's
+remainder, three items, all in `kingdom/bin/km` and `kingdom/kingdom.toml`:
 
-1. A confirmation primitive beside `seat_nudge` implementing §4 (send via
-   `send_line`, poll the three effect signals, one bare-Enter repair, verdict
-   with evidence). The recovery pass calls it; `seat_nudge`'s other callers
-   are gqlc-mbn2's to convert.
-2. The idle pass in `cmd_dispatch` upgraded per §§3, 5: new message text,
-   one-per-run serialisation, the `recover-attempts` record, the `escalated`
-   marker and its single mail, the two retry cadences, the witnessed-work
-   reset.
-3. `km status`: IDLE/NOWORK paragraph rewrite and recovery-state rendering
-   (§7). `km doctor`: the soft escalated-marker check.
-4. `kingdom/kingdom.toml` `[welfare]`: `recover_attempts = 3` and the confirm
-   window (seconds), with comments in the section's existing voice.
-   `renudge_after_minutes` is reused, not duplicated.
-5. `kingdom/brain/playbooks/citizen-protocol.md` ("How a bead reaches a seat")
-   and the NOWORK-quoting prose: note that an awake-idle seat is now asked and
-   escalated automatically — the *least available seat* lesson stands, but
-   its last sentence no longer names a human.
-6. Test rows in `.githooks/tests/km-test.sh` (the fake-tmux harness with its
-   pane fixtures and `KM_SENDKEYS_LOG` already supports all of these). This
-   is a guard bead: each row below names the break that must turn it red
-   before it ships, and the mutation battery goes in the PR body (ADR 0005).
+1. The `km status` NOWORK paragraph — §7's one mandated text change — still
+   ends in "Both want a human at the pane", the sentence Անդրանիկ ruled
+   against. It should report what the dispatcher actually does for such a
+   seat and, once item 3 exists, the escalation state.
+2. Two nudge journal reports in the idle pass still describe the deleted
+   tty ("the prompt cleared, so it was delivered"; "still sitting unsent in
+   the prompt box after a re-sent Enter"). Under herdr the ack is delivery
+   and a refused send is a mechanical failure; both lines assert evidence
+   that no longer exists.
+3. The attempt cap and escalation ladder (§5) were never built: no
+   `recover_attempts` key in `[welfare]`, no attempt record, no `escalated`
+   marker. §5 stands as the design for them — including the one-per-run
+   storm guard, to be judged on current evidence rather than the tmux-era
+   incident alone.
 
-   - a dead-turn fixture is nudged after two passes, keys sent as separate
-     clear/text/Enter (red: bundled keys, or no nudge);
-   - DELIVERED on an effect signal appearing post-send, reported with
-     evidence (red: reported UNDELIVERED — mbn2's false negative);
-   - text wrapped over multiple lines still in the box → UNDELIVERED (red:
-     the cheerful report — mbn2's false positive, the dangerous one);
-   - a modal fixture (no prompt line) is never typed at (red: any send-keys);
-   - halt up + eligible seat → no send-keys (red: recovery tunnels the halt);
-   - two eligible seats → exactly one nudged per run;
-   - cap reached → exactly one mail in Սեդրակ's inbox, and no further
-     send-keys on the next eligible tick (red: a fourth nudge or a second
-     mail — the 48-unread shape);
-   - `last_progress` advancing past the attempts → counter cleared;
-   - a DELIVERED-but-unchanged episode holds the 30-minute floor; an
-     UNDELIVERED one retries at the confirm cadence.
+§8.6's test rows will not be rebuilt in any form: the harness is gone, and
+kingdom machinery ships without tests, by standing direction. The guard duty
+those rows carried — watch the guard fail before trusting it — is not
+cancelled by that; it is discharged by hand-witness, recorded in the
+implementing PR's body.
 
-Follow-ups filed, not absorbed: `cmd_reconcile`'s `/exit` re-send is a bare
-`send_line` with no confirmation — the same family as gqlc-01ev/mbn2
-(bd gqlc-2f8o, P3).
+The follow-up previously filed here, gqlc-2f8o (`cmd_reconcile`'s
+unconfirmed `/exit` re-send), has since closed without a recorded reason.
+The stranded-in-the-box shape it named is gone with the tty, and the re-send
+repeats each reconcile tick until km-seat records `asleep` — but the journal
+line still says "re-sent" without reading `send_line`'s return, so a refused
+send is reported the same as an acknowledged one. If that ever costs a stuck
+asleep-pending seat, the residue belongs in a fresh bead, not in reopening
+2f8o.
 
 Vocabulary: this decision adds no gqlc domain term, so `CONTEXT.md` (the
 product glossary, by its own header) is untouched; the town's words for these
@@ -323,10 +317,12 @@ states live in `kingdom/bin/km`'s comments and this file.
 ## Precedent
 
 Extends: the idle-nudge pass (gqlc-5vp7) and its ask-not-force framing;
-decision 0004's mechanical-over-round-step principle; `send_line`'s own
+decision 0004's mechanical-over-round-step principle; the stalled-P0
+marker's durable-state-over-journal precedent (§7). `send_line`'s tmux-era
 contract ("no caller may treat a return from here as proof of delivery.
-Confirm instead"), which §4 finally obeys rather than restates; the
-stalled-P0 marker's durable-state-over-journal precedent (§7).
+Confirm instead") was retired by #1595 — under herdr the ack *is* delivery —
+so §4 as amended holds only the narrower principle that delivery is not
+recovery.
 
 Bends: the IDLE/NOWORK human-referral sentence — deliberately, by decree.
 Nothing here bends VI.2 or VI.4; §6 is where both are held.
