@@ -29,5 +29,8 @@ func (q *Queries) OneUnknown(ctx context.Context) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("OneUnknown: decode column %q: key not found", "r")
 	}
+	if value == nil {
+		return nil, fmt.Errorf("OneUnknown: column %q is non-nullable but arrived null", "r")
+	}
 	return value, nil
 }

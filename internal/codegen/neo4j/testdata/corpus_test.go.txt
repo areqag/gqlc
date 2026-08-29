@@ -773,9 +773,13 @@ func TestNestColumnsAccumulateAtEveryDepth(t *testing.T) {
 // constrained driver entry point to go through at all — and the null it
 // exists to carry is the one value such an entry point could not have
 // been written to carry.
+//
+// Null is not in this table because payload is NOT NULL, and what a
+// non-nullable column does with a null is refuse it — see
+// TestAnythingColumnsCarryTheirNull, which holds both halves of that.
 func TestAnythingColumnsReadWhatTheGraphHolds(t *testing.T) {
 	for _, want := range []any{
-		nil, int64(1), 1.5, "x", true,
+		int64(1), 1.5, "x", true,
 		[]any{int64(1), nil, "x"},
 		map[string]any{"k": "v"},
 	} {
@@ -828,6 +832,18 @@ func TestAnythingColumnsCarryTheirNull(t *testing.T) {
 	if _, err := queriesOver([]string{"payload"}, []any{int64(1)}).AnythingColumns(t.Context()); err == nil {
 		t.Errorf("AnythingColumns(no maybe) = no error, want a refusal")
 	}
+
+	// The non-nullable one refuses it instead. Every other width gets
+	// this for free — its Go type has no nil to return — so the refusal
+	// is the whole of what NOT NULL means for a column typed `any`.
+	_, err = queriesOver([]string{"payload", "maybe"}, []any{nil, nil}).AnythingColumns(t.Context())
+	if err == nil {
+		t.Fatalf("AnythingColumns(payload: null) = no error, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "non-nullable but arrived null") ||
+		!strings.Contains(err.Error(), "payload") {
+		t.Errorf("AnythingColumns(payload: null) = error %v, want it to name payload and its non-nullability", err)
+	}
 }
 
 // ANY PROPERTY VALUE is a second spelling of the same declared width as
@@ -844,9 +860,13 @@ func TestAnythingColumnsCarryTheirNull(t *testing.T) {
 // that goes red if they ever stop agreeing, held one emission down from
 // the schema fixture that pins the same pair as golden bytes: golden
 // bytes move under -update and this does not.
+//
+// Null is absent from this table for the reason it is absent from
+// TestAnythingColumnsReadWhatTheGraphHolds's: badge is NOT NULL, and the
+// refusal it owes a null lives in the null half below.
 func TestAnyPropertyValueColumnsReadWhatTheGraphHolds(t *testing.T) {
 	for _, want := range []any{
-		nil, int64(1), 1.5, "x", true,
+		int64(1), 1.5, "x", true,
 		[]any{int64(1), nil, "x"},
 		map[string]any{"k": "v"},
 	} {
@@ -894,6 +914,15 @@ func TestAnyPropertyValueColumnsCarryTheirNull(t *testing.T) {
 
 	if _, err := queriesOver([]string{"badge"}, []any{int64(1)}).AnyPropColumns(t.Context()); err == nil {
 		t.Errorf("AnyPropColumns(no tag) = no error, want a refusal")
+	}
+
+	_, err = queriesOver([]string{"badge", "tag"}, []any{nil, nil}).AnyPropColumns(t.Context())
+	if err == nil {
+		t.Fatalf("AnyPropColumns(badge: null) = no error, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "non-nullable but arrived null") ||
+		!strings.Contains(err.Error(), "badge") {
+		t.Errorf("AnyPropColumns(badge: null) = error %v, want it to name badge and its non-nullability", err)
 	}
 }
 
