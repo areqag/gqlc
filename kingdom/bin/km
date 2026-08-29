@@ -1698,19 +1698,33 @@ cmd_halt() {
     # question with the write verb. The `-*` arm above closed the flag
     # spellings; `km halt show` carries no dash, so it is well-formed reason
     # text, reaches here legitimately, and stopped the town for 46 minutes on
-    # 2026-08-29 (bd gqlc-wguoq). One bare word naming a read is the signature
-    # of the question — a reason someone means is prose, so two words pass.
+    # 2026-08-29 (bd gqlc-wguoq). A read-word opens the question; what may
+    # follow it is a COUNT, because `--history N` is the family's only read
+    # form taking an argument and its dash-less spelling is two tokens. Counting
+    # tokens instead of reading them let `km halt history 20` through the guard
+    # written for this very accident (bd gqlc-cwic0, Միհրի F1). Prose that opens
+    # with a read-word still passes: `show stopper in CI` has a tail that is not
+    # a number.
     local -a reason_words=()
-    read -r -a reason_words <<<"$reason" || true
-    if [ "${#reason_words[@]}" -eq 1 ]; then
-        case "$(printf '%s' "${reason_words[0]}" | tr '[:upper:]' '[:lower:]')" in
-        show | status | history | help | state | info | list)
-            die "halt: '$reason' reads as a question, not a reason — refusing to stop the town on one word.
-  is a halt up?          $(verb halt) --status
-  who raised or lowered? $(verb halt) --history
-  if you did mean to halt the town, say why in a sentence: $(verb halt) '<reason>'"
-            ;;
+    # -d '' consumes the whole reason rather than its first line, and finds no
+    # delimiter, hence the `|| true`. Reading one line counted `show` alone in a
+    # multi-line reason whose remainder was prose, and refused it (F2).
+    read -r -d '' -a reason_words <<<"$reason" || true
+    local reason_is_question=0 reason_word
+    case "$(printf '%s' "${reason_words[0]}" | tr '[:upper:]' '[:lower:]')" in
+    show | status | history | help | state | info | list) reason_is_question=1 ;;
+    esac
+    for reason_word in "${reason_words[@]:1}"; do
+        case "$reason_word" in
+        *[!0-9]*) reason_is_question=0 ;;
         esac
+    done
+    if [ "$reason_is_question" -eq 1 ]; then
+        die "halt: '$reason' reads as a question, not a reason — refusing to stop the town on a word that names a read.
+  is a halt up?          $(verb halt) --status
+  who raised or lowered? $(verb halt) --history [N]
+  the dash is what separates the two: without it, km reads the rest as your reason.
+  if you did mean to halt the town, say why in a sentence: $(verb halt) '<reason>'"
     fi
     # Read BEFORE the truncating write below, because afterwards nothing can
     # tell the two cases apart. A raise over a standing halt replaces another
