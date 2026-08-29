@@ -1,31 +1,43 @@
 //go:build codegen_live
 
-// The measured answers that no gap acts on yet.
+// The measured answer that no gap acts on yet.
 //
 // internal/codegen/age/dialect.go refuses a construct only on a probe and the
 // answer a live session gave it, and every such pair lives in
-// live_age_dialect_test.go under the sweep that binds it to its gap. The two
-// rows here have the witness and not the gap: the pinned image refuses both,
-// measured 2026-08-29 on workflow run 33268424367 (bd gqlc-osf1), and neither
-// can join a gap that exists today.
+// live_age_dialect_test.go under the sweep that binds it to its gap. The one
+// row here has the witness and not the gap: the pinned image refuses it,
+// measured 2026-08-29 on workflow run 33268424367 (bd gqlc-osf1), and it can
+// join no gap that exists today.
 //
-//   - point() is refused, but it is not a temporal, and the undefined-function
-//     gap's message scopes itself to temporal constructors. Refusing it there
-//     would print an answer about temporals over a name that is not one. It
-//     needs a third gap with its own sentinel and message: bd gqlc-l8e2n.
-//   - duration.between() is refused under a different error CLASS — 3F000
-//     invalid_schema_name, not 42883 undefined_function — because Postgres
-//     reads the openCypher namespace as a schema qualifier and fails on the
-//     qualifier before looking for a function. The answer therefore names no
-//     function at all, which is exactly what
-//     TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer requires of a row in
-//     that gap. It cannot join it even with a namespaced scanner: bd
+//   - duration.between() is refused under a different error CLASS from every
+//     name a gap already holds — 3F000 invalid_schema_name, not 42883
+//     undefined_function — because Postgres reads the openCypher namespace as a
+//     schema qualifier and fails on the qualifier before looking for a
+//     function. The answer therefore names no function at all, which is exactly
+//     what TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer requires of a
+//     row in that gap. It cannot join it even with a namespaced scanner: bd
 //     gqlc-dy40s.
 //
-// So this file is the standing evidence those two beads are built on, and the
-// tripwire if the pinned image's answer moves before either is taken. Whoever
-// takes one of them moves its row into live_age_dialect_test.go alongside the
-// gap it earns, and deletes it from here.
+// So this file is the standing evidence bd gqlc-dy40s is built on, and the
+// tripwire if the pinned image's answer moves before it is taken. Whoever takes
+// it moves this row into live_age_dialect_test.go alongside the gap it earns
+// and deletes it from here — which empties the file, so that bead retires it
+// rather than leaving an instrument measuring nothing.
+//
+// point() was the second row until bd gqlc-l8e2n gave it the third gap it
+// needed (PR #1817). That is the protocol above arriving: its row now lives in
+// TestAGERefusesTheSpatialConstructor, which asserts the same 42883 and the
+// same message and adds the served `p.point` half, so deleting it here lost no
+// evidence — and 42883 is still the contrast that makes 3F000 legible, one file
+// over. It was NOT deleted at the time, so for a while point() was probed twice
+// under two tests disagreeing about whether a gap acts on it, all gates green
+// (bd gqlc-yvubd).
+//
+// Nothing catches that. The sweep runs gap -> witness
+// (TestEveryDialectGapCarriesItsWitness); there is no witness -> no-gap
+// direction, so a row left here after its gap lands is a claim this file's own
+// title contradicts and no gate reads. Filed as bd gqlc-82ffi, and it is live
+// against the row below.
 //
 // It is in its own file rather than folded into live_age_dialect_test.go
 // because that file's sweep counterpart (TestEveryDialectGapCarriesItsWitness)
@@ -46,14 +58,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestAGEAnswersTheConstructsNoGapRefuses holds the pinned image to the answers
-// bd gqlc-l8e2n and bd gqlc-dy40s were filed on.
+// TestAGEAnswersTheConstructsNoGapRefuses holds the pinned image to the answer
+// bd gqlc-dy40s was filed on.
 //
-// Both the code and the message are asserted, and the two are what separate
-// these rows from each other and from the undefined-function gap: point()
-// answers on the same channel a missing SQL function does, duration.between()
-// on the channel a missing schema does, and it is that difference — not the
-// fact of refusal — that decides which gap each one can ever belong to.
+// Both the code and the message are asserted, and the code is what separates
+// this row from every gap that exists: a missing SQL function answers on 42883,
+// as the temporal names and point() all do, while duration.between() answers on
+// the channel a missing SCHEMA does. It is that difference — not the fact of
+// refusal — that decides which gap it can ever belong to, so asserting the
+// message alone would measure the refusal and lose the reason.
 func TestAGEAnswersTheConstructsNoGapRefuses(t *testing.T) {
 	ctx, pool, shipped := ageDialectHarness(t, "gqlc_dialect_unwitnessed")
 
@@ -61,17 +74,11 @@ func TestAGEAnswersTheConstructsNoGapRefuses(t *testing.T) {
 		name string
 		text string
 		// wantSQLSTATE and wantMessage are the server's own answer, read off
-		// run 33268424367. Asserted per row: one shared expectation would
-		// pass both while measuring the difference away.
+		// run 33268424367. Both are asserted: the message alone would hold for
+		// a refusal on any channel, and the channel is the whole finding.
 		wantSQLSTATE string
 		wantMessage  string
 	}{
-		{
-			name:         "point",
-			text:         "RETURN point({x: 1, y: 2})",
-			wantSQLSTATE: "42883",
-			wantMessage:  "function point does not exist",
-		},
 		{
 			name: "duration.between",
 			// Literal arguments rather than a MATCH: a pattern that finds
