@@ -1,0 +1,64 @@
+# Restores the pinned shellcheck binary into .bin/ from the runner cache, so the
+# jobs that need it do not each re-download it from a third-party release URL
+# (bd gqlc-bmmf). On 2026-08-29 that URL answered HTTP 504 six times running and
+# reddened `lint` on a PR whose head had not moved and which already carried a
+# judge's PASS. Three required contexts reach shellcheck — `lint` through
+# lint-hooks and lint-just, `tidy` through `lint-hooks .github/scripts`, and
+# `actionlint`, which grades a `run:` block only by handing it to shellcheck —
+# so one outage in that path can redden all three regardless of the diff.
+#
+# Requires just on PATH: run ./.github/actions/setup-just first.
+#
+# WHAT THIS BUYS, measured 2026-08-29 with the network denied via `unshare -rn`,
+# against the real recipe:
+#   .bin/shellcheck present at the pinned version -> `just ensure-shellcheck`
+#     exits 0 in silence and makes no request. That is the cache hit.
+#   .bin/shellcheck absent -> six curl attempts, then `xz: (stdin): File format
+#     not recognized`, `tar: Child returned status 1`, exit 2 — the incident's
+#     failure reproduced, differing only in curl's code (7 here, 22 there)
+#     because the network was denied rather than the endpoint failing.
+# A cache MISS still downloads, through the retry budget ensure-shellcheck
+# already carries. So this narrows the exposure to a version bump and to cache
+# eviction; it does not remove the dependency, and no claim here is that it does.
+#
+# The version is read out of the justfile rather than restated here. A literal
+# would be a second place to bump, and a stale one would key the cache to a
+# version ensure-shellcheck then rejects, so every job would re-download behind a
+# green cache step. The read is a bare assignment on its own line, not an
+# argument to echo: `set -e` acts on the exit status of the simple command, and
+# in `echo "version=$(just ...)"` that status is echo's, so a renamed justfile
+# variable would leave the step green with the key emptied to
+# `shellcheck-bin-<os>-`. Measured here, not transcribed:
+#   bash -eo pipefail -c 'echo "v=$(false)" >> f'       # rc 0, f == "v="
+#   bash -eo pipefail -c 'v="$(false)"; echo "$v" >> f' # rc 1, f untouched
+# The step sets errexit and nounset itself, on the first line of the run block,
+# so that argument is checkable from this file alone.
+#
+# NOT GUARDED BY A TEST. The sibling setup-golangci/action.yml used to say a
+# tool at internal/tools/ciguard asserts this shape; that tool was deleted with
+# the rest of the CI scaffolding in PR #1595, and the sibling now says so too
+# (bd gqlc-chep). So nothing IN THIS TREE holds the path below in agreement
+# with the justfile's `shellcheck`
+# variable, catches the errexit-spelling regression described above, or refuses
+# an `if:`/`continue-on-error:` on either step. The first two were measured once,
+# out of tree, on the branch that added this file; the third was not measured at
+# all. A measurement is not a guard either way, and gqlc-chep is where the
+# decision about a real one lives.
+name: setup-shellcheck
+description: restore the pinned shellcheck binary into .bin/ from cache
+runs:
+  using: composite
+  steps:
+    - name: read the pinned shellcheck version
+      id: pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(just --evaluate shellcheck_version)"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: restore shellcheck binary from cache
+      uses: actions/cache@v4
+      with:
+        path: .bin/shellcheck
+        key: shellcheck-bin-${{ runner.os }}-${{ steps.pin.outputs.version }}

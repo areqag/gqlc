@@ -198,6 +198,42 @@ var dialectGaps = []dialectGap{
 			"MATCH (p:Person) RETURN p.datetime",
 		},
 	},
+	{
+		// point() is refused by the pinned image the same way the
+		// temporal names are — SQLSTATE 42883, `function point does
+		// not exist` — and it is a gap of its own rather than a name
+		// added to the one above. The gap above says AGE defines no
+		// temporal constructor this project has measured, and point is
+		// not a temporal, so admitting it there would answer a spatial
+		// call with a sentence that is false about it and hand a
+		// caller branching on ErrUndefinedFunction a remedy for a
+		// different fix.
+		//
+		// It answers LAST because it is the narrowest: one name,
+		// measured once. A query spelling a temporal constructor and
+		// point() is told about the temporal one, which is arbitrary
+		// as between two true answers but is not arbitrary as a rule —
+		// the table answers in order so that the answer is stable, and
+		// TestRejectsTheSpatialConstructor pins which one comes back.
+		sentinel: ErrUndefinedSpatialFunction,
+		find:     findUndefinedSpatialFunctions,
+		diagnose: func(count int, noun, dropped string) string {
+			return fmt.Sprintf("generated code runs the author's query text verbatim "+
+				"(ADR 0005) and Apache AGE 1.7.0 does not define the spatial constructor this "+
+				"project has measured, so every call on %d %s would answer "+
+				"\"function <name> does not exist\" (SQLSTATE 42883) — store the coordinates as "+
+				"ordinary properties and compute the geometry in Go: %s", count, noun, dropped)
+		},
+		witness: "TestAGERefusesTheSpatialConstructor",
+		refused: spatialFunctionProbes,
+		served: []string{
+			// The false positive a scan for `point(` would take. There
+			// is no served CALL to put beside it: the one spatial name
+			// this project has run is refused, so the accepting half of
+			// this gap's bound is the property lookup alone.
+			"MATCH (p:Person) RETURN p.point",
+		},
+	},
 }
 
 // undefinedFunctionProbes are the constructor calls a live session ran
@@ -211,20 +247,35 @@ var dialectGaps = []dialectGap{
 // TestAGERefusesTheFunctionsItDoesNotDefine re-measures all of them on
 // every AGE live run.
 //
-// openCypher spells three more constructors this list does NOT hold —
-// time(), localtime() and point() — and a namespaced duration.between().
-// Every one of them is suspect for the same reason as the five here and
-// none was ever run, so none is refused: a false positive costs the
-// author a query that would have worked and ADR 0005 leaves them no way
-// around it, while a false negative costs a runtime error they were
-// going to get anyway. Verifying them needs a container, which needs CI
-// (bd gqlc-osf1).
+// time() and localtime() were the last two temporal constructors
+// openCypher spells that this list did not hold. Both were run against
+// the pinned image on 2026-08-29 (bd gqlc-osf1, workflow run
+// 33268424367) and both are refused, so the temporal constructor set is
+// now closed by measurement rather than left short on suspicion.
+//
+// Two constructs measured in that same run are still NOT here, and each
+// is absent for a reason rather than an oversight:
+//
+//   - point({x: 1, y: 2}) is refused, SQLSTATE 42883, but it is not a
+//     temporal, and this gap's prose scopes itself to temporals. It is
+//     the third gap below, with its own sentinel and its own message
+//     (bd gqlc-l8e2n).
+//   - duration.between(null, null) is refused under a DIFFERENT error
+//     class: SQLSTATE 3F000, `schema "duration" does not exist`. Postgres
+//     reads the openCypher namespace as a schema qualifier and fails on
+//     the qualifier before looking for any function, so the answer names
+//     no function at all — which is precisely what
+//     TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer requires of a
+//     row here. It cannot join this gap even with a namespaced scanner
+//     (bd gqlc-dy40s).
 var undefinedFunctionProbes = []dialectProbe{
 	{text: "RETURN datetime()", answer: "function datetime does not exist"},
 	{text: "RETURN date()", answer: "function date does not exist"},
 	{text: "RETURN localdatetime()", answer: "function localdatetime does not exist"},
 	{text: "RETURN duration({days:1})", answer: "function duration does not exist"},
 	{text: "RETURN toTimestamp('2024-01-01')", answer: "function toTimestamp does not exist"},
+	{text: "RETURN time()", answer: "function time does not exist"},
+	{text: "RETURN localtime()", answer: "function localtime does not exist"},
 }
 
 // undefinedFunctions is the lowercased name of every function the probes
@@ -232,15 +283,47 @@ var undefinedFunctionProbes = []dialectProbe{
 // the author's query. Deriving it rather than writing it down is what
 // makes the witness compulsory: there is no literal here for a name to
 // be added to.
-var undefinedFunctions = func() map[string]struct{} {
+var undefinedFunctions = calledFunctionNames(undefinedFunctionProbes)
+
+// spatialFunctionProbes is the third gap's evidence, on the same terms
+// as undefinedFunctionProbes: the ONLY source of the name it refuses,
+// parsed for the name rather than told it.
+//
+// One row, because one spatial constructor has been run. point() was
+// measured against apache/age@sha256:4241e2d8… (PostgreSQL 18.1, AGE
+// 1.7.0) on 2026-08-29, workflow run 33268424367, and answered SQLSTATE
+// 42883 (bd gqlc-l8e2n). openCypher spells others — point() with a
+// spatial reference system, distance(), and the point accessors — and
+// none of them is here, for the reason the temporal gap gives: a false
+// positive costs the author a query that would have worked and ADR 0005
+// leaves them no way around it, while a false negative costs a runtime
+// error they were going to get anyway.
+var spatialFunctionProbes = []dialectProbe{
+	{text: "RETURN point({x: 1, y: 2})", answer: "function point does not exist"},
+}
+
+// undefinedSpatialFunctions is the third gap's catalogue, derived from
+// its probes by the same parse for the same reason: there is no literal
+// here for a name to be added to without a measurement.
+var undefinedSpatialFunctions = calledFunctionNames(spatialFunctionProbes)
+
+// calledFunctionNames is the lowercased name of every unqualified
+// function a set of probes calls, read out of the probe TEXTS by the
+// parse the gate runs on the author's query.
+//
+// Shared by both function gaps rather than written twice, because the
+// property it carries — a refused name exists only where a probe called
+// it — is the same property in both, and two copies of it can drift into
+// one gap deriving and the other listing.
+func calledFunctionNames(probes []dialectProbe) map[string]struct{} {
 	out := make(map[string]struct{})
-	for _, p := range undefinedFunctionProbes {
+	for _, p := range probes {
 		for _, name := range cypher.UnqualifiedFunctionCalls(p.text) {
 			out[strings.ToLower(name)] = struct{}{}
 		}
 	}
 	return out
-}()
+}
 
 // findUndefinedFunctions is the calls in a query text that name a
 // function AGE does not define, quoted as the author wrote them.
@@ -250,9 +333,24 @@ var undefinedFunctions = func() map[string]struct{} {
 // resolves nothing about duration, so the two are different names and
 // only the one that was probed is refused.
 func findUndefinedFunctions(src string) []string {
+	return findCalls(undefinedFunctions, src)
+}
+
+// findUndefinedSpatialFunctions is the same reading against the spatial
+// catalogue. The two are separate functions over separate catalogues
+// rather than one over their union, because the gap a name lands in
+// decides the sentinel and the prose the author gets, and a union would
+// answer both with whichever gap ran first.
+func findUndefinedSpatialFunctions(src string) []string {
+	return findCalls(undefinedSpatialFunctions, src)
+}
+
+// findCalls is the calls in a query text naming something in a
+// catalogue, quoted as the author wrote them.
+func findCalls(catalogue map[string]struct{}, src string) []string {
 	var found []string
 	for _, name := range cypher.UnqualifiedFunctionCalls(src) {
-		if _, undefined := undefinedFunctions[strings.ToLower(name)]; !undefined {
+		if _, undefined := catalogue[strings.ToLower(name)]; !undefined {
 			continue
 		}
 		found = append(found, name)

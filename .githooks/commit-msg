@@ -45,7 +45,10 @@ _HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Referred to by name (MERGE_HEAD) and not by line number anywhere: a
 # `commit-msg:<n>-<m>` citation elsewhere in the tree went stale the first time a
 # line was inserted above it and no suite noticed (bd gqlc-m83s). The row that
-# keeps it retired lives in .githooks/tests/commit-msg-test.sh.
+# kept it retired lived in .githooks/tests/commit-msg-test.sh, deleted with the
+# rest of the directory by PR #1595. Nothing retires it now, so "not by line
+# number anywhere" is a rule this comment states and no longer a rule anything
+# checks (bd gqlc-u2nim).
 _in_merge=no
 if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
     _in_merge=yes

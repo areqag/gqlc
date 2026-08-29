@@ -33,7 +33,10 @@
 # seat inside plan mode at once, where this gate never fires because there is
 # nothing left to enter and the ungated exit is the only way out.
 #
-# Tests: .githooks/tests/claude-pre-ask-test.sh (run via `just test-hooks`).
+# NOT GUARDED BY A TEST. .githooks/tests/claude-pre-ask-test.sh covered this
+# hook, run by a `test-hooks` recipe, until PR #1595 deleted the directory and
+# the recipe together. Nothing replaced either, by standing direction: a change
+# here is witnessed by hand in the PR that makes it (bd gqlc-u2nim).
 
 import json
 import os

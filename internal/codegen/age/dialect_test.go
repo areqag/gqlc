@@ -121,19 +121,60 @@ func TestEveryDialectGapCarriesItsWitness(t *testing.T) {
 // The server's own answer is the independent reading: it names the
 // function it could not find, so a probe and its answer agreeing is two
 // sources saying the same name.
+// Both function catalogues are read, because the property belongs to the
+// derivation and there are now two of it. A gap added with its own
+// probes and its own parse inherits the whole hazard and none of the
+// check unless it is named here.
 func TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer(t *testing.T) {
-	require.NotEmpty(t, undefinedFunctionProbes)
-	for _, p := range undefinedFunctionProbes {
-		found := findUndefinedFunctions(p.text)
-		require.NotEmpty(t, found, "probe %q must call a function the gate reads", p.text)
-		for _, name := range found {
-			require.Contains(t, strings.ToLower(p.answer), strings.ToLower(name),
-				"probe %q entered %q into the catalogue, but the server's answer does not name it", p.text, name)
+	for _, cat := range functionCatalogues {
+		t.Run(cat.name, func(t *testing.T) {
+			require.NotEmpty(t, cat.probes)
+			for _, p := range cat.probes {
+				found := cat.find(p.text)
+				require.NotEmpty(t, found, "probe %q must call a function the gate reads", p.text)
+				for _, name := range found {
+					require.Contains(t, strings.ToLower(p.answer), strings.ToLower(name),
+						"probe %q entered %q into the catalogue, but the server's answer does not name it", p.text, name)
+				}
+			}
+			require.Len(t, cat.names, len(cat.probes),
+				"one probe, one name: a probe calling two functions, or two probes calling one, "+
+					"makes the catalogue and the evidence stop lining up one for one")
+		})
+	}
+}
+
+// TestTheFunctionCataloguesAreDisjoint is the cost of there being two of
+// them. Each gap's prose is a claim about its own kind of call, so a name
+// in both would be answered by whichever gap the table reaches first
+// and told about the other one's fix — the exact confusion the second
+// sentinel was minted to prevent.
+func TestTheFunctionCataloguesAreDisjoint(t *testing.T) {
+	require.Greater(t, len(functionCatalogues), 1,
+		"one catalogue, or none: this test compared nothing and would pass on any table")
+	seen := make(map[string]string)
+	for _, cat := range functionCatalogues {
+		for name := range cat.names {
+			previous, repeated := seen[name]
+			require.False(t, repeated,
+				"%q is in both the %s and %s catalogues, so one gap answers it with the other's remedy",
+				name, previous, cat.name)
+			seen[name] = cat.name
 		}
 	}
-	require.Len(t, undefinedFunctions, len(undefinedFunctionProbes),
-		"one probe, one name: a probe calling two functions, or two probes calling one, "+
-			"makes the catalogue and the evidence stop lining up one for one")
+}
+
+// functionCatalogues is the derived name sets and the probes each was
+// read out of, so the two checks above run over every one of them rather
+// than over the one that existed when they were written.
+var functionCatalogues = []struct {
+	name   string
+	probes []dialectProbe
+	names  map[string]struct{}
+	find   func(string) []string
+}{
+	{"temporal", undefinedFunctionProbes, undefinedFunctions, findUndefinedFunctions},
+	{"spatial", spatialFunctionProbes, undefinedSpatialFunctions, findUndefinedSpatialFunctions},
 }
 
 // TestWitnessSweepFailsOnEachBrokenBinding is what keeps the sweep from

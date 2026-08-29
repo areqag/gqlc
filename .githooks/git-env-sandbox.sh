@@ -16,7 +16,13 @@
 # written into the config every linked worktree in the town reads. A suite is
 # the last place anyone looks for a writer to the repo it is gating.
 #
-# Sourcing this is not a convention to remember. .githooks/tests/git-env-
-# sandbox-test.sh runs every suite in .githooks/tests/ under a poisoned
-# environment and fails the one that inherits it.
+# Sourcing this IS a convention to remember, and it did not used to be:
+# .githooks/tests/git-env-sandbox-test.sh ran every suite in .githooks/tests/
+# under a poisoned environment and failed the one that inherited it, so a
+# forgotten source was caught rather than remembered. PR #1595 deleted that
+# suite and the suites it policed. The one caller left is the justfile's
+# `check-beads-export`, which protects itself by refusing when this file is
+# missing — but that catches a missing FILE, not a caller who never sources it.
+# A new caller that forgets simply reads the wrong repository, quietly, which is
+# the failure this file was written for (bd gqlc-u2nim).
 unset "${!GIT_@}"

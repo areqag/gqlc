@@ -282,6 +282,34 @@ var zonedParamQuery = codegen.NamedQuery{
 	},
 }
 
+// listCarrierParamQuery binds a list of each carrier the three fallible
+// encoders serve, plus a nullable list, and projects nothing. It shares
+// instantParamQuery's source file for the same reason carrierParamQuery
+// does.
+//
+// It is a third query rather than four more parameters on that one
+// because a list is where the encoders COMPOSE: fallibleParamEncoder
+// wraps agtypeEncodedList around the leaf encoder, and agtypeEncodedNullable
+// around that again for a nullable list, so these four parameters are the
+// only shapes that reach either combinator. Without them the emission
+// never sets encList, agtypeEncodedList is never written into the module
+// under test, and nothing in the tree compiles or runs it (bd gqlc-t0dp).
+var listCarrierParamQuery = codegen.NamedQuery{
+	Name:        "WriteSpans",
+	Cardinality: codegen.CardinalityExec,
+	SourceFile:  temporalSource,
+	SourceText:  "CREATE (s:Spans {startsOn: $startsOn, opensAt: $opensAt, lasts: $lasts, mayLast: $mayLast})\n",
+	Validated: resolver.ValidatedQuery{
+		Statement: resolver.StatementWrite,
+		Parameters: []resolver.ResolvedParameter{
+			{Name: "startsOn", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeDate, true)}},
+			{Name: "opensAt", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeLocalTime, true)}},
+			{Name: "lasts", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeDuration, true)}},
+			{Name: "mayLast", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeDuration, true), Nullable: true}},
+		},
+	},
+}
+
 // corpusEdgeKey is the one edge type testdata/corpus_schema.gql declares.
 var corpusEdgeKey = schema.EdgeKey{Source: personLabel, KeyLabels: "ACTED_IN", Target: personLabel}
 
@@ -902,10 +930,10 @@ func wantUndefinedFunctionRefusal(count int, noun, dropped string) string {
 //
 // The refused set is DERIVED from the probe texts a live session was
 // measured on (internal/codegen/age/dialect.go), so what this test
-// really pins is that the derivation reaches the gate. The row that
-// matters most is the one asserting a name is NOT refused: localtime()
-// is every bit as suspect as datetime() and has no witness, and a
-// refusal list that grows on suspicion is a guess wearing a test suite.
+// really pins is that the derivation reaches the gate. The rows that
+// matter most are the ones asserting a name is NOT refused: a refusal
+// list that grows on suspicion, or on a measurement made for a
+// different gap, is a guess wearing a test suite.
 func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
 
@@ -993,22 +1021,33 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 		s.Require().NotEmpty(files)
 	})
 
-	s.Run("a constructor with no witness is not refused", func() {
+	s.Run("a name witnessed for a different gap is not refused by this one", func() {
 		// The bound on the whole gate, and the reason it is a table and
-		// not a list of names someone believed. localtime() is as
-		// suspect as datetime() — AGE has no temporal type for either —
-		// and no session in this repo's record has ever run it. Adding
-		// it here means adding its probe and its answer, which means a
-		// live session; until then the author gets the portable
-		// temporal refusal when they project it and no refusal at all
-		// when they do not.
+		// not a list of names someone believed. point() is REFUSED by
+		// the pinned image — SQLSTATE 42883, `function point does not
+		// exist`, measured 2026-08-29 (bd gqlc-osf1) — and it is still
+		// not refused HERE, because this gap's refused set is derived
+		// from its own probes and its message scopes itself to temporal
+		// constructors. Refusing point() on the strength of a
+		// measurement made elsewhere would print an answer about
+		// temporals over a name that is not one.
+		//
+		// This row asserted NoError until the spatial gap landed (bd
+		// gqlc-l8e2n). That was true then and is the weaker claim: it
+		// cannot tell a name this gap declined from a name no gap takes.
+		// Naming the sentinel that DOES answer keeps the property once a
+		// third gap exists, and fails on a point() smuggled into
+		// undefinedFunctionProbes either way.
 		batch := in
-		batch.Queries = []codegen.NamedQuery{textQuery("Clock",
-			"MATCH (p:Person) WHERE p.at < localtime() RETURN p.id\n",
+		batch.Queries = []codegen.NamedQuery{textQuery("Near",
+			"MATCH (p:Person) WHERE p.at < point({x: 1, y: 2}) RETURN p.id\n",
 			scalarColumn("p.id", graph.TypeInt))}
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
-		s.Require().NoError(err, "a suspicion is not a witness and must not be refused")
-		s.Require().NotEmpty(files)
+		s.Require().Error(err)
+		s.Require().Nil(files, "a rejected batch must not return a partial file set")
+		s.Require().NotErrorIs(err, age.ErrUndefinedFunction,
+			"a witness for another gap does not add a name to this one")
+		s.Require().ErrorIs(err, age.ErrUndefinedSpatialFunction)
 	})
 
 	// Cypher.g4 §oC_FunctionName is `oC_Namespace oC_SymbolicName`, and a
@@ -1114,6 +1153,158 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation)
 		s.Require().NotErrorIs(err, age.ErrUndefinedFunction)
 		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `Both (":AUTHORED|LIKES")`))
+	})
+}
+
+// wantSpatialRefusal is this test's own copy of the third text-level
+// refusal, on the same terms as the two above: a change to the
+// emission's wording has to be a change here too.
+func wantSpatialRefusal(count int, noun, dropped string) string {
+	return fmt.Sprintf("undefined spatial function: generated code runs the author's query text "+
+		"verbatim (ADR 0005) and Apache AGE 1.7.0 does not define the spatial constructor this "+
+		"project has measured, so every call on %d %s would answer "+
+		"\"function <name> does not exist\" (SQLSTATE 42883) — store the coordinates as "+
+		"ordinary properties and compute the geometry in Go: %s", count, noun, dropped)
+}
+
+// TestRejectsTheSpatialConstructor pins the third gap the text gate
+// reads. point() is refused by the pinned image — SQLSTATE 42883,
+// `function point does not exist`, measured 2026-08-29 on workflow run
+// 33268424367 (bd gqlc-l8e2n) — and it is a gap of its own rather than a
+// name in the temporal one, because the temporal gap's message is a
+// claim about temporal constructors and point is not one. A caller
+// branching with errors.Is would otherwise be handed a sentinel
+// belonging to a fix it did not ask about.
+func (s *EmissionSuite) TestRejectsTheSpatialConstructor() {
+	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
+
+	for _, tc := range []struct {
+		name    string
+		queries []codegen.NamedQuery
+		count   int
+		noun    string
+		dropped string
+	}{
+		{
+			// The load-bearing shape, as for the temporal gap: the call
+			// is in a predicate, which the query model drops (ADR 0003),
+			// so no column, parameter or binding carries it and the text
+			// is the only place it can be read.
+			name: "a call in a predicate the model drops is refused",
+			queries: []codegen.NamedQuery{textQuery("Near",
+				"MATCH (p:Person) WHERE p.loc = point({x: 1, y: 2}) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Near ("point")`,
+		},
+		{
+			name: "a call in a write that projects nothing is refused",
+			queries: []codegen.NamedQuery{execTextQuery("Place",
+				"MATCH (p:Person) SET p.loc = point({x: 1, y: 2})\n")},
+			count: 1, noun: "query", dropped: `Place ("point")`,
+		},
+		{
+			name: "the name is quoted in the author's own case",
+			queries: []codegen.NamedQuery{textQuery("Near",
+				"MATCH (p:Person) WHERE p.loc = Point({x: 1, y: 2}) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Near ("Point")`,
+		},
+		{
+			name: "every offending query in the batch is named",
+			queries: []codegen.NamedQuery{
+				servedQuery,
+				textQuery("Near",
+					"MATCH (p:Person) WHERE p.loc = point({x: 1, y: 2}) RETURN p.id\n",
+					scalarColumn("p.id", graph.TypeInt)),
+				execTextQuery("Place",
+					"MATCH (p:Person) SET p.loc = point({x: 3, y: 4})\n"),
+			},
+			count: 2, noun: "queries",
+			dropped: `Near ("point"), Place ("point")`,
+		},
+	} {
+		s.Run(tc.name, func() {
+			batch := in
+			batch.Queries = tc.queries
+			files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+			s.Require().Error(err)
+			s.Require().Nil(files, "a rejected batch must not return a partial file set")
+			s.Require().ErrorIs(err, age.ErrUndefinedSpatialFunction)
+			s.Require().NotErrorIs(err, age.ErrUndefinedFunction,
+				"the temporal gap's remedy does not answer a spatial call, and a caller "+
+					"branching with errors.Is must not be handed it")
+			s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
+			s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+			s.Require().EqualError(err, wantSpatialRefusal(tc.count, tc.noun, tc.dropped))
+		})
+	}
+
+	s.Run("a temporal call is not answered by this sentinel", func() {
+		// The other direction of the same claim, and the one that can
+		// fail on its own: a gate reading both catalogues under one
+		// sentinel would satisfy every row above while telling an
+		// author calling datetime() to store coordinates as
+		// properties.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Recent",
+			"MATCH (p:Person) WHERE p.at < datetime() RETURN p.id\n",
+			scalarColumn("p.id", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUndefinedFunction)
+		s.Require().NotErrorIs(err, age.ErrUndefinedSpatialFunction)
+	})
+
+	s.Run("a query spelling both is answered by the temporal gap", func() {
+		// Three gaps now, one query, one message. Which one wins
+		// matters less than that the answer is stable and names a real
+		// defect — but it must not be a merged message quoting a
+		// constructor and point() under one sentinel, because a caller
+		// branching with errors.Is would then get an answer true of
+		// neither.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Both",
+			"MATCH (p:Person) WHERE p.at < datetime() AND p.loc = point({x: 1, y: 2}) RETURN p.id\n",
+			scalarColumn("p.id", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUndefinedFunction)
+		s.Require().NotErrorIs(err, age.ErrUndefinedSpatialFunction)
+		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `Both ("datetime")`))
+	})
+
+	s.Run("an unserved column yields to this gap as it does to the other two", func() {
+		// rejectUnservedQueries yields to the TEXT, not to one
+		// construct in it, and a gap added to the table has to inherit
+		// that yield or the author is sent to fix a projection behind a
+		// statement that never parsed.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Bagged",
+			"MATCH (p:Person) WHERE p.loc = point({x: 1, y: 2}) RETURN properties(p) AS bag\n",
+			resolver.Column{Name: "bag", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap}})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUndefinedSpatialFunction)
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().EqualError(err, wantSpatialRefusal(1, "query", `Bagged ("point")`))
+	})
+
+	s.Run("a property named like the constructor is not a call", func() {
+		// The false positive a scan for `point(` would take, and the
+		// reason this reads the grammar rather than the characters. It
+		// is the served bound the gate has no recovery from: ADR 0005
+		// runs the author's text verbatim, so a wrong refusal leaves
+		// them no rewrite at all.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Spots",
+			"MATCH (p:Person) RETURN p.point AS pt\n",
+			scalarColumn("pt", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
 	})
 }
 

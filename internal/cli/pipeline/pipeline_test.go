@@ -221,9 +221,6 @@ const (
 	// 0005 leaves them no rewrite, so what this gate does NOT refuse is
 	// the half worth asserting at the seam.
 	//
-	//   unwitnessed — localtime() is every bit as suspect as datetime()
-	//                 and no session has run it, so it is not in the
-	//                 table and must generate (bd gqlc-osf1).
 	//   namespaced  — Cypher.g4 §oC_FunctionName is `oC_Namespace
 	//                 oC_SymbolicName`, so duration.between is a
 	//                 different name from the probed `duration`. Two
@@ -240,8 +237,15 @@ const (
 	//                 word and no schema can declare a property with it;
 	//                 `toTimestamp` is a catalogue name the schema
 	//                 grammar does admit.
-	unwitnessedConstructorQuery = "// name: Clock :one\n" +
-		"MATCH (p:Person) WHERE p.seenAt < localtime() RETURN p.id AS id\n"
+	// otherGapConstructorQuery is refused, but by the SPATIAL gap and not
+	// by the temporal one. point() answers under the same SQLSTATE and the
+	// same words as datetime() (42883, measured bd gqlc-osf1), and it is
+	// still not a temporal, so the temporal gap's derived set does not hold
+	// it and its message would be false of it. It is a gap of its own (bd
+	// gqlc-l8e2n), which is what this row asserts at the seam: not that
+	// nothing happens, but that the OTHER sentinel answers.
+	otherGapConstructorQuery = "// name: Near :one\n" +
+		"MATCH (p:Person) WHERE p.seenAt < point({x: 1, y: 2}) RETURN p.id AS id\n"
 	namespacedConstructorQuery = "// name: Between :one\n" +
 		"MATCH (p:Person) WHERE duration.between(p.seenAt, p.seenAt) > 0 RETURN p.id AS id\n"
 	namespacedRefusedNameQuery = "// name: Recent :one\n" +
@@ -815,7 +819,6 @@ func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
 		name  string
 		query string
 	}{
-		{"an unwitnessed constructor is not refused", unwitnessedConstructorQuery},
 		{"a namespaced call whose namespace is a refused name", namespacedConstructorQuery},
 		{"a namespaced call whose symbolic name is a refused name", namespacedRefusedNameQuery},
 		{"a property named like a constructor is not a call", constructorNamedPropertyQuery},
@@ -827,10 +830,30 @@ func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
 			writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
 
 			res, err := pipeline.Run(cfgPath, backendRegistry(t))
-			require.NoError(t, err, "a suspicion is not a witness, and this backend must not refuse on one")
+			require.NoError(t, err, "this gap refuses the names its own probes measured, and no others")
 			require.Empty(t, res.Diagnostics)
 		})
 	}
+
+	t.Run("a name witnessed for another gap is answered by that gap", func(t *testing.T) {
+		// The bound stated the only way it stays true once a second
+		// function gap exists. This row asserted NoError until the
+		// spatial gap landed (bd gqlc-l8e2n), which conflated "the
+		// temporal gap declined this name" with "no gap takes it" — and
+		// the three rows above are the ones that genuinely mean the
+		// latter, which is why point() no longer sits among them.
+		dir, cfgPath := writeProject(t)
+		writeFixtureFile(t, filepath.Join(dir, "schema.gql"), constructorSchema)
+		writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), otherGapConstructorQuery)
+		writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
+
+		res, err := pipeline.Run(cfgPath, backendRegistry(t))
+		require.Error(t, err)
+		require.NotErrorIs(t, err, age.ErrUndefinedFunction,
+			"a witness for another gap does not add a name to this one")
+		require.ErrorIs(t, err, age.ErrUndefinedSpatialFunction)
+		require.Equal(t, pipeline.Result{}, res)
+	})
 }
 
 // TestRunApacheAgeAnswersAnAlternationAheadOfOtherColumnRefusals pins
