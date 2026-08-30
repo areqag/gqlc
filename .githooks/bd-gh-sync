@@ -773,15 +773,36 @@ PYEOF
     echo "bd-gh-sync: no bead is eligible for a --prefer-github pull; no pull issued." >&2
   fi
 
-  # A --prefer-github pull rewrites more than the body and the status: bd derives
-  # priority, issue_type and the whole label set from GitHub's labels, and the
-  # assignee from GitHub's assignees. Scope is the only lever this script has
-  # (see the header — `bd github sync` offers no field-level exclusion), and
-  # scope is per bead, so every ALLOWed pull takes all four with it and the
-  # summary line above counts it as one more bead pulled. Measured 2026-08-30
+  # A --prefer-github pull rewrites more than the body and the status: it takes
+  # GitHub's title verbatim, and bd derives priority, issue_type and the whole
+  # label set from GitHub's labels, and the assignee from GitHub's assignees.
+  # Scope is the only lever this script has (see the header — `bd github sync`
+  # offers no field-level exclusion), and it is per bead, so every ALLOWed pull
+  # takes all five with it and the summary line above counts it as one more
+  # bead pulled. Measured 2026-08-30
   # against bd 1.0.4 through this hook: a bead at P0/task/hayk-probe/[class:
   # warrior,probe-sentinel-label] came back P2/bug/unassigned/[class:warrior,
-  # subject:kingdom/bin/km]. So the four are re-asserted here instead.
+  # subject:kingdom/bin/km]. So the five are re-asserted here instead.
+  #
+  # The title is the one of the five with no gate anywhere in bd: read at
+  # beads@ce242a879678 (the commit `bd version` reports for the 1.0.4 binary
+  # deployed here), internal/tracker/engine.go's buildPullIssueUpdates writes
+  # "title": remote.Title into every pulled bead unconditionally — no
+  # append-only test like the one this script applies to the description, and
+  # no recency test. Whether that reaches a bead is decided entirely by the
+  # eligibility rule above, which reads the DESCRIPTION; the title rides along
+  # on a gate that never looks at it.
+  #
+  # It is re-asserted rather than allowed because the live corpus says citizens
+  # correct bd titles and do not touch GitHub's. Measured 2026-08-30 over 1245
+  # mirrored beads: 6 titles disagree with their mirrors, and on 5 of the 6 the
+  # GitHub issue has NO `renamed` timeline event at all — the mirror still
+  # carries the title it was minted with, and bd's side is a later correction a
+  # pull would revert. (The sixth, GH #933, was renamed once, and even there bd
+  # holds the older, broader wording.) No such revert has landed yet: zero
+  # title reversions across 933 beads in the 142 commits of .beads/issues.jsonl
+  # history, because all 6 are held by the description gate today. That is the
+  # bead's premise confirmed as latent, not fired — gqlc-wl57h.
   #
   # The closure transition is where this bites rather than some edge: bd open
   # with the mirror closed is an ALLOW, it is how every merge ends, and it nulls
@@ -824,7 +845,8 @@ def one_line(s):
 # reads "GitHub put an assignee on a bead that had none" as nothing to do —
 # which is the direction that drops the field without saying so.
 def fields(b):
-    return {"priority": b.get("priority"),
+    return {"title": b.get("title") or "",
+            "priority": b.get("priority"),
             "issue_type": b.get("issue_type") or "",
             "assignee": b.get("assignee") or "",
             "labels": sorted(b.get("labels") or [])}
@@ -871,6 +893,10 @@ for bid in sorted(pulled):
     if was is None or now is None:
         continue
     args, what = [], []
+    if was["title"] and now["title"] != was["title"]:
+        args += ["--title", was["title"]]
+        what.append(f"title {one_line(now['title']) or '(none)'} -> "
+                    f"{one_line(was['title'])}")
     if was["priority"] is not None and now["priority"] != was["priority"]:
         args += ["-p", str(was["priority"])]
         what.append(f"priority {now['priority']} -> {was['priority']}")
@@ -900,7 +926,7 @@ if not planned:
     sys.exit(0)
 
 # One command per bead rather than one per field: bd discards a refused update
-# whole, so splitting would let three fields land and the fourth vanish with
+# whole, so splitting would let four fields land and the fifth vanish with
 # only a non-zero status to say so. The read-back below is what decides whether
 # any of it took — `bd update` prints its success line for a write that moved
 # nothing.
@@ -955,7 +981,7 @@ PYEOF
     _restore_blind="'bd list' exited ${_restore_rc}"
   fi
   if [ -n "$_restore_blind" ]; then
-    echo "bd-gh-sync: could not re-assert the priority, type, assignee and labels" >&2
+    echo "bd-gh-sync: could not re-assert the title, priority, type, assignee and labels" >&2
     echo "bd-gh-sync: that a --prefer-github pull takes from every bead it pulls" >&2
     echo "bd-gh-sync: (${_restore_blind}). Check the beads this run pulled with" >&2
     echo "bd-gh-sync: 'bd show' — an assignee nulled this way routes to nobody." >&2
@@ -1236,16 +1262,16 @@ PYEOF
     [ "$_closed" -gt 3 ] && _cnames="${_cnames}, +$((_closed - 3)) more"
     _summary="${_summary} ${_closed} of them had been closed on GitHub while open here (${_cnames}); if that is wrong, re-open the GH issue FIRST and the bead second, or the next pull undoes it."
   fi
-  # Silent when the pull moved none of the four, which is the steady state. The
+  # Silent when the pull moved none of the five, which is the steady state. The
   # two failing arms are on the line the caller keeps because both leave a bead
   # carrying GitHub's values for fields GitHub was never authoritative over —
   # and the nulled assignee among them is invisible to every dispatch pass.
   if [ -n "$_restore_blind" ]; then
-    _summary="${_summary} Whether the pull also overwrote any bead's priority, type, assignee or labels was not established (${_restore_blind})."
+    _summary="${_summary} Whether the pull also overwrote any bead's title, priority, type, assignee or labels was not established (${_restore_blind})."
   elif [ "$_stuck" -gt 0 ]; then
-    _summary="${_summary} ${_restored} bead(s) had the priority, type, assignee and labels the pull overwrote put back, and ${_stuck} did NOT — see the WARNING line(s) above."
+    _summary="${_summary} ${_restored} bead(s) had the title, priority, type, assignee and labels the pull overwrote put back, and ${_stuck} did NOT — see the WARNING line(s) above."
   elif [ "$_restored" -gt 0 ]; then
-    _summary="${_summary} ${_restored} of them had the priority, type, assignee and labels the pull overwrote put back."
+    _summary="${_summary} ${_restored} of them had the title, priority, type, assignee and labels the pull overwrote put back."
   fi
   if [ -s "$_tmp/moved.txt" ]; then
     _moved=$(wc -l <"$_tmp/moved.txt")
