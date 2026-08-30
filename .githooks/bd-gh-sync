@@ -773,8 +773,197 @@ PYEOF
     echo "bd-gh-sync: no bead is eligible for a --prefer-github pull; no pull issued." >&2
   fi
 
+  # A --prefer-github pull rewrites more than the body and the status: bd derives
+  # priority, issue_type and the whole label set from GitHub's labels, and the
+  # assignee from GitHub's assignees. Scope is the only lever this script has
+  # (see the header — `bd github sync` offers no field-level exclusion), and
+  # scope is per bead, so every ALLOWed pull takes all four with it and the
+  # summary line above counts it as one more bead pulled. Measured 2026-08-30
+  # against bd 1.0.4 through this hook: a bead at P0/task/hayk-probe/[class:
+  # warrior,probe-sentinel-label] came back P2/bug/unassigned/[class:warrior,
+  # subject:kingdom/bin/km]. So the four are re-asserted here instead.
+  #
+  # The closure transition is where this bites rather than some edge: bd open
+  # with the mirror closed is an ALLOW, it is how every merge ends, and it nulls
+  # the assignee of a bead somebody is holding — an unassigned bead in a
+  # non-ready status routes to no dispatch pass at all. bd's assignee is a seat
+  # name and GitHub's is a GitHub login, so GitHub has nothing to put back: of
+  # all 800 issues on the mirror, one carries a GH assignee, and it is open
+  # (measured 2026-08-30). Holding the pull instead was the
+  # other candidate remedy and would have withheld the closure of very nearly
+  # every bead a citizen was working.
+  #
+  # These writes move bd's edit time, which the eligibility rule reads. That
+  # costs nothing in the steady state — a bead whose body now equals GitHub's
+  # never reaches the time test — and where a GH append lands in the seconds
+  # between the pull and this re-assert, it holds that append until GitHub next
+  # moves. Holding is the direction this file errs in everywhere else.
+  _restore_rc=0
+  bd list --status all --limit 0 --json >"$_tmp/beads_pulled.json" 2>/dev/null \
+    || { _restore_rc=$?; : >"$_tmp/beads_pulled.json"; }
+  python3 - "$_tmp/beads.json" "$_tmp/beads_pulled.json" "$_tmp/pulled.txt" \
+    "$_tmp/restore_status.txt" >&2 <<'PYEOF' || true
+import json, subprocess, sys
+
+def load(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+def status(text):
+    with open(sys.argv[4], "w", encoding="utf-8") as fh:
+        fh.write(text + "\n")
+
+def one_line(s):
+    return str(s).encode("unicode_escape").decode("ascii")
+
+# Absent and empty are one value here. bd omits assignee and labels from its
+# JSON when they are unset, so a comparison that asks whether the key is present
+# reads "GitHub put an assignee on a bead that had none" as nothing to do —
+# which is the direction that drops the field without saying so.
+def fields(b):
+    return {"priority": b.get("priority"),
+            "issue_type": b.get("issue_type") or "",
+            "assignee": b.get("assignee") or "",
+            "labels": sorted(b.get("labels") or [])}
+
+def index(rows):
+    return {b["id"]: fields(b) for b in rows
+            if isinstance(b, dict) and isinstance(b.get("id"), str)}
+
+def current():
+    r = subprocess.run(["bd", "list", "--status", "all", "--limit", "0", "--json"],
+                       capture_output=True, check=False)
+    if r.returncode != 0:
+        return None
+    rows = None
+    try:
+        rows = json.loads(r.stdout.decode("utf-8", "replace"))
+    except Exception:
+        return None
+    return index(rows) if rows else None
+
+before_rows = load(sys.argv[1])
+after_rows = load(sys.argv[2])
+if not before_rows:
+    status("BLIND the pre-pull bead list was unreadable or empty")
+    sys.exit(0)
+if not after_rows:
+    status("BLIND the post-pull bead list was unreadable or empty")
+    sys.exit(0)
+# No fallback: this file is created by the caller, so a read that fails means
+# the set of beads a pull could have rewritten was never established. Restoring
+# against an unknown set would re-assert onto beads nothing touched.
+try:
+    with open(sys.argv[3], encoding="utf-8") as fh:
+        pulled = {ln.strip() for ln in fh if ln.strip()}
+except Exception:
+    status("BLIND which beads this run pulled was never recorded")
+    sys.exit(0)
+
+before, after = index(before_rows), index(after_rows)
+
+planned = {}
+for bid in sorted(pulled):
+    was, now = before.get(bid), after.get(bid)
+    if was is None or now is None:
+        continue
+    args, what = [], []
+    if was["priority"] is not None and now["priority"] != was["priority"]:
+        args += ["-p", str(was["priority"])]
+        what.append(f"priority {now['priority']} -> {was['priority']}")
+    if was["issue_type"] and now["issue_type"] != was["issue_type"]:
+        args += ["-t", was["issue_type"]]
+        what.append(f"type {now['issue_type'] or '(none)'} -> {was['issue_type']}")
+    if now["assignee"] != was["assignee"]:
+        args += ["-a", was["assignee"]]
+        what.append(f"assignee {now['assignee'] or '(none)'} -> "
+                    f"{was['assignee'] or '(none)'}")
+    if now["labels"] != was["labels"]:
+        # `--set-labels ""` is accepted and changes nothing (measured
+        # 2026-08-30), so clearing the last label has to go through
+        # --remove-label. Add and remove express both directions in one form,
+        # which leaves no emptied-set special case to get wrong.
+        for lab in sorted(set(now["labels"]) - set(was["labels"])):
+            args += ["--remove-label", lab]
+        for lab in sorted(set(was["labels"]) - set(now["labels"])):
+            args += ["--add-label", lab]
+        what.append(f"labels [{','.join(now['labels'])}] -> "
+                    f"[{','.join(was['labels'])}]")
+    if args:
+        planned[bid] = (args, what)
+
+if not planned:
+    status("OK 0 0")
+    sys.exit(0)
+
+# One command per bead rather than one per field: bd discards a refused update
+# whole, so splitting would let three fields land and the fourth vanish with
+# only a non-zero status to say so. The read-back below is what decides whether
+# any of it took — `bd update` prints its success line for a write that moved
+# nothing.
+for bid, (args, _) in planned.items():
+    r = subprocess.run(["bd", "update", bid] + args, capture_output=True,
+                       check=False)
+    if r.returncode == 0:
+        continue
+    detail = r.stderr.decode("utf-8", "replace").strip().splitlines()
+    print(f"bd-gh-sync: 'bd update' exited {r.returncode} re-asserting the "
+          f"fields the pull overwrote on {one_line(bid)}."
+          + (f" {detail[-1]}" if detail else ""), file=sys.stderr)
+
+final = current()
+if final is None:
+    status(f"BLIND {len(planned)} bead(s) were re-asserted and none could be "
+           f"read back")
+    sys.exit(0)
+
+restored, stuck = 0, 0
+for bid, (_, what) in planned.items():
+    was, now = before[bid], final.get(bid)
+    if now is not None and all(now[k] == was[k] for k in was):
+        restored += 1
+        continue
+    stuck += 1
+    # Named rather than counted: nothing else in this run will say which bead
+    # lost which field, and the pull that took it reported itself as a success.
+    print(f"bd-gh-sync: WARNING {one_line(bid)} was pulled and the fields "
+          f"GitHub overwrote did not come back ({'; '.join(what)}). Re-assert "
+          f"them with 'bd update' before treating the bead as routable.",
+          file=sys.stderr)
+status(f"OK {restored} {stuck}")
+PYEOF
+
+  # As with the postcondition below: an absent status file is this stanza never
+  # having run, which is a different finding from one that ran and could not see.
+  _restored=0
+  _stuck=0
+  _restore_blind=""
+  _restore_status=""
+  [ -f "$_tmp/restore_status.txt" ] && _restore_status=$(cat "$_tmp/restore_status.txt")
+  case "$_restore_status" in
+    "OK "*)
+      _restored=$(echo "$_restore_status" | cut -d' ' -f2)
+      _stuck=$(echo "$_restore_status" | cut -d' ' -f3)
+      ;;
+    BLIND*) _restore_blind=${_restore_status#BLIND } ;;
+    *) _restore_blind="the re-assert did not run at all" ;;
+  esac
+  if [ -n "$_restore_blind" ] && [ "$_restore_rc" -ne 0 ]; then
+    _restore_blind="'bd list' exited ${_restore_rc}"
+  fi
+  if [ -n "$_restore_blind" ]; then
+    echo "bd-gh-sync: could not re-assert the priority, type, assignee and labels" >&2
+    echo "bd-gh-sync: that a --prefer-github pull takes from every bead it pulls" >&2
+    echo "bd-gh-sync: (${_restore_blind}). Check the beads this run pulled with" >&2
+    echo "bd-gh-sync: 'bd show' — an assignee nulled this way routes to nobody." >&2
+  fi
+
   # Postcondition: a bead held out of scope must come back with the same status
-  # and the same description — the two fields a --prefer-github pull rewrites.
+  # and the same description — the two the stanza above does not cover, because
+  # for a HELD bead no pull ran to overwrite anything.
   # Scoping is an argument about what --issues means, and this measures whether
   # the argument held. It catches a reverted claim whatever moved it, including
   # the JSONL replay in `bd hooks run post-merge` — that reverts in_progress to
@@ -1046,6 +1235,17 @@ PYEOF
     _cnames=$(awk 'NR<=3 { printf "%s%s", sep, $0; sep=", " }' "$_tmp/closed.txt")
     [ "$_closed" -gt 3 ] && _cnames="${_cnames}, +$((_closed - 3)) more"
     _summary="${_summary} ${_closed} of them had been closed on GitHub while open here (${_cnames}); if that is wrong, re-open the GH issue FIRST and the bead second, or the next pull undoes it."
+  fi
+  # Silent when the pull moved none of the four, which is the steady state. The
+  # two failing arms are on the line the caller keeps because both leave a bead
+  # carrying GitHub's values for fields GitHub was never authoritative over —
+  # and the nulled assignee among them is invisible to every dispatch pass.
+  if [ -n "$_restore_blind" ]; then
+    _summary="${_summary} Whether the pull also overwrote any bead's priority, type, assignee or labels was not established (${_restore_blind})."
+  elif [ "$_stuck" -gt 0 ]; then
+    _summary="${_summary} ${_restored} bead(s) had the priority, type, assignee and labels the pull overwrote put back, and ${_stuck} did NOT — see the WARNING line(s) above."
+  elif [ "$_restored" -gt 0 ]; then
+    _summary="${_summary} ${_restored} of them had the priority, type, assignee and labels the pull overwrote put back."
   fi
   if [ -s "$_tmp/moved.txt" ]; then
     _moved=$(wc -l <"$_tmp/moved.txt")
