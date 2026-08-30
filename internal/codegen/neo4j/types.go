@@ -115,7 +115,10 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 // a nested list at runtime, which no static check can see — that write
 // fails at the server as it does today (ADR 0035 names the limit).
 func (typeMap) StorableProperty(pt graph.PropertyType) bool {
-	return !(pt.Kind() == graph.KindList && pt.Elem().Kind() == graph.KindList)
+	if pt.Kind() != graph.KindList {
+		return true
+	}
+	return pt.Elem().Kind() != graph.KindList
 }
 
 // Temporal maps a resolver Temporal kind to the Go type text C3 emits

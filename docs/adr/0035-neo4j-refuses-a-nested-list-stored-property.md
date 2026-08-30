@@ -67,7 +67,10 @@ rule:
 
 ```go
 func (typeMap) StorableProperty(pt graph.PropertyType) bool {
-	return !(pt.Kind() == graph.KindList && pt.Elem().Kind() == graph.KindList)
+	if pt.Kind() != graph.KindList {
+		return true
+	}
+	return pt.Elem().Kind() != graph.KindList
 }
 ```
 
