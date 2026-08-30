@@ -168,6 +168,21 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	return "", false
 }
 
+// StorableProperty admits every width. agtype is a JSON-shaped value and
+// nests without limit, so this store holds shapes neo4j's refuses — a
+// nested list among them, measured against the pinned image by
+// TestAGEStoresANestedListProperty, which is the other half of the
+// divergence ADR 0035 records and the reason nested_list_property is an
+// AGE-only fixture rather than a deleted one.
+//
+// The zoned-list refusal stays in Property and does not belong here: a
+// list of zoned temporals is refused because the offset sidecar is named
+// after the property and a list has one name for all its elements, so
+// there is nowhere to put any element's zone but the first. That is a
+// carrier problem, and answering it on this axis would say the store
+// cannot hold the value, which is not what is wrong with it.
+func (typeMap) StorableProperty(graph.PropertyType) bool { return true }
+
 // Temporal maps a resolved temporal-expression kind to the Go type text
 // this backend emits. Returns (typeText, ok): ok=false routes the caller
 // to ErrUnrepresentableTemporal naming the kind.

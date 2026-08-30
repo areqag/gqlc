@@ -7,18 +7,24 @@ import (
 	"github.com/areqag/gqlc/internal/codegen"
 )
 
-// nameBackend adds this backend's name to a width the shared phases
-// refused. The refusal comes from asking this package's type table, so
-// it is this backend's answer and not a property of the schema: a run
-// emitting several targets has to say which of them refused, the more
-// so for a nested list, which Apache AGE stores happily. Every other
-// refusal follows from the input alone, so wrapping it here would
-// misattribute it.
+// nameBackend attributes a storage refusal to this backend.
 //
-// neo4j's Temporal() never refuses — types.go says so — so unlike AGE's
-// twin this only ever decorates width refusals.
+// ErrUnstorableProperty ONLY. The refusal is this package's type table
+// answering, not a property of the schema — Apache AGE stores the same
+// declaration — so a run emitting several targets has to say which of
+// them refused. Every other sentinel follows from the input alone and is
+// returned unwrapped: a width refusal in particular, which reads the same
+// on any backend that lacks the carrier.
+//
+// The scope is load-bearing rather than incidental. ErrUnrepresentableWidth
+// is raised by three sweeps — the entity sweep, the query-column sweep, and
+// the query-parameter sweep — and this suffix is a claim about STORAGE. On
+// the latter two it would be false: a projected INT128 column is not a
+// stored property, and it is refused for want of a carrier. Attributing the
+// storage sentinel alone is what keeps the sentence true wherever it can
+// appear (ADR 0035).
 func nameBackend(err error) error {
-	if !errors.Is(err, codegen.ErrUnrepresentableWidth) {
+	if !errors.Is(err, codegen.ErrUnstorableProperty) {
 		return err
 	}
 	return fmt.Errorf("%w, which the neo4j backend cannot store as a property", err)
