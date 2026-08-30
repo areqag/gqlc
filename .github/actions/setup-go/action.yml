@@ -51,20 +51,17 @@ inputs:
 runs:
   using: composite
   steps:
-    # `toolchain` wins over `go` when both are present, which is the go command's
-    # own precedence. Read from the file rather than restated as a literal here:
-    # a literal is a second place to bump and a stale one provisions a toolchain
-    # the build then switches away from, behind a green step.
+    # The derivation itself lives in .github/scripts/go-toolchain-version.sh,
+    # because `just vuln` must pin the SAME toolchain locally and a second copy
+    # of it here is a copy that can go stale on one side only (bd gqlc-irvs).
+    # It is read out of the checkout, like this action itself, so it costs no
+    # download.
     - name: read the toolchain version out of go.mod
       id: pin
       shell: bash
       run: |
         set -euo pipefail
-        version="$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2; exit }' go.mod)"
-        if [ -z "$version" ]; then
-          version="$(awk '$1 == "go" { print $2; exit }' go.mod)"
-        fi
-        if [ -z "$version" ]; then
+        if ! version="$(./.github/scripts/go-toolchain-version.sh go.mod)"; then
           echo "::error title=Go toolchain version unreadable::go.mod carries neither a \`toolchain\` nor a \`go\` directive, so there is no version to provision." >&2
           exit 1
         fi
