@@ -207,11 +207,34 @@ while :; do
     # one twice in one day. Only the two mechanical contradictions are called
     # out on top, and dispatch's wording is deliberately not pattern-matched:
     # the facts line states the labels, and that IS the correction.
+    # READINESS is the fourth field of the same sentence and the one no bd field
+    # carries (bd gqlc-zu7fm). dispatch's fresh pass reads `bd ready`, which is
+    # blocker-aware, so it composes "ready warrior work — claim it"; add a blocks
+    # edge between that and this and the bead leaves the ready queue while its
+    # STORED status stays `open` and its assignee stays null. Both branches below
+    # then decline and the facts line states three fields that are all true, so
+    # the citizen is confirmed rather than corrected — and a `blocks` edge is the
+    # only hold this town enforces, so it is the mechanism that degrades to
+    # advice at the point of delivery.
+    #
+    # Derived here rather than queried: `bd show --json` already returns the
+    # blockers with their own status, in the payload above. Only `blocks` counts,
+    # and only while the blocker is unclosed — `discovered-from` edges ride in the
+    # same array and hold nothing. Measured against the whole live ledger below.
+    #
+    # The negative is stated too (`blocked-by=-`), which is why this rides on the
+    # facts line and not only in a STALE branch: an unblocked bead asserts that
+    # readiness WAS re-derived, where silence is also what a version that never
+    # checked would print.
     for b in $bead_ids; do
         row=$(jq -r --arg i "$b" '.[] | select(.id == $i)
                 | [ .id, (.status // "-"),
                     (if (.assignee // "") == "" then "-" else .assignee end),
-                    ((.labels // []) | join(",") | if . == "" then "-" else . end) ]
+                    ((.labels // []) | join(",") | if . == "" then "-" else . end),
+                    ([ (.dependencies // [])[]
+                       | select(.dependency_type == "blocks" and .status != "closed")
+                       | "\(.id)(\(.status))" ]
+                     | join(",") | if . == "" then "-" else . end) ]
                 | join(" ")' <<<"$beads_json" 2>/dev/null) || row=""
         if [ -z "$row" ]; then
             [ "$beads_read" -eq 1 ] || continue
@@ -219,15 +242,18 @@ while :; do
 STALE: $b does not resolve on the ledger at wake time, so nothing said about it above can be acted on."
             continue
         fi
-        read -r _ b_status b_assignee b_labels <<<"$row"
+        read -r _ b_status b_assignee b_labels b_blockers <<<"$row"
         reasons="$reasons
-$b now, re-derived at wake: status=$b_status assignee=$b_assignee labels=$b_labels"
+$b now, re-derived at wake: status=$b_status assignee=$b_assignee labels=$b_labels blocked-by=$b_blockers"
         if [ "$b_status" = closed ]; then
             reasons="$reasons
 STALE: $b is closed, so that reason is spent — do not act on it."
         elif [ "$b_assignee" != "-" ] && [ "$b_assignee" != "$seat" ]; then
             reasons="$reasons
 STALE: $b is held by $b_assignee, not you — do not claim it. If it was meant to be yours, say so rather than taking it."
+        elif [ "$b_blockers" != "-" ]; then
+            reasons="$reasons
+STALE: $b is blocked by $b_blockers and is not on the ready queue — do not claim it. Somebody placed that edge to keep this bead out of a citizen's hands until the blocker closes, which is the only hold this town enforces. Take other ready work; you are woken again when it releases."
         fi
     done
     # Fail loud. A silent fall-back to the old behaviour would retire this guard
