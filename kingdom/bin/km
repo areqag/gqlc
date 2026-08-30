@@ -1683,7 +1683,19 @@ cmd_up() {
         # with --cwd correct. The auto-tab is closed after the loop so the
         # roster does not carry an unlabelled placeholder.
         local created
-        created=$(herdr workspace create --label "$WORKSPACE" --no-focus 2>/dev/null)
+        # The create is the one step here that must STOP the raise: unlike the
+        # two reads below, a failure means there is no workspace to put seats
+        # in. It used to stop anyway, on `set -e`, but with the `2>/dev/null`
+        # eating herdr's account and no sentence of km's own — so `km up` ended
+        # in silence after the worktree output above (gqlc-3pks4). Dropping the
+        # redirect costs nothing on the success path: stderr never reaches
+        # `created`, which captures stdout only. Measured 2026-08-30, herdr
+        # 0.6.10 — a failing create exits 2 with the reason on stderr and stdout
+        # empty, and `workspace list`, `tab list` and `status server` each
+        # succeed writing no stderr at all. A successful CREATE was not
+        # measured: it would have raised a second workspace on the live town.
+        created=$(herdr workspace create --label "$WORKSPACE" --no-focus) \
+            || die "herdr could not create the '$WORKSPACE' workspace, so there is no town to raise and no seat was started. herdr's own account of it is on stderr above."
         # Neither read below may abort. km is between creating the workspace and
         # creating anything to put in it, and `set -e` on a bare `x=$(... python3
         # ...)` ends the raise right there — workspace up, unlabelled auto-tab,
