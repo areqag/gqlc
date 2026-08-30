@@ -95,10 +95,12 @@ this repository checks the two against each other -- so changing the set
 means finding every sentence in both whose number depends on it. The
 declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
-export has to not already show the bead closed, and the body has to carry
-none of the closing keywords and reference forms GitHub documents for that
-number -- see GH_CLOSES, which is deliberately wider than the CLOSES line
-this gate demands elsewhere. An honoured declaration prints a ::warning::
+export has to not already show the bead closed, and the body's claimable
+prose has to carry none of the closing keywords and reference forms GitHub
+documents for that number -- see GH_CLOSES, which is deliberately wider than
+the CLOSES line this gate demands elsewhere. Claimable prose and not the raw
+body, so quoting the keyword back inside a code span to explain why the
+opt-out was taken is not itself the contradiction (bd gqlc-2cmhl). An honoured declaration prints a ::warning::
 annotation, which GitHub attaches to the check run itself.
 
 Exits 0 (pass) or 1 (fail with diagnostic).
@@ -234,22 +236,30 @@ CLOSES = re.compile(r"(?i)(?:closes|fixes|resolves)\s+#(\d+)")
 # can resolve, and one missed costs this gate affirming that an issue stays
 # open when it does not.
 #
-# Two call sites read it, and they read different bodies. check_opt_out()
-# reads the raw one, which is the marker's rule inverted: a 'Closes #N'
-# quoted inside a fence refuses an opt-out although GitHub will not act on
-# it. Same direction as the rest of this pattern, and rowed as such. main()'s
-# no-bead check reads claimable_prose() instead -- there no opt-out is being
-# honoured, so the refusal buys nothing against a body that only quotes the
-# spelling, and a body on this file is where such a quote turns up: PR #901's
-# carries closing-keyword matches inside carriers claimable_prose() blanks,
-# measured at this commit against its live body. Its inline spans naming
-# #617 are among them, and #617 is absent from its closingIssuesReferences
-# while #862 and #883, written as ordinary lines, are listed -- all three
-# issues closed, so that is not the reason (bd gqlc-tysj). Both sites refuse
-# on a
-# hit and fall through to a pass on a miss, so a spelling added to this
-# pattern can turn a pass into a refusal at either and never the reverse;
-# that is the asymmetry, and it is the pattern's, not one call site's.
+# Every call site reads claimable_prose(), never the raw body, because the
+# question is this pattern's own: would GitHub close this number at merge. A
+# keyword inside a carrier claimable_prose() blanks is one GitHub was measured
+# not to act on, so it is not an answer of yes at any of them. PR #901's body
+# is the measurement: it carries closing-keyword matches inside those carriers,
+# its inline spans naming #617 among them, and #617 is absent from its
+# closingIssuesReferences while #862 and #883, written as ordinary lines, are
+# listed -- all three issues closed, so that is not the reason (bd gqlc-tysj).
+#
+# check_opt_out()'s self-contradiction check read the raw body until bd
+# gqlc-2cmhl, on the argument that a third question was being asked -- does
+# this body assert both that #N stays open and that it closes -- and that
+# refusing was the safe direction there because the cost is an edit. What
+# falsified it is that the body does not assert both: a quoted keyword is an
+# explanation, which is exactly what an author who takes the opt-out writes,
+# and gqlc-tysj had already settled that they are entitled to write it. The
+# refusal told them to 'Drop one of the two', i.e. to delete the explanation.
+# It refused PR #1983 on 2026-08-30 over a backticked keyword, and twelve
+# lines below it the extras scan passed the SAME carrier for a different
+# number, so one function answered one question two ways.
+#
+# Every site refuses on a hit and falls through to a pass on a miss, so a
+# spelling added to this pattern can turn a pass into a refusal and never the
+# reverse; that is the asymmetry, and it is the pattern's, not a call site's.
 GH_CLOSES = re.compile(
     r"(?i)\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\b:?\s*"
     r"(?:https?://github\.com/[\w.-]+/[\w.-]+/issues/"
@@ -512,16 +522,12 @@ def prose_only(pr_body, strict=False):
     on when this was written. The two errors are not equal either. The
     refusal names both ways out and says an edit alone re-runs the check;
     the pass loses the claim, and loses it on this path and not on the
-    other two, because here there is no bead to hold a number against. Of
-    the three sites reading a closing keyword out of the body, the no-bead
-    check and main()'s demand for 'Closes #N' both read claimable_prose()
-    and so both see a one-line comment's keyword and neither sees one a
-    line lower. check_opt_out() reads the raw body deliberately: it is
-    asking a third question -- does this body contradict itself, opting
-    #N out while also carrying a keyword for it -- and the safe direction
-    there is to refuse, because the cost of refusing is an edit and the
-    cost of passing is a body asserting both. Both comment spellings are
-    rows in the suite's no-bead section.
+    other two, because here there is no bead to hold a number against.
+    Every site reading a closing keyword out of the body reads
+    claimable_prose(), so all of them see a one-line comment's keyword and
+    none of them sees one a line lower. That includes check_opt_out()'s
+    self-contradiction check, which read the raw body until bd gqlc-2cmhl;
+    the comment above GH_CLOSES holds why it no longer does.
 
     Not a markdown parser. Measured against GitHub's own renderer
     (POST /markdown, mode gfm), visible_prose() blanks six bodies the
@@ -890,7 +896,7 @@ def check_opt_out(pr_body, bead, bead_id, marker_n, expected_n):
             f"it: use 'Closes #{expected_n}'.",
         )
 
-    if expected_n in GH_CLOSES.findall(pr_body):
+    if expected_n in GH_CLOSES.findall(claimable_prose(pr_body)):
         refuse(
             f"the PR body leaves {bead_id} open and also carries a closing "
             f"keyword for #{expected_n}.",
