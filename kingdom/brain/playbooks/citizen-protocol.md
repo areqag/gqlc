@@ -99,6 +99,24 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    you, and following it leaves worktrees nobody reaps (bd gqlc-wuax,
    gqlc-osuz).
 
+   **Under gqlc-w5bh a seat becomes its own full clone instead of a linked
+   worktree of the shared checkout, and the roster converts one seat at a time,
+   so yours may be either today.** Nothing above changes — the sync recipe, the
+   branch rule and the permanence read the same in a clone. What changes is what
+   your repository can see and what it can damage. A clone's refs and stash are
+   its own, so `git log --all` here stops showing a neighbour's unpushed
+   commits; conversely a bricked `core.bare` or a rewritten `core.hooksPath`
+   stops at your seat rather than reaching the town, which is the whole point of
+   the decision. **If you are rescuing the work of a session that was killed,
+   that is the half you must change**: one `git log --all` in the shared
+   checkout no longer finds a seat's unpushed commits, so walk the seats
+   themselves — `git -C ../gqlc-seat-<s> log --all` per seat, over a converted
+   roster. Their directories are still there to read. To tell which you are:
+
+       git rev-parse --path-format=absolute --git-common-dir
+
+   answering a path inside your own seat directory means a clone.
+
    **Read the unreviewed merge you are about to build on** (ADR 0004 §1). Once
    you are synced, look at what has recently landed in your bead's `subject:`
    path, and where a merge into it was not reviewed, read that merge
