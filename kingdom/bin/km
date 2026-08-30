@@ -1163,14 +1163,38 @@ seat_box_text() { # <pane> -> 0 read it, 1 the buffer holds no box, 2 unreadable
     # It does NOT reject a paste wider than half the pane. Nothing in this file
     # can: a full-width rule pasted from another pane's render is byte-identical
     # to a real edge. The limit is stated rather than papered over.
+    #
+    # THE SHAPE IS TESTED ON ASCII, after substituting, and never on `─` itself.
+    # `─` is U+2500 — three bytes — and under a C/POSIX locale awk has no
+    # multibyte notion, so `─+` parses as the bytes \xe2\x94 followed by one or
+    # more \x80. A real rule is that triple repeated N times, whose second
+    # character is \xe2 and not \x80, so the match failed for every N > 1 and NO
+    # line was an edge: measured 2026-08-30, all 8 fixtures read NOBOX under
+    # LC_ALL=C and 6 of them found their box under en_US.UTF-8 (bd gqlc-yeesk,
+    # found by Նվարդ while rebasing #1959). gsub of a multibyte LITERAL has no
+    # quantifier and is bytewise, so it is locale-independent; counting with it
+    # first and testing an ASCII shape after gives the same answer everywhere.
+    #
+    # Not live when it was found — the units inherit LANG=en_US.UTF-8 from the
+    # systemd manager — but km pins no locale anywhere, so it is one absent
+    # environment variable from town-wide, and since #1959 "no box" REFUSES a
+    # send rather than merely degrading a witness. Every send in the town would
+    # have been refused, silently and with no report of why.
+    #
+    # `dashes > 0` is not redundant with the width test below. Without it a line
+    # of ASCII hyphens is a candidate carrying zero dashes, and where the buffer
+    # holds no real rule the widest is also zero, so `0 * 2 >= 0` promotes it:
+    # two `--------` lines in a pane with no composer at all then report an
+    # EMPTY box, which is the single answer that makes send_line type (VI.2).
     printf '%s\n' "$buf" | awk '
         {
             line[NR] = $0
-            if ($0 ~ /^─+( .* ─+)?$/) {
-                probe = $0
+            probe = $0
+            dashes = gsub(/─/, "-", probe)
+            if (dashes > 0 && probe ~ /^-+( .* -+)?$/) {
                 cand[++m] = NR
-                wide[m] = gsub(/─/, "-", probe)
-                if (wide[m] > w) w = wide[m]
+                wide[m] = dashes
+                if (dashes > w) w = dashes
             }
         }
         END {
