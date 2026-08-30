@@ -27,6 +27,17 @@
 # Diagnostics go to stderr, so a caller that wants silence must redirect it.
 #
 # Design: human works through GitHub issues; agents work through bd.
+#
+# One premise this file depends on is not enforced in it. Because a single
+# GitHub account operates both sides, a mirror closed under a bead still open
+# here is ambiguous — GitHub speaking, or this script's own push echoing back —
+# and the pull applies it either way. ADR 0011 resolves the ambiguity by fixing
+# the ORDER a reopen is expressed in (GitHub first, bd second), which
+# .githooks/claude-pre-bash arm 5 refuses to let a citizen get wrong. Under that
+# order a closed mirror over an open bead is always GitHub-native and the pull
+# is always right to take it. See the CLOSING record below and the drift
+# section's "Deliberately NOT gated" for what each half of this file owes it.
+#
 #   - pull:  mirror GH state into bd for the beads where GitHub is capable of
 #            holding the local value and is not behind it. `bd github sync`
 #            offers no field-level exclusion, so scope is the only lever: the
@@ -116,7 +127,18 @@
 #            Deliberately NOT gated: `bd open / GH closed`, which the pull
 #            applies and thereby resolves, and `bd closed / GH open`, which the
 #            push closes — both transient, and a gate firing on them fires on
-#            ordinary work. Nothing in this repository calls it yet: it needs
+#            ordinary work. "Resolves" is the whole claim on the first of those,
+#            and it holds only where the mirror's closure came from GitHub. Where
+#            it is instead the echo of this script's own push, the same state
+#            means the opposite — a citizen reopened the bead and the pull is
+#            about to undo them — and applying it destroys rather than resolves
+#            (gqlc-e9huy). Nothing in the state distinguishes the two, because
+#            one GitHub account operates both sides; what distinguishes them is
+#            the ORDER the reopen was expressed in, which is enforced before this
+#            script runs (.githooks/claude-pre-bash arm 5) and recorded in
+#            ADR 0011. So the gate stays off here for the reason it always did,
+#            and the premise that makes that safe now lives somewhere this file
+#            can name but cannot check. Nothing in this repository calls it yet: it needs
 #            `gh`, so it cannot live in the offline `just test` (gqlc-x98l).
 #
 # Payloads reach python through temp files, never argv or the environment. The
@@ -472,9 +494,20 @@ for b in beads:
     # The post-pull check cannot cover this: it opens by skipping every bead the
     # run pulled, because a pull rewriting a bead it pulled is the pull working.
     # So the transition is named here, where both states are still in hand.
-    # Reported, never held — GitHub closing a mirror is how every merge ends.
+    #
+    # Reported, never held — GitHub closing a mirror is how every merge ends,
+    # and every alternative to allowing it has a worse silent-loss direction
+    # (ADR 0011 enumerates them with their falsifiers). What makes
+    # report-and-allow sound is now two things OUTSIDE this record. Order is
+    # enforced at the keyboard, so a mirror still closed under an open bead is
+    # GitHub speaking rather than an echo of bd's own push
+    # (.githooks/claude-pre-bash arm 5). And whatever slips past that lands as a
+    # note on the bead itself — the number rides on this record so the caller
+    # below can write it — because a citizen reads their bead and does not read
+    # the stderr of whoever's session happened to run the merge. gqlc-e9huy is
+    # the incident where reporting reached nobody who could act.
     if status == "open" and gh_state == "closed":
-        out.append(f"CLOSING {bid}")
+        out.append(f"CLOSING {bid} {n}")
     out.append(f"ALLOW {bid}")
 
 # An unscoped pull silently minted a bead for any unmirrored issue in its
@@ -1213,10 +1246,42 @@ PYEOF
   # takes the plan's first line for a pulled id on exactly the runs where no
   # closure may be claimed. It reached the right verdict there by accident,
   # which is worse than the wrong one: the guard against it read as green.
+  #
+  # Field-based, not `substr($0, 9)`: the record now carries the issue number
+  # after the bead id, so a fixed offset would take `<bid> <n>` for one id. Each
+  # line of closed.txt is `<bid> <n>`, and both readers below split it.
   awk -v pf="$_tmp/pulled.txt" '
     BEGIN { while ((getline _l < pf) > 0) pulled[_l] }
-    /^CLOSING / { _n = substr($0, 9); if (_n in pulled) print _n }' \
+    /^CLOSING / { if ($2 in pulled) print $2, $3 }' \
     "$_tmp/plan.txt" >"$_tmp/closed.txt"
+
+  # The closure written where the parties to it actually look. Everything this
+  # run says about it otherwise goes to the stderr of whoever's session happened
+  # to run the merge — a citizen with no stake in the bead — and the bead itself
+  # ends up carrying a null close_reason, which is the only tell that no human
+  # judged it and nothing reads that either. gqlc-e9huy is the incident: a
+  # judge's withdrawn PASS was reverted here 2.5 minutes after he withdrew it,
+  # and it was found only because the PR comments contradicted the ledger.
+  #
+  # Rides closed.txt, the intersection, and not the plan's CLOSING records:
+  # intent is not outcome, as everywhere else on this path. A bead whose batch
+  # failed was not closed and is owed no note about a closure.
+  #
+  # Every call is individually guarded. `set -Ee` is on and the ERR trap aborts
+  # the whole run, so one refused `bd update` would turn a pull that had already
+  # done its work into PULL FAILED for the sake of a note. --append-notes, never
+  # --notes, which replaces. Exit status is the evidence here: bd discards a
+  # refused update whole with a non-zero status and prints nothing on stdout, so
+  # for an append there is no silent no-op shape to distinguish.
+  _notes_failed=0
+  if [ -s "$_tmp/closed.txt" ]; then
+    _now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    while read -r _cid _cn; do
+      [ -n "$_cid" ] || continue
+      bd update "$_cid" --append-notes "bd-gh-sync pull ${_now}: closed this bead because GH mirror #${_cn} is closed while the bead was open in bd. No citizen wrote this close — close_reason is null. If this reverted a deliberate reopen: 'gh issue reopen ${_cn}' FIRST, then 'bd reopen ${_cid}', in that order, or the next pull repeats this. Incident: bd gqlc-e9huy; rule: ADR 0011." \
+        >/dev/null 2>&1 || _notes_failed=$((_notes_failed + 1))
+    done <"$_tmp/closed.txt"
+  fi
 
   # Last line, and the only line a `tail -1` caller keeps
   # (.claude/settings.json). It therefore has to report what happened rather
@@ -1262,9 +1327,14 @@ PYEOF
   # and is undone by the next pull, which reads GitHub as authoritative.
   if [ -s "$_tmp/closed.txt" ]; then
     _closed=$(wc -l <"$_tmp/closed.txt")
-    _cnames=$(awk 'NR<=3 { printf "%s%s", sep, $0; sep=", " }' "$_tmp/closed.txt")
+    _cnames=$(awk 'NR<=3 { printf "%s%s (GH #%s)", sep, $1, $2; sep=", " }' "$_tmp/closed.txt")
     [ "$_closed" -gt 3 ] && _cnames="${_cnames}, +$((_closed - 3)) more"
-    _summary="${_summary} ${_closed} of them had been closed on GitHub while open here (${_cnames}); if that is wrong, re-open the GH issue FIRST and the bead second, or the next pull undoes it."
+    _summary="${_summary} ${_closed} of them had been closed on GitHub while open here (${_cnames}); if that is wrong, re-open the GH issue FIRST and the bead second, or the next pull undoes it. Each of those beads carries a note saying so."
+    # The note is the remedy's carrier, so a note that did not land has to be
+    # said on the line the caller keeps — otherwise the sentence above promises
+    # a record that is not there, which is worse than promising nothing.
+    [ "$_notes_failed" -gt 0 ] &&
+      _summary="${_summary} WARNING: ${_notes_failed} of those note(s) failed to write — those closures are recorded nowhere but this line."
   fi
   # Silent when the pull moved none of the five, which is the steady state. The
   # two failing arms are on the line the caller keeps because both leave a bead
