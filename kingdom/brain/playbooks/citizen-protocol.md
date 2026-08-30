@@ -333,9 +333,12 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    moves under a reader" below.
 8. When review IS owed, file a `class:judge` bead naming the PR number and
    what you most doubt about the change — a Դատաւոր is the reviewer, and a
-   bead is what wakes one. **File it UNASSIGNED and class-labelled**, which
-   is the fresh pass's shape (see "How a bead reaches a seat" below): a
-   pre-assigned review bead would go to that one seat and to nobody else.
+   bead is what wakes one. **File a ROUND-1 review UNASSIGNED and
+   class-labelled**, which is the fresh pass's shape (see "How a bead reaches a
+   seat" below): a pre-assigned review bead would go to that one seat and to
+   nobody else. **A round answering a FAIL is the opposite and is assigned** —
+   the rule and its reason are three paragraphs down, and the word UNASSIGNED
+   here is scoped to round 1 by that.
    Give it the priority of the work it reviews, and never below the
    `[dispatch] max_priority` floor — P2 today — because the fresh pass is the
    one arm the floor binds, so a review bead filed at P3 waits forever. Mail
@@ -360,6 +363,15 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    assigned bead whatever the priority floor, so the assignment is what gets the
    round back to the one seat entitled to close it. Round 1 stays UNASSIGNED as
    the paragraph above says; only the post-FAIL round is assigned.
+
+   **That they are busy while another judge is idle is not a reason to
+   reroute**, and neither is anyone's rank. V.2's "whoever is free and
+   unconflicted" governs the FIRST assignment; V.4 is the specific rule for the
+   round that answers a FAIL, and the specific governs. The thing a reroute
+   risks is the one V.4 forbids by name — a second judge PASSing what the first
+   FAILed is one judge overturning another's verdict, reached by a route the
+   filer chose. Wait for them. If they are genuinely unreachable rather than
+   merely busy, that is Սեդրակ's call and not a filing decision: mail him.
 
    Then merge on the Դատաւոր's PASS; your resume wake arrives when the review
    bead closes, PASS and FAIL alike. A FAIL blocks the merge until answered
