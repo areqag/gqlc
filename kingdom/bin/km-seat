@@ -358,7 +358,14 @@ The bead(s) named above could not be re-derived — the ledger query failed — 
         # whichever throwaway launched them. Same shape as the GIT_DIR that
         # redirected bd into the shared repo this week.
         unset KM_CONFIG
+        # BEADS_DIR names the town's one ledger rather than leaving bd to
+        # discover it from the seat's cwd. A seat that is a linked worktree
+        # discovers the same path either way; a seat that is its own clone
+        # (gqlc-w5bh) discovers nothing at all. It also outranks an exported
+        # GIT_DIR, which is what once redirected bd into the shared repo from
+        # under a hook (gqlc-hg61).
         KINGDOM_SEAT=$seat BEADS_ACTOR=$seat KM_STATE_DIR=$sd \
+            BEADS_DIR="$(dirname "$KINGDOM_DIR")/.beads" \
             claude --model "$model" \
             "${effort_args[@]}" \
             --permission-mode "$pm" \

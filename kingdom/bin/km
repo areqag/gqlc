@@ -239,10 +239,22 @@ git_at() { # git_at <dir> <args...>
 # Scrubbed like the rest: an exported GIT_DIR would otherwise name the repo that
 # invoked the hook, and deploy_root() below is the first caller that WRITES to
 # whatever this returns.
+#
+# The git derivation alone answers for a linked worktree, whose common dir IS
+# the main checkout's. It does not answer from inside a seat that is its own
+# clone (gqlc-w5bh): a clone's common dir is its own, so the derivation names
+# the SEAT, and seat_worktree() below would then compose
+# `.../gqlc-seat-x-seat-y`. The basename strip is the inverse of that
+# composition, kept in the same file so the two directions cannot drift apart.
 main_root() {
-    local common
+    local common root base
     common=$(git_at . rev-parse --path-format=absolute --git-common-dir)
-    dirname "$common"
+    root=$(dirname "$common")
+    base=$(basename "$root")
+    case $base in
+        *-seat-*) echo "$(dirname "$root")/${base%-seat-*}" ;;
+        *) echo "$root" ;;
+    esac
 }
 
 state_dir() {
@@ -257,6 +269,30 @@ seat_worktree() {
     local mr
     mr=$(main_root)
     echo "$(dirname "$mr")/$(basename "$mr")-seat-$1"
+}
+
+# Both layouts are live at once during the migration of gqlc-w5bh, and a seat
+# is told apart by where its common dir lands: inside itself for a clone,
+# inside the main checkout for a linked worktree. Asked of the directory
+# rather than looked up in config, so a seat converted by hand answers the
+# same as one `km up` created.
+seat_is_clone() { # <seat-dir>
+    local wt=$1 common
+    common=$(git_at "$wt" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+    case "$common" in "$wt"/*) return 0 ;; *) return 1 ;; esac
+}
+
+# The origin/master a seat is judged and moved against. A clone has its own
+# object store, so the main checkout's SHA may not exist there at all and the
+# fallback would name a commit the seat cannot resolve. Deliberately no fetch:
+# both callers that want fresh refs fetch first and say so when it failed.
+seat_target() { # <seat-dir> <main-checkout-target> -> sha, empty if unresolvable
+    local wt=$1 fallback=$2
+    if seat_is_clone "$wt"; then
+        git_at "$wt" rev-parse --verify --quiet origin/master 2>/dev/null || true
+        return 0
+    fi
+    echo "$fallback"
 }
 
 # The runner script each seat's tmux window executes, from kingdom/bin/. Only
@@ -1886,12 +1922,24 @@ cmd_up() {
         2) die "km could not ask herdr whether its server is running (its own account is above), so it will not raise the town — that could mint a second '$WORKSPACE' workspace over a town already up." ;;
     esac
     ensure_state_tree
-    local mr s wt ws tally
+    local mr s wt ws tally url
     mr=$(main_root)
+    # A seat is its own clone, not a linked worktree of the main checkout
+    # (gqlc-w5bh): sharing refs and local config is what let one seat's writes
+    # land in another's guard window, brick the whole town's core.bare, and put
+    # one stray hooksPath in every seat's config at once. Cloned from the URL
+    # rather than from "$mr", so the seat carries no local branch of anyone
+    # else's and no object store hardlinked to the town's. core.hooksPath has
+    # to be set per clone: it lives in local config, which a clone does not
+    # inherit.
+    url=$(git_at "$mr" remote get-url origin) ||
+        die "up: cannot read the main checkout's origin URL, so it has no source to clone a seat from"
     for s in $(seats_all); do
         wt=$(seat_worktree "$s")
         if [ ! -d "$wt" ]; then
-            git -C "$mr" worktree add --detach "$wt" origin/master
+            git clone --quiet "$url" "$wt" || die "up: could not clone a repository for seat $s at $wt"
+            git_at "$wt" config core.hooksPath .githooks
+            git_at "$wt" checkout --detach --quiet origin/master
         fi
     done
     # The tab-level hazard's workspace-level twin: an unreadable list reads as
@@ -4890,8 +4938,10 @@ cmd_doctor() {
 #
 # Deliberately no fetch here. status renders this per seat on every call, and a
 # board that stalls on the network is a board nobody runs; seat-refresh fetches
-# once itself before calling in. The remote-tracking ref is shared by every
-# worktree in the town, so it is as fresh as the last fetch by anybody.
+# before calling in. How fresh the ref being judged against is therefore depends
+# on the seat's layout: a linked worktree shares one remote-tracking ref with the
+# whole town, so it is as fresh as the last fetch by anybody, while a clone
+# (gqlc-w5bh) has its own and is only as fresh as ITS last fetch.
 #
 # States, and the distinction gqlc-d38n turns on — "behind because working" is
 # not "behind because parked", and only the second is a defect. Extended by
@@ -4912,6 +4962,7 @@ seat_freshness() {
     local seat=$1 target=$2 wt head branch dirty ahead behind_all behind_gates
     wt=$(seat_worktree "$seat")
     [ -d "$wt" ] || { echo "unknown 0 0 0 no worktree at $wt"; return 0; }
+    target=$(seat_target "$wt" "$target")
     [ -n "$target" ] || { echo "unknown 0 0 0 no origin/master to judge against"; return 0; }
     head=$(git_at "$wt" rev-parse HEAD 2>/dev/null) ||
         { echo "unknown 0 0 0 git cannot read $wt"; return 0; }
@@ -5018,7 +5069,7 @@ seat_freshness() {
     echo "parked $behind_all $behind_gates 0 at $(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
 }
 
-# seat_refresh_step <seat> <check> <target> <mr> <stale_note>
+# seat_refresh_step <seat> <check> <target> <stale_note>
 #
 # One seat's verdict and, unless --check, the one move that is ever safe.
 # Echoes a line beginning "<seat>: "; the exit status is the whole point of
@@ -5047,9 +5098,22 @@ seat_freshness() {
 # of what a second copy of a predicate costs — two copies of one rule had
 # already disagreed on four inputs while that bead was open.
 seat_refresh_step() {
-    local seat=$1 check=$2 target=$3 mr=$4 stale_note=$5
+    local seat=$1 check=$2 target=$3 stale_note=$4
     local wt f state behind_all behind_gates ahead detail head
     wt=$(seat_worktree "$seat")
+    # A clone's refs are its own, so the caller's one fetch in the main
+    # checkout says nothing about this seat. Fetch per clone before judging,
+    # and note the failure the same way the caller does rather than reporting a
+    # clean verdict from an unanswered question.
+    if [ -d "$wt" ] && seat_is_clone "$wt"; then
+        git_at "$wt" fetch --quiet origin 2>/dev/null ||
+            stale_note=" [fetch failed in $seat's own clone: judged against its last known origin/master]"
+        target=$(seat_target "$wt" "$target")
+        [ -n "$target" ] || {
+            echo "$seat: cannot judge — its clone has no origin/master to judge against$stale_note"
+            return 4
+        }
+    fi
     f=$(seat_freshness "$seat" "$target")
     read -r state behind_all behind_gates ahead detail <<<"$f"
     : "$ahead"
@@ -5120,7 +5184,7 @@ seat_refresh_step() {
                 echo "$seat: could not move its published worktree to origin/master"
                 return 4
             fi
-            echo "$seat: refreshed $(git_at "$mr" rev-parse --short "$head") -> $(git_at "$wt" rev-parse --short HEAD) (branch $pr_branch finished: every PR for it is closed)$stale_note"
+            echo "$seat: refreshed $(git_at "$wt" rev-parse --short "$head") -> $(git_at "$wt" rev-parse --short HEAD) (branch $pr_branch finished: every PR for it is closed)$stale_note"
             return 0
             ;;
     esac
@@ -5149,7 +5213,7 @@ seat_refresh_step() {
         echo "$seat: could not move its parked worktree to origin/master"
         return 4
     fi
-    echo "$seat: refreshed $(git_at "$mr" rev-parse --short "$head") -> $(git_at "$wt" rev-parse --short HEAD) ($behind_gates hook/settings change(s) picked up)$stale_note"
+    echo "$seat: refreshed $(git_at "$wt" rev-parse --short "$head") -> $(git_at "$wt" rev-parse --short HEAD) ($behind_gates hook/settings change(s) picked up)$stale_note"
     return 0
 }
 
@@ -5176,7 +5240,7 @@ cmd_seat_refresh_all() {
 
     for s in $(seats_all); do
         rc=0
-        line=$(seat_refresh_step "$s" "$check" "$target" "$mr" "$stale_note") || rc=$?
+        line=$(seat_refresh_step "$s" "$check" "$target" "$stale_note") || rc=$?
         printf '  %s\n' "$line"
         case "$rc" in
             3) exposed="$exposed $s" ;;
@@ -5258,7 +5322,7 @@ cmd_seat_refresh() {
     # exit — he asked about THIS seat and got no answer. The sweep treats the
     # same rc as a row, because there the alternative is truncating the table.
     local line rc=0
-    line=$(seat_refresh_step "$seat" "$check" "$target" "$mr" "$stale_note") || rc=$?
+    line=$(seat_refresh_step "$seat" "$check" "$target" "$stale_note") || rc=$?
     [ "$rc" -ne 4 ] || die "seat-refresh: $line"
     echo "seat-refresh $line"
     return "$rc"
