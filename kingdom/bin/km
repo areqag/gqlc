@@ -4777,17 +4777,33 @@ cmd_doctor() {
     # (gqlc-z1qw), and now that it dies on a bad query, the death lands only in
     # the journal unless something asks the unit how its last run went.
     #
-    # Not `check` rows: three outcomes, not two. unit_health already separates
-    # never-fired, not-installed, mid-run and unanswerable from a genuine
-    # failure, and a boolean row threw all of that away and printed one label —
-    # 'guard last run succeeded', with the run having failed (gqlc-67ml). So the
-    # row renders unit_health's own sentence, which is the thing that was
-    # measured.
+    # Not `check` rows: unit_health has more outcomes than two. A boolean row
+    # threw that away and printed one label — 'guard last run succeeded', with
+    # the run having failed (gqlc-67ml). So the row renders unit_health's own
+    # sentence, which is the thing that was measured.
+    #
+    # But rendering and GATING are different questions, and choosing echo over
+    # `check` answered the first while silently answering the second too: it
+    # took the row out of the exit status entirely. So on 2026-08-29 the
+    # dispatcher had exited 1 on every tick for eleven minutes, routing nothing,
+    # and `km doctor` said so and exited 0 (gqlc-vqqr). This is the town's only
+    # liveness check and a dead dispatcher is the one condition under which the
+    # town does no work at all.
+    #
+    # FAILED is therefore its own arm and is hard. It is matched BY NAME rather
+    # than by making the catch-all hard, because NOT INSTALLED falls there too
+    # and is not a failure: `just kingdom-install` runs `km doctor` BEFORE
+    # `km install-units`, so a hard catch-all would refuse the command whose
+    # whole job is to install the units it is complaining are absent, on
+    # precisely the fresh box that has never had them. An operator who does hit
+    # the hard arm and needs the units rewritten anyway can run
+    # `km install-units` directly, which does not consult doctor.
     check_unit_run() { # <what> <unit>
         local uh
         uh=$(unit_health "$2")
         case "$uh" in
             ok*)      echo "ok:   $1 last run succeeded ${uh#ok }" ;;
+            FAILED*)  echo "FAIL: $1's last run FAILED, so whatever this unit does the town is not doing — $uh"; ok=1 ;;
             UNKNOWN*) echo "warn: $1 last run is UNKNOWN — ${uh#UNKNOWN — }" ;;
             # gqlc-28ysg. Without this arm the two no-record labels fall to the
             # last one and are announced as a run that did NOT succeed — the
