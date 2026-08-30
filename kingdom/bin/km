@@ -1113,8 +1113,15 @@ seat_box_emptied() { # <pane> -> 0 emptied, 1 holds text, 2 no box, 3 unreadable
     while [ "$left" -gt 0 ]; do
         left=$((left - 1))
         sleep 0.2
-        box=$(seat_box_text "$1")
-        rc=$?
+        # `|| rc=$?` rather than a bare call and `rc=$?`. km runs `set -e`, and
+        # -e is suspended only for the dynamic extent of a function evaluated in
+        # a condition. A bare `box=$(...)` here is a statement, so a pane that
+        # cannot be read ends the shell inside the first turn and the poll's
+        # other nine never happen — the mechanism would work only for callers
+        # who happened to write `if`. Same at the two reads in send_line and at
+        # cmd_reconcile's session_up (bd gqlc-nvbd3).
+        rc=0
+        box=$(seat_box_text "$1") || rc=$?
         # An unreadable pane is not a state the poll can outwait, and every turn
         # would re-emit herdr's account of it. Nine more reads and two more
         # seconds buy nothing, so the first one ends the poll.
@@ -1216,8 +1223,8 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
         echo "km: send to $seat (pane $pane): the text was typed, but the Enter that submits it failed: ${out:-herdr gave no diagnosis on either stream}. It is sitting unsent in her prompt box" >&2
         return 1
     }
-    seat_box_emptied "$pane"
-    witnessed=$?
+    witnessed=0
+    seat_box_emptied "$pane" || witnessed=$?
     [ "$witnessed" -eq 0 ] && return 0
     if [ "$witnessed" -eq 2 ]; then
         echo "km: send to $seat (pane $pane): herdr acked the text and the Enter, but the pane renders no input box, so the submission was not witnessed and is being reported as delivered (bd gqlc-gh7xj)" >&2
@@ -1236,8 +1243,8 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
         return 0
     fi
     herdr pane send-keys "$pane" Enter >/dev/null 2>&1
-    seat_box_emptied "$pane"
-    witnessed=$?
+    witnessed=0
+    seat_box_emptied "$pane" || witnessed=$?
     if [ "$witnessed" -eq 3 ]; then
         echo "km: send to $seat (pane $pane): herdr acked the text and both Enters, but the pane could not be read back (herdr's own account of it is above), so the submission was not witnessed and is being reported as delivered" >&2
         return 0
@@ -2153,8 +2160,13 @@ capped_seats() {
 # a seat instead (seat_idle), which asks rather than forces.
 cmd_reconcile() {
     no_args reconcile "$@"
-    local up_rc
-    session_up; up_rc=$?
+    # main's case arm calls this as a statement (km:5133), so -e is live here.
+    # `session_up; up_rc=$?` therefore ended the shell on every non-zero and the
+    # whole block below was dead: `km reconcile` against a down town printed zero
+    # bytes and exited 1, while dispatch, guard-sweep and status — which all use
+    # an AND-OR or an `if` — spoke correctly (bd gqlc-nvbd3).
+    local up_rc=0
+    session_up || up_rc=$?
     if [ "$up_rc" != 0 ]; then
         echo "reconcile: $(town_absent_reason "$up_rc"); nothing to reconcile"
         # Exit non-zero when km could not tell. A scheduled pass that did not
