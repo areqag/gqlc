@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -90,6 +91,38 @@ func TestImportsTimeAgreesWithTheEmittedFile(t *testing.T) {
 				map[bool]string{true: "names", false: "does not name"}[names])
 		})
 	}
+}
+
+// TestTheWireLabelsReachTheEmittedDecoder pins that the two labels an
+// entity is wired with are the two the generated decoder enforces: the
+// annotation is what agtypeEntity strips, and the wire label is what the
+// equality check beneath it demands.
+//
+// It exists as the positive control for the WithLabels bridge. Every
+// other test that wires an entity asserts on what its FIELDS render to,
+// so a WithLabels that dropped both labels on the floor left those tests
+// green — the emitted decoder then strips the empty annotation and
+// demands the empty label, and nothing in the package noticed. The label
+// here is deliberately not the entity's name, so a decoder that echoed
+// the name instead of the label would not satisfy it either.
+func TestTheWireLabelsReachTheEmittedDecoder(t *testing.T) {
+	goType, ok := age.TypeMap{}.Property(graph.TypeString)
+	require.True(t, ok)
+
+	e := age.WiredEntity{Entity: codegen.Entity{
+		Name:   "E",
+		Kind:   codegen.EntityNode,
+		Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}},
+	}}.WithLabels("Widget", age.VertexAnnotation)
+
+	var h age.Helpers
+	h.ForEntities([]age.WiredEntity{e})
+	src := string(age.RenderModels("models", []age.WiredEntity{e}, h))
+
+	require.Contains(t, src, strconv.Quote(age.VertexAnnotation),
+		"the emitted decoder does not strip the annotation the entity was wired with")
+	require.Contains(t, src, strconv.Quote("Widget"),
+		"the emitted decoder does not demand the wire label the entity was wired with")
 }
 
 // TestEmittedHelpersAreClosedOverWhatTheyCall renders models.go for a
