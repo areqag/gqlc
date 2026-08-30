@@ -81,8 +81,10 @@ var decoderProbeScalars = []decoderProbeWidth{
 // One casualty is named rather than hidden: depth 2 was the first depth
 // reaching render_models.go's writeSliceNarrow recursive arm, and no
 // stored property can reach it now. That arm is unreachable-by-
-// construction on this backend and its deletion is gqlc-52w8l, not this
-// bead. The recursive decode a nested list gets as a QUERY VALUE is a
+// construction on this backend, and it is DELETED in the same change that
+// retires these probes — the probes were its only guard, so leaving it
+// would publish an unreachable and unguarded path.
+// The recursive decode a nested list gets as a QUERY VALUE is a
 // different emitter binding a different local family (render_queries.go,
 // inner<n>/innerAcc<n>), so nothing here witnesses it and this comment
 // does not claim it does.
@@ -667,7 +669,7 @@ func (s *DecoderSuite) TestNoDecoderLocalTakesAPropertyName() {
 //
 // The lost half was guarding render_models.go's writeSliceNarrow
 // recursive arm, which the same ruling makes unreachable by
-// construction; gqlc-52w8l deletes it. A nested list arriving as a QUERY
+// construction and the same change deletes. A nested list arriving as a QUERY
 // VALUE still emits a recursive decode, from render_queries.go binding
 // inner<n>/innerAcc<n>/elem<n> — a family this suite does not sweep and
 // has never swept, since it reads models.go alone.

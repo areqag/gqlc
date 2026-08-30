@@ -23,8 +23,8 @@
 // call site that reaches depth >= 2 (sliceParamBindExpr) is reached from
 // nowhere. The recursion is left in place and untouched by that bead —
 // measured, no golden here emits a from<X>List<n> helper for any n — and
-// whether it should go the way gqlc-52w8l takes writeSliceNarrow's arm is
-// bd gqlc-tlc3e, deliberately not settled on gqlc-nxcj9.
+// whether it should go the way this change takes writeSliceNarrow's arm
+// is bd gqlc-tlc3e, deliberately not settled on gqlc-nxcj9.
 
 // name: SlotsMatching :many
 MATCH (s:Slot)

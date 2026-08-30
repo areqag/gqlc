@@ -20,7 +20,7 @@ MATCH (l:Listy) RETURN l.tags AS tags, l.blobs AS blobs, l.depths AS depths
 // the columns are non-nullable, because a literal is, so the nullable
 // nested-column arm that `deep` reached is unwitnessed here; and nothing
 // in this file now decodes a nested list off dbtype.Node at all, that
-// being the arm ADR 0035 makes unreachable (gqlc-52w8l deletes it).
+// being the arm ADR 0035 makes unreachable and the same change deletes.
 //
 // name: NestColumns :many
 RETURN [[[1]]] AS cube, [[1]] AS lhs, [["a"]] AS rhs, [[["x"]]] AS deep

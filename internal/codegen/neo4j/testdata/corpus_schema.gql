@@ -18,10 +18,10 @@
 //     the note above SlotsMatching in the queries file, which records
 //     what its removal costs and why nothing replaces it.
 //
-// The decode arms those declarations reached are render_models.go's
+// The decode arm those declarations reached was render_models.go's
 // writeSliceNarrow recursive arm, which the same ruling makes
-// unreachable by construction on this backend; gqlc-52w8l deletes it.
-// This corpus does not pretend to cover it in the meantime.
+// unreachable by construction on this backend. It is DELETED in the same
+// change, so there is no longer an arm here for this corpus to cover.
 //
 // A nested list arriving as a QUERY VALUE is still served by neo4j and
 // still decoded, by a different emitter binding a different local family

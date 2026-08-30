@@ -138,14 +138,25 @@ binding different local families. Neither witnesses the other:
 
 | | emitter | locals | reached by |
 |---|---|---|---|
-| property path | `render_models.go` `writeSliceNarrow` | `elem<n>`/`i<n>`/`nested<n>`/`acc<n>`/`v<n>` | a declared nested-list property |
+| property path | `render_models.go` `writeSliceNarrow` | `elem0`/`i0`/`v0`, and `nested<n>`/`acc<n>` for the recursion deleted here | a declared nested-list property |
 | query-column path | `render_queries.go` `walkListElemPlan` | `inner<n>`/`innerAcc<n>` | a nested list arriving as a query value |
 
 Both callers of `writeSliceNarrow` pass an `EntityField`'s `GoType`, so its
-`if isSliceType(elem)` recursive branch fires only for a declared nested-list
-property — the declaration this ADR refuses. That arm is therefore **dead but
-present** on this backend: unreachable by construction, not by accident. It is
-kept here and deleted by bead `gqlc-52w8l`, which updates this sentence.
+`if isSliceType(elem)` recursive branch fired only for a declared nested-list
+property — the declaration this ADR refuses. That arm is therefore unreachable
+by construction, not by accident, and it is **deleted in the same change that
+makes it unreachable**. With the recursion gone the function's `depth`
+parameter was provably constant at both call sites, so it goes too; the emitted
+locals keep their `0` suffix, which is a fixed part of the name rather than a
+counter, and every golden byte is unchanged.
+
+The deletion rides here rather than a follow-up because the tests that reached
+that arm are retired by this same change. Shipping the refusal alone would
+publish a code path that is both unreachable and unguarded, and the follow-up
+had been filed at P3 — below the dispatcher's `max_priority`, so it would have
+routed to nobody and the gap would have been permanent rather than brief
+(ruled by Սեդրակ, correcting the application of his own scope rule; `gqlc-52w8l`
+keeps only its documentation half).
 
 This is worth stating because the obvious repair is wrong. Re-pointing the
 property path's tests at query columns would not relocate the same coverage —
@@ -170,7 +181,7 @@ it either. Measured: no golden in the corpus emits a `from<X>List<n>` helper for
 any n. Those helpers are therefore unreachable by construction, exactly as
 `writeSliceNarrow`'s recursive arm is, and for the same reason. They are kept
 untouched here — bead `gqlc-tlc3e` carries the question of whether they should
-go the way `gqlc-52w8l` takes the other arm, and it is deliberately not settled
+go the way this change takes the other arm, and it is deliberately not settled
 in this PR.
 
 ## Considered and rejected
