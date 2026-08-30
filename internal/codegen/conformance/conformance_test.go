@@ -104,11 +104,34 @@ var sentinelLanes = []struct {
 	{"cypher.", cypher.AllSentinels()},
 }
 
+// backendSentinels is what the registered backends publish, keyed by the
+// spelling a manifest carries. This is how a backend-local refusal
+// becomes nameable here at all: the names travel WITH the values through
+// the registry, which is the one thing this package holds that reaches a
+// backend without importing one.
+//
+// Panicking at test-binary init is deliberate. NewRegistry's error
+// reports a malformed entry list, which its own doc calls a programming
+// error; there is no run of this suite in which the right answer is to
+// carry on with a registry that failed to compose.
+var backendSentinels = func() map[string]error {
+	reg, err := backends.Registry()
+	if err != nil {
+		panic(err)
+	}
+	return reg.Sentinels()
+}()
+
 // sentinelByName maps the manifest's fully-qualified sentinel string
 // back to the actual error value at load time. A change to a lane's set
 // without a fixture update fails the queryfile / codegen reachability
 // sweeps, and a fixture that names a non-canonical sentinel fails
 // invalidFixtures' map lookup.
+//
+// The backend names are merged in already qualified — they arrive with
+// their own package prefix and never meet sentinelIdent, which knows
+// only the three core lanes' symbols and would answer "unknown" for
+// every one of them.
 var sentinelByName = func() map[string]error {
 	m := make(map[string]error)
 	for _, lane := range sentinelLanes {
@@ -116,6 +139,7 @@ var sentinelByName = func() map[string]error {
 			m[lane.prefix+sentinelIdent(s)] = s
 		}
 	}
+	maps.Copy(m, backendSentinels)
 	return m
 }()
 
@@ -140,6 +164,17 @@ func TestSentinelNameMapIsTotal(t *testing.T) {
 				"sentinelIdent does not know %s sentinel %q, so no fixture can name it", lane.prefix, s)
 		}
 	}
+
+	// The backend lane has no sentinelIdent to hold in step — its names
+	// arrive qualified — so what this sweep holds for it is that it
+	// arrived at all. An empty read is what a dropped `Sentinels:` at
+	// the composition root looks like from here, and every other
+	// assertion in this file is quantified over a set that emptying
+	// satisfies vacuously.
+	require.NotEmpty(t, backendSentinels,
+		"no registered backend publishes a sentinel, so no invalid fixture can name a backend refusal")
+	total += len(backendSentinels)
+
 	require.Len(t, sentinelByName, total,
 		"two sentinels resolved to one name; the map holds whichever was built last")
 }
@@ -535,6 +570,51 @@ func TestSentinelReachability(t *testing.T) {
 	}
 	for sentinel := range covered {
 		require.True(t, canonical[sentinel], "fixture maps to non-canonical sentinel %q", sentinel)
+	}
+}
+
+// TestBackendSentinelReachability is the sibling sweep for the backend
+// lane: every name a backend publishes must be named as expectedError by
+// at least one invalid fixture.
+//
+// The rule it enforces is that publication is opt-in and a witness is
+// not. A backend may publish nothing — the two neo4j entries do — but a
+// name it does publish is a claim that the corpus records that refusal,
+// and an unwitnessed one is dead machinery that reads from the outside
+// exactly like coverage. One witnessing fixture anywhere suffices: this
+// asks whether the name is reachable, not whether every target reaches
+// it, and TestInvalid's per-target ErrorIs is what holds the fixture to
+// the behaviour.
+//
+// Not the mirror of TestSentinelReachability's second direction, and
+// deliberately: a fixture naming a published name that no backend
+// publishes cannot exist, because the name would not resolve through
+// sentinelByName and TestInvalid reds on the lookup first.
+func TestBackendSentinelReachability(t *testing.T) {
+	dirs, err := filepath.Glob(filepath.Join(fixtureRoot(), "invalid", "*"))
+	require.NoError(t, err)
+
+	covered := make(map[string]bool)
+	for _, dir := range dirs {
+		src, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+		require.NoError(t, err)
+		var m manifest
+		require.NoError(t, json.Unmarshal(src, &m))
+		if _, published := backendSentinels[m.ExpectedError]; !published {
+			continue
+		}
+		covered[m.ExpectedError] = true
+	}
+	requireSwept(t, len(covered), "the invalid corpus",
+		"no invalid fixture named a published backend sentinel, so nothing below is reconciled against a "+
+			"fixture this run read. The glob above reads a directory a rename or a redirected childRootEnv can "+
+			"silently empty, and with backendSentinels populated the loop below would then report every "+
+			"published name as unwitnessed — a true failure for the wrong reason, naming the corpus nowhere")
+
+	for name := range backendSentinels {
+		require.Truef(t, covered[name],
+			"backend sentinel %q is published and no invalid fixture names it, so the corpus does not record "+
+				"that refusal; add a fixture or stop publishing the name", name)
 	}
 }
 

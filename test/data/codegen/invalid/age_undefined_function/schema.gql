@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE AgeUndefinedFunction AS {
+    (:Person {
+        name  :: STRING NOT NULL,
+        since :: INT64 NOT NULL
+    })
+}
