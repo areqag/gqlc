@@ -12,14 +12,12 @@ import (
 
 // Reading corresponds to the Reading node type.
 type Reading struct {
-	Codes  []int32
-	Flags  *[]bool
-	Grid   *[][]int16
-	Id     int64
-	Marks  *[]string
-	Matrix *[][]float32
-	Ranks  *[]int32
-	Tags   *[]string
+	Codes []int32
+	Flags *[]bool
+	Id    int64
+	Marks *[]string
+	Ranks *[]int32
+	Tags  *[]string
 }
 
 // decodeReading decodes an agtype vertex into a Reading struct, enforcing
@@ -43,36 +41,26 @@ func decodeReading(raw []byte) (Reading, error) {
 		return Reading{}, fmt.Errorf("decode Reading.Flags: %w", err)
 	}
 	out.Flags = value1
-	value2, err := agtypeNullableProperty(props, "grid", agtypeListOfListOfInt16)
-	if err != nil {
-		return Reading{}, fmt.Errorf("decode Reading.Grid: %w", err)
-	}
-	out.Grid = value2
-	value3, err := agtypeProperty(props, "id", agtypeInt64)
+	value2, err := agtypeProperty(props, "id", agtypeInt64)
 	if err != nil {
 		return Reading{}, fmt.Errorf("decode Reading.Id: %w", err)
 	}
-	out.Id = value3
-	value4, err := agtypeNullableProperty(props, "marks", agtypeListOfString)
+	out.Id = value2
+	value3, err := agtypeNullableProperty(props, "marks", agtypeListOfString)
 	if err != nil {
 		return Reading{}, fmt.Errorf("decode Reading.Marks: %w", err)
 	}
-	out.Marks = value4
-	value5, err := agtypeNullableProperty(props, "matrix", agtypeListOfListOfFloat32)
-	if err != nil {
-		return Reading{}, fmt.Errorf("decode Reading.Matrix: %w", err)
-	}
-	out.Matrix = value5
-	value6, err := agtypeNullableProperty(props, "ranks", agtypeListOfInt32)
+	out.Marks = value3
+	value4, err := agtypeNullableProperty(props, "ranks", agtypeListOfInt32)
 	if err != nil {
 		return Reading{}, fmt.Errorf("decode Reading.Ranks: %w", err)
 	}
-	out.Ranks = value6
-	value7, err := agtypeNullableProperty(props, "tags", agtypeListOfString)
+	out.Ranks = value4
+	value5, err := agtypeNullableProperty(props, "tags", agtypeListOfString)
 	if err != nil {
 		return Reading{}, fmt.Errorf("decode Reading.Tags: %w", err)
 	}
-	out.Tags = value7
+	out.Tags = value5
 	return out, nil
 }
 
@@ -133,20 +121,6 @@ func agtypeInt64(raw []byte) (int64, error) {
 	out, err := strconv.ParseInt(strings.TrimSuffix(string(raw), "::numeric"), 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("gqlc: %q is not an agtype integer: %w", raw, err)
-	}
-	return out, nil
-}
-
-// agtypeFloat64 decodes an agtype float scalar. The float parser reads
-// it rather than the JSON decoder because agtype's float vocabulary is
-// IEEE 754's: NaN, Infinity and -Infinity are values AGE emits and JSON
-// has no spelling for. A value carrying the ::numeric annotation is one
-// AGE evaluated in arbitrary precision, and lands on the nearest
-// float64.
-func agtypeFloat64(raw []byte) (float64, error) {
-	out, err := strconv.ParseFloat(strings.TrimSuffix(string(raw), "::numeric"), 64)
-	if err != nil {
-		return 0, fmt.Errorf("gqlc: %q is not an agtype float: %w", raw, err)
 	}
 	return out, nil
 }
@@ -295,22 +269,6 @@ func agtypeListOfBool(raw []byte) ([]bool, error) {
 	return agtypeList(raw, agtypeBool)
 }
 
-// agtypeListOfFloat32 decodes an agtype list of float32 elements.
-func agtypeListOfFloat32(raw []byte) ([]float32, error) {
-	return agtypeList(raw, func(elem []byte) (float32, error) {
-		out, err := agtypeFloat64(elem)
-		return float32(out), err
-	})
-}
-
-// agtypeListOfInt16 decodes an agtype list of int16 elements.
-func agtypeListOfInt16(raw []byte) ([]int16, error) {
-	return agtypeList(raw, func(elem []byte) (int16, error) {
-		out, err := agtypeInt64(elem)
-		return int16(out), err
-	})
-}
-
 // agtypeListOfInt32 decodes an agtype list of int32 elements.
 func agtypeListOfInt32(raw []byte) ([]int32, error) {
 	return agtypeList(raw, func(elem []byte) (int32, error) {
@@ -322,16 +280,6 @@ func agtypeListOfInt32(raw []byte) ([]int32, error) {
 // agtypeListOfString decodes an agtype list of string elements.
 func agtypeListOfString(raw []byte) ([]string, error) {
 	return agtypeList(raw, agtypeString)
-}
-
-// agtypeListOfListOfFloat32 decodes an agtype list of []float32 elements.
-func agtypeListOfListOfFloat32(raw []byte) ([][]float32, error) {
-	return agtypeList(raw, agtypeListOfFloat32)
-}
-
-// agtypeListOfListOfInt16 decodes an agtype list of []int16 elements.
-func agtypeListOfListOfInt16(raw []byte) ([][]int16, error) {
-	return agtypeList(raw, agtypeListOfInt16)
 }
 
 // agtypeProperty reads one property the schema declares NOT NULL out of a

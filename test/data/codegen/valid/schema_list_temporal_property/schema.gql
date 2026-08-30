@@ -2,7 +2,6 @@ CREATE PROPERTY GRAPH TYPE SchemaListTemporalProperty AS {
     (:Sample {
         id      :: INT64 NOT NULL,
         stamps  :: LIST<TIMESTAMP NOT NULL>,
-        windows :: LIST<LIST<TIMESTAMP>>,
         days    :: LIST<DATE NOT NULL>
     })
 }

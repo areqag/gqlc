@@ -10,20 +10,18 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 )
 
-const readingColumnsQueryText = `MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.matrix AS matrix, r.marks AS marks, r.grid AS grid`
+const readingColumnsQueryText = `MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.marks AS marks`
 
 type ReadingColumnsRow struct {
-	Tags   *[]string
-	Ranks  *[]int32
-	Flags  *[]bool
-	Matrix *[][]float32
-	Marks  *[]string
-	Grid   *[][]int16
+	Tags  *[]string
+	Ranks *[]int32
+	Flags *[]bool
+	Marks *[]string
 }
 
 // ReadingColumns executes the ReadingColumns query.
 //
-//	MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.matrix AS matrix, r.marks AS marks, r.grid AS grid
+//	MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.marks AS marks
 func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, error) {
 	records, err := q.db.run(ctx, readingColumnsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
@@ -83,73 +81,23 @@ func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 			value2Ptr = &acc2
 		}
 		row.Flags = value2Ptr
-		value3, isNil, err := neo4j.GetRecordValue[[]any](record, "matrix")
-		if err != nil {
-			return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "matrix", err)
-		}
-		var value3Ptr *[][]float32
-		if !isNil {
-			acc3 := make([][]float32, 0, len(value3))
-			for i, elem := range value3 {
-				inner1, ok := elem.([]any)
-				if !ok {
-					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected []any, got %T", "matrix", i, elem)
-				}
-				innerAcc1 := make([]float32, 0, len(inner1))
-				for i, elem1 := range inner1 {
-					v, ok := elem1.(float64)
-					if !ok {
-						return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected float64, got %T", "matrix", i, elem1)
-					}
-					innerAcc1 = append(innerAcc1, float32(v))
-				}
-				acc3 = append(acc3, innerAcc1)
-			}
-			value3Ptr = &acc3
-		}
-		row.Matrix = value3Ptr
-		value4, isNil, err := neo4j.GetRecordValue[[]any](record, "marks")
+		value3, isNil, err := neo4j.GetRecordValue[[]any](record, "marks")
 		if err != nil {
 			return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "marks", err)
 		}
-		var value4Ptr *[]string
+		var value3Ptr *[]string
 		if !isNil {
-			acc4 := make([]string, 0, len(value4))
-			for i, elem := range value4 {
+			acc3 := make([]string, 0, len(value3))
+			for i, elem := range value3 {
 				v, ok := elem.(string)
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected string, got %T", "marks", i, elem)
 				}
-				acc4 = append(acc4, v)
+				acc3 = append(acc3, v)
 			}
-			value4Ptr = &acc4
+			value3Ptr = &acc3
 		}
-		row.Marks = value4Ptr
-		value5, isNil, err := neo4j.GetRecordValue[[]any](record, "grid")
-		if err != nil {
-			return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "grid", err)
-		}
-		var value5Ptr *[][]int16
-		if !isNil {
-			acc5 := make([][]int16, 0, len(value5))
-			for i, elem := range value5 {
-				inner1, ok := elem.([]any)
-				if !ok {
-					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected []any, got %T", "grid", i, elem)
-				}
-				innerAcc1 := make([]int16, 0, len(inner1))
-				for i, elem1 := range inner1 {
-					v, ok := elem1.(int64)
-					if !ok {
-						return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected int64, got %T", "grid", i, elem1)
-					}
-					innerAcc1 = append(innerAcc1, int16(v))
-				}
-				acc5 = append(acc5, innerAcc1)
-			}
-			value5Ptr = &acc5
-		}
-		row.Grid = value5Ptr
+		row.Marks = value3Ptr
 		out = append(out, row)
 	}
 	return out, nil

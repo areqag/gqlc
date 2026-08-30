@@ -12,11 +12,14 @@ type typeMap struct{}
 // Property maps a resolved property type to its native Go emission (spec
 // §5.1). Returns (typeText, ok): ok=false for the eight unrepresentable
 // widths (INT128 / INT256 / UINT128 / UINT256 / FLOAT16 / FLOAT128 /
-// FLOAT256 / DECIMAL) — caller routes to ErrUnrepresentableWidth naming
-// the width. Callers append a leading '*' for nullable columns and
-// parameters at emission time. FLOAT32 returns "float32" (the
-// carrier-widens-on-encode / narrow-on-decode contract is enforced at
-// the emission sites, spec §5.5 / §5.7).
+// FLOAT256 / DECIMAL), and for a list whose element is itself a list —
+// caller routes both to ErrUnrepresentableWidth naming the declared
+// type. The two refusals differ in kind: the widths have no Go carrier,
+// while a nested list has one and is refused because the neo4j server
+// will not store it (ADR 0035, bd gqlc-v0gk). Callers append a leading
+// '*' for nullable columns and parameters at emission time. FLOAT32
+// returns "float32" (the carrier-widens-on-encode / narrow-on-decode
+// contract is enforced at the emission sites, spec §5.5 / §5.7).
 //
 // DATE / TIME / LOCAL TIME / DURATION return the gqlc-owned neutral
 // carriers "Date" / "Time" / "LocalTime" / "Duration", declared in the
@@ -29,6 +32,23 @@ type typeMap struct{}
 // carrying Months / Days / Seconds / Nanos (see ADR 0002 Consequences).
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
+		// A list of lists is refused for a different reason than every
+		// other ok=false above: Go has the carrier ([][]int16), and the
+		// server is what will not hold it. neo4j stores a property value
+		// only if it is a scalar or a flat list of scalars, answering a
+		// nested write with "Collections containing collections can not
+		// be stored in properties" (ADR 0035, bd gqlc-v0gk). Emitting
+		// for such a property would give the author a decoder that can
+		// never see data, so it fails at generation where it can name
+		// the property instead.
+		//
+		// This binds STORED PROPERTIES only. neo4j serves nested lists
+		// as query VALUES, and the plan walker asks this table only of
+		// property-typed leaves, so a collect(collect(...)) or a nested
+		// list literal never arrives here.
+		if pt.Elem().Kind() == graph.KindList {
+			return "", false
+		}
 		elemTy, ok := t.Property(pt.Elem())
 		if !ok {
 			return "", false

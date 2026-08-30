@@ -11,12 +11,11 @@ import (
 
 // Slot corresponds to the Slot node type.
 type Slot struct {
-	Days    []Date
-	Id      int64
-	Ranks   []int32
-	Spans   *[]Duration
-	Tags    []string
-	Windows [][]Date
+	Days  []Date
+	Id    int64
+	Ranks []int32
+	Spans *[]Duration
+	Tags  []string
 }
 
 // decodeSlot decodes a driver dbtype.Node into a Slot struct,
@@ -93,26 +92,5 @@ func decodeSlot(node dbtype.Node) (Slot, error) {
 		value4s = append(value4s, v0)
 	}
 	out.Tags = value4s
-	value5, err := neo4j.GetProperty[[]any](node, "windows")
-	if err != nil {
-		return Slot{}, fmt.Errorf("decode Slot.Windows: %w", err)
-	}
-	value5s := make([][]Date, 0, len(value5))
-	for i0, elem0 := range value5 {
-		nested0, ok := elem0.([]any)
-		if !ok {
-			return Slot{}, fmt.Errorf("decode Slot.Windows: property %q element %d: expected []any, got %T", "windows", i0, elem0)
-		}
-		acc0 := make([]Date, 0, len(nested0))
-		for i1, elem1 := range nested0 {
-			v1, ok := elem1.(dbtype.Date)
-			if !ok {
-				return Slot{}, fmt.Errorf("decode Slot.Windows: property %q element %d: expected dbtype.Date, got %T", "windows", i1, elem1)
-			}
-			acc0 = append(acc0, toDate(v1))
-		}
-		value5s = append(value5s, acc0)
-	}
-	out.Windows = value5s
 	return out, nil
 }

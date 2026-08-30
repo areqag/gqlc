@@ -5,9 +5,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/neo4j"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 // TestTypeMapProperty pins the driver's Go-type table for the property
@@ -131,6 +133,124 @@ func TestTypeMapProperty(t *testing.T) {
 		_, ok := neo4j.TypeMap{}.Property(graph.ListOf(graph.TypeDecimal, false))
 		require.False(t, ok)
 	})
+}
+
+// TestTypeMapPropertyRefusesANestedList pins the one refusal in this
+// table that is not about a Go carrier (ADR 0035, bd gqlc-v0gk).
+// [][]float32 is a perfectly good Go type; what refuses it is the
+// neo4j server, which stores a property value only if it is a scalar
+// or a flat list of scalars — measured 2026-08-29 against the pinned
+// image, which answers a nested write with "Collections containing
+// collections can not be stored in properties". Generating for a
+// property no writer can ever fill emits a decoder that can never see
+// data, so the refusal moves to generation time where it can name the
+// property.
+//
+// The rows below are chosen for the ways the check could be written
+// too narrowly rather than for coverage of the width table:
+//
+//   - the NOT NULL row is here because Elem() strips the qualifier, so
+//     a check reading the raw text instead would miss it;
+//   - the depth-3 row is here because the refusal is at the outer level
+//     and does not recurse to find the nesting;
+//   - LIST<LIST<ANY>> is here because a bare LIST is spelled "LIST<ANY>"
+//     upstream, so it reaches the guard as an element whose Kind() is
+//     KindList like any other.
+//
+// The admitted rows are the other half, and they are what says this is
+// a refusal of NESTING rather than of lists: a flat list of any
+// representable width still carries, LIST<ANY> included. Over-refusing
+// here would be the expensive mistake — the server SERVES nested lists
+// as query values even though it will not store them, which is why the
+// scope is the property table and not the plan walker.
+func TestTypeMapPropertyRefusesANestedList(t *testing.T) {
+	refused := []graph.PropertyType{
+		graph.ListOf(graph.ListOf(graph.TypeInt16, false), false),
+		graph.ListOf(graph.ListOf(graph.TypeFloat32, false), false),
+		// LIST<LIST<INT16> NOT NULL> — the qualifier sits on the outer
+		// list's element, which Elem() strips.
+		graph.ListOf(graph.ListOf(graph.TypeInt16, false), true),
+		graph.ListOf(graph.ListOf(graph.ListOf(graph.TypeInt, false), false), false),
+		// The schema language spells this LIST<LIST<ANY VALUE>>;
+		// graph.TypeAnyPropertyValue normalises to "ANY".
+		graph.ListOf(graph.ListOf(graph.TypeAnyPropertyValue, false), false),
+	}
+	for _, pt := range refused {
+		t.Run("refused/"+string(pt), func(t *testing.T) {
+			require.Equal(t, graph.KindList, pt.Elem().Kind(),
+				"this row's element is not itself a list, so it is not the shape this test is about")
+			got, ok := neo4j.TypeMap{}.Property(pt)
+			require.False(t, ok,
+				"the neo4j server cannot store %s as a property value, so the table must refuse it "+
+					"rather than emit a decoder no writer can ever fill (ADR 0035)", pt)
+			require.Empty(t, got)
+		})
+	}
+
+	admitted := []struct {
+		pt   graph.PropertyType
+		want string
+	}{
+		{graph.ListOf(graph.TypeInt16, false), "[]int16"},
+		{graph.ListOf(graph.TypeString, true), "[]string"},
+		{graph.ListOf(graph.TypeAnyPropertyValue, false), "[]any"},
+	}
+	for _, tt := range admitted {
+		t.Run("admitted/"+string(tt.pt), func(t *testing.T) {
+			got, ok := neo4j.TypeMap{}.Property(tt.pt)
+			require.Truef(t, ok,
+				"%s is a flat list of a representable width, which the server stores; refusing it here "+
+					"means the nested-list check is reading the outer list rather than its element", tt.pt)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestNestedListPropertyRejectionReachesTheCaller pins what an author
+// actually sees, which is the half of the refusal that has to be right:
+// a table returning ok=false is only useful if the failure travels out
+// of generation naming the entity, the property, the declared type, and
+// the backend that refused.
+//
+// The backend name is the part this test exists for. The refusal is
+// this backend's answer and not a property of the schema — AGE stores
+// the same nested list happily — so a run emitting both targets fails
+// on one of them, and only the name says which. The wording is
+// deliberately NOT AGE's "has no carrier for": [][]float32 is a carrier
+// and Go has it. What refuses is the server's storage rule, and
+// "cannot store as a property" is true of the eight unrepresentable
+// widths and of nested lists alike, so one wrap covers both without
+// lying about either.
+func TestNestedListPropertyRejectionReachesTheCaller(t *testing.T) {
+	nested := graph.ListOf(graph.ListOf(graph.TypeFloat32, false), false)
+	files, err := neo4j.New().Generate(codegen.Input{Schema: schemaWithPayload(nested)})
+
+	require.ErrorIs(t, err, codegen.ErrUnrepresentableWidth,
+		"the nested-list refusal must ride the existing width channel, which prepare.go's entity sweep "+
+			"already routes and already names the property on")
+	require.ErrorContains(t, err,
+		`entity "Blob" property "payload" has `+string(nested)+
+			`, which the neo4j backend cannot store as a property`)
+	require.Nil(t, files)
+}
+
+// schemaWithPayload is a one-node schema whose single property carries
+// pt, so the entity width sweep is the only thing that can fail.
+func schemaWithPayload(pt graph.PropertyType) schema.Schema {
+	labels := graph.LabelSetKey("Blob")
+	return schema.Schema{
+		Name: "Widths",
+		Nodes: map[graph.LabelSetKey]schema.NodeType{
+			labels: {
+				KeyLabels:      labels,
+				CompleteLabels: labels,
+				Name:           "Blob",
+				Properties: map[string]schema.Property{
+					"payload": {Name: "payload", Type: pt},
+				},
+			},
+		},
+	}
 }
 
 // TestTypeMapPropertyListArmIsUnreachable pins the claim types.go makes

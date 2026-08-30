@@ -14,7 +14,6 @@ type Bin struct {
 	Bag   *[]any
 	Id    int64
 	Loose []any
-	Piles *[][]any
 }
 
 // decodeBin decodes a driver dbtype.Node into a Bin struct,
@@ -49,20 +48,5 @@ func decodeBin(node dbtype.Node) (Bin, error) {
 		return Bin{}, fmt.Errorf("decode Bin.Loose: %w", err)
 	}
 	out.Loose = value2
-	if v, ok := node.Props["piles"]; ok {
-		s, ok := v.([]any)
-		if !ok {
-			return Bin{}, fmt.Errorf("decode Bin.Piles: property %q: expected []any, got %T", "piles", v)
-		}
-		narrowed := make([][]any, 0, len(s))
-		for i0, elem0 := range s {
-			v0, ok := elem0.([]any)
-			if !ok {
-				return Bin{}, fmt.Errorf("decode Bin.Piles: property %q element %d: expected []any, got %T", "piles", i0, elem0)
-			}
-			narrowed = append(narrowed, v0)
-		}
-		out.Piles = &narrowed
-	}
 	return out, nil
 }

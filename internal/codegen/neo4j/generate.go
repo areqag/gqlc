@@ -1,8 +1,28 @@
 package neo4j
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/areqag/gqlc/internal/codegen"
 )
+
+// nameBackend adds this backend's name to a width the shared phases
+// refused. The refusal comes from asking this package's type table, so
+// it is this backend's answer and not a property of the schema: a run
+// emitting several targets has to say which of them refused, the more
+// so for a nested list, which Apache AGE stores happily. Every other
+// refusal follows from the input alone, so wrapping it here would
+// misattribute it.
+//
+// neo4j's Temporal() never refuses — types.go says so — so unlike AGE's
+// twin this only ever decorates width refusals.
+func nameBackend(err error) error {
+	if !errors.Is(err, codegen.ErrUnrepresentableWidth) {
+		return err
+	}
+	return fmt.Errorf("%w, which the neo4j backend cannot store as a property", err)
+}
 
 // generate is the pure emission kernel. Determinism per §2.3: input
 // slices are walked in their author-defined order; the output slice is
@@ -11,7 +31,7 @@ import (
 func generate(in codegen.Input, target driverTarget, packageName string) ([]codegen.File, error) {
 	prepared, err := codegen.Prepare(in, typeMap{}, packageName)
 	if err != nil {
-		return nil, err
+		return nil, nameBackend(err)
 	}
 
 	pkg := prepared.Package

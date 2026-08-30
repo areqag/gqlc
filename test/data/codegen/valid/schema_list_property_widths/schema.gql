@@ -4,9 +4,7 @@ CREATE PROPERTY GRAPH TYPE SchemaListPropertyWidths AS {
         tags   :: LIST<STRING>,
         ranks  :: LIST<INT32>,
         flags  :: LIST<BOOL>,
-        matrix :: LIST<LIST<FLOAT32>>,
         marks  :: LIST<STRING NOT NULL>,
-        grid   :: LIST<LIST<INT16> NOT NULL>,
         codes  :: LIST<INT32 NOT NULL> NOT NULL
     })
 }
