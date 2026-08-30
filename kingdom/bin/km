@@ -1691,6 +1691,25 @@ cmd_mail() {
 
 # ---------- wake / sleep ----------
 
+# The queue is a SET of unread reasons, not a log of attempts. A stuck queue is
+# re-derived by every dispatcher tick, and km-seat cats the whole file as ONE
+# wake, so N identical lines reach the seat as a batch dispatch never sent —
+# during the gqlc-2vxs outage Րաֆֆի's file held the guard-round reason six times
+# over. The other thirteen orphaned queues held one line each only because
+# dispatch happened to skip a seat it had already queued for; that bounding was
+# accidental, and this is the one that is not (gqlc-t37m).
+#
+# Distinct reasons still accumulate: one wake can legitimately name several
+# beads, and km-seat walks all of them. So the match is exact — -F and -x, since
+# reasons carry regex metacharacters and one reason is often a prefix of
+# another, and `--` because a reason may begin with a dash. Absent file is a
+# miss, which is the append case.
+wake_queue_add() { # <seat> <reason>
+    local f
+    f="$(seat_home "$1")/wake"
+    grep -Fxq -- "$2" "$f" 2>/dev/null || printf '%s\n' "$2" >>"$f"
+}
+
 cmd_wake() {
     local seat=${1:-} rc
     shift || true
@@ -1730,16 +1749,16 @@ cmd_wake() {
             # nobody consented to (VI.2). Queued rather than dropped: km-seat
             # reads that queue when the session ends, so declining to type now
             # costs a delay and not the message.
-            printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
+            wake_queue_add "$seat" "$reason"
             echo "wake: $seat is awake but its pane shows no prompt to type at — a modal covers the input box, or the pane cannot be read. NOT nudged: Enter there would choose whichever option is highlighted, and a modal is not consent (VI.2). Queued instead — $reason"
         elif seat_nudge "$seat" "[km] $reason — check bd mail inbox when convenient"; then
             echo "wake: $seat is already awake; nudged instead — typed and submitted"
         else
-            printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
+            wake_queue_add "$seat" "$reason"
             echo "wake: NUDGE UNDELIVERED to $seat — see the diagnosis above for which half failed, and read the pane by hand. Queued to the wake file so the reason outlives the failed send — $reason"
         fi
     else
-        printf '%s\n' "$reason" >>"$(seat_home "$seat")/wake"
+        wake_queue_add "$seat" "$reason"
         # "queued" was a statement about the QUEUE, and it stayed true while
         # being false about the world: for four hours nothing was parked on
         # Անահիտ's queue to read it (gqlc-6ha4, Article IV.1). So the report is
