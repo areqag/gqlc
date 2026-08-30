@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Claude Code PreToolUse hook for the Bash tool. Three jobs:
+# Claude Code PreToolUse hook for the Bash tool. Four jobs:
 #
 #   1. Denies `git commit` when the command's EFFECTIVE target repo is on
 #      master/main.
@@ -8,6 +8,37 @@
 #      here rather than in a git hook.
 #   3. Denies `bd close` when its close reason cites a commit sha that no
 #      remote-tracking ref in the effective repo contains (bd gqlc-90vt).
+#   4. Denies the `bd` command that would mint a label GitHub cannot hold
+#      (bd gqlc-uy7j).
+#
+# On (4): GitHub caps a label name at 50 characters and refuses the WHOLE issue
+# over one bad label, so a bead OFFERED with one ends up with no mirror. bd
+# accepts such a label silently at `bd create`, and the complaint is raised much
+# later by .githooks/bd-gh-sync, at `git push`. Those are not the same session: measured
+# 2026-08-24, gqlc-pyc6 carried a 79-character subject: label and EVERY push in
+# town printed the refusal, while its author — the one person who knew what the
+# label was for — never saw it and no reader had standing to edit someone else's
+# bead. A red line that appears on every push and cannot be acted on by the
+# person reading it is how a real failure becomes wallpaper.
+#
+# So this arm does not add a check; it moves an existing one to the boundary
+# where the author is standing. The cap, and the remedy sentence it prints, are
+# imported from .github/scripts/check-label-lengths.py rather than spelled again
+# here — see label_rule(). Three gates now read that one file, so wherever a
+# citizen meets this cap they meet the same words: always at the keyboard and in
+# CI, and at the push for a bead that is not yet mirrored.
+#
+# The paragraph above is the CREATE path. A label added to a bead that ALREADY
+# has a mirror never reaches GitHub at all — bd-gh-sync's screen skips any bead
+# carrying an external_ref, and no pass in it offers a mirrored bead's labels
+# again — so it draws no 422, no push-time NOTE, and CI is the first and only
+# thing that objects. This arm covers both arrivals, which is why it keys on the
+# subcommand rather than on `bd create` alone.
+#
+# What it does NOT reach, because a command line is all it sees: labels
+# inherited from `--parent`, and labels written in a file by `bd create --file`
+# or `--graph`. Both still meet bd-gh-sync at push time and the CI gate at PR
+# time, which is why those two stay.
 #
 # On (3): the actor in the witnessed incident was not a git hook and not a bd
 # feature — it was an agent running `bd close <id> -r "Closed by branch <b> at
@@ -269,6 +300,8 @@
 #
 # Tests: .githooks/tests/claude-pre-bash-test.sh (run via `just test-hooks`).
 
+import functools
+import importlib.util
 import json
 import os
 import re
@@ -352,15 +385,45 @@ BD_CLOSE_SUBCOMMANDS = ("close", "done")
 BD_OPTS_WITH_ARG = (
     "-C", "--directory", "--db", "--actor", "--dolt-auto-commit",
     "--session", "-r", "--reason", "--reason-file",
+    "-l", "--labels", "--label", "--add-label", "--set-labels", "--remove-label",
 )
+# `bd label` arm (bd gqlc-uy7j). Which flags WRITE a label, per subcommand —
+# and the per-subcommand table is the whole point, because `-l` is `--labels`
+# on `create` and `--label`, a FILTER, on `list` and `ready`. One letter, two
+# opposite meanings: a guard keyed on the flag alone would refuse a read.
+# Measured against the bd on this host (`bd create --help`, `bd update --help`,
+# `bd list --help`).
+BD_LABEL_WRITE_OPTS = {
+    "create": ("-l", "--labels"),
+    "new": ("-l", "--labels"),          # bd's documented alias for create
+    "update": ("--add-label", "--set-labels"),
+}
+# `--remove-label` is deliberately absent: it cannot mint a label, so screening
+# it would only refuse the command that CLEARS an over-cap one.
+#
+# `bd label add [issue-id...] [label]` takes its label POSITIONALLY, with no
+# flag to key on at all — it was the path still open when this arm screened
+# flags only, and it writes for real (measured: `✓ Added label ... to probe-r07`
+# in a throwaway workspace). The label is the last positional. `bd label remove`
+# is the inverse and is not screened; `bd label propagate` copies a label that
+# already exists, so it can mint nothing new.
+BD_LABEL_POSITIONAL = ("label", "add")
 # bd is cobra/pflag, which lets a shorthand carry its value attached (-rTEXT)
 # and lets shorthands cluster (-fr TEXT, -qr=TEXT), and this repo force-closes
 # pinned beads with -f. Measured against bd v1.0.4: `-rZZZ` and `-fr ZZZ` both
 # parse, `-fr` with nothing after it answers "flag needs an argument: 'r'", and
-# `-Z` answers "unknown shorthand flag". Only these two shorthands take a value
+# `-Z` answers "unknown shorthand flag". Of these, only `r` and `C` take a value
 # in `bd close --help`; -f, -q, -v and -h are boolean, so a cluster is walked
 # until a value-taking letter is reached.
-BD_SHORTHANDS_WITH_ARG = {"r": "--reason", "C": "--directory"}
+#
+# `l` is here for `bd create -l` and does NOT appear in `bd close --help` at all,
+# so on a close it makes the scanner consume one token pflag would have rejected.
+# That is the safe direction: over-consuming can only hide a token from the
+# subcommand test, and a close the scanner fails to see is allowed, which is this
+# guard's pre-existing bias rather than a new one. The mapping is per-shorthand
+# and not per-subcommand because a cluster is walked before any subcommand is
+# known; what the letter MEANS is decided later, by BD_LABEL_WRITE_OPTS.
+BD_SHORTHANDS_WITH_ARG = {"r": "--reason", "C": "--directory", "l": "--labels"}
 # Two tiers, because a sha is recognised by two different kinds of evidence.
 #
 # CITED_SHA_RE is the `at <sha>` / `@ <sha>` / `commit <sha>` idiom. A match is
@@ -737,11 +800,18 @@ def shorthand_arg(opt, tokens, j):
 def scan_bd(tokens, i, cwd):
     """Read one `bd ...` invocation starting at tokens[i].
 
-    Returns (next_index, close_or_None) where close is
-    (effective_dir, saw_reason_flag, reason_text, reason_file).
+    Returns (next_index, close_or_None, label_writes) where close is
+    (effective_dir, saw_reason_flag, reason_text, reason_file) and label_writes
+    is a list of (flag_or_"<positional>", label_value) this invocation would
+    WRITE onto a bead — never one it merely filters by.
     """
     target, n = cwd, len(tokens)
     saw_reason, reason, reason_file, is_close = False, None, None, False
+    # Positionals in order (the subcommand is the first) and every value handed
+    # to a label-shaped flag, both collected unconditionally. Which of them is a
+    # WRITE cannot be decided during the walk, because `-l` may be read before
+    # the subcommand that gives it its meaning (`bd -C x -l foo create`).
+    positionals, flagged = [], []
     j = i + 1
     while j < n:
         opt = tokens[j]
@@ -767,6 +837,8 @@ def scan_bd(tokens, i, cwd):
                 saw_reason, reason = True, val
             elif name == "--reason-file":
                 saw_reason, reason_file = True, val
+            else:
+                flagged.append((name, val))
             continue
         if opt.startswith("-"):
             name, val, step = shorthand_arg(opt, tokens, j)
@@ -774,6 +846,8 @@ def scan_bd(tokens, i, cwd):
                 j += step
                 if name == "--directory":
                     target = resolve(target, val)
+                elif name == "--labels":
+                    flagged.append((name, val))
                 else:
                     saw_reason, reason = True, val
                 continue
@@ -781,20 +855,58 @@ def scan_bd(tokens, i, cwd):
             continue
         if opt in BD_CLOSE_SUBCOMMANDS:
             is_close = True
+        positionals.append(opt)
         j += 1
     close = (target, saw_reason, reason, reason_file) if is_close else None
-    return j + 1, close
+    return j + 1, close, label_writes(positionals, flagged)
 
 
-def scan_tokens(tokens, cwd, wanted, closes=None):
+def label_writes(positionals, flagged):
+    """Which of a `bd` invocation's values would actually be WRITTEN as labels.
+
+    The subcommand decides. An invocation whose subcommand is not a label
+    writer contributes nothing, which is what keeps `bd list -l <label>` — a
+    filter spelled with the same letter — out of the guard entirely.
+    """
+    sub = positionals[0] if positionals else None
+    writes = []
+    for name, value in flagged:
+        # `-l` reaches here already normalised to `--labels` by both paths.
+        wanted = BD_LABEL_WRITE_OPTS.get(sub, ())
+        if name in wanted or (name == "--labels" and "-l" in wanted):
+            writes.extend((name, lab) for lab in split_labels(value))
+    # `bd label add [issue-id...] [label]`. The label is the LAST positional,
+    # after `label` and `add` themselves — so at least three are needed. With
+    # only ids and no label, pflag would error; reading the final id as a label
+    # here is inert, since a bead id is far short of the cap.
+    if tuple(positionals[:2]) == BD_LABEL_POSITIONAL and len(positionals) >= 3:
+        writes.append(("<positional>", positionals[-1]))
+    return writes
+
+
+def split_labels(value):
+    """One flag value into the labels bd would store.
+
+    cobra's `strings` flag splits on commas, so `-l a,b` is two labels and not
+    one 3-character one — screening the value whole would refuse a legal pair
+    for the sum of its parts. An empty element is dropped: it is not a label.
+    """
+    if value is None:
+        return []
+    return [part for part in value.split(",") if part]
+
+
+def scan_tokens(tokens, cwd, wanted, closes=None, labels=None):
     targets = []
     i, n = 0, len(tokens)
     while i < n:
         tok = tokens[i]
         if tok == "bd" or tok.endswith("/bd"):
-            i, close = scan_bd(tokens, i, cwd)
+            i, close, writes = scan_bd(tokens, i, cwd)
             if close is not None and closes is not None:
                 closes.append(close)
+            if labels is not None:
+                labels.extend(writes)
             continue
         if tok in ("cd", "pushd"):
             arg = tokens[i + 1] if i + 1 < n else None
@@ -837,7 +949,7 @@ def scan_tokens(tokens, cwd, wanted, closes=None):
     return targets
 
 
-def git_targets(text, cwd, wanted, depth=0, closes=None):
+def git_targets(text, cwd, wanted, depth=0, closes=None, labels=None):
     # -> [(subcommand, effective directory)], need_fallback
     if depth > 3:
         return [], False
@@ -858,7 +970,8 @@ def git_targets(text, cwd, wanted, depth=0, closes=None):
     bodies = substitution_bodies(text, cwd)
     bodies.extend(substitution_bodies(expanded, cwd))
     for body, body_cwd in bodies:
-        sub_targets, sub_fallback = git_targets(body, body_cwd, wanted, depth + 1, closes)
+        sub_targets, sub_fallback = git_targets(
+            body, body_cwd, wanted, depth + 1, closes, labels)
         targets.extend(sub_targets)
         need_fallback = need_fallback or sub_fallback
     try:
@@ -867,7 +980,7 @@ def git_targets(text, cwd, wanted, depth=0, closes=None):
         tokens = list(lex)
     except ValueError:
         return targets, True
-    targets.extend(scan_tokens(tokens, cwd, wanted, closes))
+    targets.extend(scan_tokens(tokens, cwd, wanted, closes, labels))
     return targets, need_fallback
 
 
@@ -1254,6 +1367,103 @@ def close_verdict(close):
     return "allow-reachable", None
 
 
+# Resolved beside this hook first, because all of its callers invoke it by path,
+# and off the work tree only as a fallback — the same order bd-gh-sync uses to
+# find the same file.
+LABEL_GATE_PATHS = (
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 "..", ".github", "scripts", "check-label-lengths.py"),
+)
+
+
+@functools.lru_cache(maxsize=1)
+def label_rule():
+    """(cap, prefix, remedy_fn) from the module that owns them, or None.
+
+    None means the cap could not be read, which is NOT the same as "no label is
+    over it" — see label_verdict, which reports the difference rather than
+    defaulting to a number. Cached because this hook runs ahead of every Bash
+    call and the import reads and compiles a file.
+    """
+    paths = list(LABEL_GATE_PATHS)
+    root = repo_root(os.getcwd())
+    if root:
+        paths.append(os.path.join(root, ".github", "scripts", "check-label-lengths.py"))
+    for path in paths:
+        if not os.path.isfile(path):
+            continue
+        try:
+            # Importing compiles, and python caches that compilation next to the
+            # source — a hook writing __pycache__/ into .github/scripts/, which
+            # is not gitignored and would leave an untracked directory behind in
+            # every session. bd-gh-sync hit this on its first run of this path.
+            saved, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+            try:
+                spec = importlib.util.spec_from_file_location("_label_gate", path)
+                if spec is None or spec.loader is None:
+                    continue
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+            finally:
+                sys.dont_write_bytecode = saved
+            return int(mod.MAX_LABEL), str(mod.PREFIX), mod.remedy
+        except Exception:  # noqa: BLE001 - every failure here has one meaning
+            continue
+    return None
+
+
+def label_verdict(write):
+    """(verdict name, message or None) for one label a `bd` command would write.
+
+    Five verdicts — no-label-write, allow-unexpanded-label, warn-cap-unreadable,
+    allow-label-fits, deny-label-over-cap — of which only the last refuses.
+    Named rather than reduced to a boolean because "no label was written" and
+    "the arm stopped finding labels" are the same silence otherwise.
+    """
+    flag, label = write
+    if label is None:
+        return "no-label-write", None
+    # A value the shell has not expanded has no length to measure — `$(...)`
+    # could resolve to anything. Allowed, and named so the gap is legible: the
+    # label lands unscreened, and WHAT catches it then depends on the bead. One
+    # with no mirror yet meets bd-gh-sync's push-time refusal; one that already
+    # has a mirror is skipped by that screen entirely, so nothing looks at the
+    # label until the CI gate. Refusing on the unexpanded text's own length
+    # would refuse a command whose real label fits.
+    if UNEXPANDED_RE.search(label):
+        return "allow-unexpanded-label", None
+    rule = label_rule()
+    if rule is None:
+        return "warn-cap-unreadable", (
+            "A label GitHub can hold could not be checked: the cap lives in "
+            ".github/scripts/check-label-lengths.py and that file could not be read, "
+            "so this label was NOT screened. If this bead has no mirror yet, a label "
+            "over the cap makes GitHub refuse the whole issue and leaves it without "
+            "one; if it is already mirrored, the label never reaches GitHub at all "
+            "and CI is the only thing that will object (bd gqlc-uy7j)."
+        )
+    cap, _prefix, remedy = rule
+    if len(label) <= cap:
+        return "allow-label-fits", None
+    # `bd -l` would be a command nobody typed: the subcommand is not carried
+    # this far, so name the flag as a flag. The positional path has no flag to
+    # name, which is why it names its subcommand instead.
+    where = "`%s` value" % flag if flag != "<positional>" else "`bd label add`"
+    message = (
+        "That %s would create a label GitHub cannot hold: %r is %d characters and "
+        "the cap is %d. On a bead with no mirror yet, GitHub refuses the WHOLE issue "
+        "over one bad label, so the bead would be left without one and you would not "
+        "find out here: the complaint surfaces at `git push`, in whoever's session "
+        "pushes next. On a bead that is ALREADY mirrored, bd-gh-sync skips it, so the "
+        "label reaches nobody and nothing objects until CI (bd gqlc-uy7j)."
+        % (where, label, len(label), cap)
+    )
+    advice = remedy(label)
+    if advice:
+        message += " " + advice
+    return "deny-label-over-cap", message
+
+
 def deny(reason):
     print("ERROR: %s" % reason, file=sys.stderr)
     emit(
@@ -1290,7 +1500,9 @@ def main():
         return
     cwd = os.getcwd()
     closes = []
-    targets, need_fallback = git_targets(command, cwd, HOOK_GATED, closes=closes)
+    labels = []
+    targets, need_fallback = git_targets(
+        command, cwd, HOOK_GATED, closes=closes, labels=labels)
     if need_fallback and FALLBACK_RE.search(command):
         targets.append(("commit", cwd))
     for sub, directory in targets:
@@ -1325,6 +1537,22 @@ def main():
         if message is not None:
             deny(message)
             return
+
+    # The label arm. Unlike the close arm, an exception here is NOT turned into
+    # a refusal: the damage this prevents is recoverable in one command by the
+    # person standing at the keyboard (edit the label and retype), while a bug
+    # in the arm that denied would block `bd create` in every concurrent session
+    # at once, including whichever one has to fix it. So it falls through to the
+    # top-level handler, which warns and allows.
+    for write in labels:
+        verdict, message = label_verdict(write)
+        if message is None:
+            continue
+        if verdict == "deny-label-over-cap":
+            deny(message)
+            return
+        warn(message)
+        return
 
     # A dead hook tree is repo state, not a property of this command, so the
     # refusal is scoped to the commands the dead hooks would have gated. Every
