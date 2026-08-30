@@ -1230,7 +1230,11 @@ def object_types(directory, shas):
     if proc.returncode != 0 or len(lines) != len(revs):
         return None
     types = {}
-    for rev, line in zip(revs, lines):
+    # strict=True rather than the silent truncation zip() defaults to: the
+    # guard above already returns None unless the two are the same length, so
+    # this can only raise if that guard is ever weakened, and a positional
+    # mapping that quietly drops its tail would answer about the wrong sha.
+    for rev, line in zip(revs, lines, strict=True):
         fields = line.split()
         types[rev] = fields[1] if len(fields) >= 2 and fields[1] != "missing" else ""
     return types
