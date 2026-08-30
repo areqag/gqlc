@@ -605,6 +605,82 @@ func TestTemporalKindRefusalReachesTheCaller(t *testing.T) {
 	}
 }
 
+// TestStorageRefusalReachesTheCallerAsItsOwnSentinel holds the storage
+// axis apart from the carrier axis at the one place both are asked.
+//
+// Every row runs the SAME width, LIST<LIST<INT16>>, and varies only the
+// typeMap and the position the width occupies. That is what makes the
+// axes separable: a suite that refused a width no carrier admits would
+// not be able to say which question answered.
+//
+// The admits row is not decoration. Without it the refused row is
+// satisfied by a pipeline that refuses a nested list outright, which is
+// the over-refusal the design forbids — neo4j has a faithful [][]int16
+// and decodes one arriving as a query value.
+func TestStorageRefusalReachesTheCallerAsItsOwnSentinel(t *testing.T) {
+	nested := graph.ListOf(graph.ListOf(graph.TypeInt16, true), true)
+	person := graph.LabelSetKey("Person")
+	schemaWith := func(pt graph.PropertyType) schema.Schema {
+		return schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{
+					"matrix": {Name: "matrix", Type: pt},
+				}},
+			},
+		}
+	}
+
+	t.Run("a stored property the store will not hold", func(t *testing.T) {
+		_, _, err := codegen.PhaseZAdmit(schemaWith(nested), unstorablePropertyTypeMap{refuse: nested})
+		require.ErrorIs(t, err, codegen.ErrUnstorableProperty)
+		require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth,
+			"the carrier admits this width; reporting the carrier sentinel would send the caller to a Go-type gap that is not there")
+		require.EqualError(t, err,
+			`unstorable property width: entity "Person" property "matrix" has `+string(nested))
+	})
+
+	t.Run("the same width where the store holds it", func(t *testing.T) {
+		_, _, err := codegen.PhaseZAdmit(schemaWith(nested), stubTypeMap{})
+		require.NoError(t, err,
+			"nothing else in the pipeline refuses this width, so the row above measured the storage answer and not the width")
+	})
+
+	t.Run("the carrier question is asked first", func(t *testing.T) {
+		// Refused on BOTH axes. prepareEntityFields asks the carrier
+		// first, so the caller is told the narrower thing: a backend
+		// with no Go type for a width cannot store it either, and
+		// reporting the storage gap would hide that there is no
+		// carrier to fall back to.
+		_, _, err := codegen.PhaseZAdmit(schemaWith(graph.TypeDecimal), unstorablePropertyTypeMap{refuse: graph.TypeDecimal})
+		require.ErrorIs(t, err, codegen.ErrUnrepresentableWidth)
+		require.NotErrorIs(t, err, codegen.ErrUnstorableProperty)
+	})
+
+	t.Run("a query column of the same width is not asked", func(t *testing.T) {
+		// The storage rule is about what the store keeps, and a column
+		// keeps nothing. This is the row that would go red if the
+		// sweep were folded in beside the column and parameter checks
+		// rather than beside the entity ones.
+		in := codegen.Input{
+			Schema: schemaWith(graph.TypeInt64),
+			Queries: []codegen.NamedQuery{{
+				Name:        "Nested",
+				Cardinality: codegen.CardinalityOne,
+				SourceText:  "RETURN [[1]] AS xss",
+				Validated: resolver.ValidatedQuery{Columns: []resolver.Column{{
+					Name: "xss",
+					Type: resolver.ResolvedList{Element: resolver.ResolvedList{
+						Element: resolver.ResolvedScalar{Kind: resolver.ScalarInt},
+					}},
+				}}},
+			}},
+		}
+		_, err := codegen.Prepare(in, unstorablePropertyTypeMap{refuse: nested}, "")
+		require.NoError(t, err)
+	})
+}
+
 // ageOnlyTargets is the golden target set for the four names only the
 // Apache AGE emission declares.
 var ageOnlyTargets = []string{"apache-age-pgx-v5"}
