@@ -4034,7 +4034,40 @@ unit_health() { # <unit> -> "ok …" | "FAILED …" | "NEVER RUN …" | "NOT INS
         # measured one, which is the thing this file exists to refuse.
         echo "UNKNOWN — $1 is $active right now, so its last run was not measured"
     elif [ -z "$last" ]; then
-        echo "NEVER RUN — $1 exists but its timer has never fired it"
+        # gqlc-28ysg. An empty InactiveEnterTimestamp is not a history of never
+        # having run, and this branch used to render it as one — "its timer has
+        # never fired it", about a timer this function has never queried.
+        # systemd garbage-collects an inactive service nothing references any
+        # more and re-loads it from disk with empty runtime state; LoadState
+        # stays `loaded`, so there is no tell. Measured 2026-08-30 with
+        # throwaway units: a service that never started and one whose timer was
+        # stopped three seconds ago agree on every property sampled here, and on
+        # the TIMER's own LastTriggerUSec, which is erased with them. That
+        # history survives only in the journal, so km cannot have it cheaply and
+        # this says nothing about it.
+        #
+        # What it can measure is whether anything will fire the unit AGAIN, and
+        # that is the half the operator acts on: the two states this used to
+        # collapse want opposite responses — install the units, or find out who
+        # stopped a healthy timer four minutes ago.
+        local timer=${1%.service}.timer tprops="" tload="" tactive=""
+        if ! tprops=$(systemctl --user show "$timer" -p LoadState -p ActiveState 2>/dev/null); then
+            echo "UNKNOWN — $1 has no run on record and $timer could not be asked why (is there a user bus?)"
+            return 0
+        fi
+        while IFS= read -r line; do
+            case "$line" in
+                LoadState=*) tload=${line#*=} ;;
+                ActiveState=*) tactive=${line#*=} ;;
+            esac
+        done <<<"$tprops"
+        if [ "$tload" != loaded ]; then
+            echo "NOT SCHEDULED — $timer is ${tload:-absent}, so nothing will fire $1 (km install-units)"
+        elif [ "$tactive" != active ] && [ "$tactive" != activating ]; then
+            echo "NOT SCHEDULED — $timer is $tactive, so nothing will fire $1; systemd keeps no record of the runs before it stopped ('systemctl --user enable --now $timer')"
+        else
+            echo "NO RUN ON RECORD — $timer is $tactive, but systemd holds no finished run of $1"
+        fi
     elif [ "$result" != success ]; then
         echo "FAILED — last run $last ($result, exit ${code:-?}): journalctl --user -u $1"
     else
@@ -4746,6 +4779,11 @@ cmd_doctor() {
         case "$uh" in
             ok*)      echo "ok:   $1 last run succeeded ${uh#ok }" ;;
             UNKNOWN*) echo "warn: $1 last run is UNKNOWN — ${uh#UNKNOWN — }" ;;
+            # gqlc-28ysg. Without this arm the two no-record labels fall to the
+            # last one and are announced as a run that did NOT succeed — the
+            # bead's own defect, restated by the caller of the function that
+            # stopped making it. No run is on record, so none failed either.
+            "NOT SCHEDULED"*|"NO RUN ON RECORD"*) echo "warn: $1 has no last run on record — $uh" ;;
             *)        echo "warn: $1 last run did NOT succeed — $uh" ;;
         esac
     }
