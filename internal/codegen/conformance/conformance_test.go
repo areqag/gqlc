@@ -524,6 +524,32 @@ func (s *ConformanceSuite) TestDoubleRun() {
 	}
 }
 
+// assembledOnlySentinels are the codegen sentinels no invalid fixture
+// can reach, because no query TEXT reaches the branch that returns them
+// on any enrolled target. They are reached instead by
+// TestAssembledInput, from a hand-built codegen.Input — taxonomy §5.1 —
+// and TestReachableBranchesAreReached measures the branch itself in the
+// same corpus profile, so listing one here moves the obligation rather
+// than dropping it.
+//
+// ErrUnrepresentableTemporal is the member and bd gqlc-dy40s is why. It
+// had exactly one fixture, unrepresentable_temporal_duration_column,
+// which projected duration.between(...) at apache-age-pgx-v5: the only
+// temporal spelling AGE's dialect gate did not hold, so the only text
+// that reached Prepare's carrier check with a temporal column. Closing
+// the namespace gap refuses that text too, ahead of the carrier, and
+// there is now no query an author can write that this backend parses
+// and Prepare then refuses for a temporal kind. The fixture was deleted
+// with the gap in one PR, and this list is what says so out loud rather
+// than letting the sweep quietly stop asking.
+//
+// The entry is a claim about the whole enrolled corpus, not a waiver,
+// which is why the reverse rule below reds the sweep the moment a
+// fixture DOES name one of these. A backend that carries no temporal
+// kind, or a gate that stops shadowing one, makes a fixture possible
+// again — and the fixture is the better witness whenever it exists.
+var assembledOnlySentinels = []error{codegen.ErrUnrepresentableTemporal}
+
 // TestSentinelReachability is the bidirectional sweep: every
 // codegenSentinels member has at least one invalid fixture; every
 // mapped codegen sentinel is in codegenSentinels. Queryfile sentinels
@@ -536,6 +562,12 @@ func (s *ConformanceSuite) TestDoubleRun() {
 // childRootEnv can silently make empty. The requireSwept on covered is
 // what refuses that reading; without it, emptying codegenSentinels and
 // pointing childRootEnv at an empty corpus passes.
+//
+// assembledOnlySentinels is the one exemption from the first direction,
+// and it is fail-closed in both directions of its own: a listed
+// sentinel outside codegenSentinels is prose about nothing, and a
+// listed sentinel a fixture DOES cover is a stale exemption hiding a
+// witness that exists.
 func TestSentinelReachability(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join(fixtureRoot(), "invalid", "*"))
 	require.NoError(t, err)
@@ -567,7 +599,25 @@ func TestSentinelReachability(t *testing.T) {
 	for _, sentinel := range codegenSentinels {
 		canonical[sentinel] = true
 	}
+
+	assembledOnly := make(map[error]bool, len(assembledOnlySentinels))
+	for _, sentinel := range assembledOnlySentinels {
+		require.True(t, canonical[sentinel],
+			"sentinel %q is listed assembled-only but is not in codegenSentinels, so it is exempted "+
+				"from a sweep that never asked about it — the list would be prose against nothing",
+			sentinel)
+		require.False(t, covered[sentinel],
+			"sentinel %q is listed assembled-only, but an invalid fixture names it. A fixture is the "+
+				"better witness whenever one exists — drop the entry from assembledOnlySentinels "+
+				"rather than keeping an exemption that hides it",
+			sentinel)
+		assembledOnly[sentinel] = true
+	}
+
 	for _, sentinel := range codegenSentinels {
+		if assembledOnly[sentinel] {
+			continue
+		}
 		require.True(t, covered[sentinel], "sentinel %q has no negative fixture", sentinel)
 	}
 	for sentinel := range covered {

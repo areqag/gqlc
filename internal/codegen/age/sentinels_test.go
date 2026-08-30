@@ -32,6 +32,7 @@ func TestSentinelsPinsNameToValue(t *testing.T) {
 		{"age.ErrRelationshipTypeAlternation", age.ErrRelationshipTypeAlternation},
 		{"age.ErrUndefinedFunction", age.ErrUndefinedFunction},
 		{"age.ErrUndefinedSpatialFunction", age.ErrUndefinedSpatialFunction},
+		{"age.ErrUndefinedNamespace", age.ErrUndefinedNamespace},
 	}
 
 	got := age.Sentinels()

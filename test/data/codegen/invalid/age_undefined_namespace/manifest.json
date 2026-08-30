@@ -1,0 +1,6 @@
+{
+  "package": "ageundefinednamespace",
+  "queryFiles": ["queries.cypher"],
+  "targets": ["apache-age-pgx-v5"],
+  "expectedError": "age.ErrUndefinedNamespace"
+}
