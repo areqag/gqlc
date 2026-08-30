@@ -362,6 +362,17 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    (Constitution V.4). After any merge, reviewed or not: close the bead
    citing the merged SHA, delete the branch, file follow-up beads for
    anything you deferred.
+
+   **Merging is now enqueueing** (ADR 0010). `gh pr merge <N> --squash` adds
+   the PR to the merge queue; GitHub tests master + your PR together and lands
+   it, normally within about five minutes. **Never pass `--admin`**: it
+   bypasses the queue exactly as `--no-verify` bypasses a hook (Article IV.4's
+   spirit). After enqueueing, poll `gh pr view <N> --json state` until it reads
+   `MERGED` before closing the bead citing the merged SHA — poll the PR's
+   state, not a check's conclusion. If the queue kicks your PR, the failing
+   check on the merge group is naming a semantic conflict with something that
+   merged after your base: rebase, fix, re-enqueue. That kick is this control
+   working — the red that used to land on master now lands on you.
 9. File freely, and label what you file. A defect you find while working a
    bead, whose fix is not that bead's work, gets its own bead and your own
    `class:` label — you need nobody's permission for either, and a branch
