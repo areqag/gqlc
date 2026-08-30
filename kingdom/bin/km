@@ -110,7 +110,8 @@ km — the machinery of the Թագաւորութիւն
   km reconcile                   match seat status to the sessions that exist
   km seat-live <seat>            exit 0 if a claude session exists there (herdr reports it)
   km seat-runner <seat>          exit 0 if the seat has an active herdr agent
-  km seat-idle <seat>            exit 0 if the seat's agent_status is `idle`
+  km seat-idle <seat>            exit 0 if the seat is at an empty prompt
+                                 (agent_status `idle` or `done`)
   km guard-sweep                 wake Րաֆֆի for a round (timer)
   km halt [reason] | halt --status | halt --history [N] | resume
                                  raise / ask about / replay / lower the town halt
@@ -1407,7 +1408,18 @@ seat_box_echoes() { # <pane> <text> -> 0 holds it, 1 holds something else, 2 no 
 # done/working/unknown and never blocked (bd gqlc-3evsn), and this function
 # admits all three. What kept km off those panes was not the guard below but an
 # accident of a DIFFERENT gate — the dispatch ladder's liveness test, which
-# happened to require `idle` and so never reached them.
+# required `idle` and so never reached them.
+#
+# THAT ACCIDENT IS GONE as of bd gqlc-ymbw0: the liveness test admits `done` too,
+# because `done` is the steady state a finished seat rests in and requiring
+# `idle` made the ladder blind to the whole gqlc-5vp7 population. Quota-killed
+# panes read `done` among other things, so widening it points the ladder at them
+# for the first time and the checks below are now the only thing refusing those
+# panes — which is the job this function was given here, not a new load on it.
+# Not witnessed on a live quota modal: none existed in the town when the widening
+# was measured. What is measured is a trust dialog (rc=1, above); the argument
+# that it carries is the allow-witness design — a surface with no empty composer
+# is refused whatever covers it — and that is an argument, not a second reading.
 #
 # So the enum check is kept for the modals the hook does see, and the decision is
 # made instead on the pane's own render, twice:
@@ -1534,11 +1546,43 @@ seat_pane() { # <seat> -> the pane's visible buffer
     herdr pane read "$pane" --source visible --lines 40 2>/dev/null
 }
 
-# Idle == the agent's own report says so. No pane scraping, no reconciling
-# "esc to interrupt" strings, no false-idle on a mid-tool-call — herdr's
-# hook fires at the states claude passes through.
+# Idle == herdr's report says the seat is at an empty prompt. km does no pane
+# scraping of its own: no reconciling "esc to interrupt" strings, no false-idle
+# on a mid-tool-call.
+#
+# BOTH `idle` AND `done` MEAN THAT, and taking only `idle` made this predicate
+# blind to the steady state (bd gqlc-ymbw0). Measured 2026-08-30 against the
+# live town: `done` is what a pane reads once a turn has COMPLETED under
+# herdr's observation, and `idle` is the transient before a session's first
+# turn — pane 15 went done -> idle -> working and pane 16 unknown -> idle ->
+# working, each `idle` window lasting seconds. So a seat that has been working
+# all day and stops is `done`, permanently, and `idle` is essentially reachable
+# only just after a session starts. That is backwards from what this ladder
+# needs: the seats of gqlc-5vp7 had FINISHED, which is precisely `done`.
+#
+# The claim this replaces — that claude's herdr hook "fires at the states
+# claude passes through" — is not how the value is produced. The installed
+# integration (~/.claude/hooks/herdr-agent-state.sh, HERDR_INTEGRATION_VERSION=5)
+# reports only a session id and no state at all; herdr derives the state from
+# the screen against its own manifest. That manifest emits `working`, `idle`,
+# `blocked` and `unknown` and has NO rule producing `done` — `done` is layered
+# on by herdr above detection, which is why `herdr agent explain` on a `done`
+# pane answers `state: idle`. Do not read one of these two values as more
+# authoritative than the other; they answer different questions.
+#
+# WIDENING THIS POINTS THE NUDGE LADDER AT QUOTA-KILLED PANES, deliberately, and
+# whoever narrows it again should know what they are restoring. Seats killed by a
+# usage-limit wall read done/working/unknown and never `blocked` (bd gqlc-3evsn),
+# so before this change the `= idle` here was — by accident, not by design — the
+# only thing keeping km from typing at them. send_line is where that is now
+# refused, on the pane's own render rather than on this enum; read its comment
+# before treating this predicate as a safety boundary. It is not one. It answers
+# "has this seat stopped", and the ladder's other rungs answer the rest.
 seat_pane_idle() { # <seat>
-    [ "$(seat_agent_status "$1")" = idle ]
+    case "$(seat_agent_status "$1")" in
+        idle | done) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # Whether the agent is available to receive text. `blocked` is what the hook
