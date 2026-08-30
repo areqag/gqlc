@@ -1666,12 +1666,49 @@ ensure_state_tree() {
     mkdir -p "$sd/seats/andranik/handoff/archive"
 }
 
+# The raise's own tally, and the sentence that reports it. seat_runner_start is
+# three-valued — 0 started, 1 declined because a live session already holds the
+# seat, 2 no runner appeared — and both of cmd_up's seat loops folded all three
+# into `|| true`. The closing line then counted `seats_all | wc -l`, the ROSTER,
+# so `km up` printed the same sentence whether sixteen seats came up, sixteen
+# were declined or sixteen failed (gqlc-mit2u).
+raise_seats() { # -> "<started> <declined> <failed>" on stdout
+    local s rc started=0 declined=0 failed=0
+    for s in $(seats_all); do
+        # stdout only. These were the town's only two call sites that also
+        # dropped stderr, so `km up` printed "the town is up: 16 seats" while
+        # every runner spawn was silently refused; the recurring paths (wake,
+        # reconcile, dispatch) have always passed it through.
+        seat_runner_start "$s" >/dev/null && rc=0 || rc=$?
+        case "$rc" in
+            0) started=$((started + 1)) ;;
+            1) declined=$((declined + 1)) ;;
+            *) failed=$((failed + 1)) ;;
+        esac
+    done
+    printf '%s %s %s\n' "$started" "$declined" "$failed"
+}
+
+# Declined is not a failure: it means the seat was already live, which is the
+# ordinary answer to `km up` on a town that is already up. So the raise is
+# empty only when nothing started AND nothing was already there.
+raise_report() { # <started> <declined> <failed> -> 0 reported a town, 1 reported none
+    local said="$1 started"
+    if [ "$2" -gt 0 ]; then said="$said, $2 already live"; fi
+    if [ "$3" -gt 0 ]; then said="$said, $3 could not be started (each one's reason is on stderr above)"; fi
+    if [ "$1" -eq 0 ] && [ "$2" -eq 0 ]; then
+        echo "km: no seat came up: $said. There is a '$WORKSPACE' workspace but no town in it." >&2
+        return 1
+    fi
+    echo "the town is up: $said, all asleep until woken."
+}
+
 cmd_up() {
     no_args up "$@"
     have_herdr || die "herdr is not installed, so there is no town to raise (https://herdr.dev)"
     herdr_server_up || die "herdr server is not running — start it and retry (herdr status server)"
     ensure_state_tree
-    local mr s wt ws
+    local mr s wt ws tally
     mr=$(main_root)
     for s in $(seats_all); do
         wt=$(seat_worktree "$s")
@@ -1711,16 +1748,10 @@ cmd_up() {
         # seat loop needs is not either of these ids: seat_runner_start derives
         # the workspace itself. So both reads report and continue (gqlc-be8t6).
         ws=$(printf '%s' "$created" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['workspace']['workspace_id'])" 2>/dev/null) || ws=
-        [ -n "$ws" ] || echo "km: herdr created the '$WORKSPACE' workspace but km could not read its id back out of the reply. Raising the seats anyway — each looks the workspace up for itself, so the raise completes normally if the workspace is really there. If it is not, no seat tab is created, and the closing line below still counts the roster rather than what came up: check with 'km status'." >&2
+        [ -n "$ws" ] || echo "km: herdr created the '$WORKSPACE' workspace but km could not read its id back out of the reply. Raising the seats anyway — each looks the workspace up for itself, so the raise completes normally if the workspace is really there. If it is not, no seat tab is created, and the closing line below reports that no seat came up and exits non-zero." >&2
         local auto_tab
         auto_tab=$(printf '%s' "$created" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['tab']['tab_id'])" 2>/dev/null) || auto_tab=
-        for s in $(seats_all); do
-            # stdout only. These were the town's only two call sites that also
-            # dropped stderr, so `km up` printed "the town is up: 16 seats"
-            # while every runner spawn was silently refused; the recurring
-            # paths (wake, reconcile, dispatch) have always passed it through.
-            seat_runner_start "$s" >/dev/null || true
-        done
+        tally=$(raise_seats)
         # Close the placeholder AFTER the seats are up, so herdr doesn't
         # reap the workspace between "no seats yet" and "seats added".
         if [ -n "$auto_tab" ]; then
@@ -1729,11 +1760,10 @@ cmd_up() {
             echo "km: could not read the auto-tab's id out of herdr's reply, so the workspace's unlabelled placeholder tab was not closed and is still in the roster. Harmless — close it by hand in herdr, or 'km down' and raise the town again." >&2
         fi
     else
-        for s in $(seats_all); do
-            seat_runner_start "$s" >/dev/null || true
-        done
+        tally=$(raise_seats)
     fi
-    echo "the town is up: $(seats_all | wc -l) seats, all asleep until woken."
+    # shellcheck disable=SC2086 # the tally is three integers, split on purpose
+    raise_report $tally || return 1
     echo "  herdr              — open the town's TUI (every citizen is a tab in the '$WORKSPACE' workspace)"
 }
 
