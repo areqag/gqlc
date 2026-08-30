@@ -787,8 +787,9 @@ PYEOF
   # with the mirror closed is an ALLOW, it is how every merge ends, and it nulls
   # the assignee of a bead somebody is holding — an unassigned bead in a
   # non-ready status routes to no dispatch pass at all. bd's assignee is a seat
-  # name and GitHub's is a GitHub login, so GitHub has nothing to put back: 1 of
-  # 200 sampled mirrors carries a GH assignee. Holding the pull instead was the
+  # name and GitHub's is a GitHub login, so GitHub has nothing to put back: of
+  # all 800 issues on the mirror, one carries a GH assignee, and it is open
+  # (measured 2026-08-30). Holding the pull instead was the
   # other candidate remedy and would have withheld the closure of very nearly
   # every bead a citizen was working.
   #
