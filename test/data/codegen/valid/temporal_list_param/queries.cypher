@@ -18,11 +18,13 @@
 // emits fromDateList2 without fromDateList and the goldens stop compiling.
 // ADR 0035 makes that shape unconstructible on this backend: a nested list
 // is refused as a stored property, so no neo4j schema can declare one and
-// no parameter can take its type. The rule it guarded is still real and
-// render_temporal.go's temporalListHelper still recurses for depth >= 2;
-// what is gone is this fixture's witness of it, and there is no neo4j
-// fixture that can replace it. Removing the generator's depth >= 2 support
-// would be a special case bought for nothing, so it stays (bd gqlc-nxcj9).
+// no parameter can take its type. No neo4j fixture can replace it, and no
+// other backend can: render_temporal.go has no AGE counterpart, so the one
+// call site that reaches depth >= 2 (sliceParamBindExpr) is reached from
+// nowhere. The recursion is left in place and untouched by that bead —
+// measured, no golden here emits a from<X>List<n> helper for any n — and
+// whether it should go the way gqlc-52w8l takes writeSliceNarrow's arm is
+// bd gqlc-tlc3e, deliberately not settled on gqlc-nxcj9.
 
 // name: SlotsMatching :many
 MATCH (s:Slot)
