@@ -1093,11 +1093,31 @@ lint-python dir=".github/scripts": ensure-ruff
         echo "error: '$dir' is not a directory, so ruff has nothing to lint" >&2
         exit 1
     fi
-    shopt -s nullglob globstar
-    files=("$dir"/**/*.py)
+    # Selected by suffix OR by shebang, because a hook cannot carry a suffix:
+    # git and Claude Code invoke .githooks entries by name. Suffix alone left
+    # .githooks/claude-pre-bash — the largest Python file in the repo, and the
+    # one running ahead of every Bash tool call — read by no linter at all,
+    # while sitting inside a directory lint-hooks already scans and a language
+    # this recipe already lints. It fell between the two selectors (gqlc-tmxex).
+    #
+    # Unclassified files are NOT refused here, unlike lint-hooks. That refusal
+    # is already made over both directories this recipe is pointed at, so
+    # repeating it would only give one missing shebang two voices.
+    files=()
+    while IFS= read -r f; do
+        case "$f" in
+            *.py) files+=("$f"); continue ;;
+        esac
+        head=""
+        IFS= read -r head <"$f" || true
+        case "$head" in
+            "#!"*python*) files+=("$f") ;;
+        esac
+    done < <(find "$dir" -type f | sort)
     if [ "${#files[@]}" -eq 0 ]; then
-        echo "error: no .py file found under $dir, so ruff ran over nothing and exited 0" >&2
-        echo "       over it — indistinguishable from every file passing. Either the" >&2
+        echo "error: no python file found under $dir — no .py suffix and no python" >&2
+        echo "       shebang — so ruff ran over nothing and exited 0 over it," >&2
+        echo "       indistinguishable from every file passing. Either the" >&2
         echo "       scripts moved, or this is not the repository root (bd gqlc-tqi4)." >&2
         exit 1
     fi
@@ -1872,7 +1892,7 @@ sweep-discovery-probes:
 # property of the very next line: that `golangci-lint run` reddens on gofumpt
 # and gci. Ahead of the lint, so a tree whose formatter enforcement has gone
 # quiet says so before spending eighty seconds.
-lint: ensure-golangci lint-hooks (lint-hooks "kingdom/bin") (lint-hooks ".github/scripts") lint-python lint-just check-golangci-formatters-report check-golangci-build-tags
+lint: ensure-golangci lint-hooks (lint-hooks "kingdom/bin") (lint-hooks ".github/scripts") lint-python (lint-python ".githooks") lint-just check-golangci-formatters-report check-golangci-build-tags
     {{lint_lock}} {{golangci}} run
 
 # Guard: the golangci-lint analysis cache must be non-empty after lint.
