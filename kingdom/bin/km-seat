@@ -14,6 +14,15 @@ KINGDOM_DIR=$(dirname "$SCRIPT_DIR")
 KM="$SCRIPT_DIR/km"
 SELF="$SCRIPT_DIR/$(basename -- "${BASH_SOURCE[0]}")"
 
+# Name the town's ledger rather than leaving bd to discover it from a cwd. A
+# seat that is a linked worktree discovers the same path anyway; a seat that is
+# its own clone (gqlc-w5bh) discovers a .beads carrying no database, and bd
+# fails with "no beads database found". Exported HERE, at the top, because this
+# script runs bd itself — the wake banner's re-derivation below — long before it
+# builds the environment it hands to claude (bd gqlc-kx6jy).
+BEADS_DIR="$(dirname "$KINGDOM_DIR")/.beads"
+export BEADS_DIR
+
 # The parse this process is running, identified by the CONTENT of the file it
 # came from rather than its mtime: mtime is whole seconds here, so a deploy
 # landing in the same second as a respawn is invisible to it, and content also
