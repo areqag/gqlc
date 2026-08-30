@@ -23,9 +23,15 @@ die() { echo "km: $*" >&2; exit 1; }
 
 # The verb a message advertises an operator run is free text at the print site;
 # the verbs km HAS are case labels in the dispatch table at the foot of this
-# file. Nothing joined the two, so `km halt` spent its life telling whoever had
-# just stopped the town to run `km herratsayn`, which km has never dispatched
-# (gqlc-cw7h). This reads the labels out of that table, so a print site is
+# file. Nothing joined the two, so when f6dc4c7b (#1595) deleted the tmux
+# operator chrome it took the `herratsayn)` label and left `km halt` still
+# telling whoever had just stopped the town to run `km herratsayn` (gqlc-cw7h).
+# That sentence had been correct since it was written six days earlier — the
+# label was live from c08fc7f0 (2026-08-21) — and at the moment it was deleted
+# the two sat 2489 lines apart in this file, so the deletion falsified the
+# sentence without touching it. That is the drift this catches and review does
+# not: whoever would have to notice is the one removing the arm, not the one who
+# wrote the line. This reads the labels out of that table, so a print site is
 # answered by km's own routing rather than by whatever the author typed.
 #
 # It warns and carries on rather than dying, and prints the name either way: the
@@ -2182,9 +2188,9 @@ cmd_halt() {
     echo "  the dispatcher and the guard sweep will wake nobody until it is lowered ($(verb resume))"
     # Spell the broadcast in full. This line is read at one moment — by whoever
     # has just stopped the town and now has to say why — and it used to name
-    # `km herratsayn`, which km has never dispatched (bd gqlc-cw7h). The reader
-    # in a hurry runs it, gets the usage dump, and concludes a halted town has
-    # no way to talk to itself.
+    # `km herratsayn`, which #1595 stopped dispatching without editing the line
+    # (bd gqlc-cw7h). The reader in a hurry runs it, gets the usage dump, and
+    # concludes a halted town has no way to talk to itself.
     echo "  to tell the town why: $(verb mail) send town -s '<subject>' -m '<body>'"
     echo "  $(verb wake) <seat> still reaches one seat; neither is bound by the halt."
 }
@@ -3775,7 +3781,8 @@ cmd_guard_sweep() {
     # raised it had no way to find that out (gqlc-6dzi). `km wake` and
     # `km mail` are deliberately NOT bound: a halted town still has to be
     # workable by the operator who is going to lower the halt. This named
-    # `km herratsayn` until gqlc-cw7h; there has never been such a verb.
+    # `km herratsayn` until gqlc-cw7h; #1595 had already deleted that verb, and
+    # the sentence outlived it.
     local sd
     sd=$(state_dir)
     if [ -f "$sd/halt" ]; then
