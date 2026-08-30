@@ -4,6 +4,15 @@ Date: 2026-08-29. Designed by Արփինէ against bd gqlc-hpa1, under ADR 0003.
 Executed by gqlc-9vggh. Witnesses: PR #1720; PR #1748 + PR #1679; PR #1797 +
 PR #1859 (beads gqlc-tsopi / gqlc-yskyp).
 
+> **NOT IN FORCE — the queue this describes does not exist and cannot be
+> created here.** Stage A merged (PR #1892), but GitHub refuses the ruleset
+> `merge_queue` rule type on `areqag/gqlc`: merge queues require an
+> ORGANISATION-owned repository and this one is owned by a user. Measured
+> 2026-08-30; the refusal is of the rule type, not of its parameters. The
+> problem below is real and still unfixed — only the remedy is unavailable.
+> Disposition, including whether the repository moves to an organisation, is
+> bd `gqlc-9vzmw`. Do not act on this document as though the queue were live.
+
 ## The shape of the problem, in plain words
 
 A pull request's checks run against its own base. When master moves underneath
