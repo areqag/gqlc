@@ -110,6 +110,18 @@ type nestedListQuerier interface {
 	nestedList(ctx context.Context) ([][]int64, error)
 }
 
+// deepNestedListQuerier is one arm's list_list_list_int handle: a
+// LIST<LIST<LIST<INT64>>> column, one level deeper than nestedListQuerier.
+//
+// The extra level is the whole point. At depth 2 the emitter's inner element
+// loop shadows the outer accumulator harmlessly; only at depth 3 does an
+// unsuffixed local make the emission assign an accumulator to itself, so this
+// is the shallowest column that has the decoder's local-naming rule as its
+// subject (bd gqlc-415l).
+type deepNestedListQuerier interface {
+	deepNestedList(ctx context.Context) ([][][]int64, error)
+}
+
 // entityNodeQuerier is one arm's entity_node_projected_one handle and
 // entityEdgeQuerier its entity_edge_projected_one one. Each declares
 // errNoRows for the same reason the scalar handle does: the sentinel
@@ -372,6 +384,7 @@ type backend interface {
 	oneColOneParamOne() oneColOneParamOneQuerier
 	manyColMany() manyColManyQuerier
 	nestedList() nestedListQuerier
+	deepNestedList() deepNestedListQuerier
 	entityNodeProjectedOne() entityNodeQuerier
 	entityEdgeProjectedOne() entityEdgeQuerier
 	anyValueColumns() anyValueColumnQuerier
@@ -513,6 +526,7 @@ var readScenarios = []struct {
 	{name: "one_col_one_param_one: one + sentinels", run: oneAndSentinels},
 	{name: "many_col_many: many + params", run: manyWithParams},
 	{name: "list_list_int: nested list off the wire", run: nestedListDecode},
+	{name: "list_list_list_int: thrice-nested list off the wire", run: deepNestedListDecode},
 	{name: "entity_node_projected_one: whole vertex", run: nodeEntityRead},
 	{name: "entity_edge_projected_one: whole edge", run: edgeEntityRead},
 	{name: "schema_any_property: ANY VALUE columns agree on null", run: anyValueColumnsAgreeOnNull},
@@ -598,7 +612,7 @@ var scenarioTables = []struct {
 	why  string
 }{
 	{
-		name: "readScenarios", got: len(readScenarios), want: 6,
+		name: "readScenarios", got: len(readScenarios), want: 7,
 		why: "the battery every arm runs; a lost row is a read contract no target is checked against",
 	},
 	{
@@ -906,6 +920,32 @@ func nestedListDecode(ctx context.Context, t *testing.T, b backend) { //nolint:t
 	require.NoError(t, err)
 	require.Equal(t, [][]int64{{1}, {2, 3}}, got,
 		"a nested list off the wire must decode element for element, with each inner list its own length")
+}
+
+// deepNestedListDecode drives the same contract one level deeper, at the depth
+// where the emitter's local-naming rule starts to bite.
+//
+// What the extra level is for: the decoder suffixes its per-level locals by
+// nesting depth (elemLocal in internal/codegen/neo4j). At depth 2 dropping that
+// suffix shadows harmlessly and every existing row stays green; at depth 3 it
+// emits innerAcc = append(innerAcc, innerAcc), which does not compile. So the
+// witness for the naming rule itself is the checked-in golden for this fixture,
+// not this row — remove the suffixing and the goldens stop building.
+//
+// What this row adds on top of that is the half a compile cannot answer: that
+// the three-level decoder, once it does compile, reads a real server's value
+// correctly rather than merely plausibly. Nothing else asks a server for a
+// list nested this deep.
+//
+// The literal is deliberately irregular — the first outer element holds one
+// inner list, the second holds two of different lengths — so an accumulator
+// reused across iterations at either level shows up as a wrong shape rather
+// than a wrong count. No seed, for the reason nestedListDecode gives.
+func deepNestedListDecode(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	got, err := b.deepNestedList().deepNestedList(ctx)
+	require.NoError(t, err)
+	require.Equal(t, [][][]int64{{{1}}, {{2, 3}, {4}}}, got,
+		"a thrice-nested list off the wire must decode level for level, with each list its own length")
 }
 
 // nodeEntityRead drives the node-entity contract — a whole vertex arrives

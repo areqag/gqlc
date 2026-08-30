@@ -24,6 +24,7 @@ import (
 	entityedgeage "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/apache-age-pgx-v5"
 	entitynodeage "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/apache-age-pgx-v5"
 	listlistage "github.com/areqag/gqlc/test/data/codegen/valid/list_list_int/golden/apache-age-pgx-v5"
+	deeplistage "github.com/areqag/gqlc/test/data/codegen/valid/list_list_list_int/golden/apache-age-pgx-v5"
 	manycolmanyage "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/apache-age-pgx-v5"
 	mixedage "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/apache-age-pgx-v5"
 	onecoloneage "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/apache-age-pgx-v5"
@@ -230,6 +231,7 @@ func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 		one:        oneColOneParamOneAGE{q: onecoloneage.New(h.pool, graph)},
 		many:       manyColManyAGE{q: manycolmanyage.New(h.pool, graph)},
 		nested:     nestedListAGE{q: listlistage.New(h.pool, graph)},
+		deepNested: deepNestedListAGE{q: deeplistage.New(h.pool, graph)},
 		entityNode: entityNodeAGE{q: entitynodeage.New(h.pool, graph)},
 		entityEdge: entityEdgeAGE{q: entityedgeage.New(h.pool, graph)},
 		anyValue:   anyValueColumnsAGE{q: anypropage.New(h.pool, graph)},
@@ -260,6 +262,7 @@ type ageScenario struct {
 	one        oneColOneParamOneAGE
 	many       manyColManyAGE
 	nested     nestedListAGE
+	deepNested deepNestedListAGE
 	entityNode entityNodeAGE
 	entityEdge entityEdgeAGE
 	anyValue   anyValueColumnsAGE
@@ -283,6 +286,8 @@ func (s ageScenario) oneColOneParamOne() oneColOneParamOneQuerier { return s.one
 func (s ageScenario) manyColMany() manyColManyQuerier { return s.many }
 
 func (s ageScenario) nestedList() nestedListQuerier { return s.nested }
+
+func (s ageScenario) deepNestedList() deepNestedListQuerier { return s.deepNested }
 
 func (s ageScenario) entityNodeProjectedOne() entityNodeQuerier { return s.entityNode }
 
@@ -626,6 +631,15 @@ type nestedListAGE struct{ q *listlistage.Queries }
 
 func (a nestedListAGE) nestedList(ctx context.Context) ([][]int64, error) {
 	return a.q.NestedList(ctx)
+}
+
+// deepNestedListAGE binds the list_list_list_int fixture. On this target the
+// extra level is a third recursion inside one agtype text parse, not a third
+// element loop, which is why the depth-3 row is worth running on this arm too.
+type deepNestedListAGE struct{ q *deeplistage.Queries }
+
+func (a deepNestedListAGE) deepNestedList(ctx context.Context) ([][][]int64, error) {
+	return a.q.DeepNestedList(ctx)
 }
 
 type manyColManyAGE struct{ q *manycolmanyage.Queries }
