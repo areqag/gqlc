@@ -518,13 +518,27 @@ is cheap for the reader, and stays cheap only if all four of these hold.
 
 1. **Warn the reader before the push, not after.** Find the live reader:
 
-       bd list -l class:judge --status open -n 0 --json \
-         | jq -r '.[] | select(((.title // "") + " " + (.description // "")) | contains("#<N>")) | .id'
+       bd list -l class:judge --all -n 0 --json \
+         | jq -r '.[] | select(.status != "closed") | select(((.title // "") + " " + (.description // "")) | contains("#<N>")) | .id'
+
+   `--all` with the status predicate in jq, never `--status open`: in bd that
+   is the literal status and excludes `in_progress`, which is exactly the
+   status of a judge who has claimed your review and is reading it now. The
+   narrower flag returns empty precisely when the warning is owed. Measured
+   2026-08-30 on PR #1903: `--status open` found nothing while `gqlc-g9q5c`
+   stood `in_progress` to Միհր, the one bead a rebase of that branch was owed
+   to (bd gqlc-2k1m; the same miss nearly cost a force-push over a live P0
+   read on #1735).
 
    Then `bd mail send <the judge's seat> -s "PR #<N>: forced rebase incoming"`,
    with the old and new SHA and the delta sentence from clause 2 in the body.
-   If that query returns nothing, no review bead is open against your PR and
-   nobody is reading; rebase freely.
+
+   If that query returns nothing, what it licenses is narrow: no UNCLOSED
+   review bead spells `#<N>` in its title or description. It is a search over
+   bead text, so a review filed without the number is invisible to it, and
+   empty is not the same finding as nobody reading. Rebase on it, but if the
+   PR has a review round you remember and no bead names it, find that bead
+   before you push rather than reading the silence as consent.
 
 2. **State the delta as a merge-base comparison, never a commit list.** A
    rebase makes `git log <old>..<new>` read as fix work, and `git diff <old>
