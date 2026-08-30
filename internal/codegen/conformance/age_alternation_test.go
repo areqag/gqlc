@@ -126,12 +126,21 @@ func (s *ConformanceSuite) sweepAlternations() alternationSweep {
 			if enrolled {
 				out.ageEnrolled = append(out.ageEnrolled, name)
 			}
-			// The rule's second arm. It is deliberately narrow: only an
-			// invalid fixture, and only one naming this exact sentinel.
-			// An invalid fixture expecting some OTHER refusal is still a
-			// violation, because its `|` means AGE answers on the
-			// alternation before that other gate is reached, and the
-			// fixture would be recording a refusal it does not get.
+			// The rule's second arm, and it is deliberately narrow: an
+			// invalid fixture, naming this exact sentinel. An invalid
+			// fixture expecting some OTHER refusal is still a violation.
+			//
+			// NOT because AGE necessarily answers on the alternation
+			// before that other gate is reached. It does not, and the
+			// complement below records the measurement: an alternation
+			// that also produces an edge-union COLUMN is refused with
+			// age.ErrUnsupportedQuery, the column gate answering first.
+			// The reason is narrower and is about the corpus rather than
+			// about AGE: the exemption is for the fixture whose PURPOSE
+			// is this refusal. A fixture that records some other refusal
+			// while also carrying `|` leaves which gate answered
+			// undetermined, and an exemption that wide is one the corpus
+			// has no way to check.
 			witness := arm == "invalid" && m.ExpectedError == alternationSentinelName
 			for _, qf := range m.QueryFiles {
 				src, err := os.ReadFile(filepath.Join(dir, qf))
