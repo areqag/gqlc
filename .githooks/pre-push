@@ -26,6 +26,19 @@ _replay_push_refs() {
   if [ -n "${_push_refs}" ]; then printf '%s\n' "${_push_refs}"; fi
 }
 
+# What the closing notice is entitled to claim. Each gate below appends its name
+# once it has PASSED, and push-transport-notice prints the accumulation.
+#
+# COLLECTED, never restated as a sentence down there. A hardcoded coverage line
+# is the same silent drift this repository has already measured one level down:
+# with one, deleting the test-codegen-fence arm left `just gates` green and still
+# claiming to cover codegen-fence (bd gqlc-jq50, and the argument is in the
+# `gates` comment in the justfile). A list assembled here cannot outlive the arm
+# that fills it — including on the GQLC_ALLOW_MISSING_LINTER path, where two of
+# the three drop out and a fixed list would name them anyway.
+_local_gates=""
+_ran_gate() { _local_gates="${_local_gates:+${_local_gates}, }$1"; }
+
 _replay_push_refs | "$(dirname "$0")/guard-push-destination" "$@"
 
 # Re-screens every commit this push would publish against .githooks/commit-msg.
@@ -59,6 +72,9 @@ fi
 # through and still blocks the push. Deliberately not `|| true` here — that could
 # not tell a purity complaint from a failing suite, and would disarm the suite.
 GQLC_REPO_PURITY_ADVISORY=1 "$(dirname "$0")/repo-purity" just test
+# `set -e` is what makes this line a record of a PASS rather than of an attempt:
+# a failing suite exits above and never reaches it. Same at each _ran_gate below.
+_ran_gate test
 
 # ensure-golangci self-heals the pinned binary in .bin/; a provisioning failure
 # BLOCKS the push. Until bd gqlc-l45j this arm warned and continued, justified
@@ -205,6 +221,10 @@ if just ensure-golangci >/dev/null 2>&1; then
     fi
     exit "${lint_rc}"
   fi
+  # Qualified, because `lint-new` is `--new-from-rev` only and the required
+  # context is not. A finding on a line this push did not touch is CI's to find,
+  # so a bare `lint` here would be the overclaim in miniature.
+  _ran_gate "lint (changed lines only)"
 
   # THE NESTED MODULES, which nothing above this line reads. `just test` is
   # `go build ./... && go test ./...` and `just lint-new` is a golangci run:
@@ -237,6 +257,7 @@ if just ensure-golangci >/dev/null 2>&1; then
     echo "       The findings are above. Re-run on their own with:  just test-codegen-fence" >&2
     exit "${lint_rc}"
   fi
+  _ran_gate codegen-fence
 elif [ "${GQLC_ALLOW_MISSING_LINTER:-}" = "1" ]; then
   echo "WARN: golangci-lint unavailable; lint and the nested-module fence SKIPPED by" >&2
   echo "      GQLC_ALLOW_MISSING_LINTER=1" >&2
@@ -282,4 +303,5 @@ fi
 #
 # ${SECONDS} is bash's, counting from the top of this hook, so it measures how
 # long the connection has been held idle — the quantity the notice is about.
-GQLC_PREPUSH_ELAPSED="${SECONDS}" "$(dirname "$0")/push-transport-notice" "$@" || true
+GQLC_PREPUSH_ELAPSED="${SECONDS}" GQLC_PREPUSH_GATES="${_local_gates}" \
+  "$(dirname "$0")/push-transport-notice" "$@" || true
