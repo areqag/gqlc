@@ -20,6 +20,41 @@ opinion of itself"* — is §4 of this design, made binding.
 > policy, not mechanism, and stand unchanged. Execution: gqlc-z0l6 closed
 > overtaken without shipping; the surviving remainder is gqlc-kwpt.
 
+> **Amended 2026-08-30 (bd gqlc-o3ni1, gqlc-3evsn).** §1's premise — a seat
+> covered by a modal reads `blocked`, never `idle` — was falsified by
+> measurement: nine seats killed by a usage-limit wall on 2026-08-29 read
+> `done`, `working` and `unknown`, never `idle`, so the ladder asked none of
+> them (168 dispatch runs over six hours named exactly one seat, the one that
+> was never dead), while `seat_prompt_visible` admitted `done` and only the
+> liveness gate's accident kept km from typing at a modal the hook cannot see.
+> One enum value was carrying two duties; this amendment separates them.
+> **LIVENESS** is the progress witness: awake AND (`agent_status` idle confirmed
+> twice, OR no tool call FINISHED for ≥ `[welfare] stalled_after_minutes`,
+> in-flight or not). It references no `agent_status` on the dead-turn arm, errs
+> toward not asking, and its misses are still named by `km status` from the same
+> witness. **CONSENT** is `send_line`'s per-send observation: `agent_status` not
+> `blocked`/`unknown`, an input box rendered and EMPTY before typing, the text
+> echoed in it before the Enter. It errs toward refusing, and every refusal is
+> reported and counted toward escalation (§5 amended: a refusal now spends
+> budget — under a witnessed gate it is the verdict "machinery cannot reach this
+> seat", and unbounded silent retry is the open loop §1 built). §5's storm guard
+> (one delivered ask per run) is now built, and the episode reset is the
+> witnessed-work rule as §5 wrote it, replacing the left-idle reset that
+> shipped. §6 gains: recovery never types where consent is unwitnessed, and
+> never silently. The unread-mail nudge inside the idle pass is severed from
+> this design — it wants neither liveness nor consent-to-recover but "is anyone
+> home", and is its own bead (gqlc-piae7). **Not re-decided:** §2's owner, §3's
+> message doctrine, the heartbeat non-conjunct, VI.2 and VI.4 (§6).
+> **Rejected again, on new evidence:** admitting `done` into `seat_pane_idle`
+> (the population is heterogeneous and shifting — 13 working, 3 unknown, 0 done
+> at 23:07Z — and consent would be left resting on nothing); escalate-only (a
+> town-wide wall takes the escalation target, since dispatch's mail wake for
+> Սեդրակ fires only when he is NOT awake, and typed asks are the one channel
+> measured to work when every soul was down, 2026-08-24); modal-signature
+> scraping (fails open on the modal nobody wrote down — the box check
+> allow-witnesses a composer instead of classifying modals). Execution:
+> gqlc-3evsn.
+
 ## The shape of the problem, in plain words
 
 A seat's turn can be killed from outside — an API 529 storm, a quota wall —
@@ -65,28 +100,53 @@ a confirmation that cannot lie the way the old one did, a memory, a stopping
 rule, and a truthful voice in `km status`. The alternatives — a new timer-run
 arm, or a step in Րաֆֆի's rounds — are rejected below (§2).
 
-## 1. The detection predicate, and its false-positive cost
+## 1. The detection predicate, and its false-positive cost (restated 2026-08-30)
 
-**Decision: keep the existing predicate unchanged.** A seat is a recovery
-candidate iff all of:
+**Decision: LIVENESS ONLY, on two arms.** This section decided one predicate
+that was silently doing two jobs — deciding a seat needs recovering, and
+deciding km may type at it. It now decides only the first. Consent is §6's, and
+it is observed per send rather than inferred from an enum.
 
-- its status file reads `awake`;
-- `seat_pane_idle` holds — since #1595 that is one question to the engine:
-  herdr's `agent_status`, set by claude's own hook at the states claude
-  passes through, reads `idle`. There is no pane scraping left to tune;
-- the sighting is confirmed by a second pass ≥60s later (the existing `idle`
-  marker), because one sample of a status is one photograph.
+A seat is a recovery candidate iff its status file reads `awake` and **either**
+arm holds:
 
-This is fail-closed in the one direction that must never fail open: a seat
-covered by a **modal reads `blocked`, never `idle`**, so nothing is ever sent
-to it — a modal is not consent (VI.2, gqlc-eier). An agent that is not
-reporting reads `unknown`, and `unknown` is likewise not evidence of
-idleness. Under tmux these refusals were a pane heuristic; under herdr they
-are the engine's own state model, which is a strictly better witness.
+- **idle** — `seat_pane_idle` holds (herdr's `agent_status`, set by claude's own
+  hook, reads `idle`), confirmed by a second pass ≥60s later via the existing
+  `idle` marker, because one sample of a status is one photograph;
+- **stalled** — the progress witness has run dry: no tool call has FINISHED for
+  ≥ `[welfare] stalled_after_minutes`, whether or not one is in flight.
+  `progress.json` is written by `.githooks/claude-tool-witness` and by nothing
+  on a timer, so a dry witness means nothing HAPPENED. It is durable state on
+  disk, so its age is already its own second sighting and the arm takes no
+  two-pass marker.
 
-The false-positive cost is bounded and small. A seat wrongly read as idle
-receives one queued message — at worst one spurious turn's quota — and the
-attempt cap and re-nudge floor (§5) bound how often that can recur. The
+The stalled arm reads no `agent_status` at all, which is the whole point: the
+population this design exists to serve does not produce one. Its threshold is
+shared with `km status`, so the ladder asks exactly the seats the board names
+NOWORK and WEDGED — the report and the recovery cannot come to disagree about
+who is in trouble.
+
+**A seat whose progress witness is UNREADABLE is not stalled.** An absent or
+unparseable `progress.json` says nothing about the seat, and `km status` already
+owns that case with its `?` and `unwired` readings. Failing toward silence is
+right where the instrument, not the citizen, is what went quiet.
+
+The old text claimed this predicate was "fail-closed in the one direction that
+must never fail open", because a seat covered by a **modal reads `blocked`,
+never `idle`**. That claim is withdrawn — it was false, and the two errors it
+produced ran in opposite directions. It failed OPEN-LOOP for the dead-turn
+population, which is never `idle` and was therefore never asked. And the safety
+it was credited with was never coming from here at all: `seat_prompt_visible`
+admits `idle`, `working` AND `done`, so nothing but this liveness test's
+accidental strictness stood between km and a modal the hook cannot see. A
+property supplied by an accident is not a decision, and it is now made one in
+§6.
+
+The false-positive cost is bounded and small. A seat wrongly read as a candidate
+receives one queued message — at worst one spurious turn's quota, and on the
+stalled arm typically a line a genuinely busy citizen reads at her turn's end —
+and the attempt cap, the re-nudge floor and the one-delivered-ask-per-run storm
+guard (§5) bound how often that can recur. The
 heartbeat's age remains a deliberate non-conjunct for the reason originally
 written into the predicate: it tracks the current tool call's length, not
 health, and a conjunct that may never be true makes a nudge that never
@@ -189,11 +249,18 @@ reading.
 
 ## 5. Attempts, intervals, serialisation, escalation
 
+*Annotated 2026-08-30 (gqlc-3evsn): the first bullet was never built and now is;
+the third and fifth are amended where marked. The rest stands.*
+
 - **One recovery nudge per dispatch run, town-wide.** Six dead seats resume
   staggered over ~12 minutes rather than in one burst — six simultaneous
   API-hitting turns being the very condition that caused the incident. A
   constant in the code, like `DISPATCH_LOUD_PRIORITY`: it tunes pacing, not
-  policy.
+  policy. **Built 2026-08-30**, having gone unimplemented until the stalled arm
+  made it live: that arm's population arrives as a cohort, nine seats within one
+  minute. The budget is spent by a DELIVERY — a refusal started no turn, so it
+  neither consumes the run's ask nor makes the next seat wait behind a send that
+  never happened.
 - **Attempts are counted per idle episode**, in a durable per-seat record
   (`recover-attempts` in the seat's state dir, one timestamped line per
   attempt with its verdict and evidence — this file is also the observability
@@ -203,7 +270,14 @@ reading.
   citizen's quota, and the metronome shape (48 unread check-ins) is already
   town law. **An UNDELIVERED attempt retries at the confirm cadence (two
   passes, ~4 min)** — it spent nothing, and the failure it names is
-  mechanical, not a citizen declining.
+  mechanical, not a citizen declining. **Amended 2026-08-30: an undelivered
+  attempt keeps that fast cadence but now COUNTS toward the cap.** The
+  exemption was written when every refusal here was km's own tty failing. Under
+  §6's consent witness a refusal is a verdict about the seat — machinery could
+  not find a place to type — and a verdict retried in silence forever is the
+  open loop this design was rebuilt to close. So the ladder still retries
+  quickly, and it still ends: at the cap, in a letter that quotes the last
+  refusal.
 - **After the cap: escalate once, then stop.** Write an `escalated` marker,
   send one mail to Սեդրակ naming the seat, the attempts with their evidence,
   and the seat's `context_pct` — and type nothing further at that seat until
@@ -217,7 +291,11 @@ reading.
   `last_progress` advances past the newest attempt — a tool call finished, so
   the citizen really worked. Mere pane change does not reset it; a seat that
   resumes and instantly dies again therefore counts toward escalation instead
-  of looping forever, which is the crash-loop guard.
+  of looping forever, which is the crash-loop guard. **Built literally on
+  2026-08-30.** What shipped instead reset the episode the moment the agent
+  stopped reading `idle` — a changed pane, which is the thing this bullet
+  refuses. The reset is now "neither liveness arm holds", and the stalled arm
+  not holding IS a tool call having finished inside the threshold.
 
 ## 6. What recovery never does
 
@@ -243,8 +321,15 @@ reading.
   seat resuming its work or the seat running `km sleep` itself; both are the
   citizen's act.
 - **It never ends, replaces, or types slash commands at a session** (§3), and
-  it never sends to a seat whose `agent_status` reads `blocked` or `unknown`
-  (§1).
+  it never sends to a seat whose `agent_status` reads `blocked` or `unknown`.
+- **It never types where consent is unwitnessed** (amended 2026-08-30):
+  `agent_status` `blocked` or `unknown`, no rendered input box, a box already
+  holding a citizen's text, or text that did not echo back before the Enter —
+  each refusal reported and counted, never silent (§1, §5). This is observed on
+  the pane at send time, in `send_line`, so one guard covers every caller
+  including `cmd_reconcile`'s `/exit`. An ALLOW-witness that a composer exists,
+  never a deny-list of modal signatures: a list fails open on the modal nobody
+  wrote down, and the usage-limit modal was exactly that modal.
 
 ## 7. Observability: recovered, not "reported recovering"
 
