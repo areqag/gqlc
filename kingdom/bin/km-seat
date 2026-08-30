@@ -130,9 +130,23 @@ compose() { # $1 = wake reasons, one per line; $2 = a stale-hooks warning, or em
 }
 
 while :; do
-    until [ -s "$home/wake" ]; do sleep 5; done
-    reasons=$(cat "$home/wake")
-    rm -f "$home/wake"
+    until [ -s "$home/wake" ] || [ -s "$home/wake.reading" ]; do sleep 5; done
+    # Consume by rename. `mv` within a directory is atomic, so a `km wake` that
+    # lands after this point starts a fresh queue for the next turn instead of
+    # being destroyed by an rm that raced the read — the reason arrives a turn
+    # late rather than never (gqlc-baj5j). The old shape read with `cat` and then
+    # removed the file, and anything appended between the two was deleted
+    # unread, with cmd_wake having already reported it queued.
+    #
+    # A wake.reading already sitting here is what a km-seat killed mid-drain left
+    # behind. It is THIS turn's batch and whatever queued behind it is the next
+    # one, so the reasons it holds arrive late rather than rotting in a file
+    # nothing else reads. The guard has a second job: where that residue is all
+    # there is, `wake` does not exist, and renaming it under set -e would take
+    # the runner down.
+    [ -s "$home/wake.reading" ] || mv "$home/wake" "$home/wake.reading"
+    reasons=$(cat "$home/wake.reading")
+    rm -f "$home/wake.reading"
 
     # V.6.2 delivered at wake. `km wake --bead ID` writes "bead:ID <reason>", so
     # the reasons are where a seat learns which bead it is being woken for, and
