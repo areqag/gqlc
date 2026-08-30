@@ -548,10 +548,35 @@ have_herdr() { command -v herdr >/dev/null 2>&1; }
 have_just()  { command -v just >/dev/null 2>&1; }
 
 # The herdr server is the successor to `tmux has-session` here: if it is not
-# running there is no town to reach. `herdr status server --json` returns a
-# `running` string or errors; the wrapper collapses both into a rc.
-herdr_server_up() {
-    have_herdr && herdr status server 2>/dev/null | grep -q '^status: running$'
+# running there is no town to reach.
+#
+# This collapsed a three-valued world into a two-valued rc, and every caller
+# below turned the 1 into the positive claim "the town is down" — the same
+# defect gqlc-ygcfi fixed one level up at the workspace-list read (gqlc-pgbfp).
+# herdr already separates the three, on the exit status. Measured first-party
+# 2026-08-30 against herdr 0.6.10, via HERDR_SOCKET_PATH — an env lever present
+# in the binary and absent from `herdr --help` — so the down case could be
+# reproduced without stopping the town's own server:
+#
+#   running      rc 0, stdout `status: running` + version/protocol/socket
+#   not running  rc 0, stdout `status: not running` + `socket: <path>`
+#   cannot ask   rc 1, stdout empty, stderr herdr's own Error object
+#
+# Both routine answers write 0 bytes of stderr — reproduced for an absent
+# socket, a regular file and a directory — so the `2>/dev/null` that stood here
+# was inert on every path except the one whose reason it was discarding.
+herdr_server_up() { # 0 running, 1 not running, 2 km could not ask
+    # No herdr is a READABLE answer: there is no server. It stays on the rc-1
+    # side for the same reason workspace_id keeps it on its rc-0 side — a
+    # machine that simply has no herdr, CI among them, must not read `cannot
+    # ask` and must not make km's callers hedge.
+    have_herdr || return 1
+    local out
+    out=$(herdr status server 2>&1) || {
+        echo "km: cannot ask herdr whether its server is running: ${out:-herdr gave no diagnosis on either stream}. Not answering 'not running', because that is a positive claim about the town this failure does not support." >&2
+        return 2
+    }
+    printf '%s\n' "$out" | grep -q '^status: running$'
 }
 
 # The three id lookups below all answer EMPTY for "not there", and all three
@@ -595,8 +620,17 @@ workspace_id() { # -> id on stdout; rc 0 + empty = absent, rc 1 = unreadable
     printf '%s\n' "$out"
 }
 
-session_up() { # 0 = up; 1 = down; 2 = cannot tell, the list did not parse
-    herdr_server_up || return 1
+# The two "cannot tell" answers are kept apart rather than merged into one,
+# because the sentence a caller prints names which read failed, and pointing an
+# operator at the workspace list when it was the server socket sends them to the
+# wrong place. Callers pass this rc straight to town_absent_reason.
+session_up() { # 0 up; 1 down; 2 the list did not parse; 3 could not ask herdr
+    local srv=0
+    herdr_server_up || srv=$?
+    # `if` blocks rather than `[ ... ] && return`: an AND-OR list whose test
+    # fails is a failing statement, and km runs `set -e`.
+    if [ "$srv" -eq 2 ]; then return 3; fi
+    if [ "$srv" -ne 0 ]; then return 1; fi
     local ws
     # The rc, not the emptiness. `[ -n "$(workspace_id)" ]` stood here and read
     # an unreadable workspace list as "no workspace", so every caller below
@@ -607,16 +641,17 @@ session_up() { # 0 = up; 1 = down; 2 = cannot tell, the list did not parse
     [ -n "$ws" ]
 }
 
-# The sentence a caller prints when session_up said no. rc 2 is not "down": the
-# list did not parse, so km does not know which it is. workspace_id has already
-# put the parse's own diagnosis on stderr immediately above, which is why this
-# points at it rather than restating it.
+# The sentence a caller prints when session_up said no. Neither 2 nor 3 is
+# "down": one is a workspace list that did not parse, the other a server km
+# could not ask, and in both cases km does not know which it is. The failing
+# read has already put its own diagnosis on stderr immediately above, which is
+# why these point at it rather than restating it.
 town_absent_reason() { # <session_up rc> [wording for the plain down case]
-    if [ "${1:-1}" = 2 ]; then
-        printf '%s' "km cannot tell whether the town is up — the herdr workspace list did not parse (diagnosis above)"
-    else
-        printf '%s' "${2:-the town is down}"
-    fi
+    case "${1:-1}" in
+        2) printf '%s' "km cannot tell whether the town is up — the herdr workspace list did not parse (diagnosis above)" ;;
+        3) printf '%s' "km cannot tell whether the town is up — it could not ask herdr whether its server is running (diagnosis above)" ;;
+        *) printf '%s' "${2:-the town is down}" ;;
+    esac
 }
 
 # The seat's tab exists inside the workspace. Herdr tabs carry a label; the
@@ -1741,7 +1776,15 @@ raise_report() { # <started> <declined> <failed> -> 0 reported a town, 1 reporte
 cmd_up() {
     no_args up "$@"
     have_herdr || die "herdr is not installed, so there is no town to raise (https://herdr.dev)"
-    herdr_server_up || die "herdr server is not running — start it and retry (herdr status server)"
+    local srv_rc=0
+    herdr_server_up || srv_rc=$?
+    case "$srv_rc" in
+        1) die "herdr server is not running — start it and retry (herdr status server)" ;;
+        # Refused either way, but not under a claim km cannot support: raising a
+        # town over a server km could not reach would create a second workspace
+        # if the first one is in fact there.
+        2) die "km could not ask herdr whether its server is running (its own account is above), so it will not raise the town — that could mint a second '$WORKSPACE' workspace over a town already up." ;;
+    esac
     ensure_state_tree
     local mr s wt ws tally
     mr=$(main_root)
@@ -2116,8 +2159,10 @@ cmd_reconcile() {
         echo "reconcile: $(town_absent_reason "$up_rc"); nothing to reconcile"
         # Exit non-zero when km could not tell. A scheduled pass that did not
         # run must not report success — reporting 0 over a dead query is the
-        # shape this bead is an instance of.
-        [ "$up_rc" = 2 ] && return 1
+        # shape this bead is an instance of. Both cannot-tell answers count: 2
+        # is a workspace list that did not parse, 3 a server km could not ask,
+        # and neither is evidence there was nothing to reconcile.
+        case "$up_rc" in 2 | 3) return 1 ;; esac
         return 0
     fi
     local s st suspect rc repaired=0 redelivered=0 suspected=0 respawned=0 corrected=0
@@ -3941,7 +3986,7 @@ cmd_status() {
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
     if session_up; then echo "town: UP (herdr workspace '$WORKSPACE')"
-    else echo "town: $([ $? = 2 ] && echo 'UNKNOWN — the herdr workspace list did not parse (diagnosis above)' || echo DOWN)"; fi
+    else echo "town: $(case $? in 2) echo 'UNKNOWN — the herdr workspace list did not parse (diagnosis above)' ;; 3) echo 'UNKNOWN — km could not ask herdr whether its server is running (diagnosis above)' ;; *) echo DOWN ;; esac)"; fi
     if [ -f "$sd/halt" ]; then
         # The age rides the line because a transient halt outliving its cause
         # is invisible behind any timestamp subtraction (bd gqlc-ozfr: one ran
@@ -4296,7 +4341,11 @@ cmd_doctor() {
         fi
     }
     check hard "herdr installed" "herdr is NOT installed, and the town's panes are herdr agents (https://herdr.dev)" command -v herdr
-    check hard "herdr server running" "the herdr server is not running (herdr status server)" herdr_server_up
+    # `check` is two-valued by construction and swallows the command's stderr,
+    # so this row cannot tell "not running" from "km could not ask" and must not
+    # assert either. The TOWN ROW below does distinguish them; making this one
+    # do it means giving `check` a third outcome, which is bd gqlc-vdko8.
+    check hard "herdr server running" "the herdr server is not running, or km could not ask it (herdr status server; the town row below says which)" herdr_server_up
     check hard "claude installed" "claude is NOT installed, so no seat can be woken" command -v claude
     check hard "bd installed" "bd is NOT installed, so there is no ledger to dispatch from" command -v bd
     check hard "jq installed" "jq is NOT installed, and every ledger query here is parsed with it" command -v jq
@@ -4582,7 +4631,11 @@ cmd_doctor() {
     # THE TOWN ROW: is the herdr workspace present? Server-down and
     # workspace-absent both mean the town is down; render each with its own
     # message so an operator knows whether to start herdr or run `km up`.
-    if ! herdr_server_up; then
+    local srv_rc=0
+    herdr_server_up || srv_rc=$?
+    if [ "$srv_rc" = 2 ]; then
+        echo "warn: cannot tell whether the town is up — km could not ask herdr whether its server is running (diagnosis above). Not advising 'km up': it would be wrong if the town is already up."
+    elif [ "$srv_rc" != 0 ]; then
         echo "warn: the town is DOWN — the herdr server is not running (herdr status server)"
     else
         # The rc, not the emptiness. `[ -z "$(workspace_id)" ]` stood here and
