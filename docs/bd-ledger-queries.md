@@ -5,9 +5,12 @@ and none of this can be fixed by patching it. What follows is the contract as
 measured against the deployed binary, and the rules that make a query in this
 repository truthful.
 
-All figures below were taken first-party against the live ledger on
-2026-08-23 (bd on `PATH`, 775 beads total). Treat them as readings, not as
-states — the board moves.
+Every figure below was taken first-party against the live ledger, and each
+section carries the date it was measured on: the sections up to and including
+"`--status open` means the literal status" are 2026-08-23 against 775 beads, and
+"`--all` widens the status filter" onward is 2026-08-30 against 1169. Treat them
+as readings, not as states — the board moves, so a later section does not
+correct an earlier one merely by disagreeing with its total.
 
 ## Two independent defaults, and `-n 0` disables only one
 
@@ -45,6 +48,63 @@ one of them. An audit that means "work that is not finished" and writes
 Measured 2026-08-23: four beads carried a fixture owner address; three were
 `open` and one (`gqlc-o13d`, a P0) was `in_progress`. A sweep filtered on
 `--status open` named three of the four and said nothing about the fourth.
+
+## `--all` widens the status filter and nothing else
+
+The two sections above teach that the row cap and the status filter are
+independent dimensions, and that disabling one says nothing about the other. A
+reader who has learned that has no way to know which dimension `--all` is
+scoped to — its own help text, "Show all issues including closed (overrides
+default filter)", names a filter without saying which. Measured 2026-08-30
+against a ledger of 1169 beads:
+
+| query | rows |
+|---|---|
+| `bd list --all -n 0 --json` | 1169 |
+| `bd list -l class:judge --all -n 0 --json` | 112 |
+| `bd list -l class:warrior --all -n 0 --json` | 526 |
+| `bd list -a tsovinar --all -n 0 --json` | 29 |
+| `bd list -t task --all -n 0 --json` | 578 |
+| `bd list -p 2 --all -n 0 --json` | 458 |
+
+The first row is the whole ledger; the other five each stay in force under
+`--all`, on both sides. Each is below the 1169 total, so `--all` did not discard
+the filter. Each is also above what the same query returns without `--all` — 3,
+201, 3, 110 and 37 respectively — which is the closed rows arriving, so `--all`
+did reach them. So **`--all` composes with label, assignee, type and priority**:
+it is not the general unfilter, and you do not need to reach past these flags
+and re-select on `.labels` or `.assignee` in `jq`.
+
+Each was measured separately rather than generalised from `-l`, because the
+premise of this whole document is that these flags do not compose the way they
+read.
+
+### An explicit `--status` is not overridden by `--all`
+
+"Overrides default filter" means the **default**, and only the default:
+
+    bd list --status open -n 0 --json        | jq length  -> 206
+    bd list --status open --all -n 0 --json  | jq length  -> 206
+    bd list --all --status open -n 0 --json  | jq length  -> 206
+
+Order does not change it, and the same holds for `--status closed` (946 with
+and without `--all`) — an explicit status already reaches closed rows, so
+`--all` has nothing left to widen. Writing both is therefore not belt-and-braces
+against a mistake in the status name: the status wins, silently.
+
+### What the default status set actually is
+
+The census under `--all`, same measurement: 946 closed, 206 open, 13
+`in_progress`, 3 `deferred`, 1 `blocked`. `bd list -n 0 --json` returns 223 —
+exactly 1169 − 946 — so the default is **every status except `closed`**, not an
+enumerated set. (Uncapping is load-bearing in that sentence and the two defaults
+are independent, so the bare `bd list` returns 50, not 223. A subtraction across
+two queries is only an argument when they differ in the one dimension it is
+about.) Note `deferred`, which the 2026-08-22 line at the top of this
+document does not list; that line is left as the dated measurement it was, and
+this is the current shape. If you are enumerating statuses in a script rather
+than subtracting `closed`, a status added to bd later is a row you will silently
+miss.
 
 ## The row cap is disclosed — on stderr, which scripts discard
 
