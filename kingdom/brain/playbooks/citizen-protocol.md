@@ -401,6 +401,44 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    closing the bead citing the merged SHA — poll the PR's state, not a check's
    conclusion, which reads as done while the run is still going.
 
+   **Never pass `--delete-branch` either, and do not believe a fatal from this
+   command until you have asked the PR.** With that flag gh merges over the API
+   first and only then attempts a LOCAL cleanup: switch your checkout off the
+   branch it is about to delete — to `master` — and drop the local ref. That
+   switch is `git checkout master` in your seat worktree, which is the one thing
+   step 3 of Sleeping forbids you to do by hand, asked for on your behalf. Today
+   it fails, because a branch ref is checked out in at most one worktree and the
+   deploy root legitimately holds `master` — a topology `gqlc-ig3xj` is open to
+   reconsider, which would silence this failure without making the flag any
+   safer to pass:
+
+       failed to run git: fatal: 'master' is already used by worktree at
+       '/home/antranig/Developer/gqlc/gqlc'
+
+   That is the entire output, and the command exits non-zero, so it reads as a
+   failed merge. It is not one. The merge has already landed and is
+   irreversible; only the cleanup failed. Measured twice on 2026-08-30 — seat
+   sedrak on PR #1883, and seat tsovinar on PR #1923, which was `MERGED` at
+   05:12:08Z with its remote branch already gone. Ask `gh pr view <N> --json
+   state,mergedAt` before retrying anything or concluding the merge needs
+   redoing (bd `gqlc-715gt`).
+
+   That is the cheap failure. The expensive one is already on this town's
+   record: on a STACKED PR the flag deletes the base branch out from under the
+   child, and GitHub force-closes the child PR irreversibly. #1485 died that way
+   when #1457 merged with it on 2026-08-24. A closed PR can be neither
+   retargeted ("Cannot change the base branch of a closed pull request") nor
+   reopened without its base ("Could not open the pull request") — both measured
+   at the time. The branch and its commits survive; the PR object, its review
+   and its thread do not, and the successor has to be opened by hand with the
+   verdict carried forward manually (bd `gqlc-06y9`).
+
+   The flag buys nothing to weigh against either: `delete_branch_on_merge` is on
+   for this repository, so the remote branch goes without it. Measured
+   2026-08-30 on the setting itself and on the result — PRs #1923 and #1924 were
+   merged without the flag and neither head branch survives on the remote. Omit
+   it, and park per step 3 of Sleeping when you are done.
+
    **There is no merge queue, and ADR 0010 describes one.** The ADR was
    accepted and its stage A merged, but GitHub refuses the ruleset
    `merge_queue` rule type here: merge queues require an ORGANISATION-owned
