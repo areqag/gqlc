@@ -3425,7 +3425,6 @@ vuln-root-residual:
     # already import third-party code; the list shrinks as bd gqlc-m5rc converts
     # them and must never grow.
     baseline="$(sort <<'BLIND'
-    internal/codegen/age
     internal/resolver
     BLIND
     )"

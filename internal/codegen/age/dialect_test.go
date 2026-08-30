@@ -1,4 +1,4 @@
-package age
+package age_test
 
 import (
 	"fmt"
@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/liverecipes"
 	"github.com/areqag/gqlc/internal/query/cypher"
 )
@@ -110,7 +111,7 @@ func TestEveryDialectGapCarriesItsWitness(t *testing.T) {
 			"can stop being run by it")
 	bodies := readLiveWitnessBodies(t)
 	recipes := readRecipes(t, ageLiveRecipes)
-	require.Empty(t, witnessGaps(dialectGaps, bodies, recipes),
+	require.Empty(t, witnessGaps(age.DialectGaps, bodies, recipes),
 		"every refusal this backend makes on the query text has to rest on a live measurement")
 }
 
@@ -130,11 +131,11 @@ func TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer(t *testing.T) {
 		t.Run(cat.name, func(t *testing.T) {
 			require.NotEmpty(t, cat.probes)
 			for _, p := range cat.probes {
-				found := cat.find(p.text)
-				require.NotEmpty(t, found, "probe %q must call a function the gate reads", p.text)
+				found := cat.find(p.Text())
+				require.NotEmpty(t, found, "probe %q must call a function the gate reads", p.Text())
 				for _, name := range found {
-					require.Contains(t, strings.ToLower(p.answer), strings.ToLower(name),
-						"probe %q entered %q into the catalogue, but the server's answer does not name it", p.text, name)
+					require.Contains(t, strings.ToLower(p.Answer()), strings.ToLower(name),
+						"probe %q entered %q into the catalogue, but the server's answer does not name it", p.Text(), name)
 				}
 			}
 			require.Len(t, cat.names, len(cat.probes),
@@ -169,12 +170,12 @@ func TestTheFunctionCataloguesAreDisjoint(t *testing.T) {
 // than over the one that existed when they were written.
 var functionCatalogues = []struct {
 	name   string
-	probes []dialectProbe
+	probes []age.DialectProbe
 	names  map[string]struct{}
 	find   func(string) []string
 }{
-	{"temporal", undefinedFunctionProbes, undefinedFunctions, findUndefinedFunctions},
-	{"spatial", spatialFunctionProbes, undefinedSpatialFunctions, findUndefinedSpatialFunctions},
+	{"temporal", age.UndefinedFunctionProbes, age.UndefinedFunctions, age.FindUndefinedFunctions},
+	{"spatial", age.SpatialFunctionProbes, age.UndefinedSpatialFunctions, age.FindUndefinedSpatialFunctions},
 }
 
 // TestWitnessSweepFailsOnEachBrokenBinding is what keeps the sweep from
@@ -221,59 +222,50 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 	// The build tag is here because recipeRuns requires it — a command
 	// line that does not build liveBuildTag compiles no live test.
 	recipes := map[string]string{"run-it": "go test -tags " + liveBuildTag + " -run '^" + witness + "$'"}
-	sound := dialectGap{
-		sentinel: ErrRelationshipTypeAlternation,
-		find:     findUndefinedFunctionsOrAlternations,
-		diagnose: func(int, string, string) string { return "" },
-		witness:  witness,
-		refused: []dialectProbe{{
-			text:   "MATCH (:A)-[r:X|Y]->(:B) RETURN r",
-			answer: `syntax error at or near "|"`,
-		}},
-		served: []string{"MATCH (:A)-[r:X]->(:B) RETURN r"},
-	}
-	require.Empty(t, witnessGaps([]dialectGap{sound}, bodies, recipes),
+	sound := age.DialectGapFields{
+		Sentinel: age.ErrRelationshipTypeAlternation,
+		Find:     findUndefinedFunctionsOrAlternations,
+		Diagnose: func(int, string, string) string { return "" },
+		Witness:  witness,
+		Refused:  []age.DialectProbe{age.NewDialectProbe("MATCH (:A)-[r:X|Y]->(:B) RETURN r", `syntax error at or near "|"`)},
+		Served:   []string{"MATCH (:A)-[r:X]->(:B) RETURN r"},
+	}.Build()
+	require.Empty(t, witnessGaps([]age.DialectGap{sound}, bodies, recipes),
 		"the row template must pass, or a complaint below could come from the template")
 
 	for _, tc := range []struct {
 		name string
 		// cut is the one binding this row cuts. A nil gaps slice
 		// from it means the row is about the table and not about a gap.
-		cut  func(g dialectGap) []dialectGap
+		cut  func(g age.DialectGap) []age.DialectGap
 		want string
 	}{
 		{
 			name: "a gap with no probe refuses on nothing",
-			cut:  func(g dialectGap) []dialectGap { g.refused = nil; return []dialectGap{g} },
+			cut:  func(g age.DialectGap) []age.DialectGap { g.SetRefused(nil); return []age.DialectGap{g} },
 			want: "refuses on no probe",
 		},
 		{
 			name: "a probe the gate does not read is not evidence for this gate",
-			cut: func(g dialectGap) []dialectGap {
-				g.refused = []dialectProbe{{text: "MATCH (:A)-[r:X]->(:B) RETURN r", answer: "boom"}}
-				return []dialectGap{g}
+			cut: func(g age.DialectGap) []age.DialectGap {
+				g.SetRefused([]age.DialectProbe{age.NewDialectProbe("MATCH (:A)-[r:X]->(:B) RETURN r", "boom")})
+				return []age.DialectGap{g}
 			},
 			want: "is not read by this gap",
 		},
 		{
 			name: "a probe no live test carries is never re-measured",
-			cut: func(g dialectGap) []dialectGap {
-				g.refused = []dialectProbe{{
-					text:   "MATCH (:A)-[r:P|Q]->(:B) RETURN r",
-					answer: `syntax error at or near "|"`,
-				}}
-				return []dialectGap{g}
+			cut: func(g age.DialectGap) []age.DialectGap {
+				g.SetRefused([]age.DialectProbe{age.NewDialectProbe("MATCH (:A)-[r:P|Q]->(:B) RETURN r", `syntax error at or near "|"`)})
+				return []age.DialectGap{g}
 			},
 			want: "is not carried by",
 		},
 		{
 			name: "an answer no live test asserts is a claim about a server nothing checks",
-			cut: func(g dialectGap) []dialectGap {
-				g.refused = []dialectProbe{{
-					text:   "MATCH (:A)-[r:X|Y]->(:B) RETURN r",
-					answer: "some other complaint entirely",
-				}}
-				return []dialectGap{g}
+			cut: func(g age.DialectGap) []age.DialectGap {
+				g.SetRefused([]age.DialectProbe{age.NewDialectProbe("MATCH (:A)-[r:X|Y]->(:B) RETURN r", "some other complaint entirely")})
+				return []age.DialectGap{g}
 			},
 			want: "is not asserted by",
 		},
@@ -285,70 +277,64 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 			// recipes never name, is never run against the pinned image
 			// no matter how many files spell it.
 			name: "a probe some other live test carries is not re-measured by this witness",
-			cut: func(g dialectGap) []dialectGap {
-				g.refused = []dialectProbe{{
-					text:   "MATCH (:A)-[r:M|N]->(:B) RETURN r",
-					answer: `syntax error at or near "|"`,
-				}}
-				return []dialectGap{g}
+			cut: func(g age.DialectGap) []age.DialectGap {
+				g.SetRefused([]age.DialectProbe{age.NewDialectProbe("MATCH (:A)-[r:M|N]->(:B) RETURN r", `syntax error at or near "|"`)})
+				return []age.DialectGap{g}
 			},
 			want: "is not carried by",
 		},
 		{
 			name: "an answer some other live test asserts is not asserted by this witness",
-			cut: func(g dialectGap) []dialectGap {
-				g.refused = []dialectProbe{{
-					text:   "MATCH (:A)-[r:X|Y]->(:B) RETURN r",
-					answer: "no relationship type by that name",
-				}}
-				return []dialectGap{g}
+			cut: func(g age.DialectGap) []age.DialectGap {
+				g.SetRefused([]age.DialectProbe{age.NewDialectProbe("MATCH (:A)-[r:X|Y]->(:B) RETURN r", "no relationship type by that name")})
+				return []age.DialectGap{g}
 			},
 			want: "is not asserted by",
 		},
 		{
 			name: "a served text some other live test carries was not measured as served here",
-			cut: func(g dialectGap) []dialectGap {
-				g.served = []string{"MATCH (:A)-[r:W]->(:B) RETURN r"}
-				return []dialectGap{g}
+			cut: func(g age.DialectGap) []age.DialectGap {
+				g.SetServed([]string{"MATCH (:A)-[r:W]->(:B) RETURN r"})
+				return []age.DialectGap{g}
 			},
 			want: "is not carried by",
 		},
 		{
 			name: "a gap recording no served text has nothing bounding its find",
-			cut:  func(g dialectGap) []dialectGap { g.served = nil; return []dialectGap{g} },
+			cut:  func(g age.DialectGap) []age.DialectGap { g.SetServed(nil); return []age.DialectGap{g} },
 			want: "records no served text",
 		},
 		{
 			name: "a served text the gate refuses is the false positive this table exists to prevent",
-			cut: func(g dialectGap) []dialectGap {
-				g.served = []string{"MATCH (:A)-[r:X|Y]->(:B) RETURN r"}
-				return []dialectGap{g}
+			cut: func(g age.DialectGap) []age.DialectGap {
+				g.SetServed([]string{"MATCH (:A)-[r:X|Y]->(:B) RETURN r"})
+				return []age.DialectGap{g}
 			},
 			want: "as served and its find refuses it",
 		},
 		{
 			name: "a served text no live test carries was never measured as served",
-			cut: func(g dialectGap) []dialectGap {
-				g.served = []string{"MATCH (:A)-[r:Z]->(:B) RETURN r"}
-				return []dialectGap{g}
+			cut: func(g age.DialectGap) []age.DialectGap {
+				g.SetServed([]string{"MATCH (:A)-[r:Z]->(:B) RETURN r"})
+				return []age.DialectGap{g}
 			},
 			want: "is not carried by",
 		},
 		{
 			name: "a gap naming no witness names nothing to re-measure it",
-			cut:  func(g dialectGap) []dialectGap { g.witness = ""; return []dialectGap{g} },
+			cut:  func(g age.DialectGap) []age.DialectGap { g.SetWitness(""); return []age.DialectGap{g} },
 			want: "names no witness test",
 		},
 		{
 			name: "a witness no live file declares does not exist",
-			cut:  func(g dialectGap) []dialectGap { g.witness = "TestNotWritten"; return []dialectGap{g} },
+			cut:  func(g age.DialectGap) []age.DialectGap { g.SetWitness("TestNotWritten"); return []age.DialectGap{g} },
 			want: "is not declared in any live test file",
 		},
 		{
 			name: "a witness no recipe runs never runs",
-			cut: func(g dialectGap) []dialectGap {
-				g.witness = "TestSomethingLiveButUnrun"
-				return []dialectGap{g}
+			cut: func(g age.DialectGap) []age.DialectGap {
+				g.SetWitness("TestSomethingLiveButUnrun")
+				return []age.DialectGap{g}
 			},
 			// The live file declares this one, so the declaration
 			// complaint stays silent and what is left is the recipe's.
@@ -359,17 +345,17 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 		},
 		{
 			name: "a gap with no sentinel gives a caller nothing to branch on",
-			cut:  func(g dialectGap) []dialectGap { g.sentinel = nil; return []dialectGap{g} },
+			cut:  func(g age.DialectGap) []age.DialectGap { g.SetSentinel(nil); return []age.DialectGap{g} },
 			want: "carries no sentinel",
 		},
 		{
 			name: "a gap with no find reads nothing",
-			cut:  func(g dialectGap) []dialectGap { g.find = nil; return []dialectGap{g} },
+			cut:  func(g age.DialectGap) []age.DialectGap { g.SetFind(nil); return []age.DialectGap{g} },
 			want: "has no find",
 		},
 		{
 			name: "a gap with no diagnose tells the author nothing",
-			cut:  func(g dialectGap) []dialectGap { g.diagnose = nil; return []dialectGap{g} },
+			cut:  func(g age.DialectGap) []age.DialectGap { g.SetDiagnose(nil); return []age.DialectGap{g} },
 			want: "has no diagnose",
 		},
 		{
@@ -378,7 +364,7 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 			// and a loop over nothing runs no body. Without this the
 			// whole sweep is satisfied by deleting the table.
 			name: "an empty table has measured nothing",
-			cut:  func(dialectGap) []dialectGap { return nil },
+			cut:  func(age.DialectGap) []age.DialectGap { return nil },
 			want: "the dialect gap table is empty",
 		},
 	} {
@@ -404,18 +390,18 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 func TestWitnessBodiesAreScopedToTheirOwnTest(t *testing.T) {
 	bodies := readLiveWitnessBodies(t)
 	compared := 0
-	for _, g := range dialectGaps {
-		body, declared := bodies[g.witness]
-		require.True(t, declared, "gap witness %s is not declared in any live test file", g.witness)
-		for _, other := range dialectGaps {
-			if other.witness == g.witness {
+	for _, g := range age.DialectGaps {
+		body, declared := bodies[g.Witness()]
+		require.True(t, declared, "gap witness %s is not declared in any live test file", g.Witness())
+		for _, other := range age.DialectGaps {
+			if other.Witness() == g.Witness() {
 				continue
 			}
-			for _, p := range other.refused {
+			for _, p := range other.Refused() {
 				compared++
-				require.NotContains(t, body.code, p.text,
+				require.NotContains(t, body.code, p.Text(),
 					"%s carries %s's probe %q, so the reader is not scoped to one test's body",
-					g.witness, other.witness, p.text)
+					g.Witness(), other.Witness(), p.Text())
 			}
 		}
 	}
@@ -492,15 +478,15 @@ func commentOut(block string) string {
 // sweep, so a difference between them can only be the source each writes
 // — two hand-built gaps that drifted apart would pass for the wrong
 // reason, which is the argument commentOut is derived for.
-func syntheticGap() (dialectGap, map[string]string) {
-	return dialectGap{
-			sentinel: ErrUndefinedFunction,
-			find:     findUndefinedFunctions,
-			diagnose: func(int, string, string) string { return "" },
-			witness:  syntheticWitness,
-			refused:  []dialectProbe{{text: syntheticProbeText, answer: syntheticProbeAns}},
-			served:   []string{syntheticServedText},
-		},
+func syntheticGap() (age.DialectGap, map[string]string) {
+	return age.DialectGapFields{
+			Sentinel: age.ErrUndefinedFunction,
+			Find:     age.FindUndefinedFunctions,
+			Diagnose: func(int, string, string) string { return "" },
+			Witness:  syntheticWitness,
+			Refused:  []age.DialectProbe{age.NewDialectProbe(syntheticProbeText, syntheticProbeAns)},
+			Served:   []string{syntheticServedText},
+		}.Build(),
 		map[string]string{"run-it": "go test -count=1 -tags " + liveBuildTag + " -run " + syntheticWitness}
 }
 
@@ -683,11 +669,11 @@ func TestACommentedProbeReddensTheSweep(t *testing.T) {
 	gap, recipes := syntheticGap()
 
 	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow))
-	require.Empty(t, witnessGaps([]dialectGap{gap}, run, recipes),
+	require.Empty(t, witnessGaps([]age.DialectGap{gap}, run, recipes),
 		"the template must pass, or the complaints below could come from the template")
 
 	spelled := readSyntheticWitness(t, liveWitnessSource("", commentOut(syntheticProbeRow)))
-	got := strings.Join(witnessGaps([]dialectGap{gap}, spelled, recipes), "\n")
+	got := strings.Join(witnessGaps([]age.DialectGap{gap}, spelled, recipes), "\n")
 	require.Contains(t, got, "is not carried by",
 		"a probe only a comment spells is measured by nothing")
 	require.Contains(t, got, "is not asserted by",
@@ -715,11 +701,11 @@ func TestAnUnassertedAnswerReddensTheSweep(t *testing.T) {
 	gap, recipes := syntheticGap()
 
 	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow))
-	require.Empty(t, witnessGaps([]dialectGap{gap}, run, recipes),
+	require.Empty(t, witnessGaps([]age.DialectGap{gap}, run, recipes),
 		"the template must pass, or the complaints below could come from the template")
 
 	spelled := readSyntheticWitness(t, liveWitnessSource("", syntheticUnassertedRow))
-	got := strings.Join(witnessGaps([]dialectGap{gap}, spelled, recipes), "\n")
+	got := strings.Join(witnessGaps([]age.DialectGap{gap}, spelled, recipes), "\n")
 	require.Contains(t, got, "is not asserted by",
 		"an answer no assertion reads is a claim about the server that nothing re-measures")
 	require.NotContains(t, got, "is not carried by",
@@ -731,7 +717,7 @@ func TestAnUnassertedAnswerReddensTheSweep(t *testing.T) {
 // real table refuses, so a row can cut either binding without needing a
 // second template. Test-only — the shipped table pairs one find per gap.
 func findUndefinedFunctionsOrAlternations(src string) []string {
-	if found := findUndefinedFunctions(src); len(found) > 0 {
+	if found := age.FindUndefinedFunctions(src); len(found) > 0 {
 		return found
 	}
 	return cypher.RelationshipTypeAlternations(src)
@@ -757,7 +743,7 @@ func findUndefinedFunctionsOrAlternations(src string) []string {
 // an AGE test no recipe runs, is never run against the pinned image —
 // and a sweep reading every file at once cannot tell those apart from
 // the real thing.
-func witnessGaps(gaps []dialectGap, bodies map[string]witnessBody, recipes map[string]string) []string {
+func witnessGaps(gaps []age.DialectGap, bodies map[string]witnessBody, recipes map[string]string) []string {
 	var complaints []string
 	say := func(format string, args ...any) {
 		complaints = append(complaints, fmt.Sprintf(format, args...))
@@ -775,16 +761,16 @@ func witnessGaps(gaps []dialectGap, bodies map[string]witnessBody, recipes map[s
 
 	for i, g := range gaps {
 		id := fmt.Sprintf("gap %d", i)
-		if g.witness != "" {
-			id = fmt.Sprintf("gap %d (%s)", i, g.witness)
+		if g.Witness() != "" {
+			id = fmt.Sprintf("gap %d (%s)", i, g.Witness())
 		}
-		if g.sentinel == nil {
+		if g.Sentinel() == nil {
 			say("%s carries no sentinel, so a caller has nothing to branch on", id)
 		}
-		if g.diagnose == nil {
+		if g.Diagnose() == nil {
 			say("%s has no diagnose, so its refusal would tell the author nothing", id)
 		}
-		if g.find == nil {
+		if g.Find() == nil {
 			// Everything below calls find, so this gap can be checked
 			// no further.
 			say("%s has no find, so it reads nothing out of a query text", id)
@@ -794,58 +780,58 @@ func witnessGaps(gaps []dialectGap, bodies map[string]witnessBody, recipes map[s
 		// Empty where the gap names no witness or names one no live file
 		// declares, so every binding below is reported unmeasured too —
 		// which is what it is.
-		body := bodies[g.witness]
-		switch _, declared := bodies[g.witness]; {
-		case g.witness == "":
+		body := bodies[g.Witness()]
+		switch _, declared := bodies[g.Witness()]; {
+		case g.Witness() == "":
 			say("%s names no witness test, so nothing re-measures it against the pinned image", id)
 		case !declared:
-			say("%s names witness %q, which is not declared in any live test file", id, g.witness)
+			say("%s names witness %q, which is not declared in any live test file", id, g.Witness())
 		}
-		if g.witness != "" {
+		if g.Witness() != "" {
 			for name, cmds := range recipes {
-				if !recipeRuns(cmds, g.witness) {
-					say("%s names witness %q, which is not run by recipe %s", id, g.witness, name)
+				if !recipeRuns(cmds, g.Witness()) {
+					say("%s names witness %q, which is not run by recipe %s", id, g.Witness(), name)
 				}
 			}
 		}
 
-		if len(g.refused) == 0 {
+		if len(g.Refused()) == 0 {
 			say("%s refuses on no probe, so its refusal rests on nothing measured", id)
 		}
-		for _, p := range g.refused {
+		for _, p := range g.Refused() {
 			switch {
-			case p.text == "":
+			case p.Text() == "":
 				say("%s carries a probe with no text", id)
 				continue
-			case len(g.find(p.text)) == 0:
+			case len(g.Find()(p.Text())) == 0:
 				say("%s carries probe %q, which is not read by this gap — "+
-					"so the measurement is of something the gate does not refuse", id, p.text)
+					"so the measurement is of something the gate does not refuse", id, p.Text())
 			}
-			if !strings.Contains(body.code, p.text) {
-				say("%s carries probe %q, which is not carried by %s", id, p.text, g.witness)
+			if !strings.Contains(body.code, p.Text()) {
+				say("%s carries probe %q, which is not carried by %s", id, p.Text(), g.Witness())
 			}
 			switch {
-			case p.answer == "":
-				say("%s carries probe %q with no recorded answer", id, p.text)
-			case !strings.Contains(body.asserted, p.answer):
+			case p.Answer() == "":
+				say("%s carries probe %q with no recorded answer", id, p.Text())
+			case !strings.Contains(body.asserted, p.Answer()):
 				// The narrow scope, and the one binding of the four that
 				// is not containment in the body: an answer spelled in
 				// the witness and read by nothing is a claim about the
 				// server nothing re-measures (assertedText, mutation
 				// M18).
-				say("%s records answer %q, which is not asserted by %s", id, p.answer, g.witness)
+				say("%s records answer %q, which is not asserted by %s", id, p.Answer(), g.Witness())
 			}
 		}
 
-		if len(g.served) == 0 {
+		if len(g.Served()) == 0 {
 			say("%s records no served text, so nothing bounds what its find refuses", id)
 		}
-		for _, s := range g.served {
-			if len(g.find(s)) > 0 {
+		for _, s := range g.Served() {
+			if len(g.Find()(s)) > 0 {
 				say("%s records %q as served and its find refuses it", id, s)
 			}
 			if !strings.Contains(body.code, s) {
-				say("%s records served text %q, which is not carried by %s", id, s, g.witness)
+				say("%s records served text %q, which is not carried by %s", id, s, g.Witness())
 			}
 		}
 	}

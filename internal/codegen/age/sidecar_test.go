@@ -1,4 +1,4 @@
-package age
+package age_test
 
 import (
 	"go/ast"
@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
 )
 
@@ -49,7 +50,7 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 	// match stays quiet.
 	var carried []graph.PropertyType
 	for _, pt := range widths {
-		if _, ok := (typeMap{}).Property(pt); ok {
+		if _, ok := (age.TypeMap{}).Property(pt); ok {
 			carried = append(carried, pt)
 		}
 	}
@@ -57,7 +58,7 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 
 	compared, zoned := make([]graph.PropertyType, 0, len(carried)), []graph.PropertyType{}
 	for _, pt := range widths {
-		goType, ok := typeMap{}.Property(pt)
+		goType, ok := age.TypeMap{}.Property(pt)
 		if !ok {
 			// No carrier, so no entity field is ever built for this width
 			// and neither the decode nor the gate can see one.
@@ -72,7 +73,7 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 				if !nullable {
 					zoned = append(zoned, pt)
 				}
-				require.Error(t, rejectOffsetSidecarCollisions([]codegen.Entity{entityDeclaring(f, key)}),
+				require.Error(t, age.RejectOffsetSidecarCollisions([]codegen.Entity{entityDeclaring(f, key)}),
 					"%s (nullable=%t): the decode reads property %q, and the gate serves a schema whose author declares it",
 					pt, nullable, key)
 			}
@@ -86,7 +87,7 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 				if reads && prop == key {
 					continue
 				}
-				require.NoError(t, rejectOffsetSidecarCollisions([]codegen.Entity{entityDeclaring(f, prop)}),
+				require.NoError(t, age.RejectOffsetSidecarCollisions([]codegen.Entity{entityDeclaring(f, prop)}),
 					"%s (nullable=%t): the gate refused property %q, which this width's decode does not read",
 					pt, nullable, prop)
 			}
@@ -96,8 +97,8 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 			// helper the emitted text actually named. A width reading no
 			// sidecar must leave every zoning helper unmarked, which is
 			// what the loop over the whole map answers.
-			var h helpers
-			h.forEntities([]wiredEntity{{Entity: entityDeclaring(f, "")}})
+			var h age.Helpers
+			h.ForEntities([]age.WiredEntity{{Entity: entityDeclaring(f, "")}})
 			for name, marked := range zoningHelpers {
 				require.Equal(t, reads && name == helper, marked(h),
 					"%s (nullable=%t): the decode re-zones through %q and the emission marks %s for declaration=%t",
@@ -129,9 +130,9 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 // sidecar", which is the quiet direction: the gate would then look
 // over-eager rather than blind, and the row asserting agreement would
 // pass on the wrong side.
-var zoningHelpers = map[string]func(helpers) bool{
-	"agtypeZone":     func(h helpers) bool { return h.zone },
-	"agtypeTimeZone": func(h helpers) bool { return h.timeZone },
+var zoningHelpers = map[string]func(age.Helpers) bool{
+	"agtypeZone":     func(h age.Helpers) bool { return h.Zone() },
+	"agtypeTimeZone": func(h age.Helpers) bool { return h.TimeZone() },
 }
 
 // decodedSidecarKey is the property key one field's emitted decode reads
@@ -143,7 +144,7 @@ func decodedSidecarKey(t *testing.T, f codegen.EntityField) (string, string, boo
 	t.Helper()
 
 	var b strings.Builder
-	writeEntityFieldDecode(&b, codegen.Entity{Name: "E", Kind: codegen.EntityNode, Fields: []codegen.EntityField{f}}, 0, f)
+	age.WriteEntityFieldDecode(&b, codegen.Entity{Name: "E", Kind: codegen.EntityNode, Fields: []codegen.EntityField{f}}, 0, f)
 	emitted := b.String()
 
 	// A call this walk does not recognise is a defect and not an absence.

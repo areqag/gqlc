@@ -1,4 +1,4 @@
-package age
+package age_test
 
 import (
 	"testing"

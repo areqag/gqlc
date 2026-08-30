@@ -1,15 +1,17 @@
-package age
+package age_test
 
 import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
 )
 
@@ -36,17 +38,17 @@ var propertyWidths = []graph.PropertyType{
 func TestZoneIsMarkedOnlyBesideTheInstant(t *testing.T) {
 	sawInstant := false
 	for _, pt := range propertyWidths {
-		goType, ok := typeMap{}.Property(pt)
+		goType, ok := age.TypeMap{}.Property(pt)
 		require.True(t, ok, "%s", pt)
 
-		var h helpers
-		h.forEntities([]wiredEntity{{Entity: codegen.Entity{
+		var h age.Helpers
+		h.ForEntities([]age.WiredEntity{{Entity: codegen.Entity{
 			Name:   "E",
 			Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}},
 		}}})
 
-		if h.zone {
-			require.True(t, h.instant, "%s marks the sidecar read with no instant beside it", pt)
+		if h.Zone() {
+			require.True(t, h.Instant(), "%s marks the sidecar read with no instant beside it", pt)
 			sawInstant = true
 		}
 	}
@@ -69,28 +71,58 @@ func TestZoneIsMarkedOnlyBesideTheInstant(t *testing.T) {
 func TestImportsTimeAgreesWithTheEmittedFile(t *testing.T) {
 	for _, pt := range propertyWidths {
 		t.Run(string(pt), func(t *testing.T) {
-			goType, ok := typeMap{}.Property(pt)
+			goType, ok := age.TypeMap{}.Property(pt)
 			require.True(t, ok, "%s", pt)
 
-			entities := []wiredEntity{{
-				Entity:     codegen.Entity{Name: "E", Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}}},
-				label:      "E",
-				annotation: vertexAnnotation,
-			}}
-			var h helpers
-			h.forEntities(entities)
+			entities := []age.WiredEntity{age.WiredEntity{
+				Entity: codegen.Entity{Name: "E", Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}}},
+			}.WithLabels("E", age.VertexAnnotation)}
+			var h age.Helpers
+			h.ForEntities(entities)
 
-			src := string(renderModels("m", entities, h))
+			src := string(age.RenderModels("m", entities, h))
 			// The import line itself is what importsTime writes, so the
 			// witness has to be a use of the package and not that line.
 			names := strings.Contains(src, "time.Time") || strings.Contains(src, "time.Parse") ||
 				strings.Contains(src, "time.Date") || strings.Contains(src, "time.UnixMicro") ||
 				strings.Contains(src, "time.FixedZone")
-			require.Equal(t, names, h.importsTime(),
-				"importsTime()=%v but the rendered models.go %s time", h.importsTime(),
+			require.Equal(t, names, h.ImportsTime(),
+				"importsTime()=%v but the rendered models.go %s time", h.ImportsTime(),
 				map[bool]string{true: "names", false: "does not name"}[names])
 		})
 	}
+}
+
+// TestTheWireLabelsReachTheEmittedDecoder pins that the two labels an
+// entity is wired with are the two the generated decoder enforces: the
+// annotation is what agtypeEntity strips, and the wire label is what the
+// equality check beneath it demands.
+//
+// It exists as the positive control for the WithLabels bridge. Every
+// other test that wires an entity asserts on what its FIELDS render to,
+// so a WithLabels that dropped both labels on the floor left those tests
+// green — the emitted decoder then strips the empty annotation and
+// demands the empty label, and nothing in the package noticed. The label
+// here is deliberately not the entity's name, so a decoder that echoed
+// the name instead of the label would not satisfy it either.
+func TestTheWireLabelsReachTheEmittedDecoder(t *testing.T) {
+	goType, ok := age.TypeMap{}.Property(graph.TypeString)
+	require.True(t, ok)
+
+	e := age.WiredEntity{Entity: codegen.Entity{
+		Name:   "E",
+		Kind:   codegen.EntityNode,
+		Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}},
+	}}.WithLabels("Widget", age.VertexAnnotation)
+
+	var h age.Helpers
+	h.ForEntities([]age.WiredEntity{e})
+	src := string(age.RenderModels("models", []age.WiredEntity{e}, h))
+
+	require.Contains(t, src, strconv.Quote(age.VertexAnnotation),
+		"the emitted decoder does not strip the annotation the entity was wired with")
+	require.Contains(t, src, strconv.Quote("Widget"),
+		"the emitted decoder does not demand the wire label the entity was wired with")
 }
 
 // TestEmittedHelpersAreClosedOverWhatTheyCall renders models.go for a
@@ -107,23 +139,21 @@ func TestImportsTimeAgreesWithTheEmittedFile(t *testing.T) {
 func TestEmittedHelpersAreClosedOverWhatTheyCall(t *testing.T) {
 	for _, pt := range propertyWidths {
 		for _, nullable := range []bool{false, true} {
-			goType, ok := typeMap{}.Property(pt)
+			goType, ok := age.TypeMap{}.Property(pt)
 			require.True(t, ok, "%s", pt)
 
-			e := wiredEntity{
+			e := age.WiredEntity{
 				Entity: codegen.Entity{
 					Name:   "E",
 					Kind:   codegen.EntityNode,
 					Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType, Nullable: nullable}},
 				},
-				label:      "E",
-				annotation: vertexAnnotation,
-			}
-			var h helpers
-			h.forEntities([]wiredEntity{e})
-			h.forParams([]codegen.Param{{RawName: "p", Field: "P", GoType: goType, Nullable: nullable}})
+			}.WithLabels("E", age.VertexAnnotation)
+			var h age.Helpers
+			h.ForEntities([]age.WiredEntity{e})
+			age.HelpersForParams(&h, []codegen.Param{{RawName: "p", Field: "P", GoType: goType, Nullable: nullable}})
 
-			src := renderModels("models", []wiredEntity{e}, h)
+			src := age.RenderModels("models", []age.WiredEntity{e}, h)
 			require.Empty(t, undeclaredAgtypeIdents(t, src),
 				"a batch of one %s property (nullable=%t) names an agtype helper it does not declare, so the emitted package does not compile",
 				pt, nullable)
