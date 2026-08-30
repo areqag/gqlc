@@ -684,7 +684,22 @@ you, and the reminder is yours to act on when ready.
 1. Update your bead(s): state, `--append-notes` with where things stand.
 2. If work is mid-flight, write a handoff (`handoff.md` playbook — or just
    invoke `/handoff`, which walks you through it).
-3. `km sleep` — it records your status and ends the session. Your seat, your
+3. If your branch is finished — merged, or abandoned — park DETACHED:
+
+       git checkout --detach origin/master
+
+   **Never `git checkout master` in a seat worktree.** A branch ref may be
+   checked out in exactly one worktree of a repository, so a seat holding
+   `master` makes it impossible for the deploy root to be on `master` — and
+   `km deploy` refuses a root that is not, so every merged km fix stops
+   reaching the town. Measured 2026-08-29: one seat parked this way after its
+   PR merged, and the dispatcher ran six commits stale for about 2.5 hours,
+   among them the fix written for the dispatcher itself. Nothing warned
+   anybody; `km status` showed that seat's tree as `ok` (bd gqlc-mv902,
+   gqlc-59n70). If you are still mid-work, stay on your branch — this is about
+   parking a finished one, not about leaving live work.
+
+4. `km sleep` — it records your status and ends the session. Your seat, your
    history, and your claimed beads wait for your next wake.
 
 ## Escalation
