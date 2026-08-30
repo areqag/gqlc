@@ -3566,27 +3566,37 @@ This counter clears by itself the moment one of her tool calls finishes — witn
         inferred=$((inferred + 1))
     done <<<"$routed"
 
-    # Owned pass: an unclaimed bead that names a seat goes back to that seat,
-    # ahead of any fresh routing, for the same reason the resume pass runs first
-    # (Constitution III.3). An assignee that is not a seat — a person, most of
-    # them — matches no seat here and is left alone.
-    route_owners "$owned" "assigned work waiting — claim it before you begin"
-
-    # Fresh pass: ready, unassigned, class-labelled beads, priority first. It
-    # runs with no slots left too, because judge work does not need one.
+    # Ask whether each candidate's premise is actually on master and out of every
+    # open PR's way (gqlc-pj4r). Asked ONCE, here, for BOTH of the passes below
+    # that route ready beads, and over the owned and fresh ids together.
     #
-    # Before routing anything, ask whether each candidate's premise is actually
-    # on master and out of every open PR's way (gqlc-pj4r). The edges come from
-    # ONE multi-id `bd dep list` — the single-id form returns the parent issue
-    # object instead of {issue_id, depends_on_id, type} rows, so a per-id loop
-    # would parse a different shape and quietly find no edges — and the parent
-    # statuses from ONE `bd show` over the discovered-from parents.
-    local ids deps parents parent_ids docs verdicts="" held=0
-    ids=$(awk 'NF { print $1 }' <<<"$routed")
+    # It used to be computed after the owned pass had already routed, which made
+    # the hold rule a protection for UNASSIGNED beads only: assigning a bead to a
+    # seat removed its hold, by pass ordering rather than by any decision anyone
+    # recorded. Fail-silent in the direction that reads healthy, too — the
+    # operator saw `owner-withheld`, an accurate-sounding line about capacity,
+    # and nothing anywhere said the hold question had never been asked. A mayor
+    # labelling a bead to hold it, which is the documented remedy, got no warning
+    # that assigning that same bead defeated the label (gqlc-2n3d5).
+    #
+    # The RESUME pass above is deliberately NOT covered. A seat that has already
+    # begun must stay resumable; holding it there would strand live work behind a
+    # PR the seat may itself be waiting on, and Constitution III.3 wants the seat
+    # told about its in-progress half first.
+    #
+    # The edges come from ONE multi-id `bd dep list` — the single-id form returns
+    # the parent issue object instead of {issue_id, depends_on_id, type} rows, so
+    # a per-id loop would parse a different shape and quietly find no edges — and
+    # the parent statuses from ONE `bd show` over the discovered-from parents.
+    local ids deps parents parent_ids docs verdicts="" held=0 verdict reason
+    ids=$(
+        awk 'NF { print $1 }' <<<"$routed"
+        awk 'NF { print $2 }' <<<"$owned"
+    )
     if [ -n "$ids" ]; then
         # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
         if ! deps=$(bd dep list $ids --json 2>/dev/null); then
-            echo "dispatch: the dependency query failed; fresh pass skipped this run (the resume and owned wakes above stand)"
+            echo "dispatch: the dependency query failed; neither the owned nor the fresh pass routed this run (the resume wakes above stand)"
             return 0
         fi
         parent_ids=$(jq -r '[ .[]? | select(.type == "discovered-from") | .depends_on_id ] | unique | .[]' \
@@ -3596,12 +3606,12 @@ This counter clears by itself the moment one of her tool calls finishes — witn
             # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
             if ! parents=$(bd show $parent_ids --json 2>/dev/null |
                 jq -c 'if type == "array" then . else [.] end' 2>/dev/null); then
-                echo "dispatch: the parent-status query failed; fresh pass skipped this run (the resume and owned wakes above stand)"
+                echo "dispatch: the parent-status query failed; neither the owned nor the fresh pass routed this run (the resume wakes above stand)"
                 return 0
             fi
         fi
         if ! docs=$(dispatch_candidate_docs "$ready" "$deps" "$parents" "$ids"); then
-            echo "dispatch: the candidate documents could not be assembled; fresh pass skipped this run"
+            echo "dispatch: the candidate documents could not be assembled; neither the owned nor the fresh pass routed this run (the resume wakes above stand)"
             return 0
         fi
         # Captured on the AND-OR rather than read from $? in the branch. Inside
@@ -3620,18 +3630,51 @@ This counter clears by itself the moment one of her tool calls finishes — witn
         local hv_rc=0
         verdicts=$(cmd_hold_verdict <<<"$docs") || hv_rc=$?
         if [ "$hv_rc" != 0 ]; then
-            # Never fall through to routing unchecked. The resume wakes taken
-            # above stand, and an operator reading this during an incident must
-            # be able to trust that sentence.
-            echo "dispatch: hold-verdict failed (rc=$hv_rc); fresh pass skipped this run (the resume and owned wakes above stand)"
+            # Never fall through to routing unchecked. Since gqlc-2n3d5 that
+            # covers the owned pass as well, which is the fail-closed direction:
+            # a run that could not ASK the hold question must not route a bead
+            # merely because the bead already names a seat. The resume wakes
+            # taken above stand, and an operator reading this during an incident
+            # must be able to trust that sentence.
+            echo "dispatch: hold-verdict failed (rc=$hv_rc); neither the owned nor the fresh pass routed this run (the resume wakes above stand)"
             return 0
         fi
     fi
 
+    # Owned pass: an unclaimed bead that names a seat goes back to that seat,
+    # ahead of any fresh routing, for the same reason the resume pass runs first
+    # (Constitution III.3). An assignee that is not a seat — a person, most of
+    # them — matches no seat here and is left alone.
+    #
+    # A held bead is dropped from the list before route_owners sees it, and says
+    # so on a line of its own that names the assignee. Which ARM stopped a bead
+    # has to stay legible, because `hold` and `owner-withheld` are both
+    # withholding lines and both read like the system working: a bead that is
+    # assigned AND held is reported here by the hold arm and never reaches the
+    # cap arithmetic that would have reported it as owner-withheld, so the two
+    # counters on the closing line stay disjoint and neither absorbs the other.
+    local ownable="" oseat oid
+    while IFS=' ' read -r oseat oid; do
+        [ -n "$oid" ] || continue
+        verdict=$(awk -v i="$oid" '$2 == i { $1 = $1; print; exit }' <<<"$verdicts")
+        if [ "$verdict" != "ROUTE $oid" ]; then
+            reason=${verdict#HOLD "$oid" — }
+            [ -n "$reason" ] || reason="no verdict returned for this bead"
+            echo "dispatch: hold $oid — $reason; assigned to $oseat, and it is this hold rather than the cap that stopped it"
+            held=$((held + 1))
+            continue
+        fi
+        ownable+="$oseat $oid"$'\n'
+    done <<<"$owned"
+    route_owners "$ownable" "assigned work waiting — claim it before you begin"
+
+    # Fresh pass: ready, unassigned, class-labelled beads, priority first. It
+    # runs with no slots left too, because judge work does not need one.
+    #
     # report_unroutable's accumulators; see its comment where it is defined.
     local unroutable=0 stalled=0 quiet="" stalled_beads=""
 
-    local verdict reason how
+    local how
     while IFS=' ' read -r id cls origin prio; do
         [ -n "$id" ] || continue
         verdict=$(awk -v i="$id" '$2 == i { $1 = $1; print; exit }' <<<"$verdicts")
