@@ -2541,12 +2541,11 @@ test-codegen-live-neo4j:
 
 # the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
 # the dialect fact the AGE backend's edge-union refusal rests on, the offset
-# sidecar's two live branches, the one construct AGE refuses that no gap acts
-# on yet, and the AGE half of the nested-list divergence ADR 0035 rests on —
-# each on its own apache/age
-# container. Nightly and manual only — these containers are cost this project
-# does not charge to a pull request. -count=1 because this is the AGE arm's only
-# gate and no pull request pays for it, so the run it reports on has to be a real
+# sidecar's two live branches, and the AGE half of the nested-list divergence
+# ADR 0035 rests on — each on its own apache/age container. Nightly and manual
+# only — these containers are cost this project does not charge to a pull
+# request. -count=1 because this is the AGE arm's only gate and no pull request
+# pays for it, so the run it reports on has to be a real
 # one.
 #
 # The alternation is a NAME LIST, not a pattern: go test's -run is unanchored, so
