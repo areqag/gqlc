@@ -104,8 +104,11 @@ all, per the definition above, even with `core.hooksPath` unset; and a
 *non-gated* command aimed at a drifted repo from a healthy directory
 (`git -C <drifted> status`), because the warn half keys on the hook's own
 directory — resolved up to that directory's repo root, so a subdirectory warns
-too — and never follows the command's target. Each is a pinned row in
-`.githooks/tests/claude-pre-bash-test.sh`.
+too — and never follows the command's target. Each was a pinned row in
+`.githooks/tests/claude-pre-bash-test.sh`, which PR #1595 (f6dc4c7b) deleted
+along with the rest of `.githooks/tests/` and the `test-hooks` recipe that ran
+it. Nothing holds these states today, so the list above is a dated reading of
+the hook rather than something a gate keeps honest.
 
 ## Development
 

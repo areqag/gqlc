@@ -31,10 +31,14 @@
 # for `pr <N>` and not for `census`. Until that is done, read a clean answer as
 # "no open PR touches this path under this name".
 #
-# Tests: .githooks/tests/km-overlap-test.sh (run via `just test-hooks`).
+# Tests: none. .githooks/tests/km-overlap-test.sh and the `test-hooks` recipe
+# that ran it were both deleted by PR #1595 (f6dc4c7b), and by standing rule
+# nothing under kingdom/ carries a test, harness or fixture (ruling on bd
+# gqlc-cw7h), so this file is not waiting on a replacement.
 set -uo pipefail
 
-# The tests inject a fake here; the town never sets it.
+# KM_GH is the fake-injection point the deleted suite used. It is still read,
+# so a hand-run probe can still use it; the town never sets it.
 GH="${KM_GH:-gh}"
 
 # gh pr list caps at 30 and says nothing when it truncates, so the limit is

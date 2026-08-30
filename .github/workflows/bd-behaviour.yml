@@ -5,9 +5,10 @@
 # WHY IT IS NOT IN `just test`. bd is a Dolt-backed external binary. `just test`
 # is also the pre-push hook, so anything added there is paid on every local push
 # by every citizen, and this repository treats wall-time as critical.
-# .githooks/tests/bd-gh-sync-test.sh stubs bd on PATH and drives fixture JSON,
-# so it can never observe the real CLI — and a stub encodes belief, not witness.
-# This workflow is where the REAL binary runs at the boundary.
+# .githooks/tests/bd-gh-sync-test.sh stubbed bd on PATH and drove fixture JSON,
+# so it could never observe the real CLI — and a stub encodes belief, not
+# witness. PR #1595 (f6dc4c7b) deleted it; this workflow is what remains, and it
+# is where the REAL binary runs at the boundary.
 #
 # WHY IT IS NOT A MERGE GATE, said plainly so nobody mistakes it for one. The
 # claim under test is about a binary this repository does not own and does not
@@ -45,7 +46,6 @@ on:
   pull_request:
     paths:
       - .githooks/bd-gh-sync
-      - .githooks/tests/bd-gh-sync-test.sh
       - .github/workflows/bd-behaviour.yml
       - docs/bd-ledger-writes.md
 
