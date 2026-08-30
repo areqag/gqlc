@@ -587,9 +587,28 @@ workspace_id() { # -> id on stdout; rc 0 + empty = absent, rc 1 = unreadable
     printf '%s\n' "$out"
 }
 
-session_up() {
+session_up() { # 0 = up; 1 = down; 2 = cannot tell, the list did not parse
     herdr_server_up || return 1
-    [ -n "$(workspace_id)" ]
+    local ws
+    # The rc, not the emptiness. `[ -n "$(workspace_id)" ]` stood here and read
+    # an unreadable workspace list as "no workspace", so every caller below
+    # printed "the town is down" — a positive claim km cannot support — and
+    # cmd_reconcile skipped a whole pass while the town was in fact up
+    # (gqlc-ygcfi, residue of gqlc-cp40).
+    ws=$(workspace_id) || return 2
+    [ -n "$ws" ]
+}
+
+# The sentence a caller prints when session_up said no. rc 2 is not "down": the
+# list did not parse, so km does not know which it is. workspace_id has already
+# put the parse's own diagnosis on stderr immediately above, which is why this
+# points at it rather than restating it.
+town_absent_reason() { # <session_up rc> [wording for the plain down case]
+    if [ "${1:-1}" = 2 ]; then
+        printf '%s' "km cannot tell whether the town is up — the herdr workspace list did not parse (diagnosis above)"
+    else
+        printf '%s' "${2:-the town is down}"
+    fi
 }
 
 # The seat's tab exists inside the workspace. Herdr tabs carry a label; the
@@ -1691,7 +1710,9 @@ cmd_up() {
 
 cmd_down() {
     no_args down "$@"
-    session_up || { echo "the town is already down"; return 0; }
+    # town_absent_reason writes no newline — the other callers embed it in a
+    # larger sentence — so this lone caller supplies one.
+    session_up || { town_absent_reason $? "the town is already down"; echo; return 0; }
     # Declared, not inherited. This is a machine notice with no citizen behind
     # it — `km down` is an operator command — and require_identity would
     # otherwise refuse it from the plain shell it is normally run in, losing the
@@ -1995,7 +2016,16 @@ capped_seats() {
 # a seat instead (seat_idle), which asks rather than forces.
 cmd_reconcile() {
     no_args reconcile "$@"
-    session_up || { echo "reconcile: the town is down; nothing to reconcile"; return 0; }
+    local up_rc
+    session_up; up_rc=$?
+    if [ "$up_rc" != 0 ]; then
+        echo "reconcile: $(town_absent_reason "$up_rc"); nothing to reconcile"
+        # Exit non-zero when km could not tell. A scheduled pass that did not
+        # run must not report success — reporting 0 over a dead query is the
+        # shape this bead is an instance of.
+        [ "$up_rc" = 2 ] && return 1
+        return 0
+    fi
     local s st suspect rc repaired=0 redelivered=0 suspected=0 respawned=0 corrected=0
     for s in $(seats_all); do
         st=$(seat_status "$s")
@@ -2492,7 +2522,7 @@ conditioned_verdict_ids() { # -> ids of judge beads closed with a condition in p
 
 cmd_dispatch() {
     ensure_deployed dispatch "$@" || return 1
-    session_up || { echo "dispatch: the town is down; nothing to do"; return 0; }
+    session_up || { echo "dispatch: $(town_absent_reason $?); nothing to do"; return 0; }
     local sd wakes=0 withheld=0
     sd=$(state_dir)
 
@@ -3430,7 +3460,7 @@ cmd_guard_sweep() {
     # reservation of the halt to Սեդրակ and Անդրանիկ is not engaged by it. What
     # a halt promises is a quiet town, not a filling disk.
     reap_scratch
-    session_up || { echo "guard-sweep: the town is down"; return 0; }
+    session_up || { echo "guard-sweep: $(town_absent_reason $?)"; return 0; }
     # The halt binds every TIMER-driven wake, not just the dispatcher's. This is
     # the second one, and each wake here starts a real claude session, so a halt
     # that missed it went on spending tokens once per guard cadence — and since
@@ -3816,7 +3846,8 @@ cmd_status() {
     local launch launchcol launchsay mislaunched=""
     sd=$(state_dir)
     echo "Թագաւորութիւն — $(date -u -Iseconds)"
-    if session_up; then echo "town: UP (herdr workspace '$WORKSPACE')"; else echo "town: DOWN"; fi
+    if session_up; then echo "town: UP (herdr workspace '$WORKSPACE')"
+    else echo "town: $([ $? = 2 ] && echo 'UNKNOWN — the herdr workspace list did not parse (diagnosis above)' || echo DOWN)"; fi
     if [ -f "$sd/halt" ]; then
         # The age rides the line because a transient halt outliving its cause
         # is invisible behind any timestamp subtraction (bd gqlc-ozfr: one ran
@@ -4146,7 +4177,7 @@ cmd_status() {
 # ---------- doctor / install ----------
 
 cmd_doctor() {
-    local ok=0
+    local ok=0 ws_row ws_rc
     # TWO labels, not one prefix (gqlc-67ml). A row that printed one label under
     # both outcomes STATED THE OPPOSITE of what it measured whenever the label
     # was phrased as a positive assertion: 'warn: town is up' over a town that
@@ -4459,10 +4490,18 @@ cmd_doctor() {
     # message so an operator knows whether to start herdr or run `km up`.
     if ! herdr_server_up; then
         echo "warn: the town is DOWN — the herdr server is not running (herdr status server)"
-    elif [ -z "$(workspace_id)" ]; then
-        echo "warn: the town is DOWN — no herdr workspace '$WORKSPACE' ('km up' creates it)"
     else
-        echo "ok:   the town is up — herdr workspace '$WORKSPACE' exists"
+        # The rc, not the emptiness. `[ -z "$(workspace_id)" ]` stood here and
+        # advised `km up` on a list km could not read — a raise that would be
+        # wrong if the town were in fact already up (gqlc-ygcfi).
+        ws_row=$(workspace_id) && ws_rc=0 || ws_rc=$?
+        if [ "$ws_rc" != 0 ]; then
+            echo "warn: cannot tell whether the town is up — the herdr workspace list did not parse (diagnosis above). Not advising 'km up': it would be wrong if the town is already up."
+        elif [ -z "$ws_row" ]; then
+            echo "warn: the town is DOWN — no herdr workspace '$WORKSPACE' ('km up' creates it)"
+        else
+            echo "ok:   the town is up — herdr workspace '$WORKSPACE' exists"
+        fi
     fi
     return "$ok"
 }
