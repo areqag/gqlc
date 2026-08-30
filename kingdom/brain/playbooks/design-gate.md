@@ -18,6 +18,48 @@ The design bead is ready immediately and routes to a Ճարտարապետ. The
 execution bead stays hidden from `bd ready` until the design bead closes —
 the dispatcher cannot route it early, no matter what.
 
+## Both beads are filed at once, even when the execution is unknowable
+
+**A `class:architect` bead is never filed alone.** The pair above is filed in
+one sitting. That is easy when the work is already legible, and it is the whole
+of the rule when it is not: where nobody can yet say what the execution will
+be, the execution bead is still filed, as a stub whose body is one sentence.
+
+    Execution of gqlc-XXXX; scope to be written into this bead when the
+    design closes.
+
+Write that sentence. **Never leave the description blank** — a blank body reads
+as an oversight to the next person auditing the board, and somebody will
+helpfully "fix" it.
+
+The objection to a stub is that it looks like a bead a Ռազմիկ can be woken onto
+and cannot honestly begin. It is not, and the difference is mechanical rather
+than a matter of anyone's care: a stub filed under this gate is blocked from
+birth by the dependency above, so `bd ready` does not offer it until the design
+closes. There is no window in which an empty execution bead is routable.
+
+Measured 2026-08-30 in a throwaway `bd init` workspace, both directions: with
+the design bead open, `bd ready` returned the design and NOT the stub — and
+returning the design is the control, since it shows an empty answer was not
+what hid the stub. Closing the design put the stub on the queue. The bound on
+that evidence: it is a measurement of `bd ready`, which is the queue the fresh
+and owned dispatch passes read from. The resume pass does not read it, and is
+not a hole here for a separate reason — it wants a bead that is `in_progress`
+AND assigned, and a stub at filing time is neither.
+
+The cost of NOT filing it is measured rather than hypothetical. A design bead
+with no execution partner leaves the architect finishing a design with nobody
+to hand off to, and what an architect does then is build it themselves — the
+town loses a designer to execution for the day. On 2026-08-29 `gqlc-82ffi`
+reached Արթուր with no stub, the pair never having been split at filing. He
+neither absorbed it nor bounced it: he spent his own session writing the split
+intake should have produced (`gqlc-s70bl`). That is the CHEAP version of this
+failure. Had the bead been slightly larger, the alternative in front of him was
+writing the implementation himself.
+
+Intake is Սեդրակ's, so a missing stub is a triage defect and is his to own, not
+the architect's to absorb.
+
 ## Only a Ճարտարապետ completes a design bead
 
 The gate holds only if the blocker is real. Three locks, one per layer:
@@ -83,6 +125,16 @@ can execute it without asking the architect anything. If the plan is too
 large for notes, put it in `docs/specs/` or `kingdom/brain/decisions/` and
 link it from the bead.
 
+**Writing that body is part of CLOSING the design, not a courtesy afterwards.**
+An architect who closes a design without writing what the Ռազմիկ is to do has
+finished a document, not a design. This is the half that makes the stub above
+honest: the one sentence the execution bead was born with is precisely what you
+are replacing, and until you have replaced it the design is not closed.
+
+If by then the work turns out to be several beads, split it then. Reusing the
+stub as the first of N is fine; closing it as superseded and filing N is fine
+too. Intake guessing one bead does not bind you to one.
+
 ## After the design closes
 
 Nothing to do: the execution bead becomes ready on its own and the
@@ -98,3 +150,11 @@ it is executable.
 An architect who finds themselves writing the implementation should stop and
 mail Սեդրակ: the pair was never split, and that is a triage defect to fix at
 the source rather than absorb.
+
+A design bead that reaches you with **no execution bead blocked behind it** is
+that same defect caught one step earlier, and it gets the same answer rather
+than a different one: file the stub, mail Սեդրակ that intake missed it, and do
+not let a missing handoff quietly become yours to execute. The two failures are
+mirror images — "an architect bead carrying its own implementation" and "a
+design bead carrying no handoff" — and both end with the architect having
+nobody to hand off to, which is why the remedy is symmetric.
