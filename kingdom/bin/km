@@ -1038,8 +1038,23 @@ seat_runner_start() { # <seat> -> 0 started, 1 declined (live session), 2 no run
 #
 # Exit 1 means no box was found. That is not the same answer as an empty box and
 # no caller may read it as one.
-seat_box_text() { # <pane> -> what the input box holds, nothing if it is empty
-    herdr pane read "$1" --source visible --lines 60 2>/dev/null | awk '
+#
+# It was also not the same answer as a pane that could not be read, and until
+# gqlc-p7l0u those two shared it. The read sat inside the pipeline with its
+# stderr dropped, so a failing `herdr pane read` gave awk nothing, n stayed 0,
+# and awk exited 1 — byte-identical to "the pane rendered and had no box", with
+# the reason that separates them discarded. The read is taken out of the
+# pipeline so its own status is legible, and unreadable is a third answer.
+# 2>&1 rather than dropping stderr: measured 2026-08-30 against herdr 0.6.10,
+# `pane read <bad>` exits 1 with 0 bytes on stdout and its reason on stderr —
+# and which stream carries a diagnosis is herdr's to change, so both are kept.
+seat_box_text() { # <pane> -> 0 read it, 1 the buffer holds no box, 2 unreadable
+    local buf
+    buf=$(herdr pane read "$1" --source visible --lines 60 2>&1) || {
+        echo "km: cannot read pane $1: ${buf:-herdr gave no diagnosis on either stream}" >&2
+        return 2
+    }
+    printf '%s\n' "$buf" | awk '
         /^─+$/ { edge[++n] = NR }
         { line[NR] = $0 }
         END {
@@ -1058,13 +1073,17 @@ seat_box_text() { # <pane> -> what the input box holds, nothing if it is empty
 # rendered yet — but that is a cheap guard, not a measured necessity: deleting
 # the sleep outright did not produce a false empty on the same rows, the pane
 # read's own round trip being slower than the render.
-seat_box_emptied() { # <pane> -> 0 emptied, 1 still holds text, 2 no box to read
+seat_box_emptied() { # <pane> -> 0 emptied, 1 holds text, 2 no box, 3 unreadable
     local left=10 box rc=2
     while [ "$left" -gt 0 ]; do
         left=$((left - 1))
         sleep 0.2
         box=$(seat_box_text "$1")
         rc=$?
+        # An unreadable pane is not a state the poll can outwait, and every turn
+        # would re-emit herdr's account of it. Nine more reads and two more
+        # seconds buy nothing, so the first one ends the poll.
+        if [ "$rc" -eq 2 ]; then return 3; fi
         [ "$rc" -eq 0 ] || continue
         [ -n "$box" ] || return 0
     done
@@ -1169,9 +1188,25 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
         echo "km: send to $seat (pane $pane): herdr acked the text and the Enter, but the pane renders no input box, so the submission was not witnessed and is being reported as delivered (bd gqlc-gh7xj)" >&2
         return 0
     fi
+    # Unreadable is reported as delivered too, but it is a different sentence
+    # because it is a different thing to have seen: above, a pane that rendered
+    # with no box in it; here, no reading of the pane at all. Delivered rather
+    # than not, on the same reasoning as the branch above and one more: `km
+    # sleep` sends `/exit` and prints "the /exit was NOT delivered" on a
+    # non-zero return, and a pane that has gone away between the Enter and the
+    # read is most easily explained by that /exit having worked. That is a
+    # judgement about which way to be wrong, not a measurement (gqlc-p7l0u).
+    if [ "$witnessed" -eq 3 ]; then
+        echo "km: send to $seat (pane $pane): herdr acked the text and the Enter, but the pane could not be read back (herdr's own account of it is above), so the submission was not witnessed and is being reported as delivered" >&2
+        return 0
+    fi
     herdr pane send-keys "$pane" Enter >/dev/null 2>&1
     seat_box_emptied "$pane"
     witnessed=$?
+    if [ "$witnessed" -eq 3 ]; then
+        echo "km: send to $seat (pane $pane): herdr acked the text and both Enters, but the pane could not be read back (herdr's own account of it is above), so the submission was not witnessed and is being reported as delivered" >&2
+        return 0
+    fi
     [ "$witnessed" -eq 1 ] || return 0
     echo "km: send to $seat (pane $pane): herdr acked the text and both Enters, but the box still holds the message, so it was typed and never submitted — claude reads a single burst of 64 or more characters as a paste and renders its trailing CR as a literal newline (bd gqlc-gh7xj). Nothing was delivered" >&2
     return 1
