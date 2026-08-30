@@ -51,6 +51,13 @@ name: ci
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+  # The queue tests master + this PR together — the only place the suite runs
+  # on the combination (ADR 0010). tidy's three PR-context steps skip here, as
+  # they already do on master pushes: they gate queue ENTRY on the
+  # pull_request event, and a PR body and its commit identities cannot go
+  # stale through base drift. lint/test/codegen-fence/actionlint carry no
+  # event conditional and run in full, which is the point.
+  merge_group:
   push:
     branches: [master]
 

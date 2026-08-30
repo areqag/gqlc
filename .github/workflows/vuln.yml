@@ -21,6 +21,7 @@ name: vuln
 
 on:
   pull_request:
+  merge_group:
   schedule:
     - cron: "23 6 * * 1"
 
@@ -38,9 +39,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: detect scan-relevant changes
         id: deps
-        if: github.event_name == 'pull_request'
+        # Without merge_group here every step below it skips on a queue run,
+        # so the required govulncheck context would go green having scanned
+        # nothing (ADR 0010). If merge_group.base_sha were ever empty the
+        # fetch below errors under `bash -e` and this step fails red, which is
+        # the direction to fail in.
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
           # The diff is taken on its own line, not piped into the filter: a
