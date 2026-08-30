@@ -154,6 +154,15 @@ move the unfillable declaration from a refused batch into a shipped one.
   giving the registry a way to publish a backend's sentinels; that is `gqlc-rv0h`,
   not this decision.
 
+  **Addendum, 2026-08-29 (`gqlc-rv0h`).** The constraint above is lifted. A
+  `codegen.Entry` may now publish a name-to-error map, `NewRegistry` merges it,
+  and the conformance suite folds the merged map into `sentinelByName` as a
+  fourth lane — so the names travel with the values and the no-single-backend-import
+  property still holds. `age.ErrUnsupportedSchema` has a negative fixture:
+  `test/data/codegen/invalid/age_multi_label_schema`, enrolled for
+  `apache-age-pgx-v5` only, reusing this decision's own schema. The paragraph
+  above is left as written; it was true when written.
+
 - The `EntityEdge` arm of the multi-label check is unreachable from GQL input:
   the grammar admits no `&` in an edge's key label set, so
   `-[:WORKED_FOR&FOR]->` fails to parse before codegen sees it. The arm is kept

@@ -55,6 +55,28 @@ var ErrUndefinedFunction = errors.New("undefined function")
 // dialect.go, and only by it.
 var ErrUndefinedSpatialFunction = errors.New("undefined spatial function")
 
+// Sentinels names this backend's user-reachable refusals for a consumer
+// that must not import this package to learn them — the conformance
+// corpus, which reaches every backend through the composed registry and
+// so has no spelling for a backend-local sentinel unless the name
+// travels with the value. The keys are the fully-qualified form a
+// fixture manifest's expectedError carries, "<package>.<ExportedVar>".
+//
+// Every sentinel above is here, and TestSentinelsNamesEveryRefusal reads
+// this package's source to hold that true as sentinels are added. A name
+// published here is one the corpus is required to witness with an
+// invalid fixture, so this map is a promise and not an inventory: a
+// refusal no fixture can reach does not belong in it.
+func Sentinels() map[string]error {
+	return map[string]error{
+		"age.ErrUnsupportedQuery":            ErrUnsupportedQuery,
+		"age.ErrUnsupportedSchema":           ErrUnsupportedSchema,
+		"age.ErrRelationshipTypeAlternation": ErrRelationshipTypeAlternation,
+		"age.ErrUndefinedFunction":           ErrUndefinedFunction,
+		"age.ErrUndefinedSpatialFunction":    ErrUndefinedSpatialFunction,
+	}
+}
+
 // wireEntities pairs every entity with the form it takes on the wire,
 // failing a schema that declares a node or edge type under more than one
 // label. The refusal is over the whole entity table rather than over the

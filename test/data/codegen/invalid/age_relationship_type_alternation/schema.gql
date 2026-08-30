@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE AgeRelationshipTypeAlternation AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Post   { title :: STRING NOT NULL }),
+    (:Person) -[:AUTHORED]-> (:Post),
+    (:Person) -[:LIKES]-> (:Post)
+}

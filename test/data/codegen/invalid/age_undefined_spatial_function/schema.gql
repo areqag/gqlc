@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE AgeUndefinedSpatialFunction AS {
+    (:Person {
+        name :: STRING NOT NULL,
+        x    :: INT64 NOT NULL
+    })
+}

@@ -1,0 +1,6 @@
+{
+  "package": "agerelationshiptypealternation",
+  "queryFiles": ["queries.cypher"],
+  "targets": ["apache-age-pgx-v5"],
+  "expectedError": "age.ErrRelationshipTypeAlternation"
+}

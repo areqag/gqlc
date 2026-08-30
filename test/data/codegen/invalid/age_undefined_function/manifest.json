@@ -1,0 +1,6 @@
+{
+  "package": "ageundefinedfunction",
+  "queryFiles": ["queries.cypher"],
+  "targets": ["apache-age-pgx-v5"],
+  "expectedError": "age.ErrUndefinedFunction"
+}

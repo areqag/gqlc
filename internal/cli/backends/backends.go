@@ -35,6 +35,10 @@ func Registry() (codegen.Registry, error) {
 			New: func(pkg string) codegen.Generator {
 				return age.New(age.WithPackageName(pkg))
 			},
+			// The two neo4j entries above publish nothing on purpose:
+			// their exported Err* vars are template text emitted INTO
+			// generated code, never refusals their generator returns.
+			Sentinels: age.Sentinels(),
 		},
 	)
 }
