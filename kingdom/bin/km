@@ -4329,11 +4329,37 @@ cmd_doctor() {
     # a required argument, not a defaulted one: a default would silently
     # reinstate the defect for every row that forgot it.
     check() { # check <hard|soft> <label-when-true> <label-when-false> <cmd...>
-        local kind=$1 label=$2 negative=$3
-        shift 3
-        if "$@" >/dev/null 2>&1; then
+        check_rc "$1" "$2" "$3" '' '' "${@:4}"
+    }
+
+    # check_rc adds ONE more outcome: a named rc with a sentence of its own, for
+    # a command whose exit status says more than yes/no. Two rows below have
+    # one — herdr_server_up answers 0 running / 1 not running / 2 could not ask,
+    # and `systemctl --user is-enabled` answers rc 0 enabled / 1 disabled / 4
+    # not-found. A two-valued row asserts one cause for both of the last two,
+    # whose remedies differ. That is the defect gqlc-ygcfi and gqlc-pgbfp each
+    # fixed one level down, arriving here (gqlc-vdko8).
+    #
+    # stdout is dropped, stderr is NOT. `check` swallowed both, and the doctor
+    # is the command an operator runs precisely when something is wrong — the
+    # one caller guaranteed to throw the reason away. Measured 2026-08-30 over
+    # every row here: only `mkdir -p` and herdr_server_up write to stderr at
+    # all, and both write a diagnosis naming what actually failed. `command -v`
+    # and `systemctl --user is-enabled` write none on any outcome, so passing
+    # stderr through costs those rows nothing and no per-row redirect is needed.
+    check_rc() { # <hard|soft> <label> <negative> <extra-rc|''> <its sentence> <cmd...>
+        local kind=$1 label=$2 negative=$3 extra=$4 extra_negative=$5 rc=0
+        shift 5
+        "$@" >/dev/null || rc=$?
+        if [ "$rc" = 0 ]; then
             echo "ok:   $label"
-        elif [ "$kind" = hard ]; then
+            return 0
+        fi
+        # Chosen once, above the hard/soft split: selecting it inside each arm
+        # is one edit away from a row that distinguishes the causes when it
+        # fails and not when it warns.
+        if [ -n "$extra" ] && [ "$rc" = "$extra" ]; then negative=$extra_negative; fi
+        if [ "$kind" = hard ]; then
             echo "FAIL: $negative"
             ok=1
         else
@@ -4341,11 +4367,10 @@ cmd_doctor() {
         fi
     }
     check hard "herdr installed" "herdr is NOT installed, and the town's panes are herdr agents (https://herdr.dev)" command -v herdr
-    # `check` is two-valued by construction and swallows the command's stderr,
-    # so this row cannot tell "not running" from "km could not ask" and must not
-    # assert either. The TOWN ROW below does distinguish them; making this one
-    # do it means giving `check` a third outcome, which is bd gqlc-vdko8.
-    check hard "herdr server running" "the herdr server is not running, or km could not ask it (herdr status server; the town row below says which)" herdr_server_up
+    check_rc hard "herdr server running" \
+        "the herdr server is NOT running, and the town's panes are herdr agents (herdr status server)" \
+        2 "km could not ask herdr whether its server is running (its own account is above). Not saying it is down: that is a positive claim this failure does not support." \
+        herdr_server_up
     check hard "claude installed" "claude is NOT installed, so no seat can be woken" command -v claude
     check hard "bd installed" "bd is NOT installed, so there is no ledger to dispatch from" command -v bd
     check hard "jq installed" "jq is NOT installed, and every ledger query here is parsed with it" command -v jq
@@ -4578,8 +4603,19 @@ cmd_doctor() {
         echo "ok:   every live session matches kingdom.toml on permission mode, soul and model ($lseen live, $(($(seats_all | wc -l) - lseen)) asleep and not judged)"
     fi
     check soft "bd mail.delegate points at km" "bd mail.delegate does NOT resolve to 'km mail', so mail bd delegates goes nowhere this town reads" sh -c "bd config get mail.delegate | grep -q 'km mail'"
-    check soft "dispatch timer enabled" "the dispatch timer is NOT enabled, so nothing will route a bead until someone runs km dispatch by hand" systemctl --user is-enabled kingdom-dispatch.timer
-    check soft "guard timer enabled" "the guard timer is NOT enabled, so no sweep will run until someone runs km guard-sweep by hand" systemctl --user is-enabled kingdom-guard.timer
+    # `systemctl --user is-enabled` answers three ways, measured 2026-08-30 on
+    # this host: rc 0 "enabled", rc 1 "disabled", rc 4 "not-found", all three on
+    # stdout and none of them on stderr. Installed-but-off and never-installed
+    # have different remedies, so one sentence for both sends half its readers
+    # to a command that cannot work.
+    check_rc soft "dispatch timer enabled" \
+        "the dispatch timer is NOT enabled, so nothing will route a bead until someone runs km dispatch by hand ('systemctl --user enable --now kingdom-dispatch.timer')" \
+        4 "the dispatch timer is NOT INSTALLED, so nothing will route a bead and enabling it would fail — its unit file was never written ('km deploy')" \
+        systemctl --user is-enabled kingdom-dispatch.timer
+    check_rc soft "guard timer enabled" \
+        "the guard timer is NOT enabled, so no sweep will run until someone runs km guard-sweep by hand ('systemctl --user enable --now kingdom-guard.timer')" \
+        4 "the guard timer is NOT INSTALLED, so no sweep will run and enabling it would fail — its unit file was never written ('km deploy')" \
+        systemctl --user is-enabled kingdom-guard.timer
     # An enabled timer says the machinery is armed, not that it works: the
     # dispatcher routed nothing for its whole life with both timers green
     # (gqlc-z1qw), and now that it dies on a bad query, the death lands only in
