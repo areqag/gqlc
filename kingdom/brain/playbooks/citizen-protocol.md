@@ -57,6 +57,33 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    - **Tell the winner you are not behind them on it.** One letter prevents the
      duplicated branch the race threatened.
 
+   **On a `class:judge` bead there is one more check BEFORE you claim, and it is
+   deliberately not a third field of `bd show`.** Read the PR's existing
+   verdicts. If a prior round FAILed and you did not write that FAIL,
+   the round is not yours — whatever the assignee field says, INCLUDING when it
+   says nobody. Assign it to the FAIL's author (`bd update <id> --assignee
+   <seat>`, leaving it `open`, which is what the owned pass routes from), tell
+   them, and take other work.
+
+   Where the assignee already names you, this check passes in the time it takes
+   to look. It is written for the case where the field names nobody. Constitution
+   V.4 makes the author of a FAIL the adjudicator of the answer to it, and step 8
+   tells the FILER to file the round assigned to them — but every sentence of
+   that rule addresses the filer, so the assignee field is the only thing
+   carrying it, and a single mistaken `bd update` erases it. An unassigned
+   round-2 then reads as ordinary free judge work, because that is exactly what
+   it looks like. No field can tell you otherwise; the PR can.
+
+   Measured 2026-08-30, with every actor following the text as written. The
+   round-2 bead for PR #1903 (`gqlc-v5dez`) was filed correctly and then
+   erroneously unassigned. Տիր claimed it through the normal path, checked
+   independence — not his code, not his design — judged it full-depth and closed
+   PASS. That is a second judge answering Միհր's FAIL, the one end state V.4
+   forbids, reached with nobody departing from the protocol. It was caught only
+   because a correction mail crossed the close by two minutes, and repaired by
+   reopening with a loud withdrawal on the PR. Nothing had told the CLAIMER to
+   look (bd `gqlc-w26x9`, found on patrol `gqlc-ajo5a`).
+
    Otherwise it is yours: claim it (`bd update <id> --claim`) before changing
    anything.
 
@@ -363,6 +390,13 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    assigned bead whatever the priority floor, so the assignment is what gets the
    round back to the one seat entitled to close it. Round 1 stays UNASSIGNED as
    the paragraph above says; only the post-FAIL round is assigned.
+
+   **That assignment is the routing, not the guard.** It is one field, and a
+   round-2 whose assignee gets cleared reads as ordinary free judge work to the
+   next judge who meets it — measured, on PR #1903. What catches that is the
+   claimer-side check in Waking step 4: a judge reads the PR's verdicts before
+   claiming a review. Write the assignment anyway; the check is a backstop, not
+   a substitute for routing the round to the seat that is owed it.
 
    **That they are busy while another judge is idle is not a reason to
    reroute**, and neither is anyone's rank. V.2's "whoever is free and
