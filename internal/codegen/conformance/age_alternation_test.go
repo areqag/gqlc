@@ -233,6 +233,80 @@ func (s *ConformanceSuite) TestAgeIsUnenrolledFromEveryAlternationCarryingFixtur
 			"is renaming expectedError to whatever sentinel the run happened to produce.")
 }
 
+// TestAlternationSweepChargesAnEnrolledFixtureExpectingAnotherSentinel
+// holds the narrow arm of sweepAlternations, which the tracked corpus
+// cannot hold on its own: no committed fixture is in the forbidden state,
+// so widening the arm to admit every invalid fixture changes nothing the
+// corpus can see. The forbidden state is reachable rather than
+// hypothetical — the discriminator below is a fixture TestInvalid PASSES,
+// because AGE really does refuse it with the sentinel its manifest names —
+// so the sweep is the only thing in the suite that refuses it, and an arm
+// that admitted it would leave it admitted with nothing red.
+//
+// The sweep is run over a copy of the corpus with one fixture added
+// rather than over a synthetic pair, so what is measured is the rule
+// answering about a real corpus. Both directions are asserted: the
+// discriminator is charged, and the corpus's own legitimate witness is
+// still exempt.
+func (s *ConformanceSuite) TestAlternationSweepChargesAnEnrolledFixtureExpectingAnotherSentinel() {
+	// The alternation in this fixture's query also produces an edge-union
+	// column, and the column gate answers before the alternation gate, so
+	// its refusal is a sentinel other than the one the arm exempts.
+	const (
+		donor         = "valid/edge_union_many_two_candidates"
+		discriminator = "invalid/age_edge_union_column_alternation"
+		otherSentinel = "age.ErrUnsupportedQuery"
+		corpusWitness = "invalid/age_relationship_type_alternation"
+	)
+
+	root := s.T().TempDir()
+	s.Require().NoError(os.CopyFS(root, os.DirFS(trackedFixtureDir)))
+	dir := filepath.Join(root, discriminator)
+	s.Require().NoError(os.MkdirAll(dir, 0o755))
+	for _, f := range []string{"schema.gql", "queries.cypher"} {
+		src, err := os.ReadFile(filepath.Join(root, donor, f))
+		s.Require().NoError(err)
+		s.Require().NoError(os.WriteFile(filepath.Join(dir, f), src, 0o644))
+	}
+	s.Require().NoError(os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(
+		`{"package":"ageedgeunioncolumnalternation","queryFiles":["queries.cypher"],`+
+			`"targets":["`+ageTarget+`"],"expectedError":"`+otherSentinel+`"}`+"\n"), 0o644))
+
+	s.T().Setenv(childRootEnv, root)
+
+	// What makes the discriminator an admitted state rather than a
+	// fiction: the refusal its manifest names is the refusal it gets, so
+	// TestInvalid would grade it correct.
+	refusal, published := sentinelByName[otherSentinel]
+	s.Require().Truef(published, "the AGE backend publishes no %q, so this fixture names a refusal "+
+		"no manifest can carry and the state it is here to represent is not reachable after all", otherSentinel)
+	m := s.loadManifest(dir)
+	sch := s.loadSchema(dir)
+	_, err := s.generate(ageTarget, codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)})
+	s.Require().ErrorIs(err, refusal, "%s is refused with some other sentinel than the %q its manifest names, "+
+		"so TestInvalid would red on it and this test no longer witnesses a state only the sweep refuses",
+		discriminator, otherSentinel)
+
+	sweep := s.sweepAlternations()
+
+	var charged, exempt []string
+	for _, v := range sweep.violations {
+		charged = append(charged, v.fixture)
+	}
+	for _, w := range sweep.witnesses {
+		exempt = append(exempt, w.fixture)
+	}
+	s.Require().Contains(charged, discriminator,
+		"the sweep left an AGE-enrolled invalid fixture carrying `|` and expecting %s uncharged. That is what "+
+			"the arm looks like once it stops reading expectedError: every invalid fixture becomes a witness, "+
+			"and the rule then forbids nothing an invalid fixture can do", otherSentinel)
+	s.Require().NotContains(exempt, discriminator,
+		"the sweep exempted it as a legitimate witness instead")
+	s.Require().Contains(exempt, corpusWitness,
+		"the corpus's own legitimate witness stopped being exempt, so the arm now charges the fixture whose "+
+			"whole purpose is the refusal it names")
+}
+
 // TestAgeStillRefusesAnAlternationTheCorpusUnenrolledItFrom is the
 // complement, and the half the rule above cannot state.
 //
