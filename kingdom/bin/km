@@ -1375,8 +1375,17 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
         echo "km: send to $seat (pane $pane) failed: ${out:-herdr gave no diagnosis on either stream}" >&2
         return 1
     }
-    seat_box_echoes "$pane" "$text"
-    witnessed=$?
+    # `|| witnessed=$?` and not a bare call: a bare one is an untested failing
+    # command, so `set -e` unwinds send_line at the exact moment it has something
+    # to say and the next line is what would read it. Every caller today happens
+    # to sit inside an `if`, which suspends -e for the whole dynamic extent and
+    # hides this — the refusal below was witnessed reaching nobody, with no
+    # diagnosis on either stream, the first time it was driven from a plain call
+    # (gqlc-3evsn). The same shape has taken this file twice before, once eating
+    # `km sleep`'s message (gqlc-7bps) and once killing 19 dispatch ticks
+    # outright (gqlc-87al), so the fix belongs here rather than in the callers.
+    witnessed=0
+    seat_box_echoes "$pane" "$text" || witnessed=$?
     if [ "$witnessed" -ne 0 ]; then
         if [ "$witnessed" -eq 2 ]; then
             echo "km: send to $seat (pane $pane): the box was empty when this was checked and the pane renders none at all now, so something covered the composer mid-send; no Enter was pressed. The typed text may be sitting under it — read the pane (VI.2, bd gqlc-3evsn)" >&2
