@@ -1,4 +1,4 @@
-package age
+package age_test
 
 import (
 	"testing"
@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
@@ -59,7 +60,7 @@ func TestTypeMapProperty(t *testing.T) {
 	}
 	for _, tt := range representable {
 		t.Run("representable/"+string(tt.pt), func(t *testing.T) {
-			got, ok := typeMap{}.Property(tt.pt)
+			got, ok := age.TypeMap{}.Property(tt.pt)
 			require.True(t, ok)
 			require.Equal(t, tt.want, got)
 		})
@@ -76,7 +77,7 @@ func TestTypeMapProperty(t *testing.T) {
 	}
 	for _, pt := range unrepresentable {
 		t.Run("unrepresentable/"+string(pt), func(t *testing.T) {
-			got, ok := typeMap{}.Property(pt)
+			got, ok := age.TypeMap{}.Property(pt)
 			require.False(t, ok)
 			require.Empty(t, got)
 		})
@@ -105,7 +106,7 @@ func TestTypeMapProperty(t *testing.T) {
 			graph.ListOf(graph.TypeDuration, true):   "[]Duration",
 		}
 		for pt, want := range cases {
-			got, ok := typeMap{}.Property(pt)
+			got, ok := age.TypeMap{}.Property(pt)
 			require.True(t, ok, "%s", pt)
 			require.Equal(t, want, got, "%s", pt)
 		}
@@ -124,7 +125,7 @@ func TestTypeMapProperty(t *testing.T) {
 				graph.ListOf(elem, false),
 				graph.ListOf(graph.ListOf(elem, false), false),
 			} {
-				got, ok := typeMap{}.Property(pt)
+				got, ok := age.TypeMap{}.Property(pt)
 				require.False(t, ok, "%s", pt)
 				require.Empty(t, got)
 			}
@@ -135,13 +136,13 @@ func TestTypeMapProperty(t *testing.T) {
 	// costs nothing to construct and compiles. It must reject: the caller
 	// turns that into ErrUnrepresentableWidth naming the width.
 	t.Run("width outside the table is rejected", func(t *testing.T) {
-		got, ok := typeMap{}.Property(graph.PropertyType("QUATERNION"))
+		got, ok := age.TypeMap{}.Property(graph.PropertyType("QUATERNION"))
 		require.False(t, ok)
 		require.Empty(t, got)
 	})
 
 	t.Run("list of a width outside the table is rejected", func(t *testing.T) {
-		got, ok := typeMap{}.Property(graph.ListOf("QUATERNION", false))
+		got, ok := age.TypeMap{}.Property(graph.ListOf("QUATERNION", false))
 		require.False(t, ok)
 		require.Empty(t, got)
 	})
@@ -161,7 +162,7 @@ func TestTypeMapProperty(t *testing.T) {
 func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
 	for _, pt := range []graph.PropertyType{graph.TypeBytes, graph.ListOf(graph.TypeTime, false)} {
 		t.Run(string(pt), func(t *testing.T) {
-			files, err := generate(codegen.Input{Schema: schemaWithPayload(pt)}, "age")
+			files, err := age.Generate(codegen.Input{Schema: schemaWithPayload(pt)}, "age")
 			require.ErrorIs(t, err, codegen.ErrUnrepresentableWidth)
 			require.ErrorContains(t, err,
 				`entity "Blob" property "payload" has `+string(pt)+`, which the Apache AGE backend has no carrier for`)
@@ -177,7 +178,7 @@ func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
 // the schema's widths are, so repairing them leaves the batch exactly
 // where it was. Only the query rejection says so.
 func TestUnservedQueriesOutrankUnrepresentableWidths(t *testing.T) {
-	files, err := generate(codegen.Input{
+	files, err := age.Generate(codegen.Input{
 		Schema: schemaWithPayload(graph.TypeBytes),
 		Queries: []codegen.NamedQuery{{
 			Name: "Wipe",
@@ -190,7 +191,7 @@ func TestUnservedQueriesOutrankUnrepresentableWidths(t *testing.T) {
 			},
 		}},
 	}, "age")
-	require.ErrorIs(t, err, ErrUnsupportedQuery)
+	require.ErrorIs(t, err, age.ErrUnsupportedQuery)
 	require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth)
 	require.Nil(t, files)
 }
@@ -240,7 +241,7 @@ func TestTypeMapTemporal(t *testing.T) {
 
 	for _, k := range temporalKinds {
 		t.Run(k.String(), func(t *testing.T) {
-			got, ok := typeMap{}.Temporal(k)
+			got, ok := age.TypeMap{}.Temporal(k)
 			require.False(t, ok)
 			require.Empty(t, got)
 		})
@@ -252,7 +253,7 @@ func TestTypeMapTemporal(t *testing.T) {
 	// refusing is what stops a kind added upstream from inheriting an
 	// answer chosen for the kinds that came before it.
 	t.Run("kind outside the vocabulary is refused", func(t *testing.T) {
-		got, ok := typeMap{}.Temporal(resolver.Temporal(resolver.TemporalCount))
+		got, ok := age.TypeMap{}.Temporal(resolver.Temporal(resolver.TemporalCount))
 		require.False(t, ok)
 		require.Empty(t, got)
 	})
@@ -288,7 +289,7 @@ func TestTemporalProjectionIsRefusedNamingTheKind(t *testing.T) {
 					},
 				}},
 			}
-			prepared, err := codegen.Prepare(in, typeMap{}, "age")
+			prepared, err := codegen.Prepare(in, age.TypeMap{}, "age")
 			if err == nil {
 				t.Fatalf("temporal projection reached emission typed %q, at no error",
 					prepared.Queries[0].RowFields[0].GoType)
@@ -322,7 +323,7 @@ func TestTemporalProjectionIsRefusedNamingTheKind(t *testing.T) {
 // test/data/codegen/invalid/unrepresentable_temporal_duration_column for
 // what it owes.
 func TestTemporalProjectionNamesThisBackend(t *testing.T) {
-	files, err := generate(codegen.Input{
+	files, err := age.Generate(codegen.Input{
 		Schema: schemaWithPayload(graph.TypeString),
 		Queries: []codegen.NamedQuery{{
 			Name:        "When",
@@ -359,7 +360,7 @@ func TestTypeMapScalar(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.k.String(), func(t *testing.T) {
-			require.Equal(t, tt.want, typeMap{}.Scalar(tt.k))
+			require.Equal(t, tt.want, age.TypeMap{}.Scalar(tt.k))
 		})
 	}
 
@@ -367,6 +368,6 @@ func TestTypeMapScalar(t *testing.T) {
 	// switch, so the backstop exists whether or not the resolver can
 	// reach it. Pinned so its value is a decision and not an accident.
 	t.Run("kind outside the vocabulary projects undecoded", func(t *testing.T) {
-		require.Equal(t, "any", typeMap{}.Scalar(resolver.ScalarMap+1))
+		require.Equal(t, "any", age.TypeMap{}.Scalar(resolver.ScalarMap+1))
 	})
 }

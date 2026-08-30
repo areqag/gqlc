@@ -1,4 +1,4 @@
-package age
+package age_test
 
 import (
 	"go/ast"
@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/areqag/gqlc/internal/codegen/age"
 )
 
 // TestDollarTagClosesOnlyAtTheEnds pins the delimiter choice against the
@@ -36,7 +38,7 @@ func TestDollarTagClosesOnlyAtTheEnds(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tag := dollarTag(tt.text)
+			tag := age.DollarTag(tt.text)
 			require.Equal(t, tt.want, tag)
 
 			body := tag + tt.text + tag
@@ -68,14 +70,14 @@ func TestDecodeFuncNamesTheHelperForEveryServedCarrier(t *testing.T) {
 		{goType: "uint32", want: "agtypeInt64"},
 		{goType: "float64", want: "agtypeFloat64"},
 		{goType: "float32", want: "agtypeFloat64"},
-		{goType: goInstant, want: "agtypeInstant"},
+		{goType: age.GoInstant, want: "agtypeInstant"},
 		{goType: "any", want: "agtypeValue"},
 		{goType: "map[string]any", want: "agtypeMap"},
 		{goType: "[]string", want: "agtypeListOfString"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goType, func(t *testing.T) {
-			require.Equal(t, tt.want, decodeFunc(tt.goType))
+			require.Equal(t, tt.want, age.DecodeFunc(tt.goType))
 		})
 	}
 }
@@ -109,7 +111,7 @@ func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.goType, func(t *testing.T) {
-			require.PanicsWithValue(t, tt.want, func() { decodeFunc(tt.goType) })
+			require.PanicsWithValue(t, tt.want, func() { age.DecodeFunc(tt.goType) })
 		})
 	}
 
@@ -118,10 +120,10 @@ func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
 	// refusal is one level in, at the decoder the wrapper is written with —
 	// which is where the emission reaches it (writeListHelper).
 	t.Run("a slice refuses at its element", func(t *testing.T) {
-		require.NotPanics(t, func() { decodeFunc("[]byte") })
+		require.NotPanics(t, func() { age.DecodeFunc("[]byte") })
 		require.PanicsWithValue(t,
 			`age codegen bug: Go type "byte" carries as "byte", which decodeFunc has no arm for`,
-			func() { elemDecoder("byte") })
+			func() { age.ElemDecoder("byte") })
 	})
 }
 
@@ -203,7 +205,7 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 func requireCarrierHasAnArm(t *testing.T, goType string) {
 	t.Helper()
 	for {
-		require.NotPanics(t, func() { decodeFunc(goType) },
+		require.NotPanics(t, func() { age.DecodeFunc(goType) },
 			"the type table names Go type %q, which decodeFunc has no arm for the carrier of", goType)
 		elem, ok := strings.CutPrefix(goType, "[]")
 		if !ok {

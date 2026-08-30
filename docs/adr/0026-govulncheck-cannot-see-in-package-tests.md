@@ -315,16 +315,29 @@ announce it anyway the moment an advisory clears.
 **Convert every root in-package test to an external test package.** The correct
 fix, and the reason gqlc-m5rc exists. Not done in this ADR's own change, because
 it touches every package and some of those tests want unexported state for good
-reasons. gqlc-m5rc has since done it for eight of the ten packages that were
-blind, leaving `internal/codegen/age` (gqlc-5utdh, held only until PR #1797
-merges) and `internal/resolver` (gqlc-mwohz). The resolver is the case this
-paragraph anticipated: its tests build three types from composite literals
-naming unexported fields typed by `internal/schema`, so a bridge that
-constructs them has to import a package whose closure reaches antlr and the
-package goes straight back in the blind set. Exporting the fields instead
-measures at ~285 production references. It stays blind on purpose. The goal is
-to shrink the residual and know its size, not to reach zero by exporting things
-that should stay private.
+reasons. gqlc-m5rc did it for eight of the ten packages that were blind, and gqlc-5utdh
+took `internal/codegen/age` as the ninth. `internal/resolver` (gqlc-mwohz) is
+the one that stays.
+
+The resolver is the case this paragraph anticipated: its tests build three
+types from composite literals naming unexported fields typed by
+`internal/schema`, so a bridge that constructs them has to import a package
+whose closure reaches antlr and the package goes straight back in the blind
+set. Exporting the fields instead measures at ~285 production references. It
+stays blind on purpose. The goal is to shrink the residual and know its size,
+not to reach zero by exporting things that should stay private.
+
+`internal/codegen/age` looked like the same wall and was not, which is the
+distinction worth carrying to the next package: its tests also build types from
+composite literals naming unexported fields — `dialectGap`, `dialectProbe`,
+`helpers`, `wiredEntity` — but every one of those fields is typed by a builtin
+or by the package's own types, so `export_test.go` could spell the
+constructors and accessors without importing anything at all. What decides a
+case is not whether the tests reach unexported fields but what those fields are
+TYPED by. The one signature that would have needed an import there, `forParams`
+taking `[]codegen.Param`, is bridged as a method expression, which infers the
+type instead of naming it; the call site spells `codegen.Param`, and the call
+site already imports it.
 
 **Report a module-level metric instead of packages and files.** Rejected: the
 module set is already complete, so it would report a reassuring zero over the
