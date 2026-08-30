@@ -253,7 +253,7 @@ STALE: $b is closed, so that reason is spent — do not act on it."
 STALE: $b is held by $b_assignee, not you — do not claim it. If it was meant to be yours, say so rather than taking it."
         elif [ "$b_blockers" != "-" ]; then
             reasons="$reasons
-STALE: $b is blocked by $b_blockers and is not on the ready queue — do not claim it. Somebody placed that edge to keep this bead out of a citizen's hands until the blocker closes, which is the only hold this town enforces. Take other ready work; you are woken again when it releases."
+STALE: $b is blocked by $b_blockers and is not on the ready queue — do not claim it. Somebody placed that edge to keep this bead out of a citizen's hands until the blocker closes, and a blocks edge is the only hold this town enforces. Take other ready work: the bead returns to the queue on its own when the blocker closes, though not necessarily to you."
         fi
     done
     # Fail loud. A silent fall-back to the old behaviour would retire this guard
