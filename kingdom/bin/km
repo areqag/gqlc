@@ -1138,10 +1138,42 @@ seat_box_text() { # <pane> -> 0 read it, 1 the buffer holds no box, 2 unreadable
     # ends so a line that merely CONTAINS a rule run is not an edge: a spurious
     # edge shrinks the region, and a region that reads empty when it is not is
     # what makes send_line type onto a citizen's draft.
+    # Matching the shape alone is not enough, because the shape has no minimum
+    # width: a bare rule the citizen PASTED into the box — km output, a markdown
+    # separator — is an edge at any length, and if it is the last interior line
+    # it becomes edge[n-1], the region collapses to nothing, and a box holding
+    # an unsent draft reports EMPTY (gqlc-eq1t1). That is the direction the
+    # comment above calls expensive: send_line's consent pre-check allows a send
+    # when the box reads empty, so it types a nudge onto the draft.
+    #
+    # So width decides, and it is taken from the buffer rather than fixed,
+    # because a constant would be this terminal's width and would rot on the
+    # next resize. The box's own edges are drawn to the render width and are all
+    # within 3% of each other: measured 2026-08-30 across all 16 live panes,
+    # every edge line carried between 343 and 352 ─, the bottom edge at the full
+    # 352 and the titled top edges at 343-348 (the label eats the difference).
+    # Half the widest rule in the buffer therefore clears a real edge by a wide
+    # margin while rejecting a paste that is not close to full width. What is
+    # counted is the ─ glyphs, not the length of the line, because the shape
+    # admits a label between two rules: a pasted heading of the form `─ text ─`
+    # can be 200 columns wide while being two dashes, and only the dash count
+    # calls that narrow.
+    #
+    # It does NOT reject a paste wider than half the pane. Nothing in this file
+    # can: a full-width rule pasted from another pane's render is byte-identical
+    # to a real edge. The limit is stated rather than papered over.
     printf '%s\n' "$buf" | awk '
-        /^─+( .* ─+)?$/ { edge[++n] = NR }
-        { line[NR] = $0 }
+        {
+            line[NR] = $0
+            if ($0 ~ /^─+( .* ─+)?$/) {
+                probe = $0
+                cand[++m] = NR
+                wide[m] = gsub(/─/, "-", probe)
+                if (wide[m] > w) w = wide[m]
+            }
+        }
         END {
+            for (j = 1; j <= m; j++) if (wide[j] * 2 >= w) edge[++n] = cand[j]
             if (n < 2) exit 1
             for (i = edge[n - 1] + 1; i < edge[n]; i++) {
                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", line[i])
