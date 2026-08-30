@@ -355,13 +355,44 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    cycle to rediscover that you are still waiting, each wake eating a slot from
    `concurrency.max_active` that the judge who would unblock you is competing
    for. One review bead per verdict round — after answering a FAIL, file a
-   fresh one for the re-review.
+   fresh one for the re-review, **assigned to the judge who wrote that FAIL**.
+   V.4 makes them the adjudicator of the answer, and the owned pass routes an
+   assigned bead whatever the priority floor, so the assignment is what gets the
+   round back to the one seat entitled to close it. Round 1 stays UNASSIGNED as
+   the paragraph above says; only the post-FAIL round is assigned.
 
    Then merge on the Դատաւոր's PASS; your resume wake arrives when the review
    bead closes, PASS and FAIL alike. A FAIL blocks the merge until answered
    (Constitution V.4). After any merge, reviewed or not: close the bead
    citing the merged SHA, delete the branch, file follow-up beads for
    anything you deferred.
+
+   **A verdict is PASS or FAIL, and a PASS is unconditional** (ADR 0009). It
+   asserts the judge would sign the merge of the SHA they read, as it stands, so
+   a PASS leaves you nothing to satisfy before merging. A judge whose read
+   produces wants that are not blockers files them as residue beads BEFORE
+   closing — step 9's `discovered-from` shape — and the close reason may point
+   at them: `PASS — verdict of record: <link>; residue: gqlc-xxxx`. **A close
+   reason may not carry an obligation in prose alone**, because nothing reads it
+   FOR ONE. Three things do read `close_reason`, and not one of them can route
+   an obligation: `bdguard` parses it for a cited sha and judges whether a close
+   was earned; `bd-gh-sync` takes its first line as a mirror tag; and ADR 0009's
+   own doctor row, added alongside this rule, greps it for the word and warns
+   after the fact, naming ids but assigning nobody. A condition written there
+   reaches no dispatch pass and no assignee, so it is machine-invisible for the
+   one purpose it was written to serve.
+   PR #1712 merged with neither condition of its PASS landed, and nothing
+   anywhere was red — the bead was closed, the gates were green.
+
+   Sort each condition with the ADR's one question: **would I sign this merge if
+   the condition never happens?** No → it is a FAIL, which blocks until answered
+   and prices at its delta, not at a full round. Yes → it is a residue bead. Not
+   work at all ("conditional on CI green", "head unmoved") → it is the standing
+   merge protocol, which already binds you on every PR.
+
+   Do not write "no conditions". The unqualified PASS says it already, and
+   `km doctor`'s ADR 0009 row greps closed `class:judge` beads for `conditio`,
+   so the disclaimer rings the detector it was meant to satisfy.
 
    **Merging is now enqueueing** (ADR 0010). `gh pr merge <N> --squash` adds
    the PR to the merge queue; GitHub tests master + your PR together and lands
