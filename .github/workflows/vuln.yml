@@ -41,9 +41,14 @@ jobs:
         id: deps
         # Without merge_group here every step below it skips on a queue run,
         # so the required govulncheck context would go green having scanned
-        # nothing (ADR 0010). If merge_group.base_sha were ever empty the
-        # fetch below errors under `bash -e` and this step fails red, which is
-        # the direction to fail in.
+        # nothing (ADR 0010). If merge_group.base_sha were ever empty this step
+        # still fails red, which is the direction to fail in — but it is the
+        # `git diff` that does it, not the fetch. Probed 2026-08-30: with
+        # BASE_SHA empty the fetch SUCCEEDS, resolving to origin HEAD and
+        # returning 0, and the diff then dies on the empty revision with
+        # `fatal: ambiguous argument ''` and status 128. So the guard is the
+        # diff line below, and the note there about keeping it off a pipeline
+        # is what keeps this step failing closed.
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
