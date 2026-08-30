@@ -10,24 +10,23 @@ import (
 )
 
 const slotsMatchingQueryText = `MATCH (s:Slot)
-WHERE s.tags = $tags AND s.ranks = $ranks AND s.windows = $windows AND s.days = $days AND s.spans = $spans
+WHERE s.tags = $tags AND s.ranks = $ranks AND s.days = $days AND s.spans = $spans
 RETURN s.id AS id`
 
 type SlotsMatchingParams struct {
-	Tags    []string
-	Ranks   []int32
-	Windows [][]Date
-	Days    []Date
-	Spans   *[]Duration
+	Tags  []string
+	Ranks []int32
+	Days  []Date
+	Spans *[]Duration
 }
 
 // SlotsMatching executes the SlotsMatching query.
 //
 //	MATCH (s:Slot)
-//	WHERE s.tags = $tags AND s.ranks = $ranks AND s.windows = $windows AND s.days = $days AND s.spans = $spans
+//	WHERE s.tags = $tags AND s.ranks = $ranks AND s.days = $days AND s.spans = $spans
 //	RETURN s.id AS id
 func (q *queries) SlotsMatching(ctx context.Context, arg SlotsMatchingParams) ([]int64, error) {
-	records, err := q.db.run(ctx, slotsMatchingQueryText, map[string]any{"tags": arg.Tags, "ranks": arg.Ranks, "windows": fromDateList2(arg.Windows), "days": fromDateList(arg.Days), "spans": fromDurationListPtr(arg.Spans)}, neo4j.AccessModeRead)
+	records, err := q.db.run(ctx, slotsMatchingQueryText, map[string]any{"tags": arg.Tags, "ranks": arg.Ranks, "days": fromDateList(arg.Days), "spans": fromDurationListPtr(arg.Spans)}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}

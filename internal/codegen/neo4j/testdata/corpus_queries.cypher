@@ -1,11 +1,29 @@
 // name: BinColumns :many
-MATCH (b:Bin) RETURN b.loose AS loose, b.bag AS bag, b.piles AS piles
+MATCH (b:Bin) RETURN b.loose AS loose, b.bag AS bag
 
 // name: ListyColumns :many
 MATCH (l:Listy) RETURN l.tags AS tags, l.blobs AS blobs, l.depths AS depths
 
+// NestColumns is spelled over LITERALS, where every other read here
+// projects a declared property, and the difference is ADR 0035's. The
+// columns are nested lists; the neo4j server serves those as query
+// values and refuses to STORE them, so there is no longer a nested-list
+// property in the schema to project one from — and the decode under test
+// belongs to the query path anyway (render_queries.go, binding
+// inner<n>/innerAcc<n>) rather than to the entity path.
+//
+// The literals fix the column TYPES and nothing else: the driver values
+// each decode runs against are supplied by the test, so the empty and
+// multi-element lists the assertions need are not spelled here.
+//
+// TWO THINGS THIS NO LONGER COVERS, named rather than left as silence:
+// the columns are non-nullable, because a literal is, so the nullable
+// nested-column arm that `deep` reached is unwitnessed here; and nothing
+// in this file now decodes a nested list off dbtype.Node at all, that
+// being the arm ADR 0035 makes unreachable and the same change deletes.
+//
 // name: NestColumns :many
-MATCH (n:Nest) RETURN n.cube AS cube, n.lhs AS lhs, n.rhs AS rhs, n.deep AS deep
+RETURN [[[1]]] AS cube, [[1]] AS lhs, [["a"]] AS rhs, [[["x"]]] AS deep
 
 // name: AnythingColumns :many
 MATCH (a:Anything) RETURN a.payload AS payload, a.maybe AS maybe
@@ -75,12 +93,16 @@ MATCH (s:Scalar)-[e:Edgy|Edgier]->(l:Listy) MATCH (s)-[f:Edgy|Edgier]->(l) RETUR
 // the wire, and dropping from<X>ListPtr's nil guard compiles and then
 // panics on the null the schema declared (bd gqlc-rw0m).
 //
-// $windows precedes $days deliberately. The emitter keeps one list depth
-// per carrier and must keep the DEEPEST, because the depth-2 helper is
-// written in terms of the depth-1 one. Declared shallow-first, a
-// last-one-wins emitter reaches the same depth by accident.
+// $windows was here, and its removal costs the ORDERING witness as well
+// as the depth-2 bind: the emitter keeps one list depth per carrier and
+// must keep the DEEPEST, so a depth-2 parameter declared before a depth-1
+// one over the same carrier caught a last-one-wins emitter. Every bind
+// left is depth 1, so nothing here now distinguishes keeping the deepest
+// from keeping the last. ADR 0035 leaves no neo4j property of a nested
+// width to compare a parameter against, so this is not replaceable on
+// this backend.
 //
 // name: SlotsMatching :many
 MATCH (s:Slot)
-WHERE s.tags = $tags AND s.windows = $windows AND s.days = $days AND s.spans = $spans
+WHERE s.tags = $tags AND s.days = $days AND s.spans = $spans
 RETURN s.id AS id

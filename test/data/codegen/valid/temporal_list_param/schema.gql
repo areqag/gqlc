@@ -4,7 +4,6 @@ CREATE PROPERTY GRAPH TYPE TemporalListParam AS {
         days    :: LIST<DATE NOT NULL> NOT NULL,
         tags    :: LIST<STRING NOT NULL> NOT NULL,
         ranks   :: LIST<INT32 NOT NULL> NOT NULL,
-        windows :: LIST<LIST<DATE>> NOT NULL,
         spans   :: LIST<DURATION(DAY TO SECOND) NOT NULL>
     })
 }

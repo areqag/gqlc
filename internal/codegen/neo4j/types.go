@@ -93,6 +93,34 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	return "", false
 }
 
+// StorableProperty refuses a list whose element is itself a list, and
+// admits everything else.
+//
+// This is the storage axis, not the carrier axis: Property answers
+// "[][]int16" for LIST<LIST<INT16>> and is right to, and this backend
+// emits a working recursive decode for a nested list arriving as a
+// QUERY VALUE. What refuses it is the server, which stores a property
+// value only if it is a scalar or a flat list of scalars and answers a
+// nested write with "Collections containing collections can not be
+// stored in properties" — measured against the pinned image by
+// TestNeo4jRefusesANestedListStoredProperty (ADR 0035, bd gqlc-v0gk).
+// Emitting for such a property would hand the author a struct field no
+// write could ever fill, so it fails at generation, where it can name
+// the property.
+//
+// Elem() strips the NOT NULL suffix, so LIST<LIST<INT16> NOT NULL> is
+// caught the same as LIST<LIST<FLOAT32>>; a depth-3 list is caught at
+// its outer level, its element being a list; LIST<LIST<ANY VALUE>> is
+// caught for the same reason. LIST<ANY VALUE> is ADMITTED and can carry
+// a nested list at runtime, which no static check can see — that write
+// fails at the server as it does today (ADR 0035 names the limit).
+func (typeMap) StorableProperty(pt graph.PropertyType) bool {
+	if pt.Kind() != graph.KindList {
+		return true
+	}
+	return pt.Elem().Kind() != graph.KindList
+}
+
 // Temporal maps a resolver Temporal kind to the Go type text C3 emits
 // (spec §5.1 column-shape table). Returns (typeText, ok): ok=false
 // routes the caller to ErrUnrepresentableTemporal naming the kind.

@@ -16,6 +16,28 @@ type TypeMap interface {
 	// phase routes that to ErrUnrepresentableWidth naming the width.
 	Property(pt graph.PropertyType) (goType string, ok bool)
 
+	// StorableProperty reports whether the backend's store accepts a
+	// property of this width as a stored property value. Distinct from
+	// Property, which is the CARRIER question: a width may have a
+	// faithful Go carrier the store still refuses to hold, and neo4j's
+	// nested list is exactly that — [][]int16 carries it, and the same
+	// backend emits a working recursive decode for one as a query value,
+	// while the server refuses it as a stored property (ADR 0035). false
+	// routes to ErrUnstorableProperty naming the entity, the property
+	// and the width.
+	//
+	// Asked at Phase Z only. A query column and a query parameter are
+	// read and bound, never stored, so a storage rule has nothing to say
+	// about them, and asking there would refuse values the backend
+	// serves.
+	//
+	// Required rather than an optional interface a backend may omit: an
+	// optional one defaults silently to storable, so a backend that
+	// never implemented it would be indistinguishable from one whose
+	// store holds everything. Required, the compiler names every
+	// implementation that still owes an answer.
+	StorableProperty(pt graph.PropertyType) bool
+
 	// Temporal maps a resolved temporal-expression kind to its Go type
 	// text. ok is false for a kind the backend has no faithful carrier
 	// for; the phase routes that to ErrUnrepresentableTemporal naming

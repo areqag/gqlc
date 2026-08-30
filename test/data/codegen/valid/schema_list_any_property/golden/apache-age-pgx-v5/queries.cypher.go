@@ -88,19 +88,18 @@ func (q *queries) BinById(ctx context.Context, arg int64) (Bin, error) {
 	return value0, nil
 }
 
-const binColumnsQueryText = `MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose, b.piles AS piles`
+const binColumnsQueryText = `MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose`
 
 type BinColumnsRow struct {
 	Bag   *[]any
 	Loose []any
-	Piles *[][]any
 }
 
 // BinColumns executes the BinColumns query.
 //
-//	MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose, b.piles AS piles
+//	MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose
 func (q *queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
-	stmt, err := q.cypherStmt("$gqlc$", binColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype, v2 ag_catalog.agtype")
+	stmt, err := q.cypherStmt("$gqlc$", binColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
 	}
@@ -113,8 +112,7 @@ func (q *queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
 	for rows.Next() {
 		var raw0 []byte
 		var raw1 []byte
-		var raw2 []byte
-		if err := rows.Scan(&raw0, &raw1, &raw2); err != nil {
+		if err := rows.Scan(&raw0, &raw1); err != nil {
 			return nil, fmt.Errorf("BinColumns: scan row: %w", err)
 		}
 		var value0 *[]any
@@ -132,18 +130,9 @@ func (q *queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
 		if err != nil {
 			return nil, fmt.Errorf("BinColumns: decode column %q: %w", "loose", err)
 		}
-		var value2 *[][]any
-		if raw2 != nil {
-			decoded, err := agtypeListOfListOfAny(raw2)
-			if err != nil {
-				return nil, fmt.Errorf("BinColumns: decode column %q: %w", "piles", err)
-			}
-			value2 = &decoded
-		}
 		out = append(out, BinColumnsRow{
 			Bag:   value0,
 			Loose: value1,
-			Piles: value2,
 		})
 	}
 	if err := rows.Err(); err != nil {
