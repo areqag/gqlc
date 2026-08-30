@@ -1207,6 +1207,50 @@ seat_box_emptied() { # <pane> -> 0 emptied, 1 holds text, 2 no box, 3 unreadable
     return 2
 }
 
+# One comparable line out of what the box renders. Measured 2026-08-30 on a
+# probe pane (bd gqlc-3evsn): a message too long for the pane is wrapped at WORD
+# boundaries — 350/342/237 characters over three lines for one 829-character
+# send, not a fixed column cut — and seat_box_text trims each rendered line, so
+# rejoining them with a single space reconstructs the text. Comparing the raw
+# multi-line capture against what was sent would therefore refuse every message
+# wider than the pane.
+#
+# The prompt glyph leads the first line and is followed by U+00A0, which is NOT
+# [[:space:]] in the C locale, so it is spelled as bytes rather than left to a
+# character class. Both sides of any comparison go through this, so a text that
+# itself begins with a glyph is normalised the same way and cannot drift.
+box_one_line() { # <box text> -> one line, prompt glyph dropped, whitespace collapsed
+    printf '%s' "$1" | sed -e 's/\xc2\xa0/ /g' | tr '\n\t' '  ' |
+        sed -e 's/^ *❯ *//' -e 's/^ *> *//' -e 's/  */ /g' -e 's/^ //' -e 's/ *$//'
+}
+
+# Did the text we just typed actually land in the composer? Polled on the same
+# schedule and for the same reason as seat_box_emptied: typing takes about two
+# pane reads to render, so a single immediate read would answer "no" for a send
+# that was fine.
+#
+# CONTAINMENT, not equality, and the box having been witnessed EMPTY moments
+# before is what makes that strong enough: nothing else can be in there to match
+# against, so any decoration the TUI adds around the text costs a refusal rather
+# than buying a false pass. Equality would refuse the first time claude renders a
+# hint inside the box, and a false refusal unroutes a live seat — the failure
+# gqlc-gh7xj went out of its way not to introduce.
+seat_box_echoes() { # <pane> <text> -> 0 the box holds it, 1 it holds something else, 2 no box
+    local left=10 box rc=2 want
+    want=$(box_one_line "$2")
+    while [ "$left" -gt 0 ]; do
+        left=$((left - 1))
+        sleep 0.2
+        # The `if` is not style: it suspends `set -e` for the substitution, so a
+        # no-box read is a verdict this loop records rather than an exit status
+        # that unwinds whichever caller happens not to be inside a condition.
+        if box=$(seat_box_text "$1"); then rc=0; else rc=2; continue; fi
+        case "$(box_one_line "$box")" in *"$want"*) return 0 ;; esac
+    done
+    [ "$rc" -eq 0 ] && return 1
+    return 2
+}
+
 # `herdr agent send` writes the text and `pane send-keys` writes the Enter, and
 # both go down the pane's pty as ordinary bursts. There is no socket path that
 # bypasses the tty — this comment claimed one until 2026-08-29 — and herdr emits
@@ -1273,12 +1317,42 @@ seat_box_emptied() { # <pane> -> 0 emptied, 1 holds text, 2 no box, 3 unreadable
 # sitting on a permission ask. seat_prompt_visible already draws the line the
 # nudge path uses; one guard here covers every caller, including the next one.
 #
-# What it does not look at is what the box held BEFORE the send. Typing appends,
-# so a citizen's half-written draft is silently prefixed to this text and
-# submitted with it. seat_box_text would show that if it were called first, so
-# the check is cheap and merely absent; it is bd gqlc-6bnkw, not this bead.
+# CONSENT IS OBSERVED HERE, not inferred from an enum. Until 2026-08-30 the only
+# thing standing between this function and an Enter on a modal was
+# seat_prompt_visible, whose argument was that a covered seat reads `blocked`.
+# That premise is falsified: nine seats killed by a usage-limit wall read
+# done/working/unknown and never blocked (bd gqlc-3evsn), and this function
+# admits all three. What kept km off those panes was not the guard below but an
+# accident of a DIFFERENT gate — the dispatch ladder's liveness test, which
+# happened to require `idle` and so never reached them.
+#
+# So the enum check is kept for the modals the hook does see, and the decision is
+# made instead on the pane's own render, twice:
+#
+#   BEFORE typing — an input box must exist and be EMPTY. No box is a refusal,
+#   not a shrug: there is nowhere for the text to land and the Enter would press
+#   whatever button that surface does have (Constitution VI.2). A box holding
+#   text is a refusal too — typing APPENDS, so a citizen's half-written draft
+#   would be silently prefixed to this message and submitted with it, which was
+#   bd gqlc-6bnkw and is now answered rather than only documented.
+#
+#   AFTER the send acks and BEFORE the Enter — the box must hold what was typed.
+#   The pre-check is one photograph; a modal arriving in the gap between it and
+#   the Enter is the case this narrows, and it is also the only witness that the
+#   ack meant anything on this pane.
+#
+# Measured 2026-08-30 on a live claude trust dialog: agent_status `blocked` AND
+# seat_box_text rc=1. The two witnesses agree where they overlap, which is why
+# the box check is an ALLOW-witness that a composer exists rather than a
+# deny-list of modal signatures — a list fails open on the modal nobody wrote
+# down, and the quota modal is exactly that modal.
+#
+# Every refusal returns 1 with a reason on stderr naming WHICH witness failed.
+# Callers count refusals: a send this function cannot witness is the verdict
+# "machinery cannot reach this seat", and retrying it silently forever is the
+# open loop gqlc-3evsn indicts.
 send_line() { # <target> <text> -> 0 delivered, 1 not
-    local target=$1 text=$2 seat pane out witnessed
+    local target=$1 text=$2 seat pane out witnessed box
     seat=${target##*:}
     pane=$(seat_pane_id "$seat") || pane=
     if [ -z "$pane" ]; then
@@ -1289,10 +1363,28 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
         echo "km: send to $seat: agent_status is $(seat_agent_status "$seat"), so the Enter would answer a modal nobody read; nothing was sent" >&2
         return 1
     fi
+    if ! box=$(seat_box_text "$pane"); then
+        echo "km: send to $seat (pane $pane): the pane renders no input box, so this text has nowhere to land and the Enter would press whatever that surface does answer; nothing was sent (VI.2, bd gqlc-3evsn)" >&2
+        return 1
+    fi
+    if [ -n "$box" ]; then
+        echo "km: send to $seat (pane $pane): the input box already holds text, and typing appends, so this would be pasted onto the end of a citizen's draft and submitted as one message; nothing was sent and the draft is untouched (bd gqlc-6bnkw)" >&2
+        return 1
+    fi
     out=$(herdr agent send "$pane" "$text" 2>&1) || {
         echo "km: send to $seat (pane $pane) failed: ${out:-herdr gave no diagnosis on either stream}" >&2
         return 1
     }
+    seat_box_echoes "$pane" "$text"
+    witnessed=$?
+    if [ "$witnessed" -ne 0 ]; then
+        if [ "$witnessed" -eq 2 ]; then
+            echo "km: send to $seat (pane $pane): the box was empty when this was checked and the pane renders none at all now, so something covered the composer mid-send; no Enter was pressed. The typed text may be sitting under it — read the pane (VI.2, bd gqlc-3evsn)" >&2
+        else
+            echo "km: send to $seat (pane $pane): herdr acked the text but the box does not hold it, so it did not land where the Enter would submit it; no Enter was pressed. Read the pane before sending again (bd gqlc-3evsn)" >&2
+        fi
+        return 1
+    fi
     out=$(herdr pane send-keys "$pane" Enter 2>&1) || {
         echo "km: send to $seat (pane $pane): the text was typed, but the Enter that submits it failed: ${out:-herdr gave no diagnosis on either stream}. It is sitting unsent in her prompt box" >&2
         return 1
@@ -1344,9 +1436,18 @@ seat_pane_idle() { # <seat>
     [ "$(seat_agent_status "$1")" = idle ]
 }
 
-# Whether the agent is available to receive text. `blocked` means the agent
-# is on a modal (permission ask, usage-limit); `unknown` means claude isn't
-# reporting, which includes the "no agent at all" case. Both refuse the send.
+# Whether the agent is available to receive text. `blocked` is what the hook
+# reports for the modals it SEES — measured 2026-08-30 on a live trust dialog;
+# `unknown` means claude isn't reporting, which includes the "no agent at all"
+# case. Both refuse the send.
+#
+# This comment listed the usage-limit modal among the `blocked` cases and that
+# was wrong, which mattered more than a stale sentence usually does: it was the
+# premise ADR 0007 §1 rested on. Nine seats killed by a quota wall on 2026-08-29
+# read done, working and unknown, never blocked, and this function admits the
+# first two — so `blocked` is a floor on which modals are refused here and not a
+# claim that every covered pane reaches it (bd gqlc-3evsn). What refuses the ones
+# it cannot see is send_line's box check, on the pane's own render.
 seat_prompt_visible() { # <seat>
     case "$(seat_agent_status "$1")" in
         idle | working | done) return 0 ;;
@@ -1483,6 +1584,24 @@ seat_tool_in_flight() { # <seat> -> 0 if a tool call started and has not finishe
     s=$(progress_age "$1" .last_start) || return 1
     p=$(progress_age "$1" .last_progress) || return 0 # started, never finished
     [ "$s" -lt "$p" ]
+}
+
+# How long this seat's progress witness has been dry — since the newest tool call
+# STARTED when one is in flight, since the newest one FINISHED otherwise. It is
+# the single number behind km status's WORK column and behind the recovery
+# ladder's stalled trigger, and it is one function so the board and the ladder
+# cannot come to disagree about which seats are in trouble.
+#
+# rc 1 when nothing can be read, never an age: an unreadable witness says nothing
+# about the seat, and answering "0 seconds" would say the most reassuring
+# possible thing about a seat nobody can see — the mistake the HB column had to
+# be taught out of (gqlc-eier). Callers must not read rc 1 as stalled.
+seat_dry_age() { # <seat> -> seconds since the progress witness last moved
+    if seat_tool_in_flight "$1"; then
+        progress_age "$1" .last_start
+    else
+        progress_age "$1" .last_progress
+    fi
 }
 
 # Can this seat witness its own progress at all? The same question seat_can_report
@@ -2812,50 +2931,91 @@ cmd_dispatch() {
     # by every automatic mechanism the town had, while the board called them
     # awake and the merge gate stayed shut (gqlc-5vp7).
     #
-    # This is the ASK, not the force. It types a line at a citizen who is
-    # demonstrably between turns; it does not end anyone's session, and the
-    # idle test is what keeps it away from a seat mid-work or frozen on a modal
-    # (see seat_pane_idle, and VI.2).
+    # This is the ASK, not the force. It types a line at a citizen it has reason
+    # to believe is not mid-turn; it does not end anyone's session, and whether
+    # the text may be typed at all is decided per send, on the pane's own render,
+    # by send_line (VI.2) — not here.
     #
-    # Confirmed over two passes, for the same reason cmd_reconcile confirms its
-    # own: a single capture is one photograph of a TUI, and the marker's age is
-    # what makes the second sighting a different moment rather than the same
-    # one. The marker is cleared by a nudge as well as by any sign of life, so
-    # the floor between two nudges is two full passes rather than every tick.
-    local s idle_marker nudged_marker attempts_file escalated_marker pending ask floor since cap tries before_unread
+    # TWO TRIGGERS, because one signal could not carry both duties. Until
+    # 2026-08-30 this pass fired on `agent_status == idle` alone, which also
+    # doubled as the thing keeping km off a covered pane. That conflation had a
+    # measured cost in each direction: nine seats killed by a usage-limit wall on
+    # 2026-08-29 read done/working/unknown and were therefore never asked — over
+    # six hours and 168 dispatch runs this pass named exactly ONE seat, the one
+    # that was never dead — while the property it was credited with (never type
+    # at a modal) was being supplied by that accident rather than by any check
+    # (bd gqlc-3evsn, ADR 0007 amended).
+    #
+    #   idle    — the agent reports idle, confirmed over two passes. The
+    #             empty-prompt case, unchanged: a single capture is one
+    #             photograph of a TUI, and the marker's age is what makes the
+    #             second sighting a different moment rather than the same one.
+    #   stalled — the progress witness has run dry: no tool call has FINISHED for
+    #             [welfare] stalled_after_minutes, in flight or not. This is the
+    #             dead-turn arm, and it reads no agent_status at all. It needs no
+    #             two-pass confirm because progress.json is durable state on
+    #             disk, so its age is already its own second sighting.
+    #
+    # The threshold is shared with km status, deliberately: the ladder now asks
+    # exactly the seats the board names NOWORK and WEDGED, so the report and the
+    # recovery cannot disagree about who is in trouble. A seat whose progress
+    # witness is UNREADABLE is not stalled — the board's own "?"/unwired lines
+    # own that case, and failing toward silence is right where the instrument,
+    # not the seat, is what went quiet.
+    #
+    # The marker filenames still say `idle`. They predate the stalled trigger and
+    # renaming ephemeral state buys nothing; all five are episode state, not a
+    # record of which arm fired.
+    local s idle_marker nudged_marker attempts_file escalated_marker refusal_file
+    local pending ask floor since cap tries before_unread
+    local dry idle_now stalled_age trigger age nudge_err delivered=0
     floor=$(cfg_minutes welfare renudge_after_minutes 30)
     cap=$(recover_cap)
+    dry=$(status_stalled_after)
     for s in $(seats_all); do
         idle_marker="$(seat_home "$s")/idle"
         nudged_marker="$(seat_home "$s")/idle-nudged"
         attempts_file="$(seat_home "$s")/idle-attempts"
         escalated_marker="$(seat_home "$s")/idle-escalated"
-        # Any sign of life ends the episode, and ALL of its markers go with it.
-        # The floor below is per episode and not per seat: keyed to the seat it
-        # would silence the town's only channel to a citizen who came back,
-        # worked, and went idle again, for its whole window.
+        refusal_file="$(seat_home "$s")/idle-refusal"
+        # Which arm holds, if either. Read before anything is cleared or asked,
+        # because the answer is also what ENDS an episode: a seat that is asleep,
+        # or awake with neither trigger holding, has given the only sign of life
+        # this ladder accepts.
         #
-        # Going to sleep ends the episode too, which is why the awake test is
-        # folded in here rather than sitting above as an early `continue`.
-        # Neither `km sleep` nor reconcile's freed arm removes any of these four
-        # files, so a seat that was escalated, slept, and woke again met a pass
-        # that read a stale idle-escalated and reported ESCALATED against an
-        # episode in which nobody had asked her anything — permanent silence on
-        # the town's only automatic channel to her, which is the worst failure
-        # this ladder can have. `||` short-circuits, so seat_pane_idle is still
-        # not called for a seat that is not awake.
-        if [ "$(seat_status "$s")" != awake ] || ! seat_pane_idle "$s"; then
-            rm -f "$idle_marker" "$nudged_marker" "$attempts_file" "$escalated_marker"
+        # And "neither trigger holds" is now literally witnessed work — a tool
+        # call that FINISHED inside the threshold — rather than a pane that
+        # merely stopped looking idle, which is what ADR 0007 §5 asked for and
+        # what the reset it shipped with could not deliver.
+        #
+        # Any sign of life takes ALL of the episode's markers with it. The floor
+        # below is per episode and not per seat: keyed to the seat it would
+        # silence the town's only channel to a citizen who came back, worked, and
+        # went idle again, for its whole window. Going to sleep ends the episode
+        # for the same reason, and neither `km sleep` nor reconcile's freed arm
+        # removes these files, so a seat that was escalated, slept and woke again
+        # met a pass that read a stale idle-escalated and reported ESCALATED
+        # against an episode in which nobody had asked her anything — permanent
+        # silence on the town's only automatic channel to her, which is the worst
+        # failure this ladder can have.
+        idle_now=0
+        stalled_age=""
+        if [ "$(seat_status "$s")" = awake ]; then
+            seat_pane_idle "$s" && idle_now=1
+            # rc 1 is an unreadable witness, and unreadable is not stalled.
+            if age=$(seat_dry_age "$s") && [ "$age" -ge "$dry" ]; then stalled_age=$age; fi
+        fi
+        if [ "$idle_now" -eq 0 ] && [ -z "$stalled_age" ]; then
+            rm -f "$idle_marker" "$nudged_marker" "$attempts_file" "$escalated_marker" "$refusal_file"
             continue
         fi
         # Escalated: the mayor has been told, so this pass says nothing further
         # INTO the seat for the rest of the episode. It keeps reporting, because
         # the slot is still held and going quiet here is how eleven hours passed
         # with every board reading healthy. Only witnessed work clears it — the
-        # branch above, which needs the agent to leave `idle`, not merely for the
-        # pane to look different.
+        # branch above.
         if [ -f "$escalated_marker" ]; then
-            echo "dispatch: $s is awake and idle, ESCALATED to sedrak $(fmt_age "$(($(date +%s) - $(stat -c %Y "$escalated_marker")))") ago after $cap unanswered asks; not typing at her again this episode — read the pane"
+            echo "dispatch: $s is awake and $([ -n "$stalled_age" ] && echo "has finished no tool call for $(fmt_age "$stalled_age")" || echo "idle"), ESCALATED to sedrak $(fmt_age "$(($(date +%s) - $(stat -c %Y "$escalated_marker")))") ago after $cap unanswered asks; not typing at her again this episode — read the pane"
             continue
         fi
         pending=$(unread_count "$s")
@@ -2865,28 +3025,56 @@ cmd_dispatch() {
         # finished has usually just drained her inbox, so `pending -gt 0` was
         # false for exactly the seats this pass was written to reach. The unread
         # count now chooses the WORDS; being awake and idle is the trigger.
-        if [ "$pending" -gt 0 ]; then
-            ask="[km] you have $pending unread letter(s) — bd mail inbox, and km sleep when you are done for the day (it is what makes you reachable)"
+        #
+        # The two-pass confirm belongs to the idle arm alone. When both arms hold
+        # — awake, idle, and nothing finished for the threshold, which is the
+        # gqlc-5vp7 finished-day shape — the idle words are the truer ones, so it
+        # is tested first and the stalled arm is the fallback.
+        trigger=""
+        if [ "$idle_now" -eq 1 ]; then
+            if [ ! -f "$idle_marker" ]; then
+                : >"$idle_marker"
+                [ -n "$stalled_age" ] || {
+                    echo "dispatch: $s is awake at an empty prompt with $pending unread; confirming next pass before nudging"
+                    continue
+                }
+            elif [ "$(($(date +%s) - $(stat -c %Y "$idle_marker")))" -ge 60 ]; then
+                trigger=idle
+                rm -f "$idle_marker"
+            elif [ -z "$stalled_age" ]; then
+                continue
+            fi
+        fi
+        [ -n "$trigger" ] || trigger=stalled
+        if [ "$trigger" = idle ]; then
+            if [ "$pending" -gt 0 ]; then
+                ask="[km] you have $pending unread letter(s) — bd mail inbox, and km sleep when you are done for the day (it is what makes you reachable)"
+            else
+                ask="[km] you are awake at an empty prompt with no unread mail: that holds one of the town's slots AND makes you unroutable, because every dispatch pass wakes asleep seats only. Pick up work, or run km sleep if you are done for the day"
+            fi
         else
-            ask="[km] you are awake at an empty prompt with no unread mail: that holds one of the town's slots AND makes you unroutable, because every dispatch pass wakes asleep seats only. Pick up work, or run km sleep if you are done for the day"
+            # Self-reconciling, because the seat this reaches may have lost a
+            # turn to a quota wall and cannot tell: it names the observation
+            # rather than a diagnosis, gives the citizen both readings, and tells
+            # the one whose turn died to re-read the world before trusting
+            # anything in her own context (ADR 0007 §3).
+            ask="[km] no tool call has FINISHED in your session for $(fmt_age "$stalled_age"), so from outside this cannot be told apart from a turn that died. If yours did — a usage-limit wall eats the turn and leaves the session looking busy — do not resume from memory: re-read the world first (git status in your worktree, bd show on whatever you hold, and whether your PR moved while you were gone). If you are inside one long tool call, carry on, this is only a check-in and costs you a line. If you are done for the day, km sleep is what makes you routable again"
+            [ "$pending" -eq 0 ] || ask="$ask. You also have $pending unread letter(s) — bd mail inbox"
         fi
-        if [ ! -f "$idle_marker" ]; then
-            : >"$idle_marker"
-            echo "dispatch: $s is awake at an empty prompt with $pending unread; confirming next pass before nudging"
-            continue
-        fi
-        [ "$(($(date +%s) - $(stat -c %Y "$idle_marker")))" -ge 60 ] || continue
-        rm -f "$idle_marker"
         # A nudge is not free: it STARTS A TURN in the citizen's session and
         # spends her quota. Without a floor, a seat that does not act on one is
         # typed at every two passes — 165 times over the eleven hours this pass
         # exists to end — and the town's one channel to an awake seat becomes a
         # metronome nobody reads (the same shape as the repeated welfare
         # check-ins, 48 unread). Reported and never silent: a slot is still held.
+        #
+        # The floor is set by a DELIVERED ask and by nothing else. A refusal
+        # started no turn and spent no quota, so it earns no silence — it is
+        # counted (below) and retried at the ladder's own cadence.
         if [ -f "$nudged_marker" ]; then
             since=$(($(date +%s) - $(stat -c %Y "$nudged_marker")))
             if [ "$since" -lt "$floor" ]; then
-                echo "dispatch: $s is still awake and idle $(fmt_age "$since") after a nudge that changed nothing; holding off another for $(fmt_age "$floor") rather than spending her quota on a repeat — read the pane"
+                echo "dispatch: $s is still $trigger $(fmt_age "$since") after an ask that changed nothing; holding off another for $(fmt_age "$floor") rather than spending her quota on a repeat — read the pane"
                 continue
             fi
         fi
@@ -2925,17 +3113,22 @@ cmd_dispatch() {
             # next pass, which is the direction to be wrong in.
             before_unread=$(mail_unread_from sedrak andranik)
             if mail_send sedrak --from andranik \
-                -s "$s is awake and idle after $cap unanswered asks" \
-                -m "km dispatch asked $s to pick up work or run 'km sleep' $cap times in one idle episode. Nothing changed, so it has stopped typing at her and is telling you instead. It will not mail you about this episode again.
+                -s "$s is $trigger after $cap unanswered asks" \
+                -m "km dispatch's recovery ladder spent $cap attempts on $s in one episode and got nothing back, so it has stopped and is telling you instead. It will not mail you about this episode again.
 
-She is awake, her agent reports idle, and she is holding one of $(cfg concurrency max_active) slots while answering no dispatch pass — every pass wakes ASLEEP seats only.
+Trigger: $trigger — $([ "$trigger" = idle ] && echo "her agent reports idle and she is sitting at an empty prompt" || echo "no tool call has FINISHED in her session for $(fmt_age "$stalled_age"); her agent reports $(seat_agent_status "$s")")
+
+She is awake and holding one of $(cfg concurrency max_active) slots while answering no dispatch pass — every pass wakes ASLEEP seats only.
 
 Unread mail: $pending
-Last ask: $(fmt_age "$(($(date +%s) - $(stat -c %Y "$nudged_marker" 2>/dev/null || date +%s)))") ago
+Last delivered ask: $(fmt_age "$(($(date +%s) - $(stat -c %Y "$nudged_marker" 2>/dev/null || date +%s)))") ago
+Last refusal: $(cat "$refusal_file" 2>/dev/null || echo "none — every attempt was delivered and she did not act on it")
+
+An attempt km could not DELIVER counts here too, and that is the case worth reading the pane for: it means the machinery could not witness a place to type at all, which is what a covered pane looks like from outside.
 
 Nothing here ends a session and nothing should: a seat that has not asked to leave has not consented (VI.2). Read her pane before deciding. 'km sleep --seat $s' frees the slot if she is genuinely done; if her turn died mid-work, she needs a person, not another line of text.
 
-This counter clears by itself the moment her agent leaves 'idle' — witnessed work, not a pane that merely looks different." \
+This counter clears by itself the moment one of her tool calls finishes — witnessed work, not a pane that merely looks different." \
                 && [ "$(mail_unread_from sedrak andranik)" -gt "$before_unread" ]; then
                 : >"$escalated_marker"
                 echo "dispatch: ESCALATED $s to sedrak — $cap asks in this episode changed nothing; not typing at her again this episode"
@@ -2944,21 +3137,46 @@ This counter clears by itself the moment her agent leaves 'idle' — witnessed w
             fi
             continue
         fi
-        if seat_nudge "$s" "$ask"; then
+        # ONE DELIVERED ASK PER RUN, town-wide. ADR 0007 §5 asked for this and it
+        # was never built; the stalled arm is what makes it live, because the
+        # population it reaches arrives as a COHORT — nine seats went down within
+        # the same minute on 2026-08-29 and would come back within the same one.
+        # Resuming nine sessions on one tick is the API-storm shape, and the town
+        # loses nothing by spreading them over nine ticks of a two-minute
+        # dispatch. The budget is spent by a DELIVERY: a refusal started no turn,
+        # so it is allowed through and the seat behind it is not made to wait for
+        # a send that never happened.
+        if [ "$delivered" -ge 1 ]; then
+            echo "dispatch: $s is $trigger and due an ask, but one has already been delivered this run; waiting for the next pass rather than resuming the town all at once"
+            continue
+        fi
+        # The reason is captured rather than streamed so the escalation letter can
+        # quote it, and re-emitted here so the journal loses nothing by that.
+        if nudge_err=$(seat_nudge "$s" "$ask" 2>&1 >/dev/null); then
             tries=$((tries + 1))
             echo "$tries" >"$attempts_file"
+            rm -f "$refusal_file"
             : >"$nudged_marker"
-            echo "dispatch: nudged $s (ask $tries of $cap) — awake, idle, $pending unread; the ask was typed and submitted"
+            delivered=1
+            echo "dispatch: nudged $s (ask $tries of $cap) — $trigger, $pending unread; the ask was typed and submitted"
+            [ -z "$nudge_err" ] || echo "dispatch: $s: $nudge_err"
             wakes=$((wakes + 1))
         else
-            # Reported, not counted, and no floor set. km's own success message
-            # was what let an operator believe the town unblocked while nothing
-            # moved. A failed send means she has not been asked — or, in the
-            # one case where the text was typed and the Enter failed, has not
-            # been asked YET — so it neither spends her escalation budget nor
-            # earns the half-hour silence: the next pass tries again after one
-            # more confirm cycle.
-            echo "dispatch: NUDGE UNDELIVERED to $s — the diagnosis above says which half failed. The slot is still held; retrying next confirm rather than counting it against her $cap asks"
+            # COUNTED, where it used to be reported and forgotten. That was right
+            # while every refusal here was km's own tty failing, and it is wrong
+            # now: send_line refuses when it cannot witness a place to type, so a
+            # refusal is a verdict about the SEAT — "machinery cannot reach this
+            # one" — and retrying it in silence forever is precisely the open loop
+            # this ladder was rebuilt to close (ADR 0007 §5, amended).
+            #
+            # No floor is set, so the cadence stays fast: nothing was spent, and a
+            # pane that recovers should be reached on the next pass rather than
+            # half an hour later. What ends it is the cap, and the cap now ends in
+            # a letter naming the refusal.
+            tries=$((tries + 1))
+            echo "$tries" >"$attempts_file"
+            printf '%s\n' "$nudge_err" >"$refusal_file"
+            echo "dispatch: ASK REFUSED for $s (attempt $tries of $cap, $trigger) — $nudge_err"
         fi
     done
 
@@ -4124,6 +4342,21 @@ status_unresponsive_after() { cfg_minutes welfare unresponsive_after_minutes 30;
 # this exists to catch was a tool whose name nobody had written down.
 status_stalled_after() { cfg_minutes welfare stalled_after_minutes 20; }
 
+# Has the recovery ladder given up on this seat? The WEDGED and NOWORK lines
+# name seats the ladder is supposed to be asking, so whether it has STOPPED
+# asking belongs on the same row — without it the two readings are a board that
+# says "being handled" and a dispatcher that has been silent for hours, which is
+# the state gqlc-3evsn found and could not see.
+#
+# Empty and rc 0 when there is no marker: this decorates a row, and a seat nobody
+# has escalated must render as the row it already was.
+seat_escalated_tag() { # <seat> -> " ESCALATED <age>" if the ladder has stopped asking
+    local m
+    m="$(seat_home "$1")/idle-escalated"
+    [ -f "$m" ] || return 0
+    printf ' ESCALATED %s' "$(fmt_age "$(($(date +%s) - $(stat -c %Y "$m")))")"
+}
+
 # Compact enough for a column: 45s, 12m, 3h20m.
 fmt_age() { # <seconds>
     local s=$1
@@ -4297,13 +4530,16 @@ cmd_status() {
                     workcol="*$(fmt_age "$sage")"
                     if [ "$sage" -ge "$dry" ]; then
                         workcol="$workcol!"
-                        wedged="$wedged $s($workcol $(progress_field "$s" .last_tool || echo tool) $(seat_wedge_reason "$s"))"
+                        # The reason stays the THIRD word — the WEDGED line below
+                        # says so, and the escalation tag is appended after it so
+                        # that claim survives the tag being present.
+                        wedged="$wedged $s($workcol $(progress_field "$s" .last_tool || echo tool) $(seat_wedge_reason "$s")$(seat_escalated_tag "$s"))"
                     fi
                 else
                     workcol=$(fmt_age "$wage")
                     if [ "$wage" -ge "$dry" ]; then
                         workcol="$workcol!"
-                        nowork="$nowork $s($workcol)"
+                        nowork="$nowork $s($workcol$(seat_escalated_tag "$s"))"
                     fi
                 fi
                 ;;
@@ -4388,10 +4624,10 @@ cmd_status() {
         echo "IDLE:$idle — awake, alive, and sitting at an empty prompt: unroutable, because every dispatch pass wakes ASLEEP seats only, while the live session still spends one of $(cfg concurrency max_active) slots. Six of these stalled the whole town for eleven hours with every board reading healthy (gqlc-5vp7). One capture of a TUI is not proof — read the pane first, and 'km sleep --seat <seat>' frees the slot if the citizen is done. Nothing here ends a session: a seat that has not asked to leave has not consented (VI.2, gqlc-971s)."
     fi
     if [ -n "$wedged" ]; then
-        echo "WEDGED:$wedged — a tool call that STARTED and has not come back, for longer than $(fmt_age "$dry"). This is the signal the heartbeat cannot carry: km-statusline keeps writing all through a wedged turn, so these seats' HB cells are as fresh as a seat doing real work (gqlc-n97e, 13+ minutes; gqlc-eier, 80 and 152 while every board read healthy). The named tool is the newest one started, not necessarily the one that hung. The third word is WHY, and these are opposite jobs: 'consent' is a seat waiting on one keystroke, which a citizen can answer; 'limit' is a usage wall, which no keystroke clears and which ends the turn without ending the session (gqlc-3evsn); 'unknown' means the pane carried neither marker, which covers a genuinely hung command AND every modal nobody has sampled yet, so it is a reason to look rather than a reason not to; 'unreadable'/'no-pane' mean km could not ask. Read the pane — the word is a snapshot of the screen at the moment this table was built, the seat may have moved since, and a modal answered just before the read left no trace on it. Do not end the session: a modal is not consent (VI.2)."
+        echo "WEDGED:$wedged — a tool call that STARTED and has not come back, for longer than $(fmt_age "$dry"). This is the signal the heartbeat cannot carry: km-statusline keeps writing all through a wedged turn, so these seats' HB cells are as fresh as a seat doing real work (gqlc-n97e, 13+ minutes; gqlc-eier, 80 and 152 while every board read healthy). The named tool is the newest one started, not necessarily the one that hung. The third word is WHY, and these are opposite jobs: 'consent' is a seat waiting on one keystroke, which a citizen can answer; 'limit' is a usage wall, which no keystroke clears and which ends the turn without ending the session (gqlc-3evsn); 'unknown' means the pane carried neither marker, which covers a genuinely hung command AND every modal nobody has sampled yet, so it is a reason to look rather than a reason not to; 'unreadable'/'no-pane' mean km could not ask. The recovery ladder's stalled trigger asks these seats too, under the same consent witness; a genuinely long tool call costs one queued line the citizen reads at the turn's end, and a trailing ESCALATED marks a seat the ladder has stopped asking. Read the pane — the word is a snapshot of the screen at the moment this table was built, the seat may have moved since, and a modal answered just before the read left no trace on it. Do not end the session: a modal is not consent (VI.2)."
     fi
     if [ -n "$nowork" ]; then
-        echo "NOWORK:$nowork — awake, nothing in flight, and no tool call has FINISHED for that long. Two seats look like this: one wedged between turns (a usage-limit modal eats the turn, so no tool ever starts) and one that finished its work and never ran 'km sleep' — which is the LEAST available state there is, because it holds a slot against max_active and answers no dispatch. Neither is a working citizen, and neither is waiting on you: km dispatch's idle pass confirms the state over two passes, asks the seat to pick up work or run 'km sleep', and repeats no sooner than every $(cfg welfare renudge_after_minutes) minutes. After $(recover_cap) unanswered asks in one episode it stops typing and mails sedrak, and says ESCALATED here on every later pass. The counter clears when the agent leaves 'idle' — witnessed work, not a pane that merely looks different. Reading the pane is still the fastest way to tell the two apart, and it is the only way to tell a dead turn from a finished day."
+        echo "NOWORK:$nowork — awake, nothing in flight, and no tool call has FINISHED for that long. Two seats look like this: one wedged between turns (a usage-limit modal eats the turn, so no tool ever starts) and one that finished its work and never ran 'km sleep' — which is the LEAST available state there is, because it holds a slot against max_active and answers no dispatch. Neither is a working citizen. km dispatch's recovery ladder now asks BOTH populations — the idle pass for a seat whose agent reports idle, and the stalled trigger for one whose progress witness has run dry, which is this line's own threshold — pacing one delivered ask per run, repeating no sooner than every $(cfg welfare renudge_after_minutes) minutes, and typing only when the seat's own input box is rendered, empty, and echoes the text: a modal is not consent (VI.2). A send it cannot witness is refused, counted, and after $(recover_cap) counted attempts in one episode it stops and mails sedrak — ESCALATED above marks that state. The counter clears when one of her tool calls finishes — witnessed work, not a pane that merely looks different. Reading the pane is still the fastest way to tell the two apart, and it is the only way to tell a dead turn from a finished day."
     fi
     # MARK, never act — Constitution VI.2. Nothing in km consumes any of the
     # lines below; they exist so a human or the mayor can decide, exactly
