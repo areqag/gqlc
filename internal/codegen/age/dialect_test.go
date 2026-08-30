@@ -183,21 +183,21 @@ func TestTheFunctionCataloguesAreDisjoint(t *testing.T) {
 // nothing and passing, so the assertion that can never silently find
 // nothing to compare is the assertion that the probe calls exactly one.
 func TestEveryRefusedNamespaceIsNamedByItsProbeAnswer(t *testing.T) {
-	require.NotEmpty(t, namespaceProbes,
+	require.NotEmpty(t, age.NamespaceProbes,
 		"no probes: this guard would compare nothing and pass on an empty catalogue")
-	for _, p := range namespaceProbes {
-		calls := cypher.QualifiedFunctionCalls(p.text)
+	for _, p := range age.NamespaceProbes {
+		calls := cypher.QualifiedFunctionCalls(p.Text())
 		require.Len(t, calls, 1,
 			"probe %q must make exactly one qualified call: a probe making none leaves this "+
 				"guard nothing to compare, and one making two stops the probes and the "+
-				"namespaces lining up one for one", p.text)
+				"namespaces lining up one for one", p.Text())
 		ns := calls[0].Namespace
-		require.NotEmpty(t, ns, "probe %q entered an empty namespace into the catalogue", p.text)
-		require.Contains(t, strings.ToLower(p.answer), strings.ToLower(ns),
+		require.NotEmpty(t, ns, "probe %q entered an empty namespace into the catalogue", p.Text())
+		require.Contains(t, strings.ToLower(p.Answer()), strings.ToLower(ns),
 			"probe %q entered %q into the catalogue, but the server's answer does not name it",
-			p.text, ns)
+			p.Text(), ns)
 	}
-	require.Len(t, undefinedNamespaces, len(namespaceProbes),
+	require.Len(t, age.UndefinedNamespaces, len(age.NamespaceProbes),
 		"one probe, one namespace: two probes under one namespace, or a probe naming two, "+
 			"makes the catalogue and the evidence stop lining up one for one")
 }
@@ -223,10 +223,10 @@ func TestTheNamespaceGapIsNotAFunctionCatalogue(t *testing.T) {
 	// The reason it is exempt, asserted rather than asserted-about: the
 	// probe's answer names the namespace and does NOT name a function,
 	// which is what the guard above requires and this one forbids.
-	for _, p := range namespaceProbes {
-		require.NotContains(t, strings.ToLower(p.answer), "function",
+	for _, p := range age.NamespaceProbes {
+		require.NotContains(t, strings.ToLower(p.Answer()), "function",
 			"probe %q answers naming a function, so it belongs in a function catalogue "+
-				"after all and this exemption is stale", p.text)
+				"after all and this exemption is stale", p.Text())
 	}
 }
 
