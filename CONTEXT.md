@@ -425,6 +425,32 @@ neo4j driver's package, a private carrier behind the conversion boundary);
 "runtime type" (there is no gqlc runtime module — the carriers are emitted,
 not imported).
 
+**Carrier question / storage question**:
+The two independent things a backend is asked about a **property type**,
+and the reason two sentinels answer where one used to. The carrier
+question is "is there a faithful Go type for this width?" and a `no`
+routes to `ErrUnrepresentableWidth`. The storage question is "will this
+backend's store hold a value of this width in a property?" and a `no`
+routes to `ErrUnstorableProperty`. They are not the same question and
+neither implies the other: neo4j has a faithful `[][]int16` for
+`LIST<LIST<INT16>>` and emits a working decode for one arriving as a
+query column, and the server still refuses to STORE it (ADR 0035).
+
+The storage question is asked of **declared entity properties only**,
+after the carrier question and never before it. A column and a parameter
+are asked the carrier question alone, because neither stores anything —
+so a width may be refused as a property and admitted, in the same
+package, as a projected column. That asymmetry is the whole content of
+the distinction; a reader who collapses the two questions will read the
+refusal as a missing Go type and look for a carrier that is already
+there. Being one backend's storage rule rather than a fact about the
+schema, an `ErrUnstorableProperty` names the backend that refused; the
+width sentinel does not, reading the same wherever a carrier is missing.
+_Avoid_: "unsupported type" / "unsupported width" (states neither
+question, and is false of the storage refusal — the type is supported,
+the STORE is what declines); "invalid schema" (the same declaration is
+valid on Apache AGE, which stores it).
+
 **Result type**:
 The **type** a return item's **projection** commits to for the column that
 becomes a generated method result field. Distinct from the schema-side

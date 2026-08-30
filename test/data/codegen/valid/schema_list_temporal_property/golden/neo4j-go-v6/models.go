@@ -12,10 +12,9 @@ import (
 
 // Sample corresponds to the Sample node type.
 type Sample struct {
-	Days    *[]Date
-	Id      int64
-	Stamps  *[]time.Time
-	Windows *[][]time.Time
+	Days   *[]Date
+	Id     int64
+	Stamps *[]time.Time
 }
 
 // decodeSample decodes a driver dbtype.Node into a Sample struct,
@@ -67,29 +66,6 @@ func decodeSample(node dbtype.Node) (Sample, error) {
 			narrowed = append(narrowed, v0)
 		}
 		out.Stamps = &narrowed
-	}
-	if v, ok := node.Props["windows"]; ok {
-		s, ok := v.([]any)
-		if !ok {
-			return Sample{}, fmt.Errorf("decode Sample.Windows: property %q: expected []any, got %T", "windows", v)
-		}
-		narrowed := make([][]time.Time, 0, len(s))
-		for i0, elem0 := range s {
-			nested0, ok := elem0.([]any)
-			if !ok {
-				return Sample{}, fmt.Errorf("decode Sample.Windows: property %q element %d: expected []any, got %T", "windows", i0, elem0)
-			}
-			acc0 := make([]time.Time, 0, len(nested0))
-			for i1, elem1 := range nested0 {
-				v1, ok := elem1.(time.Time)
-				if !ok {
-					return Sample{}, fmt.Errorf("decode Sample.Windows: property %q element %d: expected time.Time, got %T", "windows", i1, elem1)
-				}
-				acc0 = append(acc0, v1)
-			}
-			narrowed = append(narrowed, acc0)
-		}
-		out.Windows = &narrowed
 	}
 	return out, nil
 }

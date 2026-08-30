@@ -759,13 +759,15 @@ func decodeArmName(k codegen.ColumnKind) string {
 	return ""
 }
 
-// probeTypeMap admits every width, so the arm a column lands on is Phase
-// B's answer alone. A backend's own table refuses widths it has no
-// carrier for, which would drop shapes from the arm census and hide the
-// very gap the census exists to find.
+// probeTypeMap admits every width on both property axes, so the arm a
+// column lands on is Phase B's answer alone. A backend's own table
+// refuses widths it has no carrier for, and its storage rule refuses
+// widths it cannot hold; either would drop shapes from the arm census
+// and hide the very gap the census exists to find.
 type probeTypeMap struct{}
 
 func (probeTypeMap) Property(pt graph.PropertyType) (string, bool) { return string(pt), true }
+func (probeTypeMap) StorableProperty(graph.PropertyType) bool      { return true }
 func (probeTypeMap) Temporal(k resolver.Temporal) (string, bool) {
 	return fmt.Sprintf("temporal%d", k), true
 }

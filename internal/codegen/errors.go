@@ -74,6 +74,25 @@ var (
 	// for list leaves. Introduced at C3.
 	ErrUnrepresentableWidth = errors.New("unrepresentable property width")
 
+	// ErrUnstorableProperty is returned when a schema property has a width
+	// the target's TypeMap reports a faithful Go carrier for and the
+	// target's STORE will not hold. The carrier is what distinguishes it
+	// from ErrUnrepresentableWidth: there the answer is that no Go type
+	// carries the value, here the Go type exists and is emitted elsewhere
+	// on the same backend — a nested list decodes fine as a query value on
+	// neo4j (render_queries.go) while the server refuses it as a stored
+	// property (ADR 0035). So the two sentinels address different edits:
+	// a width refusal is answered by changing the declared width, an
+	// unstorable one by moving the value out of the schema and into a
+	// query, or by generating against a backend whose store holds it.
+	//
+	// Asked eagerly at Phase Z for declared entity properties and NOWHERE
+	// else, which is the whole of its scope: a query column and a query
+	// parameter are read and bound, never stored, so a storage rule has
+	// nothing to say about them. The fail-message names the entity, the
+	// property, and the width.
+	ErrUnstorableProperty = errors.New("unstorable property width")
+
 	// ErrUnrepresentableEdgeUnion is returned when a query column, or a
 	// list element's leaf, resolves to an edge union two of whose
 	// candidates carry the same label. An edge value carries its label
@@ -224,6 +243,7 @@ var allSentinels = []error{
 	ErrUnnamedMultiLabelType,
 	ErrPropertyFieldCollision,
 	ErrUnrepresentableWidth,
+	ErrUnstorableProperty,
 	ErrUnrepresentableEdgeUnion,
 	ErrUnrepresentableTemporal,
 	ErrExecOnProjection,

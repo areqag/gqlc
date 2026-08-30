@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE NestedListProperty AS {
+    (:Grid {
+        id     :: INT64 NOT NULL,
+        matrix :: LIST<LIST<FLOAT32>>,
+        grid   :: LIST<LIST<INT16> NOT NULL>,
+        piles  :: LIST<LIST<ANY VALUE>>
+    })
+}

@@ -11,14 +11,12 @@ import (
 
 // Reading corresponds to the Reading node type.
 type Reading struct {
-	Codes  []int32
-	Flags  *[]bool
-	Grid   *[][]int16
-	Id     int64
-	Marks  *[]string
-	Matrix *[][]float32
-	Ranks  *[]int32
-	Tags   *[]string
+	Codes []int32
+	Flags *[]bool
+	Id    int64
+	Marks *[]string
+	Ranks *[]int32
+	Tags  *[]string
 }
 
 // decodeReading decodes a driver dbtype.Node into a Reading struct,
@@ -64,34 +62,11 @@ func decodeReading(node dbtype.Node) (Reading, error) {
 		}
 		out.Flags = &narrowed
 	}
-	if v, ok := node.Props["grid"]; ok {
-		s, ok := v.([]any)
-		if !ok {
-			return Reading{}, fmt.Errorf("decode Reading.Grid: property %q: expected []any, got %T", "grid", v)
-		}
-		narrowed := make([][]int16, 0, len(s))
-		for i0, elem0 := range s {
-			nested0, ok := elem0.([]any)
-			if !ok {
-				return Reading{}, fmt.Errorf("decode Reading.Grid: property %q element %d: expected []any, got %T", "grid", i0, elem0)
-			}
-			acc0 := make([]int16, 0, len(nested0))
-			for i1, elem1 := range nested0 {
-				v1, ok := elem1.(int64)
-				if !ok {
-					return Reading{}, fmt.Errorf("decode Reading.Grid: property %q element %d: expected int64, got %T", "grid", i1, elem1)
-				}
-				acc0 = append(acc0, int16(v1))
-			}
-			narrowed = append(narrowed, acc0)
-		}
-		out.Grid = &narrowed
-	}
-	value3, err := neo4j.GetProperty[int64](node, "id")
+	value2, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Reading{}, fmt.Errorf("decode Reading.Id: %w", err)
 	}
-	out.Id = value3
+	out.Id = value2
 	if v, ok := node.Props["marks"]; ok {
 		s, ok := v.([]any)
 		if !ok {
@@ -106,29 +81,6 @@ func decodeReading(node dbtype.Node) (Reading, error) {
 			narrowed = append(narrowed, v0)
 		}
 		out.Marks = &narrowed
-	}
-	if v, ok := node.Props["matrix"]; ok {
-		s, ok := v.([]any)
-		if !ok {
-			return Reading{}, fmt.Errorf("decode Reading.Matrix: property %q: expected []any, got %T", "matrix", v)
-		}
-		narrowed := make([][]float32, 0, len(s))
-		for i0, elem0 := range s {
-			nested0, ok := elem0.([]any)
-			if !ok {
-				return Reading{}, fmt.Errorf("decode Reading.Matrix: property %q element %d: expected []any, got %T", "matrix", i0, elem0)
-			}
-			acc0 := make([]float32, 0, len(nested0))
-			for i1, elem1 := range nested0 {
-				v1, ok := elem1.(float64)
-				if !ok {
-					return Reading{}, fmt.Errorf("decode Reading.Matrix: property %q element %d: expected float64, got %T", "matrix", i1, elem1)
-				}
-				acc0 = append(acc0, float32(v1))
-			}
-			narrowed = append(narrowed, acc0)
-		}
-		out.Matrix = &narrowed
 	}
 	if v, ok := node.Props["ranks"]; ok {
 		s, ok := v.([]any)

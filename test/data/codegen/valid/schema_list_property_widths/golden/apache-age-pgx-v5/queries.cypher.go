@@ -7,22 +7,20 @@ import (
 	"fmt"
 )
 
-const readingColumnsQueryText = `MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.matrix AS matrix, r.marks AS marks, r.grid AS grid`
+const readingColumnsQueryText = `MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.marks AS marks`
 
 type ReadingColumnsRow struct {
-	Tags   *[]string
-	Ranks  *[]int32
-	Flags  *[]bool
-	Matrix *[][]float32
-	Marks  *[]string
-	Grid   *[][]int16
+	Tags  *[]string
+	Ranks *[]int32
+	Flags *[]bool
+	Marks *[]string
 }
 
 // ReadingColumns executes the ReadingColumns query.
 //
-//	MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.matrix AS matrix, r.marks AS marks, r.grid AS grid
+//	MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.marks AS marks
 func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, error) {
-	stmt, err := q.cypherStmt("$gqlc$", readingColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype, v2 ag_catalog.agtype, v3 ag_catalog.agtype, v4 ag_catalog.agtype, v5 ag_catalog.agtype")
+	stmt, err := q.cypherStmt("$gqlc$", readingColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype, v2 ag_catalog.agtype, v3 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
 	}
@@ -37,9 +35,7 @@ func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		var raw1 []byte
 		var raw2 []byte
 		var raw3 []byte
-		var raw4 []byte
-		var raw5 []byte
-		if err := rows.Scan(&raw0, &raw1, &raw2, &raw3, &raw4, &raw5); err != nil {
+		if err := rows.Scan(&raw0, &raw1, &raw2, &raw3); err != nil {
 			return nil, fmt.Errorf("ReadingColumns: scan row: %w", err)
 		}
 		var value0 *[]string
@@ -66,37 +62,19 @@ func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 			}
 			value2 = &decoded
 		}
-		var value3 *[][]float32
+		var value3 *[]string
 		if raw3 != nil {
-			decoded, err := agtypeListOfListOfFloat32(raw3)
-			if err != nil {
-				return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "matrix", err)
-			}
-			value3 = &decoded
-		}
-		var value4 *[]string
-		if raw4 != nil {
-			decoded, err := agtypeListOfString(raw4)
+			decoded, err := agtypeListOfString(raw3)
 			if err != nil {
 				return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "marks", err)
 			}
-			value4 = &decoded
-		}
-		var value5 *[][]int16
-		if raw5 != nil {
-			decoded, err := agtypeListOfListOfInt16(raw5)
-			if err != nil {
-				return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "grid", err)
-			}
-			value5 = &decoded
+			value3 = &decoded
 		}
 		out = append(out, ReadingColumnsRow{
-			Tags:   value0,
-			Ranks:  value1,
-			Flags:  value2,
-			Matrix: value3,
-			Marks:  value4,
-			Grid:   value5,
+			Tags:  value0,
+			Ranks: value1,
+			Flags: value2,
+			Marks: value3,
 		})
 	}
 	if err := rows.Err(); err != nil {

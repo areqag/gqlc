@@ -141,7 +141,6 @@ func TestBinCarriesNullElements(t *testing.T) {
 	got, err := decodeBin(node("Bin", map[string]any{
 		"loose": []any{true, nil, 3.5},
 		"bag":   []any{int64(1), nil, "x"},
-		"piles": []any{[]any{int64(1), nil}, []any{}},
 	}))
 	if err != nil {
 		t.Fatalf("decodeBin(nulls) = error %v", err)
@@ -155,15 +154,9 @@ func TestBinCarriesNullElements(t *testing.T) {
 	if want := []any{int64(1), nil, "x"}; !reflect.DeepEqual(*got.Bag, want) {
 		t.Errorf("decodeBin(nulls).Bag = %#v, want %#v", *got.Bag, want)
 	}
-	if got.Piles == nil {
-		t.Fatalf("decodeBin(nulls).Piles = nil, want a list")
-	}
-	if want := [][]any{{int64(1), nil}, {}}; !reflect.DeepEqual(*got.Piles, want) {
-		t.Errorf("decodeBin(nulls).Piles = %#v, want %#v", *got.Piles, want)
-	}
 }
 
-// Absence and shape on the same three properties: a nullable list the
+// Absence and shape on the same two properties: a nullable list the
 // graph does not hold reaches the caller as a nil pointer, an empty one
 // as an empty list, and a property holding something that is not a list
 // at all is refused rather than carried through.
@@ -178,15 +171,9 @@ func TestBinNullabilityAndShape(t *testing.T) {
 	if got.Bag != nil {
 		t.Errorf("decodeBin(absent).Bag = %#v, want nil", got.Bag)
 	}
-	if got.Piles != nil {
-		t.Errorf("decodeBin(absent).Piles = %#v, want nil", got.Piles)
-	}
 
 	if _, err := decodeBin(node("Bin", map[string]any{"loose": []any{}, "bag": "not a list"})); err == nil {
 		t.Errorf("decodeBin(bag: string) = no error, want a refusal")
-	}
-	if _, err := decodeBin(node("Bin", map[string]any{"loose": []any{}, "piles": []any{int64(1)}})); err == nil {
-		t.Errorf("decodeBin(piles: [int]) = no error, want a refusal")
 	}
 	if _, err := decodeBin(node("Bin", map[string]any{})); err == nil {
 		t.Errorf("decodeBin(no loose) = no error, want a refusal")
@@ -203,7 +190,6 @@ func TestListyNarrowsEachElement(t *testing.T) {
 	got, err := decodeListy(node("Listy", map[string]any{
 		"tags":   []any{"a", "b"},
 		"ranks":  []any{int64(1), int64(-2)},
-		"matrix": []any{[]any{int64(7), int64(8)}, []any{}},
 		"blobs":  []any{[]byte{1, 2}, []byte{}},
 		"stamps": []any{stamp},
 		"depths": []any{0.5, 1.5},
@@ -216,9 +202,6 @@ func TestListyNarrowsEachElement(t *testing.T) {
 	}
 	if want := []int32{1, -2}; !reflect.DeepEqual(got.Ranks, want) {
 		t.Errorf("decodeListy().Ranks = %#v, want %#v", got.Ranks, want)
-	}
-	if want := [][]int64{{7, 8}, {}}; !reflect.DeepEqual(got.Matrix, want) {
-		t.Errorf("decodeListy().Matrix = %#v, want %#v", got.Matrix, want)
 	}
 	if want := [][]byte{{1, 2}, {}}; !reflect.DeepEqual(got.Blobs, want) {
 		t.Errorf("decodeListy().Blobs = %#v, want %#v", got.Blobs, want)
@@ -241,7 +224,7 @@ func TestListyNarrowsEachElement(t *testing.T) {
 // either backend.
 func TestListyEmptyIsNotAbsent(t *testing.T) {
 	empty, err := decodeListy(node("Listy", map[string]any{
-		"tags": []any{}, "ranks": []any{}, "matrix": []any{},
+		"tags": []any{}, "ranks": []any{},
 		"blobs": []any{}, "stamps": []any{}, "depths": []any{},
 	}))
 	if err != nil {
@@ -250,7 +233,6 @@ func TestListyEmptyIsNotAbsent(t *testing.T) {
 	for name, got := range map[string]int{
 		"Tags":   len(empty.Tags),
 		"Ranks":  len(empty.Ranks),
-		"Matrix": len(empty.Matrix),
 		"Blobs":  len(empty.Blobs),
 		"Stamps": len(empty.Stamps),
 	} {
@@ -258,7 +240,7 @@ func TestListyEmptyIsNotAbsent(t *testing.T) {
 			t.Errorf("decodeListy(empty).%s has %d elements, want 0", name, got)
 		}
 	}
-	if empty.Tags == nil || empty.Ranks == nil || empty.Matrix == nil || empty.Blobs == nil || empty.Stamps == nil {
+	if empty.Tags == nil || empty.Ranks == nil || empty.Blobs == nil || empty.Stamps == nil {
 		t.Errorf("decodeListy(empty) reached a caller with a nil list, want empty ones")
 	}
 	if empty.Depths == nil || *empty.Depths == nil || len(*empty.Depths) != 0 {
@@ -266,7 +248,7 @@ func TestListyEmptyIsNotAbsent(t *testing.T) {
 	}
 
 	absent, err := decodeListy(node("Listy", map[string]any{
-		"tags": []any{}, "ranks": []any{}, "matrix": []any{}, "blobs": []any{}, "stamps": []any{},
+		"tags": []any{}, "ranks": []any{}, "blobs": []any{}, "stamps": []any{},
 	}))
 	if err != nil {
 		t.Fatalf("decodeListy(absent depths) = error %v", err)
@@ -281,7 +263,7 @@ func TestListyEmptyIsNotAbsent(t *testing.T) {
 // has nothing to go on.
 func TestListyRefusesAMisTypedElement(t *testing.T) {
 	_, err := decodeListy(node("Listy", map[string]any{
-		"tags": []any{}, "ranks": []any{int64(1), "no"}, "matrix": []any{},
+		"tags": []any{}, "ranks": []any{int64(1), "no"},
 		"blobs": []any{}, "stamps": []any{},
 	}))
 	if err == nil {
@@ -395,15 +377,15 @@ func TestScalarNarrows(t *testing.T) {
 
 // The widths above, narrowed off a Relationship's Props rather than a
 // Node's: a scalar and a list element that both arrive wider than the
-// schema declared, a list of lists, a nullable scalar and a nullable list
-// that arrive wider still, a list of no declared element shape holding
-// the null such a list exists to carry, and a property of no declared
-// shape read as it arrived.
+// schema declared, a nullable scalar and a nullable list that arrive
+// wider still, a list of no declared element shape holding the null such
+// a list exists to carry, and a property of no declared shape read as it
+// arrived. There is no list of lists among them, and there cannot be:
+// ADR 0035 leaves no neo4j stored property of that width to declare.
 func TestEdgyNarrowsOverARelationship(t *testing.T) {
 	got, err := decodeEdgy(relationship(map[string]any{
 		"rank":    int64(-3),
 		"ranks":   []any{int64(1), int64(-2)},
-		"matrix":  []any{[]any{int64(7), int64(8)}, []any{}},
 		"payload": map[string]any{"k": "v"},
 		"loose":   []any{true, nil, 3.5},
 		"depths":  []any{0.5, 1.5},
@@ -417,9 +399,6 @@ func TestEdgyNarrowsOverARelationship(t *testing.T) {
 	}
 	if want := []int32{1, -2}; !reflect.DeepEqual(got.Ranks, want) {
 		t.Errorf("decodeEdgy().Ranks = %#v, want %#v", got.Ranks, want)
-	}
-	if want := [][]int64{{7, 8}, {}}; !reflect.DeepEqual(got.Matrix, want) {
-		t.Errorf("decodeEdgy().Matrix = %#v, want %#v", got.Matrix, want)
 	}
 	if want := map[string]any{"k": "v"}; !reflect.DeepEqual(got.Payload, want) {
 		t.Errorf("decodeEdgy().Payload = %#v, want %#v", got.Payload, want)
@@ -452,7 +431,7 @@ func TestEdgyNarrowsOverARelationship(t *testing.T) {
 func TestEdgyRefusesWhatTheSchemaDidNotDeclare(t *testing.T) {
 	full := func() map[string]any {
 		return map[string]any{
-			"rank": int64(0), "ranks": []any{}, "matrix": []any{}, "payload": int64(1),
+			"rank": int64(0), "ranks": []any{}, "payload": int64(1),
 		}
 	}
 	with := func(key string, value any) map[string]any {
@@ -473,16 +452,6 @@ func TestEdgyRefusesWhatTheSchemaDidNotDeclare(t *testing.T) {
 	for _, want := range []string{"decode Edgy.Ranks", `"ranks"`, "element 1", "expected int64", "got string"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("decodeEdgy(ranks: [int, string]) = %q, want it to mention %s", err, want)
-		}
-	}
-
-	_, err = decodeEdgy(relationship(with("matrix", []any{int64(1)})))
-	if err == nil {
-		t.Fatalf("decodeEdgy(matrix: [int]) = no error, want a refusal")
-	}
-	for _, want := range []string{"decode Edgy.Matrix", `"matrix"`, "element 0", "expected []any", "got int64"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("decodeEdgy(matrix: [int]) = %q, want it to mention %s", err, want)
 		}
 	}
 
@@ -516,10 +485,10 @@ func TestEdgyRefusesWhatTheSchemaDidNotDeclare(t *testing.T) {
 	}
 
 	// The two non-nullable arms report a missing property through
-	// different code: rank/ranks/matrix reach neo4j.GetProperty and carry
-	// its own miss, payload is read off Props directly and carries the
-	// emission's own wording.
-	for _, key := range []string{"rank", "ranks", "matrix", "payload"} {
+	// different code: rank/ranks reach neo4j.GetProperty and carry its own
+	// miss, payload is read off Props directly and carries the emission's
+	// own wording.
+	for _, key := range []string{"rank", "ranks", "payload"} {
 		if _, err := decodeEdgy(relationship(without(key))); err == nil {
 			t.Errorf("decodeEdgy(no %s) = no error, want a refusal", key)
 		}
@@ -533,7 +502,7 @@ func TestEdgyRefusesWhatTheSchemaDidNotDeclare(t *testing.T) {
 // — its arm reads the Props map, where a key holding nil is present.
 func TestEdgyKeepsAbsentApartFromEmptyOverARelationship(t *testing.T) {
 	absent, err := decodeEdgy(relationship(map[string]any{
-		"rank": int64(0), "ranks": []any{}, "matrix": []any{}, "payload": nil,
+		"rank": int64(0), "ranks": []any{}, "payload": nil,
 	}))
 	if err != nil {
 		t.Fatalf("decodeEdgy(absent) = error %v", err)
@@ -553,12 +522,9 @@ func TestEdgyKeepsAbsentApartFromEmptyOverARelationship(t *testing.T) {
 	if absent.Ranks == nil || len(absent.Ranks) != 0 {
 		t.Errorf("decodeEdgy(absent).Ranks = %#v, want an empty list", absent.Ranks)
 	}
-	if absent.Matrix == nil || len(absent.Matrix) != 0 {
-		t.Errorf("decodeEdgy(absent).Matrix = %#v, want an empty list", absent.Matrix)
-	}
 
 	empty, err := decodeEdgy(relationship(map[string]any{
-		"rank": int64(0), "ranks": []any{}, "matrix": []any{}, "payload": int64(1),
+		"rank": int64(0), "ranks": []any{}, "payload": int64(1),
 		"loose": []any{}, "depths": []any{},
 	}))
 	if err != nil {
@@ -584,10 +550,9 @@ func TestEdgyKeepsAbsentApartFromEmptyOverARelationship(t *testing.T) {
 // Props map, so the two paths narrow independently and a null that
 // survives one can still fail the other.
 func TestBinColumnsCarryNullElements(t *testing.T) {
-	q := queriesOver([]string{"loose", "bag", "piles"}, []any{
+	q := queriesOver([]string{"loose", "bag"}, []any{
 		[]any{true, nil, 3.5},
 		[]any{int64(1), nil, "x"},
-		[]any{[]any{int64(1), nil}, []any{}},
 	})
 	got, err := q.BinColumns(t.Context())
 	if err != nil {
@@ -605,12 +570,6 @@ func TestBinColumnsCarryNullElements(t *testing.T) {
 	}
 	if want := []any{int64(1), nil, "x"}; !reflect.DeepEqual(*row.Bag, want) {
 		t.Errorf("BinColumns(nulls)[0].Bag = %#v, want %#v", *row.Bag, want)
-	}
-	if row.Piles == nil {
-		t.Fatalf("BinColumns(nulls)[0].Piles = nil, want a list")
-	}
-	if want := [][]any{{int64(1), nil}, {}}; !reflect.DeepEqual(*row.Piles, want) {
-		t.Errorf("BinColumns(nulls)[0].Piles = %#v, want %#v", *row.Piles, want)
 	}
 }
 
@@ -743,12 +702,14 @@ func TestListColumnRefusalsCarryTheDriversError(t *testing.T) {
 //
 // The two sibling depth-two columns are the control: their loops are
 // disjoint blocks, so what the deep columns are refused for is the depth
-// and not the count. They are non-nullable so that they are also a
-// control for the row assembly's own accumulator, whose collision is on
-// column position and which a nullable column hides inside the block its
-// null gate opens. No such hiding is available a level down, which is
-// what the nullable deep column carries: its loops sit inside that block
-// and collide within it just the same.
+// and not the count. The two sibling depth-THREE columns make the same
+// control one level down, where the emitter's suffixing has to hold for
+// an accumulator nested inside another.
+//
+// These columns are spelled over literals, so they are all non-nullable
+// and the nullable arm a nested column used to reach is not measured
+// here — see the note above NestColumns in the queries file for why no
+// declared property can supply one on this backend.
 func TestNestColumnsAccumulateAtEveryDepth(t *testing.T) {
 	keys := []string{"cube", "lhs", "rhs", "deep"}
 	got, err := queriesOver(keys, []any{
@@ -773,25 +734,12 @@ func TestNestColumnsAccumulateAtEveryDepth(t *testing.T) {
 	if want := [][]string{{"a"}, {}}; !reflect.DeepEqual(row.Rhs, want) {
 		t.Errorf("NestColumns(nested)[0].Rhs = %#v, want %#v", row.Rhs, want)
 	}
-	if row.Deep == nil {
-		t.Fatalf("NestColumns(nested)[0].Deep = nil, want a list")
-	}
-	if want := [][][]string{{{"x"}}}; !reflect.DeepEqual(*row.Deep, want) {
-		t.Errorf("NestColumns(nested)[0].Deep = %#v, want %#v", *row.Deep, want)
-	}
-
-	null, err := queriesOver(keys, []any{
-		[]any{}, []any{}, []any{}, nil,
-	}).NestColumns(t.Context())
-	if err != nil {
-		t.Fatalf("NestColumns(deep: null) = error %v", err)
-	}
-	if null[0].Deep != nil {
-		t.Errorf("NestColumns(deep: null)[0].Deep = %#v, want nil", null[0].Deep)
+	if want := [][][]string{{{"x"}}}; !reflect.DeepEqual(row.Deep, want) {
+		t.Errorf("NestColumns(nested)[0].Deep = %#v, want %#v", row.Deep, want)
 	}
 
 	if _, err := queriesOver(keys, []any{
-		[]any{[]any{int64(1)}}, []any{}, []any{}, nil,
+		[]any{[]any{int64(1)}}, []any{}, []any{}, []any{},
 	}).NestColumns(t.Context()); err == nil {
 		t.Errorf("NestColumns(cube: [[int]]) = no error, want a refusal")
 	}
@@ -1817,13 +1765,11 @@ func unpackableCarriers(v any) []string {
 // schema declared the parameter able to hold (bd gqlc-rw0m).
 func TestListParametersReachTheDriverPackable(t *testing.T) {
 	days := []Date{{Year: 2026, Month: 8, Day: 29}, {Year: 1969, Month: 12, Day: 31}}
-	windows := [][]Date{{{Year: 2026, Month: 1, Day: 2}}, {}}
 	spans := []Duration{{Months: 1, Days: 2, Seconds: 3, Nanos: 4}}
 	arg := SlotsMatchingParams{
-		Tags:    []string{"a", "b"},
-		Windows: windows,
-		Days:    days,
-		Spans:   &spans,
+		Tags:  []string{"a", "b"},
+		Days:  days,
+		Spans: &spans,
 	}
 
 	var bound map[string]any
@@ -1831,7 +1777,7 @@ func TestListParametersReachTheDriverPackable(t *testing.T) {
 	if _, err := q.SlotsMatching(t.Context(), arg); err != nil {
 		t.Fatalf("SlotsMatching = error %v", err)
 	}
-	for _, key := range []string{"tags", "windows", "days", "spans"} {
+	for _, key := range []string{"tags", "days", "spans"} {
 		if _, ok := bound[key]; !ok {
 			t.Fatalf("SlotsMatching bound %#v, which holds no %q — the rest of this test would pass vacuously", bound, key)
 		}
@@ -1850,22 +1796,17 @@ func TestListParametersReachTheDriverPackable(t *testing.T) {
 	}
 
 	// The temporal lists are widened per element, into the driver's own
-	// array carrier, at every depth. Spelled out rather than asserted
-	// shapelessly: a widen that produced the right TYPES from the wrong
-	// VALUES would satisfy unpackableCarriers above.
+	// array carrier. Spelled out rather than asserted shapelessly: a widen
+	// that produced the right TYPES from the wrong VALUES would satisfy
+	// unpackableCarriers above. Depth 1 only — ADR 0035 leaves no neo4j
+	// property of a nested width for a parameter to be compared against,
+	// so render_temporal.go's depth>=2 helpers have no witness here.
 	wantDays := []any{
 		dbtype.Date(time.Date(2026, time.August, 29, 0, 0, 0, 0, time.UTC)),
 		dbtype.Date(time.Date(1969, time.December, 31, 0, 0, 0, 0, time.UTC)),
 	}
 	if !reflect.DeepEqual(bound["days"], wantDays) {
 		t.Errorf("SlotsMatching bound days as %#v, want %#v", bound["days"], wantDays)
-	}
-	wantWindows := []any{
-		[]any{dbtype.Date(time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC))},
-		[]any{},
-	}
-	if !reflect.DeepEqual(bound["windows"], wantWindows) {
-		t.Errorf("SlotsMatching bound windows as %#v, want %#v", bound["windows"], wantWindows)
 	}
 	wantSpans := []any{dbtype.Duration{Months: 1, Days: 2, Seconds: 3, Nanos: 4}}
 	if !reflect.DeepEqual(bound["spans"], wantSpans) {
@@ -1884,10 +1825,9 @@ func TestListParametersReachTheDriverPackable(t *testing.T) {
 // against whichever row ran first.
 func TestNullableListParameterBindsCypherNull(t *testing.T) {
 	arg := SlotsMatchingParams{
-		Tags:    []string{},
-		Windows: [][]Date{},
-		Days:    []Date{},
-		Spans:   nil,
+		Tags:  []string{},
+		Days:  []Date{},
+		Spans: nil,
 	}
 
 	var bound map[string]any
@@ -1907,7 +1847,7 @@ func TestNullableListParameterBindsCypherNull(t *testing.T) {
 	// caller who sent no elements sent a list of none. This is what stops
 	// the assertion above from being satisfied by an emission that binds
 	// every empty list as nil.
-	for _, key := range []string{"tags", "windows", "days"} {
+	for _, key := range []string{"tags", "days"} {
 		if bound[key] == nil {
 			t.Errorf("SlotsMatching bound %q as nil, want an empty list — the schema declares it non-nullable", key)
 		}

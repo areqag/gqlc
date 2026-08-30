@@ -15,7 +15,6 @@ type Bin struct {
 	Bag   *[]any
 	Id    int64
 	Loose []any
-	Piles *[][]any
 }
 
 // decodeBin decodes an agtype vertex into a Bin struct, enforcing
@@ -44,11 +43,6 @@ func decodeBin(raw []byte) (Bin, error) {
 		return Bin{}, fmt.Errorf("decode Bin.Loose: %w", err)
 	}
 	out.Loose = value2
-	value3, err := agtypeNullableProperty(props, "piles", agtypeListOfListOfAny)
-	if err != nil {
-		return Bin{}, fmt.Errorf("decode Bin.Piles: %w", err)
-	}
-	out.Piles = value3
 	return out, nil
 }
 
@@ -255,11 +249,6 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 // agtypeListOfAny decodes an agtype list of any elements.
 func agtypeListOfAny(raw []byte) ([]any, error) {
 	return agtypeList(raw, agtypeValue)
-}
-
-// agtypeListOfListOfAny decodes an agtype list of []any elements.
-func agtypeListOfListOfAny(raw []byte) ([][]any, error) {
-	return agtypeList(raw, agtypeListOfAny)
 }
 
 // agtypeValue decodes a value of no declared shape through agtype's own

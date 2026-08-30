@@ -34,17 +34,6 @@ func fromDateList(v []Date) []any {
 	return out
 }
 
-// fromDateList2 widens a list of Date parameters element by element. The
-// driver marshals no gqlc struct, so each element converts before the
-// list reaches the wire.
-func fromDateList2(v [][]Date) []any {
-	out := make([]any, len(v))
-	for i := range v {
-		out[i] = fromDateList(v[i])
-	}
-	return out
-}
-
 // toDuration copies a driver duration field for field: dbtype.Duration
 // already holds the four components apart.
 func toDuration(v dbtype.Duration) Duration {

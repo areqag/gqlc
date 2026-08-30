@@ -5,9 +5,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/neo4j"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 // TestTypeMapProperty pins the driver's Go-type table for the property
@@ -131,6 +133,149 @@ func TestTypeMapProperty(t *testing.T) {
 		_, ok := neo4j.TypeMap{}.Property(graph.ListOf(graph.TypeDecimal, false))
 		require.False(t, ok)
 	})
+}
+
+// TestStorablePropertyRefusesANestedList pins the refusal that is not
+// about a Go carrier (ADR 0035, bd gqlc-v0gk). [][]float32 is a
+// perfectly good Go type; what refuses it is the neo4j server, which
+// stores a property value only if it is a scalar or a flat list of
+// scalars — measured 2026-08-29 against the pinned image, which answers
+// a nested write with "Collections containing collections can not be
+// stored in properties". Generating for a property no writer can ever
+// fill emits a decoder that can never see data, so the refusal moves to
+// generation time where it can name the property.
+//
+// EVERY ROW ASSERTS BOTH AXES, and that is the point of the test rather
+// than a flourish. This refusal lives on StorableProperty precisely
+// because Property still answers "[][]float32" and is right to: the same
+// backend emits a working recursive decode for a nested list arriving as
+// a QUERY VALUE. A row asserting only StorableProperty==false would go
+// on passing if someone later moved the refusal back onto the carrier
+// axis, which is the mistake this mechanism was revised to undo — it
+// would put a carrier-absence claim on a width whose carrier is
+// exercised. Pinning Property==true beside it is what makes the split
+// real rather than nominal.
+//
+// The refused rows are chosen for the ways the check could be written
+// too narrowly rather than for coverage of the width table:
+//
+//   - the NOT NULL row is here because Elem() strips the qualifier, so
+//     a check reading the raw text instead would miss it;
+//   - the depth-3 row is here because the refusal is at the outer level
+//     and does not recurse to find the nesting;
+//   - LIST<LIST<ANY>> is here because a bare LIST is spelled "LIST<ANY>"
+//     upstream, so it reaches the guard as an element whose Kind() is
+//     KindList like any other.
+//
+// The admitted rows are the other half, and they are what says this is
+// a refusal of NESTING rather than of lists: a flat list of any
+// representable width is stored, LIST<ANY> included. Over-refusing here
+// would be the expensive mistake — the server SERVES nested lists as
+// query values even though it will not store them, which is why the
+// scope is the storage axis and not the plan walker.
+func TestStorablePropertyRefusesANestedList(t *testing.T) {
+	refused := []graph.PropertyType{
+		graph.ListOf(graph.ListOf(graph.TypeInt16, false), false),
+		graph.ListOf(graph.ListOf(graph.TypeFloat32, false), false),
+		// LIST<LIST<INT16> NOT NULL> — the qualifier sits on the outer
+		// list's element, which Elem() strips.
+		graph.ListOf(graph.ListOf(graph.TypeInt16, false), true),
+		graph.ListOf(graph.ListOf(graph.ListOf(graph.TypeInt, false), false), false),
+		// The schema language spells this LIST<LIST<ANY VALUE>>;
+		// graph.TypeAnyPropertyValue normalises to "ANY".
+		graph.ListOf(graph.ListOf(graph.TypeAnyPropertyValue, false), false),
+	}
+	for _, pt := range refused {
+		t.Run("refused/"+string(pt), func(t *testing.T) {
+			require.Equal(t, graph.KindList, pt.Elem().Kind(),
+				"this row's element is not itself a list, so it is not the shape this test is about")
+			require.False(t, neo4j.TypeMap{}.StorableProperty(pt),
+				"the neo4j server cannot store %s as a property value, so the table must refuse it "+
+					"rather than emit a decoder no writer can ever fill (ADR 0035)", pt)
+
+			got, ok := neo4j.TypeMap{}.Property(pt)
+			require.Truef(t, ok,
+				"%s must stay CARRIED: this backend emits a recursive decode for one as a query value, "+
+					"and putting the refusal on the carrier axis would claim a carrier that exists does not", pt)
+			require.NotEmpty(t, got)
+		})
+	}
+
+	admitted := []struct {
+		pt   graph.PropertyType
+		want string
+	}{
+		{graph.ListOf(graph.TypeInt16, false), "[]int16"},
+		{graph.ListOf(graph.TypeString, true), "[]string"},
+		{graph.ListOf(graph.TypeAnyPropertyValue, false), "[]any"},
+	}
+	for _, tt := range admitted {
+		t.Run("admitted/"+string(tt.pt), func(t *testing.T) {
+			require.Truef(t, neo4j.TypeMap{}.StorableProperty(tt.pt),
+				"%s is a flat list of a representable width, which the server stores; refusing it here "+
+					"means the nested-list check is reading the outer list rather than its element", tt.pt)
+			got, ok := neo4j.TypeMap{}.Property(tt.pt)
+			require.True(t, ok)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestNestedListPropertyRejectionReachesTheCaller pins what an author
+// actually sees, which is the half of the refusal that has to be right:
+// a table returning ok=false is only useful if the failure travels out
+// of generation naming the entity, the property, the declared type, and
+// the backend that refused.
+//
+// The backend name is the part this test exists for. The refusal is
+// this backend's answer and not a property of the schema — AGE stores
+// the same nested list happily — so a run emitting both targets fails
+// on one of them, and only the name says which. The wording is
+// deliberately NOT AGE's "has no carrier for": [][]float32 is a carrier
+// and Go has it. What refuses is the server's storage rule, which is
+// why this rides its own sentinel and its own words.
+//
+// The NotErrorIs is load-bearing and is not the ErrorIs restated. The
+// two sentinels are both refusals of a declared property, and an
+// assertion that only names the one expected cannot tell a width this
+// axis DECLINED from a width no axis takes — if the storage clause were
+// deleted and Property's list arm made to refuse nesting again, the
+// caller would still see a refusal naming this entity and this property,
+// and an ErrorIs-only test would report success for the mechanism the
+// design amendment withdrew.
+func TestNestedListPropertyRejectionReachesTheCaller(t *testing.T) {
+	nested := graph.ListOf(graph.ListOf(graph.TypeFloat32, false), false)
+	files, err := neo4j.New().Generate(codegen.Input{Schema: schemaWithPayload(nested)})
+
+	require.ErrorIs(t, err, codegen.ErrUnstorableProperty,
+		"the nested-list refusal is a STORAGE refusal and rides its own sentinel; prepare.go's entity "+
+			"sweep routes it and already names the property on")
+	require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth,
+		"this width has a faithful Go carrier ([][]float32) that render_queries.go exercises for a "+
+			"query-valued nested list, so claiming the carrier channel here would be false")
+	require.ErrorContains(t, err,
+		`entity "Blob" property "payload" has `+string(nested)+
+			`, which the neo4j backend cannot store as a property`)
+	require.Nil(t, files)
+}
+
+// schemaWithPayload is a one-node schema whose single property carries
+// pt, so the entity width sweep is the only thing that can fail.
+func schemaWithPayload(pt graph.PropertyType) schema.Schema {
+	labels := graph.LabelSetKey("Blob")
+	return schema.Schema{
+		Name: "Widths",
+		Nodes: map[graph.LabelSetKey]schema.NodeType{
+			labels: {
+				KeyLabels:      labels,
+				CompleteLabels: labels,
+				Name:           "Blob",
+				Properties: map[string]schema.Property{
+					"payload": {Name: "payload", Type: pt},
+				},
+			},
+		},
+	}
 }
 
 // TestTypeMapPropertyListArmIsUnreachable pins the claim types.go makes

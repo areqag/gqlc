@@ -546,6 +546,13 @@ func entityAxisText(kind EntityKind, labels graph.LabelSetKey, edgeKey schema.Ed
 // folds into this pass: a property whose width the TypeMap has no
 // faithful carrier for returns ErrUnrepresentableWidth naming the entity,
 // property, and width. First offender wins across the schema-shape axis.
+//
+// The storage sweep folds in beside it, and only here: a width with a
+// carrier that the backend's STORE will not hold returns
+// ErrUnstorableProperty (ADR 0035). Declared entity properties are the
+// only positions that store, so the query-column and query-parameter
+// sweeps below do not ask — a value the store would refuse to keep is
+// still one the server will happily project or bind.
 func prepareEntityFields(entityName string, props map[string]schema.Property, tm TypeMap) ([]EntityField, error) {
 	keys := make([]string, 0, len(props))
 	for k := range props {
@@ -564,6 +571,9 @@ func prepareEntityFields(entityName string, props map[string]schema.Property, tm
 		ty, ok := tm.Property(p.Type)
 		if !ok {
 			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrUnrepresentableWidth, entityName, p.Name, p.Type)
+		}
+		if !tm.StorableProperty(p.Type) {
+			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrUnstorableProperty, entityName, p.Name, p.Type)
 		}
 		fields = append(fields, EntityField{
 			PropName: p.Name,

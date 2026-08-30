@@ -68,17 +68,16 @@ func (q *queries) BinById(ctx context.Context, arg int64) (Bin, error) {
 	return value, nil
 }
 
-const binColumnsQueryText = `MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose, b.piles AS piles`
+const binColumnsQueryText = `MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose`
 
 type BinColumnsRow struct {
 	Bag   *[]any
 	Loose []any
-	Piles *[][]any
 }
 
 // BinColumns executes the BinColumns query.
 //
-//	MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose, b.piles AS piles
+//	MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose
 func (q *queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
 	records, err := q.db.run(ctx, binColumnsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
@@ -112,27 +111,6 @@ func (q *queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
 			acc1 = append(acc1, elem)
 		}
 		row.Loose = acc1
-		value2, isNil, err := neo4j.GetRecordValue[[]any](record, "piles")
-		if err != nil {
-			return nil, fmt.Errorf("BinColumns: decode column %q: %w", "piles", err)
-		}
-		var value2Ptr *[][]any
-		if !isNil {
-			acc2 := make([][]any, 0, len(value2))
-			for i, elem := range value2 {
-				inner1, ok := elem.([]any)
-				if !ok {
-					return nil, fmt.Errorf("BinColumns: decode column %q element %d: expected []any, got %T", "piles", i, elem)
-				}
-				innerAcc1 := make([]any, 0, len(inner1))
-				for _, elem1 := range inner1 {
-					innerAcc1 = append(innerAcc1, elem1)
-				}
-				acc2 = append(acc2, innerAcc1)
-			}
-			value2Ptr = &acc2
-		}
-		row.Piles = value2Ptr
 		out = append(out, row)
 	}
 	return out, nil
