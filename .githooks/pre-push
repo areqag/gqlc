@@ -61,17 +61,19 @@ fi
 # days later (bd gqlc-ed2u, gqlc-lekg). The guard shipped in #1225 and nothing
 # called it until this line (bd gqlc-06y9).
 #
-# ADVISORY, and that is a ruling rather than a preference (gqlc-06y9). Seats here
-# are linked worktrees of ONE repository, so a neighbour committing in their own
-# tree during this window moves refs the guard watches and is indistinguishable
-# from damage by this run — measured, on this hook, against three other seats.
-# A strict verdict would refuse pushes over other citizens' work. Making
-# attribution possible at all is a topology question, filed as gqlc-w5bh.
+# ADVISORY OR STRICT IS THE GUARD'S OWN CALL, not this line's. It was pinned
+# advisory here (gqlc-06y9) because seats were linked worktrees of ONE
+# repository: a neighbour committing in their own tree during this window moves
+# refs the guard watches and is indistinguishable from damage by this run —
+# measured, on this hook, against three other seats. Seats became clones
+# (gqlc-w5bh), so that premise is no longer uniformly false, and the guard
+# derives it per repository: sharers -> report, sole worktree -> refuse. Pinned
+# here, every converted seat would keep the old town's verdict forever.
 #
-# The flag softens ONLY the purity verdict; `just test`'s own exit code is passed
+# Only the purity verdict is at stake; `just test`'s own exit code is passed
 # through and still blocks the push. Deliberately not `|| true` here — that could
 # not tell a purity complaint from a failing suite, and would disarm the suite.
-GQLC_REPO_PURITY_ADVISORY=1 "$(dirname "$0")/repo-purity" just test
+"$(dirname "$0")/repo-purity" just test
 # `set -e` is what makes this line a record of a PASS rather than of an attempt:
 # a failing suite exits above and never reaches it. Same at each _ran_gate below.
 _ran_gate test

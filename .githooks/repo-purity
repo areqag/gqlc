@@ -37,6 +37,24 @@
 #
 # Read from a linked worktree, `--local` resolves to the SHARED config, which is
 # the damaged surface. That is why this can run from a seat and still see it.
+#
+# WHETHER A COMPLAINT REFUSES THE RUN IS DERIVED PER REPOSITORY, not wired at the
+# call site. A snapshot guard rests on: the repo differs across a run only if
+# that run changed it. That premise is false exactly where another worktree
+# shares this repository — refs and local config are shared, so a neighbour
+# committing in their own tree during the window is indistinguishable from
+# damage here (bd gqlc-06y9, where advisory was ruled the interim). It is true
+# where this repository has no sharers, which is what seats became in gqlc-w5bh.
+# So: sharers -> advisory, sole worktree -> strict. Each seat turns strict at
+# its first post-conversion push, with no flag day and nothing to coordinate.
+#
+# Strict still does not claim THIS RUN did it. It claims this repository's own
+# session did — the only writer there is — which is what makes the refusal
+# actionable rather than a coin toss about a neighbour.
+#
+# KNOWN SOFTNESS, accepted: a worktree whose directory was deleted but never
+# `git worktree prune`d is still registered, so it keeps this repository
+# advisory. That fails open, in the direction that only ever under-refuses.
 set -uo pipefail
 
 if [ "$#" -eq 0 ]; then
@@ -60,6 +78,18 @@ snapshot() {
 
 INNER_RC=0
 VERIFIED=0
+
+# Counted rather than grepped so that a git which cannot answer comes back as 0
+# rather than as an exit status to interpret. A repository always lists at least
+# its own worktree, so 0 means the question went unanswered — kept distinct from
+# 1 because the two owe the operator different sentences, and a guard that says
+# "nothing else shares this repository" when it could not look is lying.
+#
+# shellcheck disable=SC2317  # called only from verify(), which runs in the EXIT
+# trap; shellcheck does not follow it, same as the directive on verify() below.
+worktree_count() {
+    git worktree list --porcelain 2>/dev/null | awk '/^worktree /{n++} END{print n+0}'
+}
 
 # shellcheck disable=SC2317  # every line below is reached only through the EXIT
 # trap, which shellcheck does not follow. Running here rather than inline is the
@@ -103,19 +133,35 @@ verify() {
     if [ "$damaged" -ne 0 ]; then
         printf 'repo-purity: the repository DIFFERS across this run (the command itself exited %d).\n' \
             "$INNER_RC" >&2
-        echo "repo-purity: this does NOT prove your command did it. Every seat in this town is a" >&2
-        echo "  linked worktree of one repository, so another seat committing in its own tree" >&2
-        echo "  during the window moves the same refs and reads exactly like your damage." >&2
-        echo "  To tell them apart: 'git reflog' the ref named above and look at who wrote it." >&2
-        echo "  A test run should still leave its own repository untouched (bd gqlc-2zet); the" >&2
-        echo "  reason this cannot yet be enforced is bd gqlc-w5bh." >&2
-        # Advisory is what the town wires into pre-push (ruled on gqlc-06y9): a
-        # strict verdict here refuses pushes over a NEIGHBOUR's concurrent work.
         # Only the purity verdict softens — INNER_RC is passed through untouched,
         # so a failing `just test` still fails the push. That is the whole reason
-        # this is a flag in here rather than a `|| true` at the call site, which
-        # could not tell the two failures apart.
-        [ "${GQLC_REPO_PURITY_ADVISORY:-0}" = 1 ] && exit "$INNER_RC"
+        # this is decided in here rather than with a `|| true` at the call site,
+        # which could not tell the two failures apart.
+        if [ "${GQLC_REPO_PURITY_ADVISORY:-0}" = 1 ]; then
+            echo "repo-purity: reporting only — GQLC_REPO_PURITY_ADVISORY=1 was set for this run." >&2
+            exit "$INNER_RC"
+        fi
+        local sharers
+        sharers=$(worktree_count)
+        if [ "$sharers" -eq 0 ]; then
+            echo "repo-purity: git could not list this repository's worktrees, so whether anything" >&2
+            echo "  else writes to it is UNKNOWN and this refusal is not an attribution. Refusing" >&2
+            echo "  rather than guessing, over damage that is not in doubt: the diff is above." >&2
+            exit 1
+        fi
+        if [ "$sharers" -gt 1 ]; then
+            echo "repo-purity: this does NOT prove your command did it. Another worktree shares" >&2
+            echo "  this repository, and refs and local config are shared, so a neighbour" >&2
+            echo "  committing in their own tree during the window reads exactly like damage" >&2
+            echo "  from here. To tell them apart: 'git reflog' the ref named above and look at" >&2
+            echo "  who wrote it. A test run should still leave its own repository untouched" >&2
+            echo "  (bd gqlc-2zet); reporting rather than refusing was ruled on bd gqlc-06y9." >&2
+            exit "$INNER_RC"
+        fi
+        echo "repo-purity: no other worktree shares this repository, so this session is its only" >&2
+        echo "  writer and this change came from it. Fix the command; a test run leaves its own" >&2
+        echo "  repository untouched (bd gqlc-2zet). To push over this once, having read the" >&2
+        echo "  diff above: GQLC_REPO_PURITY_ADVISORY=1." >&2
         exit 1
     fi
 
