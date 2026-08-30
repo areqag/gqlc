@@ -1,6 +1,8 @@
 package cypher
 
 import (
+	"strings"
+
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
@@ -48,6 +50,101 @@ func UnqualifiedFunctionCalls(src string) []string {
 	scan := &functionScan{BaseCypherListener: &gen.BaseCypherListener{}, seen: map[string]struct{}{}}
 	antlr.NewParseTreeWalker().Walk(scan, cp.OC_Cypher())
 	return scan.found
+}
+
+// QualifiedCall is one namespaced function invocation a query text spells.
+type QualifiedCall struct {
+	// Namespace is the invocation's oC_Namespace lowercased, its parts
+	// joined by '.'. Lowercased because openCypher resolution is
+	// case-insensitive and a caller comparing against a catalogue has to
+	// read it the way the resolver does.
+	Namespace string
+	// Text is the whole oC_FunctionName as the author wrote it, namespace
+	// included, so a refusal built on this quotes back what is in the file.
+	Text string
+}
+
+// QualifiedFunctionCalls reports the function invocations a query text spells
+// WITH a namespace — the exact complement of UnqualifiedFunctionCalls over the
+// same production, in first-appearance order with repeated spellings dropped.
+// A text spelling none returns nil.
+//
+// The pair partitions the calls rather than overlapping: Cypher.g4
+// §oC_FunctionName is `oC_Namespace oC_SymbolicName` and an invocation's
+// namespace is empty or it is not, so no call is reported by both and none is
+// reported by neither. Pinned by TestTheTwoFunctionScansPartitionTheCalls.
+//
+// It is a separate reading rather than a widening of the other because the two
+// answer to different evidence. Apache AGE refuses `duration.between` as
+// SQLSTATE 3F000 `schema "duration" does not exist` — Postgres resolves the
+// namespace as a schema qualifier and fails there, BEFORE it looks for any
+// function, so the server's answer names no function and a caller matching it
+// has to match on the namespace (ADR 0028, bd gqlc-dy40s).
+//
+// Everything the unqualified scan says about being a parse and not a scan for
+// characters holds here and one thing more: §oC_ProcedureName is
+// `oC_Namespace oC_SymbolicName` as well, so `CALL db.labels()` spells this
+// shape exactly while being resolved against a different catalogue. Only
+// §oC_FunctionInvocation is read.
+//
+// Total by construction on the same terms: the error listeners are REMOVED, so
+// a text the grammar cannot parse yields whatever the recovering parser built
+// and nothing is written to os.Stderr. Pinned by
+// TestQualifiedFunctionCallsIsTotal and
+// TestQualifiedFunctionCallsWritesNothingToStderr.
+func QualifiedFunctionCalls(src string) []QualifiedCall {
+	lex := gen.NewCypherLexer(antlr.NewInputStream(src))
+	cp := gen.NewCypherParser(antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel))
+	lex.RemoveErrorListeners()
+	cp.RemoveErrorListeners()
+
+	scan := &qualifiedScan{BaseCypherListener: &gen.BaseCypherListener{}, seen: map[string]struct{}{}}
+	antlr.NewParseTreeWalker().Walk(scan, cp.OC_Cypher())
+	return scan.found
+}
+
+// qualifiedScan collects the calls QualifiedFunctionCalls reports, on the same
+// terms as functionScan: the generated base listener makes every other
+// production a no-op and the walker reaches the whole tree.
+type qualifiedScan struct {
+	*gen.BaseCypherListener
+
+	found []QualifiedCall
+	seen  map[string]struct{}
+}
+
+// EnterOC_FunctionInvocation records an invocation's namespace and spelling
+// when the invocation carries a namespace.
+//
+// Repeats are dropped by the SPELLING and not by the namespace, because the
+// refusal quotes the spelling and two texts under one namespace are two things
+// to quote — the same rule the unqualified scan applies to bare names.
+func (q *qualifiedScan) EnterOC_FunctionInvocation(c *gen.OC_FunctionInvocationContext) {
+	name := c.OC_FunctionName()
+	if name == nil {
+		return
+	}
+	ns := name.OC_Namespace()
+	if ns == nil {
+		return
+	}
+	parts := ns.AllOC_SymbolicName()
+	if len(parts) == 0 {
+		return
+	}
+	lowered := make([]string, len(parts))
+	for i, p := range parts {
+		lowered[i] = strings.ToLower(p.GetText())
+	}
+	// The whole name off the grammar rather than rebuilt from the parts:
+	// §oC_Namespace admits no SP, so the context's text is the author's
+	// bytes and reassembling them could only introduce a difference.
+	text := name.GetText()
+	if _, dup := q.seen[text]; dup {
+		return
+	}
+	q.seen[text] = struct{}{}
+	q.found = append(q.found, QualifiedCall{Namespace: strings.Join(lowered, "."), Text: text})
 }
 
 // functionScan collects the names UnqualifiedFunctionCalls reports. It embeds
