@@ -220,8 +220,48 @@ _batch=100
 # so, which leaves a listing of exactly the cap indistinguishable from a complete
 # one. Each cap is named once and handed to the code that checks for it, because
 # a flag and a check that drift apart turn the check off without a diff to it.
-_gh_limit_all=1000
-_gh_limit_open=500
+#
+# The ceiling is asked of GitHub rather than chosen here, because a chosen one is
+# outgrown in silence and this repository has already done it: at 1000 the pull
+# compared 1000 of 1182 issues and held 178 beads as `not-in-listing` — a reason
+# string for the truncation, not a finding about those beads (bd gqlc-lgwjt).
+# Issue numbers are sequential and shared with pull requests, so the newest
+# issue's number is a strict upper bound on how many issues can exist, and it
+# rises on its own as the repository grows.
+#
+# A ceiling costs nothing until it is reached: GraphQL paging stops when the
+# corpus is exhausted, and `--limit 2000` over 1182 issues took the same 9.4s as
+# `--limit 1000` over 1000 (measured 2026-08-30). So there is no wall-time
+# argument for a small number, which was the only argument there was.
+#
+# Both listings take the same bound. The open-issue cap was 500 against 221 open
+# issues — not breached, the same shape, and left behind it would have been the
+# identical defect one path along.
+#
+# `// 1` is the empty repository, not a failure: a fork with no issues yet has
+# nothing to bound, and refusing there would block the run that creates the very
+# first mirror. The deny-pin below is for a listing that would not answer at all.
+_bound_rc=0
+_gh_limit_all=$(GITHUB_TOKEN="$_token" gh issue list --state all --limit 1 \
+  --json number --jq '(.[0].number // 1)' 2>/dev/null) || _bound_rc=$?
+# Fail closed, per action, in each one's own currency. A fallback constant here
+# would restore exactly the defect this replaces, and would do it on the one run
+# that had already said GitHub was unreadable.
+case "$_bound_rc:$_gh_limit_all" in
+  0:[1-9]*) ;;
+  *) echo "bd-gh-sync: GitHub would not say what its newest issue number is, so no" >&2
+     echo "bd-gh-sync: listing below has a bound this run established. Refusing rather" >&2
+     echo "bd-gh-sync: than falling back to a number nobody measured." >&2
+     case "$_action" in
+       drift) echo "bd-gh-sync: DRIFT CHECK FAILED — GitHub's state could not be read at all." >&2
+              exit 1 ;;
+       push)  echo "bd-gh-sync: PUSH FAILED — GitHub's state could not be read at all." >&2
+              exit 1 ;;
+       *)     echo "bd-gh-sync: SKIPPING pull — GitHub's state could not be read at all." >&2
+              exit 0 ;;
+     esac ;;
+esac
+_gh_limit_open=$_gh_limit_all
 
 if [ "$_action" = "pull" ] || [ "$_action" = "drift" ]; then
   # `drift` shares this whole block and stops at the end of it. Everything down
@@ -509,6 +549,22 @@ PYEOF
       echo "bd-gh-sync: GitHub. A clean verdict here would be a claim about a corpus" >&2
       echo "bd-gh-sync: this run never read." >&2
       echo "bd-gh-sync: DRIFT CHECK FAILED — no beads were examined." >&2
+      exit 1
+    fi
+    # The same reasoning one side over, and it was missing. The selection emits
+    # TRUNCATED when its GitHub listing arrived at the cap, and until now the
+    # only reader of that record was the pull's summary — which this gate exits
+    # above, so drift was handed the fact by its own plan file and dropped it.
+    # Measured 2026-08-30: it answered `no durable drift over 1151 bead(s)` and
+    # exit 0 over a listing that never held 178 of them (bd gqlc-lgwjt). A bead
+    # whose mirror fell outside the page is not compared, and an uncompared bead
+    # cannot be found to disagree.
+    if grep -q '^TRUNCATED ' "$_tmp/plan.txt"; then
+      echo "bd-gh-sync: the GitHub listing came back at its bound, so it is one page of" >&2
+      echo "bd-gh-sync: an unknown number and the beads whose mirrors fell outside it" >&2
+      echo "bd-gh-sync: were never compared. A clean verdict here would be a claim about" >&2
+      echo "bd-gh-sync: a corpus this run never read." >&2
+      echo "bd-gh-sync: DRIFT CHECK FAILED — the GitHub listing was truncated." >&2
       exit 1
     fi
     if [ "$_drift_n" -eq 0 ]; then
@@ -870,16 +926,24 @@ PYEOF
     echo "bd-gh-sync: bytes here. Re-run 'git pull' once the database is free." >&2
   fi
 
-  # The selection saw its listing arrive at the cap, so how many issues GitHub
+  # The selection saw its listing arrive at the bound, so how many issues GitHub
   # actually holds is not a thing this run established. Detail here, and the
   # count itself withdrawn from the summary below.
+  #
+  # The old remedy line said to raise the cap by hand, and that instruction is
+  # what this bound replaces — there is no number here to raise. Reaching the
+  # bound now means the newest issue's number is no larger than the count of
+  # issues, which is why the line points at the derivation rather than at a
+  # constant. `drift` refuses outright on this same record; the pull says it and
+  # carries on, because it rides on `git pull` and has held rather than guessed.
   _capped=""
   if grep -q '^TRUNCATED ' "$_tmp/plan.txt"; then
-    _capped="the GitHub listing came back at its --limit of ${_gh_limit_all}"
+    _capped="the GitHub listing came back at its bound of ${_gh_limit_all}"
     echo "bd-gh-sync: ${_capped}, so it is one page of an unknown number and" >&2
     echo "bd-gh-sync: how many GH issues have no bead was never established. Beads" >&2
-    echo "bd-gh-sync: whose mirror fell outside the page were held, not pulled. Raise" >&2
-    echo "bd-gh-sync: the cap in .githooks/bd-gh-sync if the repository has outgrown it." >&2
+    echo "bd-gh-sync: whose mirror fell outside the page were held, not pulled. That" >&2
+    echo "bd-gh-sync: bound is GitHub's own newest issue number, so reaching it means" >&2
+    echo "bd-gh-sync: the derivation at the top of this script no longer holds." >&2
   fi
 
   # Which of the closures the plan saw actually landed: a CLOSING record is what
