@@ -110,7 +110,8 @@ km — the machinery of the Թագաւորութիւն
   km reconcile                   match seat status to the sessions that exist
   km seat-live <seat>            exit 0 if a claude session exists there (herdr reports it)
   km seat-runner <seat>          exit 0 if the seat has an active herdr agent
-  km seat-idle <seat>            exit 0 if the seat's agent_status is `idle`
+  km seat-idle <seat>            exit 0 if the seat is at an empty prompt
+                                 (agent_status `idle` or `done`)
   km guard-sweep                 wake Րաֆֆի for a round (timer)
   km halt [reason] | halt --status | halt --history [N] | resume
                                  raise / ask about / replay / lower the town halt
@@ -1534,11 +1535,34 @@ seat_pane() { # <seat> -> the pane's visible buffer
     herdr pane read "$pane" --source visible --lines 40 2>/dev/null
 }
 
-# Idle == the agent's own report says so. No pane scraping, no reconciling
-# "esc to interrupt" strings, no false-idle on a mid-tool-call — herdr's
-# hook fires at the states claude passes through.
+# Idle == herdr's report says the seat is at an empty prompt. km does no pane
+# scraping of its own: no reconciling "esc to interrupt" strings, no false-idle
+# on a mid-tool-call.
+#
+# BOTH `idle` AND `done` MEAN THAT, and taking only `idle` made this predicate
+# blind to the steady state (bd gqlc-ymbw0). Measured 2026-08-30 against the
+# live town: `done` is what a pane reads once a turn has COMPLETED under
+# herdr's observation, and `idle` is the transient before a session's first
+# turn — pane 15 went done -> idle -> working and pane 16 unknown -> idle ->
+# working, each `idle` window lasting seconds. So a seat that has been working
+# all day and stops is `done`, permanently, and `idle` is essentially reachable
+# only just after a session starts. That is backwards from what this ladder
+# needs: the seats of gqlc-5vp7 had FINISHED, which is precisely `done`.
+#
+# The claim this replaces — that claude's herdr hook "fires at the states
+# claude passes through" — is not how the value is produced. The installed
+# integration (~/.claude/hooks/herdr-agent-state.sh, HERDR_INTEGRATION_VERSION=5)
+# reports only a session id and no state at all; herdr derives the state from
+# the screen against its own manifest. That manifest emits `working`, `idle`,
+# `blocked` and `unknown` and has NO rule producing `done` — `done` is layered
+# on by herdr above detection, which is why `herdr agent explain` on a `done`
+# pane answers `state: idle`. Do not read one of these two values as more
+# authoritative than the other; they answer different questions.
 seat_pane_idle() { # <seat>
-    [ "$(seat_agent_status "$1")" = idle ]
+    case "$(seat_agent_status "$1")" in
+        idle | done) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # Whether the agent is available to receive text. `blocked` is what the hook
