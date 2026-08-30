@@ -12,7 +12,7 @@
 // `resolver_test` for the reason this file does not: inside internal/resolver
 // the marker is writable, so an in-package witness there would measure
 // nothing.
-package age
+package age_test
 
 import (
 	"go/ast"
@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
@@ -205,7 +206,7 @@ var inhabitants = map[string]inhabitant{
 		embedded: embedEdgeUnion{probeEdgeUnion},
 		// The one arm that refuses with something other than the width
 		// vocabulary: it names the candidates the schema declares.
-		valueReason: edgeUnionReason(probeEdgeUnion),
+		valueReason: age.EdgeUnionReason(probeEdgeUnion),
 	},
 	"ResolvedScalar": {
 		value:       resolver.ResolvedScalar{Kind: resolver.ScalarBool},
@@ -410,7 +411,7 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 	t.Run("value form is answered by its own arm", func(t *testing.T) {
 		for _, name := range sortedInhabitantNames() {
 			in := inhabitants[name]
-			require.Equalf(t, in.valueReason, unservedColumn(in.value),
+			require.Equalf(t, in.valueReason, age.UnservedColumn(in.value),
 				"%s in its value form must be answered by the arm naming it", name)
 		}
 	})
@@ -434,7 +435,7 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 			// from the expression this row asserts, so on that one it
 			// does not. The other five have an arm that serves, which
 			// non-emptiness alone would have separated.
-			require.Equalf(t, "projects "+in.pointer.String(), unservedColumn(in.pointer),
+			require.Equalf(t, "projects "+in.pointer.String(), age.UnservedColumn(in.pointer),
 				"*%s must reach unservedColumn's fall-through; every marker and String on the variants takes a value receiver, and a pointer's method set contains its value methods, so the pointer satisfies resolver.ResolvedType while `case resolver.%s:` does not match it",
 				name, name)
 		}
@@ -444,7 +445,7 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 		for _, name := range sortedInhabitantNames() {
 			in := inhabitants[name]
 			require.NotNilf(t, in.embedded, "%s: no embedding form enumerated", name)
-			require.Equalf(t, "projects "+in.embedded.String(), unservedColumn(in.embedded),
+			require.Equalf(t, "projects "+in.embedded.String(), age.UnservedColumn(in.embedded),
 				"struct{ resolver.%s } declared in this package must reach unservedColumn's fall-through; Go promotes an embedded type's unexported methods, so it satisfies resolver.ResolvedType without naming the marker, and it is a distinct type so `case resolver.%s:` does not match it",
 				name, name)
 		}
@@ -461,8 +462,8 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 	t.Run("no non-value form is served", func(t *testing.T) {
 		for _, name := range sortedInhabitantNames() {
 			in := inhabitants[name]
-			require.NotEmptyf(t, unservedColumn(in.pointer), "*%s was served", name)
-			require.NotEmptyf(t, unservedColumn(in.embedded), "struct{ resolver.%s } was served", name)
+			require.NotEmptyf(t, age.UnservedColumn(in.pointer), "*%s was served", name)
+			require.NotEmptyf(t, age.UnservedColumn(in.embedded), "struct{ resolver.%s } was served", name)
 		}
 	})
 
@@ -504,7 +505,7 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 							Columns: []resolver.Column{{Name: "c", Type: form.typ}},
 						},
 					}},
-				}, typeMap{}, "age")
+				}, age.TypeMap{}, "age")
 				require.ErrorIsf(t, err, codegen.ErrOutOfC6Scope,
 					"%s must be refused by codegen.Prepare's own column switch, which names the same variants unservedColumn's arms do, so a shape matching no arm here matches none there",
 					form.spelling)
@@ -526,7 +527,7 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 			"struct{ embedNode }":              embedNodeEmbedder{},
 		}
 		for _, spelling := range []string{"struct{ *resolver.ResolvedNode }", "struct{ embedNode }"} {
-			require.Equalf(t, "projects node", unservedColumn(nested[spelling]),
+			require.Equalf(t, "projects node", age.UnservedColumn(nested[spelling]),
 				"%s satisfies resolver.ResolvedType and must reach unservedColumn's fall-through", spelling)
 		}
 	})
@@ -538,9 +539,9 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 	// text there instead.
 	t.Run("a shadowing embedder chooses the text after projects", func(t *testing.T) {
 		shadow := shadowEdgeUnion{probeEdgeUnion}
-		require.Equal(t, "projects "+shadowEdgeUnionText, unservedColumn(shadow),
+		require.Equal(t, "projects "+shadowEdgeUnionText, age.UnservedColumn(shadow),
 			"struct{ resolver.ResolvedEdgeUnion } declaring its own String reaches the fall-through, which returns that String")
-		require.NotEqual(t, "projects "+probeEdgeUnion.String(), unservedColumn(shadow),
+		require.NotEqual(t, "projects "+probeEdgeUnion.String(), age.UnservedColumn(shadow),
 			"the shadowing String must differ from the promoted one, or this row witnesses nothing")
 	})
 
@@ -553,11 +554,11 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 	// embedder could reach, so they say "outside what those arms return"
 	// whatever internal/resolver makes them say, and they hold.
 	t.Run("a shadowing list embedder is outside the list arm's range", func(t *testing.T) {
-		require.Equal(t, "projects "+shadowListText, unservedColumn(shadowList{}),
+		require.Equal(t, "projects "+shadowListText, age.UnservedColumn(shadowList{}),
 			"struct{ resolver.ResolvedList } declaring its own String reaches the fall-through, which returns that String")
-		require.NotEqual(t, "projects "+resolver.ResolvedList{}.String(), unservedColumn(shadowList{}),
+		require.NotEqual(t, "projects "+resolver.ResolvedList{}.String(), age.UnservedColumn(shadowList{}),
 			"the fall-through returns this for a bare list, so a row equal to it would witness nothing")
-		require.NotEqual(t, "projects "+resolver.ResolvedUnknown{}.String(), unservedColumn(shadowList{}),
+		require.NotEqual(t, "projects "+resolver.ResolvedUnknown{}.String(), age.UnservedColumn(shadowList{}),
 			"the unknown arm returns this")
 	})
 
@@ -691,7 +692,7 @@ func TestEdgeUnionRankingFlagNamesTheValueFormOnly(t *testing.T) {
 	// The ALLOW half. Without it a flag hardwired to false passes every row
 	// below.
 	t.Run("a value edge-union column outranks", func(t *testing.T) {
-		reason, edgeUnion := unservedReason(probeColumnQuery(probeEdgeUnion))
+		reason, edgeUnion := age.UnservedReason(probeColumnQuery(probeEdgeUnion))
 		require.True(t, edgeUnion,
 			"a value resolver.ResolvedEdgeUnion column is the one axis whose answer outranks the text gate's")
 		require.Contains(t, reason, "binds more than one relationship type")
@@ -708,7 +709,7 @@ func TestEdgeUnionRankingFlagNamesTheValueFormOnly(t *testing.T) {
 	}
 	for _, tc := range nonValue {
 		t.Run(tc.name, func(t *testing.T) {
-			reason, edgeUnion := unservedReason(probeColumnQuery(tc.form))
+			reason, edgeUnion := age.UnservedReason(probeColumnQuery(tc.form))
 			require.Falsef(t, edgeUnion,
 				"%T reaches unservedColumn's fall-through rather than edgeUnionReason, so its reason is not the one that outranks the text",
 				tc.form)
@@ -733,7 +734,7 @@ func TestEdgeUnionRankingFlagNamesTheValueFormOnly(t *testing.T) {
 	// produced it. The flag reads the type and is unmoved; a flag matching text
 	// would have been moved by a caller's method.
 	t.Run("a shadowing embedder does not outrank, whatever its reason reads", func(t *testing.T) {
-		reason, edgeUnion := unservedReason(probeColumnQuery(shadowEdgeUnion{probeEdgeUnion}))
+		reason, edgeUnion := age.UnservedReason(probeColumnQuery(shadowEdgeUnion{probeEdgeUnion}))
 		require.False(t, edgeUnion,
 			"the flag is a type assertion on the value form, so an embedder does not set it however its String reads")
 		require.Equal(t, `column "r" projects `+shadowEdgeUnionText, reason)
@@ -749,7 +750,7 @@ func TestEdgeUnionRankingFlagNamesTheValueFormOnly(t *testing.T) {
 	// a shallower Stringer rather than a shadowing one. The ruling is unchanged
 	// either way, which is the point: it rests on the flag reading the type.
 	t.Run("adding no String is not what those two rows turn on", func(t *testing.T) {
-		reason, edgeUnion := unservedReason(probeColumnQuery(deeperNode{}))
+		reason, edgeUnion := age.UnservedReason(probeColumnQuery(deeperNode{}))
 		require.False(t, edgeUnion,
 			"deeperNode is not resolver.ResolvedEdgeUnion, so the type assertion does not fire")
 		require.Equal(t, `column "r" projects node`, reason,
