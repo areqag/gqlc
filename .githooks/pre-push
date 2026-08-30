@@ -65,8 +65,9 @@ fi
 # advisory here (gqlc-06y9) because seats were linked worktrees of ONE
 # repository: a neighbour committing in their own tree during this window moves
 # refs the guard watches and is indistinguishable from damage by this run —
-# measured, on this hook, against three other seats. Seats became clones
-# (gqlc-w5bh), so that premise is no longer uniformly false, and the guard
+# measured, on this hook, against three other seats. Seats become clones under
+# gqlc-w5bh, one at a time, so that premise stops being uniformly false and no
+# single pinned verdict fits the roster while it is mixed. Hence the guard
 # derives it per repository: sharers -> report, sole worktree -> refuse. Pinned
 # here, every converted seat would keep the old town's verdict forever.
 #
