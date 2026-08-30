@@ -657,28 +657,50 @@ func TestStorageRefusalReachesTheCallerAsItsOwnSentinel(t *testing.T) {
 		require.NotErrorIs(t, err, codegen.ErrUnstorableProperty)
 	})
 
-	t.Run("a query column of the same width is not asked", func(t *testing.T) {
-		// The storage rule is about what the store keeps, and a column
-		// keeps nothing. This is the row that would go red if the
-		// sweep were folded in beside the column and parameter checks
-		// rather than beside the entity ones.
-		in := codegen.Input{
-			Schema: schemaWith(graph.TypeInt64),
-			Queries: []codegen.NamedQuery{{
-				Name:        "Nested",
-				Cardinality: codegen.CardinalityOne,
-				SourceText:  "RETURN [[1]] AS xss",
-				Validated: resolver.ValidatedQuery{Columns: []resolver.Column{{
+	// The storage rule is about what the store keeps, and neither a
+	// column nor a parameter keeps anything. These two rows are what
+	// would go red if the sweep were folded in beside the column and
+	// parameter checks rather than beside the entity ones.
+	//
+	// Both carry the width as a ResolvedProperty, which is the only
+	// column and parameter shape holding a graph.PropertyType and so the
+	// only one a storage sweep could be asked about. Measured: written
+	// instead as a ResolvedList over a ResolvedScalar — the shape the
+	// query text below actually resolves to — the column row passed
+	// against a prepare.go that DID ask the question in the column
+	// sweep, because that shape reaches no PropertyType to ask about.
+	for _, tt := range []struct {
+		name    string
+		queries []codegen.NamedQuery
+	}{
+		{"a query column of the same width is not asked", []codegen.NamedQuery{{
+			Name:        "Nested",
+			Cardinality: codegen.CardinalityOne,
+			SourceText:  "RETURN [[1]] AS xss",
+			Validated: resolver.ValidatedQuery{Columns: []resolver.Column{{
+				Name: "xss",
+				Type: resolver.ResolvedProperty{Type: nested},
+			}}},
+		}}},
+		{"a query parameter of the same width is not asked", []codegen.NamedQuery{{
+			Name:        "Nested",
+			Cardinality: codegen.CardinalityOne,
+			SourceText:  "MATCH (p:Person) WHERE p.matrix = $xss RETURN p.matrix AS xss",
+			Validated: resolver.ValidatedQuery{
+				Columns: []resolver.Column{{Name: "xss", Type: resolver.ResolvedScalar{Kind: resolver.ScalarInt}}},
+				Parameters: []resolver.ResolvedParameter{{
 					Name: "xss",
-					Type: resolver.ResolvedList{Element: resolver.ResolvedList{
-						Element: resolver.ResolvedScalar{Kind: resolver.ScalarInt},
-					}},
-				}}},
-			}},
-		}
-		_, err := codegen.Prepare(in, unstorablePropertyTypeMap{refuse: nested}, "")
-		require.NoError(t, err)
-	})
+					Type: resolver.ResolvedProperty{Type: nested},
+				}},
+			},
+		}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			in := codegen.Input{Schema: schemaWith(graph.TypeInt64), Queries: tt.queries}
+			_, err := codegen.Prepare(in, unstorablePropertyTypeMap{refuse: nested}, "")
+			require.NoError(t, err)
+		})
+	}
 }
 
 // ageOnlyTargets is the golden target set for the four names only the
