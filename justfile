@@ -2032,9 +2032,54 @@ bd-export-monotonic base:
     go run ./internal/tools/bdguard -base {{base}}
 
 # dev-local convenience: compare against the merge-base with origin/master.
-# Requires full history; assumes the dev worktree has it.
+#
+# It requires full history, and it now CHECKS rather than assumes. Unquoted,
+# `$(git merge-base ...)` collapses to zero words when the walk fails, and just
+# then complains about its own arity:
+#
+#     error: recipe `bd-export-monotonic` got 0 positional arguments but takes 1
+#
+# which names neither history nor `origin/master` nor shallowness, and reads as
+# a malformed recipe rather than as a fact about the repository. It reaches the
+# operator under the arm name `tidy`, which says nothing either. Measured
+# 2026-08-29 (bd gqlc-yzk1h): a shallow graft in the SHARED git dir put every
+# seat worktree's `just gates` on this message at once.
+#
+# The causes are separated because their remedies are different commands, and an
+# operator who hits this has no reason to suspect their git dir at all. A bare
+# `${base:?}` would refuse without saying which of the three happened.
+#
+# The check lives here rather than as an up-front screen in `gates` because this
+# recipe has callers `gates` does not see — it is run by hand, and a screen one
+# level up would leave the direct run with the arity message. Measured the same
+# day: of the eleven `gates` arms this is the only one that walks history, so a
+# screen there would guard one arm and own a second copy of this diagnosis.
 bd-export-monotonic-local:
-    just bd-export-monotonic $(git merge-base HEAD origin/master)
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if ! git rev-parse --verify --quiet origin/master >/dev/null; then
+        echo "error: no origin/master in this repository, so there is no base to compare against." >&2
+        echo "       This recipe diffs the bd export against the merge-base with origin/master." >&2
+        echo "       Repair:  git fetch origin master" >&2
+        exit 1
+    fi
+    base=$(git merge-base HEAD origin/master 2>/dev/null) || base=""
+    if [ -n "${base}" ]; then
+        exec just bd-export-monotonic "${base}"
+    fi
+    echo "error: HEAD and origin/master have no common ancestor this repository can see," >&2
+    echo "       so there is no merge-base to hand to bdguard. Nothing is wrong with the" >&2
+    echo "       recipe or with your branch's contents (bd gqlc-yzk1h)." >&2
+    if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+        echo "       CAUSE: this repository is SHALLOW, so the ancestor is simply not present." >&2
+        echo "       Note that .git is shared by every worktree here, so this affects them all." >&2
+        echo "       Repair:  git fetch --unshallow origin" >&2
+    else
+        echo "       The repository is not shallow, so the histories are genuinely unrelated —" >&2
+        echo "       an orphan branch, or an origin/master rewritten out from under this HEAD." >&2
+        echo "       Inspect:  git log --oneline -1 HEAD origin/master" >&2
+    fi
+    exit 1
 
 # An orphan is an open GH issue no bead names, byte-identical in title AND body
 # to an issue a bead does name, created seconds from it: .githooks/bd-gh-sync's
