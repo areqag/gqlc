@@ -3001,6 +3001,10 @@ conditioned_verdict_ids() { # -> ids of judge beads closed with a condition in p
 }
 
 cmd_dispatch() {
+    # Above ensure_deployed, not below it: on a drifted tree ensure_deployed
+    # deploys and then re-execs the deployed km with this argv, so a --help
+    # guarded below it would have written to the town before printing.
+    no_args dispatch "$@"
     ensure_deployed dispatch "$@" || return 1
     session_up || { echo "dispatch: $(town_absent_reason $?); nothing to do"; return 0; }
     local sd wakes=0 withheld=0
@@ -4082,6 +4086,8 @@ guard_unanswered() { # -> "seat(n, status) …", empty when nobody is holding tw
 }
 
 cmd_guard_sweep() {
+    # Above ensure_deployed, for the reason given in cmd_dispatch.
+    no_args guard-sweep "$@"
     ensure_deployed guard-sweep "$@" || return 1
     # ABOVE every early return below, and that placement is the design
     # (bd gqlc-u078). Scratch accumulates from AGENTS, not from the town's own
@@ -4528,6 +4534,7 @@ fmt_age() { # <seconds>
 }
 
 cmd_status() {
+    no_args status "$@"
     local sd s disp class st stcol ctx hb beads unread age hbcol stale frozen="" blind="" idle=""
     local target tree fresh fstate fball fbgates fahead fdetail stalewt="" exposed="" unjudged=""
     local workcol wage sage dry wedged="" nowork="" unwitnessed=""
@@ -4869,6 +4876,7 @@ cmd_status() {
 # ---------- doctor / install ----------
 
 cmd_doctor() {
+    no_args doctor "$@"
     local ok=0 ws_row ws_rc
     # TWO labels, not one prefix (gqlc-67ml). A row that printed one label under
     # both outcomes STATED THE OPPOSITE of what it measured whenever the label
