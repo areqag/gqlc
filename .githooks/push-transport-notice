@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Advisory printed by pre-push AFTER every gate has passed, saying so, so that a
+# Advisory printed by pre-push after its gates have passed, saying so, so that a
 # transport failure that follows cannot be read as a gate failure — bd
-# gqlc-ehgg / GH #1414.
+# gqlc-ehgg / GH #1414. It says which gates those were, and says they are not the
+# whole of what master requires, so that the same sentence cannot be read as
+# clearance for CI (bd gqlc-n54t).
 #
 # ADVISORY, NEVER REFUSING. Every path here exits 0. Everything it describes
 # happens after this hook returns, so there is nothing here to refuse; a gate
@@ -25,7 +27,9 @@
 # Args: <remote-name> <remote-url>, as git passes them to pre-push. The url is
 # read; the name is not.
 # Env: GQLC_PREPUSH_ELAPSED, the hook's ${SECONDS} at the point of the call.
-# Optional — the message is worth printing without it.
+#      GQLC_PREPUSH_GATES, the gates that passed, as the caller accumulated them.
+# Both optional — the message is worth printing without either, and each is
+# omitted rather than guessed at.
 set -uo pipefail
 
 remote_url="${2:-}"
@@ -60,12 +64,35 @@ case "${remote_url}" in
   *) transport=other ;;
 esac
 
+# WHAT PASSED, NAMED RATHER THAN QUANTIFIED. "every gate PASSED" was true of the
+# gates in this hook and false as the clearance it gets read as: pre-push mirrors
+# three of the seven required contexts, and one of those three only over the
+# lines the push touched. A citizen read it the second way on PR #1633 — green
+# here, and codegen-fence then reddened on two ireturn findings that had been in
+# the tree throughout (bd gqlc-s9bx, gqlc-n54t).
+#
+# The list is the CALLER'S, and its absence is not filled in with a guess: a
+# notice invoked without one says the gates passed and declines to name them,
+# which is weaker and still true. Deriving "what did not run" instead would need
+# the required set spelled out here, i.e. a third copy of a list that drifts
+# every time CI grows a job — citizen-protocol.md refuses to hold one for that
+# reason and points at the `gates` comment in the justfile, which is where this
+# points too.
+gates="${GQLC_PREPUSH_GATES:-}"
+
 if [ -n "${elapsed}" ]; then
-  echo "pre-push: every gate PASSED (${elapsed}s). Anything that fails from here on is the" >&2
+  echo "pre-push: the gates in this hook PASSED (${elapsed}s)." >&2
 else
-  echo "pre-push: every gate PASSED. Anything that fails from here on is the" >&2
+  echo "pre-push: the gates in this hook PASSED." >&2
 fi
-echo "          TRANSPORT handing the objects over, not this branch (bd gqlc-ehgg)." >&2
+if [ -n "${gates}" ]; then
+  echo "          Which ones: ${gates}." >&2
+fi
+echo "          THEY ARE NOT ALL OF CI'S REQUIRED CONTEXTS, so a green hook here is not" >&2
+echo "          a merge predicate — the rest are decided after this push. What runs" >&2
+echo "          where is in the 'gates' comment in the justfile (bd gqlc-n54t)." >&2
+echo "          Anything that fails from here on is the TRANSPORT handing the objects" >&2
+echo "          over, not this branch (bd gqlc-ehgg)." >&2
 echo "          If git exits 141 or 143 now, the push MAY STILL HAVE LANDED. Do not retry" >&2
 echo "          and do not abandon the branch until you have asked:  just push-landed" >&2
 
