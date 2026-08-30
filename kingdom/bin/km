@@ -1235,16 +1235,25 @@ box_one_line() { # <box text> -> one line, prompt glyph dropped, whitespace coll
 # than buying a false pass. Equality would refuse the first time claude renders a
 # hint inside the box, and a false refusal unroutes a live seat — the failure
 # gqlc-gh7xj went out of its way not to introduce.
-seat_box_echoes() { # <pane> <text> -> 0 the box holds it, 1 it holds something else, 2 no box
+seat_box_echoes() { # <pane> <text> -> 0 holds it, 1 holds something else, 2 no box, 3 unreadable
     local left=10 box rc=2 want
     want=$(box_one_line "$2")
     while [ "$left" -gt 0 ]; do
         left=$((left - 1))
         sleep 0.2
-        # The `if` is not style: it suspends `set -e` for the substitution, so a
-        # no-box read is a verdict this loop records rather than an exit status
-        # that unwinds whichever caller happens not to be inside a condition.
-        if box=$(seat_box_text "$1"); then rc=0; else rc=2; continue; fi
+        # `|| rc=$?` and not a bare call: it suspends `set -e` for the
+        # substitution, so a no-box read is a verdict this loop records rather
+        # than an exit status that unwinds whichever caller happens not to be
+        # inside a condition.
+        rc=0
+        box=$(seat_box_text "$1") || rc=$?
+        # Unreadable ends the poll on the FIRST read, as seat_box_emptied's does
+        # and for the same reason: it is not a state ten more reads can outwait,
+        # and each turn re-emits herdr's account of it on stderr. Collapsing it
+        # into the no-box arm also spent two seconds to reach a verdict that
+        # named the wrong observation (bd gqlc-3e4m5, F2/I2).
+        if [ "$rc" -eq 2 ]; then return 3; fi
+        [ "$rc" -eq 0 ] || continue
         case "$(box_one_line "$box")" in *"$want"*) return 0 ;; esac
     done
     [ "$rc" -eq 0 ] && return 1
@@ -1352,7 +1361,7 @@ seat_box_echoes() { # <pane> <text> -> 0 the box holds it, 1 it holds something 
 # "machinery cannot reach this seat", and retrying it silently forever is the
 # open loop gqlc-3evsn indicts.
 send_line() { # <target> <text> -> 0 delivered, 1 not
-    local target=$1 text=$2 seat pane out witnessed box
+    local target=$1 text=$2 seat pane out witnessed box boxrc
     seat=${target##*:}
     pane=$(seat_pane_id "$seat") || pane=
     if [ -z "$pane" ]; then
@@ -1363,7 +1372,18 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
         echo "km: send to $seat: agent_status is $(seat_agent_status "$seat"), so the Enter would answer a modal nobody read; nothing was sent" >&2
         return 1
     fi
-    if ! box=$(seat_box_text "$pane"); then
+    # Two refusals, not one. Saying "renders no input box" on a pane km never
+    # read swears to an observation nobody made, and these sentences are quoted
+    # verbatim into escalation letters (bd gqlc-3e4m5, F2/I1). rc=2 is herdr
+    # failing to read the pane at all — its own account is already on stderr
+    # above; rc=1 is a pane that rendered and had no box in it.
+    boxrc=0
+    box=$(seat_box_text "$pane") || boxrc=$?
+    if [ "$boxrc" -eq 2 ]; then
+        echo "km: send to $seat (pane $pane): the pane could not be read (herdr's own account of it is above), so whether it holds an input box is unknown and the Enter would be pressed blind; nothing was sent (VI.2, bd gqlc-3evsn)" >&2
+        return 1
+    fi
+    if [ "$boxrc" -ne 0 ]; then
         echo "km: send to $seat (pane $pane): the pane renders no input box, so this text has nowhere to land and the Enter would press whatever that surface does answer; nothing was sent (VI.2, bd gqlc-3evsn)" >&2
         return 1
     fi
@@ -1387,7 +1407,9 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
     witnessed=0
     seat_box_echoes "$pane" "$text" || witnessed=$?
     if [ "$witnessed" -ne 0 ]; then
-        if [ "$witnessed" -eq 2 ]; then
+        if [ "$witnessed" -eq 3 ]; then
+            echo "km: send to $seat (pane $pane): the text was typed, but the pane could not be read back (herdr's own account of it is above), so whether it landed is unknown; no Enter was pressed. The typed text may be sitting there unsent — read the pane (VI.2, bd gqlc-3evsn)" >&2
+        elif [ "$witnessed" -eq 2 ]; then
             echo "km: send to $seat (pane $pane): the box was empty when this was checked and the pane renders none at all now, so something covered the composer mid-send; no Enter was pressed. The typed text may be sitting under it — read the pane (VI.2, bd gqlc-3evsn)" >&2
         else
             echo "km: send to $seat (pane $pane): herdr acked the text but the box does not hold it, so it did not land where the Enter would submit it; no Enter was pressed. Read the pane before sending again (bd gqlc-3evsn)" >&2
