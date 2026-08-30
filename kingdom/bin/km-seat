@@ -12,6 +12,14 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 KINGDOM_DIR=$(dirname "$SCRIPT_DIR")
 KM="$SCRIPT_DIR/km"
+SELF="$SCRIPT_DIR/$(basename -- "${BASH_SOURCE[0]}")"
+
+# The parse this process is running, identified by the CONTENT of the file it
+# came from rather than its mtime: mtime is whole seconds here, so a deploy
+# landing in the same second as a respawn is invisible to it, and content also
+# answers "no change" correctly when a deploy puts back what was already there.
+# See the re-exec at the top of the loop (bd gqlc-s67rz).
+self_sum=$(sha256sum "$SELF" 2>/dev/null | cut -d' ' -f1)
 
 seat=${1:-}
 [ -n "$seat" ] || { echo "km-seat: which seat?" >&2; exit 1; }
@@ -131,6 +139,35 @@ compose() { # $1 = wake reasons, one per line; $2 = a stale-hooks warning, or em
 
 while :; do
     until [ -s "$home/wake" ] || [ -s "$home/wake.reading" ]; do sleep 5; done
+
+    # A runner is a long-lived bash process holding the parse of the file it
+    # started from, so `km deploy` replacing km-seat on disk reaches no seat at
+    # all: measured on the live town, 16 runners between 69725 and 85752 seconds
+    # old while deploy reported the new sha, one of them running a fix merged
+    # that morning (bd gqlc-s67rz). Take the new parse here — the park has
+    # exited, so a wake is pending and the seat is about to work anyway, but the
+    # queue is still untouched on disk, so exec loses no reason. A session in
+    # flight is never interrupted, because this line is only ever reached
+    # between sessions.
+    #
+    # Both halves of the guard are about one failure: a version we exec and
+    # cannot run ends the runner, and a seat with no runner is woken by nobody
+    # until reconcile notices. `bash -n` refuses one that does not parse, `-x`
+    # one whose mode moved — git tracks the mode, so a bad commit can change it,
+    # and a failed exec is the same silent death by another route. Either way the
+    # version is left unrun and said out loud, the old parse keeps the seat
+    # alive, and the wake is still delivered. Nothing is remembered across the
+    # refusal, so repairing the file is all that is needed to recover. An empty
+    # hash is a third answer, "we could not look": that is what this file looks
+    # like for an instant while a deploy replaces it.
+    now_sum=$(sha256sum "$SELF" 2>/dev/null | cut -d' ' -f1)
+    if [ -n "$now_sum" ] && [ "$now_sum" != "$self_sum" ]; then
+        if [ -x "$SELF" ] && bash -n "$SELF" 2>/dev/null; then
+            exec "$SELF" "$seat"
+        fi
+        echo "km-seat: $SELF changed on disk but is not runnable — it does not parse as bash, or it is not executable — so $seat is still running the parse it started with. Fix the file and the next wake takes it (bd gqlc-s67rz)." >&2
+    fi
+
     # Consume by rename. `mv` within a directory is atomic, so a `km wake` that
     # lands after this point starts a fresh queue for the next turn instead of
     # being destroyed by an rm that raced the read — the reason arrives a turn
