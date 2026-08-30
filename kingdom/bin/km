@@ -4064,7 +4064,10 @@ unit_health() { # <unit> -> "ok …" | "FAILED …" | "NEVER RUN …" | "NOT INS
         if [ "$tload" != loaded ]; then
             echo "NOT SCHEDULED — $timer is ${tload:-absent}, so nothing will fire $1 (km install-units)"
         elif [ "$tactive" != active ] && [ "$tactive" != activating ]; then
-            echo "NOT SCHEDULED — $timer is $tactive, so nothing will fire $1; systemd keeps no record of the runs before it stopped ('systemctl --user enable --now $timer')"
+            # An installed-but-inactive timer is also what one that was never
+            # started looks like, so this sentence may not narrate a stop
+            # (gqlc-rnndr) any more than the old one could narrate a never-run.
+            echo "NOT SCHEDULED — $timer is $tactive, so nothing will fire $1; whether it ran before is not in systemd's memory ('systemctl --user enable --now $timer')"
         else
             echo "NO RUN ON RECORD — $timer is $tactive, but systemd holds no finished run of $1"
         fi
