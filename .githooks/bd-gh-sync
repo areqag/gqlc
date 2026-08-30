@@ -1230,25 +1230,17 @@ def label_rule(path):
         raise ImportError("no loadable module at " + path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return int(mod.MAX_LABEL), str(mod.PREFIX)
+    return int(mod.MAX_LABEL), str(mod.PREFIX), mod.remedy
 
-# The remedy gqlc-89vw ratified: the deepest ancestor DIRECTORY that fits. Same
-# rule the CI gate prints, so the two answers cannot diverge into two different
-# instructions for one label.
-def shorter(label, cap, prefix):
-    if not label.startswith(prefix):
-        return None
-    budget = cap - len(prefix)
-    tail = label[len(prefix):]
-    s = tail
-    while len(s) > budget and "/" in s:
-        s = s.rsplit("/", 1)[0]
-    return prefix + s if len(s) <= budget and s != tail else None
-
+# The remedy gqlc-89vw ratified — the deepest ancestor DIRECTORY that fits — is
+# imported with the cap rather than reimplemented here. It used to be a local
+# copy of the rule, which made three spellings of one instruction across the
+# three gates that print it; the module owns it now (bd gqlc-uy7j).
 cap = None
 prefix = ""
+remedy = lambda label, cap, prefix: ""  # noqa: E731 - unreachable while cap is None
 try:
-    cap, prefix = label_rule(sys.argv[2])
+    cap, prefix, remedy = label_rule(sys.argv[2])
 except Exception as exc:  # noqa: BLE001 - every failure here has one meaning
     # No number, so no screening and no claim that any bead's labels are
     # mirrorable. Reported rather than defaulted: a cap guessed at here is the
@@ -1278,14 +1270,12 @@ for b in beads:
                 "API refuses the whole issue over one label and the bead would "
                 "have been left with no mirror."
                 % (bid, one_line(lab), len(lab), cap))
-        fits = shorter(lab, cap, prefix)
-        if fits:
-            note += (" Use the deepest ancestor directory that fits: %s (%d "
-                     "characters)." % (one_line(fits), len(fits)))
-        elif prefix and lab.startswith(prefix):
-            note += (" The budget after '%s' is %d characters, and no ancestor "
-                     "directory of this path fits."
-                     % (prefix, cap - len(prefix)))
+        # one_line over the whole sentence, not just the label inside it: these
+        # records are line-delimited, and the suggestion is derived from a label
+        # that may carry a newline.
+        advice = remedy(lab, cap, prefix)
+        if advice:
+            note += " " + one_line(advice)
         print("NOTE " + note)
 # How many beads the selection actually walked. "No bead needs a mirror" and
 # "the list this ran on was empty" both emit zero NEW records, and only the
