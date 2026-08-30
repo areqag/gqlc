@@ -32,6 +32,12 @@ func (stubTypeMap) Property(pt graph.PropertyType) (string, bool) {
 	return "property:" + string(pt), true
 }
 
+// StorableProperty admits every width. The storage axis is deliberately
+// total here so that the eight existing plan assertions keep measuring
+// the carrier axis alone; the refusal lives in unstorablePropertyTypeMap,
+// which names the width it refuses.
+func (stubTypeMap) StorableProperty(graph.PropertyType) bool { return true }
+
 func (stubTypeMap) Temporal(k resolver.Temporal) (string, bool) {
 	return "temporal:" + k.String(), true
 }
@@ -56,6 +62,21 @@ func (m partialTemporalTypeMap) Temporal(k resolver.Temporal) (string, bool) {
 		return "", false
 	}
 	return m.stubTypeMap.Temporal(k)
+}
+
+// unstorablePropertyTypeMap refuses exactly one width on the STORAGE
+// axis while stubTypeMap's carrier axis still admits it. That split is
+// the point: neo4j has a faithful [][]int16 for a nested list and emits
+// a working recursive decode for one as a query value, and it is the
+// server that will not hold it as a stored property (ADR 0035). A stub
+// that refused both axes at once could not tell the two sentinels apart.
+type unstorablePropertyTypeMap struct {
+	stubTypeMap
+	refuse graph.PropertyType
+}
+
+func (m unstorablePropertyTypeMap) StorableProperty(pt graph.PropertyType) bool {
+	return pt != m.refuse
 }
 
 // unknownVariant is a test-local ResolvedType stub satisfying the

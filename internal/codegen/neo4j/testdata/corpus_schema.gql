@@ -1,27 +1,51 @@
 // The schema the emitted-decoder corpus runs against. One emission has to
 // reach the arms the entity decoders carry, so between them these types
 // declare a width that narrows from its driver carrier, a nullable
-// property, a list at each of three nesting depths, a list over a narrow
-// element width, a list over each of the two slice shapes the driver
-// hands back as themselves, a list of no declared element shape, and a
-// property of no declared shape at all.
+// property, a FLAT list, a list over a narrow element width, a list over
+// each of the two slice shapes the driver hands back as themselves, a
+// list of no declared element shape, and a property of no declared shape
+// at all.
+//
+// ONE nesting depth, where there were three. Under ADR 0035 the neo4j
+// server will not hold a list of lists as a stored property, so a
+// declaration nesting deeper is refused at generation and cannot appear
+// here at all. What that removed, and where it went:
+//
+//   - Listy.matrix and Edgy.matrix (LIST<LIST<INT64>>), Bin.piles
+//     (LIST<LIST<ANY VALUE>>) and the whole Nest type, which declared
+//     nothing but nested widths;
+//   - Slot.windows (LIST<LIST<DATE>>), the depth-2 PARAMETER bind — see
+//     the note above SlotsMatching in the queries file, which records
+//     what its removal costs and why nothing replaces it.
+//
+// The decode arms those declarations reached are render_models.go's
+// writeSliceNarrow recursive arm, which the same ruling makes
+// unreachable by construction on this backend; gqlc-52w8l deletes it.
+// This corpus does not pretend to cover it in the meantime.
+//
+// A nested list arriving as a QUERY VALUE is still served by neo4j and
+// still decoded, by a different emitter binding a different local family
+// (render_queries.go, inner<n>/innerAcc<n>). That path keeps its witness
+// — NestColumns below, respelled over literals rather than over declared
+// properties. bd gqlc-415l carries the depth-3 live scenario.
 //
 // Those widths are declared on node types, so they are decoded off
-// dbtype.Node. Edgy declares eight of them again to be decoded off
+// dbtype.Node. Edgy declares seven of them again to be decoded off
 // dbtype.Relationship: a narrowing scalar (rank), a narrowing nullable
-// (weight), a walked list (ranks), a walked list of lists (matrix), a
-// walked nullable list (depths), an unwalked nullable list of no
-// declared element shape (loose), a non-nullable property of no declared
-// shape (payload), and a nullable one (spare). A decode helper is
-// emitted per entity, so a narrow or a null one helper was shown to
-// survive has not been run through another.
+// (weight), a walked list (ranks), a walked nullable list (depths), an
+// unwalked nullable list of no declared element shape (loose), a
+// non-nullable property of no declared shape (payload), and a nullable
+// one (spare). A decode helper is emitted per entity, so a narrow or a
+// null one helper was shown to survive has not been run through another.
 //
-// Those eight land on seven arms, not eight. writeEntityFieldDecode
+// Those seven land on six arms, not seven. writeEntityFieldDecode
 // branches six ways — nullable and non-nullable, each over walked slice,
 // narrow-convert and plain assign — and writeShapelessFieldDecode
-// carries two more; ranks and matrix share the non-nullable walked-slice
-// arm, differing only in how deep writeSliceNarrow recurses. No arm of
-// the eight now stands reached off dbtype.Node alone. The last one that
+// carries two more. ranks used to share the non-nullable walked-slice
+// arm with matrix, the two differing only in how deep writeSliceNarrow
+// recursed; with matrix gone ranks reaches that arm alone, and the
+// recursion depth is no longer varied here by anything. No arm of the
+// seven now stands reached off dbtype.Node alone. The last one that
 // did was the nullable shapeless read (out.Maybe = &v in decodeAnything)
 // until spare put it on a relationship, and the non-nullable plain
 // assign (out.Loose = value1 in decodeBin) until Edgier did the same.
@@ -35,9 +59,8 @@
 // TestAnythingSeparatesAbsentFromNull green.
 //
 // Edgy also declares no BYTES and no TIMESTAMP element — both of which
-// the walk asserts straight to, without narrowing — and no third
-// nesting depth. bd gqlc-np7s tracks what Edgy leaves on the node
-// types.
+// the walk asserts straight to, without narrowing. bd gqlc-np7s tracks
+// what Edgy leaves on the node types.
 //
 // Edgier is declared for the query columns rather than for a width the
 // node types had left unreached. A whole-entity column commits to a
@@ -58,20 +81,26 @@
 // type is derived from the property it is compared to and there is no
 // other way to ask for one.
 //
-// Four list widths for the four bind expressions a list parameter can
-// take: one the driver's own packer walks element by element and so needs
-// no conversion (tags), one whose leaf is a gqlc neutral carrier and so
-// owes a per-element widen (days), the same at a second nesting depth
-// (windows), and a nullable one whose helper carries the pointer through
-// (spans). LIST<DURATION> rather than a second LIST<DATE> because the
-// helpers are emitted per carrier, so a nullable list helper shown to
-// work for one carrier has not been run for another.
+// Three list widths for three of the four bind expressions a list
+// parameter can take: one the driver's own packer walks element by
+// element and so needs no conversion (tags), one whose leaf is a gqlc
+// neutral carrier and so owes a per-element widen (days), and a nullable
+// one whose helper carries the pointer through (spans). LIST<DURATION>
+// rather than a second LIST<DATE> because the helpers are emitted per
+// carrier, so a nullable list helper shown to work for one carrier has
+// not been run for another.
+//
+// The fourth was windows (LIST<LIST<DATE>>), the per-element widen at a
+// second nesting depth, and it is GONE rather than replaced: a
+// parameter's Go type is derived from the property it is compared to,
+// and ADR 0035 leaves no neo4j property of that width to compare one
+// against. The depth>=2 encode helpers in render_temporal.go keep their
+// recursion and lose their only witness here.
 CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
     (:Slot {
         id      :: INT64 NOT NULL,
         tags    :: LIST<STRING NOT NULL> NOT NULL,
         days    :: LIST<DATE NOT NULL> NOT NULL,
-        windows :: LIST<LIST<DATE>> NOT NULL,
         spans   :: LIST<DURATION(DAY TO SECOND) NOT NULL>
     }),
     (:Scalar {
@@ -84,21 +113,13 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
     (:Listy {
         tags   :: LIST<STRING> NOT NULL,
         ranks  :: LIST<INT32> NOT NULL,
-        matrix :: LIST<LIST<INT64>> NOT NULL,
         blobs  :: LIST<BYTES> NOT NULL,
         stamps :: LIST<TIMESTAMP> NOT NULL,
         depths :: LIST<FLOAT32>
     }),
     (:Bin {
         loose :: LIST NOT NULL,
-        bag   :: LIST<ANY VALUE>,
-        piles :: LIST<LIST<ANY VALUE>>
-    }),
-    (:Nest {
-        cube :: LIST<LIST<LIST<INT64>>> NOT NULL,
-        lhs  :: LIST<LIST<INT64>> NOT NULL,
-        rhs  :: LIST<LIST<STRING>> NOT NULL,
-        deep :: LIST<LIST<LIST<STRING>>>
+        bag   :: LIST<ANY VALUE>
     }),
     (:Anything {
         payload :: ANY VALUE NOT NULL,
@@ -111,7 +132,6 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
     (:Scalar) -[:Edgy {
         rank    :: INT32 NOT NULL,
         ranks   :: LIST<INT32> NOT NULL,
-        matrix  :: LIST<LIST<INT64>> NOT NULL,
         payload :: ANY VALUE NOT NULL,
         loose   :: LIST,
         depths  :: LIST<FLOAT32>,

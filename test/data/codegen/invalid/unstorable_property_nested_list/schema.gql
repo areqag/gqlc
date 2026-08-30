@@ -1,0 +1,10 @@
+// neo4j targets only, and that is the fixture's point rather than an
+// omission: the refusal is the SERVER's storage rule, not a gap in the
+// schema language or a missing Go carrier. Apache AGE stores a nested
+// list property happily, so the same schema is VALID there and lives in
+// valid/nested_list_property with AGE as its only target (ADR 0035).
+CREATE PROPERTY GRAPH TYPE UnstorablePropertyNestedList AS {
+    (:Row {
+        matrix :: LIST<LIST<FLOAT32>> NOT NULL
+    })
+}

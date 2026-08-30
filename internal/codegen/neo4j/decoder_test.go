@@ -65,29 +65,41 @@ var decoderProbeScalars = []decoderProbeWidth{
 }
 
 // decoderProbeWidths is every width the probe declares: each scalar
-// above, that scalar under the list constructor, and that scalar under
-// it twice.
+// above, and that scalar under the list constructor once.
 //
-// The list arms are derived rather than written out, so a scalar added
-// to the table above arrives with its slice and its slice-of-slice
-// already declared. Two levels is where the derivation stops, and it is
-// the first depth that reaches writeSliceNarrow's recursive arm at all.
+// The list arm is derived rather than written out, so a scalar added to
+// the table above arrives with its slice already declared. ONE level is
+// where the derivation stops, and the reason is not economy: under ADR
+// 0035 the neo4j server will not hold a list of lists as a stored
+// property, so a schema declaring one is refused at generation and no
+// probe can be built on it. The derivation stopped at two before that
+// ruling; TestDecoderProbeCoversTheTypeTable now asserts the dual —
+// that every scalar's doubly-nested width is refused by
+// StorableProperty — so the level's absence is a measured consequence
+// rather than a gap somebody trimmed.
 //
-// No depth finishes the job on its own: that walk names its locals off
-// the recursion depth, so each further level of nesting introduces
-// identifiers no shallower probe has seen, and extending this to three
-// would only move the boundary (bd gqlc-wdo7). What closes it is a
-// different measurement, not a deeper one —
+// One casualty is named rather than hidden: depth 2 was the first depth
+// reaching render_models.go's writeSliceNarrow recursive arm, and no
+// stored property can reach it now. That arm is unreachable-by-
+// construction on this backend and its deletion is gqlc-52w8l, not this
+// bead. The recursive decode a nested list gets as a QUERY VALUE is a
+// different emitter binding a different local family (render_queries.go,
+// inner<n>/innerAcc<n>), so nothing here witnesses it and this comment
+// does not claim it does.
+//
+// No depth finished the job on its own even before the ruling: that walk
+// names its locals off the recursion depth, so each further level
+// introduces identifiers no shallower probe has seen (bd gqlc-wdo7).
+// What closes it is a different measurement, not a deeper one —
 // TestDecoderLocalFamiliesAreClosedUnderDepth holds the *families* the
 // emitter draws from rather than the set one probe happens to observe.
 // This width table is what the per-width sweeps below read; the closure
 // test builds its own narrow schema.
 func decoderProbeWidths() []decoderProbeWidth {
-	out := make([]decoderProbeWidth, 0, 3*len(decoderProbeScalars))
+	out := make([]decoderProbeWidth, 0, 2*len(decoderProbeScalars))
 	for _, w := range decoderProbeScalars {
 		list := decoderProbeWidth{pt: graph.ListOf(w.pt, false), spelling: "LIST<" + w.spelling + ">"}
-		nested := decoderProbeWidth{pt: graph.ListOf(list.pt, false), spelling: "LIST<" + list.spelling + ">"}
-		out = append(out, w, list, nested)
+		out = append(out, w, list)
 	}
 	return out
 }
@@ -216,22 +228,35 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 				"schema writes it as", name, pt)
 	}
 
-	// The recursive arm of the emitted walk is reached only by a width
-	// whose element is itself a list. Counted off the widths rather than
-	// off the emission because the scope sweep compares an emission
-	// against its own reference: dropping the arm takes the locals out of
-	// both sides at once and neither side notices. Each entity's struct,
-	// its fields and its decode helper are held against the parsed schema
-	// by TestEveryElementTypeGetsItsOwnDecodeArm; the locals a decode arm
-	// binds are not, and stay inside that silence.
-	nested := 0
-	for pt := range covered {
-		if pt.Kind() == graph.KindList && pt.Elem().Kind() == graph.KindList {
-			nested++
-		}
+	// The probe declares no width whose element is itself a list, and
+	// this is the assertion that says WHY. Before ADR 0035 the claim here
+	// was the opposite — require.Positive on the count of nested widths,
+	// because depth 2 was the first depth reaching the emitted walk's
+	// recursive arm. The ruling makes such a property undeclarable on
+	// this backend, so that obligation is replaced by its dual rather
+	// than deleted: for every scalar the probe covers, the doubly-nested
+	// width must be REFUSED by the storage axis.
+	//
+	// Stated per scalar rather than as one aggregate count. An aggregate
+	// ("at least one nested width is refused") is satisfied by a single
+	// scalar and would stay green if the refusal came to depend on the
+	// leaf type — which is exactly the over-narrow check
+	// TestStorablePropertyRefusesANestedList's rows exist to catch, and a
+	// count here would let this test vouch for it anyway.
+	//
+	// The absence itself is also asserted, in the same loop: a nested
+	// width that WERE declared would be refused at generation and the
+	// whole probe schema would fail to parse, so the two halves cannot
+	// both be true by accident.
+	for _, w := range decoderProbeScalars {
+		nested := graph.ListOf(graph.ListOf(w.pt, false), false)
+		require.False(t, neo4j.TypeMap{}.StorableProperty(nested),
+			"%s is not refused by the storage axis, so a probe entity could declare it as a stored "+
+				"property and the level decoderProbeWidths stops at is a gap rather than a consequence "+
+				"of ADR 0035", nested)
+		require.False(t, covered[nested],
+			"the probe declares %s, which this backend refuses as a stored property (ADR 0035)", nested)
 	}
-	require.Positive(t, nested,
-		"no probe width nests the list constructor, so the walk's recursive arm is unreached")
 }
 
 // graphPropertyTypes reads internal/graph's normalised property types
@@ -624,11 +649,29 @@ func (s *DecoderSuite) TestNoDecoderLocalTakesAPropertyName() {
 }
 
 // closureProbeDepth is how deep the closure probe nests the list
-// constructor. Three is one level past decoderProbeWidths, which is
-// enough for a stem to be observed at three suffixes (elem0, elem1,
-// elem2) and so for "the suffix is the recursion depth" to be a reading
-// of the emission rather than of two points.
-const closureProbeDepth = 3
+// constructor. ONE, and the ceiling is the server's rather than this
+// file's: under ADR 0035 a stored property may not be a list of lists,
+// so a probe schema nesting deeper is refused at generation and cannot
+// be emitted at all. It was three before that ruling.
+//
+// WHAT THAT COSTS, said plainly rather than left for a reader to
+// discover. The test below used to compare the emissions at depth 2 and
+// depth 3 and require the same set of stems, which is how it read "the
+// suffix is the recursion depth" off three observed suffixes rather than
+// off two points. No such comparison is constructible now: one depth is
+// declarable, so there is no ladder. The SUFFIX half — the closure sweep
+// that refuses `<stem><m>` as a property name for every m past any
+// suffix the emission reaches — is untouched and is the half that
+// carries the claim, because it never depended on the emission reaching
+// depth m (bd gqlc-wdo7).
+//
+// The lost half was guarding render_models.go's writeSliceNarrow
+// recursive arm, which the same ruling makes unreachable by
+// construction; gqlc-52w8l deletes it. A nested list arriving as a QUERY
+// VALUE still emits a recursive decode, from render_queries.go binding
+// inner<n>/innerAcc<n>/elem<n> — a family this suite does not sweep and
+// has never swept, since it reads models.go alone.
+const closureProbeDepth = 1
 
 // closureProbeFill is how many properties each entity in the closure
 // probe declares. The positional locals (value0, value1, …) are indexed
@@ -693,15 +736,16 @@ func closureProbeSchema(prop string, maxDepth int) string {
 // than the probe emits five identifiers no sweep has ever seen, and a
 // property named after any of them collides undetected (bd gqlc-wdo7).
 //
-// This holds the families instead, in two halves.
+// This holds the families instead. It had two halves; ADR 0035 leaves
+// one, and closureProbeDepth records which and why.
 //
-// The stem half: emitting at each depth from the first that reaches the
-// recursive arm up to closureProbeDepth must yield the same set of
-// stems. A depth that introduced a stem no shallower one carries would
-// be a family this file has not enumerated, and the candidate half
-// below would not be probing it.
+// The stem half is GONE, not quietly dropped: it emitted at each depth
+// from the first reaching the recursive arm up to closureProbeDepth and
+// required the same set of stems, and no such ladder can be built out of
+// stored properties now that a list of lists is not one.
 //
-// The suffix half: for every stem observed with a numeric suffix, a
+// The suffix half, which is the one carrying the claim: for every stem
+// observed with a numeric suffix, a
 // property named `<stem><m>` — for every m in a range past any suffix
 // the emission reaches — must leave the decoders' scope exactly where
 // it was. That is the closure. It does not depend on the emission ever
@@ -709,31 +753,26 @@ func closureProbeSchema(prop string, maxDepth int) string {
 // refused as a property name today, so the day a user's schema nests
 // seven deep and the emitter binds it, nothing collides.
 func (s *DecoderSuite) TestDecoderLocalFamiliesAreClosedUnderDepth() {
-	scopes := make(map[int][]string)
-	stems := make(map[int][]string)
-	for depth := 2; depth <= closureProbeDepth; depth++ {
-		models, err := s.emitClosureModels(unclaimedProperty, depth)
-		s.Require().NoError(err)
-		scopes[depth] = s.decoderScopeOf(models)
-		s.Require().NotEmpty(scopes[depth], "the emitted decoders bind no identifiers to check at depth %d", depth)
-		stems[depth] = suffixedStems(scopes[depth])
-		s.Require().NotEmpty(stems[depth],
-			"no identifier the decoders bind at depth %d carries a numeric suffix, so there is no family here "+
-				"to close and the candidate sweep below would run over nothing", depth)
-	}
-	for depth := 3; depth <= closureProbeDepth; depth++ {
-		s.Require().Equal(stems[2], stems[depth],
-			"nesting the list constructor %d deep rather than 2 changes which families of local the decoders "+
-				"bind. A stem only the deeper emission carries is one the closure sweep below never probes, so "+
-				"a property named after it would collide; a stem only the shallower one carries means the "+
-				"suffix is not the recursion depth after all", depth)
-	}
+	// One emission, at the deepest nesting a stored property may take.
+	// The cross-depth stem comparison this test used to open with is
+	// unconstructible under ADR 0035 — closureProbeDepth says why — so
+	// what follows is the suffix half alone.
+	models, err := s.emitClosureModels(unclaimedProperty, closureProbeDepth)
+	s.Require().NoError(err)
+	reference := s.decoderScopeOf(models)
+	s.Require().NotEmpty(reference, "the emitted decoders bind no identifiers to check")
 
-	// The deepest emission is the reference: it is the one whose scope
-	// holds the highest suffix of every family, so a candidate that
-	// slipped into it would move the comparison.
-	reference := scopes[closureProbeDepth]
-	for _, stem := range stems[closureProbeDepth] {
+	// Asserted rather than assumed, and this is load-bearing now that
+	// there is no ladder above it: with a single emission, an empty stem
+	// set would run the whole sweep below over nothing and report a
+	// closure it never probed. The vacuous pass is the failure mode a
+	// retired ladder invites.
+	stems := suffixedStems(reference)
+	s.Require().NotEmpty(stems,
+		"no identifier the decoders bind carries a numeric suffix, so there is no family here to close "+
+			"and the candidate sweep below would run over nothing")
+
+	for _, stem := range stems {
 		for m := range closureProbeFill {
 			name := fmt.Sprintf("%s%d", stem, m)
 			s.Run(name, func() {

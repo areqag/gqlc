@@ -304,6 +304,9 @@ func collectTypeMapGoTypes(t *testing.T, fset *token.FileSet, file *ast.File, by
 		if !ok || fn.Body == nil || !isTypeMapMethod(fn) {
 			continue
 		}
+		if !namesAGoType(t, fset, fn) {
+			continue
+		}
 		if _, dup := byMethod[fn.Name.Name]; !dup {
 			byMethod[fn.Name.Name] = nil
 		}
@@ -359,8 +362,52 @@ func returnedGoType(t *testing.T, fset *token.FileSet, method string, ret *ast.R
 	}
 }
 
-// isTypeMapMethod reports whether a declaration is a method on typeMap,
-// which is the whole of the backend's Go-type table.
+// namesAGoType reports whether a typeMap method is one of the carrier
+// methods this walk reads — the ones answering the CARRIER question with
+// Go type text — as opposed to StorableProperty, which answers the
+// storage question with a bool and names no Go type (ADR 0035).
+//
+// Told apart by the declared result shape rather than by method name. A
+// name list would go stale silently the next time the table grows, which
+// is the failure this walk's own refusal exists to prevent; the shape is
+// read off the same AST as everything else here.
+//
+// Exactly two shapes are recognised and a third is REFUSED, not skipped.
+// Skipping an unrecognised shape is how a carrier method would leave the
+// census unnoticed and take its Go types with it — the walk would then
+// report an arm census over a table it had silently narrowed.
+func namesAGoType(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl) bool {
+	t.Helper()
+
+	results := fn.Type.Results
+	require.NotNil(t, results, "typeMap method %s returns nothing, so it is neither a carrier nor a predicate", fn.Name.Name)
+	require.NotEmpty(t, results.List, "typeMap method %s returns nothing, so it is neither a carrier nor a predicate", fn.Name.Name)
+
+	first, ok := results.List[0].Type.(*ast.Ident)
+	require.True(t, ok,
+		"typeMap method %s at %s returns %s first, and this walk knows only `string` (a carrier) and "+
+			"`bool` (the storage predicate); a third shape is refused rather than skipped, because "+
+			"skipping one would drop a carrier method out of the arm census in silence",
+		fn.Name.Name, fset.Position(fn.Pos()), types.ExprString(results.List[0].Type))
+
+	switch first.Name {
+	case "string":
+		return true
+	case "bool":
+		return false
+	}
+	require.Fail(t, "unreadable result in the type table",
+		"typeMap method %s at %s returns %s first, and this walk knows only `string` (a carrier) and "+
+			"`bool` (the storage predicate); a third shape is refused rather than skipped, because "+
+			"skipping one would drop a carrier method out of the arm census in silence",
+		fn.Name.Name, fset.Position(fn.Pos()), first.Name)
+	return false
+}
+
+// isTypeMapMethod reports whether a declaration is a method on typeMap.
+// Not every one is part of the Go-type table — namesAGoType is what
+// separates the carrier methods from StorableProperty's storage
+// predicate.
 func isTypeMapMethod(fn *ast.FuncDecl) bool {
 	if fn.Recv == nil || len(fn.Recv.List) != 1 {
 		return false
