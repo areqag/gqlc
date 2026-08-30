@@ -11,10 +11,34 @@
 # dead dispatcher is delivered by the thing that is dead, and would sit unread
 # for exactly as long as the fault it reports. `km wake` writes the seat's wake
 # file, which the parked km-seat reads on its own, with no dispatcher involved.
+#
+# `km wake` is still tried FIRST, and the append below is a fallback, because
+# km wake carries two things a bare append cannot: it respawns a missing runner
+# (nothing parked on the queue means nobody reads it), and it nudges a seat that
+# is already awake. Those matter in the failure class actually observed —
+# gqlc-87al, a logic abort inside a km that runs fine — so they are not spent to
+# buy the class below.
+#
+# But km wake rides @REPO@/kingdom/bin/km, which is the binary and checkout
+# whose failure this unit announces. Measured out-of-tree against a scratch
+# systemd --user (bd gqlc-leq7): with an unparseable km, and with km absent
+# altogether, the dispatch tick failed, OnFailure fired, and the alarm failed by
+# the same cause with nothing reaching Սեդրակ. The wake FILE is the half of
+# km wake that needs no km — one deduplicated line appended to a path the parked
+# km-seat reads on its own — so on any non-zero exit this appends it directly.
+# That covers a km that cannot start, an unreadable kingdom.toml, and a checkout
+# broken mid-operation. It does NOT cover a full or read-only filesystem, where
+# the append fails too and the alarm goes quiet again; nothing one level up here
+# would survive that either.
 [Unit]
 Description=Kingdom dispatch alarm — wake Սեդրակ when a dispatch tick fails
 
 [Service]
 Type=oneshot
 WorkingDirectory=@REPO@
-ExecStart=@REPO@/kingdom/bin/km wake sedrak --reason "kingdom-dispatch.service FAILED — the town is not routing. Read 'journalctl --user -u kingdom-dispatch.service -n 50' before anything else; a failing tick is a town-wide outage, not one seat's problem."
+# The reason is passed as "$1" rather than written into the script, so that its
+# own apostrophes stay inside a systemd double-quoted token and never reach the
+# shell as quotes. `echo`, not `printf '%s\n'`: systemd unescapes backslashes in
+# this value, so a format string here is one escaping level away from being read
+# as a literal newline.
+ExecStart=/bin/sh -c 'd=@STATE@/seats/sedrak; @REPO@/kingdom/bin/km wake sedrak --reason "$1" && exit 0; r="$1 ALSO: km wake exited non-zero, so this line was appended by kingdom-dispatch-alarm.service itself — km may be the fault, not just its caller."; mkdir -p "$d" || exit 1; grep -Fxq -- "$r" "$d/wake" 2>/dev/null || echo "$r" >>"$d/wake"' sh "kingdom-dispatch.service FAILED — the town is not routing. Read 'journalctl --user -u kingdom-dispatch.service -n 50' before anything else; a failing tick is a town-wide outage, not one seat's problem."

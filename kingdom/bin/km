@@ -5201,7 +5201,11 @@ cmd_seat_refresh() {
 }
 
 render_unit() { # <src> <dst>
+    # @STATE@ is resolved here, at install time, for the same reason @REPO@ is:
+    # the alarm unit's fallback append must reach the wake file without running
+    # km, so it cannot ask km where the state dir is (bd gqlc-leq7).
     sed -e "s|@REPO@|$(main_root)|g" \
+        -e "s|@STATE@|$(state_dir)|g" \
         -e "s|@DISPATCH_MIN@|$(cfg cadence dispatch_minutes)|g" \
         -e "s|@GUARD_MIN@|$(cfg cadence guard_minutes)|g" \
         "$1" >"$2"
