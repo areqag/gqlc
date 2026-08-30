@@ -44,7 +44,8 @@
 # shares this repository — refs and local config are shared, so a neighbour
 # committing in their own tree during the window is indistinguishable from
 # damage here (bd gqlc-06y9, where advisory was ruled the interim). It is true
-# where this repository has no sharers, which is what seats became in gqlc-w5bh.
+# where this repository has no sharers, which is what a seat becomes under
+# gqlc-w5bh — one seat at a time, so the roster is mixed while that runs.
 # So: sharers -> advisory, sole worktree -> strict. Each seat turns strict at
 # its first post-conversion push, with no flag day and nothing to coordinate.
 #
