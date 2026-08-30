@@ -567,9 +567,17 @@ herdr_server_up() {
 # gqlc-jvlu): every key read here is present today, so the rc is about the
 # NEXT shape change, not this one.
 #
-# The diagnosis is on stderr because nothing else carries it: the parse's own
-# traceback is discarded by the `2>/dev/null` that keeps a python stack trace
-# out of an operator's console.
+# The diagnosis is on stderr because nothing else carries it. Two redirects
+# stood on each of these reads and only one of them belonged: python's, which
+# keeps a stack trace out of an operator's console, and herdr's, which threw
+# away the sole account of the failure that exists (gqlc-v152q). Herdr's is
+# gone, so the four messages below can name which of their two hypotheses it
+# was instead of listing both: measured 2026-08-30 against herdr 0.6.10,
+# `workspace list`, `tab list`, `pane list` and `pane get` each write 0 bytes
+# of stderr when they succeed and a JSON error object with a `code` and a
+# `message` when they fail, so herdr's silence above such a message is itself
+# the evidence that herdr answered and the PAYLOAD is what km could not read.
+# `$( )` captures stdout only, so herdr's stderr cannot reach the parse.
 
 # The workspace exists as long as the town has been raised at least once and
 # not torn down. Lookup by label; herdr assigns numeric IDs we don't hold.
@@ -579,9 +587,9 @@ workspace_id() { # -> id on stdout; rc 0 + empty = absent, rc 1 = unreadable
     # `unreadable` (below) on a machine that simply has no herdr, such as CI.
     have_herdr || { echo ""; return 0; }
     local out
-    out=$(herdr workspace list 2>/dev/null |
+    out=$(herdr workspace list |
         python3 -c "import json,sys; d=json.load(sys.stdin); print(next((w['workspace_id'] for w in d['result']['workspaces'] if w['label']==sys.argv[1]),''))" "$WORKSPACE" 2>/dev/null) || {
-        echo "km: cannot read the workspace list from herdr — server unreachable, or its payload no longer carries result.workspaces[].workspace_id/label. Not answering 'absent', because absent authorizes creating a second workspace under this label." >&2
+        echo "km: cannot read the workspace list from herdr. If herdr wrote a reason above this line, that is the cause. If it wrote nothing, herdr answered and its payload no longer carries result.workspaces[].workspace_id/label. Not answering 'absent', because absent authorizes creating a second workspace under this label." >&2
         return 1
     }
     printf '%s\n' "$out"
@@ -620,9 +628,9 @@ seat_tab_id() { # <seat> -> tab_id on stdout; rc 0 + empty = absent, rc 1 = unre
     # not an unreadable one. `km up` creates the workspace and the tabs in one
     # pass, and seat_runner_start's caller has already refused on the empty ws.
     [ -n "$ws" ] || { echo ""; return 0; }
-    out=$(herdr tab list --workspace "$ws" 2>/dev/null |
+    out=$(herdr tab list --workspace "$ws" |
         python3 -c "import json,sys; d=json.load(sys.stdin); print(next((t['tab_id'] for t in d['result']['tabs'] if t.get('label','')==sys.argv[1]),''))" "$1" 2>/dev/null) || {
-        echo "km: seat $1: cannot read the tab list from herdr (workspace $ws) — server unreachable, or its payload no longer carries result.tabs[].tab_id/label. Not answering 'absent', because absent authorizes creating a tab." >&2
+        echo "km: seat $1: cannot read the tab list from herdr (workspace $ws). If herdr wrote a reason above this line, that is the cause. If it wrote nothing, herdr answered and its payload no longer carries result.tabs[].tab_id/label. Not answering 'absent', because absent authorizes creating a tab." >&2
         return 1
     }
     printf '%s\n' "$out"
@@ -637,9 +645,9 @@ seat_pane_id() { # <seat> -> pane_id on stdout; rc 0 + empty = absent, rc 1 = un
     # to fix by creating the tab — not a read that failed.
     [ -n "$tab" ] || { echo ""; return 0; }
     ws=$(workspace_id) || return 1
-    out=$(herdr pane list --workspace "$ws" 2>/dev/null |
+    out=$(herdr pane list --workspace "$ws" |
         python3 -c "import json,sys; d=json.load(sys.stdin); print(next((p['pane_id'] for p in d['result']['panes'] if p.get('tab_id')==sys.argv[1]),''))" "$tab" 2>/dev/null) || {
-        echo "km: seat $1: cannot read the pane list from herdr (workspace $ws, tab $tab) — server unreachable, or its payload no longer carries result.panes[].pane_id/tab_id." >&2
+        echo "km: seat $1: cannot read the pane list from herdr (workspace $ws, tab $tab). If herdr wrote a reason above this line, that is the cause. If it wrote nothing, herdr answered and its payload no longer carries result.panes[].pane_id/tab_id." >&2
         return 1
     }
     printf '%s\n' "$out"
@@ -686,9 +694,9 @@ seat_agent_status() { # <seat> -> idle|working|blocked|done|unknown|unreadable
     # An absent pane is not an unreadable one: there is no session because
     # there is nowhere for one to be, and seat_runner_start makes the pane.
     [ -n "$pane" ] || { echo unknown; return 0; }
-    status=$(herdr pane get "$pane" 2>/dev/null |
+    status=$(herdr pane get "$pane" |
         python3 -c "import json,sys; print(json.load(sys.stdin)['result']['pane']['agent_status'])" 2>/dev/null) || {
-        echo "km: seat $1: cannot read agent_status from herdr (pane $pane) — server unreachable, or its payload no longer carries result.pane.agent_status. Treating the seat as occupied." >&2
+        echo "km: seat $1: cannot read agent_status from herdr (pane $pane). If herdr wrote a reason above this line, that is the cause. If it wrote nothing, herdr answered and its payload no longer carries result.pane.agent_status. Treating the seat as occupied." >&2
         echo unreadable
         return 0
     }
