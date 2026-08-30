@@ -1089,8 +1089,15 @@ seat_box_text() { # <pane> -> 0 read it, 1 the buffer holds no box, 2 unreadable
         echo "km: cannot read pane $1: ${buf:-herdr gave no diagnosis on either stream}" >&2
         return 2
     }
+    # A rule is bare OR carries the tab label km writes in seat_runner_start,
+    # which renders inside the box's TOP edge: `─── Աստղիկ ──`. Matching only
+    # the bare form found one edge on every seat in the town and none of the
+    # region between them (gqlc-6re91). The optional group is anchored at both
+    # ends so a line that merely CONTAINS a rule run is not an edge: a spurious
+    # edge shrinks the region, and a region that reads empty when it is not is
+    # what makes send_line type onto a citizen's draft.
     printf '%s\n' "$buf" | awk '
-        /^─+$/ { edge[++n] = NR }
+        /^─+( .* ─+)?$/ { edge[++n] = NR }
         { line[NR] = $0 }
         END {
             if (n < 2) exit 1
