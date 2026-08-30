@@ -2488,7 +2488,7 @@ test-codegen-live-neo4j:
 
 # the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
 # the dialect fact the AGE backend's edge-union refusal rests on, the offset
-# sidecar's two live branches, and the two constructs AGE refuses that no gap
+# sidecar's two live branches, and the one construct AGE refuses that no gap
 # acts on yet — each on its own apache/age
 # container. Nightly and manual only — these containers are cost this project
 # does not charge to a pull request. -count=1 because this is the AGE arm's only
