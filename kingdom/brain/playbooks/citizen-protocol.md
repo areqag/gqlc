@@ -408,7 +408,13 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    `gqlc-9vzmw`, which holds the disposition). Until that changes, your green
    checks remain a claim about your PR's own base and not about the merge
    result — so a PR whose green predates a conflicting merge can still land
-   red on master (bd `gqlc-hpa1`). That defect is open, not solved.
+   red on master. Nothing in the town prevents that today, and three landed
+   instances are on record: PR #1720; #1748+#1679, thirteen minutes apart; and
+   #1797+#1859, five minutes apart. bd `gqlc-hpa1` is the best description of
+   the mechanism, but **do not read its CLOSED status as the defect being
+   solved** — it closed on a bare reason, its title names one file, and its own
+   description says it is "not a claim that `live_test.go` is the only file with
+   the shape".
 9. File freely, and label what you file. A defect you find while working a
    bead, whose fix is not that bead's work, gets its own bead and your own
    `class:` label — you need nobody's permission for either, and a branch
