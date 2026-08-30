@@ -281,7 +281,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		b.WriteString("\t\t}\n")
 		switch {
 		case isSliceType(f.GoType):
-			writeSliceNarrow(b, e, f, f.GoType, "s", "narrowed", "\t\t")
+			writeSliceNarrow(b, e, f, f.GoType, "s", "narrowed", "\t\t", 0)
 			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
 		case carrier != f.GoType:
 			fmt.Fprintf(b, "\t\tnarrowed := %s\n", narrowExpr(f.GoType, "s"))
@@ -300,7 +300,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	switch {
 	case isSliceType(f.GoType):
 		narrowed := value + "s"
-		writeSliceNarrow(b, e, f, f.GoType, value, narrowed, "\t")
+		writeSliceNarrow(b, e, f, f.GoType, value, narrowed, "\t", 0)
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowed)
 	case carrier != f.GoType:
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowExpr(f.GoType, value))
@@ -374,39 +374,51 @@ func ridesADriverCarrier(goType string) bool {
 // []byte and []any and nothing else with a slice shape, and the hydrator
 // builds every non-byte array as []any whatever the elements turned out
 // to be, so a LIST<STRING> property arrives as []any of string and the
-// []string the caller reads is this package's to build.
+// []string the caller reads is this package's to build. Recursion handles
+// a list of lists, which arrives as []any of []any.
 //
-// elem is never itself a slice, so there is no recursion: Phase Z's
-// StorableProperty sweep refuses a nested-list stored property before an
-// EntityField carrying one can exist (ADR 0035). A nested list reaching
-// this backend as a QUERY VALUE still emits a recursive decode, from
-// render_queries.go and under its own local family — a different emitter,
-// so neither path witnesses the other.
+// That recursive arm is now unreachable on this backend. It runs only for
+// a declared STORED PROPERTY nesting two lists deep, and ADR 0035 refuses
+// such a declaration at generation with ErrUnstorableProperty, the neo4j
+// server having no way to hold one. The arm is dead but present here;
+// gqlc-52w8l deletes it. It is not dead code in general: a nested list
+// arriving as a QUERY VALUE is served by neo4j and still decoded, by
+// render_queries.go, which walks it with its own local family
+// (inner<n>/innerAcc<n>) rather than reaching this function.
 //
-// Locals are named after nothing in the schema, so a property whose name
-// collides with one of them cannot emit a redeclaration. They keep the 0
-// suffix the depth counter used to supply: it is what makes them unlike a
-// mangled property name, and dropping it would regold every neo4j model
-// carrying a list property to no purpose.
-func writeSliceNarrow(b *strings.Builder, e codegen.Entity, f codegen.EntityField, sliceType, src, dst, indent string) {
+// Locals are suffixed by depth rather than named after anything in the
+// schema, so a property whose name collides with one of them cannot emit
+// a redeclaration.
+func writeSliceNarrow(b *strings.Builder, e codegen.Entity, f codegen.EntityField, sliceType, src, dst, indent string, depth int) {
 	elem := strings.TrimPrefix(sliceType, "[]")
-	item := "elem0"
-	idx := "i0"
-	val := "v0"
+	item := fmt.Sprintf("elem%d", depth)
+	idx := fmt.Sprintf("i%d", depth)
 	fail := fmt.Sprintf("return %s{}, fmt.Errorf(\"decode %s.%s: property %%q", e.Name, e.Name, f.Field)
 
 	fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, dst, sliceType, src)
 	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, idx, item, src)
 	body := indent + "\t"
+	if isSliceType(elem) {
+		inner := fmt.Sprintf("nested%d", depth)
+		acc := fmt.Sprintf("acc%d", depth)
+		fmt.Fprintf(b, "%s%s, ok := %s.([]any)\n", body, inner, item)
+		fmt.Fprintf(b, "%sif !ok {\n", body)
+		fmt.Fprintf(b, "%s\t%s element %%d: expected []any, got %%T\", %q, %s, %s)\n", body, fail, f.PropName, idx, item)
+		fmt.Fprintf(b, "%s}\n", body)
+		writeSliceNarrow(b, e, f, elem, inner, acc, body, depth+1)
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, acc)
+		fmt.Fprintf(b, "%s}\n", indent)
+		return
+	}
 	carrier := driverCarrier(elem)
-	fmt.Fprintf(b, "%s%s, ok := %s.(%s)\n", body, val, item, carrier)
+	fmt.Fprintf(b, "%sv%d, ok := %s.(%s)\n", body, depth, item, carrier)
 	fmt.Fprintf(b, "%sif !ok {\n", body)
 	fmt.Fprintf(b, "%s\t%s element %%d: expected %s, got %%T\", %q, %s, %s)\n", body, fail, carrier, f.PropName, idx, item)
 	fmt.Fprintf(b, "%s}\n", body)
 	if carrier != elem {
-		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, narrowExpr(elem, val))
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, narrowExpr(elem, fmt.Sprintf("v%d", depth)))
 	} else {
-		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, val)
+		fmt.Fprintf(b, "%s%s = append(%s, v%d)\n", body, dst, dst, depth)
 	}
 	fmt.Fprintf(b, "%s}\n", indent)
 }
