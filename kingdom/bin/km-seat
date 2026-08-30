@@ -19,7 +19,12 @@ SELF="$SCRIPT_DIR/$(basename -- "${BASH_SOURCE[0]}")"
 # landing in the same second as a respawn is invisible to it, and content also
 # answers "no change" correctly when a deploy puts back what was already there.
 # See the re-exec at the top of the loop (bd gqlc-s67rz).
-self_sum=$(sha256sum "$SELF" 2>/dev/null | cut -d' ' -f1)
+#
+# `|| self_sum=""` is load-bearing under `set -euo pipefail`: a failed read makes
+# the pipeline non-zero, `cut` exiting 0 does not mask it, the bare assignment
+# carries that status, and set -e would end this process before anything could
+# read the variable (bd gqlc-r6fdz).
+self_sum=$(sha256sum "$SELF" 2>/dev/null | cut -d' ' -f1) || self_sum=""
 
 seat=${1:-}
 [ -n "$seat" ] || { echo "km-seat: which seat?" >&2; exit 1; }
@@ -159,8 +164,15 @@ while :; do
     # alive, and the wake is still delivered. Nothing is remembered across the
     # refusal, so repairing the file is all that is needed to recover. An empty
     # hash is a third answer, "we could not look": that is what this file looks
-    # like for an instant while a deploy replaces it.
-    now_sum=$(sha256sum "$SELF" 2>/dev/null | cut -d' ' -f1)
+    # like for an instant while a deploy replaces it, since `git merge --ff-only`
+    # unlinks a changed tracked file before creating it.
+    #
+    # `|| now_sum=""` is what makes that third answer reachable. Without it the
+    # failed read is a failed pipeline under `set -euo pipefail`, the assignment
+    # carries that status, and set -e ends the runner one line ABOVE the guard
+    # that was written to handle it — the seat dying in the deploy window that
+    # this stanza exists to survive (bd gqlc-r6fdz).
+    now_sum=$(sha256sum "$SELF" 2>/dev/null | cut -d' ' -f1) || now_sum=""
     if [ -n "$now_sum" ] && [ "$now_sum" != "$self_sum" ]; then
         if [ -x "$SELF" ] && bash -n "$SELF" 2>/dev/null; then
             exec "$SELF" "$seat"
