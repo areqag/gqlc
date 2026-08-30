@@ -488,6 +488,21 @@ for n, (state, _, _) in sorted(gh.items()):
 if len(issues) >= int(sys.argv[3]):
     out.append(f"TRUNCATED {len(issues)}")
 
+# The same failure at the other end of the range, where the test above cannot
+# reach it: zero is below every bound, so a listing that came back empty emits
+# no TRUNCATED record. Nothing else downstream notices either — every mirrored
+# bead lands on `not-in-listing`, which is a hold and not a disagreement.
+#
+# The bound is the discriminator, and the probe has already paid for it. It is
+# GitHub's own newest ISSUE number (`gh issue list`, so a repository whose only
+# numbers are pull requests still probes 1), which makes a bound above 1 and a
+# listing of zero two claims about one repository that cannot both hold. A
+# bound of exactly 1 is the `// 1` the probe substitutes for an empty
+# repository, and that shape must keep passing: it is the bootstrap run that is
+# about to create the very first mirror.
+if not issues and int(sys.argv[3]) > 1:
+    out.append(f"EMPTYLISTING {sys.argv[3]}")
+
 # How many beads the selection actually walked. "Nothing was held back" and "the
 # list this ran on was empty" emit the same zero HOLD records, and only the
 # first is a measurement. The ORPHAN tally rides on the same list — an issue is
@@ -565,6 +580,28 @@ PYEOF
       echo "bd-gh-sync: were never compared. A clean verdict here would be a claim about" >&2
       echo "bd-gh-sync: a corpus this run never read." >&2
       echo "bd-gh-sync: DRIFT CHECK FAILED — the GitHub listing was truncated." >&2
+      exit 1
+    fi
+    # And the other end of that range, which the record above cannot carry
+    # because zero is below every bound. Measured 2026-08-30 before this arm
+    # existed: with the listing shimmed to answer as an empty repository and the
+    # bound probe answering 1152, drift reported `no durable drift over 1167
+    # bead(s)` and exit 0 — a clean verdict over a comparison that never
+    # happened, which is the same failure the truncation arm above was written
+    # for (bd gqlc-hm4qc).
+    #
+    # This arm is the gate's alone, and the record is emitted for it alone. The
+    # pull must go on tolerating an empty listing: a bead it cannot find lands
+    # on `HOLD ... not-in-listing` and is left exactly as it was, so reading
+    # nothing costs a pull nothing. A gate has no hold to fall back on — its
+    # exit status is the whole answer — so the two arms want opposite answers to
+    # one record, and only the gate refuses.
+    if grep -q '^EMPTYLISTING ' "$_tmp/plan.txt"; then
+      echo "bd-gh-sync: GitHub says its newest issue number is ${_gh_limit_all}, and then listed" >&2
+      echo "bd-gh-sync: no issues at all. Those cannot both be true of this repository, so" >&2
+      echo "bd-gh-sync: the listing failed open rather than finding nothing, and every bead" >&2
+      echo "bd-gh-sync: was compared against an empty set." >&2
+      echo "bd-gh-sync: DRIFT CHECK FAILED — the GitHub listing came back empty." >&2
       exit 1
     fi
     if [ "$_drift_n" -eq 0 ]; then
