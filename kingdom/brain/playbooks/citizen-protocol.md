@@ -394,16 +394,21 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    `km doctor`'s ADR 0009 row greps closed `class:judge` beads for `conditio`,
    so the disclaimer rings the detector it was meant to satisfy.
 
-   **Merging is now enqueueing** (ADR 0010). `gh pr merge <N> --squash` adds
-   the PR to the merge queue; GitHub tests master + your PR together and lands
-   it, normally within about five minutes. **Never pass `--admin`**: it
-   bypasses the queue exactly as `--no-verify` bypasses a hook (Article IV.4's
-   spirit). After enqueueing, poll `gh pr view <N> --json state` until it reads
-   `MERGED` before closing the bead citing the merged SHA — poll the PR's
-   state, not a check's conclusion. If the queue kicks your PR, the failing
-   check on the merge group is naming a semantic conflict with something that
-   merged after your base: rebase, fix, re-enqueue. That kick is this control
-   working — the red that used to land on master now lands on you.
+   `gh pr merge <N> --squash` merges immediately and directly. **Never pass
+   `--admin`**: it lands a PR over the branch protections rather than through
+   them, which is `--no-verify` at a different layer (Article IV.4's spirit).
+   Then poll `gh pr view <N> --json state` until it reads `MERGED` before
+   closing the bead citing the merged SHA — poll the PR's state, not a check's
+   conclusion, which reads as done while the run is still going.
+
+   **There is no merge queue, and ADR 0010 describes one.** The ADR was
+   accepted and its stage A merged, but GitHub refuses the ruleset
+   `merge_queue` rule type here: merge queues require an ORGANISATION-owned
+   repository, and `areqag/gqlc` is owned by a user (measured 2026-08-30, bd
+   `gqlc-9vzmw`, which holds the disposition). Until that changes, your green
+   checks remain a claim about your PR's own base and not about the merge
+   result — so a PR whose green predates a conflicting merge can still land
+   red on master (bd `gqlc-hpa1`). That defect is open, not solved.
 9. File freely, and label what you file. A defect you find while working a
    bead, whose fix is not that bead's work, gets its own bead and your own
    `class:` label — you need nobody's permission for either, and a branch
