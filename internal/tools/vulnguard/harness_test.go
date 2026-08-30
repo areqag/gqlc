@@ -42,6 +42,28 @@ const (
 
 	// stubModule is the throwaway root module's path.
 	stubModule = "gqlc.invalid/agt0"
+
+	// fixtureGoDirective is the `go` directive of every go.mod written below,
+	// and so what the derivation script reads out of the throwaway tree. The
+	// stub answers `go env GOVERSION` by reading that same file, so the recipe's
+	// pin assertion passes here when — and only when — the pin came from go.mod.
+	//
+	// It is NOT stdlibVersion. That is what the stub scan reports govulncheck
+	// PLACED on the standard library, which is a different fact from the
+	// toolchain the scan ran under, and a fixture spelling both the same way
+	// could not tell a recipe that confused them from one that did not.
+	fixtureGoDirective = "1.26.5"
+
+	// movedGoDirective is what a test rewrites the root go.mod to when it wants
+	// to witness that the pin FOLLOWS go.mod rather than merely agreeing with
+	// it once. Above the fixture's own so it cannot be reached by truncation.
+	movedGoDirective = "1.26.7"
+
+	// toolchainScript is the derivation `vuln` and setup-go share (bd
+	// gqlc-irvs). The real file is copied into the throwaway tree rather than
+	// restated here, so these runs exercise the derivation the repository
+	// actually ships.
+	toolchainScript = ".github/scripts/go-toolchain-version.sh"
 )
 
 // edit is one substitution applied to the `vuln` recipe before it is run.
@@ -193,6 +215,22 @@ scan() {
 cmd="${1:-}"
 shift || true
 
+# The recipe pins GOTOOLCHAIN from go.mod and then asserts the pin took, by
+# reading this back (bd gqlc-irvs).
+#
+# Answered by READING the tree's go.mod, not by echoing a constant. A constant
+# equal to the fixture's directive would be satisfied just as well by a recipe
+# that pinned that same version as a literal, so the derivation would go
+# unwitnessed; reading it here is what lets a test move go.mod and require the
+# recipe to follow.
+if [ "${cmd}" = "env" ]; then
+    case "${1:-}" in
+        GOVERSION) printf 'go%s\n' "$(sed -n 's/^go[[:space:]]\{1,\}//p' "${root}/go.mod" | head -n1)" ;;
+        *) die "unexpected 'go env' variable '${1:-}'" ;;
+    esac
+    exit 0
+fi
+
 if [ "${cmd}" = "run" ]; then
     pkg="${1:-}"
     shift || true
@@ -298,17 +336,27 @@ func writeTree(t *testing.T, dir, justfileSrc string, ids []string) {
 	}
 
 	write(justfile, justfileSrc, 0o600)
-	write("go.mod", "module "+stubModule+"\n\ngo 1.26.5\n", 0o600)
+	write("go.mod", "module "+stubModule+"\n\ngo "+fixtureGoDirective+"\n", 0o600)
 	write("root.go", "package agt0\n", 0o600)
 	write("test/data/"+blindDir+"/"+blindDir+".go",
 		"//go:build "+blindTag+"\n\npackage "+blindTag+"\n", 0o600)
 	write("test/data/platformtag/platformtag.go",
 		"//go:build !windows\n\npackage platformtag\n", 0o600)
-	write("test/data/codegen/go.mod", "module "+stubModule+"/codegen\n\ngo 1.26.5\n", 0o600)
+	write("test/data/codegen/go.mod",
+		"module "+stubModule+"/codegen\n\ngo "+fixtureGoDirective+"\n", 0o600)
 	write("test/data/codegen/codegen.go", "package codegen\n", 0o600)
 
-	root, err := filepath.EvalSymlinks(dir)
-	require.NoError(t, err)
+	// The real derivation, not a stand-in: the recipe pins GOTOOLCHAIN by
+	// running it, so a stand-in here would leave the shipped script unexercised
+	// by every run in this package.
+	derivation, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(toolchainScript)))
+	require.NoErrorf(t, err, "the derivation `%s` names is unreadable, so `%s` would die at 127 "+
+		"over this tree and every refusal below would be that rather than what it applied",
+		vulnRecipe, vulnRecipe)
+	write(toolchainScript, string(derivation), 0o700)
+
+	root, err2 := filepath.EvalSymlinks(dir)
+	require.NoError(t, err2)
 	quoted := make([]string, 0, len(ids))
 	for _, id := range ids {
 		quoted = append(quoted, "'"+id+"'")
@@ -321,6 +369,7 @@ func writeTree(t *testing.T, dir, justfileSrc string, ids []string) {
 		"@MODULE@", stubModule,
 		"@BLINDDIR@", blindDir,
 		"@BLINDTAG@", blindTag,
+		"@GODIRECTIVE@", fixtureGoDirective,
 	).Replace(stubGo)
 	write("bin/go", stub, 0o700)
 }
