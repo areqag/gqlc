@@ -470,6 +470,18 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    `class:` label — you need nobody's permission for either, and a branch
    should not absorb every defect it makes visible.
 
+   **A design is filed as a PAIR.** When what you file is a `class:architect`
+   bead — including when you stop under step 7 because the work outgrew its
+   bead — it is filed together with the `class:warrior` execution bead that
+   will carry the design out, blocked behind it. That holds EVEN WHEN nobody
+   can yet say what the execution is: then the execution bead is a
+   one-sentence stub, which is safe here because the dependency makes it
+   unroutable from birth. The rule, why a stub is not the never-label set, and
+   what the architect owes that stub when the design closes are in
+   `design-gate.md`, which is authoritative for the pairing. This is a pointer
+   and deliberately not a second copy — two copies of a rule is how
+   design-gate and CLAUDE.md drifted (bd `gqlc-wuax`).
+
    **Priority is what decides whether anyone is ever woken for it.** The
    dispatcher hands out P0, P1 and P2; a P3 or P4 is filed, searchable, and
    handed to nobody (the floor is `[dispatch] max_priority`, and it binds the
