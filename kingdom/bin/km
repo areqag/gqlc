@@ -3176,11 +3176,26 @@ This counter clears by itself the moment her agent leaves 'idle' — witnessed w
             echo "dispatch: the candidate documents could not be assembled; fresh pass skipped this run"
             return 0
         fi
-        if ! verdicts=$(cmd_hold_verdict <<<"$docs"); then
+        # Captured on the AND-OR rather than read from $? in the branch. Inside
+        # the then-branch of an `if !`, $? is the status of the NEGATED test,
+        # which is 0 exactly when the branch is taken — so this sentence spent
+        # its life reporting every failure as rc=0.
+        #
+        # The number is worth carrying because it discriminates. Measured
+        # 2026-08-30 against `km hold-verdict`: bad stdin exits 1, through
+        # die (km:22) inside the substitution's subshell, and cmd_hold_verdict
+        # ends in a jq program whose own status is the function's — a jq forced
+        # to exit 5 there surfaced here as 5. Its earlier `jq -e` guards do NOT
+        # surface: they are caught by an `if !` and collapse to die's 1. So 1
+        # means "km refused the input or a guard fired" and anything else is
+        # jq's own (bd gqlc-uethk).
+        local hv_rc=0
+        verdicts=$(cmd_hold_verdict <<<"$docs") || hv_rc=$?
+        if [ "$hv_rc" != 0 ]; then
             # Never fall through to routing unchecked. The resume wakes taken
             # above stand, and an operator reading this during an incident must
             # be able to trust that sentence.
-            echo "dispatch: hold-verdict failed (rc=$?); fresh pass skipped this run (the resume and owned wakes above stand)"
+            echo "dispatch: hold-verdict failed (rc=$hv_rc); fresh pass skipped this run (the resume and owned wakes above stand)"
             return 0
         fi
     fi
