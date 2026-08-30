@@ -1934,13 +1934,15 @@ fmt-check: ensure-golangci
 # a claim this repository gates rather than assumes, in
 # check-golangci-formatters-report (bd gqlc-sh4j).
 #
-# On the town's own machine one arm is red on a clean master: `just vuln`
-# refuses because this box's default Go is a distro build (`go1.27.0-X:nodwarf5`)
-# that govulncheck cannot place a stdlib version on, so it would scan the
-# largest attack surface in the binary and report nothing (bd gqlc-u91z). CI does
-# not hit it because .github/actions/setup-go exports GOTOOLCHAIN from go.mod's
-# own directive. Nothing here papers over that: the arm runs as CI runs it, the
-# refusal names its own remedy, and the gap between the two is bd gqlc-irvs.
+# Every arm here runs on a clean master. The `just vuln` arm used to be red on
+# the town's own machine, whose default Go is a distro build
+# (`go1.27.0-X:nodwarf5`) that govulncheck cannot place a stdlib version on, so
+# it scanned the largest attack surface in the binary and reported nothing (bd
+# gqlc-u91z). CI never hit that, because .github/actions/setup-go exports
+# GOTOOLCHAIN from go.mod. `just vuln` now pins the same toolchain from the same
+# derivation, so the arm runs as CI runs it in the way that was actually meant
+# (bd gqlc-irvs). The refusal it used to trip is untouched and still fires if
+# the pinned toolchain is one govulncheck cannot place either.
 gates:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -2572,6 +2574,35 @@ test-codegen-live-age:
 vuln: sweep-discovery-probes vuln-root-residual
     #!/usr/bin/env bash
     set -euo pipefail
+
+    # Scan under the toolchain go.mod names, which is what CI already does via
+    # .github/actions/setup-go. Without this the recipe was red on a clean
+    # master for every seat on a box whose default Go is a distribution build:
+    # govulncheck cannot match such a version to a released one, so it places no
+    # version on the standard library and refuse_unplaced_stdlib below fires (bd
+    # gqlc-irvs). That refusal is correct — it is the asymmetry that was the
+    # defect, a gate red by default being a gate citizens learn to ignore.
+    #
+    # The derivation is the same script setup-go reads, not a second copy; see
+    # the note in it for why that matters more than the four lines it saves.
+    GOTOOLCHAIN="go$(./.github/scripts/go-toolchain-version.sh go.mod)"
+    export GOTOOLCHAIN
+
+    # Assert the pin TOOK, rather than trusting the export. The clause above is
+    # the only thing standing between this gate and a silent stdlib-blind scan,
+    # and on a box whose default Go is already a released one an export that
+    # quietly did nothing is indistinguishable from one that worked — so
+    # refuse_unplaced_stdlib would not catch this going wrong there. Same reason
+    # setup-go asserts its own provisioning rather than reporting it.
+    ran_under="$(go env GOVERSION)"
+    if [ "${ran_under}" != "${GOTOOLCHAIN}" ]; then
+        echo "error: this recipe pinned GOTOOLCHAIN=${GOTOOLCHAIN} from go.mod, but the go" >&2
+        echo "       command reports GOVERSION=${ran_under}. The scan below would run under a" >&2
+        echo "       toolchain nobody chose, and the advisory set is toolchain-dependent (bd" >&2
+        echo "       gqlc-irvs)." >&2
+        exit 1
+    fi
+    echo "vuln: scanning under ${ran_under}, the toolchain go.mod names"
 
     # comm needs a stream, and printf on an empty string still emits one empty
     # line, which comm would read as a member. Without this a trip could be
