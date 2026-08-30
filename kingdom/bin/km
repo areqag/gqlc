@@ -1101,6 +1101,73 @@ seat_box_text() { # <pane> -> 0 read it, 1 the buffer holds no box, 2 unreadable
         }'
 }
 
+# Why a tool call has not come back, when the pane says so. MARK, never act:
+# nothing downstream consumes this word, it goes into the WEDGED line so a
+# citizen can decide whether the pane is worth twenty seconds (VI.2). The
+# recovery ladder that may act on the same states is gqlc-3evsn's, not this.
+#
+# It reports what was on the screen at the moment of the read and nothing else.
+# `visible` is the only source herdr 0.6.10 accepts — `scrollback`, `history`,
+# `full`, `buffer`, `all` and `screen` are all refused with `invalid read
+# source` (measured 2026-08-30) — so a modal answered a second before the read
+# leaves no trace here at all.
+#
+# WHICH SAMPLES THIS WAS BUILT FROM, and the limits of that:
+#   - the usage-limit wall, 14 first-hand captures across every other seat in
+#     the town on 2026-08-30, all reading `You've hit your limit · resets
+#     11:50pm (America/New_York)` over `/extra-usage to finish what you're
+#     working on.` gqlc-3evsn's earlier capture of the same wall separates the
+#     clause with a hyphen where these use `·`, which is exactly why the match
+#     is on the two fixed fragments and not on either whole line.
+#   - the consent modal, from the capture filed on gqlc-5ojel (Աստղիկ, frozen
+#     1h54m): `Dangerous rm operation ...` over `Do you want to proceed?` over
+#     `> 1. Yes  2. No`. That is one heuristic's wording; the harness's set of
+#     modals is not enumerable from outside it, so the match is on the SHAPE
+#     the dialog shares — an interrogative line plus a numbered option list —
+#     and deliberately not on `Dangerous`. Both are required, because prose
+#     asking a question is common and prose asking a question above a numbered
+#     list is not.
+#   - a tool genuinely in flight, first-hand from this seat's own pane during a
+#     Bash call: a spinner line and `Running 1 shell command…`, carrying
+#     neither marker. That is the `unknown` arm, and it is the arm that says km
+#     cannot tell a slow command from a hung one.
+# A modal nobody here has seen will read `unknown`. That is the honest answer
+# and it is the answer km gives today for every state.
+#
+# Always exits 0, and the failures are words rather than statuses. km runs
+# `set -e` and the caller interpolates this into an assignment at statement
+# level, where a non-zero return ends cmd_status mid-table (bd gqlc-nvbd3).
+seat_wedge_reason() { # <seat> -> consent | limit | unknown | unreadable | no-pane
+    local pane buf
+    pane=$(seat_pane_id "$1" 2>/dev/null) || { echo unreadable; return 0; }
+    [ -n "$pane" ] || { echo no-pane; return 0; }
+    buf=$(herdr pane read "$pane" --source visible --lines 60 2>/dev/null) || {
+        echo unreadable
+        return 0
+    }
+    # The LOWER marker wins, not the first one found. A pane holds the whole
+    # visible screen, so a modal that was answered minutes ago is still up
+    # there above whatever the seat is doing now; the state the operator is
+    # being told about is the one nearest the prompt.
+    # Two fragments for each state, both required, and the position of a state
+    # is its lower fragment. Either fragment alone is prose a citizen could
+    # plausibly write — `/extra-usage` and `Do you want to` both appear in this
+    # repo's own bead descriptions — so one of them on its own buys a false
+    # positive in exchange for nothing, `unknown` already meaning "look".
+    printf '%s\n' "$buf" | awk '
+        index($0, "hit your limit") { hit = NR }
+        index($0, "/extra-usage") { xtr = NR }
+        index($0, "Do you want to") { ask = NR }
+        /^[[:space:]]*[>❯]?[[:space:]]*[0-9]+\.[[:space:]]/ { opt = NR }
+        END {
+            if (hit && xtr) lim = (hit > xtr ? hit : xtr)
+            if (ask && opt) con = (ask > opt ? ask : opt)
+            if (con && con > lim) { print "consent"; exit }
+            if (lim) { print "limit"; exit }
+            print "unknown"
+        }'
+}
+
 # Both directions of this settle by the second read, 3 of 3 trials, so ten reads
 # is roughly a tenfold margin (bd gqlc-gh7xj). The sleep is the poll interval.
 # It is ordered first because typing takes those same two reads to appear, so a
@@ -4168,7 +4235,7 @@ cmd_status() {
                     workcol="*$(fmt_age "$sage")"
                     if [ "$sage" -ge "$dry" ]; then
                         workcol="$workcol!"
-                        wedged="$wedged $s($workcol $(progress_field "$s" .last_tool || echo tool))"
+                        wedged="$wedged $s($workcol $(progress_field "$s" .last_tool || echo tool) $(seat_wedge_reason "$s"))"
                     fi
                 else
                     workcol=$(fmt_age "$wage")
@@ -4259,7 +4326,7 @@ cmd_status() {
         echo "IDLE:$idle — awake, alive, and sitting at an empty prompt: unroutable, because every dispatch pass wakes ASLEEP seats only, while the live session still spends one of $(cfg concurrency max_active) slots. Six of these stalled the whole town for eleven hours with every board reading healthy (gqlc-5vp7). One capture of a TUI is not proof — read the pane first, and 'km sleep --seat <seat>' frees the slot if the citizen is done. Nothing here ends a session: a seat that has not asked to leave has not consented (VI.2, gqlc-971s)."
     fi
     if [ -n "$wedged" ]; then
-        echo "WEDGED:$wedged — a tool call that STARTED and has not come back, for longer than $(fmt_age "$dry"). This is the signal the heartbeat cannot carry: km-statusline keeps writing all through a wedged turn, so these seats' HB cells are as fresh as a seat doing real work (gqlc-n97e, 13+ minutes; gqlc-eier, 80 and 152 while every board read healthy). The named tool is the newest one started, not necessarily the one that hung. Read the pane. Do not end the session: a modal is not consent (VI.2)."
+        echo "WEDGED:$wedged — a tool call that STARTED and has not come back, for longer than $(fmt_age "$dry"). This is the signal the heartbeat cannot carry: km-statusline keeps writing all through a wedged turn, so these seats' HB cells are as fresh as a seat doing real work (gqlc-n97e, 13+ minutes; gqlc-eier, 80 and 152 while every board read healthy). The named tool is the newest one started, not necessarily the one that hung. The third word is WHY, and these are opposite jobs: 'consent' is a seat waiting on one keystroke, which a citizen can answer; 'limit' is a usage wall, which no keystroke clears and which ends the turn without ending the session (gqlc-3evsn); 'unknown' means the pane carried neither marker, which covers a genuinely hung command AND every modal nobody has sampled yet, so it is a reason to look rather than a reason not to; 'unreadable'/'no-pane' mean km could not ask. Read the pane — the word is a snapshot of the screen at the moment this table was built, the seat may have moved since, and a modal answered just before the read left no trace on it. Do not end the session: a modal is not consent (VI.2)."
     fi
     if [ -n "$nowork" ]; then
         echo "NOWORK:$nowork — awake, nothing in flight, and no tool call has FINISHED for that long. Two seats look like this: one wedged between turns (a usage-limit modal eats the turn, so no tool ever starts) and one that finished its work and never ran 'km sleep' — which is the LEAST available state there is, because it holds a slot against max_active and answers no dispatch. Neither is a working citizen, and neither is waiting on you: km dispatch's idle pass confirms the state over two passes, asks the seat to pick up work or run 'km sleep', and repeats no sooner than every $(cfg welfare renudge_after_minutes) minutes. After $(recover_cap) unanswered asks in one episode it stops typing and mails sedrak, and says ESCALATED here on every later pass. The counter clears when the agent leaves 'idle' — witnessed work, not a pane that merely looks different. Reading the pane is still the fastest way to tell the two apart, and it is the only way to tell a dead turn from a finished day."
