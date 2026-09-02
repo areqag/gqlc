@@ -1669,11 +1669,6 @@ recover_cap() {
     echo "$v"
 }
 
-# Seconds since the statusLine hook last wrote this seat's heartbeat, from the
-# file's own `updated` field rather than its mtime — the field is what the
-# writer states, and a copied or restored state dir would give an mtime that
-# means nothing. rc 1 for "unknown", which every caller must render as unknown
-# and not as zero.
 # Can this seat report at all? heartbeat.json is written by no heartbeat script:
 # it is a side effect of kingdom/bin/km-statusline, which runs only because
 # .claude/settings.json names it as the statusLine command. BOTH are TRACKED
@@ -1701,6 +1696,11 @@ seat_can_report() { # <seat> -> 1 if its checkout cannot write a heartbeat
     grep -qs '"statusLine"' "$wt/.claude/settings.json" "$wt/.claude/settings.local.json"
 }
 
+# Seconds since the statusLine hook last wrote this seat's heartbeat, from the
+# file's own `updated` field rather than its mtime — the field is what the
+# writer states, and a copied or restored state dir would give an mtime that
+# means nothing. rc 1 for "unknown", which every caller must render as unknown
+# and not as zero.
 heartbeat_age() { # <seat> -> seconds
     local f t now
     f="$(seat_home "$1")/heartbeat.json"
