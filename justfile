@@ -2083,14 +2083,14 @@ fmt-check: ensure-golangci
 #                container images. Runnable here (bd gqlc-tez0 measured the
 #                live battery at ~30s), just not at the price the other arms
 #                are; run it by hand when you touch the live battery.
-#   tidy (part)  three of that job's seven steps read state that does not exist
+#   tidy (part)  three of that job's eight steps read state that does not exist
 #                before the PR: check-pr-closes.py wants the body,
 #                check-pr-authors.sh the commit list, check-cron-freshness.sh
 #                the Actions API. Unrunnable here by construction, not by
-#                choice. The other four DO run — tidy-check and
-#                bd-export-monotonic-local and check-label-lengths.py as their
-#                own arms, and `just lint-hooks .github/scripts` because `just
-#                lint` already depends on it.
+#                choice. The other five DO run — tidy-check and
+#                check-doc-ordinals.py and bd-export-monotonic-local and
+#                check-label-lengths.py as their own arms, and `just lint-hooks
+#                .github/scripts` because `just lint` already depends on it.
 #
 # `just fmt-check` is an arm but is NOT a CI job: no workflow calls it. It is
 # here because it prints a diff where `golangci-lint run` prints issues, and it
@@ -2142,6 +2142,12 @@ gates:
     run tidy           just tidy-check
     run tidy           just bd-export-monotonic-local
     run tidy           python3 .github/scripts/check-label-lengths.py .beads/issues.jsonl
+    # The enrolled series are listed HERE and in ci.yml rather than defaulted
+    # inside the checker: "is this an ordinal series" is a fact about the
+    # directory, not one the script can infer, and a default would let a new
+    # series be added with nobody deciding it should be covered. Both lists must
+    # move together; the checker names them when it refuses.
+    run tidy           python3 .github/scripts/check-doc-ordinals.py docs/adr kingdom/brain/decisions
     run govulncheck    just vuln
 
     # Refuse BEFORE the summary, not after: the summary is a coverage claim, and
