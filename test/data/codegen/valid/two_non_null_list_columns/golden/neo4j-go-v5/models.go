@@ -63,19 +63,19 @@ func decodeListy(node dbtype.Node) (Listy, error) {
 		}
 		out.Spare = &narrowed
 	}
-	value2, err := neo4j.GetProperty[[]any](node, "tags")
+	value1, err := neo4j.GetProperty[[]any](node, "tags")
 	if err != nil {
 		return Listy{}, fmt.Errorf("decode Listy.Tags: %w", err)
 	}
-	value2s := make([]string, 0, len(value2))
-	for i0, elem0 := range value2 {
+	value1s := make([]string, 0, len(value1))
+	for i0, elem0 := range value1 {
 		v0, ok := elem0.(string)
 		if !ok {
 			return Listy{}, fmt.Errorf("decode Listy.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
 		}
-		value2s = append(value2s, v0)
+		value1s = append(value1s, v0)
 	}
-	out.Tags = value2s
+	out.Tags = value1s
 	return out, nil
 }
 

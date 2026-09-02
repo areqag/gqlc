@@ -37,10 +37,10 @@ func decodePerson(node dbtype.Node) (Person, error) {
 		}
 		out.Age = &s
 	}
-	value1, err := neo4j.GetProperty[string](node, "name")
+	value0, err := neo4j.GetProperty[string](node, "name")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Name: %w", err)
 	}
-	out.Name = value1
+	out.Name = value0
 	return out, nil
 }

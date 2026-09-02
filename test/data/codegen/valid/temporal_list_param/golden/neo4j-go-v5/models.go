@@ -83,19 +83,19 @@ func decodeSlot(node dbtype.Node) (Slot, error) {
 		}
 		out.Spans = &narrowed
 	}
-	value4, err := neo4j.GetProperty[[]any](node, "tags")
+	value3, err := neo4j.GetProperty[[]any](node, "tags")
 	if err != nil {
 		return Slot{}, fmt.Errorf("decode Slot.Tags: %w", err)
 	}
-	value4s := make([]string, 0, len(value4))
-	for i0, elem0 := range value4 {
+	value3s := make([]string, 0, len(value3))
+	for i0, elem0 := range value3 {
 		v0, ok := elem0.(string)
 		if !ok {
 			return Slot{}, fmt.Errorf("decode Slot.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
 		}
-		value4s = append(value4s, v0)
+		value3s = append(value3s, v0)
 	}
-	out.Tags = value4s
+	out.Tags = value3s
 	return out, nil
 }
 

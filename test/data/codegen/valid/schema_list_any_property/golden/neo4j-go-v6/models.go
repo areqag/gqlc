@@ -38,15 +38,15 @@ func decodeBin(node dbtype.Node) (Bin, error) {
 		}
 		out.Bag = &s
 	}
-	value1, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Bin{}, fmt.Errorf("decode Bin.Id: %w", err)
 	}
-	out.Id = value1
-	value2, err := neo4j.GetProperty[[]any](node, "loose")
+	out.Id = value0
+	value1, err := neo4j.GetProperty[[]any](node, "loose")
 	if err != nil {
 		return Bin{}, fmt.Errorf("decode Bin.Loose: %w", err)
 	}
-	out.Loose = value2
+	out.Loose = value1
 	return out, nil
 }
