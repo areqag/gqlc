@@ -14,13 +14,43 @@ KINGDOM_DIR=$(dirname "$SCRIPT_DIR")
 KM="$SCRIPT_DIR/km"
 SELF="$SCRIPT_DIR/$(basename -- "${BASH_SOURCE[0]}")"
 
+# Every km below answers from the git repository it is standing in, and this
+# runner is started by hand and by supervisors from wherever they happened to
+# be. Anchored once, here, rather than per call site: the two spellings drift
+# (gqlc-zpjuc anchored the ledger derivation and left seat-worktree resolving
+# against the caller's cwd, which from outside any repository composed
+# "./.-seat-<seat>"). Nothing below reads a relative path, and the claude child
+# gets its own `cd "$wt"`.
+cd "$KINGDOM_DIR"
+
 # Name the town's ledger rather than leaving bd to discover it from a cwd. A
 # seat that is a linked worktree discovers the same path anyway; a seat that is
 # its own clone (gqlc-w5bh) discovers a .beads carrying no database, and bd
 # fails with "no beads database found". Exported HERE, at the top, because this
 # script runs bd itself — the wake banner's re-derivation below — long before it
 # builds the environment it hands to claude (bd gqlc-kx6jy).
-BEADS_DIR="$(dirname "$KINGDOM_DIR")/.beads"
+#
+# Asked of km rather than composed from this script's own location. The two
+# agree only while this file IS the deployed copy: `dirname "$KINGDOM_DIR"`
+# names whatever checkout the runner was started from, so launching seats from a
+# seat worktree pointed ten of them at that seat's .beads. deploy_root() answers
+# from the git common dir, which is the main checkout for a linked worktree and,
+# after the basename strip, for a seat that is its own clone too (bd
+# gqlc-zpjuc). Anchored by the cd above.
+#
+# Its failure is caught here and named here. Under set -e a failed command
+# substitution kills this script with nothing on stderr at all; worse, an empty
+# answer composes "/.beads", which reaches the ledger guard below and is
+# reported as "holds no ledger database" — a true sentence about the wrong
+# cause, which is the failure mode of gqlc-xpgdc. The reachable way to get here
+# is a km older than this file (deploy-root is new with gqlc-zpjuc), so the
+# remedy names that.
+deploy_root=$("$KM" deploy-root) || deploy_root=""
+if [ -z "$deploy_root" ]; then
+    echo "km-seat: '$KM deploy-root' gave no answer, so ${1:-the seat} was not launched. That km is older than this km-seat; deploy the two together." >&2
+    exit 1
+fi
+BEADS_DIR="$deploy_root/.beads"
 export BEADS_DIR
 
 # The parse this process is running, identified by the CONTENT of the file it
@@ -66,6 +96,33 @@ class_effort=$(valid_effort "$("$KM" cfg effort "$class")" "[effort] $class")
 
 [ -f "$soul" ] || { echo "km-seat: no soul at $soul" >&2; exit 1; }
 [ -d "$wt" ] || { echo "km-seat: no worktree at $wt (km up creates it)" >&2; exit 1; }
+
+# A ledger that is merely ABSENT is not a state bd reports. Pointed at a
+# directory holding no database it does not fail — `bd prime`, which this seat's
+# own SessionStart hook runs, CREATES one, and from that moment the seat and
+# everything sharing the path read an empty town: `bd ready` returns nothing and
+# `bd show <the bead this seat was woken for>` answers "no issue found". Every
+# other verb measured (ready, stats, list, mail inbox) ignores such a BEADS_DIR
+# and falls back to discovery, which answers correctly — so nothing before the
+# first prime hints at it, and the export above looks harmless right up until it
+# is not (bd gqlc-zpjuc, where ten seats ran blind).
+#
+# Refused rather than repaired, and refused rather than left to bd. What
+# stopping costs is one wake, which is still queued. What continuing costs is a
+# citizen working a whole session against an empty ledger and filing beads into
+# it that no dispatch pass will ever see — silent, and bounded by nothing.
+#
+# Deliberately NOT a reimplementation of how bd finds a database. It asks the
+# narrower question this failure actually turns on: whether the directory holds
+# the store, beside the tracked config files every checkout carries. Named
+# exactly, not matched by a glob: a second arm accepting `*.db` was written and
+# then removed, because no such file exists in any of the 30 checkouts under
+# this town (measured 2026-09-02) — so no row could exercise it, and a guard arm
+# no row reaches is one a stray file can open from the wrong side.
+if [ ! -e "$BEADS_DIR/embeddeddolt" ]; then
+    echo "km-seat: $BEADS_DIR holds no ledger database, so $seat was not launched: bd does not fail on such a path, it creates an empty ledger there at the first 'bd prime' and the seat then reads a town with no beads in it. Check that 'km deploy-root' names the main checkout (bd gqlc-zpjuc). The wake is still queued." >&2
+    exit 1
+fi
 
 # Permission mode, gated here with the other preflights and for the same reason:
 # one line of [claude] decides how every seat in the town starts, and one of the
@@ -358,14 +415,16 @@ The bead(s) named above could not be re-derived — the ledger query failed — 
         # whichever throwaway launched them. Same shape as the GIT_DIR that
         # redirected bd into the shared repo this week.
         unset KM_CONFIG
-        # BEADS_DIR names the town's one ledger rather than leaving bd to
-        # discover it from the seat's cwd. A seat that is a linked worktree
-        # discovers the same path either way; a seat that is its own clone
-        # (gqlc-w5bh) discovers nothing at all. It also outranks an exported
-        # GIT_DIR, which is what once redirected bd into the shared repo from
-        # under a hook (gqlc-hg61).
+        # BEADS_DIR is NOT set here. It is exported once at the top of this
+        # file, so the child inherits it, and that top-level value is the only
+        # one anything checks — the guard up there refuses a launch before
+        # reaching this line. A second spelling stood here until gqlc-zpjuc,
+        # deriving the same variable independently, and the two drifted: the
+        # guard named the right ledger and the seat was handed the wrong one
+        # anyway. Deleted rather than repointed at the derived value, which
+        # would only have been a redundant copy waiting to drift again
+        # (gqlc-7mc0h asked for this deletion first).
         KINGDOM_SEAT=$seat BEADS_ACTOR=$seat KM_STATE_DIR=$sd \
-            BEADS_DIR="$(dirname "$KINGDOM_DIR")/.beads" \
             claude --model "$model" \
             "${effort_args[@]}" \
             --permission-mode "$pm" \

@@ -123,7 +123,7 @@ km — the machinery of the Թագաւորութիւն
                                  --all sweeps the roster; it moves ONLY parked seats and
                                  refuses a dirty tree, a branch, or commits of its own
                                  --check reports and moves nothing (status/doctor read it)
-  km state-dir | capped-seats | seat-info <s> | seat-worktree <s>
+  km state-dir | deploy-root | capped-seats | seat-info <s> | seat-worktree <s>
 EOF
 }
 
@@ -5818,6 +5818,7 @@ case "$cmd" in
     # holds this verb's argv. Neither is a write, so what they cost is the
     # help someone asked for, not the town.
     state-dir)       no_args state-dir "$@"; state_dir ;;
+    deploy-root)     no_args deploy-root "$@"; deploy_root ;;
     capped-seats)    no_args capped-seats "$@"; capped_seats ;;
     cfg)             cfg "${1:?km cfg <section> <key>}" "${2:?km cfg <section> <key>}" ;;
     seat-info)       is_seat "${1:-}" || die "seat-info: unknown seat ${1:-<none>}"
