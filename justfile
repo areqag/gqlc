@@ -633,12 +633,15 @@ check-push-keepalive dir=".":
 # reports the state it can establish and stops.
 #
 # AN ABSENT REMOTE HEAD HAS TWO CAUSES, and until bd gqlc-97rxk this recipe
-# knew only one of them. A squash merge DELETES the head branch, so absence is
-# the ordinary successful end state as well as the never-arrived one — and
-# absence is what a citizen meets at session close, which is the one moment
-# this recipe is advertised. Measured 2026-09-02: three branches, all pushed,
-# all merged, all told their push had failed and to retry it. Re-pushing there
-# recreates a head branch for a merged PR.
+# knew only one of them. A merge DELETES the head branch here — the repository
+# sets delete_branch_on_merge, which is what makes the claim below a fact
+# rather than a habit: `gh api repos/areqag/gqlc --jq .delete_branch_on_merge`
+# answered true on 2026-09-02. So absence is the ordinary successful end state
+# as well as the never-arrived one — and absence is what a citizen meets at
+# session close, which is the one moment this recipe is advertised. Measured
+# the same day: three branches, all pushed, all merged, all told their push had
+# failed and to retry it. Re-pushing there recreates a head branch for a merged
+# PR.
 #
 # Git cannot tell the two apart. `git merge-base --is-ancestor` calls a merged
 # branch unmerged, because a squash leaves no tip of it on master; CLAUDE.md
