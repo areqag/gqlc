@@ -363,6 +363,17 @@ func compareBranchColumns(branchCols [][]Column) error {
 // terminates the list, so removing them collides nothing. They are here so the
 // reader can see where one branch's key list ends.
 func describeColumnType(t ResolvedType) string {
+	// A nil interface matches no case below and would reach the default's
+	// t.String() with no receiver to dispatch on. It arrives here through the
+	// ResolvedList arm: resolvedTypeEqual guards its own recursion on nil and so
+	// reports the columns unequal, and compareBranchColumns renders exactly the
+	// pair it was told is unequal. Rendering is the last step of a refusal the
+	// caller has already committed to, so it answers rather than faults —
+	// internal/codegen's resolvedTypeName settled the same fault the same way
+	// (PR #937), and "<nil>" is the token its %T fallback gives a nil interface.
+	if t == nil {
+		return "<nil>"
+	}
 	switch v := t.(type) {
 	case ResolvedNode:
 		return v.String() + " " + string(v.Labels) + nullabilityNote(v.Nullable)
