@@ -1118,7 +1118,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 }
 
 // sweepIdentifiers runs spec §4.6's exported-identifier collision sweep
-// across every emitted top-level identifier. Seven sources, in insertion
+// across every emitted top-level identifier. Eight sources, in insertion
 // order (§2.2 / §5.7):
 //
 //  0. the emitter's own scopePackage declarations
