@@ -22,6 +22,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/neo4j"
+	"github.com/areqag/gqlc/internal/codegen/typescan"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
 	"github.com/areqag/gqlc/internal/schema/gql"
@@ -265,88 +266,23 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	}
 }
 
-// graphPropertyTypes reads internal/graph's normalised property types
-// off the source that declares them, mapping each to its constant name.
-//
-// The form it models is a spec that spells PropertyType and carries its
-// own string literal. A const block holding one of those and also a spec
-// written some other way fails here naming that spec, rather than
-// dropping it in silence: a spec that inherits its predecessor's value,
-// and one that is untyped, both leave the type off and both are usable
-// where a PropertyType is wanted.
+// graphPropertyTypes and propertyArmNames read internal/graph's declared
+// property types and this backend's arms for them. Both walks live in
+// internal/codegen/typescan, which is where AGE reads its own from: the
+// obligation they support is a backend's, but the shape of a const block
+// and of a switch arm is not, and a second copy of either walk would
+// drift out of step in silence.
 func graphPropertyTypes(t *testing.T) map[graph.PropertyType]string {
 	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), graphPropertyTypeSource, nil, parser.SkipObjectResolution)
-	require.NoError(t, err, "%s does not parse", graphPropertyTypeSource)
-
-	out := make(map[graph.PropertyType]string)
-	for _, decl := range file.Decls {
-		gd, ok := decl.(*ast.GenDecl)
-		if !ok || gd.Tok != token.CONST {
-			continue
-		}
-		read, skipped := 0, []string(nil)
-		for _, spec := range gd.Specs {
-			vs, ok := spec.(*ast.ValueSpec)
-			if !ok {
-				continue
-			}
-			id, isIdent := vs.Type.(*ast.Ident)
-			if !isIdent || id.Name != "PropertyType" || len(vs.Values) != len(vs.Names) {
-				for _, name := range vs.Names {
-					skipped = append(skipped, name.Name)
-				}
-				continue
-			}
-			for i, name := range vs.Names {
-				lit, isLit := vs.Values[i].(*ast.BasicLit)
-				require.True(t, isLit, "%s: constant %s is not a literal", graphPropertyTypeSource, name.Name)
-				value, unquoteErr := strconv.Unquote(lit.Value)
-				require.NoError(t, unquoteErr, "%s: constant %s", graphPropertyTypeSource, name.Name)
-				out[graph.PropertyType(value)] = name.Name
-				read++
-			}
-		}
-		require.True(t, read == 0 || len(skipped) == 0,
-			"%s: a const block declaring PropertyType constants also declares %v, which this walk "+
-				"cannot read a PropertyType value off", graphPropertyTypeSource, skipped)
-	}
+	out, err := typescan.PropertyTypes(graphPropertyTypeSource)
+	require.NoError(t, err)
 	return out
 }
 
-// propertyArmNames names every graph constant typeMap.Property switches
-// on, whether or not its arm answers with a carrier. Read off the source
-// because the compiled function does not enumerate its arms: it answers
-// about a candidate handed to it, and which candidates exist is the
-// question being asked.
 func propertyArmNames(t *testing.T) map[string]bool {
 	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), typeTableSource, nil, parser.SkipObjectResolution)
-	require.NoError(t, err, "%s does not parse", typeTableSource)
-
-	out := make(map[string]bool)
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "Property" || fn.Recv == nil {
-			continue
-		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			clause, isClause := n.(*ast.CaseClause)
-			if !isClause {
-				return true
-			}
-			for _, expr := range clause.List {
-				sel, isSel := expr.(*ast.SelectorExpr)
-				if !isSel {
-					continue
-				}
-				if pkg, isIdent := sel.X.(*ast.Ident); isIdent && pkg.Name == "graph" {
-					out[sel.Sel.Name] = true
-				}
-			}
-			return true
-		})
-	}
+	out, err := typescan.PropertyArms(typeTableSource, "Property")
+	require.NoError(t, err)
 	return out
 }
 
