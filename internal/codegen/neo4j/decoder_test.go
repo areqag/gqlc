@@ -1106,14 +1106,13 @@ func (s *DecoderSuite) TestPositionalDecoderLocalsAreDense() {
 	}
 	s.Require().NotEmpty(models, "no models.go in the emission")
 
-	helpers, checked := 0, 0
+	checked := 0
 	for _, decl := range s.parseModels(models).Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Recv != nil || fn.Body == nil ||
 			!strings.HasPrefix(fn.Name.Name, "decode") {
 			continue
 		}
-		helpers++
 
 		// Source order, taken off the tree rather than the bytes: a
 		// commented-out declaration is not one, and a raw scan would
@@ -1132,8 +1131,8 @@ func (s *DecoderSuite) TestPositionalDecoderLocalsAreDense() {
 
 		// An entity with no required property binds none, and :Endpoint is
 		// declared here to be exactly that. Skipping it is safe only
-		// because the population assertion below refuses a run where
-		// every helper took this branch.
+		// because the population assertion below names the exact number
+		// of helpers that must NOT have taken this branch.
 		if len(positions) == 0 {
 			continue
 		}
@@ -1150,14 +1149,12 @@ func (s *DecoderSuite) TestPositionalDecoderLocalsAreDense() {
 			fn.Name.Name, positions, len(positions)-1)
 	}
 
-	// The vacuity guards, one level up. An emission carrying no decode
-	// helper would run the loop zero times and report success, and one
-	// where every helper skipped would report success having compared
-	// nothing -- which is what a probe that quietly stopped declaring
-	// required properties would look like.
-	s.Require().GreaterOrEqual(helpers, 3,
-		"the probe declares two node types and an edge type, so it owes three decode "+
-			"helpers; got %d", helpers)
+	// The vacuity guard, one level up, and it is exact rather than a
+	// lower bound. An emission carrying no decode helper would run the
+	// loop zero times and report success; so would one where every
+	// helper hit the skip above, which is what a probe that quietly
+	// stopped declaring required properties looks like. A `>= 1` would
+	// pass on both of those halves of the probe going missing.
 	s.Require().Equal(2, checked,
 		"exactly the interleaved node and the interleaved edge carry required properties, "+
 			"so exactly two helpers owe a density comparison; %d made one", checked)
