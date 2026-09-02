@@ -635,8 +635,27 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 			}
 			return fmt.Errorf("%w: query %q at position %d has cardinality %s but the query is a %s — annotate :exec or add a RETURN clause", ErrCardinalityShapeMismatch, q.Name, i, cardinalityAnnotation(q.Cardinality), shape)
 		}
+		// Both backends emit SourceText through a Go RAW string literal, so the
+		// two bytes such a literal cannot carry are refused here rather than
+		// emitted. A backtick cannot appear in one at all; a carriage return
+		// can, and is DISCARDED from the literal's value (Go spec, "String
+		// literals"). The CR is the worse of the pair because the loss is
+		// silent: generate exits 0 having written a constant whose value is not
+		// the text that was parsed and resolved. For AGE that forges the
+		// dollar-quote delimiter, dollarTag having scanned the bytes before
+		// emission and the SQL parser the bytes after; for neo4j the discarded
+		// byte glues the tokens it separated (bd gqlc-7f9a).
+		//
+		// Every CR reaching here is content, never a line ending, so this
+		// refuses no authoring convention: queryfile reads with
+		// bufio.ScanLines, which takes a CRLF's CR before SourceText exists,
+		// and a lone-CR file is one line the annotation grammar already
+		// rejects.
 		if strings.ContainsRune(q.SourceText, '`') {
 			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC6Scope, q.Name, i)
+		}
+		if strings.ContainsRune(q.SourceText, '\r') {
+			return fmt.Errorf("%w: query %q at position %d has a carriage return in its source text", ErrOutOfC6Scope, q.Name, i)
 		}
 		for ci, col := range q.Validated.Columns {
 			// Shape check first (spec §4.3, §6.4): count(*), arithmetic

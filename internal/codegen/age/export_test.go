@@ -32,6 +32,7 @@ var (
 	Generate                      = generate
 	NamespaceProbes               = namespaceProbes
 	RejectOffsetSidecarCollisions = rejectOffsetSidecarCollisions
+	RenderCypherFile              = renderCypherFile
 	RenderModels                  = renderModels
 	SpatialFunctionProbes         = spatialFunctionProbes
 	UndefinedFunctionProbes       = undefinedFunctionProbes
