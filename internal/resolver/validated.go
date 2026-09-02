@@ -319,8 +319,18 @@ func ScalarValues() []Scalar {
 
 // String is the wire tag ("bool" / "int" / "float" / "string" / "null" /
 // "map"). Single source the JSON encoding derives from.
+//
+// A value the constant block does not name renders as Scalar(<n>), the form
+// stringer emits, rather than falling through to a member's own tag. It used
+// to answer "bool" — ScalarBool's tag, and ScalarBool is the zero value, so it
+// had no arm of its own either; the reasoning [Temporal.String] gives applies
+// here unchanged, and this is that fix applied to the member that did not get
+// it. Every declared member now has its own arm, so the default answers for
+// the undeclared alone.
 func (s Scalar) String() string {
 	switch s {
+	case ScalarBool:
+		return "bool"
 	case ScalarInt:
 		return "int"
 	case ScalarFloat:
@@ -332,7 +342,7 @@ func (s Scalar) String() string {
 	case ScalarMap:
 		return "map"
 	default:
-		return "bool"
+		return "Scalar(" + strconv.Itoa(int(s)) + ")"
 	}
 }
 

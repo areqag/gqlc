@@ -1,6 +1,8 @@
 package resolver
 
 import (
+	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -158,6 +160,68 @@ func TestListElementScalarProjectionStillResolves(t *testing.T) {
 	got, err := resolveType(query.NewTypeList(query.TypeInt{}))
 	require.NoError(t, err)
 	require.Equal(t, ResolvedList{Element: ResolvedScalar{Kind: ScalarInt}}, got)
+}
+
+// scalarFallback is the form [Scalar.String] must reserve for a value the
+// constant block does not name — the spelling stringer emits, and the same
+// shape [Temporal.String] already answers with.
+func scalarFallback(v int) string { return "Scalar(" + strconv.Itoa(v) + ")" }
+
+// TestScalarStringAnswersForDeclaredKindsAlone is the twin of
+// TestTemporalStringerAnswersForDeclaredKindsAlone in
+// internal/codegen/conformance, for the enum that did not get the fix when
+// Temporal did.
+//
+// Both directions are here because either alone is satisfiable by a mutant.
+// The undeclared rows fail on their own before this bead: the default arm
+// returned "bool", ScalarBool's tag, and ScalarBool is the zero value and had
+// no arm of its own, so every value off the end of the enum claimed to be
+// ScalarBool — through Scalar.MarshalJSON, which is json.Marshal(s.String()),
+// and through ResolvedScalar.String, which is what ErrUnionColumnMismatch
+// renders. The declared rows are vacuous until that is fixed and load-bearing
+// afterwards: once the default answers Scalar(<n>), deleting the ScalarBool
+// arm makes ScalarBool render as the undeclared form and reddens this row.
+// That is what keeps the new arm from being decorative.
+//
+// The sweep is driven by [ScalarValues] rather than a written-out list so it
+// cannot fall behind the constant block, and it runs one value PAST the
+// vocabulary rather than starting there, so a kind appended above is measured
+// in both directions instead of silently widening the undeclared population.
+func TestScalarStringAnswersForDeclaredKindsAlone(t *testing.T) {
+	tagOf := make(map[string]Scalar, ScalarCount)
+	for _, s := range ScalarValues() {
+		tag := s.String()
+		require.NotEqual(t, scalarFallback(int(s)), tag,
+			"Scalar(%d) is declared but Scalar.String has no arm for it, so it renders as the form reserved for undeclared values; add the case",
+			int(s))
+		first, dup := tagOf[tag]
+		require.False(t, dup,
+			"Scalar(%d) and Scalar(%d) both render %q, so the wire tag no longer identifies the kind",
+			int(first), int(s), tag)
+		tagOf[tag] = s
+	}
+
+	for _, v := range []int{ScalarCount, ScalarCount + 1, -1} {
+		require.Equal(t, scalarFallback(v), Scalar(v).String(),
+			"Scalar(%d) names no constant but Scalar.String answers for it; either the constant is missing or the arm is stale, and either way a value nothing declares is rendering as though something does",
+			v)
+	}
+}
+
+// TestScalarMarshalJSONCarriesTheUndeclaredForm is the second channel, and it
+// is not a restatement of the row above: Scalar.String is a single source, but
+// the defect's reach is what a caller SERIALISES, and a fix that repaired only
+// the diagnostic spelling would still put a declared kind's wire tag on an
+// undeclared value here.
+func TestScalarMarshalJSONCarriesTheUndeclaredForm(t *testing.T) {
+	b, err := json.Marshal(Scalar(ScalarCount))
+	require.NoError(t, err)
+	require.JSONEq(t, `"`+scalarFallback(ScalarCount)+`"`, string(b),
+		"an undeclared kind must not serialise as a declared kind's wire tag")
+
+	require.Equal(t, "scalar("+scalarFallback(ScalarCount)+")",
+		ResolvedScalar{Kind: Scalar(ScalarCount)}.String(),
+		"ErrUnionColumnMismatch renders through here, so a conflict must not name a kind the value is not")
 }
 
 // TestDescribeColumnTypeRendersANilListElement pins the third posture in this
