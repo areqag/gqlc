@@ -87,6 +87,7 @@
     "delete_second_target_unknown_property.cypher": "social_r6.gql",
     "merge_on_match_second_effect_unknown_property.cypher": "social_r6.gql",
     "union_column_name_only_mismatch.cypher": "social_r5.gql",
+    "union_column_name_mismatch_nonzero_index.cypher": "social_r5.gql",
     "union_third_branch_mismatch.cypher": "social_r5.gql",
     "union_node_type_mismatch.cypher": "social_r5.gql",
     "union_edge_union_nullability_mismatch.cypher": "social_r5.gql",
