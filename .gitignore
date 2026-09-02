@@ -28,3 +28,8 @@
 # Python
 __pycache__/
 *.pyc
+
+# Claude Code runtime state, written by the ScheduleWakeup mechanism in any seat
+# that schedules one. settings.json and skills/ under the same directory are
+# TRACKED, so this is the one path rather than the whole directory.
+/.claude/scheduled_tasks.lock
