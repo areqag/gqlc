@@ -781,6 +781,13 @@ func writeGoldenTarget(root, target string, files []codegen.File) error {
 // Every other emitted file is compared across targets, so a file some
 // future backend adds is held invariant until it is named here on
 // purpose.
+//
+// This is an EXCLUSION, and it is not the only list of emitted basenames
+// in the tree: codegen's fixedDeclarationFiles is an inclusion and its
+// inputDerivedFiles an exclusion, over the same corpus for a different
+// question. None is authoritative over the others — each is held to the
+// goldens by its own test, this one by
+// TestConnectionSurfaceIsExcludedOnEvidence.
 var connectionSurface = map[string]bool{"db.go": true, "graph.go": true}
 
 // TestBackendInvariantSurface pins the property the multi-backend design
@@ -866,6 +873,88 @@ func TestBackendInvariantSurface(t *testing.T) {
 	require.NotZero(t, compared, "no fixture is enrolled in two targets, so this test holds nothing")
 }
 
+// TestConnectionSurfaceIsExcludedOnEvidence holds connectionSurface to
+// the corpus, which nothing did before (gqlc-6ynu).
+//
+// Every name in that map is subtracted from the backend-invariance
+// comparison above, so the map is the one place where that property can
+// be narrowed silently. Measured: adding models.go to it leaves the whole
+// conformance package green while every entity struct stops being
+// compared across backends. A stale entry is the milder half of the same
+// hole — the file it names is no longer emitted, and the exclusion sits
+// there ready to fire against whatever later takes the name.
+//
+// The justification for excluding a file is that it "differs by
+// construction", so that is what gets asserted. Two grounds count, and
+// the corpus supplies one each:
+//
+//  1. ASYMMETRIC EMISSION — some target emits it and another does not.
+//     Comparing it would then fail on presence alone. graph.go is this:
+//     Apache AGE emits it, neo4j does not.
+//  2. DIFFERING SURFACE — every target emits it, but the declarations
+//     disagree. db.go is this: a pgx pool on one backend, a driver and a
+//     managed transaction on the other.
+//
+// A file that satisfies neither is emitted everywhere and declares the
+// same surface everywhere, so excluding it hides nothing and only
+// shrinks the invariant. That is the models.go case.
+//
+// Difference is read with the same extractor the comparison uses, not
+// over bytes. Bytes differ between targets for reasons the invariant
+// deliberately ignores — imports, bodies, query text — so a byte
+// comparison would call almost any file "differing" and accept exactly
+// the entries this exists to refuse.
+func TestConnectionSurfaceIsExcludedOnEvidence(t *testing.T) {
+	goldens, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden"))
+	require.NoError(t, err)
+	require.NotEmpty(t, goldens, "valid goldens must exist")
+
+	emitted := map[string]bool{}
+	// basename -> the fixture witnessing each ground, for the fail message.
+	asymmetric, differs := map[string]string{}, map[string]string{}
+	for _, golden := range goldens {
+		targets, err := os.ReadDir(golden)
+		require.NoError(t, err)
+		if len(targets) < 2 {
+			continue
+		}
+		fixture := filepath.Base(filepath.Dir(golden))
+		for _, base := range slices.Sorted(maps.Keys(connectionSurface)) {
+			var surfaces []map[string]string
+			for _, target := range targets {
+				path := filepath.Join(golden, target.Name(), base)
+				if _, err := os.Stat(path); err != nil {
+					continue
+				}
+				emitted[base] = true
+				out := map[string]string{}
+				fileSurface(t, out, token.NewFileSet(), path)
+				surfaces = append(surfaces, out)
+			}
+			if len(surfaces) == 0 {
+				continue
+			}
+			if len(surfaces) < len(targets) {
+				asymmetric[base] = fixture
+			}
+			for _, s := range surfaces[1:] {
+				if !maps.Equal(s, surfaces[0]) {
+					differs[base] = fixture
+				}
+			}
+		}
+	}
+
+	for _, base := range slices.Sorted(maps.Keys(connectionSurface)) {
+		require.Truef(t, emitted[base],
+			"connectionSurface excludes %s, which no golden under a two-target fixture emits; the emitter renamed it and this map kept the old name, so the exclusion now protects nothing and will fire against whatever next takes that name",
+			base)
+		require.Truef(t, asymmetric[base] != "" || differs[base] != "",
+			"connectionSurface excludes %s on no evidence: every two-target fixture emits it under EVERY target and declares the SAME surface under each. The exclusion therefore hides no difference and only narrows TestBackendInvariantSurface, which is how that property gets weakened silently. Either %s genuinely varies by backend and some fixture must show it, or it belongs in the comparison",
+			base, base)
+	}
+}
+
 // declaredSurface is one golden target's declared Go surface: every type
 // declaration and every method signature outside the connection surface,
 // keyed by what declares it and valued as rendered source. The doc
@@ -884,51 +973,70 @@ func declaredSurface(t *testing.T, dir string) map[string]string {
 		if connectionSurface[filepath.Base(path)] {
 			continue
 		}
-		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
-		require.NoError(t, err, "parsing %s", path)
-		for _, decl := range file.Decls {
-			switch d := decl.(type) {
-			case *ast.GenDecl:
-				// A const or a var declares no surface a caller
-				// writes against: the query texts are unexported
-				// and the interface assertions are compile-time.
-				if d.Tok != token.TYPE {
-					continue
-				}
-				for _, spec := range d.Specs {
-					ts, ok := spec.(*ast.TypeSpec)
-					require.True(t, ok, "%s: type declaration holds a %T", path, spec)
-					doc := ts.Doc
-					if doc == nil && len(d.Specs) == 1 {
-						doc = d.Doc
-					}
-					addDeclaration(t, out, path, "type "+ts.Name.Name, docLines(doc)+render(t, fset, ts))
-				}
-			case *ast.FuncDecl:
-				// A receiver-less function is a decode helper. Passing
-				// over it is sound only while it stays unexported: an
-				// exported one is surface a caller writes against, and
-				// one skipped here could diverge between backends with
-				// nothing to see it.
-				//
-				// What is skipped here is not unwatched. The decoders
-				// this passes over are swept for unsatisfiable label
-				// guards by TestEmittedDecodersGuardOnlyOnStampableLabels;
-				// their per-backend divergence is what that gate assumes
-				// and this one must not assert.
-				if d.Recv == nil {
-					require.False(t, ast.IsExported(d.Name.Name),
-						"%s: package-level func %s is exported, so it is caller-facing surface this comparison skips",
-						path, d.Name.Name)
-					continue
-				}
-				doc := d.Doc
-				d.Doc, d.Body = nil, nil
-				addDeclaration(t, out, path, "method "+receiverName(t, path, d)+"."+d.Name.Name, docLines(doc)+render(t, fset, d))
-			}
-		}
+		exported := fileSurface(t, out, fset, path)
+		require.Emptyf(t, exported,
+			"%s: package-level func(s) %v are exported, so they are caller-facing surface this comparison skips",
+			path, exported)
 	}
 	return out
+}
+
+// fileSurface adds one file's declared surface to out and returns the
+// exported package-level funcs it declared. Split out of declaredSurface
+// so one excluded file can be surfaced on its own, which declaredSurface
+// cannot do by construction.
+//
+// The exportedness check is the caller's rather than this function's: it
+// is a property of a file being COMPARED, and the connection-surface
+// files this exists to read legitimately declare an exported New.
+func fileSurface(t *testing.T, out map[string]string, fset *token.FileSet, path string) []string {
+	t.Helper()
+
+	var exported []string
+	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+	require.NoError(t, err, "parsing %s", path)
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.GenDecl:
+			// A const or a var declares no surface a caller
+			// writes against: the query texts are unexported
+			// and the interface assertions are compile-time.
+			if d.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range d.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				require.True(t, ok, "%s: type declaration holds a %T", path, spec)
+				doc := ts.Doc
+				if doc == nil && len(d.Specs) == 1 {
+					doc = d.Doc
+				}
+				addDeclaration(t, out, path, "type "+ts.Name.Name, docLines(doc)+render(t, fset, ts))
+			}
+		case *ast.FuncDecl:
+			// A receiver-less function is a decode helper. Passing
+			// over it is sound only while it stays unexported: an
+			// exported one is surface a caller writes against, and
+			// one skipped here could diverge between backends with
+			// nothing to see it.
+			//
+			// What is skipped here is not unwatched. The decoders
+			// this passes over are swept for unsatisfiable label
+			// guards by TestEmittedDecodersGuardOnlyOnStampableLabels;
+			// their per-backend divergence is what that gate assumes
+			// and this one must not assert.
+			if d.Recv == nil {
+				if ast.IsExported(d.Name.Name) {
+					exported = append(exported, d.Name.Name)
+				}
+				continue
+			}
+			doc := d.Doc
+			d.Doc, d.Body = nil, nil
+			addDeclaration(t, out, path, "method "+receiverName(t, path, d)+"."+d.Name.Name, docLines(doc)+render(t, fset, d))
+		}
+	}
+	return exported
 }
 
 // addDeclaration records one declaration, failing a name declared twice:
