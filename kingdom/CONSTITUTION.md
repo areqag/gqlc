@@ -156,7 +156,7 @@ self-governing; the ledger is honest.
       review-free PR sat three days for want of a live author session, and was
       then merged while its author's verification screen was still running,
       her "not yet" existing only in her pane (gqlc-23m3v, PR #2066).
-      Reasoning and measurements: ADR 0012.
+      Reasoning and measurements: ADR 0014.
       1. **On a PR that owes no review, the author's finished-signal is
          arming GitHub auto-merge**: `gh pr merge <N> --squash --auto`, one
          command and no fallback. GitHub is the named merger: it merges when
@@ -166,7 +166,7 @@ self-governing; the ledger is honest.
          resume wake finds the PR merged and closes the bead citing the SHA.
          **Arming is not a reservation — it is a merge that fires as soon as
          it can**, which on a PR that is already green is immediately
-         (measured; ADR 0012, W2).
+         (measured; ADR 0014, W2).
       2. **An armed PR asserts that no review is owed on it and none is
          open.** Arming a PR that owes or carries a review merges over that
          review, which Article IV.4's spirit forbids — and by clause 1 it may

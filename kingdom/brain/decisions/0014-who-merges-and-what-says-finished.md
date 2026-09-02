@@ -1,4 +1,4 @@
-# 0012 — Who merges a PR, and what says the author is finished
+# 0014 — Who merges a PR, and what says the author is finished
 
 Date: 2026-09-02. Designed against bd gqlc-23m3v (Արփինէ), raised by the mayor's
 open-PR sweep. Executed by gqlc-l51ns (Ար). Amends Constitution V.2, which is
@@ -238,7 +238,7 @@ inherited from the design.
 ## Precedent this supersedes
 
 ADR 0009's line about "an author acting on merge-on-PASS" describes the
-pre-0012 flow. It is correct as a dated record of how the town then worked, and
+pre-0014 flow. It is correct as a dated record of how the town then worked, and
 is left standing as one. This ADR supersedes that phrase alone: under V.2.4.3
 the judge merges, not the author. Everything else ADR 0009 says about what a
 PASS is — unconditional, signed on the SHA read, residue filed before closing —
