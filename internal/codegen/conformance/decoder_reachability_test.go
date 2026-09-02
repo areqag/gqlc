@@ -1232,6 +1232,70 @@ func decodePerson(raw []byte) (Person, error) {
 			"the other's guards ungraded while claiming the classification is total")
 }
 
+// TestBoundLiteralNamesBindsNothingWhenNamesAndValuesDisagree answers
+// boundLiteralNames' length guard by name, in both of its directions.
+//
+// The two directions were not answered alike, and one of them was not
+// answered by an assertion at all. More names than values is written by
+// TestSweepMarksEachYieldedFunctionByItsSpelling, whose list gains an entry
+// spelled differently the moment the guard starts pairing name i with value
+// i. Fewer names than values — the direction that indexes lhs past its end,
+// and the only one that can — was written only by the last row of
+// TestSweepReadsAFunctionLiteralAtAnyDepthOfADeclaration, and there nothing
+// asserts it: the run PANICS inside the guard.
+//
+// A panic is a kill and not a pin. It reports `index out of range` against a
+// line in a helper rather than naming the property that was broken, and it
+// takes the binary down, so every test declared after it reports nothing at
+// all — a mutation screen reading test counts sees the whole package move
+// rather than one row. This calls boundLiteralNames directly and recovers,
+// so each direction fails as a named row and the run survives to report the
+// rest.
+//
+// DECLARATION ORDER IS LOAD-BEARING HERE and is why this sits above the
+// sweep tests rather than beside the helper it pins. Go runs a package's
+// tests in the order they are declared, and the mutation this test exists to
+// name is the one that panics in a sweep row below: declared after that row,
+// this test would never run under the mutation it pins, and a pin the
+// mutation prevents from running is not a pin. Measured both ways before it
+// was placed here.
+//
+// The third row is a liveness control and not a third direction. Without it
+// every assertion here is satisfied by a guard that binds nothing ever,
+// which is a mutation neither of the first two rows can see.
+func TestBoundLiteralNamesBindsNothingWhenNamesAndValuesDisagree(t *testing.T) {
+	// notALiteral is undeclared and never called: these are parsed, not
+	// typechecked, which is the whole reason a name list can disagree with
+	// its value list here at all.
+	for _, tc := range []struct {
+		name, decl string
+		want       []string
+	}{
+		{name: "fewer names than values", decl: `var only = notALiteral(), func() {}`},
+		{name: "more names than values", decl: `var first, second = func() {}`},
+		{name: "as many names as values", decl: `var paired = func() {}`, want: []string{"paired"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "models.go", "package emitted\n\n"+tc.decl+"\n", parser.SkipObjectResolution)
+			require.NoError(t, err)
+
+			var names map[*ast.FuncLit]string
+			require.NotPanics(t, func() { names = boundLiteralNames(file) },
+				"boundLiteralNames indexed its name list past the end on a declaration binding %s. go/parser "+
+					"accepts that spelling because it does not typecheck, so an emission can reach the binding "+
+					"with more values than names, and the length guard is the only thing standing between it and "+
+					"an out-of-range index", tc.name)
+
+			require.Equal(t, tc.want, slices.Sorted(maps.Values(names)),
+				"boundLiteralNames named the literals of a declaration binding %s differently than it must. A "+
+					"declaration whose names and values disagree pairs nothing: a literal bound there is reported "+
+					"by position, because pairing name i with value i would report it under a name its own "+
+					"declaration does not give it", tc.name)
+		})
+	}
+}
+
 // TestSweepReadsAFunctionLiteralAtAnyDepthOfADeclaration holds the sweep to
 // every function literal a package-level declaration holds, and not only to
 // the one spelled as a declared name's whole value.
@@ -2200,7 +2264,15 @@ func boundLiteralNames(root ast.Node) map[*ast.FuncLit]string {
 		// Bounds alone would be `<`. It is `!=` so that the other direction —
 		// more names than values — binds nothing rather than pairing name i
 		// with value i and reporting a literal under lhs[i].
-		// TestSweepMarksEachYieldedFunctionByItsSpelling writes that shape.
+		//
+		// Both directions are answered by name in
+		// TestBoundLiteralNamesBindsNothingWhenNamesAndValuesDisagree, which
+		// calls this directly and recovers. Each also has a witness through
+		// the sweep, and they are not alike: more names than values changes
+		// an entry in TestSweepMarksEachYieldedFunctionByItsSpelling's list,
+		// while fewer names than values only PANICS here, in the last row of
+		// TestSweepReadsAFunctionLiteralAtAnyDepthOfADeclaration. That panic
+		// is why the named test is declared ahead of both.
 		if len(lhs) != len(rhs) {
 			return
 		}
