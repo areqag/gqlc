@@ -925,6 +925,44 @@ seat_pane_idle() { # <seat>
     esac
 }
 
+# An idle seat's composer is not always empty, and the difference decides
+# whether anything can still reach the seat. send_line refuses every send into a
+# non-empty box — typing appends, so it would paste onto the end of a citizen's
+# draft and submit the pair as one message (gqlc-6bnkw) — and cmd_wake, cmd_sleep,
+# cmd_down and dispatch's recovery ask all route through it. So a seat holding
+# any text is unreachable by all four transports at once while seat_agent_status
+# still says `idle` (gqlc-gv7dw).
+#
+# HOW THE TEXT GOT THERE IS NOT KNOWABLE FROM HERE, and this predicate is
+# deliberately silent about it, because at least three things produce the same
+# bytes: a citizen composing right now, a nudge km typed itself (a burst of 64
+# characters or more is read as a paste and its trailing CR renders as a literal
+# newline, gqlc-gh7xj), and a sender outside km — two judges were found holding a
+# character-identical 25-character line that appears in no km code path, which is
+# the case gqlc-gv7dw was filed on and is NOT the gh7xj mode.
+#
+# ONLY A POSITIVE READ OF TEXT makes the claim. A pane with no box (rc 1) or one
+# that could not be read (rc 2) answers "not boxed", which leaves the seat in
+# whatever population it was already in rather than inventing a new alarm out of
+# a failed read. The conservative direction here is to under-report: a boxed seat
+# missed still shows up as IDLE, which is the state it had before this existed.
+#
+# box_one_line and not a bare `-n "$box"`, and the difference is one case, not
+# the obvious one: seat_box_text's awk already drops a line that is EXACTLY `❯`
+# or `>`, so a bare glyph never reaches here. What does reach here is a glyph
+# followed by spaces or the U+00A0 the TUI pads with — awk keeps that line, and
+# `-n` on it reports an empty composer as BOXED, which raises the unreachable
+# alarm over a seat a send would have reached. It is also the normalisation
+# send_line's own witness uses, so this predicate answers about the same bytes
+# as the guard it is reporting on.
+seat_box_holds_text() { # <seat> -> 0 the composer holds text, 1 empty/no box/unreadable
+    local pane box
+    pane=$(seat_pane_id "$1") || return 1
+    [ -n "$pane" ] || return 1
+    box=$(seat_box_text "$pane" 2>/dev/null) || return 1
+    [ -n "$(box_one_line "$box")" ]
+}
+
 # history: kingdom/brain/km-notes.md#seat_prompt_visible
 seat_prompt_visible() { # <seat>
     case "$(seat_agent_status "$1")" in
@@ -2980,7 +3018,7 @@ fmt_age() { # <seconds>
 
 cmd_status() {
     no_args status "$@"
-    local sd s disp class st stcol ctx hb beads unread age hbcol stale frozen="" blind="" idle=""
+    local sd s disp class st stcol ctx hb beads unread age hbcol stale frozen="" blind="" idle="" boxed=""
     local target tree fresh fstate fball fbgates fahead fdetail stalewt="" exposed="" unjudged=""
     local workcol wage sage dry wedged="" nowork="" unwitnessed=""
     local stall stall_age stall_list wake_age undrained=""
@@ -3039,8 +3077,23 @@ cmd_status() {
         # history: kingdom/brain/km-notes.md#cmd_status-2
         stcol="$st"
         if [ "$st" = awake ] && seat_pane_idle "$s"; then
-            stcol="awake-idle"
-            idle="$idle $s"
+            # BOXED is a refinement of IDLE, not a population beside it, and a
+            # boxed seat is deliberately taken OUT of idle rather than listed in
+            # both. IDLE's stated remedy is `km sleep --seat <seat>`, which
+            # routes through send_line and is refused by the very box this
+            # detects — so leaving a boxed seat on the IDLE line hands the
+            # operator a remedy that cannot work, which is worse than the
+            # silence it replaces.
+            #
+            # Costs one extra pane read per already-idle seat, and only for
+            # those: the working majority never reaches this branch.
+            if seat_box_holds_text "$s"; then
+                stcol="awake-box"
+                boxed="$boxed $s"
+            else
+                stcol="awake-idle"
+                idle="$idle $s"
+            fi
         fi
         ctx="-"
         hbcol="-"
@@ -3187,8 +3240,11 @@ cmd_status() {
     if [ -n "$frozen" ]; then
         echo "UNRESPONSIVE:$frozen — no heartbeat for over $(fmt_age "$stale"); read the pane before believing the STATE column. A frozen seat holds its slot, answers no mail, and reports as healthy. Do not end the session: a modal is not consent (VI.2)."
     fi
+    if [ -n "$boxed" ]; then
+        echo "BOXED:$boxed — awake and idle, with TEXT SITTING UNSUBMITTED in the input box, so no transport in this town can reach these seats at all. send_line refuses every send into a non-empty box, correctly: typing APPENDS, so it would paste onto the end of a citizen's draft and submit the pair as one message (gqlc-6bnkw). cmd_wake, cmd_sleep, cmd_down and dispatch's recovery ask all route through that one function, so these seats cannot be woken, nudged, slept or brought down, while each still holds one of $(cfg concurrency max_active) slots and every dispatch pass wakes ASLEEP seats only. HOW THE TEXT GOT THERE IS NOT KNOWABLE FROM THIS LINE, and at least three things produce it: a citizen composing right now; a nudge km typed itself, since a burst of 64 characters or more is read as a paste and its trailing CR renders as a literal newline (gqlc-gh7xj); and a sender outside km entirely — two judges were found holding a character-identical 25-character line that appears in no km code path, which is the case this line was built for and is NOT the gh7xj mode (gqlc-gv7dw). Seven panes sat like this through the eleven-hour freeze of 2026-09-01, every one of them reporting as awake-idle, and the ESCALATED tags on that board were asks that never arrived rather than citizens ignoring them (gqlc-5vp7). It refines the IDLE population and nothing else: a seat whose agent still reports \`working\` never reaches this check, so an ABSENT BOXED line says only that no IDLE pane holds a stranded ask. These are NOT on the IDLE line below, because IDLE's remedy — 'km sleep --seat <seat>' — is itself a send and is refused by this same box. DO NOT RELAX THAT GUARD: appending to a live draft and submitting it is a worse failure than a held slot. km neither clears nor submits the text, because it cannot tell a stale line from work in progress — reading the pane and deciding is an operator's, and ending or unblocking a session is not km's to do on a timer (VI.2)."
+    fi
     if [ -n "$idle" ]; then
-        echo "IDLE:$idle — awake, alive, and sitting at an empty prompt: unroutable, because every dispatch pass wakes ASLEEP seats only, while the live session still spends one of $(cfg concurrency max_active) slots. Six of these stalled the whole town for eleven hours with every board reading healthy (gqlc-5vp7). One capture of a TUI is not proof — read the pane first, and 'km sleep --seat <seat>' frees the slot if the citizen is done. Nothing here ends a session: a seat that has not asked to leave has not consented (VI.2, gqlc-971s)."
+        echo "IDLE:$idle — awake, alive, and sitting at an empty prompt — the composer was READ and found empty, so these are the ones a send can still reach; a seat whose box held text is on the BOXED line above instead, and is not reachable at all. Unroutable, because every dispatch pass wakes ASLEEP seats only, while the live session still spends one of $(cfg concurrency max_active) slots. Six of these stalled the whole town for eleven hours with every board reading healthy (gqlc-5vp7). One capture of a TUI is not proof — read the pane first, and 'km sleep --seat <seat>' frees the slot if the citizen is done. Nothing here ends a session: a seat that has not asked to leave has not consented (VI.2, gqlc-971s)."
     fi
     if [ -n "$wedged" ]; then
         echo "WEDGED:$wedged — a tool call that STARTED and has not come back, for longer than $(fmt_age "$dry"). This is the signal the heartbeat cannot carry: km-statusline keeps writing all through a wedged turn, so these seats' HB cells are as fresh as a seat doing real work (gqlc-n97e, 13+ minutes; gqlc-eier, 80 and 152 while every board read healthy). The named tool is the newest one started, not necessarily the one that hung. The third word is WHY, and these are opposite jobs: 'consent' is a seat waiting on one keystroke, which a citizen can answer; 'limit' is a usage wall, which no keystroke clears and which ends the turn without ending the session (gqlc-3evsn); 'unknown' means the pane carried neither marker, which covers a genuinely hung command AND every modal nobody has sampled yet, so it is a reason to look rather than a reason not to; 'unreadable'/'no-pane' mean km could not ask. The recovery ladder's stalled trigger asks these seats too, under the same consent witness; a genuinely long tool call costs one queued line the citizen reads at the turn's end, and a trailing ESCALATED marks a seat the ladder has stopped asking. Read the pane — the word is a snapshot of the screen at the moment this table was built, the seat may have moved since, and a modal answered just before the read left no trace on it. Do not end the session: a modal is not consent (VI.2)."
