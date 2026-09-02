@@ -390,13 +390,19 @@ func requireCarrierHasAnArm(t *testing.T, goType string) {
 // its element, and the element widths that arm composes with are the
 // literals of the scalar arms beside it.
 //
-// That second shape is the walk's remaining blind spot, and the AST
-// cannot close it: `"[]" + elemTy` and `"[]" + goDecimal` are the same
-// tree, so what the right-hand side holds is invisible without type
-// resolution. Today it holds Property's own recursive answer, which is a
-// literal of an arm beside it (types.go, the KindList branch). A list
-// arm composed with something else would be accepted here and swept by
-// nothing.
+// That second shape is where the walk's blind spot is, and it is
+// narrower than the whole shape. Where the right-hand side is itself a
+// string literal the tree names the type outright, so `"[]" +
+// "decimal.Decimal"` is read and swept like any other literal; it used
+// to be dropped, which made a carrier spelled that way compile,
+// preserve the arm count, and reach no subtest (bd gqlc-geny).
+//
+// What the AST cannot close is an RHS naming a VALUE: `"[]" + elemTy`
+// and `"[]" + goDecimal` are the same tree, so what that value holds is
+// invisible without type resolution. Today it holds Property's own
+// recursive answer, which is a literal of an arm beside it (types.go,
+// the KindList branch). A list arm composed with some other value would
+// be accepted here and swept by nothing.
 func typeTableGoTypes(t *testing.T) map[string][]string {
 	t.Helper()
 
@@ -485,7 +491,20 @@ func returnedGoType(t *testing.T, fset *token.FileSet, method string, ret *ast.R
 		lhs, isLit := first.X.(*ast.BasicLit)
 		require.True(t, isLit && first.Op == token.ADD && lhs.Kind == token.STRING && lhs.Value == `"[]"`,
 			cannotRead, where, method, types.ExprString(first))
-		return "", false
+		// A right-hand side that is itself a string literal names its Go
+		// type here as plainly as the BasicLit arm above does, so it is
+		// read rather than dropped: `"[]" + "decimal.Decimal"` compiles,
+		// preserves the arm count, and was invisible to this walk (bd
+		// gqlc-geny). What stays invisible is an RHS naming a VALUE —
+		// `"[]" + elemTy` — where the tree says nothing about what the
+		// value holds.
+		rhs, isLit := first.Y.(*ast.BasicLit)
+		if !isLit {
+			return "", false
+		}
+		elem, err := strconv.Unquote(rhs.Value)
+		require.NoError(t, err, "%s returns a literal this walk cannot read as a Go type text: %s", method, rhs.Value)
+		return "[]" + elem, true
 	default:
 		require.Fail(t, "unreadable return in the type table", cannotRead, where, method, types.ExprString(first))
 		return "", false
