@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -1099,6 +1100,25 @@ var inputDerivedFiles = map[string]bool{"models.go": true}
 // partition is a suffix rather than a set of names (§5.5).
 const queryFileSuffix = ".cypher.go"
 
+// querySourceOf is the query source a per-source query golden was
+// emitted from: the emitter names the file after the source's own
+// basename, so `people.cypher` yields `people.cypher.go`. The source is
+// read from the emitting fixture's own directory, beside its
+// manifest.json, which is where every one of the corpus's query sources
+// sits.
+//
+// The second result is false for a golden that is not per-source shaped
+// at all, which is how db.go and models.go leave this arm before the
+// filesystem is consulted.
+func querySourceOf(path string) (string, bool) {
+	base := filepath.Base(path)
+	if !strings.HasSuffix(base, queryFileSuffix) {
+		return "", false
+	}
+	fixtureDir := filepath.Dir(filepath.Dir(filepath.Dir(path)))
+	return filepath.Join(fixtureDir, strings.TrimSuffix(base, ".go")), true
+}
+
 // TestFixedDeclarationSweepEqualsTheReservedSet reads the exported
 // declarations of the goldens fixedDeclarationFiles names and holds that
 // set equal to reservedIdentifiers, in both directions.
@@ -1129,18 +1149,28 @@ const queryFileSuffix = ".cypher.go"
 // filter below for being unexported, not for their receiver.
 //
 // Which side of the partition a file sits on is measured, not only
-// declared. A basename more than one fixture emits, and an exported name
-// every one of those fixtures declares, is a name that does not follow
-// from the batch, so its file belongs in fixedDeclarationFiles. That is
-// what holds the queryFileSuffix arm, which names no file and so admits
-// any emitted file whose name ends in it. A basename a single fixture
-// emits carries no such evidence and is skipped — today the two
-// per-source query files of multi_source_files — so a new emitted file
-// that one fixture alone carries still escapes on that arm (gqlc-laoy).
-// One fixture is one fixture directory across every target — see
-// goldenFixture — so qualifying that key by target too puts each of
-// those two files at two fixtures with an everywhere-name apiece, and
-// this loop then demands they enter fixedDeclarationFiles.
+// declared, and the queryFileSuffix arm is measured twice over. The
+// suffix says only what SHAPE a file has; what admits it is a query
+// source of that name in its own fixture (querySourceOf). So the arm
+// admits exactly the per-source files the batch's own sources justify,
+// and an emitted file that merely ends in the suffix is unclassified —
+// which is what closes gqlc-laoy. That evidence is per file rather than
+// counted across fixtures, so a file one fixture alone emits is held to
+// it like any other.
+//
+// The second measurement is the older one and still earns its place on
+// what the first does not cover: a basename more than one fixture emits,
+// and an exported name every one of those fixtures declares, is a name
+// that does not follow from the batch however well the FILE is
+// justified, so it belongs in fixedDeclarationFiles. A basename a single
+// fixture emits carries no such evidence and is skipped there — today
+// the two per-source query files of multi_source_files. One fixture is
+// one fixture directory across every target — see goldenFixture — so
+// qualifying that key by target puts each of those two at two fixtures
+// with an everywhere-name apiece, and that loop then demands they enter
+// fixedDeclarationFiles though both are genuinely input-derived. Closing
+// gqlc-laoy does not make that key safe to change; it removes the reason
+// to want to.
 //
 // It reads the committed goldens, not the emitter. A target with no
 // enrolled fixture declares nothing here, and a rename in a template
@@ -1156,9 +1186,22 @@ func TestFixedDeclarationSweepEqualsTheReservedSet(t *testing.T) {
 	declaredBy := map[string]map[string]map[string]bool{}
 	// name -> one swept path declaring it, for the fail message.
 	found := map[string]string{}
+	// basename -> one emitting path whose own fixture carries no query
+	// source of that name, and the source it looked for. A basename absent
+	// here is one every emitting fixture justifies, so a file justified
+	// under one fixture and not another is still reported.
+	unjustified := map[string][2]string{}
+	perSource := 0
 	fset := token.NewFileSet()
 	for _, path := range paths {
 		base, fixture := filepath.Base(path), goldenFixture(t, path)
+		if src, isQueryFile := querySourceOf(path); isQueryFile {
+			if _, err := os.Stat(src); err == nil {
+				perSource++
+			} else if _, seen := unjustified[base]; !seen {
+				unjustified[base] = [2]string{path, src}
+			}
+		}
 		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		require.NoError(t, err, "parsing %s", path)
 		if emittedBy[base] == nil {
@@ -1180,19 +1223,19 @@ func TestFixedDeclarationSweepEqualsTheReservedSet(t *testing.T) {
 		})
 	}
 
-	suffixed := 0
 	for _, base := range slices.Sorted(maps.Keys(emittedBy)) {
-		if strings.HasSuffix(base, queryFileSuffix) {
-			suffixed++
-		}
 		require.True(t,
 			fixedDeclarationFiles[base] || inputDerivedFiles[base] || strings.HasSuffix(base, queryFileSuffix),
 			"the corpus emits %s, which neither fixedDeclarationFiles nor inputDerivedFiles classifies; an unclassified file is one this sweep never reads, so every exported name it declares owes no reserved row",
 			base)
+		at := unjustified[base]
+		require.Emptyf(t, at[0],
+			"%s is emitted, but its fixture carries no query source at %s, so no source in the batch justifies that file; the %s suffix alone admits any emitted file whose name ends in it, and every exported name this one declares would then owe no reserved row (gqlc-laoy)",
+			at[0], at[1], queryFileSuffix)
 	}
-	require.NotZero(t, suffixed,
-		"no golden under %s ends %s, so the suffix arm of the partition excludes nothing; the emitter renamed the per-source query file and this suffix kept the old name",
-		goldenCorpusGlob, queryFileSuffix)
+	require.NotZero(t, perSource,
+		"no golden under %s is the emitted counterpart of a query source in its own fixture, so this arm of the partition admits nothing; the emitter renamed the per-source query file, or the fixtures moved their query sources out of the fixture directory",
+		goldenCorpusGlob)
 	for _, base := range slices.Sorted(maps.Keys(fixedDeclarationFiles)) {
 		require.NotEmpty(t, emittedBy[base],
 			"no golden under %s is named %s, so every exported declaration that file emits went unread; the emitter renamed it and this set kept the old name, or the corpus lost every fixture emitting it",
