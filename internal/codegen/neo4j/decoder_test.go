@@ -1,12 +1,15 @@
 package neo4j_test
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -923,4 +926,121 @@ func declaredIdents(n ast.Node) []*ast.Ident {
 // the whole of what the §4.2 mangle does to them.
 func exportedField(name string) string {
 	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+// narrowingWidths names every emitted Go type a driver carrier has to be
+// narrowed INTO. int64 and float64 are absent because they are the
+// carriers themselves, so a conversion to one of them is a widening and
+// cannot lose a value; the neutral temporal types are absent because they
+// are not conversion-compatible with their carriers at all and go through
+// an emitted to<X> helper (ADR 0033), which is a shape change and has no
+// range question.
+var narrowingWidths = map[string]bool{
+	"int": true, "int8": true, "int16": true, "int32": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"float32": true,
+}
+
+// narrowHelperNames are the two emitted helpers that legitimately hold a
+// bare narrowing conversion, because performing one and reporting on it
+// is what they are for.
+var narrowHelperNames = map[string]bool{"narrowInt": true, "narrowFloat32": true}
+
+// TestEmittedDecodersNarrowThroughACheck refuses a bare Go conversion to a
+// declared width anywhere in an emitted body but the two helpers that
+// implement the check.
+//
+// It is the mechanical form of the question ADR 0036 answers. A renderer
+// arm that converts at the site rather than calling the helper wraps a
+// value the declared width cannot hold, silently and with no error — and
+// nothing else in this package fails when it does: the suite is green
+// either way, the emission compiles, the goldens agree with themselves,
+// and the wrong number reaches the caller looking exactly like a right
+// one. The corpus rows catch the eight sites that exist today. This
+// catches the ninth.
+//
+// Both fixtures are walked because neither reaches the other's arms: the
+// probe declares every width the type table carries but only on entity
+// properties, and the corpus reaches the query column and list-element
+// paths but at a handful of widths.
+func TestEmittedDecodersNarrowThroughACheck(t *testing.T) {
+	t.Parallel()
+
+	for name, src := range emissionsUnderNarrowingGuard(t) {
+		file, err := parser.ParseFile(token.NewFileSet(), name, src, parser.SkipObjectResolution)
+		require.NoError(t, err, "%s does not parse", name)
+		fset := token.NewFileSet()
+		fset.AddFile(name, fset.Base(), len(src))
+
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || narrowHelperNames[fn.Name.Name] {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, isCall := n.(*ast.CallExpr)
+				if !isCall || len(call.Args) != 1 {
+					return true
+				}
+				id, isIdent := call.Fun.(*ast.Ident)
+				if !isIdent || !narrowingWidths[id.Name] {
+					return true
+				}
+				t.Errorf("%s: %s narrows to %s by a bare conversion, which wraps a value "+
+					"the declared width cannot hold; it must go through narrowInt/narrowFloat32 (ADR 0036)",
+					name, fn.Name.Name, id.Name)
+				return true
+			})
+		}
+	}
+}
+
+// narrowingGuardSkips names emitted files the guard above does not walk.
+//
+// temporal_neo4j.go is the only one, and it is skipped because it holds a
+// legitimate narrowing the guard cannot tell from an illegitimate one:
+// toDate converts a time.Month to int, which is a conversion between two
+// integer types of the same width and loses nothing. Excluding it costs
+// exactly one thing, stated so nobody has to rediscover it — a bare
+// narrowing introduced INTO a temporal helper is not caught here. That is
+// a narrow loss because the helpers are fixed text: render_temporal.go
+// returns each as a string constant, so no renderer arm composes a
+// conversion into one per width, which is the thing this guard exists to
+// catch.
+var narrowingGuardSkips = map[string]bool{"temporal_neo4j.go": true}
+
+// emissionsUnderNarrowingGuard is every emitted Go file the guard above
+// walks, keyed by a name that says which fixture it came from.
+//
+// The bytes come from Generate rather than from the golden tree, for the
+// reason the corpus states: a golden regenerated alongside a defect
+// agrees with itself.
+func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	keep := func(prefix string, files []codegen.File) {
+		for _, f := range files {
+			if !narrowingGuardSkips[f.Path] {
+				out[prefix+f.Path] = string(f.Contents)
+			}
+		}
+	}
+
+	probe, err := gql.New().Parse(strings.NewReader(decoderProbeSchema(unclaimedProperty)))
+	require.NoError(t, err, "the probe schema does not parse")
+	probeFiles, err := neo4j.New().Generate(codegen.Input{Schema: probe})
+	require.NoError(t, err)
+	keep("probe/", probeFiles)
+
+	src, err := os.ReadFile(filepath.Join("testdata", corpusSchema))
+	require.NoError(t, err)
+	sch, err := gql.New().Parse(bytes.NewReader(src))
+	require.NoError(t, err)
+	corpusFiles, err := neo4j.New(neo4j.WithPackageName(corpusPackage)).
+		Generate(codegen.Input{Schema: sch, Queries: corpusNamedQueries(t, sch)})
+	require.NoError(t, err)
+	keep("corpus/", corpusFiles)
+
+	require.NotEmpty(t, out, "the guard walked no emitted files at all")
+	return out
 }
