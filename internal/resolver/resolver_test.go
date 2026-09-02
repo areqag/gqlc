@@ -409,27 +409,26 @@ var invalidFixtures = map[string]error{
 	"plural_endpoint_unlabelled_hop_stays_plural.cypher":          ErrAmbiguousBinding,
 	"plural_endpoint_unlabelled_hop_property_stays_plural.cypher": ErrAmbiguousBinding,
 	// Part 1 infers `c` through an OPTIONAL hop and `WITH c` carries it into
-	// Part 2. sxzj moved which Part refuses and with which sentinel: Phase B
-	// used to commit `c` to Company alone, so Part 1 accepted, WITH carried a
-	// singular type with no provenance, and the refusal fell to Part 2's
-	// projection of `p2`. Phase B now leaves `c` over both company types, and
-	// `WITH c` projects the whole entity, which a plural node binding is refused
-	// for. The sentinel is ErrAmbiguousBinding and not the ErrAmbiguousLabel
-	// `MATCH (c:Company) WITH c ...` gets on this same schema, because `c` here
-	// carries no labels — Phase B's plural commitment put it in the cands lane,
-	// not resolveNodeLabels. The refusal is Part 1's, at the `WITH` itself: the
-	// query never reaches Part 2, which is why nothing in the resolver carries
-	// this provenance across a Part boundary (see scope.pluralByInference).
-	// Those are the only two cells of the corpus sweep the sxzj change moved
-	// without being a fixture written for it — this query against each of the
-	// two copies of the schema, and nothing else — and they are also the only
-	// two that the sentinel split moves.
+	// Part 2, whose `p2` is left over both person types by the two WORKS_AT
+	// declarations — so personOnly is missing on one of them. That is the
+	// refusal the fixture is named for, and which Part it lands in has moved
+	// twice. sxzj moved it OFF Part 2: Phase B stopped committing `c` to
+	// Company alone, `WITH c` became a whole-entity projection of a plural
+	// binding, and the refusal became Part 1's ErrAmbiguousBinding on `c`
+	// before Part 2 was ever resolved. etj6 moved it back, by deferring that
+	// projection refusal in a non-final Part — a `WITH` is not a user-visible
+	// column, so a plural binding may cross one and be narrowed on the far
+	// side. Nothing narrows `c` here, but nothing needs to: `c` is projected
+	// nowhere else, and Part 2's own fault is reached first.
+	//
+	// So this fixture no longer witnesses the widened lane's whole-entity
+	// message; unlabelled_optional_hop_whole_entity_stays_wide carries that
+	// pin instead, in a single-Part query no carry can move.
 	//
 	// The carry lane it used to pin (newScope leaving a carried entry out of
-	// resolvedCovers) is still live; this fixture no longer reaches it, because
-	// Part 1 stops before the carry. carried_uncovered_endpoint_stays_plural
-	// below reaches it instead.
-	"plural_endpoint_carried_hop_property_stays_plural.cypher": ErrAmbiguousBinding,
+	// resolvedCovers) is still live; carried_uncovered_endpoint_stays_plural
+	// below reaches it.
+	"plural_endpoint_carried_hop_property_stays_plural.cypher": ErrUnknownProperty,
 	// The carry lane, reached by the route sxzj left open: `p` is singular from
 	// its label, the ONE WORKS_AT out of Person&Employee lands on Company&Large,
 	// and no edge touching `c` is trustworthy — the hop is OPTIONAL — so Phase B
@@ -529,6 +528,14 @@ var invalidFixtures = map[string]error{
 	// pinned below: it is what says `c` is plural rather than pinned to the
 	// type that happens to carry the property.
 	"unlabelled_optional_hop_type_only_property.cypher": ErrUnknownProperty,
+	// The same `c` again, projected WHOLE. This is the widened lane's other
+	// exit: refProjectionType's nodeCands arm with an empty property, which
+	// renders the candidate slice itself rather than picking a type out of it.
+	// The sentinel is ErrAmbiguousBinding and not ErrAmbiguousLabel because `c`
+	// carries no labels — the split is pluralByInference's, and this fixture is
+	// the corpus' only whole-entity projection of a binding that reached the
+	// lane by inference. Its message pins the slice's ORDER; see below.
+	"unlabelled_optional_hop_whole_entity_stays_wide.cypher": ErrAmbiguousBinding,
 	// The control for the widening's gate. `(p:Employee)` pins the mandatory
 	// hop's far end to Person&Employee, whose WORKS_AT reaches Company&Large
 	// only, and the OPTIONAL hop reaches the bare Company only — so the
@@ -672,11 +679,16 @@ var invalidFixtureContains = map[string]string{
 	// reaches a compatible type.
 	"unlabelled_optional_hop_empty_intersection.cypher": `no edge in the pattern reaches a compatible schema node type`,
 	// The widened lane's own rendering, and the only fixture that shows one: `c`
-	// reaches ErrAmbiguousLabel out of t.cands, so this is nodeTypesForKeys' key
-	// order verbatim. Ascending is what satisfyingNodeTypes produces for a
+	// reaches the whole-entity arm out of t.cands, so this is nodeTypesForKeys'
+	// key order verbatim. Ascending is what satisfyingNodeTypes produces for a
 	// LABELLED plural binding, and the two lanes feed the same formatter, so a
 	// widened `c` that rendered descending would spell the same set two ways.
-	"plural_endpoint_carried_hop_property_stays_plural.cypher": `node type: Company, Company&Large`,
+	"unlabelled_optional_hop_whole_entity_stays_wide.cypher": `node type: Company, Company&Large`,
+	// Names `p2` and not `c`: the whole point of the retarget is that the carry
+	// no longer refuses, so a bare ErrUnknownProperty would be satisfied by a
+	// refusal on either side of the `WITH`. "plural-satisfying type" is
+	// unionNodeProperty's phrase and says Part 2 reached the plural lane.
+	"plural_endpoint_carried_hop_property_stays_plural.cypher": `p2.personOnly missing on plural-satisfying type Employee&Person`,
 	// Names `p2` and the Person branch: the refusal has to come from the plural
 	// lane on the binding AFTER the carry, not from `c` itself. `c` is singular
 	// here (Person&Employee has one WORKS_AT), so a message about `c` would mean
@@ -1211,6 +1223,157 @@ func (s *ResolverSuite) TestEdgeClosureNarrowingCannotOutrunTheFacts() {
 	vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
 	s.Require().NoError(err, "an empty intersection falls back to label satisfaction; it is not a refusal")
 	s.Require().Equal([]Column{{Name: "p.name", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, vq.Columns)
+}
+
+// TestABareWithCarriesAPluralBindingForwards pins the widening: a non-final
+// Part's projection is a CARRY, not a user-visible column, so a bare `WITH v`
+// naming a plural binding no longer has to name a single type. The candidate
+// set travels in branchState.exportedNodeCands — a lane Export has always
+// written and no downstream Part could ever read, because this refusal fired
+// one Part earlier (the claim scope.go's pluralByInference comment used to
+// rest on).
+//
+// The first two rows are the two halves of the same fault and only one of them
+// is what gqlc-etj6 describes. Row 2 is the bead's query, where Part 1's edge
+// narrows `p`. Row 1 has no edge and no narrowing anywhere: it is refused
+// purely for crossing a WITH, while the identical one-Part spelling resolves.
+// That row is what says the defect is the premature refusal rather than the
+// ORDER the narrowing and the carry run in — there is no carry check to
+// reorder, and a fix that only moved the narrowing would leave row 1 refused.
+func (s *ResolverSuite) TestABareWithCarriesAPluralBindingForwards() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
+	resolve := func(src string) []Column {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		s.Require().NoErrorf(err, "%s", src)
+		return vq.Columns
+	}
+
+	id := []Column{{Name: "p.id", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}}
+	employeeID := []Column{{Name: "p.employeeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}}
+	employeePerson := []Column{{Name: "p", Type: ResolvedNode{Labels: "Employee&Person"}}}
+
+	// A WITH is transparent to plural satisfaction. `id` is declared on both
+	// candidates, so ADR 0022's intersection names it either way — and the
+	// one-Part spelling below already resolves on master. The two must agree:
+	// nothing about crossing a Part boundary changes which types satisfy `p`.
+	s.Require().Equal(id, resolve("MATCH (p:Person) RETURN p.id"))
+	s.Require().Equal(id, resolve("MATCH (p:Person) WITH p RETURN p.id"))
+
+	// gqlc-etj6's own query. The only declared WORKS_AT is
+	// Employee&Person -> Company, so Part 1's closure pins `p` — the carried
+	// candidate set is narrowed by exactly the mechanism that narrows a
+	// locally-bound one.
+	s.Require().Equal(id, resolve("MATCH (p:Person) WITH p MATCH (p)-[w:WORKS_AT]->(c:Company) RETURN p.id"))
+
+	// employeeId is declared on Employee&Person and NOT on Person, so this
+	// column exists only because the carried set was narrowed downstream. The
+	// union over both candidates has no such property, which is what makes
+	// this row evidence of narrowing rather than of the carry alone.
+	s.Require().Equal(employeeID,
+		resolve("MATCH (p:Person) WITH p MATCH (p)-[w:WORKS_AT]->(c:Company) RETURN p.employeeId"))
+
+	// The whole entity is nameable in the final Part once the narrowing has
+	// run, so the refusal that used to fire in Part 0 does not simply move
+	// downstream.
+	s.Require().Equal(employeePerson,
+		resolve("MATCH (p:Person) WITH p MATCH (p)-[w:WORKS_AT]->(c:Company) RETURN p"))
+
+	// WITH * reaches the same rule through materialiseReturns' synthesised
+	// items rather than through s.returns, so it is a separate code path to
+	// the same predicate and not a restatement of the row above.
+	s.Require().Equal(employeePerson,
+		resolve("MATCH (p:Person) WITH * MATCH (p)-[w:WORKS_AT]->(c:Company) RETURN p"))
+
+	// Two carries in sequence: Part 1 reads `p` from the carry and re-exports
+	// it without ever binding it locally, which is the only shape where the
+	// carried candidate set has to survive a Part that does not declare it.
+	s.Require().Equal(employeePerson,
+		resolve("MATCH (p:Person) WITH p WITH p MATCH (p)-[w:WORKS_AT]->(c:Company) RETURN p"))
+}
+
+// TestAPluralCarryStillRefusesWhereNothingNarrowsIt is the other half. A
+// widening that accepts these is not a widening, it is a wrong answer: each row
+// is a shape where the carry must NOT be allowed to launder an unnameable type
+// into an accepted query, and each fails on a different way of getting the
+// deferral's boundary wrong.
+//
+// Rows 1 and 2 say the refusal is DEFERRED, not deleted — it fires in the Part
+// that actually projects the entity to the user. Row 3 is the aliased carry,
+// and it is the reason the rule is spelled on the bare self-named projection
+// rather than on "any whole-entity projection in a non-final Part": Export
+// records a nodeCands entry only when the alias equals the variable, so
+// `WITH p AS q` drops the candidate set on the floor. Deferring there would
+// carry a name downstream with its satisfying set lost, which is strictly worse
+// than refusing.
+func (s *ResolverSuite) TestAPluralCarryStillRefusesWhereNothingNarrowsIt() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
+	refuse := func(src string) error {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+		s.Require().Errorf(err, "%s: nothing here names a single type for p", src)
+		return err
+	}
+
+	for _, src := range []string{
+		// The final Part projects the whole entity and no edge ever narrowed
+		// it — the deferral has to arrive somewhere.
+		"MATCH (p:Person) WITH p RETURN p",
+		// Part 1 has an edge, but the directed REVIEWED is declared on BOTH
+		// person types, so its contribution is p's whole satisfying set and
+		// narrows nothing. This is the row that says the acceptance above
+		// comes from the narrowing and not from the carry being permissive.
+		"MATCH (p:Person) WITH p MATCH (p)-[r:REVIEWED]->(c:Company) RETURN p",
+		// Aliased carry: `q` reaches Part 1 as a projection alias with no
+		// candidate set behind it, so the plural fault must be reported where
+		// the set still exists.
+		"MATCH (p:Person) WITH p AS q RETURN q",
+	} {
+		err := refuse(src)
+		s.Require().ErrorIs(err, ErrAmbiguousLabel, "%s", src)
+		// The message enumerates the surviving candidates, so a deferral that
+		// dropped one on the way across the boundary and still refused
+		// (because two remain) passes errors.Is and fails here.
+		s.Require().ErrorContains(err, "Employee&Person", "%s", src)
+		s.Require().ErrorContains(err, "Person", "%s", src)
+	}
+}
+
+// TestACarriedPluralBindingKeepsItsOwnSentinel pins the lane the widening
+// forces into existence. errors.go makes the two plural sentinels
+// category-grained: ErrAmbiguousLabel for a LABEL SET with several satisfying
+// types, ErrAmbiguousBinding for an UNLABELLED binding Phase B could not
+// narrow. Which one fires is read off scope.pluralByInference, and nodeCands
+// cannot answer it — its values are the same []schema.NodeType either way.
+//
+// Before this change no carry could hold a plural name at all, so that lane
+// deliberately had no carry seed. Now that one can, an unlabelled binding
+// crossing a WITH would come out the far side reported as a LABEL fault: the
+// query names no label for `p`, so telling its author to disambiguate a label
+// set is advice they cannot act on. The two rows are the same query either
+// side of one WITH, and they must give the same sentinel.
+func (s *ResolverSuite) TestACarriedPluralBindingKeepsItsOwnSentinel() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
+	sentinel := func(src string) error {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+		s.Require().Errorf(err, "%s", src)
+		return err
+	}
+
+	for _, src := range []string{
+		"MATCH (p)-[r:REVIEWED]->(c:Company) RETURN p",
+		"MATCH (p)-[r:REVIEWED]->(c:Company) WITH p RETURN p",
+		"MATCH (p)-[r:REVIEWED]->(c:Company) WITH p WITH p RETURN p",
+	} {
+		err := sentinel(src)
+		s.Require().ErrorIs(err, ErrAmbiguousBinding,
+			"%s: p carries no label, so this is an inference fault either side of a WITH", src)
+		s.Require().NotErrorIs(err, ErrAmbiguousLabel, "%s", src)
+	}
 }
 
 // TestNarrowingLearnsOnlyFromEdgesEveryRowHas is the accepted half of the six

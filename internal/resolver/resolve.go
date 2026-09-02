@@ -108,8 +108,17 @@ func useSitesToScopes(sites []parameterUseSite) []partScope {
 // the downstream Part. Demotion of a member proven in Part K+1 pulls the
 // whole carried group via the ay9 fixed-point in demoteNullableInPlace.
 type branchState struct {
-	exportedNodeTypes       map[string]schema.NodeType
-	exportedNodeCands       map[string][]schema.NodeType
+	exportedNodeTypes map[string]schema.NodeType
+	exportedNodeCands map[string][]schema.NodeType
+	// exportedPluralByInference carries the scope lane of the same name for
+	// the plural bindings exportedNodeCands carries. nodeCands cannot answer
+	// it — its values are the same []schema.NodeType whether the binding went
+	// plural by label satisfaction or by Phase B inference — and it selects
+	// which of the two category-grained sentinels the downstream whole-entity
+	// refusal fires (errors.go). Without it an unlabelled binding crossing a
+	// WITH is reported as a label fault the query names no label for.
+	exportedPluralByInference map[string]bool
+
 	exportedEdgeTypes       map[string]schema.EdgeType
 	exportedEdgeKeys        map[string]schema.EdgeKey
 	exportedEdgeCands       map[string][]schema.EdgeKey
@@ -161,7 +170,7 @@ func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]
 	lastIdx := len(branch.Parts) - 1
 
 	for k, part := range branch.Parts {
-		cols, exported, uses, ev, err := resolvePart(part, carry, s, r)
+		cols, exported, uses, ev, err := resolvePart(part, carry, s, r, k == lastIdx)
 		if err != nil {
 			return nil, nil, orientationEvidence{}, err
 		}
@@ -190,7 +199,12 @@ func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]
 // Part), the branchState exported to Part K+1 (§4.2.2), the parameter-Use
 // witnesses collected inside this Part, and the edge-closure evidence the
 // wrong-orientation-drop detector reads.
-func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.Registry) ([]Column, branchState, []parameterUseSite, orientationEvidence, error) {
+//
+// final says whether this is the branch's last Part. Only the projection walk
+// reads it: a non-final Part's columns are discarded by resolveBranch, so its
+// projection is a carry rather than a user-visible column and a bare `WITH v`
+// naming a plural binding need not name a single type there (§4.4).
+func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.Registry, final bool) ([]Column, branchState, []parameterUseSite, orientationEvidence, error) {
 	sc := newScope(carry)
 	sc.Ingest(part)
 
@@ -277,7 +291,7 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 	// Projection walk (§4.4): scopeOrder + materialiseReturns +
 	// per-item projectionType, all on scope. Populates sc.scopeOrder,
 	// sc.items, sc.columns for Export.
-	if err := sc.ResolveProjections(s); err != nil {
+	if err := sc.ResolveProjections(s, final); err != nil {
 		return nil, branchState{}, nil, orientationEvidence{}, err
 	}
 

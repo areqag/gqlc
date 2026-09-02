@@ -391,7 +391,7 @@ func TestScopeCarryForwardRoundTrip(t *testing.T) {
 	sc.Ingest(query.Part{ReturnsAll: true})
 	sc.SeedLocalNullability() // no local bindings → no-op
 	sc.DemoteNullability()    // no local bindings, no groups → no-op
-	require.NoError(t, sc.ResolveProjections(sch))
+	require.NoError(t, sc.ResolveProjections(sch, false))
 	out := sc.Export()
 
 	// Ten carry lanes round-trip: node binding, edge binding lanes,
@@ -490,7 +490,7 @@ func TestScopeDemoteNullabilityAy9CrossPart(t *testing.T) {
 	sc0.SeedLocalNullability()
 	sc0.DemoteNullability()
 	sch := schema.Schema{Nodes: map[graph.LabelSetKey]schema.NodeType{nt.KeyLabels: nt}}
-	require.NoError(t, sc0.ResolveProjections(sch))
+	require.NoError(t, sc0.ResolveProjections(sch, false))
 	c1 := sc0.Export()
 	require.Equal(t, g, c1.exportedOptionalGroup["a"])
 	require.Equal(t, g, c1.exportedOptionalGroup["b"])
@@ -586,7 +586,7 @@ func TestScopeExportWildcardVsExplicit(t *testing.T) {
 	require.NoError(t, scWild.BindNode(nbV, nt))
 	scWild.SeedLocalNullability()
 	scWild.DemoteNullability()
-	require.NoError(t, scWild.ResolveProjections(sch))
+	require.NoError(t, scWild.ResolveProjections(sch, false))
 	outWild := scWild.Export()
 	require.Contains(t, outWild.exportedResolvedTypes, "v")
 	require.Contains(t, outWild.exportedNodeTypes, "v", "wildcard export populates binding lanes for v")
@@ -605,7 +605,7 @@ func TestScopeExportWildcardVsExplicit(t *testing.T) {
 	require.NoError(t, scExpl.BindNode(nbV2, nt))
 	scExpl.SeedLocalNullability()
 	scExpl.DemoteNullability()
-	require.NoError(t, scExpl.ResolveProjections(sch))
+	require.NoError(t, scExpl.ResolveProjections(sch, false))
 	outExpl := scExpl.Export()
 	require.Contains(t, outExpl.exportedResolvedTypes, "v")
 	require.Contains(t, outExpl.exportedResolvedTypes, "x")
@@ -630,7 +630,7 @@ func TestScopeExportWildcardVsExplicit(t *testing.T) {
 	require.NoError(t, scRenamed.BindNode(nbV3, nt))
 	scRenamed.SeedLocalNullability()
 	scRenamed.DemoteNullability()
-	require.NoError(t, scRenamed.ResolveProjections(sch))
+	require.NoError(t, scRenamed.ResolveProjections(sch, false))
 	outRenamed := scRenamed.Export()
 	require.Contains(t, outRenamed.exportedResolvedTypes, "w")
 	require.Empty(t, outRenamed.exportedNodeTypes, "a renamed bare projection exports no binding lane, under either name")
@@ -685,7 +685,7 @@ func TestScopeGroupZeroIsNotAnOptionalGroup(t *testing.T) {
 	require.True(t, sc.nullableBinding["a"], "a shares no OPTIONAL group with b, so b's witness must not demote it")
 	require.False(t, sc.nullableBinding["b"])
 
-	require.NoError(t, sc.ResolveProjections(sch))
+	require.NoError(t, sc.ResolveProjections(sch, false))
 	out := sc.Export()
 	require.NotContains(t, out.exportedOptionalGroup, "a", "a zero group id is absence, and must not travel in the carry")
 	require.NotContains(t, out.exportedOptionalGroup, "b")
