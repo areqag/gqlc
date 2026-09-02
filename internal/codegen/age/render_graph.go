@@ -86,8 +86,9 @@ func SessionInit(ctx context.Context, conn *pgx.Conn) error {
 // edge table's end_id read off a two-column vertex table ("invalid
 // attribute number 3"), and a "relation does not exist" naming a label
 // that belongs to a DIFFERENT graph, qualified with this one's name.
-// Dropping create_graph from the concurrent window gave 0 of 10. gqlc cannot hold a lock across your processes, so the
-// interlock is yours to arrange.
+// Dropping create_graph from the concurrent window gave 0 of 10. gqlc
+// cannot hold a lock across your processes, so the interlock is yours
+// to arrange.
 //
 // Two limits on that, so it is read for what it is. Whether
 // label-creating DML alone carries the hazard — the first CREATE of a
