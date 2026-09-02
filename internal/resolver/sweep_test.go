@@ -806,8 +806,13 @@ func TestSweepComparisonSortsEachDisagreement(t *testing.T) {
 	require.Len(t, cmp.onlyInSweep, 1)
 	require.Equal(t, 6, cmp.disagreements())
 
-	report := cmp.report(sweepManifestPath)
+	// A path no constant in this file carries. The report names the file the
+	// counts were taken against, and two files are compared this way now, so a
+	// summary that reached for sweepManifestPath instead of its argument would
+	// send a reader diffing the registry delta to a manifest that did not move.
+	report := cmp.report("synthetic/against.tsv")
 	for _, want := range []string{
+		"sweep vs synthetic/against.tsv:",
 		"DIFFERENT SENTINEL, same verdict (2)",
 		"DIFFERENT VERDICT (1)",
 		"DIFFERENT DETAIL, same verdict and sentinel (1)",
