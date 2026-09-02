@@ -914,11 +914,18 @@ func orientationDisagreement(cands []schema.EdgeKey, srcs, tgts []graph.LabelSet
 // its Target one it admits on the right, and right-to-left when the same holds
 // with the slices exchanged. Both can be true of one key: a directed close
 // probes only the left-to-right reading, but where srcs and tgts overlap a
-// candidate it returns still answers to the other one. endpointContribution
-// asks both questions of every candidate whatever the arrow said, so such a key
-// contributes both of its ends and the result is a superset of what the arrow
-// permits — widening in ADR 0006's safe direction, filed as gqlc-pv0u rather
-// than narrowed here.
+// candidate it returns still answers to the other one. So the right-to-left
+// question is asked only where the arrow leaves it open — endpointContribution
+// takes `directed` for exactly this and skips it on a directed close.
+//
+// It used to ask both of every candidate whatever the arrow said, on the
+// reasoning that the extra end only ever widened the result and so erred in ADR
+// 0006's safe direction. That reasoning does not hold at this call site (bd
+// gqlc-pv0u). Widening is safe for an inferred type, but the set this feeds is
+// the endpoint narrowing, where a second surviving type is not a broader answer
+// but no answer: the caller refuses the whole entity as ambiguous. The extra end
+// therefore bought refusals of queries the schema fully determines, which is the
+// unsafe direction wearing the safe one's name.
 //
 // Package-level rather than closures inside orientationDisagreement because the
 // endpoint narrowing asks the same question of the same candidate set and must
