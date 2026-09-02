@@ -19,6 +19,15 @@
 // recorded opens carry no volatile state at all. The redirect itself is
 // clean too: os.MkdirTemp records only `getenv TMPDIR`, and getenv lines are
 // hashed from the go command's OWN environment, not from the Setenv below.
+//
+// The fence beside this file keeps packages wired, and what it reaches is
+// worth stating exactly, because it was once claimed to catch any future
+// temp-using package and does not. It reads each package's own test files
+// for a direct temp call, and the non-test files of packages those test
+// files import for an exported function making one. Past that it is blind:
+// a temp acquisition two packages deep, or behind a value rather than a
+// call it can name, is unreachable without the call graph and is not
+// reported (bd gqlc-nvmz).
 package testtmp
 
 import (
