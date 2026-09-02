@@ -293,7 +293,7 @@ func TestDecodeVertexReadsNullableProperties(t *testing.T) {
 // to wrap: the decoder took the agtype carrier and converted at the
 // field, so a rank of 1<<40 reached the caller as 0 and a tally written
 // from a negative carrier as 18446744073709551615 (bd gqlc-awtb,
-// ADR 0036).
+// ADR 0037).
 //
 // The error text is asserted in full rather than merely for presence,
 // because this fixture already has a way for every one of these rows to
