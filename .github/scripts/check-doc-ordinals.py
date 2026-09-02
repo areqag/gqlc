@@ -31,9 +31,11 @@ the author who is about to allocate a number that an UNMERGED branch already
 holds -- which is the moment the collision is actually created, and the moment it
 is free to fix. Measured again on 2026-09-01: ADR 0037 existed only on
 `fix/gqlc-awtb-narrow-width-refuses` and a "next free number" read of master
-would have taken it a second time. The remedy printed below therefore names
-remote branches rather than the working tree, and the allocation-time half is
-filed separately.
+would have taken it a second time. The allocation-time half now exists as
+next-doc-ordinal.py / `just adr-next` (bd gqlc-dawo1), which fetches and answers
+across every origin branch; the remedy printed below sends the author there
+rather than describing the manual scan it replaced. This file remains the
+backstop, because allocation cannot see a number that has never been pushed.
 
 WHICH SERIES ARE ENROLLED is decided by the call sites, not here, because "is
 this an ordinal series" is not a property this file can infer. Enrolled today:
@@ -63,12 +65,12 @@ from pathlib import Path
 ORDINAL = re.compile(r"^(\d{4})-.+\.md$")
 
 REMEDY = (
-    "Renumber one of them to the next free ordinal -- and pick it by reading the "
-    "REMOTE BRANCHES, not this tree. A number free on master can already be taken "
-    "by a branch in flight, and a clean rebase will not tell you: two files "
-    "claiming one ordinal differ in name, so git has nothing to conflict over. "
-    "`git ls-remote --heads origin` then grep the series across those branches, "
-    "or `gh pr list --state open --json files` and look for the directory."
+    "Renumber one of them to the next free ordinal, and get that number from "
+    "`just adr-next` rather than by reading this tree. A number free on master "
+    "can already be taken by a branch in flight, and a clean rebase will not "
+    "tell you: two files claiming one ordinal differ in name, so git has nothing "
+    "to conflict over. `just adr-next` fetches and answers across every origin "
+    "branch, and refuses rather than guess if it cannot reach the remote."
 )
 
 

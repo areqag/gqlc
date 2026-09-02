@@ -2191,6 +2191,25 @@ test: check-hooks check-worktree-upstream check-shared-config check-claude-permi
 tidy-check:
     go mod tidy -diff
 
+# the next free ordinal in a hand-numbered series, across origin as well as here.
+#
+# Run this BEFORE naming a new ADR or decision file. Reading master and adding
+# one is the thing that creates duplicate ordinals: a number free on master can
+# already be held by a branch in flight, and the two files differ in name, so
+# nothing ever conflicts over it. check-doc-ordinals.py in `just gates` is the
+# other half, and it can only catch this once both documents are in one tree —
+# by then the number is spent and the fix is a rename plus every citation.
+#
+# Measured live 2026-09-01 (bd gqlc-dawo1): master's highest ADR was 0037, so
+# the naive read offered 0038, which an open PR already held. Both enrolled
+# series were carrying a trap that day.
+#
+# It fetches, and refuses if it cannot: an answer from stale refs is the defect
+# wearing the fix's name. Series default to the two the gate enrols; pass a
+# directory to ask about another.
+adr-next *dirs="docs/adr kingdom/brain/decisions":
+    python3 .github/scripts/next-doc-ordinal.py {{dirs}}
+
 # fails when .beads/issues.jsonl regresses vs base (dropped or reopened issues).
 # Motivated by bd gqlc-v2p: PR #422's blanket `git add -A` shipped a stale bd
 # passive export that would have reopened two closed beads and dropped one.
