@@ -127,10 +127,16 @@ func TestRelationshipTypeAlternationsReadsTheText(t *testing.T) {
 			want: []string{":LIKES|REPOSTED", ":AUTHORED|FLAGGED"},
 		},
 		{
-			name: "the same alternation written twice is reported once",
+			// Twice, not once. Two occurrences are two patterns the
+			// author has to rewrite, and the position each carries is
+			// what makes naming both an answer rather than the same
+			// answer printed twice (bd gqlc-rmzg). The positions are
+			// asserted by TestRelationshipTypeAlternationsLocatesEachOne;
+			// what this row holds is that neither is dropped.
+			name: "the same alternation written twice is reported twice",
 			src: "MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post), " +
 				"(:Person)-[s:AUTHORED|LIKES]->(p) RETURN p.id",
-			want: []string{":AUTHORED|LIKES"},
+			want: []string{":AUTHORED|LIKES", ":AUTHORED|LIKES"},
 		},
 		{
 			name: "a list comprehension's '|' names no relationship type",
@@ -156,6 +162,95 @@ func TestRelationshipTypeAlternationsReadsTheText(t *testing.T) {
 			name: "a '|' inside a comment names no relationship type",
 			src:  "// AUTHORED|LIKES\nMATCH (:Person)-[r:AUTHORED]->(p:Post) RETURN p.id",
 			want: nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, alternationTexts(cypher.RelationshipTypeAlternations(tc.src)))
+		})
+	}
+}
+
+// alternationTexts is the spellings alone, for the rows above, which are
+// about WHAT is read out of a text rather than where each one sits.
+func alternationTexts(alts []cypher.Alternation) []string {
+	if len(alts) == 0 {
+		return nil
+	}
+	out := make([]string, len(alts))
+	for i, a := range alts {
+		out[i] = a.Text
+	}
+	return out
+}
+
+// TestRelationshipTypeAlternationsLocatesEachOne is the other half: the
+// coordinate, which is the only thing separating two occurrences of one
+// spelling.
+//
+// Every expected position here was counted off the source by hand rather
+// than recorded from a run, because a coordinate copied out of the answer it
+// is meant to check certifies itself. Two conventions are asserted at once
+// and both are off-by-one hazards: the line is ANTLR's, which counts from 1,
+// and the column is NOT — ANTLR counts a line's characters from 0, so every
+// row here would be one short if the conversion were dropped.
+//
+// The rows vary the two axes independently on purpose. Two alternations
+// sharing a line differ only in the column, two on different lines at one
+// column differ only in the line, and one row sits where the line and the
+// column are not equal, so a coordinate that swapped them reds.
+func TestRelationshipTypeAlternationsLocatesEachOne(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  string
+		want []cypher.Alternation
+	}{
+		{
+			// "MATCH " is 6, "(:Person)" takes 7-15 and "-[r" takes
+			// 16-18, so the ':' opening the detail is the 19th character.
+			name: "the position is the ':' that opens the relationship detail",
+			src:  "MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN r",
+			want: []cypher.Alternation{{Text: ":AUTHORED|LIKES", Line: 1, Column: 19}},
+		},
+		{
+			// The same prefix again after ", ": ":AUTHORED|LIKES" is 15
+			// characters ending at 33, "]->" ends at 36, "(p:Post)" at
+			// 44, "," at 45, " " at 46, "(:Person)" at 55 and "-[s" at
+			// 58 — so the second ':' is the 59th.
+			name: "two occurrences of one spelling on one line differ by the column",
+			src: "MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post), " +
+				"(:Person)-[s:AUTHORED|LIKES]->(p) RETURN p.id",
+			want: []cypher.Alternation{
+				{Text: ":AUTHORED|LIKES", Line: 1, Column: 19},
+				{Text: ":AUTHORED|LIKES", Line: 1, Column: 59},
+			},
+		},
+		{
+			name: "two occurrences of one spelling on two lines differ by the line",
+			src: "MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post)\n" +
+				"MATCH (:Person)-[s:AUTHORED|LIKES]->(p)\n" +
+				"RETURN p.id",
+			want: []cypher.Alternation{
+				{Text: ":AUTHORED|LIKES", Line: 1, Column: 19},
+				{Text: ":AUTHORED|LIKES", Line: 2, Column: 19},
+			},
+		},
+		{
+			// Line 2 is "MATCH (p)-[r:LIKES|REPOSTED]->(q:Post)": "MATCH "
+			// is 6, "(p)" takes 7-9 and "-[r" takes 10-12, so the ':' is
+			// the 13th. Neither axis equals the other, so a coordinate
+			// reporting the column as the line reds here and nowhere else.
+			name: "a line and a column that are not equal",
+			src: "MATCH (p:Person)\n" +
+				"MATCH (p)-[r:LIKES|REPOSTED]->(q:Post)\n" +
+				"RETURN q.id",
+			want: []cypher.Alternation{{Text: ":LIKES|REPOSTED", Line: 2, Column: 13}},
+		},
+		{
+			// Whitespace inside the alternation moves what follows it,
+			// and the position is of the START, so it does not move.
+			name: "spaces inside the alternation do not move its position",
+			src:  "MATCH (:Person)-[r:AUTHORED | LIKES]->(p:Post) RETURN p.id",
+			want: []cypher.Alternation{{Text: ":AUTHORED | LIKES", Line: 1, Column: 19}},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

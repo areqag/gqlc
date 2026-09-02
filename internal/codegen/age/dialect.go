@@ -24,6 +24,49 @@ type dialectProbe struct {
 	answer string
 }
 
+// finding is one offending spelling a gap's find read out of a query
+// text, with where in that text it was spelled if the scan carries a
+// position.
+type finding struct {
+	// text is the spelling, quoted back to the author as written.
+	text string
+	// line and column are 1-based and index the QUERY's own text, not
+	// the file: a NamedQuery carries no file offset and queryfile's
+	// parse trims the body it stores, so nothing here can turn one into
+	// a file line. The refusal says which text they index.
+	//
+	// Zero on both means the scan reports no position, and the refusal
+	// then quotes the spelling alone — the three function gaps, whose
+	// scans answer with names (bd gqlc-rmzg, which carried the position
+	// for the alternation only; gqlc-fpl14 is the same remedy for those
+	// three).
+	line, column int
+}
+
+// findRelationshipTypeAlternations is the alternation scan's answer as
+// findings. The scan's coordinate is already 1-based on both axes
+// (cypher.Alternation), so nothing is adjusted here.
+func findRelationshipTypeAlternations(src string) []finding {
+	alts := cypher.RelationshipTypeAlternations(src)
+	out := make([]finding, len(alts))
+	for i, a := range alts {
+		out[i] = finding{text: a.Text, line: a.Line, column: a.Column}
+	}
+	return out
+}
+
+// positionless adapts a scan that answers with spellings alone.
+func positionless(find func(src string) []string) func(src string) []finding {
+	return func(src string) []finding {
+		texts := find(src)
+		out := make([]finding, len(texts))
+		for i, t := range texts {
+			out[i] = finding{text: t}
+		}
+		return out
+	}
+}
+
 // dialectGap is one construct Apache AGE 1.7.0 will not accept, together
 // with the evidence that it will not.
 //
@@ -62,7 +105,7 @@ type dialectGap struct {
 	// scanning for characters, because the characters are ambiguous:
 	// '|' is spelled by three Cypher.g4 productions and a name followed
 	// by '(' is spelled by procedure invocation too.
-	find func(src string) []string
+	find func(src string) []finding
 	// diagnose is the prose the refusal carries, given the arithmetic
 	// and the per-query list. Per gap, because the way out differs.
 	diagnose func(count int, noun, dropped string) string
@@ -122,12 +165,19 @@ var dialectGaps = []dialectGap{
 		// is quoted ":A | B". That is the axis the column refusal
 		// cannot have, since its label list is a subset of what the
 		// pattern names.
+		//
+		// Each is located as well as quoted, because the quote alone
+		// does not identify one: a long query, or a query spelling one
+		// alternation twice, leaves the author the same bytes in more
+		// than one place and no way to tell which the refusal means
+		// (bd gqlc-rmzg).
 		sentinel: ErrRelationshipTypeAlternation,
-		find:     cypher.RelationshipTypeAlternations,
+		find:     findRelationshipTypeAlternations,
 		diagnose: func(count int, noun, dropped string) string {
 			return fmt.Sprintf("generated code runs the author's query text verbatim (ADR 0005) and "+
 				"Apache AGE 1.7.0's parser has no \"|\" in a relationship pattern, so every call on %d %s "+
-				"would answer %q (SQLSTATE 42601) — write each relationship type as its own query: %s",
+				"would answer %q (SQLSTATE 42601) — write each relationship type as its own query; each "+
+				"alternation is located line:column within its own query's text: %s",
 				count, noun, `syntax error at or near "|"`, dropped)
 		},
 		witness: "TestAGERefusesRelationshipTypeAlternation",
@@ -179,7 +229,7 @@ var dialectGaps = []dialectGap{
 		// author's own case, which is what the author has to find in
 		// their file.
 		sentinel: ErrUndefinedFunction,
-		find:     findUndefinedFunctions,
+		find:     positionless(findUndefinedFunctions),
 		diagnose: func(count int, noun, dropped string) string {
 			return fmt.Sprintf("generated code runs the author's query text verbatim "+
 				"(ADR 0005) and Apache AGE 1.7.0 defines no temporal constructor this project has "+
@@ -216,7 +266,7 @@ var dialectGaps = []dialectGap{
 		// the table answers in order so that the answer is stable, and
 		// TestRejectsTheSpatialConstructor pins which one comes back.
 		sentinel: ErrUndefinedSpatialFunction,
-		find:     findUndefinedSpatialFunctions,
+		find:     positionless(findUndefinedSpatialFunctions),
 		diagnose: func(count int, noun, dropped string) string {
 			return fmt.Sprintf("generated code runs the author's query text verbatim "+
 				"(ADR 0005) and Apache AGE 1.7.0 does not define the spatial constructor this "+
@@ -275,7 +325,7 @@ var dialectGaps = []dialectGap{
 		// regardless, because a gap is what a probe witnessed and ADR
 		// 0005 leaves an author no way around a false positive.
 		sentinel: ErrUndefinedNamespace,
-		find:     findUndefinedNamespaces,
+		find:     positionless(findUndefinedNamespaces),
 		diagnose: func(count int, noun, dropped string) string {
 			return fmt.Sprintf("generated code runs the author's query text verbatim "+
 				"(ADR 0005) and Apache AGE 1.7.0 has no schema for the namespace this project has "+
@@ -558,7 +608,10 @@ func (g dialectGap) reject(queries []codegen.NamedQuery) error {
 		}
 		quoted := make([]string, len(found))
 		for i, f := range found {
-			quoted[i] = strconv.Quote(f)
+			quoted[i] = strconv.Quote(f.text)
+			if f.line > 0 {
+				quoted[i] += fmt.Sprintf(" at %d:%d", f.line, f.column)
+			}
 		}
 		dropped = append(dropped, q.Name+" ("+strings.Join(quoted, ", ")+")")
 	}

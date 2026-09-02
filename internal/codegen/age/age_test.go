@@ -524,7 +524,8 @@ func wantAlternationRefusal(count int, noun, dropped string) string {
 	return fmt.Sprintf("relationship type alternation: generated code runs the author's query text "+
 		"verbatim (ADR 0005) and Apache AGE 1.7.0's parser has no \"|\" in a relationship pattern, "+
 		"so every call on %d %s would answer \"syntax error at or near \\\"|\\\"\" (SQLSTATE 42601) "+
-		"— write each relationship type as its own query: %s", count, noun, dropped)
+		"— write each relationship type as its own query; each alternation is located line:column "+
+		"within its own query's text: %s", count, noun, dropped)
 }
 
 // textQuery is a batch entry whose columns and parameters this backend
@@ -586,21 +587,21 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			queries: []codegen.NamedQuery{textQuery("PostIDs",
 				"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `PostIDs (":AUTHORED|LIKES")`,
+			count: 1, noun: "query", dropped: `PostIDs (":AUTHORED|LIKES" at 1:19)`,
 		},
 		{
 			name: "an alternation narrowed to one declared candidate is refused",
 			queries: []codegen.NamedQuery{textQuery("Rels",
 				"MATCH (:Person)-[r:AUTHORED|FLAGGED]->(p:Post) RETURN r\n",
 				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
-			count: 1, noun: "query", dropped: `Rels (":AUTHORED|FLAGGED")`,
+			count: 1, noun: "query", dropped: `Rels (":AUTHORED|FLAGGED" at 1:19)`,
 		},
 		{
 			name: "an alternation bound by an anonymous edge is refused",
 			queries: []codegen.NamedQuery{textQuery("Anon",
 				"MATCH (:Person)-[:AUTHORED|LIKES|REPOSTED]->(p:Post) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Anon (":AUTHORED|LIKES|REPOSTED")`,
+			count: 1, noun: "query", dropped: `Anon (":AUTHORED|LIKES|REPOSTED" at 1:18)`,
 		},
 		{
 			// The arity witness, read as the grammar spells it rather
@@ -614,14 +615,14 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			queries: []codegen.NamedQuery{textQuery("Repeat",
 				"MATCH (:Person)-[r:LIKES|LIKES]->(p:Post) RETURN r\n",
 				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
-			count: 1, noun: "query", dropped: `Repeat (":LIKES|LIKES")`,
+			count: 1, noun: "query", dropped: `Repeat (":LIKES|LIKES" at 1:19)`,
 		},
 		{
 			name: "a type the alternation repeats in the legacy spelling is refused",
 			queries: []codegen.NamedQuery{textQuery("RepeatLegacy",
 				"MATCH (:Person)-[r:LIKES|:LIKES]->(p:Post) RETURN r\n",
 				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
-			count: 1, noun: "query", dropped: `RepeatLegacy (":LIKES|:LIKES")`,
+			count: 1, noun: "query", dropped: `RepeatLegacy (":LIKES|:LIKES" at 1:19)`,
 		},
 		{
 			// Whitespace inside the alternation is quoted, not dropped:
@@ -632,14 +633,44 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			queries: []codegen.NamedQuery{textQuery("Spaced",
 				"MATCH (:Person)-[r:AUTHORED | LIKES]->(p:Post) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Spaced (":AUTHORED | LIKES")`,
+			count: 1, noun: "query", dropped: `Spaced (":AUTHORED | LIKES" at 1:19)`,
 		},
 		{
 			name: "a query spelling two alternations names both",
 			queries: []codegen.NamedQuery{textQuery("Both",
 				"MATCH (:Person)-[r:LIKES|REPOSTED]->(p:Post), (:Person)-[s:AUTHORED|FLAGGED]->(p) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Both (":LIKES|REPOSTED", ":AUTHORED|FLAGGED")`,
+			count: 1, noun: "query", dropped: `Both (":LIKES|REPOSTED" at 1:19, ":AUTHORED|FLAGGED" at 1:59)`,
+		},
+		{
+			// Two occurrences of ONE spelling, which is the case the
+			// quoted text alone cannot answer: the author has two
+			// patterns to rewrite and the message can only say so by
+			// naming where each is. Nothing but the position
+			// distinguishes these two entries, so a scan that dropped
+			// the repeat, or one that carried a position it did not
+			// vary, reads as a query with a single alternation in it
+			// (bd gqlc-rmzg).
+			name: "the same alternation written twice is named twice, at different positions",
+			queries: []codegen.NamedQuery{textQuery("Twice",
+				"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post), (:Person)-[s:AUTHORED|LIKES]->(p) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query",
+			dropped: `Twice (":AUTHORED|LIKES" at 1:19, ":AUTHORED|LIKES" at 1:59)`,
+		},
+		{
+			// Two occurrences of one spelling on DIFFERENT lines, where
+			// the line alone separates them. Beside the row above, which
+			// varies only the column, this is what keeps both halves of
+			// the coordinate load-bearing: a position carrying the line
+			// and a constant column passes one of these rows and not the
+			// other, and so does one carrying the column alone.
+			name: "the same alternation on two lines is separated by the line",
+			queries: []codegen.NamedQuery{textQuery("TwiceDown",
+				"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post)\nMATCH (:Person)-[s:AUTHORED|LIKES]->(p)\nRETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query",
+			dropped: `TwiceDown (":AUTHORED|LIKES" at 1:19, ":AUTHORED|LIKES" at 2:19)`,
 		},
 		{
 			// The zero-column row. A :exec write is a query the AGE
@@ -650,7 +681,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			name: "an alternation in a write that projects nothing is refused",
 			queries: []codegen.NamedQuery{execTextQuery("DropActions",
 				"MATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) DELETE r\n")},
-			count: 1, noun: "query", dropped: `DropActions (":AUTHORED|LIKES")`,
+			count: 1, noun: "query", dropped: `DropActions (":AUTHORED|LIKES" at 1:20)`,
 		},
 		{
 			name: "every offending query in the batch is named",
@@ -664,7 +695,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 					scalarColumn("p.id", graph.TypeInt)),
 			},
 			count: 2, noun: "queries",
-			dropped: `PostIDs (":AUTHORED|LIKES"), Anon (":AUTHORED|REPOSTED")`,
+			dropped: `PostIDs (":AUTHORED|LIKES" at 1:19), Anon (":AUTHORED|REPOSTED" at 1:18)`,
 		},
 	} {
 		s.Run(tc.name, func() {
@@ -722,7 +753,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		s.Require().NotErrorIs(err, codegen.ErrUnrepresentableEdgeUnion,
 			"shared admission would refuse this column, and reaching it first would send the author to fix a projection the server never gets far enough to read")
 		s.Require().EqualError(err,
-			wantAlternationRefusal(1, "query", `FoundedOrBacked (":FOUNDED|BACKED")`))
+			wantAlternationRefusal(1, "query", `FoundedOrBacked (":FOUNDED|BACKED" at 1:19)`))
 	})
 
 	s.Run("an edge-union column is answered by the column gate, which says more", func() {
@@ -760,7 +791,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation,
 			"the alternation is the obstacle underneath: the statement has to be rewritten before the projection can be put to this server at all")
 		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
-		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `Bagged (":AUTHORED|LIKES")`))
+		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `Bagged (":AUTHORED|LIKES" at 1:19)`))
 
 		// The discriminator. Without the '|' the very same column is
 		// still unserved and the column gate still owns it, so what
@@ -810,7 +841,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation,
 			"the alternation is the obstacle underneath: the statement has to be rewritten before the argument can be put to this server at all")
 		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
-		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `ByBlob (":AUTHORED|LIKES")`))
+		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `ByBlob (":AUTHORED|LIKES" at 1:19)`))
 
 		// The discriminator. Without the '|' the very same parameter is
 		// still unserved and the column gate still owns it, so what
@@ -1191,7 +1222,7 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation)
 		s.Require().NotErrorIs(err, age.ErrUndefinedFunction)
-		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `Both (":AUTHORED|LIKES")`))
+		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `Both (":AUTHORED|LIKES" at 1:19)`))
 	})
 }
 
