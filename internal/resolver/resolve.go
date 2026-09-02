@@ -1233,7 +1233,7 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 			// in turn.
 			//
 			// That transitivity is the absence, not the delete. The else arm
-			// changes no answer and no test can pin it: an unlabelled pending
+			// changes no answer on any QUERY: an unlabelled pending
 			// binding is never already in the lane — the lane's other writers
 			// are BindNode, which never sees an unlabelled binding, and the
 			// narrowing's collapse, which cannot run before Phase B; newScope
@@ -1243,6 +1243,13 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 			// rather than assumed: seeding the lane from the carry is the
 			// change newScope names as its alternative, and it would make this
 			// arm live.
+			// TestPhaseBsUncoveredSingularCommitClearsAResolvedCoversMark pins
+			// it from a seeded table, which is the only place the state is
+			// constructible. Reaching the else at all needs an uncovered
+			// commitment, and the shape that gives one is this transitivity
+			// itself: a far end already in `resolved` and absent from the lane,
+			// on a MANDATORY hop — an OPTIONAL-only one leaves the binding
+			// unconstrained and never commits.
 			if covered {
 				t.resolvedCovers[n.Variable()] = struct{}{}
 			} else {
