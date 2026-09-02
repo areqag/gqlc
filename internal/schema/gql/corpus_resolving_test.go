@@ -295,38 +295,6 @@ var declinedCarriers = []declinedCarriage{
 			{"NOTHING", "token"},
 		},
 	},
-	{
-		sentinel: gql.ErrRecordValueType,
-		bead:     "gqlc-h9n.33",
-		why:      "A record is structured and graph.PropertyType is a flat enum, so there is nowhere to put the fields. Unimplemented rather than declined: gqlc-h9n.33 retires this group, and would retire the closed unions with it.",
-		names: []declinedName{
-			{"recordType#1", "alt"},
-			{"recordType#2", "alt"},
-			{"recordType", "rule"},
-			{"RECORD", "token"},
-		},
-	},
-	{
-		sentinel: gql.ErrDynamicUnionType,
-		bead:     "gqlc-h9n.33",
-		why:      "The closed unions (#9, #10) need the enum to carry members and are gqlc-h9n.33's. The open ones (#7, #8) are now implemented (ADR 0020), so valueType#7, valueType#8 and VALUE gained resolving carriers and left this group.",
-		names: []declinedName{
-			{"valueType#10", "alt"},
-			{"valueType#9", "alt"},
-			{"VERTICAL_BAR", "token"},
-		},
-	},
-	{
-		sentinel: gql.ErrUnsupportedType,
-		bead:     "gqlc-h9n.33",
-		why:      "The four field-type grammar rules are carried by two declined families at once — RECORD (ErrRecordValueType) and binding-table references (ErrReferenceValueType) — so no leaf accounts for all of their carriers and the class is the most specific sentinel that does. LIST/ARRAY names moved out when gqlc-h9n.5 gave them resolving carriers; the angle and square brackets left with them for the same reason.",
-		names: []declinedName{
-			{"fieldName", "rule"},
-			{"fieldType", "rule"},
-			{"fieldTypeList", "rule"},
-			{"fieldTypesSpecification", "rule"},
-		},
-	},
 }
 
 // declinedAlso is the escape the paragraph above leaves open for a name whose

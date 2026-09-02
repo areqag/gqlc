@@ -1,11 +1,15 @@
 -- fieldTypesSpecification with its `fieldTypeList?` elided (GQL.g4:1988): the empty
 -- record `RECORD {}`. The braces are written and declare no fields.
 --
--- It reports ErrRecordValueType like every other record spelling, which is worth
--- noting because a record with no fields is the one that would NOT need
--- graph.PropertyType to carry members. The decline is still right: gqlc has no
--- record type at all to resolve it to, empty or otherwise, and giving the empty
--- case a special path would land a construct nothing generates code for.
+-- It resolves to RECORD<>, which is a DIFFERENT type from the braceless RECORD in
+-- constructed_record_bare.gql: `RECORD` says the fields are undeclared and
+-- `RECORD {}` says there are none, and an encoding collapsing them would let a
+-- schema promising nothing unify with one promising anything.
+--
+-- It is also the shape ANTLR's accessors lie about. FieldTypeList() is nil here
+-- rather than an empty list, so an implementation trusting a non-nil parent
+-- accessor walks nothing. gqlc-h9n.33 lifted the decline this file used to pin;
+-- ADR 0039 has the encoding.
 CREATE PROPERTY GRAPH TYPE Seed AS {
     (:Row { r :: RECORD {} })
 }

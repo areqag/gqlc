@@ -809,8 +809,6 @@ var valueTypeFamilies = []struct {
 	{gql.ErrPathValueType, "path value type", "PATH"},
 	{gql.ErrReferenceValueType, "reference value type", "ANY NODE"},
 	{gql.ErrImmaterialValueType, "immaterial value type", "NOTHING"},
-	{gql.ErrRecordValueType, "record type", "RECORD"},
-	{gql.ErrDynamicUnionType, "dynamic union type", "ANY VALUE<STRING | INT>"},
 }
 
 // TestValueTypeFamiliesAreIsoProductions is what entitles errors.go to say the
@@ -828,10 +826,12 @@ func TestValueTypeFamiliesAreIsoProductions(t *testing.T) {
 	}
 }
 
-// TestValueTypeFamilyErrorsWrapTheClass keeps the five leaves matching a caller
-// that asks only whether the property type was rejected. That caller is the
-// reason ADR 0019 could split the sentinel at all: the split widened the public
-// surface rather than narrowing it, so no existing errors.Is stopped working.
+// TestValueTypeFamilyErrorsWrapTheClass keeps the surviving leaves matching a
+// caller that asks only whether the property type was rejected. That caller is
+// the reason ADR 0019 could split the sentinel at all: the split widened the
+// public surface rather than narrowing it, so no existing errors.Is stopped
+// working. It is also what let gqlc-h9n.33 delete two of the five leaves without
+// breaking such a caller — the class it asks about outlived them.
 func TestValueTypeFamilyErrorsWrapTheClass(t *testing.T) {
 	for _, family := range valueTypeFamilies {
 		require.ErrorIs(t, family.sentinel, gql.ErrUnsupportedType)
@@ -844,11 +844,12 @@ func TestValueTypeFamilyErrorsWrapTheClass(t *testing.T) {
 // answering ErrReferenceValueType for NOTHING, updating the corpus entry to
 // match would be the obvious fix and the register would stay green.
 //
-// The spellings are deliberately the *bare* ones. Every family also has a
-// parameterised spelling in the corpus, and those nest a value type of their own:
-// `RECORD { f :: STRING }` and `BINDING TABLE { id :: STRING }` both carry a
-// predefinedType for the field, so a classifier that descended would answer for
-// the field instead. The corpus catches that; this pins the shape it relies on.
+// The spellings are deliberately the *bare* ones, and one of the three still
+// nests a value type: `BINDING TABLE { id :: STRING }` carries a predefinedType
+// for its field, so a classifier that descended into a DECLINED family would
+// answer for the field instead. The corpus catches that; this pins the shape it
+// relies on. Descent into a RESOLVING family is a different thing and is now
+// deliberate — see TestDeclinedFamilyInsideRecordOrUnionSurfacesItsOwnSentinel.
 func TestValueTypeFamilyDeclines(t *testing.T) {
 	for _, family := range valueTypeFamilies {
 		t.Run(family.spelling, func(t *testing.T) {
@@ -1143,6 +1144,7 @@ var allSentinels = map[string]error{
 	"ErrDuplicateNodeType":           gql.ErrDuplicateNodeType,
 	"ErrDuplicateEdgeType":           gql.ErrDuplicateEdgeType,
 	"ErrDuplicatePropertyName":       gql.ErrDuplicatePropertyName,
+	"ErrDuplicateFieldName":          gql.ErrDuplicateFieldName,
 	"ErrNoGraphType":                 gql.ErrNoGraphType,
 	"ErrMultipleGraphTypes":          gql.ErrMultipleGraphTypes,
 	"ErrLikeGraphSource":             gql.ErrLikeGraphSource,
@@ -1157,8 +1159,6 @@ var allSentinels = map[string]error{
 	"ErrPathValueType":               gql.ErrPathValueType,
 	"ErrReferenceValueType":          gql.ErrReferenceValueType,
 	"ErrImmaterialValueType":         gql.ErrImmaterialValueType,
-	"ErrRecordValueType":             gql.ErrRecordValueType,
-	"ErrDynamicUnionType":            gql.ErrDynamicUnionType,
 }
 
 // sentinelsWithoutAFile are the package's error values allSentinels deliberately
@@ -1168,7 +1168,7 @@ var allSentinels = map[string]error{
 var sentinelsWithoutAFile = map[string]string{
 	"ErrUnsupportedSource": "a class the graph-type-source leaves wrap rather than a leaf; nothing produces it bare, so no file could pin it without first making one that does. TestGraphTypeSourceErrorsWrapTheClass is the pin it gets instead",
 	"ErrCopyOfSource":      "reported by Parse alone, and every corpus file is read through the Loader now — which resolves a reference or names the reason it could not, and reports this never. So no fixture can pin it: a file that did would have to be parsed with no catalogue behind it, which is a property of the call and not of the file. TestParseRefusesEveryReachableReference in loader_test.go is the pin it gets instead, sweeping every reachable spelling rather than one",
-	"ErrUnsupportedType":   "a class the five value-type families wrap; after gqlc-h9n.5 nothing produces it bare (LIST/ARRAY was the only bare source, and it now resolves). Same posture as ErrUnsupportedSource",
+	"ErrUnsupportedType":   "a class the value-type families wrap; after gqlc-h9n.5 nothing produces it bare (LIST/ARRAY was the only bare source, and it now resolves). It wrapped five families until gqlc-h9n.33 retired the two carrying a \"yet\", and wraps three now. Same posture as ErrUnsupportedSource",
 }
 
 // isSentinel reports whether err is one of the parser's sentinels. allSentinels is

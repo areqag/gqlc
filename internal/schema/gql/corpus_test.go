@@ -96,7 +96,13 @@ import (
 const (
 	// 123 → 136 under gqlc-h9n.1: thirteen files, of which six are the targets
 	// references now reach rather than spellings of their own (ADR 0034 §5.3).
-	wantCorpusEntries = 136
+	//
+	// 136 → 137 under gqlc-h9n.33: constructed_record_field_name_repeated.gql,
+	// which could not have been written before. A record was declined at its
+	// outermost context and its fields never read, so a duplicate among them was
+	// unreachable; the encoding that made fields resolve is what made the
+	// duplicate a question with an answer.
+	wantCorpusEntries = 137
 	// 68 → 67 under gqlc-4np: 18.2-node-type/property_name_repeated.gql was
 	// demoted from resolves to unsupported, ADR 0030 having decided that a
 	// repeated property name is rejected rather than silently resolved to one
@@ -105,7 +111,14 @@ const (
 	// 67 → 78 under gqlc-h9n.1, the largest move this pin has recorded: five
 	// COPY OF entries flip from unsupported to resolves now that a reference
 	// names a file, and six of the new files resolve on their own.
-	wantCorpusResolving = 78
+	//
+	// 78 → 86 under gqlc-h9n.33: the six record spellings and the two closed
+	// dynamic unions in 18.9, which the parameterised PropertyType encoding
+	// (ADR 0039) gives somewhere to resolve to. Measured, not derived — the
+	// three files spelling RECORD incidentally, to pin that a collector forwards
+	// a decline, moved to PATH and stayed unsupported rather than flipping, so
+	// counting the retired sentinel's entries would have given 89.
+	wantCorpusResolving = 86
 	// 18 → 17 under gqlc-4np, the legitimate once-per-case drop this pin exists
 	// to make an author account for: the property_name_repeated case is closed
 	// by ErrDuplicatePropertyName, so it is an unsupported entry now rather than

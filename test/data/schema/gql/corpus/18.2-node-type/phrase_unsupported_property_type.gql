@@ -5,9 +5,11 @@
 -- an unsupported property type would have been silently discarded, taking its
 -- node out of the schema without a diagnostic.
 --
--- Unsupported: ErrRecordValueType (gqlc-h9n.33). The value type is incidental —
--- 18.9-value-type/constructed_record_bare.gql pins that RECORD declines. What
--- this file pins is that the phrase-form collector forwards the decline at all.
+-- Unsupported: ErrPathValueType (gqlc-0ri). The value type is incidental —
+-- 18.9-value-type/constructed_path.gql pins that PATH declines. What this file
+-- pins is that the phrase-form collector forwards the decline at all. It spelled
+-- RECORD until gqlc-h9n.33 made records resolve; the family was swapped rather
+-- than the entry demoted, because a resolving value type discharges nothing here.
 CREATE PROPERTY GRAPH TYPE T AS {
-    NODE TYPE Bag :Bag { items :: RECORD } AS b
+    NODE TYPE Bag :Bag { route :: PATH } AS b
 }

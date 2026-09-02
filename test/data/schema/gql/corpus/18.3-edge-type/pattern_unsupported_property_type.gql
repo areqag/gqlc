@@ -5,11 +5,13 @@
 -- the tree green. An edge carrying an unsupported property type was silently
 -- dropped from the schema, taking the relationship with it.
 --
--- Unsupported: ErrRecordValueType (gqlc-h9n.33). The value type is incidental —
--- 18.9-value-type/constructed_record_bare.gql pins that RECORD declines on a node.
--- What this file pins is that the edge lane forwards the decline at all.
+-- Unsupported: ErrPathValueType (gqlc-0ri). The value type is incidental —
+-- 18.9-value-type/constructed_path.gql pins that PATH declines on a node. What
+-- this file pins is that the edge lane forwards the decline at all. It spelled
+-- RECORD until gqlc-h9n.33 made records resolve; the family was swapped rather
+-- than the entry demoted, because a resolving value type discharges nothing here.
 CREATE PROPERTY GRAPH TYPE T AS {
     (:Person { id :: INT NOT NULL }),
     (:Post { id :: INT NOT NULL }),
-    (:Person) -[:AUTHORED { items :: RECORD }]-> (:Post)
+    (:Person) -[:AUTHORED { route :: PATH }]-> (:Post)
 }

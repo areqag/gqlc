@@ -540,6 +540,48 @@ func entityAxisText(kind EntityKind, labels graph.LabelSetKey, edgeKey schema.Ed
 	return fmt.Sprintf("edge type (%s -[:%s]-> %s)", string(edgeKey.Source), string(edgeKey.KeyLabels), string(edgeKey.Target))
 }
 
+// unimplementedTypeKind reports the outermost sub-type of pt whose KIND
+// gqlc has built no emission for, and whether pt carries one at all. It
+// is asked at every position that asks a TypeMap for a property carrier,
+// and asked FIRST — see ErrUnimplementedTypeKind for why the table's own
+// ok=false is the wrong answer here.
+//
+// The recursion is through list elements only. A record or a union is
+// refused at its own node, so nothing below one is ever reached and a
+// walk into Fields or Members would be unreachable — the design named
+// them, and this is the deviation: an arm no input can enter is not a
+// guard, and there is nothing to test it with. A list is different,
+// because a list of scalars must still generate; descending it is the
+// only way to tell LIST<INT32> from LIST<RECORD<…>>, and without the
+// descent the second reaches the table and comes back a width error.
+func unimplementedTypeKind(pt graph.PropertyType) (graph.PropertyType, bool) {
+	switch pt.Kind() {
+	case graph.KindRecord, graph.KindUnion:
+		return pt, true
+	case graph.KindList:
+		return unimplementedTypeKind(pt.Elem())
+	case graph.KindScalar:
+		// Every scalar has an emission on some backend, so the walk stops
+		// and the carrier question below decides. Named rather than left
+		// to the default so a fourth kind cannot be added silently.
+	}
+	return "", false
+}
+
+// unimplementedKindDetail renders the tail every ErrUnimplementedTypeKind
+// message shares, so the four fail-sites differ only in how they name
+// themselves. For a bare record or union the two arguments are the same
+// string and it renders as the plain `has %s` the width refusals use;
+// under a list they differ, and both are named because neither alone
+// tells the reader what to edit — the declared width does not say which
+// level is unbuilt, and the sub-type alone cannot be found in the schema.
+func unimplementedKindDetail(declared, kind graph.PropertyType) string {
+	if declared == kind {
+		return string(declared)
+	}
+	return string(declared) + ", whose " + string(kind) + " has no emission"
+}
+
 // prepareEntityFields derives an entity's per-property field list in
 // map-key-sorted order (spec §5.2), reporting a same-entity field-name
 // collision as ErrPropertyFieldCollision. The C3 eager width sweep (§4.8)
@@ -568,6 +610,9 @@ func prepareEntityFields(entityName string, props map[string]schema.Property, tm
 			return nil, fmt.Errorf("%w: entity %q properties %q and %q both mangle to %q", ErrPropertyFieldCollision, entityName, first, p.Name, field)
 		}
 		seen[field] = p.Name
+		if kind, unbuilt := unimplementedTypeKind(p.Type); unbuilt {
+			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrUnimplementedTypeKind, entityName, p.Name, unimplementedKindDetail(p.Type, kind))
+		}
 		ty, ok := tm.Property(p.Type)
 		if !ok {
 			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrUnrepresentableWidth, entityName, p.Name, p.Type)
@@ -668,6 +713,9 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 			}
 			switch t := col.Type.(type) {
 			case resolver.ResolvedProperty:
+				if kind, unbuilt := unimplementedTypeKind(t.Type); unbuilt {
+					return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnimplementedTypeKind, q.Name, ci, col.Name, unimplementedKindDetail(t.Type, kind))
+				}
 				if _, ok := tm.Property(t.Type); !ok {
 					return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnrepresentableWidth, q.Name, ci, col.Name, t.Type)
 				}
@@ -711,6 +759,9 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
 				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, ResolvedTypeName(p.Type))
+			}
+			if kind, unbuilt := unimplementedTypeKind(prop.Type); unbuilt {
+				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnimplementedTypeKind, q.Name, pi, p.Name, unimplementedKindDetail(prop.Type, kind))
 			}
 			if _, ok := tm.Property(prop.Type); !ok {
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
@@ -1276,6 +1327,9 @@ func findEdgeUnionLeaf(t resolver.ResolvedType) ([]schema.EdgeKey, bool) {
 func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex map[entityLookupKey]int, tm TypeMap, unionIdx int, unionInterfaceName string) (*ListElem, error) {
 	switch tt := t.(type) {
 	case resolver.ResolvedProperty:
+		if kind, unbuilt := unimplementedTypeKind(tt.Type); unbuilt {
+			return nil, fmt.Errorf("%w: list element has %s", ErrUnimplementedTypeKind, unimplementedKindDetail(tt.Type, kind))
+		}
 		ty, ok := tm.Property(tt.Type)
 		if !ok {
 			return nil, fmt.Errorf("%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
