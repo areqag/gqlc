@@ -403,9 +403,23 @@ func TestAnAbsentGhDegradesInsteadOfAsserting(t *testing.T) {
 		t.Errorf("the report claims %q on a question it could not ask:\n%s",
 			failedPushClaim, got.output)
 	}
-	if !got.says("gh") {
-		t.Errorf("the report does not name what it was missing, so the reader cannot "+
-			"repair it:\n%s", got.output)
+	// Naming gh is not enough. Measured: with the recipe's `command -v gh`
+	// check deleted, the invocation still fails and still degrades, so the
+	// verdict and the exit status are identical — what changes is that the
+	// report quotes bash's own "gh: command not found" under `gh said:`,
+	// attributing a shell error to a program that never ran, and drops the
+	// one instruction that repairs the state. That is the whole of what the
+	// check is for, so it is what this row asks about.
+	if !got.says("not installed") {
+		t.Errorf("the report does not say gh is missing, so the reader cannot tell an "+
+			"absent gh from one that answered badly:\n%s", got.output)
+	}
+	if got.says("gh said:") {
+		t.Errorf("the report quotes a program that never ran:\n%s", got.output)
+	}
+	if !got.says("gh pr list --head") {
+		t.Errorf("the report leaves the reader no way to settle the question by hand:\n%s",
+			got.output)
 	}
 }
 
