@@ -41,13 +41,13 @@ func (q *queries) PathActions(ctx context.Context) ([]PathActionsR, error) {
 		}
 		switch rel.Type {
 		case "AUTHORED":
-			entity, err := decodeAUTHORED(rel)
+			entity, err := decodeAuthored(rel)
 			if err != nil {
 				return nil, fmt.Errorf("PathActions: decode column %q element %d: %w", "r", i, err)
 			}
 			acc = append(acc, entity)
 		case "LIKES":
-			entity, err := decodeLIKES(rel)
+			entity, err := decodeLikes(rel)
 			if err != nil {
 				return nil, fmt.Errorf("PathActions: decode column %q element %d: %w", "r", i, err)
 			}

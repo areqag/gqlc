@@ -683,12 +683,12 @@ func slicesEqual[T comparable](got, want []T) bool {
 }
 
 func TestDecodeEdge(t *testing.T) {
-	got, err := decodeACTEDIN([]byte(actedIn))
+	got, err := decodeActedIn([]byte(actedIn))
 	if err != nil {
-		t.Fatalf("decodeACTEDIN = error %v", err)
+		t.Fatalf("decodeActedIn = error %v", err)
 	}
-	if want := (ACTEDIN{Since: 2019}); got != want {
-		t.Errorf("decodeACTEDIN = %+v, want %+v", got, want)
+	if want := (ActedIn{Since: 2019}); got != want {
+		t.Errorf("decodeActedIn = %+v, want %+v", got, want)
 	}
 }
 
@@ -697,8 +697,8 @@ func TestDecodeEdge(t *testing.T) {
 // vertex whose label happens to match. Both directions are checked.
 func TestEntityDecodersRefuseTheOtherAnnotation(t *testing.T) {
 	edgeShapedAsVertex := strings.Replace(actedIn, "::edge", "::vertex", 1)
-	if got, err := decodeACTEDIN([]byte(edgeShapedAsVertex)); err == nil {
-		t.Errorf("decodeACTEDIN(vertex) = %+v, want an error", got)
+	if got, err := decodeActedIn([]byte(edgeShapedAsVertex)); err == nil {
+		t.Errorf("decodeActedIn(vertex) = %+v, want an error", got)
 	}
 	vertexShapedAsEdge := strings.Replace(alice, "::vertex", "::edge", 1)
 	if got, err := decodePerson([]byte(vertexShapedAsEdge)); err == nil {

@@ -5,7 +5,7 @@ package entityedgeprojectedone
 import "context"
 
 type ReadQuerier interface {
-	OneActedIn(ctx context.Context) (ACTEDIN, error)
+	OneActedIn(ctx context.Context) (ActedIn, error)
 }
 
 type WriteQuerier interface {

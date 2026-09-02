@@ -35,13 +35,13 @@ func (q *queries) ListActions(ctx context.Context) ([]ListActionsR, error) {
 		}
 		switch rel.Type {
 		case "AUTHORED":
-			entity, err := decodeAUTHORED(rel)
+			entity, err := decodeAuthored(rel)
 			if err != nil {
 				return nil, fmt.Errorf("ListActions: decode column %q: %w", "r", err)
 			}
 			out = append(out, entity)
 		case "LIKES":
-			entity, err := decodeLIKES(rel)
+			entity, err := decodeLikes(rel)
 			if err != nil {
 				return nil, fmt.Errorf("ListActions: decode column %q: %w", "r", err)
 			}

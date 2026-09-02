@@ -37,17 +37,17 @@ func decodePerson(node dbtype.Node) (Person, error) {
 	return out, nil
 }
 
-// KNOWS corresponds to the KNOWS edge type (Person -> Person).
-type KNOWS struct {
+// Knows corresponds to the KNOWS edge type (Person -> Person).
+type Knows struct {
 }
 
-// decodeKNOWS decodes a driver dbtype.Relationship into a KNOWS struct,
+// decodeKnows decodes a driver dbtype.Relationship into a Knows struct,
 // enforcing the wire label and the per-property nullability the
 // schema declares.
-func decodeKNOWS(rel dbtype.Relationship) (KNOWS, error) {
+func decodeKnows(rel dbtype.Relationship) (Knows, error) {
 	if rel.Type != "KNOWS" {
-		return KNOWS{}, fmt.Errorf("decode KNOWS: expected a relationship of type %q, got %q", "KNOWS", rel.Type)
+		return Knows{}, fmt.Errorf("decode Knows: expected a relationship of type %q, got %q", "KNOWS", rel.Type)
 	}
-	var out KNOWS
+	var out Knows
 	return out, nil
 }

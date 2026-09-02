@@ -15,27 +15,27 @@ const getActionQueryText = `MATCH (p:Person)-[r:AUTHORED|LIKES]->(q:Post), (p)-[
 // GetAction executes the GetAction query.
 //
 //	MATCH (p:Person)-[r:AUTHORED|LIKES]->(q:Post), (p)-[r:LIKES|SHARED]->(q) RETURN r
-func (q *queries) GetAction(ctx context.Context) (LIKES, error) {
+func (q *queries) GetAction(ctx context.Context) (Likes, error) {
 	records, err := q.db.run(ctx, getActionQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
-		return LIKES{}, err
+		return Likes{}, err
 	}
 	if len(records) == 0 {
-		return LIKES{}, ErrNoRows
+		return Likes{}, ErrNoRows
 	}
 	if len(records) > 1 {
-		return LIKES{}, ErrMultipleResults
+		return Likes{}, ErrMultipleResults
 	}
 	rel, isNil, err := neo4j.GetRecordValue[dbtype.Relationship](records[0], "r")
 	if err != nil {
-		return LIKES{}, fmt.Errorf("GetAction: decode column %q: %w", "r", err)
+		return Likes{}, fmt.Errorf("GetAction: decode column %q: %w", "r", err)
 	}
 	if isNil {
-		return LIKES{}, fmt.Errorf("GetAction: column %q is non-nullable but arrived null", "r")
+		return Likes{}, fmt.Errorf("GetAction: column %q is non-nullable but arrived null", "r")
 	}
-	value, err := decodeLIKES(rel)
+	value, err := decodeLikes(rel)
 	if err != nil {
-		return LIKES{}, fmt.Errorf("GetAction: decode column %q: %w", "r", err)
+		return Likes{}, fmt.Errorf("GetAction: decode column %q: %w", "r", err)
 	}
 	return value, nil
 }

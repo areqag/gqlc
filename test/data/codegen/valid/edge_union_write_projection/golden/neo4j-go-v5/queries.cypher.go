@@ -44,13 +44,13 @@ func (q *queries) MergeAction(ctx context.Context, arg MergeActionParams) (Merge
 	}
 	switch rel.Type {
 	case "AUTHORED":
-		entity, err := decodeAUTHORED(rel)
+		entity, err := decodeAuthored(rel)
 		if err != nil {
 			return nil, fmt.Errorf("MergeAction: decode column %q: %w", "r", err)
 		}
 		return entity, nil
 	case "LIKES":
-		entity, err := decodeLIKES(rel)
+		entity, err := decodeLikes(rel)
 		if err != nil {
 			return nil, fmt.Errorf("MergeAction: decode column %q: %w", "r", err)
 		}
