@@ -2083,6 +2083,25 @@ func (s *ResolverSuite) TestInlineEndpointsAgreeWithTheirVarSpelling() {
 			inline: "MATCH (p:Person)-[r:WORKS_AT]->(:Company:Desk) RETURN p",
 			varSpe: "MATCH (p:Person)-[r:WORKS_AT]->(z:Company:Desk) RETURN p",
 		},
+		{
+			// The row above on the other side of the arrow. An endpoint is asked
+			// the question because it is an endpoint, not because of which end it
+			// is, and a check that reads only the target passes every row above.
+			name: "an unsatisfiable endpoint written on the source", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			inline: "MATCH (:Company:Desk)-[r:HAS_DESK]->(d:Desk) RETURN d",
+			varSpe: "MATCH (z:Company:Desk)-[r:HAS_DESK]->(d:Desk) RETURN d",
+		},
+		{
+			// The other way a label set yields no type. Company&Desk is
+			// unsatisfiable although both its labels are declared; Nope is not
+			// declared at all. They are one question — no type can stand here —
+			// and asking only the first leaves the inline spelling reporting a
+			// missing edge to a type nothing declares, which is the whole defect
+			// in its second shape.
+			name: "an endpoint label nothing declares", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			inline: "MATCH (p:Person)-[r:WORKS_AT]->(:Nope) RETURN p",
+			varSpe: "MATCH (p:Person)-[r:WORKS_AT]->(z:Nope) RETURN p",
+		},
 	}
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
