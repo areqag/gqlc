@@ -705,6 +705,51 @@ than buying a false pass. Equality would refuse the first time claude renders a
 hint inside the box, and a false refusal unroutes a live seat — the failure
 gqlc-gh7xj went out of its way not to introduce.
 
+## km_authored_text — the whole corpus of what km types, as a predicate
+
+(`kingdom/bin/km`, `km_authored_text`)
+
+Every string km types into a citizen's composer is either `/exit` or carries
+the `[km] ` prefix. That was already true when this predicate was written; what
+it adds is that it is now CHECKED, at the one place text enters a pane, so it
+cannot be quietly falsified by a new send site (bd gqlc-cj7hp).
+
+THE CORPUS WAS MEASURED, not remembered. Extracted from the source on
+2026-09-02: five templates — `/exit` from two call sites, and four `[km] `
+asks. `send_line` is the only thing in the whole repository that types into a
+pane, over `kingdom/`, `.githooks/`, the justfile and every `*.sh`, `*.py`
+and `*.go`; `km-seat` hands the wake queue to claude as argv and so cannot
+strand text in a box. The falsifier that would have sunk this — an older km
+that sent unprefixed asks, whose text could still be sitting in a box today —
+was looked for and did not exist: `git log -S'[km] ' -- kingdom/bin/km`
+reaches the founding commit c08fc7f0.
+
+WHAT THE INVARIANT BUYS is the ability to rule km OUT. Seven stranded,
+unsubmitted strings had been read out of live panes by 2026-09-02 — four in
+gqlc-cj7hp's own filing, then `merge it once the screen confirms` (33) on
+Վահագն's pane at 15:32Z, and `go with the design bead, dont bother with the
+cheap amendment` (61) and `merge it when CI is green` (25) on Սեդրակ's and
+Հայկ's at 15:44Z. Not one matches the corpus, and the longest is 61 characters
+against gqlc-gh7xj's threshold of 64 — so gh7xj, km typing a burst claude
+renders as a paste and never submits, explains none of them. Without a checked
+corpus that reads as an impression about phrasing; with one it is a
+measurement, and it is what `seat_box_state` reports on.
+
+DO NOT INVERT THAT. 61 is under 64 by three characters, so the next specimen
+may well be longer, and a string over 64 is not thereby km's — the corpus is
+the test, and length is only the reason gh7xj cannot be the answer for these
+seven. The two later specimens sharpen what the sender is doing rather than
+who it is: each is an imperative granting a decision on that seat's actual
+in-flight work — Սեդրակ was weighing a design bead against a cheap amendment,
+Հայկ was waiting on CI — which agrees with astghik's content-coupling finding
+and rules out a fixed script on a timer. `dont` for `don't` is the kind of tell
+a keyboard leaves and a template does not, and it is offered as exactly that:
+a tell, not a finding.
+
+The prefix is therefore load-bearing prose, not decoration. Anything that
+gives km a new thing to say gives it the prefix, or it is refused at
+`send_line` with the reason above.
+
 ## send_line — herdr writes the text and send-keys writes the Enter
 
 (`kingdom/bin/km`, `send_line`)
@@ -884,6 +929,53 @@ only thing keeping km from typing at them. send_line is where that is now
 refused, on the pane's own render rather than on this enum; read its comment
 before treating this predicate as a safety boundary. It is not one. It answers
 "has this seat stopped", and the ladder's other rungs answer the rest.
+
+## seat_box_state — not whether a seat is boxed, but by whose text
+
+(`kingdom/bin/km`, `seat_box_state`)
+
+An idle seat's composer is not always empty, and the difference decides whether
+anything can still reach the seat. send_line refuses every send into a
+non-empty box — typing appends, so it would paste onto the end of a citizen's
+draft and submit the pair as one message (gqlc-6bnkw) — and cmd_wake,
+cmd_sleep, cmd_down and dispatch's recovery ask all route through it. So a seat
+holding any text is unreachable by all four transports at once while
+seat_agent_status still says `idle` (gqlc-gv7dw).
+
+THIS ANSWERS BY WHOSE TEXT, which the predicate it replaces
+(`seat_box_holds_text`, yes/no) could not. The tag narrows how the text got
+there without settling it, and the narrowing is only worth anything because
+km's own corpus is now checked at the send — see `## km_authored_text`. `km` is
+text km itself types, so read gqlc-gh7xj first: km's own long nudge is read as
+a paste and its trailing CR renders as a literal newline, which strands it.
+`foreign` is neither shape, so no code path in this town typed it — it is a
+citizen composing right now, or the second sender of gqlc-cj7hp.
+
+IT READS THE COMPOSER'S BYTES AND NOTHING ELSE, which is the whole of its
+authority and the whole of its blindness. A citizen whose own draft happens to
+open with `[km] ` is tagged `km`; a box holding two texts is tagged by whichever
+is first. Do not read the tag as provenance. It is a shape test against a
+corpus, and it is worth having only because the corpus is enforced at the one
+place text enters a pane.
+
+ONLY A POSITIVE READ OF TEXT makes any claim beyond `none`. A pane with no box
+or one that could not be read answers `none`, which leaves the seat in whatever
+population it was already in rather than inventing a new alarm out of a failed
+read. The conservative direction here is to under-report: a boxed seat missed
+still shows up as IDLE, which is the state it had before this existed. That is
+also why every failure path echoes `none` and returns 0 rather than returning
+non-zero with nothing on stdout — a caller doing `x=$(seat_box_state "$s")`
+cannot distinguish an empty capture from a function that does not exist, and a
+harness row asserting the empty string passes on both.
+
+box_one_line and not a bare `-n "$box"`, and the difference is one case, not
+the obvious one: seat_box_text's awk already drops a line that is EXACTLY `❯`
+or `>`, so a bare glyph never reaches here. What does reach here is a glyph
+followed by spaces or the U+00A0 the TUI pads with — awk keeps that line, and
+`-n` on it reports an empty composer as BOXED, which raises the unreachable
+alarm over a seat a send would have reached. It is also the normalisation
+send_line's own witness uses, so this function answers about the same bytes as
+the guard it is reporting on.
 
 ## seat_prompt_visible — whether the agent can receive text at all
 
