@@ -37,7 +37,7 @@ Warn about type L on edge e when, and only when, all of these hold:
 2. **L is dropped entirely** from e's committed candidate set.
 3. **Both endpoints are covering** (`endpointKeys.covers` on each). A WITH carry
    or an uncovered Phase-B inference reports only the keys it happens to know, so
-   the drop may be an artifact of what the resolver failed to learn rather than
+   the drop may be an artefact of what the resolver failed to learn rather than
    of the arrow the author drew.
 4. **A reversed declaration witnesses the wrong arrow**: for some committed
    `(src, tgt)` pair of e, `EdgeKey{Source: tgt, KeyLabels: L, Target: src}` is

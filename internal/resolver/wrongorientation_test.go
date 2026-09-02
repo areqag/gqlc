@@ -78,7 +78,7 @@ func TestWrongOrientationBroadDropWithoutReversedWitnessIsSilent(t *testing.T) {
 
 // The covers gate. `a` reaches the second Part through a WITH carry, whose
 // provenance that Part cannot see, so its key set is not known to cover every
-// key a matching row can put there. The drop may then be an artifact of what
+// key a matching row can put there. The drop may then be an artefact of what
 // the resolver failed to learn rather than of the arrow the author drew, and an
 // accusation would be unfounded.
 //

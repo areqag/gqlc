@@ -78,7 +78,7 @@ func (ev *orientationEvidence) recordEdge(e query.EdgeBinding, src, tgt endpoint
 		}
 		// Clause 3. An endpoint that reports only the keys it happens to know —
 		// a WITH carry, an uncovered Phase-B inference — cannot support an
-		// accusation: the drop may be an artifact of what the resolver failed to
+		// accusation: the drop may be an artefact of what the resolver failed to
 		// learn rather than of the arrow the author drew.
 		if !src.covers || !tgt.covers {
 			continue
