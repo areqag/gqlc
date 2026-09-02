@@ -3,7 +3,7 @@
 # schema under test/data/resolver/{valid,invalid}/schemas/*.gql. Generated
 # file: edit internal/resolver/sweep_test.go, not this.
 #
-# corpus: 323 queries, 40 schemas. 12920 cells: 3856 accept, 9064 refuse.
+# corpus: 323 queries, 40 schemas. 12920 cells: 3859 accept, 9061 refuse.
 #
 # cell rows: query, schema, verdict, sentinel, detail. A refusing cell's
 # detail digests the error text and is expanded by the strconv.Quote'd msg
@@ -91,6 +91,7 @@ msg	546cbbe3d652	"unknown edge: Contractor&Person-[REVIEWED]->Employee&Person, E
 msg	54a5befe0d35	"unknown property: n.notAProp missing on plural-satisfying type Contractor&Person"
 msg	54d53ee99383	"invalid effect target: REMOVE c.p: \"c\" resolves to a projection alias, not an entity binding"
 msg	550645dcee37	"unknown edge: Contractor&Person-[AUTHORED]->Post, Employee&Person-[AUTHORED]->Post, Person-[AUTHORED]->Post"
+msg	550d36b077bc	"unknown property: property r.notAProp missing on union member Person-[KNOWS]->Employee&Person"
 msg	55874483a547	"union column mismatch: column \"x\" projects list of edge Person-[AUTHORED]->Post (not null) in branch 1 but list of edge Person-[KNOWS]->Person (not null) in branch 0"
 msg	56e5d6eb65b2	"unknown label: SET n:Nonexistent: label \"Nonexistent\" not declared on any node type"
 msg	574eb406c924	"unknown edge: Contractor&Person-[KNOWS]->Contractor&Person, Contractor&Person-[KNOWS]->Employee&Person, Employee&Person-[KNOWS]->Contractor&Person, Employee&Person-[KNOWS]->Employee&Person, Contractor&Person-[BLOCKED]->Contractor&Person, Contractor&Person-[BLOCKED]->Employee&Person, Employee&Person-[BLOCKED]->Contractor&Person, Employee&Person-[BLOCKED]->Employee&Person"
@@ -2425,7 +2426,7 @@ cell	invalid/parameter_use_unknown_edge_property.cypher	valid/schemas/satisfy_pl
 cell	invalid/parameter_use_unknown_edge_property.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	6f457e5bb08a
 cell	invalid/parameter_use_unknown_edge_property.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	c504839fd900
 cell	invalid/parameter_use_unknown_edge_property.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_use_unknown_edge_property.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrAmbiguousLabel	2da29fcc911f
+cell	invalid/parameter_use_unknown_edge_property.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownProperty	550d36b077bc
 cell	invalid/parameter_use_unknown_edge_property.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	6f457e5bb08a
 cell	invalid/parameter_use_unknown_edge_property.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	5b7767c8f09c
 cell	invalid/parameter_use_unknown_edge_property.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	5b7767c8f09c
@@ -4905,7 +4906,7 @@ cell	invalid/unknown_edge.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	E
 cell	invalid/unknown_edge.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	6f457e5bb08a
 cell	invalid/unknown_edge.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	c504839fd900
 cell	invalid/unknown_edge.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/unknown_edge.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrAmbiguousLabel	1c8db2c225f5
+cell	invalid/unknown_edge.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	accept	-	5ef5936e801f
 cell	invalid/unknown_edge.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	6f457e5bb08a
 cell	invalid/unknown_edge.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	5b7767c8f09c
 cell	invalid/unknown_edge.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	5b7767c8f09c
@@ -11185,7 +11186,7 @@ cell	valid/remove_property_on_edge.cypher	valid/schemas/satisfy_plural_edges.gql
 cell	valid/remove_property_on_edge.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	6f457e5bb08a
 cell	valid/remove_property_on_edge.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	c504839fd900
 cell	valid/remove_property_on_edge.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/remove_property_on_edge.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrAmbiguousLabel	2da29fcc911f
+cell	valid/remove_property_on_edge.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	accept	-	3525119f7cb7
 cell	valid/remove_property_on_edge.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	6f457e5bb08a
 cell	valid/remove_property_on_edge.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	5b7767c8f09c
 cell	valid/remove_property_on_edge.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	5b7767c8f09c
@@ -11625,7 +11626,7 @@ cell	valid/set_entity_on_edge.cypher	valid/schemas/satisfy_plural_edges.gql	refu
 cell	valid/set_entity_on_edge.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	6f457e5bb08a
 cell	valid/set_entity_on_edge.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	c504839fd900
 cell	valid/set_entity_on_edge.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/set_entity_on_edge.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrAmbiguousLabel	2da29fcc911f
+cell	valid/set_entity_on_edge.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	accept	-	3525119f7cb7
 cell	valid/set_entity_on_edge.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	6f457e5bb08a
 cell	valid/set_entity_on_edge.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	5b7767c8f09c
 cell	valid/set_entity_on_edge.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	5b7767c8f09c

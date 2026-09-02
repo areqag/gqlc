@@ -2683,6 +2683,90 @@ func (s *ResolverSuite) TestDeferredEdgesCloseBeforeTheNarrowing() {
 	}, vq.Columns)
 }
 
+// TestADirectedCloseDropsTheRightToLeftReading is the arrow's half of the
+// endpoint narrowing: on a directed edge the pattern's left end gets Sources and
+// its right end gets Targets, and neither end may collect the other's.
+//
+// The bug this pins (bd gqlc-pv0u) needed srcs and tgts to OVERLAP before it
+// could show. edgeProbes already builds one orientation per directed edge, so
+// every candidate satisfies the left-to-right reading by construction; the
+// right-to-left reading is then not a second source of candidates but a second
+// question asked of the same ones, and where the two endpoint slices share a key
+// it answers yes and contributes the candidate's far end to the near end of the
+// pattern. `(:Node)` satisfying all three types is what makes the slices equal
+// here, which is the ordinary shape of a supertype label, not a contrived one.
+//
+// The two ends are asserted together because that is what makes this the ARROW's
+// doing rather than a narrowing that merely got smaller. X is declared A->B and
+// B->C, so following the arrow the left end is {A,B} — C has no outgoing X — and
+// the right end is {B,C} — A has no incoming X. They are different sets, both
+// proper subsets of the three the label satisfies, and each is the other's
+// mirror. A narrowing that lost the right-to-left reading everywhere, or that
+// applied the arrow to one end only, cannot produce that pair.
+//
+// The refusal itself is not the subject and does not move: two types survive at
+// each end, so ErrAmbiguousLabel stands before and after. What changes is which
+// types it names, which is why the assertion reads the enumeration rather than
+// the sentinel — and why no query in this schema goes from refused to accepted,
+// since A, B and C share only `id`. The narrowing is precision, in ADR 0006's
+// safe direction; it is not a new acceptance.
+func (s *ResolverSuite) TestADirectedCloseDropsTheRightToLeftReading() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_chain.gql")
+	ambiguousSet := func(src string) string {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+		s.Require().ErrorIs(err, ErrAmbiguousLabel,
+			"two types survive at each end, so the whole-entity refusal stands either way")
+		return errAmbiguousLabelSet(err)
+	}
+
+	s.Require().Equal("A&Node, B&Node",
+		ambiguousSet("MATCH (p:Node)-[r:X]->(q:Node) RETURN p"),
+		"the arrow puts p on a Source of X, and C&Node has no outgoing X")
+	s.Require().Equal("B&Node, C&Node",
+		ambiguousSet("MATCH (p:Node)-[r:X]->(q:Node) RETURN q"),
+		"the arrow puts q on a Target of X, and A&Node has no incoming X")
+
+	// Control: the same pattern written undirected must keep all three at both
+	// ends. Without this row the two above are also satisfied by a narrowing that
+	// dropped the right-to-left reading unconditionally, which would be a
+	// soundness bug on the undirected form -- there the reading is not a spurious
+	// second answer but the whole reason edgeProbes emits both orientations.
+	s.Require().Equal("A&Node, B&Node, C&Node",
+		ambiguousSet("MATCH (p:Node)-[r:X]-(q:Node) RETURN p"),
+		"an undirected close probes both orientations, so every type the label satisfies still stands")
+
+	// The user-visible half. Above, both ends stay plural and only the named set
+	// moves; here the left end narrows to ONE type, so a query the resolver used
+	// to refuse now answers. KNOWS is declared Person->Person and
+	// Person->Employee&Person, so every candidate's Source is Person and no
+	// Employee&Person has an outgoing KNOWS — `a` was never ambiguous, and the
+	// refusal was the right-to-left reading inventing a second type for it.
+	//
+	// `b` is asserted in the same breath because it is what makes this the arrow
+	// and not the narrowing simply collapsing everything: the right end still
+	// holds both types, since both are declared Targets. One end singular and the
+	// other plural, from one pattern, is a shape neither the old behaviour nor a
+	// blanket narrowing can produce.
+	sym := s.loadSchema("valid", "satisfy_plural_edges_symmetric.gql")
+	q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(
+		"MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN a")))
+	s.Require().NoError(err)
+	vq, err := New(sym, WithRegistry(regR7)).Resolve(q)
+	s.Require().NoError(err,
+		"KNOWS runs only out of Person, so the arrow determines a and there is nothing to refuse")
+	s.Require().Equal([]Column{{Name: "a", Type: ResolvedNode{Labels: "Person"}}}, vq.Columns)
+
+	q, err = cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(
+		"MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN b")))
+	s.Require().NoError(err)
+	_, err = New(sym, WithRegistry(regR7)).Resolve(q)
+	s.Require().ErrorIs(err, ErrAmbiguousLabel)
+	s.Require().Equal("Employee&Person, Person", errAmbiguousLabelSet(err),
+		"both types are declared Targets of KNOWS, so the arrow settles nothing at the right end")
+}
+
 // errAmbiguousLabelSet lifts the candidate enumeration out of an
 // ErrAmbiguousLabel message: everything after the final ": ".
 func errAmbiguousLabelSet(err error) string {
@@ -2703,6 +2787,11 @@ func errAmbiguousLabelSet(err error) string {
 // subset, and only a schema where the two readings differ shows it. The rows
 // below are those, written as the function's answer rather than as a query, and
 // the mixed row is the one that separates union from either reading alone.
+//
+// Every row here is the UNDIRECTED rule, which is why each passes directed=false
+// explicitly rather than letting a zero value speak for it. The directed rule is
+// the last row, and TestADirectedCloseDropsTheRightToLeftReading is the same
+// claim reached through a query.
 func (s *ResolverSuite) TestEndpointContributionUnionsTheTwoReadings() {
 	key := func(src, tgt string) schema.EdgeKey {
 		return schema.EdgeKey{Source: graph.LabelSetKey(src), KeyLabels: "MENTORS", Target: graph.LabelSetKey(tgt)}
@@ -2727,10 +2816,10 @@ func (s *ResolverSuite) TestEndpointContributionUnionsTheTwoReadings() {
 	}
 
 	s.Require().Equal([]graph.LabelSetKey{"Engineer&Person&Staff", "Manager&Person&Staff"},
-		keys(endpointContribution(cands, srcs, tgts, patternLeft)),
+		keys(endpointContribution(cands, srcs, tgts, patternLeft, false)),
 		"left-to-right offers Manager and right-to-left offers Engineer; taking either alone loses a type the schema permits")
 	s.Require().Equal([]graph.LabelSetKey{"Engineer&Person&Staff", "Manager&Person&Staff", "Person"},
-		keys(endpointContribution(cands, srcs, tgts, patternRight)),
+		keys(endpointContribution(cands, srcs, tgts, patternRight, false)),
 		"the right end reads the same candidates from the other side, and the right-to-left candidate offers Person there")
 
 	// Control: on a candidate that reads one way only, the two ends disagree
@@ -2738,9 +2827,9 @@ func (s *ResolverSuite) TestEndpointContributionUnionsTheTwoReadings() {
 	// collapsing to one answer.
 	oneWay := []schema.EdgeKey{key("Manager&Person&Staff", "Person")}
 	s.Require().Equal([]graph.LabelSetKey{"Manager&Person&Staff"},
-		keys(endpointContribution(oneWay, srcs, tgts, patternLeft)))
+		keys(endpointContribution(oneWay, srcs, tgts, patternLeft, false)))
 	s.Require().Equal([]graph.LabelSetKey{"Person"},
-		keys(endpointContribution(oneWay, srcs, tgts, patternRight)))
+		keys(endpointContribution(oneWay, srcs, tgts, patternRight, false)))
 
 	// Equal slices: the shape a pattern takes when ONE variable names both ends
 	// of an edge, because endpointLabels then hands both ends the same keys.
@@ -2751,12 +2840,24 @@ func (s *ResolverSuite) TestEndpointContributionUnionsTheTwoReadings() {
 	equal := []graph.LabelSetKey{"Employee&Person", "Person"}
 	loop := []schema.EdgeKey{key("Employee&Person", "Person")}
 	s.Require().Equal(
-		keys(endpointContribution(loop, equal, equal, patternLeft)),
-		keys(endpointContribution(loop, equal, equal, patternRight)),
+		keys(endpointContribution(loop, equal, equal, patternLeft, false)),
+		keys(endpointContribution(loop, equal, equal, patternRight, false)),
 		"with srcs == tgts a candidate's two readings are the same predicate, so neither end can learn more than the other")
 	s.Require().Equal([]graph.LabelSetKey{"Employee&Person", "Person"},
-		keys(endpointContribution(loop, equal, equal, patternLeft)),
+		keys(endpointContribution(loop, equal, equal, patternLeft, false)),
 		"and what they both learn is both of the key's ends, or the equality above holds by being empty twice")
+
+	// Directed, on the very row above: with srcs == tgts every candidate reads
+	// both ways, so this is where dropping the second reading moves the answer by
+	// the widest margin the function admits. The two ends now disagree — the left
+	// gets the key's Source and the right its Target — which is the arrow being
+	// obeyed, and is the equality five lines up broken on purpose.
+	s.Require().Equal([]graph.LabelSetKey{"Employee&Person"},
+		keys(endpointContribution(loop, equal, equal, patternLeft, true)),
+		"a directed close puts the pattern's left end on the candidate's Source alone")
+	s.Require().Equal([]graph.LabelSetKey{"Person"},
+		keys(endpointContribution(loop, equal, equal, patternRight, true)),
+		"and its right end on the Target alone")
 }
 
 // TestTwoSwappedPairsReportsTheFirstInCandidateOrder holds §4.4's determinism
