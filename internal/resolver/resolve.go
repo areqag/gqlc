@@ -326,6 +326,14 @@ const unionColumnTypeArm = " projects "
 // branch's projection first. The direction is arbitrary; the consistency is not,
 // because one error that reads in two directions makes the reader re-derive
 // which number is the culprit on every arm.
+//
+// Whether branch 0 should lead instead was asked under gqlc-eb5j and answered
+// no. Branch 0 does define the result columns (R5 §3.1), which is the argument
+// for it, but the reader arrives at this message already knowing that and
+// looking for the branch to go and edit — which is branch b. Kept as it is, so
+// this is a settled question rather than an open one; PR #717 had already moved
+// the type arm to this direction deliberately, and all three arms move together
+// or not at all.
 func compareBranchColumns(branchCols [][]Column) error {
 	if len(branchCols) < 2 {
 		return nil
@@ -338,7 +346,7 @@ func compareBranchColumns(branchCols [][]Column) error {
 		}
 		for i := range base {
 			if other[i].Name != base[i].Name {
-				return fmt.Errorf("%w: branch %d column %d named %q; branch 0 column %d named %q", ErrUnionColumnMismatch, b, i, other[i].Name, i, base[i].Name)
+				return fmt.Errorf("%w: branch %d column %d named %q; branch 0 named %q", ErrUnionColumnMismatch, b, i, other[i].Name, base[i].Name)
 			}
 			if !resolvedTypeEqual(other[i].Type, base[i].Type) {
 				return fmt.Errorf("%w: column %q"+unionColumnTypeArm+"%s in branch %d but %s in branch 0", ErrUnionColumnMismatch, base[i].Name, describeColumnType(other[i].Type), b, describeColumnType(base[i].Type))
