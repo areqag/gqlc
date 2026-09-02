@@ -442,6 +442,23 @@ presence, exactly as the tmux era had it. What the herdr migration bought
 us is that the pane persists across a crashed km-seat, which is the whole
 reason we need to distinguish presence at all.
 
+## seat_runner_path — which km-seat a runner is actually executing
+
+(`kingdom/bin/km`, `seat_runner_path`)
+
+seat_runner_live answers WHETHER a runner is there; this answers WHERE its
+bytes came from, which is a different question and the one nothing in the town
+was asking. Read from the process's own argv rather than composed from the
+roster, because argv is the only thing that records the directory its launcher
+happened to be standing in. `exec` rewrites argv, so this also tracks a runner
+that has re-exec'd into the deployed copy rather than reporting where it
+started (Ծովինար's test, gqlc-kp3h1).
+
+The argv element is found by matching `*/km-seat` rather than by index: a
+runner appears as `bash <path> <seat>` when started through the interpreter and
+as `<path> <seat>` when executed directly, so argv[1] is the path in one shape
+and the seat in the other.
+
 ## seat_wake_queue_age — the age of a seat's wake file
 
 (`kingdom/bin/km`, `seat_wake_queue_age`)
@@ -2996,6 +3013,36 @@ on.
 Per seat and never in aggregate: an "all seats ok" over sixteen sources
 passes when fifteen go silent, so each seat is judged alone and an
 unresolvable process is named rather than skipped.
+
+## cmd_doctor-rooting — a runner rooted in a citizen's worktree
+
+(`kingdom/bin/km`, `cmd_doctor`)
+
+A runner executes the km-seat file its launcher happened to be standing next
+to. Measured 2026-09-02 by Սեդրակ from /proc: nine of sixteen were running
+km-seat out of `gqlc-seat-sedrak` rather than the deploy root, put there by
+whoever's shell started them (bd gqlc-lzkps, the residual of gqlc-qs4jq).
+
+WHY NOTHING CAUGHT IT, and it is not that gqlc-s67rz's re-exec is wrong. That
+guard compares the DEPLOYED bytes against the parse the runner started with and
+execs the deployed copy when they differ, which always heals toward the deploy
+root. But a runner rooted in a worktree parked at origin/master is running
+bytes IDENTICAL to the deployed ones, so the sums agree and it never re-execs.
+The heal is dormant exactly while the hazard is dormant, and the state it
+cannot leave is the one that looks healthy. `km seat-refresh` cannot see it
+either, because the tree it would report on is fine.
+
+What makes it a hazard rather than a curiosity is that one `git checkout` in
+that citizen's worktree rewrites the bytes a live runner is executing, and the
+frozen self_sum means nothing notices. On 2026-09-02 that same worktree being
+parked at an old commit froze ten seats for nine hours while every board read
+healthy.
+
+REPORT, NOT REPAIR. Refusing or re-exec'ing means ending a runner, and a runner
+ending means its citizen's session ends, which is not km's to do on a timer
+(VI.2). The population drains itself as seats respawn from the deploy root — 9
+to 2 in the four hours after the measurement above — so what was missing was
+never a mechanism, only a reader.
 
 ## cmd_doctor-9 — an armed timer is not a working one
 
