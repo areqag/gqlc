@@ -43,13 +43,13 @@ func (q *queries) MaybeAction(ctx context.Context, arg int64) (MaybeActionR, err
 		}
 		switch rel.Type {
 		case "AUTHORED":
-			entity, err := decodeAUTHORED(rel)
+			entity, err := decodeAuthored(rel)
 			if err != nil {
 				return nil, fmt.Errorf("MaybeAction: decode column %q: %w", "r", err)
 			}
 			return entity, nil
 		case "LIKES":
-			entity, err := decodeLIKES(rel)
+			entity, err := decodeLikes(rel)
 			if err != nil {
 				return nil, fmt.Errorf("MaybeAction: decode column %q: %w", "r", err)
 			}

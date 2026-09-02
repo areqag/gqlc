@@ -12,38 +12,38 @@ const oneActedInQueryText = `MATCH (:Person)-[r:ACTED_IN]->(:Movie) RETURN r`
 // OneActedIn executes the OneActedIn query.
 //
 //	MATCH (:Person)-[r:ACTED_IN]->(:Movie) RETURN r
-func (q *queries) OneActedIn(ctx context.Context) (ACTEDIN, error) {
+func (q *queries) OneActedIn(ctx context.Context) (ActedIn, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneActedInQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
-		return ACTEDIN{}, err
+		return ActedIn{}, err
 	}
 	rows, err := q.db.Query(ctx, stmt, "{}")
 	if err != nil {
-		return ACTEDIN{}, fmt.Errorf("OneActedIn: %w", err)
+		return ActedIn{}, fmt.Errorf("OneActedIn: %w", err)
 	}
 	defer rows.Close()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return ACTEDIN{}, fmt.Errorf("OneActedIn: %w", err)
+			return ActedIn{}, fmt.Errorf("OneActedIn: %w", err)
 		}
-		return ACTEDIN{}, ErrNoRows
+		return ActedIn{}, ErrNoRows
 	}
 	var raw0 []byte
 	if err := rows.Scan(&raw0); err != nil {
-		return ACTEDIN{}, fmt.Errorf("OneActedIn: scan row: %w", err)
+		return ActedIn{}, fmt.Errorf("OneActedIn: scan row: %w", err)
 	}
 	if rows.Next() {
-		return ACTEDIN{}, ErrMultipleResults
+		return ActedIn{}, ErrMultipleResults
 	}
 	if err := rows.Err(); err != nil {
-		return ACTEDIN{}, fmt.Errorf("OneActedIn: %w", err)
+		return ActedIn{}, fmt.Errorf("OneActedIn: %w", err)
 	}
 	if raw0 == nil {
-		return ACTEDIN{}, fmt.Errorf("OneActedIn: column %q is non-nullable but arrived null", "r")
+		return ActedIn{}, fmt.Errorf("OneActedIn: column %q is non-nullable but arrived null", "r")
 	}
-	value0, err := decodeACTEDIN(raw0)
+	value0, err := decodeActedIn(raw0)
 	if err != nil {
-		return ACTEDIN{}, fmt.Errorf("OneActedIn: decode column %q: %w", "r", err)
+		return ActedIn{}, fmt.Errorf("OneActedIn: decode column %q: %w", "r", err)
 	}
 	return value0, nil
 }

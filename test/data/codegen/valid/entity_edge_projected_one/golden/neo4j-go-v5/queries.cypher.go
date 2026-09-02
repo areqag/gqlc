@@ -15,27 +15,27 @@ const oneActedInQueryText = `MATCH (:Person)-[r:ACTED_IN]->(:Movie) RETURN r`
 // OneActedIn executes the OneActedIn query.
 //
 //	MATCH (:Person)-[r:ACTED_IN]->(:Movie) RETURN r
-func (q *queries) OneActedIn(ctx context.Context) (ACTEDIN, error) {
+func (q *queries) OneActedIn(ctx context.Context) (ActedIn, error) {
 	records, err := q.db.run(ctx, oneActedInQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
-		return ACTEDIN{}, err
+		return ActedIn{}, err
 	}
 	if len(records) == 0 {
-		return ACTEDIN{}, ErrNoRows
+		return ActedIn{}, ErrNoRows
 	}
 	if len(records) > 1 {
-		return ACTEDIN{}, ErrMultipleResults
+		return ActedIn{}, ErrMultipleResults
 	}
 	rel, isNil, err := neo4j.GetRecordValue[dbtype.Relationship](records[0], "r")
 	if err != nil {
-		return ACTEDIN{}, fmt.Errorf("OneActedIn: decode column %q: %w", "r", err)
+		return ActedIn{}, fmt.Errorf("OneActedIn: decode column %q: %w", "r", err)
 	}
 	if isNil {
-		return ACTEDIN{}, fmt.Errorf("OneActedIn: column %q is non-nullable but arrived null", "r")
+		return ActedIn{}, fmt.Errorf("OneActedIn: column %q is non-nullable but arrived null", "r")
 	}
-	value, err := decodeACTEDIN(rel)
+	value, err := decodeActedIn(rel)
 	if err != nil {
-		return ACTEDIN{}, fmt.Errorf("OneActedIn: decode column %q: %w", "r", err)
+		return ActedIn{}, fmt.Errorf("OneActedIn: decode column %q: %w", "r", err)
 	}
 	return value, nil
 }

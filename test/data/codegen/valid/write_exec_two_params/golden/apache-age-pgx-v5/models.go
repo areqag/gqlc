@@ -34,21 +34,21 @@ func decodePerson(raw []byte) (Person, error) {
 	return out, nil
 }
 
-// KNOWS corresponds to the KNOWS edge type (Person -> Person).
-type KNOWS struct {
+// Knows corresponds to the KNOWS edge type (Person -> Person).
+type Knows struct {
 }
 
-// decodeKNOWS decodes an agtype edge into a KNOWS struct, enforcing
+// decodeKnows decodes an agtype edge into a Knows struct, enforcing
 // the label and the per-property nullability the schema declares.
-func decodeKNOWS(raw []byte) (KNOWS, error) {
+func decodeKnows(raw []byte) (Knows, error) {
 	label, _, err := agtypeEntity(raw, "::edge")
 	if err != nil {
-		return KNOWS{}, fmt.Errorf("decode KNOWS: %w", err)
+		return Knows{}, fmt.Errorf("decode Knows: %w", err)
 	}
 	if label != "KNOWS" {
-		return KNOWS{}, fmt.Errorf("decode KNOWS: expected label %q, got %q", "KNOWS", label)
+		return Knows{}, fmt.Errorf("decode Knows: expected label %q, got %q", "KNOWS", label)
 	}
-	var out KNOWS
+	var out Knows
 	return out, nil
 }
 

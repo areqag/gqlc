@@ -815,6 +815,12 @@ func TestReservedScopeDecidesWhichEntityNamesCollide(t *testing.T) {
 				},
 			}
 		}},
+		// The edge half names its entity explicitly (Rule 1) rather than
+		// through the label, because Rule 3 title-cases an ALL-CAPS edge
+		// label — so no label mangles to DBTX, and driving this axis
+		// through the label would silently stop testing that row. The
+		// node half still reaches every row through the label mangle,
+		// which is where Rule 2's identity disposition is covered.
 		{"edge", func(name string) schema.Schema {
 			key := schema.EdgeKey{Source: person, KeyLabels: graph.LabelSetKey(name), Target: person}
 			return schema.Schema{
@@ -823,7 +829,7 @@ func TestReservedScopeDecidesWhichEntityNamesCollide(t *testing.T) {
 					person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{}},
 				},
 				Edges: map[schema.EdgeKey]schema.EdgeType{
-					key: {EdgeKey: key, Properties: map[string]schema.Property{}},
+					key: {EdgeKey: key, Name: name, Properties: map[string]schema.Property{}},
 				},
 			}
 		}},
@@ -1182,5 +1188,79 @@ func TestFixedDeclarationSweepEqualsTheReservedSet(t *testing.T) {
 		require.True(t, swept,
 			"no golden this sweep read declares reserved %q, so the file declaring it is classified out of fixedDeclarationFiles and owes nothing here",
 			name)
+	}
+}
+
+// allCapsNameFixture builds a one-node schema, optionally with one edge
+// from that node to itself, and returns the derived entity names by
+// lookup key. Phase Z derives every entity eagerly (§4.5 Rule 4), so no
+// query is needed to reach the naming rules.
+func allCapsNameFixture(t *testing.T, nodeLabel, edgeLabel string) map[codegen.EntityLookupKey]string {
+	t.Helper()
+	node := graph.LabelSetKey(nodeLabel)
+	sch := schema.Schema{
+		Name: "Test",
+		Nodes: map[graph.LabelSetKey]schema.NodeType{
+			node: {KeyLabels: node, CompleteLabels: node, Properties: map[string]schema.Property{}},
+		},
+		Edges: map[schema.EdgeKey]schema.EdgeType{},
+	}
+	if edgeLabel != "" {
+		key := schema.EdgeKey{Source: node, KeyLabels: graph.LabelSetKey(edgeLabel), Target: node}
+		sch.Edges[key] = schema.EdgeType{EdgeKey: key, Properties: map[string]schema.Property{}}
+	}
+	entities, index, err := codegen.PhaseZAdmit(sch, stubTypeMap{})
+	require.NoError(t, err)
+	names := make(map[codegen.EntityLookupKey]string, len(index))
+	for key, i := range index {
+		names[key] = entities[i].Name
+	}
+	return names
+}
+
+// TestAllCapsEdgeLabelTitleCasesPerRule3 pins spec §4.5 Rule 3's worked
+// examples for an ALL-CAPS edge label — `ACTED_IN` -> `ActedIn`,
+// `KNOWS` -> `Knows`. Neo4j's own convention is SCREAMING_SNAKE
+// relationship types, so this is the shape a real schema hits first.
+//
+// The node rows are not decoration: Rule 2 pins the OPPOSITE disposition
+// for a node label (`PERSON` -> `PERSON`), because a node label runs
+// through §4.2's parameter mangle where preserving an acronym is the
+// point ($ID, $URL). They are the regression guard for that shared
+// function — the fix must reach edge labels without touching it.
+func TestAllCapsEdgeLabelTitleCasesPerRule3(t *testing.T) {
+	edgeCases := []struct{ label, want string }{
+		{label: "KNOWS", want: "Knows"},
+		{label: "ACTED_IN", want: "ActedIn"},
+		{label: "LINKED", want: "Linked"},
+		{label: "WORKS_FOR_NOW", want: "WorksForNow"},
+		{label: "Follows", want: "Follows"},
+		{label: "acted_in", want: "ActedIn"},
+	}
+	for _, tc := range edgeCases {
+		t.Run("edge/"+tc.label, func(t *testing.T) {
+			names := allCapsNameFixture(t, "Person", tc.label)
+			key := codegen.EntityLookupKey{Kind: codegen.EntityEdge, EdgeKey: schema.EdgeKey{
+				Source:    graph.LabelSetKey("Person"),
+				KeyLabels: graph.LabelSetKey(tc.label),
+				Target:    graph.LabelSetKey("Person"),
+			}}
+			require.Equal(t, tc.want, names[key],
+				"§4.5 Rule 3: edge label %q must derive the entity struct name %q", tc.label, tc.want)
+		})
+	}
+
+	nodeCases := []struct{ label, want string }{
+		{label: "PERSON", want: "PERSON"},
+		{label: "Person", want: "Person"},
+		{label: "Person_type", want: "PersonType"},
+	}
+	for _, tc := range nodeCases {
+		t.Run("node/"+tc.label, func(t *testing.T) {
+			names := allCapsNameFixture(t, tc.label, "")
+			key := codegen.EntityLookupKey{Kind: codegen.EntityNode, Labels: graph.LabelSetKey(tc.label)}
+			require.Equal(t, tc.want, names[key],
+				"§4.5 Rule 2: node label %q must derive the entity struct name %q", tc.label, tc.want)
+		})
 	}
 }

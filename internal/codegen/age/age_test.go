@@ -1955,7 +1955,7 @@ func (s *EmissionSuite) TestRejectsAnAuthorOwnedOffsetSidecar() {
         takenAtOffset :: INT64     NOT NULL
     }]-> (:Photo)
 }`,
-			entity:  "SAW",
+			entity:  "Saw",
 			instant: "takenAt",
 		},
 	}

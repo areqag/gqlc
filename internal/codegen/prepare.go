@@ -523,7 +523,7 @@ func entityStructName(kind EntityKind, labels graph.LabelSetKey, edgeKey schema.
 	if ambiguousEdgeLabel {
 		return "", fmt.Errorf("%w: edge label %q is shared across endpoint pairs — (%s -[:%s]-> %s) requires an explicit Name", ErrUnnamedMultiLabelType, string(edgeKey.KeyLabels), string(edgeKey.Source), string(edgeKey.KeyLabels), string(edgeKey.Target))
 	}
-	name := paramFieldName(labelParts[0])
+	name := edgeLabelFieldName(labelParts[0])
 	if !exportedGoIdent(name) {
 		return "", fmt.Errorf("%w: edge type label %q mangles to %q, not a valid exported Go identifier", ErrInvalidEntityName, string(edgeKey.KeyLabels), name)
 	}

@@ -57,13 +57,13 @@ func (q *queries) PersonAction(ctx context.Context, arg int64) (PersonActionRow,
 	}
 	switch rel1.Type {
 	case "AUTHORED":
-		entity1, err := decodeAUTHORED(rel1)
+		entity1, err := decodeAuthored(rel1)
 		if err != nil {
 			return PersonActionRow{}, fmt.Errorf("PersonAction: decode column %q: %w", "r", err)
 		}
 		row.R = entity1
 	case "LIKES":
-		entity1, err := decodeLIKES(rel1)
+		entity1, err := decodeLikes(rel1)
 		if err != nil {
 			return PersonActionRow{}, fmt.Errorf("PersonAction: decode column %q: %w", "r", err)
 		}

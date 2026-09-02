@@ -58,25 +58,25 @@ func decodePerson(raw []byte) (Person, error) {
 	return out, nil
 }
 
-// ACTEDIN corresponds to the ACTED_IN edge type (Person -> Movie).
-type ACTEDIN struct {
+// ActedIn corresponds to the ACTED_IN edge type (Person -> Movie).
+type ActedIn struct {
 	Since int64
 }
 
-// decodeACTEDIN decodes an agtype edge into a ACTEDIN struct, enforcing
+// decodeActedIn decodes an agtype edge into a ActedIn struct, enforcing
 // the label and the per-property nullability the schema declares.
-func decodeACTEDIN(raw []byte) (ACTEDIN, error) {
+func decodeActedIn(raw []byte) (ActedIn, error) {
 	label, props, err := agtypeEntity(raw, "::edge")
 	if err != nil {
-		return ACTEDIN{}, fmt.Errorf("decode ACTEDIN: %w", err)
+		return ActedIn{}, fmt.Errorf("decode ActedIn: %w", err)
 	}
 	if label != "ACTED_IN" {
-		return ACTEDIN{}, fmt.Errorf("decode ACTEDIN: expected label %q, got %q", "ACTED_IN", label)
+		return ActedIn{}, fmt.Errorf("decode ActedIn: expected label %q, got %q", "ACTED_IN", label)
 	}
-	var out ACTEDIN
+	var out ActedIn
 	value0, err := agtypeProperty(props, "since", agtypeInt64)
 	if err != nil {
-		return ACTEDIN{}, fmt.Errorf("decode ACTEDIN.Since: %w", err)
+		return ActedIn{}, fmt.Errorf("decode ActedIn.Since: %w", err)
 	}
 	out.Since = value0
 	return out, nil
