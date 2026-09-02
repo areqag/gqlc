@@ -154,10 +154,11 @@ func TestListExpressionColumnIsJudgedByItsElement(t *testing.T) {
 		},
 		{
 			// A whole vertex decodes through the entity's own helper,
-			// which columnDecoder reaches only for a top-level column;
-			// elemDecoder has no arm for an entity struct name and
-			// decodeFunc panics on one. So the element is refused here
-			// rather than emitted into a package that cannot be built.
+			// which columnDecoder reaches only for a top-level column; a
+			// list element goes to decodeFunc instead, which has no arm
+			// for an entity struct name and panics on one. So the element
+			// is refused here rather than emitted into a package that
+			// cannot be built.
 			name:       "a list of whole vertices names the element",
 			col:        listOf(resolver.ResolvedNode{Labels: person}),
 			wantReason: "projects a list of node",

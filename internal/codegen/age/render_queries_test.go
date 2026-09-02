@@ -245,13 +245,15 @@ func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
 
 	// A slice takes its wrapper's name from the text alone, so the slice
 	// arm asks nothing about the element and refuses nothing. The element's
-	// refusal is one level in, at the decoder the wrapper is written with —
-	// which is where the emission reaches it (writeListHelper).
-	t.Run("a slice refuses at its element", func(t *testing.T) {
+	// refusal is one level in: writeListHelper writes the wrapper with the
+	// ELEMENT's decoder, so "[]byte" is named here and refused there. That
+	// second half is not asserted in this test, because asserting it here
+	// would only re-run the "byte" row above — writeListHelper's routing of
+	// the element is held by TestEmittedHelpersDecodeTheAgtypeCorpus and
+	// TestListExpressionColumnDecodesThroughTheSliceWrapper, both of which
+	// go red when the wrapper is written with the slice type instead.
+	t.Run("a slice names a wrapper without asking about its element", func(t *testing.T) {
 		require.NotPanics(t, func() { age.DecodeFunc("[]byte") })
-		require.PanicsWithValue(t,
-			`age codegen bug: Go type "byte" carries as "byte", which decodeFunc has no arm for`,
-			func() { age.ElemDecoder("byte") })
 	})
 }
 

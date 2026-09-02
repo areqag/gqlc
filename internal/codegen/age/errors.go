@@ -638,10 +638,10 @@ func unservedColumn(t resolver.ResolvedType) string {
 //
 //   - A whole vertex or edge is served as a TOP-LEVEL column and refused
 //     here. columnDecoder answers a top-level entity column with the
-//     entity's own decoder, which is where the label check lives;
-//     elemDecoder has no such arm and hands the entity struct name to
-//     decodeFunc, which panics on a carrier the type table never
-//     produced. Refusing keeps that panic unreachable.
+//     entity's own decoder, which is where the label check lives; a list
+//     element reaches no such arm, because writeListHelper hands the
+//     element's Go type to decodeFunc, which panics on a carrier the type
+//     table never produced. Refusing keeps that panic unreachable.
 //
 //   - An edge union is refused for the reason the top-level arm refuses
 //     one it can answer for, one level in: a list with an edge union at

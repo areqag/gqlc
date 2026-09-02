@@ -26,7 +26,6 @@ var (
 	DialectGaps                   = dialectGaps
 	DollarTag                     = dollarTag
 	EdgeUnionReason               = edgeUnionReason
-	ElemDecoder                   = elemDecoder
 	FindUndefinedFunctions        = findUndefinedFunctions
 	FindUndefinedSpatialFunctions = findUndefinedSpatialFunctions
 	Generate                      = generate

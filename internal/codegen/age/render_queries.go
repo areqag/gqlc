@@ -614,8 +614,8 @@ func columnDecoder(f codegen.Row) string {
 // names, as the two_non_null_list_columns golden shows. What
 // unservedColumn refuses is a list EXPRESSION column
 // (resolver.ResolvedList), and that refusal is what keeps an entity or an
-// edge union from arriving as a list element and reaching this through
-// elemDecoder.
+// edge union from arriving as a list element and reaching this switch as
+// the element decoder writeListHelper asks for.
 //
 // So a carrier with no arm is a change to the table rather than anything
 // an author wrote. Answering one with a helper picked for some other
