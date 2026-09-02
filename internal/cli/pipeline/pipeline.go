@@ -323,7 +323,7 @@ func frontEndWalk(queryParser query.Parser, res *resolver.Resolver, queryDir str
 				continue
 			}
 			for _, w := range vq.Warnings {
-				warns = append(warns, fmt.Sprintf("%s: query %s: %s", path, aq.Name, w))
+				warns = append(warns, fmt.Sprintf("%s: query %s: %s", path, aq.Name, w.Text))
 			}
 			batch = append(batch, codegen.NamedQuery{
 				Name:        aq.Name,

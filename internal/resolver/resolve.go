@@ -28,13 +28,20 @@ func resolve(q query.Query, s schema.Schema, r procsig.Registry) (ValidatedQuery
 	branchCols := make([][]Column, len(q.Branches))
 	branchScopeTables := make([][]partScope, len(q.Branches))
 
+	// One evidence value for the whole query, not one per branch: the
+	// wrong-orientation survival rule asks whether a type reached ANY candidate
+	// set anywhere, and a UNION whose two arms draw the same alternation both
+	// ways is the mirrored idiom the rule exists to keep quiet.
+	var orientation orientationEvidence
+
 	for b, branch := range q.Branches {
-		cols, uses, err := resolveBranch(branch, s, r)
+		cols, uses, ev, err := resolveBranch(branch, s, r)
 		if err != nil {
 			return ValidatedQuery{}, err
 		}
 		branchCols[b] = cols
 		branchScopeTables[b] = useSitesToScopes(uses)
+		orientation.absorb(ev)
 	}
 
 	if err := compareBranchColumns(branchCols); err != nil {
@@ -53,7 +60,14 @@ func resolve(q query.Query, s schema.Schema, r procsig.Registry) (ValidatedQuery
 		Distinct:   computeDistinct(q),
 		// Last, and only on the success path: a query that fails resolution
 		// gets one verdict, the error (ADR 0032).
-		Warnings: undeclaredRelationshipTypeWarnings(q, s),
+		//
+		// ADR 0032's lane leads. generate.go prints warnings ahead of the
+		// diagnostics on the reasoning that a misspelled relationship type is
+		// the likeliest cause of the refusal below them, and that argument is
+		// about the 0032 lane specifically.
+		Warnings: append(
+			undeclaredRelationshipTypeWarnings(q, s),
+			wrongOrientationDropWarnings(orientation)...),
 	}, nil
 }
 
@@ -126,27 +140,33 @@ type parameterUseSite struct {
 // resolveBranch walks a branch's Parts left-to-right, threading a branchState
 // carry. Returns the final Part's resolved column list (with grouping-key bits
 // filled), the aggregated parameter-Use witnesses collected across every Part,
-// and the first failure encountered.
+// the branch's accumulated edge-closure evidence, and the first failure
+// encountered.
 //
-// Pinned signature per R5 §2.2 / team-lead brief.
-func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]Column, []parameterUseSite, error) {
+// Pinned signature per R5 §2.2 / team-lead brief, plus the orientationEvidence
+// return: the wrong-orientation-drop detector's survival rule is query-wide, so
+// its evidence has to leave the branch the same way parameter uses do rather
+// than be decided inside one.
+func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]Column, []parameterUseSite, orientationEvidence, error) {
 	if len(branch.Parts) == 0 {
 		// Defensive tripwire; parser's buildBranch guarantees >= 1.
-		return nil, nil, fmt.Errorf("%w: empty parts", ErrOutOfR0Scope)
+		return nil, nil, orientationEvidence{}, fmt.Errorf("%w: empty parts", ErrOutOfR0Scope)
 	}
 
 	var carry branchState
 	var allUses []parameterUseSite
+	var evidence orientationEvidence
 	var finalCols []Column
 	var finalPart query.Part
 	lastIdx := len(branch.Parts) - 1
 
 	for k, part := range branch.Parts {
-		cols, exported, uses, err := resolvePart(part, carry, s, r)
+		cols, exported, uses, ev, err := resolvePart(part, carry, s, r)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, orientationEvidence{}, err
 		}
 		allUses = append(allUses, uses...)
+		evidence.absorb(ev)
 		carry = exported
 		if k == lastIdx {
 			finalCols = cols
@@ -158,7 +178,7 @@ func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]
 	// per-column bit lives on ValidatedQuery.Columns (§3.2.1); no other
 	// consumer reads it. Non-final Parts fold via exportedResolvedTypes.
 	fillGroupingKeys(finalCols, finalPart)
-	return finalCols, allUses, nil
+	return finalCols, allUses, evidence, nil
 }
 
 // resolvePart runs the per-Part kernel: R4's Phase A/B/C for the local
@@ -167,9 +187,10 @@ func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]
 // AggregateProjection support (§4.5) and RETURN * / WITH * expansion (§4.4),
 // and per-Part parameter-Use witness collection (§4.2.4). Returns the Part's
 // column list (unfilled GroupingKey; filled by resolveBranch on the final
-// Part), the branchState exported to Part K+1 (§4.2.2), and the parameter-Use
-// witnesses collected inside this Part.
-func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.Registry) ([]Column, branchState, []parameterUseSite, error) {
+// Part), the branchState exported to Part K+1 (§4.2.2), the parameter-Use
+// witnesses collected inside this Part, and the edge-closure evidence the
+// wrong-orientation-drop detector reads.
+func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.Registry) ([]Column, branchState, []parameterUseSite, orientationEvidence, error) {
 	sc := newScope(carry)
 	sc.Ingest(part)
 
@@ -185,27 +206,27 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 			}
 			nts, err := resolveNodeLabels(bb.Labels(), s)
 			if err != nil {
-				return nil, branchState{}, nil, err
+				return nil, branchState{}, nil, orientationEvidence{}, err
 			}
 			if len(nts) == 1 {
 				if err := sc.BindNode(bb, nts[0]); err != nil {
-					return nil, branchState{}, nil, err
+					return nil, branchState{}, nil, orientationEvidence{}, err
 				}
 			} else {
 				if err := sc.BindNodeCands(bb, nts); err != nil {
-					return nil, branchState{}, nil, err
+					return nil, branchState{}, nil, orientationEvidence{}, err
 				}
 			}
 		case query.EdgeBinding:
 			if err := sc.BindEdge(bb); err != nil {
-				return nil, branchState{}, nil, err
+				return nil, branchState{}, nil, orientationEvidence{}, err
 			}
 		case query.CallBinding:
 			if err := sc.BindCall(bb, r); err != nil {
-				return nil, branchState{}, nil, err
+				return nil, branchState{}, nil, orientationEvidence{}, err
 			}
 		default:
-			return nil, branchState{}, nil, fmt.Errorf("%w: %s binding", ErrOutOfR0Scope, b.Kind())
+			return nil, branchState{}, nil, orientationEvidence{}, fmt.Errorf("%w: %s binding", ErrOutOfR0Scope, b.Kind())
 		}
 	}
 
@@ -213,7 +234,7 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 	// unlabelled nodes) + Phase C (retry deferred edges), all
 	// scope-internal per spec §2.2.
 	if err := sc.CloseEdges(s); err != nil {
-		return nil, branchState{}, nil, err
+		return nil, branchState{}, nil, orientationEvidence{}, err
 	}
 
 	// Phase D (§4.6): seed with carry, override with local, then demote.
@@ -229,14 +250,14 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 	// effective-nullability map that the projection walk sees. First
 	// failure short-circuits.
 	if err := sc.ValidateEffects(s); err != nil {
-		return nil, branchState{}, nil, err
+		return nil, branchState{}, nil, orientationEvidence{}, err
 	}
 
 	// Projection walk (§4.4): scopeOrder + materialiseReturns +
 	// per-item projectionType, all on scope. Populates sc.scopeOrder,
 	// sc.items, sc.columns for Export.
 	if err := sc.ResolveProjections(s); err != nil {
-		return nil, branchState{}, nil, err
+		return nil, branchState{}, nil, orientationEvidence{}, err
 	}
 
 	// Emit this Part's scope snapshot as one parameterUseSite. The
@@ -250,7 +271,7 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 	// surviving WITH keep their Part-K OPTIONAL group id via
 	// exportedOptionalGroup, so downstream Parts can close cross-Part
 	// group demotion via the ay9 fixed point.
-	return sc.columns, sc.Export(), []parameterUseSite{site}, nil
+	return sc.columns, sc.Export(), []parameterUseSite{site}, sc.orientation, nil
 }
 
 // fillGroupingKeys populates Column.GroupingKey for branch 0's final Part per
@@ -2407,13 +2428,13 @@ func undeclaredLabels(labels graph.LabelSet, s schema.Schema) []string {
 //
 // Deduplicated query-wide by type name in first-appearance order: one
 // misspelling repeated across three MATCHes is one mistake.
-func undeclaredRelationshipTypeWarnings(q query.Query, s schema.Schema) []string {
+func undeclaredRelationshipTypeWarnings(q query.Query, s schema.Schema) []Warning {
 	declared := make(map[graph.LabelSetKey]struct{}, len(s.Edges))
 	for k := range s.Edges {
 		declared[k.KeyLabels] = struct{}{}
 	}
 
-	var out []string
+	var out []Warning
 	seen := make(map[string]struct{})
 	for _, br := range q.Branches {
 		for _, part := range br.Parts {
@@ -2430,7 +2451,10 @@ func undeclaredRelationshipTypeWarnings(q query.Query, s schema.Schema) []string
 						continue
 					}
 					seen[l] = struct{}{}
-					out = append(out, undeclaredRelationshipTypeMessage(l, e))
+					out = append(out, Warning{
+						Producer: producerUndeclaredRelationshipType,
+						Text:     undeclaredRelationshipTypeMessage(l, e),
+					})
 				}
 			}
 		}

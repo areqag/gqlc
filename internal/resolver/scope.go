@@ -60,6 +60,12 @@ type scope struct {
 	nullableBinding   map[string]bool
 	callTypes         map[string]callBindingSlot
 
+	// orientation is CloseEdges' diagnostic by-product: which relationship
+	// types the closure kept and which it dropped in the wrong-orientation
+	// shape. It is a lane rather than a CloseEdges return value so the phase
+	// methods keep their signatures; resolvePart reads it after the close.
+	orientation orientationEvidence
+
 	// Ingested Part — set once by Ingest, read by every phase method.
 	// Only the fields the phase methods actually consume are captured
 	// (part.Distinct is not on scope — computeDistinct walks q.Branches
@@ -393,6 +399,7 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 		if err := closeEdge(eb, src.declared(), tgt.declared(), sch, s.edgeTypes, s.edgeKeys, s.edgeCands); err != nil {
 			return err
 		}
+		s.orientation.recordEdge(eb, src, tgt, sch)
 	}
 	if err := s.InferUnlabelled(sch); err != nil {
 		return err
@@ -409,6 +416,7 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 		if err := closeEdge(eb, src.declared(), tgt.declared(), sch, s.edgeTypes, s.edgeKeys, s.edgeCands); err != nil {
 			return err
 		}
+		s.orientation.recordEdge(eb, src, tgt, sch)
 	}
 	s.NarrowPluralEndpoints(sch)
 	return nil
