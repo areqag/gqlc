@@ -2225,7 +2225,7 @@ unreachable_owner_rows() { # -> lines of "<assignee> <id> <id> ..."
 }
 
 # history: kingdom/brain/km-notes.md#conditioned_verdict_ids
-conditioned_verdict_ids() { # -> ids of judge beads closed with a condition in prose since ADR 0009
+conditioned_verdict_ids() { # -> ids of judge beads closed with a condition in prose since decision 0009
     local cutoff=2026-08-29T18:31:01Z board
     board=$(bd list --all --json -n 0 2>/dev/null) || return 1
     # A `bd` that exits 0 having printed a non-array is the one shape the
@@ -2250,7 +2250,7 @@ conditioned_verdict_ids() { # -> ids of judge beads closed with a condition in p
 wall_flag() { echo "$(state_dir)/walled"; }
 wall_probe_stamp() { echo "$(state_dir)/wall-probe"; }
 
-# Constants, not settings, for the reason ADR 0004 §2 gives its own bound: a
+# Constants, not settings, for the reason decision 0004 §2 gives its own bound: a
 # refused model call is near-free, so these price recovery LATENCY rather than
 # spend, and a knob here is one more thing to read wrong mid-incident.
 WALL_TRIGGER_WINDOW=900  # a refusal older than 15 min is not evidence of now
@@ -2525,7 +2525,7 @@ cmd_dispatch() {
             # turn to a quota wall and cannot tell: it names the observation
             # rather than a diagnosis, gives the citizen both readings, and tells
             # the one whose turn died to re-read the world before trusting
-            # anything in her own context (ADR 0007 §3).
+            # anything in her own context (decision 0007 §3).
             ask="[km] no tool call has FINISHED in your session for $(fmt_age "$stalled_age"), so from outside this cannot be told apart from a turn that died. If yours did — a usage-limit wall eats the turn and leaves the session looking busy — do not resume from memory: re-read the world first (git status in your worktree, bd show on whatever you hold, and whether your PR moved while you were gone). If you are inside one long tool call, carry on, this is only a check-in and costs you a line. If you are done for the day, km sleep is what makes you routable again"
             [ "$pending" -eq 0 ] || ask="$ask. You also have $pending unread letter(s) — bd mail inbox"
         fi
@@ -3184,13 +3184,13 @@ file_patrol_bead() {
 
 WINDOW: $window.
 
-TARGET: merges whose PR was NOT reviewed. Under ADR 0003 a PR is read by a judge only if its bead was blocked by a design bead, if it amends the constitution, or if a citizen asked; everything else merged on green gates alone.
+TARGET: merges whose PR was NOT reviewed. Under decision 0003 a PR is read by a judge only if its bead was blocked by a design bead, if it amends the constitution, or if a citizen asked; everything else merged on green gates alone.
 
-OUTPUT: defect beads, and a postmortem where something broke (Constitution V.4, Article III.4). Never a verdict — nothing in the window is open to one, the code has merged. A defect bead about already-merged code carries from-pr:<N>, the number of the PR that introduced it, and omits the label rather than guessing where no single PR can be identified (ADR 0004 section 3). That label is the only record Constitution V.2.0.4 will have when the town re-tunes its review gate.
+OUTPUT: defect beads, and a postmortem where something broke (Constitution V.4, Article III.4). Never a verdict — nothing in the window is open to one, the code has merged. A defect bead about already-merged code carries from-pr:<N>, the number of the PR that introduced it, and omits the label rather than guessing where no single PR can be identified (decision 0004 section 3). That label is the only record Constitution V.2.0.4 will have when the town re-tunes its review gate.
 
 DEPTH is yours. A round that reads one merge properly is a round. Closing this bead asserts NOTHING about the window being clean, and no citizen should read its closure that way.
 
-BOUND: exactly one patrol bead is open at a time, permanently, whatever the merge rate (ADR 0004 section 2). This one was filed because none was open." >/dev/null 2>&1; then
+BOUND: exactly one patrol bead is open at a time, permanently, whatever the merge rate (decision 0004 section 2). This one was filed because none was open." >/dev/null 2>&1; then
         echo "guard-sweep: patrol bead could not be filed — bd create refused" >&2
         return 0
     fi
@@ -3293,9 +3293,9 @@ tell_dirty_authors() {
 Conflicted paths:
   ${paths//$'\n'/$'\n'  }
 
-You almost certainly did not cause this. A merge that appends to a shared registry invalidates every open PR that appends to the same registry (ADR 0006, kingdom/brain/decisions/0006-a-head-that-moves-under-a-reader.md).
+You almost certainly did not cause this. A merge that appends to a shared registry invalidates every open PR that appends to the same registry (decision 0006, kingdom/brain/decisions/0006-a-head-that-moves-under-a-reader.md).
 
-Rebase on origin/master, re-run the gates, and force-push. If a judge is reading this PR, warn them BEFORE you push, and state the delta as a merge-base comparison rather than a commit list — a rebase makes 'git log old..new' read as fix work (ADR 0006 section 3).
+Rebase on origin/master, re-run the gates, and force-push. If a judge is reading this PR, warn them BEFORE you push, and state the delta as a merge-base comparison rather than a commit list — a rebase makes 'git log old..new' read as fix work (decision 0006 section 3).
 
 Measured by km guard-sweep with 'git merge-tree --write-tree --name-only', not with gh's mergeable field, which returns UNKNOWN while GitHub recomputes and reads as clean." 2>/dev/null; then
             : >"$key"
@@ -3803,18 +3803,18 @@ cmd_doctor() {
         echo "ok:   every assignee on the board is a seat or a known person"
     fi
 
-    # ADR 0009's detector, and a WARN for the same reason the arm above is one:
+    # decision 0009's detector, and a WARN for the same reason the arm above is one:
     # it rests on the wording of a sentence a judge typed, not on the
     # dispatcher's arithmetic. Three outcomes, and the finding NAMES the beads —
-    # the whole complaint ADR 0009 makes about a conditioned PASS is that its
+    # the whole complaint decision 0009 makes about a conditioned PASS is that its
     # content reaches nobody, so a row reporting a count would repeat the defect.
     local conditioned
     if ! conditioned=$(conditioned_verdict_ids); then
         echo "warn: the conditioned-verdict query failed, so no close reason can be certified unconditional"
     elif [ -n "$conditioned" ]; then
-        echo "warn: closed with a condition in the close reason, which carries it to nobody — a verdict is PASS or FAIL, a PASS is unconditional, and binding content travels in bead ids (ADR 0009): $conditioned"
+        echo "warn: closed with a condition in the close reason, which carries it to nobody — a verdict is PASS or FAIL, a PASS is unconditional, and binding content travels in bead ids (decision 0009): $conditioned"
     else
-        echo "ok:   every judge verdict closed since ADR 0009 is unconditional"
+        echo "ok:   every judge verdict closed since decision 0009 is unconditional"
     fi
 
     # history: kingdom/brain/km-notes.md#cmd_doctor-wall

@@ -1211,7 +1211,7 @@ case. Both refuse the send.
 
 This comment listed the usage-limit modal among the `blocked` cases and that
 was wrong, which mattered more than a stale sentence usually does: it was the
-premise ADR 0007 §1 rested on. Nine seats killed by a quota wall on 2026-08-29
+premise decision 0007 §1 rested on. Nine seats killed by a quota wall on 2026-08-29
 read done, working and unknown, never blocked, and this function admits the
 first two — so `blocked` is a floor on which modals are refused here and not a
 claim that every covered pane reaches it (bd gqlc-3evsn). What refuses the ones
@@ -1708,11 +1708,11 @@ confident sweep over evidence this function does not have: it cannot tell a
 retired seat from a person the roster has not caught up with, and both look
 identical here. Naming them is the whole job; the decision is a human's.
 
-## conditioned_verdict_ids — the cutoff is ADR 0009's own merge, to the second and not to the day
+## conditioned_verdict_ids — the cutoff is decision 0009's own merge, to the second and not to the day
 
 (`kingdom/bin/km`, `conditioned_verdict_ids`)
 
-ADR 0009: a verdict is PASS or FAIL, and a PASS is unconditional. A condition
+Decision 0009: a verdict is PASS or FAIL, and a PASS is unconditional. A condition
 written into a close reason reaches no dispatch pass and no assignee. Other
 things do read `close_reason` — bdguard parses it for a cited sha, bd-gh-sync
 takes its first line as a mirror tag — but neither can route an obligation,
@@ -1721,9 +1721,9 @@ rather than fails. The match can be this blunt because ruling 2
 leaves a compliant close reason no reason to contain the word at all, down to
 forbidding "no conditions" as a disclaimer.
 
-The cutoff is the ADR's own merge (3c5a9988), to the SECOND and not to the
+The cutoff is the decision's own merge (3c5a9988), to the SECOND and not to the
 day. Fifteen close reasons already on the ledger carry the word, and seven of
-them closed on the ADR's own date — a bare `2026-08-29` would have shipped
+them closed on the decision's own date — a bare `2026-08-29` would have shipped
 this row ringing on all seven from its first run, which is how a warn row
 teaches the town to scroll past it.
 
@@ -1958,7 +1958,7 @@ measured cost in each direction: nine seats killed by a usage-limit wall on
 six hours and 168 dispatch runs this pass named exactly ONE seat, the one
 that was never dead — while the property it was credited with (never type
 at a modal) was being supplied by that accident rather than by any check
-(bd gqlc-3evsn, ADR 0007 amended).
+(bd gqlc-3evsn, decision 0007 amended).
 
   idle    — the agent reports idle, confirmed over two passes. The
             empty-prompt case, unchanged: a single capture is one
@@ -1992,7 +1992,7 @@ this ladder accepts.
 
 And "neither trigger holds" is now literally witnessed work — a tool
 call that FINISHED inside the threshold — rather than a pane that
-merely stopped looking idle, which is what ADR 0007 §5 asked for and
+merely stopped looking idle, which is what decision 0007 §5 asked for and
 what the reset it shipped with could not deliver.
 
 Any sign of life takes ALL of the episode's markers with it. The floor
@@ -2081,7 +2081,7 @@ next pass, which is the direction to be wrong in.
 
 (`kingdom/bin/km`, `cmd_dispatch`)
 
-ONE DELIVERED ASK PER RUN, town-wide. ADR 0007 §5 asked for this and it
+ONE DELIVERED ASK PER RUN, town-wide. Decision 0007 §5 asked for this and it
 was never built; the stalled arm is what makes it live, because the
 population it reaches arrives as a COHORT — nine seats went down within
 the same minute on 2026-08-29 and would come back within the same one.
@@ -2100,7 +2100,7 @@ while every refusal here was km's own tty failing, and it is wrong
 now: send_line refuses when it cannot witness a place to type, so a
 refusal is a verdict about the SEAT — "machinery cannot reach this
 one" — and retrying it in silence forever is precisely the open loop
-this ladder was rebuilt to close (ADR 0007 §5, amended).
+this ladder was rebuilt to close (decision 0007 §5, amended).
 
 No floor is set, so the cadence stays fast: nothing was spent, and a
 pane that recovers should be reached on the next pass rather than
@@ -2510,15 +2510,15 @@ workable by the operator who is going to lower the halt. This named
 `km herratsayn` until gqlc-cw7h; #1595 had already deleted that verb, and
 the sentence outlived it.
 
-## patrol_open_ids — ADR 0004 §2, the execution half
+## patrol_open_ids — decision 0004 §2, the execution half
 
 (`kingdom/bin/km`, `patrol_open_ids`)
 
-ADR 0004 §2, the execution half. ADR 0003 change 2 names the judges' PATROL
+Decision 0004 §2, the execution half. Decision 0003 change 2 names the judges' PATROL
 duty as the compensating control on the whole unreviewed-merge regime — very
 nearly every PR now merges on green gates with the author as its only reader
 — and measured at c129a0a5 patrol was two sentences in the tree,
-kingdom/README.md line 77 and that clause of ADR 0003. It had no trigger, no
+kingdom/README.md line 77 and that clause of decision 0003. It had no trigger, no
 target and no output shape. A seat runs only when woken; dispatch wakes a
 seat only for a bead; nothing filed one. So the compensating control on the
 town's central throughput trade could not begin at all.
@@ -2531,9 +2531,9 @@ and a tick that returns because Րաֆֆի is already awake files none either.
 Neither is a missed obligation — the next tick meets the same empty board.
 
 BOUNDED TO ONE, PERMANENTLY, and not configurable. Patrol's queue depth is
-one whatever the merge rate. That clause is what keeps ADR 0004 inside ADR
+one whatever the merge rate. That clause is what keeps decision 0004 inside decision
 0003's constraint, and a later change making it a setting reintroduces
-exactly the queue ADR 0003 was written to drain.
+exactly the queue decision 0003 was written to drain.
 
 The bound is measured as NOT CLOSED, never as `--status open`. In bd,
 `--status open` is the literal status and excludes in_progress and blocked,
@@ -2557,7 +2557,7 @@ gqlc-z298 at 03:19:33Z, dispatch woke a judge, and at 03:21:30Z after a fetch
 could produce nothing. At guard_minutes=15 the effective patrol cadence
 collapses to the guard interval — an arithmetic ceiling of four judge wakes
 an hour across any merge-free stretch, and the merge-free stretches are the
-overnight and quota-walled ones. That is the wake burn ADR 0003 exists to
+overnight and quota-walled ones. That is the wake burn decision 0003 exists to
 drain, restarted by its own compensating control.
 
 THE POSTURE HERE IS INVERTED FROM THE BOUND'S, deliberately. A bound that
@@ -2572,11 +2572,11 @@ patrol bead to start a window from all file.
 landing in the same second as the close is read by the next round rather
 than falling between the two.
 
-## dirty_open_prs — ADR 0006 §1, the execution half
+## dirty_open_prs — decision 0006 §1, the execution half
 
 (`kingdom/bin/km`, `dirty_open_prs`)
 
-ADR 0006 §1, the execution half (bd gqlc-wz47). Nothing told an author their
+Decision 0006 §1, the execution half (bd gqlc-wz47). Nothing told an author their
 open PR had gone DIRTY. Every case on 2026-08-22 was found by a person
 happening to look, and Արամազդ's estimate was that three of seven affected
 authors did not know. A PR goes DIRTY through nothing its author did: a merge

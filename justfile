@@ -2372,6 +2372,10 @@ gates:
     # series be added with nobody deciding it should be covered. Both lists must
     # move together; the checker names them when it refuses.
     run tidy           python3 .github/scripts/check-doc-ordinals.py docs/adr kingdom/brain/decisions
+    # Enrolled directory listed HERE and in ci.yml, same reasoning as the
+    # ordinal check above: which trees reserve the bare "ADR NNNN" form for
+    # docs/adr is a convention decision, not one the script can infer.
+    run tidy           python3 .github/scripts/check-adr-citations.py kingdom
     run govulncheck    just vuln
 
     # Refuse BEFORE the summary, not after: the summary is a coverage claim, and
