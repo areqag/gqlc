@@ -190,15 +190,17 @@ func (typeMap) StorableProperty(graph.PropertyType) bool { return true }
 // Every arm refuses, and the reason is upstream of the encoding table
 // gqlc-35yu.11 landed for stored TIMESTAMP properties. A column of this
 // shape exists only because the query text called a temporal
-// constructor, and AGE 1.7.0 has none: date(), datetime(),
-// localdatetime(), duration() and toTimestamp() are all "function does
-// not exist", and a sweep of all 348 ag_catalog functions for
+// constructor, and no temporal constructor this project has measured is
+// defined on AGE 1.7.0: date(), datetime(), localdatetime(), duration()
+// and toTimestamp() are all "function does not exist", and a sweep of
+// the 348 ag_catalog functions then in the pinned image for
 // time|date|dur|epoch|local|zone|instant returns exactly one hit,
 // age_timestamp, which is an epoch-millis integer and not a temporal
-// value (spike gqlc-35yu.5 §1a, live against AGE 1.7.0). So admitting a
-// kind here would emit a compiling method whose statement the server
-// rejects at run time — the failure mode ADR 0025 created this channel
-// to prevent, one step worse.
+// value (spike gqlc-35yu.5 §1a, live against AGE 1.7.0). No test
+// re-measures the catalogue, so that sweep is provenance rather than a
+// closed set. Admitting a kind here would therefore emit a compiling
+// method whose statement the server rejects at run time — the failure
+// mode ADR 0025 created this channel to prevent, one step worse.
 //
 // A carrier is missing too, for five of the six. The Go type the other
 // backends spell date, time, local time, local datetime and duration
