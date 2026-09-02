@@ -531,6 +531,42 @@ of each other (sequential pids, `ps -o lstart`), so a runner that is coming
 is here at once. The cost of the budget is paid only when the respawn has
 already failed.
 
+## seat_runner_start-2 — a runner comes from the tree the town deployed, never from the caller's
+
+(`kingdom/bin/km`, `seat_runner_start`)
+
+The runner the town DEPLOYED, not the copy sitting beside this km.
+`$SCRIPT_DIR` is wherever the caller happened to be standing, so a citizen
+running `km up`, `km wake`, `km reconcile` or `km dispatch` from their own seat
+worktree starts every runner it spawns out of THAT worktree — and km-seat then
+asks the km NEXT TO IT for the ledger, the state dir, and the seat's class,
+model, effort and permission mode, so a whole seat is launched from one
+branch's `kingdom/` rather than from master's.
+
+Measured 2026-09-02 on the live town (bd gqlc-dpo3o): 10 of 16 runners were
+executing `gqlc-seat-sedrak/kingdom/bin/km-seat`, that worktree parked at
+e4e032a0 against master's 7dabb01a. Its km-seat was byte-identical to the
+deployed one, but the km and kingdom.toml beside it were not — the config was
+missing `deploy_escalate_after_ticks`, merged that day in #2066.
+
+Two earlier fixes patched the symptoms and left this. #2136 (gqlc-zpjuc)
+taught km-seat to ask `km deploy-root` for the ledger, which is why those ten
+seats read the town's beads correctly rather than an empty ledger; #2170
+(gqlc-mrelv) taught it to re-exec the deployed parse of ITSELF at its next
+wake. Neither reaches the spawn, and the second is a backstop with three gaps
+this closes: it hashes km-seat alone, so a divergent km or kingdom.toml beside
+it is invisible; it cannot fire while the two copies are byte-identical, which
+is the state all ten were in, so a runner sits on the wrong tree indefinitely
+with nothing to notice; and everything km-seat does BEFORE its loop — the
+ledger guard, seat-info, the soul and worktree checks — has already run from
+the wrong tree by the time the re-exec could help.
+
+The five answers km-seat takes from its neighbouring km were compared across
+both trees that day (deploy-root, state-dir, seat-info, `cfg claude
+permission_mode`, `cfg effort warrior`) and all five AGREED. So no live harm
+was found, and none is claimed here. What was wrong is that nothing made them
+agree.
+
 ## seat_box_text — where claude's TUI draws the input box
 
 (`kingdom/bin/km`, `seat_box_text`)
