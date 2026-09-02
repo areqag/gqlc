@@ -898,6 +898,166 @@ check-bd-gh-sync-selection:
         exit 1
     fi
 
+# This check is the acceptance of bd gqlc-xpgdc, and like the recipe above it
+# verifies that fix and surveils for nothing else.
+#
+# What it holds: every "the bead list came back empty" line bd-gh-sync prints is
+# equally true of a town with no beads and of a bd aimed at a ledger nobody
+# meant, and none of them named the path. Measured 2026-09-02 on the push arm:
+# an empty ledger and BEADS_DIR pointed at another seat's .beads produced BYTE-
+# IDENTICAL output. That ambiguity ran four hours across ten seats with this
+# script's own empty-list line as the only tell (gqlc-zpjuc). `_ledger` is what
+# separates them, and these are the rows that redden when it is edited away.
+#
+# It runs the REAL `_ledger`, cut out of .githooks/bd-gh-sync, rather than a
+# restatement of it — a restatement keeps passing after the hook stops agreeing
+# with it. No bd, no gh, no git, no network: the helper reads the environment
+# and nothing else, which is the property that makes it cheap to run here and
+# is itself asserted below.
+#
+# WHAT IT DOES NOT WITNESS, said plainly. It does not run the hook end to end,
+# so it cannot see the arms that CALL `_ledger` actually being reached; the call
+# sites are pinned textually instead, with comments stripped so a commented-out
+# call cannot vouch for a live one. The end-to-end run was measured by hand
+# against stubbed bd/gh while fixing gqlc-xpgdc and is deliberately not
+# committed: PR #1595 deleted the stub-driven hook suite because a stub encodes
+# belief rather than witness, and `just test` is also the pre-push hook, where
+# wall-time is paid by every citizen on every push.
+[private]
+check-bd-gh-sync-ledger:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    hook={{ quote(justfile_directory() + "/.githooks/bd-gh-sync") }}
+    if [ ! -f "$hook" ]; then
+        echo "error: $hook is missing, so bd-gh-sync's ledger naming cannot be run and" >&2
+        echo "       this check would report a pass over nothing (bd gqlc-xpgdc)." >&2
+        exit 1
+    fi
+    scratch="$(mktemp -d)" || exit 1
+    trap 'rm -rf "$scratch"' EXIT
+
+    # Cut the helper out by its definition line. Every way the cut can come back
+    # wrong — anchor missing, anchor duplicated, body unterminated, body empty —
+    # is fatal, because an empty file sources cleanly and would leave `_ledger`
+    # undefined while every row below still "passed".
+    erc=0
+    awk '
+        $0 == "_ledger() {" { anchors++; inblock = 1; print; next }
+        inblock && $0 == "}" { inblock = 0; closed++; print; next }
+        inblock { print }
+        END {
+            if (anchors != 1) { printf "the _ledger definition matched %d time(s), want exactly 1\n", anchors + 0 >"/dev/stderr"; exit 3 }
+            if (closed != 1) { printf "that definition closed %d time(s), want 1\n", closed + 0 >"/dev/stderr"; exit 3 }
+        }
+    ' "$hook" >"$scratch/ledger.sh" 2>"$scratch/extract.err" || erc=$?
+    if [ "$erc" -ne 0 ] || [ ! -s "$scratch/ledger.sh" ]; then
+        echo "error: could not cut _ledger out of $hook (bd gqlc-xpgdc)." >&2
+        sed 's/^/       /' "$scratch/extract.err" >&2
+        echo "       Refusing rather than judging a helper nobody read. If it was" >&2
+        echo "       deliberately reshaped, update the anchor in this recipe to match." >&2
+        exit 1
+    fi
+
+    # Driven under the hook's own shell options, because `set -u` is what makes
+    # the unset arm a real question: an unguarded $BEADS_DIR would abort there.
+    probe="/probe/gqlc-xpgdc/not-a-real-ledger"
+    drive='set -Eeuo pipefail; . "$0"; _ledger'
+    named=$(BEADS_DIR="$probe" bash -c "$drive" "$scratch/ledger.sh" 2>"$scratch/named.err"); nrc=$?
+    unset_out=$(env -u BEADS_DIR bash -c "$drive" "$scratch/ledger.sh" 2>"$scratch/unset.err"); urc=$?
+    if [ "$nrc" -ne 0 ] || [ "$urc" -ne 0 ]; then
+        echo "error: _ledger exited non-zero ($nrc named, $urc unset), so what bd-gh-sync" >&2
+        echo "       reports its ledger to be cannot be read at all (bd gqlc-xpgdc)." >&2
+        sed 's/^/       /' "$scratch/named.err" "$scratch/unset.err" >&2
+        exit 1
+    fi
+
+    # Row 1: a named ledger is quoted verbatim. This is the byte that was
+    # missing, and the whole of the fix.
+    case "$named" in
+        *"$probe"*) ;;
+        *) echo "error: _ledger did not name the BEADS_DIR it was given (bd gqlc-xpgdc)." >&2
+           echo "       BEADS_DIR=$probe produced: $named" >&2
+           echo "       A diagnosis that omits the path cannot tell an empty town from a" >&2
+           echo "       bd aimed somewhere nobody meant; that is the defect this fixes." >&2
+           exit 1 ;;
+    esac
+
+    # Row 2: the two states must DIFFER. Naming the path is only useful if the
+    # genuinely-empty case says something else, and a helper hard-coded to any
+    # constant would satisfy row 1 alone.
+    if [ "$named" = "$unset_out" ]; then
+        echo "error: _ledger answered identically with BEADS_DIR set and unset, so the" >&2
+        echo "       two states bd-gh-sync must distinguish are again the same bytes" >&2
+        echo "       (bd gqlc-xpgdc). Both said: $named" >&2
+        exit 1
+    fi
+
+    # Row 3: the unset arm says so rather than printing an empty path, and does
+    # not smuggle the probe in from the ambient environment.
+    case "$unset_out" in
+        *"$probe"*) echo "error: _ledger named $probe with BEADS_DIR unset — it is reading" >&2
+                    echo "       something other than its own environment (bd gqlc-xpgdc)." >&2
+                    exit 1 ;;
+        *unset*) ;;
+        *) echo "error: with BEADS_DIR unset _ledger did not say so; it said: $unset_out" >&2
+           echo "       An empty or silent path reads as a ledger nobody chose (bd gqlc-xpgdc)." >&2
+           exit 1 ;;
+    esac
+
+    # The falsifier, in band. Row 2 is the load-bearing row — it is what a
+    # helper hard-coded to any constant would fail — so it is the one that has
+    # to be shown capable of failing. Its predicate is re-run here against a
+    # deliberately environment-blind _ledger, and this refuses unless that
+    # predicate FIRES on it. Row 1 satisfies the same fixture (the constant is
+    # the probe path), which is precisely why row 1 alone would witness nothing.
+    #
+    # Not a second assertion about the real helper: by this point row 2 has
+    # already exited on `named = unset_out`, so any further test phrased over
+    # those two values is unreachable and would vouch for nothing.
+    cat >"$scratch/inert.sh" <<'INERT'
+    _ledger() { echo "BEADS_DIR=/probe/gqlc-xpgdc/not-a-real-ledger"; }
+    INERT
+    f_named=$(BEADS_DIR="$probe" bash -c ". '$scratch/inert.sh'; _ledger" 2>/dev/null)
+    f_unset=$(env -u BEADS_DIR bash -c ". '$scratch/inert.sh'; _ledger" 2>/dev/null)
+    case "$f_named" in
+        *"$probe"*) ;;
+        *) echo "error: the falsifier fixture does not satisfy row 1, so it does not" >&2
+           echo "       isolate row 2 as the row under test (bd gqlc-xpgdc)." >&2
+           exit 1 ;;
+    esac
+    if [ "$f_named" != "$f_unset" ]; then
+        echo "error: row 2's predicate did not fire on a _ledger that ignores its" >&2
+        echo "       environment, so row 2 above passed without being able to fail" >&2
+        echo "       (bd gqlc-xpgdc). The fixture answered '$f_named' set and" >&2
+        echo "       '$f_unset' unset; an environment-blind helper must answer both" >&2
+        echo "       alike, which is exactly what row 2 rejects." >&2
+        exit 1
+    fi
+
+    # The call sites. Comments are stripped first: a `$(_ledger)` inside the
+    # block comment above the helper would otherwise vouch for a live call that
+    # had been deleted (bd gqlc-xpgdc, and the same trap as a raw-bytes grep
+    # accepting commented-out evidence).
+    sed 's/[[:space:]]*#.*$//' "$hook" >"$scratch/nocomments.sh"
+    missing=0
+    while IFS='|' read -r anchor what; do
+        if ! awk -v a="$anchor" '
+            index($0, a) { armed = NR }
+            armed && NR > armed && NR <= armed + 4 && index($0, "$(_ledger)") { found = 1 }
+            END { exit found ? 0 : 1 }
+        ' "$scratch/nocomments.sh"; then
+            echo "error: the $what diagnosis no longer names its ledger within 4 lines of" >&2
+            echo "       \"$anchor\" (bd gqlc-xpgdc). That diagnosis is now true of an empty" >&2
+            echo "       town and of a bd aimed at the wrong ledger alike, which is exactly" >&2
+            echo "       the four-hour ambiguity of gqlc-zpjuc." >&2
+            missing=1
+        fi
+    done <<'ANCHORS'
+    the bead list was empty when this run chose what to push|push-side empty-list
+    the bead list came back empty when this run chose what to|pull-side empty-list
+    ANCHORS
+    [ "$missing" -eq 0 ] || exit 1
+
 # The single entry point to internal/tools/tmpreap, so GOTMPDIR and the raw-df
 # fallback below are spelled once rather than once per caller.
 #
@@ -2183,7 +2343,7 @@ gates:
 # test-binary args, so every run misses), and inter-test coupling in a codegen
 # dev tool is a low-value gate relative to a ~2m40s tax on every push. Revisit
 # if ordering coupling actually bites us.
-test: check-hooks check-worktree-upstream check-shared-config check-claude-permission-mode check-beads-export check-bd-gh-sync-selection check-tmp check-push-keepalive
+test: check-hooks check-worktree-upstream check-shared-config check-claude-permission-mode check-beads-export check-bd-gh-sync-selection check-bd-gh-sync-ledger check-tmp check-push-keepalive
     go build ./...
     go test ./...
 
