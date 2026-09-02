@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/areqag/gqlc/internal/cli/backends"
@@ -190,14 +191,33 @@ func temporalFallback(v int) string { return "Temporal(" + strconv.Itoa(v) + ")"
 // stray kind reads against temporalKinds as one appended member instead of
 // displacing all six.
 func (s *AssembledInputSuite) declaredTemporals() []temporalMember {
-	entries, err := os.ReadDir(resolverDir)
-	s.Require().NoError(err,
+	return declaredTemporalsIn(s.Require(), resolverDir)
+}
+
+// sweptFile is one non-test source file of the swept package, parsed once.
+// The sweep reads the package twice — once for the names that spell
+// resolver.Temporal, once for the constants carrying them — and a file
+// parsed twice could differ between the passes.
+type sweptFile struct {
+	Name string
+	File *ast.File
+}
+
+// declaredTemporalsIn is the derivation above, over the package in dir.
+//
+// The directory is a parameter so that the sweep's own reading can be put to
+// source written for the purpose. Every escape this fence has had was a
+// package read wrongly rather than one it failed to find, and none of those
+// is reachable through internal/resolver: pinning them there would mean
+// committing a stray kind to the resolver and leaving it in the tree.
+func declaredTemporalsIn(req *require.Assertions, dir string) []temporalMember {
+	entries, err := os.ReadDir(dir)
+	req.NoError(err,
 		"cannot read %s, the package declaring resolver.Temporal; this suite derives the enum's members from its source because compilation erases them",
-		resolverDir)
+		dir)
 
 	var scanned []string
-	var anchorMembers, otherMembers []temporalMember
-	anchored := false
+	var files []sweptFile
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -205,23 +225,31 @@ func (s *AssembledInputSuite) declaredTemporals() []temporalMember {
 		}
 		scanned = append(scanned, name)
 
+		path := filepath.Join(dir, name)
 		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, resolverPath(name), nil, 0)
-		s.Require().NoError(err,
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		req.NoError(err,
 			"cannot parse %s, a source file of the package declaring resolver.Temporal; this suite derives the enum's members from that source because compilation erases them",
-			resolverPath(name))
+			path)
+		files = append(files, sweptFile{Name: name, File: file})
+	}
 
+	spellings := temporalSpellings(files)
+
+	var anchorMembers, otherMembers []temporalMember
+	anchored := false
+	for _, swept := range files {
 		var found []temporalMember
-		for _, decl := range file.Decls {
+		for _, decl := range swept.File.Decls {
 			gen, ok := decl.(*ast.GenDecl)
 			if !ok || gen.Tok != token.CONST {
 				continue
 			}
-			members, isRun := s.temporalsOf(gen, name)
+			members, isRun := temporalsOf(req, gen, dir, swept.Name, spellings)
 			anchored = anchored || isRun
 			found = append(found, members...)
 		}
-		if name == resolverAnchorFile {
+		if swept.Name == resolverAnchorFile {
 			anchorMembers = append(anchorMembers, found...)
 			continue
 		}
@@ -236,12 +264,12 @@ func (s *AssembledInputSuite) declaredTemporals() []temporalMember {
 	// failure from the anchored one below, which the two fixes are opposite
 	// for: swept the wrong directory, versus swept the right one and found
 	// no enum in it.
-	s.Require().Contains(scanned, resolverAnchorFile,
+	req.Contains(scanned, resolverAnchorFile,
 		"the temporal sweep read %v under %s, which does not include %s; the sweep ran against the wrong directory, and one that cannot see the file declaring resolver.Temporal derives the enum from whatever it did see",
-		scanned, resolverDir, resolverAnchorFile)
-	s.Require().True(anchored,
+		scanned, dir, resolverAnchorFile)
+	req.True(anchored,
 		"no file of %s declares a `<name> Temporal = iota` const block; this suite derives the enum's members from that block, and a derivation that found nothing would report an empty enum",
-		resolverDir)
+		dir)
 
 	members := make([]temporalMember, 0, len(anchorMembers)+len(otherMembers))
 	members = append(members, anchorMembers...)
@@ -250,9 +278,9 @@ func (s *AssembledInputSuite) declaredTemporals() []temporalMember {
 	held := make(map[int]temporalMember, len(members))
 	for _, m := range members {
 		first, dup := held[m.Value]
-		s.Require().False(dup,
+		req.False(dup,
 			"%s: resolver.%s and %s: resolver.%s are both Temporal(%d), so a value no longer names one kind",
-			resolverPath(first.File), first.Name, resolverPath(m.File), m.Name, m.Value)
+			filepath.Join(dir, first.File), first.Name, filepath.Join(dir, m.File), m.Name, m.Value)
 		held[m.Value] = m
 	}
 	return members
@@ -288,13 +316,13 @@ func (s *AssembledInputSuite) declaredTemporals() []temporalMember {
 // is the one thing validated.go says a successor sentinel must never be.
 // No other assertion here can see it: the difference between the two is
 // in no value, only in the type the line declines to write.
-func (s *AssembledInputSuite) temporalsOf(gen *ast.GenDecl, file string) (members []temporalMember, anchored bool) {
-	path := resolverPath(file)
+func temporalsOf(req *require.Assertions, gen *ast.GenDecl, dir, file string, spellings map[string]bool) (members []temporalMember, anchored bool) {
+	path := filepath.Join(dir, file)
 	runType, runFromIota := "", false
 	var untyped []string
 	for i, raw := range gen.Specs {
 		spec, ok := raw.(*ast.ValueSpec)
-		s.Require().True(ok, "%s: const spec %d is a shape the derivation cannot read", path, i)
+		req.True(ok, "%s: const spec %d is a shape the derivation cannot read", path, i)
 
 		declType, fromIota := runType, runFromIota
 		if len(spec.Values) > 0 {
@@ -306,12 +334,12 @@ func (s *AssembledInputSuite) temporalsOf(gen *ast.GenDecl, file string) (member
 				untyped = append(untyped, ident.Name)
 			}
 		}
-		if declType != temporalTypeName {
+		if !spellings[declType] {
 			continue
 		}
 		anchored = anchored || fromIota
 
-		s.Require().Len(spec.Names, 1,
+		req.Len(spec.Names, 1,
 			"%s: a Temporal is declared on a line holding %d names; the derivation reads each kind's value off its own line",
 			path, len(spec.Names))
 		name := spec.Names[0].Name
@@ -320,19 +348,26 @@ func (s *AssembledInputSuite) temporalsOf(gen *ast.GenDecl, file string) (member
 		}
 		val := i
 		if !fromIota {
-			s.Require().NotEmpty(spec.Values,
+			req.NotEmpty(spec.Values,
 				"%s: %s inherits its value from a line that is not `= iota`, so its position in the block is not its value",
 				path, name)
-			val = s.intValue(spec.Values[0], name, path)
+			val = intValue(req, spec.Values[0], name, path)
 		}
 		members = append(members, temporalMember{Name: name, Value: val, File: file})
 	}
 	if anchored && len(untyped) > 0 {
-		s.Require().Empty(untyped,
+		req.Empty(untyped,
 			"%s: %v share resolver.Temporal's const block and name no type, so each is an untyped constant assignable to Temporal; `case %s:` would compile inside a switch over the enum while this derivation reads it as no member of one. Give the line a type — int if it is a count, Temporal if it is a kind",
 			path, untyped, untyped[0])
 	}
 	return members, anchored
+}
+
+// temporalSpellings is every name in the swept package that means
+// resolver.Temporal: the type's own name, and each alias that resolves to
+// it.
+func temporalSpellings(files []sweptFile) map[string]bool {
+	return map[string]bool{temporalTypeName: true}
 }
 
 // typeName is the name of the type a const spec declares, or "" when it
@@ -356,13 +391,13 @@ func isIdent(expr ast.Expr, name string) bool {
 
 // intValue reads the integer literal the Temporal named name is declared
 // at in the file at path.
-func (s *AssembledInputSuite) intValue(expr ast.Expr, name, path string) int {
+func intValue(req *require.Assertions, expr ast.Expr, name, path string) int {
 	lit, ok := expr.(*ast.BasicLit)
-	s.Require().True(ok && lit.Kind == token.INT,
+	req.True(ok && lit.Kind == token.INT,
 		"%s: resolver.%s is a Temporal declared at neither iota nor an integer literal; the derivation reads a kind's value to ask whether Temporal.String has an arm for it",
 		path, name)
 	v, err := strconv.Atoi(lit.Value)
-	s.Require().NoError(err, "%s: resolver.%s is declared at %s, which the derivation cannot read as a value", path, name, lit.Value)
+	req.NoError(err, "%s: resolver.%s is declared at %s, which the derivation cannot read as a value", path, name, lit.Value)
 	return v
 }
 
