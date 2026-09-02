@@ -121,6 +121,13 @@ esac
     echo "         post-merge  — the bd/GitHub issue mirror"
     echo "       Linked worktrees share one .git/config, so every worktree is affected."
     echo ""
+    echo "       MOST FIRINGS ARE TRANSIENT, so try your command again before you go"
+    echo "       hunting. The known writer is a worktree-isolated agent spawn, which"
+    echo "       rewrites the shared value while it builds its worktree and puts it"
+    echo "       back afterwards — measured 2026-09-02 at 13s and 14s for one spawn"
+    echo "       and 54s for two overlapping, and any seat's spawn unhooks yours."
+    echo "       Four occurrences on record never cleared, so if it stands, repair."
+    echo ""
     echo "       Repair (idempotent, arms every worktree at once): just init"
 } >&2
 
