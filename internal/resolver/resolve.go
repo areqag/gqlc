@@ -1617,11 +1617,11 @@ func (i unlabelledInference) unconstrained() bool {
 // Coverage is decided off the unnarrowed reading and the narrowing does not
 // touch it: `attested` turns on the far end's own covering() and on
 // witnessesItsEndpoints, and the narrowing changes neither. endpointNarrowing
-// only ever drops types that no matching row can
-// put at that end — it folds in an edge only when the edge witnesses its
-// endpoints and both of its ends cover — which is the same argument
-// NarrowPluralEndpoints makes when it keeps resolvedCovers on a collapse, and
-// the same one that lets `attainable` be read as covering.
+// only ever drops types that no matching row can put at that end — it folds in
+// an edge only when the edge witnesses its endpoints and both of its ends cover
+// — which is the same argument NarrowPluralEndpoints makes when it keeps
+// resolvedCovers on a collapse, and the same one that lets `attainable` be read
+// as covering.
 func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}) unlabelledInference {
 	var all, attainable candidateAcc
 	inf := unlabelledInference{bindingNullable: n.Nullable()}
