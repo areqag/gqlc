@@ -368,12 +368,32 @@ func requireCarrierHasAnArm(t *testing.T, goType string) {
 // _test.go files are read too, deliberately: dropping a class of file
 // reopens that hole in a smaller place, and a method on typeMap is the
 // table wherever in the package it is declared. What the walk leaves out
-// is what is not a .go file of this directory — testdata/ above all,
-// which it does not descend into because that tree is the generator's
-// OUTPUT rather than its table, and which the go tool leaves out of the
-// package for the same reason. Selection is by directory listing and not
-// by build list, so a .go file the go tool itself skips — a build tag, a
-// leading underscore — is read here and must parse.
+// is what is not a .go file of this directory: every entry that is a
+// directory is skipped, unconditionally and by shape rather than by name.
+// testdata/ carries no exclusion of its own — it is simply the only
+// subdirectory there is.
+//
+// Which is worth saying, because this comment used to call that tree the
+// generator's OUTPUT and it is not: it holds four .gql generator INPUTS
+// and corpus_test.go.txt, a hand-written driver, while the generator's
+// actual output goes to a t.TempDir(). What puts it out of this table's
+// reach is neither of those but the go tool's own rule — a directory named
+// testdata is ignored whole, so nothing under it is in package age and
+// nothing under it can declare a method on typeMap. Measured rather than
+// recited: a testdata/*.go declaring `package age`, a duplicate typeMap
+// and a line of invalid Go leaves `go build` on this package green and
+// never enters `go list`'s GoFiles. That is a guarantee and not a count,
+// which is why nothing here asserts that testdata/ holds no .go file: it
+// holds none today, and one appearing would still not be a hole
+// (bd gqlc-ww8u).
+//
+// Selection is by directory listing and not by build list, so a .go file
+// the go tool itself skips — a build tag, a leading underscore — is read
+// here and must parse. That is a claim about files IN this directory and
+// it does not reach downwards; it is the reason the directory skip has to
+// be unconditional rather than a judgement about any one subtree, since a
+// listing-driven walk that descended would read a testdata file the go
+// tool never compiles.
 //
 // "As a returned string literal" is the whole of what this reads, and it
 // is why the walk REFUSES a return it cannot read rather than passing
