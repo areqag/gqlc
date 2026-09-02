@@ -1677,6 +1677,194 @@ them closed on the ADR's own date — a bare `2026-08-29` would have shipped
 this row ringing on all seven from its first run, which is how a warn row
 teaches the town to scroll past it.
 
+## wall — what the flag is for, and the two outages that bought it
+
+(`kingdom/bin/km`, `wall_flag` and the `wall_*` family)
+
+The quota wall is per-ACCOUNT, so it arrives town-wide and lifts town-wide, and
+until this landed nothing noticed either edge. Twice measured: reset 03:50Z and
+first routed wake 12:34Z, 8h44m of silence while kingdom-dispatch.timer fired
+~260 times exiting 0 (gqlc-tdciz); then 2026-09-01/02, ten seats frozen 8-10.7h
+in single unfinished turns, recovered only by an operator restart. Every board
+read the town as UP through both.
+
+A walled seat is never freed by anything already here, and it is worth being
+precise about why, because the first design of this guard was aimed at the
+wrong failure. `cmd_reconcile` writes `asleep` only for a seat recorded awake
+with NO live session; a walled seat HAS a live claude, sitting at a prompt
+whose first turn was refused. So it never cycles, never returns its slot, and
+never answers a pass — every routing pass wakes ASLEEP seats only. The original
+plan guarded a launch storm; there is no storm, and the bead's own design was
+re-ruled once that was measured (gqlc-nmxmr).
+
+What is left is three failures, and this family addresses the first two and
+reports the third:
+
+1. The recovery ladder POISONS a walled seat. Each ask strands text in a
+   composer that never submits it, and `send_line` then correctly refuses that
+   seat forever (gqlc-6bnkw, gqlc-gv7dw) — the guard protecting a citizen's
+   draft turns one stranded nudge into a seat nothing can reach again. The
+   3-ask cap then converts one town-wide wall into sixteen private ESCALATED
+   episodes that OUTLIVE it.
+2. Nothing watched for the reset.
+3. Post-reset the held slots strangle routing: ten capped seats awake means
+   `slots=0`, and only judge work is cap-exempt. This design does not fix that
+   one — ending a session is an operator's action (VI.2) — it hands the
+   operator the roster instead of a healthy-looking board.
+
+## wall_refusal_seats — dispatch's own artefact, never a pane read
+
+(`kingdom/bin/km`, `wall_refusal_seats`)
+
+The raise interface is the per-seat `idle-refusal` file the ladder writes when
+a send is refused, removed the moment the seat works again or an ask lands.
+Deliberately NOT `seat_wedge_reason`: that reads a live pane, it keeps exactly
+one caller in `cmd_status`, and nothing in dispatch may read a pane for this.
+Three bounds on the interface, all known and all accepted:
+
+- It is LATE. An idle-shape wall (the turn ended at a prompt) reaches a refusal
+  in ~4-6 min through the two-pass idle confirm; a mid-turn wall — last night's
+  shape, where `seat_agent_status` keeps saying `working` — reaches one only
+  through the dry path at `welfare.stalled_after_minutes`. So the first
+  evidence lands 5-45 min after onset. That delays the first walled LINE, not
+  the recovery: the wall itself is hours long, and the probe interval is what
+  prices the clear.
+- It is NOT wall-specific. A consent modal, a citizen's own draft and a foreign
+  sender all produce refusals. Nothing here infers a wall from them — they only
+  decide when a probe is worth spending. The probe is the disambiguation.
+- It is budget-EXEMPT, which the arithmetic needs: a refusal does not set
+  `delivered`, so two seats can both acquire the marker inside one pass. If
+  refusals were capped at one per run the two-seat threshold could never be
+  reached in the window.
+
+## wall_probe — a subprocess with an exit code, which is why it replaced a canary wake
+
+(`kingdom/bin/km`, `wall_probe`)
+
+The first design woke a seat as a canary and asked it to run a verb first
+thing. That was withdrawn: a canary needs an asleep seat AND a free slot, and a
+full wall holds every capped slot while leaving almost nobody asleep; each
+canary launch is itself a wake into a wall, stranding one more composer; and
+its fast path depended on a citizen remembering a first action. A probe has no
+session, no slot, no pane and nothing to forget.
+
+Three details are load-bearing:
+
+- **The cwd is a `mktemp -d`, never a checkout.** From a checkout, SessionStart
+  hooks and CLAUDE.md load the project into a probe whose whole purpose is to
+  cost nothing.
+- **No `--model`.** The seats' default model is the one whose wall this asks
+  about. A cheaper model that answers while theirs is still walled would clear
+  the flag onto a town that is still stopped.
+- **Everything unrecognised is WALLED.** Nonzero, timeout, empty stdout,
+  limit-shaped stdout. Wrongly walled costs one 10-minute interval; wrongly
+  clear costs a whole re-raise cycle, and re-raising means the ladder gets one
+  more chance to poison a seat first.
+
+The design named one load-bearing guess, and it is still a guess at the time
+of writing: `claude -p` under a standing wall has not been observed, because
+no wall stood to measure against. The predicate above defaults the unmeasured
+branch to the cheap side. The first live wall's actual probe output belongs in
+the decision doc, verbatim.
+
+The limit fragments are the same two `seat_wedge_reason` matches on a pane.
+Two readers of one vendor string, cross-referenced by comment rather than
+folded into a shared helper: for two greps a helper buys nothing, and it would
+couple a pane parser to a subprocess parser so that a change to either drags
+the other.
+
+## wall_withheld — the line that must appear on EVERY pass
+
+(`kingdom/bin/km`, `wall_withheld`)
+
+A watcher that waits silently is indistinguishable from the eleven hours this
+exists to prevent, so the flag says so every single pass rather than once at
+the raise. It names when it was raised, when the last probe ran, when the next
+is due, and the `rm` that overrides it — an operator reading one line during an
+incident should not have to find this file by searching.
+
+It also names what is withheld, and the whole pass is: reconcile, the ladder,
+and routing. The ladder because an ask into a walled seat strands a draft that
+makes it permanently unreachable; routing because a wake into a wall mints
+another frozen slot-holder. A wake file already queued before the raise is
+consumed by its runner and freezes one seat anyway; that seat becomes further
+refusal evidence, and nothing here is built for it.
+
+## wall_clear — the marker wipe, and the letter that is the real deliverable
+
+(`kingdom/bin/km`, `wall_clear`)
+
+Two things happen that are easy to read as tidying and are not.
+
+**The five per-seat ladder markers are deleted.** The counters measured the
+WALL, not the citizens: an ask refused because the account was stopped is not
+an unanswered ask. Leaving them means every seat that accumulated three
+refusals during the wall stays ESCALATED afterwards, so the ladder is silent
+for the rest of the episode — exactly when post-reset delivery might finally
+work.
+
+The ladder does not do this wipe for us, and the reason is narrower than it
+looks. The ladder clears the five markers on one branch only — a seat that is
+neither idle nor stalled — and that branch covers a seat witnessed working AND
+a seat km cannot read at all. A seat who sat through the wall is neither: she
+is awake with a progress witness hours stale, so she is stalled, so the ladder
+walks straight past its wipe into the episode.
+
+Measured, because the first attempt to witness this was vacuous. Blinding this
+`rm -f` in a copy of km and then clearing a wall left both planted seats at
+5/5 markers, and that pass then read `dispatch: hayk is awake and has finished
+no tool call for 3h00m, ESCALATED to sedrak 2s ago after 3 unanswered asks;
+not typing at her again this episode` — silenced for refusals the wall caused,
+which is the defect this wipe exists to prevent. Unmutated, the same seats end
+the pass at 2/5, and those two are `idle-attempts` holding `1` and a fresh
+`idle-refusal`: the ladder opens a NEW episode in the same pass and counts
+from zero. That is the intended shape, not a leak — the wipe forgets the
+wall's refusals, it does not excuse a seat who is still stalled after it.
+
+The vacuous run had planted no `status` and no `progress.json`, so every seat
+read unreadable, took the ladder's wipe branch, and reached 0/5 whether or not
+`wall_clear` ran at all.
+
+**The letter to Սեդրակ is the deliverable, not the routing.** Routing resumes
+by falling through, in the same two minutes. What routing cannot do is tell
+anyone that ten slots are still held by sessions that will never end. The
+letter names each seat with the age of the last tool call of hers that
+FINISHED, and says plainly that this is the evidence and not the verdict — one
+long legitimate tool call reads identically from outside, and the wrong seat
+ended is a citizen's day. Ending them is an operator's action and nobody
+else's (VI.2), on gqlc-qs4jq's protocol: ask each seat to self-park first, end
+only what does not park.
+
+It is sent with the ladder's own witnessed-delivery idiom — `mail_send`
+exiting 0 is not delivery, and this letter is the only artefact of a lift
+nobody watched.
+
+## wall_guard — probes cost nothing in the healthy case, and the flag is raised only by evidence
+
+(`kingdom/bin/km`, `wall_guard`)
+
+Two thresholds, and they do different jobs. The two-seat rule prices only how
+OFTEN a probe is spent: one seat wedges for private reasons routinely, and a
+probe is a real model call, so a lone consent modal must not buy one. The
+probe is what actually raises. A false trigger therefore answers itself at once
+and costs exactly one probe — which is why the trigger can afford to be a crude
+signal.
+
+The lone-walled-seat corner is named and accepted rather than solved: a single
+walled seat escalates (mail is a file write, it succeeds), the mail wake
+launches Սեդրակ into the same wall, and his seat becomes the second refusal
+source 20-50 minutes later.
+
+Probes run only under suspicion or under a standing flag. Unconditional
+per-pass probing was rejected: it is a steady-state model-call spend to watch
+for a condition that is absent almost always.
+
+The call site sits ABOVE the mayor's mail wake, inverting the halt's placement
+below it. The halt sits underneath deliberately, so that a halted town can hear
+by mail that its cause is over (gqlc-ozfr). A walled town cannot hear anything,
+and waking Սեդրակ into a wall freezes the one seat the whole recovery chain
+routes through.
+
 ## cmd_dispatch — read the world before anything is counted or chosen
 
 (`kingdom/bin/km`, `cmd_dispatch`)
@@ -2610,6 +2798,76 @@ before their name was added reddens this arm through no fault of the
 board. A gate that goes red when a human takes work is one operators learn
 to run with, and this file has that failure written into it twice already.
 A named warning is the thing an operator can act on; the acting is theirs.
+
+## cmd_doctor-wall — a standing wall is a WARN, and only its age makes it a FAIL
+
+(`kingdom/bin/km`, `cmd_doctor`)
+
+Three outcomes, and the middle one is the point of the row.
+
+A flag that is standing is **not** a defect. It is the mechanism working: the
+account is stopped, dispatch is withholding routing, and it will probe again
+inside ten minutes. A row that reddened on the flag alone would be red for the
+whole of every wall — through the exact hours an operator most needs the board
+to mean something — and would train everyone to ignore it. So a standing flag
+reports `warn:` and says in the same sentence what is being withheld and how
+often the probe runs, because an operator reading `warn` needs to know whether
+to act (no) and when it resolves itself.
+
+What IS a defect is a flag nobody is clearing. Past `WALL_STALE_SECONDS` (12h)
+the row FAILs, and it deliberately names both readings rather than choosing:
+either the probe loop has stopped — no dispatch pass at all, or a probe that
+never succeeds — or a wall has genuinely stood that long, which a weekly cap
+can do. Both are operator news and neither is diagnosable from here. The
+measured outages this machinery was built for were 8h44m and ~9h, so 12h sits
+above the longest wall we have actually seen and below a day.
+
+The unreadable arm FAILs too, and it is not pedantry: `wall_raised_epoch`
+failing means the age cannot be computed, so the 12h arm above it can never
+fire. A flag with a corrupt first line would otherwise stand forever behind a
+green board — silent withholding of routing, which is the failure this whole
+bead exists to end.
+
+Witnessed by backdating a flag to 13h and reading the row (FAIL), to 20m
+(warn), and removing it (ok). Blinding the 12h arm turned the 13h case back
+into the `warn` line, so the FAIL comes from the age and not from the flag
+merely existing.
+
+## cmd_doctor-fence — a count pin over a prohibition that has no other enforcement
+
+(`kingdom/bin/km`, `cmd_doctor`)
+
+The town must never invoke the vendor's paid-overflow command, under any
+condition (Անդրանիկ, 2026-08-30, gqlc-tdciz). Nothing else in the machinery
+can enforce that: the string is legitimate to READ — the wedge detector
+matches it in a pane, and the wall probe's predicate matches it in the probe's
+own output — so a plain "must not appear" grep would be red on the honest
+tree, and a grep that skips readers cannot tell a reader from a composer.
+
+So the row pins the COUNT. Three matches under `kingdom/bin/`, all three
+readers, enumerated in the failure message itself so the next person does not
+have to rediscover which three are allowed. A fourth line is a line somebody
+added, and the only thing a new line can be doing with that string that the
+three do not already do is composing or typing it.
+
+Two limits, stated because the row does not cover them:
+
+**It is one-directional.** The row FAILs when the count EXCEEDS the pin, so
+deleting a reader — the wedge detector, say — passes. That is why the `ok:`
+line prints the observed count against the pin rather than saying nothing: a
+drop from 3 to 2 is visible to a reader of the output, and is not caught by
+the gate. Making it an equality would red the board on any legitimate
+refactor of a detector, and the harm it guards against is invoking the
+command, not failing to grep for it.
+
+**It sees `kingdom/bin/` only.** A composer added under `kingdom/brain/` or in
+a playbook is outside it. The prohibition is wider than the fence; the fence
+is where machinery that could actually run it lives.
+
+Both mutants were run. Appending ` or run /extra-usage` to one ladder ask took
+the count to 4 and the row FAILed naming the offending file. Deleting the row
+itself made the probe report zero fence rows rather than a passing one — a
+deleted gate does not read as a green one.
 
 ## cmd_doctor-4 — "can any pass reach this bead" versus "can this seat"
 
