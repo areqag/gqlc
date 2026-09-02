@@ -145,9 +145,17 @@ var corpusTests = []string{
 // corpusTests is a census of top-level names, and a top-level test passes
 // and carries its name whether or not anything ran inside it. Measured on
 // this fixture: with TestAgtypeString's accepts table emptied to
-// `map[string]string{}` and nothing else touched, the child run reported 29
-// top-level passes and 0 subtest passes, and the set comparison below
-// stayed green (bd gqlc-mlf4). Held against these counts it goes red.
+// `map[string]string{}` and nothing else touched, the child run reported 51
+// top-level passes and 11 subtest passes — this key's 11 gone, the other
+// two keys' 4 and 7 still there — and the set comparison below stayed
+// green. Held against these counts it goes red, naming the key:
+// "TestAgtypeString: declared 11, ran no entry".
+//
+// Re-taken 2026-09-02 (bd gqlc-wuyu). The verdict is the one gqlc-mlf4
+// recorded; the two figures beside it were not re-taken with it and had
+// gone stale. That measurement read 29 top-level passes and 0 subtest
+// passes, on a fixture that has since grown to 51 tests and gained the two
+// DecodeVertex keys below, which is where the 0 went.
 //
 // A count is a size, not a membership. Renaming a case, or swapping one
 // case for another, leaves the count where it was; what a count refuses is
@@ -169,12 +177,15 @@ var corpusSubtests = map[string]int{
 // This is the third census because the first two cannot see the fixture's
 // commonest shape. corpusTests names top-level tests and a top-level test
 // passes whether or not anything ran inside it; corpusSubtests counts
-// subtest passes and this fixture has exactly one t.Run in 46 top-level
-// tests, so a test whose table goes empty has no key on either side,
-// which is equality. Measured: emptying the five-entry table in
-// TestAgtypeListRefusesAnElementOfTheWrongScalar reddens this census and
-// nothing else in the run moved (bd gqlc-eum1, the half gqlc-mlf4 left
-// open).
+// subtest passes and this fixture has three t.Run call sites among 51
+// top-level tests, so for the other 48 a test whose table goes empty has
+// no key on either side, which is equality. Measured: emptying the
+// five-entry table in TestAgtypeListRefusesAnElementOfTheWrongScalar
+// reddens this census and nothing else in the run moved (bd gqlc-eum1,
+// the half gqlc-mlf4 left open; re-taken 2026-09-02 under gqlc-wuyu,
+// where "nothing else moved" is witnessed by Check's order — Tables is
+// compared last, so reaching it means Tests and Subtests both agreed).
+// The count of t.Run sites was one in 46 tests when this was written.
 //
 // Every test here that ranges over anything has an entry, and a test that
 // ranges over nothing has none — see corpusrun.Table for what Rows and

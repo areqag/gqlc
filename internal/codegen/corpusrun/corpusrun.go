@@ -347,7 +347,8 @@ func diffMultiset(what string, want, got []string) error {
 	if slices.Equal(w, g) {
 		return nil
 	}
-	return fmt.Errorf("the child run's passing tests are not what %s names, entry for entry and counting repeats\n"+
+	return fmt.Errorf("the child run's passing tests are not what %s names: the comparison is by multiset — same names, same number of repeats, order not compared\n"+
+		"both lists below are sorted for reading, so neither is in declaration order\n"+
 		"declared: %v\nran:      %v", what, w, g)
 }
 
