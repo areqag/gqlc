@@ -234,9 +234,11 @@ func (s *scope) BindNodeCands(nb query.NodeBinding, nts []schema.NodeType) error
 	// resolvedCovers mark; the lane qualifies `resolved` only. The delete keeps
 	// the two lanes from ever both claiming v.
 	//
-	// It changes no answer and no test can pin it — the singular arm above
-	// already refuses a v in s.nodeTypes, so v cannot be in the lane when this
-	// runs. It is written for the same reason as BindEdge's copy: the lane must
+	// It changes no answer on any QUERY — the singular arm above already
+	// refuses a v in s.nodeTypes, so no query puts v in the lane before this
+	// runs. A test does pin it, by seeding the lane on a scope directly:
+	// TestScopeBindNodeCandsClearsASeededResolvedCoversMark.
+	// It is written for the same reason as BindEdge's copy: the lane must
 	// not outlive the `resolved` entry it qualifies under any seeding regime,
 	// and the moment newScope seeds resolvedCovers from the carry this delete
 	// is what stops a carried mark surviving a plural re-bind and making the
@@ -272,7 +274,7 @@ func (s *scope) BindEdge(eb query.EdgeBinding) error {
 	}
 	s.edgeBindings[v] = eb
 	// Edge shadows any carried node state. The resolvedCovers line changes no
-	// answer and no test can pin it: the only node state a shadow can find at v
+	// answer on any QUERY: the only node state a shadow can find at v
 	// is the carry's, newScope does not seed the lane from the carry, and a
 	// same-Part BindNode at v never reaches here at all — the PARSER refuses
 	// that query, with `variable bound with conflicting kinds` from
@@ -284,8 +286,10 @@ func (s *scope) BindEdge(eb query.EdgeBinding) error {
 	// qualifies under ANY seeding regime — the moment newScope seeds it, this
 	// delete is what stops a stale mark from making an edge-shadowed name read
 	// as a covering endpoint. Same argument for BindNodeCands' and BindCall's
-	// copies; those three deletes are the whole set of unreachable writes to
-	// this lane on a shadow path.
+	// copies; those three deletes are the whole set of query-unreachable writes
+	// to this lane on a shadow path, and each is pinned by a test that seeds the
+	// lane on a scope directly — here,
+	// TestScopeBindEdgeClearsASeededResolvedCoversMark.
 	delete(s.nodeTypes, v)
 	delete(s.nodeCands, v)
 	delete(s.resolvedCovers, v)
@@ -307,9 +311,11 @@ func (s *scope) BindCall(cb query.CallBinding, r procsig.Registry) error {
 	// the same name (parser-unreachable belt-and-braces since
 	// build.go's imported[v] check rejects the collision at parse).
 	//
-	// The resolvedCovers line is unreachable twice over — that parser check,
-	// and newScope not seeding the lane from the carry — so it changes no
-	// answer and no test can pin it. It is written for BindEdge's reason: the
+	// The resolvedCovers line is unreachable from a query twice over — that
+	// parser check, and newScope not seeding the lane from the carry — so it
+	// changes no answer on any query. A test does pin it, by seeding the lane on
+	// a scope directly: TestScopeBindCallClearsASeededResolvedCoversMark.
+	// It is written for BindEdge's reason: the
 	// lane must not outlive the `resolved` entry it qualifies under any seeding
 	// regime, and seeding it from the carry is what would make this delete live.
 	delete(s.nodeTypes, v)

@@ -1620,6 +1620,64 @@ func (s *ResolverSuite) TestPhaseBsPluralCommitLeavesNoResolvedCoversMark() {
 		"a mark qualifying a `resolved` entry the plural arm did not write must not survive it")
 }
 
+// TestPhaseBsUncoveredSingularCommitClearsAResolvedCoversMark pins the `else`
+// of the singular arm's covered/uncovered branch — the fourth sibling of the
+// three scope-level deletes and of the plural arm above.
+//
+// The arm writes `resolved` and must NOT mark it: an uncovered commitment is
+// exactly the one the narrowing may not learn from, and that is expressed as the
+// ABSENCE of a mark. Its comment says the absence is asserted rather than
+// assumed, which is only true if something asserts it.
+//
+// Seeded for the same reason as the plural test: a name leaves `pending` on the
+// iteration it commits, so there is no second commit to overwrite, and the
+// lane's other writers never see an unlabelled binding. The state is
+// constructible only from a hand-seeded table.
+func (s *ResolverSuite) TestPhaseBsUncoveredSingularCommitClearsAResolvedCoversMark() {
+	sch := s.loadSchema("valid", "satisfy_plural_edges_inline_subtype.gql")
+
+	// The transitivity the arm's own comment describes, one hop wide. `c` is
+	// already committed and UNMARKED, so endpointLabels hands `d`'s only edge a
+	// far end that reports covers=false and candidateTypes' conjunction fails on
+	// its first conjunct — the edge folds into `inferred` but not `attainable`,
+	// and commit() returns the unattested reading with covered=false. The hop is
+	// MANDATORY, so the binding is constrained rather than reaching case 0's
+	// OPTIONAL-only refusal; and HAS_DESK is declared once, so `inferred` is the
+	// singleton that takes the singular arm rather than widening to the plural
+	// one.
+	d, err := query.NewNodeBinding("d", graph.LabelSet{})
+	s.Require().NoError(err)
+	cEnd, err := query.NewVarEndpoint("c")
+	s.Require().NoError(err)
+	dEnd, err := query.NewVarEndpoint("d")
+	s.Require().NoError(err)
+	hasDesk, err := query.NewEdgeBinding("h", graph.LabelSet{"HAS_DESK"}, cEnd, dEnd, true)
+	s.Require().NoError(err)
+
+	table := nodeTable{
+		resolved:          map[string]schema.NodeType{"c": sch.Nodes[graph.LabelSet{"Company"}.Key()]},
+		cands:             map[string][]schema.NodeType{},
+		pluralByInference: map[string]bool{},
+		resolvedCovers:    map[string]struct{}{"d": {}},
+	}
+	s.Require().NoError(inferUnlabelled(
+		[]query.NodeBinding{d}, []query.EdgeBinding{hasDesk},
+		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}))
+
+	// Tripwires. Without them the assertion below passes for a `d` that took the
+	// plural arm — already pinned above — or that never committed at all, and it
+	// passes for a `d` that committed COVERED, which is the other branch.
+	s.Require().Contains(table.resolved, "d",
+		"d must commit singular, or the arm under test did not run")
+	s.Require().NotContains(table.cands, "d",
+		"d must not have taken the plural arm, which is a different sibling's delete")
+	s.Require().NotContains(table.resolvedCovers, "c",
+		"the seeded far end must stay unmarked, or d's edge covered and the covered branch ran instead")
+
+	s.Require().NotContains(table.resolvedCovers, "d",
+		"an uncovered commitment must not inherit a mark: the absence IS how the resolver says the narrowing may not learn from it")
+}
+
 // TestAWholeEntityProjectionNamesTheFaultItActuallyHas pins which of the two
 // ambiguity sentinels the plural whole-entity refusal carries, on the axis that
 // selects it: whether the binding carried labels.
