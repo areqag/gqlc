@@ -64,12 +64,13 @@ func TestUndeclaredRelationshipTypeIsWarnedAbout(t *testing.T) {
 	vq := resolveDrift(t, "MATCH (:Person)-[r:AUTHORED|LIKES|FLAGGED]->(p:Post) RETURN r")
 
 	require.Len(t, vq.Warnings, 1)
-	require.Contains(t, vq.Warnings[0], `"FLAGGED"`)
-	require.Contains(t, vq.Warnings[0], "not declared")
-	require.Contains(t, vq.Warnings[0], `edge "r"`)
+	require.Equal(t, producerUndeclaredRelationshipType, vq.Warnings[0].Producer)
+	require.Contains(t, vq.Warnings[0].Text, `"FLAGGED"`)
+	require.Contains(t, vq.Warnings[0].Text, "not declared")
+	require.Contains(t, vq.Warnings[0].Text, `edge "r"`)
 	// The declared members of the same alternation are not accused.
-	require.NotContains(t, vq.Warnings[0], "AUTHORED")
-	require.NotContains(t, vq.Warnings[0], "LIKES")
+	require.NotContains(t, vq.Warnings[0].Text, "AUTHORED")
+	require.NotContains(t, vq.Warnings[0].Text, "LIKES")
 }
 
 // The negative half. Remove the one undeclared type and the same query shape
@@ -120,8 +121,8 @@ func TestUndeclaredRelationshipTypesAreDedupedAndOrdered(t *testing.T) {
 		"MATCH (:Person)-[r:AUTHORED|FLAGGED]->(p:Post) "+
 			"MATCH (:Person)-[s:LIKES|BOOSTED]->(q:Post) RETURN p")
 	require.Len(t, vq.Warnings, 2)
-	require.Contains(t, vq.Warnings[0], `"FLAGGED"`)
-	require.Contains(t, vq.Warnings[1], `"BOOSTED"`)
+	require.Contains(t, vq.Warnings[0].Text, `"FLAGGED"`)
+	require.Contains(t, vq.Warnings[1].Text, `"BOOSTED"`)
 }
 
 // The message has to be actionable on its own: the offending type, the edge the
@@ -129,7 +130,7 @@ func TestUndeclaredRelationshipTypesAreDedupedAndOrdered(t *testing.T) {
 func TestUndeclaredRelationshipTypeMessageNamesBothReadings(t *testing.T) {
 	vq := resolveDrift(t, "MATCH (:Person)-[r:AUTHORED|FLAGGED]->(p:Post) RETURN r")
 	require.Len(t, vq.Warnings, 1)
-	m := vq.Warnings[0]
+	m := vq.Warnings[0].Text
 	require.Contains(t, m, "no decoder", "says what gqlc did")
 	require.Contains(t, m, "misspelled", "names the typo reading")
 	require.Contains(t, m, "declare it", "names the drift reading")
@@ -140,6 +141,6 @@ func TestUndeclaredRelationshipTypeMessageNamesBothReadings(t *testing.T) {
 func TestUndeclaredRelationshipTypeOnAnonymousEdge(t *testing.T) {
 	vq := resolveDrift(t, "MATCH (:Person)-[:AUTHORED|FLAGGED]->(p:Post) RETURN p")
 	require.Len(t, vq.Warnings, 1)
-	require.NotContains(t, vq.Warnings[0], `edge ""`)
-	require.Contains(t, vq.Warnings[0], `"FLAGGED"`)
+	require.NotContains(t, vq.Warnings[0].Text, `edge ""`)
+	require.Contains(t, vq.Warnings[0].Text, `"FLAGGED"`)
 }

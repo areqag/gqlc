@@ -29,8 +29,33 @@ type ValidatedQuery struct {
 	// warns about nothing are unchanged. A warning is an event; an
 	// always-emitted empty list would put a shape into 200-odd goldens that
 	// says nothing.
-	Warnings []string `json:"warnings,omitempty"`
+	Warnings []Warning `json:"warnings,omitempty"`
 }
+
+// Warning is one non-fatal resolver diagnostic and the detector that raised it.
+//
+// The producer tag is here because ADR 0032 ruled that the string lane becomes
+// a tagged struct BEFORE a third detector arrives, and the wrong-orientation
+// drop is the second. Text alone cannot answer "which detector said this",
+// which is what per-project suppression will need to select on; recovering it
+// by matching message prose would couple suppression to wording.
+//
+// Deliberately two strings. No severity (every entry is a warning), no source
+// position (the resolver's diagnostics place themselves in the author's own
+// query text instead), and no interface — a struct that grows those before a
+// caller needs them is the framework ADR 0032 declined to build.
+type Warning struct {
+	// Producer names the detector, in kebab-case.
+	Producer string `json:"producer"`
+	// Text is the whole human-facing line, actionable read alone on stderr.
+	Text string `json:"text"`
+}
+
+// The producer tags. Constants rather than literals at the append sites so two
+// detectors cannot drift into two spellings of one tag.
+const (
+	producerUndeclaredRelationshipType = "undeclared-relationship-type"
+)
 
 // Column is one result column in projection order: its name (an explicit alias
 // or the parser's source-text name, verbatim from ReturnItem.Name) and its

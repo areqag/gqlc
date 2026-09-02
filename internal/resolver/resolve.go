@@ -2407,13 +2407,13 @@ func undeclaredLabels(labels graph.LabelSet, s schema.Schema) []string {
 //
 // Deduplicated query-wide by type name in first-appearance order: one
 // misspelling repeated across three MATCHes is one mistake.
-func undeclaredRelationshipTypeWarnings(q query.Query, s schema.Schema) []string {
+func undeclaredRelationshipTypeWarnings(q query.Query, s schema.Schema) []Warning {
 	declared := make(map[graph.LabelSetKey]struct{}, len(s.Edges))
 	for k := range s.Edges {
 		declared[k.KeyLabels] = struct{}{}
 	}
 
-	var out []string
+	var out []Warning
 	seen := make(map[string]struct{})
 	for _, br := range q.Branches {
 		for _, part := range br.Parts {
@@ -2430,7 +2430,10 @@ func undeclaredRelationshipTypeWarnings(q query.Query, s schema.Schema) []string
 						continue
 					}
 					seen[l] = struct{}{}
-					out = append(out, undeclaredRelationshipTypeMessage(l, e))
+					out = append(out, Warning{
+						Producer: producerUndeclaredRelationshipType,
+						Text:     undeclaredRelationshipTypeMessage(l, e),
+					})
 				}
 			}
 		}
