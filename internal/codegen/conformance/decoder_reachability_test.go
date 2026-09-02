@@ -138,6 +138,31 @@ var multiLabelEmittingTargets = map[string]bool{
 	"neo4j-go-v6":       true,
 }
 
+// edgeUnionDispatchingTargets records, per registered target, whether that
+// backend dispatches an edge-union column on the wire label inside the
+// query method itself, rather than inside a function the decoder census
+// reads.
+//
+// The neo4j targets do: writeEdgeUnionDispatchBody and walkListElemBody
+// (internal/codegen/neo4j/render_queries.go) both write `switch rel.Type`
+// into the method that runs the query. apache-age-pgx-v5 does not, and
+// the reason is that it cannot get there — AGE 1.7.0 rejects
+// relationship-type alternation outright, so codegen refuses every
+// edge-union column on ErrUnrepresentableEdgeUnion and the backend emits
+// for none of the fixtures that carry one.
+//
+// Both halves are checked, which is what stops AGE's silence from being
+// the same green as a clean sweep: a target recorded true must write at
+// least one such switch over the whole corpus, and a target recorded
+// false must write none. So the day AGE grows an edge-union emission it
+// reddens here until someone enrols it and its dispatch comes under the
+// rule below, rather than passing on a zero.
+var edgeUnionDispatchingTargets = map[string]bool{
+	"apache-age-pgx-v5": false,
+	"neo4j-go-v5":       true,
+	"neo4j-go-v6":       true,
+}
+
 // shapeWords is what to call one entity axis in a diagnostic: what the
 // schema calls the type, and what to call a value that carries its label.
 // Both are backend-neutral — a node rather than AGE's vertex — because
@@ -573,6 +598,119 @@ func (s *ConformanceSuite) TestEmittedClosuresNameNoEntityAndCompareNoString() {
 				"that named one backend's closures and dropped another's; a backend dropping out of this set is the "+
 				"same defect, recorded rather than written down",
 			target)
+	}
+}
+
+// TestEveryLabelSwitchAMethodWritesIsAnEdgeUnionItsQueryDeclares closes the
+// half of the reachability claim the decoder census states it does not
+// hold: a guard emitted in a query method's own body (gqlc-9xy0).
+//
+// The census recognises a decoder by the prepared entity its results name
+// and grades the strings it compares against that entity's axis. A query
+// method returns a row struct, so it is recognised as no entity's decoder,
+// and its body is read by nothing — while neo4j writes the edge-union
+// dispatch there, `switch rel.Type { case "AUTHORED": … }`, which is the
+// same unsatisfiable-guard shape one emission site over. Under `just test`
+// the only thing beneath a case no value can reach is a golden byte diff,
+// which `go test -update` blesses away.
+//
+// The axis a method's switch is graded against is not the enclosing
+// function's, because a query method has none. It is the query's:
+// codegen.Prepare derives one EdgeUnion per edge-union column, with the
+// candidate edge keys in resolver-canonical order, and the emitter writes
+// one case per key. So the property asserted is set equality — the case
+// labels are exactly the labels of one EdgeUnion the query declares.
+//
+// Equality rather than containment, and that is the whole strength of it.
+// Containment refuses only the unreachable case the bead names; equality
+// refuses a dropped candidate too, which is a column that decodes a value
+// the query can return by falling into the default arm and reporting an
+// "unexpected relationship type" for a type the pattern admits. The two
+// are one derivation read two ways and there is no reason to hold the
+// emission to the weaker half.
+//
+// What it does not decide. It reads no call graph, so it says nothing
+// about whether the method is reachable, only about what its dispatch can
+// reach if it runs. It grades each switch against *some* EdgeUnion of the
+// query rather than against the one belonging to that switch's column: a
+// query with two edge-union columns whose candidate sets differ would
+// accept the first column's alphabet in the second column's switch. No
+// fixture in the corpus carries that shape today — the one two-column
+// fixture declares the same two candidates twice — and closing it needs
+// the switch tied back to its column, which the emission spells only in
+// the neighbouring error text.
+func (s *ConformanceSuite) TestEveryLabelSwitchAMethodWritesIsAnEdgeUnionItsQueryDeclares() {
+	targets := s.backends.Keys()
+	s.Require().Equal(targets, slices.Sorted(maps.Keys(edgeUnionDispatchingTargets)),
+		"the edge-union dispatch ledger no longer names exactly the registered backends")
+
+	// dispatched counts the switches actually held to an alphabet,
+	// incremented where one is compared and nowhere else, so the floors
+	// below are a statement about comparisons this sweep performed rather
+	// than about emissions it walked.
+	dispatched := make(map[string]int, len(targets))
+
+	for _, dir := range s.validFixtures() {
+		fixture := filepath.Base(dir)
+		s.Run(fixture, func() {
+			m := s.loadManifest(dir)
+			sch := s.loadSchema(dir)
+			in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+			alphabets := queryEdgeUnionAlphabets(s.Require(), in)
+
+			for _, target := range targets {
+				files, ok := s.emitOrRefuse(target, in)
+				if !ok {
+					continue
+				}
+				fset := token.NewFileSet()
+				for _, f := range files {
+					file, err := parser.ParseFile(fset, f.Path, f.Contents, parser.SkipObjectResolution)
+					s.Require().NoError(err, "parsing emitted %s", f.Path)
+
+					for _, sw := range methodLabelSwitches(s.Require(), fset, file) {
+						dispatched[target]++
+						sets, named := alphabets[sw.method]
+						s.Require().True(named,
+							"%s emits %s:%d, a switch over the string set %v inside method %s, and no query in "+
+								"fixture %s is emitted under that name. This gate grades a method's label "+
+								"dispatch against the edge-union candidates codegen.Prepare derived for the "+
+								"query it belongs to; a method that belongs to no query has no alphabet, so "+
+								"whatever %v are, nothing here can say they are reachable",
+							target, f.Path, sw.line, sw.labels, sw.method, fixture, sw.labels)
+						s.Require().True(slices.ContainsFunc(sets, func(set []string) bool {
+							return slices.Equal(set, sw.labels)
+						}),
+							"%s emits %s:%d, a switch over the string set %v inside method %s, and query %s "+
+								"of fixture %s declares the edge-union candidate sets %v. The emitter writes "+
+								"one case per codegen.EdgeUnion.EdgeKeys entry, so a set matching none of "+
+								"them is one of two defects and both are live: a case no value on that "+
+								"column can carry, which is dead code emitted at exit 0, or a candidate the "+
+								"query admits and the dispatch dropped, which decodes as an \"unexpected "+
+								"relationship type\" error for a type the pattern matched",
+							target, f.Path, sw.line, sw.labels, sw.method, sw.method, fixture, sets)
+					}
+				}
+			}
+		})
+	}
+
+	for _, target := range targets {
+		if edgeUnionDispatchingTargets[target] {
+			s.Require().NotZero(dispatched[target],
+				"%s is recorded as dispatching an edge-union column on the wire label inside the query "+
+					"method, and it emitted no such switch anywhere in the corpus. Either the corpus no "+
+					"longer holds a fixture declaring an edge-union column, or the dispatch moved into a "+
+					"shape this sweep does not read — and either way the guards this gate believes it is "+
+					"grading are not being graded",
+				target)
+			continue
+		}
+		s.Require().Zero(dispatched[target],
+			"%s is recorded as emitting no in-method label dispatch, and it emitted %d over the corpus. "+
+				"Enrol it in edgeUnionDispatchingTargets so its dispatch is held to the candidates its "+
+				"queries declare",
+			target, dispatched[target])
 	}
 }
 
@@ -2238,6 +2376,146 @@ func packageLevelFuncs(fset *token.FileSet, file *ast.File) []emittedFunc {
 			out = append(out, emittedFunc{name: fn.Name.Name, typ: fn.Type, body: fn.Body})
 		}
 		literals(decl)
+	}
+	return out
+}
+
+// labelSwitch is one switch statement an emitted method writes directly in
+// its own body, dispatching on a closed set of string literals.
+type labelSwitch struct {
+	method string
+	line   int
+	labels []string // sorted, and the whole non-default case list
+}
+
+// methodLabelSwitches is every string-literal switch each method of one
+// emitted file writes in its own body, outside any function literal.
+//
+// It reads the half of an emission packageLevelFuncs states it does not:
+// that census yields receiver-less functions and the literals any
+// declaration holds, so a string compared in a method's own body is read
+// by neither, and an unsatisfiable guard written there passed the
+// reachability gate unseen (gqlc-9xy0). The two readers partition the
+// emission on the same line rather than overlapping — this one stops at
+// every *ast.FuncLit, exactly as comparedStrings does, so no switch is
+// read as both a method's and a literal's, and a dispatch a future
+// emitter moved into a closure is refused by the census rather than
+// graded twice here.
+//
+// A "label switch" is decided by what the cases hold and not by what the
+// tag is spelled: every non-default case value must be a string literal,
+// and there must be at least one. That is a description of a guard on a
+// closed alphabet, which is the thing this gate has a verdict about, and
+// it is what separates the edge-union dispatch from the other switches
+// the backends emit — neo4j's `switch access` compares
+// neo4j.AccessModeRead, and AGE's agtype scanners switch over bytes —
+// without keying on `rel.Type`, a spelling the emitter is free to change.
+//
+// AGE's `switch string(raw) { case "true": ... }` is a string-literal
+// switch and is deliberately out of reach here: it is written in
+// agtypeBool, a package-level function, so the decoder census reads it
+// and holds it to wireScalarSpellings. Nothing is read by both.
+//
+// A type switch is a different node (*ast.TypeSwitchStmt) and is not
+// matched, which is correct rather than incidental: its cases name types,
+// so there is no alphabet of the wire's for them to be graded against.
+func methodLabelSwitches(r *require.Assertions, fset *token.FileSet, file *ast.File) []labelSwitch {
+	var out []labelSwitch
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || fn.Body == nil {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			switch node := n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.SwitchStmt:
+				if labels, dispatches := switchedLabels(r, node); dispatches {
+					out = append(out, labelSwitch{
+						method: fn.Name.Name,
+						line:   fset.Position(node.Pos()).Line,
+						labels: labels,
+					})
+				}
+			}
+			return true
+		})
+	}
+	return out
+}
+
+// switchedLabels is the sorted case values of one switch, and whether that
+// switch dispatches on a closed set of strings at all.
+//
+// One non-string case value disqualifies the whole switch rather than
+// being skipped. A switch mixing a label with a computed value is not a
+// guard on a closed alphabet — the alphabet does not bound what it can
+// reach — so grading its string cases against one would be a verdict
+// about a switch this gate cannot read. Refusing to read it is what puts
+// it in front of a person.
+func switchedLabels(r *require.Assertions, stmt *ast.SwitchStmt) ([]string, bool) {
+	var labels []string
+	for _, clause := range stmt.Body.List {
+		cc, ok := clause.(*ast.CaseClause)
+		if !ok {
+			return nil, false
+		}
+		// A nil List is the default clause: it names no value, so it
+		// neither contributes a label nor disqualifies the switch.
+		for _, expr := range cc.List {
+			lit, ok := expr.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return nil, false
+			}
+			text, err := strconv.Unquote(lit.Value)
+			r.NoError(err, "emitted string literal %s does not unquote", lit.Value)
+			labels = append(labels, text)
+		}
+	}
+	if len(labels) == 0 {
+		return nil, false
+	}
+	slices.Sort(labels)
+	return labels, true
+}
+
+// queryEdgeUnionAlphabets is the label set each query's edge-union columns
+// admit, keyed by the method name that query is emitted under.
+//
+// Both the alphabet and the key come off codegen.Prepare rather than off a
+// convention. The emitter writes one case per codegen.EdgeUnion.EdgeKeys
+// entry and names the method p.MethodName (neo4j's
+// writeEdgeUnionDispatchBody and walkListElemBody), so what is compared
+// below is one derivation read two ways: what the backend wrote against
+// what the shared phases said was there.
+//
+// A query with no edge-union column is present with an empty slice, and
+// the distinction is load-bearing in the diagnostic: a label switch in a
+// method no query names is a different finding from one in a query that
+// admits no edge union, and both are different from a set that does not
+// match.
+//
+// A list-of-edgeUnion column is covered by the same map without a second
+// arm. Phase B synthesises an EdgeUnion for the leaf too (prepare.go's
+// ColumnList arm) and the emitter's list walk reads its EdgeKeys, so both
+// emission sites take their cases from an entry of this slice.
+func queryEdgeUnionAlphabets(r *require.Assertions, in codegen.Input) map[string][][]string {
+	prepared, err := codegen.Prepare(in, probeTypeMap{}, "")
+	r.NoError(err, "codegen.Prepare on a fixture the corpus holds valid")
+
+	out := make(map[string][][]string, len(prepared.Queries))
+	for _, q := range prepared.Queries {
+		sets := make([][]string, 0, len(q.EdgeUnions))
+		for _, u := range q.EdgeUnions {
+			labels := make([]string, 0, len(u.EdgeKeys))
+			for _, ek := range u.EdgeKeys {
+				labels = append(labels, string(ek.KeyLabels))
+			}
+			slices.Sort(labels)
+			sets = append(sets, labels)
+		}
+		out[q.MethodName] = sets
 	}
 	return out
 }
