@@ -1118,12 +1118,15 @@ const queryFileSuffix = ".cypher.go"
 // whatever its receiver, and exportedness rather than the receiver is
 // what the filter below applies, so an exported method on a receiver
 // other than *Queries is forced into reservedIdentifiers, where Phase A
-// refuses a query on membership alone. Three are: Commit, Rollback and
-// Queries on *Tx. For Commit and Rollback that reservation is a false
-// refusal — `func (q *Queries) Commit` redeclares nothing — and
-// reservedIdentifiers records why it is kept anyway. The run methods the
-// neo4j targets' db.go declares on driverDB and on txDB are dropped by
-// the filter below for being unexported, not for their receiver.
+// refuses a query on membership alone. Two are, both on *Tx: Commit and
+// Rollback. That is correct rather than tolerated — a query taking one
+// of those names is emitted on the core and promotes into *Tx, where the
+// depth-0 method shadows it silently (spec codegen-tx-embedded-querier.md
+// §5). Redeclaration was never the ground, so the receiver is not what
+// the reservation turns on. TestSweptMethodReceiversEmbedTheQueryCore
+// fences the antecedent that makes this so. The run methods the neo4j
+// targets' db.go declares on driverDB and on txDB are dropped by the
+// filter below for being unexported, not for their receiver.
 //
 // Which side of the partition a file sits on is measured, not only
 // declared. A basename more than one fixture emits, and an exported name
@@ -1232,6 +1235,131 @@ func TestFixedDeclarationSweepEqualsTheReservedSet(t *testing.T) {
 			"no golden this sweep read declares reserved %q, so the file declaring it is classified out of fixedDeclarationFiles and owes nothing here",
 			name)
 	}
+}
+
+// queryCoreType is the unexported struct carrying the emitted query
+// methods. Both exported handles embed it, which is the whole mechanism
+// §5 rests on.
+const queryCoreType = "queries"
+
+// namedType reads the type name out of a receiver or an embedded field,
+// through a pointer and through type parameters. The second result is
+// false for a shape that names no single type, which no emitted receiver
+// is today.
+func namedType(expr ast.Expr) (string, bool) {
+	for {
+		switch e := expr.(type) {
+		case *ast.StarExpr:
+			expr = e.X
+		case *ast.IndexExpr:
+			expr = e.X
+		case *ast.IndexListExpr:
+			expr = e.X
+		case *ast.Ident:
+			return e.Name, true
+		default:
+			return "", false
+		}
+	}
+}
+
+// TestSweptMethodReceiversEmbedTheQueryCore fences the antecedent that
+// makes the sweep above correct.
+//
+// That sweep demands a reservedIdentifiers row for every exported
+// declaration in fixedDeclarationFiles, methods included, whatever the
+// receiver — and Phase A refuses a query on membership alone. The
+// refusal is right only because every receiver carrying an exported
+// fixed method embeds queryCoreType: a user query is emitted on the core
+// and promotes into that receiver's method set, where the fixed method
+// at depth 0 shadows it with no diagnostic (spec
+// codegen-tx-embedded-querier.md §5). An exported method on a receiver
+// that does NOT embed the core promotes nothing and shadows nothing, so
+// the row the sweep would demand for it buys a refusal of a query name
+// that generates fine.
+//
+// Nothing enforced that until this test: the limit was stated in prose
+// and a new receiver type would have arrived as a row someone added
+// rather than a decision someone made (gqlc-tisj).
+//
+// The embedding is read per emitted package directory rather than per
+// file, because the receiver's type declaration and its methods need not
+// share a file. Unexported methods are out of scope for the same reason
+// the sweep skips them — they occupy no name a schema element can
+// derive.
+func TestSweptMethodReceiversEmbedTheQueryCore(t *testing.T) {
+	paths, err := filepath.Glob(goldenCorpusGlob)
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no golden Go under %s, so this fence holds nothing", goldenCorpusGlob)
+
+	// package dir -> type name -> embeds the core.
+	embedsCore := map[string]map[string]bool{}
+	// package dir -> receiver type name -> one exported method it carries.
+	receivers := map[string]map[string]string{}
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		dir := filepath.Dir(path)
+		if embedsCore[dir] == nil {
+			embedsCore[dir] = map[string]bool{}
+			receivers[dir] = map[string]string{}
+		}
+
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				st, ok := ts.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+				for _, f := range st.Fields.List {
+					// An embedded field is the one with no name of its own.
+					if len(f.Names) > 0 {
+						continue
+					}
+					if name, ok := namedType(f.Type); ok && name == queryCoreType {
+						embedsCore[dir][ts.Name.Name] = true
+					}
+				}
+			}
+		}
+
+		if !fixedDeclarationFiles[filepath.Base(path)] {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || len(fn.Recv.List) == 0 || !ast.IsExported(fn.Name.Name) {
+				continue
+			}
+			recv, ok := namedType(fn.Recv.List[0].Type)
+			require.Truef(t, ok,
+				"%s declares exported method %s on a receiver naming no single type, which this fence cannot classify; teach it that shape or the receiver goes unchecked",
+				path, fn.Name.Name)
+			receivers[dir][recv] = fn.Name.Name
+		}
+	}
+
+	checked := 0
+	for _, dir := range slices.Sorted(maps.Keys(receivers)) {
+		for _, recv := range slices.Sorted(maps.Keys(receivers[dir])) {
+			checked++
+			require.Truef(t, embedsCore[dir][recv],
+				"%s declares exported method %s on %s, which does not embed %s. The fixed-declaration sweep will demand a reservedIdentifiers row for %s, and Phase A then refuses any query of that name — but a query emitted on the core neither promotes into %s nor is shadowed by it, so that refusal rejects a name which generates fine. Either %s embeds the core, or %s must be excluded from the sweep rather than reserved",
+				dir, receivers[dir][recv], recv, queryCoreType, receivers[dir][recv], recv, recv, receivers[dir][recv])
+		}
+	}
+	require.NotZero(t, checked,
+		"no golden under %s declares an exported method in a fixedDeclarationFiles file, so this fence excluded nothing; the emitter stopped emitting the fixed method surface, or fixedDeclarationFiles no longer names the file carrying it",
+		goldenCorpusGlob)
 }
 
 // allCapsNameFixture builds a one-node schema, optionally with one edge
