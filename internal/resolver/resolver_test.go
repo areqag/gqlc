@@ -165,9 +165,10 @@ var invalidFixtures = map[string]error{
 	// and left the name check free. This one differs in name only.
 	"union_column_name_only_mismatch.cypher": ErrUnionColumnMismatch,
 	// eb5j. Both name-arm fixtures above mismatch at column 0, so every index
-	// the arm prints is the same digit and the message cannot be read wrong.
-	// Here the branches agree on column 0 and differ on the name of column 1,
-	// which is what makes the printed index a fact with a value to get wrong.
+	// the arm prints is the same digit and no wrong index can show. Here the
+	// branches agree on columns 0 and 1 and differ on the name of column 2 —
+	// two columns of agreement, so the arm has to walk past them, and an index
+	// that matches neither branch 1 nor the 0 the others sit at.
 	"union_column_name_mismatch_nonzero_index.cypher": ErrUnionColumnMismatch,
 	// No fixture had three branches, so comparing only branch 1 against
 	// branch 0 was free.
@@ -619,17 +620,22 @@ var invalidFixtureContains = map[string]string{
 	// constant's own; the phrase is spelled here in full so a change to it has
 	// to be a change someone made on purpose.
 	"union_column_type_mismatch.cypher": `column "x" projects `,
-	// eb5j. The name arm's index, pinned where it has a value that is not 0.
+	// eb5j. The name arm's index, pinned where it has a value to get wrong.
 	// The comparison is positional — other[i] against base[i] — so branch 0's
 	// index can never differ from the one already printed, and the arm used to
-	// restate it: "branch 1 column 1 named "z"; branch 0 column 1 named "y"".
+	// restate it: "branch 1 column 2 named "q"; branch 0 column 2 named "p"".
 	// Two numbers a reader is invited to check against each other and can learn
-	// nothing from. This pins the single-index spelling AND that the index
-	// reported is the mismatching column rather than the 0 both earlier
-	// fixtures happen to sit at. If the comparison ever stops being positional,
-	// the second index becomes a real fact and comes back with the code that
-	// makes it one.
-	"union_column_name_mismatch_nonzero_index.cypher": `branch 1 column 1 named "z"; branch 0 named "y"`,
+	// nothing from.
+	//
+	// The mismatch sits at column 2 of branch 1, so the two numbers in this
+	// message differ. Both other name-arm fixtures mismatch at column 0 of
+	// branch 1, where the column index, branch 0's restated index and the digit
+	// 0 are all the same character — and column 1 of branch 1 would have been
+	// no better, since the column index and the branch index would then agree.
+	// Only a message whose indices disagree can say that the number reported is
+	// the mismatching COLUMN rather than the branch, or the constant a
+	// coincidence made look right.
+	"union_column_name_mismatch_nonzero_index.cypher": `branch 1 column 2 named "q"; branch 0 named "p"`,
 	// h6h7's stays-wide direction. ErrAmbiguousBinding says only that Phase B
 	// declined to pick; this says it declined over BOTH person types, i.e. that
 	// the OPTIONAL hop narrowed nothing. A narrowing that fired here would list

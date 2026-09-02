@@ -20,7 +20,6 @@
 # regenerate: go test ./internal/resolver/ -run '^TestCorpusSweepManifest$' -update -v
 msg	00e5b117fa25	"unknown property: p.age missing on plural-satisfying type Employee&Person"
 msg	0273ae417901	"invalid effect target: DELETE c.x: \"c\" resolves to a projection alias, not an entity binding"
-msg	03c0d3802de8	"unknown property: c.ein"
 msg	049ca579bda7	"unknown edge: Engineer&Person&Staff-[AUTHORED]->Post, Manager&Person&Staff-[AUTHORED]->Post, Person-[AUTHORED]->Post"
 msg	04a7da8d1913	"unknown property: a.nope missing on plural-satisfying type Contractor&Person"
 msg	05424bd2a75e	"unknown property: a.name"
@@ -63,6 +62,7 @@ msg	2c86186736b5	"call argument assignability: procedure \"test.my.proc\" argume
 msg	2da29fcc911f	"ambiguous label: a is satisfied by more than one declared node type: Employee&Person, Person"
 msg	2daa9952f7c1	"part binding type conflict: variable \"r\" carried as edge with labels KNOWS, re-bound with labels LIKES"
 msg	2effa1326783	"unknown property: a.notAProp missing on plural-satisfying type Engineer&Person&Staff"
+msg	304e3272375e	"union column mismatch: branch 1 column 2 named \"q\"; branch 0 named \"p\""
 msg	33664e09e49c	"unknown property: p.name missing on plural-satisfying type Employee&Person"
 msg	361e2b5adcc5	"part binding type conflict: variable \"label\" carried as CALL YIELD scalar, re-bound as plural node"
 msg	365a812a52c6	"unknown property: a.age missing on plural-satisfying type Engineer&Person&Staff"
@@ -173,13 +173,11 @@ msg	a60c64bcbaf6	"unknown edge: Engineer&Person&Staff-[AUTHORED]->Post, Post-[AU
 msg	a631ac8f85cd	"unknown edge: Employee&Person-[FOUNDED]->Company, Company-[FOUNDED]->Employee&Person, Person-[FOUNDED]->Company, Company-[FOUNDED]->Person"
 msg	a6e43d93bc66	"unknown label: cannot infer type of target endpoint of the [:AUTHORED] edge between p and ()"
 msg	a703c5b7dc9c	"union column mismatch: column \"e\" projects edgeUnion {Person-[AUTHORED]->Note, Person-[LIKES]->Note} (not null) in branch 1 but edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null) in branch 0"
-msg	a80d3a5d435d	"union column mismatch: branch 1 column 1 named \"z\"; branch 0 named \"y\""
 msg	a9143e2828ab	"unknown edge: Engineer&Person&Staff-[WORKS_AT]->Company, Manager&Person&Staff-[WORKS_AT]->Company, Person-[WORKS_AT]->Company"
 msg	a93c38ae1de1	"ambiguous label: a is satisfied by more than one declared node type: Contractor&Person, Employee&Person"
 msg	ac99706661a2	"unknown property: property r.views missing on union member Person-[LIKES]->Post"
 msg	acbf57bdf842	"unknown edge: Employee&Person-[WORKS_AT]->Company, Company-[WORKS_AT]->Employee&Person, Employee&Person-[WORKS_AT]->Company&Startup, Company&Startup-[WORKS_AT]->Employee&Person, Person-[WORKS_AT]->Company, Company-[WORKS_AT]->Person, Person-[WORKS_AT]->Company&Startup, Company&Startup-[WORKS_AT]->Person"
 msg	ad27a8cd001f	"unknown label: Book is not declared on any node type"
-msg	af6610838206	"unknown property: c.ein missing on plural-satisfying type Company"
 msg	af8e771c032f	"unknown edge: Person-[REVIEWED]->Company, Company-[REVIEWED]->Person"
 msg	b16590b8e102	"unknown property: a.notAProp"
 msg	b24151cb50e7	"unknown property: p.bOnly missing on plural-satisfying type A&Node"
@@ -4364,42 +4362,42 @@ cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/edg
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownProperty	d37513aa9515
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	af6610838206
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	225d6affd495
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownProperty	03c0d3802de8
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	8bf9d0748b6c
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownProperty	8bf9d0748b6c
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownProperty	8bf9d0748b6c
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownProperty	03c0d3802de8
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownProperty	af6610838206
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownProperty	f04cadef9ae6
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownProperty	8bf9d0748b6c
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	0fad26bace16
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	6734d8cf01f0
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	225d6affd495
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	225d6affd495
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	225d6affd495
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnionColumnMismatch	a80d3a5d435d
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnionColumnMismatch	a80d3a5d435d
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnionColumnMismatch	a80d3a5d435d
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	6734d8cf01f0
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	6734d8cf01f0
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnionColumnMismatch	304e3272375e
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnionColumnMismatch	304e3272375e
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnionColumnMismatch	304e3272375e
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownProperty	03c0d3802de8
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	af6610838206
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownProperty	8bf9d0748b6c
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	8bf9d0748b6c
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownProperty	365a812a52c6
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownProperty	8bf9d0748b6c
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	0fad26bace16
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	225d6affd495
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	6734d8cf01f0
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	225d6affd495
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownProperty	6734d8cf01f0
 cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	225d6affd495
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r5.gql	refuse	ErrUnionColumnMismatch	a80d3a5d435d
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r6.gql	refuse	ErrUnionColumnMismatch	a80d3a5d435d
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r7.gql	refuse	ErrUnionColumnMismatch	a80d3a5d435d
-cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r5.gql	refuse	ErrUnionColumnMismatch	304e3272375e
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r6.gql	refuse	ErrUnionColumnMismatch	304e3272375e
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_r7.gql	refuse	ErrUnionColumnMismatch	304e3272375e
+cell	invalid/union_column_name_mismatch_nonzero_index.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownProperty	6734d8cf01f0
 cell	invalid/union_column_name_only_mismatch.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	05424bd2a75e
 cell	invalid/union_column_name_only_mismatch.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/union_column_name_only_mismatch.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownProperty	d37513aa9515
