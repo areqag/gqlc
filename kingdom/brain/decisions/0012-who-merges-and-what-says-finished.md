@@ -173,9 +173,21 @@ inherited from the design.
 - `gh api repos/areqag/gqlc/branches/master/protection` → required contexts
   `lint, test, tidy, actionlint, govulncheck, live-smoke, codegen-fence`;
   `strict: false`; `enforce_admins: true`. These seven are what an armed merge
-  waits for. (Ruleset 18407856 requires five of the seven — ADR 0010's known
-  drift; enforcement is the union, so seven binds, and nothing here needs
-  changing.)
+  waits for.
+- `gh api repos/areqag/gqlc/rulesets/18407856` → the same seven contexts,
+  `enforcement: active`, `updated_at 2026-08-29T20:53:49-04:00`. The two
+  sources agree; there is no union to take. **This line is a correction.** Round
+  1 of this PR's review (bd `gqlc-nj9ub`) found the sentence that stood here —
+  that the ruleset required five of the seven, ADR 0010's known drift — and
+  falsified it by running the command above. It was the one premise in this
+  block I inherited rather than re-ran, under a heading that says all of them
+  were re-run, and the drift it described had been closed three days before the
+  design was written. ADR 0010 is not wrong: it measured on 2026-08-29 and says
+  so, and consolidating the ruleset was its own prerequisite. It is simply no
+  longer current, and this ADR restated it as if it were.
+  Nothing downstream moves — seven bound before and seven bind now — which is
+  why the finding is about the provenance of a measurement rather than about
+  the decision it supports.
 - Article V.2 read directly before the edit: both merge sentences state when,
   neither names an agent. Hole 1 confirmed against the text itself.
 - PR #2066: `createdAt 2026-08-30T14:39:14Z`, `mergedAt 2026-09-02T15:21:52Z`.
