@@ -4,7 +4,10 @@ The ruling for **gqlc-f45qn** ("can the resolver upgrade a rich projection's
 `TypeUnknown` from the schema at all, given `ExprProjection` carries no
 expression tree") and the implementation brief for its execution bead
 **gqlc-t0bk** ("`collect([p.id, p.age])` is `[][]any`"). Every file:line in
-this document was read on master `1c31c10a`.
+this document was read on master `1c31c10a` and re-verified at this branch's
+base `23a30399` (the delta between the two touches `resolve.go` only, in two
+additive hunks above the cited lines; every other cited file is byte-identical
+across the pair).
 
 The shape of the problem, before any file path: a property's declared type is
 knowable at exactly the point the model discards it. `RETURN p.id` types from
@@ -12,7 +15,7 @@ the schema because `RefProjection` reaches a schema-aware resolver arm;
 `RETURN [p.id, p.age]` and `collect(p.id)` do not, because `ExprProjection`
 and `AggregateProjection` carry only a result type and a flat `[]Ref`, and the
 resolver maps that result type through `resolveType`
-(`internal/resolver/resolve.go:1725`), which takes no schema. ADR 0003's
+(`internal/resolver/resolve.go:1751`), which takes no schema. ADR 0003's
 Stage-6 sentence — "the resolver upgrades these from the schema" — is true
 for a bare `var.prop` and structurally false for every rich expression. This
 ruling makes it true for the one class of rich expression where it can be made
@@ -165,7 +168,7 @@ before the existing `resolveType(pp.Type())` fallthrough:
 schema resolution now **refuses** where it was silently accepted as `[]any`.
 `RETURN [p.nosuch]` today resolves (the `ExprProjection` arm never looks at
 refs — verified: the only resolver `Refs()` walk is the effects path,
-`resolve.go:2264-2266`, which skips); after this change it refuses
+`resolve.go:2290-2292`, which skips); after this change it refuses
 `ErrUnknownProperty: p.nosuch`, exactly as bare `RETURN p.nosuch` already
 does. Same for the plural-candidate intersection miss. This is the
 "rejects anything the schema does not support" posture of ADR 0003 applied
