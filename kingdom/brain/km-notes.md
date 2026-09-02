@@ -852,9 +852,40 @@ judgement about which way to be wrong, not a measurement (gqlc-p7l0u).
 
 (`kingdom/bin/km`, `seat_pane_idle`)
 
-Idle == herdr's report says the seat is at an empty prompt. km does no pane
-scraping of its own: no reconciling "esc to interrupt" strings, no false-idle
-on a mid-tool-call.
+Idle == herdr's report says the seat is at an empty prompt, AND no work is
+running there. km still does no pane scraping of its own: no reconciling "esc to
+interrupt" strings, no false-idle on a mid-tool-call. The second half is a
+process-table witness, `seat_work_running`, not a read of the screen.
+
+THE SECOND WITNESS, and why the enum alone was not enough (bd gqlc-y8puo). A
+seat whose turn ended with a BACKGROUND shell still running reads `done`: herdr
+derives its state from the screen and cannot see the shell, while Claude Code
+re-invokes the agent the moment the shell finishes. So the most careful work in
+the town — a long mutation battery parked in the background — was the work most
+likely to read as a dead seat, and the ladder's remedy is `km sleep`, which ends
+the session. Priced on what can be DESTROYED rather than what is held up.
+
+The bead's own stated mechanism was wrong and is worth not re-deriving: it said
+a LONG shell reads idle. It does not. Measured 2026-09-02 by sampling
+`km seat-idle` ten times at 3s intervals from inside a single 30s FOREGROUND
+call — not-idle on all ten. Foreground work is `working` throughout. Only the
+background case reaches `done`.
+
+Why the process table and not the pane's "N shell still running" line: that line
+is Claude Code chrome and moves with its version. A claude process AT REST HAS
+NO CHILDREN, which is what makes the witness discriminate rather than exempt
+everyone — measured across the live town the same day, five seats held a live
+claude with zero children (stable across repeated samples) while six held
+children, and the one seat the bead was filed on held Claude Code's own
+`bash -c source .../shell-snapshots/...`.
+
+A DEAD SEAT IS STILL REACHED, which is the property that keeps the ladder alive:
+when a session is killed its children are reparented to init and the pid this
+looks under is gone, so a seat that has genuinely stopped answers "no work" and
+stays in the idle population. Verified by blinding the enum arm so `seat-idle`
+reported the witness alone: five childless seats answered IDLE, six with
+children answered not-idle. A witness that answered not-idle for everyone would
+have silenced the ladder town-wide and is exactly what that screen was for.
 
 BOTH `idle` AND `done` MEAN THAT, and taking only `idle` made this predicate
 blind to the steady state (bd gqlc-ymbw0). Measured 2026-08-30 against the
