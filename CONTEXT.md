@@ -559,6 +559,19 @@ that runs after parsing; the parser is schema-agnostic and never produces a
 validated query on its own. Once it passes, every query in the application is
 valid or the application halts.
 
+**Wrong-orientation drop**:
+A relationship type a pattern names that the schema declares only with its two
+ends the other way round, so endpoint narrowing drops it from that edge's
+candidate set. `(:Person)-[r:AUTHORED|REPORTED]->(:Post)` against a schema
+declaring `(:Post)-[:REPORTED]->(:Person)` is one: REPORTED cannot match the
+arrow as drawn. The generated code is well-typed either way — no decoder arm is
+emitted for the dropped type — but the query text still asks the server for it,
+so the author matches less than they believe. Warned about, not refused
+(ADR 0038), and only when the type survives on no other edge in the query; the
+broader class of *any* declared-but-dropped type is ordinary narrowing (ADR 0022)
+and stays silent. Distinct from the **undeclared relationship type** of ADR 0032,
+which is declared nowhere at all.
+
 ## Generation language
 
 **Config file**:

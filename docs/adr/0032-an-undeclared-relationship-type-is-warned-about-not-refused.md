@@ -78,8 +78,17 @@ would fire constantly and bury the signal this exists for. `gqlc-he8v` records
 the endpoint-narrowing question as a separate one, deliberately not answered
 here.
 
-`TestEndpointNarrowedButDeclaredTypeIsSilent` is the row that holds the line:
-broadening the test to candidate-set membership turns it red.
+ADR 0038 has since answered it, and moved this boundary a little: the narrowed
+case is still not this detector's, but a drop whose type is declared ONLY in the
+reversed orientation — and which survives nowhere else in the query — now warns
+in a second lane. The broad "not in the candidate set" test stated above remains
+rejected, by argument here and by measurement there.
+
+`TestWrongOrientationDropIsWarnedAbout` is the row that holds the line, and it
+replaced `TestEndpointNarrowedButDeclaredTypeIsSilent` when the boundary moved.
+Broadening THIS detector to candidate-set membership still turns it red, because
+it asserts the drop is reported by the wrong-orientation producer and not by this
+one.
 
 ### Why warnings are not diagnostics
 
@@ -88,10 +97,13 @@ discards every target's batch (§6.2) and fails the run. A warning routed there
 would refuse the compile, which is the decision this ADR declines to make. So
 `Warnings` is a second, parallel lane rather than a severity on the first.
 
-It is deliberately small. There is no severity enum, no source position, no
-suppression flag and no second producer — one lane of strings, one producer, one
-consumer. A general diagnostics framework can be built when there is a second
-caller to generalise over.
+It is deliberately small. There is no severity enum, no source position and no
+suppression flag. A general diagnostics framework can be built when there is a
+second caller to generalise over.
+
+At this ADR the lane was one lane of strings with one producer. ADR 0038 added
+the second, and the ruling below fired: the lane is now `[]Warning` where
+`Warning` is `{Producer, Text string}`, and no larger.
 
 Two properties of the lane that are asserted rather than assumed:
 
