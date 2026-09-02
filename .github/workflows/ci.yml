@@ -176,8 +176,15 @@ jobs:
       #
       # Unconditional, unlike most steps below: it reads the tree, so it needs no
       # PR to exist and it also holds on a master push. The enrolled series are
-      # spelled here and in the `gates` recipe; see the checker's docstring for
-      # why kingdom/brain/postmortems is deliberately absent.
+      # spelled here, in the `gates` recipe and in ordinal-recheck.yml; see the
+      # checker's docstring for why kingdom/brain/postmortems is deliberately
+      # absent.
+      #
+      # On a pull_request the tree this reads is the merge ref, which GitHub
+      # assembled at the author's last push — so it is blind to a collision that
+      # arrives from the OTHER side, master taking the ordinal while the PR sits
+      # still. That half is ordinal-recheck.yml, which re-asks on every master
+      # push and posts the answer onto each open PR's head SHA (bd gqlc-4plwf).
       - name: no two documents claim one ordinal
         run: python3 .github/scripts/check-doc-ordinals.py docs/adr kingdom/brain/decisions
       # Both series above share every number from 0001 to 0014, so a bare

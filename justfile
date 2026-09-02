@@ -2428,16 +2428,21 @@ gates:
     run tidy           just tidy-check
     run tidy           just bd-export-monotonic-local
     run tidy           python3 .github/scripts/check-label-lengths.py .beads/issues.jsonl
-    # The enrolled series are listed HERE and in ci.yml rather than defaulted
-    # inside the checker: "is this an ordinal series" is a fact about the
-    # directory, not one the script can infer, and a default would let a new
-    # series be added with nobody deciding it should be covered. Both lists must
-    # move together; the checker names them when it refuses.
+    # The enrolled series are listed HERE, in ci.yml and in ordinal-recheck.yml
+    # rather than defaulted inside the checker: "is this an ordinal series" is a
+    # fact about the directory, not one the script can infer, and a default
+    # would let a new series be added with nobody deciding it should be covered.
+    # All three lists must move together; the checker names them when it refuses.
     run tidy           python3 .github/scripts/check-doc-ordinals.py docs/adr kingdom/brain/decisions
     # Enrolled directory listed HERE and in ci.yml, same reasoning as the
     # ordinal check above: which trees reserve the bare "ADR NNNN" form for
     # docs/adr is a convention decision, not one the script can infer.
     run tidy           python3 .github/scripts/check-adr-citations.py kingdom
+    # The moved-base half's decision core (bd gqlc-4plwf). Its own rows, not a
+    # scan of the tree — the network path cannot run here, and it is the LOGIC
+    # that would otherwise be exercised by nothing until a real collision. This
+    # repository has no Python test runner, so this is where those rows live.
+    run tidy           python3 .github/scripts/check-open-pr-ordinals.py --self-test
     run govulncheck    just vuln
 
     # Refuse BEFORE the summary, not after: the summary is a coverage claim, and
