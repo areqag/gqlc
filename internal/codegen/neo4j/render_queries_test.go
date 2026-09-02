@@ -99,3 +99,57 @@ func TestParamBindExprTemporalLists(t *testing.T) {
 		})
 	}
 }
+
+// TestParamBindExprUnsignedWidthsReachTheDriverUnconverted pins the bind
+// expression for every integer width, and exists for the two rows that
+// change: uint64 and uint.
+//
+// The driver already refuses a uint64 the signed wire cannot hold.
+// packX and packV both route `case reflect.Uint64, reflect.Uint` to
+// packer.Uint64, which opens with checkOverflowInt — `if i >
+// math.MaxInt64` sets an OverflowError, and outgoing.end hands that to
+// onPackErr, which fails the connection rather than sending. Read at
+// v5.28.4 (packstream/packer.go:93-96, 260-264; bolt/outgoing.go:377-378,
+// 481-482) and identical at v6.2.0.
+//
+// So the defect was never a missing guard. Emitting int64(arg) performed
+// the wrap in OUR code and handed the driver an already-negative int64,
+// where a check that only inspects the uint64 entry point cannot see it —
+// gqlc disarmed a refusal the driver was offering. The nullable and list
+// arms never had the bug precisely BECAUSE they bind bare, so binding
+// bare here makes the three arms agree instead of adding a fourth
+// mechanism (bd gqlc-tzjqu).
+//
+// The narrower unsigned widths keep the conversion. Every value of
+// uint8, uint16 and uint32 fits int64, so their widen cannot lose one
+// and there is nothing for a check to catch; changing them would churn
+// goldens to fix nothing.
+func TestParamBindExprUnsignedWidthsReachTheDriverUnconverted(t *testing.T) {
+	tests := []struct {
+		name   string
+		goType string
+		want   string
+	}{
+		// The two widths whose range is not a subset of int64's.
+		{"uint64", "uint64", "arg"},
+		{"uint", "uint", "arg"},
+
+		// Unchanged: each of these always fits the carrier.
+		{"uint8", "uint8", "int64(arg)"},
+		{"uint16", "uint16", "int64(arg)"},
+		{"uint32", "uint32", "int64(arg)"},
+		{"int8", "int8", "int64(arg)"},
+		{"int16", "int16", "int64(arg)"},
+		{"int32", "int32", "int64(arg)"},
+		{"int", "int", "int64(arg)"},
+
+		// Its own carrier, so it is assigned bare at the call site.
+		{"int64", "int64", "arg"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := codegen.Param{RawName: "p", Field: "P", GoType: tt.goType}
+			require.Equal(t, tt.want, neo4j.ParamBindExpr(f, "arg"))
+		})
+	}
+}
