@@ -125,6 +125,30 @@ func agtypeInt64(raw []byte) (int64, error) {
 	return out, nil
 }
 
+// agtypeIntAs decodes an agtype integer into a width narrower than the
+// int64 scalar it rides in, refusing a stored value that width cannot
+// hold rather than wrapping it.
+//
+// Two clauses, and both are load-bearing. The round-trip catches every
+// width whose range is a strict subset of int64's. It cannot catch
+// uint64, where the conversion is a bijection and int64(uint64(-1)) is
+// -1 again; there the sign comparison is the whole of the check. A
+// UINT64 property's readable set is therefore [0, MaxInt64], since
+// agtype's integer scalar is signed 64-bit and a larger value is
+// unstorable rather than unreadable.
+func agtypeIntAs[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](raw []byte) (T, error) {
+	v, err := agtypeInt64(raw)
+	if err != nil {
+		return 0, err
+	}
+	out := T(v)
+	if int64(out) != v || (out < T(0)) != (v < 0) {
+		return 0, fmt.Errorf("gqlc: value %d does not fit the declared %T width", v, out)
+	}
+	return out, nil
+}
+
 // agtypeSpan reports where the value at the front of b ends: the offset
 // of the first stop byte outside any nested structure, or len(b) when
 // there is none. A string, a nested map and a nested list are each
@@ -271,10 +295,7 @@ func agtypeListOfBool(raw []byte) ([]bool, error) {
 
 // agtypeListOfInt32 decodes an agtype list of int32 elements.
 func agtypeListOfInt32(raw []byte) ([]int32, error) {
-	return agtypeList(raw, func(elem []byte) (int32, error) {
-		out, err := agtypeInt64(elem)
-		return int32(out), err
-	})
+	return agtypeList(raw, agtypeIntAs[int32])
 }
 
 // agtypeListOfString decodes an agtype list of string elements.

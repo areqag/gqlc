@@ -104,10 +104,20 @@ func carriesZone(goType string) bool {
 // four are in every emission this package can produce. A field standing
 // for a condition that cannot be false would report nothing.
 type helpers struct {
-	args     bool // agtypeArgs — some query binds at least one parameter
-	boolean  bool
-	integer  bool
-	float    bool
+	args    bool // agtypeArgs — some query binds at least one parameter
+	boolean bool
+	integer bool
+	float   bool
+
+	// The checked narrowings, each emitted only where a width narrower
+	// than its carrier decodes. They are separate marks rather than one,
+	// because an emission that declares only integer widths would
+	// otherwise carry agtypeFloat32 and the math import it alone names,
+	// and an unexported function nothing calls fails the golden lint
+	// fence (bd gqlc-awtb).
+	intAs       bool // agtypeIntAs — an integer width narrower than int64 decodes
+	narrowFloat bool // agtypeFloat32 — a FLOAT32 decodes
+
 	list     bool // agtypeList — something decodes an agtype list
 	value    bool // agtypeValue / agtypeMap — something decodes a value of no declared shape
 	prop     bool // agtypeProperty — some entity declares a non-nullable property
@@ -254,9 +264,12 @@ func (h *helpers) forParams(params []codegen.Param) {
 }
 
 // need marks the helper one emitted Go type decodes through. Narrow
-// integer and float widths ride the wide carrier and narrow through a Go
-// conversion at the call site, so they mark the same helper their
-// carrier does. A slice marks the generic list walk plus a named wrapper
+// integer and float widths ride the wide carrier, so they mark their
+// carrier's helper AND the checked narrowing built on it — the
+// narrowing is where the declared width is enforced, and it is a helper
+// of its own rather than a conversion at the call site so that no
+// emission site can reach the width without the check (ADR 0036).
+// A slice marks the generic list walk plus a named wrapper
 // of its own, and recurses so the element's helper is marked too; a Go
 // type of no declared shape marks the agtype value vocabulary.
 func (h *helpers) need(goType string) {
@@ -277,8 +290,14 @@ func (h *helpers) need(goType string) {
 		h.boolean = true
 	case "int64":
 		h.integer = true
+		if goType != "int64" {
+			h.intAs = true
+		}
 	case "float64":
 		h.float = true
+		if goType != "float64" {
+			h.narrowFloat = true
+		}
 	case goInstant:
 		// The instant rides the integer scalar, so its helper is built
 		// on the integer one.
@@ -388,6 +407,11 @@ func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	b.WriteString("\t\"bytes\"\n")
 	b.WriteString("\t\"encoding/json\"\n")
 	b.WriteString("\t\"fmt\"\n")
+	// agtypeFloat32 is the only thing here that names math, so the import
+	// gates on it alone rather than on any narrowing.
+	if h.narrowFloat {
+		b.WriteString("\t\"math\"\n")
+	}
 	if h.integer || h.float {
 		b.WriteString("\t\"strconv\"\n\t\"strings\"\n")
 	}
@@ -469,6 +493,33 @@ func agtypeInt64(raw []byte) (int64, error) {
 }
 `)
 	}
+	if h.intAs {
+		b.WriteString(`
+// agtypeIntAs decodes an agtype integer into a width narrower than the
+// int64 scalar it rides in, refusing a stored value that width cannot
+// hold rather than wrapping it.
+//
+// Two clauses, and both are load-bearing. The round-trip catches every
+// width whose range is a strict subset of int64's. It cannot catch
+// uint64, where the conversion is a bijection and int64(uint64(-1)) is
+// -1 again; there the sign comparison is the whole of the check. A
+// UINT64 property's readable set is therefore [0, MaxInt64], since
+// agtype's integer scalar is signed 64-bit and a larger value is
+// unstorable rather than unreadable.
+func agtypeIntAs[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](raw []byte) (T, error) {
+	v, err := agtypeInt64(raw)
+	if err != nil {
+		return 0, err
+	}
+	out := T(v)
+	if int64(out) != v || (out < T(0)) != (v < 0) {
+		return 0, fmt.Errorf("gqlc: value %d does not fit the declared %T width", v, out)
+	}
+	return out, nil
+}
+`)
+	}
 	if h.float {
 		b.WriteString(`
 // agtypeFloat64 decodes an agtype float scalar. The float parser reads
@@ -481,6 +532,31 @@ func agtypeFloat64(raw []byte) (float64, error) {
 	out, err := strconv.ParseFloat(strings.TrimSuffix(string(raw), "::numeric"), 64)
 	if err != nil {
 		return 0, fmt.Errorf("gqlc: %q is not an agtype float: %w", raw, err)
+	}
+	return out, nil
+}
+`)
+	}
+	if h.narrowFloat {
+		b.WriteString(`
+// agtypeFloat32 decodes an agtype float into the narrower width,
+// refusing a value that overflows to an infinity the stored value did
+// not hold.
+//
+// Precision loss is NOT refused: FLOAT32 is approximate and every
+// in-range float64 rounds to reach it. The test is the invented infinity
+// rather than a comparison against math.MaxFloat32, because a float64
+// strictly greater than MaxFloat32 can still round DOWN to it — that
+// value is representable and a magnitude test would refuse it. An
+// infinity or a NaN the store already held passes through unchanged.
+func agtypeFloat32(raw []byte) (float32, error) {
+	v, err := agtypeFloat64(raw)
+	if err != nil {
+		return 0, err
+	}
+	out := float32(v)
+	if math.IsInf(float64(out), 0) && !math.IsInf(v, 0) {
+		return 0, fmt.Errorf("gqlc: value %g does not fit the declared float32 width", v)
 	}
 	return out, nil
 }
@@ -1265,16 +1341,12 @@ func writeListHelper(b *strings.Builder, goType string) {
 	fmt.Fprintf(b, "\treturn agtypeList(raw, %s)\n}\n", elemDecoder(elem))
 }
 
-// elemDecoder is the decode function one list element goes through. A
-// width narrower than the agtype scalar it rides in has no helper of its
-// own, so it takes a conversion wrapped around its carrier's — the same
-// narrowing an entity field does, done per element.
+// elemDecoder is the decode function one list element goes through.
+// Every width has a helper of its own now that a narrow one decodes
+// through the checked narrowing, so there is no wrapping closure left:
+// this is decodeFunc under a name that says where it is used.
 func elemDecoder(elem string) string {
-	if agtypeCarrier(elem) == elem {
-		return decodeFunc(elem)
-	}
-	return fmt.Sprintf("func(elem []byte) (%s, error) {\n\t\tout, err := %s(elem)\n\t\treturn %s(out), err\n\t}",
-		elem, decodeFunc(elem), elem)
+	return decodeFunc(elem)
 }
 
 // writeEntities emits the schema's entity surface: one exported struct
@@ -1342,12 +1414,12 @@ func writeEntityDecoder(b *strings.Builder, e wiredEntity) {
 }
 
 // writeEntityFieldDecode emits the read of the property at index i. A
-// width narrower than the agtype scalar it rides in converts at the field,
-// so the struct carries the width the schema declared and not the
-// carrier's.
+// width narrower than the agtype scalar it rides in is produced by the
+// decoder itself rather than converted here, so the struct carries the
+// width the schema declared and a value that width cannot hold fails the
+// read instead of wrapping (ADR 0036).
 func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField) {
 	value := valueName(i)
-	carrier := agtypeCarrier(f.GoType)
 	reader := "agtypeProperty"
 	if f.Nullable {
 		reader = "agtypeNullableProperty"
@@ -1366,15 +1438,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		writeZoning(b, e, i, f, sidecar, zoner)
 		return
 	}
-	switch {
-	case carrier == f.GoType:
-		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
-	case f.Nullable:
-		fmt.Fprintf(b, "\tif %s != nil {\n\t\tnarrowed := %s(*%s)\n\t\tout.%s = &narrowed\n\t}\n",
-			value, f.GoType, value, f.Field)
-	default:
-		fmt.Fprintf(b, "\tout.%s = %s(%s)\n", f.Field, f.GoType, value)
-	}
+	fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
 }
 
 // writeZoning emits the read of one zoned property's offset sidecar and

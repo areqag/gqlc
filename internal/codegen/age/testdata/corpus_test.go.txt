@@ -237,8 +237,8 @@ func TestAgtypeFloat64(t *testing.T) {
 // not the schema's or the author's, and a null property arrives as no key
 // at all rather than as a key holding null.
 const (
-	alice  = `{"id": 844424930131969, "label": "Person", "properties": {"id": 1, "rank": 3, "name": "Alice", "score": 9.5, "active": true}}::vertex`
-	bob    = `{"id": 844424930131970, "label": "Person", "properties": {"id": 2, "rank": 4, "name": "Bob", "score": 1.0, "weight": 0.5, "active": false, "middleName": "Q"}}::vertex`
+	alice  = `{"id": 844424930131969, "label": "Person", "properties": {"id": 1, "rank": 3, "tally": 7, "name": "Alice", "score": 9.5, "active": true}}::vertex`
+	bob    = `{"id": 844424930131970, "label": "Person", "properties": {"id": 2, "rank": 4, "tally": 8, "name": "Bob", "score": 1.0, "weight": 0.5, "active": false, "middleName": "Q"}}::vertex`
 	marker = `{"id": 1407374883553281, "label": "Marker", "properties": {}}::vertex`
 	actedIn = `{"id": 1125899906842625, "label": "ACTED_IN", "end_id": 844424930131970, "start_id": 844424930131969, "properties": {"since": 2019}}::edge`
 
@@ -255,7 +255,7 @@ func TestDecodeVertex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodePerson(alice) = error %v", err)
 	}
-	want := Person{Active: true, Id: 1, Name: "Alice", Rank: 3, Score: 9.5}
+	want := Person{Active: true, Id: 1, Name: "Alice", Rank: 3, Score: 9.5, Tally: 7}
 	if got != want {
 		t.Errorf("decodePerson(alice) = %+v, want %+v", got, want)
 	}
@@ -286,6 +286,167 @@ func TestDecodeVertexReadsNullableProperties(t *testing.T) {
 	}
 	if got.Rank != 4 {
 		t.Errorf("decodePerson(bob).Rank = %d, want 4", got.Rank)
+	}
+}
+
+// A stored value the declared width cannot hold fails the read. It used
+// to wrap: the decoder took the agtype carrier and converted at the
+// field, so a rank of 1<<40 reached the caller as 0 and a tally written
+// from a negative carrier as 18446744073709551615 (bd gqlc-awtb,
+// ADR 0036).
+//
+// The error text is asserted in full rather than merely for presence,
+// because this fixture already has a way for every one of these rows to
+// fail for another reason: a value out of the carrier's own range, or a
+// property missing from the vertex, fails inside agtypeInt64 and would
+// satisfy a bare `err != nil`.
+func TestDecodeVertexRefusesAValueTheDeclaredWidthCannotHold(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			// Above int32 by a wide margin, so the round-trip clause
+			// refuses it whatever the sign clause does.
+			name: "int32 above range",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": 1099511627776, "tally": 7, "name": "P", "score": 9.5, "active": true}}::vertex`,
+			want: "decode Person.Rank: gqlc: value 1099511627776 does not fit the declared int32 width",
+		},
+		{
+			name: "int32 below range",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": -1099511627776, "tally": 7, "name": "P", "score": 9.5, "active": true}}::vertex`,
+			want: "decode Person.Rank: gqlc: value -1099511627776 does not fit the declared int32 width",
+		},
+		{
+			// THE SIGN CLAUSE'S ONLY WITNESS. uint64(-1) round-trips
+			// back to -1 exactly, so int64(T(v)) == v holds and the
+			// round-trip clause sees nothing wrong. Only comparing the
+			// signs refuses it. A mutation that deletes the sign clause
+			// must kill this row and no other.
+			name: "uint64 from a negative carrier",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": 3, "tally": -1, "name": "P", "score": 9.5, "active": true}}::vertex`,
+			want: "decode Person.Tally: gqlc: value -1 does not fit the declared uint64 width",
+		},
+		{
+			// float64's maximum overflows float32 to +Inf, and the
+			// carrier held no infinity, so the conversion invented one.
+			// This row also reaches the nullable arm, which composes the
+			// check through agtypeNullableProperty rather than beside it.
+			name: "float32 overflows to an infinity",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": 3, "tally": 7, "name": "P", "score": 9.5, "active": true, "weight": 1.7976931348623157e+308}}::vertex`,
+			want: "decode Person.Weight: gqlc: value 1.7976931348623157e+308 does not fit the declared float32 width",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := decodePerson([]byte(tc.raw))
+			if err == nil {
+				t.Fatalf("decodePerson(%s) = %+v, want a refusal", tc.name, got)
+			}
+			if msg := err.Error(); msg != tc.want {
+				t.Errorf("decodePerson(%s) = %q, want %q", tc.name, msg, tc.want)
+			}
+		})
+	}
+}
+
+// The other side of the same check: a value the declared width DOES hold
+// reaches the caller unchanged. Without these rows a decoder that refused
+// every narrow value would satisfy the refusals above, and the boundary
+// rows are where a check written one comparison too tight shows up.
+func TestDecodeVertexAcceptsWhatTheDeclaredWidthHolds(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		raw   string
+		check func(*testing.T, Person)
+	}{
+		{
+			name: "int32 at its maximum",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": 2147483647, "tally": 7, "name": "P", "score": 9.5, "active": true}}::vertex`,
+			check: func(t *testing.T, got Person) {
+				if got.Rank != 2147483647 {
+					t.Errorf("Rank = %d, want 2147483647", got.Rank)
+				}
+			},
+		},
+		{
+			name: "int32 at its minimum",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": -2147483648, "tally": 7, "name": "P", "score": 9.5, "active": true}}::vertex`,
+			check: func(t *testing.T, got Person) {
+				if got.Rank != -2147483648 {
+					t.Errorf("Rank = %d, want -2147483648", got.Rank)
+				}
+			},
+		},
+		{
+			// MaxInt64 is the largest value a uint64 property can be
+			// read back as: agtype's integer scalar is signed 64-bit,
+			// so a larger one is unstorable rather than unreadable.
+			name: "uint64 at the largest readable value",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": 3, "tally": 9223372036854775807, "name": "P", "score": 9.5, "active": true}}::vertex`,
+			check: func(t *testing.T, got Person) {
+				if got.Tally != 9223372036854775807 {
+					t.Errorf("Tally = %d, want 9223372036854775807", got.Tally)
+				}
+			},
+		},
+		{
+			name: "float32 at its maximum",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": 3, "tally": 7, "name": "P", "score": 9.5, "active": true, "weight": 3.4028234663852886e+38}}::vertex`,
+			check: func(t *testing.T, got Person) {
+				if got.Weight == nil || *got.Weight != math.MaxFloat32 {
+					t.Errorf("Weight = %#v, want MaxFloat32", got.Weight)
+				}
+			},
+		},
+		{
+			// THE SPELLING PIN. This float64 is strictly greater than
+			// MaxFloat32 and yet converts to exactly MaxFloat32, because
+			// it lies below the rounding boundary. A check written as
+			// `v > math.MaxFloat32` refuses it; the IsInf composite the
+			// design prescribes lets it through. The row fails in the
+			// PASS direction, which is the only direction that can
+			// distinguish the two spellings.
+			name: "float32 just above its maximum, which rounds down",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": 3, "tally": 7, "name": "P", "score": 9.5, "active": true, "weight": 3.402823466385289e+38}}::vertex`,
+			check: func(t *testing.T, got Person) {
+				if got.Weight == nil || *got.Weight != math.MaxFloat32 {
+					t.Errorf("Weight = %#v, want MaxFloat32 — this value rounds down, it does not overflow", got.Weight)
+				}
+			},
+		},
+		{
+			// Precision loss is not an overflow and is not refused:
+			// FLOAT32 is approximate and every in-range float64 rounds.
+			name: "float32 losing precision in range",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": 3, "tally": 7, "name": "P", "score": 9.5, "active": true, "weight": 0.1}}::vertex`,
+			check: func(t *testing.T, got Person) {
+				if got.Weight == nil || *got.Weight != float32(0.1) {
+					t.Errorf("Weight = %#v, want float32(0.1)", got.Weight)
+				}
+			},
+		},
+		{
+			// An infinity the carrier already held is passed through
+			// rather than refused: the conversion invented nothing.
+			// Infinity is agtype's own spelling, which is why the float
+			// helper parses rather than unmarshals.
+			name: "float32 from a carrier that was already infinite",
+			raw:  `{"id": 844424930131972, "label": "Person", "properties": {"id": 1, "rank": 3, "tally": 7, "name": "P", "score": 9.5, "active": true, "weight": Infinity}}::vertex`,
+			check: func(t *testing.T, got Person) {
+				if got.Weight == nil || !math.IsInf(float64(*got.Weight), 1) {
+					t.Errorf("Weight = %#v, want +Inf", got.Weight)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := decodePerson([]byte(tc.raw))
+			if err != nil {
+				t.Fatalf("decodePerson(%s) = error %v, want the value through", tc.name, err)
+			}
+			tc.check(t, got)
+		})
 	}
 }
 
@@ -453,6 +614,43 @@ func TestAgtypeListOfNarrowElementWidth(t *testing.T) {
 	}
 	if !slicesEqual(depths, []float32{0.5, 1.5}) {
 		t.Errorf("agtypeListOfFloat32([0.5, 1.5]) = %#v", depths)
+	}
+}
+
+// The list element path, which narrows in a third place: the wrapper's
+// element decoder, not the entity field and not a column. Both numeric
+// widths are covered because the element decoder is picked per element
+// type, so the integer and the float reach it through different arms.
+//
+// The element index is asserted with the text, since a walk that refuses
+// the right value at the wrong index is a walk that lost its place.
+func TestAgtypeListRefusesAnOutOfRangeElement(t *testing.T) {
+	got, err := agtypeListOfInt32([]byte(`[1, 1099511627776]`))
+	if err == nil {
+		t.Fatalf("agtypeListOfInt32([1, 1099511627776]) = %#v, want a refusal", got)
+	}
+	want := `gqlc: element 1 of "[1, 1099511627776]": gqlc: value 1099511627776 does not fit the declared int32 width`
+	if msg := err.Error(); msg != want {
+		t.Errorf("agtypeListOfInt32(out of range) = %q, want %q", msg, want)
+	}
+
+	depths, err := agtypeListOfFloat32([]byte(`[0.5, 1.7976931348623157e+308]`))
+	if err == nil {
+		t.Fatalf("agtypeListOfFloat32([0.5, MaxFloat64]) = %#v, want a refusal", depths)
+	}
+	want = `gqlc: element 1 of "[0.5, 1.7976931348623157e+308]": gqlc: value 1.7976931348623157e+308 does not fit the declared float32 width`
+	if msg := err.Error(); msg != want {
+		t.Errorf("agtypeListOfFloat32(out of range) = %q, want %q", msg, want)
+	}
+
+	// The same widths at their boundaries still decode: a walk that
+	// refused every narrow element would satisfy the two rows above.
+	ranks, err := agtypeListOfInt32([]byte(`[-2147483648, 2147483647]`))
+	if err != nil {
+		t.Fatalf("agtypeListOfInt32(boundaries) = error %v", err)
+	}
+	if !slicesEqual(ranks, []int32{-2147483648, 2147483647}) {
+		t.Errorf("agtypeListOfInt32(boundaries) = %#v", ranks)
 	}
 }
 
