@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -85,6 +86,30 @@ func agtypeInt64(raw []byte) (int64, error) {
 	return out, nil
 }
 
+// agtypeIntAs decodes an agtype integer into a width narrower than the
+// int64 scalar it rides in, refusing a stored value that width cannot
+// hold rather than wrapping it.
+//
+// Two clauses, and both are load-bearing. The round-trip catches every
+// width whose range is a strict subset of int64's. It cannot catch
+// uint64, where the conversion is a bijection and int64(uint64(-1)) is
+// -1 again; there the sign comparison is the whole of the check. A
+// UINT64 property's readable set is therefore [0, MaxInt64], since
+// agtype's integer scalar is signed 64-bit and a larger value is
+// unstorable rather than unreadable.
+func agtypeIntAs[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](raw []byte) (T, error) {
+	v, err := agtypeInt64(raw)
+	if err != nil {
+		return 0, err
+	}
+	out := T(v)
+	if int64(out) != v || (out < T(0)) != (v < 0) {
+		return 0, fmt.Errorf("gqlc: value %d does not fit the declared %T width", v, out)
+	}
+	return out, nil
+}
+
 // agtypeFloat64 decodes an agtype float scalar. The float parser reads
 // it rather than the JSON decoder because agtype's float vocabulary is
 // IEEE 754's: NaN, Infinity and -Infinity are values AGE emits and JSON
@@ -95,6 +120,28 @@ func agtypeFloat64(raw []byte) (float64, error) {
 	out, err := strconv.ParseFloat(strings.TrimSuffix(string(raw), "::numeric"), 64)
 	if err != nil {
 		return 0, fmt.Errorf("gqlc: %q is not an agtype float: %w", raw, err)
+	}
+	return out, nil
+}
+
+// agtypeFloat32 decodes an agtype float into the narrower width,
+// refusing a value that overflows to an infinity the stored value did
+// not hold.
+//
+// Precision loss is NOT refused: FLOAT32 is approximate and every
+// in-range float64 rounds to reach it. The test is the invented infinity
+// rather than a comparison against math.MaxFloat32, because a float64
+// strictly greater than MaxFloat32 can still round DOWN to it — that
+// value is representable and a magnitude test would refuse it. An
+// infinity or a NaN the store already held passes through unchanged.
+func agtypeFloat32(raw []byte) (float32, error) {
+	v, err := agtypeFloat64(raw)
+	if err != nil {
+		return 0, err
+	}
+	out := float32(v)
+	if math.IsInf(float64(out), 0) && !math.IsInf(v, 0) {
+		return 0, fmt.Errorf("gqlc: value %g does not fit the declared float32 width", v)
 	}
 	return out, nil
 }
@@ -245,18 +292,12 @@ func agtypeListOfAny(raw []byte) ([]any, error) {
 
 // agtypeListOfFloat32 decodes an agtype list of float32 elements.
 func agtypeListOfFloat32(raw []byte) ([]float32, error) {
-	return agtypeList(raw, func(elem []byte) (float32, error) {
-		out, err := agtypeFloat64(elem)
-		return float32(out), err
-	})
+	return agtypeList(raw, agtypeFloat32)
 }
 
 // agtypeListOfInt16 decodes an agtype list of int16 elements.
 func agtypeListOfInt16(raw []byte) ([]int16, error) {
-	return agtypeList(raw, func(elem []byte) (int16, error) {
-		out, err := agtypeInt64(elem)
-		return int16(out), err
-	})
+	return agtypeList(raw, agtypeIntAs[int16])
 }
 
 // agtypeListOfListOfAny decodes an agtype list of []any elements.

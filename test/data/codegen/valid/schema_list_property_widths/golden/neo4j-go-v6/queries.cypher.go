@@ -59,7 +59,11 @@ func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected int64, got %T", "ranks", i, elem)
 				}
-				acc1 = append(acc1, int32(v))
+				vn, err := narrowInt[int32](v)
+				if err != nil {
+					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: %w", "ranks", i, err)
+				}
+				acc1 = append(acc1, vn)
 			}
 			value1Ptr = &acc1
 		}

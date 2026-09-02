@@ -56,7 +56,11 @@ func (q *queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
 			if !ok {
 				return nil, fmt.Errorf("ListyColumns: decode column %q element %d: expected int64, got %T", "ranks", i, elem)
 			}
-			acc1 = append(acc1, int32(v))
+			vn, err := narrowInt[int32](v)
+			if err != nil {
+				return nil, fmt.Errorf("ListyColumns: decode column %q element %d: %w", "ranks", i, err)
+			}
+			acc1 = append(acc1, vn)
 		}
 		row.Ranks = acc1
 		out = append(out, row)
@@ -115,7 +119,11 @@ func (q *queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
 		if !ok {
 			return ListyRowRow{}, fmt.Errorf("ListyRow: decode column %q element %d: expected int64, got %T", "ranks", i, elem)
 		}
-		acc1 = append(acc1, int32(v))
+		vn, err := narrowInt[int32](v)
+		if err != nil {
+			return ListyRowRow{}, fmt.Errorf("ListyRow: decode column %q element %d: %w", "ranks", i, err)
+		}
+		acc1 = append(acc1, vn)
 	}
 	row.Ranks = acc1
 	return row, nil
@@ -186,7 +194,11 @@ func (q *queries) ListyMixed(ctx context.Context) ([]ListyMixedRow, error) {
 			if !ok {
 				return nil, fmt.Errorf("ListyMixed: decode column %q element %d: expected int64, got %T", "ranks", i, elem)
 			}
-			acc2 = append(acc2, int32(v))
+			vn, err := narrowInt[int32](v)
+			if err != nil {
+				return nil, fmt.Errorf("ListyMixed: decode column %q element %d: %w", "ranks", i, err)
+			}
+			acc2 = append(acc2, vn)
 		}
 		row.Ranks = acc2
 		out = append(out, row)

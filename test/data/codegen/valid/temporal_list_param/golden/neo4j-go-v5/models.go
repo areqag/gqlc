@@ -61,7 +61,11 @@ func decodeSlot(node dbtype.Node) (Slot, error) {
 		if !ok {
 			return Slot{}, fmt.Errorf("decode Slot.Ranks: property %q element %d: expected int64, got %T", "ranks", i0, elem0)
 		}
-		value2s = append(value2s, int32(v0))
+		v0n, err := narrowInt[int32](v0)
+		if err != nil {
+			return Slot{}, fmt.Errorf("decode Slot.Ranks: property %q element %d: %w", "ranks", i0, err)
+		}
+		value2s = append(value2s, v0n)
 	}
 	out.Ranks = value2s
 	if v, ok := node.Props["spans"]; ok {
@@ -92,5 +96,23 @@ func decodeSlot(node dbtype.Node) (Slot, error) {
 		value4s = append(value4s, v0)
 	}
 	out.Tags = value4s
+	return out, nil
+}
+
+// narrowInt converts a driver's int64 down to the integer width the
+// schema declared, refusing a value that width cannot represent.
+//
+// The round-trip catches every width whose range is a strict subset of
+// int64's. uint64 is the one where it does not: the conversion is a
+// bijection there, so uint64(-1) round-trips back to -1 unchanged and
+// only the sign disagreement gives it away. A uint64 property's readable
+// range is [0, MaxInt64] — the wire integer is signed 64-bit — so a
+// negative carrier is always a violation rather than a large value.
+func narrowInt[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](v int64) (T, error) {
+	out := T(v)
+	if int64(out) != v || (out < T(0)) != (v < 0) {
+		return 0, fmt.Errorf("value %d does not fit the declared %T width", v, out)
+	}
 	return out, nil
 }

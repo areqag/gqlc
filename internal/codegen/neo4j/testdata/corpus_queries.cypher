@@ -66,7 +66,7 @@ MATCH (s:Scalar)-[e:Edgy|Edgier]->(l:Listy) RETURN e AS e
 //                             itself, so two are needed to observe it.
 //
 // name: ScalarColumns :many
-MATCH (s:Scalar) RETURN s.id AS id, s.rank AS rank, s.active AS active, s.name AS name, s.weight AS weight
+MATCH (s:Scalar) RETURN s.id AS id, s.rank AS rank, s.active AS active, s.name AS name, s.weight AS weight, s.tally AS tally
 
 // name: OptionalEntityColumns :many
 MATCH (s:Scalar) OPTIONAL MATCH (s)-[e:Edgy]->(l:Listy) RETURN s AS s, e AS e, l AS l

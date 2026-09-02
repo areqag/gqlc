@@ -28,19 +28,16 @@ func decodePerson(raw []byte) (Person, error) {
 		return Person{}, fmt.Errorf("decode Person: expected label %q, got %q", "Person", label)
 	}
 	var out Person
-	value0, err := agtypeNullableProperty(props, "age", agtypeInt64)
+	value0, err := agtypeNullableProperty(props, "age", agtypeIntAs[int])
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Age: %w", err)
 	}
-	if value0 != nil {
-		narrowed := int(*value0)
-		out.Age = &narrowed
-	}
-	value1, err := agtypeProperty(props, "id", agtypeInt64)
+	out.Age = value0
+	value1, err := agtypeProperty(props, "id", agtypeIntAs[int])
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
 	}
-	out.Id = int(value1)
+	out.Id = value1
 	value2, err := agtypeProperty(props, "name", agtypeString)
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Name: %w", err)
@@ -92,6 +89,30 @@ func agtypeInt64(raw []byte) (int64, error) {
 	out, err := strconv.ParseInt(strings.TrimSuffix(string(raw), "::numeric"), 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("gqlc: %q is not an agtype integer: %w", raw, err)
+	}
+	return out, nil
+}
+
+// agtypeIntAs decodes an agtype integer into a width narrower than the
+// int64 scalar it rides in, refusing a stored value that width cannot
+// hold rather than wrapping it.
+//
+// Two clauses, and both are load-bearing. The round-trip catches every
+// width whose range is a strict subset of int64's. It cannot catch
+// uint64, where the conversion is a bijection and int64(uint64(-1)) is
+// -1 again; there the sign comparison is the whole of the check. A
+// UINT64 property's readable set is therefore [0, MaxInt64], since
+// agtype's integer scalar is signed 64-bit and a larger value is
+// unstorable rather than unreadable.
+func agtypeIntAs[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](raw []byte) (T, error) {
+	v, err := agtypeInt64(raw)
+	if err != nil {
+		return 0, err
+	}
+	out := T(v)
+	if int64(out) != v || (out < T(0)) != (v < 0) {
+		return 0, fmt.Errorf("gqlc: value %d does not fit the declared %T width", v, out)
 	}
 	return out, nil
 }

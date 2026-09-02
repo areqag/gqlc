@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -28,11 +29,11 @@ func decodePerson(raw []byte) (Person, error) {
 		return Person{}, fmt.Errorf("decode Person: expected label %q, got %q", "Person", label)
 	}
 	var out Person
-	value0, err := agtypeProperty(props, "height", agtypeFloat64)
+	value0, err := agtypeProperty(props, "height", agtypeFloat32)
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Height: %w", err)
 	}
-	out.Height = float32(value0)
+	out.Height = value0
 	value1, err := agtypeProperty(props, "id", agtypeInt64)
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
@@ -103,6 +104,28 @@ func agtypeFloat64(raw []byte) (float64, error) {
 	out, err := strconv.ParseFloat(strings.TrimSuffix(string(raw), "::numeric"), 64)
 	if err != nil {
 		return 0, fmt.Errorf("gqlc: %q is not an agtype float: %w", raw, err)
+	}
+	return out, nil
+}
+
+// agtypeFloat32 decodes an agtype float into the narrower width,
+// refusing a value that overflows to an infinity the stored value did
+// not hold.
+//
+// Precision loss is NOT refused: FLOAT32 is approximate and every
+// in-range float64 rounds to reach it. The test is the invented infinity
+// rather than a comparison against math.MaxFloat32, because a float64
+// strictly greater than MaxFloat32 can still round DOWN to it — that
+// value is representable and a magnitude test would refuse it. An
+// infinity or a NaN the store already held passes through unchanged.
+func agtypeFloat32(raw []byte) (float32, error) {
+	v, err := agtypeFloat64(raw)
+	if err != nil {
+		return 0, err
+	}
+	out := float32(v)
+	if math.IsInf(float64(out), 0) && !math.IsInf(v, 0) {
+		return 0, fmt.Errorf("gqlc: value %g does not fit the declared float32 width", v)
 	}
 	return out, nil
 }

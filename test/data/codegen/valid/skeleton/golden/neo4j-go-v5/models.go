@@ -34,11 +34,33 @@ func decodePerson(node dbtype.Node) (Person, error) {
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
 	}
-	out.Id = int(value0)
+	value0n, err := narrowInt[int](value0)
+	if err != nil {
+		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
+	}
+	out.Id = value0n
 	value1, err := neo4j.GetProperty[string](node, "name")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Name: %w", err)
 	}
 	out.Name = value1
+	return out, nil
+}
+
+// narrowInt converts a driver's int64 down to the integer width the
+// schema declared, refusing a value that width cannot represent.
+//
+// The round-trip catches every width whose range is a strict subset of
+// int64's. uint64 is the one where it does not: the conversion is a
+// bijection there, so uint64(-1) round-trips back to -1 unchanged and
+// only the sign disagreement gives it away. A uint64 property's readable
+// range is [0, MaxInt64] — the wire integer is signed 64-bit — so a
+// negative carrier is always a violation rather than a large value.
+func narrowInt[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](v int64) (T, error) {
+	out := T(v)
+	if int64(out) != v || (out < T(0)) != (v < 0) {
+		return 0, fmt.Errorf("value %d does not fit the declared %T width", v, out)
+	}
 	return out, nil
 }

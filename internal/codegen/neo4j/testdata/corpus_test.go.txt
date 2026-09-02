@@ -2,6 +2,7 @@ package neo4jcorpus
 
 import (
 	"context"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -351,7 +352,7 @@ func TestAnythingMissingPropertyReadsLikeTheDrivers(t *testing.T) {
 // pointer to the zero value.
 func TestScalarNarrows(t *testing.T) {
 	got, err := decodeScalar(node("Scalar", map[string]any{
-		"id": int64(7), "rank": int64(-3), "active": true, "name": "n", "weight": 0.5,
+		"id": int64(7), "rank": int64(-3), "active": true, "name": "n", "weight": 0.5, "tally": int64(5),
 	}))
 	if err != nil {
 		t.Fatalf("decodeScalar = error %v", err)
@@ -366,7 +367,7 @@ func TestScalarNarrows(t *testing.T) {
 		t.Errorf("decodeScalar().Weight = %#v, want 0.5", got.Weight)
 	}
 
-	absent, err := decodeScalar(node("Scalar", map[string]any{"id": int64(7), "rank": int64(0), "active": false}))
+	absent, err := decodeScalar(node("Scalar", map[string]any{"id": int64(7), "rank": int64(0), "active": false, "tally": int64(0)}))
 	if err != nil {
 		t.Fatalf("decodeScalar(absent) = error %v", err)
 	}
@@ -911,7 +912,7 @@ func TestAnyPropertyValueColumnsCarryTheirNull(t *testing.T) {
 // property. Each carries every property its type declared NOT NULL, so
 // what a test varies is the one thing it is about.
 func scalarProps() map[string]any {
-	return map[string]any{"id": int64(7), "rank": int64(-3), "active": true, "name": "n"}
+	return map[string]any{"id": int64(7), "rank": int64(-3), "active": true, "name": "n", "tally": int64(5)}
 }
 
 func listyProps() map[string]any {
@@ -1262,8 +1263,8 @@ func TestNodeDecoderRefusesAnUnlabelledNode(t *testing.T) {
 // corpus produced at all — so the arm could be deleted whole and every
 // row stayed green (bd gqlc-8bl0).
 func TestScalarColumnsNarrowTheirCarriers(t *testing.T) {
-	keys := []string{"id", "rank", "active", "name", "weight"}
-	got, err := queriesOver(keys, []any{int64(7), int64(-3), true, "n", 0.5}).ScalarColumns(t.Context())
+	keys := []string{"id", "rank", "active", "name", "weight", "tally"}
+	got, err := queriesOver(keys, []any{int64(7), int64(-3), true, "n", 0.5, int64(5)}).ScalarColumns(t.Context())
 	if err != nil {
 		t.Fatalf("ScalarColumns = error %v", err)
 	}
@@ -1283,7 +1284,7 @@ func TestScalarColumnsNarrowTheirCarriers(t *testing.T) {
 
 	// A nullable one the graph holds as null is a nil pointer rather than
 	// a pointer to the zero the driver hands back beside its isNil.
-	null, err := queriesOver(keys, []any{int64(7), int64(-3), true, nil, nil}).ScalarColumns(t.Context())
+	null, err := queriesOver(keys, []any{int64(7), int64(-3), true, nil, nil, int64(5)}).ScalarColumns(t.Context())
 	if err != nil {
 		t.Fatalf("ScalarColumns(name: null) = error %v", err)
 	}
@@ -1297,7 +1298,7 @@ func TestScalarColumnsNarrowTheirCarriers(t *testing.T) {
 	// A non-nullable one the graph holds as null is refused rather than
 	// carried as the carrier's zero, which is what the caller would
 	// otherwise read as a rank of 0.
-	_, err = queriesOver(keys, []any{int64(7), nil, true, "n", 0.5}).ScalarColumns(t.Context())
+	_, err = queriesOver(keys, []any{int64(7), nil, true, "n", 0.5, int64(5)}).ScalarColumns(t.Context())
 	if err == nil {
 		t.Fatalf("ScalarColumns(rank: null) = no error, want a refusal")
 	}
@@ -1322,7 +1323,7 @@ func TestScalarColumnsNarrowTheirCarriers(t *testing.T) {
 // down — a gate rewritten to route a type disagreement through that one
 // would report a column the graph holds as having arrived null.
 func TestScalarColumnRefusalsCarryTheDriversError(t *testing.T) {
-	keys := []string{"id", "rank", "active", "name", "weight"}
+	keys := []string{"id", "rank", "active", "name", "weight", "tally"}
 	check := func(what string, got []ScalarColumnsRow, err error, want string) {
 		t.Helper()
 		if err == nil {
@@ -1341,15 +1342,15 @@ func TestScalarColumnRefusalsCarryTheDriversError(t *testing.T) {
 
 	// A value of a type the carrier does not admit. The columns around it
 	// are well-formed, so the refusal is this column's.
-	misTyped := []any{int64(7), "not an int", true, "n", 0.5}
+	misTyped := []any{int64(7), "not an int", true, "n", 0.5, int64(5)}
 	got, err := queriesOver(keys, misTyped).ScalarColumns(t.Context())
 	check("ScalarColumns(rank: string)", got, err, driverRefusal[int64](t, keys, misTyped, "rank"))
 
 	// A record that does not hold the key the query projected, which the
 	// driver reports through the same gate — and which it reports with
 	// isNil false, so nothing further down the arm can catch it either.
-	absent := []string{"id", "nope", "active", "name", "weight"}
-	held := []any{int64(7), int64(-3), true, "n", 0.5}
+	absent := []string{"id", "nope", "active", "name", "weight", "tally"}
+	held := []any{int64(7), int64(-3), true, "n", 0.5, int64(5)}
 	got, err = queriesOver(absent, held).ScalarColumns(t.Context())
 	check("ScalarColumns(no rank)", got, err, driverRefusal[int64](t, absent, held, "rank"))
 }
@@ -1851,5 +1852,298 @@ func TestNullableListParameterBindsCypherNull(t *testing.T) {
 		if bound[key] == nil {
 			t.Errorf("SlotsMatching bound %q as nil, want an empty list — the schema declares it non-nullable", key)
 		}
+	}
+}
+
+// A stored value the declared width cannot hold fails the read, on all
+// three paths that narrow: an entity property, a query column, and a list
+// element. None of this can be established from the emission's source —
+// an assertion there says a check was written, not that it fires on the
+// value a graph can actually store, nor that the value it lets through
+// arrives intact.
+//
+// The three paths are run separately because they are three emissions of
+// one rule reached through different plumbing: the entity property comes
+// off a Props map, the column off the driver's record, and the element out
+// of a per-element loop. A check that survives one has been seen to be
+// absent from another.
+//
+// The values here are all ones a Bolt hydrator can build. That is the
+// whole premise of the defect: an INT32 property whose store holds 1<<40
+// arrives as a perfectly well-typed int64, so nothing upstream of the
+// conversion has anything to object to (bd gqlc-awtb).
+func TestScalarRefusesAValueTheDeclaredWidthCannotHold(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		props map[string]any
+		want  string
+	}{
+		{
+			// Above int32 by a wide margin, so the round-trip clause
+			// refuses it whatever the sign clause does.
+			name:  "int32 above range",
+			props: map[string]any{"rank": int64(1) << 40},
+			want:  "decode Scalar.Rank: value 1099511627776 does not fit the declared int32 width",
+		},
+		{
+			name:  "int32 below range",
+			props: map[string]any{"rank": int64(-1) << 40},
+			want:  "decode Scalar.Rank: value -1099511627776 does not fit the declared int32 width",
+		},
+		{
+			// THE SIGN CLAUSE'S ONLY WITNESS. uint64(-1) round-trips
+			// back to -1 exactly, so int64(T(v)) == v holds and the
+			// round-trip clause sees nothing wrong. Only comparing the
+			// signs refuses it. A mutation that deletes the sign clause
+			// must kill this row and no other.
+			name:  "uint64 from a negative carrier",
+			props: map[string]any{"tally": int64(-1)},
+			want:  "decode Scalar.Tally: value -1 does not fit the declared uint64 width",
+		},
+		{
+			// float64's maximum overflows float32 to +Inf, and the
+			// carrier held no infinity, so the conversion invented one.
+			name:  "float32 overflows to an infinity",
+			props: map[string]any{"weight": math.MaxFloat64},
+			want:  "decode Scalar.Weight: value 1.7976931348623157e+308 does not fit the declared float32 width",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			props := scalarProps()
+			for k, v := range tc.props {
+				props[k] = v
+			}
+			_, err := decodeScalar(node("Scalar", props))
+			if err == nil {
+				t.Fatalf("decodeScalar(%s) = no error, want a refusal", tc.name)
+			}
+			if got := err.Error(); got != tc.want {
+				t.Errorf("decodeScalar(%s) = %q, want %q", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// The other side of the same check: a value the declared width DOES hold
+// reaches the caller unchanged. Without these rows a decoder that refused
+// every narrow value would satisfy the refusals above, and the boundary
+// rows are where a check written one comparison too tight shows up.
+func TestScalarAcceptsWhatTheDeclaredWidthHolds(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		props map[string]any
+		check func(*testing.T, Scalar)
+	}{
+		{
+			name:  "int32 at its maximum",
+			props: map[string]any{"rank": int64(math.MaxInt32)},
+			check: func(t *testing.T, got Scalar) {
+				if got.Rank != math.MaxInt32 {
+					t.Errorf("Rank = %d, want %d", got.Rank, int32(math.MaxInt32))
+				}
+			},
+		},
+		{
+			name:  "int32 at its minimum",
+			props: map[string]any{"rank": int64(math.MinInt32)},
+			check: func(t *testing.T, got Scalar) {
+				if got.Rank != math.MinInt32 {
+					t.Errorf("Rank = %d, want %d", got.Rank, int32(math.MinInt32))
+				}
+			},
+		},
+		{
+			// MaxInt64 is the largest value a uint64 property can be
+			// read back as: both agtype and Bolt integers are signed
+			// 64-bit, so a larger one is unstorable rather than
+			// unreadable.
+			name:  "uint64 at the largest readable value",
+			props: map[string]any{"tally": int64(math.MaxInt64)},
+			check: func(t *testing.T, got Scalar) {
+				if got.Tally != uint64(math.MaxInt64) {
+					t.Errorf("Tally = %d, want %d", got.Tally, uint64(math.MaxInt64))
+				}
+			},
+		},
+		{
+			name:  "float32 at its maximum",
+			props: map[string]any{"weight": float64(math.MaxFloat32)},
+			check: func(t *testing.T, got Scalar) {
+				if got.Weight == nil || *got.Weight != math.MaxFloat32 {
+					t.Errorf("Weight = %#v, want MaxFloat32", got.Weight)
+				}
+			},
+		},
+		{
+			// THE SPELLING PIN. This float64 is strictly greater than
+			// MaxFloat32 and yet converts to exactly MaxFloat32, because
+			// it lies below the rounding boundary. A check written as
+			// `v > math.MaxFloat32` refuses it; the IsInf composite the
+			// design prescribes lets it through. The row fails in the
+			// PASS direction, which is the only direction that can
+			// distinguish the two spellings.
+			name:  "float32 just above its maximum, which rounds down",
+			props: map[string]any{"weight": math.Nextafter(float64(math.MaxFloat32), math.Inf(1))},
+			check: func(t *testing.T, got Scalar) {
+				if got.Weight == nil || *got.Weight != math.MaxFloat32 {
+					t.Errorf("Weight = %#v, want MaxFloat32 — this value rounds down, it does not overflow", got.Weight)
+				}
+			},
+		},
+		{
+			// Precision loss is not an overflow and is not refused:
+			// FLOAT32 is approximate and every in-range float64 rounds.
+			name:  "float32 losing precision in range",
+			props: map[string]any{"weight": 0.1},
+			check: func(t *testing.T, got Scalar) {
+				if got.Weight == nil || *got.Weight != float32(0.1) {
+					t.Errorf("Weight = %#v, want float32(0.1)", got.Weight)
+				}
+			},
+		},
+		{
+			// An infinity the carrier already held is passed through
+			// rather than refused: the conversion invented nothing.
+			name:  "float32 from a carrier that was already infinite",
+			props: map[string]any{"weight": math.Inf(1)},
+			check: func(t *testing.T, got Scalar) {
+				if got.Weight == nil || !math.IsInf(float64(*got.Weight), 1) {
+					t.Errorf("Weight = %#v, want +Inf", got.Weight)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			props := scalarProps()
+			for k, v := range tc.props {
+				props[k] = v
+			}
+			got, err := decodeScalar(node("Scalar", props))
+			if err != nil {
+				t.Fatalf("decodeScalar(%s) = error %v, want the value through", tc.name, err)
+			}
+			tc.check(t, got)
+		})
+	}
+}
+
+// The column path, which reaches the same rule through the driver's
+// record rather than through a Props map. One refusal and one boundary
+// pass per numeric width, because a column decode is a separate emission
+// and the entity rows above carry nothing over to it.
+func TestScalarColumnsRefuseAValueTheDeclaredWidthCannotHold(t *testing.T) {
+	keys := []string{"id", "rank", "active", "name", "weight", "tally"}
+	for _, tc := range []struct {
+		name string
+		row  []any
+		want string
+	}{
+		{
+			name: "int32 above range",
+			row:  []any{int64(7), int64(1) << 40, true, "n", 0.5, int64(1)},
+			want: `ScalarColumns: decode column "rank": value 1099511627776 does not fit the declared int32 width`,
+		},
+		{
+			// The nullable arm, which narrows inside an `if !isNil` and
+			// so is a second emission of the check rather than the same
+			// one. A nullable column that refuses is the shape most
+			// likely to be left unchecked, since the value never leaves
+			// the branch.
+			name: "float32 overflows to an infinity, on the nullable arm",
+			row:  []any{int64(7), int64(1), true, "n", math.MaxFloat64, int64(1)},
+			want: `ScalarColumns: decode column "weight": value 1.7976931348623157e+308 does not fit the declared float32 width`,
+		},
+		{
+			name: "uint64 from a negative carrier",
+			row:  []any{int64(7), int64(1), true, "n", 0.5, int64(-1)},
+			want: `ScalarColumns: decode column "tally": value -1 does not fit the declared uint64 width`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := queriesOver(keys, tc.row).ScalarColumns(t.Context())
+			if err == nil {
+				t.Fatalf("ScalarColumns(%s) = no error, want a refusal", tc.name)
+			}
+			if got := err.Error(); got != tc.want {
+				t.Errorf("ScalarColumns(%s) = %q, want %q", tc.name, got, tc.want)
+			}
+		})
+	}
+
+	// And the boundary values still come back through the column path,
+	// so the rows above are not satisfied by a column decode that refuses
+	// everything narrow.
+	got, err := queriesOver(keys, []any{
+		int64(7), int64(math.MaxInt32), true, "n",
+		math.Nextafter(float64(math.MaxFloat32), math.Inf(1)), int64(math.MaxInt64),
+	}).ScalarColumns(t.Context())
+	if err != nil {
+		t.Fatalf("ScalarColumns(boundaries) = error %v, want the values through", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ScalarColumns(boundaries) returned %d rows, want 1", len(got))
+	}
+	if got[0].Rank != math.MaxInt32 {
+		t.Errorf("ScalarColumns(boundaries)[0].Rank = %d, want %d", got[0].Rank, int32(math.MaxInt32))
+	}
+	if got[0].Weight == nil || *got[0].Weight != math.MaxFloat32 {
+		t.Errorf("ScalarColumns(boundaries)[0].Weight = %#v, want MaxFloat32", got[0].Weight)
+	}
+	if got[0].Tally != uint64(math.MaxInt64) {
+		t.Errorf("ScalarColumns(boundaries)[0].Tally = %d, want %d", got[0].Tally, uint64(math.MaxInt64))
+	}
+}
+
+// The list-element path, on both the entity walk and the column walk. A
+// list is decoded whole, so the refusal has to name the position as the
+// mis-typed-element refusal above it does — a caller told only that some
+// element of a list of a thousand did not fit has been told nothing
+// actionable.
+func TestListyRefusesAnOutOfRangeElement(t *testing.T) {
+	_, err := decodeListy(node("Listy", map[string]any{
+		"tags": []any{}, "ranks": []any{int64(1), int64(1) << 40},
+		"blobs": []any{}, "stamps": []any{},
+	}))
+	if err == nil {
+		t.Fatalf("decodeListy(ranks: [1, 1<<40]) = no error, want a refusal")
+	}
+	want := `decode Listy.Ranks: property "ranks" element 1: value 1099511627776 does not fit the declared int32 width`
+	if got := err.Error(); got != want {
+		t.Errorf("decodeListy(out-of-range element) = %q, want %q", got, want)
+	}
+
+	// The same width, one nesting of plumbing away: the nullable list
+	// arm, whose elements narrow inside a different branch.
+	_, err = decodeListy(node("Listy", map[string]any{
+		"tags": []any{}, "ranks": []any{}, "blobs": []any{}, "stamps": []any{},
+		"depths": []any{0.5, math.MaxFloat64},
+	}))
+	if err == nil {
+		t.Fatalf("decodeListy(depths: [0.5, MaxFloat64]) = no error, want a refusal")
+	}
+	want = `decode Listy.Depths: property "depths" element 1: value 1.7976931348623157e+308 does not fit the declared float32 width`
+	if got := err.Error(); got != want {
+		t.Errorf("decodeListy(out-of-range depths element) = %q, want %q", got, want)
+	}
+}
+
+// The column walk's own element narrowing, which is a third emitter
+// (walkListElemBody) rather than either of the two above.
+//
+// The width is FLOAT32 rather than the INT32 the entity rows use because
+// ListyColumns projects tags, blobs and depths, and depths is the only
+// narrowing element among them. One width is enough here: walkListElemBody
+// narrows through a single arm whichever numeric width reaches it, so that
+// arm is either checked or it is not.
+func TestListyColumnsRefuseAnOutOfRangeElement(t *testing.T) {
+	_, err := queriesOver([]string{"tags", "blobs", "depths"},
+		[]any{[]any{}, []any{}, []any{0.5, math.MaxFloat64}},
+	).ListyColumns(t.Context())
+	if err == nil {
+		t.Fatalf("ListyColumns(depths: [0.5, MaxFloat64]) = no error, want a refusal")
+	}
+	want := `ListyColumns: decode column "depths" element 1: value 1.7976931348623157e+308 does not fit the declared float32 width`
+	if got := err.Error(); got != want {
+		t.Errorf("ListyColumns(out-of-range element) = %q, want %q", got, want)
 	}
 }

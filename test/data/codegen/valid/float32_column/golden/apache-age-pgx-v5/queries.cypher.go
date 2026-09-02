@@ -41,9 +41,9 @@ func (q *queries) PersonHeight(ctx context.Context) (float32, error) {
 	if raw0 == nil {
 		return 0, fmt.Errorf("PersonHeight: column %q is non-nullable but arrived null", "h")
 	}
-	value0, err := agtypeFloat64(raw0)
+	value0, err := agtypeFloat32(raw0)
 	if err != nil {
 		return 0, fmt.Errorf("PersonHeight: decode column %q: %w", "h", err)
 	}
-	return float32(value0), nil
+	return value0, nil
 }
