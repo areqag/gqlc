@@ -415,17 +415,16 @@ The bead(s) named above could not be re-derived — the ledger query failed — 
         # whichever throwaway launched them. Same shape as the GIT_DIR that
         # redirected bd into the shared repo this week.
         unset KM_CONFIG
-        # BEADS_DIR names the town's one ledger rather than leaving bd to
-        # discover it from the seat's cwd. A seat that is a linked worktree
-        # discovers the same path either way; a seat that is its own clone
-        # (gqlc-w5bh) discovers nothing at all. It also outranks an exported
-        # GIT_DIR, which is what once redirected bd into the shared repo from
-        # under a hook (gqlc-hg61). It is the value derived and guarded at the
-        # top of this file, not a second derivation: the two spellings drifted
-        # apart in gqlc-zpjuc, where the guard above named the right ledger and
-        # the seat was handed the wrong one anyway.
+        # BEADS_DIR is NOT set here. It is exported once at the top of this
+        # file, so the child inherits it, and that top-level value is the only
+        # one anything checks — the guard up there refuses a launch before
+        # reaching this line. A second spelling stood here until gqlc-zpjuc,
+        # deriving the same variable independently, and the two drifted: the
+        # guard named the right ledger and the seat was handed the wrong one
+        # anyway. Deleted rather than repointed at the derived value, which
+        # would only have been a redundant copy waiting to drift again
+        # (gqlc-7mc0h asked for this deletion first).
         KINGDOM_SEAT=$seat BEADS_ACTOR=$seat KM_STATE_DIR=$sd \
-            BEADS_DIR="$BEADS_DIR" \
             claude --model "$model" \
             "${effort_args[@]}" \
             --permission-mode "$pm" \
