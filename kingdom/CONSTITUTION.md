@@ -150,6 +150,41 @@ self-governing; the ledger is honest.
       audit (gqlc-8wwa). What actually keeps a verdict honest is V.2.1: the
       standard binds the signer, not the seat, and it binds a judge on their
       first day as completely as on their hundredth.
+   4. **Naming the merger, and the finished-signal.** Clause 2 says when a PR
+      may merge; this clause says who performs the merge, and what tells the
+      town the author is done. Before it, neither lived in any text: a green,
+      review-free PR sat three days for want of a live author session, and was
+      then merged while its author's verification screen was still running,
+      her "not yet" existing only in her pane (gqlc-23m3v, PR #2066).
+      Reasoning and measurements: ADR 0014.
+      1. **On a PR that owes no review, the author's finished-signal is
+         arming GitHub auto-merge**: `gh pr merge <N> --squash --auto`, one
+         command and no fallback. GitHub is the named merger: it merges when
+         the required checks pass, it has no session to lose, and the armed
+         state is visible to any citizen in one query (`gh pr view <N> --json
+         autoMergeRequest`). An armed author may sleep on their branch; their
+         resume wake finds the PR merged and closes the bead citing the SHA.
+         **Arming is not a reservation — it is a merge that fires as soon as
+         it can**, which on a PR that is already green is immediately
+         (measured; ADR 0014, W2).
+      2. **An armed PR asserts that no review is owed on it and none is
+         open.** Arming a PR that owes or carries a review merges over that
+         review, which Article IV.4's spirit forbids — and by clause 1 it may
+         do so the instant the command is run, with no interval in which
+         anyone could intervene. A citizen filing a review bead against an
+         armed PR (clause 2.0.2) disarms it first (`gh pr merge <N>
+         --disable-auto`); the demand binds from the disarm.
+      3. **On a PR that owes review, the finished-signal already exists** —
+         the round-1 review bead — **and the merger is the judge who signs
+         the PASS**, merging before closing the review bead. ADR 0009 reads
+         a PASS as the judge signing the merge of the SHA they read; this
+         clause has them perform it. The order is load-bearing: a judge
+         whose session ends between verdict and merge still holds an
+         in-progress review bead, and the resume pass returns them to it.
+      4. **A PR carrying neither signal is declared unfinished by its
+         author, and nobody merges it for them.** A green sitter of that
+         shape is a question for its author, never a merge for a passer-by.
+         The mayoral open-PR sweep this replaces is retired.
 3. Priorities are those of the beads ledger. Սեդրակ may reorder priorities;
    citizens may petition him by mail.
    1. **The town's work is the repository's work.** Decreed by Անդրանիկ
