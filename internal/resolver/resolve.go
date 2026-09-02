@@ -371,6 +371,11 @@ func describeColumnType(t ResolvedType) string {
 	// caller has already committed to, so it answers rather than faults —
 	// internal/codegen's resolvedTypeName settled the same fault the same way
 	// (PR #937), and "<nil>" is the token its %T fallback gives a nil interface.
+	//
+	// Nothing originates the value: TestNilColumnTypeIsNotConstructible measures
+	// that across the whole projection-type surface (bd gqlc-oltq), so this arm
+	// and resolvedTypeEqual's nil guard are one posture held in two places, and
+	// that test is where the reachability question is settled.
 	if t == nil {
 		return "<nil>"
 	}
@@ -404,6 +409,12 @@ func nullabilityNote(nullable bool) string {
 // stable MarshalJSON output would work too, but a variant-by-variant check is
 // direct and avoids the allocation.
 func resolvedTypeEqual(a, b ResolvedType) bool {
+	// Defence, not live handling. No arm of the projection-type surface
+	// originates a nil, which TestNilColumnTypeIsNotConstructible measures
+	// rather than asserts (bd gqlc-oltq) — so this guard is not evidence that
+	// nil is expected here. It stays because it is what reports nil-versus-
+	// populated unequal, which is how describeColumnType comes to render a nil
+	// as part of a refusal rather than faulting inside one.
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
