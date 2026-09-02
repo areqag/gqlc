@@ -176,7 +176,19 @@ func run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	// paths, and a root spelled differently from the resolved one would match
 	// no worktree at all — every worktree would then be classified plain and
 	// lose its dirty and landed checks.
-	root, err := filepath.EvalSymlinks(o.root)
+	//
+	// Abs first because EvalSymlinks does not absolutise: it returned a
+	// relative -root still relative, which then matched no scratch directory
+	// and was refused with a message saying the directory was not scratch. The
+	// directory was; the spelling was all that was wrong (bd gqlc-cxhw).
+	// Everything downstream compares against absolute paths, so this is where
+	// the spelling stops mattering — and the refusal below now names the
+	// directory it judged rather than the abbreviation the operator typed.
+	abs, err := filepath.Abs(o.root)
+	if err != nil {
+		return fmt.Errorf("resolve -root %s: %w", o.root, err)
+	}
+	root, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		return fmt.Errorf("resolve -root %s: %w", o.root, err)
 	}
