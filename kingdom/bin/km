@@ -873,7 +873,7 @@ seat_wedge_reason() { # <seat> -> consent | limit | unknown | unreadable | no-pa
 # the sleep outright did not produce a false empty on the same rows, the pane
 # read's own round trip being slower than the render.
 seat_box_emptied() { # <pane> -> 0 emptied, 1 holds text, 2 no box, 3 unreadable
-    local left=10 box rc=2
+    local left=10 box rc
     while [ "$left" -gt 0 ]; do
         left=$((left - 1))
         sleep 0.2
@@ -890,11 +890,11 @@ seat_box_emptied() { # <pane> -> 0 emptied, 1 holds text, 2 no box, 3 unreadable
         # would re-emit herdr's account of it. Nine more reads and two more
         # seconds buy nothing, so the first one ends the poll.
         if [ "$rc" -eq 2 ]; then return 3; fi
-        [ "$rc" -eq 0 ] || continue
+        # history: kingdom/brain/km-notes.md#seat_box_emptied
+        if [ "$rc" -eq 1 ]; then return 2; fi
         [ -n "$box" ] || return 0
     done
-    [ "$rc" -eq 0 ] && return 1
-    return 2
+    return 1
 }
 
 # history: kingdom/brain/km-notes.md#box_one_line

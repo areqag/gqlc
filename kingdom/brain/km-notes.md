@@ -708,6 +708,77 @@ plausibly write — `/extra-usage` and `Do you want to` both appear in this
 repo's own bead descriptions — so one of them on its own buys a false
 positive in exchange for nothing, `unknown` already meaning "look".
 
+## seat_box_emptied — a read that finds no box is a verdict, not a turn to skip
+
+(`kingdom/bin/km`, `seat_box_emptied`)
+
+A read that finds NO BOX ends the poll, with the same verdict the loop used to
+reach only if its LAST read happened to find none. It used to `continue`
+instead, which let a single later read overturn every earlier one — and the
+later read is not a second look at the same box. It is a look at a different
+screen.
+
+This is the mechanism behind gqlc-hrft2 and gqlc-4b0cc: a `/exit` that WAS
+submitted, reported by `send_line` as "the box still holds text" across roughly
+4.2 seconds of polling, on a seat that had plainly exited. Three measurements,
+2026-09-02, and the first two are the ones that settle it:
+
+- **A delivered `/exit` leaves the pane with no box at all, and keeps it that
+  way.** Captured every ~100ms for 10s across a submitted `/exit` in a
+  throwaway tmux session: the frame before the Enter reads the box holding
+  `/exit`, and every one of the 100 frames after it reads NO BOX. Confirmed
+  through km's own reader too — a seat's pane after its session ends carries no
+  horizontal rule anywhere in the visible buffer, so `seat_box_text` answers 1.
+- **A freshly started claude renders a NON-EMPTY box over an EMPTY composer.**
+  Its placeholder: `❯ Try "edit <filepath> to..."`. Nothing distinguishes that
+  from a citizen's draft at the byte level, because it is text in the composer.
+- The poll spans both. `km-seat` relaunches claude in the SAME pane on the next
+  queued wake, so nine reads can witness the composer gone and the tenth catch
+  its successor's placeholder. The 4.2 seconds were never one box read twenty
+  times.
+
+So the old code returned "holds text" for a message that had been delivered,
+and `send_line` then pressed its second Enter into whatever now occupied the
+pane — a different session's composer — before reporting "Nothing was
+delivered". Both halves are wrong in the direction that costs most: the wake is
+re-sent, and a stray Enter is submitted into a session nobody was addressing.
+
+The direction of the verdict is the argument for the change. A box that has
+VANISHED is the strongest evidence available that the text left it, since
+typing only ever appends and nothing km does clears a composer. `send_line`
+already draws exactly that inference on the two weaker premises next to it —
+the unreadable-pane and no-box arms both report delivered — so this makes the
+poll agree with the function that calls it.
+
+What it costs, stated rather than dismissed: a transient failure to parse the
+box while the text is still in it now reports delivered instead of polling on.
+Nothing measured produces that transition inside a live session — the observed
+no-box states are session boundaries, and the pre-send check at the top of
+`send_line` already treats a no-box read as decisive — but the sandbox that
+says so is small, so it is a risk taken knowingly and not one ruled out.
+
+`seat_box_echoes` still has the `continue`, deliberately, and it has TWO call
+sites rather than the one it is easy to see. At km:983 it runs BEFORE any
+Enter, and the failure it feeds ("something covered the composer mid-send")
+presses no key, so a late read that overturns nine earlier ones costs nothing
+there. At km:1035 it runs after BOTH Enters, and every non-zero verdict it can
+return — including the no-box one — lands in the same arm and reports
+delivered, so the overturning read cannot change the outcome either. Neither
+site has this bug; whether they should match anyway is gqlc-w63bv.
+
+That second site does carry a smaller inaccuracy, filed on the same bead: its
+message says "the box is not empty — but what it holds is NOT this message",
+which is a sentence about rc 1 being printed for rc 2 as well, where there is
+no box to hold anything.
+
+Not the cause, checked and cleared: gqlc-051cj's normalisation asymmetry —
+`box_one_line` folds U+00A0 to a space and `seat_box_text`'s awk trims only
+POSIX whitespace — is REAL and does turn a composer rendering glyph+U+00A0 into
+a box that reads as occupied. It was measured through `tmux capture-pane`,
+which preserves that byte. It is not reachable through the reader km actually
+uses: `herdr pane read` returns an idle composer as a bare glyph, on five live
+seats sampled across two days.
+
 ## box_one_line — one comparable line out of what the box renders
 
 (`kingdom/bin/km`, `box_one_line`)
