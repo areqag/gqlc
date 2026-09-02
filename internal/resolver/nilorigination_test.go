@@ -33,6 +33,15 @@
 // through one of the enumerated arms would satisfy every row here, which is
 // exactly why part 3 is an enumeration that fails on a new entry rather than a
 // pattern that accepts one.
+//
+// That last sentence was false in two ways until bd gqlc-y8kb6, and both are
+// worth keeping in view because they are how a syntactic guard rots. Part 3
+// examined only returns whose second result was the literal nil, so an arm
+// shaped `return rt, err` joined the surface with no row failing — and one
+// already had. And its keys are rendered return TEXT, so a new arm spelling its
+// return like an existing one inherited that arm's recorded argument. Neither
+// is fixed by looking harder at the enumeration; both are fixed at the reader,
+// which is where the remedy sits.
 package resolver_test
 
 import (
@@ -89,6 +98,18 @@ var nonConstructingReturns = map[string]string{
 	// so part 1 above already establishes it does not hand back a nil type
 	// with a nil error — this arm inherits that rather than re-arguing it.
 	"certifiedProjectionType: return base, nil": "base is resolveType's non-nil return, reached only on its nil-error path",
+
+	// The one enumerated arm whose error may be non-nil, so it needs both
+	// halves argued. err != nil: the pair is (whatever resolveType returned,
+	// an error), which is not the originating shape however base reads. err ==
+	// nil and the projection uncertified: base is resolveType's non-nil
+	// return, exactly as the entry above.
+	//
+	// Only visible to this file since gqlc-y8kb6 dropped part 3's literal-nil
+	// filter on the second result. It was in the tree before that and no row
+	// read it, which is the falsifier for the old prose claiming part 3
+	// enumerated every such arm.
+	"certifiedProjectionType: return base, err": "either err is non-nil, or resolveType succeeded and base is its non-nil return; neither is a nil type on a nil error",
 
 	// fillLeaf is a total rewrite of base: every arm returns either its own
 	// argument, a ResolvedList composite literal, or leaf — a ResolvedProperty
@@ -263,25 +284,45 @@ func TestNilColumnTypeIsNotConstructible(t *testing.T) {
 	// Part 3: the arms returning a value from elsewhere are enumerated, not
 	// pattern-matched, so a new one arrives as a failure with a name on it.
 	t.Run("returns of a non-constructed value are enumerated", func(t *testing.T) {
-		seen := map[string]bool{}
+		counts := map[string]int{}
 		for _, name := range auditedSurface {
 			for _, ret := range returnsOf(t, funcs[name]) {
-				if len(ret.Results) != 2 || !isNilIdent(ret.Results[1]) {
+				if len(ret.Results) != 2 {
+					continue
+				}
+				// The error-path shape, and the ONLY shape skipped by the
+				// second result: `return nil, err` hands back no type at all.
+				// `return nil, nil` is part 1's row, not this one's.
+				//
+				// Nothing else is filtered on the error. Requiring a literal
+				// nil there would skip `return rt, err` — the natural shape for
+				// an arm that handles an error rather than forwarding one — so
+				// such an arm would join the surface with no row failing
+				// (bd gqlc-y8kb6).
+				if isNilIdent(ret.Results[0]) {
 					continue
 				}
 				if _, isLiteral := ret.Results[0].(*ast.CompositeLit); isLiteral {
 					continue
 				}
-				key := name + ": " + renderReturn(ret)
-				seen[key] = true
-				_, enumerated := nonConstructingReturns[key]
-				require.Truef(t, enumerated,
-					"%q returns a value on the success path that it does not construct in the return statement, and no argument is recorded for why that value is not nil. Add an entry to nonConstructingReturns saying why — or, if it can be nil, this is the originator bd gqlc-oltq looked for and did not find",
-					key)
+				counts[name+": "+renderReturn(ret)]++
 			}
 		}
+		for key, n := range counts {
+			_, enumerated := nonConstructingReturns[key]
+			require.Truef(t, enumerated,
+				"%q returns a value on the success path that it does not construct in the return statement, and no argument is recorded for why that value is not nil. Add an entry to nonConstructingReturns saying why — or, if it can be nil, this is the originator bd gqlc-oltq looked for and did not find",
+				key)
+			// Keys are rendered TEXT, so a wholly new arm that happens to spell
+			// its return the same words as an enumerated one would inherit that
+			// arm's argument — an argument written about different code. One
+			// key licenses one arm (bd gqlc-y8kb6).
+			require.Equalf(t, 1, n,
+				"%q appears %d times in the audited surface, and nonConstructingReturns holds ONE argument for it. Whichever arm the entry was written about, the others are licensed by spelling alone. Give each arm a distinguishable return, or split the entry so every arm has its own recorded reason",
+				key, n)
+		}
 		for key := range nonConstructingReturns {
-			require.Truef(t, seen[key],
+			require.NotZerof(t, counts[key],
 				"nonConstructingReturns enumerates %q, which no longer appears in the sources. A stale entry silently licenses nothing and hides that the arm it argued about is gone", key)
 		}
 	})
