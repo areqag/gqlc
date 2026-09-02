@@ -1196,7 +1196,9 @@ a second ask was delivered into a box the first had already made non-empty.
 
 That correction moves gqlc-cj7hp's population, not its conclusion. The nine
 strings read that day were classified by their first line, so some counted as
-foreign were mixed; the hand-send reading is owed a re-read against this tag.
+foreign were mixed; the hand-send reading is owed a re-read against this tag,
+which is bd gqlc-nypdt and is not yet done. Until it is, cite gqlc-cj7hp for
+what herdr does and not for how many boxes it accounts for.
 
 IT READS THE COMPOSER'S BYTES AND NOTHING ELSE, which is the whole of its
 authority and the whole of its blindness. A citizen whose own draft happens to
