@@ -104,6 +104,20 @@ const alternationSQLSTATE = "42601"
 // two witnesses (bd gqlc-l8e2n).
 const undefinedFunctionSQLSTATE = "42883"
 
+// invalidSchemaNameSQLSTATE is PostgreSQL's invalid_schema_name, and the whole
+// argument of the namespace gap is that this is the code a namespaced call
+// answers under.
+//
+// It is asserted and not merely quoted because the CLASS is the claim. The gap
+// refuses a NAMESPACE rather than a full name, and what licenses that is where
+// the failure happens: Postgres resolves the schema qualifier before it looks
+// for any function, so the refusal belongs to the qualifier and every function
+// under it is refused by the same mechanism. The day this image gains a
+// `duration` schema, resolution reaches the function and the code changes —
+// which is exactly the day the per-namespace claim needs re-arguing, so the
+// witness has to red then rather than pass on the message alone.
+const invalidSchemaNameSQLSTATE = "3F000"
+
 // TestAGERefusesRelationshipTypeAlternation measures, against the pinned AGE
 // image, that the pattern an edge-union column requires does not parse — and
 // that the patterns AGE does parse in its place carry no union.
@@ -392,6 +406,134 @@ func TestAGERefusesTheSpatialConstructor(t *testing.T) {
 				require.NoError(t, rows.Scan(&raw), "scan value")
 			}
 			require.NoError(t, rows.Err())
+		})
+	}
+}
+
+// TestAGERefusesTheNamespaceItHasNoSchemaFor measures, against the pinned AGE
+// image, the fourth gap the text gate reads — and the only one whose refusal
+// names no function.
+//
+// A namespaced call reaches PostgreSQL as a schema-qualified name, and
+// PostgreSQL resolves the qualifier before it looks for a function. So the
+// server answers `schema "duration" does not exist` under SQLSTATE 3F000, and
+// there is nothing in that sentence for the temporal gap's name-witness guard
+// to match a function name against. Hence a gap of its own, catalogued by
+// namespace.
+//
+// Two rows carry the per-namespace claim rather than one. The catalogue holds
+// `duration` on the strength of duration.between, and the gate then refuses
+// duration.inSeconds too — a name no probe ever ran. That widening is the
+// ruling's one inferential step, so inSeconds is measured here beside it: same
+// class, same message, a different function under the same absent namespace.
+// Without that row the gate would refuse a spelling nothing had witnessed.
+//
+// The mixed-case row is not politeness either. The gate lowercases the
+// namespace before matching because internal/codegen/age/shape.go lowercases
+// it before typing a temporal, so a case-sensitive gate would let
+// Duration.Between through to a refusal that names a column instead of the
+// text. The server's own answer quotes the author's case back —
+// `schema "Duration"` — which is why the gate's catalogue folds case and the
+// unit guard compares case-insensitively.
+//
+// The served rows are the half that bounds the false positive, and this gap
+// has a served CALL where the spatial gap has none: ag_catalog.age_timestamp()
+// is namespaced AND resolves, so the gate is shown to refuse the measured
+// namespace rather than the call shape. Both served rows read the seeded
+// Person: an empty graph short-circuits a MATCH on an unknown label and never
+// evaluates what follows, so a served row over a label with no nodes would
+// pass without measuring anything.
+//
+// Not measured here, deliberately: com.example.between. A multi-part namespace
+// does not reach schema resolution at all — AGE's own cypher parser refuses it
+// as 42601 invalid indirection syntax — so it is neither a refusal of this
+// class nor a text the server serves, and it belongs in the unit suite as the
+// find-silence pin it is (internal/query/cypher).
+func TestAGERefusesTheNamespaceItHasNoSchemaFor(t *testing.T) {
+	ctx, pool, shipped := ageDialectHarness(t, "gqlc_dialect_namespace")
+
+	for _, tc := range []struct {
+		name string
+		// text replaces the author's query text inside the shipped envelope.
+		text string
+		// wantMessage is the substring the server's error must carry. Empty
+		// means the statement must parse.
+		wantMessage string
+	}{
+		{
+			// The probe the catalogue is derived from. Null arguments
+			// because the NAME is what is being measured: the qualifier
+			// fails before an argument could be evaluated.
+			name:        "duration.between",
+			text:        "RETURN duration.between(null, null)",
+			wantMessage: `schema "duration" does not exist`,
+		},
+		{
+			// The widening's own witness: a function no probe ran, under
+			// the namespace a probe did.
+			name:        "another function under the same namespace",
+			text:        "RETURN duration.inSeconds(null, null)",
+			wantMessage: `schema "duration" does not exist`,
+		},
+		{
+			// The server quotes the namespace as written, so this row also
+			// records that the answer is NOT lowercased — the reason the
+			// gate folds case on its own side.
+			name:        "the namespace in the author's case",
+			text:        "RETURN Duration.Between(null, null)",
+			wantMessage: `schema "Duration" does not exist`,
+		},
+		{
+			// The shape only a text gate can catch. A constructor in a
+			// predicate reaches no column at all, because the query model
+			// drops predicate structure (ADR 0003).
+			name:        "a namespaced call in a predicate",
+			text:        "MATCH (p:Person) WHERE p.d < duration.between(p.a, p.b) RETURN p.id",
+			wantMessage: `schema "duration" does not exist`,
+		},
+		{
+			// A qualified call that resolves. The served row this gap has
+			// and the spatial gap does not.
+			name: "a namespaced call AGE does define",
+			text: "RETURN ag_catalog.age_timestamp()",
+		},
+		{
+			// A property lookup spells the namespace and calls nothing —
+			// the false positive a scan for `duration.` would take.
+			name: "a property named like the namespace",
+			text: "MATCH (p:Person) RETURN p.duration",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stmt := substituteQueryText(t, shipped, tc.text)
+			rows, err := pool.Query(ctx, stmt, "{}")
+			if tc.wantMessage != "" {
+				require.Error(t, err, "AGE must refuse this call")
+				var pgErr *pgconn.PgError
+				require.ErrorAs(t, err, &pgErr, "the refusal must be the server's")
+				require.Equal(t, invalidSchemaNameSQLSTATE, pgErr.Code,
+					"the refusal is the QUALIFIER's, which is what licenses refusing per namespace")
+				require.Contains(t, pgErr.Message, tc.wantMessage,
+					"the namespace is what the server must name, and it names no function")
+				require.NotContains(t, pgErr.Message, "function",
+					"an answer naming a function would belong to the temporal gap's catalogue, "+
+						"which is derived from answers that name one")
+				return
+			}
+			require.NoError(t, err, "AGE must accept this call")
+			defer rows.Close()
+
+			var seen int
+			for rows.Next() {
+				var raw []byte
+				require.NoError(t, rows.Scan(&raw), "scan value")
+				seen++
+			}
+			require.NoError(t, rows.Err())
+			require.Equal(t, 1, seen,
+				"a served row that matched nothing measured nothing: AGE short-circuits a MATCH "+
+					"on a label with no nodes and never evaluates the call under test")
 		})
 	}
 }

@@ -391,13 +391,15 @@ runs no body.
 
 ## What is refused today
 
-Three gaps, each carrying its own refused probes and served texts — read off
+Four gaps, each carrying its own refused probes and served texts — read off
 `dialectGaps` itself rather than restated here, so adding a probe moves the
 totals without touching this sentence. The alternation gap holds the
 relationship-type alternation spellings `.14` measured; the undefined-function
 gap holds the temporal constructor names a live session was measured on; the
-spatial gap holds the one constructor a later live run measured. Each carries
-served texts alongside. The numbers belong at the pin, not in prose.
+spatial gap holds the one constructor a later live run measured; the namespace
+gap holds the one namespace a later run measured, and is a catalogue of
+namespaces rather than of names. Each carries served texts alongside. The
+numbers belong at the pin, not in prose.
 
 1. **Relationship-type alternation** (`ErrRelationshipTypeAlternation`, from
    `gqlc-35yu.14`): `-[r:A|B]->` in any of three spellings, answered
@@ -448,49 +450,118 @@ served texts alongside. The numbers belong at the pin, not in prose.
    compute the geometry in Go. A sentinel here is chosen by the fix, not by the
    SQLSTATE, which is why one 42883 answers to two.
 
+4. **Undefined namespace** (`ErrUndefinedNamespace`, bd `gqlc-dy40s`):
+   `duration.between(null, null)`, answered `schema "duration" does not exist`,
+   SQLSTATE **3F000** — a different error class from the two above, and the
+   whole reason this is a gap of its own. PostgreSQL reads the openCypher
+   namespace as a schema qualifier and resolves the qualifier before it looks
+   for any function, so the server names the namespace and no function at all.
+   Measured first-party against the same pinned digest (bd `gqlc-dy40s`).
+
+   That is what makes it uncombinable with item 2 rather than merely
+   inconvenient to combine. Item 2's guard,
+   `TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer`, requires each probe's
+   answer to name the function it refused; this probe's answer names no
+   function, so the row could not be added to that catalogue without weakening
+   the guard that makes the catalogue mean anything. Its diagnostic differs for
+   the same reason: it can name the namespace and cannot name the function, and
+   the remedy it offers has to be true of *every* function under that
+   namespace, since none of them resolve.
+
+   The catalogue is therefore of **namespaces**, derived from the qualified
+   calls the probes make (`calledNamespaces`), so a namespace cannot be refused
+   without a probe that called into it. One probe per namespace, which
+   `TestEveryRefusedNamespaceIsNamedByItsProbeAnswer` holds by `Len`.
+   `ag_catalog.age_timestamp()` is its served *call* — AGE's own schema, the
+   function behind the bare `timestamp()` item 2 serves — and `p.duration` is
+   its served property lookup, the false positive a scan for `duration.` would
+   take.
+
+   Two limits, both measured and neither an oversight. `duration.inSeconds`
+   answers identically, which is why the refusal's prose says no function under
+   the namespace resolves *whatever it is called* rather than generalising from
+   one name on faith; it rides as a live-witness row rather than a second probe,
+   because the catalogue admits one probe per namespace. And a **multi-part**
+   namespace never reaches schema resolution at all: `com.example.between`
+   answers 42601 `invalid indirection syntax` from AGE's own cypher parser. So
+   it is pinned as silence at the unit level and is deliberately *not* a served
+   text — a served text is a claim that the server answers it, and this one the
+   server does not parse.
+
 Matching is case-insensitive, which is what openCypher function resolution is;
 the name is quoted back in the author's own case, because that is what they have
-to find in their file. A namespaced call is a different name
-(`Cypher.g4 §oC_FunctionName`) and is not refused.
+to find in their file — for item 4, the whole qualified name, namespace
+included.
 
-That last claim has two spellings and only one of them can fail, which is worth
-writing down because the obvious one is the safe one. Drop the namespace guard
-and `duration.between` reports `between`, a name no probe put in the catalogue,
-so nothing is refused either way. `com.example.datetime()` reports `datetime`,
-which is in it — and the author is refused a call to a function they defined, on
-the strength of a probe that measured a different name. Both spellings are
-pinned, at the unit level and at the CLI seam.
+A namespaced call is a different name from a bare one
+(`Cypher.g4 §oC_FunctionName` is `oC_Namespace oC_SymbolicName`), and the two
+scans partition invocations between them: an invocation carries a namespace or
+it does not, so item 2 and item 4 cannot both claim one call and no call
+escapes both. That partition is why item 4 is exempt from
+`TestTheFunctionCataloguesAreDisjoint` — the disjointness there is a property
+of the call *shape*, not of the two name sets, and `duration` being a temporal
+constructor while `duration` is also a refused namespace are facts about two
+different spellings.
+
+The claim that a namespaced call is a different name has two spellings and only
+one of them can fail, which is worth writing down because the obvious one is the
+safe one. Drop the namespace guard and `duration.between` reports `between`, a
+name no probe put in item 2's catalogue, so item 2 refuses nothing either way —
+item 4 is what holds it. `com.example.datetime()` reports `datetime`, which *is*
+in item 2's catalogue — and the author would be refused a call to a function
+they defined, on the strength of a probe that measured a different name. Both
+spellings are pinned, at the unit level and at the CLI seam.
 
 ## Measured but not refused
 
 The list that stood here was of constructs suspected and never run. All of them
 have now been run, on `codegen-live` run `33268424367` against the pinned digest
 (bd `gqlc-osf1`), and two of them were refused by the server while still being
-refused by no gap here. `point({x: 1, y: 2})` was one, and is one no longer: it
-is item 3 above as of bd `gqlc-l8e2n`, a gap of its own for the reason this
-section gave. One is left, and it is not an oversight:
+refused by no gap here. Both have since become gaps of their own:
+`point({x: 1, y: 2})` is item 3 as of bd `gqlc-l8e2n`, and
+`duration.between(null, null)` is item 4 as of bd `gqlc-dy40s`.
 
-- **`duration.between(null, null)`.** Refused under a different error *class*:
-  SQLSTATE 3F000, `schema "duration" does not exist`. Postgres reads the
-  openCypher namespace as a schema qualifier and fails on the qualifier before
-  looking for a function, so the answer names no function at all — which is
-  precisely what the gap's own guard
-  (`TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer`) requires of a row in
-  it. It cannot join this gap even with a namespaced scanner, and needs its own:
-  bd `gqlc-dy40s`.
+**The list is empty, and an empty list here is the state this section was
+written to reach** rather than a sign it has stopped being maintained. It says
+that every construct this project has put to the pinned image is either served
+or refused by a gap — that the gate's catalogue and the project's measurements
+have not drifted apart. The one thing it does not do is bound what has *not*
+been tried: it is a record of measurements taken, not of the server's surface.
 
-It is held to that answer by `TestAGEAnswersTheConstructsNoGapRefuses`, so the
-bead inherits a witness rather than a suspicion, and the pinned image changing
-its answer reds the nightly rather than surfacing when someone finally builds
-the gap.
+The instrument that held the list to its answers,
+`TestAGEAnswersTheConstructsNoGapRefuses` in
+`test/data/codegen/live_age_ungated_test.go`, was retired with the last entry —
+which is that file's own documented protocol, since a live test that costs a
+container to assert nothing is worse than no test. So a *future* entry here
+owes its own witness before it is written down: an entry with no live row is a
+suspicion, and this section's whole claim is that its entries are measurements.
+Recreating the file is the cheapest way to pay that, and bd `gqlc-s70bl` — the
+reverse sweep that would have caught a row left here after its gap landed — is
+open and anchored on that test's name, so it and the next entry arrive
+together.
 
 The AGE live half remains nightly-and-manual (`codegen-live.yml`, job
 `live-smoke-age`, skipped on pull requests), so a refusal here ships verified by
 a dispatched run rather than by the pull request that adds it.
 `codegen-live.yml` accepts `workflow_dispatch`, which is what lets the arm be
-witnessed off the nightly clock at all; Docker being unavailable locally is a
-limit on iteration, not on witnessing. The lag is one cycle, against an image
+witnessed off the nightly clock at all. The lag is one cycle, against an image
 pinned by digest that no pull request can alter except by editing that digest.
+
+An earlier draft of this section said Docker was unavailable locally, which made
+iteration a matter of dispatching a run and waiting. That is not true on every
+host — item 4's probes, its served call, and the short-circuit trap below were
+all measured first-party against the same pinned digest in a local container (bd
+`gqlc-dy40s`). Where it is available it is worth using: it does not replace the
+CI witness, which is what the gate's guards actually require, but it turns a
+question that cost a dispatch cycle into one that costs a minute.
+
+One trap that local measurement surfaced and that anyone measuring this way
+needs: **an empty graph answers a predicate without evaluating it.**
+`MATCH (p:Person) WHERE p.d < duration.between(...)` returned zero rows and no
+error, because AGE short-circuits a `MATCH` on a label with no nodes. Seed the
+node and the same text answers 3F000. A served row measured that way vouches for
+nothing, so the live witness asserts a row actually came back rather than only
+that no error did.
 
 ### What closing the temporal set cost
 
@@ -503,17 +574,43 @@ and the move is worth recording because the room it left is small.
 Every route to a temporal column runs through a temporal constructor
 (`internal/query/cypher/shape.go §temporalConstructorType`; an aggregate over a
 temporal *property* types as unknown at that layer, so it does not reach one).
-With the bare set closed, the only spelling that still reaches
-`codegen.ErrUnrepresentableTemporal` on this backend is the namespaced
+With the bare set closed, the only spelling that still reached
+`codegen.ErrUnrepresentableTemporal` on this backend was the namespaced
 `duration.between`. Both moved onto it, and
-`test/data/codegen/invalid/unrepresentable_temporal_duration_column` is now the
+`test/data/codegen/invalid/unrepresentable_temporal_duration_column` became the
 only fixture in the corpus naming that sentinel — which
 `TestSentinelReachability` requires one of.
 
-So building `gqlc-dy40s` closes the last route, and whoever takes it owes that
-question an answer before deleting the fixture: a sentinel this backend can no
-longer reach from any query text is either a sentinel to retire or a gate whose
-ordering should change.
+Item 4 closed that last route, and the question this section left open was
+answered in the same pull request. **Neither** of the two options it named was
+taken. The sentinel is not retired: `codegen.Prepare` is portable code and the
+neo4j backends carry every temporal kind, so the branch is live for any consumer
+whose type map lacks one, and retiring it would delete a real refusal on the
+strength of one backend's gate. The ordering does not change either: the text
+gate is *correctly* first, because a statement this server cannot parse is the
+obstacle underneath a column it also cannot carry, and answering the carrier
+first costs the author two rounds on one query — change the projection,
+regenerate, and only then learn the query never parsed. That ordering is pinned
+at the CLI seam by a row whose `NotErrorIs` fails if it ever flips.
+
+What changed instead is the *witness*. The fixture was deleted, and
+`ErrUnrepresentableTemporal` is now listed in `assembledOnlySentinels`: no
+invalid fixture reaches it, and `TestAssembledInput` reaches the branch from a
+hand-built `codegen.Input` (taxonomy §5.1), with
+`TestReachableBranchesAreReached` still measuring the branch itself in the same
+corpus profile. So the obligation moved rather than lapsed. That list is
+fail-closed in both directions: an entry outside `codegenSentinels` is prose
+against nothing and reds the sweep, and so does an entry a fixture *does* cover
+— because a fixture is the better witness whenever one exists, and a backend
+that carries no temporal kind, or a gate that stops shadowing one, makes a
+fixture possible again.
+
+The third option — refusing item 4 in a *later* pull request than the deletion —
+is not available, and that is a property worth naming. The suite reds on the
+deletion alone, because until the gate refuses the text the fixture's query
+still reaches the carrier and the fixture still passes. That is the fail-closed
+property working: the two edits are one change, and the corpus refuses to let
+them be split.
 
 ## Considered options
 

@@ -1051,33 +1051,73 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 
 	// Cypher.g4 §oC_FunctionName is `oC_Namespace oC_SymbolicName`, and a
 	// server resolving `duration.between` resolves nothing about
-	// `duration`. The probe measured the bare name, so the bare name is
-	// what is refused.
+	// `duration`. So a namespaced call is not a name in THIS gap — and
+	// since bd gqlc-dy40s it is not unrefused either: it is the fourth
+	// gap's, answered per namespace under ErrUndefinedNamespace.
 	//
-	// Both halves are here because only the second one can fail. Drop the
-	// namespace guard in cypher.UnqualifiedFunctionCalls and
-	// `duration.between` reports "between" — a name no probe entered into
-	// the catalogue, so nothing is refused either way and a row spelling
-	// only this shape stays green over a scanner that has stopped reading
-	// the namespace at all. `com.example.datetime()` reports "datetime",
-	// which IS in the catalogue: without the guard the author is refused
-	// a call to their own user-defined function on the strength of a
-	// probe that measured a different name. That is a false positive, the
-	// one failure this gate has no recovery from — ADR 0005 leaves no
-	// rewrite — so it is the shape worth pinning.
-	for _, tc := range []struct{ name, text string }{
-		{"the refused name is the namespace", "MATCH (p:Person) WHERE duration.between(p.a, p.b) > 0 RETURN p.id\n"},
-		{"the refused name is the symbolic name", "MATCH (p:Person) WHERE p.at < com.example.datetime() RETURN p.id\n"},
-	} {
-		s.Run("a namespaced call is a different name and is not refused: "+tc.name, func() {
-			batch := in
-			batch.Queries = []codegen.NamedQuery{textQuery("Between", tc.text,
-				scalarColumn("p.id", graph.TypeInt))}
-			files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
-			s.Require().NoError(err)
-			s.Require().NotEmpty(files)
-		})
-	}
+	// Both sentinels are named on the refusing row. Naming only the one
+	// that answers would leave the row green if the temporal gap started
+	// claiming namespaced calls, which is the confusion the fourth
+	// sentinel was minted to prevent.
+	s.Run("a namespaced call is refused by the namespace gap, not this one", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Between",
+			"MATCH (p:Person) WHERE duration.between(p.a, p.b) > 0 RETURN p.id\n",
+			scalarColumn("p.id", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files, "a rejected batch must not return a partial file set")
+		s.Require().NotErrorIs(err, age.ErrUndefinedFunction,
+			"the temporal catalogue holds the bare name, and this call does not spell it")
+		s.Require().ErrorIs(err, age.ErrUndefinedNamespace)
+		s.Require().Contains(err.Error(), `"duration.between"`,
+			"the refusal quotes the whole call the author wrote, namespace included")
+	})
+
+	// The false positive, and the half of this pair that can still fail.
+	// `com.example.datetime()` calls a function under a namespace no
+	// probe has measured. Two different guards have to hold for it to
+	// generate: the unqualified scan must not report "datetime" out of
+	// it — that name IS in the temporal catalogue, so a scan that lost
+	// its namespace guard would refuse an author's own user-defined
+	// function on the strength of a probe that measured something else —
+	// and the namespace gap must not refuse an unprobed namespace.
+	//
+	// The pinned image refuses this text too, and that is deliberately
+	// not gqlc's business: a gap is what a probe witnessed. A false
+	// positive is the one failure this gate has no recovery from, since
+	// ADR 0005 leaves the author no rewrite, so the gate under-refuses on
+	// purpose and this row is where that choice is held.
+	s.Run("a call under a namespace no probe measured is not refused", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Between",
+			"MATCH (p:Person) WHERE p.at < com.example.datetime() RETURN p.id\n",
+			scalarColumn("p.id", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
+	})
+
+	// Case folding, which is load-bearing rather than cosmetic.
+	// shape.go lowercases a namespace before typing a temporal, so
+	// `Duration.Between` reaches a temporal column further down and is
+	// answered by the portable carrier refusal instead of by the text —
+	// a different sentinel, a different remedy, and a claim about this
+	// backend's carriers rather than about the server's schemas. The
+	// pinned image folds nothing: it answers `schema "Duration" does not
+	// exist`, quoting the author's own case back.
+	s.Run("a namespaced call is refused whatever case it is written in", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Between",
+			"MATCH (p:Person) WHERE Duration.Between(p.a, p.b) > 0 RETURN p.id\n",
+			scalarColumn("p.id", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files, "a rejected batch must not return a partial file set")
+		s.Require().ErrorIs(err, age.ErrUndefinedNamespace)
+		s.Require().Contains(err.Error(), `"Duration.Between"`,
+			"the refusal quotes the author's own case, which is what they have to find in the file")
+	})
 
 	s.Run("a property named like a constructor is not a call", func() {
 		// The false positive a scan for `datetime(` would take, and the
@@ -1301,6 +1341,194 @@ func (s *EmissionSuite) TestRejectsTheSpatialConstructor() {
 		batch.Queries = []codegen.NamedQuery{textQuery("Spots",
 			"MATCH (p:Person) RETURN p.point AS pt\n",
 			scalarColumn("pt", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
+	})
+}
+
+// wantNamespaceRefusal is the fourth gap's message, built here so a
+// change to the prose has to be made twice — once where the author reads
+// it and once where it is asserted.
+func wantNamespaceRefusal(count int, noun, dropped string) string {
+	return fmt.Sprintf("undefined namespace: generated code runs the author's query text verbatim "+
+		"(ADR 0005) and Apache AGE 1.7.0 has no schema for the namespace this project has "+
+		"measured, so every call on %d %s would answer \"schema <namespace> does not exist\" "+
+		"(SQLSTATE 3F000) — PostgreSQL resolves the namespace as a schema qualifier before it "+
+		"looks for any function, so no function under that namespace resolves whatever it is "+
+		"called: compute the value in Go and bind it as a parameter, or generate against a "+
+		"neo4j target: %s", count, noun, dropped)
+}
+
+// TestRejectsTheUndefinedNamespace pins the fourth gap: a call under a
+// namespace the pinned image has no schema for.
+//
+// It is the one gap here whose refusal names no function. PostgreSQL
+// resolves the schema qualifier before it looks for a function, so
+// duration.between answers SQLSTATE 3F000 `schema "duration" does not
+// exist` — measured on the pinned image, bd gqlc-dy40s — and the
+// catalogue is therefore of namespaces. That widening is the gap's one
+// step past its probe's letter, and it is witnessed rather than assumed:
+// duration.inSeconds, a function no probe ran, answers the same class
+// with the same message on the same image
+// (TestAGERefusesTheNamespaceItHasNoSchemaFor).
+func (s *EmissionSuite) TestRejectsTheUndefinedNamespace() {
+	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
+
+	for _, tc := range []struct {
+		name    string
+		queries []codegen.NamedQuery
+		count   int
+		noun    string
+		dropped string
+	}{
+		{
+			// The load-bearing shape: a predicate reaches no column at
+			// all, because the query model drops predicate structure
+			// (ADR 0003), so only the text carries this call.
+			name: "a call in a predicate the model drops is refused",
+			queries: []codegen.NamedQuery{textQuery("Between",
+				"MATCH (p:Person) WHERE p.d < duration.between(p.a, p.b) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Between ("duration.between")`,
+		},
+		{
+			name: "a call in a write that projects nothing is refused",
+			queries: []codegen.NamedQuery{execTextQuery("Stamp",
+				"MATCH (p:Person) SET p.d = duration.between(p.a, p.b)\n")},
+			count: 1, noun: "query", dropped: `Stamp ("duration.between")`,
+		},
+		{
+			// The whole call is quoted, namespace included. Quoting the
+			// namespace alone would print a string that is nowhere in
+			// the author's file.
+			name: "the call is quoted whole and in the author's own case",
+			queries: []codegen.NamedQuery{textQuery("Between",
+				"MATCH (p:Person) WHERE p.d < Duration.Between(p.a, p.b) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Between ("Duration.Between")`,
+		},
+		{
+			// A function no probe ever called, refused on the strength
+			// of its namespace. This is the per-namespace catalogue
+			// doing the thing a per-full-name one could not.
+			name: "another function under the measured namespace is refused too",
+			queries: []codegen.NamedQuery{textQuery("Secs",
+				"MATCH (p:Person) WHERE p.d < duration.inSeconds(p.a) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Secs ("duration.inSeconds")`,
+		},
+		{
+			name: "every offending query in the batch is named",
+			queries: []codegen.NamedQuery{
+				servedQuery,
+				textQuery("Between",
+					"MATCH (p:Person) WHERE p.d < duration.between(p.a, p.b) RETURN p.id\n",
+					scalarColumn("p.id", graph.TypeInt)),
+				execTextQuery("Stamp",
+					"MATCH (p:Person) SET p.d = duration.between(p.a, p.b)\n"),
+			},
+			count: 2, noun: "queries",
+			dropped: `Between ("duration.between"), Stamp ("duration.between")`,
+		},
+	} {
+		s.Run(tc.name, func() {
+			batch := in
+			batch.Queries = tc.queries
+			files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+			s.Require().Error(err)
+			s.Require().Nil(files, "a rejected batch must not return a partial file set")
+			s.Require().ErrorIs(err, age.ErrUndefinedNamespace)
+			s.Require().NotErrorIs(err, age.ErrUndefinedFunction,
+				"the temporal gap's catalogue holds bare names, and its remedy names a "+
+					"missing function rather than a missing schema")
+			s.Require().NotErrorIs(err, age.ErrUndefinedSpatialFunction)
+			s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
+			s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+			s.Require().EqualError(err, wantNamespaceRefusal(tc.count, tc.noun, tc.dropped))
+		})
+	}
+
+	// The two ordering pins. The namespace gap answers LAST, so a query
+	// spelling an earlier gap's construct as well is told about that one,
+	// and the pair is also where the call-shape partition is measured:
+	// each spelling is claimed by exactly one gap, so the two scans
+	// cannot both take one call.
+	s.Run("a query spelling a bare constructor and a namespaced one is answered by the temporal gap", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Both",
+			"MATCH (p:Person) WHERE p.a < duration({days: 1}) AND p.d < duration.between(p.x, p.y) RETURN p.id\n",
+			scalarColumn("p.id", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUndefinedFunction)
+		s.Require().NotErrorIs(err, age.ErrUndefinedNamespace)
+		// The message quotes the bare name ALONE. One token spells both
+		// constructs here, so a merged reading would be invisible to the
+		// sentinel assertions above and visible only in what is quoted.
+		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `Both ("duration")`))
+	})
+
+	s.Run("a query spelling a spatial constructor and a namespaced call is answered by the spatial gap", func() {
+		// The analogous pairing for the gap that answers third. It pairs
+		// point() with duration.between() rather than with
+		// point.distance(): `point` is not a namespace any probe has
+		// measured, so a point()/point.distance() query trips only the
+		// spatial gap and would pin no ordering at all. That silence is
+		// itself worth having, and it is the row below.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Both",
+			"MATCH (p:Person) WHERE p.loc = point({x: 1, y: 2}) AND p.d < duration.between(p.x, p.y) RETURN p.id\n",
+			scalarColumn("p.id", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUndefinedSpatialFunction)
+		s.Require().NotErrorIs(err, age.ErrUndefinedNamespace)
+		s.Require().EqualError(err, wantSpatialRefusal(1, "query", `Both ("point")`))
+	})
+
+	s.Run("a namespace no probe measured is served, even where the bare name is refused", func() {
+		// point() is refused and `point.distance()` is not, which reads
+		// like an inconsistency and is the gate's central rule: a gap is
+		// what a probe witnessed. The pinned image refuses this text —
+		// `foo.bar(1)` answers 3F000 the same way, measured — and gqlc
+		// still generates it, because a false positive is the one
+		// failure ADR 0005 leaves the author no rewrite from.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Far",
+			"MATCH (p:Person) WHERE p.d < point.distance(p.a, p.b) RETURN p.id\n",
+			scalarColumn("p.id", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
+	})
+
+	s.Run("an unserved column yields to this gap as it does to the other three", func() {
+		// rejectUnservedQueries yields to the TEXT, not to one construct
+		// in it, so a gap added to the table has to inherit that yield
+		// or the author is sent to fix a projection sitting behind a
+		// statement that never parsed.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Bagged",
+			"MATCH (p:Person) WHERE p.d < duration.between(p.a, p.b) RETURN properties(p) AS bag\n",
+			resolver.Column{Name: "bag", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap}})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUndefinedNamespace)
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().EqualError(err, wantNamespaceRefusal(1, "query", `Bagged ("duration.between")`))
+	})
+
+	s.Run("a property named like the namespace is not a call", func() {
+		// The false positive a scan for `duration.` would take, and the
+		// reason this reads the grammar rather than the characters.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Spans",
+			"MATCH (p:Person) RETURN p.duration AS d\n",
+			scalarColumn("d", graph.TypeInt))}
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
 		s.Require().NoError(err)
 		s.Require().NotEmpty(files)

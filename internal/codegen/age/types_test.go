@@ -308,20 +308,24 @@ func TestTemporalProjectionIsRefusedNamingTheKind(t *testing.T) {
 // kind alone does not say which — the same reason the width refusal
 // carries a backend name.
 //
-// The constructor is NAMESPACED, because every bare temporal
-// constructor openCypher spells is a name the dialect gate refuses on
-// the TEXT (dialect.go), which runs ahead of Prepare and would answer
-// this query before the carrier was ever asked about. A namespaced call
-// is a different name (Cypher.g4 §oC_FunctionName is `oC_Namespace
-// oC_SymbolicName`) and cypher.UnqualifiedFunctionCalls drops it, so it
-// is the one temporal spelling that still reaches the carrier question —
-// which makes this test the other half of the bound
-// TestRejectsUndefinedFunctions/"a namespaced call is a different name
-// and is not refused" states: an unrefused name reaches the carrier
-// question, and this is the answer it gets. bd gqlc-dy40s is the bead that would close that
-// gap; see the sibling fixture
-// test/data/codegen/invalid/unrepresentable_temporal_duration_column for
-// what it owes.
+// The Input is ASSEMBLED and its SourceText spells no constructor at
+// all, which is the whole of what this test can be since bd gqlc-dy40s.
+// Every temporal constructor openCypher spells is now refused on the
+// TEXT by the dialect gate, which runs ahead of Prepare: the bare names
+// by the temporal gap and the namespaced ones by the namespace gap. The
+// namespaced spelling this test used to carry —
+// duration.between(b.a, b.z) — was the last text that reached the
+// carrier question, and it is refused now, so a query text that reaches
+// here does not exist.
+//
+// That is not a hole in the coverage, it is the reachability this
+// sentinel HAS. A hand-assembled codegen.Input handed to Generate is a
+// reachable path by the taxonomy's own law (docs/specs/
+// codegen-sentinel-taxonomy.md §5.1, the gqlc-h4ug precedent), and it is
+// the path any future backend with partial temporal support would be
+// answered on. The column below is therefore declared directly, and the
+// text is a plain property lookup so that nothing in it is doing work
+// the column is supposed to do.
 func TestTemporalProjectionNamesThisBackend(t *testing.T) {
 	files, err := age.Generate(codegen.Input{
 		Schema: schemaWithPayload(graph.TypeString),
@@ -329,7 +333,7 @@ func TestTemporalProjectionNamesThisBackend(t *testing.T) {
 			Name:        "When",
 			Cardinality: codegen.CardinalityMany,
 			SourceFile:  "q.cypher",
-			SourceText:  "MATCH (b:Blob) RETURN duration.between(b.a, b.z) AS t\n",
+			SourceText:  "MATCH (b:Blob) RETURN b.span AS t\n",
 			Validated: resolver.ValidatedQuery{
 				Columns: []resolver.Column{{
 					Name: "t", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalDuration},

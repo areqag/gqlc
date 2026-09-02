@@ -611,6 +611,14 @@ func columnDecoder(f codegen.Row) string {
 // text at all, which is why there is no arm for one: every arm of
 // Temporal answers ok=false, so Prepare refuses a temporal column with
 // ErrUnrepresentableTemporal and no ColumnTemporal Row is built here.
+// That refusal is now reached by assembled input alone. Every spelling
+// that puts a temporal into a query TEXT on this backend is a call into
+// a constructor the server has no function for, and since bd gqlc-dy40s
+// the namespaced spelling too, so the dialect gate answers on the text
+// before Prepare is asked (ADR 0028 item 4). The invalid fixture that
+// used to reach it went with that change; the witnesses that remain are
+// the conformance suite's assembled column-temporal case and the
+// declared-kind column this package assembles for itself.
 //
 // A list is not one of those bounds. A schema property of list width is
 // SERVED: it arrives as a resolver.ResolvedProperty, typeMap.Property

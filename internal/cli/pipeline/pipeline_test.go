@@ -223,15 +223,15 @@ const (
 	//
 	//   namespaced  — Cypher.g4 §oC_FunctionName is `oC_Namespace
 	//                 oC_SymbolicName`, so duration.between is a
-	//                 different name from the probed `duration`. Two
-	//                 spellings, because only one of them can fail: drop
-	//                 the namespace guard and `duration.between` reports
-	//                 "between", which no probe put in the catalogue, so
-	//                 nothing is refused either way. `com.example.
-	//                 datetime()` reports "datetime", which IS in it, and
-	//                 the author is refused a call to a function they
-	//                 defined on the strength of a probe that measured
-	//                 another name.
+	//                 different name from the probed `duration` and this
+	//                 gap does not hold it. Since bd gqlc-dy40s the
+	//                 NAMESPACE gap does, so the served spelling here is
+	//                 the one under a namespace no probe measured:
+	//                 `com.example.datetime()` spells "datetime", which
+	//                 IS in this catalogue, so a scan reading the bare
+	//                 name off a qualified call would refuse the author
+	//                 a function they defined themselves on the strength
+	//                 of a probe that measured another name.
 	//   property    — p.toTimestamp spells a refused name and calls
 	//                 nothing. Not `datetime`, because GQL reserves that
 	//                 word and no schema can declare a property with it;
@@ -246,12 +246,35 @@ const (
 	// nothing happens, but that the OTHER sentinel answers.
 	otherGapConstructorQuery = "// name: Near :one\n" +
 		"MATCH (p:Person) WHERE p.seenAt < point({x: 1, y: 2}) RETURN p.id AS id\n"
-	namespacedConstructorQuery = "// name: Between :one\n" +
-		"MATCH (p:Person) WHERE duration.between(p.seenAt, p.seenAt) > 0 RETURN p.id AS id\n"
 	namespacedRefusedNameQuery = "// name: Recent :one\n" +
 		"MATCH (p:Person) WHERE p.seenAt < com.example.datetime() RETURN p.id AS id\n"
 	constructorNamedPropertyQuery = "// name: Stamps :one\n" +
 		"MATCH (p:Person) RETURN p.toTimestamp AS stamp\n"
+
+	// The namespace gap's shapes (bd gqlc-dy40s), the same three as
+	// above because the argument for each is the same one: a predicate
+	// leaves no column, a write projects nothing, and a projection is
+	// the one shape a carrier can also see. Every one calls
+	// duration.between, which the pinned image answers with SQLSTATE
+	// 3F000 naming the SCHEMA and no function at all — so the refusal
+	// an author reads has to come from the namespace gap even on the
+	// projected row, where ErrUnrepresentableTemporal is a true
+	// statement about the same query and the wrong one to answer first.
+	//
+	// namespaceServedQuery is the bound, and it is a call the pinned
+	// image really answers: ag_catalog is AGE's own schema and
+	// age_timestamp() is the function behind the bare timestamp() the
+	// temporal gap serves (measured bd gqlc-dy40s). A gate that took
+	// the call SHAPE rather than the measured namespace would refuse
+	// it, and ADR 0005 leaves the author no rewrite.
+	predicateNamespacedQuery = "// name: Between :one\n" +
+		"MATCH (p:Person) WHERE duration.between(p.seenAt, p.seenAt) > 0 RETURN p.id AS id\n"
+	execNamespacedQuery = "// name: Touch :exec\n" +
+		"MATCH (p:Person) SET p.seen = duration.between(p.seenAt, p.seenAt)\n"
+	projectedNamespacedQuery = "// name: Spans :one\n" +
+		"MATCH (p:Person) RETURN p.id AS id, duration.between(p.seenAt, p.seenAt) AS span\n"
+	namespaceServedQuery = "// name: Made :one\n" +
+		"MATCH (p:Person) WHERE p.seenAt < ag_catalog.age_timestamp() RETURN p.id AS id\n"
 
 	// wideColumnAlternationSchema declares narrowedSchema's two
 	// relationship types over a Post carrying a BYTES property, so one
@@ -819,7 +842,6 @@ func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
 		name  string
 		query string
 	}{
-		{"a namespaced call whose namespace is a refused name", namespacedConstructorQuery},
 		{"a namespaced call whose symbolic name is a refused name", namespacedRefusedNameQuery},
 		{"a property named like a constructor is not a call", constructorNamedPropertyQuery},
 	} {
@@ -840,8 +862,10 @@ func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
 		// function gap exists. This row asserted NoError until the
 		// spatial gap landed (bd gqlc-l8e2n), which conflated "the
 		// temporal gap declined this name" with "no gap takes it" — and
-		// the three rows above are the ones that genuinely mean the
-		// latter, which is why point() no longer sits among them.
+		// the served rows above are the ones that genuinely mean the
+		// latter, which is why point() no longer sits among them, and
+		// why duration.between left them for the namespace gap's own
+		// test below (bd gqlc-dy40s).
 		dir, cfgPath := writeProject(t)
 		writeFixtureFile(t, filepath.Join(dir, "schema.gql"), constructorSchema)
 		writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), otherGapConstructorQuery)
@@ -853,6 +877,109 @@ func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
 			"a witness for another gap does not add a name to this one")
 		require.ErrorIs(t, err, age.ErrUndefinedSpatialFunction)
 		require.Equal(t, pipeline.Result{}, res)
+	})
+}
+
+// TestRunApacheAgeRefusesTheUndefinedNamespace is the namespace gap at
+// the seam, in the same three shapes as the constructor gap above and
+// for the same reason: generated code runs the author's query text
+// verbatim (ADR 0005), so a call the server cannot resolve is a defect
+// of the text and has to be answered before any code is written.
+//
+// What is different is what the server says. PostgreSQL reads
+// `duration.between` as schema-qualified and resolves the schema first,
+// so the answer is SQLSTATE 3F000 `schema "duration" does not exist` and
+// names no function at all — measured against the pinned image, bd
+// gqlc-dy40s. That is why this is a gap of its own rather than four more
+// names in the constructor catalogue: its refusal cannot name the
+// function, because the server never looked one up.
+//
+// The projected row is the ordering pin, and it is the one this gate
+// took a fixture from. duration.between projects a duration column,
+// codegen.Prepare has no agtype carrier for one, and until this gap
+// existed that carrier refusal was the answer an author got — the whole
+// of test/data/codegen/invalid/unrepresentable_temporal_duration_column,
+// deleted in this branch. It was true and it was second: change the
+// projection on its advice and the statement still does not parse on
+// this server. NotErrorIs is what says the order did not quietly flip
+// back.
+func TestRunApacheAgeRefusesTheUndefinedNamespace(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query string
+		// dropped is the "<Name> (<names>)" list the refusal ends with,
+		// written out per row rather than derived.
+		dropped string
+		// portable is the shared refusal this gate must answer ahead of,
+		// or nil where no other gate applies to the row.
+		portable error
+	}{
+		{
+			name:    "a namespaced call in a predicate reaches no column",
+			query:   predicateNamespacedQuery,
+			dropped: `Between ("duration.between")`,
+		},
+		{
+			name:    "a namespaced call in a write that projects nothing",
+			query:   execNamespacedQuery,
+			dropped: `Touch ("duration.between")`,
+		},
+		{
+			name:     "a projected namespaced call is answered here, ahead of the carrier",
+			query:    projectedNamespacedQuery,
+			dropped:  `Spans ("duration.between")`,
+			portable: codegen.ErrUnrepresentableTemporal,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, cfgPath := writeProject(t)
+			writeFixtureFile(t, filepath.Join(dir, "schema.gql"), constructorSchema)
+			writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), tc.query)
+			writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
+
+			res, err := pipeline.Run(cfgPath, backendRegistry(t))
+			require.ErrorIs(t, err, age.ErrUndefinedNamespace)
+			require.NotErrorIs(t, err, age.ErrUndefinedFunction,
+				"the server resolved no function here, and a refusal that named one would send "+
+					"the author looking for a name that is not the obstacle")
+			require.NotErrorIs(t, err, age.ErrUndefinedSpatialFunction)
+			require.NotErrorIs(t, err, age.ErrUnsupportedQuery)
+			if tc.portable != nil {
+				require.NotErrorIs(t, err, tc.portable,
+					"the carrier is not yet the obstacle: the statement never parses on this server")
+			}
+			require.EqualError(t, err, "graph[0]: undefined namespace: generated code runs the "+
+				"author's query text verbatim (ADR 0005) and Apache AGE 1.7.0 has no schema for the "+
+				"namespace this project has measured, so every call on 1 query would answer "+
+				`"schema <namespace> does not exist" (SQLSTATE 3F000) — PostgreSQL resolves the `+
+				"namespace as a schema qualifier before it looks for any function, so no function "+
+				"under that namespace resolves whatever it is called: compute the value in Go and "+
+				"bind it as a parameter, or generate against a neo4j target: "+tc.dropped)
+			require.Equal(t, pipeline.Result{}, res)
+
+			// duration.between is a served function on neo4j and a
+			// duration is a carried column there, so the same project
+			// generates. That is the asymmetry the refusal's own advice
+			// rests on, and the projected row is the one that needs it
+			// most: it is the row whose portable refusal would fire on
+			// every backend if the carrier were really the obstacle.
+			writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverNeo4jGoV5), ""))
+			res, err = pipeline.Run(cfgPath, backendRegistry(t))
+			require.NoError(t, err)
+			require.Empty(t, res.Diagnostics)
+		})
+	}
+
+	t.Run("a qualified call the image resolves is not refused", func(t *testing.T) {
+		dir, cfgPath := writeProject(t)
+		writeFixtureFile(t, filepath.Join(dir, "schema.gql"), constructorSchema)
+		writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), namespaceServedQuery)
+		writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
+
+		res, err := pipeline.Run(cfgPath, backendRegistry(t))
+		require.NoError(t, err, "this gap refuses a measured namespace, not the shape of a "+
+			"qualified call")
+		require.Empty(t, res.Diagnostics)
 	})
 }
 

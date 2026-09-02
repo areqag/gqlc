@@ -55,6 +55,27 @@ var ErrUndefinedFunction = errors.New("undefined function")
 // dialect.go, and only by it.
 var ErrUndefinedSpatialFunction = errors.New("undefined spatial function")
 
+// ErrUndefinedNamespace is returned when a batch carries a query whose
+// TEXT calls a function under a NAMESPACE Apache AGE 1.7.0 has no schema
+// for. It is the one gap in this table whose refusal is not about a
+// function at all: PostgreSQL reads an openCypher namespace as a schema
+// qualifier and resolves it BEFORE looking for any function, so the
+// server answers SQLSTATE 3F000 invalid_schema_name and names the
+// NAMESPACE, never the function. That is why it cannot be a name in the
+// catalogue behind ErrUndefinedFunction — a row there has to be named by
+// its own probe's answer, and this answer names no function — and why
+// the remedy prose says "no schema" where the others say "no such
+// function".
+//
+// "Namespace" is the grammar's own word (Cypher.g4 §oC_Namespace).
+// "Schema" is one server's reading of it, so it belongs in the
+// diagnostic, where it quotes the answer the author will see, and not in
+// the sentinel, where it would name the construct after that reading.
+//
+// Which namespaces are refused is decided by the probe table in
+// dialect.go, and only by it.
+var ErrUndefinedNamespace = errors.New("undefined namespace")
+
 // Sentinels names this backend's user-reachable refusals for a consumer
 // that must not import this package to learn them — the conformance
 // corpus, which reaches every backend through the composed registry and
@@ -74,6 +95,7 @@ func Sentinels() map[string]error {
 		"age.ErrRelationshipTypeAlternation": ErrRelationshipTypeAlternation,
 		"age.ErrUndefinedFunction":           ErrUndefinedFunction,
 		"age.ErrUndefinedSpatialFunction":    ErrUndefinedSpatialFunction,
+		"age.ErrUndefinedNamespace":          ErrUndefinedNamespace,
 	}
 }
 

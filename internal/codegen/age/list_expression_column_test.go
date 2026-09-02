@@ -231,6 +231,14 @@ func TestListOfEdgeUnionStaysRefused(t *testing.T) {
 // query. The top-level temporal arm stands aside for the same reason and
 // has done since the gate was written; the list arm inherits it, and this
 // row is what stops the recursion from inventing a second, worse answer.
+//
+// The column below is DECLARED, and since bd gqlc-dy40s that is the only
+// way to reach this arm. A list of temporals arrives from a query text as
+// collect() over a temporal constructor, and every spelling of one — bare
+// or namespaced — is now refused on the text by the dialect gate ahead of
+// this phase (ADR 0028 item 4). So this row pins the standing-aside for
+// assembled input, which is the reachability the sentinel has here, not a
+// path an author's .cypher file can still walk.
 func TestListOfTemporalYieldsToTheTypeTable(t *testing.T) {
 	t.Parallel()
 

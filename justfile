@@ -2561,12 +2561,11 @@ test-codegen-live-neo4j:
 
 # the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
 # the dialect fact the AGE backend's edge-union refusal rests on, the offset
-# sidecar's two live branches, the one construct AGE refuses that no gap acts
-# on yet, and the AGE half of the nested-list divergence ADR 0035 rests on —
-# each on its own apache/age
-# container. Nightly and manual only — these containers are cost this project
-# does not charge to a pull request. -count=1 because this is the AGE arm's only
-# gate and no pull request pays for it, so the run it reports on has to be a real
+# sidecar's two live branches, and the AGE half of the nested-list divergence
+# ADR 0035 rests on — each on its own apache/age container. Nightly and manual
+# only — these containers are cost this project does not charge to a pull
+# request. -count=1 because this is the AGE arm's only gate and no pull request
+# pays for it, so the run it reports on has to be a real
 # one.
 #
 # The alternation is a NAME LIST, not a pattern: go test's -run is unanchored, so
@@ -2585,7 +2584,7 @@ test-codegen-live-neo4j:
 # runs nowhere else actually executed. It goes on the whole recipe rather than a
 # second `go test` invocation, which would start a second AGE container.
 test-codegen-live-age:
-    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGERefusesTheSpatialConstructor|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEAnswersTheConstructsNoGapRefuses|TestAGEStoresANestedListProperty' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGERefusesTheSpatialConstructor|TestAGERefusesTheNamespaceItHasNoSchemaFor|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEStoresANestedListProperty' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than
