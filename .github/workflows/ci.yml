@@ -169,6 +169,17 @@ jobs:
       # read inside it.
       - uses: ./.github/actions/setup-shellcheck
       - run: just tidy-check
+      # bd gqlc-lsll5: two documents claiming one ordinal differ in FILENAME, so
+      # git compares them as unrelated additions and a rebase has nothing to
+      # conflict over. Measured on PR #2105: a clean rebase, `just gates` all
+      # green and this job green, on a tree carrying two ADRs numbered 0036.
+      #
+      # Unconditional, unlike most steps below: it reads the tree, so it needs no
+      # PR to exist and it also holds on a master push. The enrolled series are
+      # spelled here and in the `gates` recipe; see the checker's docstring for
+      # why kingdom/brain/postmortems is deliberately absent.
+      - name: no two documents claim one ordinal
+        run: python3 .github/scripts/check-doc-ordinals.py docs/adr kingdom/brain/decisions
       # bd gqlc-v2p: fails when a PR's `.beads/issues.jsonl` drops or reopens
       # an issue vs its base. Fetch only the base commit (depth 1) so cost is
       # O(1) in history size, not O(N). Skip on master push — the tip IS the
