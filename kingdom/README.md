@@ -38,9 +38,10 @@ kingdom/
 
 Runtime state lives OUTSIDE the repo, shared by every seat, never committed:
 `<parent-of-main-checkout>/kingdom-state/` — maildirs (`mail/<seat>/{inbox,read,sent}`),
-seat heartbeats and status, handoff notes, the halt flag. `bin/km` derives the
-path from `git rev-parse --git-common-dir`, so it resolves identically from any
-seat worktree.
+seat heartbeats and status, handoff notes, the halt flag. `bin/km` places it
+beside the main checkout that `kingdom.toml` STATES in `[kingdom] root`, so it
+resolves identically from any seat worktree and from any cwd at all — and km
+refuses when none is stated rather than guessing.
 
 ## How work flows
 
