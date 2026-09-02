@@ -213,3 +213,20 @@ func TestOne(t *testing.T) {
 		})
 	}
 }
+
+// A CI reader gets the message and nothing else. It has to say that
+// order is not compared, because the lists it prints are sorted and two
+// sorted lists side by side are exactly what invites reading them index
+// by index.
+func TestTestsCensusMessageDisclaimsOrderAndDisclosesItsSort(t *testing.T) {
+	t.Parallel()
+
+	d := corpusrun.Declared{Tests: []string{"TestB", "TestA"}}
+	err := d.Check(corpusrun.Report{Passed: []string{"TestB"}}, "corpus_test.go", "package corpus\n")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "order not compared")
+	require.Contains(t, err.Error(), "sorted for reading")
+	// The disclosure has to be true of the bytes beside it: declared in
+	// the order TestB, TestA, printed sorted.
+	require.Contains(t, err.Error(), "declared: [TestA TestB]")
+}
