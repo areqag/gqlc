@@ -1452,7 +1452,6 @@ func (a candidateAcc) result() map[graph.LabelSetKey]struct{} {
 // it fires. The mixed case is unobserved, not impossible.
 type unlabelledInference struct {
 	inferred   map[graph.LabelSetKey]struct{}
-	covered    bool
 	attainable map[graph.LabelSetKey]struct{}
 	attested   bool
 	// innerJoined records that some folded edge drops the rows that lack it, so
@@ -1505,16 +1504,29 @@ type unlabelledInference struct {
 //     Pinned by invalid/ambiguous_unlabelled_binding.cypher and by
 //     TestInlineEndpointCommitsOnTheTypesSatisfyingIt.
 //
-// There is no separate guard on i.covered. When every touching edge passed both
-// conjuncts, attainable and inferred folded the identical edge sequence — an
-// edge that folds into one folds into the other, and the edges candidateTypes
-// skips fold into neither — so the substitution returns the set it replaces.
-// Relaxing the length gate is what makes the covered case observable, which is
-// why the fixtures above pin the length gate rather than this.
+// `covered` is decided here and nowhere else, and by WHICH SET is returned
+// rather than by any per-edge tally:
 //
-// The substituted set covers by construction: every edge it folded witnesses its
-// endpoints and had a far end that covered, which is endpointKeys.covering()'s
-// contract on both halves.
+//   - the substituted set covers by construction — every edge it folded
+//     witnesses its endpoints and had a far end that covered, which is
+//     endpointKeys.covering()'s contract on both halves;
+//   - `inferred` does not cover when this function hands it to a singular
+//     commitment. Reaching that return with a singleton means !attested, so
+//     every edge that folded failed a conjunct, and an intersection built only
+//     out of edges that could each have dropped a type enumerates nothing. A
+//     singleton WITH attested takes the substitution instead, and the other two
+//     lengths never reach a commitment to read the bit: 0 refuses, and 2 or more
+//     defers to the next round.
+//
+// There is no accumulator behind it. candidateTypes used to carry a `covered`
+// field conjoining the same two conjuncts once per edge, and by the second
+// bullet its value at this line was `false` on every input — measured green with
+// the field's read replaced by the literal, over this package's tests and the
+// corpus sweep. It read as the lever a finer coverage rule would pull
+// (gqlc-xzgt) and it was not one: the conjunction that carries that precision is
+// the one over `attested` and `attainable`, since crediting one more edge THERE
+// is what lets the substitution fire, and the substitution is the only route to
+// a covered commitment.
 //
 // A substituted set of two or more is committed, not deferred, because deferring
 // reaches ErrAmbiguousBinding and that refuses the queries whose answer does not
@@ -1542,7 +1554,7 @@ func (i unlabelledInference) commit() (keys map[graph.LabelSetKey]struct{}, cove
 		return nil, false, false
 	}
 	if !i.attested || len(i.inferred) != 1 {
-		return i.inferred, i.covered, false
+		return i.inferred, false, false
 	}
 	return i.attainable, true, true
 }
@@ -1571,9 +1583,8 @@ func (i unlabelledInference) unconstrained() bool {
 // resolves into ErrUnknownLabel, and the wrong type it infers from one is
 // gqlc-3uof — pre-existing on master and deliberately left alone.
 //
-// The rule for `covered` is a CONJUNCTION over the edges that contributed, and
-// each conjunct is a different way the intersection can drop a type the returned
-// rows really have:
+// An edge folds into `attainable` under a CONJUNCTION, and each conjunct is a
+// different way the intersection can drop a type the returned rows really have:
 //
 //   - the far end covered — otherwise the keys probed against are a strict
 //     subset of the ones a matching row can put there, and the declarations
@@ -1584,10 +1595,11 @@ func (i unlabelledInference) unconstrained() bool {
 //     is the demonstrated case: it is an outer join, so the rows that lack it
 //     come back anyway and this binding is whatever those rows put here.
 //
-// The same conjunction decides which accumulator an edge folds into. Failing it
-// does not skip the edge for `inferred`, only for `attainable`: `inferred` is
-// left exactly as master computes it, so nothing reads a set master would not
-// have produced.
+// Failing it does not skip the edge for `inferred`, only for `attainable`:
+// `inferred` is left exactly as master computes it, so nothing reads a set
+// master would not have produced. Failing it also leaves no separate mark — the
+// two accumulators and `attested` carry the whole answer, and commit() says why
+// a per-edge coverage tally beside them could only restate `attested`.
 //
 // An edge skipped above (an endpoint endpointLabels cannot read yet) contributes
 // to neither accumulator, which only widens both, so skipping cannot break the
@@ -1602,15 +1614,17 @@ func (i unlabelledInference) unconstrained() bool {
 // refuses where the nil lane would not, and never turns that lane's
 // ErrAmbiguousBinding into case 0's ErrUnknownLabel.
 //
-// `covered` is computed off the unnarrowed reading and the narrowing does not
-// touch it. endpointNarrowing only ever drops types that no matching row can
-// put at that end — it folds in an edge only when the edge witnesses its
-// endpoints and both of its ends cover — which is the same argument
-// NarrowPluralEndpoints makes when it keeps resolvedCovers on a collapse, and
-// the same one that lets `attainable` be read as covering.
+// Coverage is decided off the unnarrowed reading and the narrowing does not
+// touch it: `attested` turns on the far end's own covering() and on
+// witnessesItsEndpoints, and the narrowing changes neither. endpointNarrowing
+// only ever drops types that no matching row can put at that end — it folds in
+// an edge only when the edge witnesses its endpoints and both of its ends cover
+// — which is the same argument NarrowPluralEndpoints makes when it keeps
+// resolvedCovers on a collapse, and the same one that lets `attainable` be read
+// as covering.
 func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}) unlabelledInference {
 	var all, attainable candidateAcc
-	inf := unlabelledInference{covered: true, bindingNullable: n.Nullable()}
+	inf := unlabelledInference{bindingNullable: n.Nullable()}
 	for _, e := range edges {
 		side, touches := touchingSide(e, n.Variable())
 		if !touches {
@@ -1633,8 +1647,6 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 		if otherCovers && witnessesItsEndpoints(e, written) {
 			attainable.fold(e, side, other, otherKeys, s, narrowing)
 			inf.attested = true
-		} else {
-			inf.covered = false
 		}
 		if !e.Nullable() {
 			inf.innerJoined = true
