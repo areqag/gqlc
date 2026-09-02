@@ -1040,12 +1040,53 @@ seat_pane() { # <seat> -> the pane's visible buffer
     herdr pane read "$pane" --source visible --lines 40 2>/dev/null
 }
 
+# A seat whose turn ended with a BACKGROUND shell still running reads `done`:
+# herdr derives its state from the screen and cannot see the shell, while Claude
+# Code re-invokes the agent the moment that shell finishes. Such a seat has not
+# stopped, so it is not idle. The witness is the process table and not the
+# pane's "N shell still running" line, because that line is Claude Code chrome
+# and moves with its version (bd gqlc-y8puo).
+#
+# A claude process AT REST HAS NO CHILDREN, which is what makes this
+# discriminate rather than exempt everyone: measured across the live town
+# 2026-09-02, sedrak (idle at an empty prompt) and artur and ayg held a live
+# claude with zero children, stable over repeated samples, while vahagn — the
+# seat this bead was filed on — held one child that was Claude Code's own
+# `bash -c source .../shell-snapshots/...`.
+#
+# Absent claude processes are NOT work: a seat killed mid-shell leaves its
+# children reparented to init and the pid this looks under is gone, so a dead
+# seat still answers "no work" and still reaches the ladder. That is arpine on
+# the same pass — `done`, no process, correctly still nudgeable.
+#
+# There is deliberately NO fail-loud arm here, unlike seat_agent_status. Every
+# way this can fail to see work — an unreadable /proc entry, a pgrep that finds
+# nothing, a worktree that does not exist — lands on "no work running", which
+# leaves the seat in exactly the population it occupied before this predicate
+# existed. That is a return to the old behaviour rather than a new harm, and it
+# is the only direction that cannot silence the ladder town-wide.
+seat_work_running() { # <seat> -> 0 a claude process in the seat's worktree has a live child
+    local wt p
+    wt=$(seat_worktree "$1")
+    for p in $(pgrep -x claude 2>/dev/null); do
+        [ "$(readlink "/proc/$p/cwd" 2>/dev/null)" = "$wt" ] || continue
+        pgrep -P "$p" >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
 # history: kingdom/brain/km-notes.md#seat_pane_idle
 seat_pane_idle() { # <seat>
     case "$(seat_agent_status "$1")" in
-        idle | done) return 0 ;;
+        idle | done) ;;
         *) return 1 ;;
     esac
+    # `done` is the STEADY state — permanent once any turn completes — so it is
+    # the value a working seat wears between turns as well as the one a stopped
+    # seat wears forever. Narrowing the enum back to `idle` is not the fix and
+    # was already tried: it made this blind to the steady state (bd gqlc-ymbw0).
+    # The second witness separates the two instead.
+    ! seat_work_running "$1"
 }
 
 # An idle seat's composer is not always empty, and the difference decides
