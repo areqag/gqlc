@@ -1411,18 +1411,32 @@ func (FuncProjection) isProjection() {}
 // Stage-6 type, spec §1.2). count(*) is the degenerate case — AggCount with an
 // empty []Ref and a TypeInt result.
 type AggregateProjection struct {
-	fn         AggregateFunc // which aggregate this is (the cardinality signal)
-	refs       []Ref         // the var/var.prop arguments the aggregate touches
-	distinct   bool          // Stage 10: DISTINCT dedup axis; changes result semantics
-	resultType Type          // Stage 10: per-aggregate result type; TypeUnknown when the parser cannot commit
+	fn            AggregateFunc // which aggregate this is (the cardinality signal)
+	refs          []Ref         // the var/var.prop arguments the aggregate touches
+	distinct      bool          // Stage 10: DISTINCT dedup axis; changes result semantics
+	resultType    Type          // Stage 10: per-aggregate result type; TypeUnknown when the parser cannot commit
+	leavesAreRefs bool          // the ref-valued-leaf certificate (ADR 0008 amendment 2026-09-02, spec model-change-f45qn)
 }
 
 // NewAggregateProjection builds an AggregateProjection. Total: the listener
 // supplies an AggregateFunc from the closed enum, Refs it has already mined,
 // the DISTINCT flag (read from the OC_FunctionInvocation grammar node), and
-// the Stage-10 result type it computed via aggregateResultType.
+// the Stage-10 result type it computed via aggregateResultType. Forwards
+// leavesAreRefs=false to NewAggregateProjectionWithAxes — the zero-value-safe
+// shorthand for callers that predate the ADR 0008 2026-09-02 amendment.
 func NewAggregateProjection(fn AggregateFunc, refs []Ref, distinct bool, t Type) AggregateProjection {
-	return AggregateProjection{fn: fn, refs: refs, distinct: distinct, resultType: t}
+	return NewAggregateProjectionWithAxes(fn, refs, distinct, t, false)
+}
+
+// NewAggregateProjectionWithAxes builds an AggregateProjection carrying every
+// axis, including the ref-valued-leaf certificate. leavesAreRefs is minted by
+// classifyAggregateCall for collect alone, and only when its single argument
+// is a uniform-depth tree of bare refs; see LeavesAreRefs for what the bit
+// asserts. The certificate is appended after the pre-existing parameters
+// rather than placed beside distinct, so no call site can transpose two
+// adjacent bools.
+func NewAggregateProjectionWithAxes(fn AggregateFunc, refs []Ref, distinct bool, t Type, leavesAreRefs bool) AggregateProjection {
+	return AggregateProjection{fn: fn, refs: refs, distinct: distinct, resultType: t, leavesAreRefs: leavesAreRefs}
 }
 
 // Func is which aggregate this is — the cardinality-bearing distinction (§4).
@@ -1444,6 +1458,14 @@ func (p AggregateProjection) Distinct() bool { return p.distinct }
 // worse than an honest TypeUnknown the resolver can upgrade from the schema.
 func (p AggregateProjection) Type() Type { return p.resultType }
 
+// LeavesAreRefs is the ref-valued-leaf certificate — the same axis
+// ExprProjection.LeavesAreRefs documents, which states what the bit asserts.
+// Only collect mints it, because collect(T) = list<T> puts the operand's
+// values at the result type's unknown leaf verbatim. sum/min/max/avg never
+// mint: their unknown is the result of a fold, or engine-dependent, and no
+// schema lookup may overwrite it (spec model-change-f45qn §1 answer 3).
+func (p AggregateProjection) LeavesAreRefs() bool { return p.leavesAreRefs }
+
 func (AggregateProjection) isProjection() {}
 
 // ExprProjection is a rich scalar expression at a RETURN or WITH position
@@ -1459,6 +1481,7 @@ type ExprProjection struct {
 	refs              []Ref // the var/var.prop bindings the expression touches
 	resultType        Type  // the parser-computed result type; TypeUnknown when it cannot commit
 	containsAggregate bool  // true iff the expression subtree contains at least one aggregate call (Shape B, ADR 0008 amendment 2026-07-06)
+	leavesAreRefs     bool  // the ref-valued-leaf certificate (ADR 0008 amendment 2026-09-02, spec model-change-f45qn)
 }
 
 // NewExprProjection builds an ExprProjection carrying its result type and
@@ -1474,9 +1497,18 @@ func NewExprProjection(refs []Ref, t Type) ExprProjection {
 // result type, touched refs, and the ContainsAggregate bit — true iff the
 // expression subtree contains at least one aggregate function call (Shape B
 // per ADR 0008 amendment 2026-07-06). Callers that do not need the bit use
-// NewExprProjection, which forwards containsAggregate=false.
+// NewExprProjection, which forwards containsAggregate=false. Forwards
+// leavesAreRefs=false to NewExprProjectionWithAxes.
 func NewExprProjectionWithAggregate(refs []Ref, t Type, containsAggregate bool) ExprProjection {
-	return ExprProjection{refs: refs, resultType: t, containsAggregate: containsAggregate}
+	return NewExprProjectionWithAxes(refs, t, containsAggregate, false)
+}
+
+// NewExprProjectionWithAxes builds an ExprProjection carrying every axis,
+// including the ref-valued-leaf certificate. leavesAreRefs is minted by
+// classifyRichExpression for a uniform-depth list literal of bare refs; see
+// LeavesAreRefs for what the bit asserts.
+func NewExprProjectionWithAxes(refs []Ref, t Type, containsAggregate, leavesAreRefs bool) ExprProjection {
+	return ExprProjection{refs: refs, resultType: t, containsAggregate: containsAggregate, leavesAreRefs: leavesAreRefs}
 }
 
 // Refs are the var/var.prop bindings the expression touches, so the
@@ -1495,24 +1527,42 @@ func (p ExprProjection) Type() Type { return p.resultType }
 // (docs/specs/resolver-stage-r5.md §4.5.3 close-out).
 func (p ExprProjection) ContainsAggregate() bool { return p.containsAggregate }
 
+// LeavesAreRefs is the ref-valued-leaf certificate (spec model-change-f45qn
+// §2). True asserts all three of: every value appearing at a TypeUnknown leaf
+// of Type() is exactly the value of one of Refs(); Refs() is non-empty and
+// consists exactly of those leaf lookups; and Type()'s list spine agrees with
+// the value's actual structure. False asserts nothing — it is the state of
+// every projection that predates the axis.
+//
+// The certificate carries no STRUCTURE, and that is the stopping rule rather
+// than an omission: structure lives solely in the committed Type, whose only
+// parameterised variant is TypeList, so a committed type has at most one
+// TypeUnknown leaf for the resolver to fill. A shape needing per-position or
+// per-element typing — mixed depth, mixed types, a fold — is beyond the
+// certificate permanently, and []any is its correct answer, not a gap.
+func (p ExprProjection) LeavesAreRefs() bool { return p.leavesAreRefs }
+
 func (ExprProjection) isProjection() {}
 
 // MarshalJSON renders an ExprProjection as a tagged union member discriminated
 // by "kind", carrying its refs, always-emitted result type, and the
-// ContainsAggregate axis (omit-when-false — the campaign convention recorded
-// in the ADR 0008 2026-07-06 amendment note, so earlier goldens whose
-// subtree carries no aggregate stay byte-identical).
+// ContainsAggregate and LeavesAreRefs axes (omit-when-false — the campaign
+// convention recorded in the ADR 0008 2026-07-06 amendment note, so earlier
+// goldens whose subtree carries no aggregate and mints no certificate stay
+// byte-identical).
 func (p ExprProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind              string    `json:"kind"`
 		Refs              []flatRef `json:"refs"`
 		Type              Type      `json:"type"`
 		ContainsAggregate bool      `json:"containsAggregate,omitempty"`
+		LeavesAreRefs     bool      `json:"leavesAreRefs,omitempty"`
 	}{
 		Kind:              projectionKindExpr,
 		Refs:              flattenRefs(p.refs),
 		Type:              projectionType(p.resultType),
 		ContainsAggregate: p.containsAggregate,
+		LeavesAreRefs:     p.leavesAreRefs,
 	})
 }
 
@@ -2059,15 +2109,19 @@ func (p FuncProjection) MarshalJSON() ([]byte, error) {
 // AggregateFunc.String, the single source), its referenced bindings as "refs",
 // the Stage-10 DISTINCT axis as "distinct" (always emitted, matching the
 // always-emit convention nullable / directed / hops / returnsAll follow),
-// and its Stage-10 result type as "type".
+// its Stage-10 result type as "type", and the LeavesAreRefs axis
+// (omit-when-false — the campaign convention recorded in the ADR 0008
+// 2026-07-06 amendment note, so every golden whose query mints no certificate
+// stays byte-identical).
 func (p AggregateProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind     string    `json:"kind"`
-		Func     string    `json:"func"`
-		Refs     []flatRef `json:"refs"`
-		Distinct bool      `json:"distinct"`
-		Type     Type      `json:"type"`
-	}{Kind: projectionKindAggregate, Func: p.fn.String(), Refs: flattenRefs(p.refs), Distinct: p.distinct, Type: projectionType(p.resultType)})
+		Kind          string    `json:"kind"`
+		Func          string    `json:"func"`
+		Refs          []flatRef `json:"refs"`
+		Distinct      bool      `json:"distinct"`
+		Type          Type      `json:"type"`
+		LeavesAreRefs bool      `json:"leavesAreRefs,omitempty"`
+	}{Kind: projectionKindAggregate, Func: p.fn.String(), Refs: flattenRefs(p.refs), Distinct: p.distinct, Type: projectionType(p.resultType), LeavesAreRefs: p.leavesAreRefs})
 }
 
 // Effect is one write operation the query performs at a specific query part

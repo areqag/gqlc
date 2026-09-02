@@ -1156,7 +1156,7 @@ var mustParse = map[string]struct {
 				{
 					Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
 					Returns: []query.ReturnItem{
-						{Name: "ns", Value: query.NewAggregateProjection(query.AggCollect, []query.Ref{{Variable: "n"}}, false, query.NewTypeList(query.TypeNode{}))},
+						{Name: "ns", Value: query.NewAggregateProjectionWithAxes(query.AggCollect, []query.Ref{{Variable: "n"}}, false, query.NewTypeList(query.TypeNode{}), true)},
 					},
 				},
 				{
@@ -1221,12 +1221,19 @@ var mustParse = map[string]struct {
 	// Stage 10 — collect(TypeNode) → list<node>. The aggregate always yields a
 	// list; the element type composes with Stage-6 typing (a bare node ref
 	// types as TypeNode).
+	// The certificate is minted here and buys nothing, which is the point of
+	// pinning it: collect(n) commits list<node>, so there is no TypeUnknown
+	// leaf for the resolver to fill and the bit is a true statement about a
+	// type nothing will touch. The mint predicate answers a question about
+	// the ARGUMENT's shape, deliberately not about whether the answer is
+	// useful — a predicate that also read the committed type would have two
+	// reasons to say no and no single place to read them.
 	"collect node": {
 		src: "MATCH (n)\nRETURN collect(n)",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
 			Returns: []query.ReturnItem{
-				{Name: "collect(n)", Value: query.NewAggregateProjection(query.AggCollect, []query.Ref{{Variable: "n"}}, false, query.NewTypeList(query.TypeNode{}))},
+				{Name: "collect(n)", Value: query.NewAggregateProjectionWithAxes(query.AggCollect, []query.Ref{{Variable: "n"}}, false, query.NewTypeList(query.TypeNode{}), true)},
 			},
 		}),
 	},
@@ -1239,7 +1246,7 @@ var mustParse = map[string]struct {
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
 			Returns: []query.ReturnItem{
-				{Name: "collect(n.name)", Value: query.NewAggregateProjection(query.AggCollect, []query.Ref{{Variable: "n", Property: "name"}}, false, query.NewTypeList(query.TypeUnknown{}))},
+				{Name: "collect(n.name)", Value: query.NewAggregateProjectionWithAxes(query.AggCollect, []query.Ref{{Variable: "n", Property: "name"}}, false, query.NewTypeList(query.TypeUnknown{}), true)},
 			},
 		}),
 	},
