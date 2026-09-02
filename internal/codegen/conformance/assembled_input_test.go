@@ -1112,6 +1112,11 @@ func TestTemporalSweepRefusesAnUntypedKindWhereverItIsDeclared(t *testing.T) {
 		{name: "in a parenthesised block of its own", decl: "const (\n\tTemporalWeek = 6\n)\n"},
 		{name: "at iota in a block of its own", decl: "const (\n\tTemporalWeek = iota\n)\n"},
 		{name: "inheriting an untyped run", decl: "const (\n\tTemporalWeek = 6\n\tTemporalFortnight\n)\n"},
+		// The refusal is fail-closed: a value this cannot read is refused
+		// rather than admitted, because the cost of refusing one wrongly is
+		// a type annotation and the cost of admitting one wrongly is the
+		// escape the whole derivation exists to close.
+		{name: "at a value the derivation cannot read", decl: "const TemporalWeek = 3 + 3\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, refusals := recordedTemporalSweep(sweptPackage(t, map[string]string{
