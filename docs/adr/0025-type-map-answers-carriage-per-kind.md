@@ -171,10 +171,19 @@ scalar kinds is a decode helper, which is a different fix — below.
   `db.Record` that hydrator fills, so the members measured are the ones a
   caller reads off a record. That is the driver's mapping from packed marker to
   Go type, not a live session: it does not witness which marker a server picks
-  for a given Cypher value. Nor was a live run an alternative. The fixture whose
-  golden returns a `map[string]any` is `scalar_map` (`RETURN {a: 1} AS m`,
-  emitted for `neo4j-go-v5`), and no scenario in the live battery drives it, so
-  a green `live-smoke` witnesses nothing about a map member either.
+  for a given Cypher value. A live run witnesses that, and now does: the
+  fixture whose golden returns a `map[string]any` is `scalar_map`
+  (`RETURN {a: 1} AS m`, emitted for `neo4j-go-v5` and `neo4j-go-v6`), and
+  `mapColumnScenarios` drives it on both neo4j arms of the live battery,
+  requiring the emitted read to answer with a one-member map whose member `a`
+  is `int64(1)` (bd `gqlc-y6mo`). One member of one kind on one server, which
+  is narrower than
+  the table below in every direction — it says which marker THIS server picks
+  for a literal integer inside a map, and nothing about the other twelve kinds
+  or about Aura, a cluster, or another 5.x. What it does close is the gap that
+  the marker→Go-type mapping alone left open: until it existed, no scenario in
+  the live battery drove `scalar_map` at all, so a green `live-smoke`
+  witnessed nothing about a map member.
 
   Only the AGE half of this is gated. `TestAgtypeValue`, in the corpus the
   emitted helpers are run against, reads
@@ -202,8 +211,11 @@ scalar kinds is a decode helper, which is a different fix — below.
   What never depended on the answer is that `TestBackendInvariantSurface`
   compares declarations — it nils each method body and passes over the
   receiver-less decode helpers, which is where this behaviour lives — so it
-  would not see a divergence of this shape either way. It also skips a fixture
-  enrolled in fewer than two targets, and `scalar_map` is enrolled in one.
+  would not see a divergence of this shape either way. `scalar_map` is enrolled
+  in `neo4j-go-v5` and `neo4j-go-v6`, so it clears that test's two-target floor
+  and is compared — but those two targets are one emitter under two version
+  options, which is the reason the test's own header gives for the edge-union
+  fixtures holding nothing there, and it applies here unchanged.
 
 - A member holding a temporal, a spatial value, a byte array, or a v6 vector or
   UUID carries the same Go type as the identical value at the top level, on both
