@@ -221,6 +221,27 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 			if err := sc.BindEdge(bb); err != nil {
 				return nil, branchState{}, nil, orientationEvidence{}, err
 			}
+			// An inline endpoint carries a label expression but no variable, so
+			// it is not in sc.bindings and the arm above never reaches it. Ask it
+			// the same question here that a var spelling gets, at the same phase:
+			// the two are the same pattern and must refuse the same way.
+			//
+			// Satisfiability is a property of the expression and the schema
+			// alone, so an unsatisfiable set means no row can ever stand there and
+			// there was never an edge to look for. Left to edge closure it fell
+			// through to the SPELLED key, which no declared type carries, and
+			// refused as a missing EDGE — inviting the author to go declare
+			// `Person-[WORKS_AT]->Company&Desk`, a thing no node could be an
+			// endpoint of (bd gqlc-jqix).
+			for _, ep := range []query.Endpoint{bb.Source(), bb.Target()} {
+				ie, inline := ep.(query.InlineEndpoint)
+				if !inline || len(ie.Labels()) == 0 {
+					continue
+				}
+				if _, err := resolveNodeLabels(ie.Labels(), s); err != nil {
+					return nil, branchState{}, nil, orientationEvidence{}, err
+				}
+			}
 		case query.CallBinding:
 			if err := sc.BindCall(bb, r); err != nil {
 				return nil, branchState{}, nil, orientationEvidence{}, err
@@ -773,11 +794,11 @@ func endpointLabels(e query.Endpoint, t nodeTable, s schema.Schema) (endpointKey
 		if sat := satisfyingNodeTypes(ls, s); len(sat) > 0 {
 			return endpointKeys{keys: sat, covers: true}, true
 		}
-		// Nothing declared satisfies the expression, so no row can stand here and
-		// the keys below are reached only by the refusal that follows. The spelled
-		// key is what that refusal has to name: describeTriedEdges renders the
-		// probes, and an author who wrote `(:Foo)` needs to read Foo back.
-		return endpointKeys{keys: []graph.LabelSetKey{ls.Key()}, covers: true}, true
+		// Unreachable: Phase A1 refuses an inline endpoint no declared type
+		// satisfies, before any edge is closed. Yielding the SPELLED key here is
+		// what used to make that refusal arrive as a missing EDGE naming a source
+		// or target nothing declares (bd gqlc-jqix).
+		return endpointKeys{}, false
 	default:
 		return endpointKeys{}, false
 	}

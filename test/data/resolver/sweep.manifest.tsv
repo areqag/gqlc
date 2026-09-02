@@ -20,7 +20,6 @@
 # regenerate: go test ./internal/resolver/ -run '^TestCorpusSweepManifest$' -update -v
 msg	00e5b117fa25	"unknown property: p.age missing on plural-satisfying type Employee&Person"
 msg	0273ae417901	"invalid effect target: DELETE c.x: \"c\" resolves to a projection alias, not an entity binding"
-msg	049ca579bda7	"unknown edge: Engineer&Person&Staff-[AUTHORED]->Post, Manager&Person&Staff-[AUTHORED]->Post, Person-[AUTHORED]->Post"
 msg	04a7da8d1913	"unknown property: a.nope missing on plural-satisfying type Contractor&Person"
 msg	05424bd2a75e	"unknown property: a.name"
 msg	054d70336fa3	"unknown label: Author is not declared on any node type"
@@ -28,7 +27,6 @@ msg	06951febdcc9	"ambiguous label: n is satisfied by more than one declared node
 msg	0714e2c7f541	"unknown label: cannot infer type of target endpoint of edge \"r\""
 msg	0928cf093593	"unknown edge: Contractor&Person-[FOUNDED]->Company, Company-[FOUNDED]->Contractor&Person, Employee&Person-[FOUNDED]->Company, Company-[FOUNDED]->Employee&Person, Person-[FOUNDED]->Company, Company-[FOUNDED]->Person"
 msg	0b7410ed84ee	"query construct not supported at resolver stage R0: path binding"
-msg	0d7446c44046	"unknown edge: Employee&Person-[WORKS_AT]->Company, Person-[WORKS_AT]->Company"
 msg	0fad26bace16	"unknown property: a.name missing on plural-satisfying type Employee&Person"
 msg	0fc82c813393	"query construct not supported at resolver stage R0: unwind binding"
 msg	102a62a42923	"unknown property: p.nickname"
@@ -43,7 +41,6 @@ msg	18f62248cf82	"unknown property: r.weight"
 msg	19e49559c3da	"union column mismatch: column \"x\" projects property:INT (nullable) in branch 1 but property:STRING (not null) in branch 0"
 msg	1a14f8c1694c	"unknown edge: Employee&Person-[REVIEWED]->Company, Company-[REVIEWED]->Employee&Person, Person-[REVIEWED]->Company, Company-[REVIEWED]->Person"
 msg	1a69bd116cb1	"unknown property: p.doesnt_exist"
-msg	1ad32bd26904	"unknown edge: Contractor&Person-[AUTHORED]->Post, Post-[AUTHORED]->Contractor&Person, Employee&Person-[AUTHORED]->Post, Post-[AUTHORED]->Employee&Person, Person-[AUTHORED]->Post, Post-[AUTHORED]->Person"
 msg	1c867a6623eb	"unknown label: Person is not declared on any node type"
 msg	1c8db2c225f5	"ambiguous label: p is satisfied by more than one declared node type: Employee&Person, Person"
 msg	1c96aae0534a	"unknown label: SET n:Draft: label \"Draft\" not declared on any node type"
@@ -71,7 +68,6 @@ msg	3dd9ebd833e4	"ambiguous binding: cannot uniquely infer type of unlabelled bi
 msg	3f90fc3269c7	"unknown edge: Employee&Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Person, Person-[REVIEWED]->Employee&Person"
 msg	40a941ffddb3	"unknown property: r.views"
 msg	40c701648a34	"unknown property: a.notAProp missing on plural-satisfying type Contractor&Person"
-msg	422529c215f9	"unknown edge: Employee&Person-[AUTHORED]->Post, Person-[AUTHORED]->Post"
 msg	4246b27b8fb2	"unknown label: Desk is not declared on any node type"
 msg	43082c348dc5	"unknown label: cannot infer type of unlabelled binding \"p\" — no edge in the pattern reaches a compatible schema node type"
 msg	440e841b4147	"parameter type conflict: parameter \"x\": temporal(date) vs temporal(duration)"
@@ -90,7 +86,6 @@ msg	53b202fdddc9	"unknown edge: Employee&Person-[KNOWS]->Employee&Person, Employ
 msg	546cbbe3d652	"unknown edge: Contractor&Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Contractor&Person, Employee&Person-[REVIEWED]->Employee&Person, Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Person"
 msg	54a5befe0d35	"unknown property: n.notAProp missing on plural-satisfying type Contractor&Person"
 msg	54d53ee99383	"invalid effect target: REMOVE c.p: \"c\" resolves to a projection alias, not an entity binding"
-msg	550645dcee37	"unknown edge: Contractor&Person-[AUTHORED]->Post, Employee&Person-[AUTHORED]->Post, Person-[AUTHORED]->Post"
 msg	550d36b077bc	"unknown property: property r.notAProp missing on union member Person-[KNOWS]->Employee&Person"
 msg	55874483a547	"union column mismatch: column \"x\" projects list of edge Person-[AUTHORED]->Post (not null) in branch 1 but list of edge Person-[KNOWS]->Person (not null) in branch 0"
 msg	56e5d6eb65b2	"unknown label: SET n:Nonexistent: label \"Nonexistent\" not declared on any node type"
@@ -100,7 +95,6 @@ msg	58f6df02c27f	"unknown edge: Contractor&Person-[KNOWS]->Contractor&Person, Co
 msg	598c1820ae9d	"unknown label: Hub is not declared on any node type"
 msg	5a4241bcc7d2	"query construct not supported at resolver stage R0: list-of-edges projection"
 msg	5b7767c8f09c	"unknown edge: Person-[KNOWS]->Person"
-msg	5db6b74fc710	"unknown edge: Person-[AUTHORED]->Post"
 msg	5e967e07ea59	"unknown label: Tag is not declared on any node type"
 msg	5f2655e9e2d3	"unknown label: no node type satisfies Contractor&Employee; declared types carrying these labels: Contractor&Person, Employee&Person"
 msg	5f6ac7ed60b0	"ambiguous edge orientation: edge \"r\" matches Person-[REVIEWED]->Employee&Person left-to-right and Employee&Person-[REVIEWED]->Person right-to-left"
@@ -117,7 +111,6 @@ msg	6700926b45c5	"invalid effect target: DELETE on variable-length edge \"r\""
 msg	6734d8cf01f0	"unknown property: a.age"
 msg	675f2cb8a541	"unknown edge: Contractor&Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Contractor&Person, Employee&Person-[REVIEWED]->Employee&Person"
 msg	69c66121a7fe	"unknown property: n.age missing on plural-satisfying type Contractor&Person"
-msg	6ab77baad929	"unknown edge: Contractor&Person-[AUTHORED]->Post, Post-[AUTHORED]->Contractor&Person, Employee&Person-[AUTHORED]->Post, Post-[AUTHORED]->Employee&Person"
 msg	6b06b9159eac	"unknown property: n.age missing on plural-satisfying type Employee&Person"
 msg	6b6136df18be	"unknown property: p.nickname missing on plural-satisfying type Contractor&Person"
 msg	6eea6a6d1601	"unknown property: q.nickname missing on plural-satisfying type Contractor&Person"
@@ -163,18 +156,14 @@ msg	9c02f64e008b	"invalid effect target: REMOVE labels on edge binding \"e\""
 msg	9c93ca575aeb	"unknown property: property r.views missing on union member Person-[AUTHORED]->Post"
 msg	9faf5531add3	"ambiguous edge orientation: edge \"r\" matches Author-[REVIEWED]->Book left-to-right and Book-[REVIEWED]->Author&Editor right-to-left"
 msg	a1d7d351bcd2	"ambiguous label: p is satisfied by more than one declared node type: Contractor&Person, Employee&Person"
-msg	a2f5406dc523	"unknown edge: Contractor&Person-[WORKS_AT]->Company, Employee&Person-[WORKS_AT]->Company"
 msg	a3263f60ed28	"unknown edge: Person-[WORKS_AT]->Company"
 msg	a3dac0754a20	"ambiguous binding: cannot uniquely infer type of unlabelled binding \"p\" — candidate types: Author, Author&Editor"
 msg	a3f85dbcac41	"unknown edge: Person-[LIKES]->Post, Post-[LIKES]->Person"
 msg	a49ecb6b62b7	"union column mismatch: column \"r\" projects edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null) in branch 1 but edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null) in branch 0"
-msg	a5829868fd77	"unknown edge: Employee&Person-[AUTHORED]->Post, Post-[AUTHORED]->Employee&Person, Person-[AUTHORED]->Post, Post-[AUTHORED]->Person"
 msg	a58736e2c15c	"unknown property: b.notAProp"
-msg	a60c64bcbaf6	"unknown edge: Engineer&Person&Staff-[AUTHORED]->Post, Post-[AUTHORED]->Engineer&Person&Staff, Manager&Person&Staff-[AUTHORED]->Post, Post-[AUTHORED]->Manager&Person&Staff, Person-[AUTHORED]->Post, Post-[AUTHORED]->Person"
 msg	a631ac8f85cd	"unknown edge: Employee&Person-[FOUNDED]->Company, Company-[FOUNDED]->Employee&Person, Person-[FOUNDED]->Company, Company-[FOUNDED]->Person"
 msg	a6e43d93bc66	"unknown label: cannot infer type of target endpoint of the [:AUTHORED] edge between p and ()"
 msg	a703c5b7dc9c	"union column mismatch: column \"e\" projects edgeUnion {Person-[AUTHORED]->Note, Person-[LIKES]->Note} (not null) in branch 1 but edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null) in branch 0"
-msg	a9143e2828ab	"unknown edge: Engineer&Person&Staff-[WORKS_AT]->Company, Manager&Person&Staff-[WORKS_AT]->Company, Person-[WORKS_AT]->Company"
 msg	a93c38ae1de1	"ambiguous label: a is satisfied by more than one declared node type: Contractor&Person, Employee&Person"
 msg	ac99706661a2	"unknown property: property r.views missing on union member Person-[LIKES]->Post"
 msg	acbf57bdf842	"unknown edge: Employee&Person-[WORKS_AT]->Company, Company-[WORKS_AT]->Employee&Person, Employee&Person-[WORKS_AT]->Company&Startup, Company&Startup-[WORKS_AT]->Employee&Person, Person-[WORKS_AT]->Company, Company-[WORKS_AT]->Person, Person-[WORKS_AT]->Company&Startup, Company&Startup-[WORKS_AT]->Person"
@@ -274,8 +263,6 @@ msg	f81bb33a3ff0	"unknown label: NotDeclared is not declared on any node type"
 msg	f8c4768b84be	"unknown property: p.nickname missing on plural-satisfying type Engineer&Person&Staff"
 msg	f99632a45885	"union column mismatch: branch 1 column 0 named \"y\"; branch 0 named \"x\""
 msg	f9fd212515b1	"unknown property: a.nickname missing on plural-satisfying type Contractor&Person"
-msg	fae6196e8779	"unknown edge: Person-[AUTHORED]->Post, Post-[AUTHORED]->Person"
-msg	fd9aba9587d4	"unknown edge: Contractor&Person-[AUTHORED]->Post, Employee&Person-[AUTHORED]->Post"
 msg	fe02742e8fe3	"unknown edge: Employee&Person-[REVIEWED]->Contractor&Person, Contractor&Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Employee&Person"
 msg	fef43c728cb2	"unknown property: a.notAProp missing on plural-satisfying type Employee&Person"
 msg	ffc91200f96a	"unknown property: b.age"
@@ -401,15 +388,15 @@ cell	invalid/ambiguous_edge_orientation_anonymous.cypher	valid/schemas/social_r7
 cell	invalid/ambiguous_edge_orientation_anonymous.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	c2e79c5bc5e4
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownEdge	6ab77baad929
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	a5829868fd77
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownEdge	a5829868fd77
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownEdge	a5829868fd77
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownEdge	1ad32bd26904
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownEdge	a5829868fd77
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	a5829868fd77
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/social.gql	accept	-	73ee1d0cd8a0
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/social_edgeunion.gql	accept	-	73ee1d0cd8a0
@@ -422,13 +409,13 @@ cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	invalid/schemas/social_r7.gql	refuse	ErrAmbiguousEdgeOrientation	e2845245bc3a
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownEdge	a5829868fd77
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	a5829868fd77
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	a60c64bcbaf6
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownEdge	a5829868fd77
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	a5829868fd77
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	fae6196e8779
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/social_edgeunion.gql	accept	-	73ee1d0cd8a0
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/social_r1.gql	accept	-	73ee1d0cd8a0
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/social_r2.gql	accept	-	73ee1d0cd8a0
@@ -438,7 +425,7 @@ cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/s
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/social_r5.gql	refuse	ErrAmbiguousEdgeOrientation	e2845245bc3a
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/social_r6.gql	refuse	ErrAmbiguousEdgeOrientation	e2845245bc3a
 cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/social_r7.gql	refuse	ErrAmbiguousEdgeOrientation	e2845245bc3a
-cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownEdge	fae6196e8779
+cell	invalid/ambiguous_edge_orientation_anonymous_inline_endpoint.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/ambiguous_edge_orientation_overlapping_endpoints.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	d46372fb7542
 cell	invalid/ambiguous_edge_orientation_overlapping_endpoints.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	d46372fb7542
 cell	invalid/ambiguous_edge_orientation_overlapping_endpoints.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownEdge	fe02742e8fe3
@@ -2799,24 +2786,24 @@ cell	invalid/plural_endpoint_created_edge_stays_plural.cypher	valid/schemas/soci
 cell	invalid/plural_endpoint_created_edge_stays_plural.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownEdge	a3263f60ed28
 cell	invalid/plural_endpoint_created_edge_stays_plural.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownEdge	a3263f60ed28
 cell	invalid/plural_endpoint_created_edge_stays_plural.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	225d6affd495
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownEdge	a3263f60ed28
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownEdge	a2f5406dc523
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	bb834c44c145
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownEdge	0d7446c44046
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownProperty	cc79aaab6f5b
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownProperty	d400ec7bc217
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownEdge	940ecf5dd42a
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	0d7446c44046
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social.gql	refuse	ErrUnknownEdge	a3263f60ed28
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownEdge	a3263f60ed28
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownEdge	a3263f60ed28
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownEdge	a3263f60ed28
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownEdge	a3263f60ed28
@@ -2824,39 +2811,39 @@ cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownProperty	cc79aaab6f5b
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownProperty	bb834c44c145
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	a9143e2828ab
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownEdge	0d7446c44046
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	0d7446c44046
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownEdge	a3263f60ed28
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownEdge	a3263f60ed28
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownEdge	a3263f60ed28
 cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownEdge	a3263f60ed28
+cell	invalid/plural_endpoint_inline_endpoint_property_stays_plural.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownEdge	a2f5406dc523
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrAmbiguousLabel	1c8db2c225f5
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownEdge	0d7446c44046
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	accept	-	b401df5a8fa0
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrAmbiguousLabel	a1d7d351bcd2
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownEdge	940ecf5dd42a
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	0d7446c44046
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social.gql	refuse	ErrUnknownEdge	a3263f60ed28
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownEdge	a3263f60ed28
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownEdge	a3263f60ed28
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownEdge	a3263f60ed28
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownEdge	a3263f60ed28
@@ -2864,21 +2851,21 @@ cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/m
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges.gql	accept	-	b401df5a8fa0
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrAmbiguousLabel	1c8db2c225f5
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	a9143e2828ab
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownEdge	0d7446c44046
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	0d7446c44046
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownEdge	a3263f60ed28
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r3.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	225d6affd495
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r4.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r5.gql	refuse	ErrUnknownEdge	a3263f60ed28
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownEdge	a3263f60ed28
 cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownEdge	a3263f60ed28
-cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownEdge	a3263f60ed28
+cell	invalid/plural_endpoint_inline_endpoint_stays_plural.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_merged_edge_stays_plural.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	225d6affd495
 cell	invalid/plural_endpoint_merged_edge_stays_plural.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/plural_endpoint_merged_edge_stays_plural.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	225d6affd495
@@ -9000,18 +8987,18 @@ cell	valid/infer_via_reverse_orientation.cypher	valid/schemas/social_r6.gql	acce
 cell	valid/infer_via_reverse_orientation.cypher	valid/schemas/social_r7.gql	accept	-	6ac6b641650a
 cell	valid/infer_via_reverse_orientation.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	7fbc388270b1
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/edge_union_keys.gql	accept	-	a3a55d9b6b99
-cell	valid/inline_endpoint_source.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_source.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4da3cbf622c1
-cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4da3cbf622c1
-cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/social.gql	accept	-	a3a55d9b6b99
-cell	valid/inline_endpoint_source.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownEdge	5db6b74fc710
+cell	valid/inline_endpoint_source.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/social_edgeunion.gql	accept	-	a3a55d9b6b99
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/social_r2.gql	accept	-	a3a55d9b6b99
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/social_r3.gql	accept	-	a3a55d9b6b99
@@ -9020,12 +9007,12 @@ cell	valid/inline_endpoint_source.cypher	invalid/schemas/social_r3_typediff.gql	
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/social_r5.gql	accept	-	a3a55d9b6b99
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/social_r6.gql	accept	-	a3a55d9b6b99
 cell	valid/inline_endpoint_source.cypher	invalid/schemas/social_r7.gql	accept	-	a3a55d9b6b99
-cell	valid/inline_endpoint_source.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	4da3cbf622c1
-cell	valid/inline_endpoint_source.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_source.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/inline_endpoint_source.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/inline_endpoint_source.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_source.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_source.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4da3cbf622c1
-cell	valid/inline_endpoint_source.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_source.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/inline_endpoint_source.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_source.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_source.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4da3cbf622c1
@@ -9041,15 +9028,15 @@ cell	valid/inline_endpoint_source.cypher	valid/schemas/social_r7.gql	accept	-	a3
 cell	valid/inline_endpoint_source.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_target.cypher	invalid/schemas/edge_union_keys.gql	accept	-	fcd1cf49a9ad
 cell	valid/inline_endpoint_target.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownEdge	fd9aba9587d4
+cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	422529c215f9
-cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownEdge	422529c215f9
-cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownEdge	422529c215f9
+cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownEdge	550645dcee37
-cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownEdge	422529c215f9
-cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	422529c215f9
+cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_target.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_target.cypher	invalid/schemas/social.gql	accept	-	fcd1cf49a9ad
 cell	valid/inline_endpoint_target.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/inline_endpoint_target.cypher	invalid/schemas/social_edgeunion.gql	accept	-	fcd1cf49a9ad
@@ -9062,13 +9049,13 @@ cell	valid/inline_endpoint_target.cypher	invalid/schemas/social_r6.gql	accept	-	
 cell	valid/inline_endpoint_target.cypher	invalid/schemas/social_r7.gql	accept	-	fcd1cf49a9ad
 cell	valid/inline_endpoint_target.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownEdge	422529c215f9
-cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	422529c215f9
-cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	049ca579bda7
+cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownEdge	422529c215f9
-cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	422529c215f9
-cell	valid/inline_endpoint_target.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	5db6b74fc710
+cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_target.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/inline_endpoint_target.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/inline_endpoint_target.cypher	valid/schemas/social_edgeunion.gql	accept	-	fcd1cf49a9ad
 cell	valid/inline_endpoint_target.cypher	valid/schemas/social_r1.gql	accept	-	fcd1cf49a9ad
 cell	valid/inline_endpoint_target.cypher	valid/schemas/social_r2.gql	accept	-	fcd1cf49a9ad
@@ -9078,7 +9065,7 @@ cell	valid/inline_endpoint_target.cypher	valid/schemas/social_r4.gql	accept	-	fc
 cell	valid/inline_endpoint_target.cypher	valid/schemas/social_r5.gql	accept	-	fcd1cf49a9ad
 cell	valid/inline_endpoint_target.cypher	valid/schemas/social_r6.gql	accept	-	fcd1cf49a9ad
 cell	valid/inline_endpoint_target.cypher	valid/schemas/social_r7.gql	accept	-	fcd1cf49a9ad
-cell	valid/inline_endpoint_target.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownEdge	5db6b74fc710
+cell	valid/inline_endpoint_target.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/label_satisfy_plural_intersection.cypher	invalid/schemas/edge_union_keys.gql	accept	-	8ebee5703921
 cell	valid/label_satisfy_plural_intersection.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/label_satisfy_plural_intersection.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownProperty	12bd4408694e
