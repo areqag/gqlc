@@ -93,14 +93,25 @@ MATCH (s:Scalar)-[e:Edgy|Edgier]->(l:Listy) MATCH (s)-[f:Edgy|Edgier]->(l) RETUR
 // the wire, and dropping from<X>ListPtr's nil guard compiles and then
 // panics on the null the schema declared (bd gqlc-rw0m).
 //
-// $windows was here, and its removal costs the ORDERING witness as well
-// as the depth-2 bind: the emitter keeps one list depth per carrier and
-// must keep the DEEPEST, so a depth-2 parameter declared before a depth-1
-// one over the same carrier caught a last-one-wins emitter. Every bind
-// left is depth 1, so nothing here now distinguishes keeping the deepest
-// from keeping the last. ADR 0035 leaves no neo4j property of a nested
-// width to compare a parameter against, so this is not replaceable on
-// this backend.
+// $windows was here, and its removal cost the ORDERING witness as well as
+// the depth-2 bind: the emitter then kept one list depth per carrier and
+// had to keep the DEEPEST, so a depth-2 parameter declared before a
+// depth-1 one over the same carrier caught a last-one-wins emitter. Every
+// bind left is depth 1, so nothing here distinguished keeping the deepest
+// from keeping the last, and ADR 0035 leaves no neo4j property of a nested
+// width to compare a parameter against, so it was not replaceable on this
+// backend.
+//
+// That gap is moot as of bd gqlc-tlc3e (2026-09-02): the per-carrier depth
+// is a bool, and a bool has no deepest to keep. It is replaced by a
+// NARROWER accumulator with the same shape of hazard, and this corpus does
+// not witness that one either. temporalUses ORs f.Nullable across the
+// batch, so one carrier bound as both a nullable and a non-nullable list
+// still owes from<X>ListPtr; a last-one-wins mutant of that OR survives
+// this suite, because days and spans below are different carriers and the
+// OR never gets two inputs. Measured while judging PR #2287; the fix shape
+// is a unit test on temporalUses rather than a fixture, and is bd
+// gqlc-1ddo5. Named here rather than closed over, as the depth gap was.
 //
 // name: SlotsMatching :many
 MATCH (s:Slot)
