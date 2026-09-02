@@ -128,6 +128,36 @@ func TestPlanWorktrees_LandedCleanAndIdleIsReaped(t *testing.T) {
 	}
 }
 
+// R2b — the age gate, alone, on the shape where it is the only thing holding.
+//
+// A worktree cut minutes ago and not yet committed to answers SAFE at every
+// other gate: its touched set is empty, so landedOn correctly says its content
+// is on master; it is clean; nobody is standing in it. Row 10 is the sole
+// holder, and until this row existed deleting that arm outright left the whole
+// suite green while `-apply` removed a minutes-old tree.
+//
+// That is not an exotic shape. It is every sibling worktree in its first hours
+// — the population least likely to have a landed diff or a PR, which is the
+// same population the gqlc-24wf deletion came out of. Found by Անահիտ in review
+// (mutation A1, bd gqlc-z3pqp), witnessed live before it was priced.
+//
+// It asserts the REASON and not merely the verdict, because HOLD is the answer
+// nine other arms also give: a row reading only the verdict would keep passing
+// if the age gate went away and some neighbouring gate began answering instead.
+func TestPlanWorktrees_AFreshWorktreeIsHeldByTheAgeGateAlone(t *testing.T) {
+	repo, base := wtWorld(t)
+	path := filepath.Join(base, "gqlc-fresh")
+	mustGit(t, repo, "worktree", "add", "-q", path, "-b", "feat/fresh")
+
+	e := wtFind(t, planFor(t, repo, nil), "gqlc-fresh")
+	if e.verdict != wtHold {
+		t.Fatalf("verdict = %s, want HOLD; reason: %s", e.verdict, e.reason)
+	}
+	if !strings.Contains(e.reason, "inside the 12h0m0s threshold") {
+		t.Fatalf("held for some other reason than its age, so the age gate is still unwitnessed: %s", e.reason)
+	}
+}
+
 // R3 — untracked ALONE counts as dirty. A file nobody has added is the shape
 // an agent's in-progress work most often takes, and it is the shape git's own
 // `worktree remove` also refuses.
