@@ -2,10 +2,12 @@
 # km — the machinery of the Թագաւորութիւն (kingdom/README.md).
 #
 # Path resolution: this script's own location names the kingdom/ tree it
-# serves; the runtime state dir is derived from the git COMMON dir so every
-# seat worktree resolves the same shared state (KM_STATE_DIR overrides, for
-# tests). tmux may be absent (CI): every tmux-touching path degrades to a
-# message or a state file, never a crash.
+# serves, and that tree's kingdom.toml STATES the town's main checkout. Every
+# other path hangs off it — the deploy target, the seat worktrees, the shared
+# state dir — so not one of them depends on where the caller happens to stand,
+# and km refuses when none is stated rather than guessing (KM_STATE_DIR and
+# KM_DEPLOY_ROOT override, for tests). tmux may be absent (CI): every
+# tmux-touching path degrades to a message or a state file, never a crash.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -167,17 +169,33 @@ git_at() { # git_at <dir> <args...>
     env "${scrub[@]}" "${keep[@]}" "${bound[@]}" git -C "$dir" "$@"
 }
 
-# history: kingdom/brain/km-notes.md#main_root
-main_root() {
-    local common root base
-    common=$(git_at . rev-parse --path-format=absolute --git-common-dir)
-    root=$(dirname "$common")
-    base=$(basename "$root")
-    case $base in
-        *-seat-*) echo "$(dirname "$root")/${base%-seat-*}" ;;
-        *) echo "$root" ;;
+# Resolved once here, at load, and deliberately NOT inside main_root: `die` in a
+# function that every caller reaches as `$(main_root)` exits the command
+# substitution and nothing else, so km printed the refusal in full and then
+# exited 0 with an empty root — a guard that fails open, measured on this change
+# before it shipped. At load the failing assignment ends km, and it ends it
+# before any verb has run.
+MAIN_ROOT=$(
+    root=$(cfg kingdom root)
+    [ -n "$root" ] || die "no [kingdom] root is stated in $CONFIG, so km cannot say which checkout is the town's, and it will not guess.
+  every path km resolves hangs off that one — the tree deploy fast-forwards, the
+  seat worktrees, the state dir — and deriving them from the caller's cwd is the
+  defect this refusal replaces (bd gqlc-yfi2).
+  state it, absolute:  root = \"/path/to/the/main/checkout\"   under [kingdom]"
+    case $root in
+        /*) ;;
+        *) die "[kingdom] root in $CONFIG is \"$root\", which is not absolute.
+  a relative root is resolved against the caller's cwd, which is exactly the
+  derivation this key exists to replace (bd gqlc-yfi2)." ;;
     esac
-}
+    [ -d "$root" ] || die "[kingdom] root in $CONFIG names \"$root\", which is not a directory.
+  km refuses rather than composing a deploy target and a worktree for every seat
+  on the roster under a path that is not there (bd gqlc-yfi2)."
+    echo "$root"
+) || exit 1
+
+# history: kingdom/brain/km-notes.md#main_root
+main_root() { echo "$MAIN_ROOT"; }
 
 state_dir() {
     if [ -n "${KM_STATE_DIR:-}" ]; then

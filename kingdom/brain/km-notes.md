@@ -115,20 +115,53 @@ needs: deploy now runs from inside the dispatch and guard ticks (gqlc-nm7w),
 and OnUnitActiveSec means the next tick cannot begin until this one ends, so
 one hung fetch is a stopped town.
 
-## main_root — an exported GIT_DIR would name the wrong repository
+## main_root — stated in kingdom.toml, because a derived root answers about wherever you stand
 
 (`kingdom/bin/km`, `main_root`)
 
-Scrubbed like the rest: an exported GIT_DIR would otherwise name the repo that
-invoked the hook, and deploy_root() below is the first caller that WRITES to
-whatever this returns.
+Read from `[kingdom] root`, refusing when it is unstated, relative, or names no
+directory. Nothing here consults git or the cwd.
 
-The git derivation alone answers for a linked worktree, whose common dir IS
-the main checkout's. It does not answer from inside a seat that is its own
-clone (gqlc-w5bh): a clone's common dir is its own, so the derivation names
-the SEAT, and seat_worktree() below would then compose
-`.../gqlc-seat-x-seat-y`. The basename strip is the inverse of that
-composition, kept in the same file so the two directions cannot drift apart.
+IT USED TO. The root was derived from the git common dir of the caller's cwd,
+with the `-seat-<name>` suffix stripped off the basename so a seat resolved the
+shared checkout. That reads as robust and it is the defect: every path km
+resolves hangs off this one, so all of them became a function of where the
+process happened to stand. Both halves were reached by ordinary work, neither
+by contrivance (bd gqlc-yfi2).
+
+The WRITE half is what the bead was filed for. `deploy_root()` below is the
+first caller that WRITES to whatever this returns — a fetch and a
+`merge --ff-only` — so km run from an unrelated repository named THAT
+repository as the tree to fast-forward. It is not hypothetical: during a
+mutation screen one mutant fast-forwarded the real shared checkout through
+exactly this path (`kingdom/brain/postmortems/2026-08-21-test-suite-damaged-its-own-repo.md`),
+and gqlc-nm7w since put cmd_deploy inside the dispatch and guard ticks, so the
+write is now performed by a timer rather than only by a command a human typed.
+
+The READ half has no mitigation and needs only a caller in a plausible
+directory, which is why the bead was repriced P3 → P2. Run from the PARENT of
+the checkouts, the derivation resolved a common dir whose basename is `.`, so
+seat_worktree() composed `.../.-seat-sedrak` for every seat — and `km doctor`,
+the town's health oracle, then printed a FAIL naming twelve seats as
+unverifiable and a warn that bd's mail delegation resolved nowhere. Both false.
+Re-run from a seat worktree the same two lines read ok. A readout that lies is
+a defect in its own right, and the mayor had begun drafting a bead against the
+`.-seat-` path before he re-ran it correctly.
+
+Two properties the stated key gets for free, both of which the derivation had
+to work for. An exported GIT_DIR can no longer name the repo that invoked a
+hook, because no git command runs here to be redirected — `git_at`'s scrub
+still guards every other call site, but this one is out of that blast radius by
+construction. And the seat-clone case (gqlc-w5bh) needs no inverse: a clone's
+common dir is its own, so the derivation named the SEAT and the basename strip
+existed to undo the `.../gqlc-seat-x-seat-y` that seat_worktree() would then
+compose. A stated root is the same string from a clone, a linked worktree, or
+anywhere else, so there is no composition left to invert.
+
+The cost, which is real and is the trade the bead asked for: a clone of this
+repository anywhere else must edit that line before km will run there. Prefer
+refusing to guessing — a km that says it cannot tell where the town is is worth
+more than one that answers about a town that does not exist.
 
 ## km_gate_paths — the paths whose content IS a gate, defined once so drift and freshness cannot disagree
 

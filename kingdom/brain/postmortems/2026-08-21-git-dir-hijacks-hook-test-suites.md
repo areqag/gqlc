@@ -45,8 +45,11 @@ The mechanism: git invokes hooks with `GIT_DIR` exported, absolute, pointing at 
 repository. `git init`, `git commit`, `git config` and `git rev-parse` honour `GIT_DIR`
 over **both** the current working directory **and** an explicit `-C <dir>`. Under the
 hook, every git call the fixture made was addressed to the repo the hook was gating.
-`git rev-parse` is also how `km` locates its repo, so the fixture was built and then
-silently bypassed: the rows answered about the real checkout.
+`git rev-parse` was also how `km` located its repo, so the fixture was built and then
+silently bypassed: the rows answered about the real checkout. That half no longer holds
+— `km` reads its main checkout from `[kingdom] root` in `kingdom.toml` and runs no git
+to find it (gqlc-yfi2) — so `GIT_DIR` can no longer redirect km itself. It still
+redirects every other git caller in this account, which is the part to carry forward.
 
 Recovery was `git reset` to the last good commit and a re-commit from the working tree,
 which was never damaged; the three identity keys were removed at 22:56:41. The
