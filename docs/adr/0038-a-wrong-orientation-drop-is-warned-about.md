@@ -61,8 +61,10 @@ run.
 
 ## Why not broader
 
-Measured over the corpus at `origin/master` 13157072 — 322 queries × 40 schemas
-= 12880 sweep cells:
+Measured over the pre-existing corpus, this ADR's own fixture excluded, so the
+column counts only cells the corpus already held. Measured twice: at
+`origin/master` 13157072 (322 queries × 40 schemas = 12880 cells) and again at
+82db231d (323 × 40 = 12920). No count below moved between them.
 
 | Detector | Accepted cells that fire |
 |---|---|
@@ -76,6 +78,12 @@ with the argument. All 9 cells that clause 5 removes are the mirrored-alternatio
 idiom — the same `AUTHORED|LIKES` alternation written on both orientations across
 two MATCHes — in `valid/edge_rebind_resets_carried_close.cypher`. Clause 4
 removes 18 cells that are ordinary narrowing with no wrong arrow to report.
+
+The second measurement is not ceremony. Between the two bases master gained
+#2135, which moved 3 cells from refuse to accept (3856 → 3859 accepting, headers
+at 646a853d and its parent). A cell this detector never saw because it was
+refused is exactly the kind that can start firing once it is accepted, and the
+broad column would have grown first. It did not, and neither did the others.
 
 That the full shape fires on zero pre-existing corpus cells is the point: this
 detector adds no noise to any query the corpus already holds.
