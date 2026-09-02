@@ -1,0 +1,3 @@
+CREATE PROPERTY GRAPH TYPE OutOfC6ScopeCarriageReturnText AS {
+    (:Person { id :: INT64 NOT NULL })
+}

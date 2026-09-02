@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
 )
 
@@ -48,6 +49,125 @@ func TestDollarTagClosesOnlyAtTheEnds(t *testing.T) {
 				"the scanner would close %q before the end", body)
 		})
 	}
+}
+
+// TestEmittedQueryTextIsTheBytesTheTagWasChosenOn closes the gap the test
+// above structurally cannot see. That one hands dollarTag a string and judges
+// the answer against the same string. But the delimiter is chosen at generate
+// time on SourceText, while the SQL parser scans the VALUE of the raw string
+// literal SourceText was emitted into — and those are not the same bytes
+// whenever the text holds a carriage return, which such a literal discards
+// (bd gqlc-7f9a). So this renders the file and reads BOTH sides back out of
+// the emitted Go: the constant's value, and the tag the method actually
+// passes to cypherStmt.
+//
+// Reading them through go/parser rather than by string surgery is what makes
+// the fence honest — it is the decoding the compiler does, so it reports what
+// a running program would send rather than the source bytes the emission
+// wrote. Recomputing the tag here instead would judge the emission against
+// this test's own second opinion, and could not see the emission handing
+// dollarTag different bytes from the ones it emits.
+func TestEmittedQueryTextIsTheBytesTheTagWasChosenOn(t *testing.T) {
+	// Every text prepare admits — the backtick and the carriage return are
+	// refused upstream (internal/codegen: ErrOutOfC6Scope), which is what makes
+	// this invariant satisfiable at all. The rows are the shapes whose bytes a
+	// raw literal or a delimiter search is most likely to disagree over: the
+	// delimiter's own spelling, a straddle across the text/tag boundary, an
+	// escalated candidate, a backslash, and both quote characters.
+	for _, text := range []string{
+		"MATCH (p:Person) RETURN p.name",
+		"MATCH (p:Person) WHERE p.id = $id RETURN p.name",
+		"RETURN '$gqlc$'",
+		"RETURN p.name\n// trailing $gqlc",
+		"RETURN '$gqlc$' // $gqlc1",
+		`RETURN 'a\nb' AS x`,
+		"RETURN \"double\" AS x\n\tRETURN 'single' AS y",
+	} {
+		t.Run(text, func(t *testing.T) {
+			p := codegen.Query{
+				NamedQuery: codegen.NamedQuery{
+					Name:        "Q",
+					SourceText:  text,
+					Cardinality: codegen.CardinalityExec,
+				},
+				MethodName: "Q",
+				Bare:       "q",
+			}
+			rendered := age.RenderCypherFile("p", []codegen.Query{p})
+
+			emitted := constValue(t, rendered, codegen.QueryTextConst(p))
+			require.Equal(t, text, emitted,
+				"the emitted constant's value is not the text the emission was given")
+
+			// Judged with the delimiter appended, and on the FIRST match,
+			// because that is what an SQL scanner does: it closes on the
+			// earliest occurrence after the opening tag. Counting matches
+			// instead would miss a straddle — strings.Count is
+			// non-overlapping, so a text ending $gqlc under the tag $gqlc$
+			// composes a body whose two counted matches are the opening tag
+			// and the straddle, with the emission's own closing tag never
+			// counted and LastIndex still landing at the end.
+			tag := emittedDollarTag(t, rendered)
+			require.Equal(t, len(emitted), strings.Index(emitted+tag, tag),
+				"the scanner closes %q before the end of the EMITTED text", emitted+tag)
+		})
+	}
+}
+
+// emittedDollarTag returns the delimiter the rendered method hands cypherStmt
+// — the bytes the SQL parser will be told to close on, as opposed to whatever
+// dollarTag would answer if asked again here.
+func emittedDollarTag(t *testing.T, src []byte) string {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "rendered.go", src, 0)
+	require.NoError(t, err, "the emission is not parseable Go:\n%s", src)
+	var tags []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "cypherStmt" {
+			return true
+		}
+		lit, ok := call.Args[0].(*ast.BasicLit)
+		require.True(t, ok, "cypherStmt's delimiter argument is not a literal")
+		val, err := strconv.Unquote(lit.Value)
+		require.NoError(t, err)
+		tags = append(tags, val)
+		return true
+	})
+	require.Len(t, tags, 1, "the emission should compose exactly one statement:\n%s", src)
+	return tags[0]
+}
+
+// constValue compiles-by-parsing one rendered file and returns the value of
+// the named string constant.
+func constValue(t *testing.T, src []byte, name string) string {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "rendered.go", src, 0)
+	require.NoError(t, err, "the emission is not parseable Go:\n%s", src)
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			require.True(t, ok, "a const spec is not a value spec")
+			if vs.Names[0].Name != name {
+				continue
+			}
+			lit, ok := vs.Values[0].(*ast.BasicLit)
+			require.True(t, ok, "const %s is not a literal", name)
+			val, err := strconv.Unquote(lit.Value)
+			require.NoError(t, err)
+			return val
+		}
+	}
+	t.Fatalf("the emission declares no const %s:\n%s", name, src)
+	return ""
 }
 
 // TestDecodeFuncNamesTheHelperForEveryServedCarrier pins the arm-to-helper
