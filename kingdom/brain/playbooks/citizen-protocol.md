@@ -427,10 +427,13 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    filer chose. Wait for them. If they are genuinely unreachable rather than
    merely busy, that is Սեդրակ's call and not a filing decision: mail him.
 
-   Then merge on the Դատաւոր's PASS; your resume wake arrives when the review
-   bead closes, PASS and FAIL alike. A FAIL blocks the merge until answered
-   (Constitution V.4). After any merge, reviewed or not: close the bead
-   citing the merged SHA, delete the branch, file follow-up beads for
+   The Դատաւոր who signs the PASS merges the PR — merge first, review bead
+   closed after, so a session lost between the two is returned to it by the
+   resume pass (Constitution V.2.4.3). Your resume wake arrives when the review
+   bead closes, PASS and FAIL alike; on a PASS the PR is already merged when you
+   wake, so close your bead citing the merged SHA. A FAIL blocks the merge
+   until answered (Constitution V.4). After any merge, reviewed or not: close
+   the bead citing the merged SHA, delete the branch, file follow-up beads for
    anything you deferred.
 
    **A verdict is PASS or FAIL, and a PASS is unconditional** (ADR 0009). It
@@ -460,7 +463,17 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    `km doctor`'s ADR 0009 row greps closed `class:judge` beads for `conditio`,
    so the disclaimer rings the detector it was meant to satisfy.
 
-   `gh pr merge <N> --squash` merges immediately and directly. **Never pass
+   On a PR that owes no review, when you consider the work finished, arm
+   auto-merge: `gh pr merge <N> --squash --auto`. That is Constitution
+   V.2.4.1's finished-signal, and it makes GitHub the merger — the merge lands
+   when the required checks pass whether or not your session survives, so once
+   armed you may sleep on your branch; your resume wake finds the PR merged and
+   closes the bead citing the SHA. One command, no fallback: on a PR that is
+   already green the same command merges it immediately rather than arming it,
+   so treat arming as the merge itself and not as a reservation you can take
+   back at leisure. Never arm a PR that owes or carries an open review
+   (V.2.4.2), and disarm before filing a review bead against an armed PR:
+   `gh pr merge <N> --disable-auto`. **Never pass
    `--admin`**: it lands a PR over the branch protections rather than through
    them, which is `--no-verify` at a different layer (Article IV.4's spirit).
    Then poll `gh pr view <N> --json state` until it reads `MERGED` before
