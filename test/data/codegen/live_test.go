@@ -293,6 +293,27 @@ type localDateTimeColumnQuerier interface {
 	builtLocalDateTime(ctx context.Context) (localDateTimeValue, error)
 }
 
+// mapColumnQuerier is one arm's scalar_map handle: a column whose value is
+// a whole map rather than a scalar, a list of scalars, or an entity.
+//
+// The emitted read is neo4j.GetRecordValue[map[string]any], and until this
+// handle existed that line was held by the golden comparison and by the
+// compiler and by nothing else — pinned as text, and as something that
+// builds. What neither can see is the value the server actually sends: the
+// read is a type ASSERTION on an `any` the driver hydrated, so an arrival
+// that is not a map[string]any fails it at run time with the golden
+// unchanged and the package still compiling (bd gqlc-y6mo).
+//
+// The member's own Go type is the second half and is the reason the
+// scenario asserts a value rather than a length. `any` is inhabited by
+// every carriage the driver could have chosen, so nothing in the emitted
+// method distinguishes an int64 member from a float64 one — a caller type-
+// switching on the member is what has to be right, and the column's Go type
+// tells it nothing at all.
+type mapColumnQuerier interface {
+	oneMap(ctx context.Context) (map[string]any, error)
+}
+
 // zonedTimeRoundtripQuerier is one arm's zoned_time_roundtrip handle.
 type zonedTimeRoundtripQuerier interface {
 	addSlot(ctx context.Context, id int64, startsAt timeValue) error
@@ -374,6 +395,22 @@ type savepointHarness interface {
 type localDateTimeColumnHarness interface {
 	harness
 	localDateTimeColumnScenario(ctx context.Context, t *testing.T) localDateTimeColumnBackend
+}
+
+// mapColumnHarness is an arm whose target emits a map-valued column at all.
+// Apache AGE does not: it refuses the kind at generation time —
+//
+//	unsupported query: the Apache AGE backend serves scalar and entity
+//	columns, so 1 query would be dropped: OneMap (column "m" projects
+//	scalar(map))
+//
+// — which internal/codegen/age/age_test.go pins at four sites, so that arm
+// has no OneMap to bind and this stays false for it. Lifting the refusal is
+// an ADR 0025 question about what agtype can carry, not a corpus enrolment
+// (bd gqlc-faa1).
+type mapColumnHarness interface {
+	harness
+	mapColumnScenario(ctx context.Context, t *testing.T) mapColumnBackend
 }
 
 // backend is one scenario's isolated view of an arm: a graph no other
@@ -481,18 +518,26 @@ type localDateTimeColumnBackend interface {
 	localDateTimeColumn() localDateTimeColumnQuerier
 }
 
+// mapColumnBackend is a scenario's view of a mapColumnHarness.
+type mapColumnBackend interface {
+	backend
+	mapColumn() mapColumnQuerier
+}
+
 // arms are the backends the battery runs against. Each adapter owns its
 // container, its connection, and its isolation strategy.
 //
 // writes records that the arm's target emits the write fixture, edgeUnions
 // that it emits an edge-union dispatch, temporals that it admits the zoneless
 // temporal widths, zonedTime that it admits TIME WITH TIME ZONE, and
-// savepoints that its driver serves a nested Begin with one, and
+// savepoints that its driver serves a nested Begin with one,
 // constructedTemporal that it admits a column the server builds by calling a
-// temporal constructor.
+// temporal constructor, and mapColumns that it admits a column whose value is
+// a whole map.
 // TestLiveSmoke holds each harness to its column, so an arm that stops
 // satisfying writeHarness, edgeUnionHarness, temporalHarness,
-// zonedTimeHarness, savepointHarness or localDateTimeColumnHarness fails the
+// zonedTimeHarness, savepointHarness, localDateTimeColumnHarness or
+// mapColumnHarness fails the
 // battery rather than dropping those scenarios unremarked — and an arm that
 // starts satisfying one fails it too, which is what would happen if Apache AGE
 // gained the alternation and the backend's refusal were lifted, or if it
@@ -512,9 +557,10 @@ var arms = []struct {
 	zonedTime           bool
 	savepoints          bool
 	constructedTemporal bool
+	mapColumns          bool
 }{
-	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true, edgeUnions: true, temporals: true, zonedTime: true, constructedTemporal: true},
-	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true, edgeUnions: true, temporals: true, zonedTime: true, constructedTemporal: true},
+	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true, edgeUnions: true, temporals: true, zonedTime: true, constructedTemporal: true, mapColumns: true},
+	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true, edgeUnions: true, temporals: true, zonedTime: true, constructedTemporal: true, mapColumns: true},
 	{name: "apache-age-pgx-v5", start: startAGE, writes: true, temporals: true, savepoints: true},
 }
 
@@ -585,6 +631,13 @@ var localDateTimeColumnScenarios = []struct {
 	{name: "local_datetime_constructed_column: components arrive whole", run: constructedLocalDateTime},
 }
 
+var mapColumnScenarios = []struct {
+	name string
+	run  func(ctx context.Context, t *testing.T, b mapColumnBackend)
+}{
+	{name: "scalar_map: a map column arrives as a map, member types and all", run: mapColumnArrives},
+}
+
 // edgeUnionScenarios are the battery an arm runs once its target emits an
 // edge-union dispatch, written against edgeUnionBackend under the same rules.
 var edgeUnionScenarios = []struct {
@@ -637,6 +690,10 @@ var scenarioTables = []struct {
 	{
 		name: "localDateTimeColumnScenarios", got: len(localDateTimeColumnScenarios), want: 1,
 		why: "the only live witness for a LOCALDATETIME the server constructs; every other zoneless width is written by the client first, so without this row EVERY zoneless width is asserted against a value our own encode produced, and an encode and a decode wrong in agreement would pass all of them",
+	},
+	{
+		name: "mapColumnScenarios", got: len(mapColumnScenarios), want: 1,
+		why: "the only live witness that a map column's emitted GetRecordValue[map[string]any] is a read a server's answer actually satisfies; the golden holds the line as text and the compiler holds it as a build, and neither can see what arrives",
 	},
 	{
 		name: "edgeUnionScenarios", got: len(edgeUnionScenarios), want: 1,
@@ -793,6 +850,20 @@ func TestLiveSmoke(t *testing.T) {
 							t.Parallel()
 						}
 						sc.run(ctx, t, lh.localDateTimeColumnScenario(ctx, t))
+					})
+				}
+			}
+
+			mch, servesMapColumns := h.(mapColumnHarness)
+			require.Equal(t, arm.mapColumns, servesMapColumns,
+				"the arm's map-column capability must match the arms table; a target that gained or lost a map-valued column updates both")
+			if servesMapColumns {
+				for _, sc := range mapColumnScenarios {
+					t.Run(sc.name, func(t *testing.T) {
+						if parallelScenarios {
+							t.Parallel()
+						}
+						sc.run(ctx, t, mch.mapColumnScenario(ctx, t))
 					})
 				}
 			}
@@ -1581,6 +1652,42 @@ func constructedLocalDateTime(ctx context.Context, t *testing.T, b localDateTime
 	require.NoError(t, err)
 	require.Equal(t, localDateTimeValue{Year: 2024, Month: 3, Day: 5, Hour: 6, Minute: 7, Second: 8, Nanosecond: 9}, built,
 		"a constructed LOCALDATETIME column must arrive component for component")
+}
+
+// mapColumnArrives drives the one column kind whose emitted read is a type
+// assertion the server can falsify.
+//
+// scalar_map's query is `RETURN {a: 1} AS m`, so the map is built by the
+// server out of a literal and nothing here writes or seeds. What the
+// scenario is for is the two halves of GetRecordValue[map[string]any]:
+// that the driver hands back a map[string]any at all, and that the member
+// inside it is the int64 the fixture's `1` implies.
+//
+// The member type is pinned by require.Equal and not by a length or a key
+// set, deliberately: Equal is reflect.DeepEqual here, so an arrival of
+// float64(1) under the same key fails this row. Nothing else in the
+// battery would notice — the column's Go type is map[string]any, `any` is
+// inhabited by both, and the golden reads the same either way.
+//
+// FALSIFIER, and it is not the one bd gqlc-y6mo asked for. The bead names
+// GetRecordValue[map[string]string] as the mutation this row must red on,
+// and that mutant does not exist: GetRecordValue's parameter is
+// constrained to neo4j.RecordValue, a union of the driver's own carriers,
+// and map[string]string is not among them (v5 record.go:25, v6
+// record.go:25). The compiler refuses it before any test runs, on both
+// majors, which is a red for the wrong reason and not one this row can
+// take credit for. The mutation actually run was
+// GetRecordValue[[]any] — inside the union, so it compiles, and wrong, so
+// the assertion in the emitted method fails and this row reds where the
+// golden and the build alone stay green.
+func mapColumnArrives(ctx context.Context, t *testing.T, b mapColumnBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	got, err := b.mapColumn().oneMap(ctx)
+	require.NoError(t, err,
+		"the emitted read asserts the arriving value is a map[string]any; an error here is the server "+
+			"sending a carriage that assertion does not hold for")
+	require.Equal(t, map[string]any{"a": int64(1)}, got,
+		"a map column must arrive whole and with the member types the emitted map[string]any leaves "+
+			"entirely to the driver; an int64 member arriving as float64 passes every other gate")
 }
 
 // zonedSlots are the values the zoned-time scenario writes. The offsets
