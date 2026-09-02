@@ -44,7 +44,8 @@
                   }
                 ],
                 "distinct": false,
-                "type": "list\u003cnode\u003e"
+                "type": "list\u003cnode\u003e",
+                "leavesAreRefs": true
               }
             }
           ],

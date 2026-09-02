@@ -186,5 +186,12 @@
     "unlabelled_mandatory_hop_pins_the_next_hop.cypher": "satisfy_plural_edges_inline_subtype.gql",
     "unlabelled_optional_hop_shared_property.cypher": "satisfy_plural_edges_inline_subtype.gql",
     "attainable_commitment_covers_the_next_hop.cypher": "satisfy_plural_edges_inline_subtype.gql",
-    "attainable_commitment_covers_two_hops_out.cypher": "satisfy_plural_edges_inline_subtype.gql"
+    "attainable_commitment_covers_two_hops_out.cypher": "satisfy_plural_edges_inline_subtype.gql",
+    "certified_list_of_properties.cypher": "certificate.gql",
+    "certified_nested_list.cypher": "certificate.gql",
+    "certified_collect_property.cypher": "certificate.gql",
+    "certified_collect_list.cypher": "certificate.gql",
+    "certified_mixed_types_degrade.cypher": "certificate.gql",
+    "certified_mixed_widths_degrade.cypher": "certificate.gql",
+    "uncertified_arithmetic_control.cypher": "certificate.gql"
 }

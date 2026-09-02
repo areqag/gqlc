@@ -895,7 +895,11 @@ func (l *listener) classifyRichExpression(e gen.IOC_ExpressionContext) query.Pro
 		}
 		l.addParameterUse(name, p, query.NewExprUse(t, query.ExprInProjection))
 	}
-	return query.NewExprProjectionWithAggregate(refs, t, subtreeContainsAggregate(e))
+	// Depth ≥ 1 rather than ok alone: a depth-0 bare ref classifies as a
+	// RefProjection before reaching this function, so a depth-0 ok here would
+	// certify something that cannot arrive.
+	depth, refValued := refValuedShape(e)
+	return query.NewExprProjectionWithAxes(refs, t, subtreeContainsAggregate(e), refValued && depth >= 1)
 }
 
 // subtreeContainsAggregate reports whether the expression subtree contains at
