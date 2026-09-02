@@ -101,18 +101,25 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
 
+	// math gates on the checked-narrowing helpers below, whose float arm
+	// is the only thing in this file that names it.
+	anyNarrow := narrowsANumericWidth(entities, prepared)
+
 	// Imports: dbtype is unconditional (every helper's argument type);
-	// fmt gates on anyProp; time gates on anyTime (TIMESTAMP property);
-	// neo4j gates on anyNonNull. Alphabetical: fmt, time, then external
-	// neo4j / dbtype.
+	// fmt gates on anyProp; math gates on anyNarrow; time gates on
+	// anyTime (TIMESTAMP property); neo4j gates on anyNonNull.
+	// Alphabetical: fmt, math, time, then external neo4j / dbtype.
 	b.WriteString("import (\n")
 	if anyProp {
 		b.WriteString("\t\"fmt\"\n")
 	}
+	if anyNarrow {
+		b.WriteString("\t\"math\"\n")
+	}
 	if anyTime {
 		b.WriteString("\t\"time\"\n")
 	}
-	if anyProp || anyTime {
+	if anyProp || anyNarrow || anyTime {
 		b.WriteString("\n")
 	}
 	if anyNonNull {
@@ -134,6 +141,10 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 		}
 		b.WriteString("\n")
 		writeEntityDecodeHelper(&b, e)
+	}
+
+	if anyNarrow {
+		writeNarrowHelpers(&b)
 	}
 
 	// EdgeUnion interface declarations, appended after entity blocks,
@@ -283,8 +294,14 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		case isSliceType(f.GoType):
 			writeSliceNarrow(b, e, f, f.GoType, "s", "narrowed", "\t\t")
 			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
-		case carrier != f.GoType:
+		case isTemporalCarrier(f.GoType):
 			fmt.Fprintf(b, "\t\tnarrowed := %s\n", narrowExpr(f.GoType, "s"))
+			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
+		case carrier != f.GoType:
+			fmt.Fprintf(b, "\t\tnarrowed, err := %s\n", narrowCall(f.GoType, "s"))
+			fmt.Fprintf(b, "\t\tif err != nil {\n")
+			fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)
+			b.WriteString("\t\t}\n")
 			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
 		default:
 			fmt.Fprintf(b, "\t\tout.%s = &s\n", f.Field)

@@ -131,19 +131,115 @@ func temporalListHelper(leaf string, depth int) string {
 
 // narrowExpr renders the expression that turns a value of the driver
 // carrier into the emitted Go type, given the local the driver value
-// landed in. Widths the driver over-carries (int64 → int8, float64 →
-// float32) narrow by a Go conversion; the neutral temporal carriers are
-// not conversion-compatible with their dbtype counterparts — they are
-// different shapes, not different spellings — so they route through the
-// emitted to<X> helper instead.
+// landed in. The neutral temporal carriers are not conversion-compatible
+// with their dbtype counterparts — they are different shapes, not
+// different spellings — so they route through the emitted to<X> helper.
 //
 // Callers reach here only when driverCarrier(goType) != goType; a type
 // that is its own carrier is assigned bare at the call site.
+//
+// EVERY REMAINING CALLER IS TEMPORAL. The numeric widths the driver
+// over-carries (int64 → int8, float64 → float32) used to narrow here by
+// a bare Go conversion, which wraps silently on a value the declared
+// width cannot hold; they now go through narrowCall below, which fails
+// the decode instead (ADR 0036, bd gqlc-awtb).
 func narrowExpr(goType, src string) string {
 	if isTemporalCarrier(goType) {
 		return fmt.Sprintf("to%s(%s)", goType, src)
 	}
 	return fmt.Sprintf("%s(%s)", goType, src)
+}
+
+// narrowCall renders the CHECKED narrowing of a driver carrier down to a
+// numeric width the schema declared, as a call answering (value, error).
+// The caller emits the error plumbing, because what a failed decode
+// returns and how it is worded differ per site.
+//
+// Only the numeric widths reach here. A temporal carrier is a shape
+// change rather than a range question — a dbtype.Date holds exactly what
+// a Date holds — so narrowExpr keeps those and they have no failure to
+// report.
+func narrowCall(goType, src string) string {
+	if goType == "float32" {
+		return fmt.Sprintf("narrowFloat32(%s)", src)
+	}
+	return fmt.Sprintf("narrowInt[%s](%s)", goType, src)
+}
+
+// narrowsANumericWidth reports whether this emission holds a site that
+// narrows a driver carrier to a numeric width, and so whether the two
+// helpers below have to be declared. They are emitted conditionally
+// because an unexported function nothing calls fails the emitted
+// package's own lint fence.
+func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) bool {
+	narrows := func(goType string) bool {
+		leaf := leafType(goType)
+		return driverCarrier(leaf) != leaf && !isTemporalCarrier(leaf)
+	}
+	for _, e := range entities {
+		for _, f := range e.Fields {
+			if narrows(f.GoType) {
+				return true
+			}
+		}
+	}
+	for _, p := range prepared {
+		for _, f := range p.RowFields {
+			if narrows(f.GoType) {
+				return true
+			}
+			for elem := f.ListElem; elem != nil; elem = elem.Nested {
+				if narrows(elem.GoType) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// writeNarrowHelpers emits the two checked-narrowing helpers. Both answer
+// the same sentence, because to a caller they are one rule: a stored
+// value the declared width cannot hold fails the read, as a null on a
+// non-nullable column and a value of the wrong dynamic type already do
+// (ADR 0036).
+func writeNarrowHelpers(b *strings.Builder) {
+	b.WriteString(`
+// narrowInt converts a driver's int64 down to the integer width the
+// schema declared, refusing a value that width cannot represent.
+//
+// The round-trip catches every width whose range is a strict subset of
+// int64's. uint64 is the one where it does not: the conversion is a
+// bijection there, so uint64(-1) round-trips back to -1 unchanged and
+// only the sign disagreement gives it away. A uint64 property's readable
+// range is [0, MaxInt64] — the wire integer is signed 64-bit — so a
+// negative carrier is always a violation rather than a large value.
+func narrowInt[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](v int64) (T, error) {
+	out := T(v)
+	if int64(out) != v || (out < T(0)) != (v < 0) {
+		return 0, fmt.Errorf("value %d does not fit the declared %T width", v, out)
+	}
+	return out, nil
+}
+
+// narrowFloat32 converts a driver's float64 down to float32, refusing a
+// value that overflows to an infinity the carrier did not hold.
+//
+// Precision loss is NOT refused: FLOAT32 is approximate and every
+// in-range float64 rounds to reach it. The test is the invented infinity
+// rather than a comparison against math.MaxFloat32, because a float64
+// strictly greater than MaxFloat32 can still round DOWN to it — that
+// value is representable and a magnitude test would refuse it. An
+// infinity or a NaN the store already held passes through unchanged.
+func narrowFloat32(v float64) (float32, error) {
+	out := float32(v)
+	if math.IsInf(float64(out), 0) && !math.IsInf(v, 0) {
+		return 0, fmt.Errorf("value %g does not fit the declared float32 width", v)
+	}
+	return out, nil
+}
+`)
 }
 
 // widenExpr renders the parameter-binding expression for a non-nullable
