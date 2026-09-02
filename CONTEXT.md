@@ -408,6 +408,14 @@ _Avoid_: "datetime type" (colloquial for the whole family; the family is
 "temporal type"); "duration accessor" (duration accessors like
 `duration.between` are constructor calls in the type interface — the
 namespaced function returns a `duration` — not property lookups).
+The call/lookup distinction is load-bearing on the Apache AGE backend and
+not only in prose: its dialect gate refuses `duration.between(...)` for
+its **namespace**, since PostgreSQL reads `duration` as a schema
+qualifier and answers `schema "duration" does not exist` (SQLSTATE 3F000,
+naming no function at all), while `p.duration` is a property lookup that
+calls nothing and is served. Both are pinned, and the gate reads the
+grammar rather than the text, so `duration.` is never matched as a
+prefix. ADR 0028 item 4.
 
 **Neutral temporal carrier**:
 One of the five gqlc-owned Go types (`Date`, `Time`, `LocalTime`,

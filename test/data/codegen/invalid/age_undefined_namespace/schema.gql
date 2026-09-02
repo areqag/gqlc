@@ -1,4 +1,4 @@
-CREATE PROPERTY GRAPH TYPE UnrepresentableTemporalLocalTimeColumn AS {
+CREATE PROPERTY GRAPH TYPE AgeUndefinedNamespace AS {
     (:Event {
         id        :: INT64     NOT NULL,
         startedAt :: TIMESTAMP NOT NULL,

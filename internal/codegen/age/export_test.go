@@ -30,11 +30,13 @@ var (
 	FindUndefinedFunctions        = findUndefinedFunctions
 	FindUndefinedSpatialFunctions = findUndefinedSpatialFunctions
 	Generate                      = generate
+	NamespaceProbes               = namespaceProbes
 	RejectOffsetSidecarCollisions = rejectOffsetSidecarCollisions
 	RenderModels                  = renderModels
 	SpatialFunctionProbes         = spatialFunctionProbes
 	UndefinedFunctionProbes       = undefinedFunctionProbes
 	UndefinedFunctions            = undefinedFunctions
+	UndefinedNamespaces           = undefinedNamespaces
 	UndefinedSpatialFunctions     = undefinedSpatialFunctions
 	UnservedColumn                = unservedColumn
 	UnservedReason                = unservedReason

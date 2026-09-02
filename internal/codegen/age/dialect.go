@@ -234,6 +234,73 @@ var dialectGaps = []dialectGap{
 			"MATCH (p:Person) RETURN p.point",
 		},
 	},
+	{
+		// The fourth gap, and the only one here that does not refuse a
+		// function. A namespaced call — Cypher.g4 §oC_FunctionName is
+		// `oC_Namespace oC_SymbolicName` — reaches PostgreSQL as a
+		// SCHEMA-qualified name, and PostgreSQL resolves the qualifier
+		// before it looks for any function. So the pinned image answers
+		// duration.between with SQLSTATE 3F000, `schema "duration" does
+		// not exist`, and the answer names the namespace and no function
+		// at all.
+		//
+		// That is why it is not a name in the temporal gap. A row there
+		// has to be named by its own probe's answer
+		// (TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer), which
+		// is what keeps that catalogue honest, and no answer of this
+		// shape can satisfy it. Widening that guard to take a second
+		// answer shape would have bought this row at the price of the
+		// property the guard exists for.
+		//
+		// The catalogue is of NAMESPACES rather than of full names, and
+		// that is the server's own reading rather than a convenience:
+		// the qualifier fails to resolve, so EVERY function under it is
+		// refused by the same mechanism, and a per-full-name catalogue
+		// would refuse `duration.between` while serving
+		// `duration.inSeconds` — a distinction the server does not make.
+		// Both spellings were measured on the pinned image and both
+		// answer 3F000 with the same message (bd gqlc-dy40s), so the
+		// widening is witnessed and not inferred; the witness carries
+		// the second one for exactly that reason.
+		//
+		// It answers LAST, so a query spelling a bare constructor and a
+		// namespaced one is told about the bare one. That is not
+		// arbitrary between two true answers: the bare call is the older
+		// and better-measured refusal, and the table answers in order so
+		// the answer is stable.
+		//
+		// The refusal is narrower than the server is, deliberately. An
+		// unprobed namespace is refused by the image too — `foo.bar(1)`
+		// answers 3F000 the same way — and is served by this gate
+		// regardless, because a gap is what a probe witnessed and ADR
+		// 0005 leaves an author no way around a false positive.
+		sentinel: ErrUndefinedNamespace,
+		find:     findUndefinedNamespaces,
+		diagnose: func(count int, noun, dropped string) string {
+			return fmt.Sprintf("generated code runs the author's query text verbatim "+
+				"(ADR 0005) and Apache AGE 1.7.0 has no schema for the namespace this project has "+
+				"measured, so every call on %d %s would answer \"schema <namespace> does not exist\" "+
+				"(SQLSTATE 3F000) — PostgreSQL resolves the namespace as a schema qualifier before it "+
+				"looks for any function, so no function under that namespace resolves whatever it is "+
+				"called: compute the value in Go and bind it as a parameter, or generate against a "+
+				"neo4j target: %s", count, noun, dropped)
+		},
+		witness: "TestAGERefusesTheNamespaceItHasNoSchemaFor",
+		refused: namespaceProbes,
+		served: []string{
+			// A qualified call that DOES resolve, which is what bounds
+			// the false positive: this gate refuses a namespace, so a
+			// served namespace is the half that says it refuses the
+			// measured one rather than the call shape. ag_catalog is
+			// AGE's own schema and age_timestamp() is the function
+			// behind the bare timestamp() the temporal gap serves.
+			"RETURN ag_catalog.age_timestamp()",
+			// The false positive a scan for `duration.` would take, and
+			// the accessor/property distinction CONTEXT.md draws: a
+			// property lookup spells the namespace and calls nothing.
+			"MATCH (p:Person) RETURN p.duration",
+		},
+	},
 }
 
 // undefinedFunctionProbes are the constructor calls a live session ran
@@ -266,8 +333,9 @@ var dialectGaps = []dialectGap{
 //     the qualifier before looking for any function, so the answer names
 //     no function at all — which is precisely what
 //     TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer requires of a
-//     row here. It cannot join this gap even with a namespaced scanner
-//     (bd gqlc-dy40s).
+//     row here. It could not join this gap even once a namespaced
+//     scanner existed, so it is the FOURTH gap above, catalogued by
+//     namespace and carrying its own sentinel (bd gqlc-dy40s).
 var undefinedFunctionProbes = []dialectProbe{
 	{text: "RETURN datetime()", answer: "function datetime does not exist"},
 	{text: "RETURN date()", answer: "function date does not exist"},
@@ -307,6 +375,59 @@ var spatialFunctionProbes = []dialectProbe{
 // here for a name to be added to without a measurement.
 var undefinedSpatialFunctions = calledFunctionNames(spatialFunctionProbes)
 
+// namespaceProbes is the fourth gap's evidence. One row, because one
+// namespace has been measured — and one row is also all this gap's
+// catalogue can carry per namespace, since
+// TestEveryRefusedNamespaceIsNamedByItsProbeAnswer requires the probes
+// and the namespaces to line up one for one.
+//
+// duration.between(null, null) was run against apache/age@sha256:4241e2d8…
+// (PostgreSQL 18.1, AGE 1.7.0) on 2026-08-29 by Արամազդ, workflow run
+// 33268424367, and re-measured locally against the same image digest the
+// same day (bd gqlc-dy40s). Both runs answered SQLSTATE 3F000 with the
+// message below. The arguments are null because what is being measured
+// is the NAME: the qualifier fails to resolve before anything is
+// evaluated, so no argument could change the answer.
+//
+// The answer is the server's own words and quotes the namespace in the
+// case the AUTHOR wrote it — `Duration.Between` answers `schema
+// "Duration" does not exist`, measured. That is why the guard compares
+// case-insensitively, and why the catalogue lowercases what it stores.
+var namespaceProbes = []dialectProbe{
+	{text: "RETURN duration.between(null, null)", answer: `schema "duration" does not exist`},
+}
+
+// undefinedNamespaces is the fourth gap's catalogue: the lowercased
+// namespace of every qualified call its probes make, read out of the
+// probe TEXTS by the same parse the gate runs on the author's query.
+// Derived rather than written down for the reason the other two are —
+// there is no literal here for a namespace to be added to without a
+// measurement — and the guard that closes the loop is
+// TestEveryRefusedNamespaceIsNamedByItsProbeAnswer.
+var undefinedNamespaces = calledNamespaces(namespaceProbes)
+
+// calledNamespaces is the lowercased namespace of every qualified
+// function call a set of probes makes.
+//
+// It is a separate reading from calledFunctionNames and not a widening
+// of it, because the two catalogues hold different things: that one
+// holds function names read off unqualified calls, this one holds
+// namespaces read off qualified ones. The scans they read through
+// partition the calls (internal/query/cypher), so nothing is counted by
+// both and nothing escapes both.
+func calledNamespaces(probes []dialectProbe) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, p := range probes {
+		for _, c := range cypher.QualifiedFunctionCalls(p.text) {
+			// Already lowercased by the scan, which is where the
+			// case-folding belongs: the resolver folds it, so every
+			// reader of a namespace has to.
+			out[c.Namespace] = struct{}{}
+		}
+	}
+	return out
+}
+
 // calledFunctionNames is the lowercased name of every unqualified
 // function a set of probes calls, read out of the probe TEXTS by the
 // parse the gate runs on the author's query.
@@ -343,6 +464,29 @@ func findUndefinedFunctions(src string) []string {
 // answer both with whichever gap ran first.
 func findUndefinedSpatialFunctions(src string) []string {
 	return findCalls(undefinedSpatialFunctions, src)
+}
+
+// findUndefinedNamespaces is the QUALIFIED calls in a query text whose
+// namespace names something the pinned image has no schema for, quoted
+// whole — namespace included — as the author wrote them.
+//
+// It reads the other scan, and that is the partition the four gaps rest
+// on: an invocation carries a namespace or it does not, so this and
+// findCalls cannot both claim one call and no call escapes both. That is
+// also why the namespace catalogue is exempt from
+// TestTheFunctionCataloguesAreDisjoint — the disjointness it would test
+// for is a property of the call SHAPE here, not of the two name sets,
+// and `duration` being in the temporal catalogue and `duration` being a
+// refused namespace are facts about two different spellings.
+func findUndefinedNamespaces(src string) []string {
+	var found []string
+	for _, c := range cypher.QualifiedFunctionCalls(src) {
+		if _, undefined := undefinedNamespaces[c.Namespace]; !undefined {
+			continue
+		}
+		found = append(found, c.Text)
+	}
+	return found
 }
 
 // findCalls is the calls in a query text naming something in a

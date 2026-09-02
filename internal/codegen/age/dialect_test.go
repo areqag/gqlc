@@ -165,6 +165,71 @@ func TestTheFunctionCataloguesAreDisjoint(t *testing.T) {
 	}
 }
 
+// TestEveryRefusedNamespaceIsNamedByItsProbeAnswer is the namespace
+// catalogue's half of the same discipline, and a parallel guard rather
+// than a widening of the one above.
+//
+// The two contracts differ in what the server's answer has to name. A
+// function gap's probe answers `function <name> does not exist`, so the
+// name in the catalogue is checkable against it. This gap's probe
+// answers `schema "duration" does not exist` and names no function at
+// all — the refusal belongs to the qualifier. Teaching the guard above
+// to accept either shape would make it satisfiable by a row that names
+// nothing, which is the exact hazard both guards exist to forbid, so
+// there are two guards with one contract each.
+//
+// The one-qualified-call clause is the fail-closed half. A probe text
+// that yields NO qualified call would leave the loop below comparing
+// nothing and passing, so the assertion that can never silently find
+// nothing to compare is the assertion that the probe calls exactly one.
+func TestEveryRefusedNamespaceIsNamedByItsProbeAnswer(t *testing.T) {
+	require.NotEmpty(t, age.NamespaceProbes,
+		"no probes: this guard would compare nothing and pass on an empty catalogue")
+	for _, p := range age.NamespaceProbes {
+		calls := cypher.QualifiedFunctionCalls(p.Text())
+		require.Len(t, calls, 1,
+			"probe %q must make exactly one qualified call: a probe making none leaves this "+
+				"guard nothing to compare, and one making two stops the probes and the "+
+				"namespaces lining up one for one", p.Text())
+		ns := calls[0].Namespace
+		require.NotEmpty(t, ns, "probe %q entered an empty namespace into the catalogue", p.Text())
+		require.Contains(t, strings.ToLower(p.Answer()), strings.ToLower(ns),
+			"probe %q entered %q into the catalogue, but the server's answer does not name it",
+			p.Text(), ns)
+	}
+	require.Len(t, age.UndefinedNamespaces, len(age.NamespaceProbes),
+		"one probe, one namespace: two probes under one namespace, or a probe naming two, "+
+			"makes the catalogue and the evidence stop lining up one for one")
+}
+
+// TestTheNamespaceGapIsNotAFunctionCatalogue pins the exemption rather
+// than leaving it to be noticed. functionCatalogues drives two checks
+// whose contract this gap cannot meet — its probe's answer names no
+// function — so it is deliberately absent, and an absence nothing
+// asserts is indistinguishable from an omission.
+//
+// The disjointness those checks enforce is not lost, it is held by a
+// different argument: the two scans partition the calls by SHAPE, so
+// `duration` the refused function name and `duration` the refused
+// namespace are facts about two different spellings and no call can be
+// claimed by both. TestAQueryOfBothKindsIsAnsweredByTheEarlierGap is
+// where that is measured.
+func TestTheNamespaceGapIsNotAFunctionCatalogue(t *testing.T) {
+	for _, cat := range functionCatalogues {
+		require.NotEqual(t, "namespace", cat.name,
+			"the namespace gap answers with a message naming no function, so the function "+
+				"catalogue checks cannot hold it")
+	}
+	// The reason it is exempt, asserted rather than asserted-about: the
+	// probe's answer names the namespace and does NOT name a function,
+	// which is what the guard above requires and this one forbids.
+	for _, p := range age.NamespaceProbes {
+		require.NotContains(t, strings.ToLower(p.Answer()), "function",
+			"probe %q answers naming a function, so it belongs in a function catalogue "+
+				"after all and this exemption is stale", p.Text())
+	}
+}
+
 // functionCatalogues is the derived name sets and the probes each was
 // read out of, so the two checks above run over every one of them rather
 // than over the one that existed when they were written.
