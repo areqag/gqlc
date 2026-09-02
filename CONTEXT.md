@@ -455,20 +455,34 @@ neo4j driver's package, a private carrier behind the conversion boundary);
 "runtime type" (there is no gqlc runtime module — the carriers are emitted,
 not imported).
 
-**Carrier question / storage question**:
-The two independent things a backend is asked about a **property type**,
-and the reason two sentinels answer where one used to. The carrier
-question is "is there a faithful Go type for this width?" and a `no`
-routes to `ErrUnrepresentableWidth`. The storage question is "will this
-backend's store hold a value of this width in a property?" and a `no`
-routes to `ErrUnstorableProperty`. They are not the same question and
-neither implies the other: neo4j has a faithful `[][]int16` for
+**Emission question / carrier question / storage question**:
+The three independent things asked about a **property type**, and the
+reason three sentinels answer where one used to. Only the last two are
+asked of a backend.
+
+The emission question is "has gqlc built an emission for this KIND at
+all?" and a `no` routes to `ErrUnimplementedTypeKind`. It is asked first,
+of gqlc rather than of a target, and the answer is the same on every
+target at once — today `no` for `RECORD` and the closed dynamic unions,
+which the schema front end resolves and nothing renders (`gqlc-h9n.33`).
+Asking it first is what stops a kind reaching a type table that has no
+case for it and coming back as a missing carrier, which would name an
+edit — change the declared width — that cannot help, because no width of
+that kind is emitted anywhere. It is the one refusal of the three that a
+future stage retires.
+
+The carrier question is "is there a faithful Go type for this width?" and
+a `no` routes to `ErrUnrepresentableWidth`. The storage question is "will
+this backend's store hold a value of this width in a property?" and a
+`no` routes to `ErrUnstorableProperty`. They are not the same question
+and neither implies the other: neo4j has a faithful `[][]int16` for
 `LIST<LIST<INT16>>` and emits a working decode for one arriving as a
 query column, and the server still refuses to STORE it (ADR 0035).
 
 The storage question is asked of **declared entity properties only**,
 after the carrier question and never before it. A column and a parameter
-are asked the carrier question alone, because neither stores anything —
+are asked the emission and carrier questions alone, because neither
+stores anything —
 so a width may be refused as a property and admitted, in the same
 package, as a projected column. That asymmetry is the whole content of
 the distinction; a reader who collapses the two questions will read the
@@ -476,15 +490,18 @@ refusal as a missing Go type and look for a carrier that is already
 there. Being one backend's storage rule rather than a fact about the
 schema, an `ErrUnstorableProperty` names the backend that refused; the
 width sentinel does not, reading the same wherever a carrier is missing.
-_Avoid_: "unsupported type" / "unsupported width" (states neither
-question, and is false of the storage refusal — the type is supported,
-the STORE is what declines); "invalid schema" (the same declaration is
-valid on Apache AGE, which stores it).
+_Avoid_: "unsupported type" / "unsupported width" (states none of the
+three, and is false of the storage refusal — the type is supported, the
+STORE is what declines); "invalid schema" (the same declaration is valid
+on Apache AGE, which stores it); "unsupported width" for a record or a
+union in particular (there is no width in question — it is the kind that
+has no emission, and on every backend, so the phrase points at a
+per-target answer that does not exist).
 
 **Result type**:
 The **type** a return item's **projection** commits to for the column that
 becomes a generated method result field. Distinct from the schema-side
-**property type**: a property type describes a stored scalar; a result type
+**property type**: a property type describes a stored value; a result type
 describes a projected column, which may be a whole entity (`node`/`edge`),
 a scalar (`bool`/`int`/…), a collection (`list<T>`/`map`), or `unknown`.
 The result type is what codegen emits — not what the query author wrote,

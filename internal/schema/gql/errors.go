@@ -133,7 +133,7 @@ var (
 // built, and carried a "yet" to say so. Both of the second kind are now gone.
 // ErrDynamicUnionType lost its open halves to gqlc-h9n.34 (ADR 0020) and its
 // closed ones to gqlc-h9n.33, which also deleted ErrRecordValueType — the
-// parameterised PropertyType encoding (ADR 0037) gave records and closed unions
+// parameterised PropertyType encoding (ADR 0039) gave records and closed unions
 // somewhere to put their fields and members, so parsing them is no longer
 // deferred and there is nothing left for a "yet" to promise.
 //

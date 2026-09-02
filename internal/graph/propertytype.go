@@ -125,7 +125,7 @@ func RecordOf(fields []RecordField) PropertyType {
 //
 // These reductions are recorded gqlc decisions, not readings of ISO 39075 —
 // the semantics volume is not among the freely published artefacts (the
-// arbiter is bd gqlc-lir). See the ADR.
+// arbiter is bd gqlc-lir). ADR 0039 records each reduction and its edge.
 func UnionOf(members []UnionMember) PropertyType {
 	flat := make([]UnionMember, 0, len(members))
 	for _, m := range members {

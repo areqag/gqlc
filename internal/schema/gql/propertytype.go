@@ -125,7 +125,7 @@ func resolveRecordType(rt gen.IRecordTypeContext, ts *antlr.CommonTokenStream) (
 // resolveUnionMembers lowers the members of either closed dynamic union
 // alternative. Neither admits a notNull of its own (GQL.g4:1731-1732), so the
 // property is always nullable here and a trailing NOT NULL belongs to the last
-// member — the grammar's reading rather than the charitable one (ADR 0037).
+// member — the grammar's reading rather than the charitable one (ADR 0039).
 func resolveUnionMembers(vts []gen.IValueTypeContext, ts *antlr.CommonTokenStream) (graph.PropertyType, bool, error) {
 	members := make([]graph.UnionMember, 0, len(vts))
 	for _, vt := range vts {

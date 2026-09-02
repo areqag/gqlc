@@ -8,7 +8,7 @@
 -- that `typed` is punctuation carrying nothing is asserted by the two rows of
 -- TestRecordPropertyResolves that spell `a :: INT` and `a INT` and want the same
 -- string. This file pinned a decline until gqlc-h9n.33 gave records an encoding
--- (ADR 0037), and a decline could not have distinguished the two spellings at all.
+-- (ADR 0039), and a decline could not have distinguished the two spellings at all.
 CREATE PROPERTY GRAPH TYPE Seed AS {
     (:Row { r :: RECORD { f STRING } })
 }

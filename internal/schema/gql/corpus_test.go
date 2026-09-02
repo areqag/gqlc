@@ -114,7 +114,7 @@ const (
 	//
 	// 78 → 86 under gqlc-h9n.33: the six record spellings and the two closed
 	// dynamic unions in 18.9, which the parameterised PropertyType encoding
-	// (ADR 0037) gives somewhere to resolve to. Measured, not derived — the
+	// (ADR 0039) gives somewhere to resolve to. Measured, not derived — the
 	// three files spelling RECORD incidentally, to pin that a collector forwards
 	// a decline, moved to PATH and stayed unsupported rather than flipping, so
 	// counting the retired sentinel's entries would have given 89.

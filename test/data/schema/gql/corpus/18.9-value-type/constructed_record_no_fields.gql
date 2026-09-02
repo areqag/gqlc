@@ -9,7 +9,7 @@
 -- It is also the shape ANTLR's accessors lie about. FieldTypeList() is nil here
 -- rather than an empty list, so an implementation trusting a non-nil parent
 -- accessor walks nothing. gqlc-h9n.33 lifted the decline this file used to pin;
--- ADR 0037 has the encoding.
+-- ADR 0039 has the encoding.
 CREATE PROPERTY GRAPH TYPE Seed AS {
     (:Row { r :: RECORD {} })
 }

@@ -84,7 +84,7 @@ var isoGaps = []isoGap{
 	{
 		production: "constructed value type",
 		bead:       "gqlc-h9n.5",
-		why:        "ISO umbrella for list, record, and dynamic-union types. Lists are implemented (gqlc-h9n.5); records and closed unions are gqlc-h9n.33's. Production name is absent because GQL.g4 implements these as labelled alternatives of valueType rather than a named constructedValueType rule",
+		why:        "implemented: ISO's umbrella for list, record and dynamic-union types, all three of which resolve now — lists at gqlc-h9n.5, records and closed unions at gqlc-h9n.33. Production name is absent because GQL.g4 implements these as labelled alternatives of valueType rather than a named constructedValueType rule",
 	},
 	{
 		production: "component type",
@@ -94,12 +94,12 @@ var isoGaps = []isoGap{
 	{
 		production: "component type list",
 		bead:       "gqlc-h9n.33",
-		why:        "the comma-separated member list inside a closed dynamic union (ANY VALUE<A|B>); not implemented because the closed-union family awaits gqlc-h9n.33. Production name is absent because GQL.g4 uses a labelled alternative rather than a named rule — the same pattern as the other value-type productions in this list",
+		why:        "implemented: the member list inside a closed dynamic union (ANY VALUE<A|B>); gqlc-h9n.33 reads it through resolveUnionMembers, which recurses on each member valueType. ISO separates members by comma and GQL.g4 by VERTICAL_BAR, which is a spelling difference the resolution does not see. Production name is absent because GQL.g4 uses a labelled alternative rather than a named rule — the same pattern as the other value-type productions in this list",
 	},
 	{
 		production: "dynamic union type",
 		bead:       "gqlc-h9n.33",
-		why:        "umbrella for open and closed union spellings; the open ones (#7, #8) now resolve to graph.TypeAnyPropertyValue (ADR 0020), but the closed ones (#9, #10) need the enum to carry members, which gqlc-h9n.33 builds. Production name is absent because GQL.g4 uses labelled alternatives of valueType rather than a named rule",
+		why:        "implemented: umbrella for open and closed union spellings. The open ones (#7, #8) resolve to graph.TypeAnyPropertyValue (ADR 0020); the closed ones (#9, #10) resolve to graph.UnionOf now that a PropertyType carries members (gqlc-h9n.33). Production name is absent because GQL.g4 uses labelled alternatives of valueType rather than a named rule",
 	},
 	{
 		production: "open dynamic union type",
@@ -109,7 +109,7 @@ var isoGaps = []isoGap{
 	{
 		production: "closed dynamic union type",
 		bead:       "gqlc-h9n.33",
-		why:        "ANY VALUE<A|B> and bare A|B need the enum to carry members, which graph.PropertyType as a flat string cannot do. Unimplemented; gqlc-h9n.33 is the bead that fixes it",
+		why:        "implemented: ANY VALUE<A|B> and bare A|B both resolve to graph.UnionOf (gqlc-h9n.33). The bar it was blocked on — that a flat-string PropertyType cannot carry members — was answered by parameterising the encoding rather than by leaving the string, so the type stays comparable. Production name is absent because GQL.g4 spells both as labelled alternatives of valueType (Atl1 and Atl2) rather than a named rule",
 	},
 	{
 		production: "dynamic property value type",

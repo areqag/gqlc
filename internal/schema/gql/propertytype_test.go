@@ -623,7 +623,7 @@ func TestClosedUnionMemberOrderCanonicalisedThroughParser(t *testing.T) {
 // follow from the code. Neither closed-union alternative admits a notNull of its
 // own (GQL.g4:1731-1732), so the qualifier in `STRING | INT NOT NULL` is inside
 // the right member's valueType and belongs to that member. gqlc takes the
-// grammar's reading rather than the charitable one; ADR 0037 argues why.
+// grammar's reading rather than the charitable one; ADR 0039 argues why.
 func TestClosedUnionTrailingNotNullBindsToTheRightMember(t *testing.T) {
 	got, err := parseFirstProperty(t, "STRING | INT NOT NULL")
 	require.NoError(t, err)
