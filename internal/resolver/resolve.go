@@ -1242,6 +1242,21 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 				return nil, 0, fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, n.Variable(), joinCandidates(cands))
 			}
 			t.cands[n.Variable()] = nodeTypesForKeys(cands, s)
+			// A name entering the plural lane is BindNodeCands' transition, so it
+			// owes BindNodeCands' delete: resolvedCovers qualifies `resolved`
+			// alone, and this arm writes no `resolved` entry for a mark to
+			// qualify.
+			//
+			// It changes no answer and no QUERY can pin it — every writer of the
+			// lane writes `resolved` in the same breath, and a name already in
+			// `resolved` leaves `pending` before the first round, so no mark can
+			// be here. It is written for the reason the singular arm above and
+			// BindNodeCands both give: the lane must not outlive the entry it
+			// qualifies under any seeding regime, and seeding it from the carry is
+			// the alternative newScope names and declines.
+			// TestPhaseBsPluralCommitLeavesNoResolvedCoversMark pins it from a
+			// seeded table, which is the only place the state is constructible.
+			delete(t.resolvedCovers, n.Variable())
 			// Unconditionally true, and it is the only value this writer can
 			// write: every `n` in Phase B's pending set is an unlabelled node
 			// binding, since resolveBranch routes a binding here exactly when
