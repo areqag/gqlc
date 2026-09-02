@@ -52,6 +52,7 @@ import (
 var auditedSurface = []string{
 	"PropertyUseWitness",
 	"callProjectionType",
+	"certifiedProjectionType",
 	"projectionType",
 	"refProjectionType",
 	"resolveType",
@@ -82,6 +83,18 @@ var nonConstructingReturns = map[string]string{
 	// The inductive step, and the only arm that returns a value originating
 	// outside this function. Pinned by the carry-writer row below.
 	"refProjectionType: return rt, nil": "rt is a previous Part's Column.Type, propagated through the carry maps; see the carry-writer row",
+
+	// base is resolveType's return, and both arms are reached only after the
+	// err beside it tested nil. resolveType is itself in the audited surface,
+	// so part 1 above already establishes it does not hand back a nil type
+	// with a nil error — this arm inherits that rather than re-arguing it.
+	"certifiedProjectionType: return base, nil": "base is resolveType's non-nil return, reached only on its nil-error path",
+
+	// fillLeaf is a total rewrite of base: every arm returns either its own
+	// argument, a ResolvedList composite literal, or leaf — a ResolvedProperty
+	// VALUE, which is never a nil interface. It cannot introduce a nil into a
+	// tree that had none, and base had none by the row above.
+	"certifiedProjectionType: return fillLeaf(base, leaf, false), nil": "fillLeaf returns base's own nodes, a ResolvedList literal, or the ResolvedProperty value it was given",
 }
 
 // carryWriters is every assignment into the two maps that move a resolved
