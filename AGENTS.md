@@ -28,7 +28,21 @@ is noise; delete it.
 ## Tests
 
 - Use **testify** (`suite.Suite` for setup/grouping, `require` for fail-fast
-  assertions). Not bare `testing.T`.
+  assertions). Not bare `testing.T` — except where the next bullet forbids it.
+- **Default to an external test package** (`package foo_test`). An IN-PACKAGE
+  test that imports third-party code — testify counts — takes its whole package
+  out of govulncheck's call graph, so `just vuln` goes on exiting 0 while
+  reporting nothing about that package (bd `gqlc-m5rc`). Where a test needs
+  unexported state, keep it in-package and assert with bare `testing.T`; that is
+  the one place the rule above does not apply, and it is forced rather than a
+  style choice. Several packages are already in that shape and this file does
+  not list them, because a list here would be stale by the next such test.
+  `just vuln-root-residual` is what to run: it reports the in-package/external
+  file counts and names the packages that HAVE gone blind — not the ones using
+  bare `testing.T`, which is the shape that keeps them out of that set. It runs
+  in CI's `lint` job on every PR and RATCHETS the blind set, so a package going
+  blind this way fails the gate rather than merging, and its message prescribes
+  the remedy.
 - **Table-driven.** Each case is a named row; the loop is the test body.
 - High signal, no fluff: no asserting the obvious, no dead helpers, no cases
   that duplicate each other's coverage. A reader should see what each case
