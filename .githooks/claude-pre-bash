@@ -1831,6 +1831,39 @@ def main():
             deny(message)
             return
 
+    # The reopen arm takes the close arm's exception policy, not the label
+    # arm's: an exception here denies. The label arm reasons that a bug in an
+    # arm that denied would block `bd create` in every concurrent session at
+    # once, and the same is true of `bd reopen` — but the damage the two arms
+    # prevent is not the same shape. An over-long label is caught later by CI
+    # and costs a retype; a reopen destroyed by the next pull is caught by
+    # nobody, and the citizen who typed it has by then been told it succeeded.
+    # A bd invocation naming several ids denies on the first mirror it finds
+    # closed and names it: bd discards a refused update whole anyway, so there
+    # is no half-applied command to describe.
+    #
+    # It runs BEFORE the label arm because that arm can WARN AND RETURN, and the
+    # return used to skip this one entirely: a single `bd update` carrying both a
+    # label and `--status open` went unchecked whenever the cap file could not be
+    # read. A warning about a label is not a reason to stop asking whether the
+    # command destroys a reopen (bd gqlc-v3d99, from Տիր's round-1 read of PR
+    # #2068). The swap is safe in the other direction too — nothing below
+    # consumes `reopens`, and a command tripping both arms now gets the deny,
+    # which is the louder of the two answers.
+    for reopen in reopens:
+        try:
+            _, message = reopen_verdict(reopen)
+        except Exception as exc:  # noqa: BLE001 - deliberate: an exception denies
+            message = (
+                "A `bd` command that would set status `open` could not be checked "
+                "against its GitHub mirror (%s: %s), so it is refused rather than "
+                "allowed through unverified (bd gqlc-e9huy)."
+                % (type(exc).__name__, exc)
+            )
+        if message is not None:
+            deny(message)
+            return
+
     # The label arm. Unlike the close arm, an exception here is NOT turned into
     # a refusal: the damage this prevents is recoverable in one command by the
     # person standing at the keyboard (edit the label and retype), while a bug
@@ -1846,30 +1879,6 @@ def main():
             return
         warn(message)
         return
-
-    # The reopen arm takes the close arm's exception policy, not the label
-    # arm's: an exception here denies. The label arm reasons that a bug in an
-    # arm that denied would block `bd create` in every concurrent session at
-    # once, and the same is true of `bd reopen` — but the damage the two arms
-    # prevent is not the same shape. An over-long label is caught later by CI
-    # and costs a retype; a reopen destroyed by the next pull is caught by
-    # nobody, and the citizen who typed it has by then been told it succeeded.
-    # A bd invocation naming several ids denies on the first mirror it finds
-    # closed and names it: bd discards a refused update whole anyway, so there
-    # is no half-applied command to describe.
-    for reopen in reopens:
-        try:
-            _, message = reopen_verdict(reopen)
-        except Exception as exc:  # noqa: BLE001 - deliberate: an exception denies
-            message = (
-                "A `bd` command that would set status `open` could not be checked "
-                "against its GitHub mirror (%s: %s), so it is refused rather than "
-                "allowed through unverified (bd gqlc-e9huy)."
-                % (type(exc).__name__, exc)
-            )
-        if message is not None:
-            deny(message)
-            return
 
     # A dead hook tree is repo state, not a property of this command, so the
     # refusal is scoped to the commands the dead hooks would have gated. Every
