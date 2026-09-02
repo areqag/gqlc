@@ -9,6 +9,12 @@
 //
 // It is a test rather than a command so that `just test` carries it. A separate
 // gate arm would be one more edge somebody can drop and leave the tree green.
+//
+// It asserts with the standard library alone. An in-package test that imports
+// third-party code takes its whole package out of govulncheck's call graph, so
+// `just vuln` would report nothing about this package and still exit 0 (bd
+// gqlc-m5rc) — testify here bought two helpers and cost the package its
+// coverage.
 package testcite
 
 import (
@@ -20,8 +26,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 // repoRoot reaches the module root from this package's directory.
@@ -103,7 +107,9 @@ func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []cita
 	declared = map[string]bool{}
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("walking %s: %v", path, err)
+		}
 		if d.IsDir() {
 			// The root is exempt from both skips. It is reached as a relative
 			// path whose own base name starts with a dot, so a dot check
@@ -126,7 +132,9 @@ func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []cita
 		// drop its citations silently, which is the fail-silent shape this
 		// guard exists to remove; if a deliberately-malformed Go fixture ever
 		// lands here, exempt it by path rather than making the walk lenient.
-		require.NoError(t, parseErr, "every .go file in this checkout must parse: %s", path)
+		if parseErr != nil {
+			t.Fatalf("every .go file in this checkout must parse: %s: %v", path, parseErr)
+		}
 		files++
 
 		if strings.HasSuffix(path, "_test.go") {
@@ -143,7 +151,9 @@ func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []cita
 		}
 
 		rel, relErr := filepath.Rel(root, path)
-		require.NoError(t, relErr)
+		if relErr != nil {
+			t.Fatalf("relative path for %s: %v", path, relErr)
+		}
 		rel = filepath.ToSlash(rel)
 		for _, group := range f.Comments {
 			line := fset.Position(group.Pos()).Line
@@ -161,7 +171,9 @@ func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []cita
 		}
 		return nil
 	})
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatalf("walking %s: %v", root, err)
+	}
 	return declared, cites, files
 }
 
@@ -180,9 +192,15 @@ func TestEveryCitedTestExists(t *testing.T) {
 	// Non-degeneracy, asserted per source rather than on a total. A walk that
 	// found no files, no declarations, or no citations would satisfy the loop
 	// below vacuously and report a green guard over nothing.
-	require.NotEmpty(t, files, "the walk found no Go files, so the guard examined nothing")
-	require.NotEmpty(t, declared, "the walk found no test declarations, so every citation would read as dangling")
-	require.NotEmpty(t, cites, "the walk found no citations, so the loop below proves nothing")
+	if files == 0 {
+		t.Fatal("the walk found no Go files, so the guard examined nothing")
+	}
+	if len(declared) == 0 {
+		t.Fatal("the walk found no test declarations, so every citation would read as dangling")
+	}
+	if len(cites) == 0 {
+		t.Fatal("the walk found no citations, so the loop below proves nothing")
+	}
 
 	for _, c := range cites {
 		if declared[c.name] {
@@ -216,11 +234,14 @@ func TestEveryIllustrativePinIsStillWritten(t *testing.T) {
 		written[c.file][c.name] = true
 	}
 
-	require.NotEmpty(t, illustrative, "with no pins this test proves nothing")
+	if len(illustrative) == 0 {
+		t.Fatal("with no pins this test proves nothing")
+	}
 	for file, names := range illustrative {
 		for name := range names {
-			require.True(t, written[file][name],
-				"%s is pinned as illustrative in %s, but no comment there writes it — drop the pin", name, file)
+			if !written[file][name] {
+				t.Errorf("%s is pinned as illustrative in %s, but no comment there writes it — drop the pin", name, file)
+			}
 		}
 	}
 }
