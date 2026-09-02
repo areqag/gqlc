@@ -782,6 +782,41 @@ and rules out a fixed script on a timer. `dont` for `don't` is the kind of tell
 a keyboard leaves and a template does not, and it is offered as exactly that:
 a tell, not a finding.
 
+IT IS NOW A FINDING, and it settles who the other sender is (bd gqlc-cj7hp,
+2026-09-02). `herdr agent send` writes literal text and presses no Enter —
+herdr's own help says so — so a string left sitting in a composer is exactly
+what that verb leaves behind, and a person typing at the herdr TUI leaves the
+same thing. The paragraph above is right that nothing in this REPOSITORY types
+it; the step it was missing is that the repository is not the only thing on
+this machine. Measured the same day: the interactive herdr client is pid
+1510441 on `pts/0` with STAT `Sl+` — the foreground process group of a terminal
+— parented `herdr <- fish <- ghostty <- Hyprland`, and `herdr-client.log`'s
+attach windows cover every stranding anyone has measured. An eighth specimen
+that afternoon, `take the next ready warrior bead` in Այգ's box, was
+byte-identical to one Ար had read in a different pane 13.5 hours earlier, which
+softens the content-coupling argument without overturning it: a supervisor with
+a handful of standard directives produces repetition AND apparent coupling,
+because the standard directive is the apt one.
+
+DO NOT SPEND A SESSION HUNTING THE SENDER IN herdr's LOG. It records a send
+only when the send FAILS. Of 458 `api.request.complete` events in
+`~/.config/herdr/herdr-server.log` since 2026-06-13, the 136 with
+`outcome="ok"` are all `tab.create`, `agent.start`, `workspace.*`, `tab.*`,
+`pane.release_agent` and `agent.focus` — not one send; `agent.send` appears 172
+times and `pane.send_keys` 79, every one an error. Confirmed against a
+known-good event: Սեդրակ delivered three nudges at 14:43Z and the log holds no
+api line between 14:40 and 14:49. A delivered send leaves no trace by design,
+so no after-the-fact attribution exists to be found. What the log DOES witness
+is operator presence: `tab.focus` is logged, and exactly one of its 376 events
+was CLI-originated.
+
+None of that makes the sender's instructions wrong — the ones legible on the
+panes were apt, given at the right moment. The defect is ours: the only
+hand-path into a composer leaves the text unsubmitted, a boxed seat is
+unreachable by wake, nudge, sleep and down at once, and nothing tells the
+person who typed it. `km wake <seat> --reason "<text>"` is the same sentence
+delivered with a receipt, because it routes through `send_line`.
+
 The prefix is therefore load-bearing prose, not decoration. Anything that
 gives km a new thing to say gives it the prefix, or it is refused at
 `send_line` with the reason above.
