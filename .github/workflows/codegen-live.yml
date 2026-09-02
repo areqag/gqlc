@@ -22,7 +22,7 @@ name: codegen-live
 on:
   pull_request:
   # live-smoke is required, so it must run on the merge group too or the
-  # queue would land a merge result it never smoked (ADR 0010). live-smoke-age
+  # queue would land a merge result it never smoked (decision 0010). live-smoke-age
   # stays off it, by the positive enumeration on that job below.
   merge_group:
   workflow_dispatch:
@@ -55,7 +55,7 @@ jobs:
   #
   # Enumerated positively rather than as `!= 'pull_request'`: that negative went
   # TRUE on a merge group, charging every queued merge the AGE container
-  # wall-time a PR is deliberately not charged (ADR 0010).
+  # wall-time a PR is deliberately not charged (decision 0010).
   live-smoke-age:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

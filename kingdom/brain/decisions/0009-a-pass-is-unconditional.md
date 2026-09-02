@@ -1,6 +1,6 @@
 # 0009 — A verdict is PASS or FAIL, and a PASS is unconditional
 
-Date: 2026-08-29. Designed against bd gqlc-vnil, under ADR 0003. Executed by
+Date: 2026-08-29. Designed against bd gqlc-vnil, under decision 0003. Executed by
 gqlc-zfb0. Witnesses: PR #1712 / gqlc-ftxp / gqlc-mpgw (Վահագն's letter of
 2026-08-29T17:17:46Z), gqlc-o3gj, gqlc-sniv.
 
@@ -62,7 +62,7 @@ better than prose:
    a sentence in a close reason is none of those.
 3. A fact to verify at merge time **is the standing merge protocol**, which
    already binds every author on every PR: gates green, `Closes` present and
-   correct, and the head not moved past the PASS (ADR 0006). Restating one
+   correct, and the head not moved past the PASS (decision 0006). Restating one
    is a reminder and is harmless. Minting a new one is either case 1 or an
    attempt to legislate per-PR, which a verdict is not for.
 
@@ -85,7 +85,7 @@ woken, and mail wakes nobody but Սեդրակ. The bead must close to wake the
 author, and the only closing verdict that blocks the merge is a FAIL.
 
 Second, **a PASS spent on bytes that must then change is a PASS spent on a
-doomed SHA** — ADR 0006's exact finding, arrived at from the other side. If
+doomed SHA** — decision 0006's exact finding, arrived at from the other side. If
 the conditions land on the branch before the merge, what merges differs from
 what the judge read by the author's implementation of the conditions: new,
 unread bytes inside a merge that owes review by construction. The judge
@@ -118,7 +118,7 @@ delete mechanism, not to build mechanism that launders a worse habit.
 3. **A FAIL prices at its delta.** The standing objection — "a trivial
    condition does not deserve a whole round" — mistakes the round's cost as
    fixed. Answering a FAIL that names one missing paragraph is an author
-   editing a body and a judge reading it back: minutes, because ADR 0006's
+   editing a body and a judge reading it back: minutes, because decision 0006's
    merge-base comparison scopes the re-read to the delta. The re-review bead
    for a FAIL's answer is filed **assigned to the judge who wrote the
    FAIL** — V.4 makes that judge the adjudicator of the answer, and the
@@ -139,7 +139,7 @@ delete mechanism, not to build mechanism that launders a worse habit.
 ## The detector, and its deliberate modesty
 
 One row in `km doctor` (`cmd_doctor`, kingdom/bin/km:3790): a closed
-`class:judge` bead whose `closed_at` postdates this ADR's merge and whose
+`class:judge` bead whose `closed_at` postdates this decision's merge and whose
 close reason matches `conditio` (case-insensitive) is named in a **warn**
 row. Time-scoped so the eight historical verdicts do not ring it forever.
 
@@ -147,7 +147,7 @@ Warn, not FAIL, by the doctor's own written doctrine: the stranded-bead arm
 FAILs because it rests on the dispatcher's arithmetic; the
 unreachable-assignee arm warns because it rests on a roster a human
 maintains. This row rests on wording a human wrote, so it warns. It is made
-exact rather than fuzzy by ruling 2's close-reason format: under this ADR a
+exact rather than fuzzy by ruling 2's close-reason format: under this decision a
 compliant close reason has no reason to contain the word at all — do not
 write "no conditions"; the unqualified PASS says it — so a match is either
 the abolished shape or a format drift worth a glance. A detector that fires
@@ -163,7 +163,7 @@ converted. gqlc-ftxp's are already carried by gqlc-mpgw (in flight);
 gqlc-ib5y's was verified satisfied at close; gqlc-4juf's was CI state,
 verifiable trivially. The remainder — gqlc-sk5j and gqlc-sq0d (three binding
 conditions on PR #1481), gqlc-qxhp (#1707), gqlc-j87i (#1679, whose
-condition "ADR 0005 body edit" is ambiguous about which body — itself
+condition "decision 0005 body edit" is ambiguous about which body — itself
 evidence for ruling 2), gqlc-uwwg (#1485's successor) — are audited by the
 execution bead: read each verdict of record, verify each condition **by
 content** against master, and file a bead per unlanded condition with
@@ -175,9 +175,9 @@ by however many of these are real.
 
 **The open-bead hole is not this hole.** PR #1481 merged while its blocking
 review bead sat open (gqlc-sniv) — a merge that outran its verdict, where
-this ADR's subject is a verdict that outran its own content. gqlc-sniv
+this decision's subject is a verdict that outran its own content. gqlc-sniv
 remains open and this ruling closes no part of it; it does make sniv's
-eventual detector cleaner, since after this ADR an open judge bead against a
+eventual detector cleaner, since after this decision an open judge bead against a
 merged PR is unambiguous (there is no "it closed conditioned" middle state
 to classify). sniv's own notes prefer a merge-path refusal over an
 after-the-fact detector, and nothing here prejudges that.
@@ -191,5 +191,5 @@ untouched.
 **The constitution is not amended.** V.2 ("merges on a Դատաւոր's PASS") and
 V.4 ("a FAIL blocks until answered") already carry this ruling's whole
 weight; the conditioned PASS was never constitutional text, only practice.
-An ADR is how this town retires a practice (0002, 0006 are precedents), and
+A decision is how this town retires a practice (0002, 0006 are precedents), and
 an amendment would add review cost without adding force.

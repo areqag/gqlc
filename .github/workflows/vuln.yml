@@ -41,7 +41,7 @@ jobs:
         id: deps
         # Without merge_group here every step below it skips on a queue run,
         # so the required govulncheck context would go green having scanned
-        # nothing (ADR 0010). If merge_group.base_sha were ever empty this step
+        # nothing (decision 0010). If merge_group.base_sha were ever empty this step
         # still fails red, which is the direction to fail in — but it is the
         # `git diff` that does it, not the fetch. Probed 2026-08-30: with
         # BASE_SHA empty the fetch SUCCEEDS, resolving to origin HEAD and

@@ -36,7 +36,7 @@ ledger supports.
   routing error. No judge is senior to another and none has a different role:
   work goes to whoever is free and unconflicted (Constitution V.2), never by
   rank. A PR is reviewed only where V.2 says it is — its bead was blocked by a
-  design bead, or it amends the constitution, or a citizen asked (ADR 0003
+  design bead, or it amends the constitution, or a citizen asked (decision 0003
   repealed reviewing everything). Those requests ride on a `class:judge` bead,
   which warriors file themselves, unassigned, for whichever judge is free.
 

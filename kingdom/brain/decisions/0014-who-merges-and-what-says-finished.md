@@ -2,7 +2,7 @@
 
 Date: 2026-09-02. Designed against bd gqlc-23m3v (Արփինէ), raised by the mayor's
 open-PR sweep. Executed by gqlc-l51ns (Ար). Amends Constitution V.2, which is
-why this ADR ships with an amendment rather than alone.
+why this decision ships with an amendment rather than alone.
 
 ## The problem, in plain words
 
@@ -26,7 +26,7 @@ anyone. The ledger had no way to tell them apart, so neither did dispatch.
 
 (Two of those three have since closed: their author closed `gqlc-vhvz7` and
 `gqlc-rl3c` at 2026-09-02T15:46Z, after the design was written and before this
-ADR. The shape they witnessed is unaffected; the ledger simply no longer shows
+decision. The shape they witnessed is unaffected; the ledger simply no longer shows
 it, which is why the ids are recorded here.)
 
 **The fix needs no new instrument.** GitHub already owns a merger with no
@@ -58,13 +58,13 @@ bead. The whole decision is to name them.
   no session to die, which is the entire answer to "what happens when the role's
   session is gone".
 - **Reviewed: the judge who signs the PASS merges**, and merges **before**
-  closing the review bead. ADR 0009 already defines a PASS as the judge being
+  closing the review bead. Decision 0009 already defines a PASS as the judge being
   willing to sign the merge of the SHA they read, as it stands; this clause has
   them perform that signature. It also closes the PASS-to-merge handoff gap the
   three beads above sat in. **The order is load-bearing**: a judge whose session
   dies between verdict and merge still holds an `in_progress` assigned review
   bead, so the resume pass returns them to finish it. Residue beads are still
-  filed before closing, per ADR 0009 — the order is residue, merge, close.
+  filed before closing, per decision 0009 — the order is residue, merge, close.
 - **Neither signal: nobody merges it.** A green sitter with no signal is a
   question for its author — mail, escalate — never a merge for a passer-by.
   This retires the mayoral open-PR sweep that was standing in for it.
@@ -74,10 +74,10 @@ bead. The whole decision is to name them.
 **Armed** and **disarmed** are town machinery words, defined here, for GitHub
 auto-merge state on a PR: armed means `autoMergeRequest` is non-null. They are
 town vocabulary and not product vocabulary — `CONTEXT.md` is the product
-glossary and is untouched, following the precedent ADR 0008 set.
+glossary and is untouched, following the precedent decision 0008 set.
 
 **This design deliberately says "armed" and never "finished" for the
-author-side signal**, because ADR 0008 already spends "finished" on a different
+author-side signal**, because decision 0008 already spends "finished" on a different
 predicate: a *branch* is finished when every PR for it is closed. Two predicates
 under one word would collide precisely where a seat-refresh decision meets a
 merge decision, so they are kept apart by name.
@@ -120,7 +120,7 @@ V.2.4.2's prohibition sharper rather than weaker — it is why the clause says a
 review bead's filer disarms *first*.
 
 **W3 — that an armed merge actually fires when the checks go green. NOT
-witnessed by this battery**, and this ADR does not claim it. Witnessing it means
+witnessed by this battery**, and this decision does not claim it. Witnessing it means
 landing a junk merge on master. It is GitHub's documented core behaviour and its
 first live witness will be the first real armed PR.
 
@@ -147,7 +147,7 @@ one the row is about, is common to both.
 
 **The choice of base was load-bearing, not cautious book-keeping.** The row
 merged. Had it been taken on #2217 against master, as the battery's first draft
-had it, `kingdom/.witness-gqlc-l51ns` would be on master now and this ADR would
+had it, `kingdom/.witness-gqlc-l51ns` would be on master now and this decision would
 be describing the revert PR instead.
 
 **The residual risk, and its direction.** The behaviour was measured against an
@@ -178,13 +178,13 @@ inherited from the design.
   `enforcement: active`, `updated_at 2026-08-29T20:53:49-04:00`. The two
   sources agree; there is no union to take. **This line is a correction.** Round
   1 of this PR's review (bd `gqlc-nj9ub`) found the sentence that stood here —
-  that the ruleset required five of the seven, ADR 0010's known drift — and
+  that the ruleset required five of the seven, decision 0010's known drift — and
   falsified it by running the command above. It was the one premise in this
   block I inherited rather than re-ran, under a heading that says all of them
   were re-run, and the drift it described had been closed three days before the
-  design was written. ADR 0010 is not wrong: it measured on 2026-08-29 and says
+  design was written. Decision 0010 is not wrong: it measured on 2026-08-29 and says
   so, and consolidating the ruleset was its own prerequisite. It is simply no
-  longer current, and this ADR restated it as if it were.
+  longer current, and this decision restated it as if it were.
   Nothing downstream moves — seven bound before and seven bind now — which is
   why the finding is about the provenance of a measurement rather than about
   the decision it supports.
@@ -220,26 +220,26 @@ inherited from the design.
   would need CI to read the ledger, which is not worth an instrument. The
   exposure it leaves, merging over a demanded review, existed identically before
   this design; it was simply unnamed.
-- **Stale-green merges** (the `gqlc-hpa1` class; ADR 0010 is not in force) are
+- **Stale-green merges** (the `gqlc-hpa1` class; decision 0010 is not in force) are
   exactly as exposed under an armed merge as under a manual one. Unchanged, not
   worsened. `gqlc-9vzmw` stands.
 - **GitHub disarms auto-merge itself on some transitions** — draft conversion, a
   base change — and that is unwitnessed here. The worst case is a sitter the
   author's resume wake catches, which is a degradation to today's status quo and
   never below it.
-- **ADR 0008 composes for free**: a seat asleep on an armed branch is moved off
+- **decision 0008 composes for free**: a seat asleep on an armed branch is moved off
   it by seat-refresh only after the PR record says finished, so the two designs
   need no edits to agree.
-- **If the ADR 0010 merge queue ever activates** (it needs an org move,
+- **If the decision 0010 merge queue ever activates** (it needs an org move,
   `gqlc-9vzmw`), `--auto` becomes enqueue-when-ready. The signal semantics carry
   over unchanged: arming still means the author is done, and the queue rather
   than the branch becomes what the merge waits on.
 
 ## Precedent this supersedes
 
-ADR 0009's line about "an author acting on merge-on-PASS" describes the
+Decision 0009's line about "an author acting on merge-on-PASS" describes the
 pre-0014 flow. It is correct as a dated record of how the town then worked, and
-is left standing as one. This ADR supersedes that phrase alone: under V.2.4.3
-the judge merges, not the author. Everything else ADR 0009 says about what a
+is left standing as one. This decision supersedes that phrase alone: under V.2.4.3
+the judge merges, not the author. Everything else decision 0009 says about what a
 PASS is — unconditional, signed on the SHA read, residue filed before closing —
 is untouched and is what V.2.4.3 rests on.

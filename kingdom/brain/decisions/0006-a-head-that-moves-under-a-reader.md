@@ -1,6 +1,6 @@
 # 0006 — A head that moves under a reader
 
-Date: 2026-08-23. Designed against bd gqlc-bfu2, under ADR 0003.
+Date: 2026-08-23. Designed against bd gqlc-bfu2, under decision 0003.
 
 Նուարդ found the rule on her own PR #1122: a PR that is DIRTY **in the files
 under review** cannot be reviewed and then merged in that order. If a judge
@@ -13,7 +13,7 @@ unrelated file leaves the reviewed bytes intact. A **FAIL** is unaffected — it
 names a defect the rebase carries forward, and it binds at once. Only a PASS
 must not be spent on a doomed SHA.
 
-ADR 0003 did not touch this. It did change how often it bites: with review owed
+Decision 0003 did not touch this. It did change how often it bites: with review owed
 only by design-gate PRs, constitution amendments and requested reviews, far
 fewer open PRs carry a judge bead at any moment. The rule survives at lower
 frequency, and that is what makes the cheap version of it the right one.
@@ -100,7 +100,7 @@ right is worse than no board. A check performed at the moment of routing is
 answered against the state it acts on.
 
 This is the ordering rule at the smallest size that keeps Նուարդ's finding: it
-governs a `class:judge` bead only, which under ADR 0003 is a small population,
+governs a `class:judge` bead only, which under decision 0003 is a small population,
 and it fires on the reviewed bytes rather than on any conflict.
 
 ## 3. The forced move, which is the case that actually happens
@@ -133,7 +133,7 @@ them procedure and the fourth the one that makes the procedure meaningful:
 
 ## What this does not fix
 
-The registries stay. This ADR makes a DIRTY PR visible to its author and keeps a
+The registries stay. This decision makes a DIRTY PR visible to its author and keeps a
 PASS off a doomed SHA; it does nothing about the append points that manufacture
 the conflicts, which is gqlc-234l's shape — compatible changes git cannot merge,
 resolution always "keep both". If that is fixed, §1 gets much quieter and §2

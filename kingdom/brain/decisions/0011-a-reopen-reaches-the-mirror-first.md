@@ -1,7 +1,7 @@
 # 0011 — A closure's authority follows its origin, and a reopen reaches the mirror first
 
 Date: 2026-08-30. Designed against bd gqlc-amy3w (Արփինէ), raised by gqlc-e9huy,
-under ADR 0003. Executed by gqlc-e9huy (Հայկ). Witness: gqlc-v5dez / PR #1903 /
+under decision 0003. Executed by gqlc-e9huy (Հայկ). Witness: gqlc-v5dez / PR #1903 /
 GH #1965, 2026-08-29.
 
 ## The incident
@@ -163,10 +163,10 @@ this design holds, and it is lower than "cannot happen".
 
 - `.githooks/claude-pre-bash` — arm 5, the order gate.
 - `.githooks/bd-gh-sync` — the `CLOSING` plan record, its note-writing caller,
-  and the header's Design and drift sections, which each cite this ADR for the
+  and the header's Design and drift sections, which each cite this decision for the
   premise they depend on and do not check.
 - `CONTEXT.md` is deliberately untouched: it is gqlc's *product* glossary
-  (schema and query domain), and machinery vocabulary belongs in this ADR and
+  (schema and query domain), and machinery vocabulary belongs in this decision and
   in the file headers where the machinery's readers are. Recorded so the
   omission is a decision rather than a miss.
 

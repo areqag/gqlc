@@ -31,7 +31,7 @@
 # One premise this file depends on is not enforced in it. Because a single
 # GitHub account operates both sides, a mirror closed under a bead still open
 # here is ambiguous — GitHub speaking, or this script's own push echoing back —
-# and the pull applies it either way. ADR 0011 resolves the ambiguity by fixing
+# and the pull applies it either way. Decision 0011 resolves the ambiguity by fixing
 # the ORDER a reopen is expressed in (GitHub first, bd second), which
 # .githooks/claude-pre-bash arm 5 refuses to let a citizen get wrong. Under that
 # order a closed mirror over an open bead is always GitHub-native and the pull
@@ -136,7 +136,7 @@
 #            one GitHub account operates both sides; what distinguishes them is
 #            the ORDER the reopen was expressed in, which is enforced before this
 #            script runs (.githooks/claude-pre-bash arm 5) and recorded in
-#            ADR 0011. So the gate stays off here for the reason it always did,
+#            decision 0011. So the gate stays off here for the reason it always did,
 #            and the premise that makes that safe now lives somewhere this file
 #            can name but cannot check. Nothing in this repository calls it yet: it needs
 #            `gh`, so it cannot live in the offline `just test` (gqlc-x98l).
@@ -520,7 +520,7 @@ for b in beads:
     #
     # Reported, never held — GitHub closing a mirror is how every merge ends,
     # and every alternative to allowing it has a worse silent-loss direction
-    # (ADR 0011 enumerates them with their falsifiers). What makes
+    # (decision 0011 enumerates them with their falsifiers). What makes
     # report-and-allow sound is now two things OUTSIDE this record. Order is
     # enforced at the keyboard, so a mirror still closed under an open bead is
     # GitHub speaking rather than an echo of bd's own push
@@ -1305,7 +1305,7 @@ PYEOF
     _now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     while read -r _cid _cn; do
       [ -n "$_cid" ] || continue
-      bd update "$_cid" --append-notes "bd-gh-sync pull ${_now}: closed this bead because GH mirror #${_cn} is closed while the bead was open in bd. No citizen wrote this close — close_reason is null. If this reverted a deliberate reopen: 'gh issue reopen ${_cn}' FIRST, then 'bd reopen ${_cid}', in that order, or the next pull repeats this. Incident: bd gqlc-e9huy; rule: ADR 0011." \
+      bd update "$_cid" --append-notes "bd-gh-sync pull ${_now}: closed this bead because GH mirror #${_cn} is closed while the bead was open in bd. No citizen wrote this close — close_reason is null. If this reverted a deliberate reopen: 'gh issue reopen ${_cn}' FIRST, then 'bd reopen ${_cid}', in that order, or the next pull repeats this. Incident: bd gqlc-e9huy; rule: decision 0011." \
         >/dev/null 2>&1 || _notes_failed=$((_notes_failed + 1))
     done <"$_tmp/closed.txt"
   fi

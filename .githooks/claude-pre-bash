@@ -12,7 +12,7 @@
 #      (bd gqlc-uy7j).
 #   5. Denies the `bd` command that would reopen a bead in bd alone while its
 #      GitHub mirror is still closed, because the next pull destroys it
-#      (bd gqlc-e9huy, ADR 0011).
+#      (bd gqlc-e9huy, decision 0011).
 #
 # On (5): a mirror's CLOSED state carries two different events that arrive as
 # the same byte. A GitHub-NATIVE closure — a merge resolving `Closes #N`, or a
@@ -1700,7 +1700,7 @@ def reopen_verdict(reopen):
             "GitHub mirror — and whether that mirror is closed — is unknown. "
             "Reopening a bead in bd alone while its mirror is closed is undone "
             "silently by the next pull, so this is refused rather than allowed "
-            "through unverified (bd gqlc-e9huy, ADR 0011)." % bead_id
+            "through unverified (bd gqlc-e9huy, decision 0011)." % bead_id
         )
     if ref is None:
         return "allow-unmirrored", None
@@ -1714,7 +1714,7 @@ def reopen_verdict(reopen):
             "would not say which repository this checkout mirrors into, so "
             "whether that issue is one .githooks/bd-gh-sync pulls from could not "
             "be established. Refused rather than allowed through unverified "
-            "(bd gqlc-e9huy, ADR 0011)." % (bead_id, ref)
+            "(bd gqlc-e9huy, decision 0011)." % (bead_id, ref)
         )
     if "%s/%s" % (prefix.group(1), prefix.group(2)) != nwo:
         return "allow-foreign-ref", None
@@ -1724,7 +1724,7 @@ def reopen_verdict(reopen):
             "%s carries the external_ref %r, which names this repository (%s) "
             "but not an issue number this hook can read, so its mirror state "
             "could not be checked. Refused rather than allowed through "
-            "unverified (bd gqlc-e9huy, ADR 0011)." % (bead_id, ref, nwo)
+            "unverified (bd gqlc-e9huy, decision 0011)." % (bead_id, ref, nwo)
         )
     number = full.group(3)
     ok, state = mirror_state(nwo, number)
@@ -1736,7 +1736,7 @@ def reopen_verdict(reopen):
             "is refused rather than allowed through unverified. If GitHub is "
             "unreachable from here the reopen has to wait — there is no order "
             "of these two writes that is safe while only one of them can be "
-            "made (bd gqlc-e9huy, ADR 0011)." % (number, nwo, bead_id)
+            "made (bd gqlc-e9huy, decision 0011)." % (number, nwo, bead_id)
         )
     if state != "closed":
         return "allow-mirror-open", None
@@ -1751,7 +1751,7 @@ def reopen_verdict(reopen):
         "then re-run this exact command. The incident this is written from is "
         "bd gqlc-e9huy: a judge's withdrawn PASS was reverted this way 2.5 "
         "minutes after he withdrew it, which released the block his FAIL was "
-        "holding on a merge. ADR 0011 has the rule."
+        "holding on a merge. Decision 0011 has the rule."
         % (bead_id, number, number, nwo)
     )
 

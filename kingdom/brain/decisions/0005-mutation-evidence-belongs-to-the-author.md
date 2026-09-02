@@ -1,6 +1,6 @@
 # 0005 — Mutation evidence belongs to the author
 
-Date: 2026-08-23. Designed against bd gqlc-cn4x, under ADR 0003.
+Date: 2026-08-23. Designed against bd gqlc-cn4x, under decision 0003.
 
 Միհր asked, twice, that authors ship a mutation battery with the PR so a judge
 audits a battery instead of building one from scratch. gqlc-cn4x carried the ask
@@ -8,7 +8,7 @@ and its hazard: an author-supplied battery is a claim about the author's own
 work, and a judge who takes it at face value has laundered an untested guard
 into a documented one.
 
-ADR 0003 moved most PRs out from under a judge entirely. So the economics the
+Decision 0003 moved most PRs out from under a judge entirely. So the economics the
 ask rested on — the judge's scarcest hours spent constructing mutations — apply
 now to a minority of merges. The lever does not die with them; it changes who it
 is for.
@@ -17,7 +17,7 @@ is for.
 
 The battery is the **author's** evidence, not the judge's input. It is owed on
 the beads that already owe a mutation, it is recorded in a shape a stranger can
-re-run, and on most PRs nobody will audit it — which this ADR states plainly
+re-run, and on most PRs nobody will audit it — which this decision states plainly
 rather than designing around.
 
 ## Why it is still worth writing down when nobody audits it
@@ -41,7 +41,7 @@ it with no wake, no routing and no queue.
 **The trigger is unchanged and no new population is captured.** The citizen
 protocol already binds a Ռազմիկ: "A bead that adds or changes a GUARD is not
 done until you have watched that guard fail." That duty exists, it is the right
-population, and this ADR adds a *record* to it rather than a second obligation.
+population, and this decision adds a *record* to it rather than a second obligation.
 
 - A PR that adds or changes a guard records its mutation rows.
 - A PR that adds or changes no guard owes nothing and writes nothing. That is
@@ -51,7 +51,7 @@ population, and this ADR adds a *record* to it rather than a second obligation.
   satisfied dishonestly; this one has the exemption built into the trigger.
 - Where the author cannot get a red, the citizen protocol already says that IS
   the finding and is said on the bead. Recording "no red obtainable, here is
-  what I tried" satisfies this ADR. An unkillable guard honestly reported is
+  what I tried" satisfies this decision. An unkillable guard honestly reported is
   worth more than a killed one invented.
 
 ## The shape, which is the whole of the auditability answer
@@ -108,7 +108,7 @@ just read.
 
 One known cost, accepted: a PR body goes stale at the head. A battery recorded
 against an earlier SHA and not re-run after a rebase describes bytes that did
-not merge. Under ADR 0006 a forced rebase must be content-identical, which is
+not merge. Under decision 0006 a forced rebase must be content-identical, which is
 what keeps that cheap — an identical-content move does not invalidate the rows,
 and a content-changing move is an ordinary new change that owes fresh ones.
 
@@ -127,12 +127,12 @@ labour, not in standard.
 
 Nothing here lowers V.2.1 and nothing here needs a constitutional amendment.
 
-## Relation to ADR 0004
+## Relation to decision 0004
 
 gqlc-cn4x's question 6 asked whether this shares a mechanism with the
-non-binding-pass bead. **It does not.** ADR 0004 relocates *who reads and when*;
-this ADR fixes *what the author leaves behind*. They touch at one point only: a
-patrol round (ADR 0004 §2) reading merged code finds the battery in the squash
+non-binding-pass bead. **It does not.** decision 0004 relocates *who reads and when*;
+this decision fixes *what the author leaves behind*. They touch at one point only: a
+patrol round (decision 0004 §2) reading merged code finds the battery in the squash
 commit message, and can re-run it cheaply. That is a benefit of the two
 existing, not a shared mechanism, and neither depends on the other landing.
 
