@@ -55,6 +55,7 @@ type Warning struct {
 // detectors cannot drift into two spellings of one tag.
 const (
 	producerUndeclaredRelationshipType = "undeclared-relationship-type"
+	producerWrongOrientationDrop       = "wrong-orientation-drop"
 )
 
 // Column is one result column in projection order: its name (an explicit alias

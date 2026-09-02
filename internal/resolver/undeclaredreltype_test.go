@@ -81,17 +81,33 @@ func TestFullyDeclaredAlternationIsSilent(t *testing.T) {
 	require.Empty(t, vq.Warnings)
 }
 
-// The second negative, and the one that pins WHICH narrowing is reported.
-// REPORTED is a declared relationship type; this pattern's ends drop it from
-// the candidate set anyway. That is ADR 0022 endpoint narrowing, deliberately
-// out of ADR 0032's scope: a plural endpoint narrowing to a subset is the
-// resolver working, and warning there would bury the typo signal in noise.
+// The wrong-orientation drop, which ADR 0032 deliberately left silent and the
+// wrong-orientation-drop detector now warns about in one narrow shape. REPORTED
+// is declared, but only as (Post)-[:REPORTED]->(Person); this pattern draws the
+// arrow the other way, so endpoint narrowing (ADR 0022) drops it, no decoder is
+// generated for it, and the server still sees the verbatim type name at
+// runtime.
 //
-// Broaden the detector from "declared nowhere" to "not in the candidate set"
-// and this row goes red.
-func TestEndpointNarrowedButDeclaredTypeIsSilent(t *testing.T) {
+// This row replaces TestEndpointNarrowedButDeclaredTypeIsSilent, which asserted
+// the opposite boundary. The replacement is deliberate rather than a deletion:
+// the boundary moved, and a row has to state where it moved TO.
+//
+// AUTHORED shares the alternation and survives, so it must not be accused —
+// that is what separates this from a detector that fires on any narrowing.
+func TestWrongOrientationDropIsWarnedAbout(t *testing.T) {
 	vq := resolveDrift(t, "MATCH (:Person)-[r:AUTHORED|REPORTED]->(p:Post) RETURN r")
-	require.Empty(t, vq.Warnings)
+
+	require.Len(t, vq.Warnings, 1)
+	require.Equal(t, producerWrongOrientationDrop, vq.Warnings[0].Producer)
+	require.Contains(t, vq.Warnings[0].Text, `"REPORTED"`)
+	require.Contains(t, vq.Warnings[0].Text, `edge "r"`)
+	// The reversed declared key is the witness that makes this actionable:
+	// without it the author cannot tell a wrong arrow from a stale type.
+	require.Contains(t, vq.Warnings[0].Text, "Post-[REPORTED]->Person")
+	// Both remedies, because gqlc cannot choose between them.
+	require.Contains(t, vq.Warnings[0].Text, "Flip the arrow")
+	require.Contains(t, vq.Warnings[0].Text, "remove")
+	require.NotContains(t, vq.Warnings[0].Text, "AUTHORED")
 }
 
 // A single-typed edge whose type is declared nowhere has an empty candidate

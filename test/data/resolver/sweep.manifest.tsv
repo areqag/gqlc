@@ -3,7 +3,7 @@
 # schema under test/data/resolver/{valid,invalid}/schemas/*.gql. Generated
 # file: edit internal/resolver/sweep_test.go, not this.
 #
-# corpus: 323 queries, 40 schemas. 12920 cells: 3859 accept, 9061 refuse.
+# corpus: 324 queries, 40 schemas. 12960 cells: 3868 accept, 9092 refuse.
 #
 # cell rows: query, schema, verdict, sentinel, detail. A refusing cell's
 # detail digests the error text and is expanded by the strconv.Quote'd msg
@@ -8639,6 +8639,46 @@ cell	valid/edge_rebind_var_length_vs_fixed.cypher	valid/schemas/social_r5.gql	ac
 cell	valid/edge_rebind_var_length_vs_fixed.cypher	valid/schemas/social_r6.gql	accept	-	ecc5f9f07d5d
 cell	valid/edge_rebind_var_length_vs_fixed.cypher	valid/schemas/social_r7.gql	accept	-	ecc5f9f07d5d
 cell	valid/edge_rebind_var_length_vs_fixed.cypher	valid/schemas/social_selfloop.gql	accept	-	ecc5f9f07d5d
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownEdge	f55f65b621e5
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/social.gql	refuse	ErrUnknownEdge	f55f65b621e5
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	f55f65b621e5
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownEdge	f55f65b621e5
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/social_r3.gql	accept	-	843ec21dac96
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownEdge	f55f65b621e5
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownEdge	f55f65b621e5
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/social_r5.gql	accept	-	843ec21dac96
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/social_r6.gql	accept	-	843ec21dac96
+cell	valid/edge_wrong_orientation_drop_warns.cypher	invalid/schemas/social_r7.gql	accept	-	843ec21dac96
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	f55f65b621e5
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownEdge	f55f65b621e5
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownEdge	f55f65b621e5
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social_r3.gql	accept	-	843ec21dac96
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownEdge	f55f65b621e5
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social_r4.gql	accept	-	843ec21dac96
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social_r5.gql	accept	-	843ec21dac96
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social_r6.gql	accept	-	843ec21dac96
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social_r7.gql	accept	-	843ec21dac96
+cell	valid/edge_wrong_orientation_drop_warns.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	valid/expr_projection_bool.cypher	invalid/schemas/edge_union_keys.gql	accept	-	cc8084ab71cc
 cell	valid/expr_projection_bool.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	valid/expr_projection_bool.cypher	invalid/schemas/satisfy_ambiguous.gql	accept	-	cc8084ab71cc

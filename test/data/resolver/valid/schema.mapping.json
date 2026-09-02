@@ -70,6 +70,7 @@
     "optional_var_length_whole_entity.cypher": "social_r4.gql",
     "with_carry_binding.cypher": "social_r5.gql",
     "edge_rebind_resets_carried_close.cypher": "social_r5.gql",
+    "edge_wrong_orientation_drop_warns.cypher": "social_r5.gql",
     "with_carry_property_projection.cypher": "social_r5.gql",
     "with_carry_transitive.cypher": "social_r5.gql",
     "with_where_predicate.cypher": "social_r5.gql",

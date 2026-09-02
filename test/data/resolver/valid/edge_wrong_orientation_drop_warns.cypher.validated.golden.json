@@ -1,0 +1,26 @@
+{
+  "columns": [
+    {
+      "name": "r",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Post",
+          "key_labels": "AUTHORED",
+          "target": "Person"
+        },
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false,
+  "warnings": [
+    {
+      "producer": "wrong-orientation-drop",
+      "text": "warning: relationship type \"LIKES\" on edge \"r\" is declared only in the opposite orientation (Person-[LIKES]-\u003ePost); the pattern's arrow drops it and no decoder is generated for it, so a row of that type fails at runtime. Flip the arrow if the direction is the mistake, or remove \"LIKES\" from the pattern if the type is stale."
+    }
+  ]
+}
