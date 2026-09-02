@@ -129,9 +129,9 @@ Sub-microsecond precision truncates at encode, silently — the policy
 `agtypeMicros` already applies to TIMESTAMP, extended, not invented.
 
 Two refusals survive unchanged. Temporal **expression** kinds stay refused on
-AGE (`Temporal()` in age/types.go): AGE 1.7.0 has no temporal constructor
-functions, so this is a dialect gap, already loud and documented at the
-refusal site. Lists of temporals stay refused: the sidecar scheme has no
+AGE (`Temporal()` in age/types.go): no temporal constructor this project has
+measured is defined on AGE 1.7.0, so this is a dialect gap, already loud and
+documented at the refusal site. Lists of temporals stay refused: the sidecar scheme has no
 per-element home for offsets, and admitting the non-zoned ones alone is a
 follow-up with its own bead, not a rider here.
 
