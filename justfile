@@ -3530,10 +3530,34 @@ vuln: sweep-discovery-probes vuln-root-residual
         out="$(cd "${dir}" && go run golang.org/x/vuln/cmd/govulncheck@latest "${tagflag[@]}" -test -show verbose ./... 2>&1)" || rc=$?
         printf '%s\n' "${out}"
         if [ "${rc}" -ne 0 ]; then
-            echo "error: the scan of ${dir} exited ${rc}. govulncheck exits non-zero when this tree" >&2
-            echo "       CALLS a known vulnerability, and when it cannot load the module at all —" >&2
-            echo "       the output above says which. Neither belongs in the register below: that" >&2
-            echo "       is for advisories nothing calls (bd gqlc-k22l)." >&2
+            # WHICH cause it was is derived here rather than left to the reader.
+            # Measured 2026-09-02 (bd gqlc-y2dgv): a called vulnerability, a
+            # module that will not load, and a `go run` that cannot fetch
+            # govulncheck all exit 1, so the status separates none of them — and
+            # the third is not a cause the old text named at all, so a tool
+            # download that failed was reported as this tree calling something.
+            #
+            # The summary line is the discriminator because govulncheck prints
+            # it only on a scan that ran to completion. Anchored, and matched on
+            # the summary rather than on a `Vulnerability #` header: the headers
+            # are printed by the package-results section before the scan has
+            # finished, so keying on one would call a truncated run complete.
+            if grep -qE '^Your code is affected by [0-9]+ vulnerabilit' <<<"${out}"; then
+                echo "error: the scan of ${dir} exited ${rc} having run to completion, so this tree" >&2
+                echo "       CALLS a known vulnerability. The output above names it. That does not" >&2
+                echo "       belong in the register below, which is for advisories nothing calls" >&2
+                echo "       (bd gqlc-k22l)." >&2
+            else
+                echo "error: the scan of ${dir} exited ${rc} without reporting: the output above" >&2
+                echo "       carries no 'Your code is affected by' summary, so govulncheck did not" >&2
+                echo "       finish a scan and this tree has NOT been shown to call anything." >&2
+                echo "       Two causes reach here and the exit status separates neither — the" >&2
+                echo "       module could not be loaded, or 'go run' could not fetch or build" >&2
+                echo "       govulncheck itself. The output above is the only evidence which." >&2
+                echo "       Do not re-run to decide: a red that clears on a re-run has been a" >&2
+                echo "       real called vulnerability arriving in the advisory database mid-scan," >&2
+                echo "       not a flake (bd gqlc-y2dgv, bd gqlc-4twyd)." >&2
+            fi
             exit "${rc}"
         fi
         # What accumulates is the name the grading itself printed, taken in the
