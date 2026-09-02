@@ -608,17 +608,32 @@ func isTypeMapMethod(fn *ast.FuncDecl) bool {
 // The neo4j backend needs no equivalent — its driver refuses this at the
 // packer — and the two facts are not in tension. gqlc has to carry the
 // refusal wherever the transport does not, and json.Marshal does not.
+// Each row pins the WHOLE bind expression rather than the encoder's
+// name, because the four shapes differ only in what is composed around
+// the same leaf, and a substring check for "agtypeUnsigned" passes on
+// every one of them however badly the composition is assembled. The
+// nullable list is the row that makes this concrete: it is the only shape
+// whose closure has to spell the inner encoder's return type, which comes
+// from a table entry no other assertion here reads, and emptying that
+// entry emits `([], error)` — invalid Go that the substring form still
+// called a pass (measured, mutation row C1).
 func TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
 		goType   string
 		nullable bool
+		bind     string
 	}{
-		{"uint64", "uint64", false},
-		{"uint", "uint", false},
-		{"nullable uint64", "uint64", true},
-		{"uint64 list", "[]uint64", false},
-		{"nullable uint64 list", "[]uint64", true},
+		{"uint64", "uint64", false, "agtypeUnsigned(arg)"},
+		{"uint", "uint", false, "agtypeUnsigned(arg)"},
+		{"nullable uint64", "uint64", true, "agtypeEncodedNullable(arg, agtypeUnsigned)"},
+		{"uint64 list", "[]uint64", false, "agtypeEncodedList(arg, agtypeUnsigned)"},
+		{
+			"nullable uint64 list", "[]uint64", true,
+			"agtypeEncodedNullable(arg, func(in []uint64) ([]int64, error) {\n" +
+				"\t\treturn agtypeEncodedList(in, agtypeUnsigned)\n" +
+				"\t})",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			p := codegen.Query{
@@ -638,8 +653,8 @@ func TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind(t *testing.T) {
 			require.NotContains(t, rendered, `map[string]any{"u": arg}`,
 				"the parameter crosses bare, so a value above MaxInt64 reaches the server "+
 					"as a literal agtype cannot hold")
-			require.Contains(t, rendered, "agtypeUnsigned",
-				"the bind does not route through the checked unsigned encoder")
+			require.Contains(t, rendered, "err := "+tt.bind+"\n",
+				"the bind does not compose the checked unsigned encoder for this shape")
 			require.Contains(t, rendered, `Q: parameter $u:`,
 				"the refusal does not name the parameter the author wrote")
 		})
