@@ -252,10 +252,15 @@ say so:
   row already records. The scope gate's biconditional (§9.1's "scope
   iff some golden declares it package-level") holds without edits;
   regenerated goldens still declare `type Queries` package-level.
-- **`WithTx`** — unchanged ground (redeclaration on `*Queries`), plus
-  the same promotion-shadow argument now applies through `*Queries`
-  itself (a user `WithTx` on the core would be shadowed on the root
-  handle). No row change.
+- **`WithTx`** — the ground is promotion-shadow, not redeclaration.
+  Query methods are emitted on the unexported core `*queries`
+  (`neo4j/render_queries.go:353`) and the fixed `WithTx` is on
+  `*Queries` (`neo4j/render_db.go:49`), which embeds the core, so a user
+  query named WithTx redeclares nothing — it is shadowed at depth 0 on
+  the root handle, silently, exactly as `Commit` and `Rollback` are on
+  `*Tx`. What the reservation prevents is not a collision but a
+  successful build with the user's query unreachable on the handle it
+  was written for. No row change.
 
 No **new** reservation is needed for `queries` itself: §2's grammar
 facts make a lowercase user-derived name impossible, and the refusal
