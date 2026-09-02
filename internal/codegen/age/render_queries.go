@@ -402,14 +402,17 @@ func encodeParam(f codegen.Param, access string) string {
 }
 
 // encodedParamText is the agtype-side Go type one carrier encodes to: the
-// string a DATE is stored as, and the microsecond count the other two
-// are. Named because the nullable-list composition below has to spell the
-// inner encoder's signature.
+// string a DATE is stored as, the microsecond count the other three are,
+// and the signed width the two unsigned ones are checked into. Named
+// because the nullable-list composition below has to spell the inner
+// encoder's signature.
 var encodedParamText = map[string]string{
 	goDate:      "string",
 	goLocalTime: "int64",
 	goTime:      "int64",
 	goDuration:  "int64",
+	"uint64":    "int64",
+	"uint":      "int64",
 }
 
 // fallibleParamEncoder composes the encode expression for one parameter
@@ -449,6 +452,13 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 		encoder = "agtypeTimeMicros"
 	case goDuration:
 		encoder = "agtypeDurationMicros"
+	case "uint64", "uint":
+		// Not a shape change like the four above, but a range one: an
+		// agtype integer is signed 64-bit, so these two widths are the
+		// only ones carrying values the wire cannot hold at all. They
+		// reach the same combinators because nullability and nesting ask
+		// nothing about why the leaf can fail (bd gqlc-tzjqu).
+		encoder = "agtypeUnsigned"
 	default:
 		return "", false
 	}

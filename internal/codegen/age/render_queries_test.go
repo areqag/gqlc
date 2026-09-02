@@ -588,3 +588,75 @@ func isTypeMapMethod(fn *ast.FuncDecl) bool {
 	id, ok := recv.(*ast.Ident)
 	return ok && id.Name == "typeMap"
 }
+
+// TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind witnesses the
+// encode half of the posture the read path already states in its own
+// words: agtypeIntAs documents that "a UINT64 property's readable set is
+// therefore [0, MaxInt64], since agtype's integer scalar is signed
+// 64-bit and a larger value is UNSTORABLE rather than unreadable".
+// Unstorable is a claim about this path, and until now nothing here
+// enforced it — encodeParam returned every non-temporal bare and
+// agtypeArgs is json.Marshal, which writes a uint64 exactly and never
+// errors on magnitude. So the too-large value left gqlc intact and what
+// the server made of it was the server's business (bd gqlc-tzjqu).
+//
+// Asserted on the rendered emission rather than on the encoder helper,
+// because the requirement is that the METHOD cannot send the value: a
+// checked encoder nothing routes through would satisfy a unit test and
+// change nothing that reaches a database.
+//
+// The neo4j backend needs no equivalent — its driver refuses this at the
+// packer — and the two facts are not in tension. gqlc has to carry the
+// refusal wherever the transport does not, and json.Marshal does not.
+// Each row pins the WHOLE bind expression rather than the encoder's
+// name, because the four shapes differ only in what is composed around
+// the same leaf, and a substring check for "agtypeUnsigned" passes on
+// every one of them however badly the composition is assembled. The
+// nullable list is the row that makes this concrete: it is the only shape
+// whose closure has to spell the inner encoder's return type, which comes
+// from a table entry no other assertion here reads, and emptying that
+// entry emits `([], error)` — invalid Go that the substring form still
+// called a pass (measured, mutation row C1).
+func TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		goType   string
+		nullable bool
+		bind     string
+	}{
+		{"uint64", "uint64", false, "agtypeUnsigned(arg)"},
+		{"uint", "uint", false, "agtypeUnsigned(arg)"},
+		{"nullable uint64", "uint64", true, "agtypeEncodedNullable(arg, agtypeUnsigned)"},
+		{"uint64 list", "[]uint64", false, "agtypeEncodedList(arg, agtypeUnsigned)"},
+		{
+			"nullable uint64 list", "[]uint64", true,
+			"agtypeEncodedNullable(arg, func(in []uint64) ([]int64, error) {\n" +
+				"\t\treturn agtypeEncodedList(in, agtypeUnsigned)\n" +
+				"\t})",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := codegen.Query{
+				NamedQuery: codegen.NamedQuery{
+					Name:        "Q",
+					SourceText:  "MATCH (r:Row) WHERE r.u = $u RETURN r.id",
+					Cardinality: codegen.CardinalityExec,
+				},
+				MethodName: "Q",
+				Bare:       "q",
+				ParamFields: []codegen.Param{
+					{RawName: "u", Field: "U", GoType: tt.goType, Nullable: tt.nullable},
+				},
+			}
+			rendered := string(age.RenderCypherFile("p", []codegen.Query{p}))
+
+			require.NotContains(t, rendered, `map[string]any{"u": arg}`,
+				"the parameter crosses bare, so a value above MaxInt64 reaches the server "+
+					"as a literal agtype cannot hold")
+			require.Contains(t, rendered, "err := "+tt.bind+"\n",
+				"the bind does not compose the checked unsigned encoder for this shape")
+			require.Contains(t, rendered, `Q: parameter $u:`,
+				"the refusal does not name the parameter the author wrote")
+		})
+	}
+}

@@ -1,0 +1,9 @@
+CREATE PROPERTY GRAPH TYPE Uint64Parameter AS {
+    (:Counter {
+        id     :: INT64  NOT NULL,
+        hits   :: UINT64 NOT NULL,
+        misses :: UINT64,
+        runs   :: LIST<UINT64 NOT NULL> NOT NULL,
+        spans  :: LIST<UINT64 NOT NULL>
+    })
+}

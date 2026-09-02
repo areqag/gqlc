@@ -466,11 +466,34 @@ func paramBindExpr(f codegen.Param, access string) string {
 		// Cypher null via the driver's parameter marshalling.
 		return access
 	}
+	if outrangesTheSignedCarrier(f.GoType) {
+		return access
+	}
 	carrier := driverCarrier(f.GoType)
 	if carrier != f.GoType {
 		return widenExpr(f.GoType, access)
 	}
 	return access
+}
+
+// outrangesTheSignedCarrier reports whether a Go integer width holds
+// values the driver's signed int64 carrier does not, which is true of
+// uint64 and of uint on a 64-bit platform and of nothing else.
+//
+// Such a parameter binds bare, and that is a refusal rather than a
+// permission. The driver checks this itself — packX and packV route
+// `case reflect.Uint64, reflect.Uint` to packer.Uint64, whose
+// checkOverflowInt raises an OverflowError above math.MaxInt64 and whose
+// error outgoing.end feeds to onPackErr, failing the send. But the check
+// sits on the uint64 entry point alone, so an emitted int64(v) reached it
+// as an already-wrapped negative int64 and it could not fire: gqlc's own
+// conversion was disarming the driver's guard, and the value the store
+// then held was one the caller never wrote (bd gqlc-tzjqu).
+//
+// uint8, uint16 and uint32 are deliberately absent. Every one of their
+// values fits int64, so their widen cannot lose one.
+func outrangesTheSignedCarrier(goType string) bool {
+	return goType == "uint64" || goType == "uint"
 }
 
 // sliceParamBindExpr renders the binding for a list parameter.
