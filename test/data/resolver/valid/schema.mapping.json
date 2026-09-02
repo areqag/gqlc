@@ -193,5 +193,6 @@
     "certified_collect_list.cypher": "certificate.gql",
     "certified_mixed_types_degrade.cypher": "certificate.gql",
     "certified_mixed_widths_degrade.cypher": "certificate.gql",
+    "certified_carried_fold_degrade.cypher": "certificate.gql",
     "uncertified_arithmetic_control.cypher": "certificate.gql"
 }

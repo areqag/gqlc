@@ -3,7 +3,7 @@
 # schema under test/data/resolver/{valid,invalid}/schemas/*.gql. Generated
 # file: edit internal/resolver/sweep_test.go, not this.
 #
-# corpus: 334 queries, 42 schemas. 14028 cells: 4221 accept, 9807 refuse.
+# corpus: 335 queries, 42 schemas. 14070 cells: 4256 accept, 9814 refuse.
 #
 # cell rows: query, schema, verdict, sentinel, detail. A refusing cell's
 # detail digests the error text and is expanded by the strconv.Quote'd msg
@@ -7541,6 +7541,48 @@ cell	valid/carry_wins_over_unlabelled_rebind.cypher	valid/schemas/social_r5.gql	
 cell	valid/carry_wins_over_unlabelled_rebind.cypher	valid/schemas/social_r6.gql	accept	-	6212a8c80ed1
 cell	valid/carry_wins_over_unlabelled_rebind.cypher	valid/schemas/social_r7.gql	accept	-	6212a8c80ed1
 cell	valid/carry_wins_over_unlabelled_rebind.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4da3cbf622c1
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/certificate.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/edge_union_keys.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/satisfy_ambiguous.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/satisfy_singular.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/social.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/social_edgeunion.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/social_r2.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/social_r3.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/social_r3_nulldiff.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/social_r3_typediff.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/social_r5.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/social_r6.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	invalid/schemas/social_r7.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/certificate.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/satisfy_plural_edges.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/satisfy_singular.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social_edgeunion.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social_r1.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social_r2.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social_r3.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social_r3_unionnn.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social_r4.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social_r5.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social_r6.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social_r7.gql	accept	-	dcc0209b4704
+cell	valid/certified_carried_fold_degrade.cypher	valid/schemas/social_selfloop.gql	accept	-	dcc0209b4704
 cell	valid/certified_collect_list.cypher	invalid/schemas/certificate.gql	accept	-	1596822d87e1
 cell	valid/certified_collect_list.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	9973104ea190
 cell	valid/certified_collect_list.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
