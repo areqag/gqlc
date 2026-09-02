@@ -82,12 +82,16 @@
 #            refuses the pull — an external_ref is matched over any URL and may
 #            name another repository, so mirrored beads over an empty listing
 #            is a legitimate configuration rather than a lost one.
-#   - push:  mirror bd-created beads that have no GH mirror yet, AND close
-#            GH issues whose bead was closed locally.
+#   - push:  mirror bd-created beads that have no GH mirror yet and are still
+#            live, AND close GH issues whose bead was closed locally.
 #            Deliberately does NOT run `bd github sync --push-only` (which
 #            takes ~30s scanning every bead) — its close propagation is also
 #            unreliable (memory: bd-github-sync-quirks). Instead:
-#              1. `bd github push <ids>` per new bead (no external_ref).
+#              1. `bd github push <ids>` per new bead — no external_ref AND not
+#                 closed locally. A bead that closed before it was ever
+#                 mirrored is never offered, so the two arms below cannot both
+#                 fire for one bead: nothing is minted here only to be closed
+#                 by arm 2 in the same run (bd gqlc-bc26w).
 #              2. Bulk `gh issue list --state open` intersected with
 #                 closed-bd beads bearing an external_ref; each mismatch
 #                 gets `gh issue close`.
@@ -1479,6 +1483,20 @@ with open(sys.argv[1], encoding="utf-8") as fh:
 for b in beads:
     if b.get("external_ref"):
         continue
+    # A bead that closed before it was ever mirrored is not offered. The mirror
+    # is a worklist — it carries `Closes #N` on a PR and puts live work on a
+    # board — and both are moot for work that finished unmirrored, so an issue
+    # minted here is a row with no reader that the stale-mirror pass below
+    # closes in the same run. Nothing about such a bead ever changes again, so
+    # without this it is re-offered on every push by every citizen forever
+    # (bd gqlc-bc26w).
+    #
+    # Above the label screen deliberately, not below it: the bead that provoked
+    # this carries an over-cap label, so screening first would keep printing
+    # UNMIRRORABLE for it. `closed` alone — blocked and deferred are live work
+    # parked, and they still want a board row.
+    if b.get("status") == "closed":
+        continue
     bid = one_line(b["id"])
     over = [] if cap is None else [
         lab for lab in (b.get("labels") or []) if len(lab) > cap]
@@ -1610,9 +1628,15 @@ if [ -n "$_ids" ]; then
 fi
 
 # Re-read the beads: `bd github push` assigns external_ref to everything it
-# mirrors, and the close pass keys on external_ref. Reusing the pre-push
-# snapshot skips exactly the beads that were closed before their first push,
-# leaving the mirror it just minted open forever.
+# mirrors, and both the close pass and the verify pass key on external_ref, so
+# the pre-push snapshot does not carry the refs this run just minted.
+#
+# This used to carry a second and stronger reason — that a bead closed before
+# its first push got its mirror here and had to be closed again in the same run.
+# That case no longer exists: the selection does not offer a closed bead at all
+# (bd gqlc-bc26w). What remains is narrower and still real — a bead that was
+# open when the selection ran and that another session closed while this one was
+# pushing.
 _post_rc=0
 bd list --status all --limit 0 --json >"$_tmp/beads_after.json" 9>&- 2>/dev/null \
   || { _post_rc=$?; : >"$_tmp/beads_after.json"; }

@@ -754,6 +754,150 @@ check-beads-export dir=".":
     fi
     exit "$rc"
 
+# This check is the acceptance of bd gqlc-bc26w, not a new instrument — it
+# verifies the fix itself and does not surveil for anything else (Սեդրակ,
+# 2026-09-01, ruling that the gate freeze does not reach a regression test for a
+# defect being shipped).
+#
+# What it holds: bd-gh-sync's push selection asked only whether a bead already
+# had a mirror, never what its status was, so a bead that CLOSED before it was
+# ever mirrored was offered to GitHub on every push, by every citizen, forever.
+# The fix is one `continue`. This is the row that reddens when it is edited away.
+#
+# It runs the REAL selection, cut out of .githooks/bd-gh-sync between its own
+# invocation line and the heredoc terminator, rather than a restatement of the
+# rule. A restatement keeps passing after the hook stops agreeing with it, which
+# is the failure this exists to notice. Every way the cut can come back with the
+# wrong bytes — anchor missing, anchor duplicated, heredoc unterminated, block
+# empty — is fatal here, because an empty selection emits an empty plan and an
+# empty plan is the shape of a healthy run.
+#
+# The comparator is FALSIFIED in band on every run: it is re-driven with a plan
+# the selection never produced, one offering the closed bead, and this fails if
+# it accepts it. A comparator that cannot fail is a row that witnesses nothing.
+#
+# ~100ms: one python3 start, no network, no git and no bd. Wired into `test`,
+# which is also what puts it in .githooks/pre-push — that hook's gate is
+# `just test`, so a second call site there would only run it twice.
+[private]
+check-bd-gh-sync-selection:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    hook={{ quote(justfile_directory() + "/.githooks/bd-gh-sync") }}
+    label_gate={{ quote(justfile_directory() + "/.github/scripts/check-label-lengths.py") }}
+    for f in "$hook" "$label_gate"; do
+        if [ ! -f "$f" ]; then
+            echo "error: $f is missing, so bd-gh-sync's push selection cannot be run and" >&2
+            echo "       this check would report a pass over nothing (bd gqlc-bc26w)." >&2
+            exit 1
+        fi
+    done
+    scratch="$(mktemp -d)" || exit 1
+    trap 'rm -rf "$scratch"' EXIT
+
+    # The anchor is the start of the selection's own invocation line. The file
+    # carries six `PYEOF` heredocs and this names the one that decides what is
+    # offered to GitHub; the other five answer different questions.
+    #
+    # It stops before that line's trailing `\` continuation and carries no
+    # backslash at all, which is load-bearing. awk performs escape-sequence
+    # processing on a `-v` assignment, and a lone trailing backslash is where
+    # the awks disagree: gawk 5.4 keeps it, mawk — /usr/bin/awk on the CI
+    # runners — does not. Measured on this branch: with the backslash the anchor
+    # matched once in every seat worktree and 0 times on the runner. That was
+    # the fail-closed refusal below rather than a false pass, but it is still a
+    # red no seat can reproduce. With no backslash the escape processing is a
+    # no-op by construction rather than by luck, and ENVIRON does none at all.
+    anchor='python3 - "$_tmp/beads.json" "$_label_gate"'
+    erc=0
+    ANCHOR="$anchor" awk '
+        index($0, ENVIRON["ANCHOR"]) == 1 { anchors++; armed = 1; next }
+        armed && index($0, "<<") && index($0, "PYEOF") { armed = 0; inblock = 1; opened++; next }
+        inblock && $0 == "PYEOF" { inblock = 0; closed++; next }
+        inblock { print }
+        END {
+            if (anchors != 1) { printf "the anchor line matched %d time(s), want exactly 1\n", anchors + 0 >"/dev/stderr"; exit 3 }
+            if (opened != 1) { printf "the heredoc after the anchor opened %d time(s), want 1\n", opened + 0 >"/dev/stderr"; exit 3 }
+            if (closed != 1) { printf "that heredoc closed %d time(s), want 1\n", closed + 0 >"/dev/stderr"; exit 3 }
+        }
+    ' "$hook" >"$scratch/selection.py" 2>"$scratch/extract.err" || erc=$?
+    if [ "$erc" -ne 0 ] || [ ! -s "$scratch/selection.py" ]; then
+        echo "error: could not cut bd-gh-sync's push selection out of $hook (bd gqlc-bc26w)." >&2
+        sed 's/^/       /' "$scratch/extract.err" >&2
+        echo "       Refusing rather than judging a block nobody read. If the invocation was" >&2
+        echo "       deliberately reshaped, update the anchor in this recipe to match it." >&2
+        exit 1
+    fi
+
+    # Seven beads, one per cell of the decision the fix changed. The over-cap
+    # label is 52 characters against the gate's cap of 50, and nothing asserts
+    # that separately: were it short, its row would read NEW and the comparison
+    # below would fail.
+    cat >"$scratch/beads.json" <<'BEADS'
+    [
+      {"id": "probe-closed-plain",    "status": "closed",   "external_ref": null, "labels": ["subject:.githooks"]},
+      {"id": "probe-closed-overcap",  "status": "closed",   "external_ref": null, "labels": ["subject:.githooks/probe/deliberately/over/the/cap.sh"]},
+      {"id": "probe-open-plain",      "status": "open",     "external_ref": null, "labels": ["subject:.githooks"]},
+      {"id": "probe-open-overcap",    "status": "open",     "external_ref": null, "labels": ["subject:.githooks/probe/deliberately/over/the/cap.sh"]},
+      {"id": "probe-open-mirrored",   "status": "open",     "external_ref": "https://github.com/areqag/gqlc/issues/1", "labels": ["subject:.githooks"]},
+      {"id": "probe-blocked-plain",   "status": "blocked",  "external_ref": null, "labels": ["subject:.githooks"]},
+      {"id": "probe-deferred-plain",  "status": "deferred", "external_ref": null, "labels": ["subject:.githooks"]}
+    ]
+    BEADS
+
+    # Both closed beads are absent, which is the fix. blocked and deferred are
+    # present, which is its narrowness: they are live work parked and still want
+    # a board row. COUNT proves the selection walked the whole fixture rather
+    # than stopping early, which would also produce an absence.
+    cat >"$scratch/expected.txt" <<'PLAN'
+    NEW probe-open-plain
+    UNMIRRORABLE probe-open-overcap
+    NOTE probe-open-overcap
+    NEW probe-blocked-plain
+    NEW probe-deferred-plain
+    COUNT 7
+    DONE
+    PLAN
+
+    # The NOTE line's tail is the label gate's remedy wording, which this check
+    # does not own and which gqlc-uy7j moved once already. The id on it is what
+    # the selection decided, so that is what is compared.
+    compare() {
+        sed -E 's/^(NOTE [^ ]+) .*/\1/' "$1" | diff -u "$scratch/expected.txt" -
+    }
+
+    prc=0
+    python3 "$scratch/selection.py" "$scratch/beads.json" "$label_gate" \
+        >"$scratch/plan.txt" 2>"$scratch/plan.err" || prc=$?
+    if [ "$prc" -ne 0 ]; then
+        echo "error: bd-gh-sync's push selection exited $prc on a seven-bead fixture, so" >&2
+        echo "       what it decides cannot be read at all (bd gqlc-bc26w). It said:" >&2
+        sed 's/^/       /' "$scratch/plan.err" >&2
+        exit 1
+    fi
+    if ! compare "$scratch/plan.txt" >"$scratch/verdict.diff" 2>&1; then
+        echo "error: bd-gh-sync's push selection no longer decides what gqlc-bc26w fixed." >&2
+        echo "       Expected on the left, what the live hook produced on the right:" >&2
+        sed 's/^/       /' "$scratch/verdict.diff" >&2
+        if [ -s "$scratch/plan.err" ]; then
+            echo "       The selection also wrote to stderr:" >&2
+            sed 's/^/       /' "$scratch/plan.err" >&2
+        fi
+        echo "       A closed bead reappearing here is offered to GitHub on every push by" >&2
+        echo "       every citizen, forever, and mints an issue for finished work." >&2
+        exit 1
+    fi
+
+    # The falsifier, in band: a plan the run never produced, differing only by
+    # offering the bead the fix withholds.
+    { echo "NEW probe-closed-plain"; cat "$scratch/plan.txt"; } >"$scratch/synthetic.txt"
+    if compare "$scratch/synthetic.txt" >/dev/null 2>&1; then
+        echo "error: the comparator accepted a plan offering probe-closed-plain — a bead" >&2
+        echo "       closed before it was ever mirrored — so the row above passed without" >&2
+        echo "       being able to fail (bd gqlc-bc26w)." >&2
+        exit 1
+    fi
+
 # The single entry point to internal/tools/tmpreap, so GOTMPDIR and the raw-df
 # fallback below are spelled once rather than once per caller.
 #
@@ -2033,7 +2177,7 @@ gates:
 # test-binary args, so every run misses), and inter-test coupling in a codegen
 # dev tool is a low-value gate relative to a ~2m40s tax on every push. Revisit
 # if ordering coupling actually bites us.
-test: check-hooks check-worktree-upstream check-shared-config check-claude-permission-mode check-beads-export check-tmp check-push-keepalive
+test: check-hooks check-worktree-upstream check-shared-config check-claude-permission-mode check-beads-export check-bd-gh-sync-selection check-tmp check-push-keepalive
     go build ./...
     go test ./...
 
