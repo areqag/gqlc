@@ -2228,6 +2228,186 @@ conditioned_verdict_ids() { # -> ids of judge beads closed with a condition in p
            | .id ] | join(" ")' <<<"$board"
 }
 
+# ---------- the quota wall ----------
+
+# history: kingdom/brain/km-notes.md#wall
+wall_flag() { echo "$(state_dir)/walled"; }
+wall_probe_stamp() { echo "$(state_dir)/wall-probe"; }
+
+# Constants, not settings, for the reason ADR 0004 §2 gives its own bound: a
+# refused model call is near-free, so these price recovery LATENCY rather than
+# spend, and a knob here is one more thing to read wrong mid-incident.
+WALL_TRIGGER_WINDOW=900  # a refusal older than 15 min is not evidence of now
+WALL_PROBE_INTERVAL=600  # at most one probe per 10 min, suspected or standing
+WALL_TRIGGER_SEATS=2     # one seat wedges for private reasons routinely
+WALL_PROBE_TIMEOUT=120
+WALL_STALE_SECONDS=43200 # 12h; past this the probe loop itself is the suspect
+WALL_FENCE_PIN=3
+
+# history: kingdom/brain/km-notes.md#wall_refusal_seats
+wall_refusal_seats() { # -> the seats whose last ask was refused inside the window
+    local s f now age
+    now=$(date +%s)
+    for s in $(seats_all); do
+        f="$(seat_home "$s")/idle-refusal"
+        [ -f "$f" ] || continue
+        age=$((now - $(stat -c %Y "$f")))
+        if [ "$age" -le "$WALL_TRIGGER_WINDOW" ]; then echo "$s"; fi
+    done
+}
+
+# history: kingdom/brain/km-notes.md#wall_probe
+wall_probe() { # -> 0 the account answered, 1 walled, refused or unreadable
+    local dir out rc=0
+    dir=$(mktemp -d)
+    # NEVER from a checkout: a SessionStart hook and CLAUDE.md would load the
+    # project into a probe whose whole purpose is to cost nothing. No --model
+    # either — the seats' default model is the one whose wall this asks about,
+    # and a cheaper model that answers while theirs is walled clears the flag
+    # onto a town that is still stopped.
+    out=$(cd "$dir" && env -u KINGDOM_SEAT timeout "$WALL_PROBE_TIMEOUT" claude -p hi 2>/dev/null) || rc=$?
+    rm -rf "$dir"
+    # After the call and in one place, so a refused probe paces exactly as a
+    # successful one does.
+    : >"$(wall_probe_stamp)"
+    [ "$rc" -eq 0 ] || return 1
+    [ -n "$out" ] || return 1
+    # The same two fragments seat_wedge_reason matches on a pane (km:855-856):
+    # two readers of one vendor string, cross-referenced by this comment rather
+    # than folded into a shared helper, which for two greps buys nothing and
+    # couples a pane parser to a subprocess parser.
+    case "$out" in *"hit your limit"* | *"/extra-usage"*) return 1 ;; esac
+    return 0
+}
+
+wall_raised_epoch() { # -> epoch of the raise; rc 1 if the line carries no readable one
+    local line iso
+    line=$(head -1 "$(wall_flag)" 2>/dev/null) || return 1
+    iso=$(printf '%s\n' "$line" | awk '{ print $2 }')
+    [ -n "$iso" ] || return 1
+    date -d "$iso" +%s 2>/dev/null || return 1
+}
+
+# history: kingdom/brain/km-notes.md#wall_withheld
+wall_withheld() {
+    local flag stamp now age last next
+    flag=$(wall_flag)
+    stamp=$(wall_probe_stamp)
+    now=$(date +%s)
+    last="never"
+    next="on this pass"
+    if [ -f "$stamp" ]; then
+        age=$((now - $(stat -c %Y "$stamp")))
+        last="$(fmt_age "$age") ago"
+        if [ "$age" -lt "$WALL_PROBE_INTERVAL" ]; then
+            next="in $(fmt_age "$((WALL_PROBE_INTERVAL - age))")"
+        fi
+    fi
+    echo "dispatch: WALLED — $(head -1 "$flag" 2>/dev/null); probe last $last, next $next; routing, the recovery ladder and reconcile are ALL withheld this pass — an ask into a walled seat strands a draft that makes it permanently unreachable (gqlc-6bnkw) and a wake into one mints another frozen slot-holder; operator override: rm $flag"
+}
+
+# history: kingdom/brain/km-notes.md#wall_clear
+wall_clear() {
+    local flag raised stood epoch s h held="" nheld=0 max active=0 age before_unread
+    flag=$(wall_flag)
+    raised=$(head -1 "$flag" 2>/dev/null || true)
+    if epoch=$(wall_raised_epoch); then
+        stood=$(fmt_age "$(($(date +%s) - epoch))")
+    else
+        stood="an unmeasurable time ($flag carried no readable raise line)"
+    fi
+    rm -f "$flag"
+    # The episode counters measured the WALL, not the citizens: an ask that was
+    # refused because the account was stopped is not an unanswered ask, and
+    # leaving the markers suppresses the ladder for the rest of the episode —
+    # exactly when post-reset delivery might work.
+    for s in $(seats_all); do
+        h=$(seat_home "$s")
+        rm -f "$h/idle" "$h/idle-nudged" "$h/idle-attempts" "$h/idle-escalated" "$h/idle-refusal"
+    done
+    max=$(cfg concurrency max_active)
+    for s in $(capped_seats); do
+        seat_session_live "$s" || continue
+        active=$((active + 1))
+        [ "$(seat_status "$s")" = awake ] || continue
+        nheld=$((nheld + 1))
+        if age=$(seat_dry_age "$s"); then
+            held="$held $s($(fmt_age "$age") since a tool call of hers finished)"
+        else
+            held="$held $s(no readable progress witness)"
+        fi
+    done
+    [ -n "$held" ] || held=" none"
+    echo "dispatch: the wall is over — it stood $stood ($raised). $active/$max capped slots are in use, $nheld of them by seats that are awake and so sat through it:$held. Until an operator ends those sessions (VI.2 — km neither ends them nor types into them) only judge work routes."
+    # Witnessed like the ladder's own escalation: mail_send exiting 0 is not
+    # delivery, and this letter is the only artefact of a lift nobody watched.
+    before_unread=$(mail_unread_from sedrak andranik)
+    if mail_send sedrak --from andranik \
+        -s "the quota wall is over after $stood — the post-reset kill list" \
+        -m "km dispatch probed the account and it answered, so the wall that stood $stood is over and routing has resumed in this same pass. This letter is the part routing cannot do.
+
+$active of $max capped slots are in use, and $nheld are held by seats that are awake with a live session. A session that sat through a wall is a session whose turn died inside it: it will never end by itself, never return its slot, and never answer a dispatch pass, because every pass wakes ASLEEP seats only.
+$held
+
+Each seat is named with the age of the last tool call of hers that FINISHED. That is the evidence, not the verdict — one long legitimate tool call reads the same from outside. Read a pane before ending anything.
+
+ENDING THOSE SESSIONS IS AN OPERATOR'S ACTION AND NOBODY ELSE'S (VI.2). The protocol is gqlc-qs4jq's: ask each seat to self-park first ('km sleep' from her own pane frees the slot with her consent), and end only what does not park. km neither clears a stranded input box nor submits one, so a seat holding text an ask stranded there needs a person either way.
+
+The recovery ladder's episode markers were wiped when the flag cleared: the refusals it counted were the wall's, not the citizens'.
+
+The flag's own raise line: $raised
+Written by machinery, not by Անդրանիկ." \
+        && [ "$(mail_unread_from sedrak andranik)" -gt "$before_unread" ]; then
+        :
+    else
+        echo "dispatch: the post-reset kill list did NOT reach sedrak's inbox — no new letter from andranik arrived, so the roster printed above is the whole of what anyone has been told"
+    fi
+}
+
+# history: kingdom/brain/km-notes.md#wall_guard
+wall_guard() { # -> 0 carry on with the pass, 1 the town is walled and this pass is over
+    local flag stamp now due=0 age seats n
+    flag=$(wall_flag)
+    stamp=$(wall_probe_stamp)
+    now=$(date +%s)
+    if [ ! -f "$stamp" ]; then
+        due=1
+    else
+        age=$((now - $(stat -c %Y "$stamp")))
+        if [ "$age" -ge "$WALL_PROBE_INTERVAL" ]; then due=1; fi
+    fi
+
+    if [ ! -f "$flag" ]; then
+        # No flag standing, so a probe is spent only under SUSPICION: a healthy
+        # steady state must cost nothing, and one seat refusing an ask is a
+        # consent modal or a citizen's own draft far more often than it is a
+        # town-wide wall.
+        seats=$(wall_refusal_seats | tr '\n' ' ' | sed 's/ *$//')
+        n=$(printf '%s' "$seats" | wc -w)
+        if [ "$n" -lt "$WALL_TRIGGER_SEATS" ] || [ "$due" -eq 0 ]; then
+            return 0
+        fi
+        if wall_probe; then
+            # A false trigger answers itself at once and costs one probe. Said
+            # out loud because the alternative is a silent model call.
+            echo "dispatch: $n seats were refused an ask inside $(fmt_age "$WALL_TRIGGER_WINDOW") ($seats), so a probe was spent — the account answered, this is not a quota wall, and the pass continues"
+            return 0
+        fi
+        printf 'raised %s on: %s\n' "$(date -u -Iseconds)" "$seats" >"$flag"
+        printf '%s probe refused\n' "$(date -u -Iseconds)" >>"$flag"
+        echo "dispatch: WALL RAISED — $n seats refused an ask inside $(fmt_age "$WALL_TRIGGER_WINDOW") ($seats) and a probe from a clean directory was refused too"
+    elif [ "$due" -eq 1 ]; then
+        if wall_probe; then
+            wall_clear
+            # Fall THROUGH: routing resumes in these same two minutes.
+            return 0
+        fi
+        printf '%s probe refused\n' "$(date -u -Iseconds)" >>"$flag"
+    fi
+    wall_withheld
+    return 1
+}
+
 cmd_dispatch() {
     # Above ensure_deployed, not below it: on a drifted tree ensure_deployed
     # deploys and then re-execs the deployed km with this argv, so a --help
@@ -2237,6 +2417,12 @@ cmd_dispatch() {
     session_up || { echo "dispatch: $(town_absent_reason $?); nothing to do"; return 0; }
     local sd wakes=0 withheld=0
     sd=$(state_dir)
+
+    # ABOVE the mayor's mail wake, inverting the halt's placement below it. The
+    # halt sits underneath so a halted town can hear by mail that its cause is
+    # over; a walled town cannot hear anything, and waking Սեդրակ into a wall
+    # freezes the one seat the whole recovery chain routes through.
+    wall_guard || return 0
 
     # Սեդրակ answers his mail regardless of the cap — and regardless of the
     # halt (bd gqlc-ozfr): the halt's cause being over is exactly the kind of
@@ -3575,6 +3761,36 @@ cmd_doctor() {
         echo "warn: closed with a condition in the close reason, which carries it to nobody — a verdict is PASS or FAIL, a PASS is unconditional, and binding content travels in bead ids (ADR 0009): $conditioned"
     else
         echo "ok:   every judge verdict closed since ADR 0009 is unconditional"
+    fi
+
+    # history: kingdom/brain/km-notes.md#cmd_doctor-wall
+    local wflag wraised wepoch wage
+    wflag=$(wall_flag)
+    if [ ! -f "$wflag" ]; then
+        echo "ok:   no quota wall is flagged"
+    elif ! wepoch=$(wall_raised_epoch) || [ -z "$wepoch" ]; then
+        wraised=$(head -1 "$wflag" 2>/dev/null || true)
+        echo "FAIL: $wflag exists but carries no readable raise time, so how long the town has been walled could NOT be measured — and dispatch is withholding routing, the recovery ladder and reconcile for as long as it stands: ${wraised:-<the file is empty>}"
+        ok=1
+    else
+        wraised=$(head -1 "$wflag")
+        wage=$(($(date +%s) - wepoch))
+        if [ "$wage" -ge "$WALL_STALE_SECONDS" ]; then
+            echo "FAIL: a quota wall has been flagged for $(fmt_age "$wage") — EITHER the probe loop that clears it has stopped running (no dispatch pass, or a probe that never succeeds) OR a wall has genuinely stood that long, which a weekly cap can do. Both are operator news, and routing has been withheld throughout: $wraised ($wflag)"
+            ok=1
+        else
+            echo "warn: a quota wall is flagged, standing $(fmt_age "$wage") — an expected state mid-wall, not a defect: dispatch withholds routing and probes the account every $(fmt_age "$WALL_PROBE_INTERVAL") until it answers. $wraised"
+        fi
+    fi
+
+    # history: kingdom/brain/km-notes.md#cmd_doctor-fence
+    local xcount
+    xcount=$(grep -rn 'extra-usage' "$KINGDOM_DIR/bin/" 2>/dev/null | wc -l)
+    if [ "$xcount" -gt "$WALL_FENCE_PIN" ]; then
+        echo "FAIL: $KINGDOM_DIR/bin carries $xcount lines naming the vendor's paid-overflow command, above the pin of $WALL_FENCE_PIN — and the pinned $WALL_FENCE_PIN are all READERS (the wedge detector, the wall probe's predicate, and this row's own pattern), so a new one is machinery that composes or types it. This town must NEVER invoke it, under any condition (Անդրանիկ, 2026-08-30, gqlc-tdciz). Read the new line and take it out"
+        ok=1
+    else
+        echo "ok:   nothing under $KINGDOM_DIR/bin composes the forbidden overflow command ($xcount matches against a pin of $WALL_FENCE_PIN, all of them readers)"
     fi
 
     # history: kingdom/brain/km-notes.md#cmd_doctor-4
