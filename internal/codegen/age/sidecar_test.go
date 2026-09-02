@@ -207,15 +207,36 @@ func entityDeclaring(f codegen.EntityField, prop string) codegen.Entity {
 // takes one, which is what makes them widths everywhere except in a walk
 // keyed on the annotation.
 //
-// The marks read are a spec sharing a block with the annotated widths
-// and a name prefixed as they are; the values recognised are a string
-// literal and a conversion whose function is the identifier
-// PropertyType. A declaration bearing neither mark, or building its text
-// some other way, is not seen here.
+// Two marks are read, and they are not equally strong, so they are not
+// read the same way. A declaration bearing neither is not seen here.
 func declaresAWidth(gen *ast.GenDecl, value *ast.ValueSpec) bool {
 	if len(value.Values) == 0 {
 		return false
 	}
+	// The NAME is the decisive mark, and it is read before the value and
+	// independently of it. A value this walk cannot parse is a reason to
+	// fail loudly, not evidence that the spec is not a width: reading the
+	// value first is what let `TypeFoo = "F" + "OO"` and
+	// `var TypeFoo = ListOf(TypeInt, false)` — a concatenation and a
+	// constructor call, both perfectly good widths, neither a string
+	// literal nor a PropertyType conversion — leave the domain a width
+	// short while the sweep still reported agreement (bd gqlc-ld2o).
+	//
+	// So a Type-prefixed spec whose value is genuinely not a width, a
+	// `TypeFoo = 64`, is now reported too. That is a false red naming its
+	// own remedy — annotate it or rename it — which is the direction this
+	// walk is allowed to be wrong in; the silence it replaces was not.
+	for _, n := range value.Names {
+		if strings.HasPrefix(n.Name, "Type") {
+			return true
+		}
+	}
+	// Sharing a block with the annotated widths is the weaker mark: it is
+	// positional, and a block is free to hold a constant that is not a
+	// width. So it stays qualified by the value's shape — a string literal
+	// or a conversion whose function is the identifier PropertyType —
+	// which is what keeps a length or a count declared beside the widths
+	// from being reported as one.
 	for _, v := range value.Values {
 		if call, ok := v.(*ast.CallExpr); ok {
 			if id, ok := call.Fun.(*ast.Ident); !ok || id.Name != "PropertyType" {
@@ -225,11 +246,6 @@ func declaresAWidth(gen *ast.GenDecl, value *ast.ValueSpec) bool {
 		}
 		if lit, ok := v.(*ast.BasicLit); !ok || lit.Kind != token.STRING {
 			return false
-		}
-	}
-	for _, n := range value.Names {
-		if strings.HasPrefix(n.Name, "Type") {
-			return true
 		}
 	}
 	for _, s := range gen.Specs {
@@ -242,6 +258,89 @@ func declaresAWidth(gen *ast.GenDecl, value *ast.ValueSpec) bool {
 		}
 	}
 	return false
+}
+
+// TestDeclaresAWidthReadsAnUnannotatedWidthWhateverItsValue puts every
+// declaration shape to declaresAWidth directly, because internal/graph
+// annotates all 32 of its widths today: the unannotated path the function
+// exists for is unreachable from the real vocabulary, so nothing else in
+// this package exercises it. The rows are the whole of its exercise.
+//
+// Each row is source handed to the parser, never compiled, so it may
+// declare shapes internal/graph does not have. The `want` column is the
+// answer declaresAWidth owes, not the answer it gave when this was
+// written: two rows below (bd gqlc-ld2o) were false when it was.
+func TestDeclaresAWidthReadsAnUnannotatedWidthWhateverItsValue(t *testing.T) {
+	// The annotated sibling every block needs before the block-sharing
+	// mark can fire. Rows that omit it are testing the name mark alone.
+	const sibling = "\tTypeString PropertyType = \"STRING\"\n"
+
+	for _, row := range []struct {
+		name string
+		decl string
+		want bool
+		why  string
+	}{
+		{
+			"string literal, name prefixed", "const (\n" + sibling + "\tTypeFoo = \"FOO\"\n)", true,
+			"an untyped string constant serves as a PropertyType at every call site that takes one",
+		},
+		{
+			"conversion, name prefixed", "const (\n" + sibling + "\tTypeFoo = PropertyType(\"FOO\")\n)", true,
+			"a typed constant written without the annotation",
+		},
+		{
+			"concatenation, name prefixed", "const (\n" + sibling + "\tTypeFoo = \"F\" + \"OO\"\n)", true,
+			"the residue: a value this walk cannot read is a reason to fail loudly, not evidence of a non-width",
+		},
+		{
+			"constructor call, name prefixed", "var (\n" + sibling + "\tTypeFoo = ListOf(TypeInt, false)\n)", true,
+			"the other residue: the same shape a list width would really be written in",
+		},
+		{
+			"name prefixed, no annotated sibling", "const (\n\tTypeFoo = \"F\" + \"OO\"\n)", true,
+			"the name is the mark; it does not need the block",
+		},
+		{
+			"no value", "const (\n" + sibling + "\tTypeFoo\n)", false,
+			"an iota continuation carries no text a width could be read from",
+		},
+		{
+			"block shared, string literal", "const (\n" + sibling + "\tsomeWidth = \"FOO\"\n)", true,
+			"the positional mark, on a value this walk can read",
+		},
+		{
+			"block shared, non-string value", "const (\n" + sibling + "\tmaxNameLen = 64\n)", false,
+			"the positional mark stays qualified by the value: a length beside the widths is not one",
+		},
+		{
+			"neither mark", "const (\n\tmaxNameLen = 64\n)", false,
+			"no name prefix and no annotated sibling",
+		},
+		{
+			"other annotation, iota", "const (\n\tKindScalar PropertyTypeKind = iota\n\tKindList\n)", false,
+			"internal/graph really declares this, and it is not a width",
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "graph.go",
+				"package graph\n\n"+row.decl+"\n", parser.SkipObjectResolution)
+			require.NoError(t, err, "the row's own source does not parse")
+
+			gen, ok := file.Decls[0].(*ast.GenDecl)
+			require.True(t, ok, "the row does not declare a const or var block")
+			specs := gen.Specs
+			// The spec under test is the last in the block; the annotated
+			// sibling, where a row has one, leads. Asserted rather than
+			// assumed: a row that lost its subject would otherwise put the
+			// sibling to the function and pass by testing the wrong spec.
+			value, ok := specs[len(specs)-1].(*ast.ValueSpec)
+			require.True(t, ok)
+			require.Nil(t, value.Type, "the spec under test must be the UNANNOTATED one — an annotated spec never reaches declaresAWidth")
+
+			require.Equal(t, row.want, declaresAWidth(gen, value), row.why)
+		})
+	}
 }
 
 // declaredPropertyTypes is every width internal/graph declares under its
