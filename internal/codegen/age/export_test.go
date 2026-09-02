@@ -16,31 +16,34 @@ package age
 type (
 	DialectGap   = dialectGap
 	DialectProbe = dialectProbe
+	Finding      = finding
 	Helpers      = helpers
 	TypeMap      = typeMap
 	WiredEntity  = wiredEntity
 )
 
 var (
-	DecodeFunc                    = decodeFunc
-	DialectGaps                   = dialectGaps
-	DollarTag                     = dollarTag
-	EdgeUnionReason               = edgeUnionReason
-	FindUndefinedFunctions        = findUndefinedFunctions
-	FindUndefinedSpatialFunctions = findUndefinedSpatialFunctions
-	Generate                      = generate
-	NamespaceProbes               = namespaceProbes
-	RejectOffsetSidecarCollisions = rejectOffsetSidecarCollisions
-	RenderCypherFile              = renderCypherFile
-	RenderModels                  = renderModels
-	SpatialFunctionProbes         = spatialFunctionProbes
-	UndefinedFunctionProbes       = undefinedFunctionProbes
-	UndefinedFunctions            = undefinedFunctions
-	UndefinedNamespaces           = undefinedNamespaces
-	UndefinedSpatialFunctions     = undefinedSpatialFunctions
-	UnservedColumn                = unservedColumn
-	UnservedReason                = unservedReason
-	WriteEntityFieldDecode        = writeEntityFieldDecode
+	DecodeFunc                       = decodeFunc
+	DialectGaps                      = dialectGaps
+	DollarTag                        = dollarTag
+	EdgeUnionReason                  = edgeUnionReason
+	FindRelationshipTypeAlternations = findRelationshipTypeAlternations
+	FindUndefinedFunctions           = findUndefinedFunctions
+	FindUndefinedSpatialFunctions    = findUndefinedSpatialFunctions
+	Generate                         = generate
+	NamespaceProbes                  = namespaceProbes
+	RejectOffsetSidecarCollisions    = rejectOffsetSidecarCollisions
+	RenderCypherFile                 = renderCypherFile
+	Positionless                     = positionless
+	RenderModels                     = renderModels
+	SpatialFunctionProbes            = spatialFunctionProbes
+	UndefinedFunctionProbes          = undefinedFunctionProbes
+	UndefinedFunctions               = undefinedFunctions
+	UndefinedNamespaces              = undefinedNamespaces
+	UndefinedSpatialFunctions        = undefinedSpatialFunctions
+	UnservedColumn                   = unservedColumn
+	UnservedReason                   = unservedReason
+	WriteEntityFieldDecode           = writeEntityFieldDecode
 )
 
 const (
@@ -61,7 +64,7 @@ const (
 // which is the form the sweep's rows are read in.
 type DialectGapFields struct {
 	Sentinel error
-	Find     func(src string) []string
+	Find     func(src string) []Finding
 	Diagnose func(count int, noun, dropped string) string
 	Witness  string
 	Refused  []dialectProbe
@@ -87,14 +90,14 @@ func (p dialectProbe) Text() string   { return p.text }
 func (p dialectProbe) Answer() string { return p.answer }
 
 func (g dialectGap) Sentinel() error                            { return g.sentinel }
-func (g dialectGap) Find() func(src string) []string            { return g.find }
+func (g dialectGap) Find() func(src string) []Finding           { return g.find }
 func (g dialectGap) Diagnose() func(int, string, string) string { return g.diagnose }
 func (g dialectGap) Witness() string                            { return g.witness }
 func (g dialectGap) Refused() []dialectProbe                    { return g.refused }
 func (g dialectGap) Served() []string                           { return g.served }
 
 func (g *dialectGap) SetSentinel(s error)                            { g.sentinel = s }
-func (g *dialectGap) SetFind(f func(src string) []string)            { g.find = f }
+func (g *dialectGap) SetFind(f func(src string) []Finding)           { g.find = f }
 func (g *dialectGap) SetDiagnose(d func(int, string, string) string) { g.diagnose = d }
 func (g *dialectGap) SetWitness(w string)                            { g.witness = w }
 func (g *dialectGap) SetRefused(p []dialectProbe)                    { g.refused = p }

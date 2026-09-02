@@ -6,10 +6,38 @@ import (
 	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
 )
 
+// Alternation is one relationship-type alternation a query text spells, and
+// where in that text it is spelled.
+type Alternation struct {
+	// Text is the oC_RelationshipTypes production's source text, quoted as
+	// the author wrote it.
+	Text string
+	// Line and Column locate the production's first character — the ':'
+	// opening the relationship detail — within the text that was scanned.
+	// BOTH are 1-based: ANTLR numbers lines from 1 and columns from 0, and a
+	// coordinate mixing the two conventions is off by one on an axis nothing
+	// in the answer distinguishes, so the column is converted here rather
+	// than at each caller.
+	//
+	// They index the SCANNED TEXT and no file. A caller holding one query's
+	// text has no file offset to add — internal/codegen's NamedQuery carries
+	// none, and queryfile's parse trims the body it stores (bodyText), so the
+	// offset is not derivable downstream either. A caller printing these has
+	// to say which text they index rather than let them read as the file
+	// lines internal/queryfile's own diagnostics spell.
+	Line, Column int
+}
+
 // RelationshipTypeAlternations reports the relationship-type alternations a
-// query text spells: the source text of every oC_RelationshipTypes production
-// spelling more than one relationship-type NAME, in first-appearance order
-// with repeated texts dropped. A text spelling none returns nil.
+// query text spells: every oC_RelationshipTypes production spelling more than
+// one relationship-type NAME, in source order. A text spelling none returns
+// nil.
+//
+// Two occurrences of ONE spelling are two answers, not one — they are two
+// patterns the author has to rewrite, and the position is what makes naming
+// both an answer rather than noise. Until the position was carried the repeat
+// was dropped, so a query spelling `:A|B` twice read as a query spelling it
+// once (bd gqlc-rmzg).
 //
 // More than one name, not more than one distinct name. `-[r:A|A]->` names one
 // type twice and is reported, because the '|' it needs is the character the
@@ -49,13 +77,13 @@ import (
 // consults no procedure
 // signature registry, unlike Parse: the walk is syntactic, so a CALL that only
 // resolves against a registry is read the same way with or without one.
-func RelationshipTypeAlternations(src string) []string {
+func RelationshipTypeAlternations(src string) []Alternation {
 	lex := gen.NewCypherLexer(antlr.NewInputStream(src))
 	cp := gen.NewCypherParser(antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel))
 	lex.RemoveErrorListeners()
 	cp.RemoveErrorListeners()
 
-	scan := &alternationScan{BaseCypherListener: &gen.BaseCypherListener{}, seen: map[string]struct{}{}}
+	scan := &alternationScan{BaseCypherListener: &gen.BaseCypherListener{}}
 	antlr.NewParseTreeWalker().Walk(scan, cp.OC_Cypher())
 	return scan.found
 }
@@ -69,8 +97,7 @@ func RelationshipTypeAlternations(src string) []string {
 type alternationScan struct {
 	*gen.BaseCypherListener
 
-	found []string
-	seen  map[string]struct{}
+	found []Alternation
 }
 
 // EnterOC_RelationshipTypes records the production's text when it spells more
@@ -87,14 +114,21 @@ type alternationScan struct {
 // gate serves). Pinned by TestRelationshipTypeAlternationsReadsTheText's
 // repeated-type rows and, end to end, by
 // TestRunApacheAgeRefusesRelationshipTypeAlternation's.
+//
+// The position comes off the production's own start token, which is the ':'
+// opening the detail. The token is in hand at the point the finding is made,
+// so nothing is searched for and nothing is reconstructed: the coordinate
+// names the same characters GetText quotes.
 func (a *alternationScan) EnterOC_RelationshipTypes(c *gen.OC_RelationshipTypesContext) {
 	if len(c.AllOC_RelTypeName()) < 2 {
 		return
 	}
-	text := c.GetText()
-	if _, dup := a.seen[text]; dup {
-		return
-	}
-	a.seen[text] = struct{}{}
-	a.found = append(a.found, text)
+	start := c.GetStart()
+	a.found = append(a.found, Alternation{
+		Text: c.GetText(),
+		Line: start.GetLine(),
+		// +1 because ANTLR counts a line's characters from 0 while it
+		// counts the lines from 1.
+		Column: start.GetColumn() + 1,
+	})
 }

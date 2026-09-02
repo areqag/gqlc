@@ -180,11 +180,14 @@ func alternationsIn(src []byte) []string {
 	var out []string
 	for _, text := range texts {
 		for _, alt := range cypher.RelationshipTypeAlternations(text) {
-			if seen[alt] {
+			// The TEXT alone: this reads a fixture for the set of
+			// spellings it carries, so where each one sits is not part
+			// of the question.
+			if seen[alt.Text] {
 				continue
 			}
-			seen[alt] = true
-			out = append(out, alt)
+			seen[alt.Text] = true
+			out = append(out, alt.Text)
 		}
 	}
 	sort.Strings(out)
