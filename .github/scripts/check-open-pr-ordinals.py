@@ -138,6 +138,37 @@ def verdict(directory, master_names, added_names):
     return False, detail[:DESCRIPTION_LIMIT]
 
 
+def claimed_by(head_sha, files, directories):
+    """The enrolled files a compare's entries claim, as {directory: [name, ...]}.
+
+    The second decision core, kept free of the network for the reason verdict()
+    is: which entry claims an ordinal is a judgement, and a test that can only
+    see the final verdict cannot see it being made. Refuses at the cap here
+    rather than in the caller because the cap is a property of this list.
+    """
+    if len(files) >= COMPARE_FILE_CAP:
+        sys.exit(
+            f"error: the compare for {head_sha} returned {len(files)} files, at or "
+            f"over the {COMPARE_FILE_CAP} the API caps this response at. It sends no "
+            "Link header and does not paginate, so the rest cannot be fetched and a "
+            "truncated list is indistinguishable from a complete one. Refusing to "
+            "post a verdict on a question that was not fully asked."
+        )
+
+    claimed = {directory: [] for directory in directories}
+    for entry in files:
+        if entry.get("status") not in CLAIMING_STATUSES:
+            continue
+        path = Path(entry["filename"])
+        for directory in directories:
+            # Equality, not a prefix test: an enrolled series is one flat
+            # directory, and a document in a subdirectory of it is not part of
+            # the numbering these two gates share.
+            if path.parent == Path(directory):
+                claimed[directory].append(path.name)
+    return claimed
+
+
 def added_under(repo, base_sha, head_sha, directories):
     """The enrolled files this PR adds, as {directory: [basename, ...]}."""
     compare = json.loads(
@@ -149,25 +180,7 @@ def added_under(repo, base_sha, head_sha, directories):
             ]
         ).stdout
     )
-    files = compare.get("files", [])
-    if len(files) >= COMPARE_FILE_CAP:
-        sys.exit(
-            f"error: the compare for {head_sha} returned {len(files)} files, at or "
-            f"over the {COMPARE_FILE_CAP} the API caps this response at. It sends no "
-            "Link header and does not paginate, so the rest cannot be fetched and a "
-            "truncated list is indistinguishable from a complete one. Refusing to "
-            "post a verdict on a question that was not fully asked."
-        )
-
-    added = {directory: [] for directory in directories}
-    for entry in files:
-        if entry.get("status") not in CLAIMING_STATUSES:
-            continue
-        path = Path(entry["filename"])
-        for directory in directories:
-            if path.parent == Path(directory):
-                added[directory].append(path.name)
-    return added
+    return claimed_by(head_sha, compare.get("files", []), directories)
 
 
 def post_status(repo, head_sha, state, description, target_url):
@@ -247,13 +260,88 @@ def check_open_prs(directories):
     return 0
 
 
+def self_test_claimed_by():
+    """Drive the status filter: which compare entry claims an ordinal.
+
+    Split out from the verdict rows because a mutation narrowing
+    CLAIMING_STATUSES survives every one of them -- the verdict never sees a
+    file the filter dropped, so it cannot report the collision it hides.
+    """
+    enrolled = ["docs/adr", "kingdom/brain/decisions"]
+    doc = "0012-something.md"
+    rows = [
+        ("an added document claims its ordinal", "added", f"docs/adr/{doc}", True),
+        ("a renumber arrives as a RENAME and claims", "renamed", f"docs/adr/{doc}", True),
+        ("a copy claims the ordinal it lands on", "copied", f"docs/adr/{doc}", True),
+        ("modifying 0012 leaves it claimed once, not twice", "modified", f"docs/adr/{doc}", False),
+        ("deleting 0012 frees the number, it does not take it", "removed", f"docs/adr/{doc}", False),
+        (
+            "a date-prefixed series is not enrolled, so it claims nothing",
+            "added",
+            f"kingdom/brain/postmortems/{doc}",
+            False,
+        ),
+        (
+            "a document one level below an enrolled directory is outside its numbering",
+            "added",
+            f"docs/adr/sub/{doc}",
+            False,
+        ),
+    ]
+
+    failed = False
+    for name, status, filename, want_claimed in rows:
+        claimed = claimed_by("headsha", [{"status": status, "filename": filename}], enrolled)
+        got_claimed = any(claimed.values())
+        if got_claimed != want_claimed:
+            failed = True
+            print(
+                f"self-test FAILED: {name}\n"
+                f"  wanted claimed={want_claimed}, got {claimed!r}",
+                file=sys.stderr,
+            )
+            continue
+        print(f"self-test ok: {name}")
+
+    # The cap refusal, driven rather than trusted. It is the one place this file
+    # chooses to fail loudly instead of answering, so a mutation that deletes it
+    # buys a green status on a question that was never fully asked -- the exact
+    # shape of the defect this gate exists to remove.
+    name = "a compare at the API's file cap is refused, not under-checked"
+    at_cap = [
+        {"status": "added", "filename": f"docs/adr/{i:04d}-x.md"}
+        for i in range(COMPARE_FILE_CAP)
+    ]
+    try:
+        claimed_by("headsha", at_cap, ["docs/adr"])
+    except SystemExit as refusal:
+        print(f"self-test ok: {name}")
+        if str(COMPARE_FILE_CAP) not in str(refusal):
+            failed = True
+            print(
+                f"self-test FAILED: {name}\n"
+                f"  the refusal does not name the cap: {refusal!s:.120}",
+                file=sys.stderr,
+            )
+    else:
+        failed = True
+        print(
+            f"self-test FAILED: {name}\n"
+            f"  {COMPARE_FILE_CAP} entries were answered rather than refused",
+            file=sys.stderr,
+        )
+
+    return failed
+
+
 def self_test():
-    """Drive the decision core over the window this gate was built from.
+    """Drive the decision cores over the window this gate was built from.
 
     Run inline by the workflow before any PR is examined, and by `just gates`,
     because this repository has no Python test runner and a gate whose logic
     nothing exercises is a gate nobody has watched fail. The rows are the ones
-    the design named as owed.
+    the design named as owed, plus the status-filter rows a mutation battery
+    showed were owed and missing.
     """
     taken = "0012-release-of-an-unreachable-seat.md"
     rows = [
@@ -283,7 +371,7 @@ def self_test():
         ),
     ]
 
-    failed = False
+    failed = self_test_claimed_by()
     for name, master_names, added_names, want_ok in rows:
         got_ok, description = verdict("docs/adr", master_names, added_names)
         if got_ok != want_ok:
