@@ -971,9 +971,20 @@ of types that declare the `isResolvedType` marker — pointer forms and
 embedders satisfy the interface without declaring it, so the check is
 Go-value equality against a specific arm, not membership in a closed
 set; see `internal/resolver/validated.go` on `ResolvedType`). If any
-disagrees at index
-i, fail: `ErrUnionColumnMismatch: branch %d column %q has type %s;
-branch 0 has type %s`.
+disagrees at index i, fail: `ErrUnionColumnMismatch: column %q projects
+%s in branch %d but %s in branch 0`.
+
+That is the one arm of the three that does not lead with the failing
+branch, and the difference is deliberate rather than drift. The column
+is the one thing the two branches agree on, so it leads; the failing
+branch's projection then comes before branch 0's, which is the
+direction the count and name arms take too. Whether branch 0 should
+lead instead was asked under `gqlc-eb5j` and answered no — branch 0
+defines the result columns (§3.1), but a reader arrives here already
+knowing that and looking for the branch to go and edit, which is branch
+b. All three arms move together or not at all; see
+`compareBranchColumns`' doc comment, which is where that reasoning
+lives.
 
 **Judgment call — no lattice widening across branches.** openCypher's
 column-compatibility rule for UNION is stricter than "assignable-from":
