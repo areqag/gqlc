@@ -126,10 +126,13 @@ func TestDescribeColumnTypeRendersANilListElement(t *testing.T) {
 // that makes one function safe is what delivers the other its nil.
 //
 // The value is constructed directly rather than resolved from a fixture
-// because no query originates it: all three ResolvedList constructions in
-// non-test code assign a non-nil Element, and unify only PROPAGATES a nil that
-// already exists (bd gqlc-t802). The fault is latent, and a pin is what keeps
-// it from being re-armed by a future originator.
+// because no query originates it. That was read here as the three ResolvedList
+// constructions in non-test code all assigning a non-nil Element, with unify
+// only PROPAGATING a nil that already exists (bd gqlc-t802); the property is
+// wider and is now measured rather than argued, across every arm that can
+// produce a column type, by TestNilColumnTypeIsNotConstructible (bd
+// gqlc-oltq). The fault is latent, and a pin is what keeps it from being
+// re-armed by a future originator.
 func TestCompareBranchColumnsSurvivesANilListElement(t *testing.T) {
 	branchCols := [][]Column{
 		{{Name: "c", Type: ResolvedList{Element: ResolvedProperty{Type: graph.TypeInt}}}},
