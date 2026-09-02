@@ -5,7 +5,7 @@ package relationshiprebindnarrowstoonetype
 import "context"
 
 type ReadQuerier interface {
-	GetAction(ctx context.Context) (LIKES, error)
+	GetAction(ctx context.Context) (Likes, error)
 }
 
 type WriteQuerier interface {

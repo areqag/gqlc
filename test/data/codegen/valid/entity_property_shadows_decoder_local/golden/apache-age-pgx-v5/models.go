@@ -97,43 +97,43 @@ func decodeMarker(raw []byte) (Marker, error) {
 	return out, nil
 }
 
-// LINKS corresponds to the LINKS edge type (Marker -> Marker).
-type LINKS struct {
+// Links corresponds to the LINKS edge type (Marker -> Marker).
+type Links struct {
 	Err    string
 	Out    string
 	Rel    string
 	Value0 string
 }
 
-// decodeLINKS decodes an agtype edge into a LINKS struct, enforcing
+// decodeLinks decodes an agtype edge into a Links struct, enforcing
 // the label and the per-property nullability the schema declares.
-func decodeLINKS(raw []byte) (LINKS, error) {
+func decodeLinks(raw []byte) (Links, error) {
 	label, props, err := agtypeEntity(raw, "::edge")
 	if err != nil {
-		return LINKS{}, fmt.Errorf("decode LINKS: %w", err)
+		return Links{}, fmt.Errorf("decode Links: %w", err)
 	}
 	if label != "LINKS" {
-		return LINKS{}, fmt.Errorf("decode LINKS: expected label %q, got %q", "LINKS", label)
+		return Links{}, fmt.Errorf("decode Links: expected label %q, got %q", "LINKS", label)
 	}
-	var out LINKS
+	var out Links
 	value0, err := agtypeProperty(props, "err", agtypeString)
 	if err != nil {
-		return LINKS{}, fmt.Errorf("decode LINKS.Err: %w", err)
+		return Links{}, fmt.Errorf("decode Links.Err: %w", err)
 	}
 	out.Err = value0
 	value1, err := agtypeProperty(props, "out", agtypeString)
 	if err != nil {
-		return LINKS{}, fmt.Errorf("decode LINKS.Out: %w", err)
+		return Links{}, fmt.Errorf("decode Links.Out: %w", err)
 	}
 	out.Out = value1
 	value2, err := agtypeProperty(props, "rel", agtypeString)
 	if err != nil {
-		return LINKS{}, fmt.Errorf("decode LINKS.Rel: %w", err)
+		return Links{}, fmt.Errorf("decode Links.Rel: %w", err)
 	}
 	out.Rel = value2
 	value3, err := agtypeProperty(props, "value0", agtypeString)
 	if err != nil {
-		return LINKS{}, fmt.Errorf("decode LINKS.Value0: %w", err)
+		return Links{}, fmt.Errorf("decode Links.Value0: %w", err)
 	}
 	out.Value0 = value3
 	return out, nil

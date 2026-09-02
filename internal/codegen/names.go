@@ -60,6 +60,32 @@ func paramFieldName(raw string) string {
 	return b.String()
 }
 
+// edgeLabelFieldName derives the entity struct name for an edge type's
+// label (spec §4.5 Rule 3: `ACTED_IN` → `ActedIn`, `KNOWS` → `Knows`).
+//
+// It differs from paramFieldName in exactly one disposition, and the
+// difference is the point rather than an inconsistency: §4.2 preserves an
+// ALL-CAPS segment because a parameter acronym ($ID, $URL) wants its case
+// kept, and Rule 2 inherits that for node labels (`PERSON` → `PERSON`).
+// An edge label is a second caller with the opposite convention — Neo4j
+// relationship types are SCREAMING_SNAKE by convention, so preserving the
+// case there yields a Go type named LINKED, or runs the segments together
+// into ACTEDIN with no word boundary left. Both are valid exported
+// identifiers, so nothing downstream refuses them (bd gqlc-ghdz).
+//
+// Lower-casing an ALL-CAPS segment before the shared mangle, rather than
+// re-implementing the walk, keeps the '_' split, the empty-segment drop
+// and the leading-digit failure disposition in one place.
+func edgeLabelFieldName(raw string) string {
+	segments := strings.Split(raw, "_")
+	for i, seg := range segments {
+		if isAllCaps(seg) {
+			segments[i] = strings.ToLower(seg)
+		}
+	}
+	return paramFieldName(strings.Join(segments, "_"))
+}
+
 // isAllCaps reports whether every letter rune in s is uppercase (and s
 // contains at least one letter). ALL-CAPS segments preserve their case
 // under §4.2 so acronyms like API / URL / ID keep their form.

@@ -100,40 +100,40 @@ func decodeMarker(node dbtype.Node) (Marker, error) {
 	return out, nil
 }
 
-// LINKS corresponds to the LINKS edge type (Marker -> Marker).
-type LINKS struct {
+// Links corresponds to the LINKS edge type (Marker -> Marker).
+type Links struct {
 	Err    string
 	Out    string
 	Rel    string
 	Value0 string
 }
 
-// decodeLINKS decodes a driver dbtype.Relationship into a LINKS struct,
+// decodeLinks decodes a driver dbtype.Relationship into a Links struct,
 // enforcing the wire label and the per-property nullability the
 // schema declares.
-func decodeLINKS(rel dbtype.Relationship) (LINKS, error) {
+func decodeLinks(rel dbtype.Relationship) (Links, error) {
 	if rel.Type != "LINKS" {
-		return LINKS{}, fmt.Errorf("decode LINKS: expected a relationship of type %q, got %q", "LINKS", rel.Type)
+		return Links{}, fmt.Errorf("decode Links: expected a relationship of type %q, got %q", "LINKS", rel.Type)
 	}
-	var out LINKS
+	var out Links
 	value0, err := neo4j.GetProperty[string](rel, "err")
 	if err != nil {
-		return LINKS{}, fmt.Errorf("decode LINKS.Err: %w", err)
+		return Links{}, fmt.Errorf("decode Links.Err: %w", err)
 	}
 	out.Err = value0
 	value1, err := neo4j.GetProperty[string](rel, "out")
 	if err != nil {
-		return LINKS{}, fmt.Errorf("decode LINKS.Out: %w", err)
+		return Links{}, fmt.Errorf("decode Links.Out: %w", err)
 	}
 	out.Out = value1
 	value2, err := neo4j.GetProperty[string](rel, "rel")
 	if err != nil {
-		return LINKS{}, fmt.Errorf("decode LINKS.Rel: %w", err)
+		return Links{}, fmt.Errorf("decode Links.Rel: %w", err)
 	}
 	out.Rel = value2
 	value3, err := neo4j.GetProperty[string](rel, "value0")
 	if err != nil {
-		return LINKS{}, fmt.Errorf("decode LINKS.Value0: %w", err)
+		return Links{}, fmt.Errorf("decode Links.Value0: %w", err)
 	}
 	out.Value0 = value3
 	return out, nil

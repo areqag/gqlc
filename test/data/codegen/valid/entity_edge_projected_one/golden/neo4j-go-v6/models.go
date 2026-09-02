@@ -65,22 +65,22 @@ func decodePerson(node dbtype.Node) (Person, error) {
 	return out, nil
 }
 
-// ACTEDIN corresponds to the ACTED_IN edge type (Person -> Movie).
-type ACTEDIN struct {
+// ActedIn corresponds to the ACTED_IN edge type (Person -> Movie).
+type ActedIn struct {
 	Since int64
 }
 
-// decodeACTEDIN decodes a driver dbtype.Relationship into a ACTEDIN struct,
+// decodeActedIn decodes a driver dbtype.Relationship into a ActedIn struct,
 // enforcing the wire label and the per-property nullability the
 // schema declares.
-func decodeACTEDIN(rel dbtype.Relationship) (ACTEDIN, error) {
+func decodeActedIn(rel dbtype.Relationship) (ActedIn, error) {
 	if rel.Type != "ACTED_IN" {
-		return ACTEDIN{}, fmt.Errorf("decode ACTEDIN: expected a relationship of type %q, got %q", "ACTED_IN", rel.Type)
+		return ActedIn{}, fmt.Errorf("decode ActedIn: expected a relationship of type %q, got %q", "ACTED_IN", rel.Type)
 	}
-	var out ACTEDIN
+	var out ActedIn
 	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {
-		return ACTEDIN{}, fmt.Errorf("decode ACTEDIN.Since: %w", err)
+		return ActedIn{}, fmt.Errorf("decode ActedIn.Since: %w", err)
 	}
 	out.Since = value0
 	return out, nil

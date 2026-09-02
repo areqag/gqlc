@@ -65,53 +65,53 @@ func decodePost(node dbtype.Node) (Post, error) {
 	return out, nil
 }
 
-// AUTHORED corresponds to the AUTHORED edge type (Person -> Post).
-type AUTHORED struct {
+// Authored corresponds to the AUTHORED edge type (Person -> Post).
+type Authored struct {
 	Since int64
 }
 
-// decodeAUTHORED decodes a driver dbtype.Relationship into a AUTHORED struct,
+// decodeAuthored decodes a driver dbtype.Relationship into a Authored struct,
 // enforcing the wire label and the per-property nullability the
 // schema declares.
-func decodeAUTHORED(rel dbtype.Relationship) (AUTHORED, error) {
+func decodeAuthored(rel dbtype.Relationship) (Authored, error) {
 	if rel.Type != "AUTHORED" {
-		return AUTHORED{}, fmt.Errorf("decode AUTHORED: expected a relationship of type %q, got %q", "AUTHORED", rel.Type)
+		return Authored{}, fmt.Errorf("decode Authored: expected a relationship of type %q, got %q", "AUTHORED", rel.Type)
 	}
-	var out AUTHORED
+	var out Authored
 	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {
-		return AUTHORED{}, fmt.Errorf("decode AUTHORED.Since: %w", err)
+		return Authored{}, fmt.Errorf("decode Authored.Since: %w", err)
 	}
 	out.Since = value0
 	return out, nil
 }
 
-// LIKES corresponds to the LIKES edge type (Person -> Post).
-type LIKES struct {
+// Likes corresponds to the LIKES edge type (Person -> Post).
+type Likes struct {
 }
 
-// decodeLIKES decodes a driver dbtype.Relationship into a LIKES struct,
+// decodeLikes decodes a driver dbtype.Relationship into a Likes struct,
 // enforcing the wire label and the per-property nullability the
 // schema declares.
-func decodeLIKES(rel dbtype.Relationship) (LIKES, error) {
+func decodeLikes(rel dbtype.Relationship) (Likes, error) {
 	if rel.Type != "LIKES" {
-		return LIKES{}, fmt.Errorf("decode LIKES: expected a relationship of type %q, got %q", "LIKES", rel.Type)
+		return Likes{}, fmt.Errorf("decode Likes: expected a relationship of type %q, got %q", "LIKES", rel.Type)
 	}
-	var out LIKES
+	var out Likes
 	return out, nil
 }
 
-// SHARED corresponds to the SHARED edge type (Person -> Post).
-type SHARED struct {
+// Shared corresponds to the SHARED edge type (Person -> Post).
+type Shared struct {
 }
 
-// decodeSHARED decodes a driver dbtype.Relationship into a SHARED struct,
+// decodeShared decodes a driver dbtype.Relationship into a Shared struct,
 // enforcing the wire label and the per-property nullability the
 // schema declares.
-func decodeSHARED(rel dbtype.Relationship) (SHARED, error) {
+func decodeShared(rel dbtype.Relationship) (Shared, error) {
 	if rel.Type != "SHARED" {
-		return SHARED{}, fmt.Errorf("decode SHARED: expected a relationship of type %q, got %q", "SHARED", rel.Type)
+		return Shared{}, fmt.Errorf("decode Shared: expected a relationship of type %q, got %q", "SHARED", rel.Type)
 	}
-	var out SHARED
+	var out Shared
 	return out, nil
 }

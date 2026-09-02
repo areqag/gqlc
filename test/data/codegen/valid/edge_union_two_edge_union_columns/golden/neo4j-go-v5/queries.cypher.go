@@ -45,13 +45,13 @@ func (q *queries) PairActions(ctx context.Context) (PairActionsRow, error) {
 	}
 	switch rel0.Type {
 	case "AUTHORED":
-		entity0, err := decodeAUTHORED(rel0)
+		entity0, err := decodeAuthored(rel0)
 		if err != nil {
 			return PairActionsRow{}, fmt.Errorf("PairActions: decode column %q: %w", "r1", err)
 		}
 		row.R1 = entity0
 	case "LIKES":
-		entity0, err := decodeLIKES(rel0)
+		entity0, err := decodeLikes(rel0)
 		if err != nil {
 			return PairActionsRow{}, fmt.Errorf("PairActions: decode column %q: %w", "r1", err)
 		}
@@ -72,13 +72,13 @@ func (q *queries) PairActions(ctx context.Context) (PairActionsRow, error) {
 	}
 	switch rel1.Type {
 	case "AUTHORED":
-		entity1, err := decodeAUTHORED(rel1)
+		entity1, err := decodeAuthored(rel1)
 		if err != nil {
 			return PairActionsRow{}, fmt.Errorf("PairActions: decode column %q: %w", "r2", err)
 		}
 		row.R2 = entity1
 	case "LIKES":
-		entity1, err := decodeLIKES(rel1)
+		entity1, err := decodeLikes(rel1)
 		if err != nil {
 			return PairActionsRow{}, fmt.Errorf("PairActions: decode column %q: %w", "r2", err)
 		}
