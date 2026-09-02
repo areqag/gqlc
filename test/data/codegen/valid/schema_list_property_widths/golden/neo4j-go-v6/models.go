@@ -66,11 +66,11 @@ func decodeReading(node dbtype.Node) (Reading, error) {
 		}
 		out.Flags = &narrowed
 	}
-	value2, err := neo4j.GetProperty[int64](node, "id")
+	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Reading{}, fmt.Errorf("decode Reading.Id: %w", err)
 	}
-	out.Id = value2
+	out.Id = value1
 	if v, ok := node.Props["marks"]; ok {
 		s, ok := v.([]any)
 		if !ok {

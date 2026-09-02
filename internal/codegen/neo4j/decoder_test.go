@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1043,4 +1044,118 @@ func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
 
 	require.NotEmpty(t, out, "the guard walked no emitted files at all")
 	return out
+}
+
+// densityProbeSchema declares entities whose required and nullable
+// properties interleave, which is the only shape that can expose a gap:
+// with the nullable ones at either end the sequence stays dense by
+// accident and the defect hides.
+//
+// The interleaving is spelled in the NAMES, not in the declaration
+// order, and that is not decoration. prepareEntityFields sorts an
+// entity's properties by property name (prepare.go:561), so a schema
+// that alternates as written but groups when sorted emits a run of
+// required properties and no gap at all -- which is what the first
+// draft of this probe did, and it reported a 4-offset rather than the
+// interleaving it was written to show.
+const densityProbeSchema = `CREATE PROPERTY GRAPH TYPE DensityProbe AS {
+    (:Endpoint),
+    (:Interleaved {
+        alphaOptional :: STRING,
+        bravoRequired :: INT64 NOT NULL,
+        chalkOptional :: STRING,
+        deltaRequired :: INT64 NOT NULL,
+        elderRequired :: INT64 NOT NULL,
+        fennelOptional :: STRING,
+        gorseRequired :: INT64 NOT NULL,
+        hazelOptional :: STRING
+    }),
+    (:Endpoint) -[:Edged {
+        irisRequired :: INT64 NOT NULL,
+        jasmineOptional :: STRING,
+        kelpRequired :: INT64 NOT NULL
+    }]-> (:Endpoint)
+}`
+
+// positionalLocal matches the generator-owned decode local and nothing
+// derived from it: writeSliceNarrow and the narrowing arm bind `value0s`
+// and `value0n` off the same stem, and those are not positions.
+var positionalLocal = regexp.MustCompile(`^value(\d+)$`)
+
+// TestPositionalDecoderLocalsAreDense holds the emitted sequence to
+// value0..valueN with no gaps (bd gqlc-7qr5).
+//
+// Nothing breaks when it is violated, and saying so is the point of this
+// comment: the indices are unique by construction, which is the only
+// property the naming scheme needs, and Go's unused-variable rule turns
+// any positional mis-wiring into a compile error whatever the density.
+// What a gap costs is a reader. `value1` followed by `value3` in
+// generated code reads as though a statement was deleted, and someone
+// who notices goes looking for a bug that is not there.
+func (s *DecoderSuite) TestPositionalDecoderLocalsAreDense() {
+	sch, err := gql.New().Parse(strings.NewReader(densityProbeSchema))
+	s.Require().NoError(err)
+	files, err := neo4j.New().Generate(codegen.Input{Schema: sch})
+	s.Require().NoError(err)
+
+	var models string
+	for _, f := range files {
+		if f.Path == "models.go" {
+			models = string(f.Contents)
+		}
+	}
+	s.Require().NotEmpty(models, "no models.go in the emission")
+
+	checked := 0
+	for _, decl := range s.parseModels(models).Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Body == nil ||
+			!strings.HasPrefix(fn.Name.Name, "decode") {
+			continue
+		}
+
+		// Source order, taken off the tree rather than the bytes: a
+		// commented-out declaration is not one, and a raw scan would
+		// count it.
+		var positions []int
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			for _, id := range declaredIdents(n) {
+				if m := positionalLocal.FindStringSubmatch(id.Name); m != nil {
+					n, err := strconv.Atoi(m[1])
+					s.Require().NoError(err)
+					positions = append(positions, n)
+				}
+			}
+			return true
+		})
+
+		// An entity with no required property binds none, and :Endpoint is
+		// declared here to be exactly that. Skipping it is safe only
+		// because the population assertion below names the exact number
+		// of helpers that must NOT have taken this branch.
+		if len(positions) == 0 {
+			continue
+		}
+		checked++
+
+		want := make([]int, len(positions))
+		for i := range want {
+			want[i] = i
+		}
+		s.Require().Equal(want, positions,
+			"%s emits positional locals %v; the sequence must be dense value0..value%d, "+
+				"because a gap reads like a deleted statement to whoever opens the "+
+				"generated file",
+			fn.Name.Name, positions, len(positions)-1)
+	}
+
+	// The vacuity guard, one level up, and it is exact rather than a
+	// lower bound. An emission carrying no decode helper would run the
+	// loop zero times and report success; so would one where every
+	// helper hit the skip above, which is what a probe that quietly
+	// stopped declaring required properties looks like. A `>= 1` would
+	// pass on both of those halves of the probe going missing.
+	s.Require().Equal(2, checked,
+		"exactly the interleaved node and the interleaved edge carry required properties, "+
+			"so exactly two helpers owe a density comparison; %d made one", checked)
 }

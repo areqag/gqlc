@@ -58,12 +58,12 @@ func decodeCounter(node dbtype.Node) (Counter, error) {
 		}
 		out.Misses = &narrowed
 	}
-	value3, err := neo4j.GetProperty[[]any](node, "runs")
+	value2, err := neo4j.GetProperty[[]any](node, "runs")
 	if err != nil {
 		return Counter{}, fmt.Errorf("decode Counter.Runs: %w", err)
 	}
-	value3s := make([]uint64, 0, len(value3))
-	for i0, elem0 := range value3 {
+	value2s := make([]uint64, 0, len(value2))
+	for i0, elem0 := range value2 {
 		v0, ok := elem0.(int64)
 		if !ok {
 			return Counter{}, fmt.Errorf("decode Counter.Runs: property %q element %d: expected int64, got %T", "runs", i0, elem0)
@@ -72,9 +72,9 @@ func decodeCounter(node dbtype.Node) (Counter, error) {
 		if err != nil {
 			return Counter{}, fmt.Errorf("decode Counter.Runs: property %q element %d: %w", "runs", i0, err)
 		}
-		value3s = append(value3s, v0n)
+		value2s = append(value2s, v0n)
 	}
-	out.Runs = value3s
+	out.Runs = value2s
 	if v, ok := node.Props["spans"]; ok {
 		s, ok := v.([]any)
 		if !ok {

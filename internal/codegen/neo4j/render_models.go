@@ -198,8 +198,18 @@ func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 	fmt.Fprintf(b, "func decode%s(%s %s) (%s, error) {\n", e.Name, arg, carrier, e.Name)
 	writeLabelGuard(b, e, arg)
 	fmt.Fprintf(b, "\tvar out %s\n", e.Name)
-	for i, f := range e.Fields {
-		writeEntityFieldDecode(b, e, i, f, arg)
+	// The position counted is the local's, not the field's. Both decode
+	// arms bind a value<i> only where the property is required — the
+	// nullable ones bind their own generator-fixed locals inside an `if`
+	// block and consume no position — so counting fields leaves a gap at
+	// every nullable property, and generated code that skips from value1
+	// to value3 reads as though a statement was deleted.
+	position := 0
+	for _, f := range e.Fields {
+		writeEntityFieldDecode(b, e, position, f, arg)
+		if !f.Nullable {
+			position++
+		}
 	}
 	b.WriteString("\treturn out, nil\n")
 	b.WriteString("}\n")
