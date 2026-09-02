@@ -645,7 +645,7 @@ func decodeFunc(goType string) string {
 	case "int64":
 		// A width narrower than the carrier decodes through the checked
 		// narrowing, so the declared width is enforced once here rather
-		// than at each of the sites that used to convert (ADR 0036).
+		// than at each of the sites that used to convert (ADR 0037).
 		// An instantiated generic is valid both called and passed as a
 		// function value, which is what lets every call shape below take
 		// this the same way it takes the others.

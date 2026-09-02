@@ -142,7 +142,7 @@ func temporalListHelper(leaf string, depth int) string {
 // over-carries (int64 → int8, float64 → float32) used to narrow here by
 // a bare Go conversion, which wraps silently on a value the declared
 // width cannot hold; they now go through narrowCall below, which fails
-// the decode instead (ADR 0036, bd gqlc-awtb).
+// the decode instead (ADR 0037, bd gqlc-awtb).
 func narrowExpr(goType, src string) string {
 	if isTemporalCarrier(goType) {
 		return fmt.Sprintf("to%s(%s)", goType, src)
@@ -206,7 +206,7 @@ func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) (
 // emission calls. Both answer the same sentence, because to a caller they
 // are one rule: a stored value the declared width cannot hold fails the
 // read, as a null on a non-nullable column and a value of the wrong
-// dynamic type already do (ADR 0036). They are nonetheless emitted
+// dynamic type already do (ADR 0037). They are nonetheless emitted
 // independently, because a schema narrowing only integers calls only one
 // of them and the other would be an unexported function nothing calls.
 func writeNarrowHelpers(b *strings.Builder, ints, floats bool) {

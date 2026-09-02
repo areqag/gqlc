@@ -950,7 +950,7 @@ var narrowHelperNames = map[string]bool{"narrowInt": true, "narrowFloat32": true
 // declared width anywhere in an emitted body but the two helpers that
 // implement the check.
 //
-// It is the mechanical form of the question ADR 0036 answers. A renderer
+// It is the mechanical form of the question ADR 0037 answers. A renderer
 // arm that converts at the site rather than calling the helper wraps a
 // value the declared width cannot hold, silently and with no error — and
 // nothing else in this package fails when it does: the suite is green
@@ -987,7 +987,7 @@ func TestEmittedDecodersNarrowThroughACheck(t *testing.T) {
 					return true
 				}
 				t.Errorf("%s: %s narrows to %s by a bare conversion, which wraps a value "+
-					"the declared width cannot hold; it must go through narrowInt/narrowFloat32 (ADR 0036)",
+					"the declared width cannot hold; it must go through narrowInt/narrowFloat32 (ADR 0037)",
 					name, fn.Name.Name, id.Name)
 				return true
 			})

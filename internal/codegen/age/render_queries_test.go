@@ -61,7 +61,7 @@ func TestDollarTagClosesOnlyAtTheEnds(t *testing.T) {
 //
 // A width narrower than its carrier names the checked narrowing rather
 // than the carrier's own helper, which is what makes a stored value the
-// width cannot hold fail the read instead of wrapping (ADR 0036). Both
+// width cannot hold fail the read instead of wrapping (ADR 0037). Both
 // sides of that split are rows here: int64 and float64 are the widths
 // that ARE their carrier and still name the plain helper, so a change
 // that routed everything through the narrowing would go red too.

@@ -268,7 +268,7 @@ func (h *helpers) forParams(params []codegen.Param) {
 // carrier's helper AND the checked narrowing built on it — the
 // narrowing is where the declared width is enforced, and it is a helper
 // of its own rather than a conversion at the call site so that no
-// emission site can reach the width without the check (ADR 0036).
+// emission site can reach the width without the check (ADR 0037).
 // A slice marks the generic list walk plus a named wrapper
 // of its own, and recurses so the element's helper is marked too; a Go
 // type of no declared shape marks the agtype value vocabulary.
@@ -1417,7 +1417,7 @@ func writeEntityDecoder(b *strings.Builder, e wiredEntity) {
 // width narrower than the agtype scalar it rides in is produced by the
 // decoder itself rather than converted here, so the struct carries the
 // width the schema declared and a value that width cannot hold fails the
-// read instead of wrapping (ADR 0036).
+// read instead of wrapping (ADR 0037).
 func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField) {
 	value := valueName(i)
 	reader := "agtypeProperty"

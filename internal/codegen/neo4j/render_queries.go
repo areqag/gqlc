@@ -624,7 +624,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	// Emit the value expression: bare varName if carrier == GoType, else
 	// the shape-changing to<X> for a temporal. A numeric width the driver
 	// over-carries takes neither, because narrowing it can FAIL — those go
-	// through a checked call in each arm below (ADR 0036, bd gqlc-awtb).
+	// through a checked call in each arm below (ADR 0037, bd gqlc-awtb).
 	checked := carrier != f.GoType && !isTemporalCarrier(f.GoType)
 	valueExpr := varName
 	if carrier != f.GoType && !checked {
