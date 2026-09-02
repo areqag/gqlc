@@ -630,7 +630,27 @@ check-push-keepalive dir=".":
 #
 # READ-ONLY, and deliberately not a retry. Pushing again into a remote state
 # nobody has looked at is how a force-push argument gets made at 3am; this
-# reports the three states and stops.
+# reports the state it can establish and stops.
+#
+# AN ABSENT REMOTE HEAD HAS TWO CAUSES, and until bd gqlc-97rxk this recipe
+# knew only one of them. A squash merge DELETES the head branch, so absence is
+# the ordinary successful end state as well as the never-arrived one — and
+# absence is what a citizen meets at session close, which is the one moment
+# this recipe is advertised. Measured 2026-09-02: three branches, all pushed,
+# all merged, all told their push had failed and to retry it. Re-pushing there
+# recreates a head branch for a merged PR.
+#
+# Git cannot tell the two apart. `git merge-base --is-ancestor` calls a merged
+# branch unmerged, because a squash leaves no tip of it on master; CLAUDE.md
+# records the same trap for remote-branch pruning. GitHub can, so the absent
+# arm asks it — and only that arm, because the state this recipe was written
+# for (bd gqlc-ehgg) is answered by `git ls-remote` alone and must not cost a
+# round trip.
+#
+# THE GITHUB CALL IS AN ADDED DEPENDENCY, so it degrades rather than fails
+# closed: an absent or erroring `gh` yields UNKNOWN naming which of the two it
+# hit, never the old verdict. Only GitHub answering "no PR from that head, in
+# any state" now licenses NOT LANDED.
 push-landed branch="":
     #!/usr/bin/env bash
     set -uo pipefail
@@ -642,20 +662,61 @@ push-landed branch="":
         exit 1
     fi
     remote_sha="$(git ls-remote origin "refs/heads/$branch" 2>/dev/null | awk 'NR==1 { print $1 }')"
-    if [ -z "$remote_sha" ]; then
-        echo "NOT LANDED: origin has no refs/heads/$branch. Local is $local_sha."
-        echo "            The push did fail. Retry it; nothing on the remote is at stake."
-        exit 1
-    fi
-    if [ "$remote_sha" = "$local_sha" ]; then
+    if [ -n "$remote_sha" ] && [ "$remote_sha" = "$local_sha" ]; then
         echo "LANDED: origin/$branch is $remote_sha, the same commit as local."
         echo "        The push SUCCEEDED whatever rc git reported (bd gqlc-ehgg). Do not retry;"
         echo "        do not abandon this work as unpushed."
         exit 0
     fi
-    echo "DIVERGED: origin/$branch is $remote_sha, local is $local_sha."
-    echo "          Something landed, but not this commit. Look before pushing again:"
-    echo "            git fetch origin '$branch' && git log --oneline FETCH_HEAD...$branch"
+    if [ -n "$remote_sha" ]; then
+        echo "DIVERGED: origin/$branch is $remote_sha, local is $local_sha."
+        echo "          Something landed, but not this commit. Look before pushing again:"
+        echo "            git fetch origin '$branch' && git log --oneline FETCH_HEAD...$branch"
+        exit 1
+    fi
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "UNKNOWN: origin has no refs/heads/$branch, and gh is not installed here, so"
+        echo "         the second cause of that absence cannot be ruled out: a squash merge"
+        echo "         DELETES the head branch. Local is $local_sha. Do not conclude the push"
+        echo "         failed, and do not re-push, before asking:"
+        echo "           gh pr list --head '$branch' --state all"
+        exit 1
+    fi
+    gh_err="$(mktemp)"
+    trap 'rm -f "$gh_err"' EXIT
+    if ! prs="$(gh pr list --head "$branch" --state all --json number,state,mergeCommit \
+            --jq '.[] | "\(.state) \(.number) \(.mergeCommit.oid // "-")"' 2>"$gh_err")"; then
+        echo "UNKNOWN: origin has no refs/heads/$branch, and GitHub could not be asked, so"
+        echo "         the second cause of that absence cannot be ruled out: a squash merge"
+        echo "         DELETES the head branch. Local is $local_sha. gh said:"
+        sed 's/^/           /' "$gh_err"
+        echo "         Do not conclude the push failed on this. Retry the question, not the push."
+        exit 1
+    fi
+    merged="$(printf '%s\n' "$prs" | awk '$1 == "MERGED" { print; exit }')"
+    if [ -n "$merged" ]; then
+        read -r _ number oid <<<"$merged"
+        echo "LANDED AND MERGED: PR #$number merged as $oid."
+        echo "                   origin has no refs/heads/$branch because the merge DELETED"
+        echo "                   it. That is the ordinary end state, not a failed push."
+        echo "                   Local is $local_sha. Do NOT re-push: that recreates a head"
+        echo "                   branch for a merged PR. To confirm by content rather than by"
+        echo "                   this report, read the merged file on master:"
+        echo "                     git show origin/master:<path>"
+        exit 0
+    fi
+    if [ -n "$prs" ]; then
+        echo "ARRIVED, NOT MERGED: origin has no refs/heads/$branch, but GitHub has a PR from"
+        echo "                     that head, and a PR cannot be opened from a head that never"
+        echo "                     arrived. So the push did not fail. Local is $local_sha."
+        printf '%s\n' "$prs" | sed 's/^/                       /'
+        echo "                     Nothing of this branch is on master. Read the PR before"
+        echo "                     re-pushing; re-pushing is how a closed PR's head comes back."
+        exit 1
+    fi
+    echo "NOT LANDED: origin has no refs/heads/$branch, and GitHub has no PR from that head"
+    echo "            in any state. Local is $local_sha."
+    echo "            The push did fail. Retry it; nothing on the remote is at stake."
     exit 1
 
 # refuses to run when bd's auto-export cannot stage its own output — bd
