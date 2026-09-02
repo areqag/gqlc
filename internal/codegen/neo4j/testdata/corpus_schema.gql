@@ -30,25 +30,29 @@
 // properties. bd gqlc-415l carries the depth-3 live scenario.
 //
 // Those widths are declared on node types, so they are decoded off
-// dbtype.Node. Edgy declares seven of them again to be decoded off
+// dbtype.Node. Edgy declares eight of them again to be decoded off
 // dbtype.Relationship: a narrowing scalar (rank), a narrowing nullable
-// (weight), a walked list (ranks), a walked nullable list (depths), an
-// unwalked nullable list of no declared element shape (loose), a
-// non-nullable property of no declared shape (payload), and a nullable
-// one (spare). A decode helper is emitted per entity, so a narrow or a
-// null one helper was shown to survive has not been run through another.
+// (weight), a walked list (ranks), a walked list whose elements arrive
+// as themselves (blobs), a walked nullable list (depths), an unwalked
+// nullable list of no declared element shape (loose), a non-nullable
+// property of no declared shape (payload), and a nullable one (spare).
+// A decode helper is emitted per entity, so a narrow or a null one
+// helper was shown to survive has not been run through another.
 //
-// Those seven land on six arms, not seven. writeEntityFieldDecode
+// Those eight land on six arms, not eight. writeEntityFieldDecode
 // branches six ways — nullable and non-nullable, each over walked slice,
 // narrow-convert and plain assign — and writeShapelessFieldDecode
 // carries two more. ranks used to share the non-nullable walked-slice
 // arm with matrix, the two differing only in how deep writeSliceNarrow
 // recursed; with matrix gone ranks reaches that arm alone, and the
-// recursion depth is no longer varied here by anything. No arm of the
-// seven now stands reached off dbtype.Node alone. The last one that
-// did was the nullable shapeless read (out.Maybe = &v in decodeAnything)
-// until spare put it on a relationship, and the non-nullable plain
-// assign (out.Loose = value1 in decodeBin) until Edgier did the same.
+// recursion depth is no longer varied here by anything. blobs shares
+// that arm too, and what it varies is one level down: which of
+// writeSliceNarrow's three ELEMENT cases the walk that arm emits then
+// takes. No arm of the eight now stands reached off dbtype.Node alone.
+// The last one that did was the nullable shapeless read (out.Maybe = &v
+// in decodeAnything) until spare put it on a relationship, and the
+// non-nullable plain assign (out.Loose = value1 in decodeBin) until
+// Edgier did the same.
 //
 // A helper shown to survive on one entity says nothing about another,
 // and the emitter writes one shapeless-nullable arm that both carriers
@@ -58,9 +62,29 @@
 // TestEdgySpareSeparatesAbsentFromNullOverARelationship and leaves
 // TestAnythingSeparatesAbsentFromNull green.
 //
-// Edgy also declares no BYTES and no TIMESTAMP element — both of which
-// the walk asserts straight to, without narrowing. bd gqlc-np7s tracks
-// what Edgy leaves on the node types.
+// blobs is that element case (bd gqlc-np7s). Its elements are the one
+// kind the driver hands back already the width the schema declared, so
+// the walk asserts straight to them and appends what it asserted —
+// writeSliceNarrow's DEFAULT case, where carrier == elem. ranks and
+// depths both take the case above it, the per-element narrowing call, so
+// before blobs the default case ran off dbtype.Node alone. Its Go type
+// is [][]byte, two slice prefixes, and it is the only property that can
+// carry two under ADR 0035: the nesting is inside BYTES rather than in
+// the declared list, so Phase Z has nothing to refuse.
+//
+// LIST<TIMESTAMP> is NOT a second such property, though bd gqlc-np7s
+// listed it as one. Its element type is time.Time, which is its own
+// driver carrier and is not one of the five neutral temporal carriers
+// (codegen.TemporalCarriers), so a TIMESTAMP element takes the same
+// default case blobs takes and would witness nothing blobs does not.
+// The 'time' import it was thought to gate is decided over every entity
+// in the emission at once (anyTime, render_models.go), so Listy.stamps
+// already sets it and no edge property can move it.
+//
+// The third element case — a temporal carrier, narrowed through the
+// emitted to<X> helper — is reached by no DECODED property here at all.
+// Slot.days is this fixture's only list of one, and Slot exists for the
+// encode direction; nothing projects it. bd gqlc-abf6t carries that.
 //
 // Edgier is declared for the query columns rather than for a width the
 // node types had left unreached. A whole-entity column commits to a
@@ -141,6 +165,7 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
     (:Scalar) -[:Edgy {
         rank    :: INT32 NOT NULL,
         ranks   :: LIST<INT32> NOT NULL,
+        blobs   :: LIST<BYTES> NOT NULL,
         payload :: ANY VALUE NOT NULL,
         loose   :: LIST,
         depths  :: LIST<FLOAT32>,
