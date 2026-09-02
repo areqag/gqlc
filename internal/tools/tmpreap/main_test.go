@@ -433,6 +433,78 @@ func TestRun_DryRunIsNotConstrainedByTheApplyGuard(t *testing.T) {
 	}
 }
 
+// The spelling an operator actually uses. `just tmp-reap apply` takes the root
+// positionally, and someone standing in the directory they mean types its
+// short name. filepath.EvalSymlinks does not absolutise, so a relative -root
+// reached refuseNonScratchRoot still relative and matched no scratch directory
+// — and the refusal said the directory was not scratch, which was false about
+// the only thing the operator could act on. Wrong at the exact moment the
+// filesystem is full and they are reading fast (bd gqlc-cxhw).
+func TestRun_ApplyAcceptsARelativeRootInsideScratch(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+	t.Chdir(filepath.Dir(root))
+
+	out, err := runTool(t,
+		"-root", filepath.Base(root), "-repo", repo, "-base", "master", "-age", "12h",
+		"-archive", archive, "-apply")
+	if err != nil {
+		t.Fatalf("-apply refused a relative root naming a directory inside scratch: %v", err)
+	}
+	// The run reached the decision table rather than merely surviving the
+	// guard: an accepted root that reaped nothing would pass an err == nil
+	// assertion while still never resolving.
+	if _, statErr := os.Stat(filepath.Join(root, "factory")); !os.IsNotExist(statErr) {
+		t.Errorf("abandoned scratch survived a run that reported success: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "gqlc-open")); statErr != nil {
+		t.Errorf("unlanded work was deleted: %v", statErr)
+	}
+	if !strings.Contains(out, "reclaimed") {
+		t.Errorf("the report does not say it reclaimed anything:\n%s", out)
+	}
+}
+
+// The other direction, and the reason the row above is not the whole test.
+// Absolutising widens what reaches the comparison: before it, every relative
+// spelling was refused for the wrong reason, which incidentally refused this
+// one too. The guard must now refuse it on its merits.
+func TestRun_ApplyRefusesARelativeRootResolvingOutsideScratch(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+	base := filepath.Dir(root)
+	outside := mkdir(t, filepath.Join(t.TempDir(), "not-scratch"))
+	writeFile(t, filepath.Join(outside, "keep.md"), "not this tool's to delete\n")
+	rel, err := filepath.Rel(base, outside)
+	if err != nil {
+		t.Fatalf("relative spelling for %s from %s: %v", outside, base, err)
+	}
+	if !strings.HasPrefix(rel, "..") {
+		t.Fatalf("the fixture never left scratch: %s resolves to %s, which is inside %s", rel, outside, base)
+	}
+	t.Chdir(base)
+
+	out, runErr := runTool(t,
+		"-root", rel, "-repo", repo, "-base", "master", "-age", "12h",
+		"-archive", archive, "-apply")
+	if runErr == nil {
+		t.Fatal("-apply ran over a relative root resolving outside every scratch directory")
+	}
+	if !strings.Contains(runErr.Error(), "is not scratch") {
+		t.Errorf("the refusal does not say the root is not scratch: %v", runErr)
+	}
+	// The message names what the spelling resolved to, not the spelling. An
+	// operator who mistyped a `..` cannot see their mistake in the short form
+	// they typed, and the resolved path is the thing the guard actually judged.
+	if !strings.Contains(runErr.Error(), outside) {
+		t.Errorf("the refusal does not name the directory it judged (%s): %v", outside, runErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "keep.md")); statErr != nil {
+		t.Errorf("a file outside scratch was deleted despite the refusal: %v", statErr)
+	}
+	if strings.Contains(out, "reclaimed") {
+		t.Error("the report claims it reclaimed space after refusing to run")
+	}
+}
+
 // --- the -apply-above gate: what makes this safe on a timer (bd gqlc-u078) ---
 //
 // A cadence that reaps on every tick is a cadence that deletes a citizen's
