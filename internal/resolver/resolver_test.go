@@ -1539,6 +1539,65 @@ func (s *ResolverSuite) TestANativelyPluralBindingDefersEvenWhenEveryCandidateDe
 	s.Require().NotEmpty(cols)
 }
 
+// TestPhaseBsPluralCommitLeavesNoResolvedCoversMark pins the lane write the
+// plural arm of commitUnlabelledRound is the one writer not to make.
+//
+// resolvedCovers qualifies `resolved` alone (nodeTable says so), so a mark must
+// not outlive the `resolved` entry it qualifies. Four siblings state that rule
+// in their own words and act on it: BindNodeCands, whose delete "keeps the two
+// lanes from ever both claiming v"; BindEdge and BindCall on their shadow
+// cascades; and the SINGULAR arm of this same round, whose `else` deletes so
+// "the absence is asserted rather than assumed". The plural arm moves a name
+// into `cands` — BindNodeCands' own transition — and left the lane alone.
+//
+// The mark is seeded here because no input produces it: every writer of the
+// lane writes `resolved` in the same breath, and Phase B filters a name already
+// in `resolved` out of `pending` before the first round. So this test does not
+// claim the state arises today. It claims the arm clears it when it is there,
+// which is exactly what the four siblings were written for, and what seeding
+// the lane from the carry — the alternative newScope names and declines — would
+// make live.
+func (s *ResolverSuite) TestPhaseBsPluralCommitLeavesNoResolvedCoversMark() {
+	sch := s.loadSchema("valid", "satisfy_plural_edges_inline_subtype.gql")
+
+	// unlabelled_optional_hop_shared_property.cypher's shape, built directly so
+	// the mark can be seeded: a MANDATORY WORKS_AT off a `(:Person)` inline end
+	// makes both company types attainable, and an OPTIONAL HAS_DESK — which
+	// witnesses no endpoint, so it folds into `inferred` alone — narrows the
+	// inference to the bare Company. That is commit()'s widened case, which is
+	// the only way into the plural arm.
+	c, err := query.NewNodeBinding("c", graph.LabelSet{})
+	s.Require().NoError(err)
+	cEnd, err := query.NewVarEndpoint("c")
+	s.Require().NoError(err)
+	worksAt, err := query.NewEdgeBinding("q", graph.LabelSet{"WORKS_AT"},
+		query.NewInlineEndpoint(graph.LabelSet{"Person"}), cEnd, true)
+	s.Require().NoError(err)
+	hasDesk, err := query.NewNullableEdgeBinding("h", graph.LabelSet{"HAS_DESK"},
+		cEnd, query.NewInlineEndpoint(graph.LabelSet{"Desk"}), true)
+	s.Require().NoError(err)
+
+	table := nodeTable{
+		resolved:          map[string]schema.NodeType{},
+		cands:             map[string][]schema.NodeType{},
+		pluralByInference: map[string]bool{},
+		resolvedCovers:    map[string]struct{}{"c": {}},
+	}
+	s.Require().NoError(inferUnlabelled(
+		[]query.NodeBinding{c}, []query.EdgeBinding{worksAt, hasDesk},
+		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}))
+
+	// The tripwire. Without these the assertion below passes for a `c` that
+	// never reached the plural arm at all.
+	s.Require().Len(table.cands["c"], 2,
+		"c must commit to the plural lane, or the arm under test did not run")
+	s.Require().NotContains(table.resolved, "c",
+		"the plural arm writes no singular entry, so no mark of its making qualifies one")
+
+	s.Require().NotContains(table.resolvedCovers, "c",
+		"a mark qualifying a `resolved` entry the plural arm did not write must not survive it")
+}
+
 // TestAWholeEntityProjectionNamesTheFaultItActuallyHas pins which of the two
 // ambiguity sentinels the plural whole-entity refusal carries, on the axis that
 // selects it: whether the binding carried labels.
