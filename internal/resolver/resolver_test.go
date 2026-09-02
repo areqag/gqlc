@@ -1306,7 +1306,8 @@ func (s *ResolverSuite) TestABareWithCarriesAPluralBindingForwards() {
 // records a nodeCands entry only when the alias equals the variable, so
 // `WITH p AS q` drops the candidate set on the floor. Deferring there would
 // carry a name downstream with its satisfying set lost, which is strictly worse
-// than refusing.
+// than refusing. Row 4, after the loop, is the other conjunct of that same
+// spelling: a PROPERTY projection whose alias happens to equal the variable.
 func (s *ResolverSuite) TestAPluralCarryStillRefusesWhereNothingNarrowsIt() {
 	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
 	refuse := func(src string) error {
@@ -1339,6 +1340,21 @@ func (s *ResolverSuite) TestAPluralCarryStillRefusesWhereNothingNarrowsIt() {
 		s.Require().ErrorContains(err, "Employee&Person", "%s", src)
 		s.Require().ErrorContains(err, "Person", "%s", src)
 	}
+
+	// `WITH p.employeeId AS p` shadows the binding with a scalar under its own
+	// name, so it satisfies the deferral's alias condition and is separated
+	// only by the property one. It must still be refused: employeeId is absent
+	// from the bare Person, and a property fault belongs to the Part that owns
+	// the binding whether or not that Part is final. Deferring it would carry a
+	// ResolvedUnknown named `p` past a real error, and Export records no
+	// candidate set for a property projection, so no downstream Part could ever
+	// report it — the query would ACCEPT. Its corpus twin is
+	// valid/parameter_across_with_alias_shadow.cypher, whose three plural cells
+	// are what the sweep catches; this row is what catches it without the
+	// sweep, which is regenerable.
+	err := refuse("MATCH (p:Person) WITH p.employeeId AS p RETURN p")
+	s.Require().ErrorIs(err, ErrUnknownProperty)
+	s.Require().ErrorContains(err, "p.employeeId missing on plural-satisfying type Person")
 }
 
 // TestACarriedPluralBindingKeepsItsOwnSentinel pins the lane the widening
