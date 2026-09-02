@@ -1004,22 +1004,33 @@ check-bd-gh-sync-ledger:
            exit 1 ;;
     esac
 
-    # The falsifier, in band: a helper that ignores its environment must be
-    # REJECTED by the rows above. Without this they can pass while asserting
-    # nothing, which is the failure the rows exist to notice.
+    # The falsifier, in band. Row 2 is the load-bearing row — it is what a
+    # helper hard-coded to any constant would fail — so it is the one that has
+    # to be shown capable of failing. Its predicate is re-run here against a
+    # deliberately environment-blind _ledger, and this refuses unless that
+    # predicate FIRES on it. Row 1 satisfies the same fixture (the constant is
+    # the probe path), which is precisely why row 1 alone would witness nothing.
+    #
+    # Not a second assertion about the real helper: by this point row 2 has
+    # already exited on `named = unset_out`, so any further test phrased over
+    # those two values is unreachable and would vouch for nothing.
     cat >"$scratch/inert.sh" <<'INERT'
     _ledger() { echo "BEADS_DIR=/probe/gqlc-xpgdc/not-a-real-ledger"; }
     INERT
     f_named=$(BEADS_DIR="$probe" bash -c ". '$scratch/inert.sh'; _ledger" 2>/dev/null)
     f_unset=$(env -u BEADS_DIR bash -c ". '$scratch/inert.sh'; _ledger" 2>/dev/null)
+    case "$f_named" in
+        *"$probe"*) ;;
+        *) echo "error: the falsifier fixture does not satisfy row 1, so it does not" >&2
+           echo "       isolate row 2 as the row under test (bd gqlc-xpgdc)." >&2
+           exit 1 ;;
+    esac
     if [ "$f_named" != "$f_unset" ]; then
-        echo "error: the falsifier below is not inert — it answered differently with" >&2
-        echo "       BEADS_DIR set and unset, so it cannot show that row 2 can fail" >&2
-        echo "       (bd gqlc-xpgdc)." >&2
-        exit 1
-    fi
-    if [ "$f_named" != "$named" ] && [ "$f_named" = "$f_unset" ] && [ "$named" = "$unset_out" ]; then
-        echo "error: row 2 accepted a _ledger that ignores its environment (bd gqlc-xpgdc)." >&2
+        echo "error: row 2's predicate did not fire on a _ledger that ignores its" >&2
+        echo "       environment, so row 2 above passed without being able to fail" >&2
+        echo "       (bd gqlc-xpgdc). The fixture answered '$f_named' set and" >&2
+        echo "       '$f_unset' unset; an environment-blind helper must answer both" >&2
+        echo "       alike, which is exactly what row 2 rejects." >&2
         exit 1
     fi
 
