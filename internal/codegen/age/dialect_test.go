@@ -590,7 +590,7 @@ func commentOut(block string) string {
 func syntheticGap() (age.DialectGap, map[string]string) {
 	return age.DialectGapFields{
 			Sentinel: age.ErrUndefinedFunction,
-			Find:     age.FindUndefinedFunctions,
+			Find:     age.Positionless(age.FindUndefinedFunctions),
 			Diagnose: func(int, string, string) string { return "" },
 			Witness:  syntheticWitness,
 			Refused:  []age.DialectProbe{age.NewDialectProbe(syntheticProbeText, syntheticProbeAns)},
@@ -873,11 +873,11 @@ func TestAnUnassertedAnswerReddensTheSweep(t *testing.T) {
 // reads the alternation the template probes and the function names the
 // real table refuses, so a row can cut either binding without needing a
 // second template. Test-only — the shipped table pairs one find per gap.
-func findUndefinedFunctionsOrAlternations(src string) []string {
-	if found := age.FindUndefinedFunctions(src); len(found) > 0 {
+func findUndefinedFunctionsOrAlternations(src string) []age.Finding {
+	if found := age.Positionless(age.FindUndefinedFunctions)(src); len(found) > 0 {
 		return found
 	}
-	return cypher.RelationshipTypeAlternations(src)
+	return age.FindRelationshipTypeAlternations(src)
 }
 
 // witnessGaps is the sweep, expressed as the complaints it has rather

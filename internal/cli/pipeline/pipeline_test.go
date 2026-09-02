@@ -661,25 +661,25 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 			name:    "an alternation the query never projects",
 			schema:  narrowedSchema,
 			query:   unprojectedAlternationQuery,
-			dropped: `PostIDs (":AUTHORED|LIKES")`,
+			dropped: `PostIDs (":AUTHORED|LIKES" at 1:19)`,
 		},
 		{
 			name:    "an alternation the resolver narrowed to one declared candidate",
 			schema:  soleTypeSchema,
 			query:   narrowedToOneAlternationQuery,
-			dropped: `GetAction (":AUTHORED|FLAGGED")`,
+			dropped: `GetAction (":AUTHORED|FLAGGED" at 1:19)`,
 		},
 		{
 			name:    "both at once",
 			schema:  soleTypeSchema,
 			query:   narrowedUnprojectedAlternationQuery,
-			dropped: `PostIDs (":AUTHORED|FLAGGED")`,
+			dropped: `PostIDs (":AUTHORED|FLAGGED" at 1:19)`,
 		},
 		{
 			name:    "an alternation a re-bound variable narrowed to one type",
 			schema:  narrowedSchema,
 			query:   reboundNarrowedAlternationQuery,
-			dropped: `GetAction (":AUTHORED|LIKES")`,
+			dropped: `GetAction (":AUTHORED|LIKES" at 1:19)`,
 		},
 		{
 			// The zero-column row: a :exec write projects nothing, so
@@ -692,7 +692,7 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 			name:    "an alternation in a write that projects nothing",
 			schema:  narrowedSchema,
 			query:   execAlternationQuery,
-			dropped: `DropActions (":AUTHORED|LIKES")`,
+			dropped: `DropActions (":AUTHORED|LIKES" at 1:20)`,
 		},
 		{
 			// The arity row, and the one the front end has to be run for
@@ -705,13 +705,13 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 			name:    "an alternation naming one type twice",
 			schema:  narrowedSchema,
 			query:   repeatedTypeAlternationQuery,
-			dropped: `GetAction (":LIKES|LIKES")`,
+			dropped: `GetAction (":LIKES|LIKES" at 1:19)`,
 		},
 		{
 			name:    "the same repeat in the legacy spelling",
 			schema:  narrowedSchema,
 			query:   repeatedTypeLegacyAlternationQuery,
-			dropped: `GetAction (":LIKES|:LIKES")`,
+			dropped: `GetAction (":LIKES|:LIKES" at 1:19)`,
 		},
 		{
 			// The spaced rendering. SP is a default-channel token, so
@@ -721,7 +721,7 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 			name:    "an alternation written with spaces around the '|'",
 			schema:  narrowedSchema,
 			query:   spacedAlternationQuery,
-			dropped: `PostIDs (":AUTHORED | LIKES")`,
+			dropped: `PostIDs (":AUTHORED | LIKES" at 1:19)`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -738,7 +738,7 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 				"the author's query text verbatim (ADR 0005) and Apache AGE 1.7.0's parser has no "+
 				`"|" in a relationship pattern, so every call on 1 query would answer `+
 				`"syntax error at or near \"|\"" (SQLSTATE 42601) — write each relationship type as `+
-				"its own query: "+tc.dropped)
+				"its own query; each alternation is located line:column within its own query's text: "+tc.dropped)
 			require.Equal(t, pipeline.Result{}, res)
 
 			// The same project on a driver whose server parses the
@@ -1017,7 +1017,7 @@ func TestRunApacheAgeAnswersAnAlternationAheadOfOtherColumnRefusals(t *testing.T
 	require.ErrorIs(t, err, age.ErrRelationshipTypeAlternation,
 		"the column gate yields to the text on every reason but the edge union, so the author is not sent to fix a projection first")
 	require.NotErrorIs(t, err, age.ErrUnsupportedQuery)
-	require.ErrorContains(t, err, `PostPayload (":AUTHORED|LIKES")`)
+	require.ErrorContains(t, err, `PostPayload (":AUTHORED|LIKES" at 1:19)`)
 	require.NotContains(t, err.Error(), "property:BYTES",
 		"the projection is not the obstacle yet; the statement is")
 	require.Equal(t, pipeline.Result{}, res)
@@ -1070,7 +1070,7 @@ func TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission(t *testing.T) {
 	require.NotErrorIs(t, err, codegen.ErrUnrepresentableEdgeUnion,
 		"reaching shared admission first would give this fixture the sentinel its manifest names, and its apache-age-pgx-v5 enrolment would be correct after all")
 	require.NotErrorIs(t, err, age.ErrUnsupportedQuery)
-	require.ErrorContains(t, err, `GetAction (":LIKES|WROTE")`)
+	require.ErrorContains(t, err, `GetAction (":LIKES|WROTE" at 1:20)`)
 	require.Equal(t, pipeline.Result{}, res)
 
 	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverNeo4jGoV5), ""))
