@@ -956,7 +956,12 @@ compatibility check:
 **Rule 2 — column names.** For each column index i,
 `Columns[b][i].Name == Columns[0][i].Name` for every branch b. If any
 disagrees at index i, fail: `ErrUnionColumnMismatch: branch %d column %d
-named %q; branch 0 column %d named %q`.
+named %q; branch 0 named %q`. The index is printed once: the comparison
+is positional, so branch 0's index is always the one already given, and
+restating it invites the reader to check two numbers against each other
+and learn nothing. Should the comparison ever stop being positional — a
+named-column join across branches — the second index becomes a fact and
+returns with the code that makes it one.
 
 **Rule 3 — column types.** For each column index i,
 `Columns[b][i].Type` must equal `Columns[0][i].Type` for every branch b.
