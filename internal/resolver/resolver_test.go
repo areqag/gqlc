@@ -100,13 +100,82 @@ var signaturesR7 = []procsig.Signature{
 
 // regR7 is the Registry built from signaturesR7. Package-level so the R7
 // fixture suite constructs it once — a construction failure fails the whole
-// suite via mustBuildRegR7's panic-on-error posture (spec §6.3 design note).
-var regR7 = mustBuildRegR7()
+// suite via mustBuildRegistry's panic-on-error posture (spec §6.3 design note).
+var regR7 = mustBuildRegistry("R7", signaturesR7)
 
-func mustBuildRegR7() procsig.Registry {
-	reg, err := procsig.NewRegistry(signaturesR7)
+// regR7Alt is the corpus sweep's second registry (gqlc-2xkf). WithRegistry is
+// the resolver's only Option, so a registry is the whole of the axis the sweep
+// otherwise holds constant, and a CALL diagnostic reachable only under some
+// other signature table moves no cell of the manifest.
+//
+// It is DERIVED from signaturesR7, not authored beside it. The parser resolves
+// a CALL's procedure name, its arity and its YIELD field names against the
+// registry it is handed (cypher/call.go: collectCall's three fail-sites), so a
+// second literal table that drifted on any of those three would stop a fixture
+// PARSING and abort the sweep at require.NoError with a message naming the
+// fixture rather than the table. Deriving holds all three identical by
+// construction and leaves only what the resolver reads.
+var regR7Alt = mustBuildRegistry("R7Alt", perturbSignatures(signaturesR7))
+
+// perturbSignatures rotates every type token one step around the closed
+// TypeToken sum and flips every nullability. The rotation is a permutation, so
+// no token keeps its value and every result is still inside the sum
+// NewRegistry admits.
+//
+// The two axes reach the resolver's output by different routes, which is why
+// TestSweepRegistryDelta asserts a live cell on each rather than on their
+// total: a PARAM token reaches argAssignable, where the rotation turns a
+// STRING argument at a STRING parameter into one at a NUMBER parameter and
+// refuses; a RESULT token and its nullability reach the parser's TypeToken
+// bridge and land on the CallBinding's result type, so they move an accepting
+// cell's model without moving its verdict.
+//
+// A NUMBER result is not a shape a deployment would author — the bridge maps
+// it to query.TypeUnknown (procsig package doc, Stage 14 §3.2). It is admitted
+// here because this table is a perturbation of R7 and not a claim about any
+// deployment.
+func perturbSignatures(in []procsig.Signature) []procsig.Signature {
+	out := make([]procsig.Signature, len(in))
+	for i, sig := range in {
+		out[i] = procsig.Signature{Name: sig.Name}
+		for _, p := range sig.Params {
+			out[i].Params = append(out[i].Params, procsig.Param{
+				Name: p.Name, Token: rotateToken(p.Token), Nullable: !p.Nullable,
+			})
+		}
+		for _, r := range sig.Results {
+			out[i].Results = append(out[i].Results, procsig.Result{
+				Name: r.Name, Token: rotateToken(r.Token), Nullable: !r.Nullable,
+			})
+		}
+	}
+	return out
+}
+
+// rotateToken names every member of the sum and panics on anything else, in
+// mustBuildRegistry's posture: a token added to procsig without a case here
+// would otherwise fold silently onto an existing one, and two signatures that
+// perturb to the same token are a perturbation that moves fewer cells than its
+// caller's comment claims.
+func rotateToken(t procsig.TypeToken) procsig.TypeToken {
+	switch t {
+	case procsig.TokenInteger:
+		return procsig.TokenFloat
+	case procsig.TokenFloat:
+		return procsig.TokenString
+	case procsig.TokenString:
+		return procsig.TokenNumber
+	case procsig.TokenNumber:
+		return procsig.TokenInteger
+	default:
+		panic(fmt.Sprintf("resolver_test: TypeToken %d is outside the sum rotateToken names", int(t)))
+	}
+}
+
+func mustBuildRegistry(name string, sigs []procsig.Signature) procsig.Registry {
+	reg, err := procsig.NewRegistry(sigs)
 	if err != nil {
-		panic("resolver_test: R7 signatures failed to build registry: " + err.Error())
+		panic("resolver_test: " + name + " signatures failed to build registry: " + err.Error())
 	}
 	return reg
 }
