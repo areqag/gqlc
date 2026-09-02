@@ -185,18 +185,41 @@ echo asleep >"$home/status"
 trap 'echo asleep >"$home/status"' EXIT
 trap 'exit 0' INT TERM
 
-compose() { # $1 = wake reasons, one per line; $2 = a stale-hooks warning, or empty
+compose() { # $1 = wake reasons; $2 = km seat-refresh's exposure line, or empty; $3 = its exit code
     printf 'Բարի լոյս, %s։ A new workday begins in your seat (%s).\n\n' "$display" "$seat"
     printf 'Why you were woken:\n'
     printf '%s\n' "$1" | sed 's/^/  - /'
 
+    # The two paragraphs are separate because the two exposures have different
+    # remedies and a seat can carry either alone. Which is owed is read off km's
+    # EXIT CODE (seat_exposure_rc: 3 hooks, 6 documents, 7 both) rather than off
+    # the wording of its sentence, so no edit to that sentence can silently
+    # switch which advice a citizen is given (bd gqlc-gsjbs).
     if [ -n "$2" ]; then
-        printf '\nBEFORE YOU PUSH — your gates are not master'"'"'s:\n  %s\n' "$2"
-        printf 'You have work in flight here, so nothing was moved for you. The hooks in\n'
-        printf 'this worktree (and .claude/settings.json) are the versions your branch was\n'
-        printf 'cut from — including the guard that refuses a push resolving to master.\n'
-        printf 'Rebase onto origin/master, or check your push destination by hand with\n'
-        printf 'git branch -vv (bd gqlc-xtre).\n'
+        printf '\nBEFORE YOU WORK — this worktree is not master:\n  %s\n' "$2"
+        printf 'You have work in flight here, so nothing was moved for you.\n'
+        case "$3" in
+            3 | 7)
+                printf '\nThe hooks here (and .claude/settings.json) are the versions your branch\n'
+                printf 'was cut from — including the guard that refuses a push resolving to\n'
+                printf 'master. Rebase onto origin/master, or check your push destination by\n'
+                printf 'hand with git branch -vv (bd gqlc-xtre).\n'
+                ;;
+        esac
+        case "$3" in
+            6 | 7)
+                printf '\nThe constitution and the playbooks here are that same old copy, and they\n'
+                printf 'are what you will read when you follow your procedure: every path in the\n'
+                printf 'ritual named below is relative to THIS tree, so a rule that landed after\n'
+                printf 'your branch was cut is not in the document you are about to open. This\n'
+                printf 'has already cost the town once — a citizen followed a protocol that had\n'
+                printf 'been superseded 91 minutes before her branch was cut, put the old rule\n'
+                printf 'in writing to another seat, and rerouted a judge bead off the judge\n'
+                printf 'entitled to it, with nothing in the town able to catch it. Read any\n'
+                printf 'governing text you are about to rely on from master first —\n'
+                printf 'git show origin/master:<path> — or rebase (bd gqlc-gsjbs).\n'
+                ;;
+        esac
     fi
 
     local unread
@@ -450,13 +473,14 @@ The bead(s) named above could not be re-derived: bd gave no answer at all for th
     # is never moved — it gets told instead, in its first message.
     refresh_out=$("$KM" seat-refresh "$seat" 2>&1) && refresh_rc=0 || refresh_rc=$?
     stale=""
+    stale_kind=0
     case "$refresh_rc" in
         0) ;;
-        3) stale=$refresh_out ;;
+        3 | 6 | 7) stale=$refresh_out; stale_kind=$refresh_rc ;;
         *) echo "km-seat: could not refresh $seat's worktree: $refresh_out" >&2 ;;
     esac
 
-    msg=$(compose "$reasons" "$stale")
+    msg=$(compose "$reasons" "$stale" "$stale_kind")
 
     echo awake >"$home/status"
     (

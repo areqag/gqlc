@@ -257,6 +257,13 @@ deploy_root() { echo "${KM_DEPLOY_ROOT:-$(main_root)}"; }
 # history: kingdom/brain/km-notes.md#km_gate_paths
 KM_GATE_PATHS=(kingdom/ .githooks/ .claude/)
 
+# The documents that tell a citizen what to do, as opposed to the machinery that
+# does it. The distinction is the whole point of the split: a seat runs the
+# DEPLOYED km, so stale machinery in its worktree costs it nothing — but it
+# READS its procedure by relative path from its own cwd, so a stale document is
+# followed (bd gqlc-gsjbs).
+KM_DOC_PATHS=(kingdom/CONSTITUTION.md kingdom/brain/playbooks/ kingdom/brain/decisions/)
+
 # history: kingdom/brain/km-notes.md#master_holder
 master_holder() { # <root>
     git_at "$1" worktree list --porcelain 2>/dev/null |
@@ -4031,13 +4038,13 @@ cmd_doctor() {
 
 # history: kingdom/brain/km-notes.md#seat_freshness-2
 seat_freshness() {
-    local seat=$1 target=$2 wt head branch dirty ahead behind_all behind_gates
+    local seat=$1 target=$2 wt head branch dirty ahead behind_all behind_gates behind_docs
     wt=$(seat_worktree "$seat")
-    [ -d "$wt" ] || { echo "unknown 0 0 0 no worktree at $wt"; return 0; }
+    [ -d "$wt" ] || { echo "unknown 0 0 0 0 no worktree at $wt"; return 0; }
     target=$(seat_target "$wt" "$target")
-    [ -n "$target" ] || { echo "unknown 0 0 0 no origin/master to judge against"; return 0; }
+    [ -n "$target" ] || { echo "unknown 0 0 0 0 no origin/master to judge against"; return 0; }
     head=$(git_at "$wt" rev-parse HEAD 2>/dev/null) ||
-        { echo "unknown 0 0 0 git cannot read $wt"; return 0; }
+        { echo "unknown 0 0 0 0 git cannot read $wt"; return 0; }
 
     branch=$(git_at "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
     dirty=$(git_at "$wt" status --porcelain 2>/dev/null || echo "?")
@@ -4055,6 +4062,20 @@ seat_freshness() {
     # The hooks are the opposite — core.hooksPath is relative, so they resolve
     # inside the seat's own checkout.
     behind_gates=$(git_at "$wt" rev-list --count "HEAD..$target" -- .githooks .claude 2>/dev/null) || behind_gates=0
+    # The clause above is true of kingdom/ as MACHINERY and was read as true of
+    # all of it, which is the gap this count closes. A citizen opens
+    # citizen-protocol.md by relative path from their own worktree, so the
+    # procedure they follow is their copy's, whatever the deployed km runs.
+    # Այգ read a protocol that had been superseded 91 minutes before her branch
+    # was cut, told another seat the old rule in writing, and rerouted a judge
+    # bead off the judge entitled to it — while km told her that her hooks were
+    # current, which they were (bd gqlc-gsjbs).
+    #
+    # Counted separately from behind_gates rather than folded into it because
+    # the two have different remedies and different failure directions. A stale
+    # hook fails toward refusing a push, loudly. A stale document fails toward
+    # the citizen confidently doing the wrong thing and explaining why.
+    behind_docs=$(git_at "$wt" rev-list --count "HEAD..$target" -- "${KM_DOC_PATHS[@]}" 2>/dev/null) || behind_docs=0
 
     # history: kingdom/brain/km-notes.md#seat_freshness-3
     local unique upstream_known=0 upstream_gone=""
@@ -4080,11 +4101,11 @@ seat_freshness() {
         [ -n "$upstream_gone" ] &&
             why="branch $branch had upstream $upstream_gone, which is gone — whether its work landed is not a question git can answer"
         [ -n "$dirty" ] && why="uncommitted work in the tree"
-        echo "working $behind_all $behind_gates $ahead $why"
+        echo "working $behind_all $behind_gates $behind_docs $ahead $why"
         return 0
     fi
     if [ "$head" = "$target" ]; then
-        echo "current 0 0 0 at $(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
+        echo "current 0 0 0 0 at $(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
         return 0
     fi
     # On a branch, clean, upstream resolved, everything held by that upstream:
@@ -4093,16 +4114,49 @@ seat_freshness() {
     # merged one. The word deliberately refuses to say `parked`; the PR record
     # is the authority (0008) and seat_refresh_step is where it is consulted.
     if [ -n "$branch" ] && [ "$upstream_known" -eq 1 ]; then
-        echo "published $behind_all $behind_gates 0 branch $branch fully held by its upstream"
+        echo "published $behind_all $behind_gates $behind_docs 0 branch $branch fully held by its upstream"
         return 0
     fi
-    echo "parked $behind_all $behind_gates 0 at $(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
+    echo "parked $behind_all $behind_gates $behind_docs 0 at $(git_at "$wt" rev-parse --short HEAD 2>/dev/null || echo "$head")"
+}
+
+# Names everything a seat's worktree is behind on that its citizen will actually
+# run or read, or nothing at all when it is behind on neither. Spelled once
+# because the same sentence is owed from four places, and the failure this
+# repairs was a message that was true about one exposure and silent about the
+# other (bd gqlc-gsjbs).
+seat_exposure() { # <behind_gates> <behind_docs>
+    local gates=$1 docs=$2 phrase=""
+    if [ "$gates" -gt 0 ]; then
+        phrase="$gates hook/settings change(s) behind master and NOT applied"
+    fi
+    if [ "$docs" -gt 0 ]; then
+        if [ -n "$phrase" ]; then phrase="$phrase; also "; fi
+        phrase="$phrase$docs change(s) to the governing documents behind master — the constitution and playbooks IN THIS WORKTREE are the ones its citizen opens and follows"
+    fi
+    echo "$phrase"
+}
+
+# Which remedy a held seat is owed, as a number: 3 hooks/settings, 6 governing
+# documents, 7 both, 0 nothing. It exists so km-seat can choose its paragraphs
+# without matching on the WORDING of seat_exposure's sentence — a coupling
+# between two files that nothing would check, and that would fail by silently
+# printing the wrong advice rather than by breaking (bd gqlc-gsjbs).
+#
+# The three codes are literals, not flags summed together: 3 is the exposed code
+# this function inherited and cannot move, and 4 and 5 are already spoken for by
+# "cannot judge" and "--check declined".
+seat_exposure_rc() { # <behind_gates> <behind_docs>
+    if [ "$1" -gt 0 ] && [ "$2" -gt 0 ]; then echo 7; return 0; fi
+    if [ "$1" -gt 0 ]; then echo 3; return 0; fi
+    if [ "$2" -gt 0 ]; then echo 6; return 0; fi
+    echo 0
 }
 
 # history: kingdom/brain/km-notes.md#seat_refresh_step
 seat_refresh_step() {
     local seat=$1 check=$2 target=$3 stale_note=$4
-    local wt f state behind_all behind_gates ahead detail head
+    local wt f state behind_all behind_gates behind_docs ahead detail head
     wt=$(seat_worktree "$seat")
     # A clone's refs are its own, so the caller's one fetch in the main
     # checkout says nothing about this seat. Fetch per clone before judging,
@@ -4118,7 +4172,7 @@ seat_refresh_step() {
         }
     fi
     f=$(seat_freshness "$seat" "$target")
-    read -r state behind_all behind_gates ahead detail <<<"$f"
+    read -r state behind_all behind_gates behind_docs ahead detail <<<"$f"
     : "$ahead"
 
     case "$state" in
@@ -4127,13 +4181,14 @@ seat_refresh_step() {
             return 4
             ;;
         working)
-            local why="$detail"
-            if [ "$behind_gates" -eq 0 ]; then
-                echo "$seat: held ($why); its hooks are current$stale_note"
+            local why="$detail" exposure
+            exposure=$(seat_exposure "$behind_gates" "$behind_docs")
+            if [ -z "$exposure" ]; then
+                echo "$seat: held ($why); its hooks and governing documents are current$stale_note"
                 return 0
             fi
-            echo "$seat: HELD — $behind_gates hook/settings change(s) behind master and NOT applied ($why)$stale_note"
-            return 3
+            echo "$seat: HELD — $exposure ($why)$stale_note"
+            return "$(seat_exposure_rc "$behind_gates" "$behind_docs")"
             ;;
         current)
             echo "$seat: current at $(git_at "$wt" rev-parse --short HEAD)$stale_note"
@@ -4158,12 +4213,14 @@ seat_refresh_step() {
                 finished) pr_reason="" ;;
             esac
             if [ "$pr_state" != "finished" ]; then
-                if [ "$behind_gates" -eq 0 ]; then
-                    echo "$seat: held ($pr_reason); its hooks are current$stale_note"
+                local exposure
+                exposure=$(seat_exposure "$behind_gates" "$behind_docs")
+                if [ -z "$exposure" ]; then
+                    echo "$seat: held ($pr_reason); its hooks and governing documents are current$stale_note"
                     return 0
                 fi
-                echo "$seat: HELD — $behind_gates hook/settings change(s) behind master and NOT applied ($pr_reason)$stale_note"
-                return 3
+                echo "$seat: HELD — $exposure ($pr_reason)$stale_note"
+                return "$(seat_exposure_rc "$behind_gates" "$behind_docs")"
             fi
             # history: kingdom/brain/km-notes.md#seat_refresh_step-2
             if seat_session_live "$seat"; then
@@ -4188,15 +4245,17 @@ seat_refresh_step() {
     head=$(git_at "$wt" rev-parse HEAD)
     if [ "$check" -eq 1 ]; then
         # history: kingdom/brain/km-notes.md#seat_refresh_step-3
-        echo "$seat: STALE (--check, nothing moved) — $behind_all commit(s) behind origin/master, $behind_gates of them touching .githooks/.claude$stale_note"
-        [ "$behind_gates" -eq 0 ] || return 5
+        echo "$seat: STALE (--check, nothing moved) — $behind_all commit(s) behind origin/master, $behind_gates of them touching .githooks/.claude and $behind_docs touching the governing documents$stale_note"
+        if [ "$behind_gates" -ne 0 ] || [ "$behind_docs" -ne 0 ]; then
+            return 5
+        fi
         return 0
     fi
     if ! git_at "$wt" checkout --detach --quiet "$target" 2>/dev/null; then
         echo "$seat: could not move its parked worktree to origin/master"
         return 4
     fi
-    echo "$seat: refreshed $(git_at "$wt" rev-parse --short "$head") -> $(git_at "$wt" rev-parse --short HEAD) ($behind_gates hook/settings change(s) picked up)$stale_note"
+    echo "$seat: refreshed $(git_at "$wt" rev-parse --short "$head") -> $(git_at "$wt" rev-parse --short HEAD) ($behind_gates hook/settings and $behind_docs governing-document change(s) picked up)$stale_note"
     return 0
 }
 
@@ -4215,7 +4274,10 @@ cmd_seat_refresh_all() {
         line=$(seat_refresh_step "$s" "$check" "$target" "$stale_note") || rc=$?
         printf '  %s\n' "$line"
         case "$rc" in
-            3) exposed="$exposed $s" ;;
+            # 3, 6 and 7 all mean the same thing to this sweep: the seat holds
+            # work, so nothing here moves it. They are told apart only by
+            # km-seat, which owes a different paragraph for each.
+            3 | 6 | 7) exposed="$exposed $s" ;;
             5) declined="$declined $s" ;;
             # NOT fatal, and this is the property the sweep turns on: tir is
             # last in roster order and has no worktree at all, so a loop that
@@ -4230,7 +4292,7 @@ cmd_seat_refresh_all() {
         esac
     done
 
-    local summary="seat-refresh --all: $refreshed refreshed, $current already current, $held held with hooks current"
+    local summary="seat-refresh --all: $refreshed refreshed, $current already current, $held held with hooks and governing documents current"
     if [ -n "$exposed" ]; then
         summary="$summary; STILL EXPOSED:$exposed — each is holding work, so nothing here will move it; its citizen must rebase"
     fi
