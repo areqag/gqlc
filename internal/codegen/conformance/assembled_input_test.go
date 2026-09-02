@@ -324,12 +324,13 @@ func declaredTemporalsIn(req *require.Assertions, dir string) []temporalMember {
 // Refusing package-wide is deliberately wider than the hazard's own file,
 // and the reason it can be is that the refusal costs an annotation. It is
 // bounded on the other side by assignableToTemporal, so an untyped string
-// or boolean is left alone: measured on internal/resolver, all three
-// untyped constants the package declares are strings, and refusing those
-// would redden three lines that carry no hazard. What remains is a
-// standing constraint on the whole package — an untyped integer constant
-// here must be given a type — which is the price of deciding membership
-// syntactically at all.
+// or boolean is left alone — every untyped constant internal/resolver
+// declares is one, and a widening without that exemption reddens this
+// suite on lines that carry no hazard. What remains is a standing
+// constraint on the whole package: an untyped integer constant here must
+// be given a type. That is the price of deciding membership syntactically
+// at all, and it is the reason this refusal names the line rather than
+// the value.
 func temporalsOf(req *require.Assertions, gen *ast.GenDecl, dir, file string, spellings map[string]bool) (members []temporalMember, anchored bool) {
 	path := filepath.Join(dir, file)
 	runType, runFromIota, runAssignable := "", false, true
@@ -1158,13 +1159,15 @@ func TestTemporalSweepReadsAnAliasAndNotADefinedType(t *testing.T) {
 // over the whole package's const vocabulary.
 //
 // Widening the untyped refusal to every declaration would refuse constants
-// that carry no hazard: a string or a bool is not assignable to an integer
-// type, so no switch over Temporal can have an arm for one and the enum owes
-// it nothing. Measured on internal/resolver at 077aa74b, all three untyped
-// constants the package declares are strings — unionColumnTypeArm,
-// producerUndeclaredRelationshipType and producerWrongOrientationDrop — so a
-// widening without this exemption reddens the real package on three lines
-// that are none of this sweep's business.
+// that carry no hazard: a string or a bool is assignable to no integer
+// type, so no switch over Temporal can have an arm for one and the enum
+// owes it nothing.
+//
+// This exemption is witnessed against the real package rather than only
+// here, and that is worth knowing before touching it: the untyped
+// constants internal/resolver declares are strings, so dropping the
+// exemption reddens TestAssembledInputSuite and not merely these rows. No
+// count is given because the count is not what holds — the live suite is.
 func TestTemporalSweepAdmitsAConstantNoSwitchOverTheEnumCanName(t *testing.T) {
 	for _, tc := range []struct{ name, decl string }{
 		{name: "an untyped string", decl: "const producerTag = \"undeclared-relationship-type\"\n"},
