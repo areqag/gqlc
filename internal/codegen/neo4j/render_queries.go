@@ -621,17 +621,28 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	carrier := driverCarrier(f.GoType)
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[%s](%s, %q)\n", indent, varName, carrier, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
-	// Emit the value expression: bare varName if carrier == GoType, else a
-	// Go conversion. Used both in the nullable and non-nullable arms.
+	// Emit the value expression: bare varName if carrier == GoType, else
+	// the shape-changing to<X> for a temporal. A numeric width the driver
+	// over-carries takes neither, because narrowing it can FAIL — those go
+	// through a checked call in each arm below (ADR 0037, bd gqlc-awtb).
+	checked := carrier != f.GoType && !isTemporalCarrier(f.GoType)
 	valueExpr := varName
-	if carrier != f.GoType {
+	if carrier != f.GoType && !checked {
 		valueExpr = narrowExpr(f.GoType, varName)
 	}
+	fail := fmt.Sprintf("return %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)", zero, p.MethodName, f.ColumnName)
 	if f.Nullable {
 		// Nullable: nil pointer when null, address of a narrowed local
 		// otherwise.
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
-		fmt.Fprintf(b, "%sif !isNil {\n%s\tv := %s\n%s\t%sPtr = &v\n%s}\n", indent, indent, valueExpr, indent, varName, indent)
+		if checked {
+			fmt.Fprintf(b, "%sif !isNil {\n", indent)
+			fmt.Fprintf(b, "%s\tv, err := %s\n", indent, narrowCall(f.GoType, varName))
+			fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\t%s\n%s\t}\n", indent, indent, fail, indent)
+			fmt.Fprintf(b, "%s\t%sPtr = &v\n%s}\n", indent, varName, indent)
+		} else {
+			fmt.Fprintf(b, "%sif !isNil {\n%s\tv := %s\n%s\t%sPtr = &v\n%s}\n", indent, indent, valueExpr, indent, varName, indent)
+		}
 		b.WriteString(indent)
 		b.WriteString(assignPrefix[len(indent):])
 		b.WriteString(varName)
@@ -641,6 +652,11 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	}
 	// Non-nullable: error if isNil; else assign narrowed value.
 	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	if checked {
+		valueExpr = varName + "n"
+		fmt.Fprintf(b, "%s%s, err := %s\n", indent, valueExpr, narrowCall(f.GoType, varName))
+		fmt.Fprintf(b, "%sif err != nil {\n%s\t%s\n%s}\n", indent, indent, fail, indent)
+	}
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(valueExpr)
@@ -835,9 +851,14 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		carrier := driverCarrier(e.GoType)
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, carrier)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, carrier, f.ColumnName, iterVar, indent)
-		if carrier != e.GoType {
+		switch {
+		case isTemporalCarrier(e.GoType):
 			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, narrowExpr(e.GoType, "v"))
-		} else {
+		case carrier != e.GoType:
+			fmt.Fprintf(b, "%svn, err := %s\n", indent, narrowCall(e.GoType, "v"))
+			fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+			fmt.Fprintf(b, "%s%s = append(%s, vn)\n", indent, accVar, accVar)
+		default:
 			fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
 		}
 	case codegen.ColumnTemporal:

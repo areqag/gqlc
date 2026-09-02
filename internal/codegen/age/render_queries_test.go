@@ -58,6 +58,13 @@ func TestDollarTagClosesOnlyAtTheEnds(t *testing.T) {
 // string is a row because it moved out of the default arm, which is now
 // the refusal: of the carriers the type table produces it was the one
 // this switch named by falling through rather than by matching.
+//
+// A width narrower than its carrier names the checked narrowing rather
+// than the carrier's own helper, which is what makes a stored value the
+// width cannot hold fail the read instead of wrapping (ADR 0037). Both
+// sides of that split are rows here: int64 and float64 are the widths
+// that ARE their carrier and still name the plain helper, so a change
+// that routed everything through the narrowing would go red too.
 func TestDecodeFuncNamesTheHelperForEveryServedCarrier(t *testing.T) {
 	tests := []struct {
 		goType string
@@ -66,10 +73,11 @@ func TestDecodeFuncNamesTheHelperForEveryServedCarrier(t *testing.T) {
 		{goType: "bool", want: "agtypeBool"},
 		{goType: "string", want: "agtypeString"},
 		{goType: "int64", want: "agtypeInt64"},
-		{goType: "int8", want: "agtypeInt64"},
-		{goType: "uint32", want: "agtypeInt64"},
+		{goType: "int8", want: "agtypeIntAs[int8]"},
+		{goType: "uint32", want: "agtypeIntAs[uint32]"},
+		{goType: "uint64", want: "agtypeIntAs[uint64]"},
 		{goType: "float64", want: "agtypeFloat64"},
-		{goType: "float32", want: "agtypeFloat64"},
+		{goType: "float32", want: "agtypeFloat32"},
 		{goType: age.GoInstant, want: "agtypeInstant"},
 		{goType: "any", want: "agtypeValue"},
 		{goType: "map[string]any", want: "agtypeMap"},

@@ -117,6 +117,11 @@ var corpusTests = []string{
 	"TestTwoEdgeUnionColumnsDoNotShareLocals",
 	"TestListParametersReachTheDriverPackable",
 	"TestNullableListParameterBindsCypherNull",
+	"TestScalarRefusesAValueTheDeclaredWidthCannotHold",
+	"TestScalarAcceptsWhatTheDeclaredWidthHolds",
+	"TestScalarColumnsRefuseAValueTheDeclaredWidthCannotHold",
+	"TestListyRefusesAnOutOfRangeElement",
+	"TestListyColumnsRefuseAnOutOfRangeElement",
 }
 
 // corpusSubtests names, per top-level test, how many subtest passes the
@@ -138,7 +143,10 @@ var corpusTests = []string{
 // a tree that goes silent drops a key this file still holds, and a tree
 // that appears adds one this file does not.
 var corpusSubtests = map[string]int{
-	"TestListyRefusesAMisTypedElement": 4,
+	"TestListyRefusesAMisTypedElement":                        4,
+	"TestScalarRefusesAValueTheDeclaredWidthCannotHold":       4,
+	"TestScalarAcceptsWhatTheDeclaredWidthHolds":              7,
+	"TestScalarColumnsRefuseAValueTheDeclaredWidthCannotHold": 3,
 }
 
 // corpusTables counts, per top-level test, the in-body range tables the
@@ -159,25 +167,28 @@ var corpusSubtests = map[string]int{
 // Dynamic each refuse. When a deliberate fixture edit moves a number, the
 // failure prints the fixture's current census as a Go literal to paste.
 var corpusTables = map[string]corpusrun.Table{
-	"TestAnyPropertyValueColumnsReadWhatTheGraphHolds": {Rows: 6},
-	"TestAnythingColumnsReadWhatTheGraphHolds":         {Rows: 6},
-	"TestAnythingReadsWhatTheGraphHolds":               {Rows: 7},
-	"TestDecodersRefuseAValueOfAnotherType":            {Rows: 4},
-	"TestEdgeUnionColumnDispatchesOnTheWireLabel":      {Rows: 2},
-	"TestEdgyRefusesWhatTheSchemaDidNotDeclare":        {Rows: 13},
-	"TestEntityColumnRefusalsCarryTheDriversError":     {Rows: 2},
-	"TestEntityColumnsDecodeWholeEntities":             {Rows: 4},
-	"TestListColumnRefusalsCarryTheDriversError":       {Rows: 4},
-	"TestListParametersReachTheDriverPackable":         {Rows: 3},
-	"TestListyEmptyIsNotAbsent":                        {Rows: 4},
-	"TestListyRefusesAMisTypedElement":                 {Rows: 4},
-	"TestNullableListParameterBindsCypherNull":         {Rows: 2},
-	"TestOptionalEdgeUnionColumnCarriesItsNull":        {Rows: 2, Dynamic: 1},
-	"TestOptionalEntityColumnsCarryTheirNull":          {Rows: 2},
-	"TestScalarColumnsNarrowTheirCarriers":             {Rows: 2},
-	"TestTwoEdgeUnionColumnsDoNotShareLocals":          {Rows: 2},
-	"TestVarLengthEdgeColumnDecodesEveryElement":       {Rows: 5, Dynamic: 1},
-	"TestVarLengthEdgeUnionColumnDispatchesPerElement": {Rows: 5},
+	"TestAnyPropertyValueColumnsReadWhatTheGraphHolds":        {Rows: 6},
+	"TestAnythingColumnsReadWhatTheGraphHolds":                {Rows: 6},
+	"TestAnythingReadsWhatTheGraphHolds":                      {Rows: 7},
+	"TestDecodersRefuseAValueOfAnotherType":                   {Rows: 4},
+	"TestEdgeUnionColumnDispatchesOnTheWireLabel":             {Rows: 2},
+	"TestEdgyRefusesWhatTheSchemaDidNotDeclare":               {Rows: 13},
+	"TestEntityColumnRefusalsCarryTheDriversError":            {Rows: 2},
+	"TestEntityColumnsDecodeWholeEntities":                    {Rows: 4},
+	"TestListColumnRefusalsCarryTheDriversError":              {Rows: 4},
+	"TestListParametersReachTheDriverPackable":                {Rows: 3},
+	"TestListyEmptyIsNotAbsent":                               {Rows: 4},
+	"TestListyRefusesAMisTypedElement":                        {Rows: 4},
+	"TestNullableListParameterBindsCypherNull":                {Rows: 2},
+	"TestOptionalEdgeUnionColumnCarriesItsNull":               {Rows: 2, Dynamic: 1},
+	"TestOptionalEntityColumnsCarryTheirNull":                 {Rows: 2},
+	"TestScalarAcceptsWhatTheDeclaredWidthHolds":              {Rows: 7, Dynamic: 1},
+	"TestScalarColumnsNarrowTheirCarriers":                    {Rows: 2},
+	"TestScalarColumnsRefuseAValueTheDeclaredWidthCannotHold": {Rows: 3},
+	"TestScalarRefusesAValueTheDeclaredWidthCannotHold":       {Rows: 4, Dynamic: 1},
+	"TestTwoEdgeUnionColumnsDoNotShareLocals":                 {Rows: 2},
+	"TestVarLengthEdgeColumnDecodesEveryElement":              {Rows: 5, Dynamic: 1},
+	"TestVarLengthEdgeUnionColumnDispatchesPerElement":        {Rows: 5},
 }
 
 // TestEmittedDecodersRunOnDriverValues runs the emitted entity decoders

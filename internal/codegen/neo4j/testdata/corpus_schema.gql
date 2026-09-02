@@ -96,6 +96,14 @@
 // and ADR 0035 leaves no neo4j property of that width to compare one
 // against. The depth>=2 encode helpers in render_temporal.go keep their
 // recursion and lose their only witness here.
+// Scalar.tally is the one UNSIGNED width here, and it is declared for the
+// range check rather than for a decode arm — uint64 rides the same int64
+// carrier and takes the same arm rank already reaches. What it alone
+// witnesses is the sign clause: for every other width the round-trip
+// int64(T(v)) != v catches an unrepresentable carrier, but uint64 is the
+// case where the round-trip is a bijection, so uint64(-1) survives it and
+// only the sign comparison refuses. Without an unsigned property the
+// clause has no test that dies when it is deleted (bd gqlc-awtb).
 CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
     (:Slot {
         id      :: INT64 NOT NULL,
@@ -108,7 +116,8 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
         rank   :: INT32 NOT NULL,
         active :: BOOL NOT NULL,
         name   :: STRING,
-        weight :: FLOAT32
+        weight :: FLOAT32,
+        tally  :: UINT64 NOT NULL
     }),
     (:Listy {
         tags   :: LIST<STRING> NOT NULL,

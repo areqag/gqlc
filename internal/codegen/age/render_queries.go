@@ -465,12 +465,12 @@ func writeOneBody(b *strings.Builder, p codegen.Query) {
 		writeColumnDecode(b, p, i, f, "\t", zero)
 	}
 	if len(p.RowFields) == 1 {
-		fmt.Fprintf(b, "\treturn %s, nil\n", valueExpr(0, p.RowFields[0]))
+		fmt.Fprintf(b, "\treturn %s, nil\n", valueName(0))
 		return
 	}
 	fmt.Fprintf(b, "\treturn %sRow{\n", p.MethodName)
 	for i, f := range p.RowFields {
-		fmt.Fprintf(b, "\t\t%s: %s,\n", f.Field, valueExpr(i, f))
+		fmt.Fprintf(b, "\t\t%s: %s,\n", f.Field, valueName(i))
 	}
 	b.WriteString("\t}, nil\n")
 }
@@ -486,11 +486,11 @@ func writeManyBody(b *strings.Builder, p codegen.Query) {
 		writeColumnDecode(b, p, i, f, "\t\t", "nil")
 	}
 	if len(p.RowFields) == 1 {
-		fmt.Fprintf(b, "\t\tout = append(out, %s)\n", valueExpr(0, p.RowFields[0]))
+		fmt.Fprintf(b, "\t\tout = append(out, %s)\n", valueName(0))
 	} else {
 		fmt.Fprintf(b, "\t\tout = append(out, %sRow{\n", p.MethodName)
 		for i, f := range p.RowFields {
-			fmt.Fprintf(b, "\t\t\t%s: %s,\n", f.Field, valueExpr(i, f))
+			fmt.Fprintf(b, "\t\t\t%s: %s,\n", f.Field, valueName(i))
 		}
 		b.WriteString("\t\t})\n")
 	}
@@ -524,16 +524,6 @@ func rawName(i int) string { return fmt.Sprintf("raw%d", i) }
 // already holds.
 func valueName(i int) string { return fmt.Sprintf("value%d", i) }
 
-// valueExpr is what a column contributes to the returned row. A narrow
-// width rides its wide carrier through the decode and converts here; a
-// nullable column already holds a pointer of the declared width.
-func valueExpr(i int, f codegen.Row) string {
-	if !f.Nullable && agtypeCarrier(f.GoType) != f.GoType {
-		return f.GoType + "(" + valueName(i) + ")"
-	}
-	return valueName(i)
-}
-
 // writeColumnDecode emits one column's null handling and decode. A
 // non-nullable column that arrives null fails the row: the schema says
 // the value is there, and a Go zero would report absence as a value the
@@ -555,11 +545,7 @@ func writeColumnDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.R
 	fmt.Fprintf(b, "%s\tdecoded, err := %s(%s)\n", indent, columnDecoder(f), raw)
 	fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(%q, %q, err)\n%s\t}\n",
 		indent, indent, zero, decodeErr, f.ColumnName, indent)
-	if carrier := agtypeCarrier(f.GoType); carrier != f.GoType {
-		fmt.Fprintf(b, "%s\tnarrowed := %s(decoded)\n%s\t%s = &narrowed\n", indent, f.GoType, indent, value)
-	} else {
-		fmt.Fprintf(b, "%s\t%s = &decoded\n", indent, value)
-	}
+	fmt.Fprintf(b, "%s\t%s = &decoded\n", indent, value)
 	fmt.Fprintf(b, "%s}\n", indent)
 }
 
@@ -657,8 +643,20 @@ func decodeFunc(goType string) string {
 	case "bool":
 		return "agtypeBool"
 	case "int64":
+		// A width narrower than the carrier decodes through the checked
+		// narrowing, so the declared width is enforced once here rather
+		// than at each of the sites that used to convert (ADR 0037).
+		// An instantiated generic is valid both called and passed as a
+		// function value, which is what lets every call shape below take
+		// this the same way it takes the others.
+		if goType != "int64" {
+			return "agtypeIntAs[" + goType + "]"
+		}
 		return "agtypeInt64"
 	case "float64":
+		if goType == "float32" {
+			return "agtypeFloat32"
+		}
 		return "agtypeFloat64"
 	case "string":
 		return "agtypeString"

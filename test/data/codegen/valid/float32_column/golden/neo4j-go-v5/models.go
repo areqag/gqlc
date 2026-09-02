@@ -4,6 +4,7 @@ package float32column
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
@@ -34,11 +35,32 @@ func decodePerson(node dbtype.Node) (Person, error) {
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Height: %w", err)
 	}
-	out.Height = float32(value0)
+	value0n, err := narrowFloat32(value0)
+	if err != nil {
+		return Person{}, fmt.Errorf("decode Person.Height: %w", err)
+	}
+	out.Height = value0n
 	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
 	}
 	out.Id = value1
+	return out, nil
+}
+
+// narrowFloat32 converts a driver's float64 down to float32, refusing a
+// value that overflows to an infinity the carrier did not hold.
+//
+// Precision loss is NOT refused: FLOAT32 is approximate and every
+// in-range float64 rounds to reach it. The test is the invented infinity
+// rather than a comparison against math.MaxFloat32, because a float64
+// strictly greater than MaxFloat32 can still round DOWN to it — that
+// value is representable and a magnitude test would refuse it. An
+// infinity or a NaN the store already held passes through unchanged.
+func narrowFloat32(v float64) (float32, error) {
+	out := float32(v)
+	if math.IsInf(float64(out), 0) && !math.IsInf(v, 0) {
+		return 0, fmt.Errorf("value %g does not fit the declared float32 width", v)
+	}
 	return out, nil
 }
