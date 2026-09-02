@@ -131,6 +131,96 @@ func TestScopeBindCallShadowCascade(t *testing.T) {
 	require.Contains(t, sc.callTypes, "c")
 }
 
+// The three tests below pin the resolvedCovers delete in BindNodeCands, BindEdge
+// and BindCall — the three siblings of the plural arm that
+// TestPhaseBsPluralCommitLeavesNoResolvedCoversMark pins in resolver_test.go.
+//
+// Each seeds the lane by hand, because newScope deliberately does not seed
+// resolvedCovers from the carry (scope.go says so and gives the precision
+// argument), and every in-Part writer of the lane writes s.nodeTypes in the same
+// breath. So no query reaches a scope holding a mark these methods could find.
+// Seeding is what makes the state constructible, exactly as the plural arm's
+// test seeds a nodeTable; keylabelset_test.go uses the same technique for state
+// the corpus cannot express.
+//
+// These do not claim the state arises today. They claim each method clears it
+// when it is there, which is the whole reason the three deletes were written:
+// the lane must not outlive the `resolved` entry it qualifies under any seeding
+// regime, and seeding newScope from the carry — the alternative scope.go names
+// and declines — is what would make them live. Three tests rather than one, and
+// three separate scopes, so a dropped delete names the method that dropped it.
+
+func TestScopeBindNodeCandsClearsASeededResolvedCoversMark(t *testing.T) {
+	np, err := query.NewNodeBinding("p", graph.LabelSet{})
+	require.NoError(t, err)
+	person := graph.LabelSet{"Person"}.Key()
+	employee := graph.LabelSet{"Employee"}.Key()
+
+	sc := newScope(branchState{})
+	sc.Ingest(query.Part{})
+	// Seeded WITHOUT a nodeTypes entry. With one, BindNodeCands refuses the
+	// re-bind outright ("carried as singular node type, re-bound as plural") and
+	// never reaches the delete — which is the unreachability its comment states.
+	sc.resolvedCovers["p"] = struct{}{}
+
+	require.NoError(t, sc.BindNodeCands(np, []schema.NodeType{
+		{KeyLabels: person, CompleteLabels: person},
+		{KeyLabels: employee, CompleteLabels: employee},
+	}))
+
+	// Tripwire: without it the assertion below passes for a p that never entered
+	// the plural lane, so the arm under test never ran.
+	require.Contains(t, sc.nodeCands, "p", "p must enter the plural lane, or the arm under test did not run")
+	require.NotContains(t, sc.nodeTypes, "p", "the plural arm writes no singular entry for a mark to qualify")
+
+	require.NotContains(t, sc.resolvedCovers, "p",
+		"a mark qualifying a `resolved` entry BindNodeCands did not write must not survive it")
+}
+
+func TestScopeBindEdgeClearsASeededResolvedCoversMark(t *testing.T) {
+	// The node-shadow arm: an edge binding at a name the node lanes already hold.
+	// TestScopeBindEdgeShadowCascade seeds those lanes through the carry and pins
+	// the nodeTypes/nodeCands deletes; the carry cannot reach resolvedCovers, so
+	// that test says nothing about this third delete and stays green without it.
+	carry := branchState{
+		exportedNodeTypes: map[string]schema.NodeType{"x": {KeyLabels: graph.LabelSet{"Person"}.Key(), CompleteLabels: graph.LabelSet{"Person"}.Key()}},
+	}
+	sc := newScope(carry)
+	sc.Ingest(query.Part{})
+	sc.resolvedCovers["x"] = struct{}{}
+
+	eb, err := makeTestEdgeBinding("x")
+	require.NoError(t, err)
+	require.NoError(t, sc.BindEdge(eb))
+
+	require.Contains(t, sc.edgeBindings, "x", "the edge must bind, or the shadow cascade under test did not run")
+	require.NotContains(t, sc.nodeTypes, "x", "the shadowed singular entry goes")
+
+	require.NotContains(t, sc.resolvedCovers, "x",
+		"a mark qualifying a `resolved` entry an edge shadow removed must not outlive it")
+}
+
+func TestScopeBindCallClearsASeededResolvedCoversMark(t *testing.T) {
+	carry := branchState{
+		exportedNodeTypes: map[string]schema.NodeType{"c": {KeyLabels: graph.LabelSet{"Person"}.Key(), CompleteLabels: graph.LabelSet{"Person"}.Key()}},
+	}
+	sc := newScope(carry)
+	sc.Ingest(query.Part{})
+	sc.resolvedCovers["c"] = struct{}{}
+
+	cb, err := query.NewCallBinding("c", "test.proc", "value", query.TypeInt{}, false)
+	require.NoError(t, err)
+	reg, err := procsig.NewRegistry(nil)
+	require.NoError(t, err)
+	require.NoError(t, sc.BindCall(cb, reg))
+
+	require.Contains(t, sc.callTypes, "c", "the call must bind, or the shadow cascade under test did not run")
+	require.NotContains(t, sc.nodeTypes, "c", "the shadowed singular entry goes")
+
+	require.NotContains(t, sc.resolvedCovers, "c",
+		"a mark qualifying a `resolved` entry a CALL shadow removed must not outlive it")
+}
+
 func TestScopeSnapshotNarrowing(t *testing.T) {
 	// Snapshot exposes only the five witness lanes. callTypes,
 	// carriedResolvedTypes, carriedGroups, and the ingested Part are
