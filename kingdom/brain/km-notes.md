@@ -757,10 +757,19 @@ no-box states are session boundaries, and the pre-send check at the top of
 `send_line` already treats a no-box read as decisive — but the sandbox that
 says so is small, so it is a risk taken knowingly and not one ruled out.
 
-`seat_box_echoes` still has the `continue`, deliberately. Its no-box arm is
-read BEFORE any Enter, where the failure it feeds ("something covered the
-composer mid-send") presses no key and loses nothing. gqlc-w63bv holds the
-question of whether it should match.
+`seat_box_echoes` still has the `continue`, deliberately, and it has TWO call
+sites rather than the one it is easy to see. At km:983 it runs BEFORE any
+Enter, and the failure it feeds ("something covered the composer mid-send")
+presses no key, so a late read that overturns nine earlier ones costs nothing
+there. At km:1035 it runs after BOTH Enters, and every non-zero verdict it can
+return — including the no-box one — lands in the same arm and reports
+delivered, so the overturning read cannot change the outcome either. Neither
+site has this bug; whether they should match anyway is gqlc-w63bv.
+
+That second site does carry a smaller inaccuracy, filed on the same bead: its
+message says "the box is not empty — but what it holds is NOT this message",
+which is a sentence about rc 1 being printed for rc 2 as well, where there is
+no box to hold anything.
 
 Not the cause, checked and cleared: gqlc-051cj's normalisation asymmetry —
 `box_one_line` folds U+00A0 to a space and `seat_box_text`'s awk trims only
