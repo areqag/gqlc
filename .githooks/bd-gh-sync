@@ -212,6 +212,29 @@ _count() {
   printf '%s\n' "${_n:-0}"
 }
 
+# Names the ledger the diagnoses below were read from. Every "the bead list came
+# back empty" line here is equally true of a town that has no beads and of a bd
+# pointed somewhere nobody intended, and the two are otherwise byte-identical:
+# measured 2026-09-02 on this script's own push arm, an empty ledger and
+# BEADS_DIR aimed at another seat's .beads produced the same nine lines. That
+# ambiguity ran for four hours across ten seats with this script's empty-list
+# line as the only tell (bd gqlc-xpgdc, gqlc-zpjuc). The path is the one byte
+# that separates them.
+#
+# Environment only, and deliberately NOT `bd info`: against a BEADS_DIR that
+# holds no database, bd CREATES one rather than refusing (bd gqlc-5smcw), which
+# is how the fabricated ledger of that incident acquired its 932 plausible-
+# looking issues. A diagnostic that mutates the thing it is diagnosing is worse
+# than the silence it replaces, so this reads the variable and nothing else —
+# which also means it reports what bd was ASKED for, not what bd resolved.
+_ledger() {
+  if [ -n "${BEADS_DIR:-}" ]; then
+    echo "BEADS_DIR=${BEADS_DIR}"
+  else
+    echo "BEADS_DIR is unset, so bd chose a database by discovery from $(pwd)"
+  fi
+}
+
 command -v bd >/dev/null 2>&1 || exit 0
 command -v gh >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || {
@@ -563,7 +586,8 @@ PYEOF
     # it was empty, and "wait for the bd database" and "GitHub or the token is
     # the problem" are not the same instruction.
     if [ "$_list_rc" -ne 0 ]; then
-      echo "bd-gh-sync: 'bd list' exited ${_list_rc} — usually something else holds the bd database." >&2
+      echo "bd-gh-sync: 'bd list' exited ${_list_rc} — usually something else holds the bd database," >&2
+      echo "bd-gh-sync: though a ledger nobody can open reads the same. Asked for: $(_ledger)" >&2
     fi
     if [ "$_gh_rc" -ne 0 ]; then
       echo "bd-gh-sync: 'gh issue list' exited ${_gh_rc} — GitHub's state could not be read at all." >&2
@@ -1184,6 +1208,7 @@ PYEOF
     echo "bd-gh-sync: that usually means something else holds the bd database — which" >&2
     echo "bd-gh-sync: is also what reverts a claim behind this script's back. Re-run" >&2
     echo "bd-gh-sync: 'git pull' once it is free, or check claims with 'bd list'." >&2
+    echo "bd-gh-sync: The ledger asked for was: $(_ledger)" >&2
   fi
 
   # Both numbers on the summary line are read off the bead listing: "held"
@@ -1212,7 +1237,9 @@ PYEOF
     echo "bd-gh-sync: pull, so which beads were held back — and which GH issues" >&2
     echo "bd-gh-sync: have no bead at all — was never established. An empty" >&2
     echo "bd-gh-sync: repository and a bd database nobody could read are the same" >&2
-    echo "bd-gh-sync: bytes here. Re-run 'git pull' once the database is free." >&2
+    echo "bd-gh-sync: bytes here. The ledger asked for was: $(_ledger)" >&2
+    echo "bd-gh-sync: If that is not the ledger you meant, nothing is locked and" >&2
+    echo "bd-gh-sync: re-running will not change this — fix the path and pull again." >&2
   fi
 
   # The selection saw its listing arrive at the bound, so how many issues GitHub
@@ -1603,7 +1630,8 @@ if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]
   # refusal itself has to be what a `tail -1` caller keeps.
   sed 's/^/bd-gh-sync:   /' "$_tmp/plan.err" >&2 2>/dev/null
   if [ "$_list_rc" -ne 0 ]; then
-    echo "bd-gh-sync: 'bd list' exited ${_list_rc} — usually something else holds the bd database." >&2
+    echo "bd-gh-sync: 'bd list' exited ${_list_rc} — usually something else holds the bd database," >&2
+    echo "bd-gh-sync: though a ledger nobody can open reads the same. Asked for: $(_ledger)" >&2
   fi
   echo "bd-gh-sync: selection exited ${_rc}; which beads still need a GitHub" >&2
   echo "bd-gh-sync: mirror cannot be decided, and pushing an unknown set of" >&2
@@ -1941,7 +1969,9 @@ if [ "$_before_n" -eq 0 ]; then
   echo "bd-gh-sync: the bead list was empty when this run chose what to push, so" >&2
   echo "bd-gh-sync: how many beads needed a GitHub mirror was never established —" >&2
   echo "bd-gh-sync: an empty repository and an unreadable bd database read alike" >&2
-  echo "bd-gh-sync: here. Re-run 'git push' once the database is free." >&2
+  echo "bd-gh-sync: here. The ledger asked for was: $(_ledger)" >&2
+  echo "bd-gh-sync: If that is not the ledger you meant, nothing is locked and" >&2
+  echo "bd-gh-sync: re-running will not change this — fix the path and push again." >&2
 fi
 
 # Last line, and the only line a `tail -1` caller keeps. It reports what reached
