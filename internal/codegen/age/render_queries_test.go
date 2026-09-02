@@ -588,3 +588,60 @@ func isTypeMapMethod(fn *ast.FuncDecl) bool {
 	id, ok := recv.(*ast.Ident)
 	return ok && id.Name == "typeMap"
 }
+
+// TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind witnesses the
+// encode half of the posture the read path already states in its own
+// words: agtypeIntAs documents that "a UINT64 property's readable set is
+// therefore [0, MaxInt64], since agtype's integer scalar is signed
+// 64-bit and a larger value is UNSTORABLE rather than unreadable".
+// Unstorable is a claim about this path, and until now nothing here
+// enforced it — encodeParam returned every non-temporal bare and
+// agtypeArgs is json.Marshal, which writes a uint64 exactly and never
+// errors on magnitude. So the too-large value left gqlc intact and what
+// the server made of it was the server's business (bd gqlc-tzjqu).
+//
+// Asserted on the rendered emission rather than on the encoder helper,
+// because the requirement is that the METHOD cannot send the value: a
+// checked encoder nothing routes through would satisfy a unit test and
+// change nothing that reaches a database.
+//
+// The neo4j backend needs no equivalent — its driver refuses this at the
+// packer — and the two facts are not in tension. gqlc has to carry the
+// refusal wherever the transport does not, and json.Marshal does not.
+func TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		goType   string
+		nullable bool
+	}{
+		{"uint64", "uint64", false},
+		{"uint", "uint", false},
+		{"nullable uint64", "uint64", true},
+		{"uint64 list", "[]uint64", false},
+		{"nullable uint64 list", "[]uint64", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := codegen.Query{
+				NamedQuery: codegen.NamedQuery{
+					Name:        "Q",
+					SourceText:  "MATCH (r:Row) WHERE r.u = $u RETURN r.id",
+					Cardinality: codegen.CardinalityExec,
+				},
+				MethodName: "Q",
+				Bare:       "q",
+				ParamFields: []codegen.Param{
+					{RawName: "u", Field: "U", GoType: tt.goType, Nullable: tt.nullable},
+				},
+			}
+			rendered := string(age.RenderCypherFile("p", []codegen.Query{p}))
+
+			require.NotContains(t, rendered, `map[string]any{"u": arg}`,
+				"the parameter crosses bare, so a value above MaxInt64 reaches the server "+
+					"as a literal agtype cannot hold")
+			require.Contains(t, rendered, "agtypeUnsigned",
+				"the bind does not route through the checked unsigned encoder")
+			require.Contains(t, rendered, `Q: parameter $u:`,
+				"the refusal does not name the parameter the author wrote")
+		})
+	}
+}

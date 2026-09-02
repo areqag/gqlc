@@ -155,6 +155,14 @@ type helpers struct {
 	timeMicros      bool // agtypeTimeMicros — some query binds a TIME parameter
 	durationMicros  bool // agtypeDurationMicros — some query binds a DURATION parameter
 
+	// agtypeUnsigned — some query binds a uint64 or uint parameter. It
+	// sits among the encoders above rather than beside agtypeIntAs
+	// because it is an encode-direction helper, but what it guards is a
+	// range and not a shape: agtype's integer scalar is signed 64-bit,
+	// so those two widths are the only ones carrying a value the wire
+	// cannot hold (bd gqlc-tzjqu).
+	unsigned bool
+
 	encNullable bool // agtypeEncodedNullable — one of those parameters is nullable
 	encList     bool // agtypeEncodedList — one of those parameters is a list
 
@@ -258,6 +266,8 @@ func (h *helpers) forParams(params []codegen.Param) {
 			h.wrapDay = true
 		case goDuration:
 			h.durationMicros = true
+		case "uint64", "uint":
+			h.unsigned = true
 		default:
 			fallible = false
 		}
@@ -1038,6 +1048,27 @@ func agtypeDurationMicros(d Duration) (int64, error) {
 			"gqlc: a duration of %d months has no faithful encoding here, because a month is not a fixed count of microseconds", d.Months)
 	}
 	return (d.Days*86400+d.Seconds)*1000000 + int64(d.Nanos)/1000, nil
+}
+`)
+	}
+	if h.unsigned {
+		b.WriteString(`
+// agtypeUnsigned encodes an unsigned value into the signed 64-bit integer
+// an agtype scalar carries, refusing one above that range rather than
+// letting it cross as the negative it would wrap to.
+//
+// This is the encode side of the readable set agtypeIntAs names: a UINT64
+// value above MaxInt64 is unstorable, so refusing it here is refusing to
+// write a value no read could ever return. uint8, uint16 and uint32 are
+// absent because every one of their values fits, and uint is here because
+// on a 64-bit platform it is uint64 (bd gqlc-tzjqu).
+func agtypeUnsigned[T ~uint | ~uint64](v T) (int64, error) {
+	const maxInt64 = 1<<63 - 1
+	if uint64(v) > maxInt64 {
+		return 0, fmt.Errorf(
+			"gqlc: value %d does not fit the signed 64-bit integer an agtype scalar carries", v)
+	}
+	return int64(v), nil
 }
 `)
 	}
