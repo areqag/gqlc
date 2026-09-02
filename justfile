@@ -1251,6 +1251,68 @@ tmp-reap mode="dry-run" root=scratch_root:
 tmp-reap-cadence root=scratch_root threshold=reap_threshold:
     @just tmpreap {{quote(root)}} -apply -apply-above {{quote(threshold)}}
 
+# The single entry point to the -worktrees mode, and a second one rather than an
+# argument to `tmpreap` above because that recipe passes -root, which this mode
+# refuses: it decides over the worktrees -repo has REGISTERED, wherever on disk
+# they live, so there is no scan root to name. The df fallback is gone for the
+# same reason — nothing this mode reports is a measurement of a filesystem, so
+# printing one after a failure would answer a question nobody asked.
+[private]
+wtreap *args:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mkdir -p {{quote(gotmpdir)}}
+    GOTMPDIR={{quote(gotmpdir)}} go run ./internal/tools/tmpreap \
+        -worktrees -repo {{quote(justfile_directory())}} {{args}}
+
+# which of the worktrees this repository has registered can be removed, with a
+# verdict and a checkable reason for every one of them.
+#
+# Read-only by construction: it cannot be handed -apply. It is the companion to
+# `tmp-report`, which answers about a scan root's children and so cannot see a
+# worktree living beside the main checkout under $HOME — which is where every
+# seat and every hand-made sibling worktree in this town lives.
+worktree-report:
+    @just wtreap
+
+# removes the worktrees `just worktree-report` proved abandoned. Dry run by
+# default; `just worktree-reap apply` is what removes.
+#
+# What it will not touch, each for its own reason: the main checkout, any
+# permanent seat worktree (matched by NAME, so an ad-hoc tree named like a seat
+# leaks rather than dies), a worktree git reports as locked, one with
+# uncommitted or untracked changes, one whose content is not already present and
+# equal on origin/master, one a live process has as its cwd or holds an fd on,
+# and one written to inside the age threshold.
+#
+# `git worktree remove` is the actuator and it is never given --force, so git
+# re-asks its own dirt question at the moment of removal. Nothing is archived:
+# a candidate is clean by construction, so what dies with the checkout is
+# gitignored build output.
+#
+# The occupancy gate is the one this mode exists for. The only worktree sweep
+# this town ever ran deleted a live agent's working directory while every safety
+# question it asked answered safe, because all of them were about the CONTENT of
+# the tree and the harm was to the OCCUPANT (bd gqlc-24wf).
+#
+# The mode is refused rather than defaulted when it is neither of the two: a typo
+# that silently dry-runs is a reap somebody thinks they performed.
+worktree-reap mode="dry-run":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    # Shell-quoted into one variable rather than pasted raw into the case head
+    # and the message: `{{{{mode}}}}` interpolates verbatim, so a value carrying a
+    # quote or a `)` is shell syntax there rather than data (bd gqlc-4seg).
+    mode={{quote(mode)}}
+    case "$mode" in
+        dry-run) just wtreap ;;
+        apply)   just wtreap -apply ;;
+        *)
+            echo "error: unknown mode '$mode' — expected 'dry-run' or 'apply'." >&2
+            exit 1
+            ;;
+    esac
+
 # provisions the pinned golangci-lint into the gitignored .bin/ when missing
 # or version-mismatched (~3s; official release binary — golangci-lint does not
 # support builds from source). The happy path is a ~30ms version check, cheap

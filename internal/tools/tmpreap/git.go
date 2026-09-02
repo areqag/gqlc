@@ -109,23 +109,119 @@ func listWorktrees(ctx context.Context, repo string) (map[string]bool, error) {
 // worktree — and an unreachable guard is an untested one.
 func parseWorktreeList(out, repo string) (map[string]bool, error) {
 	set := make(map[string]bool)
-	for _, line := range splitLines(out) {
-		path, ok := strings.CutPrefix(line, "worktree ")
-		if !ok {
-			continue
-		}
+	for _, reg := range parseWorktreeRegistrations(out) {
 		// A registration whose checkout is gone cannot be resolved; it is also
 		// not on disk, so it can never match an entry under the root.
-		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		if resolved, err := filepath.EvalSymlinks(reg.path); err == nil {
 			set[resolved] = true
 		}
-		set[filepath.Clean(path)] = true
+		set[filepath.Clean(reg.path)] = true
 	}
 	if len(set) == 0 {
 		return nil, fmt.Errorf("`git worktree list` in %s named no worktree at all, not even the main one, "+
 			"so nothing under the scan root could be recognised as a worktree", repo)
 	}
 	return set, nil
+}
+
+// worktreeReg is one registration, with the attributes the -worktrees decision
+// table reads. The two that matter beyond the path are `locked` and `prunable`,
+// and both can appear with or without a reason — `locked` bare is a lock nobody
+// annotated — so each carries a separate "was it present" bool. Reading the
+// reason alone would make an unannotated lock indistinguishable from no lock,
+// which is the direction that removes someone's held worktree.
+type worktreeReg struct {
+	path       string
+	head       string
+	branch     string
+	detached   bool
+	locked     string
+	isLocked   bool
+	prunable   string
+	isPrunable bool
+}
+
+// at names what the worktree has checked out, for the report. Several
+// registrations in this town are on detached HEADs — a parked seat is
+// deliberately detached — so a report that could only name branches would be
+// silent about exactly those.
+func (w worktreeReg) at() string {
+	switch {
+	case w.branch != "":
+		return strings.TrimPrefix(w.branch, "refs/heads/")
+	case w.detached && len(w.head) >= 8:
+		return "detached at " + w.head[:8]
+	case w.detached:
+		return "detached"
+	default:
+		return "no checkout"
+	}
+}
+
+// parseWorktreeRegistrations reads `git worktree list --porcelain`. The format
+// is one blank-line-separated stanza per worktree, each opening with a
+// `worktree <path>` line; git documents the main worktree as the first stanza,
+// which is how the decision table recognises it.
+//
+// Unknown attribute lines are ignored rather than refused: git has added
+// attributes to this format before, and a reaper that fails to parse is a
+// reaper that reports nothing, while one that ignores an attribute it does not
+// know still holds everything its own gates hold.
+func parseWorktreeRegistrations(out string) []worktreeReg {
+	var regs []worktreeReg
+	for _, line := range splitLines(out) {
+		key, value, _ := strings.Cut(line, " ")
+		switch key {
+		case "worktree":
+			regs = append(regs, worktreeReg{path: filepath.Clean(value)})
+			continue
+		case "":
+			continue
+		}
+		if len(regs) == 0 {
+			continue
+		}
+		cur := &regs[len(regs)-1]
+		switch key {
+		case "HEAD":
+			cur.head = value
+		case "branch":
+			cur.branch = value
+		case "detached":
+			cur.detached = true
+		case "locked":
+			cur.isLocked, cur.locked = true, value
+		case "prunable":
+			cur.isPrunable, cur.prunable = true, value
+		}
+	}
+	return regs
+}
+
+// listWorktreeRegistrations is listWorktrees' sibling for the -worktrees mode,
+// which decides over the registry itself rather than over a scan root's
+// children.
+func listWorktreeRegistrations(ctx context.Context, repo string) ([]worktreeReg, error) {
+	out, err := git(ctx, repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("list worktrees of %s: %w", repo, err)
+	}
+	return parseRegistry(out, repo)
+}
+
+// parseRegistry is split out for the same reason parseWorktreeList is, and it
+// carries the same refusal: git always names the main worktree, so an empty
+// list means the repository was not found, and a plan over an empty registry
+// reports success over nothing. Real git can produce neither an error nor an
+// empty list, so the refusal is unreachable from listWorktreeRegistrations —
+// and an unreachable guard is an untested one.
+func parseRegistry(out, repo string) ([]worktreeReg, error) {
+	regs := parseWorktreeRegistrations(out)
+	if len(regs) == 0 {
+		return nil, fmt.Errorf("`git worktree list` in %s named no worktree at all, not even the main one, "+
+			"so there is no registry to decide over", repo)
+	}
+	return regs, nil
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {

@@ -99,14 +99,14 @@ func TestProcRefs_IgnoresReferencesOutsideRoot(t *testing.T) {
 // The boundary the in-use filter turns on. A prefix test on the string alone
 // would call a process sitting in /scratch-backup a reference into /scratch,
 // and pin an entry no one is using.
-func TestAppendIfUnder_SiblingSharingANamePrefixIsNotUnderRoot(t *testing.T) {
+func TestAppendIfUnderAny_SiblingSharingANamePrefixIsNotUnderRoot(t *testing.T) {
 	for _, target := range []string{"/scratch-backup/foo", "/scratchfoo", "/scratch2"} {
-		if refs := appendIfUnder(nil, "/scratch", procRef{pid: "1", via: "cwd", target: target}); len(refs) != 0 {
+		if refs := appendIfUnderAny(nil, []string{"/scratch"}, procRef{pid: "1", via: "cwd", target: target}); len(refs) != 0 {
 			t.Errorf("%s was taken as a reference into /scratch: %v", target, refs)
 		}
 	}
 	for _, target := range []string{"/scratch", "/scratch/foo", "/scratch/foo/deep/run.log"} {
-		if refs := appendIfUnder(nil, "/scratch", procRef{pid: "1", via: "cwd", target: target}); len(refs) != 1 {
+		if refs := appendIfUnderAny(nil, []string{"/scratch"}, procRef{pid: "1", via: "cwd", target: target}); len(refs) != 1 {
 			t.Errorf("%s was dropped, but it is under /scratch", target)
 		}
 	}
@@ -136,8 +136,8 @@ func TestHeldTopLevel_MapsADeepReferenceToItsTopLevelChild(t *testing.T) {
 }
 
 // An unlinked-but-open file still pins where it lived.
-func TestAppendIfUnder_StripsTheDeletedSuffix(t *testing.T) {
-	refs := appendIfUnder(nil, "/scratch", procRef{pid: "3", via: "fd", target: "/scratch/gone/run.log (deleted)"})
+func TestAppendIfUnderAny_StripsTheDeletedSuffix(t *testing.T) {
+	refs := appendIfUnderAny(nil, []string{"/scratch"}, procRef{pid: "3", via: "fd", target: "/scratch/gone/run.log (deleted)"})
 	if len(refs) != 1 {
 		t.Fatalf("a deleted-but-open fd under the root was dropped: %v", refs)
 	}

@@ -20,6 +20,17 @@
 //	tmpreap [-root DIR] [-repo DIR]     # pressure, composition, and the reap plan
 //	tmpreap [-root DIR] [-repo DIR] -apply
 //	tmpreap [-root DIR] [-repo DIR] -apply -apply-above PCT   # the timer's form
+//	tmpreap -worktrees [-repo DIR]      # the registry, not a scan root
+//	tmpreap -worktrees [-repo DIR] -apply
+//
+// -worktrees is a second mode over a different population, and the reason it
+// lives in this command rather than beside it is that every hard question was
+// already here and tested: the /proc occupancy scan, the content-on-base
+// landing test, and a decision table whose every gate fails toward retention.
+// It decides over the worktrees -repo has REGISTERED, excludes the main
+// checkout and the permanent seats, and removes through `git worktree remove`
+// — never with --force, never with os.RemoveAll. See worktrees.go, which
+// carries the incident that shaped it.
 //
 // Nothing is deleted without -apply, and with -apply-above nothing is even
 // SCANNED until the filesystem is at or past PCT in whichever of bytes and
@@ -92,7 +103,11 @@ type options struct {
 	// is the default and is what every hand-typed `just tmp-reap apply` gets —
 	// an operator who typed the word apply has already decided.
 	applyAbove float64
-	archiveL   archiveLimits
+	// worktrees selects the registry mode. It is a mode and not a filter: the
+	// population it decides over is `git worktree list`, which has no -root and
+	// no filesystem to measure the pressure of.
+	worktrees bool
+	archiveL  archiveLimits
 	// procDir is the procfs mount the in-use scan reads. It is not a flag: an
 	// operator has no reason to move it, and a wrong value silently empties the
 	// held set, which reads exactly like "nothing is in use". It exists so plan
@@ -141,6 +156,7 @@ func parseOptions(args []string, errOut io.Writer) (options, error) {
 	fs.Float64Var(&o.warnPct, "warn", 85, "usage percentage, of bytes or inodes, at which -check warns")
 	fs.Float64Var(&o.failPct, "fail", 95, "usage percentage, of bytes or inodes, at which -check fails")
 	fs.Float64Var(&o.applyAbove, "apply-above", -1, "with -apply, reap only when bytes or inodes are at or past this percentage (negative: always reap)")
+	fs.BoolVar(&o.worktrees, "worktrees", false, "decide over the worktrees -repo has registered instead of over -root's children")
 	fs.Int64Var(&o.archiveL.maxFileBytes, "archive-max-file", defaultArchiveMaxFile, "largest single file the archive will take; a text file above it is reported as unrecoverable and deleted anyway")
 	fs.Int64Var(&o.archiveL.maxTotalBytes, "archive-max-total", 2<<30, "largest total input the archive will take")
 	if err := fs.Parse(args); err != nil {
@@ -163,13 +179,46 @@ func parseOptions(args []string, errOut io.Writer) (options, error) {
 	if o.applyAbove > 100 {
 		return options{}, fmt.Errorf("-apply-above %.0f can never be reached: a filesystem does not exceed 100%%", o.applyAbove)
 	}
+	// Refused rather than ignored, the same call as -apply-above above and for
+	// the same reason: a flag accepted in a mode that never reads it teaches a
+	// reader it was honoured. -root is the sharpest of them — someone who
+	// writes `-worktrees -root /tmp` has said which population they mean, and
+	// this mode would silently decide over a different one.
+	if o.worktrees {
+		var dead []string
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "root", "check", "apply-above", "archive", "archive-max-file", "archive-max-total", "top", "warn", "fail":
+				dead = append(dead, "-"+f.Name)
+			}
+		})
+		if len(dead) != 0 {
+			return options{}, fmt.Errorf("-worktrees does not read %s: it decides over the worktrees -repo has "+
+				"registered, which have no scan root and no filesystem pressure, so %s gates nothing here",
+				strings.Join(dead, ", "), pluralGates(dead))
+		}
+	}
 	return o, nil
+}
+
+func pluralGates(dead []string) string {
+	if len(dead) == 1 {
+		return dead[0]
+	}
+	return "each of them"
 }
 
 func run(ctx context.Context, args []string, out, errOut io.Writer) error {
 	o, err := parseOptions(args, errOut)
 	if err != nil {
 		return err
+	}
+
+	// Before the root is resolved and before anything is measured: this mode
+	// has no root and no filesystem of its own to statfs. Its population is the
+	// registry, which lives wherever the repository put it.
+	if o.worktrees {
+		return runWorktrees(ctx, o, out)
 	}
 
 	// EvalSymlinks before anything else: `git worktree list` prints resolved
