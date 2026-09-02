@@ -1567,6 +1567,70 @@ func (s *ResolverSuite) TestNarrowingLearnsOnlyFromEdgesEveryRowHas() {
 	}
 }
 
+// TestAnAnonymousWrittenBindingSilencesAnAnonymousMatchedEdge pins the
+// over-approximation writtenBindings makes for ANONYMOUS positions, which
+// every row above misses because all of them name their bindings.
+//
+// scope.writtenBindings reads CreateEffect.Variables / MergeEffect.Variables,
+// and an anonymous position enters as the EMPTY STRING. witnessesItsEndpoints
+// then asks `written[e.Variable()]`, and an anonymous MATCHED edge's Variable()
+// is the empty string too. So a Part that writes any anonymous binding silences
+// every anonymous matched edge in it, whether or not it is the same one.
+//
+// The pair below is the whole claim, and the two rows differ by ONE EDIT: the
+// CREATE's bindings are named in the second and anonymous in the first. The
+// MATCH is byte-identical across both, so nothing about the matched edge can
+// explain the difference — only the contents of the written set can. That is
+// what makes this a pin on writtenBindings rather than on the narrowing.
+//
+// THE FIRST ROW IS NOT ASSERTED TO BE CORRECT. It is asserted to be what the
+// resolver does today. The widening is the SAFE direction — membership means
+// "do not learn from this edge", which lands on the pre-narrowing answer, so
+// the cost is a query refused that could have been accepted, never a wrong type
+// committed. Both the implementer and the reviewer of
+// feat/resolver-narrow-plural-endpoints measured the reachable shapes as
+// landing on master's answer, which is why this was filed as residue rather
+// than as a defect (bd gqlc-f2h7). Narrowing writtenBindings to skip the empty
+// string would make the first row ACCEPT, and that is a deliberate change to
+// Phase B's answer — this test is here so it cannot be made silently.
+func (s *ResolverSuite) TestAnAnonymousWrittenBindingSilencesAnAnonymousMatchedEdge() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+	employeePerson := []Column{{Name: "p", Type: ResolvedNode{Labels: "Employee&Person"}}}
+
+	const matched = "MATCH (p:Person)-[:WORKS_AT]->(c:Company) "
+
+	// The baseline, and the row that makes the other two mean anything: the
+	// MATCHed edge is anonymous and it narrows on its own. Without it, the
+	// refusal below could be the anonymous MATCH failing to narrow for a reason
+	// of its own rather than the CREATE silencing it.
+	got, err := resolve(matched + "RETURN p")
+	s.Require().NoError(err, "an anonymous single-hop mandatory edge is a witness when nothing is written")
+	s.Require().Equal(employeePerson, got)
+
+	// The over-approximation. The CREATE's pattern shares no binding with the
+	// MATCH — it writes a different edge between two freshly created nodes — so
+	// the only thing it has in common with the MATCHed edge is anonymity.
+	_, err = resolve(matched + "CREATE (:Person:Employee)-[:WORKS_AT]->(:Company) RETURN p")
+	s.Require().ErrorIs(err, ErrAmbiguousLabel,
+		"the CREATE writes an anonymous edge, which enters writtenBindings as the empty string; "+
+			"the MATCHed edge is anonymous too, so it tests written and stops being a witness, and p stays plural")
+	s.Require().ErrorContains(err, "p is satisfied by more than one declared node type: Employee&Person, Person",
+		"the refusal must be p staying plural — refused for any other reason, the row passes its sentinel and pins nothing")
+
+	// One edit from the row above: the same CREATE with its bindings NAMED.
+	got, err = resolve(matched + "CREATE (a:Person:Employee)-[w:WORKS_AT]->(b:Company) RETURN p")
+	s.Require().NoError(err,
+		"naming the CREATE's bindings takes the empty string out of the written set, so the same "+
+			"anonymous MATCHed edge becomes a witness again — the answer turns on the WRITTEN side alone")
+	s.Require().Equal(employeePerson, got)
+}
+
 // TestNarrowingLearnsOnlyFromASingleHopEdge is the accepted half of the four
 // invalid/plural_endpoint_*hop*_stays_plural fixtures, and the reason the
 // witness predicate asks for a single hop rather than for a non-zero lower
