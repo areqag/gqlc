@@ -666,8 +666,19 @@ func renderRegistryDelta(cells map[cellKey]sweepCell, order []cellKey, messages 
 	b.WriteString("# the cross product is resolved under regR7Alt instead of regR7. Generated\n")
 	b.WriteString("# file: edit internal/resolver/sweep_test.go, not this.\n")
 	b.WriteString("#\n")
-	fmt.Fprintf(&b, "# %d cells differ. Absent from this file means the two registries agree\n", len(order))
-	b.WriteString("# on that cell, which is every cell of a query with no CALL clause.\n")
+	seenQ := map[string]bool{}
+	for _, k := range order {
+		seenQ[k.query] = true
+	}
+	fmt.Fprintf(&b, "# %d cells differ, over %d queries. Both counts are taken off the rows\n", len(order), len(seenQ))
+	b.WriteString("# they head rather than written as prose, so they restate themselves on the\n")
+	b.WriteString("# next regeneration.\n")
+	b.WriteString("#\n")
+	b.WriteString("# A cell is absent because the two registries agree on it. That is every\n")
+	b.WriteString("# cell of a query with no CALL clause, and also a CALL-bearing cell that\n")
+	b.WriteString("# refuses upstream of the CALL's result type under both — a refusal text\n")
+	b.WriteString("# carries no column type. So the query list here is a SUBSET of the\n")
+	b.WriteString("# corpus's CALL-bearing queries and not equal to it.\n")
 	b.WriteString("#\n")
 	b.WriteString("# cell rows carry the regR7Alt side only, in the manifest's grammar: query,\n")
 	b.WriteString("# schema, verdict, sentinel, detail, with a strconv.Quote'd msg row per\n")

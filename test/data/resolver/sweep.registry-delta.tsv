@@ -2,8 +2,15 @@
 # the cross product is resolved under regR7Alt instead of regR7. Generated
 # file: edit internal/resolver/sweep_test.go, not this.
 #
-# 944 cells differ. Absent from this file means the two registries agree
-# on that cell, which is every cell of a query with no CALL clause.
+# 944 cells differ, over 23 queries. Both counts are taken off the rows
+# they head rather than written as prose, so they restate themselves on the
+# next regeneration.
+#
+# A cell is absent because the two registries agree on it. That is every
+# cell of a query with no CALL clause, and also a CALL-bearing cell that
+# refuses upstream of the CALL's result type under both — a refusal text
+# carries no column type. So the query list here is a SUBSET of the
+# corpus's CALL-bearing queries and not equal to it.
 #
 # cell rows carry the regR7Alt side only, in the manifest's grammar: query,
 # schema, verdict, sentinel, detail, with a strconv.Quote'd msg row per
