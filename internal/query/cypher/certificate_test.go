@@ -146,6 +146,18 @@ func TestCertificateMintPredicate(t *testing.T) {
 			want: false,
 		},
 		{
+			// The arity half of the predicate, which nothing else in the
+			// pipeline defends: the grammar accepts a multi-argument
+			// aggregate and the resolver checks arity for procedures only,
+			// so this query reaches the mint site intact. Its refs are
+			// p.id and p.age at one depth — indistinguishable from
+			// collect([p.id, p.age]), which mints — and collect(x, y) has
+			// no defined leaf for a fill to land on.
+			name: "collect over two arguments does not mint",
+			src:  "MATCH (p:Person) RETURN collect(p.id, p.age) AS xs",
+			want: false,
+		},
+		{
 			// sum/min/max commit the result of a FOLD: the leaf holds a
 			// value no ref ever held, so clause 1 is false however
 			// ref-shaped the operand is. Each is pinned against the
