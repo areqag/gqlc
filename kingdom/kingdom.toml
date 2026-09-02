@@ -4,6 +4,30 @@
 # using any of those here.
 
 [kingdom]
+# The town's main checkout, absolute. Every path km resolves hangs off this one
+# — the tree `km deploy` fast-forwards, each seat worktree, the state dir beside
+# it — and it is STATED here rather than derived from the caller's cwd, which is
+# what it used to be. Derivation made all of those a function of where the
+# process happened to stand, and both halves of that were reached by ordinary
+# work rather than by contrivance (bd gqlc-yfi2):
+#
+#   the READ half — `km doctor` from the PARENT directory of the checkouts
+#   answered `./.-seat-<name>` for every seat worktree, then printed a confident
+#   FAIL naming twelve seats as unverifiable and a warn that the town's mail
+#   delegation was broken. Both false, and about a town it was not looking at.
+#
+#   the WRITE half — km from an unrelated repository named THAT repository as
+#   the tree to fast-forward. One mutation run did exactly that to the shared
+#   checkout (see kingdom/brain/postmortems/), and since gqlc-nm7w deploy runs
+#   from inside the dispatch and guard ticks, so it is no longer only a command
+#   a human typed.
+#
+# The cost, stated because it is real: a clone of this repository anywhere else
+# must edit this line before km will run there. km refuses rather than guessing,
+# which is the trade — a km that says it cannot tell where the town is is worth
+# more than one that answers about a town that does not exist. KM_DEPLOY_ROOT
+# still overrides the deploy target alone, for tests.
+root = "/home/antranig/Developer/gqlc/gqlc"
 # The herdr workspace name the town lives in. Every seat is a tab in it.
 # Keyed `tmux_session` for backwards-compat with `cfg kingdom tmux_session`
 # call sites; the value is a herdr workspace label now, not a tmux session.

@@ -117,6 +117,11 @@ five-line hook that prints its environment. It took two minutes.
   agree with the root lets the leak pass. The suite adopted the house idiom
   `unset "${!GIT_@}"`; km cannot, since origin is ssh and `GIT_SSH_COMMAND` must
   survive the scrub, and it now says so where a reader will look.
+  *Superseded 2026-09-02 (gqlc-yfi2):* `main_root()` no longer resolves through
+  the scrubbing helper because it no longer runs git at all — the root is STATED
+  in `kingdom.toml` and read from there, so the derived root this entry hardened
+  is gone and with it the leak it was hardened against. The scrub still guards
+  every other `git_at` call site; only this one left its blast radius.
 - **gqlc-2zet** (P1, filed): a gate that snapshots the repository's own state
   around the test run and FAILS when the run changed it.
 - **gqlc-kl2d** (P2, filed): the "every git call is scrubbed" rule, currently
