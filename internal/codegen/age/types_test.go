@@ -7,6 +7,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
+	"github.com/areqag/gqlc/internal/codegen/typescan"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
@@ -86,6 +87,49 @@ func TestTypeMapProperty(t *testing.T) {
 			require.False(t, ok)
 			require.Empty(t, got)
 		})
+	}
+
+	// Every constant the switch has an arm for owes a row above, and every
+	// row owes an arm. The two walks read different files — PropertyArms
+	// the case expressions in this backend's type table, PropertyTypes the
+	// const specs in internal/graph — so a name in an arm that no constant
+	// declares fails here too, rather than quietly widening the obligation
+	// by a spelling nothing upstream holds.
+	//
+	// The doc comment above says the constant SET is held by Property's
+	// switch having no default arm. That is a claim about the SET and not
+	// this obligation: it concerns a constant internal/graph gains, and
+	// says nothing about what an arm that already exists answers. Measured
+	// 2026-09-02 (bd gqlc-ozdkx): deleting the TypeUint16 row with its arm
+	// left in place, and separately adding an arm no row names, both left
+	// this suite green while the identical mutations reddened neo4j's.
+	declared := agePropertyTypes(t)
+	covered := make(map[string]bool)
+	for _, tt := range representable {
+		name, known := declared[tt.pt]
+		require.True(t, known, "the representable table names %s, which %s declares no constant for", tt.pt, graphPropertyTypeSource)
+		require.False(t, covered[name], "graph.%s has two rows in this table", name)
+		covered[name] = true
+	}
+	for _, pt := range unrepresentable {
+		name, known := declared[pt]
+		require.True(t, known, "the unrepresentable table names %s, which %s declares no constant for", pt, graphPropertyTypeSource)
+		require.False(t, covered[name], "graph.%s has two rows in this table", name)
+		covered[name] = true
+	}
+	arms := agePropertyArms(t)
+	require.NotEmpty(t, arms,
+		"the walk read no case expression off %s, so the obligation below is satisfied by any table at all", typeTableSource)
+	for name := range arms {
+		require.True(t, covered[name],
+			"typeMap.Property has an arm for graph.%s and no row above names it, so what that arm answers is "+
+				"unswept: add it to the representable table with the Go carrier it returns, or to the "+
+				"unrepresentable one", name)
+	}
+	for name := range covered {
+		require.True(t, arms[name],
+			"a row above names graph.%s and typeMap.Property has no arm for it, so the row is measuring the "+
+				"fallthrough rather than a decision the table makes", name)
 	}
 
 	// A list is admitted exactly when its element width is, at whatever
@@ -396,4 +440,33 @@ func TestTypeMapScalar(t *testing.T) {
 	t.Run("kind outside the vocabulary projects undecoded", func(t *testing.T) {
 		require.Equal(t, "any", age.TypeMap{}.Scalar(resolver.ScalarMap+1))
 	})
+}
+
+// graphPropertyTypeSource is where internal/graph declares the normalised
+// property types, and typeTableSource is where this backend declares
+// which of them it emits a carrier for. Both obligations above are read
+// off those files rather than restated here, so a width added upstream,
+// or an arm added below, joins the obligation without an edit in this
+// file.
+const (
+	graphPropertyTypeSource = "../../graph/propertytype.go"
+	typeTableSource         = "types.go"
+)
+
+// agePropertyTypes and agePropertyArms are the walks internal/codegen/neo4j
+// reads its own obligation with. Shared rather than copied: what a const
+// block is and what a switch arm is do not vary by backend, and this
+// backend having no walk at all is what bd gqlc-ozdkx was filed for.
+func agePropertyTypes(t *testing.T) map[graph.PropertyType]string {
+	t.Helper()
+	out, err := typescan.PropertyTypes(graphPropertyTypeSource)
+	require.NoError(t, err)
+	return out
+}
+
+func agePropertyArms(t *testing.T) map[string]bool {
+	t.Helper()
+	out, err := typescan.PropertyArms(typeTableSource, "Property")
+	require.NoError(t, err)
+	return out
 }
