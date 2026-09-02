@@ -3482,6 +3482,13 @@ vuln: sweep-discovery-probes vuln-root-residual
     # bought with no reduction in exposure, since it is not called. Revisit
     # when testcontainers-go itself moves; `go list -m -u` in
     # test/data/codegen is the check.
+    #
+    # That argument is about an UNCALLED advisory and does not reach a called
+    # one. x/crypto was pinned ahead of testcontainers-go in exactly the way
+    # this paragraph declines, on 2026-09-02, because GO-2026-6355 and
+    # GO-2026-6354 arrived with a call trace — startAGEContainer to
+    # testcontainers.GenericContainer to ssh.NewClientConn — and a called
+    # advisory is not registrable here at any size of diff (bd gqlc-4twyd).
     accepted="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' -e '/^$/d' <<'ACCEPTED' | sort -u
     # go.opentelemetry.io/otel v1.41.0 in test/data/codegen: baggage parsing no
     # longer caps raw header length. Imported, not called. Fixed in v1.42.0, and
@@ -3491,12 +3498,6 @@ vuln: sweep-discovery-probes vuln-root-residual
     # available and none coming. Required, not imported. This one is permanent
     # unless x/crypto drops the package, and bumping x/crypto cannot clear it.
     GO-2026-5932
-    # golang.org/x/crypto/ssh: source-address critical option not enforced for
-    # non-public-key auth callbacks. Imported by an indirect dep, not called
-    # by gqlc — no ssh server code here. Fixed in x/crypto v0.55.0; we are on
-    # v0.52.0 via a transitive constraint. Registered rather than bumped to
-    # keep the herdr-migration PR small; follow-up work should bump x/crypto.
-    GO-2026-6303
     ACCEPTED
     )"
 
