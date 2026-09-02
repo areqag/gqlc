@@ -53,6 +53,13 @@ fi
 BEADS_DIR="$deploy_root/.beads"
 export BEADS_DIR
 
+# The km-seat a runner OUGHT to be running, which is not always the one it is.
+# `km deploy` fast-forwards the deploy root's checkout and touches nothing else,
+# so this is the only km-seat a deploy can reach; $SELF is wherever whoever
+# started the runner happened to be standing. The re-exec below compares the
+# two (bd gqlc-mrelv).
+deployed="$deploy_root/kingdom/bin/km-seat"
+
 # The parse this process is running, identified by the CONTENT of the file it
 # came from rather than its mtime: mtime is whole seconds here, so a deploy
 # landing in the same second as a respawn is invisible to it, and content also
@@ -215,11 +222,31 @@ while :; do
     # started from, so `km deploy` replacing km-seat on disk reaches no seat at
     # all: measured on the live town, 16 runners between 69725 and 85752 seconds
     # old while deploy reported the new sha, one of them running a fix merged
-    # that morning (bd gqlc-s67rz). Take the new parse here — the park has
+    # that morning (bd gqlc-s67rz). Take the deployed parse here — the park has
     # exited, so a wake is pending and the seat is about to work anyway, but the
     # queue is still untouched on disk, so exec loses no reason. A session in
     # flight is never interrupted, because this line is only ever reached
     # between sessions.
+    #
+    # Compared against $deployed rather than $SELF, which is one line covering
+    # two failures instead of one. When the runner already IS the deployed copy
+    # the two spellings are the same file and this is exactly the gqlc-s67rz
+    # behaviour. When it is not, the old spelling asked whether the wrong file
+    # had changed — and a copy no `km deploy` ever writes to does not change, so
+    # the answer was no, forever. Measured 2026-09-02: 10 of 15 runners were
+    # exec'ing km-seat from a seat worktree parked at #2041, which is where
+    # somebody's shell happened to be when they started them. The fix for
+    # gqlc-zpjuc had been deployed and merged and could not reach any of them,
+    # so two thirds of the runners alive woke reading an empty ledger, against a
+    # deploy that reported itself clean (bd gqlc-mrelv).
+    # A runner is defined by the parse the town deployed, not by the directory
+    # its launcher was standing in.
+    #
+    # This heals such a runner on its next wake and permanently: after the exec
+    # $SELF IS $deployed, so the sums agree from then on and nothing re-execs in
+    # a loop. It cannot heal a runner started BEFORE this line existed, which
+    # still compares its own path against itself — those need one respawn each,
+    # and that is the operational half of gqlc-mrelv, not this one.
     #
     # Both halves of the guard are about one failure: a version we exec and
     # cannot run ends the runner, and a seat with no runner is woken by nobody
@@ -238,12 +265,12 @@ while :; do
     # carries that status, and set -e ends the runner one line ABOVE the guard
     # that was written to handle it — the seat dying in the deploy window that
     # this stanza exists to survive (bd gqlc-r6fdz).
-    now_sum=$(sha256sum "$SELF" 2>/dev/null | cut -d' ' -f1) || now_sum=""
+    now_sum=$(sha256sum "$deployed" 2>/dev/null | cut -d' ' -f1) || now_sum=""
     if [ -n "$now_sum" ] && [ "$now_sum" != "$self_sum" ]; then
-        if [ -x "$SELF" ] && bash -n "$SELF" 2>/dev/null; then
-            exec "$SELF" "$seat"
+        if [ -x "$deployed" ] && bash -n "$deployed" 2>/dev/null; then
+            exec "$deployed" "$seat"
         fi
-        echo "km-seat: $SELF changed on disk but is not runnable — it does not parse as bash, or it is not executable — so $seat is still running the parse it started with. Fix the file and the next wake takes it (bd gqlc-s67rz)." >&2
+        echo "km-seat: $deployed differs from the parse $seat is running but is not runnable — it does not parse as bash, or it is not executable — so $seat is still running the parse it started with. Fix the file and the next wake takes it (bd gqlc-s67rz)." >&2
     fi
 
     # Consume by rename. `mv` within a directory is atomic, so a `km wake` that
