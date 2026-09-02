@@ -1590,11 +1590,16 @@ func TestPriorDependenciesReadsTheDumpJustWrites(t *testing.T) {
 
 // TestRecipeBodiesReadsTheDumpJustWrites cuts the other reduction one way at a
 // time, for the reason given above TestPriorDependenciesReadsTheDumpJustWrites:
-// the live dump reaches only the shape this repo's justfile has. Under that
-// dump the reduction is exercised end to end but never cornered — every
-// recipe here has a non-empty body, no assignment it interpolates is anything
-// but a literal, and no submodule is declared, so the joins, the expansion
-// fallbacks and the walk past Modules are all unwitnessed there.
+// the live dump reaches only the shape this repo's justfile has. Here that
+// reason takes two forms and it is worth keeping them apart.
+//
+// Some of what is cut below does run live — bodies in this justfile do
+// interpolate assignments just reports as expression trees rather than as
+// literals — but running is not pinning: the live comparison asks of a body
+// only whether it spells modscopePkg, so a reduction that renders the rest of
+// the text wrongly still agrees with just, and both joins can be swapped
+// without reddening it. The remainder is not reached at all, no recipe here
+// having an empty body and no submodule being declared.
 func TestRecipeBodiesReadsTheDumpJustWrites(t *testing.T) {
 	cases := []struct {
 		name string
