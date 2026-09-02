@@ -131,6 +131,7 @@
     "unlabelled_optional_far_end_stays_wide.cypher": "satisfy_plural_edges_inline_subtype.gql",
     "unlabelled_optional_hop_next_hop_stays_wide.cypher": "satisfy_plural_edges_inline_subtype.gql",
     "unlabelled_optional_hop_type_only_property.cypher": "satisfy_plural_edges_inline_subtype.gql",
+    "unlabelled_optional_hop_whole_entity_stays_wide.cypher": "satisfy_plural_edges_inline_subtype.gql",
     "unlabelled_optional_hop_empty_intersection.cypher": "satisfy_plural_edges_inline_subtype.gql",
     "unlabelled_narrowed_ends_disagree.cypher": "narrowed_ends_disagree.gql",
     "carried_uncovered_endpoint_stays_plural.cypher": "satisfy_plural_edges_inline_subtype.gql",

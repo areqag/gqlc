@@ -32,25 +32,28 @@ type scope struct {
 	// recoverable from nodeCands, whose values are the same []schema.NodeType
 	// either way.
 	//
-	// One writer, deliberately, and the membership test defaults false for
-	// every name that writer did not name. BindNodeCands does NOT write a
-	// false here and the carry does not seed the lane; both were written and
-	// both SURVIVED mutation, because neither can be reached:
+	// Two writers: BindNodeCands' Phase B counterpart, and the carry seed.
+	// BindNodeCands still does NOT write a false here, and that remains
+	// unreachable — a name cannot be in the lane before BindNodeCands runs,
+	// since Phase A1 precedes Phase B within a Part, so the ordering that
+	// would let an inference entry be inherited by a later labelled re-bind
+	// does not occur and the zero value is already the answer.
 	//
-	//   - A name cannot be in the lane before BindNodeCands runs. Phase A1
-	//     precedes Phase B within a Part, so the only ordering that would let
-	//     an inference entry be inherited by a later labelled re-bind does not
-	//     occur, and the zero value is already the answer.
-	//   - No carry can hold one. Export records a nodeCands entry only for a
-	//     bare `WITH v` (alias equal to the variable, no property), and a bare
-	//     whole-entity projection of a plural binding is refused in that very
-	//     Part — so the resolve stops before any downstream Part reads it.
+	// The carry seed is live as of gqlc-etj6. It used to be unreachable for a
+	// stated reason that no longer holds: Export records a nodeCands entry
+	// only for a bare `WITH v` (alias equal to the variable, no property), and
+	// a bare whole-entity projection of a plural binding was refused in that
+	// very Part, so the resolve stopped before any downstream Part read it.
+	// ResolveProjections now defers that refusal in a non-final Part
+	// (carriesPluralBinding), which is precisely what makes a carried plural
+	// name possible — and it has to bring this lane with it, because the
+	// sentinel is not recoverable from nodeCands.
 	//
-	// Nothing deletes from the lane either. The narrowing's shrink rewrites a
-	// name already in it, and shrinking a candidate set does not change how
-	// the binding was written; the narrowing's collapse and Bind*'s shadow
-	// cascade both take the name out of nodeCands, and refProjectionType asks
-	// this lane only from inside the nodeCands arm.
+	// Nothing deletes from the lane. The narrowing's shrink rewrites a name
+	// already in it, and shrinking a candidate set does not change how the
+	// binding was written; the narrowing's collapse and Bind*'s shadow cascade
+	// both take the name out of nodeCands, and refProjectionType asks this
+	// lane only from inside the nodeCands arm.
 	pluralByInference map[string]bool
 	resolvedCovers    map[string]struct{}
 	edgeTypes         map[string]schema.EdgeType
@@ -91,7 +94,7 @@ type scope struct {
 	ingested bool
 }
 
-// newScope seeds a scope from Part K's exported carry — the eleven fields
+// newScope seeds a scope from Part K's exported carry — the twelve fields
 // of branchState. Part 0's carry is the zero-value branchState (nil
 // maps everywhere) and the constructor treats it as empty without
 // nil-guards at every read; the make calls give every downstream
@@ -122,12 +125,15 @@ func newScope(carry branchState) *scope {
 	// narrowing declines to learn from a carried singular endpoint, which lands
 	// on the pre-narrowing answer. The cost is precision on
 	// `MATCH (a:Only) WITH a MATCH (p:Plural)-[r]->(a)`; the alternative is a
-	// twelfth branchState lane, and no fixture pays the precision.
+	// further branchState lane, and no fixture pays the precision.
 	for name, nt := range carry.exportedNodeTypes {
 		s.nodeTypes[name] = nt
 	}
 	for name, nts := range carry.exportedNodeCands {
 		s.nodeCands[name] = nts
+	}
+	for name, byInference := range carry.exportedPluralByInference {
+		s.pluralByInference[name] = byInference
 	}
 	for name, et := range carry.exportedEdgeTypes {
 		s.edgeTypes[name] = et
@@ -770,7 +776,7 @@ func (s *scope) DemoteNullability() {
 // s.carriedOrder / s.nodeTypes / s.edgeBindings / s.callTypes /
 // s.returns / s.returnsAll / s.carriedResolvedTypes; writes the three
 // projection-output fields. First error short-circuits.
-func (s *scope) ResolveProjections(sch schema.Schema) error {
+func (s *scope) ResolveProjections(sch schema.Schema, final bool) error {
 	s.scopeOrder = s.buildScopeOrder()
 
 	items, err := s.materialiseReturns()
@@ -781,6 +787,10 @@ func (s *scope) ResolveProjections(sch schema.Schema) error {
 
 	s.columns = make([]Column, 0, len(items))
 	for _, item := range items {
+		if !final && s.carriesPluralBinding(item) {
+			s.columns = append(s.columns, Column{Name: item.Name, Type: ResolvedUnknown{}})
+			continue
+		}
 		colType, err := s.projectionType(item.Value, sch)
 		if err != nil {
 			return err
@@ -788,6 +798,43 @@ func (s *scope) ResolveProjections(sch schema.Schema) error {
 		s.columns = append(s.columns, Column{Name: item.Name, Type: colType})
 	}
 	return nil
+}
+
+// carriesPluralBinding reports whether item is the one projection shape a
+// non-final Part may leave untyped: a bare `WITH v` (or its WITH * equivalent)
+// naming a node binding that several declared types satisfy.
+//
+// Such a Part's columns are discarded by resolveBranch, so this projection is a
+// carry and not a column anyone reads a type off. Refusing it here is premature
+// — the downstream Part may narrow the candidate set by edge closure, and if it
+// does not, the whole-entity refusal fires there instead, on the same candidate
+// set and through the same sentinel. The deferral is why exportedNodeCands is
+// reachable at all.
+//
+// The predicate deliberately restates Export's own condition rather than
+// asking "is this a whole-entity projection". Export records a nodeCands entry
+// only when the alias equals the variable and no property is named, so those
+// are exactly the projections whose candidate set survives the boundary. For
+// `WITH p AS q` the set is dropped and only exportedResolvedTypes carries `q`
+// — deferring there would send a name downstream with nothing left to refuse
+// it against, so an aliased plural projection is still refused here.
+//
+// The column type is ResolvedUnknown because at this Part the type genuinely is
+// not yet determined. It reaches no caller: resolveBranch keeps only the final
+// Part's columns, and while Export does copy it into exportedResolvedTypes, the
+// same name also lands in exportedNodeCands, which every downstream reader
+// consults first.
+func (s *scope) carriesPluralBinding(item query.ReturnItem) bool {
+	rp, ok := item.Value.(query.RefProjection)
+	if !ok {
+		return false
+	}
+	ref := rp.Ref()
+	if ref.Property != "" || item.Name != ref.Variable {
+		return false
+	}
+	_, plural := s.nodeCands[ref.Variable]
+	return plural
 }
 
 // buildScopeOrder computes the deterministic order for RETURN * / WITH *
@@ -1109,16 +1156,17 @@ func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedTyp
 // lanes / s.carriedGroups off the receiver.
 func (s *scope) Export() branchState {
 	out := branchState{
-		exportedNodeTypes:       make(map[string]schema.NodeType),
-		exportedNodeCands:       make(map[string][]schema.NodeType),
-		exportedEdgeTypes:       make(map[string]schema.EdgeType),
-		exportedEdgeKeys:        make(map[string]schema.EdgeKey),
-		exportedEdgeCands:       make(map[string][]schema.EdgeKey),
-		exportedEdgeBindings:    make(map[string]query.EdgeBinding),
-		exportedNullableBinding: make(map[string]bool),
-		exportedOptionalGroup:   make(map[string]int),
-		exportedResolvedTypes:   make(map[string]ResolvedType),
-		exportedCallTypes:       make(map[string]callBindingSlot),
+		exportedNodeTypes:         make(map[string]schema.NodeType),
+		exportedNodeCands:         make(map[string][]schema.NodeType),
+		exportedPluralByInference: make(map[string]bool),
+		exportedEdgeTypes:         make(map[string]schema.EdgeType),
+		exportedEdgeKeys:          make(map[string]schema.EdgeKey),
+		exportedEdgeCands:         make(map[string][]schema.EdgeKey),
+		exportedEdgeBindings:      make(map[string]query.EdgeBinding),
+		exportedNullableBinding:   make(map[string]bool),
+		exportedOptionalGroup:     make(map[string]int),
+		exportedResolvedTypes:     make(map[string]ResolvedType),
+		exportedCallTypes:         make(map[string]callBindingSlot),
 	}
 	// Build the local group-id lookup up front: a name gets its local
 	// binding's OptionalGroup if declared this Part, otherwise its carried
@@ -1195,6 +1243,12 @@ func (s *scope) Export() branchState {
 		}
 		if cands, ok := s.nodeCands[v]; ok {
 			out.exportedNodeCands[v] = cands
+			// Only alongside a nodeCands entry: the lane is meaningless for a
+			// name with no candidate set, and seeding it for one would put a
+			// true into a downstream scope that nothing ever clears.
+			if s.pluralByInference[v] {
+				out.exportedPluralByInference[v] = true
+			}
 		}
 		if et, ok := s.edgeTypes[v]; ok {
 			out.exportedEdgeTypes[v] = et
