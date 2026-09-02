@@ -695,6 +695,24 @@ package's *name* — the entry's `gen.go.package` key, related but
 distinct); output target (this directory's old name, retired with the
 `output` key).
 
+**Wire family**:
+The equivalence class of declared widths that one backend's driver
+delivers as a single indistinguishable wire shape. On neo4j every
+integer width arrives as `int64` and every float as `float64`; on AGE
+a DATE arrives as ISO text (sharing the string family with STRING)
+and TIMESTAMP, LOCAL TIME and DURATION all arrive as integer
+microsecond counts (sharing the integer family with the INT widths
+and each other). A per-backend fact, never a property of the schema:
+two widths in one family on AGE may be distinct families on neo4j.
+Load-bearing for closed dynamic unions — a union is emittable on a
+backend only where its members land in pairwise-distinct wire
+families there, because decode has nothing but the wire shape to
+dispatch on (`docs/specs/codegen-record-union-carriers.md` §4).
+_Avoid_: wire type (suggests one width, not a class); carrier (the
+emitted Go type — related, but a family can hold widths whose
+carriers differ, e.g. `int32` and `int64` both riding neo4j's
+`int64`).
+
 **Transaction handle (Tx)**:
 The object the generated repository's `Begin` returns: an open, always
 write-mode transaction finished by exactly one `Commit` or `Rollback`.
