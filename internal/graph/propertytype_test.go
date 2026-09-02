@@ -162,6 +162,19 @@ func TestUnionOfSetSemantics(t *testing.T) {
 			}))
 	})
 
+	// Only a BARE ANY absorbs. Absorbing a qualified one would resolve
+	// "ANY NOT NULL | STRING" to plain ANY and lose the qualifier, and there
+	// is no member left to carry it. Whether that reduction is sound is a
+	// question for the semantics volume gqlc does not have (bd gqlc-lir), so
+	// the design chose the reading that discards nothing; this row is what
+	// holds that choice against a tempting simplification.
+	t.Run("a NOT NULL ANY member does not absorb", func(t *testing.T) {
+		require.Equal(t, graph.PropertyType("UNION<ANY NOT NULL|STRING>"),
+			graph.UnionOf([]graph.UnionMember{
+				{Type: graph.TypeString}, {Type: graph.TypeAnyPropertyValue, NotNull: true},
+			}))
+	})
+
 	t.Run("nested unions are flattened", func(t *testing.T) {
 		inner := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt}, {Type: graph.TypeBool}})
 		require.Equal(t, graph.PropertyType("UNION<BOOL|INT|STRING>"),
