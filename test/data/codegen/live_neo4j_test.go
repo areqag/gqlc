@@ -35,6 +35,8 @@ import (
 	mixedv6 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v6"
 	onecolonev5 "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/neo4j-go-v5"
 	onecolonev6 "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/neo4j-go-v6"
+	scalarmapv5 "github.com/areqag/gqlc/test/data/codegen/valid/scalar_map/golden/neo4j-go-v5"
+	scalarmapv6 "github.com/areqag/gqlc/test/data/codegen/valid/scalar_map/golden/neo4j-go-v6"
 	anypropv5 "github.com/areqag/gqlc/test/data/codegen/valid/schema_any_property/golden/neo4j-go-v5"
 	anypropv6 "github.com/areqag/gqlc/test/data/codegen/valid/schema_any_property/golden/neo4j-go-v6"
 	temporalv5 "github.com/areqag/gqlc/test/data/codegen/valid/temporal_property_roundtrip/golden/neo4j-go-v5"
@@ -97,6 +99,7 @@ type neo4jV5 struct {
 	temporals  temporalRoundtripV5
 	builtLDT   localDateTimeColumnV5
 	zonedTimes zonedTimeRoundtripV5
+	maps       mapColumnV5
 }
 
 // neo4jStoredTemporal is both neo4j arms' declaration of what their target
@@ -148,6 +151,7 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 		temporals:  temporalRoundtripV5{q: temporalv5.New(driver)},
 		builtLDT:   localDateTimeColumnV5{q: ldtv5.New(driver)},
 		zonedTimes: zonedTimeRoundtripV5{q: zonedv5.New(driver)},
+		maps:       mapColumnV5{q: scalarmapv5.New(driver)},
 	}
 }
 
@@ -174,6 +178,11 @@ func (h *neo4jV5) temporalScenario(ctx context.Context, t *testing.T) temporalBa
 }
 
 func (h *neo4jV5) localDateTimeColumnScenario(ctx context.Context, t *testing.T) localDateTimeColumnBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV5) mapColumnScenario(ctx context.Context, t *testing.T) mapColumnBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
 }
@@ -294,6 +303,8 @@ func (s neo4jV5Scenario) seedSeenOn(ctx context.Context, t *testing.T, id int64,
 
 func (s neo4jV5Scenario) localDateTimeColumn() localDateTimeColumnQuerier { return s.arm.builtLDT }
 
+func (s neo4jV5Scenario) mapColumn() mapColumnQuerier { return s.arm.maps }
+
 func (s neo4jV5Scenario) zonedTimeRoundtrip() zonedTimeRoundtripQuerier { return s.arm.zonedTimes }
 
 // temporalRoundtripV5 binds the zoneless temporal fixture. Every
@@ -380,6 +391,16 @@ func (a localDateTimeColumnV5) builtLocalDateTime(ctx context.Context) (localDat
 		Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond,
 	}, nil
 }
+
+// mapColumnV5 binds the map-column fixture. The method it forwards returns
+// the generated map[string]any unchanged, unlike the temporal adapters
+// either side: those restate a per-package struct so the battery can read
+// components off it, and a map has no per-package shape to restate. So this
+// adapter narrows nothing, and what the scenario asserts on is the value the
+// emitted read produced.
+type mapColumnV5 struct{ q *scalarmapv5.Queries }
+
+func (a mapColumnV5) oneMap(ctx context.Context) (map[string]any, error) { return a.q.OneMap(ctx) }
 
 // zonedTimeRoundtripV5 binds the zoned temporal fixture.
 type zonedTimeRoundtripV5 struct{ q *zonedv5.Queries }
@@ -598,6 +619,7 @@ type neo4jV6 struct {
 	temporals  temporalRoundtripV6
 	builtLDT   localDateTimeColumnV6
 	zonedTimes zonedTimeRoundtripV6
+	maps       mapColumnV6
 }
 
 func startNeo4jV6(ctx context.Context, t *testing.T) harness {
@@ -628,6 +650,7 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 		temporals:  temporalRoundtripV6{q: temporalv6.New(driver)},
 		builtLDT:   localDateTimeColumnV6{q: ldtv6.New(driver)},
 		zonedTimes: zonedTimeRoundtripV6{q: zonedv6.New(driver)},
+		maps:       mapColumnV6{q: scalarmapv6.New(driver)},
 	}
 }
 
@@ -654,6 +677,11 @@ func (h *neo4jV6) temporalScenario(ctx context.Context, t *testing.T) temporalBa
 }
 
 func (h *neo4jV6) localDateTimeColumnScenario(ctx context.Context, t *testing.T) localDateTimeColumnBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV6) mapColumnScenario(ctx context.Context, t *testing.T) mapColumnBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
 }
@@ -762,6 +790,8 @@ func (s neo4jV6Scenario) seedSeenOn(ctx context.Context, t *testing.T, id int64,
 
 func (s neo4jV6Scenario) localDateTimeColumn() localDateTimeColumnQuerier { return s.arm.builtLDT }
 
+func (s neo4jV6Scenario) mapColumn() mapColumnQuerier { return s.arm.maps }
+
 func (s neo4jV6Scenario) zonedTimeRoundtrip() zonedTimeRoundtripQuerier { return s.arm.zonedTimes }
 
 // temporalRoundtripV6 binds the zoneless temporal fixture on the v6
@@ -845,6 +875,12 @@ func (a localDateTimeColumnV6) builtLocalDateTime(ctx context.Context) (localDat
 		Hour: v.Hour, Minute: v.Minute, Second: v.Second, Nanosecond: v.Nanosecond,
 	}, nil
 }
+
+// mapColumnV6 binds the map-column fixture on the v6 driver, forwarding
+// unchanged for the reason the v5 adapter gives.
+type mapColumnV6 struct{ q *scalarmapv6.Queries }
+
+func (a mapColumnV6) oneMap(ctx context.Context) (map[string]any, error) { return a.q.OneMap(ctx) }
 
 // zonedTimeRoundtripV6 binds the zoned temporal fixture on the v6 driver.
 type zonedTimeRoundtripV6 struct{ q *zonedv6.Queries }
