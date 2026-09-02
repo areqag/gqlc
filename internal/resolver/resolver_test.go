@@ -2069,6 +2069,20 @@ func (s *ResolverSuite) TestInlineEndpointsAgreeWithTheirVarSpelling() {
 			inline: "MATCH (:Staff)-[r:WORKS_AT]->(c:Company) RETURN c",
 			varSpe: "MATCH (e:Staff)-[r:WORKS_AT]->(c:Company) RETURN c",
 		},
+		{
+			// Both sides refuse, so the pair is not about the accept/refuse line
+			// but about WHICH refusal. No declared type carries both Company and
+			// Desk, so the label set is unsatisfiable and there was never an edge
+			// to look for; the var spelling says so at Phase A1. Until the inline
+			// spelling was given the same satisfiability check it reached edge
+			// closure with an empty satisfying set, fell through to the spelled
+			// key and reported a missing EDGE — telling the author to go declare
+			// `Person-[WORKS_AT]->Company&Desk`, which no node could ever be an
+			// endpoint of (bd gqlc-jqix).
+			name: "an endpoint no declared type satisfies", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			inline: "MATCH (p:Person)-[r:WORKS_AT]->(:Company:Desk) RETURN p",
+			varSpe: "MATCH (p:Person)-[r:WORKS_AT]->(z:Company:Desk) RETURN p",
+		},
 	}
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
@@ -2111,11 +2125,19 @@ func (s *ResolverSuite) TestInlineEndpointsAgreeWithTheirVarSpelling() {
 // each declared type's complete label set, not the whole schema, so spelling
 // both labels leaves one satisfying type and the answer is singular again.
 //
-// The last row is the arm where there is no satisfying set to name. No row can
-// stand at such an endpoint, so the keys it yields decide no verdict — only the
-// wording of the refusal, and the labels an author reads back have to be the
-// ones they wrote. Asserting the whole message is what holds that up: drop the
-// arm and the refusal still arrives, naming nothing.
+// The last row is the arm where there is no satisfying set at all, so the
+// endpoint commits on nothing and the answer is a refusal. Which refusal is the
+// whole of it: satisfiability is a property of the expression and the schema
+// alone, so an unsatisfiable set means no row can stand there and there was
+// never an edge to look for. It is asked at Phase A1, where the same question
+// on a var spelling is asked, and the message is the same one (bd gqlc-jqix).
+//
+// This row used to assert `unknown edge: ...Company&Desk`, from an endpointLabels
+// arm that yielded the SPELLED key once nothing satisfied the expression. That
+// arm is now unreachable, and asserting the whole message here is what keeps the
+// wording pinned: TestInlineEndpointsAgreeWithTheirVarSpelling compares the two
+// spellings to each other and would pass on any message they regressed to
+// together.
 func (s *ResolverSuite) TestInlineEndpointCommitsOnTheTypesSatisfyingIt() {
 	worksAtKeys := []schema.EdgeKey{
 		{Source: "Employee&Person", KeyLabels: "WORKS_AT", Target: "Company&Large"},
@@ -2153,9 +2175,9 @@ func (s *ResolverSuite) TestInlineEndpointCommitsOnTheTypesSatisfyingIt() {
 		{
 			name: "a conjunction no type satisfies", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
 			query:   "MATCH (p:Person)-[r:WORKS_AT]->(:Company:Desk) RETURN p",
-			wantErr: ErrUnknownEdge,
-			wantMsg: "unknown edge: Employee&Person-[WORKS_AT]->Company&Desk, " +
-				"Person-[WORKS_AT]->Company&Desk",
+			wantErr: ErrUnknownLabel,
+			wantMsg: "unknown label: no node type satisfies Company&Desk; " +
+				"declared types carrying these labels: Company, Company&Large, Desk",
 		},
 	}
 	for _, tt := range tests {
