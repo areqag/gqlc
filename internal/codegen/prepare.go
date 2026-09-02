@@ -1128,6 +1128,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 //  4. `<Method>Params` for two-plus-param queries (C1)
 //  5. `<Method>Row` for two-plus-column queries (C1)
 //  6. edgeUnion interface names, per-query-column (C5)
+//  7. `<bareMethod>QueryText` consts, one per query (C6)
 //
 // First insertion-order duplicate wins, so a batch-derived name that
 // lands on a fixed declaration reports the fixed declaration. Source 0
@@ -1137,18 +1138,26 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 // Source 3 reaches source 0 only after Phase A has refused a
 // NamedQuery.Name in the reserved set, so the fail it reports is the
 // Phase A one.
-// Marker method names (source 6's per-candidate satisfier) and
-// <methodName>QueryText consts are unexported and stay off the sweep
-// (§4.6 defence). A marker collision is caught by the interface-name axis
-// first. A QueryText collision is not, and the omission is a real hole:
-// the const shares the unexported namespace with source 2's
-// decode<Entity> helpers, which derive from schema labels rather than
-// from method names, so a node label FooQueryText alongside a query named
-// DecodeFoo emits decodeFooQueryText from both axes and neither insert
-// below sees the other. Generation exits 0 and go build reports the
-// redeclaration. The hole is gqlc-igs4: both colliding names are
-// generator-owned, so the capture guards — which police author-chosen
-// identifiers against generator-owned ones — are structurally blind to it.
+// Marker method names (source 6's per-candidate satisfier) are
+// unexported and stay off the sweep (§4.6 defence), because a marker
+// collision is caught by the interface-name axis first.
+//
+// Source 7 is unexported too and is swept anyway, because nothing else
+// catches it. The QueryText const shares the unexported namespace with
+// source 2's decode<Entity> helpers, and the two derive from different
+// author text — method names on one side, schema labels on the other — so
+// a node label FooQueryText alongside a query named DecodeFoo produces
+// decodeFooQueryText twice. Both names are generator-owned, which is why
+// the capture guards are structurally blind to the pair: those police
+// author-chosen identifiers against generator-owned ones, and here
+// neither side is author-chosen. Until gqlc-igs4 that meant generate
+// exited 0 and go build reported the redeclaration.
+//
+// Swept rather than made disjoint by a reserved suffix, because what
+// this sweep asserts is that the generator-owned package-level names are
+// pairwise distinct. That is an equality check over the names actually
+// emitted, so a later source added without a matching insert here fails
+// loudly rather than resting on a spelling convention nobody re-derives.
 func sweepIdentifiers(entities []Entity, prepared []Query) error {
 	seen := make(map[string]string, len(reservedIdentifiers)+len(entities)*2+len(prepared)*3)
 	insert := func(ident, source string) error {
@@ -1212,6 +1221,15 @@ func sweepIdentifiers(entities []Entity, prepared []Query) error {
 			if err := insert(u.InterfaceName, fmt.Sprintf("edgeUnion interface %q for query %q column %d %q", u.InterfaceName, p.Name, u.ColumnPos, u.ColumnName)); err != nil {
 				return err
 			}
+		}
+	}
+	// Source 7: query-text consts, one per query, emitted unconditionally
+	// by every backend. Last, so the sources that were here before it
+	// keep reporting the same side of a collision as "first".
+	for _, p := range prepared {
+		ident := QueryTextConst(p)
+		if err := insert(ident, fmt.Sprintf("query %q query-text const %q", p.Name, ident)); err != nil {
+			return err
 		}
 	}
 	return nil
