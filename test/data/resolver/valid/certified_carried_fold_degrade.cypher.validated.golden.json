@@ -1,0 +1,17 @@
+{
+  "columns": [
+    {
+      "name": "xs",
+      "type": {
+        "kind": "list",
+        "element": {
+          "kind": "unknown"
+        }
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
