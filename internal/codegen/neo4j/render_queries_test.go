@@ -72,9 +72,12 @@ func TestParamBindExprSlices(t *testing.T) {
 // element into the driver's own array carrier — []any — mirroring the
 // per-element narrow the decode side has had since walkListElemBody.
 //
-// Every row is a list of depth 1, which is the only depth reachable: a
-// parameter's Go type is its property's, and ADR 0035 refuses a nested
-// list as a stored property on this backend.
+// Every row is a list of depth 1, which is the only depth the helper is
+// reached at: a parameter's Go type is its property's, and ADR 0035
+// refuses a nested declared list as a stored property. LIST<BYTES> does
+// emit [][]byte, but "byte" is no temporal carrier, so ParamBindExpr
+// hands that back unconverted — the [][]string rows above are the
+// standing witness for that arm.
 func TestParamBindExprTemporalLists(t *testing.T) {
 	tests := []struct {
 		name     string

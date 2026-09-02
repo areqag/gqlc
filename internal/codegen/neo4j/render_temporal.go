@@ -15,10 +15,13 @@ type temporalUse struct {
 	encode    bool // from<X>: a carrier bound as a non-nullable parameter
 	encodePtr bool // from<X>Ptr: a carrier bound as a nullable parameter
 	// list records that the carrier is bound as a list parameter. A bool
-	// rather than a depth: a parameter's Go type is its property's
-	// (prepare.go), and ADR 0035 refuses a nested list as a stored
-	// property on this backend, so no declaration yields a list of lists
-	// here (ruled on bd gqlc-a2g2v).
+	// rather than a depth: a parameter's Go type is its property's, and
+	// ADR 0035 refuses a nested DECLARED list as a stored property, so a
+	// list whose leaf is a temporal carrier is depth 1 (ruled on bd
+	// gqlc-a2g2v). Two slice prefixes are not themselves impossible —
+	// LIST<BYTES> emits [][]byte, nesting inside the element rather than
+	// in the declared list — but such a leaf is not a carrier and marks
+	// nothing here.
 	list bool
 	// listPtr records that a list parameter of this carrier is ALSO bound
 	// nullable somewhere in the batch, which owes the from<X>ListPtr
