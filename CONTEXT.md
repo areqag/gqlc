@@ -365,6 +365,25 @@ item**).
 _Avoid_: expression (reserve for the grammar's `oC_Expression`; a projection is
 the curated subset the model carries).
 
+**Ref-valued-leaf certificate**:
+A single additive bit on a rich projection (an expression projection or an
+aggregate) asserting that its flat ref slice is not merely "the bindings the
+expression touches" but is **leaf-exact and exhaustive**: every value at the
+committed **type**'s `unknown` leaf is literally the value of one of the
+projection's `var` / `var.prop` refs. Minted by the parser only for uniform
+ref-tree shapes — `[p.id, p.age]`, `collect(p.id)`, `collect([p.id, p.age])`,
+homogeneous-depth nested list literals — and never for folds, heterogeneous or
+mixed-depth literals, or engine-dependent aggregates. The certificate is what
+lets the resolver fill the unknown leaf from the schema without an expression
+tree: it carries no structure (the list spine already lives in the committed
+type), so ADR 0003's no-expression-tree line holds. Ruled in
+`docs/specs/model-change-f45qn-ref-valued-leaves.md` (bead gqlc-f45qn); lands
+with bead gqlc-t0bk.
+_Avoid_: marker bit (the Stage-5 direction marker is a different axis);
+inferring ref-valuedness from the flat ref set (falsified —
+`collect(size(p.tags))` has the same ref shape as `collect(p.id)` and a
+different answer).
+
 **Type**:
 The result type of a **projection**: a marker-sealed sum of `bool`, `int`,
 `float`, `string`, `null`, `list<T>` (parameterised over an element type),
@@ -381,7 +400,10 @@ expression carries the result of the parser's constant folding over the
 scalar-expression grammar. `unknown` is the parser's honest posture on
 the type-interface boundary (ADR 0005) for property lookups, function
 calls, aggregates, and any expression touching a property or `null` —
-the resolver upgrades these from the schema. Incremental: Stage 7 added
+the resolver upgrades these from the schema where it can reach one: a
+bare `var.prop` ref, or the leaves of a projection carrying the
+**ref-valued-leaf certificate**; every other rich shape stays honestly
+unknown, permanently. Incremental: Stage 7 added
 the six temporal types, Stage 8 added `path`; ADR 0008 records the sum
 at seventeen as of Stage 14 completion.
 _Avoid_: `any` (use `unknown` — the parser's "I cannot tell"); property
