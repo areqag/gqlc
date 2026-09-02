@@ -795,13 +795,23 @@ check-bd-gh-sync-selection:
     scratch="$(mktemp -d)" || exit 1
     trap 'rm -rf "$scratch"' EXIT
 
-    # The anchor is the selection's own invocation line, matched whole. The file
+    # The anchor is the start of the selection's own invocation line. The file
     # carries six `PYEOF` heredocs and this names the one that decides what is
     # offered to GitHub; the other five answer different questions.
-    anchor='python3 - "$_tmp/beads.json" "$_label_gate" \'
+    #
+    # It stops before that line's trailing `\` continuation and carries no
+    # backslash at all, which is load-bearing. awk performs escape-sequence
+    # processing on a `-v` assignment, and a lone trailing backslash is where
+    # the awks disagree: gawk 5.4 keeps it, mawk — /usr/bin/awk on the CI
+    # runners — does not. Measured on this branch: with the backslash the anchor
+    # matched once in every seat worktree and 0 times on the runner. That was
+    # the fail-closed refusal below rather than a false pass, but it is still a
+    # red no seat can reproduce. With no backslash the escape processing is a
+    # no-op by construction rather than by luck, and ENVIRON does none at all.
+    anchor='python3 - "$_tmp/beads.json" "$_label_gate"'
     erc=0
-    awk -v anchor="$anchor" '
-        $0 == anchor { anchors++; armed = 1; next }
+    ANCHOR="$anchor" awk '
+        index($0, ENVIRON["ANCHOR"]) == 1 { anchors++; armed = 1; next }
         armed && index($0, "<<") && index($0, "PYEOF") { armed = 0; inblock = 1; opened++; next }
         inblock && $0 == "PYEOF" { inblock = 0; closed++; next }
         inblock { print }
