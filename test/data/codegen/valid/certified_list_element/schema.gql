@@ -1,0 +1,23 @@
+-- The gqlc-t0bk reproducer. The bead measured `RETURN p.id` typed from the
+-- schema and `RETURN [p.id, p.age]` NOT typed over the same two declared
+-- properties; PersonId and PersonPair are that pair, and their agreeing
+-- element types are this fixture's reason to exist. PersonCollectId and
+-- PersonCollectPair are the collect() shapes the bead reports inheriting it.
+--
+-- `id` and `age` are the bead's own properties, verbatim. `score` and `rank`
+-- answer the two things spec model-change-f45qn §6 asks the execution to
+-- verify rather than assume: what a nullable element renders as, and whether
+-- the fill carries the DECLARED width or flattens everything to int64.
+--
+-- PersonFoldPair is the uncertified control. It holds the same two refs as
+-- PersonPair and must still come back as `any`, because the certificate is
+-- what licenses the fill and a fold does not mint it — the row that witnesses
+-- the resolver never infers from the flat ref set alone.
+CREATE PROPERTY GRAPH TYPE CertifiedListElement AS {
+    (:Person {
+        id    :: INT64 NOT NULL,
+        age   :: INT64 NOT NULL,
+        score :: INT64,
+        rank  :: INT32 NOT NULL
+    })
+}
