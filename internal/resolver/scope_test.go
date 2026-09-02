@@ -690,3 +690,42 @@ func TestScopeGroupZeroIsNotAnOptionalGroup(t *testing.T) {
 	require.NotContains(t, out.exportedOptionalGroup, "a", "a zero group id is absence, and must not travel in the carry")
 	require.NotContains(t, out.exportedOptionalGroup, "b")
 }
+
+// TestCertifiedBareUnknownIsNotFilled pins fillLeaf's underList belt (spec
+// model-change-f45qn §5). Neither mint site can produce this projection: both
+// certify a list spine, so a certified BARE unknown has no grammar today. It is
+// built by hand precisely for that reason — the belt guards a shape nothing
+// reaches yet, and without this test deleting it is invisible to the corpus.
+//
+// The shape is not hypothetical. A future mint site over an engine-dependent
+// result (avg) or over a fold would certify exactly this, where the unknown
+// means "the server decides" — something no schema lookup is entitled to
+// overwrite. Such a projection must fail toward any, never toward a
+// confidently wrong concrete.
+func TestCertifiedBareUnknownIsNotFilled(t *testing.T) {
+	sc := newScope(branchState{})
+	sc.Ingest(query.Part{})
+
+	nb, err := query.NewNodeBinding("p", graph.LabelSet{"Person"})
+	require.NoError(t, err)
+	require.NoError(t, sc.BindNode(nb, schema.NodeType{
+		KeyLabels:      graph.LabelSet{"Person"}.Key(),
+		CompleteLabels: graph.LabelSet{"Person"}.Key(),
+		Properties:     map[string]schema.Property{"id": {Name: "id", Type: graph.PropertyType("INT64")}},
+	}))
+
+	refs := []query.Ref{{Variable: "p", Property: "id"}}
+	want := ResolvedProperty{Type: graph.PropertyType("INT64")}
+
+	// The control, and it is load-bearing: the SAME refs and the same
+	// certificate under a list spine do fill. Without it, a bare unknown
+	// staying unknown would also be satisfied by the ref failing to resolve,
+	// or by the certificate being ignored outright.
+	filled, err := sc.certifiedProjectionType(query.NewTypeList(query.TypeUnknown{}), refs, true, schema.Schema{})
+	require.NoError(t, err)
+	require.Equal(t, ResolvedList{Element: want}, filled, "a certified unknown UNDER a list fills")
+
+	bare, err := sc.certifiedProjectionType(query.TypeUnknown{}, refs, true, schema.Schema{})
+	require.NoError(t, err)
+	require.Equal(t, ResolvedUnknown{}, bare, "a certified BARE unknown must stay unknown")
+}

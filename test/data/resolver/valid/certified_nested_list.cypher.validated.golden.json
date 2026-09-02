@@ -1,0 +1,22 @@
+{
+  "columns": [
+    {
+      "name": "xs",
+      "type": {
+        "kind": "list",
+        "element": {
+          "kind": "list",
+          "element": {
+            "kind": "property",
+            "type": "INT",
+            "nullable": true
+          }
+        }
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}

@@ -560,6 +560,16 @@ var invalidFixtures = map[string]error{
 	// alternative newScope names, and the one
 	// carried_uncovered_endpoint_stays_plural is written against.
 	"unlabelled_hop_to_carried_far_end_stays_wide.cypher": ErrUnknownProperty,
+
+	// The ref-valued-leaf certificate's acceptance change (spec
+	// model-change-f45qn §5). Before it, a rich projection's Refs were never
+	// resolved against the schema, so both of these were ACCEPTED as []any and
+	// the typo survived to the generated code. Each is its valid twin with one
+	// property renamed — certified_list_of_properties and
+	// certified_collect_property — so the pair isolates the undeclared property
+	// as the only difference between resolving and refusing.
+	"certified_list_unknown_property.cypher":    ErrUnknownProperty,
+	"certified_collect_unknown_property.cypher": ErrUnknownProperty,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is

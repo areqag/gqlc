@@ -38,7 +38,8 @@
                   }
                 ],
                 "distinct": false,
-                "type": "list\u003cedge\u003e"
+                "type": "list\u003cedge\u003e",
+                "leavesAreRefs": true
               }
             }
           ],

@@ -123,7 +123,8 @@
                   }
                 ],
                 "distinct": false,
-                "type": "list\u003cunknown\u003e"
+                "type": "list\u003cunknown\u003e",
+                "leavesAreRefs": true
               }
             },
             {

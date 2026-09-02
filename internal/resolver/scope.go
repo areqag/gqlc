@@ -905,11 +905,102 @@ func (s *scope) projectionType(p query.Projection, sch schema.Schema) (ResolvedT
 	case query.FuncProjection:
 		return resolveType(pp.Type())
 	case query.ExprProjection:
-		return resolveType(pp.Type())
+		return s.certifiedProjectionType(pp.Type(), pp.Refs(), pp.LeavesAreRefs(), sch)
 	case query.AggregateProjection:
-		return resolveType(pp.Type())
+		return s.certifiedProjectionType(pp.Type(), pp.Refs(), pp.LeavesAreRefs(), sch)
 	default:
 		return nil, fmt.Errorf("%w: unknown projection variant (%T)", ErrOutOfR0Scope, p)
+	}
+}
+
+// certifiedProjectionType resolves a rich projection's column type, filling
+// the committed type's unknown leaf from the schema when the projection
+// carries the ref-valued-leaf certificate (query.ExprProjection.LeavesAreRefs,
+// spec docs/specs/model-change-f45qn-ref-valued-leaves.md §5). Without the
+// certificate this is resolveType and nothing else — the behaviour every rich
+// projection had before the axis existed.
+//
+// The consistency invariant the design hangs on: a certified projection's leaf
+// type is byte-identical to what the same ref projected BARE would resolve to,
+// because the refs go through refProjectionType rather than a second reading of
+// the schema. Same nullability OR, same plural-candidate intersection, same
+// CALL-YIELD and carried-alias lanes, same refusals.
+func (s *scope) certifiedProjectionType(t query.Type, refs []query.Ref, certified bool, sch schema.Schema) (ResolvedType, error) {
+	base, err := resolveType(t)
+	if err != nil || !certified {
+		return base, err
+	}
+	leaf, unified, err := s.unifiedRefPropertyType(refs, sch)
+	if err != nil {
+		return nil, err
+	}
+	if !unified {
+		return base, nil
+	}
+	return fillLeaf(base, leaf, false), nil
+}
+
+// unifiedRefPropertyType resolves every ref of a certified projection and
+// unifies them into the one property type they all mean. unified is false when
+// they mean more than one thing — [p.id, p.name] is int64 and string, so the
+// certificate is spent and the honest list<any> stands; that is a degrade, not
+// an error. A resolution failure IS an error and propagates: `[p.nosuch]`
+// refuses exactly as bare `p.nosuch` already does.
+//
+// Only ResolvedProperty fills. It is the sole variant that both arrives at a
+// committed TypeUnknown leaf (the parser types every property lookup unknown,
+// ADR 0003) and carries a schema-declared type to put there. Restricting the
+// fill also keeps a refusal intact: a node or edge leaf reaching a list
+// position is what resolveType refuses as a list-of-entities projection, and
+// filling one in would route around that refusal rather than satisfy it.
+//
+// Widths never widen, per ADR 0002: ResolvedProperty{INT32} and
+// ResolvedProperty{INT64} do not unify. Nullability is the one field that
+// composes, and it ORs — a list holding one nullable element is nullable at
+// the element position.
+func (s *scope) unifiedRefPropertyType(refs []query.Ref, sch schema.Schema) (ResolvedProperty, bool, error) {
+	var unified ResolvedProperty
+	for i, ref := range refs {
+		rt, err := s.refProjectionType(ref, sch)
+		if err != nil {
+			return ResolvedProperty{}, false, err
+		}
+		prop, ok := rt.(ResolvedProperty)
+		if !ok {
+			return ResolvedProperty{}, false, nil
+		}
+		if i == 0 {
+			unified = prop
+			continue
+		}
+		if prop.Type != unified.Type {
+			return ResolvedProperty{}, false, nil
+		}
+		unified.Nullable = unified.Nullable || prop.Nullable
+	}
+	return unified, len(refs) > 0, nil
+}
+
+// fillLeaf replaces t's unknown leaf with leaf wherever it sits STRICTLY under
+// a list, leaving every other position alone.
+//
+// underList is the belt, and it is a real guard rather than a formality even
+// though every certified projection today commits a list spine. A future mint
+// site over an engine-dependent result (avg) or a fold would certify a BARE
+// unknown, where the unknown means "the server decides" — something no schema
+// lookup is entitled to overwrite. Such a projection must fail toward any,
+// never toward a confidently wrong concrete, and this is where that happens.
+func fillLeaf(t, leaf ResolvedType, underList bool) ResolvedType {
+	switch tt := t.(type) {
+	case ResolvedList:
+		return ResolvedList{Element: fillLeaf(tt.Element, leaf, true)}
+	case ResolvedUnknown:
+		if underList {
+			return leaf
+		}
+		return t
+	default:
+		return t
 	}
 }
 

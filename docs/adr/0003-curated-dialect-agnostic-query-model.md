@@ -247,3 +247,13 @@ and the full expression tree are deliberately outside the initial model.
 > wrapped message disambiguates) and `ErrProcedureArity`
 > (statically-wrong argument count on explicit invocation). The
 > no-expression-tree line holds._
+
+> _Note (2026-09-01, gqlc-t0bk): the curated subset now includes the
+> **ref-valued-leaf certificate** (ADR 0008 amendment, spec
+> `docs/specs/model-change-f45qn-ref-valued-leaves.md`) — one
+> additive bit per rich-projection variant asserting the `Refs()`
+> slice is leaf-exact and exhaustive, letting the resolver fill the
+> committed type's unknown leaf from the schema for uniform
+> ref-tree literals and `collect`. The certificate carries no
+> structure — the spine stays in the committed `Type` — so the
+> no-expression-tree line holds._

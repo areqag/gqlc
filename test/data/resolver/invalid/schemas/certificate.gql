@@ -1,0 +1,12 @@
+-- Serves the ref-valued-leaf certificate rows (gqlc-t0bk). `rank` is INT32
+-- against `id`'s INT so the width row has two integers the resolver must
+-- refuse to unify: ADR 0002 preserves widths, and numeric widening is
+-- deliberately not inferred.
+CREATE PROPERTY GRAPH TYPE Certificate AS {
+    (:Person {
+        id   :: INT NOT NULL,
+        age  :: INT,
+        name :: STRING NOT NULL,
+        rank :: INT32 NOT NULL
+    })
+}

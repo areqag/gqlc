@@ -60,6 +60,81 @@ func nonArithmeticAtom(e gen.IOC_ExpressionContext) gen.IOC_NonArithmeticOperato
 	return nae
 }
 
+// refValuedShape is the mint predicate for the ref-valued-leaf certificate
+// (query.ExprProjection.LeavesAreRefs, spec model-change-f45qn §4). ok reports
+// whether e is, recursively, a bare var / var.prop lookup (depth 0) or a
+// non-empty list literal whose elements are all ok AT ONE COMMON DEPTH
+// (yielding that depth + 1). depth is meaningless when ok is false.
+//
+// The common-depth requirement is the certificate's third clause, not a
+// tidiness rule: [[p.id], p.age] commits list<unknown> — one leaf for two
+// value shapes — so filling that leaf would type the p.age element as a list
+// and the [p.id] element's contents as a scalar, both confidently wrong. A
+// wrong concrete type is strictly worse than an honest unknown.
+//
+// Depth itself is deliberately uncapped. [[p.id],[p.age]] certifies with the
+// same single bit because the spine is already committed in the type; a cap
+// would be an arbitrary line defended by nothing.
+//
+// This is a post-hoc walk over the grammar node, mirroring
+// subtreeContainsAggregate: no state threads through typeExpressionMining, so
+// the typing walk and the certificate cannot drift into disagreeing about
+// which nodes they visited.
+func refValuedShape(e gen.IOC_ExpressionContext) (int, bool) {
+	nae := nonArithmeticAtom(e)
+	if nae == nil {
+		return 0, false
+	}
+	if _, ok := refFromNonArithmetic(nae); ok {
+		return 0, true
+	}
+	ll := listLiteralOf(nae)
+	if ll == nil {
+		return 0, false
+	}
+	// An accessor that is non-nil can still hold nothing, so the element count
+	// is read rather than the list literal's presence: [] has no leaves to
+	// certify and its committed list<unknown> must stay unknown.
+	elems := ll.AllOC_Expression()
+	if len(elems) == 0 {
+		return 0, false
+	}
+	depth := -1
+	for _, el := range elems {
+		d, ok := refValuedShape(el)
+		if !ok {
+			return 0, false
+		}
+		if depth == -1 {
+			depth = d
+			continue
+		}
+		if d != depth {
+			return 0, false
+		}
+	}
+	return depth + 1, true
+}
+
+// listLiteralOf returns the list literal an already-gated non-arithmetic
+// expression is, or nil. nonArithmeticAtom has ruled out node labels and list
+// operators; a property lookup is ruled out here, so [p.id].x is not a list
+// literal for the certificate's purposes.
+func listLiteralOf(nae gen.IOC_NonArithmeticOperatorExpressionContext) gen.IOC_ListLiteralContext {
+	if nae == nil || len(nae.AllOC_PropertyLookup()) > 0 {
+		return nil
+	}
+	atom := nae.OC_Atom()
+	if atom == nil {
+		return nil
+	}
+	lit := atom.OC_Literal()
+	if lit == nil {
+		return nil
+	}
+	return lit.OC_ListLiteral()
+}
+
 // isScalarLiteral reports whether a literal is a scalar (number, string, boolean
 // or NULL) rather than a list or map literal. A scalar literal projects as a
 // LiteralProjection; a list/map literal is Stage 6 material.

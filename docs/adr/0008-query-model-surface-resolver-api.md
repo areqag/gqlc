@@ -276,6 +276,40 @@
 > contract, the walker boundaries, the 20-golden rebaseline set,
 > and the semantic-diff-only fence command._
 
+> _Amendment (2026-09-01, gqlc-t0bk): the **ref-valued-leaf
+> certificate** — an additive `leavesAreRefs bool` on BOTH
+> `ExprProjection` and `AggregateProjection`, with
+> `NewExprProjectionWithAxes` / `NewAggregateProjectionWithAxes`
+> beside the existing constructors, which delegate with the axis
+> false. The certificate asserts three things at once about the
+> committed `Type()`'s `TypeUnknown` leaf: every value there is
+> exactly a bare `var` / `var.prop` lookup from `Refs()`, `Refs()`
+> is exhaustive over those lookups, and the committed type's list
+> spine agrees with the value's actual structure. It is what lets
+> the resolver fill that leaf from the schema for uniform ref-tree
+> list literals and for `collect`, closing gqlc-t0bk's report that
+> `collect([p.id, p.age])` came back `[][]any` while `p.id` alone
+> was typed. It carries **no structure** — the spine stays in the
+> committed `Type`, whose only parameterised variant is `TypeList`
+> — which is the stopping rule that keeps ADR 0003's
+> no-expression-tree line intact rather than an omission.
+> The JSON encoding follows the omit-when-false convention this
+> ADR's gqlc-hk0 amendment established, and the measured
+> rebaseline is what that convention promises: **27 parser goldens
+> changed, 28 mints**, and a census of every changed line across
+> them returns exactly 28 `+"leavesAreRefs"` additions and 28
+> `"type"` trailing-comma flips — no third kind of line. No
+> codegen golden moved at all (0 modified; the corpus held no
+> certified shape), and codegen needed **zero source change**,
+> `buildListElemPlan` already rendering `ResolvedProperty`
+> elements with width mapping. One acceptance change is carried
+> deliberately: a certified projection whose ref fails schema
+> resolution now refuses `ErrUnknownProperty` where it was
+> silently accepted as `[]any`. See
+> `docs/specs/model-change-f45qn-ref-valued-leaves.md` for the
+> three-clause contract, the two mint sites, the fill's strictness
+> rules, and the rejected alternatives._
+
 ADR 0004's feature-complete target is reached. All fifteen parser stages (the
 read core of Stages 0–5 plus the ADR 0007 expansion through Stage 14) and the
 TCK corpus sweep are complete, and the two cardinality fixes — the Part-level

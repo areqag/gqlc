@@ -436,7 +436,19 @@ func (l *listener) classifyAggregateCall(fi gen.IOC_FunctionInvocationContext, f
 		l.addParameterUse(name, p, query.NewExprUse(resultType, query.ExprInProjection))
 	}
 	distinct := fi.DISTINCT() != nil
-	return query.NewAggregateProjection(fn, refs, distinct, resultType)
+	// collect alone mints the ref-valued-leaf certificate: collect(T) =
+	// list<T> puts the operand's values at the result type's unknown leaf
+	// verbatim, which is what the certificate asserts. sum/min/max commit the
+	// result of a FOLD and avg/stDev/percentile* are engine-dependent — for
+	// both, an unknown may mean something no schema lookup is entitled to
+	// overwrite (spec model-change-f45qn §1 answer 3). Any depth qualifies,
+	// since collect(p.id) and collect([p.id, p.age]) both put refs at the
+	// leaf; DISTINCT is orthogonal and does not block minting.
+	leavesAreRefs := false
+	if fn == query.AggCollect && len(args) == 1 {
+		_, leavesAreRefs = refValuedShape(args[0])
+	}
+	return query.NewAggregateProjectionWithAxes(fn, refs, distinct, resultType, leavesAreRefs)
 }
 
 // mineClauseSlotParameter mines a bare $p atom from a SKIP or LIMIT expression,
