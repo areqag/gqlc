@@ -1588,6 +1588,114 @@ func TestPriorDependenciesReadsTheDumpJustWrites(t *testing.T) {
 	}
 }
 
+// TestRecipeBodiesReadsTheDumpJustWrites cuts the other reduction one way at a
+// time, for the reason given above TestPriorDependenciesReadsTheDumpJustWrites:
+// the live dump reaches only the shape this repo's justfile has. Under that
+// dump the reduction is exercised end to end but never cornered — every
+// recipe here has a non-empty body, no assignment it interpolates is anything
+// but a literal, and no submodule is declared, so the joins, the expansion
+// fallbacks and the walk past Modules are all unwitnessed there.
+func TestRecipeBodiesReadsTheDumpJustWrites(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		want map[string]string
+	}{
+		{
+			// The reduction reconstructs a body rather than a run-together of
+			// it. runsModscope matches per line, so a join that lost the
+			// newlines would glue two lines into a mention neither spells.
+			name: "body lines are joined with a newline",
+			json: `{"recipes":{"vuln":{"body":[["go build"],["./x"]]}}}`,
+			want: map[string]string{"vuln": "go build\n./x"},
+		},
+		{
+			// The opposite join, one level down: fragments are pieces of one
+			// line and take nothing between them.
+			name: "fragments within a line are concatenated with nothing between them",
+			json: `{"recipes":{"vuln":{"body":[["go run ","./x"]]}}}`,
+			want: map[string]string{"vuln": "go run ./x"},
+		},
+		{
+			// An empty body line separates blocks in several recipes here and
+			// is part of the line structure runsModscope reads.
+			name: "an empty body line is kept rather than dropped",
+			json: `{"recipes":{"vuln":{"body":[["go build"],[],["./x"]]}}}`,
+			want: map[string]string{"vuln": "go build\n\n./x"},
+		},
+		{
+			// A commented-out invocation is an invocation, the same stance
+			// parseJustfile takes. Both sides keep these lines or the
+			// comparison reports a difference neither reader made.
+			name: "a comment line is kept, because a commented-out invocation is one",
+			json: `{"recipes":{"vuln":{"body":[["# go run ./internal/tools/modscope"]]}}}`,
+			want: map[string]string{"vuln": "# go run ./internal/tools/modscope"},
+		},
+		{
+			// Not a shape this repo's justfile has: every recipe here has a
+			// body. An absent key would read as a recipe just never declared,
+			// which is the invented-recipe complaint rather than the truth.
+			name: "a recipe with no body reads as empty text, not a missing key",
+			json: `{"recipes":{"vuln":{}}}`,
+			want: map[string]string{"vuln": ""},
+		},
+		{
+			name: "every recipe the dump names gets an entry",
+			json: `{"recipes":{"a":{"body":[["x"]]},"b":{"body":[["y"]]}}}`,
+			want: map[string]string{"a": "x", "b": "y"},
+		},
+		{
+			// bd gqlc-wkio: a path assembled in an assignment and interpolated
+			// at the site is read as the invocation it is, so the expansion is
+			// what keeps such a caller inside the comparison.
+			name: "an interpolated variable is expanded through the dump's assignments",
+			json: `{"assignments":{"pkg":{"value":"./internal/tools/modscope"}},` +
+				`"recipes":{"vuln":{"body":[["go run ",[["variable","pkg"]]]]}}}`,
+			want: map[string]string{"vuln": "go run ./internal/tools/modscope"},
+		},
+		{
+			// Empty, not the variable's name: rendering the name would put the
+			// text `pkg` in a body just does not run, and a name that happened
+			// to spell the path would be read as a call.
+			name: "a variable the dump assigns nothing expands to nothing, not to its name",
+			json: `{"recipes":{"vuln":{"body":[["go run ",[["variable","pkg"]]]]}}}`,
+			want: map[string]string{"vuln": "go run "},
+		},
+		{
+			// An assignment just reports as an expression tree has no literal
+			// expansion, and this side must drop exactly the ones parseJustfile
+			// drops or the two readings differ over the variable rather than
+			// over the body.
+			name: "an assignment that is not a bare string is not a literal expansion",
+			json: `{"assignments":{"pkg":{"value":["call","env",["x"]]}},` +
+				`"recipes":{"vuln":{"body":[["go run ",[["variable","pkg"]]]]}}}`,
+			want: map[string]string{"vuln": "go run "},
+		},
+		{
+			// A submodule's recipes are answered by submoduleRefusals, not by
+			// this reduction. Walking into Modules here would put a recipe in
+			// the map that parseJustfile never read out of the one file, which
+			// this file reports as an invented recipe.
+			name: "recipes under a submodule are not read into the top-level bodies",
+			json: `{"recipes":{"a":{"body":[["x"]]}},` +
+				`"modules":{"sub":{"recipes":{"b":{"body":[["y"]]}}}}}`,
+			want: map[string]string{"a": "x"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var dumped justDump
+			if err := json.Unmarshal([]byte(tc.json), &dumped); err != nil {
+				t.Fatalf("unmarshal the fixture dump: %v", err)
+			}
+			if got := recipeBodies(dumped); !maps.Equal(got, tc.want) {
+				t.Errorf("recipeBodies = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // justfileDisagreements compares the recipes just declares with the recipes
 // parseJustfile read out of the same source and returns a line for each way the
 // two answers differ. Nothing returned is agreement.
@@ -1656,15 +1764,16 @@ func justfileDisagreements(
 		// unsweptModscopeCallers reads a body for, and the two sides spell the
 		// same body differently in ways recipeBodies records above.
 		//
-		// The witness that the 24 pinned bodies in
-		// TestParseJustfileReadsWhatJustReads do not already cover this: cap
-		// the reader's body at 10 lines and every one of those rows stays
-		// green, because the longest body they pin is 3 lines. vuln's body in
-		// this repo's justfile runs 632 lines and names modscopePkg at line
-		// 12, so the cap drops vuln from the caller set — while the three
-		// other recipes naming it do so at line 2, which keeps
+		// Why the rows pinned in TestParseJustfileReadsWhatJustReads do not
+		// reach this clause: cap the reader's body at ten lines and every one
+		// of them stays green, none pinning a body long enough to feel the
+		// cap, while this comparison reddens on vuln — the one recipe here
+		// that first names modscopePkg past a tenth line, where the others
+		// naming it do so in their opening lines, which keeps
 		// unsweptModscopeCallers' "no recipe body names" complaint quiet.
-		// With that cap and without this clause the suite reports ok.
+		// The clause's two directions are pinned directly by
+		// TestJustfileDisagreementsFindsEachWayTheTwoReadingsPart, so those
+		// rows, not this comparison, are what fails first if it goes.
 		justNames := runsModscope(declaredBodies[name])
 		readerNames := runsModscope(got.body)
 		switch {
