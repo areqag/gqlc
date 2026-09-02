@@ -309,6 +309,37 @@ var listCarrierParamQuery = codegen.NamedQuery{
 	},
 }
 
+// nestedListCarrierParamQuery binds DEPTH-2 lists of non-zoned carriers,
+// nullable and not, which is the shape ADR 0036 admits and the encoder does
+// not yet compose for.
+//
+// It is a separate query from listCarrierParamQuery because depth 2 does not
+// fail more than depth 1, it fails DIFFERENTLY. At depth 1 the single
+// strings.CutPrefix in fallibleParamEncoder leaves a leaf the switch matches,
+// so the parameter is encoded. At depth 2 it leaves "[]civil.Date", which
+// matches no arm, and the resulting ("", false) is read by the call site as
+// "this parameter crosses raw" — plain json.Marshal over carriers that define
+// no MarshalJSON. So the defect is not a wrong encoding but NO encoding, and
+// no query at depth 1 can reach it (bd gqlc-vhvz7, bug gqlc-jc8mc).
+//
+// Two carriers rather than one: Date encodes to a string and Duration to an
+// int64, so a composition that hard-coded either side of encodedParamText
+// would pass on the other.
+var nestedListCarrierParamQuery = codegen.NamedQuery{
+	Name:        "WriteSchedules",
+	Cardinality: codegen.CardinalityExec,
+	SourceFile:  temporalSource,
+	SourceText:  "CREATE (s:Schedules {runsOn: $runsOn, mayRunOn: $mayRunOn, windows: $windows})\n",
+	Validated: resolver.ValidatedQuery{
+		Statement: resolver.StatementWrite,
+		Parameters: []resolver.ResolvedParameter{
+			{Name: "runsOn", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.ListOf(graph.TypeDate, true), true)}},
+			{Name: "mayRunOn", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.ListOf(graph.TypeDate, true), true), Nullable: true}},
+			{Name: "windows", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.ListOf(graph.TypeDuration, true), true)}},
+		},
+	},
+}
+
 // corpusEdgeKey is the one edge type testdata/corpus_schema.gql declares.
 var corpusEdgeKey = schema.EdgeKey{Source: personLabel, KeyLabels: "ACTED_IN", Target: personLabel}
 
