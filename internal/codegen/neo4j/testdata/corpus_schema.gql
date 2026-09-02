@@ -62,15 +62,26 @@
 // TestEdgySpareSeparatesAbsentFromNullOverARelationship and leaves
 // TestAnythingSeparatesAbsentFromNull green.
 //
-// blobs is that element case (bd gqlc-np7s). Its elements are the one
-// kind the driver hands back already the width the schema declared, so
-// the walk asserts straight to them and appends what it asserted —
-// writeSliceNarrow's DEFAULT case, where carrier == elem. ranks and
-// depths both take the case above it, the per-element narrowing call, so
-// before blobs the default case ran off dbtype.Node alone. Its Go type
-// is [][]byte, two slice prefixes, and it is the only property that can
-// carry two under ADR 0035: the nesting is inside BYTES rather than in
-// the declared list, so Phase Z has nothing to refuse.
+// blobs is the row for the walk's DEFAULT element case (bd gqlc-np7s).
+// Its elements are the one kind the driver hands back already the width
+// the schema declared, so the walk asserts straight to them and appends
+// what it asserted — writeSliceNarrow's default case, where
+// carrier == elem. ranks and depths both take the case above it, the
+// per-element narrowing call, so before blobs the default case ran off
+// dbtype.Node alone. Its Go type is [][]byte, two slice prefixes, and it
+// is the only property that can carry two under ADR 0035: the nesting is
+// inside BYTES rather than in the declared list, so Phase Z has nothing
+// to refuse.
+//
+// Measured the way spare was, carrier-specific: emitting that case's
+// append as `append(dst, v0, v0)` for EntityEdge alone reddens
+// TestEdgyNarrowsOverARelationship on the Blobs assertion and leaves
+// TestListyNarrowsEachElement green. The same mutation against this
+// fixture as it stood before blobs — with the mutant verified present in
+// the tree — ran the whole corpus green, which is the state this row
+// ends. Appending a zero value was the first mutant tried and is not the
+// one to use: it leaves v0 unused, so the child module fails to build
+// and the compiler kills the mutant before any test can.
 //
 // LIST<TIMESTAMP> is NOT a second such property, though bd gqlc-np7s
 // listed it as one. Its element type is time.Time, which is its own
