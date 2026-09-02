@@ -217,7 +217,9 @@ evidence for a depth-2 parameter bind declared before a depth-1 one over the
 same carrier — the emitter keeps one list depth per carrier and must keep the
 deepest, and with every remaining bind at depth 1 nothing now distinguishes
 keeping the deepest from keeping the last. The corpus files say so at each site
-rather than closing over the gap.
+rather than closing over the gap. That second gap is now moot rather than
+merely unwitnessed: the paragraph below records the depth being replaced by a
+bool, and a bool has no deepest to keep.
 
 A **third** arm falls the same way, and it was not anticipated by the design.
 `render_temporal.go`'s depth≥2 encode helpers (`from<X>List2` and up) are
@@ -227,10 +229,15 @@ compared against, which this ADR now refuses at that width. `render_temporal.go`
 is a neo4j file with no AGE counterpart, so there is no other backend reaching
 it either. Measured: no golden in the corpus emits a `from<X>List<n>` helper for
 any n. Those helpers are therefore unreachable by construction, exactly as
-`writeSliceNarrow`'s recursive arm is, and for the same reason. They are kept
-untouched here — bead `gqlc-tlc3e` carries the question of whether they should
-go the way this change takes the other arm, and it is deliberately not settled
-in this PR.
+`writeSliceNarrow`'s recursive arm is, and for the same reason. The measurement
+sentences above are kept as the record of why.
+
+They were kept untouched in this PR, which left the question to bead
+`gqlc-tlc3e`. It has since been answered: ruled on `gqlc-a2g2v`, the depth≥2
+machinery goes the way this change took the other arm, and is deleted. So
+`temporalUse` carries a `list` bool rather than a depth and a set of nullable
+depths, `temporalListHelper` names one helper per carrier, and `sliceDepth` is
+gone with its last caller. No emitted byte moved on any target.
 
 ## Considered and rejected
 

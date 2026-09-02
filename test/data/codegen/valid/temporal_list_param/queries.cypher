@@ -12,19 +12,23 @@
 // a nullable one whose helper has to carry the pointer through (spans).
 //
 // THE DEPTH-2 SHAPE USED TO BE HERE AND CANNOT BE. A fifth parameter
-// $windows :: LIST<LIST<DATE>> witnessed the emitter's rule that it records
-// one list depth per carrier and must keep the DEEPEST, since the depth-2
-// helper is written in terms of the depth-1 one — declared deepest-first it
-// emits fromDateList2 without fromDateList and the goldens stop compiling.
-// ADR 0035 makes that shape unconstructible on this backend: a nested list
-// is refused as a stored property, so no neo4j schema can declare one and
-// no parameter can take its type. No neo4j fixture can replace it, and no
-// other backend can: render_temporal.go has no AGE counterpart, so the one
-// call site that reaches depth >= 2 (sliceParamBindExpr) is reached from
-// nowhere. The recursion is left in place and untouched by that bead —
-// measured, no golden here emits a from<X>List<n> helper for any n — and
-// whether it should go the way this change takes writeSliceNarrow's arm
-// is bd gqlc-tlc3e, deliberately not settled on gqlc-nxcj9.
+// $windows :: LIST<LIST<DATE>> witnessed the emitter's rule as it then
+// stood: it recorded one list depth per carrier and had to keep the
+// DEEPEST, since the depth-2 helper was written in terms of the depth-1
+// one — declared deepest-first it emitted fromDateList2 without
+// fromDateList and the goldens stopped compiling. ADR 0035 makes that
+// shape unconstructible on this backend: a nested list is refused as a
+// stored property, so no neo4j schema can declare one and no parameter can
+// take its type. No neo4j fixture could replace it, and no other backend
+// could: render_temporal.go has no AGE counterpart, so the one call site
+// that reached depth >= 2 (sliceParamBindExpr) was reached from nowhere.
+//
+// gqlc-nxcj9 left that recursion in place and left the question of its
+// removal open. bd gqlc-tlc3e settled it (2026-09-02): the depth machinery
+// is deleted, temporalUse's listDepth int is now a list bool, and no
+// from<X>List<n> helper exists to emit for any n > 1. The measurement that
+// licensed the deletion — no golden here emitted one for any n — is why
+// removing it moved no byte of this fixture's goldens.
 
 // name: SlotsMatching :many
 MATCH (s:Slot)

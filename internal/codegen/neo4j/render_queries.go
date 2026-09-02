@@ -497,7 +497,7 @@ func sliceParamBindExpr(goType string, nullable bool, access string) string {
 	if !isTemporalCarrier(leafType(goType)) {
 		return access
 	}
-	helper := temporalListHelper(leafType(goType), sliceDepth(goType))
+	helper := temporalListHelper(leafType(goType))
 	if nullable {
 		helper += "Ptr"
 	}
