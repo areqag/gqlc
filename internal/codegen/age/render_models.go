@@ -1338,15 +1338,7 @@ func writeListHelper(b *strings.Builder, goType string) {
 	elem := strings.TrimPrefix(goType, "[]")
 	fmt.Fprintf(b, "\n// %s decodes an agtype list of %s elements.\n", listHelperName(goType), elem)
 	fmt.Fprintf(b, "func %s(raw []byte) (%s, error) {\n", listHelperName(goType), goType)
-	fmt.Fprintf(b, "\treturn agtypeList(raw, %s)\n}\n", elemDecoder(elem))
-}
-
-// elemDecoder is the decode function one list element goes through.
-// Every width has a helper of its own now that a narrow one decodes
-// through the checked narrowing, so there is no wrapping closure left:
-// this is decodeFunc under a name that says where it is used.
-func elemDecoder(elem string) string {
-	return decodeFunc(elem)
+	fmt.Fprintf(b, "\treturn agtypeList(raw, %s)\n}\n", decodeFunc(elem))
 }
 
 // writeEntities emits the schema's entity surface: one exported struct
