@@ -7,6 +7,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1263,4 +1264,117 @@ func TestAllCapsEdgeLabelTitleCasesPerRule3(t *testing.T) {
 				"§4.5 Rule 2: node label %q must derive the entity struct name %q", tc.label, tc.want)
 		})
 	}
+}
+
+// TestARawStringLiteralChangesNoTextPrepareAdmits is the fence over the two
+// refusals above it. Both backends emit SourceText through a Go RAW string
+// literal, and the byte that hurts is not the one such a literal cannot hold
+// but the one it holds DIFFERENTLY: a carriage return is dropped from the
+// literal's VALUE, so the emission compiles and the constant is not the query
+// that was parsed and resolved (bd gqlc-7f9a). Naming bytes in phaseAAdmit is
+// a claim about a SET, so the set is what this measures — a third such byte
+// would pass the guard and every fixture alike, because no fixture can be
+// written for a byte nobody has thought of.
+//
+// Each candidate is emitted into a raw literal and read back the way the
+// compiler would, which sorts it into exactly one bucket:
+//
+//	carried  — parses and round-trips. Prepare must ADMIT it, or the guard
+//	           refuses texts nothing justifies refusing.
+//	changed  — parses, and the value differs. Prepare must REFUSE it, or a
+//	           corrupt query ships silently. \r is the only member, and this
+//	           is the bucket it was admitted from.
+//	unparsed — the emission is not Go at all. Nothing ships, so this is loud
+//	           rather than wrong and the refusal is a courtesy: the backtick
+//	           gets one, NUL and invalid UTF-8 do not (bd gqlc-32n53). Pinned
+//	           by name AND by that answer, so both a byte joining the bucket
+//	           and a refusal arriving for one already in it fail here.
+func TestARawStringLiteralChangesNoTextPrepareAdmits(t *testing.T) {
+	// Emission does not parse → whether Prepare refuses it today. NUL is a
+	// documented implementation restriction on Go source; the last two are a
+	// lone invalid byte and a truncated sequence, since Go source must be
+	// UTF-8. Fixing gqlc-32n53 flips its two false values to true.
+	unparseable := map[string]bool{"`": true, "\x00": false, "\xff": false, "\xc3(": false}
+
+	var carried, changed, unparsed int
+	for _, mid := range rawLiteralCandidates() {
+		text := "MATCH (p:Person)" + mid + "RETURN 1"
+
+		emitted, parses := rawLiteralValue(text)
+		_, err := codegen.Prepare(codegen.Input{
+			Queries: []codegen.NamedQuery{{
+				Name:        "Q",
+				Cardinality: codegen.CardinalityExec,
+				SourceText:  text,
+			}},
+		}, stubTypeMap{}, "p")
+
+		switch {
+		case !parses:
+			unparsed++
+			refused, pinned := unparseable[mid]
+			require.True(t, pinned,
+				"emitting %q yields Go the parser rejects and this test does not name it — refuse it in "+
+					"phaseAAdmit, or pin it here with a bead (bd gqlc-32n53)", mid)
+			if refused {
+				require.ErrorIs(t, err, codegen.ErrOutOfC6Scope, "%q is pinned as refused but Prepare admits it", mid)
+			} else {
+				require.NoError(t, err, "%q is pinned as admitted but Prepare refuses it; move it in the map (bd gqlc-32n53)", mid)
+			}
+		case emitted != text:
+			changed++
+			require.ErrorIs(t, err, codegen.ErrOutOfC6Scope,
+				"a raw string literal silently changes %q, so the emitted constant would not be the query that "+
+					"was parsed and resolved, yet Prepare admits it", mid)
+		default:
+			carried++
+			require.NoError(t, err, "a raw string literal carries %q unchanged, so nothing justifies refusing it", mid)
+		}
+	}
+
+	// A degenerate sweep — every candidate in one bucket — asserts nothing
+	// while passing, so each bucket is pinned occupied.
+	require.NotZero(t, carried, "no candidate round-tripped; the harness is not reaching the emission")
+	require.Equal(t, 1, changed, "the carriage return should be the only byte a raw literal silently changes")
+	require.Len(t, unparseable, unparsed, "every pinned unparseable byte should have been reached")
+}
+
+// rawLiteralCandidates is every ASCII rune plus the non-ASCII shapes a raw
+// literal or the Go source encoding could treat specially: an invalid byte, a
+// truncated UTF-8 sequence, an accented rune, an astral rune, and a
+// zero-width space.
+func rawLiteralCandidates() []string {
+	out := make([]string, 0, 0x80+5)
+	for r := rune(0); r < 0x80; r++ {
+		out = append(out, string(r))
+	}
+	return append(out, "\xff", "\xc3(", "é", "\U0001F600", "\u200b")
+}
+
+// rawLiteralValue emits text into a raw string literal, parses the result, and
+// returns the constant's value together with whether the emission was Go at
+// all. It reads the literal back through go/parser rather than by string
+// surgery so the answer is the one the compiler would give.
+func rawLiteralValue(text string) (string, bool) {
+	src := "package p\n\nconst x = `" + text + "`\n"
+	f, err := parser.ParseFile(token.NewFileSet(), "p.go", src, 0)
+	if err != nil {
+		return "", false
+	}
+	for _, d := range f.Decls {
+		g, ok := d.(*ast.GenDecl)
+		if !ok || g.Tok != token.CONST {
+			continue
+		}
+		lit, ok := g.Specs[0].(*ast.ValueSpec).Values[0].(*ast.BasicLit)
+		if !ok {
+			return "", false
+		}
+		val, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return "", false
+		}
+		return val, true
+	}
+	return "", false
 }
