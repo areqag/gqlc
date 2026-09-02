@@ -924,7 +924,7 @@ seat_box_echoes() { # <pane> <text> -> 0 holds it, 1 holds something else, 2 no 
 
 # history: kingdom/brain/km-notes.md#send_line
 send_line() { # <target> <text> -> 0 delivered, 1 not
-    local target=$1 text=$2 seat pane out witnessed box boxrc
+    local target=$1 text=$2 seat pane out witnessed box boxrc echoed
     seat=${target##*:}
     pane=$(seat_pane_id "$seat") || pane=
     if [ -z "$pane" ]; then
@@ -995,7 +995,39 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
         return 0
     fi
     [ "$witnessed" -eq 1 ] || return 0
-    echo "km: send to $seat (pane $pane): herdr acked the text and both Enters, but the box still holds the message, so it was typed and never submitted — claude reads a single burst of 64 or more characters as a paste and renders its trailing CR as a literal newline (bd gqlc-gh7xj). Nothing was delivered" >&2
+    # seat_box_emptied establishes ONE thing: the box is not empty. It never
+    # compares what is in it against $text. Reporting that as "the box still
+    # holds the message" swore to an observation nobody made, and it was false
+    # in the case that found this: a five-character /exit that HAD been
+    # submitted, read back seconds later with an empty box and the seat mid-turn
+    # (bd gqlc-hrft2). So ask the question the sentence was already answering.
+    #
+    # A box that does not hold $text means $text LEFT it, and typing appends —
+    # nothing km does replaces a composer's contents — so the only way out is
+    # submission. That is the same inference the rc 2 and rc 3 arms above make
+    # from a weaker premise, and it is why this arm reports delivered.
+    #
+    # Costs one more poll (measured 2106 ms to exhaust, 4 ms of it the pane
+    # read; the rest is the interval) and only on this path, which is the one
+    # that was about to declare a failure and send the caller to do by hand a
+    # thing that had already happened.
+    echoed=0
+    seat_box_echoes "$pane" "$text" || echoed=$?
+    if [ "$echoed" -ne 0 ]; then
+        echo "km: send to $seat (pane $pane): herdr acked the text and both Enters, and the box is not empty — but what it holds is NOT this message, so this text did leave the composer and the submission is being reported as delivered. Something else has been typed there since; read the pane before sending again, because the next send will be refused while it sits there (bd gqlc-6bnkw, gqlc-hrft2)" >&2
+        return 0
+    fi
+    # Only now is "it was typed and never submitted" an observation. gqlc-gh7xj
+    # is named ONLY when the text could actually have tripped it: the threshold
+    # is a property of the burst km sent, so it is knowable here and does not
+    # have to be guessed. Naming it unconditionally is what made the /exit
+    # report read as a diagnosis rather than the guess it was, and a message
+    # that names the wrong cause is worse than one that says it does not know.
+    if [ "${#text}" -ge 64 ]; then
+        echo "km: send to $seat (pane $pane): herdr acked the text and both Enters, but the box still holds THIS message, so it was typed and never submitted — it is ${#text} characters, at or over the 64 at which claude reads a single burst as a paste and renders its trailing CR as a literal newline (bd gqlc-gh7xj). Nothing was delivered" >&2
+    else
+        echo "km: send to $seat (pane $pane): herdr acked the text and both Enters, but the box still holds THIS message, so it was typed and never submitted. km does not know why: at ${#text} characters this is under the 64-character paste threshold, so gqlc-gh7xj does not explain it (bd gqlc-hrft2). Nothing was delivered" >&2
+    fi
     return 1
 }
 
