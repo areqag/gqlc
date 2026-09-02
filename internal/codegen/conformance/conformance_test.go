@@ -781,6 +781,13 @@ func writeGoldenTarget(root, target string, files []codegen.File) error {
 // Every other emitted file is compared across targets, so a file some
 // future backend adds is held invariant until it is named here on
 // purpose.
+//
+// This is an EXCLUSION, and it is not the only list of emitted basenames
+// in the tree: codegen's fixedDeclarationFiles is an inclusion and its
+// inputDerivedFiles an exclusion, over the same corpus for a different
+// question. None is authoritative over the others — each is held to the
+// goldens by its own test, this one by
+// TestConnectionSurfaceIsExcludedOnEvidence.
 var connectionSurface = map[string]bool{"db.go": true, "graph.go": true}
 
 // TestBackendInvariantSurface pins the property the multi-backend design
