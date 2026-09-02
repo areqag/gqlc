@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Claude Code PreToolUse hook for the Bash tool. Four jobs:
+# Claude Code PreToolUse hook for the Bash tool. Five jobs:
 #
 #   1. Denies `git commit` when the command's EFFECTIVE target repo is on
 #      master/main.
@@ -10,6 +10,48 @@
 #      remote-tracking ref in the effective repo contains (bd gqlc-90vt).
 #   4. Denies the `bd` command that would mint a label GitHub cannot hold
 #      (bd gqlc-uy7j).
+#   5. Denies the `bd` command that would reopen a bead in bd alone while its
+#      GitHub mirror is still closed, because the next pull destroys it
+#      (bd gqlc-e9huy, ADR 0011).
+#
+# On (5): a mirror's CLOSED state carries two different events that arrive as
+# the same byte. A GitHub-NATIVE closure — a merge resolving `Closes #N`, or a
+# human closing the issue — is GitHub speaking, and .githooks/bd-gh-sync's pull
+# is right to carry it into bd. An ECHO is bd's own past state reflected back:
+# the push closed the mirror because the bead closed. Applying an echo back onto
+# bd is not synchronization but a time loop, and one GitHub account operates
+# everything here, so no actor field tells the two apart.
+#
+# What does tell them apart is ORDER OF EXPRESSION, and that we control. If
+# every bd-side reopen reaches the mirror FIRST, then a closed mirror under an
+# open bead is always GitHub-native by the time a pull reads it, and the pull's
+# existing behaviour is correct as it stands. This arm enforces that order at
+# the one boundary every seat's reopen passes through — the keyboard.
+#
+# The incident it is written from, all four events inside 19 minutes on
+# 2026-08-30: review bead gqlc-v5dez closed PASS at 13:06:36Z; the push echoed
+# that closure to mirror #1965 at 13:09:25Z; the verdict was WITHDRAWN on
+# constitutional grounds and the bead reopened in bd at 13:22:33Z; the next
+# merge's pull read the echo as GitHub speaking and re-closed the bead at
+# 13:24:59Z, close_reason null. Nothing was red. A review bead blocks its
+# implementation bead, so destroying the reopen also released that block — the
+# judge who owed the verdict became unroutable and the implementer was woken as
+# though the verdict had landed. A withdrawn merge authorization was silently
+# re-granted.
+#
+# Refusal rather than repair: a PreToolUse hook that ran `gh issue reopen` as a
+# side effect of vetting a command would claim an authority nothing else in this
+# file claims. The remedy sentence is in the message instead.
+#
+# It denies when it cannot check — `bd show` unrunnable, a this-repo
+# external_ref it cannot parse, `gh` failing or timing out. That is the opposite
+# of arm (4)'s bias and matches arm (3)'s, for arm (3)'s reason: the hazard here
+# is itself a silent destruction, so allowing on "could not check" re-opens the
+# hole in exactly the session that also cannot express the reopen to GitHub. The
+# state would then sit armed until the network returns and somebody merges. The
+# cost of the choice is real and is named here rather than in a bead: where `gh`
+# is absent from the environment altogether there is no remedy the citizen can
+# type, and the reopen has to wait.
 #
 # On (4): GitHub caps a label name at 50 characters and refuses the WHOLE issue
 # over one bad label, so a bead OFFERED with one ends up with no mirror. bd
@@ -386,6 +428,7 @@ BD_OPTS_WITH_ARG = (
     "-C", "--directory", "--db", "--actor", "--dolt-auto-commit",
     "--session", "-r", "--reason", "--reason-file",
     "-l", "--labels", "--label", "--add-label", "--set-labels", "--remove-label",
+    "-s", "--status",
 )
 # `bd label` arm (bd gqlc-uy7j). Which flags WRITE a label, per subcommand —
 # and the per-subcommand table is the whole point, because `-l` is `--labels`
@@ -408,6 +451,23 @@ BD_LABEL_WRITE_OPTS = {
 # is the inverse and is not screened; `bd label propagate` copies a label that
 # already exists, so it can mint nothing new.
 BD_LABEL_POSITIONAL = ("label", "add")
+# `bd reopen` arm (bd gqlc-e9huy). Two spellings reach status `open`, and bd
+# documents them as alternatives to each other: `bd reopen [id...]` ("more
+# explicit than 'bd update --status open'", `bd reopen --help`), and `bd update
+# --status open`. Both are screened; either alone is a bypass of the other.
+BD_REOPEN_SUBCOMMANDS = ("reopen",)
+# Per-subcommand, for the same reason BD_LABEL_WRITE_OPTS is: `-s` is
+# `--status` and WRITES on `update`, `--status` and merely FILTERS on `list`,
+# and `--sort` on `ready` — one letter, three meanings, measured against the bd
+# on this host. A guard keyed on the flag alone would refuse two reads.
+BD_STATUS_WRITE_OPTS = {"update": ("-s", "--status")}
+# Literal `open` and nothing else. The other statuses are not merely
+# out-of-scope, they are a DIFFERENT state: bd-gh-sync's pull can only carry
+# GitHub's two-value domain, so entering in_progress/blocked/deferred under a
+# closed mirror reaches the drift class it reports and holds (bd-gh-sync:106,
+# and the WARNING at :1282), not the class it silently applies. Only `open` is
+# REPRESENTABLE (bd-gh-sync:371) and therefore destroyable.
+BD_REOPEN_STATUS = "open"
 # bd is cobra/pflag, which lets a shorthand carry its value attached (-rTEXT)
 # and lets shorthands cluster (-fr TEXT, -qr=TEXT), and this repo force-closes
 # pinned beads with -f. Measured against bd v1.0.4: `-rZZZ` and `-fr ZZZ` both
@@ -423,7 +483,15 @@ BD_LABEL_POSITIONAL = ("label", "add")
 # guard's pre-existing bias rather than a new one. The mapping is per-shorthand
 # and not per-subcommand because a cluster is walked before any subcommand is
 # known; what the letter MEANS is decided later, by BD_LABEL_WRITE_OPTS.
-BD_SHORTHANDS_WITH_ARG = {"r": "--reason", "C": "--directory", "l": "--labels"}
+#
+# `s` is here for `bd update -s open`. Like `l` it is normalised without knowing
+# the subcommand, and every bd subcommand that has an `-s` at all takes a value
+# for it (`update`/`list`: --status; `ready`: --sort — measured on this host), so
+# the consumption is right everywhere and only the MEANING waits for
+# BD_STATUS_WRITE_OPTS.
+BD_SHORTHANDS_WITH_ARG = {
+    "r": "--reason", "C": "--directory", "l": "--labels", "s": "--status",
+}
 # Two tiers, because a sha is recognised by two different kinds of evidence.
 #
 # CITED_SHA_RE is the `at <sha>` / `@ <sha>` / `commit <sha>` idiom. A match is
@@ -793,17 +861,23 @@ def shorthand_arg(opt, tokens, j):
             return name, rest[1:], 1
         if rest:
             return name, rest, 1
-        return name, (tokens[j + 1] if j + 1 < len(tokens) else None), 2
+        # The shorthand half of scan_bd's operator rule; see the note there.
+        # `-s ;` and `-r ;` swallowed the terminator the same way.
+        nxt = tokens[j + 1] if j + 1 < len(tokens) else None
+        if nxt is not None and is_op(nxt):
+            return name, None, 1
+        return name, nxt, 2
     return None, None, 1
 
 
 def scan_bd(tokens, i, cwd):
     """Read one `bd ...` invocation starting at tokens[i].
 
-    Returns (next_index, close_or_None, label_writes) where close is
-    (effective_dir, saw_reason_flag, reason_text, reason_file) and label_writes
-    is a list of (flag_or_"<positional>", label_value) this invocation would
-    WRITE onto a bead — never one it merely filters by.
+    Returns (next_index, close_or_None, label_writes, reopens) where close is
+    (effective_dir, saw_reason_flag, reason_text, reason_file), label_writes is
+    a list of (flag_or_"<positional>", label_value) this invocation would WRITE
+    onto a bead — never one it merely filters by — and reopens is a list of
+    (effective_dir, bead_id) this invocation would move to status `open`.
     """
     target, n = cwd, len(tokens)
     saw_reason, reason, reason_file, is_close = False, None, None, False
@@ -829,8 +903,24 @@ def scan_bd(tokens, i, cwd):
             if inline:
                 j += 1
             else:
-                val = tokens[j + 1] if j + 1 < n else None
-                j += 2
+                # A flag whose next token is an OPERATOR consumes the flag
+                # alone, exactly as redirect_skip does above and for the same
+                # reason: swallowing the operator as a value hides the command
+                # after it. Here that is not a missed filename but a missed
+                # INVOCATION — `bd update x --status ; bd reopen y` ate the `;`,
+                # so `bd`, `reopen` and `y` became positionals of the update and
+                # the reopen arm never saw a reopen, while the shell ran it
+                # anyway. Measured ALLOW where DENY was owed on `;`, `&&` and
+                # `|`, and on --status/--add-label/--reason alike, so the close
+                # arm was exposed by the same token (bd gqlc-e9huy, found by
+                # Տիր's round-1 read of PR #2068).
+                nxt = tokens[j + 1] if j + 1 < n else None
+                if nxt is not None and is_op(nxt):
+                    val = None
+                    j += 1
+                else:
+                    val = nxt
+                    j += 2
             if name in ("-C", "--directory"):
                 target = resolve(target, val)
             elif name in ("-r", "--reason"):
@@ -846,7 +936,7 @@ def scan_bd(tokens, i, cwd):
                 j += step
                 if name == "--directory":
                     target = resolve(target, val)
-                elif name == "--labels":
+                elif name in ("--labels", "--status"):
                     flagged.append((name, val))
                 else:
                     saw_reason, reason = True, val
@@ -858,7 +948,8 @@ def scan_bd(tokens, i, cwd):
         positionals.append(opt)
         j += 1
     close = (target, saw_reason, reason, reason_file) if is_close else None
-    return j + 1, close, label_writes(positionals, flagged)
+    reopens = [(target, bid) for bid in reopen_ids(positionals, flagged)]
+    return j + 1, close, label_writes(positionals, flagged), reopens
 
 
 def label_writes(positionals, flagged):
@@ -884,6 +975,29 @@ def label_writes(positionals, flagged):
     return writes
 
 
+def reopen_ids(positionals, flagged):
+    """The bead ids a `bd` invocation would move to status `open`.
+
+    Empty for every other command, including `bd update --claim` (which sets
+    in_progress) and `bd list -s open` (which sets nothing). The subcommand
+    decides, exactly as it does for labels: `-s` reaches here normalised to
+    `--status` from both paths, and on `list`/`ready` that value is a filter or
+    a sort key with no write behind it.
+
+    Ids are every positional after the subcommand. `bd update` and `bd reopen`
+    both take `[id...]`, and a bead id is the only positional either has.
+    """
+    sub = positionals[0] if positionals else None
+    if sub in BD_REOPEN_SUBCOMMANDS:
+        return positionals[1:]
+    wanted = BD_STATUS_WRITE_OPTS.get(sub, ())
+    for name, value in flagged:
+        if name in wanted or (name == "--status" and "-s" in wanted):
+            if value is not None and value.strip() == BD_REOPEN_STATUS:
+                return positionals[1:]
+    return []
+
+
 def split_labels(value):
     """One flag value into the labels bd would store.
 
@@ -896,17 +1010,19 @@ def split_labels(value):
     return [part for part in value.split(",") if part]
 
 
-def scan_tokens(tokens, cwd, wanted, closes=None, labels=None):
+def scan_tokens(tokens, cwd, wanted, closes=None, labels=None, reopens=None):
     targets = []
     i, n = 0, len(tokens)
     while i < n:
         tok = tokens[i]
         if tok == "bd" or tok.endswith("/bd"):
-            i, close, writes = scan_bd(tokens, i, cwd)
+            i, close, writes, opens = scan_bd(tokens, i, cwd)
             if close is not None and closes is not None:
                 closes.append(close)
             if labels is not None:
                 labels.extend(writes)
+            if reopens is not None:
+                reopens.extend(opens)
             continue
         if tok in ("cd", "pushd"):
             arg = tokens[i + 1] if i + 1 < n else None
@@ -949,7 +1065,7 @@ def scan_tokens(tokens, cwd, wanted, closes=None, labels=None):
     return targets
 
 
-def git_targets(text, cwd, wanted, depth=0, closes=None, labels=None):
+def git_targets(text, cwd, wanted, depth=0, closes=None, labels=None, reopens=None):
     # -> [(subcommand, effective directory)], need_fallback
     if depth > 3:
         return [], False
@@ -971,7 +1087,7 @@ def git_targets(text, cwd, wanted, depth=0, closes=None, labels=None):
     bodies.extend(substitution_bodies(expanded, cwd))
     for body, body_cwd in bodies:
         sub_targets, sub_fallback = git_targets(
-            body, body_cwd, wanted, depth + 1, closes, labels)
+            body, body_cwd, wanted, depth + 1, closes, labels, reopens)
         targets.extend(sub_targets)
         need_fallback = need_fallback or sub_fallback
     try:
@@ -980,7 +1096,7 @@ def git_targets(text, cwd, wanted, depth=0, closes=None, labels=None):
         tokens = list(lex)
     except ValueError:
         return targets, True
-    targets.extend(scan_tokens(tokens, cwd, wanted, closes, labels))
+    targets.extend(scan_tokens(tokens, cwd, wanted, closes, labels, reopens))
     return targets, need_fallback
 
 
@@ -1468,6 +1584,178 @@ def label_verdict(write):
     return "deny-label-over-cap", message
 
 
+# bd's external_ref is a free-form string — `gh-9`, `jira-ABC`, a Linear URL
+# (`bd update --help`) — so a bead is mirrored HERE only when the whole ref
+# parses as a GitHub issue URL and its owner/repo is origin's. The prefix
+# pattern exists to separate a ref this repo cannot parse from one that names
+# somewhere else: the first is a bead whose mirror state is unknown, and the
+# second is a bead whose mirror this repo's pull never touches.
+GH_ISSUE_URL_RE = re.compile(
+    r"\Ahttps?://github\.com/([^/\s]+)/([^/\s]+)/issues/([0-9]+)\Z")
+GH_ISSUE_PREFIX_RE = re.compile(
+    r"\Ahttps?://github\.com/([^/\s]+)/([^/\s]+)/issues/")
+
+
+def origin_nwo(directory):
+    """`owner/repo` of `origin` in `directory`, or None when git will not say.
+
+    Read from the remote URL rather than from `gh repo view`, which is a network
+    call: this runs ahead of every Bash command, and the answer is local.
+    """
+    if not directory or not os.path.isdir(directory):
+        return None
+    try:
+        proc = subprocess.run(
+            ("git", "-C", directory, "remote", "get-url", "origin"),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=git_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    url = proc.stdout.strip()
+    if url.endswith(".git"):
+        url = url[:-4]
+    # Both spellings origin is written in here: `git@github.com:owner/repo` and
+    # `https://github.com/owner/repo`.
+    match = re.search(r"github\.com[:/]+([^/\s]+/[^/\s]+)\Z", url)
+    return match.group(1) if match else None
+
+
+def bead_external_ref(directory, bead_id):
+    """(ok, external_ref or None) for one bead.
+
+    ok is False only when `bd show` could not answer AT ALL — unrunnable, timed
+    out, or output that is not JSON. A bead that does not RESOLVE answers
+    (True, None): bd says so in a JSON object carrying `error`, the command
+    being vetted will fail on the same id, and a bead that is not there has no
+    mirror to destroy. The two are kept apart because only one of them is
+    evidence about a mirror.
+
+    `cwd=` rather than `bd -C`: the two are documented as the same thing and
+    this way the subprocess carries no argument a shim or a future bd release
+    could parse differently.
+    """
+    try:
+        proc = subprocess.run(
+            ("bd", "show", bead_id, "--json"),
+            capture_output=True,
+            text=True,
+            timeout=15,
+            cwd=(directory if directory and os.path.isdir(directory) else None),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False, None
+    try:
+        payload = json.loads(proc.stdout)
+    except ValueError:
+        return False, None
+    if not isinstance(payload, list) or not payload:
+        return True, None
+    first = payload[0]
+    if not isinstance(first, dict):
+        return False, None
+    # `external_ref`, never `external_link`: the misnamed key answers null with
+    # exit 0, so the probe that should catch a missing mirror confirms one
+    # instead (CLAUDE.md, "PR & GitHub issue hygiene").
+    return True, (first.get("external_ref") or None)
+
+
+def mirror_state(nwo, number):
+    """(ok, lowercased issue state) for a GitHub issue.
+
+    ok is False when gh will not answer, which is NOT the same value as any
+    state — this arm denies on the first and decides on the second.
+    """
+    try:
+        proc = subprocess.run(
+            ("gh", "issue", "view", str(number), "--repo", nwo,
+             "--json", "state", "--jq", ".state"),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False, None
+    if proc.returncode != 0:
+        return False, None
+    return True, proc.stdout.strip().lower()
+
+
+def reopen_verdict(reopen):
+    """(verdict name, message or None) for one bead a `bd` command would reopen.
+
+    Seven verdicts, of which four refuse. Named rather than reduced to a
+    boolean for the reason the label arm gives: "this bead has no mirror" and
+    "the arm stopped finding mirrors" are otherwise the same silence.
+    """
+    directory, bead_id = reopen
+    ok, ref = bead_external_ref(directory, bead_id)
+    if not ok:
+        return "deny-bead-unreadable", (
+            "`bd show %s --json` could not be read, so whether that bead has a "
+            "GitHub mirror — and whether that mirror is closed — is unknown. "
+            "Reopening a bead in bd alone while its mirror is closed is undone "
+            "silently by the next pull, so this is refused rather than allowed "
+            "through unverified (bd gqlc-e9huy, ADR 0011)." % bead_id
+        )
+    if ref is None:
+        return "allow-unmirrored", None
+    prefix = GH_ISSUE_PREFIX_RE.match(ref.strip())
+    if prefix is None:
+        return "allow-foreign-ref", None
+    nwo = origin_nwo(directory or os.getcwd())
+    if nwo is None:
+        return "deny-origin-unreadable", (
+            "%s carries the GitHub mirror %s, and `git remote get-url origin` "
+            "would not say which repository this checkout mirrors into, so "
+            "whether that issue is one .githooks/bd-gh-sync pulls from could not "
+            "be established. Refused rather than allowed through unverified "
+            "(bd gqlc-e9huy, ADR 0011)." % (bead_id, ref)
+        )
+    if "%s/%s" % (prefix.group(1), prefix.group(2)) != nwo:
+        return "allow-foreign-ref", None
+    full = GH_ISSUE_URL_RE.match(ref.strip())
+    if full is None:
+        return "deny-ref-unparseable", (
+            "%s carries the external_ref %r, which names this repository (%s) "
+            "but not an issue number this hook can read, so its mirror state "
+            "could not be checked. Refused rather than allowed through "
+            "unverified (bd gqlc-e9huy, ADR 0011)." % (bead_id, ref, nwo)
+        )
+    number = full.group(3)
+    ok, state = mirror_state(nwo, number)
+    if not ok:
+        return "deny-mirror-unreadable", (
+            "`gh issue view %s --repo %s` could not answer, so whether %s's "
+            "mirror is closed is unknown. A bead reopened in bd while its "
+            "mirror is closed is re-closed silently by the next pull, so this "
+            "is refused rather than allowed through unverified. If GitHub is "
+            "unreachable from here the reopen has to wait — there is no order "
+            "of these two writes that is safe while only one of them can be "
+            "made (bd gqlc-e9huy, ADR 0011)." % (number, nwo, bead_id)
+        )
+    if state != "closed":
+        return "allow-mirror-open", None
+    return "deny-mirror-closed", (
+        "That would reopen %s in bd while its GitHub mirror #%s is still "
+        "CLOSED, and .githooks/bd-gh-sync's pull — which runs on every merge and "
+        "at session start — reads a closed mirror under an open bead as GitHub "
+        "speaking and closes the bead again. It leaves no stderr line you will "
+        "see, no drift row, and a null close_reason. Re-open the GH issue FIRST "
+        "and the bead second, or the next pull undoes it:\n"
+        "    gh issue reopen %s --repo %s\n"
+        "then re-run this exact command. The incident this is written from is "
+        "bd gqlc-e9huy: a judge's withdrawn PASS was reverted this way 2.5 "
+        "minutes after he withdrew it, which released the block his FAIL was "
+        "holding on a merge. ADR 0011 has the rule."
+        % (bead_id, number, number, nwo)
+    )
+
+
 def deny(reason):
     print("ERROR: %s" % reason, file=sys.stderr)
     emit(
@@ -1505,8 +1793,9 @@ def main():
     cwd = os.getcwd()
     closes = []
     labels = []
+    reopens = []
     targets, need_fallback = git_targets(
-        command, cwd, HOOK_GATED, closes=closes, labels=labels)
+        command, cwd, HOOK_GATED, closes=closes, labels=labels, reopens=reopens)
     if need_fallback and FALLBACK_RE.search(command):
         targets.append(("commit", cwd))
     for sub, directory in targets:
@@ -1536,6 +1825,39 @@ def main():
             message = (
                 "`bd close` could not be checked for an unpushed sha citation (%s: %s), "
                 "so it is refused rather than allowed through unverified (bd gqlc-90vt)."
+                % (type(exc).__name__, exc)
+            )
+        if message is not None:
+            deny(message)
+            return
+
+    # The reopen arm takes the close arm's exception policy, not the label
+    # arm's: an exception here denies. The label arm reasons that a bug in an
+    # arm that denied would block `bd create` in every concurrent session at
+    # once, and the same is true of `bd reopen` — but the damage the two arms
+    # prevent is not the same shape. An over-long label is caught later by CI
+    # and costs a retype; a reopen destroyed by the next pull is caught by
+    # nobody, and the citizen who typed it has by then been told it succeeded.
+    # A bd invocation naming several ids denies on the first mirror it finds
+    # closed and names it: bd discards a refused update whole anyway, so there
+    # is no half-applied command to describe.
+    #
+    # It runs BEFORE the label arm because that arm can WARN AND RETURN, and the
+    # return used to skip this one entirely: a single `bd update` carrying both a
+    # label and `--status open` went unchecked whenever the cap file could not be
+    # read. A warning about a label is not a reason to stop asking whether the
+    # command destroys a reopen (bd gqlc-v3d99, from Տիր's round-1 read of PR
+    # #2068). The swap is safe in the other direction too — nothing below
+    # consumes `reopens`, and a command tripping both arms now gets the deny,
+    # which is the louder of the two answers.
+    for reopen in reopens:
+        try:
+            _, message = reopen_verdict(reopen)
+        except Exception as exc:  # noqa: BLE001 - deliberate: an exception denies
+            message = (
+                "A `bd` command that would set status `open` could not be checked "
+                "against its GitHub mirror (%s: %s), so it is refused rather than "
+                "allowed through unverified (bd gqlc-e9huy)."
                 % (type(exc).__name__, exc)
             )
         if message is not None:
