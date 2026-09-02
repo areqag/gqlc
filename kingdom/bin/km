@@ -967,11 +967,56 @@ seat_box_echoes() { # <pane> <text> -> 0 holds it, 1 holds something else, 2 no 
 }
 
 # history: kingdom/brain/km-notes.md#km_authored_text
+#
+# Deliberately a test on ONE string and not on a buffer. send_line's caller-side
+# use is a refusal — it decides whether km may type this text at all — and a
+# version that answered yes when ANY line matched would let a multi-line ask
+# through on the strength of its second line. The buffer question is a different
+# question with a different safe direction, and it is box_authorship's.
 km_authored_text() { # <text> -> 0 km could have typed this, 1 nothing in km types it
     case $1 in
         '/exit' | '[km] '*) return 0 ;;
     esac
     return 1
+}
+
+# Who typed what is in a composer, over EVERY line of it rather than over the
+# first.
+#
+# A box is not one string. Two of the three lines in the box that produced this
+# function were km's own stranded asks, sitting behind a citizen's three-word
+# draft, and km reported the whole box as (foreign) — a tag the status prose
+# then reads out as "no code path in this town typed it" (bd gqlc-fb8ip). The
+# cause was that seat_box_state flattened the box before asking, so the '[km] '
+# PREFIX test could only ever see line one.
+#
+# box_one_line is left alone rather than taught to keep newlines, and per line
+# is where it is applied. Two callers now want the raw buffer for two different
+# reasons — this one wants attribution, cmd_release's disclosure wants the bytes
+# it swears are verbatim (bd gqlc-j3uht, F4) — while the one-line collapse is
+# still exactly right for a hash and for a status column. So the fix is in the
+# callers, and this is the first half of it.
+#
+# `mixed` is a THIRD answer and not a lean toward either. A box holding both is
+# the case where the operator's next move differs from both pure cases: km's own
+# ask is stranded in there and must be re-sent once the box is cleared, and
+# somebody's draft is in there too and must not be destroyed to do it.
+box_authorship() { # <raw box text> -> km | foreign | mixed
+    local line one km=0 foreign=0
+    while IFS= read -r line; do
+        # Per line, because a rendered composer puts its prompt glyph on the
+        # first line only and pads the rest; an unstripped '❯ ' would make every
+        # continuation line read as foreign.
+        one=$(box_one_line "$line")
+        [ -n "$one" ] || continue
+        if km_authored_text "$one"; then km=1; else foreign=1; fi
+    done <<<"$1"
+    if [ "$km" -eq 1 ] && [ "$foreign" -eq 1 ]; then echo mixed; return 0; fi
+    if [ "$km" -eq 1 ]; then echo km; return 0; fi
+    # No line matched either because there were no lines with content in them.
+    # The caller has already refused an empty box, so this is a buffer of
+    # whitespace and glyphs, which nothing in km types.
+    echo foreign
 }
 
 # history: kingdom/brain/km-notes.md#send_line
@@ -1147,14 +1192,17 @@ seat_pane_idle() { # <seat>
 }
 
 # history: kingdom/brain/km-notes.md#seat_box_state
-seat_box_state() { # <seat> -> none | km | foreign, on stdout
+seat_box_state() { # <seat> -> none | km | foreign | mixed, on stdout
     local pane box
     pane=$(seat_pane_id "$1") || { echo none; return 0; }
     [ -n "$pane" ] || { echo none; return 0; }
     box=$(seat_box_text "$pane" 2>/dev/null) || { echo none; return 0; }
-    box=$(box_one_line "$box")
-    [ -n "$box" ] || { echo none; return 0; }
-    if km_authored_text "$box"; then echo km; else echo foreign; fi
+    # Emptiness is asked of the collapsed form and authorship of the RAW one.
+    # Collapsing first is what hid two of km's own asks behind a citizen's
+    # opening line (bd gqlc-fb8ip); collapsing for the emptiness test is still
+    # right, because a box of glyphs and whitespace holds nothing to attribute.
+    [ -n "$(box_one_line "$box")" ] || { echo none; return 0; }
+    box_authorship "$box"
 }
 
 # history: kingdom/brain/km-notes.md#seat_prompt_visible
@@ -3459,7 +3507,7 @@ cmd_status() {
         # Unread, and reset per seat because TWO places now ask for it — the
         # idle refinement just below, and the NOWORK arm further down for a
         # seat that never reaches this branch. "" is the unread marker, which
-        # is safe because seat_box_state answers none|km|foreign and never
+        # is safe because seat_box_state answers none|km|foreign|mixed and never
         # empty; without the reset a seat inherits its predecessor's box.
         boxstate=""
         if [ "$st" = awake ] && seat_pane_idle "$s"; then
@@ -3659,7 +3707,7 @@ cmd_status() {
         echo "UNRESPONSIVE:$frozen — no heartbeat for over $(fmt_age "$stale"); read the pane before believing the STATE column. A frozen seat holds its slot, answers no mail, and reports as healthy. Do not end the session: a modal is not consent (VI.2)."
     fi
     if [ -n "$boxed" ]; then
-        echo "BOXED:$boxed — awake, with TEXT SITTING UNSUBMITTED in the input box, so no transport in this town can reach these seats at all. send_line refuses every send into a non-empty box, correctly: typing APPENDS, so it would paste onto the end of a citizen's draft and submit the pair as one message (gqlc-6bnkw). cmd_wake, cmd_sleep, cmd_down and dispatch's recovery ask all route through that one function, so these seats cannot be woken, nudged, slept or brought down, while each still holds one of $(cfg concurrency max_active) slots and every dispatch pass wakes ASLEEP seats only. EACH SEAT CARRIES A TAG for what its box holds, which says how the text got there. (km) is text km itself types — /exit, or an ask carrying the '[km] ' prefix, which send_line now refuses to send without — so read gqlc-gh7xj first: a burst of 64 characters or more is read as a paste and its trailing CR renders as a literal newline. (foreign) is neither shape, so no code path in this town typed it: it is a citizen composing right now, or a hand-send. The hand-send is settled (gqlc-cj7hp, 2026-09-02): 'herdr agent send' writes literal text and presses no Enter, and a person typing at the herdr TUI leaves the same thing — so a (foreign) box is most often a CORRECT instruction that somebody believes they delivered, and the seat it froze is the receipt nobody got. Do not hunt the sender in herdr's log: it records a send only when the send FAILS — of 136 successful api requests logged since 2026-06-13, not one is a send — so a delivered one leaves no trace, by design. Say it with 'km wake <seat> --reason \"<text>\"' instead, which types, presses Enter, and witnesses the box emptied. The nine strings measured that day ran 8 to 61 characters against gh7xj's threshold of 64, so gh7xj explains none of them — but 61 is close enough that the next may land the other side of it, and a string over 64 is NOT thereby km's. The tag reads the composer's bytes and nothing else, so a citizen whose own draft opens with '[km] ' is tagged km, and a box holding two texts is tagged by whichever is first. Seven panes sat like this through the eleven-hour freeze of 2026-09-01, every one of them reporting as awake-idle, and the ESCALATED tags on that board were asks that never arrived rather than citizens ignoring them (gqlc-5vp7). It refines TWO populations, and an absent line is bounded by both: the IDLE seats below, and the NOWORK ones, whose agent still reports \`working\` and which therefore never reach the idle check at all — that second half is why Վահագն could sit provably boxed and be named merely stalled (gqlc-u5w1e). What neither read covers is a seat that is working AND whose work witness is still fresh, so an ABSENT BOXED line says that no idle pane and no stalled one holds a stranded ask, and says nothing whatever about the working majority, which is deliberately never read. These are NOT on the IDLE line below, because IDLE's remedy — 'km sleep --seat <seat>' — is itself a send and is refused by this same box. They ARE still on NOWORK when they qualify, tagged there: that line carries the dry age and the escalation tag, which exist nowhere else. DO NOT RELAX THAT GUARD: appending to a live draft and submitting it is a worse failure than a held slot. km neither clears nor submits the text, because it cannot tell a stale line from work in progress — reading the pane and deciding is an operator's, and ending or unblocking a session is not km's to do on a timer (VI.2)."
+        echo "BOXED:$boxed — awake, with TEXT SITTING UNSUBMITTED in the input box, so no transport in this town can reach these seats at all. send_line refuses every send into a non-empty box, correctly: typing APPENDS, so it would paste onto the end of a citizen's draft and submit the pair as one message (gqlc-6bnkw). cmd_wake, cmd_sleep, cmd_down and dispatch's recovery ask all route through that one function, so these seats cannot be woken, nudged, slept or brought down, while each still holds one of $(cfg concurrency max_active) slots and every dispatch pass wakes ASLEEP seats only. EACH SEAT CARRIES A TAG for what its box holds, which says how the text got there. (km) is a box EVERY line of which km itself typed — /exit, or an ask carrying the '[km] ' prefix, which send_line now refuses to send without — so read gqlc-gh7xj first: a burst of 64 characters or more is read as a paste and its trailing CR renders as a literal newline. (foreign) is a box NO line of which carries either shape, so no code path in this town typed any of it: it is a citizen composing right now, or a hand-send. The hand-send is settled (gqlc-cj7hp, 2026-09-02): 'herdr agent send' writes literal text and presses no Enter, and a person typing at the herdr TUI leaves the same thing — so a (foreign) box is most often a CORRECT instruction that somebody believes they delivered, and the seat it froze is the receipt nobody got. That reading was taken over boxes classified by their first line, before (mixed) existed, so some of what it counted as foreign was mixed and some of those strings were km's own: the conclusion is not refuted but its POPULATION is, and it is owed a re-read against this tag (bd gqlc-fb8ip). Do not hunt the sender in herdr's log: it records a send only when the send FAILS — of 136 successful api requests logged since 2026-06-13, not one is a send — so a delivered one leaves no trace, by design. Say it with 'km wake <seat> --reason \"<text>\"' instead, which types, presses Enter, and witnesses the box emptied. The nine strings measured that day ran 8 to 61 characters against gh7xj's threshold of 64, so gh7xj explains none of them — but 61 is close enough that the next may land the other side of it, and a string over 64 is NOT thereby km's. (mixed) is both shapes in one box, and it is the tag that says an ask of km's own is STRANDED: km typed into a composer somebody had already made non-empty, so that ask never arrived and the citizen's draft is still sitting under it. Neither pure remedy fits — clearing the box destroys a citizen's words, leaving it holds a slot and loses the ask — so read the pane before you touch it. Until this tag existed a box was named by its FIRST line alone: Սեդրակ measured a three-line composer on raffi holding a three-word draft above two '[km] ' asks, km called it (foreign), and this very sentence asserted of it that nothing in the town had typed it (bd gqlc-fb8ip). The tag reads the composer's bytes and nothing else, so a citizen whose own draft opens with '[km] ' is still tagged km. Seven panes sat like this through the eleven-hour freeze of 2026-09-01, every one of them reporting as awake-idle, and the ESCALATED tags on that board were asks that never arrived rather than citizens ignoring them (gqlc-5vp7). It refines TWO populations, and an absent line is bounded by both: the IDLE seats below, and the NOWORK ones, whose agent still reports \`working\` and which therefore never reach the idle check at all — that second half is why Վահագն could sit provably boxed and be named merely stalled (gqlc-u5w1e). What neither read covers is a seat that is working AND whose work witness is still fresh, so an ABSENT BOXED line says that no idle pane and no stalled one holds a stranded ask, and says nothing whatever about the working majority, which is deliberately never read. These are NOT on the IDLE line below, because IDLE's remedy — 'km sleep --seat <seat>' — is itself a send and is refused by this same box. They ARE still on NOWORK when they qualify, tagged there: that line carries the dry age and the escalation tag, which exist nowhere else. DO NOT RELAX THAT GUARD: appending to a live draft and submitting it is a worse failure than a held slot. km neither clears nor submits the text, because it cannot tell a stale line from work in progress — reading the pane and deciding is an operator's, and ending or unblocking a session is not km's to do on a timer (VI.2)."
     fi
     if [ -n "$idle" ]; then
         echo "IDLE:$idle — awake, alive, and sitting at an empty prompt — the composer was READ and found empty, so these are the ones a send can still reach; a seat whose box held text is on the BOXED line above instead, and is not reachable at all. Unroutable, because every dispatch pass wakes ASLEEP seats only, while the live session still spends one of $(cfg concurrency max_active) slots. Six of these stalled the whole town for eleven hours with every board reading healthy (gqlc-5vp7). One capture of a TUI is not proof — read the pane first, and 'km sleep --seat <seat>' frees the slot if the citizen is done. Nothing here ends a session: a seat that has not asked to leave has not consented (VI.2, gqlc-971s)."

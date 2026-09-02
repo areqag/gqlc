@@ -871,6 +871,13 @@ the `[km] ` prefix. That was already true when this predicate was written; what
 it adds is that it is now CHECKED, at the one place text enters a pane, so it
 cannot be quietly falsified by a new send site (bd gqlc-cj7hp).
 
+IT IS A TEST ON ONE STRING AND MUST STAY ONE. `send_line` uses it as a REFUSAL,
+on text km is about to type, so a version answering yes when any line of a
+buffer matched would let a multi-line ask through on the strength of its second
+line. The buffer question — who typed what is already sitting in a composer —
+is a different question with a different safe direction, and it belongs to
+`box_authorship` (bd gqlc-fb8ip).
+
 THE CORPUS WAS MEASURED, not remembered. Extracted from the source on
 2026-09-02: five templates — `/exit` from two call sites, and four `[km] `
 asks. `send_line` is the only thing in the whole repository that types into a
@@ -1171,13 +1178,29 @@ there without settling it, and the narrowing is only worth anything because
 km's own corpus is now checked at the send — see `## km_authored_text`. `km` is
 text km itself types, so read gqlc-gh7xj first: km's own long nudge is read as
 a paste and its trailing CR renders as a literal newline, which strands it.
-`foreign` is neither shape, so no code path in this town typed it — it is a
-citizen composing right now, or the second sender of gqlc-cj7hp.
+`foreign` is a box no line of which carries either shape, so no code path in
+this town typed any of it — it is a citizen composing right now, or the second
+sender of gqlc-cj7hp. `mixed` is both in one box.
+
+`mixed` WAS ADDED AFTER THIS PARAGRAPH WAS FIRST TRUE OF ONE LINE ONLY. Until
+bd gqlc-fb8ip the box was flattened by `box_one_line` before the corpus test
+ran, and that test matches a PREFIX, so it could only ever see the first line.
+Սեդրակ measured the cost on raffi 2026-09-02: a composer holding a three-word
+draft above two of km's own `[km] ` asks was tagged `foreign`, over which the
+status prose asserts that no code path in this town typed it. Classification
+now runs per line, in `box_authorship`, and `mixed` is a third answer rather
+than a lean toward either — it is the case whose remedy differs from both, an
+ask of km's stranded above a citizen's draft that must not be destroyed to
+clear it. It is also the direct evidence that km's asks strand and ACCUMULATE:
+a second ask was delivered into a box the first had already made non-empty.
+
+That correction moves gqlc-cj7hp's population, not its conclusion. The nine
+strings read that day were classified by their first line, so some counted as
+foreign were mixed; the hand-send reading is owed a re-read against this tag.
 
 IT READS THE COMPOSER'S BYTES AND NOTHING ELSE, which is the whole of its
 authority and the whole of its blindness. A citizen whose own draft happens to
-open with `[km] ` is tagged `km`; a box holding two texts is tagged by whichever
-is first. Do not read the tag as provenance. It is a shape test against a
+open with `[km] ` is tagged `km`. Do not read the tag as provenance. It is a shape test against a
 corpus, and it is worth having only because the corpus is enforced at the one
 place text enters a pane.
 
