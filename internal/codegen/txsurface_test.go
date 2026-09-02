@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,15 +27,28 @@ import (
 // a second neo4j target.
 var txTargets = []string{"neo4j-go-v5", "apache-age-pgx-v5"}
 
+// txProbeQueryFile is where the probe batch's query methods are emitted.
+// It is the one file allowed to declare exported methods on the core, so
+// the closed-set assertion over the rest is written against this name
+// rather than against each of the others in turn — a file added to the
+// emission is then held by default.
+const txProbeQueryFile = "txprobe.cypher.go"
+
 // txSurfaceNames is the exported Tx surface both backends owe, spelled
 // with receivers because `Begin` hangs off `*Queries` while `Commit` and
 // `Rollback` hang off `*Tx`. A bare name set cannot tell those apart, and
 // a gate that cannot tell them apart would pass on an emission that moved
 // a method to the wrong receiver.
 //
-// The set is closed — the gate refuses an emission carrying MORE exported
-// Tx surface than this, not only one carrying less. Two concrete cases it
-// holds. A `(*Tx).Close` is declined by docs/specs/codegen-tx-object.md
+// The set is closed over DECLARED Tx surface — the gate refuses an
+// emission carrying more of it than this, not only one carrying less. It
+// is not closed over PROMOTED surface, and cannot be: extractTxSurface
+// reads declarations, and a method on the embedded core is a declaration
+// whose receiver is neither *Tx nor (*Queries).Begin, so it never becomes
+// a candidate for this set however exported it is. That half is closed by
+// the core-surface assertion in TestTxPromotionPreconditions instead (bd
+// gqlc-eunj4). Two concrete cases this one holds. A `(*Tx).Close` is
+// declined by docs/specs/codegen-tx-object.md
 // §10 because Rollback's nil-after-done already covers the defer idiom,
 // and a decline that nothing enforces is re-proposed by the next author
 // to want one. A `(*Tx).Queries` is the accessor
@@ -165,7 +179,7 @@ func TestTxPromotionPreconditions(t *testing.T) {
 			// Every generated query method hangs off the core. A renderer
 			// regressed to *Queries reddens here by name, and the promoted
 			// calls in the live adapters stop compiling.
-			_, queryFile := parseProbeFile(t, target, "txprobe.cypher.go", files)
+			_, queryFile := parseProbeFile(t, target, txProbeQueryFile, files)
 			methods := 0
 			for _, d := range queryFile.Decls {
 				fn, ok := d.(*ast.FuncDecl)
@@ -187,6 +201,67 @@ func TestTxPromotionPreconditions(t *testing.T) {
 			// produced no query methods at all.
 			require.Equal(t, len(txProbeInput().Queries), methods,
 				"%s: the probe batch's query methods are not all emitted", target)
+
+			// Every EXPORTED method on the core promotes into *Tx's method
+			// set, so the core's exported surface is the transaction's,
+			// beyond Commit and Rollback. Nothing above holds that. The
+			// txCoreLifecycleNames loop is a deny-list of five identifiers,
+			// txSurfaceNames never sees a core method at all (extractTxSurface
+			// skips every receiver that is neither *Tx nor (*Queries).Begin),
+			// and TestTxMethodSet in test/data/codegen is an absent-list, so
+			// a SIXTH exported core method reddens none of the three.
+			//
+			// Measured under bd gqlc-eunj4: emitting
+			// `func (q *queries) Dialect() string` from both renderers, then
+			// following each red it produced to the remedy that red's own
+			// message named, left the root module, the nested module and this
+			// file all green with *Tx one exported method wider than
+			// txSurfaceNames declares.
+			//
+			// The generated query methods are the one population that may
+			// hang off the core, and they are emitted into the .cypher.go
+			// file the loop above reads receiver by receiver. Every other
+			// emitted file must contribute none — all of them, not db.go
+			// alone: moving AGE's DropGraph onto the core in graph.go is the
+			// same widening from a file the rest of this test never opens.
+			// A value receiver is walked too: `func (q queries) X()` promotes
+			// into *Tx exactly as the pointer form does.
+			exportedCoreMethods := func(path string) []string {
+				var found []string
+				_, emitted := parseProbeFile(t, target, path, files)
+				for _, d := range emitted.Decls {
+					fn, ok := d.(*ast.FuncDecl)
+					if !ok || fn.Recv == nil || len(fn.Recv.List) != 1 || !fn.Name.IsExported() {
+						continue
+					}
+					if recv, ok := receiverIdent(fn.Recv.List[0].Type); !ok || recv != "queries" {
+						continue
+					}
+					found = append(found, fn.Name.Name)
+				}
+				return found
+			}
+
+			// The walk must find the query methods counted above in the file
+			// they are emitted into. Without this the emptiness below is
+			// satisfied by a walk that recognises nothing — a receiverIdent
+			// that stopped resolving the core would empty it silently, and
+			// the assertion would then pass on every emission.
+			require.Len(t, exportedCoreMethods(txProbeQueryFile), methods,
+				"%s: the walk does not find the query methods on the core, so its emptiness elsewhere means nothing", target)
+
+			var promoted []string
+			for _, path := range slices.Sorted(maps.Keys(files)) {
+				if path == txProbeQueryFile {
+					continue
+				}
+				for _, name := range exportedCoreMethods(path) {
+					promoted = append(promoted, path+": "+name)
+				}
+			}
+			require.Empty(t, promoted,
+				"%s: these are declared on the embedded core, so they promote into *Tx's method set and widen the transaction surface past %v",
+				target, txSurfaceNames)
 
 			// The emitted pins are the generated package's own compile-time
 			// claim that both handles satisfy Querier. Asserting them here
