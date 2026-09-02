@@ -142,7 +142,9 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
 
        git rev-parse --path-format=absolute --git-common-dir
 
-   answering a path inside your own seat directory means a clone.
+   answering a path inside your own seat directory means a clone. The rest of a
+   rescue — deciding whether the work already landed, and triaging loose commits
+   when it did not — is `kingdom/brain/playbooks/rescuing-killed-work.md`.
 
    **Read the unreviewed merge you are about to build on** (ADR 0004 §1). Once
    you are synced, look at what has recently landed in your bead's `subject:`
