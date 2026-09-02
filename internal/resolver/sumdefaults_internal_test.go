@@ -76,6 +76,90 @@ func TestValidateEffectDispatchesADeclaredVariant(t *testing.T) {
 		"a declared Effect variant must be dispatched, not fall through to the tripwire")
 }
 
+// TestListElementEntityProjectionsAreRefusedAtR0 pins the two refusals that
+// decide, from here, whether a whole arm of the neo4j emitter is live code.
+//
+// resolveType is one of three places that construct a ResolvedList. The other
+// two cannot originate an entity element: scope.go's variable-length edge
+// binding builds ResolvedEdge or ResolvedEdgeUnion and never a ResolvedNode,
+// and unify only PROPAGATES an element both of its arguments already carry.
+// So these two lines are the whole of the question, and today they answer no.
+//
+// WHAT RIDES ON THE NODES ROW. internal/codegen's buildListElemPlan maps a
+// ResolvedList whose Element is a ResolvedNode to a ListElem of kind
+// codegen.ColumnNode, and internal/codegen/neo4j's walkListElemBody has an arm
+// for that kind which emits a dbtype.Node assertion and a decode<Entity> call.
+// Because no query reaches these lines with a node element, that arm is unrun.
+// Measured 2026-09-02 with -coverpkg over ./internal/codegen/...: of the
+// eighteen coverage blocks inside that switch, the ColumnNode case is the only
+// case with no covered block at all, while the ColumnEdge and ColumnEdgeUnion
+// cases beside it are covered by the variable-length-edge corpus queries. Two
+// further blocks read zero and are deliberately not claimed here — a
+// temporal-carrier branch of the ColumnProperty arm and the non-narrowing
+// branch of ColumnTemporal — because both sit inside arms that do run.
+//
+// It is unrun and it is not deletable, which is why this pin exists instead of
+// a deletion. Measured the same day by deleting the arm: `go build ./...`
+// still succeeds and `go test -count=1 ./internal/codegen/...` is entirely
+// green — no test in this repository defends it — but golangci-lint's
+// exhaustive fails with "missing cases in switch of type codegen.ColumnKind:
+// codegen.ColumnNode", because that switch carries no default. Satisfying the
+// linter after a deletion means adding one, and .golangci.yml sets
+// default-signifies-exhaustive, so a default would switch the exhaustive check
+// off for that switch permanently — trading a dead arm for the dead guard that
+// makes every future ColumnKind land there. So the arm stays.
+//
+// What was missing was any signal on the other side. If the day comes that R5
+// or later admits a list-of-nodes projection, the emitter arm stops being
+// hypothetical and needs a corpus query covering it the way the edge arms are
+// covered — and nothing said so. This test is that signal: it fails when the
+// refusal is lifted, and its message names the arm to go and cover.
+//
+// The edges row is the control and not a second claim. Both refusals sit in
+// one type switch and return the same sentinel, so a single row could be
+// satisfied by a mutant that refuses every list alike; two rows with distinct
+// messages cannot. Lifting the edges refusal has no such consequence for the
+// emitter — codegen.ColumnEdge is reachable through the edge-binding route
+// above — so only the nodes row carries the warning.
+func TestListElementEntityProjectionsAreRefusedAtR0(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		elem query.Type
+		want string
+		why  string
+	}{
+		{
+			"nodes",
+			query.TypeNode{},
+			"list-of-nodes projection",
+			"lifting this refusal makes internal/codegen/neo4j walkListElemBody's codegen.ColumnNode arm reachable: " +
+				"cover it with a corpus query the way VarLengthEdgeColumn covers the edge arm, then change this row",
+		},
+		{
+			"edges",
+			query.TypeEdge{},
+			"list-of-edges projection",
+			"the control: a refusal that does not distinguish its two element kinds is not pinned by the row above",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveType(query.NewTypeList(tt.elem))
+			require.ErrorIs(t, err, ErrOutOfR0Scope, tt.why)
+			require.Contains(t, err.Error(), tt.want, tt.why)
+			require.Nil(t, got, "a refusal returns no resolved type")
+		})
+	}
+}
+
+// TestListElementScalarProjectionStillResolves keeps the two rows above from
+// being satisfied by a resolver that refuses every list. It is the same
+// posture as TestResolveTypeMapsADeclaredVariant one function up.
+func TestListElementScalarProjectionStillResolves(t *testing.T) {
+	got, err := resolveType(query.NewTypeList(query.TypeInt{}))
+	require.NoError(t, err)
+	require.Equal(t, ResolvedList{Element: ResolvedScalar{Kind: ScalarInt}}, got)
+}
+
 // TestDescribeColumnTypeRendersANilListElement pins the third posture in this
 // file, and it differs from both above on purpose.
 //
