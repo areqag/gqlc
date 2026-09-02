@@ -458,9 +458,9 @@ func (a edgeUnionV5) actionOnPost(ctx context.Context, postID int64) (edgeUnionA
 		return edgeUnionAction{}, err
 	}
 	switch v := got.(type) {
-	case edgeunionv5.AUTHORED:
+	case edgeunionv5.Authored:
 		return edgeUnionAction{Kind: "AUTHORED", Since: v.Since}, nil
-	case edgeunionv5.LIKES:
+	case edgeunionv5.Likes:
 		return edgeUnionAction{Kind: "LIKES", Rating: v.Rating}, nil
 	default:
 		return edgeUnionAction{}, fmt.Errorf("battery: %T is not a member this scenario knows", v)
@@ -920,9 +920,9 @@ func (a edgeUnionV6) actionOnPost(ctx context.Context, postID int64) (edgeUnionA
 		return edgeUnionAction{}, err
 	}
 	switch v := got.(type) {
-	case edgeunionv6.AUTHORED:
+	case edgeunionv6.Authored:
 		return edgeUnionAction{Kind: "AUTHORED", Since: v.Since}, nil
-	case edgeunionv6.LIKES:
+	case edgeunionv6.Likes:
 		return edgeUnionAction{Kind: "LIKES", Rating: v.Rating}, nil
 	default:
 		return edgeUnionAction{}, fmt.Errorf("battery: %T is not a member this scenario knows", v)
