@@ -19,6 +19,21 @@ state_dirname = "kingdom-state"
 # variant (km-seat-ox, 2026-08-25 → 2026-08-28) whose process-per-wake shape
 # broke pane-scoped invariants — reverted by direct decree (bd gqlc-zp37).
 seat_runner = "km-seat"
+# How many CONSECUTIVE ticks may refuse to deploy the root above before km
+# mails Սեդրակ once. The refusal itself is fail-open by decision (gqlc-nm7w:
+# refusing stopped the town), and it has printed a journal WARNING on every one
+# of those ticks since — 1800+ of them over the retained journal, not one of
+# which produced a repair. Mail is the only channel here that survives nobody
+# looking.
+#
+# Both timers count against it — dispatch every two minutes and the guard sweep
+# every fifteen — so ten is about seventeen minutes of wall clock. Long enough
+# that the refusals which heal by themselves (a merge landing mid-fetch, an
+# index lock) are gone, short enough that the parked-root shape — 1700 of those
+# refusals, and the one that never heals — is named while it still matters.
+# Lower it if a real episode is found to have gone unnamed for too long;
+# raising it past an hour makes this the second channel nobody reads.
+deploy_escalate_after_ticks = 10
 
 [concurrency]
 # Global and work-conserving: any free slot goes to whichever class has ready

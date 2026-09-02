@@ -288,12 +288,101 @@ kingdom_drift() {
 
 deployed_ok() { [ -z "$(kingdom_drift)" ]; }
 
+# How many consecutive refused ticks before the mayor is mailed. Fail-open to
+# 10 for the same reason cfg_minutes does, and 0 is refused for the same reason
+# recover_cap refuses it: it would mail on the first refusal, before anything
+# is known to persist.
+#
+# A tick is any call that reaches here, and BOTH timers do: dispatch every two
+# minutes and the guard sweep every fifteen. So ten of them is about seventeen
+# minutes of wall clock, not twenty. The refusals that heal by themselves are
+# races — a merge landing between the fetch and the diff, an index lock held by
+# a concurrent deploy — and they are gone on the next tick or two. The ones
+# worth a letter are the parked-root shape, which never heals: 1700 of the
+# retained journal's refusals name one branch (gqlc-1amz6).
+deploy_escalate_cap() {
+    local v
+    v=$(cfg kingdom deploy_escalate_after_ticks)
+    case "$v" in '' | *[!0-9]*) v=10 ;; esac
+    [ "$v" -gt 0 ] || v=10
+    echo "$v"
+}
+
+deploy_refusals_file() { echo "$(state_dir)/deploy-refusals"; }
+deploy_escalated_marker() { echo "$(state_dir)/deploy-escalated"; }
+
+# The episode ends the moment the deployed tree is good again, and BOTH files
+# go with it — the count so the next episode starts from one, and the marker so
+# the next episode can be reported at all. Leaving the marker behind is the
+# failure the idle ladder measured next door: a stale one silences the channel
+# permanently for an episode in which nobody was ever told.
+deploy_episode_clear() { rm -f "$(deploy_refusals_file)" "$(deploy_escalated_marker)"; }
+
+# Fail-open on a channel nobody reads is silence. Every refusal below has
+# printed a WARNING to the journal since the fail-open was introduced, and over
+# the retained journal 1800+ of them produced no repair — every fix came from
+# someone noticing something else, the most recent costing ~2.5 hours with two
+# merged km fixes sitting inert in the stale tree (gqlc-1amz6). So the Nth
+# consecutive refusal mails the one citizen whose job is deciding, once.
+#
+# ONCE per episode. The marker records a DELIVERY and not an attempt: mail_send
+# returns 0 once the body reaches the SENDER's sent box, so a send that never
+# reached the inbox would otherwise write the marker and restore exactly the
+# permanent silence this exists to end. Counted from andranik alone, because
+# any letter landing in the window confirms a plain inbox count.
+#
+# andranik is the sender because a tick has no seat author, and mail_send's
+# is_seat check would refuse anything but a registered seat or the crown.
+deploy_refusal_escalate() { # <command name for the message> <drift> <last deploy output>
+    local name=$1 drift=$2 out=$3 file marker cap count before
+    file=$(deploy_refusals_file)
+    marker=$(deploy_escalated_marker)
+    cap=$(deploy_escalate_cap)
+    # `|| true` under `set -e`: the file is absent on the first refusal of every
+    # episode, which is the commonest case rather than a corner of one. Without
+    # it the failing substitution takes down the tick this function exists to
+    # keep running — the same rung the idle ladder died on (gqlc-w3wb).
+    count=$(cat "$file" 2>/dev/null || true)
+    case "$count" in '' | *[!0-9]*) count=0 ;; esac
+    count=$((count + 1))
+    # State this function cannot write is state it cannot count, and it must
+    # still not stop the tick: fail-open applies to its own bookkeeping too.
+    # ENOSPC has emptied this town's scratch before (gqlc-vze6), so a refused
+    # write here is not hypothetical — and without the guard `set -e` turns it
+    # into the halted dispatcher this whole path exists to avoid.
+    { mkdir -p "$(dirname "$file")" && echo "$count" >"$file"; } 2>/dev/null || return 0
+    [ "$count" -ge "$cap" ] || return 0
+    [ ! -f "$marker" ] || return 0
+    before=$(mail_unread_from sedrak andranik)
+    if mail_send sedrak --from andranik \
+        -s "$(deploy_root) has run stale for $count consecutive ticks" \
+        -m "km has refused to deploy $(deploy_root) on $count consecutive ticks, and every one of them ran the town's machinery from that tree anyway. That is by design (gqlc-nm7w — refusing is what stopped the town once), and it is why nothing has turned red.
+
+What the refusal says:
+
+  ${drift//$'\n'/$'\n  '}
+
+Last deploy attempt: ${out:-not attempted on this tick}
+
+Nothing here has stopped. Every tick since the first refusal has run whatever machinery that tree holds, so a merged fix to km, the hooks, or .claude/ is not reaching the town — the last episode of this ran ~2.5 hours with two merged km fixes sitting inert in it.
+
+The repair is 'km deploy' (just kingdom-deploy) in that root. If it refuses because the root is parked off master, 'km doctor' names the worktree holding the branch.
+
+You will not be mailed about this episode again. The count and this suppression both clear on the first tick that finds the tree deployable." >/dev/null \
+        && [ "$(mail_unread_from sedrak andranik)" -gt "$before" ]; then
+        : >"$marker"
+        echo "$name: ESCALATED to sedrak — $count consecutive ticks have run from a stale $(deploy_root); not mailing again until a deploy lands" >&2
+    else
+        echo "$name: ESCALATION UNDELIVERED — no new letter from andranik reached sedrak's inbox, so nothing was recorded and the next tick will try again" >&2
+    fi
+}
+
 # history: kingdom/brain/km-notes.md#ensure_deployed
 ensure_deployed() { # <command name for the message> [the args to hand on]
     local name=$1 drift out km
     shift
     drift=$(kingdom_drift)
-    [ -n "$drift" ] || return 0
+    [ -n "$drift" ] || { deploy_episode_clear; return 0; }
     if [ -z "${KM_SELF_DEPLOYED:-}" ]; then
         echo "$name: DRIFT — deploying $(deploy_root) before it runs" >&2
         if out=$(cmd_deploy 2>&1); then
@@ -307,10 +396,11 @@ ensure_deployed() { # <command name for the message> [the args to hand on]
                 export KM_SELF_DEPLOYED=1
                 exec "$km" "$name" "$@"
             fi
+            deploy_episode_clear
             return 0
         fi
         drift=$(kingdom_drift)
-        [ -n "$drift" ] || return 0
+        [ -n "$drift" ] || { deploy_episode_clear; return 0; }
         printf '%s: deploy failed: %s\n' "$name" "${out//$'\n'/ }" >&2
     fi
     {
@@ -318,6 +408,7 @@ ensure_deployed() { # <command name for the message> [the args to hand on]
         echo "  ${drift//$'\n'/$'\n  '}"
         echo "$name: run 'km deploy' (just kingdom-deploy) by hand — km status and km doctor carry this too"
     } >&2
+    deploy_refusal_escalate "$name" "$drift" "${out:-}"
     return 0
 }
 
