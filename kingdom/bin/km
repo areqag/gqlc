@@ -647,6 +647,18 @@ seat_runner_live() { # <seat>
     pgrep -f "/km-seat[[:space:]]+$1([[:space:]]|\$)" >/dev/null 2>&1
 }
 
+# history: kingdom/brain/km-notes.md#seat_runner_path
+seat_runner_path() { # <seat> -> the km-seat file its runner is executing, or nothing
+    local pid part
+    for pid in $(pgrep -f "/km-seat[[:space:]]+$1([[:space:]]|\$)" 2>/dev/null); do
+        while IFS= read -r part; do
+            case $part in
+                */km-seat) printf '%s\n' "$part"; return 0 ;;
+            esac
+        done < <(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null)
+    done
+}
+
 # history: kingdom/brain/km-notes.md#seat_wake_queue_age
 seat_wake_queue_age() { # <seat> -> seconds since mtime, or empty
     local f
@@ -3925,6 +3937,26 @@ cmd_doctor() {
         # matches" over a roster where nothing was live is a true sentence that
         # means nothing, and it is the sentence a reader takes for reassurance.
         echo "ok:   every live session matches kingdom.toml on permission mode, soul and model ($lseen live, $(($(seats_all | wc -l) - lseen)) asleep and not judged)"
+    fi
+    # history: kingdom/brain/km-notes.md#cmd_doctor-rooting
+    local rseat rpath rwant rstray="" rseen=0
+    rwant="$(deploy_root)/kingdom/bin/km-seat"
+    for rseat in $(seats_all); do
+        rpath=$(seat_runner_path "$rseat")
+        [ -n "$rpath" ] || continue
+        rseen=$((rseen + 1))
+        [ "$rpath" = "$rwant" ] && continue
+        rstray="$rstray $rseat($rpath)"
+    done
+    if [ -n "$rstray" ]; then
+        echo "FAIL: runners executing a km-seat that is not the town's:$rstray — the bytes a seat runs come from whatever tree its launcher was standing in, and a citizen's worktree is one 'git checkout' away from changing them under a live runner. km-seat re-execs into $rwant only when the DEPLOYED bytes change, so a runner rooted in a tree that currently matches never re-execs and stays there. Report only — ending a runner ends its citizen's session (VI.2); each repairs itself at its next respawn from the deploy root (bd gqlc-lzkps)"
+        ok=1
+    else
+        # The count, for the same reason the launch row carries one: "every
+        # runner is the town's" over a roster where none was found is a true
+        # sentence about nothing, and it is the sentence a reader takes for
+        # reassurance.
+        echo "ok:   every live runner executes the town's own km-seat ($rseen found, of $(seats_all | wc -l) seats)"
     fi
     check soft "bd mail.delegate points at km" "bd mail.delegate does NOT resolve to 'km mail', so mail bd delegates goes nowhere this town reads" sh -c "bd config get mail.delegate | grep -q 'km mail'"
     # `systemctl --user is-enabled` answers three ways, measured 2026-08-30 on
