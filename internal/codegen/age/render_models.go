@@ -222,8 +222,18 @@ func (h *helpers) forEntities(entities []wiredEntity) {
 // agtypeDateText.
 func (h *helpers) forParams(params []codegen.Param) {
 	for _, p := range params {
-		leaf, list := p.GoType, false
-		if elem, ok := strings.CutPrefix(leaf, "[]"); ok {
+		// Counted, not stripped once. A depth-2 list left "[]civil.Date"
+		// here, which matches no carrier arm, so the parameter was taken
+		// for one whose encode cannot fail and neither the leaf encoder
+		// nor agtypeEncodedList was ever marked — an emission calling
+		// helpers it does not define (bd gqlc-vhvz7).
+		leaf := p.GoType
+		list := false
+		for {
+			elem, ok := strings.CutPrefix(leaf, "[]")
+			if !ok {
+				break
+			}
 			leaf, list = elem, true
 		}
 		if leaf == goInstant {
