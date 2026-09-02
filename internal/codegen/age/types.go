@@ -153,6 +153,13 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		return "Time", true
 	case graph.TypeDuration:
 		return "Duration", true
+	case graph.TypeAnyRecord:
+		// Refused by prepare.go's kind walk before any table is asked
+		// (ErrUnimplementedTypeKind, ADR 0039), so this is unreachable —
+		// listed for the exhaustive linter, as graph.TypeList is. The
+		// false is fail-closed rather than an answer: a record has no
+		// emission on any backend, so no width claim here would be true.
+		return "", false
 	case graph.TypeBytes,
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,

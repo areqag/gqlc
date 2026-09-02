@@ -3,10 +3,12 @@
 -- and it has to be written here because clause 18.10 owns no files — a field type
 -- is spellable only inside a record or binding table type. See ownershipOnlyPrefixes.
 --
--- Declining before the field is read is what makes this file's class knowable:
--- declineValueType reads the outermost value type and does not descend, so the
--- record is named and the STRING inside it never classified. That is deliberate,
--- and ADR 0019 says why — a subtree search would answer for the field instead.
+-- The elision is invisible in the resolved type, and this file does not assert
+-- that: the corpus records that the spelling resolves, never to what. The claim
+-- that `typed` is punctuation carrying nothing is asserted by the two rows of
+-- TestRecordPropertyResolves that spell `a :: INT` and `a INT` and want the same
+-- string. This file pinned a decline until gqlc-h9n.33 gave records an encoding
+-- (ADR 0039), and a decline could not have distinguished the two spellings at all.
 CREATE PROPERTY GRAPH TYPE Seed AS {
     (:Row { r :: RECORD { f STRING } })
 }

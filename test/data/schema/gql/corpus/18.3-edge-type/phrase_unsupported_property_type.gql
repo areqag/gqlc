@@ -4,11 +4,13 @@
 -- EnterEdgeTypePhrase's arm left the suite green even with the pattern-form file
 -- present.
 --
--- Unsupported: ErrRecordValueType (gqlc-h9n.33). The value type is incidental;
--- what this file pins is that the phrase-form edge collector forwards the decline
--- at all.
+-- Unsupported: ErrPathValueType (gqlc-0ri). The value type is incidental; what
+-- this file pins is that the phrase-form edge collector forwards the decline at
+-- all. It spelled RECORD until gqlc-h9n.33 made records resolve; the family was
+-- swapped rather than the entry demoted, because a resolving value type
+-- discharges nothing here.
 CREATE PROPERTY GRAPH TYPE T AS {
     (a :Person { id :: INT NOT NULL }),
     (b :Post { id :: INT NOT NULL }),
-    DIRECTED EDGE TYPE Wrote :WROTE { items :: RECORD } CONNECTING (a -> b)
+    DIRECTED EDGE TYPE Wrote :WROTE { route :: PATH } CONNECTING (a -> b)
 }

@@ -67,6 +67,11 @@ func TestTypeMapProperty(t *testing.T) {
 	}
 
 	unrepresentable := []graph.PropertyType{
+		// Not a width claim: a record is refused a step earlier, by
+		// prepare.go's kind walk (codegen.ErrUnimplementedTypeKind,
+		// ADR 0039), so this arm is unreachable. The row pins that it is
+		// fail-closed — reached, it must not hand back a carrier.
+		graph.TypeAnyRecord,
 		// agtype has no byte-string scalar.
 		graph.TypeBytes,
 		// No faithful Go carrier on any backend (§9).

@@ -1,0 +1,23 @@
+-- The same field name declared twice in one fieldTypeList. The ISO BNF admits
+-- it — <field type list> ::= <field type> [{ <comma> <field type> }...] states
+-- no uniqueness constraint, exactly as <property type list> does not — so it
+-- parses. gqlc rejects it with ErrDuplicateFieldName.
+--
+-- It is 18.2's property_name_repeated.gql read one level down, and it inherits
+-- that file's provisional standing whole: the free BNF settles the SYNTAX and
+-- nothing else, whether a repeat is an error is Syntax Rules prose gqlc-lir
+-- declined to buy, and rejection is the interim posture because keeping one
+-- declaration and discarding the other is the only reading that can be wrong
+-- silently (ADR 0030). gqlc-tlbo revisits both if the clause is ever bought.
+--
+-- The sentinel is its own rather than ErrDuplicatePropertyName because the two
+-- are not interchangeable to a reader: the property names here are distinct, and
+-- being told a PROPERTY name repeats would send them to a list where it does not.
+--
+-- The file could not exist before gqlc-h9n.33. A record was declined at its
+-- outermost context and its fields were never read, so a duplicate among them
+-- was unreachable; the encoding that made the fields resolvable is what made
+-- this a question with an answer (ADR 0039).
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Row { r :: RECORD { f :: STRING, f :: INT } })
+}

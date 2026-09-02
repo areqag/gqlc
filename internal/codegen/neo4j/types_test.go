@@ -74,7 +74,15 @@ func TestTypeMapProperty(t *testing.T) {
 		})
 	}
 
+	// The rows below all answer ("", false), which is the only thing this
+	// table asserts. TypeAnyRecord is here for that answer and not for the
+	// claim the slice's name makes: a record is refused a step earlier, by
+	// prepare.go's kind walk (codegen.ErrUnimplementedTypeKind, ADR 0039),
+	// and its arm is unreachable for the same reason TypeList's is. What
+	// the row pins is that the unreachable arm is fail-closed — were it
+	// ever reached, it must not hand back a carrier.
 	unrepresentable := []graph.PropertyType{
+		graph.TypeAnyRecord,
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
