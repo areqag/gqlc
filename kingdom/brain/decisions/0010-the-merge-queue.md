@@ -1,6 +1,6 @@
 # 0010 — The merge queue: test the merge result, not the PR's stale base
 
-Date: 2026-08-29. Designed by Արփինէ against bd gqlc-hpa1, under ADR 0003.
+Date: 2026-08-29. Designed by Արփինէ against bd gqlc-hpa1, under decision 0003.
 Executed by gqlc-9vggh. Witnesses: PR #1720; PR #1748 + PR #1679; PR #1797 +
 PR #1859 (beads gqlc-tsopi / gqlc-yskyp).
 
@@ -42,7 +42,7 @@ Twice in one day, and the rate scales with the merge rate — 60 merges in 18.7h
 peaking at 12/hour. A red master blocks every product merge in the town, so
 this is not a machinery nicety; it is the thing that stops everyone.
 
-ADR 0006 already ruled out file-keyed remedies for this family ("a KIND of
+Decision 0006 already ruled out file-keyed remedies for this family ("a KIND of
 file, not a list"), so the fix has to sit at the merge and be generic.
 
 ## The decision
@@ -75,16 +75,16 @@ each burning citizen quota on repair, each capable of pulling in several
 citizens at once. The class grows with the merge rate, so this option gets
 worse on its own.
 
-## Relation to ADR 0006
+## Relation to decision 0006
 
 Unchanged, and the two do different jobs. The queue protects the **merge
-result**. ADR 0006's rebase-before-PASS protects **what a reviewer's eyes
+result**. Decision 0006's rebase-before-PASS protects **what a reviewer's eyes
 read** — a PASS spent on a doomed SHA is still spent, queue or no queue.
 
 ## Rollback
 
 One ruleset PUT: remove the `merge_queue` rule from ruleset 18407856. The
-workflow triggers this ADR adds are inert without a queue, because
+workflow triggers this decision adds are inert without a queue, because
 `merge_group` never fires when no queue exists — so nothing needs reverting in
 the tree to turn the queue off.
 

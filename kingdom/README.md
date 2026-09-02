@@ -36,6 +36,17 @@ kingdom/
 └── systemd/           user units: dispatch + guard timers
 ```
 
+**Citing law.** Kingdom decisions (`brain/decisions/NNNN-*.md`) are cited as
+**"decision NNNN"**, never "ADR NNNN": that bare form belongs to `docs/adr/`
+exclusively, and the two series share every number from 0001 to 0014, so a
+bare citation in that range is silently ambiguous — both targets exist and
+the reader just gets the wrong one. Kingdom prose citing a product ADR spells
+the path (`docs/adr/NNNN-slug.md`). Enforced under `kingdom/` by
+`.github/scripts/check-adr-citations.py` in the `tidy` gate; outside
+`kingdom/` the convention binds by this paragraph alone, because the product
+tree cites `docs/adr/` bare everywhere and no stateless check can tell which
+series an outside citation means (bd gqlc-ktc8e).
+
 Runtime state lives OUTSIDE the repo, shared by every seat, never committed:
 `<parent-of-main-checkout>/kingdom-state/` — maildirs (`mail/<seat>/{inbox,read,sent}`),
 seat heartbeats and status, handoff notes, the halt flag. `bin/km` places it
@@ -78,7 +89,7 @@ refuses when none is stated rather than guessing.
 5. The Դատաւորներ also **patrol** merged work. Patrol is the compensating
    control on rule 4: with most PRs merging unreviewed, it is the only reader
    much of the tree gets that is not its author. A patrol ROUND is defined
-   (ADR 0004 §2):
+   (decision 0004 §2):
 
    - **Target.** Merges to master since the previous patrol bead closed,
      restricted to those whose PR was not reviewed. Fresh, not from the

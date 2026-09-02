@@ -156,7 +156,7 @@ self-governing; the ledger is honest.
       review-free PR sat three days for want of a live author session, and was
       then merged while its author's verification screen was still running,
       her "not yet" existing only in her pane (gqlc-23m3v, PR #2066).
-      Reasoning and measurements: ADR 0014.
+      Reasoning and measurements: decision 0014.
       1. **On a PR that owes no review, the author's finished-signal is
          arming GitHub auto-merge**: `gh pr merge <N> --squash --auto`, one
          command and no fallback. GitHub is the named merger: it merges when
@@ -166,7 +166,7 @@ self-governing; the ledger is honest.
          resume wake finds the PR merged and closes the bead citing the SHA.
          **Arming is not a reservation — it is a merge that fires as soon as
          it can**, which on a PR that is already green is immediately
-         (measured; ADR 0014, W2).
+         (measured; decision 0014, W2).
       2. **An armed PR asserts that no review is owed on it and none is
          open.** Arming a PR that owes or carries a review merges over that
          review, which Article IV.4's spirit forbids — and by clause 1 it may
@@ -176,7 +176,7 @@ self-governing; the ledger is honest.
          --disable-auto`); the demand binds from the disarm.
       3. **On a PR that owes review, the finished-signal already exists** —
          the round-1 review bead — **and the merger is the judge who signs
-         the PASS**, merging before closing the review bead. ADR 0009 reads
+         the PASS**, merging before closing the review bead. Decision 0009 reads
          a PASS as the judge signing the merge of the SHA they read; this
          clause has them perform it. The order is load-bearing: a judge
          whose session ends between verdict and merge still holds an

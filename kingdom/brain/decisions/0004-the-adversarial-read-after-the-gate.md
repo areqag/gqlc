@@ -1,28 +1,28 @@
 # 0004 — The adversarial read after the gate
 
-Date: 2026-08-23. Designed against bd gqlc-hd2y, under ADR 0003.
+Date: 2026-08-23. Designed against bd gqlc-hd2y, under decision 0003.
 
 Միհր asked, twice, for a non-binding adversarial pass BEFORE a judge's round 1,
 because round 1 was the first time anyone but the author read the branch
 adversarially. gqlc-hd2y carried that ask and six open questions.
 
-ADR 0003 answered the framing rather than the ask. Under it most PRs have no
+Decision 0003 answered the framing rather than the ask. Under it most PRs have no
 round 1 at all, so "before round 1" now names a moment that does not exist for
 the majority of merges. The ask survives the framing: **a reader who is not the
 author finds things the author cannot see**, and that is now true of more work,
 not less.
 
-This ADR decides where that read lives.
+This decision decides where that read lives.
 
 ## What is rejected, and it is the thing that was asked for
 
-**No per-PR pre-merge pass, by any class, binding or not.** ADR 0003 removed a
+**No per-PR pre-merge pass, by any class, binding or not.** decision 0003 removed a
 per-PR judge wake because the queue was the constraint: 25 open PRs, a bench of
 two, a backlog draining slower than it filled. A non-binding pass costs a
 cheaper wake than a verdict and it costs one per PR, which is the quantity that
 was the problem. gqlc-hd2y's own question 4 anticipated this — "if the judge
 must wait for the pass, this is a gate with a non-binding label on it" — and
-under ADR 0003 the sharper version is that it is a gate on a merge that owes no
+under decision 0003 the sharper version is that it is a gate on a merge that owes no
 gate.
 
 Also rejected: making the pass optional-but-expected. gqlc-hd2y's question 5 is
@@ -61,21 +61,21 @@ work next to. Code nobody touches again is not read by it at all.
 
 ### 2. Patrol, which is the compensating control, and currently has no trigger
 
-ADR 0003 change 2 says: "With most PRs now unreviewed, the judges' **patrol**
+Decision 0003 change 2 says: "With most PRs now unreviewed, the judges' **patrol**
 duty carries more weight than it did: it is the compensating control on change
 1."
 
 Measured in the tree at c129a0a5: patrol appears in exactly two places —
 `kingdom/README.md` line 77 ("The Դատաւորներ also patrol merged work on their
-own judgment") and that sentence of ADR 0003. It has no target, no cadence, no
+own judgment") and that sentence of decision 0003. It has no target, no cadence, no
 output shape, and no way to begin. A seat runs only when woken; `kingdom/bin/km`
 installs two timers, `kingdom-dispatch` and `kingdom-guard`; dispatch wakes a
 seat only for a bead, and nothing in the tree files a patrol bead. So a judge
-with no `class:judge` bead open is a judge who is never woken, and under ADR
+with no `class:judge` bead open is a judge who is never woken, and under decision
 0003 that is the judges' expected state most of the time.
 
 The compensating control on the town's central throughput trade is therefore a
-sentence. That is the defect this ADR is mainly for.
+sentence. That is the defect this decision is mainly for.
 
 **Decision.** Patrol becomes a bead, filed on a cadence by machinery that
 already runs, and bounded so it can never become a queue:
@@ -97,7 +97,7 @@ already runs, and bounded so it can never become a queue:
   fail in opposite directions and a later reader will "tidy" them into
   consistency if the reason is not on the record. Patrol therefore has a queue
   depth of one, permanently — and pays one wake per cadence rather than per PR,
-  which is the trade this ADR was written to make.
+  which is the trade this decision was written to make.
 - **Target.** Merges to master since the last patrol bead closed, restricted to
   those whose PR was not reviewed. Fresh; a patrol that starts at the founding
   commit re-reads what has already been read.
@@ -108,10 +108,10 @@ already runs, and bounded so it can never become a queue:
   judge's judgment, and a round that reads one merge properly is a round. A
   patrol bead does not carry a completeness claim, and no citizen should read
   its closure as "the window was clean".
-- **Priority P2.** It routes (ADR 0003 change 4 routes P0–P2) and it sits under
+- **Priority P2.** It routes (decision 0003 change 4 routes P0–P2) and it sits under
   every real defect.
 
-Patrol is the only part of this ADR that costs a wake, and it costs one per
+Patrol is the only part of this decision that costs a wake, and it costs one per
 cadence rather than one per PR. That is the whole trade.
 
 ### 3. Constitution V.2.0.4 needs a number nobody is recording
@@ -156,7 +156,7 @@ inherited. Under the relocation above:
    the bead is gone: V.2's bar on a Ճարտարապետ reviewing a Ռազմիկ's PR is
    about PRs, and neither §1 nor §2 touches an open PR. §2 is a judge doing
    what README §5 already assigns them. No amendment is required. The
-   playbook line stating this is execution work, not this ADR's.
+   playbook line stating this is execution work, not this decision's.
 4. **Whether it delays the merge.** No. Both halves happen after it.
 5. **What the judge owes it.** Nothing — there is no pre-verdict artifact for a
    judge to owe anything to. Where a judge does review a PR, V.2.1 binds them
@@ -169,8 +169,8 @@ inherited. Under the relocation above:
 
 An unreviewed PR still merges with one reader. §1 and §2 both find defects after
 they are on master, which is later and cheaper for the author and more expensive
-for anyone who built on them in between. That is the cost ADR 0003 accepted; it
+for anyone who built on them in between. That is the cost decision 0003 accepted; it
 is not reduced here, only measured (§3) and partly compensated (§2).
 
 If the `from-pr` numbers come in badly, V.2.0.4 says what happens next, and it
-is not this ADR's business to soften it.
+is not this decision's business to soften it.

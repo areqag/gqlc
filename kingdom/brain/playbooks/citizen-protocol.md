@@ -146,7 +146,7 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    rescue — deciding whether the work already landed, and triaging loose commits
    when it did not — is `kingdom/brain/playbooks/rescuing-killed-work.md`.
 
-   **Read the unreviewed merge you are about to build on** (ADR 0004 §1). Once
+   **Read the unreviewed merge you are about to build on** (decision 0004 §1). Once
    you are synced, look at what has recently landed in your bead's `subject:`
    path, and where a merge into it was not reviewed, read that merge
    adversarially before you depend on it:
@@ -184,14 +184,14 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    protocol will tell you. Whatever class holds the bead — a Ռազմիկ's gate, a
    Ճարտարապետ's invariant, a Դատաւոր's detector — the answer to a guard is the
    mutation and not the effort dial: `high` is the ceiling for every class but
-   a Ճարտարապետ on a design (ADR 0003), so a guard bead does not raise it. If
+   a Ճարտարապետ on a design (decision 0003), so a guard bead does not raise it. If
    you cannot get a red, that IS the finding — say so on the bead rather than
    shipping a guard asserted by nothing (bd gqlc-uqta; on gqlc-07e3 a hook's
    own FAIL-CLOSED paragraph turned out to be asserted by nothing, and the
    suite had been green throughout).
 
    **Record that mutation in the PR body, in a shape a stranger can re-run**
-   (ADR 0005). This is a record of the duty above, not a second duty, and the
+   (decision 0005). This is a record of the duty above, not a second duty, and the
    trigger is the same one: a PR that adds or changes a guard writes its rows;
    a PR that adds or changes no guard owes nothing and writes nothing. A docs
    change or a config line has no guard, so the trigger does not fire — that is
@@ -347,12 +347,12 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    step 1 or a patrol round (README §5): neither touches an open PR, neither
    produces a verdict, and any citizen of any class may do the first. No
    constitutional amendment is needed for either, and none should be written
-   (ADR 0004, answer 3 of its six).
+   (decision 0004, answer 3 of its six).
 
    **Rebase before you ask for review.** Do not ask for a review on a PR that
    is DIRTY *in the files under review*: if a judge PASSes at that SHA you must
    afterwards resolve real conflicts in reviewed code, so what merges is bytes
-   no judge read, and the PASS was true of a SHA that never landed (ADR 0006).
+   no judge read, and the PASS was true of a SHA that never landed (decision 0006).
    Both qualifiers are load-bearing. A conflict in an unrelated file leaves the
    reviewed bytes intact and is not this case. And a FAIL is unaffected — it
    names a defect the rebase carries forward, so it binds at once; it is only a
@@ -436,7 +436,7 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    the bead citing the merged SHA, delete the branch, file follow-up beads for
    anything you deferred.
 
-   **A verdict is PASS or FAIL, and a PASS is unconditional** (ADR 0009). It
+   **A verdict is PASS or FAIL, and a PASS is unconditional** (decision 0009). It
    asserts the judge would sign the merge of the SHA they read, as it stands, so
    a PASS leaves you nothing to satisfy before merging. A judge whose read
    produces wants that are not blockers files them as residue beads BEFORE
@@ -445,7 +445,7 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    reason may not carry an obligation in prose alone**, because nothing reads it
    FOR ONE. Three things do read `close_reason`, and not one of them can route
    an obligation: `bdguard` parses it for a cited sha and judges whether a close
-   was earned; `bd-gh-sync` takes its first line as a mirror tag; and ADR 0009's
+   was earned; `bd-gh-sync` takes its first line as a mirror tag; and decision 0009's
    own doctor row, added alongside this rule, greps it for the word and warns
    after the fact, naming ids but assigning nobody. A condition written there
    reaches no dispatch pass and no assignee, so it is machine-invisible for the
@@ -453,14 +453,14 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    PR #1712 merged with neither condition of its PASS landed, and nothing
    anywhere was red — the bead was closed, the gates were green.
 
-   Sort each condition with the ADR's one question: **would I sign this merge if
+   Sort each condition with the decision's one question: **would I sign this merge if
    the condition never happens?** No → it is a FAIL, which blocks until answered
    and prices at its delta, not at a full round. Yes → it is a residue bead. Not
    work at all ("conditional on CI green", "head unmoved") → it is the standing
    merge protocol, which already binds you on every PR.
 
    Do not write "no conditions". The unqualified PASS says it already, and
-   `km doctor`'s ADR 0009 row greps closed `class:judge` beads for `conditio`,
+   `km doctor`'s decision 0009 row greps closed `class:judge` beads for `conditio`,
    so the disclaimer rings the detector it was meant to satisfy.
 
    On a PR that owes no review, when you consider the work finished, arm
@@ -518,7 +518,7 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    merged without the flag and neither head branch survives on the remote. Omit
    it, and park per step 3 of Sleeping when you are done.
 
-   **There is no merge queue, and ADR 0010 describes one.** The ADR was
+   **There is no merge queue, and decision 0010 describes one.** The decision was
    accepted and its stage A merged, but GitHub refuses the ruleset
    `merge_queue` rule type here: merge queues require an ORGANISATION-owned
    repository, and `areqag/gqlc` is owned by a user (measured 2026-08-30, bd
@@ -643,12 +643,12 @@ read, and this is not rare: #1127, #1225, #1172, #1237 and #1195 all needed a
 rebase on 2026-08-22, none of them optional, several forced by another PR
 merging into a shared registry — the usage/case pair in `kingdom/bin/km` being
 the one still standing. A merge that appends to a registry invalidates every
-open PR that appends to the same registry (ADR 0006). Nothing tells you it
+open PR that appends to the same registry (decision 0006). Nothing tells you it
 happened, so check before you push.
 
-ADR 0006 names two further examples, the `EXPECTED_ROWS` pin in
+Decision 0006 names two further examples, the `EXPECTED_ROWS` pin in
 `.githooks/tests/km-test.sh` and the `test-hooks` recipe in the `justfile`. PR
-#1595 (f6dc4c7b) deleted both, so do not go looking for them; the ADR is the
+#1595 (f6dc4c7b) deleted both, so do not go looking for them; the decision is the
 dated record of when it was written and is correct as such. The rule is
 unchanged — it is about the shape, not about those three files, and a registry
 added tomorrow is covered without anyone editing this list.
