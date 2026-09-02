@@ -176,14 +176,17 @@ scalar kinds is a decode helper, which is a different fix — below.
   (`RETURN {a: 1} AS m`, emitted for `neo4j-go-v5` and `neo4j-go-v6`), and
   `mapColumnScenarios` drives it on both neo4j arms of the live battery,
   requiring the emitted read to answer with a one-member map whose member `a`
-  is `int64(1)` (bd `gqlc-y6mo`). One member of one kind on one server, which
-  is narrower than
-  the table below in every direction — it says which marker THIS server picks
-  for a literal integer inside a map, and nothing about the other twelve kinds
-  or about Aura, a cluster, or another 5.x. What it does close is the gap that
-  the marker→Go-type mapping alone left open: until it existed, no scenario in
-  the live battery drove `scalar_map` at all, so a green `live-smoke`
-  witnessed nothing about a map member.
+  is `int64(1)` (bd `gqlc-y6mo`). One member of one kind on one server, which is
+  narrower than the table below in every direction — it says which marker THIS
+  server picks for a literal integer inside a map, and says nothing about any
+  other kind a member can hold, nor about Aura, a cluster, or another 5.x. Those
+  other kinds are not unaddressed, they are addressed by a different instrument:
+  the bullet below answers them structurally, from the one call site both
+  `record` and `amap` fill through, which is an argument about the driver rather
+  than a witness of a server. What this scenario closes is the gap that the
+  marker→Go-type mapping alone left open: until it existed, no scenario in the
+  live battery drove `scalar_map` at all, so a green `live-smoke` witnessed
+  nothing about a map member.
 
   Only the AGE half of this is gated. `TestAgtypeValue`, in the corpus the
   emitted helpers are run against, reads
