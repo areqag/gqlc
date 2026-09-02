@@ -947,21 +947,30 @@ const (
 // intersects across touching edges, and the direct analogue of R3 §4.5.2's
 // per-edge contribution for unlabelled bindings.
 //
-// A candidate contributes through each reading it has, and the contribution is
-// the UNION of them. That is the whole subtlety: an undirected close probes both
-// orientations, so one candidate set can put this end of the pattern on the
-// Source of some candidates and on the Target of others, and a set can even hold
-// a candidate that reads both ways alongside candidates that read one way.
-// Taking a single reading — or intersecting the two — narrows away a node type
-// the schema permits at this end, which the caller would then commit as a
-// refusal or as the wrong type.
+// On an UNDIRECTED close a candidate contributes through each reading it has,
+// and the contribution is the UNION of them. That is the whole subtlety: an
+// undirected close probes both orientations, so one candidate set can put this
+// end of the pattern on the Source of some candidates and on the Target of
+// others, and a set can even hold a candidate that reads both ways alongside
+// candidates that read one way. Taking a single reading — or intersecting the
+// two — narrows away a node type the schema permits at this end, which the
+// caller would then commit as a refusal or as the wrong type.
+//
+// On a DIRECTED close only the left-to-right reading contributes, which is what
+// `directed` selects. edgeProbes builds a single orientation for a directed
+// binding, so every candidate here already satisfies that reading and the other
+// one is not a second source of candidates but a second question asked of the
+// same ones. Where srcs and tgts share a key — the ordinary shape of a supertype
+// label admitted at both ends — it answers yes, and answering it would put the
+// candidate's far end into the pattern's near end: a node type the arrow
+// excludes. Asking it anyway was bd gqlc-pv0u.
 //
 // Every element of the result is drawn from the slice this end contributed to
 // the probe, because a reading is a claim about both of the candidate's ends and
 // every candidate was probed from those two slices. So a single edge can never
 // empty the set it is intersected into, and the narrowing is a refinement of
 // label satisfaction rather than an independent answer.
-func endpointContribution(cands []schema.EdgeKey, srcs, tgts []graph.LabelSetKey, end patternEnd) map[graph.LabelSetKey]struct{} {
+func endpointContribution(cands []schema.EdgeKey, srcs, tgts []graph.LabelSetKey, end patternEnd, directed bool) map[graph.LabelSetKey]struct{} {
 	out := make(map[graph.LabelSetKey]struct{}, len(cands))
 	for _, k := range cands {
 		if readsLeftToRight(k, srcs, tgts) {
@@ -971,7 +980,7 @@ func endpointContribution(cands []schema.EdgeKey, srcs, tgts []graph.LabelSetKey
 				out[k.Target] = struct{}{}
 			}
 		}
-		if readsRightToLeft(k, srcs, tgts) {
+		if !directed && readsRightToLeft(k, srcs, tgts) {
 			if end == patternLeft {
 				out[k.Target] = struct{}{}
 			} else {
@@ -1077,7 +1086,7 @@ func endpointNarrowing(edges []query.EdgeBinding, t nodeTable, s schema.Schema, 
 			if _, plural := t.cands[v]; !plural {
 				continue
 			}
-			contrib := endpointContribution(cands, srcs, tgts, side.end)
+			contrib := endpointContribution(cands, srcs, tgts, side.end, e.Directed())
 			if prev, seen := perEdge[v]; seen {
 				for k := range prev {
 					contrib[k] = struct{}{}

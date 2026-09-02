@@ -11,6 +11,15 @@
 -- the same two candidates, so the arrow that §4.6 case C prescribes would
 -- change nothing. §4.6 case D types it.
 --
+-- "Changes nothing" is about the CLOSE, and only about it. The arrow does change
+-- the endpoint NARROWING here, and this schema is where that is sharpest (bd
+-- gqlc-pv0u): both declared KNOWS keys run OUT OF `Person`, so on the directed
+-- pattern the left endpoint is `Person` alone while the right stays plural.
+-- Until the right-to-left reading was dropped on a directed close, the left end
+-- also collected each candidate's Target and was refused as ambiguous — which is
+-- why the directed queries against this schema moved from refusal to acceptance
+-- rather than merely renaming a set.
+--
 -- `Person-[KNOWS]->Person` is the shape that makes the "no orientation signal"
 -- skip load-bearing rather than merely correct: read as a disagreement it is
 -- its own counterparty, and the fail-message would name one key twice.
