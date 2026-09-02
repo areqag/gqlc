@@ -978,7 +978,8 @@ func wantUndefinedFunctionRefusal(count int, noun, dropped string) string {
 		"measured, so every call on %d %s would answer \"function <name> does not exist\" — "+
 		"timestamp() is the one that answered, returning epoch milliseconds as an integer, so "+
 		"compute the value in Go and bind it as a parameter, or generate against a neo4j "+
-		"target: %s", count, noun, dropped)
+		"target; each call is located line:column within its own query's text: %s",
+		count, noun, dropped)
 }
 
 // TestRejectsUndefinedFunctions pins the second gap the text gate reads,
@@ -1013,13 +1014,13 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 			queries: []codegen.NamedQuery{textQuery("Recent",
 				"MATCH (p:Person) WHERE p.at < datetime() RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Recent ("datetime")`,
+			count: 1, noun: "query", dropped: `Recent ("datetime" at 1:31)`,
 		},
 		{
 			name: "a call in a write that projects nothing is refused",
 			queries: []codegen.NamedQuery{execTextQuery("Touch",
 				"MATCH (p:Person) SET p.seen = datetime()\n")},
-			count: 1, noun: "query", dropped: `Touch ("datetime")`,
+			count: 1, noun: "query", dropped: `Touch ("datetime" at 1:31)`,
 		},
 		{
 			// The name is quoted as the author spelled it, because the
@@ -1031,14 +1032,14 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 			queries: []codegen.NamedQuery{textQuery("Recent",
 				"MATCH (p:Person) WHERE p.at < DateTime() RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Recent ("DateTime")`,
+			count: 1, noun: "query", dropped: `Recent ("DateTime" at 1:31)`,
 		},
 		{
 			name: "a query calling two undefined functions names both",
 			queries: []codegen.NamedQuery{textQuery("Window",
 				"MATCH (p:Person) WHERE p.at > date() AND p.d < duration({days: 1}) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Window ("date", "duration")`,
+			count: 1, noun: "query", dropped: `Window ("date" at 1:31, "duration" at 1:48)`,
 		},
 		{
 			name: "every offending query in the batch is named",
@@ -1051,7 +1052,36 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 					"MATCH (p:Person) SET p.seen = localdatetime()\n"),
 			},
 			count: 2, noun: "queries",
-			dropped: `Recent ("datetime"), Touch ("localdatetime")`,
+			dropped: `Recent ("datetime" at 1:31), Touch ("localdatetime" at 1:31)`,
+		},
+		{
+			// Two calls on ONE name, which is the case the quoted name
+			// alone cannot answer: the author has two calls to rewrite
+			// and the message can only say so by naming where each is.
+			// Nothing but the position distinguishes these two entries,
+			// so a scan dropping the repeat, or one carrying a position
+			// it did not vary, reads as a query calling the function
+			// once (bd gqlc-fpl14).
+			name: "the same call written twice is named twice, at different positions",
+			queries: []codegen.NamedQuery{textQuery("Twice",
+				"MATCH (p:Person) WHERE p.at < datetime() AND p.until > datetime() RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query",
+			dropped: `Twice ("datetime" at 1:31, "datetime" at 1:56)`,
+		},
+		{
+			// The same repeat moved onto its own line. Beside the row
+			// above, which varies only the column, this keeps both
+			// halves of the coordinate load-bearing: a position
+			// carrying the line with a constant column passes one of
+			// these and not the other, and so does one carrying the
+			// column alone.
+			name: "the same call on a later line carries that line",
+			queries: []codegen.NamedQuery{textQuery("TwiceDown",
+				"MATCH (p:Person)\nWHERE p.at < datetime() AND p.until > datetime()\nRETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query",
+			dropped: `TwiceDown ("datetime" at 2:14, "datetime" at 2:39)`,
 		},
 	} {
 		s.Run(tc.name, func() {
@@ -1215,7 +1245,7 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 		s.Require().ErrorIs(err, age.ErrUndefinedFunction)
 		s.Require().NotErrorIs(err, codegen.ErrUnrepresentableTemporal,
 			"the carrier is not yet the obstacle: the statement never parses")
-		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `SeenOn ("date")`))
+		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `SeenOn ("date" at 1:37)`))
 	})
 
 	s.Run("an unserved column yields to this gap as it does to the alternation", func() {
@@ -1233,7 +1263,7 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrUndefinedFunction)
 		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
-		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `Bagged ("datetime")`))
+		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `Bagged ("datetime" at 1:31)`))
 	})
 
 	s.Run("the alternation is answered first when a query spells both", func() {
@@ -1265,7 +1295,8 @@ func wantSpatialRefusal(count int, noun, dropped string) string {
 		"verbatim (ADR 0005) and Apache AGE 1.7.0 does not define the spatial constructor this "+
 		"project has measured, so every call on %d %s would answer "+
 		"\"function <name> does not exist\" (SQLSTATE 42883) — store the coordinates as "+
-		"ordinary properties and compute the geometry in Go: %s", count, noun, dropped)
+		"ordinary properties and compute the geometry in Go; each call is located "+
+		"line:column within its own query's text: %s", count, noun, dropped)
 }
 
 // TestRejectsTheSpatialConstructor pins the third gap the text gate
@@ -1295,20 +1326,20 @@ func (s *EmissionSuite) TestRejectsTheSpatialConstructor() {
 			queries: []codegen.NamedQuery{textQuery("Near",
 				"MATCH (p:Person) WHERE p.loc = point({x: 1, y: 2}) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Near ("point")`,
+			count: 1, noun: "query", dropped: `Near ("point" at 1:32)`,
 		},
 		{
 			name: "a call in a write that projects nothing is refused",
 			queries: []codegen.NamedQuery{execTextQuery("Place",
 				"MATCH (p:Person) SET p.loc = point({x: 1, y: 2})\n")},
-			count: 1, noun: "query", dropped: `Place ("point")`,
+			count: 1, noun: "query", dropped: `Place ("point" at 1:30)`,
 		},
 		{
 			name: "the name is quoted in the author's own case",
 			queries: []codegen.NamedQuery{textQuery("Near",
 				"MATCH (p:Person) WHERE p.loc = Point({x: 1, y: 2}) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Near ("Point")`,
+			count: 1, noun: "query", dropped: `Near ("Point" at 1:32)`,
 		},
 		{
 			name: "every offending query in the batch is named",
@@ -1321,7 +1352,25 @@ func (s *EmissionSuite) TestRejectsTheSpatialConstructor() {
 					"MATCH (p:Person) SET p.loc = point({x: 3, y: 4})\n"),
 			},
 			count: 2, noun: "queries",
-			dropped: `Near ("point"), Place ("point")`,
+			dropped: `Near ("point" at 1:32), Place ("point" at 1:30)`,
+		},
+		{
+			// Two calls on ONE name, which the quoted name alone
+			// cannot answer: the author has two calls to rewrite and
+			// the message can only say so by naming where each is.
+			// Nothing but the column separates these two entries, so a
+			// scan dropping the repeat drops one of them. "MATCH " is
+			// 6, "(p:Person)" takes 7-16, " WHERE" ends at 22, " p.a"
+			// at 26, " =" at 28 and " " at 29, so the first begins at
+			// 30; "point({x: 1, y: 2})" is 19 characters ending at 48,
+			// " AND" at 52, " p.b" at 56, " =" at 58 and " " at 59, so
+			// the second begins at 60.
+			name: "the same call written twice is named twice, at different positions",
+			queries: []codegen.NamedQuery{textQuery("Twice",
+				"MATCH (p:Person) WHERE p.a = point({x: 1, y: 2}) AND p.b = point({x: 3, y: 4}) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query",
+			dropped: `Twice ("point" at 1:30, "point" at 1:60)`,
 		},
 	} {
 		s.Run(tc.name, func() {
@@ -1373,7 +1422,7 @@ func (s *EmissionSuite) TestRejectsTheSpatialConstructor() {
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrUndefinedFunction)
 		s.Require().NotErrorIs(err, age.ErrUndefinedSpatialFunction)
-		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `Both ("datetime")`))
+		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `Both ("datetime" at 1:31)`))
 	})
 
 	s.Run("an unserved column yields to this gap as it does to the other two", func() {
@@ -1390,7 +1439,7 @@ func (s *EmissionSuite) TestRejectsTheSpatialConstructor() {
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrUndefinedSpatialFunction)
 		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
-		s.Require().EqualError(err, wantSpatialRefusal(1, "query", `Bagged ("point")`))
+		s.Require().EqualError(err, wantSpatialRefusal(1, "query", `Bagged ("point" at 1:32)`))
 	})
 
 	s.Run("a property named like the constructor is not a call", func() {
@@ -1419,7 +1468,8 @@ func wantNamespaceRefusal(count int, noun, dropped string) string {
 		"(SQLSTATE 3F000) — PostgreSQL resolves the namespace as a schema qualifier before it "+
 		"looks for any function, so no function under that namespace resolves whatever it is "+
 		"called: compute the value in Go and bind it as a parameter, or generate against a "+
-		"neo4j target: %s", count, noun, dropped)
+		"neo4j target; each call is located line:column within its own query's text: %s",
+		count, noun, dropped)
 }
 
 // TestRejectsTheUndefinedNamespace pins the fourth gap: a call under a
@@ -1452,13 +1502,13 @@ func (s *EmissionSuite) TestRejectsTheUndefinedNamespace() {
 			queries: []codegen.NamedQuery{textQuery("Between",
 				"MATCH (p:Person) WHERE p.d < duration.between(p.a, p.b) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Between ("duration.between")`,
+			count: 1, noun: "query", dropped: `Between ("duration.between" at 1:30)`,
 		},
 		{
 			name: "a call in a write that projects nothing is refused",
 			queries: []codegen.NamedQuery{execTextQuery("Stamp",
 				"MATCH (p:Person) SET p.d = duration.between(p.a, p.b)\n")},
-			count: 1, noun: "query", dropped: `Stamp ("duration.between")`,
+			count: 1, noun: "query", dropped: `Stamp ("duration.between" at 1:28)`,
 		},
 		{
 			// The whole call is quoted, namespace included. Quoting the
@@ -1468,7 +1518,7 @@ func (s *EmissionSuite) TestRejectsTheUndefinedNamespace() {
 			queries: []codegen.NamedQuery{textQuery("Between",
 				"MATCH (p:Person) WHERE p.d < Duration.Between(p.a, p.b) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Between ("Duration.Between")`,
+			count: 1, noun: "query", dropped: `Between ("Duration.Between" at 1:30)`,
 		},
 		{
 			// A function no probe ever called, refused on the strength
@@ -1478,7 +1528,7 @@ func (s *EmissionSuite) TestRejectsTheUndefinedNamespace() {
 			queries: []codegen.NamedQuery{textQuery("Secs",
 				"MATCH (p:Person) WHERE p.d < duration.inSeconds(p.a) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
-			count: 1, noun: "query", dropped: `Secs ("duration.inSeconds")`,
+			count: 1, noun: "query", dropped: `Secs ("duration.inSeconds" at 1:30)`,
 		},
 		{
 			name: "every offending query in the batch is named",
@@ -1491,7 +1541,23 @@ func (s *EmissionSuite) TestRejectsTheUndefinedNamespace() {
 					"MATCH (p:Person) SET p.d = duration.between(p.a, p.b)\n"),
 			},
 			count: 2, noun: "queries",
-			dropped: `Between ("duration.between"), Stamp ("duration.between")`,
+			dropped: `Between ("duration.between" at 1:30), Stamp ("duration.between" at 1:28)`,
+		},
+		{
+			// Two calls under ONE namespace, on the same terms as the
+			// other two gaps: the quoted spelling is identical, so only
+			// the column tells the author which call is which. "MATCH "
+			// is 6, "(p:Person)" takes 7-16, " WHERE" ends at 22,
+			// " p.d" at 26, " <" at 28 and " " at 29, so the first
+			// begins at 30; "duration.between" is 16 characters ending
+			// at 45, "(p.a, p.b)" at 55, " AND" at 59, " p.e" at 63,
+			// " <" at 65 and " " at 66, so the second begins at 67.
+			name: "the same call written twice is named twice, at different positions",
+			queries: []codegen.NamedQuery{textQuery("Twice",
+				"MATCH (p:Person) WHERE p.d < duration.between(p.a, p.b) AND p.e < duration.between(p.x, p.y) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query",
+			dropped: `Twice ("duration.between" at 1:30, "duration.between" at 1:67)`,
 		},
 	} {
 		s.Run(tc.name, func() {
@@ -1529,7 +1595,7 @@ func (s *EmissionSuite) TestRejectsTheUndefinedNamespace() {
 		// The message quotes the bare name ALONE. One token spells both
 		// constructs here, so a merged reading would be invisible to the
 		// sentinel assertions above and visible only in what is quoted.
-		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `Both ("duration")`))
+		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `Both ("duration" at 1:30)`))
 	})
 
 	s.Run("a query spelling a spatial constructor and a namespaced call is answered by the spatial gap", func() {
@@ -1548,7 +1614,7 @@ func (s *EmissionSuite) TestRejectsTheUndefinedNamespace() {
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrUndefinedSpatialFunction)
 		s.Require().NotErrorIs(err, age.ErrUndefinedNamespace)
-		s.Require().EqualError(err, wantSpatialRefusal(1, "query", `Both ("point")`))
+		s.Require().EqualError(err, wantSpatialRefusal(1, "query", `Both ("point" at 1:32)`))
 	})
 
 	s.Run("a namespace no probe measured is served, even where the bare name is refused", func() {
@@ -1581,7 +1647,7 @@ func (s *EmissionSuite) TestRejectsTheUndefinedNamespace() {
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrUndefinedNamespace)
 		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
-		s.Require().EqualError(err, wantNamespaceRefusal(1, "query", `Bagged ("duration.between")`))
+		s.Require().EqualError(err, wantNamespaceRefusal(1, "query", `Bagged ("duration.between" at 1:30)`))
 	})
 
 	s.Run("a property named like the namespace is not a call", func() {

@@ -34,7 +34,6 @@ var (
 	NamespaceProbes                  = namespaceProbes
 	RejectOffsetSidecarCollisions    = rejectOffsetSidecarCollisions
 	RenderCypherFile                 = renderCypherFile
-	Positionless                     = positionless
 	RenderModels                     = renderModels
 	SpatialFunctionProbes            = spatialFunctionProbes
 	UndefinedFunctionProbes          = undefinedFunctionProbes
@@ -85,6 +84,10 @@ func (f DialectGapFields) Build() dialectGap {
 func NewDialectProbe(text, answer string) dialectProbe {
 	return dialectProbe{text: text, answer: answer}
 }
+
+func (f finding) Text() string { return f.text }
+func (f finding) Line() int    { return f.line }
+func (f finding) Column() int  { return f.column }
 
 func (p dialectProbe) Text() string   { return p.text }
 func (p dialectProbe) Answer() string { return p.answer }
