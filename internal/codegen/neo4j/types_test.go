@@ -316,8 +316,20 @@ func TestTypeMapTemporal(t *testing.T) {
 		{resolver.TemporalLocalDateTime, "LocalDateTime"},
 		{resolver.TemporalDuration, "Duration"},
 	}
-	require.Len(t, tests, resolver.TemporalCount,
-		"the sweep must cover the resolver's whole temporal vocabulary")
+	// Membership, not size. This assertion used to be
+	// require.Len(tests, resolver.TemporalCount), which passes on a table
+	// naming one kind twice and another not at all — the shape a
+	// hand-edited table actually takes — and when it does fire it names
+	// nothing about which kind was lost. ElementsMatch against the
+	// vocabulary answers that by name, and is a multiset compare, so the
+	// duplicate is caught too (bd gqlc-fb4a).
+	swept := make([]resolver.Temporal, 0, len(tests))
+	for _, tt := range tests {
+		swept = append(swept, tt.k)
+	}
+	require.ElementsMatch(t, resolver.TemporalValues(), swept,
+		"the sweep must cover the resolver's whole temporal vocabulary, once each")
+
 	for _, tt := range tests {
 		t.Run(tt.k.String(), func(t *testing.T) {
 			got, ok := neo4j.TypeMap{}.Temporal(tt.k)
@@ -351,7 +363,16 @@ func TestTypeMapScalar(t *testing.T) {
 		{resolver.ScalarNull, "any"},
 		{resolver.ScalarMap, "map[string]any"},
 	}
-	require.Len(t, tests, 6)
+	// Membership, not size; see TestTypeMapTemporal above for why. This
+	// one was worse than its temporal twin — the literal 6 was counted by
+	// hand, so it did not even move when the vocabulary did.
+	swept := make([]resolver.Scalar, 0, len(tests))
+	for _, tt := range tests {
+		swept = append(swept, tt.k)
+	}
+	require.ElementsMatch(t, resolver.ScalarValues(), swept,
+		"the sweep must cover the resolver's whole scalar vocabulary, once each")
+
 	for _, tt := range tests {
 		t.Run(tt.k.String(), func(t *testing.T) {
 			require.Equal(t, tt.want, neo4j.TypeMap{}.Scalar(tt.k))
@@ -389,7 +410,6 @@ func TestDriverCarrier(t *testing.T) {
 		{"float64", "float64"},
 		{"string", "string"},
 		{"bool", "bool"},
-		{"[]byte", "[]byte"},
 		{"any", "any"},
 		{"map[string]any", "map[string]any"},
 		{"time.Time", "time.Time"},
@@ -402,13 +422,117 @@ func TestDriverCarrier(t *testing.T) {
 		{"LocalTime", "dbtype.LocalTime"},
 		{"LocalDateTime", "dbtype.LocalDateTime"},
 		{"Duration", "dbtype.Duration"},
+
+		// The two slice shapes neo4j.PropertyValue admits, which
+		// isSliceType excludes so each arrives as itself. Their
+		// exclusion is documented on isSliceType as load-bearing rather
+		// than an optimisation — walking a []any would fail the whole
+		// decode on the null element that width exists to carry — and
+		// until the obligation below existed neither had a row here.
+		{"[]byte", "[]byte"},
+		{"[]any", "[]any"},
+
+		// Every other emitted slice, which is the branch that runs
+		// BEFORE the switch above and had no row at all. The element
+		// widths are not on the wire to be asserted: a Bolt driver hands
+		// back every array but the byte array as []any, so the answer is
+		// []any whatever the schema declared the elements to be.
+		{"[]bool", "[]any"},
+		{"[]string", "[]any"},
+		{"[]int", "[]any"},
+		{"[]int8", "[]any"},
+		{"[]int16", "[]any"},
+		{"[]int32", "[]any"},
+		{"[]int64", "[]any"},
+		{"[]uint", "[]any"},
+		{"[]uint8", "[]any"},
+		{"[]uint16", "[]any"},
+		{"[]uint32", "[]any"},
+		{"[]uint64", "[]any"},
+		{"[]float32", "[]any"},
+		{"[]float64", "[]any"},
+		{"[]time.Time", "[]any"},
+		{"[]Date", "[]any"},
+		{"[]Time", "[]any"},
+		{"[]LocalTime", "[]any"},
+		{"[]Duration", "[]any"},
+		// A list of a width that is itself a slice. Both reach the same
+		// answer, and they are here because the check is on the "[]"
+		// prefix rather than on the element: a guard written to look at
+		// what the element is would answer these two differently.
+		{"[][]byte", "[]any"},
+		{"[][]any", "[]any"},
 	}
-	require.Len(t, tests, 23)
+
+	// The obligation is membership over what the TABLE can emit, not a
+	// count. This was require.Len(tests, 23), and 23 was right about the
+	// rows written above it while saying nothing about which Go types
+	// they were: the whole isSliceType branch — the first thing
+	// driverCarrier does — had no row, and neither did either of the two
+	// exclusions its own doc comment calls load-bearing. A count cannot
+	// notice an absence it was counted from (bd gqlc-fb4a).
+	//
+	// The expected side is derived by asking the type table what it
+	// answers, so a width that gains a carrier arrives here owing a row.
+	// The want column stays hand-written, which is what keeps this from
+	// asserting driverCarrier against itself.
+	swept := make([]string, 0, len(tests))
+	for _, tt := range tests {
+		swept = append(swept, tt.goType)
+	}
+	require.ElementsMatch(t, emittedGoTypes(t), swept,
+		"every Go type the type table can put on an emitted surface owes a row here, once each")
+
 	for _, tt := range tests {
 		t.Run(tt.goType, func(t *testing.T) {
 			require.Equal(t, tt.want, neo4j.DriverCarrier(tt.goType))
 		})
 	}
+}
+
+// emittedGoTypes is every Go type this backend's type table can put on an
+// emitted surface, and so every type driverCarrier can be handed.
+//
+// It is derived by asking the table rather than by listing, over all three
+// axes it answers on: the property widths internal/graph declares, the
+// one-level list of each — which is what graph.ListOf builds and the only
+// way the slice family enters at all — and the resolver's scalar and
+// temporal vocabularies. Unrepresentable widths contribute nothing,
+// because the caller routes them to ErrUnrepresentableWidth instead of to
+// a carrier.
+//
+// Deeper nesting is not enumerated and does not need to be: driverCarrier
+// dispatches on the "[]" prefix, so [][]byte and [][]any settle the
+// recursion question that a third level would ask again. Both are rows.
+//
+// The property walk reuses graphPropertyTypes, the AST read of
+// internal/graph's own const specs (decoder_test.go), so a width declared
+// upstream reaches this obligation without anyone adding it here.
+func emittedGoTypes(t *testing.T) []string {
+	t.Helper()
+	seen := map[string]bool{}
+	add := func(s string, ok bool) {
+		if ok {
+			seen[s] = true
+		}
+	}
+	for pt := range graphPropertyTypes(t) {
+		add(neo4j.TypeMap{}.Property(pt))
+		add(neo4j.TypeMap{}.Property(graph.ListOf(pt, false)))
+	}
+	for _, k := range resolver.ScalarValues() {
+		add(neo4j.TypeMap{}.Scalar(k), true)
+	}
+	for _, k := range resolver.TemporalValues() {
+		add(neo4j.TypeMap{}.Temporal(k))
+	}
+	require.NotEmpty(t, seen,
+		"the derivation read no carrier off the type table, so the obligation it feeds is satisfied by any table at all")
+	out := make([]string, 0, len(seen))
+	for s := range seen {
+		out = append(out, s)
+	}
+	return out
 }
 
 // TestAccessModeText asserts the run-call's fourth argument follows the

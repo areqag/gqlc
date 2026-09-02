@@ -237,8 +237,13 @@ var temporalKinds = []resolver.Temporal{
 // admitting one lands as a failure rather than as a quiet change of
 // column type.
 func TestTypeMapTemporal(t *testing.T) {
-	require.Len(t, temporalKinds, resolver.TemporalCount,
-		"the sweep must cover the resolver's whole temporal vocabulary")
+	// Membership, not size. require.Len against the count passes on a
+	// table naming one kind twice and another not at all — the shape a
+	// hand-edited table actually takes — and names nothing about what was
+	// lost when it fires. ElementsMatch is a multiset compare, so it
+	// catches both directions and reports the kind (bd gqlc-fb4a).
+	require.ElementsMatch(t, resolver.TemporalValues(), temporalKinds,
+		"the sweep must cover the resolver's whole temporal vocabulary, once each")
 
 	for _, k := range temporalKinds {
 		t.Run(k.String(), func(t *testing.T) {
@@ -363,6 +368,17 @@ func TestTypeMapScalar(t *testing.T) {
 		{resolver.ScalarNull, "any"},
 		{resolver.ScalarMap, "map[string]any"},
 	}
+	// This table had NO coverage assertion at all: gqlc-35yu.6 removed the
+	// hand-counted require.Len and nothing replaced it, so deleting a row
+	// stopped testing a kind and failed nothing. Membership restores the
+	// obligation without restoring the count (bd gqlc-fb4a).
+	swept := make([]resolver.Scalar, 0, len(tests))
+	for _, tt := range tests {
+		swept = append(swept, tt.k)
+	}
+	require.ElementsMatch(t, resolver.ScalarValues(), swept,
+		"the sweep must cover the resolver's whole scalar vocabulary, once each")
+
 	for _, tt := range tests {
 		t.Run(tt.k.String(), func(t *testing.T) {
 			require.Equal(t, tt.want, age.TypeMap{}.Scalar(tt.k))
