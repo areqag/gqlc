@@ -32,11 +32,13 @@ import (
 // mutation M15, see witnessBodies), and narrowing the answer to the
 // assertions took another (M18, bd gqlc-35yu.17).
 //
-// Where it still stops: assertedText follows a name one hop and knows
-// require and assert alone, so a witness asserting through the testify
-// suite form or a helper of its own reports its answers unasserted. That
-// is a false red, which is the safe direction here — see the hazard
-// argument below.
+// Where it still stops: assertedText follows a name one hop, and it
+// reaches an assertion through a suite gateway or through a helper the
+// same file declares but no further — a helper behind a second helper, a
+// helper in a sibling live file, and the bare promoted form
+// `s.Contains(...)` all still report their answers unasserted (bd
+// gqlc-bpew narrowed the first three shapes, not these). That is a false
+// red, which is the safe direction here — see the hazard argument below.
 //
 // The hazard is asymmetric, which is why the binding is worth its cost.
 // A missing refusal costs the author a runtime error they were going to
@@ -510,6 +512,48 @@ const syntheticUnassertedRow = "\tprobe := \"" + syntheticProbeText + "\"\n" +
 	"\t_ = probe\n" +
 	"\t_ = answer\n"
 
+// syntheticSuiteRow is the answer asserted through the testify suite
+// form. Every byte of the assertion is there and none of it is rooted at
+// the identifier `require`: the call is a method on whatever `s` is, and
+// the package name appears nowhere in the row.
+const syntheticSuiteRow = "\ts.Require().Contains(msg, \"" + syntheticProbeAns + "\")\n"
+
+// syntheticSuiteNonAssertionRow is a method call on the same receiver
+// that asserts nothing. It is the widening this bead's fix has to not be:
+// a reader that took every method call on `s` for an assertion would put
+// this row's argument in the corpus, and with it every argument of every
+// setup call a suite-form witness makes.
+const syntheticSuiteNonAssertionRow = "\ts.loadSchema(\"" + syntheticProbeAns + "\")\n"
+
+// syntheticChainedNonAssertionRow reaches a non-assertion method through
+// a chained call, which is the suite form's own SHAPE with a different
+// name in the middle. It is what makes the gateway list a list rather
+// than "any call in selector position".
+const syntheticChainedNonAssertionRow = "\ts.harness().loadSchema(\"" + syntheticProbeAns + "\")\n"
+
+// syntheticHelperRow is the answer asserted through a helper the witness
+// declares itself, so the answer reaches require one call deeper than the
+// witness's own body goes.
+const syntheticHelperRow = "\tassertRefusal(t, msg, \"" + syntheticProbeAns + "\")\n"
+
+// syntheticHelperDecl is the helper syntheticHelperRow calls. It is a
+// sibling declaration and not a closure, because that is the shape the
+// bead names and the shape a reader given one function body cannot see.
+const syntheticHelperDecl = "\nfunc assertRefusal(t *testing.T, msg, want string) {\n" +
+	"\trequire.Contains(t, msg, want)\n}\n"
+
+// syntheticInertHelperRow calls a sibling declaration that asserts
+// nothing. The negative half of the helper form: what makes a helper
+// count is that an assertion is reached through it, not that the witness
+// called something declared nearby.
+const syntheticInertHelperRow = "\trecordRefusal(t, \"" + syntheticProbeAns + "\")\n"
+
+// syntheticInertHelperDecl is syntheticHelperDecl with the assertion
+// taken out and nothing else changed, so the two rows differ in the one
+// thing this reader is supposed to be deciding on.
+const syntheticInertHelperDecl = "\nfunc recordRefusal(t *testing.T, note string) {\n" +
+	"\tt.Log(note)\n}\n"
+
 // liveWitnessSource is a live test file declaring one witness, with the
 // served text always in code and the refused probe wherever row puts it.
 //
@@ -517,13 +561,13 @@ const syntheticUnassertedRow = "\tprobe := \"" + syntheticProbeText + "\"\n" +
 // witnessBodies is a separate function at all: this repo's live files
 // comment no probe out, so nothing in them can tell a reader that keeps
 // comments from one that drops them. doc goes above the declaration, row
-// inside the body.
-func liveWitnessSource(doc, row string) []byte {
+// inside the body, decls after it as siblings of the witness.
+func liveWitnessSource(doc, row, decls string) []byte {
 	return []byte("//go:build codegen_live\n\npackage fixtures_test\n\n" + doc +
 		"func " + syntheticWitness + "(t *testing.T) {\n" +
 		"\tserved := \"" + syntheticServedText + "\"\n" +
 		row +
-		"\t_ = served\n}\n")
+		"\t_ = served\n}\n" + decls)
 }
 
 // commentOut is a block of code behind `//`, byte for byte. Derived
@@ -609,7 +653,7 @@ func TestWitnessBodyIsCodeAndNotCommentary(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := readSyntheticWitness(t, liveWitnessSource(tc.doc, tc.row))[syntheticWitness].code
+			body := readSyntheticWitness(t, liveWitnessSource(tc.doc, tc.row, ""))[syntheticWitness].code
 			require.Contains(t, body, syntheticServedText,
 				"the body's own code must be read back, or every assertion below passes on an empty string")
 			if tc.carried {
@@ -644,6 +688,9 @@ func TestAssertedTextIsWhatAnAssertionReads(t *testing.T) {
 		name string
 		doc  string
 		row  string
+		// decls are sibling declarations placed after the witness, for
+		// the rows whose assertion is reached through one.
+		decls string
 		// asserted is whether the answer must be found in the part of
 		// the body an assertion reads.
 		asserted bool
@@ -701,9 +748,54 @@ func TestAssertedTextIsWhatAnAssertionReads(t *testing.T) {
 			name: "a commented-out table column reads nothing",
 			row:  commentOut(syntheticColumnRow),
 		},
+		{
+			// bd gqlc-bpew, shape 1. The selector base is a receiver
+			// rather than the package, so the whole assertion was
+			// invisible and the answer reported unasserted.
+			name:     "an answer asserted through the suite form is read",
+			row:      syntheticSuiteRow,
+			asserted: true,
+			spelled:  true,
+		},
+		{
+			// The widening the row above must not be. A suite-form
+			// witness reaches its fixtures through methods on the same
+			// receiver, and taking those for assertions would put every
+			// setup argument in the corpus.
+			name:    "a suite method that asserts nothing reads nothing",
+			row:     syntheticSuiteNonAssertionRow,
+			spelled: true,
+		},
+		{
+			// The same widening one shape over: this row has the suite
+			// form's chained selector and a name that is not a gateway,
+			// so it is what the gateway list itself is holding.
+			name:    "a chained call through a non-gateway reads nothing",
+			row:     syntheticChainedNonAssertionRow,
+			spelled: true,
+		},
+		{
+			// bd gqlc-bpew, shape 2. The answer is an argument here and
+			// reaches require one call deeper, in a declaration a reader
+			// given one function body cannot see.
+			name:     "an answer asserted through the witness's own helper is read",
+			row:      syntheticHelperRow,
+			decls:    syntheticHelperDecl,
+			asserted: true,
+			spelled:  true,
+		},
+		{
+			// The widening the row above must not be. What earns a
+			// helper its arguments is that an assertion is reached
+			// through it, not that the witness called a sibling.
+			name:    "a helper that asserts nothing reads nothing",
+			row:     syntheticInertHelperRow,
+			decls:   syntheticInertHelperDecl,
+			spelled: true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := readSyntheticWitness(t, liveWitnessSource(tc.doc, tc.row))[syntheticWitness]
+			body := readSyntheticWitness(t, liveWitnessSource(tc.doc, tc.row, tc.decls))[syntheticWitness]
 			require.Equal(t, tc.spelled, strings.Contains(body.code, syntheticProbeAns),
 				"this row is about what reads the answer, so whether the code spells it at all must be the stated one")
 			if tc.asserted {
@@ -733,11 +825,11 @@ func TestAssertedTextIsWhatAnAssertionReads(t *testing.T) {
 func TestACommentedProbeReddensTheSweep(t *testing.T) {
 	gap, recipes := syntheticGap()
 
-	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow))
+	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow, ""))
 	require.Empty(t, witnessGaps([]age.DialectGap{gap}, run, recipes),
 		"the template must pass, or the complaints below could come from the template")
 
-	spelled := readSyntheticWitness(t, liveWitnessSource("", commentOut(syntheticProbeRow)))
+	spelled := readSyntheticWitness(t, liveWitnessSource("", commentOut(syntheticProbeRow), ""))
 	got := strings.Join(witnessGaps([]age.DialectGap{gap}, spelled, recipes), "\n")
 	require.Contains(t, got, "is not carried by",
 		"a probe only a comment spells is measured by nothing")
@@ -765,11 +857,11 @@ func TestACommentedProbeReddensTheSweep(t *testing.T) {
 func TestAnUnassertedAnswerReddensTheSweep(t *testing.T) {
 	gap, recipes := syntheticGap()
 
-	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow))
+	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow, ""))
 	require.Empty(t, witnessGaps([]age.DialectGap{gap}, run, recipes),
 		"the template must pass, or the complaints below could come from the template")
 
-	spelled := readSyntheticWitness(t, liveWitnessSource("", syntheticUnassertedRow))
+	spelled := readSyntheticWitness(t, liveWitnessSource("", syntheticUnassertedRow, ""))
 	got := strings.Join(witnessGaps([]age.DialectGap{gap}, spelled, recipes), "\n")
 	require.Contains(t, got, "is not asserted by",
 		"an answer no assertion reads is a claim about the server that nothing re-measures")
@@ -959,6 +1051,7 @@ func witnessBodies(fset *token.FileSet, path string, src []byte) (map[string]wit
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	helpers := assertionHelpers(file)
 	bodies := make(map[string]witnessBody)
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -969,7 +1062,7 @@ func witnessBodies(fset *token.FileSet, path string, src []byte) (map[string]wit
 		if err := format.Node(&code, fset, fn.Body); err != nil {
 			return nil, fmt.Errorf("render %s's body in %s: %w", fn.Name.Name, path, err)
 		}
-		asserted, err := assertedText(fset, fn.Body)
+		asserted, err := assertedText(fset, fn.Body, helpers)
 		if err != nil {
 			return nil, fmt.Errorf("render %s's assertions in %s: %w", fn.Name.Name, path, err)
 		}
@@ -978,15 +1071,74 @@ func witnessBodies(fset *token.FileSet, path string, src []byte) (map[string]wit
 	return bodies, nil
 }
 
-// assertionPackages are the identifiers a call has to be rooted at to
-// count as an assertion here. Narrow on purpose: the suite form
-// (s.Require().Equal) and any hand-rolled helper are not recognised, so a
-// witness written that way reports its answer unasserted. That is a false
-// RED and not a false green — the sweep would refuse a real measurement
-// and say which one, which is the direction this table's whole hazard
-// argument runs in (a wrong refusal is the expensive one, so the guard
-// that polices refusals is allowed to be strict about itself).
+// assertionPackages are the identifiers a call can be rooted at to count
+// as an assertion here.
 var assertionPackages = map[string]bool{"require": true, "assert": true}
+
+// assertionGateways are the no-argument methods testify's suite type
+// hands an assertion object back from, so `s.Require().Contains(...)` is
+// an assertion however `s` is named. Keyed on the gateway rather than on
+// the assertion method after it: a list of testify's assertion names
+// would rot as testify grows one, and a receiver-name rule would take
+// every method call on `s` — including the setup calls a suite-form
+// witness reaches its fixtures through.
+//
+// The bare form `s.Contains(...)`, promoted from an embedded suite.Suite,
+// is NOT recognised. Deciding it needs the method set of `s`, which is a
+// type this reader cannot resolve: the live files are in another module
+// and behind a build tag, so all it has is their syntax. It stays the
+// false RED bd gqlc-bpew describes, one shape narrower.
+var assertionGateways = map[string]bool{"Require": true, "Assert": true}
+
+// isAssertionCall reports whether call is one this reader takes the
+// arguments of. Three shapes: a call on an assertion package, a call
+// through a suite gateway, and a call to a helper that reaches one of the
+// first two. helpers may be nil, which is how assertionHelpers asks the
+// question while it is still deciding what the helpers are.
+func isAssertionCall(call *ast.CallExpr, helpers map[string]bool) bool {
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		return helpers[fun.Name]
+	case *ast.SelectorExpr:
+		if pkg, ok := fun.X.(*ast.Ident); ok {
+			return assertionPackages[pkg.Name]
+		}
+		gateway, ok := fun.X.(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		sel, ok := gateway.Fun.(*ast.SelectorExpr)
+		return ok && assertionGateways[sel.Sel.Name]
+	}
+	return false
+}
+
+// assertionHelpers are the functions this file declares that reach an
+// assertion, so a witness calling one is asserting through it.
+//
+// One hop and one file. A helper calling a second helper is not followed,
+// and neither is a helper declared in a sibling live file — each is a
+// false RED of the kind bd gqlc-bpew narrows rather than a way for an
+// unasserted answer to pass, because what widens the corpus here is
+// finding MORE assertions, never fewer.
+func assertionHelpers(file *ast.File) map[string]bool {
+	helpers := make(map[string]bool)
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || !isAssertionCall(call, nil) {
+				return true
+			}
+			helpers[fn.Name.Name] = true
+			return false
+		})
+	}
+	return helpers
+}
 
 // assertedText is the part of a witness's body an assertion reads, and
 // the answer half of the sweep is checked against this rather than
@@ -1002,18 +1154,19 @@ var assertionPackages = map[string]bool{"require": true, "assert": true}
 // the row that would have caught it.
 //
 // It is ONE HOP and not a dataflow analysis. The corpus is every
-// assertion call's arguments, plus the values bound to any name those
-// arguments read — an assignment, a var declaration, or a keyed field in
-// a composite literal. That is enough for the two shapes this repo's
-// witnesses use: a literal passed straight to require.Contains, and a
-// table column reached as tc.wantMessage.
+// assertion call's arguments — see isAssertionCall for what counts as one
+// — plus the values bound to any name those arguments read, through an
+// assignment, a var declaration, or a keyed field in a composite literal.
+// That is enough for the two shapes this repo's witnesses use: a literal
+// passed straight to require.Contains, and a table column reached as
+// tc.wantMessage.
 //
 // A range variable is deliberately NOT resolved back to the slice it
 // ranges over. Doing so would pull every field of every row of the table
 // into the corpus the moment any assertion mentioned tc at all, which
 // puts the unasserted columns back in and makes this function a slower
 // spelling of the body it replaced.
-func assertedText(fset *token.FileSet, body *ast.BlockStmt) (string, error) {
+func assertedText(fset *token.FileSet, body *ast.BlockStmt, helpers map[string]bool) (string, error) {
 	var out strings.Builder
 	var failed error
 	render := func(n ast.Node) {
@@ -1031,15 +1184,7 @@ func assertedText(fset *token.FileSet, body *ast.BlockStmt) (string, error) {
 	read := make(map[string]bool)
 	ast.Inspect(body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		pkg, ok := sel.X.(*ast.Ident)
-		if !ok || !assertionPackages[pkg.Name] {
+		if !ok || !isAssertionCall(call, helpers) {
 			return true
 		}
 		for _, arg := range call.Args {
