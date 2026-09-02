@@ -861,7 +861,12 @@ def shorthand_arg(opt, tokens, j):
             return name, rest[1:], 1
         if rest:
             return name, rest, 1
-        return name, (tokens[j + 1] if j + 1 < len(tokens) else None), 2
+        # The shorthand half of scan_bd's operator rule; see the note there.
+        # `-s ;` and `-r ;` swallowed the terminator the same way.
+        nxt = tokens[j + 1] if j + 1 < len(tokens) else None
+        if nxt is not None and is_op(nxt):
+            return name, None, 1
+        return name, nxt, 2
     return None, None, 1
 
 
@@ -898,8 +903,24 @@ def scan_bd(tokens, i, cwd):
             if inline:
                 j += 1
             else:
-                val = tokens[j + 1] if j + 1 < n else None
-                j += 2
+                # A flag whose next token is an OPERATOR consumes the flag
+                # alone, exactly as redirect_skip does above and for the same
+                # reason: swallowing the operator as a value hides the command
+                # after it. Here that is not a missed filename but a missed
+                # INVOCATION — `bd update x --status ; bd reopen y` ate the `;`,
+                # so `bd`, `reopen` and `y` became positionals of the update and
+                # the reopen arm never saw a reopen, while the shell ran it
+                # anyway. Measured ALLOW where DENY was owed on `;`, `&&` and
+                # `|`, and on --status/--add-label/--reason alike, so the close
+                # arm was exposed by the same token (bd gqlc-e9huy, found by
+                # Տիր's round-1 read of PR #2068).
+                nxt = tokens[j + 1] if j + 1 < n else None
+                if nxt is not None and is_op(nxt):
+                    val = None
+                    j += 1
+                else:
+                    val = nxt
+                    j += 2
             if name in ("-C", "--directory"):
                 target = resolve(target, val)
             elif name in ("-r", "--reason"):
