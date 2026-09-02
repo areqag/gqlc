@@ -388,10 +388,13 @@ entity struct names as a fourth identifier source (§4.6).
 ### 4.5 Entity struct names — the entity-naming rules
 
 D3 Resolved (2026-07-11) pins five rules; C2 renders them as the
-`entityStructName` helper (§2.2). Applied uniformly to node types
-and edge types; the axes differ (`Labels` for a node type,
-`EdgeKey` + `Label` ambiguity for an edge type) but the disposition
-of each rule is identical.
+`entityStructName` helper (§2.2). Applied to node types and edge
+types, but not identically on either count. The axes differ
+(`Labels` for a node type, `EdgeKey` + `Label` ambiguity for an edge
+type), and so does the mangle: Rule 2 puts a node label through
+`paramFieldName`, which preserves an ALL-CAPS segment, while Rule 3
+puts an edge label through `edgeLabelFieldName`, which lowers one
+first. Rules 1, 4 and 5 do dispose identically on both axes.
 
 **Rule 1 — Explicit `Name` wins.** If `NodeType.Name` /
 `EdgeType.Name` is non-empty:
@@ -418,11 +421,21 @@ derived text. Practical case: a label of `_person` mangles to
 `Person` (leading underscore dropped, §4.2); a label of `1st` fails
 the check.
 
-**Rule 3 — Single-label edge type with unambiguous label → same
-mangle.** If `Rule 1` did not fire and `len(Label.Split()) == 1`
-and `!edgeLabelAmbiguous(schema.Edges, Label)`: emit the entity
-struct as `paramFieldName(label)` — `ACTED_IN` → `ActedIn`;
-`KNOWS` → `Knows`. Same failure disposition as Rule 2 (mangle-
+**Rule 3 — Single-label edge type with unambiguous label →
+edge-label mangle.** If `Rule 1` did not fire and
+`len(Label.Split()) == 1` and
+`!edgeLabelAmbiguous(schema.Edges, Label)`: emit the entity struct
+as `edgeLabelFieldName(label)` — Rule 2's mangle, but with every
+ALL-CAPS segment lowered first, so the split-on-`_` +
+capitalise-first-rune-per-segment walk sees a word boundary where
+Rule 2 sees an acronym. `ACTED_IN` → `ActedIn`; `KNOWS` → `Knows`.
+Rule 2's preserve-ALL-CAPS disposition would give `ACTEDIN` and
+`KNOWS` here, both valid exported identifiers that nothing
+downstream would refuse, which is why the difference is stated
+rather than left to the shared helper: Neo4j relationship types are
+SCREAMING_SNAKE by convention, so an edge label is the one caller
+for which preserving the case destroys the word boundaries instead
+of keeping an acronym. Same failure disposition as Rule 2 (mangle-
 result-not-valid → `ErrInvalidEntityName`).
 
 **Rule 4 — Multi-label type OR ambiguous edge label →
