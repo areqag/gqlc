@@ -598,6 +598,39 @@ def is_op(tok):
     return bool(tok) and all(c in OPERATOR_CHARS for c in tok)
 
 
+def flag_value(tokens, j):
+    """(value, tokens consumed) for a value-taking flag at tokens[j].
+
+    The shell never hands a command-boundary operator to a program as an
+    argument, so a flag standing last before one is VALUELESS and the operator
+    has to stay visible to the caller's walk. Consuming it hides every command
+    after it: `bd update x --add-label ; git stash clear` was walked as bd
+    positionals, reached no git arm, and allowed (bd gqlc-0328j). The shape is
+    ordinary rather than adversarial — an unquoted empty shell variable spells
+    it, bd exits non-zero on the malformed flag, and `;` runs the next command
+    anyway. redirect_skip below already had to learn this rule for `cmd > ; x`;
+    this is the same rule for its other six consumers.
+
+    Five of those six change a verdict. The `cd`/`pushd` one cannot yet: a bare
+    `cd` leaves the directory unresolvable either way — this answers None
+    directly, resolve()'s own is_op guard answered None by a longer route — and
+    an unresolvable cwd fails OPEN in the git arms, so no row can tell the two
+    routes apart until that fail-open is closed (gqlc-2cylz). It is changed for
+    locality, not for a verdict. Revert this site AND resolve()'s guard together
+    and `cd ; git stash clear` DENIES against the joined path `<cwd>/;`, which
+    is the distant guard being the only thing holding the site up.
+
+    Found independently at the scan_bd site, where `bd update x --status ; bd
+    reopen y` ate the `;` so the reopen arm never saw a reopen while the shell
+    ran it anyway. Measured ALLOW where DENY was owed on `;`, `&&` and `|`, and
+    on --status/--add-label/--reason alike, so the close arm was exposed by the
+    same token (bd gqlc-e9huy, Տիր's round-1 read of PR #2068).
+    """
+    if j + 1 < len(tokens) and not is_op(tokens[j + 1]):
+        return tokens[j + 1], 2
+    return None, 1
+
+
 def redirect_skip(tokens, j):
     """Tokens a redirection at tokens[j] consumes, or 0 when it is not one.
 
@@ -893,12 +926,8 @@ def shorthand_arg(opt, tokens, j):
             return name, rest[1:], 1
         if rest:
             return name, rest, 1
-        # The shorthand half of scan_bd's operator rule; see the note there.
-        # `-s ;` and `-r ;` swallowed the terminator the same way.
-        nxt = tokens[j + 1] if j + 1 < len(tokens) else None
-        if nxt is not None and is_op(nxt):
-            return name, None, 1
-        return name, nxt, 2
+        val, step = flag_value(tokens, j)
+        return name, val, step
     return None, None, 1
 
 
@@ -935,24 +964,8 @@ def scan_bd(tokens, i, cwd):
             if inline:
                 j += 1
             else:
-                # A flag whose next token is an OPERATOR consumes the flag
-                # alone, exactly as redirect_skip does above and for the same
-                # reason: swallowing the operator as a value hides the command
-                # after it. Here that is not a missed filename but a missed
-                # INVOCATION — `bd update x --status ; bd reopen y` ate the `;`,
-                # so `bd`, `reopen` and `y` became positionals of the update and
-                # the reopen arm never saw a reopen, while the shell ran it
-                # anyway. Measured ALLOW where DENY was owed on `;`, `&&` and
-                # `|`, and on --status/--add-label/--reason alike, so the close
-                # arm was exposed by the same token (bd gqlc-e9huy, found by
-                # Տիր's round-1 read of PR #2068).
-                nxt = tokens[j + 1] if j + 1 < n else None
-                if nxt is not None and is_op(nxt):
-                    val = None
-                    j += 1
-                else:
-                    val = nxt
-                    j += 2
+                val, step = flag_value(tokens, j)
+                j += step
             if name in ("-C", "--directory"):
                 target = resolve(target, val)
             elif name in ("-r", "--reason"):
@@ -1075,9 +1088,9 @@ def scan_tokens(tokens, cwd, wanted, closes=None, labels=None, reopens=None):
                 reopens.extend(opens)
             continue
         if tok in ("cd", "pushd"):
-            arg = tokens[i + 1] if i + 1 < n else None
+            arg, step = flag_value(tokens, i)
             cwd = None if (arg is None or arg.startswith("-")) else resolve(cwd, arg)
-            i += 2
+            i += step
             continue
         if tok == "git" or tok.endswith("/git"):
             target = cwd
@@ -1092,13 +1105,14 @@ def scan_tokens(tokens, cwd, wanted, closes=None, labels=None, reopens=None):
                 if is_op(opt):
                     break
                 if opt == "-C":
-                    target = resolve(target, tokens[j + 1] if j + 1 < n else None)
-                    j += 2
+                    val, step = flag_value(tokens, j)
+                    target = resolve(target, val)
+                    j += step
                 elif opt in GIT_OPTS_WITH_ARG:
-                    j += 2
+                    j += flag_value(tokens, j)[1]
                 elif opt in ("--git-dir", "--work-tree"):
                     target = None
-                    j += 2
+                    j += flag_value(tokens, j)[1]
                 elif opt.startswith(("--git-dir=", "--work-tree=")):
                     target = None
                     j += 1
