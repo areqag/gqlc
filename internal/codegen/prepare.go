@@ -560,6 +560,10 @@ func unimplementedTypeKind(pt graph.PropertyType) (graph.PropertyType, bool) {
 		return pt, true
 	case graph.KindList:
 		return unimplementedTypeKind(pt.Elem())
+	case graph.KindScalar:
+		// Every scalar has an emission on some backend, so the walk stops
+		// and the carrier question below decides. Named rather than left
+		// to the default so a fourth kind cannot be added silently.
 	}
 	return "", false
 }
