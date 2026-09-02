@@ -362,12 +362,15 @@ type savepointHarness interface {
 }
 
 // localDateTimeColumnHarness is an arm whose target admits a constructed
-// temporal column. Apache AGE defines no temporal constructor at all —
-// measured on the pinned image by
-// TestAGERefusesTheFunctionsItDoesNotDefine — and no bead lifts that:
-// the backend refuses such a column at generation, so this column stays
-// false for that arm permanently rather than until some later width
-// lands.
+// temporal column. Apache AGE refuses every temporal constructor
+// openCypher spells, and every one is re-measured on the pinned image on
+// each live run: the six bare names by
+// TestAGERefusesTheFunctionsItDoesNotDefine, duration.between by
+// TestAGERefusesTheNamespaceItHasNoSchemaFor. That is closure over the
+// names a query can spell, which is all this column needs, and not over
+// AGE's function catalogue, which nothing here counts. The backend
+// refuses such a column at generation, so this column stays false for
+// that arm permanently rather than until some later width lands.
 type localDateTimeColumnHarness interface {
 	harness
 	localDateTimeColumnScenario(ctx context.Context, t *testing.T) localDateTimeColumnBackend

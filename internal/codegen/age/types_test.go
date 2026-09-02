@@ -232,9 +232,10 @@ var temporalKinds = []resolver.Temporal{
 // TestTypeMapTemporal pins the temporal column-shape row (spec §5.1).
 // Every kind refuses, and lifting the TIMESTAMP property width to a real
 // encoding did not change that: a column of this shape exists only
-// because the query called a temporal constructor, and AGE 1.7.0 has
-// none to call. The rows exist so admitting one lands as a failure
-// rather than as a quiet change of column type.
+// because the query called a temporal constructor, and AGE 1.7.0
+// defines none of the ones openCypher spells. The rows exist so
+// admitting one lands as a failure rather than as a quiet change of
+// column type.
 func TestTypeMapTemporal(t *testing.T) {
 	require.Len(t, temporalKinds, resolver.TemporalCount,
 		"the sweep must cover the resolver's whole temporal vocabulary")

@@ -26,12 +26,15 @@
 // the shared admission this gate stands aside for; edgeUnionReason says which
 // is which and why.
 //
-// AGE defines no temporal constructor. agtype has no temporal value type and no
-// cast to or from one, and of the 348 functions in ag_catalog exactly one has a
-// temporal name — reached from cypher as timestamp(), returning epoch
-// milliseconds as an integer. So a query calling datetime() is a package that
-// compiles and fails on every call, and the only place to answer is generate
-// time.
+// AGE defines none of the temporal constructors openCypher spells, and every
+// one of them is measured below on each live run. agtype has no temporal value
+// type and no cast to or from one, and of the 348 functions in ag_catalog then
+// in the pinned image exactly one has a temporal name — reached from cypher as
+// timestamp(), returning epoch milliseconds as an integer. Nothing re-measures
+// that sweep, so it is provenance for the encoding rather than a closed set;
+// what is closed here, by measurement, is the set of names a query can spell.
+// So a query calling datetime() is a package that compiles and fails on every
+// call, and the only place to answer is generate time.
 //
 // AGE does not define point() either, which is the third gap rather than a name
 // in the second: 42883 is the same code the undefined temporal names come back
