@@ -791,17 +791,17 @@ func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
 		{
 			name:    "a constructor in a predicate reaches no column",
 			query:   predicateConstructorQuery,
-			dropped: `Recent ("datetime")`,
+			dropped: `Recent ("datetime" at 1:35)`,
 		},
 		{
 			name:    "a constructor in a write that projects nothing",
 			query:   execConstructorQuery,
-			dropped: `Touch ("localdatetime")`,
+			dropped: `Touch ("localdatetime" at 1:31)`,
 		},
 		{
 			name:     "a projected constructor is answered here, ahead of the carrier",
 			query:    projectedConstructorQuery,
-			dropped:  `SeenOn ("date")`,
+			dropped:  `SeenOn ("date" at 1:37)`,
 			portable: codegen.ErrUnrepresentableTemporal,
 		},
 	} {
@@ -825,7 +825,8 @@ func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
 				`this project has measured, so every call on 1 query would answer "function <name> `+
 				`does not exist" — timestamp() is the one that answered, returning epoch milliseconds `+
 				"as an integer, so compute the value in Go and bind it as a parameter, or generate "+
-				"against a neo4j target: "+tc.dropped)
+				"against a neo4j target; each call is located line:column within its own query's "+
+				"text: "+tc.dropped)
 			require.Equal(t, pipeline.Result{}, res)
 
 			// The same project on a driver whose server defines the
@@ -917,17 +918,17 @@ func TestRunApacheAgeRefusesTheUndefinedNamespace(t *testing.T) {
 		{
 			name:    "a namespaced call in a predicate reaches no column",
 			query:   predicateNamespacedQuery,
-			dropped: `Between ("duration.between")`,
+			dropped: `Between ("duration.between" at 1:24)`,
 		},
 		{
 			name:    "a namespaced call in a write that projects nothing",
 			query:   execNamespacedQuery,
-			dropped: `Touch ("duration.between")`,
+			dropped: `Touch ("duration.between" at 1:31)`,
 		},
 		{
 			name:     "a projected namespaced call is answered here, ahead of the carrier",
 			query:    projectedNamespacedQuery,
-			dropped:  `Spans ("duration.between")`,
+			dropped:  `Spans ("duration.between" at 1:37)`,
 			portable: codegen.ErrUnrepresentableTemporal,
 		},
 	} {
@@ -954,7 +955,8 @@ func TestRunApacheAgeRefusesTheUndefinedNamespace(t *testing.T) {
 				`"schema <namespace> does not exist" (SQLSTATE 3F000) — PostgreSQL resolves the `+
 				"namespace as a schema qualifier before it looks for any function, so no function "+
 				"under that namespace resolves whatever it is called: compute the value in Go and "+
-				"bind it as a parameter, or generate against a neo4j target: "+tc.dropped)
+				"bind it as a parameter, or generate against a neo4j target; each call is located "+
+				"line:column within its own query's text: "+tc.dropped)
 			require.Equal(t, pipeline.Result{}, res)
 
 			// duration.between is a served function on neo4j and a

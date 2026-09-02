@@ -135,9 +135,9 @@ func TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer(t *testing.T) {
 			for _, p := range cat.probes {
 				found := cat.find(p.Text())
 				require.NotEmpty(t, found, "probe %q must call a function the gate reads", p.Text())
-				for _, name := range found {
-					require.Contains(t, strings.ToLower(p.Answer()), strings.ToLower(name),
-						"probe %q entered %q into the catalogue, but the server's answer does not name it", p.Text(), name)
+				for _, f := range found {
+					require.Contains(t, strings.ToLower(p.Answer()), strings.ToLower(f.Text()),
+						"probe %q entered %q into the catalogue, but the server's answer does not name it", p.Text(), f.Text())
 				}
 			}
 			require.Len(t, cat.names, len(cat.probes),
@@ -239,7 +239,7 @@ var functionCatalogues = []struct {
 	name   string
 	probes []age.DialectProbe
 	names  map[string]struct{}
-	find   func(string) []string
+	find   func(string) []age.Finding
 }{
 	{"temporal", age.UndefinedFunctionProbes, age.UndefinedFunctions, age.FindUndefinedFunctions},
 	{"spatial", age.SpatialFunctionProbes, age.UndefinedSpatialFunctions, age.FindUndefinedSpatialFunctions},
@@ -590,7 +590,7 @@ func commentOut(block string) string {
 func syntheticGap() (age.DialectGap, map[string]string) {
 	return age.DialectGapFields{
 			Sentinel: age.ErrUndefinedFunction,
-			Find:     age.Positionless(age.FindUndefinedFunctions),
+			Find:     age.FindUndefinedFunctions,
 			Diagnose: func(int, string, string) string { return "" },
 			Witness:  syntheticWitness,
 			Refused:  []age.DialectProbe{age.NewDialectProbe(syntheticProbeText, syntheticProbeAns)},
@@ -874,7 +874,7 @@ func TestAnUnassertedAnswerReddensTheSweep(t *testing.T) {
 // real table refuses, so a row can cut either binding without needing a
 // second template. Test-only — the shipped table pairs one find per gap.
 func findUndefinedFunctionsOrAlternations(src string) []age.Finding {
-	if found := age.Positionless(age.FindUndefinedFunctions)(src); len(found) > 0 {
+	if found := age.FindUndefinedFunctions(src); len(found) > 0 {
 		return found
 	}
 	return age.FindRelationshipTypeAlternations(src)

@@ -35,11 +35,10 @@ type finding struct {
 	// parse trims the body it stores, so nothing here can turn one into
 	// a file line. The refusal says which text they index.
 	//
-	// Zero on both means the scan reports no position, and the refusal
-	// then quotes the spelling alone — the three function gaps, whose
-	// scans answer with names (bd gqlc-rmzg, which carried the position
-	// for the alternation only; gqlc-fpl14 is the same remedy for those
-	// three).
+	// Every gap in the table fills these, so reject renders them
+	// unconditionally. They were optional while only the alternation
+	// carried a position (bd gqlc-rmzg); gqlc-fpl14 gave the other three
+	// theirs and the optionality went with it.
 	line, column int
 }
 
@@ -53,18 +52,6 @@ func findRelationshipTypeAlternations(src string) []finding {
 		out[i] = finding{text: a.Text, line: a.Line, column: a.Column}
 	}
 	return out
-}
-
-// positionless adapts a scan that answers with spellings alone.
-func positionless(find func(src string) []string) func(src string) []finding {
-	return func(src string) []finding {
-		texts := find(src)
-		out := make([]finding, len(texts))
-		for i, t := range texts {
-			out[i] = finding{text: t}
-		}
-		return out
-	}
 }
 
 // dialectGap is one construct Apache AGE 1.7.0 will not accept, together
@@ -229,14 +216,15 @@ var dialectGaps = []dialectGap{
 		// author's own case, which is what the author has to find in
 		// their file.
 		sentinel: ErrUndefinedFunction,
-		find:     positionless(findUndefinedFunctions),
+		find:     findUndefinedFunctions,
 		diagnose: func(count int, noun, dropped string) string {
 			return fmt.Sprintf("generated code runs the author's query text verbatim "+
 				"(ADR 0005) and Apache AGE 1.7.0 defines no temporal constructor this project has "+
 				"measured, so every call on %d %s would answer \"function <name> does not exist\" — "+
 				"timestamp() is the one that answered, returning epoch milliseconds as an integer, so "+
 				"compute the value in Go and bind it as a parameter, or generate against a neo4j "+
-				"target: %s", count, noun, dropped)
+				"target; each call is located line:column within its own query's text: %s",
+				count, noun, dropped)
 		},
 		witness: "TestAGERefusesTheFunctionsItDoesNotDefine",
 		refused: undefinedFunctionProbes,
@@ -266,13 +254,14 @@ var dialectGaps = []dialectGap{
 		// the table answers in order so that the answer is stable, and
 		// TestRejectsTheSpatialConstructor pins which one comes back.
 		sentinel: ErrUndefinedSpatialFunction,
-		find:     positionless(findUndefinedSpatialFunctions),
+		find:     findUndefinedSpatialFunctions,
 		diagnose: func(count int, noun, dropped string) string {
 			return fmt.Sprintf("generated code runs the author's query text verbatim "+
 				"(ADR 0005) and Apache AGE 1.7.0 does not define the spatial constructor this "+
 				"project has measured, so every call on %d %s would answer "+
 				"\"function <name> does not exist\" (SQLSTATE 42883) — store the coordinates as "+
-				"ordinary properties and compute the geometry in Go: %s", count, noun, dropped)
+				"ordinary properties and compute the geometry in Go; each call is located "+
+				"line:column within its own query's text: %s", count, noun, dropped)
 		},
 		witness: "TestAGERefusesTheSpatialConstructor",
 		refused: spatialFunctionProbes,
@@ -325,7 +314,7 @@ var dialectGaps = []dialectGap{
 		// regardless, because a gap is what a probe witnessed and ADR
 		// 0005 leaves an author no way around a false positive.
 		sentinel: ErrUndefinedNamespace,
-		find:     positionless(findUndefinedNamespaces),
+		find:     findUndefinedNamespaces,
 		diagnose: func(count int, noun, dropped string) string {
 			return fmt.Sprintf("generated code runs the author's query text verbatim "+
 				"(ADR 0005) and Apache AGE 1.7.0 has no schema for the namespace this project has "+
@@ -333,7 +322,8 @@ var dialectGaps = []dialectGap{
 				"(SQLSTATE 3F000) — PostgreSQL resolves the namespace as a schema qualifier before it "+
 				"looks for any function, so no function under that namespace resolves whatever it is "+
 				"called: compute the value in Go and bind it as a parameter, or generate against a "+
-				"neo4j target: %s", count, noun, dropped)
+				"neo4j target; each call is located line:column within its own query's text: %s",
+				count, noun, dropped)
 		},
 		witness: "TestAGERefusesTheNamespaceItHasNoSchemaFor",
 		refused: namespaceProbes,
@@ -489,8 +479,8 @@ func calledNamespaces(probes []dialectProbe) map[string]struct{} {
 func calledFunctionNames(probes []dialectProbe) map[string]struct{} {
 	out := make(map[string]struct{})
 	for _, p := range probes {
-		for _, name := range cypher.UnqualifiedFunctionCalls(p.text) {
-			out[strings.ToLower(name)] = struct{}{}
+		for _, c := range cypher.UnqualifiedFunctionCalls(p.text) {
+			out[strings.ToLower(c.Text)] = struct{}{}
 		}
 	}
 	return out
@@ -503,7 +493,7 @@ func calledFunctionNames(probes []dialectProbe) map[string]struct{} {
 // `oC_Namespace oC_SymbolicName`, and a server resolving duration.between
 // resolves nothing about duration, so the two are different names and
 // only the one that was probed is refused.
-func findUndefinedFunctions(src string) []string {
+func findUndefinedFunctions(src string) []finding {
 	return findCalls(undefinedFunctions, src)
 }
 
@@ -512,7 +502,7 @@ func findUndefinedFunctions(src string) []string {
 // rather than one over their union, because the gap a name lands in
 // decides the sentinel and the prose the author gets, and a union would
 // answer both with whichever gap ran first.
-func findUndefinedSpatialFunctions(src string) []string {
+func findUndefinedSpatialFunctions(src string) []finding {
 	return findCalls(undefinedSpatialFunctions, src)
 }
 
@@ -528,26 +518,27 @@ func findUndefinedSpatialFunctions(src string) []string {
 // for is a property of the call SHAPE here, not of the two name sets,
 // and `duration` being in the temporal catalogue and `duration` being a
 // refused namespace are facts about two different spellings.
-func findUndefinedNamespaces(src string) []string {
-	var found []string
+func findUndefinedNamespaces(src string) []finding {
+	var found []finding
 	for _, c := range cypher.QualifiedFunctionCalls(src) {
 		if _, undefined := undefinedNamespaces[c.Namespace]; !undefined {
 			continue
 		}
-		found = append(found, c.Text)
+		found = append(found, finding{text: c.Text, line: c.Line, column: c.Column})
 	}
 	return found
 }
 
 // findCalls is the calls in a query text naming something in a
-// catalogue, quoted as the author wrote them.
-func findCalls(catalogue map[string]struct{}, src string) []string {
-	var found []string
-	for _, name := range cypher.UnqualifiedFunctionCalls(src) {
-		if _, undefined := catalogue[strings.ToLower(name)]; !undefined {
+// catalogue, quoted as the author wrote them and located within that
+// text.
+func findCalls(catalogue map[string]struct{}, src string) []finding {
+	var found []finding
+	for _, c := range cypher.UnqualifiedFunctionCalls(src) {
+		if _, undefined := catalogue[strings.ToLower(c.Text)]; !undefined {
 			continue
 		}
-		found = append(found, name)
+		found = append(found, finding{text: c.Text, line: c.Line, column: c.Column})
 	}
 	return found
 }
@@ -608,10 +599,7 @@ func (g dialectGap) reject(queries []codegen.NamedQuery) error {
 		}
 		quoted := make([]string, len(found))
 		for i, f := range found {
-			quoted[i] = strconv.Quote(f.text)
-			if f.line > 0 {
-				quoted[i] += fmt.Sprintf(" at %d:%d", f.line, f.column)
-			}
+			quoted[i] = fmt.Sprintf("%s at %d:%d", strconv.Quote(f.text), f.line, f.column)
 		}
 		dropped = append(dropped, q.Name+" ("+strings.Join(quoted, ", ")+")")
 	}

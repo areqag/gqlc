@@ -79,9 +79,13 @@ func TestUnqualifiedFunctionCallsReadsTheText(t *testing.T) {
 			want: []string{"date", "duration"},
 		},
 		{
-			name: "the same name written twice is reported once",
+			// Two calls, not one. They are two calls the author has to
+			// rewrite, and dropping the repeat made a query calling `date()`
+			// twice read as a query calling it once (bd gqlc-fpl14). The
+			// position is what tells them apart; that is the test below.
+			name: "the same name written twice is reported twice",
 			src:  "MATCH (p:Person) WHERE p.a < date() AND p.b < date() RETURN p.id",
-			want: []string{"date"},
+			want: []string{"date", "date"},
 		},
 		{
 			// Two spellings of one name are two answers, because the
@@ -137,6 +141,105 @@ func TestUnqualifiedFunctionCallsReadsTheText(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, callTexts(cypher.UnqualifiedFunctionCalls(tc.src)))
+		})
+	}
+}
+
+// callTexts is the spellings alone, for the rows above, which are about WHAT
+// is read out of a text rather than where each one sits.
+func callTexts(calls []cypher.Call) []string {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]string, len(calls))
+	for i, c := range calls {
+		out[i] = c.Text
+	}
+	return out
+}
+
+// TestUnqualifiedFunctionCallsLocatesEachOne is the other half: the
+// coordinate, which is the only thing separating two invocations of one name.
+//
+// Every expected position here was counted off the source by hand rather than
+// recorded from a run, because a coordinate copied out of the answer it is
+// meant to check certifies itself. Two conventions are asserted at once and
+// both are off-by-one hazards: the line is ANTLR's, which counts from 1, and
+// the column is NOT — ANTLR counts a line's characters from 0, so every row
+// here would be one short if the conversion were dropped.
+//
+// The rows vary the two axes independently on purpose. Two calls sharing a
+// line differ only in the column, two on different lines at one column differ
+// only in the line, and one row sits where the line and the column are not
+// equal, so a coordinate that swapped them reds.
+func TestUnqualifiedFunctionCallsLocatesEachOne(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  string
+		want []cypher.Call
+	}{
+		{
+			// "RETURN " is 7 characters, so the name's 'd' is the 8th.
+			name: "the position is the name's first character",
+			src:  "RETURN datetime() AS now",
+			want: []cypher.Call{{Text: "datetime", Line: 1, Column: 8}},
+		},
+		{
+			// "MATCH " is 6, "(p:Person)" takes 7-16, " WHERE" ends at
+			// 22, " p.at" at 27, " <" at 29 and " " at 30, so the first
+			// name begins at 31. It is 8 characters, "()" ends at 40,
+			// " AND" at 44, " p.until" at 52, " >" at 54 and " " at 55,
+			// so the second begins at 56.
+			name: "two invocations of one name on one line differ by the column",
+			src:  "MATCH (p:Person) WHERE p.at < datetime() AND p.until > datetime() RETURN p.id",
+			want: []cypher.Call{
+				{Text: "datetime", Line: 1, Column: 31},
+				{Text: "datetime", Line: 1, Column: 56},
+			},
+		},
+		{
+			// Both predicate lines carry the same 13 characters before
+			// the name — "WHERE p.at < " and "  AND p.at < " are the
+			// same length — so the two differ in the line alone.
+			name: "two invocations of one name on two lines differ by the line",
+			src: "MATCH (p:Person)\n" +
+				"WHERE p.at < datetime()\n" +
+				"  AND p.at < datetime()\n" +
+				"RETURN p.id",
+			want: []cypher.Call{
+				{Text: "datetime", Line: 2, Column: 14},
+				{Text: "datetime", Line: 3, Column: 14},
+			},
+		},
+		{
+			// Neither axis equals the other, so a coordinate reporting
+			// the column as the line reds here and nowhere else.
+			name: "a line and a column that are not equal",
+			src: "MATCH (p:Person)\n" +
+				"RETURN datetime() AS now",
+			want: []cypher.Call{{Text: "datetime", Line: 2, Column: 8}},
+		},
+		{
+			// "RETURN " is 7 and "toString" takes 8-15, so the '(' is
+			// 16 and the inner name begins at 17. Pre-order, so the
+			// outer one is first, and the two columns separate them.
+			name: "a nested call locates both names",
+			src:  "RETURN toString(datetime()) AS s",
+			want: []cypher.Call{
+				{Text: "toString", Line: 1, Column: 8},
+				{Text: "datetime", Line: 1, Column: 17},
+			},
+		},
+		{
+			// §oC_FunctionInvocation puts SP? between the name and the
+			// '(', so the space is past the position and cannot move it.
+			name: "a space before the paren does not move the name's position",
+			src:  "RETURN datetime () AS now",
+			want: []cypher.Call{{Text: "datetime", Line: 1, Column: 8}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, cypher.UnqualifiedFunctionCalls(tc.src))
 		})
 	}
@@ -157,7 +260,7 @@ func TestQualifiedFunctionCallsReadsTheText(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		src  string
-		want []cypher.QualifiedCall
+		want []namespacedCall
 	}{
 		{
 			name: "no call is no answer",
@@ -167,7 +270,7 @@ func TestQualifiedFunctionCallsReadsTheText(t *testing.T) {
 		{
 			name: "a qualified call is reported by namespace and spelling",
 			src:  "MATCH (p:Person) RETURN duration.between(p.a, p.b) AS d",
-			want: []cypher.QualifiedCall{{Namespace: "duration", Text: "duration.between"}},
+			want: []namespacedCall{{namespace: "duration", text: "duration.between"}},
 		},
 		{
 			// Load-bearing, not politeness. shape.go lowercases namespace
@@ -176,7 +279,7 @@ func TestQualifiedFunctionCallsReadsTheText(t *testing.T) {
 			// reading here would let it past the gate that must answer it.
 			name: "the namespace is lowercased and the spelling is the author's",
 			src:  "MATCH (p:Person) RETURN Duration.Between(p.a, p.b) AS d",
-			want: []cypher.QualifiedCall{{Namespace: "duration", Text: "Duration.Between"}},
+			want: []namespacedCall{{namespace: "duration", text: "Duration.Between"}},
 		},
 		{
 			// The partition the two scans rest on: an invocation is
@@ -194,50 +297,56 @@ func TestQualifiedFunctionCallsReadsTheText(t *testing.T) {
 			// equal.
 			name: "a multi-part namespace is joined by dots",
 			src:  "MATCH (p:Person) RETURN com.example.between(p.a, p.b) AS d",
-			want: []cypher.QualifiedCall{{Namespace: "com.example", Text: "com.example.between"}},
+			want: []namespacedCall{{namespace: "com.example", text: "com.example.between"}},
 		},
 		{
 			// The shape the model cannot answer for. Predicate structure
 			// is dropped (ADR 0003), so nothing but the text carries this.
 			name: "a call in a predicate the model drops still counts",
 			src:  "MATCH (p:Person) WHERE p.d < duration.between(p.a, p.b) RETURN p.id",
-			want: []cypher.QualifiedCall{{Namespace: "duration", Text: "duration.between"}},
+			want: []namespacedCall{{namespace: "duration", text: "duration.between"}},
 		},
 		{
 			name: "a call in a write clause that projects nothing still counts",
 			src:  "MATCH (p:Person) CREATE (e:Event {d: duration.between(p.a, p.b)})",
-			want: []cypher.QualifiedCall{{Namespace: "duration", Text: "duration.between"}},
+			want: []namespacedCall{{namespace: "duration", text: "duration.between"}},
 		},
 		{
 			name: "a call under SET still counts",
 			src:  "MATCH (p:Person) SET p.d = duration.between(p.a, p.b)",
-			want: []cypher.QualifiedCall{{Namespace: "duration", Text: "duration.between"}},
+			want: []namespacedCall{{namespace: "duration", text: "duration.between"}},
 		},
 		{
 			name: "a call inside EXISTS counts, because the server parses it too",
 			src:  "MATCH (p:Person) WHERE exists { (p)-[:AUTHORED]->(o:Post) WHERE o.d > duration.between(p.a, p.b) }\nRETURN p.id",
-			want: []cypher.QualifiedCall{{Namespace: "duration", Text: "duration.between"}},
+			want: []namespacedCall{{namespace: "duration", text: "duration.between"}},
 		},
 		{
 			name: "a nested call reports both, outermost first",
 			src:  "MATCH (p:Person) RETURN duration.between(p.a, duration.inSeconds(p.b)) AS d",
-			want: []cypher.QualifiedCall{
-				{Namespace: "duration", Text: "duration.between"},
-				{Namespace: "duration", Text: "duration.inSeconds"},
+			want: []namespacedCall{
+				{namespace: "duration", text: "duration.between"},
+				{namespace: "duration", text: "duration.inSeconds"},
 			},
 		},
 		{
 			name: "two calls are reported in source order",
 			src:  "MATCH (p:Person) WHERE p.a < duration.between(p.x, p.y) AND p.b < point.distance(p.u, p.v) RETURN p.id",
-			want: []cypher.QualifiedCall{
-				{Namespace: "duration", Text: "duration.between"},
-				{Namespace: "point", Text: "point.distance"},
+			want: []namespacedCall{
+				{namespace: "duration", text: "duration.between"},
+				{namespace: "point", text: "point.distance"},
 			},
 		},
 		{
-			name: "the same spelling written twice is reported once",
+			// Two calls, not one, for the reason the unqualified scan
+			// gives: two calls the author has to rewrite, and only the
+			// position tells them apart (bd gqlc-fpl14).
+			name: "the same spelling written twice is reported twice",
 			src:  "MATCH (p:Person) WHERE p.a < duration.between(p.x, p.y) AND p.b < duration.between(p.u, p.v) RETURN p.id",
-			want: []cypher.QualifiedCall{{Namespace: "duration", Text: "duration.between"}},
+			want: []namespacedCall{
+				{namespace: "duration", text: "duration.between"},
+				{namespace: "duration", text: "duration.between"},
+			},
 		},
 		{
 			// Two spellings of one name are two answers, on the same terms
@@ -245,9 +354,9 @@ func TestQualifiedFunctionCallsReadsTheText(t *testing.T) {
 			// wrote and here there are two texts to quote.
 			name: "two cases of one name are both reported",
 			src:  "MATCH (p:Person) WHERE p.a < duration.between(p.x, p.y) AND p.b < Duration.Between(p.u, p.v) RETURN p.id",
-			want: []cypher.QualifiedCall{
-				{Namespace: "duration", Text: "duration.between"},
-				{Namespace: "duration", Text: "Duration.Between"},
+			want: []namespacedCall{
+				{namespace: "duration", text: "duration.between"},
+				{namespace: "duration", text: "Duration.Between"},
 			},
 		},
 		{
@@ -288,7 +397,107 @@ func TestQualifiedFunctionCallsReadsTheText(t *testing.T) {
 			// qualified name.
 			name: "a space before the paren is outside the quoted name",
 			src:  "MATCH (p:Person) RETURN duration.between (p.a, p.b) AS d",
-			want: []cypher.QualifiedCall{{Namespace: "duration", Text: "duration.between"}},
+			want: []namespacedCall{{namespace: "duration", text: "duration.between"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, namespacedCalls(cypher.QualifiedFunctionCalls(tc.src)))
+		})
+	}
+}
+
+// namespacedCall is a qualified call's namespace and spelling without its
+// position, for the rows above, which are about WHAT is read out of a text
+// rather than where each one sits. Both fields, because the lowercasing row
+// is precisely about the two differing.
+type namespacedCall struct {
+	namespace string
+	text      string
+}
+
+func namespacedCalls(calls []cypher.QualifiedCall) []namespacedCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]namespacedCall, len(calls))
+	for i, c := range calls {
+		out[i] = namespacedCall{namespace: c.Namespace, text: c.Text}
+	}
+	return out
+}
+
+// TestQualifiedFunctionCallsLocatesEachOne is the coordinate half, on the
+// same terms as the unqualified scan's: hand-counted expectations, the two
+// axes varied independently, and one row where the line and the column are
+// not equal so a swap has somewhere to red.
+//
+// One claim is this scan's alone. §oC_FunctionName is `oC_Namespace
+// oC_SymbolicName` and Text quotes the WHOLE of it, so the position has to
+// name the namespace's first character rather than the bare name's, or the
+// coordinate and the quoted spelling would point at different characters.
+func TestQualifiedFunctionCallsLocatesEachOne(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  string
+		want []cypher.QualifiedCall
+	}{
+		{
+			// "MATCH " is 6, "(p:Person)" takes 7-16, " RETURN" ends at
+			// 23 and " " is 24, so the namespace's 'd' is the 25th. The
+			// bare name begins at 34, so a position taken off
+			// oC_SymbolicName reds here.
+			name: "the position is the namespace's first character, not the bare name's",
+			src:  "MATCH (p:Person) RETURN duration.between(p.a, p.b) AS d",
+			want: []cypher.QualifiedCall{
+				{Namespace: "duration", Text: "duration.between", Line: 1, Column: 25},
+			},
+		},
+		{
+			// The same prefix through " p.a" (26), " <" (28) and " "
+			// (29), so the first begins at 30. "duration.between" is 16
+			// characters ending at 45, "(p.x, p.y)" at 55, " AND" at 59,
+			// " p.b" at 63, " <" at 65 and " " at 66, so the second
+			// begins at 67.
+			name: "two invocations of one spelling on one line differ by the column",
+			src: "MATCH (p:Person) WHERE p.a < duration.between(p.x, p.y) " +
+				"AND p.b < duration.between(p.u, p.v) RETURN p.id",
+			want: []cypher.QualifiedCall{
+				{Namespace: "duration", Text: "duration.between", Line: 1, Column: 30},
+				{Namespace: "duration", Text: "duration.between", Line: 1, Column: 67},
+			},
+		},
+		{
+			// "WHERE p.a < " and "  AND p.a < " are both 12 characters,
+			// so the two differ in the line alone.
+			name: "two invocations of one spelling on two lines differ by the line",
+			src: "MATCH (p:Person)\n" +
+				"WHERE p.a < duration.between(p.x, p.y)\n" +
+				"  AND p.a < duration.between(p.u, p.v)\n" +
+				"RETURN p.id",
+			want: []cypher.QualifiedCall{
+				{Namespace: "duration", Text: "duration.between", Line: 2, Column: 13},
+				{Namespace: "duration", Text: "duration.between", Line: 3, Column: 13},
+			},
+		},
+		{
+			// "RETURN " is 7, so the name begins at 8 on line 2 and
+			// neither axis equals the other.
+			name: "a line and a column that are not equal",
+			src: "MATCH (p:Person)\n" +
+				"RETURN duration.between(p.a, p.b) AS d",
+			want: []cypher.QualifiedCall{
+				{Namespace: "duration", Text: "duration.between", Line: 2, Column: 8},
+			},
+		},
+		{
+			// A multi-part namespace is located at its FIRST part, which
+			// is where Text starts. "example" begins at 29, so a
+			// position taken off the last part reds here.
+			name: "a multi-part namespace is located at its first part",
+			src:  "MATCH (p:Person) RETURN com.example.between(p.a, p.b) AS d",
+			want: []cypher.QualifiedCall{
+				{Namespace: "com.example", Text: "com.example.between", Line: 1, Column: 25},
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -305,10 +514,10 @@ func TestQualifiedFunctionCallsReadsTheText(t *testing.T) {
 func TestTheTwoFunctionScansPartitionTheCalls(t *testing.T) {
 	const src = "MATCH (p:Person) WHERE p.a < duration({days: 1}) AND p.b < duration.between(p.x, p.y) RETURN p.id"
 
-	require.Equal(t, []string{"duration"}, cypher.UnqualifiedFunctionCalls(src))
+	require.Equal(t, []string{"duration"}, callTexts(cypher.UnqualifiedFunctionCalls(src)))
 	require.Equal(t,
-		[]cypher.QualifiedCall{{Namespace: "duration", Text: "duration.between"}},
-		cypher.QualifiedFunctionCalls(src))
+		[]namespacedCall{{namespace: "duration", text: "duration.between"}},
+		namespacedCalls(cypher.QualifiedFunctionCalls(src)))
 }
 
 // TestQualifiedFunctionCallsAgreesWithTheParserOnTheAcceptedTexts is the
