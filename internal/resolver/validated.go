@@ -284,7 +284,38 @@ const (
 	ScalarNull
 	// ScalarMap is a map literal.
 	ScalarMap
+
+	// ScalarCount is how many members the vocabulary has, taken from iota
+	// one line past the last of them rather than from that member's
+	// ordinal, for the reason [TemporalCount] gives at length: a kind
+	// appended above leaves the last member's ordinal alone, so
+	// `int(ScalarMap)+1` would stay 6 and a sweep sized by it would go on
+	// claiming to be whole while missing the new kind. This moves.
+	//
+	// Typed int rather than Scalar so it is a count and not a value, which
+	// also keeps it out of the enum: an exhaustive switch over Scalar
+	// neither needs an arm for it nor may have one.
+	ScalarCount int = iota
 )
+
+// ScalarValues is the whole scalar vocabulary in declaration order.
+//
+// It exists so a sweep can state MEMBERSHIP rather than size. A test
+// holding its table to len(table) == ScalarCount passes on a table that
+// names one kind twice and another not at all, which is the shape a
+// hand-edited table actually takes; comparing against this answers which
+// kinds are missing by name (bd gqlc-fb4a).
+//
+// Built from the [ScalarCount] sentinel rather than from a written-out
+// list, so it cannot fall behind the constant block the way a second
+// enumeration would.
+func ScalarValues() []Scalar {
+	vs := make([]Scalar, ScalarCount)
+	for i := range vs {
+		vs[i] = Scalar(i)
+	}
+	return vs
+}
 
 // String is the wire tag ("bool" / "int" / "float" / "string" / "null" /
 // "map"). Single source the JSON encoding derives from.
@@ -361,6 +392,17 @@ const (
 	// neither needs an arm for it nor may have one.
 	TemporalCount int = iota
 )
+
+// TemporalValues is the whole temporal vocabulary in declaration order,
+// and exists for the reason [ScalarValues] does: a sweep states which
+// kinds it covers, not how many.
+func TemporalValues() []Temporal {
+	vs := make([]Temporal, TemporalCount)
+	for i := range vs {
+		vs[i] = Temporal(i)
+	}
+	return vs
+}
 
 // String is the wire tag ("date" / "time" / "localtime" / "datetime" /
 // "localdatetime" / "duration"). Single source the JSON encoding derives
