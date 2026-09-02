@@ -186,18 +186,87 @@ scalar kinds is a decode helper, which is a different fix — below.
   neo4j half is a driver's behaviour rather than this repository's, and nothing
   here gates it.
 
-  Two bounds this does not cross. An integer member outside `int64` range
+  One bound this does not cross. An integer member outside `int64` range
   decodes as `float64` on AGE, where `agtypeInt64` fails and `agtypeValue` falls
   through to the float parse; the driver reads every packed integer marker
   through `Int() int64`, so that is a value the neo4j path does not carry rather
-  than one the two decode differently. And a member holding a temporal, a point,
-  a byte array, or a v6 vector or UUID was not measured.
+  than one the two decode differently. AGE spells such a value with an
+  annotation, and both integer and float helpers strip it by hand
+  (`strings.TrimSuffix(…, "::numeric")`), so the width alone decides which one
+  answers: `3::numeric` reaches the caller as `int64` and
+  `123456789012345678901234567890::numeric` as `float64(1.2345678901234568e+29)`.
+  `TestAgtypeValue` pins the annotated rows at both widths that fit and the
+  unannotated overflow; the annotated overflow is measured here and not gated,
+  since it is those two behaviours composed rather than a third.
 
   What never depended on the answer is that `TestBackendInvariantSurface`
   compares declarations — it nils each method body and passes over the
   receiver-less decode helpers, which is where this behaviour lives — so it
   would not see a divergence of this shape either way. It also skips a fixture
   enrolled in fewer than two targets, and `scalar_map` is enrolled in one.
+
+- A member holding a temporal, a spatial value, a byte array, or a v6 vector or
+  UUID carries the same Go type as the identical value at the top level, on both
+  driver majors — and on neo4j that is structural rather than sampled, so it
+  holds for kinds nobody packed. `record` fills `rec.Values[i] = h.value()` and
+  `amap` fills `m[key] = h.value()`: the same method, entered with the same
+  `unp.Curr`, in v5.28.4 and v6.2.0 alike. There is no per-kind bound to look
+  for because the one call site covers every kind `value` can return. That is
+  the answer to the question `gqlc-c4mb` raised — the rows below check the
+  reading, they do not enumerate the set.
+
+  Each row packed ONE `RECORD` carrying the value twice, bare as field 0 and as
+  the single member of a map as field 1, so a difference could not come from
+  hydrator state drifting between two runs, and hydrated it with the driver's
+  own `hydrator` (`boltMajor: 5`, `useUtc: true`; v6 additionally
+  `supportsUuid: true`). Both majors: `'D'` → `dbtype.Date`, `'t'` →
+  `dbtype.LocalTime`, `'T'` → `dbtype.Time`, `'d'` → `dbtype.LocalDateTime`,
+  `'I'` and `'i'` → `time.Time`, `'E'` → `dbtype.Duration`, `'X'` →
+  `dbtype.Point2D`, `'Y'` → `dbtype.Point3D`, a packed byte array → `[]uint8`.
+  v6 only: `'V'` → `dbtype.Vector[float64]`, and the `0xE0` UUID →
+  `dbtype.UUID` — that last one is not a struct tag, so it reaches its answer
+  through a different branch of `value` than every other row here. The two
+  controls answered: an integer bare against a float nested reported the pair
+  unequal, and the same value stored under a key the reader does not ask for
+  reported the member absent.
+
+  `useUtc: true` means `'F'` and `'f'`, the pre-UTC datetime spellings, were not
+  packed — `value` refuses them outright in that mode. The structural argument
+  above covers them; a row does not.
+
+  The two datetime tags are worth naming on their own, twice over. A zoned
+  datetime member is the one kind here whose carrier is not a driver alias — it
+  arrives as bare `time.Time`, so it is indistinguishable by type from any other
+  `time.Time` a member might hold. And `'i'` is the one kind whose carrier is
+  not decided by the wire bytes alone: it carries a zone NAME, and
+  `utcDateTimeNamedZone` answers a name `time.LoadLocation` cannot resolve with
+  `*dbtype.InvalidValue` instead. Both outcomes were measured, and the second
+  one by accident: `Asia/Yerevan` gives `time.Time` on both majors, and the
+  probe read `*dbtype.InvalidValue` on both majors while it had the zone
+  misspelt as `Europe/Yerevan`. So a caller type-switching on `time.Time` has a
+  row it can miss for a reason no other kind here has.
+
+  Whether a correctly spelt name can also miss — on a host whose zone database
+  does not carry it — is the reading of `time.LoadLocation` and is NOT measured
+  here. `ZONEINFO` pointed at an empty directory does not falsify it: the
+  resolution fell through to the system database and answered `time.Time`
+  anyway, so this host cannot produce the absence.
+
+  AGE has no answer to compare for any of those kinds, and the reason is
+  structural on that side too: `agtypeValue`'s switch can return `string`,
+  `[]any`, `map[string]any`, a nil `any`, `bool`, `int64` and `float64`, and
+  nothing else. Run against the shipped `schema_any_property` helper it
+  reproduces the seven rows above, answers `"\\x0102"` and `"2026-09-01"` with
+  `string` because they are strings, and refuses `zzz`. So each of these kinds
+  is a value the AGE path does not carry, the same shape as the out-of-range
+  integer, rather than one the two backends decode differently.
+
+  What that does not witness, beyond the limits the previous bullet already
+  states. It does not witness that a server places any of these kinds inside a
+  map — only what the decoder does when one arrives. And on the AGE side the
+  claim that no temporal can arrive at all rests on the `ag_catalog` sweep
+  recorded at `age.typeMap.Temporal`, which is provenance from spike
+  `gqlc-35yu.5` against AGE 1.7.0 and was not re-run here.
 
 - Only the AGE generator wraps `ErrUnrepresentableTemporal` (and
   `ErrUnrepresentableWidth`) with its own name. Neither neo4j backend does, so a
