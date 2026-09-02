@@ -170,9 +170,10 @@ const ParamArg = "arg"
 // are not. This one lands in the unexported namespace the decode<Entity>
 // helpers occupy, and those derive from schema labels rather than from
 // method names, so the two can meet: a node label FooQueryText alongside
-// a query named DecodeFoo emits decodeFooQueryText as both a const and a
-// func. The const is off sweepIdentifiers, so generation exits 0 and the
-// redeclaration surfaces at go build. That collision is gqlc-igs4.
+// a query named DecodeFoo derives decodeFooQueryText as both a const and
+// a func. sweepIdentifiers carries this as source 7 and refuses the pair
+// at generate time (bd gqlc-igs4); before it did, generation exited 0 and
+// the redeclaration surfaced at go build.
 func QueryTextConst(p Query) string {
 	return p.Bare + "QueryText"
 }
