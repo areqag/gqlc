@@ -13,9 +13,11 @@ author picked "the next free number" by reading master.
 
 MEASURED 2026-09-01 by Այգ, and the repository was carrying a live instance
 while this was written. master's highest ADR ordinal was 0037, so the naive read
-offered 0038 -- and 0038 already existed on
-origin/feat/gqlc-7aw2j-wrong-orientation-drop-warning, an open PR. An author
-allocating that day from master alone would have collided, exactly as PR #2105
+offered 0038 -- and 0038 already existed on the branch of PR #2126, open at the
+time and merged the next day. The PR number is cited rather than the branch name
+this script actually matched on, because a merged PR's branch is eventually
+deleted and a citation nobody can resolve reads later as a claim nobody checked.
+An author allocating that day from master alone would have collided, as PR #2105
 collided with PR #2093 over 0036 the day before. Both reads of master were
 correct when they were made. That is the whole defect: master is not the
 allocation namespace, and nothing told anybody so.
