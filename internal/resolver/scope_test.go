@@ -221,6 +221,105 @@ func TestScopeBindCallClearsASeededResolvedCoversMark(t *testing.T) {
 		"a mark qualifying a `resolved` entry a CALL shadow removed must not outlive it")
 }
 
+// The two tests below drive BindCall's parser-drift tripwires — the registry
+// miss and the arity mismatch. No query reaches either: cypher/call.go's
+// collectCall fails first with ErrUnknownProcedure and ErrProcedureArity, which
+// is the parser-authoritative trust posture BindCall's own comment states. They
+// are drivable here anyway because BindCall takes the registry as an argument,
+// so a scope-level caller can hand it a registry no parser would have passed.
+//
+// Asserted on the MESSAGE, which is unusual in this package and deliberate.
+// scope.go returns these two as plain non-sentinel errors precisely so a drift
+// bug cannot pollute ErrCallArgAssignability's fixture semantics — so there is
+// no errors.Is to lean on, and the wording is the whole of the contract.
+//
+// Both are guarded by `len(args) > 0`, so both carry a tripwire that the args
+// slice is non-empty: without it a binding that never entered the guarded block
+// would report "no error" and pass the control half while testing nothing. Each
+// also carries a CONTROL that the same registry admits a call it should, so a
+// Lookup wired to miss unconditionally cannot pass the refusing half for the
+// wrong reason.
+
+func TestScopeBindCallRefusesAProcedureMissingFromTheRegistry(t *testing.T) {
+	// A populated registry, not an empty one: the claim is that the refusal is
+	// about this NAME. An empty registry would also be refused by a Lookup that
+	// had stopped consulting its argument at all.
+	reg, err := procsig.NewRegistry([]procsig.Signature{{
+		Name:   "test.present",
+		Params: []procsig.Param{{Name: "n", Token: procsig.TokenInteger}},
+	}})
+	require.NoError(t, err)
+	args := []query.CallArg{query.NewCallArg(query.TypeInt{})}
+
+	sc := newScope(branchState{})
+	sc.Ingest(query.Part{})
+	cb, err := query.NewCallBindingWithArgs("c", "test.absent", "value", query.TypeInt{}, false, args)
+	require.NoError(t, err)
+	require.NotEmpty(t, cb.Args(), "args must be non-empty, or BindCall's guarded block never runs")
+
+	require.EqualError(t, sc.BindCall(cb, reg),
+		`resolver: procedure "test.absent" missing from registry (parser drift)`)
+	require.NotContains(t, sc.callTypes, "c", "a refused CALL must not enter the call lane")
+
+	// Control: same registry, same args, a name it does hold.
+	ctl := newScope(branchState{})
+	ctl.Ingest(query.Part{})
+	held, err := query.NewCallBindingWithArgs("c", "test.present", "value", query.TypeInt{}, false, args)
+	require.NoError(t, err)
+	require.NoError(t, ctl.BindCall(held, reg),
+		"the registry must admit a name it holds, or the refusal above is not about the name")
+}
+
+func TestScopeBindCallRefusesAnArityMismatch(t *testing.T) {
+	reg, err := procsig.NewRegistry([]procsig.Signature{{
+		Name: "test.two",
+		Params: []procsig.Param{
+			{Name: "a", Token: procsig.TokenInteger},
+			{Name: "b", Token: procsig.TokenInteger},
+		},
+	}})
+	require.NoError(t, err)
+	intArg := func(n int) []query.CallArg {
+		out := make([]query.CallArg, n)
+		for i := range out {
+			out[i] = query.NewCallArg(query.TypeInt{})
+		}
+		return out
+	}
+
+	// Both directions, because the guard is load-bearing differently in each.
+	// Under-supply falls through to an assignability loop that would find every
+	// arg assignable and admit the call; over-supply would index sig.Params past
+	// its end. The second is why this guard is not merely a better message.
+	for _, tc := range []struct {
+		name string
+		args []query.CallArg
+		want string
+	}{
+		{"fewer args than params", intArg(1), `resolver: procedure "test.two" expects 2 arguments, got 1 (parser drift)`},
+		{"more args than params", intArg(3), `resolver: procedure "test.two" expects 2 arguments, got 3 (parser drift)`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := newScope(branchState{})
+			sc.Ingest(query.Part{})
+			cb, err := query.NewCallBindingWithArgs("c", "test.two", "value", query.TypeInt{}, false, tc.args)
+			require.NoError(t, err)
+			require.NotEmpty(t, cb.Args(), "args must be non-empty, or BindCall's guarded block never runs")
+
+			require.EqualError(t, sc.BindCall(cb, reg), tc.want)
+			require.NotContains(t, sc.callTypes, "c", "a refused CALL must not enter the call lane")
+		})
+	}
+
+	// Control: the same registry and procedure at the arity it declares.
+	ctl := newScope(branchState{})
+	ctl.Ingest(query.Part{})
+	matched, err := query.NewCallBindingWithArgs("c", "test.two", "value", query.TypeInt{}, false, intArg(2))
+	require.NoError(t, err)
+	require.NoError(t, ctl.BindCall(matched, reg),
+		"a matching arity must be admitted, or the refusals above are not about the count")
+}
+
 func TestScopeSnapshotNarrowing(t *testing.T) {
 	// Snapshot exposes only the five witness lanes. callTypes,
 	// carriedResolvedTypes, carriedGroups, and the ingested Part are
