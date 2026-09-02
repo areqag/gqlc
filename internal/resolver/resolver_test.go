@@ -1351,12 +1351,21 @@ func (s *ResolverSuite) TestAPluralCarryStillRefusesWhereNothingNarrowsIt() {
 // Before this change no carry could hold a plural name at all, so that lane
 // deliberately had no carry seed. Now that one can, an unlabelled binding
 // crossing a WITH would come out the far side reported as a LABEL fault: the
-// query names no label for `p`, so telling its author to disambiguate a label
-// set is advice they cannot act on. The two rows are the same query either
-// side of one WITH, and they must give the same sentinel.
+// query names no label for it, so telling its author to disambiguate a label
+// set is advice they cannot act on.
+//
+// The rows are asserted on the MESSAGE and not only the sentinel, because the
+// two faults reach the reader through two different refusals and only one of
+// them is the carried lane's. Phase B's terminal deferral ("cannot uniquely
+// infer type of unlabelled binding") is also ErrAmbiguousBinding, and it fires
+// in the Part that owns the binding — before any WITH, and without consulting
+// pluralByInference at all. A row that lands there is green whether or not the
+// lane crosses the boundary; the earlier version of this test was three such
+// rows, and dropping both halves of the carry survived it. The rows that bite
+// are the WIDENED ones, whose message is refProjectionType's
+// "is satisfied by more than one declared node type".
 func (s *ResolverSuite) TestACarriedPluralBindingKeepsItsOwnSentinel() {
-	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
-	sentinel := func(src string) error {
+	sentinel := func(sch schema.Schema, src string) error {
 		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
 		s.Require().NoError(err)
 		_, err = New(sch, WithRegistry(regR7)).Resolve(q)
@@ -1364,15 +1373,59 @@ func (s *ResolverSuite) TestACarriedPluralBindingKeepsItsOwnSentinel() {
 		return err
 	}
 
+	// Phase B declines to pick a type for `p` at all, so the refusal never
+	// reaches a projection. Stable across WITHs for the trivial reason that no
+	// WITH is reached — which is exactly why these rows cannot stand alone.
+	reversed := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
 	for _, src := range []string{
 		"MATCH (p)-[r:REVIEWED]->(c:Company) RETURN p",
 		"MATCH (p)-[r:REVIEWED]->(c:Company) WITH p RETURN p",
 		"MATCH (p)-[r:REVIEWED]->(c:Company) WITH p WITH p RETURN p",
 	} {
-		err := sentinel(src)
+		err := sentinel(reversed, src)
 		s.Require().ErrorIs(err, ErrAmbiguousBinding,
 			"%s: p carries no label, so this is an inference fault either side of a WITH", src)
 		s.Require().NotErrorIs(err, ErrAmbiguousLabel, "%s", src)
+		s.Require().ErrorContains(err, `cannot uniquely infer type of unlabelled binding "p"`, "%s", src)
+	}
+
+	// The lane's own rows. `c` is WIDENED here rather than deferred — the
+	// OPTIONAL HAS_DESK hop is not a witness, so Phase B commits both company
+	// types into nodeCands and marks pluralByInference — and the whole-entity
+	// projection that refuses it is now deferred across every WITH in front of
+	// it. The zero-WITH row is the control that says the message and set are
+	// the Part's own answer before any carry is involved; the others say the
+	// carry reproduces it verbatim.
+	inline := s.loadSchema("invalid", "satisfy_plural_edges_inline_subtype.gql")
+	const widened = "MATCH (p:Person)-[q:WORKS_AT]->(c) OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) "
+	for _, src := range []string{
+		widened + "RETURN c",
+		widened + "WITH c RETURN c",
+		widened + "WITH c WITH c RETURN c",
+	} {
+		err := sentinel(inline, src)
+		s.Require().ErrorIs(err, ErrAmbiguousBinding,
+			"%s: c carries no label, so the widened set is an inference fault", src)
+		s.Require().NotErrorIs(err, ErrAmbiguousLabel, "%s", src)
+		s.Require().ErrorContains(err,
+			"c is satisfied by more than one declared node type: Company, Company&Large", "%s", src)
+	}
+
+	// The discriminator. Same schema, same candidate set, same message tail,
+	// same number of WITHs to cross — and a LABEL fault, because `c` is spelled
+	// with one. Without this row every assertion above is satisfied by a
+	// resolver that answers ErrAmbiguousBinding unconditionally.
+	for _, src := range []string{
+		"MATCH (c:Company) RETURN c",
+		"MATCH (c:Company) WITH c RETURN c",
+		"MATCH (c:Company) WITH c WITH c RETURN c",
+	} {
+		err := sentinel(inline, src)
+		s.Require().ErrorIs(err, ErrAmbiguousLabel,
+			"%s: c is spelled with a label, so the same set is a label fault", src)
+		s.Require().NotErrorIs(err, ErrAmbiguousBinding, "%s", src)
+		s.Require().ErrorContains(err,
+			"c is satisfied by more than one declared node type: Company, Company&Large", "%s", src)
 	}
 }
 
