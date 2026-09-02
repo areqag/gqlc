@@ -604,6 +604,42 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 			msg: `unrepresentable property width: query "Fetch" column 0 "x" has INT128`,
 		},
 		{
+			name: "column-unimplemented-kind",
+			why:  "A column carrying a record, on column-width's argument one step further along: Phase Z walks the schema and refuses a declared record property there, so a column reaching the kind check is one no declared property backs. The resolver types a column from a schema property or from callProjectionType, and neither yields a kind Phase Z has not already refused.",
+			in: codegen.Input{
+				Schema:  probeSchema(),
+				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{Name: "r", Type: resolver.ResolvedProperty{Type: graph.RecordOf([]graph.RecordField{{Name: "a", Type: graph.TypeInt32}})}})},
+			},
+			is:  codegen.ErrUnimplementedTypeKind,
+			msg: `property type kind not implemented yet: query "Fetch" column 0 "r" has RECORD<a INT32>`,
+		},
+		{
+			name: "param-unimplemented-kind",
+			why:  "A parameter carrying a union, on param-width's argument. The union rather than a record so that the two kinds gqlc has no emission for are each carried by a live case here; the sites do not distinguish them, and a check narrowed to records alone would leave this the only red.",
+			in: codegen.Input{
+				Schema: probeSchema(),
+				Queries: []codegen.NamedQuery{probeParamQuery(resolver.ResolvedParameter{
+					Name: "p",
+					Type: resolver.ResolvedProperty{Type: graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})},
+				})},
+			},
+			is:  codegen.ErrUnimplementedTypeKind,
+			msg: `property type kind not implemented yet: query "Fetch" parameter 0 $p has UNION<INT32|STRING>`,
+		},
+		{
+			name: "list-elem-unimplemented-kind",
+			why:  "A ResolvedList over a ResolvedProperty carrying a record, on list-elem-width's argument. The element is spelled as a bare record rather than a LIST<RECORD<…>> property because that is the shape this SITE takes: Phase B splits a list property into its element before reaching here, so the nesting the walk exists to see through is exercised at the unit level and the reach measured here is the site's own.",
+			in: codegen.Input{
+				Schema: probeSchema(),
+				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{
+					Name: "rs",
+					Type: resolver.ResolvedList{Element: resolver.ResolvedProperty{Type: graph.RecordOf([]graph.RecordField{{Name: "a", Type: graph.TypeInt32}})}},
+				})},
+			},
+			is:  codegen.ErrUnimplementedTypeKind,
+			msg: `query "Fetch" column 0 "rs": property type kind not implemented yet: list element has RECORD<a INT32>`,
+		},
+		{
 			name: "column-unknown-node",
 			why:  "A ResolvedNode naming labels the schema does not declare. The resolver resolves against the same schema Phase Z indexed.",
 			in: codegen.Input{

@@ -1591,3 +1591,234 @@ func rawLiteralValue(text string) (string, bool) {
 	}
 	return "", false
 }
+
+// unknownWidthTypeMap refuses one width outright and admits the rest,
+// which is what a real dialect table does with a width it has no case
+// for: neo4j's Property falls off the end of its switch and returns
+// ok=false (internal/codegen/neo4j/types.go:30). stubTypeMap admits
+// every width but DECIMAL, so without this wrapper the rows below could
+// only measure the permissive answer, and the ordering claim — that the
+// kind question is asked BEFORE the carrier question — would have
+// nothing to bite on.
+type unknownWidthTypeMap struct {
+	stubTypeMap
+	refuse graph.PropertyType
+}
+
+func (m unknownWidthTypeMap) Property(pt graph.PropertyType) (string, bool) {
+	if pt == m.refuse {
+		return "", false
+	}
+	return m.stubTypeMap.Property(pt)
+}
+
+// TestUnimplementedKindRefusedBeforeTheCarrierQuestion pins the refusal
+// gqlc-h9n.33 owes the rest of the pipeline. The schema front end now
+// resolves RECORD and closed dynamic unions to a PropertyType carrying
+// its parts, and no backend emits either kind, so every position that
+// asks a TypeMap for a carrier has to refuse the kind first.
+//
+// Two different things go wrong without that, and they need separate
+// typeMaps to tell apart.
+//
+// Under a dialect table the kind reaches a switch with no case for it
+// and leaves as ok=false, so the caller is told ErrUnrepresentableWidth
+// — that the backend has no Go type WIDE enough, which sends them to
+// change the declared width. There is no width to change: the answer is
+// that gqlc has built no emission for the kind at all. Every row's
+// NotErrorIs is what witnesses that, and it is the reason the refusal
+// cannot simply be left to the tables.
+//
+// Under a permissive table the kind is not refused at all — stubTypeMap
+// answers "property:RECORD<a INT32>", and generation would emit that
+// string as a Go type. So the refusal must not depend on a table
+// refusing, which is a claim only a table that admits everything can
+// make.
+//
+// The list rows are the shallow-walk falsifier: a check that asks
+// Kind() at the top and stops admits LIST<RECORD<…>>, whose record then
+// dies inside the table as a width error — the exact confusion this
+// test exists to forbid, one level down and invisible to every other
+// row.
+func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
+	entities, index := listPlanTestFixture(t)
+	person := graph.LabelSetKey("Person")
+
+	record := graph.RecordOf([]graph.RecordField{{Name: "a", Type: graph.TypeInt32}})
+	union := graph.UnionOf([]graph.UnionMember{
+		{Type: graph.TypeInt32},
+		{Type: graph.TypeString},
+	})
+
+	// Every position that asks a TypeMap for a property carrier. The
+	// four are prepare.go's entity-property, query-column,
+	// query-parameter and list-element sweeps; a fifth appearing later
+	// with no row here is a hole this test cannot see, so a new
+	// tm.Property call site owes this table an entry.
+	positions := []struct {
+		name string
+		run  func(pt graph.PropertyType, tm codegen.TypeMap) error
+	}{{
+		name: "entity property",
+		run: func(pt graph.PropertyType, tm codegen.TypeMap) error {
+			_, _, err := codegen.PhaseZAdmit(schema.Schema{
+				Name: "Test",
+				Nodes: map[graph.LabelSetKey]schema.NodeType{
+					person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{
+						"p": {Name: "p", Type: pt},
+					}},
+				},
+			}, tm)
+			return err
+		},
+	}, {
+		name: "query column",
+		run: func(pt graph.PropertyType, tm codegen.TypeMap) error {
+			_, err := codegen.Prepare(codegen.Input{
+				Schema: schema.Schema{Name: "Test"},
+				Queries: []codegen.NamedQuery{{
+					Name:        "GetP",
+					Cardinality: codegen.CardinalityOne,
+					SourceText:  "MATCH (n) RETURN n.p AS p",
+					Validated: resolver.ValidatedQuery{
+						Columns: []resolver.Column{{Name: "p", Type: resolver.ResolvedProperty{Type: pt}}},
+					},
+				}},
+			}, tm, "")
+			return err
+		},
+	}, {
+		name: "query parameter",
+		run: func(pt graph.PropertyType, tm codegen.TypeMap) error {
+			_, err := codegen.Prepare(codegen.Input{
+				Schema: schema.Schema{Name: "Test"},
+				Queries: []codegen.NamedQuery{{
+					Name:        "GetP",
+					Cardinality: codegen.CardinalityOne,
+					SourceText:  "MATCH (n) WHERE n.p = $p RETURN n.q AS q",
+					Validated: resolver.ValidatedQuery{
+						Columns:    []resolver.Column{{Name: "q", Type: resolver.ResolvedProperty{Type: graph.TypeInt32}}},
+						Parameters: []resolver.ResolvedParameter{{Name: "p", Type: resolver.ResolvedProperty{Type: pt}}},
+					},
+				}},
+			}, tm, "")
+			return err
+		},
+	}, {
+		name: "list element",
+		run: func(pt graph.PropertyType, tm codegen.TypeMap) error {
+			_, err := codegen.BuildListElemPlan(resolver.ResolvedProperty{Type: pt}, entities, index, tm, -1, "")
+			return err
+		},
+	}}
+
+	refused := []struct {
+		name string
+		pt   graph.PropertyType
+	}{
+		{"a record with fields", record},
+		{"a record whose fields are undeclared", graph.TypeAnyRecord},
+		{"a record with no fields", graph.RecordOf(nil)},
+		{"a union", union},
+		{"a record under a list", graph.ListOf(record, true)},
+		{"a union under a list", graph.ListOf(union, true)},
+		{"a record under two lists", graph.ListOf(graph.ListOf(record, true), true)},
+	}
+
+	tables := []struct {
+		name string
+		of   func(pt graph.PropertyType) codegen.TypeMap
+	}{{
+		// The dialect's answer. Asserts ORDER: the kind is refused
+		// before the table is asked, so moving the walk below
+		// tm.Property reds every row here.
+		name: "a table with no case for the width",
+		of:   func(pt graph.PropertyType) codegen.TypeMap { return unknownWidthTypeMap{refuse: pt} },
+	}, {
+		// Asserts INDEPENDENCE: the refusal is gqlc's own and does
+		// not borrow the table's. Deleting the walk entirely leaves
+		// these rows generating a Go type spelled
+		// "property:RECORD<a INT32>".
+		name: "a table that admits every width",
+		of:   func(graph.PropertyType) codegen.TypeMap { return stubTypeMap{} },
+	}}
+
+	for _, pos := range positions {
+		for _, tbl := range tables {
+			for _, r := range refused {
+				t.Run(pos.name+"/"+tbl.name+"/"+r.name, func(t *testing.T) {
+					err := pos.run(r.pt, tbl.of(r.pt))
+					require.ErrorIs(t, err, codegen.ErrUnimplementedTypeKind)
+					require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth,
+						"the caller has no width to change; reporting the carrier gap sends them to an edit that cannot help")
+				})
+			}
+		}
+	}
+
+	// The over-refusal fence. A walk that answered "not a scalar" rather
+	// than "a record or a union" refuses these too, and every row above
+	// stays green while lists stop generating.
+	admitted := []struct {
+		name string
+		pt   graph.PropertyType
+	}{
+		{"a scalar", graph.TypeInt32},
+		{"a list of scalars", graph.ListOf(graph.TypeInt32, true)},
+		{"a list of lists of scalars", graph.ListOf(graph.ListOf(graph.TypeInt32, true), true)},
+	}
+	for _, pos := range positions {
+		for _, a := range admitted {
+			t.Run(pos.name+"/admitted/"+a.name, func(t *testing.T) {
+				require.NoError(t, pos.run(a.pt, stubTypeMap{}))
+			})
+		}
+	}
+}
+
+// TestUnimplementedTypeKindNamesTheKindAndTheSite holds the message to
+// the two things a reader needs from it: WHICH kind stopped generation,
+// and where it was declared.
+//
+// The nested row is the one that costs anything. There the declared
+// width and the unbuilt kind are different strings, and a message naming
+// only one leaves the reader guessing which level to edit — the list
+// they can see in the schema, or the record inside it they cannot. The
+// bare row is the other branch of the same rendering, and it is here
+// because a message that appended `whose RECORD<a INT32> has no
+// emission` to a property already declared as exactly that would be
+// noise no reader gains from.
+func TestUnimplementedTypeKindNamesTheKindAndTheSite(t *testing.T) {
+	person := graph.LabelSetKey("Person")
+	record := graph.RecordOf([]graph.RecordField{{Name: "a", Type: graph.TypeInt32}})
+
+	tests := []struct {
+		name    string
+		pt      graph.PropertyType
+		wantErr string
+	}{{
+		name:    "the property is the unbuilt kind",
+		pt:      record,
+		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` + string(record),
+	}, {
+		name: "the unbuilt kind is inside the declared width",
+		pt:   graph.ListOf(record, true),
+		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` +
+			string(graph.ListOf(record, true)) + `, whose ` + string(record) + ` has no emission`,
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := codegen.PhaseZAdmit(schema.Schema{
+				Name: "Test",
+				Nodes: map[graph.LabelSetKey]schema.NodeType{
+					person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{
+						"p": {Name: "p", Type: tt.pt},
+					}},
+				},
+			}, stubTypeMap{})
+			require.ErrorIs(t, err, codegen.ErrUnimplementedTypeKind)
+			require.EqualError(t, err, tt.wantErr)
+		})
+	}
+}

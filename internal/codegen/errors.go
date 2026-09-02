@@ -93,6 +93,35 @@ var (
 	// property, and the width.
 	ErrUnstorableProperty = errors.New("unstorable property width")
 
+	// ErrUnimplementedTypeKind is returned when a schema property, a query
+	// column, a query parameter, or a list element carries a PropertyType
+	// of a KIND gqlc has built no emission for — today KindRecord and
+	// KindUnion, which the schema front end resolves (gqlc-h9n.33) and no
+	// backend renders.
+	//
+	// It asks a question the other three refusals below it do not, and
+	// asking it first is the whole point. ErrUnrepresentableWidth means
+	// the backend has no Go type wide enough for a width gqlc does emit;
+	// ErrUnstorableProperty means the carrier exists and the store will
+	// not keep it. Both send the reader to a declared width. There is no
+	// width to change here, so a dialect table falling off its switch and
+	// answering ok=false would name the wrong edit — the answer is that
+	// gqlc emits nothing of this shape yet, at any width, on any backend.
+	// That is why the refusal is gqlc's own and lives in prepare.go
+	// rather than in the two typeMaps, which are untouched by it.
+	//
+	// The one sentinel here carrying a "yet". The kinds are unbuilt, not
+	// refused: an emission retires it, and this is the fence that keeps
+	// the interim honest rather than silently generating a Go type named
+	// after an encoding. It is asked at every position that asks a
+	// TypeMap for a property carrier, and the ask RECURSES through list
+	// elements — a shallow check admits LIST<RECORD<…>>, whose record
+	// then dies inside the table as a width error, which is exactly the
+	// confusion this sentinel exists to prevent. The fail-message names
+	// the fail-site, the declared width, and the sub-type with no
+	// emission, because under a list those last two differ.
+	ErrUnimplementedTypeKind = errors.New("property type kind not implemented yet")
+
 	// ErrUnrepresentableEdgeUnion is returned when a query column, or a
 	// list element's leaf, resolves to an edge union two of whose
 	// candidates carry the same label. An edge value carries its label
@@ -244,6 +273,7 @@ var allSentinels = []error{
 	ErrPropertyFieldCollision,
 	ErrUnrepresentableWidth,
 	ErrUnstorableProperty,
+	ErrUnimplementedTypeKind,
 	ErrUnrepresentableEdgeUnion,
 	ErrUnrepresentableTemporal,
 	ErrExecOnProjection,
