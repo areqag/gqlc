@@ -337,11 +337,13 @@ def self_test_claimed_by():
 def self_test():
     """Drive the decision cores over the window this gate was built from.
 
-    Run inline by the workflow before any PR is examined, and by `just gates`,
-    because this repository has no Python test runner and a gate whose logic
-    nothing exercises is a gate nobody has watched fail. The rows are the ones
-    the design named as owed, plus the status-filter rows a mutation battery
-    showed were owed and missing.
+    Run by `just gates`, by ci.yml's tidy job on every PR, and by
+    ordinal-recheck.yml before any PR is examined, because this repository has
+    no Python test runner and a gate whose logic nothing exercises is a gate
+    nobody has watched fail. The tidy step is the one that MATTERS for a break:
+    the other two red only after the breaking change has merged. The rows are
+    the ones the design named as owed, plus the status-filter rows a mutation
+    battery showed were owed and missing.
     """
     taken = "0012-release-of-an-unreachable-seat.md"
     rows = [

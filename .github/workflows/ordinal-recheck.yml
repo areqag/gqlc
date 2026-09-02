@@ -42,10 +42,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Before any PR is examined. This repository has no Python test runner,
-      # so the decision core's own rows run inline here: a gate whose logic
-      # nothing exercises is a gate nobody has watched fail, and the rows are
-      # cheap enough to pay for on every master push.
+      # Before any PR is examined, and cheap enough to pay for on every master
+      # push. This is the LATE copy: ci.yml's tidy job runs the same rows on
+      # every PR, which is where a break is still stoppable. Kept here as well
+      # because this workflow is the one that fails closed — if the rows red
+      # here, no status is posted to anybody, and the run says why rather than
+      # posting verdicts from logic it has just watched misbehave.
       - name: the decision core behaves as designed
         run: python3 .github/scripts/check-open-pr-ordinals.py --self-test
       # The enrolled series are spelled at the call site, not inferred, per

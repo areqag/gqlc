@@ -193,6 +193,16 @@ jobs:
       # for the same reason as the ordinal check: it reads the tree.
       - name: kingdom cites its law as decision NNNN, not ADR NNNN
         run: python3 .github/scripts/check-adr-citations.py kingdom
+      # The moved-base half's decision cores, driven by their own rows. Here and
+      # not only in ordinal-recheck.yml because that workflow fires on master
+      # PUSH: a PR breaking a core would pass every required context, merge, and
+      # red the guard afterwards — and from then on every open PR would silently
+      # stop receiving its status, an absence nothing notices because the
+      # recheck context is deliberately not required. That is the very shape bd
+      # gqlc-4plwf exists to refuse, so it must not be the shape of its own
+      # guard. Unconditional and network-free: it reads no PR and no remote.
+      - name: the moved-base ordinal check's own rows
+        run: python3 .github/scripts/check-open-pr-ordinals.py --self-test
       # bd gqlc-v2p: fails when a PR's `.beads/issues.jsonl` drops or reopens
       # an issue vs its base. Fetch only the base commit (depth 1) so cost is
       # O(1) in history size, not O(N). Skip on master push — the tip IS the
