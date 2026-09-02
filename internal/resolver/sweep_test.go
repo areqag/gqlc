@@ -18,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/query/cypher"
 	"github.com/areqag/gqlc/internal/schema"
@@ -55,6 +56,16 @@ const (
 	// only "ok" and the breakdown of what it absorbed reaches nobody. -run is
 	// anchored because it is an unanchored regexp by default.
 	sweepRegenCmd = "go test ./internal/resolver/ -run '^TestCorpusSweepManifest$' -update -v"
+
+	// sweepDeltaPath holds the cells whose outcome moves when the corpus is
+	// swept under regR7Alt instead of regR7 — the registry axis the manifest
+	// holds constant (gqlc-2xkf). Only the differing cells are committed, and
+	// only their regR7Alt side: the regR7 side of every one of them is already
+	// a row of the manifest under the same key, so carrying it here would
+	// duplicate it and move this file every time the manifest moved.
+	sweepDeltaPath = fixtureDir + "/sweep.registry-delta.tsv"
+
+	sweepDeltaRegenCmd = "go test ./internal/resolver/ -run '^TestSweepRegistryDelta$' -update -v"
 )
 
 // sentinelNames renders each sentinel as the identifier a reader greps for.
@@ -168,18 +179,26 @@ func sweepCorpus(t *testing.T) (queries, schemas []string) {
 	return queries, schemas
 }
 
-// runSweep resolves every query against every schema. Each query and schema is
-// parsed once and reused across its row and column, which is sound only while
-// Resolve leaves its arguments alone — TestSweepIsIndependentOfCellOrder is
-// what holds that.
-func runSweep(t *testing.T, queries, schemas []string) (map[cellKey]sweepCell, []cellKey, map[string]string) {
+// runSweep resolves every query against every schema under reg. Each query and
+// schema is parsed once and reused across its row and column, which is sound
+// only while Resolve leaves its arguments alone — TestSweepIsIndependentOfCellOrder
+// is what holds that.
+//
+// reg is handed to the parser and to the resolver both, because the registry
+// reaches a cell's outcome by both routes: the parser types a YIELD column from
+// it, the resolver checks argument assignability against it. The parse
+// assertion below names only the fixture, which is enough while every registry
+// this is called with agrees with regR7 on procedure names, arities and result
+// field names — the three things collectCall fails on. regR7Alt is derived
+// from signaturesR7 so that it does (resolver_test.go).
+func runSweep(t *testing.T, queries, schemas []string, reg procsig.Registry) (map[cellKey]sweepCell, []cellKey, map[string]string) {
 	t.Helper()
 
 	parsedQ := make(map[string]query.Query, len(queries))
 	for _, name := range queries {
 		src, err := os.ReadFile(filepath.Join(fixtureDir, name))
 		require.NoError(t, err)
-		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader(src))
+		q, err := cypher.New(cypher.WithRegistry(reg)).Parse(bytes.NewReader(src))
 		require.NoError(t, err, "query fixture %s must parse", name)
 		parsedQ[name] = q
 	}
@@ -209,7 +228,7 @@ func runSweep(t *testing.T, queries, schemas []string) (map[cellKey]sweepCell, [
 	for _, qn := range queries {
 		for _, sn := range schemas {
 			k := cellKey{query: qn, schema: sn}
-			vq, err := New(parsedS[sn], WithRegistry(regR7)).Resolve(parsedQ[qn])
+			vq, err := New(parsedS[sn], WithRegistry(reg)).Resolve(parsedQ[qn])
 			cells[k] = recordCell(k, vq, err, record)
 			order = append(order, k)
 		}
@@ -295,19 +314,27 @@ func renderSweepManifest(cells map[cellKey]sweepCell, order []cellKey, messages 
 	b.WriteString("#\n")
 	fmt.Fprintf(&b, "# regenerate: %s\n", sweepRegenCmd)
 
+	writeSweepRows(&b, cells, order, messages)
+	return []byte(b.String())
+}
+
+// writeSweepRows writes the msg block and then the cell block. Both committed
+// files are written through it, so they share one row grammar and one parser
+// (parseSweepManifest); a second row writer is what would let the registry
+// delta drift into a format that file's guards no longer hold.
+func writeSweepRows(b *strings.Builder, cells map[cellKey]sweepCell, order []cellKey, messages map[string]string) {
 	ids := make([]string, 0, len(messages))
 	for id := range messages {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		fmt.Fprintf(&b, "msg\t%s\t%s\n", id, strconv.Quote(messages[id]))
+		fmt.Fprintf(b, "msg\t%s\t%s\n", id, strconv.Quote(messages[id]))
 	}
 	for _, k := range order {
 		c := cells[k]
-		fmt.Fprintf(&b, "cell\t%s\t%s\t%s\t%s\t%s\n", c.key.query, c.key.schema, c.verdict, c.sentinel, c.detail)
+		fmt.Fprintf(b, "cell\t%s\t%s\t%s\t%s\t%s\n", c.key.query, c.key.schema, c.verdict, c.sentinel, c.detail)
 	}
-	return []byte(b.String())
 }
 
 // sweepT is what the manifest parser reports through. The corpus run passes a
@@ -346,9 +373,18 @@ func checkSweepSentinelColumn(t sweepT, where, verdict, column string) {
 // loadSweepManifest parses the committed baseline.
 func loadSweepManifest(t *testing.T) sweepManifest {
 	t.Helper()
-	raw, err := os.ReadFile(sweepManifestPath)
-	require.NoError(t, err, "missing sweep manifest; regenerate with %s", sweepRegenCmd)
-	return parseSweepManifest(t, sweepManifestPath, raw)
+	return loadSweepFile(t, sweepManifestPath, sweepRegenCmd)
+}
+
+// loadSweepFile parses one committed sweep file, naming in the missing-file
+// message the command that writes THAT file. A shared message would send a
+// reader regenerating the registry delta to the manifest's command, which
+// rewrites the wrong file and leaves the failure exactly where it was.
+func loadSweepFile(t *testing.T, path, regenCmd string) sweepManifest {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err, "missing %s; regenerate with %s", path, regenCmd)
+	return parseSweepManifest(t, path, raw)
 }
 
 // parseSweepManifest re-derives each msg row's digest from its own text. A
@@ -431,7 +467,11 @@ func (c sweepComparison) disagreements() int {
 
 // summary states the count in every category whether or not any fired, so a
 // green run says what it compared rather than only that it found nothing.
-func (c sweepComparison) summary() string {
+//
+// against is the file the counts were taken against. It is a parameter and not
+// sweepManifestPath because two files are compared this way now, and a report
+// naming the wrong one sends a reader to diff a file that did not move.
+func (c sweepComparison) summary(against string) string {
 	return fmt.Sprintf(
 		"sweep vs %s:\n"+
 			"  %6d  same verdict, same sentinel, same detail\n"+
@@ -440,7 +480,7 @@ func (c sweepComparison) summary() string {
 			"  %6d  DIFFERENT VERDICT\n"+
 			"  %6d  cell in manifest, absent from sweep\n"+
 			"  %6d  cell in sweep, absent from manifest",
-		sweepManifestPath, c.identical, len(c.differentDetail), len(c.differentSentinel),
+		against, c.identical, len(c.differentDetail), len(c.differentSentinel),
 		len(c.differentVerdict), len(c.onlyInManifest), len(c.onlyInSweep))
 }
 
@@ -488,8 +528,8 @@ func compareSweep(want sweepManifest, gotCells map[cellKey]sweepCell, gotOrder [
 // the -update path print it: regenerating the manifest absorbs the diff, and a
 // regeneration that stated only its counts would absorb a sentinel change
 // without ever naming the sentinel.
-func (c sweepComparison) report() string {
-	return c.summary() +
+func (c sweepComparison) report(against string) string {
+	return c.summary(against) +
 		sweepCategoryDetail("DIFFERENT VERDICT", c.differentVerdict) +
 		sweepCategoryDetail("DIFFERENT SENTINEL, same verdict", c.differentSentinel) +
 		sweepCategoryDetail("DIFFERENT DETAIL, same verdict and sentinel", c.differentDetail) +
@@ -574,22 +614,137 @@ func sweepCategoryDetail(label string, lines []string) string {
 // the manifest header, which is regenerated with the file.
 func TestCorpusSweepManifest(t *testing.T) {
 	queries, schemas := sweepCorpus(t)
-	cells, order, msgs := runSweep(t, queries, schemas)
+	cells, order, msgs := runSweep(t, queries, schemas, regR7)
 
 	if *update {
 		if _, err := os.Stat(sweepManifestPath); err == nil {
-			t.Log(compareSweep(loadSweepManifest(t), cells, order, msgs).report())
+			t.Log(compareSweep(loadSweepManifest(t), cells, order, msgs).report(sweepManifestPath))
 		}
 		require.NoError(t, os.WriteFile(sweepManifestPath, renderSweepManifest(cells, order, msgs), 0o644))
 		return
 	}
 
 	cmp := compareSweep(loadSweepManifest(t), cells, order, msgs)
-	t.Log(cmp.report())
+	t.Log(cmp.report(sweepManifestPath))
 	if cmp.disagreements() == 0 {
 		return
 	}
-	t.Errorf("%s\n\nif these changes are intended, regenerate with:\n  %s", cmp.report(), sweepRegenCmd)
+	t.Errorf("%s\n\nif these changes are intended, regenerate with:\n  %s", cmp.report(sweepManifestPath), sweepRegenCmd)
+}
+
+// registryDelta keeps the regR7Alt side of every cell whose (verdict, sentinel,
+// detail) triple moved between the two sweeps, in the corpus order, with the
+// alt-side text of each digest it kept.
+//
+// The messages map is filtered to the digests the kept cells cite rather than
+// passed through whole: parseSweepManifest rejects a msg row no cell cites, so
+// carrying every alt message would make the file it renders unloadable.
+func registryDelta(base, alt map[cellKey]sweepCell, order []cellKey, altMsgs map[string]string) (map[cellKey]sweepCell, []cellKey, map[string]string) {
+	cells := map[cellKey]sweepCell{}
+	kept := make([]cellKey, 0, len(order))
+	msgs := map[string]string{}
+	for _, k := range order {
+		b, a := base[k], alt[k]
+		if b.verdict == a.verdict && b.sentinel == a.sentinel && b.detail == a.detail {
+			continue
+		}
+		cells[k] = a
+		kept = append(kept, k)
+		if text, ok := altMsgs[a.detail]; ok {
+			msgs[a.detail] = text
+		}
+	}
+	return cells, kept, msgs
+}
+
+// renderRegistryDelta serialises the delta in the manifest's row grammar, under
+// a header of its own: the manifest's says the rows are the whole cross product
+// and these are a subset of it under a second registry.
+func renderRegistryDelta(cells map[cellKey]sweepCell, order []cellKey, messages map[string]string) []byte {
+	var b strings.Builder
+	b.WriteString("# resolver corpus sweep, registry axis: the cells whose outcome moves when\n")
+	b.WriteString("# the cross product is resolved under regR7Alt instead of regR7. Generated\n")
+	b.WriteString("# file: edit internal/resolver/sweep_test.go, not this.\n")
+	b.WriteString("#\n")
+	fmt.Fprintf(&b, "# %d cells differ. Absent from this file means the two registries agree\n", len(order))
+	b.WriteString("# on that cell, which is every cell of a query with no CALL clause.\n")
+	b.WriteString("#\n")
+	b.WriteString("# cell rows carry the regR7Alt side only, in the manifest's grammar: query,\n")
+	b.WriteString("# schema, verdict, sentinel, detail, with a strconv.Quote'd msg row per\n")
+	b.WriteString("# refusal digest. The regR7 side is the row under the same key in\n")
+	b.WriteString("# sweep.manifest.tsv.\n")
+	b.WriteString("#\n")
+	b.WriteString("# what this file adds over that manifest: regR7 is the only registry the\n")
+	b.WriteString("# manifest is swept under, so a CALL diagnostic that fires only under some\n")
+	b.WriteString("# other signature table moves no row there. It moves a row here.\n")
+	b.WriteString("#\n")
+	b.WriteString("# what it does not add: any registry beyond regR7Alt, which is signaturesR7\n")
+	b.WriteString("# with every type token rotated and every nullability flipped. A diagnostic\n")
+	b.WriteString("# needing a procedure name, an arity or a result field regR7 does not\n")
+	b.WriteString("# declare is outside both files.\n")
+	b.WriteString("#\n")
+	fmt.Fprintf(&b, "# regenerate: %s\n", sweepDeltaRegenCmd)
+
+	writeSweepRows(&b, cells, order, messages)
+	return []byte(b.String())
+}
+
+// TestSweepRegistryDelta sweeps the corpus a second time under regR7Alt and
+// holds the cells that move to a committed file. WithRegistry is the resolver's
+// only Option, so the registry is the one axis TestCorpusSweepManifest holds
+// constant, and a change to a CALL diagnostic visible only under another
+// signature table moves nothing there (gqlc-2xkf).
+//
+// The non-degeneracy assertions run BEFORE the -update write, and they assert
+// per route rather than on the size of the delta. A single NotEmpty over the
+// delta is satisfied by either route alone, so it stays green when the registry
+// stops reaching the parser — and the parser route is the one that types a
+// YIELD column, which is most of what a CALL cell's model is. Their two counts
+// are what a -update cannot absorb: regenerating writes whatever the sweep
+// produced, so a delta gone empty or gone one-sided would otherwise be
+// committed as the new baseline in silence.
+//
+//   - a moved VERDICT witnesses the resolver route: a rotated PARAM token
+//     reaches argAssignable and refuses an argument regR7 admits.
+//   - a cell accepting under both registries with a different detail witnesses
+//     the parser route: a rotated RESULT token and its flipped nullability
+//     change the CallBinding's result type and therefore the model, without
+//     touching any verdict.
+func TestSweepRegistryDelta(t *testing.T) {
+	queries, schemas := sweepCorpus(t)
+	base, order, _ := runSweep(t, queries, schemas, regR7)
+	alt, _, altMsgs := runSweep(t, queries, schemas, regR7Alt)
+
+	cells, deltaOrder, msgs := registryDelta(base, alt, order, altMsgs)
+
+	var movedVerdict, movedModel int
+	for _, k := range deltaOrder {
+		switch {
+		case base[k].verdict != alt[k].verdict:
+			movedVerdict++
+		case base[k].verdict == verdictAccept && base[k].detail != alt[k].detail:
+			movedModel++
+		}
+	}
+	require.NotZero(t, movedVerdict,
+		"no cell of the %d-cell cross product changes verdict under regR7Alt: the registry does not reach the resolver's argument-assignability check", len(order))
+	require.NotZero(t, movedModel,
+		"no cell of the %d-cell cross product accepts under both registries with a different model: the registry does not reach the parser's YIELD column typing", len(order))
+
+	if *update {
+		if _, err := os.Stat(sweepDeltaPath); err == nil {
+			t.Log(compareSweep(loadSweepFile(t, sweepDeltaPath, sweepDeltaRegenCmd), cells, deltaOrder, msgs).report(sweepDeltaPath))
+		}
+		require.NoError(t, os.WriteFile(sweepDeltaPath, renderRegistryDelta(cells, deltaOrder, msgs), 0o644))
+		return
+	}
+
+	cmp := compareSweep(loadSweepFile(t, sweepDeltaPath, sweepDeltaRegenCmd), cells, deltaOrder, msgs)
+	t.Log(cmp.report(sweepDeltaPath))
+	if cmp.disagreements() == 0 {
+		return
+	}
+	t.Errorf("%s\n\nif these changes are intended, regenerate with:\n  %s", cmp.report(sweepDeltaPath), sweepDeltaRegenCmd)
 }
 
 // TestSweepComparisonSortsEachDisagreement drives compareSweep with synthetic
@@ -651,7 +806,7 @@ func TestSweepComparisonSortsEachDisagreement(t *testing.T) {
 	require.Len(t, cmp.onlyInSweep, 1)
 	require.Equal(t, 6, cmp.disagreements())
 
-	report := cmp.report()
+	report := cmp.report(sweepManifestPath)
 	for _, want := range []string{
 		"DIFFERENT SENTINEL, same verdict (2)",
 		"DIFFERENT VERDICT (1)",
@@ -701,7 +856,7 @@ func TestRecordCellReportsAMarshalFailure(t *testing.T) {
 		map[cellKey]sweepCell{k: broken}, []cellKey{k}, texts)
 	require.Len(t, cmp.differentDetail, 1)
 	require.Empty(t, cmp.differentVerdict)
-	require.Contains(t, cmp.report(), marshalErrPrefix)
+	require.Contains(t, cmp.report(sweepManifestPath), marshalErrPrefix)
 
 	// The refusing arm goes through the same function, and a refusal is
 	// recorded on its sentinel even when a model was returned alongside it.
@@ -893,7 +1048,7 @@ func TestSweepManifestSurvivesHostileRefusalText(t *testing.T) {
 	require.Empty(t, cmp.differentSentinel)
 	require.Empty(t, cmp.differentVerdict)
 	require.Equal(t, 1, cmp.identical)
-	require.Contains(t, cmp.report(), "rewritten")
+	require.Contains(t, cmp.report(sweepManifestPath), "rewritten")
 }
 
 // multiSentinel satisfies every error it was built from. It is the shape a
@@ -1049,7 +1204,7 @@ func TestSentinelMembershipCountsEachMember(t *testing.T) {
 // sentinel reachable, so this stays red across a -update that hides one.
 func TestSweepReachesEverySentinel(t *testing.T) {
 	queries, schemas := sweepCorpus(t)
-	cells, _, _ := runSweep(t, queries, schemas)
+	cells, _, _ := runSweep(t, queries, schemas, regR7)
 
 	count := sentinelMembership(cells)
 	require.Zero(t, count[sentinelUnmatched],
@@ -1073,7 +1228,7 @@ func TestSweepReachesEverySentinel(t *testing.T) {
 // to render differently, and report that disagreement as cell order.
 func TestSweepIsIndependentOfCellOrder(t *testing.T) {
 	queries, schemas := sweepCorpus(t)
-	once, order, _ := runSweep(t, queries, schemas)
+	once, order, _ := runSweep(t, queries, schemas, regR7)
 
 	parsedS := make(map[string]schema.Schema, len(schemas))
 	for _, name := range schemas {
