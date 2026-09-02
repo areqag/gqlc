@@ -131,6 +131,54 @@ and it is refused for want of a carrier. Three conformance rows in
 `assembled_input_test.go` read those exact strings back and went red on the
 changed text, which is how the claim was falsified rather than argued.
 
+### Carrier wording was then asked for, and declined (bd `gqlc-fkdwq`)
+
+That leaves the *storage* wording answered and a second question open, which
+was filed rather than settled on the branch: AGE's twin attributes its width
+refusals with carrier wording — ", which the Apache AGE backend has no carrier
+for" — which stays true on all three sweeps, because a missing carrier is a
+missing carrier wherever the width appears. Should neo4j gain the same?
+
+**No**, and the rule that answers it governs both backends: *a backend names
+itself exactly when another enrolled backend answers the same declaration
+differently.* Attribution implicates contingency — naming a backend tells the
+author "this is this backend's answer, and another may differ" — so the name is
+owed where the targets disagree and misleads where they do not.
+
+The two refused-width sets are not equal, and that is the whole answer:
+
+| | refused by `neo4j/types.go` | refused by `age/types.go` |
+|---|---|---|
+| the eight oversized numerics | yes | yes |
+| `BYTES` | no | yes |
+| a `LIST` whose element carries a zone | no | yes |
+
+So AGE's suffix is owed: `test/data/codegen/valid/property_bytes` is
+`targets:["neo4j-go-v5"]` *because* AGE refuses `BYTES`, and in a run emitting
+both targets the name is the only thing saying which one failed —
+`nested_list_property` is the same fact mirrored, AGE-only because neo4j
+refuses the storage. neo4j's is not: every width its table refuses is one no
+backend carries, permanent under spec §9, so the suffix would send an author
+looking for a target that carries `INT128`. There is none, and the remedy is to
+change the declared width.
+
+The premise that carries the "no" is measured and could stop being true, so it
+is guarded rather than recorded:
+`TestAContingentRefusalNamesItsBackend` in `internal/cli/backends` — the
+composition root being the only layer that knows the enrolled roster — sweeps
+the width vocabulary across every registered target and requires a backend that
+refuses what another accepts to name itself. Today 25 widths divide the roster
+and the sweep holds both sentinels with one assertion: `BYTES` / `LIST<TIME>` /
+`LIST<TIMESTAMP>` for AGE's `ErrUnrepresentableWidth`, and the `LIST<LIST<T>>`
+family for neo4j's `ErrUnstorableProperty`. The day neo4j's table refuses a
+width another target accepts, that test reddens and this decision is re-opened
+by the machinery rather than by somebody remembering.
+
+One thing it deliberately does not assert: the converse, that a refusal every
+target shares carries *no* name. AGE appends its phrase to the eight universal
+widths too, which over-attributes them on this rule. That is bd `gqlc-oxgyt`,
+left open with the counter-argument stated, rather than a red row here.
+
 ## The emitter asymmetry, and one arm that is now unreachable
 
 neo4j has **two** recursive nested-list decoders, in different emitters,
