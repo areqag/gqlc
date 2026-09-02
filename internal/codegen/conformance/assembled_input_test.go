@@ -1165,6 +1165,11 @@ func TestTemporalSweepAdmitsAConstantNoSwitchOverTheEnumCanName(t *testing.T) {
 		{name: "an untyped string", decl: "const producerTag = \"undeclared-relationship-type\"\n"},
 		{name: "an untyped bool", decl: "const producerTagged = true\n"},
 		{name: "a run of untyped strings", decl: "const (\n\tfirstTag = \"a\"\n\tsecondTag = \"b\"\n)\n"},
+		// A bare line repeats the expression above it, so what it is
+		// assignable to is decided by a line that is not its own. Without
+		// that inheritance this reads as an untyped constant of no known
+		// value and the refusal fires on a string.
+		{name: "a bare line inheriting an untyped string", decl: "const (\n\tfirstTag = \"a\"\n\tsecondTag\n)\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, refusals := recordedTemporalSweep(sweptPackage(t, map[string]string{
