@@ -1,6 +1,7 @@
 package gql
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
@@ -29,12 +30,13 @@ func property(ctx gen.IPropertyTypeContext, ts *antlr.CommonTokenStream) (schema
 }
 
 // resolveValueType maps a valueType parse-tree node to its normalised
-// PropertyType and the outer NOT NULL qualifier. It handles list alternatives
-// before delegating to declineValueType / normaliseType so that:
+// PropertyType and the outer NOT NULL qualifier. It handles the parameterised
+// alternatives — lists, records and closed dynamic unions — before delegating
+// to declineValueType / normaliseType so that:
 //
-//   - list alternatives are correctly parameterised and their outer notNull?
-//     is read from the direct child rather than by scanning the subtree
-//     (hasNotNull would attribute the element's qualifier to the list itself);
+//   - they are correctly parameterised, and their outer notNull? is read from
+//     the direct child rather than by scanning the subtree (hasNotNull would
+//     attribute an element's, field's or member's qualifier to the property);
 //   - declined families return their named sentinel;
 //   - scalar spellings resolve via the existing table.
 func resolveValueType(vt gen.IValueTypeContext, ts *antlr.CommonTokenStream) (graph.PropertyType, bool, error) {
@@ -56,6 +58,15 @@ func resolveValueType(vt gen.IValueTypeContext, ts *antlr.CommonTokenStream) (gr
 	case *gen.ListValueTypeAlt3Context:
 		// LIST (notNull?)  /  ARRAY (notNull?)  — bare, no element type
 		return graph.TypeList, lt.NotNull() != nil, nil
+	case *gen.RecordTypeLabelContext:
+		return resolveRecordType(lt.RecordType(), ts)
+	case *gen.ClosedDynamicUnionTypeAtl1Context:
+		// ANY VALUE? <A | B | …>
+		return resolveUnionMembers(lt.AllValueType(), ts)
+	case *gen.ClosedDynamicUnionTypeAtl2Context:
+		// A | B, left-associative, so A | B | C arrives as ((A | B) | C) and
+		// UnionOf's flattening is what makes the three members one set.
+		return resolveUnionMembers(lt.AllValueType(), ts)
 	}
 
 	if err := declineValueType(vt); err != nil {
@@ -68,28 +79,89 @@ func resolveValueType(vt gen.IValueTypeContext, ts *antlr.CommonTokenStream) (gr
 	return pt, hasNotNull(vt), nil
 }
 
+// resolveRecordType lowers a recordType (GQL.g4:1977-1980) to its encoded
+// PropertyType and the record's own NOT NULL. The three shapes are distinct
+// types, not three spellings of one: a braceless RECORD says its fields are
+// undeclared, `RECORD { }` says there are none, and a field list says which.
+//
+// The notNull comes from the recordType's direct accessor, so a field's
+// qualifier is never read as the property's.
+func resolveRecordType(rt gen.IRecordTypeContext, ts *antlr.CommonTokenStream) (graph.PropertyType, bool, error) {
+	notNull := rt.NotNull() != nil
+
+	spec := rt.FieldTypesSpecification()
+	if spec == nil {
+		return graph.TypeAnyRecord, notNull, nil
+	}
+	// FieldTypeList() is nil for `{ }` — the accessor being non-nil for a
+	// populated list says nothing about the empty one.
+	list := spec.FieldTypeList()
+	if list == nil {
+		return graph.RecordOf(nil), notNull, nil
+	}
+
+	declared := list.AllFieldType()
+	fields := make([]graph.RecordField, 0, len(declared))
+	seen := make(map[string]bool, len(declared))
+	for _, ft := range declared {
+		// Verbatim, delimiters and all, exactly as property() takes a property
+		// name (:25). RecordOf quotes it for the encoding; the model keeps the
+		// name the author wrote.
+		name := ft.FieldName().GetText()
+		if seen[name] {
+			return "", false, fmt.Errorf("%w: %q", ErrDuplicateFieldName, name)
+		}
+		seen[name] = true
+
+		fieldType, fieldNotNull, err := resolveValueType(ft.ValueType(), ts)
+		if err != nil {
+			return "", false, err
+		}
+		fields = append(fields, graph.RecordField{Name: name, Type: fieldType, NotNull: fieldNotNull})
+	}
+	return graph.RecordOf(fields), notNull, nil
+}
+
+// resolveUnionMembers lowers the members of either closed dynamic union
+// alternative. Neither admits a notNull of its own (GQL.g4:1731-1732), so the
+// property is always nullable here and a trailing NOT NULL belongs to the last
+// member — the grammar's reading rather than the charitable one (ADR 0037).
+func resolveUnionMembers(vts []gen.IValueTypeContext, ts *antlr.CommonTokenStream) (graph.PropertyType, bool, error) {
+	members := make([]graph.UnionMember, 0, len(vts))
+	for _, vt := range vts {
+		memberType, memberNotNull, err := resolveValueType(vt, ts)
+		if err != nil {
+			return "", false, err
+		}
+		members = append(members, graph.UnionMember{Type: memberType, NotNull: memberNotNull})
+	}
+	return graph.UnionOf(members), false, nil
+}
+
 // declineValueType names the family of a value type gqlc does not model, or nil
 // to let normaliseType try the spelling. Deciding on the parse tree rather than
 // the spelling is what makes the family knowable at all: `(:X)` and `NOTHING`
 // share no text with each other or with anything in typeSpellings, so a lookup
 // miss can say only that the lookup missed.
 //
-// It reads the outermost context and does not descend. Two declined families
-// nest a value type inside themselves — `BINDING TABLE { id :: STRING }` and
-// `RECORD { f :: STRING }` both carry a predefinedType for the field — so a
-// subtree search would report the field's family in place of the property's.
+// It reads the outermost context and does not descend. One declined family still
+// nests a value type inside itself — `BINDING TABLE { id :: STRING }` carries a
+// predefinedType for its field — so a subtree search would report the field's
+// family in place of the property's.
+//
+// Descent happens in resolveValueType instead, and only through a construct that
+// resolves: a record's field and a union's member are resolved recursively, so
+// `RECORD { p :: PATH }` reports ErrPathValueType. That is not the case this
+// paragraph warns about — the record itself has a type now, and the only thing
+// left to report is the field's.
 //
 // A value type this does not name falls through to the bare ErrUnsupportedType
-// class. List alternatives are dispatched before this is called (see
-// resolveValueType), so they never reach here.
+// class. The parameterised alternatives are dispatched before this is called
+// (see resolveValueType), so they never reach here.
 func declineValueType(vt gen.IValueTypeContext) error {
 	switch t := vt.(type) {
 	case *gen.PathValueTypeLabelContext:
 		return ErrPathValueType
-	case *gen.RecordTypeLabelContext:
-		return ErrRecordValueType
-	case *gen.ClosedDynamicUnionTypeAtl1Context, *gen.ClosedDynamicUnionTypeAtl2Context:
-		return ErrDynamicUnionType
 	case *gen.PredefinedTypeLabelContext:
 		// ISO files references and the immaterial types under <predefined type>,
 		// alongside BOOL and STRING, rather than under <constructed value type> —

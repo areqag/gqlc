@@ -46,6 +46,20 @@ var ErrEdgeKindArcMismatch = errors.New("edge kind contradicts arc direction")
 // ADR 0030. Revisit when the Syntax Rules are available.
 var ErrDuplicatePropertyName = errors.New("property name declared more than once in one property types specification")
 
+// ErrDuplicateFieldName is ErrDuplicatePropertyName's rule read onto record
+// fields, and it is provisional on the same grounds: <field type list> ::=
+// <field type> [{ <comma> <field type> }...] states no uniqueness constraint
+// either, so the free BNF admits `RECORD { a :: INT, a :: STRING }` and the
+// reading lives in Syntax Rules prose gqlc has not bought.
+//
+// It is a sentinel of its own rather than a reuse of the property one because
+// the two rejections are not interchangeable to a caller: a field name repeats
+// inside one property's value type, and reporting it as a repeated PROPERTY
+// name would send a reader to the property list, where the names are distinct.
+// See ADR 0030 for the argument and gqlc-lir for the arbiter that would settle
+// it.
+var ErrDuplicateFieldName = errors.New("field name declared more than once in one record type")
+
 // ErrUnsupportedSource is the class of rejected <graph type source> alternatives
 // rather than a leaf sentinel: the two reachable rejections below wrap it, so a
 // caller that only asks "was the source rejected" still matches with errors.Is,
@@ -113,16 +127,23 @@ var (
 // isobnf.DDLClosure — so the taxonomy is the standard's rather than one gqlc
 // invented to suit its internals.
 //
-// The split that matters is not five ways but two, and ADR 0019 argues it: the
-// first three say what the construct *is*, and no change to the model or the
-// target store reaches them. The last two say what gqlc has not built, so the
-// "yet" in their messages is load-bearing — gqlc-h9n.33 is the bead that
-// deletes ErrRecordValueType; gqlc-h9n.34 (ADR 0020) already deleted the open
-// halves of ErrDynamicUnionType, leaving it to cover only the closed unions.
+// ADR 0019 split this class five ways and argued that the split ran two ways,
+// not five: three of the leaves said what the construct *is*, and no change to
+// the model or the target store would reach them; two said what gqlc had not
+// built, and carried a "yet" to say so. Both of the second kind are now gone.
+// ErrDynamicUnionType lost its open halves to gqlc-h9n.34 (ADR 0020) and its
+// closed ones to gqlc-h9n.33, which also deleted ErrRecordValueType — the
+// parameterised PropertyType encoding (ADR 0037) gave records and closed unions
+// somewhere to put their fields and members, so parsing them is no longer
+// deferred and there is nothing left for a "yet" to promise.
+//
+// So the three below are the permanent kind, and their absence of a "yet" is
+// the claim. A family declined because gqlc has not built it belongs in
+// internal/codegen, at the layer that has not built it: ErrUnimplementedTypeKind
+// is where record and union EMISSION is deferred, and it carries the "yet"
+// these three must not.
 var (
 	ErrPathValueType       = fmt.Errorf("%w: PATH is a traversal a query produces, not a value an element stores", ErrUnsupportedType)
 	ErrReferenceValueType  = fmt.Errorf("%w: a graph, node, edge or binding table reference is a handle into a graph rather than a value, and a property holding one would be a relationship no traversal can follow", ErrUnsupportedType)
 	ErrImmaterialValueType = fmt.Errorf("%w: NULL admits only null, which the property's own nullability already records, and NOTHING (with NULL NOT NULL) admits nothing at all", ErrUnsupportedType)
-	ErrRecordValueType     = fmt.Errorf("%w: RECORD needs a property type that carries its fields, which this model does not have yet", ErrUnsupportedType)
-	ErrDynamicUnionType    = fmt.Errorf("%w: closed dynamic unions (ANY VALUE<A|B> and bare A|B) need a property type that carries their members, which this model does not have yet", ErrUnsupportedType)
 )

@@ -478,20 +478,179 @@ func TestPropertyBareDurationRejectedAtParse(t *testing.T) {
 	)
 }
 
-// TestPropertyUnsupportedType covers grammar-valid value types outside the
-// families this model maps; they must surface ErrUnsupportedType (ADR 0002).
-// Scalar time-of-day / byte-string / duration spellings that once lived here
-// are now supported (gqlc-h9n.4) and appear in TestPropertyTypeMapping instead;
-// list spellings are now supported (gqlc-h9n.5) and appear in TestListPropertyResolves;
-// the remaining shapes are constructed / reference / dynamic types the model
-// does not carry.
-func TestPropertyUnsupportedType(t *testing.T) {
-	for _, spelling := range []string{
-		"RECORD",
+// TestRecordPropertyResolves pins the four record shapes the grammar admits
+// (GQL.g4:1977-1980) against the encoding gqlc-be1me settled on. The braceless
+// forms and the empty-brace form are DISTINCT types: `RECORD` declares fields
+// exist and does not say which, `RECORD { }` declares there are none, and
+// collapsing them would let a schema that promises nothing unify with one that
+// promises anything.
+func TestRecordPropertyResolves(t *testing.T) {
+	for _, tc := range []struct {
+		spelling string
+		want     graph.PropertyType
+	}{
+		{"RECORD", graph.TypeAnyRecord},
+		{"ANY RECORD", graph.TypeAnyRecord},
+		{"RECORD { }", "RECORD<>"},
+		{"{ }", "RECORD<>"},
+		{"RECORD { a :: INT }", "RECORD<a INT>"},
+		{"RECORD { a :: INT, b :: STRING }", "RECORD<a INT,b STRING>"},
+		// RECORD is optional before the brace (GQL.g4:1979) and `typed` is
+		// optional before the field's value type (:1997); neither spelling
+		// changes the type.
+		{"{ a :: INT, b :: STRING }", "RECORD<a INT,b STRING>"},
+		{"RECORD { a INT, b STRING }", "RECORD<a INT,b STRING>"},
+		{"RECORD { a :: RECORD { x :: INT, y :: INT }, b :: STRING }", "RECORD<a RECORD<x INT,y INT>,b STRING>"},
+		{"RECORD { a :: LIST<INT> }", "RECORD<a LIST<INT>>"},
 	} {
-		t.Run(spelling, func(t *testing.T) {
-			_, err := parseFirstProperty(t, spelling)
-			require.ErrorIs(t, err, gql.ErrUnsupportedType)
+		t.Run(tc.spelling, func(t *testing.T) {
+			got, err := parseFirstProperty(t, tc.spelling)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got.Type)
+			require.True(t, got.Nullable, "no NOT NULL was spelled")
+		})
+	}
+}
+
+// TestRecordFieldOrderCanonicalisedThroughParser is the guard the whole
+// canonicalisation exists for, asserted where a user can reach it. Two schemas
+// declaring the same fields in different orders describe one type, and the
+// resolver unifies a query's property reference across labels with `==`
+// (resolver/scope.go:1023) — so an implementation that encoded declaration order
+// would refuse a valid query, and nothing else in the suite would notice.
+func TestRecordFieldOrderCanonicalisedThroughParser(t *testing.T) {
+	ab, err := parseFirstProperty(t, "RECORD { a :: INT, b :: STRING }")
+	require.NoError(t, err)
+	ba, err := parseFirstProperty(t, "RECORD { b :: STRING, a :: INT }")
+	require.NoError(t, err)
+	require.Equal(t, ab.Type, ba.Type)
+}
+
+// TestRecordNotNullBindsWhereItIsSpelled separates the record's own qualifier
+// from its fields'. They are different syntax positions (recordType's own
+// notNull? at GQL.g4:1979 versus the field's, inside its valueType) and reading
+// the record's from a subtree scan would report a field's qualifier as the
+// property's — the defect the list alternatives were written around
+// (propertytype.go:33-39), reachable here through one more shape.
+func TestRecordNotNullBindsWhereItIsSpelled(t *testing.T) {
+	t.Run("on the record", func(t *testing.T) {
+		got, err := parseFirstProperty(t, "RECORD { a :: INT } NOT NULL")
+		require.NoError(t, err)
+		require.Equal(t, graph.PropertyType("RECORD<a INT>"), got.Type)
+		require.False(t, got.Nullable)
+	})
+	t.Run("on a field", func(t *testing.T) {
+		got, err := parseFirstProperty(t, "RECORD { a :: INT NOT NULL }")
+		require.NoError(t, err)
+		require.Equal(t, graph.PropertyType("RECORD<a INT NOT NULL>"), got.Type)
+		require.True(t, got.Nullable, "the field's qualifier is not the property's")
+	})
+	t.Run("on the braceless record", func(t *testing.T) {
+		got, err := parseFirstProperty(t, "ANY RECORD NOT NULL")
+		require.NoError(t, err)
+		require.Equal(t, graph.TypeAnyRecord, got.Type)
+		require.False(t, got.Nullable)
+	})
+}
+
+// TestRecordDelimitedFieldNameQuoted is the forgery guard at the layer that can
+// actually be forged. fieldName is an identifier (GQL.g4:2891) and identifier
+// admits a delimited one, so a legal field name may contain the encoding's own
+// separators. The name is carried verbatim, delimiters included, exactly as
+// propertyName is (propertytype.go:25) — undelimiting it here and nowhere else
+// would be an inconsistency invented by this bead.
+func TestRecordDelimitedFieldNameQuoted(t *testing.T) {
+	got, err := parseFirstProperty(t, "RECORD { `a,b>c` :: INT, z :: STRING }")
+	require.NoError(t, err)
+
+	fields := got.Type.Fields()
+	require.Len(t, fields, 2, "the separators inside the delimited name must not split it")
+	require.Equal(t, "`a,b>c`", fields[0].Name)
+	require.Equal(t, graph.TypeInt, fields[0].Type)
+	require.Equal(t, "z", fields[1].Name)
+}
+
+// TestDuplicateFieldNameRejected mirrors ADR 0030's reading of a repeated
+// property name onto fields, for the same reason and with the same provisional
+// standing: the free ISO BNF states no uniqueness constraint, and of the two
+// readings only "keep one and drop the other" can be wrong silently.
+func TestDuplicateFieldNameRejected(t *testing.T) {
+	_, err := parseFirstProperty(t, "RECORD { a :: INT, a :: STRING }")
+	require.ErrorIs(t, err, gql.ErrDuplicateFieldName)
+}
+
+// TestClosedUnionPropertyResolves pins both closed-union alternatives
+// (GQL.g4:1731-1732) and the set semantics gqlc-be1me chose for them: members
+// sorted by their encoded spelling, exact duplicates dropped, and a lone
+// unqualified member collapsing to itself, since `ANY VALUE<STRING>` admits
+// precisely what `STRING` admits.
+func TestClosedUnionPropertyResolves(t *testing.T) {
+	for _, tc := range []struct {
+		spelling string
+		want     graph.PropertyType
+	}{
+		{"ANY VALUE<STRING | INT>", "UNION<INT|STRING>"},
+		{"ANY<STRING | INT>", "UNION<INT|STRING>"},
+		{"STRING | INT", "UNION<INT|STRING>"},
+		{"INT | STRING", "UNION<INT|STRING>"},
+		{"STRING | INT | DATE", "UNION<DATE|INT|STRING>"},
+		{"STRING | STRING", graph.TypeString},
+		{"ANY VALUE<STRING>", graph.TypeString},
+		{"LIST<STRING> | INT", "UNION<INT|LIST<STRING>>"},
+		{"ANY VALUE<STRING | ANY VALUE<INT | DATE>>", "UNION<DATE|INT|STRING>"},
+	} {
+		t.Run(tc.spelling, func(t *testing.T) {
+			got, err := parseFirstProperty(t, tc.spelling)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got.Type)
+			require.True(t, got.Nullable, "no NOT NULL binds to the property here")
+		})
+	}
+}
+
+// TestClosedUnionMemberOrderCanonicalisedThroughParser is the union half of
+// TestRecordFieldOrderCanonicalisedThroughParser, and carries the same argument.
+func TestClosedUnionMemberOrderCanonicalisedThroughParser(t *testing.T) {
+	si, err := parseFirstProperty(t, "ANY VALUE<STRING | INT>")
+	require.NoError(t, err)
+	is, err := parseFirstProperty(t, "ANY VALUE<INT | STRING>")
+	require.NoError(t, err)
+	require.Equal(t, si.Type, is.Type)
+}
+
+// TestClosedUnionTrailingNotNullBindsToTheRightMember records a reading a schema
+// author may well not expect, which is why it is pinned rather than left to
+// follow from the code. Neither closed-union alternative admits a notNull of its
+// own (GQL.g4:1731-1732), so the qualifier in `STRING | INT NOT NULL` is inside
+// the right member's valueType and belongs to that member. gqlc takes the
+// grammar's reading rather than the charitable one; ADR 0037 argues why.
+func TestClosedUnionTrailingNotNullBindsToTheRightMember(t *testing.T) {
+	got, err := parseFirstProperty(t, "STRING | INT NOT NULL")
+	require.NoError(t, err)
+	require.Equal(t, graph.PropertyType("UNION<INT NOT NULL|STRING>"), got.Type)
+	require.True(t, got.Nullable, "the property itself is unqualified")
+}
+
+// TestDeclinedFamilyInsideRecordOrUnionSurfacesItsOwnSentinel is the behaviour
+// change the recursion brings, stated positively. declineValueType deliberately
+// did not descend (propertytype.go:77-81) because the outer context was the only
+// thing it could answer for; now that records and unions resolve their parts,
+// the part that cannot resolve reports its own family. A reader who sees
+// ErrUnsupportedType bare for `PATH | STRING` is reading a regression.
+func TestDeclinedFamilyInsideRecordOrUnionSurfacesItsOwnSentinel(t *testing.T) {
+	for _, tc := range []struct {
+		spelling string
+		want     error
+	}{
+		{"PATH | STRING", gql.ErrPathValueType},
+		{"RECORD { p :: PATH }", gql.ErrPathValueType},
+		{"RECORD { n :: ANY NODE }", gql.ErrReferenceValueType},
+		{"ANY VALUE<STRING | NOTHING>", gql.ErrImmaterialValueType},
+		{"RECORD { r :: RECORD { p :: PATH } }", gql.ErrPathValueType},
+	} {
+		t.Run(tc.spelling, func(t *testing.T) {
+			_, err := parseFirstProperty(t, tc.spelling)
+			require.ErrorIs(t, err, tc.want)
 		})
 	}
 }
