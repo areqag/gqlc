@@ -714,6 +714,164 @@ func (s *ConformanceSuite) TestEveryLabelSwitchAMethodWritesIsAnEdgeUnionItsQuer
 	}
 }
 
+// TestMethodLabelSwitchReaderReadsWhatItClaims holds methodLabelSwitches
+// to each arm of the rule it states, one witness apiece.
+//
+// The corpus cannot do this. Every in-method label switch any backend
+// emits today is the edge-union dispatch, written directly in the method
+// body with string cases and a default — so the corpus exercises one arm,
+// and each of the others could be deleted with the whole suite green. A
+// reader that answered "yes, a label switch" to every switch in the tree
+// would still pass the sweep above, because the switches it would then
+// also read are in package-level functions the sweep looks up no alphabet
+// for, and it would red on nothing until the day it swallowed one.
+//
+// So the arms are pinned here against source that is parsed and never
+// compiled, which is what lets a row spell a shape the emitters do not
+// write. The two exclusions that carry the most weight are the ones the
+// corpus is furthest from reaching: a switch inside a function literal
+// inside a method, which belongs to the decoder census on the other side
+// of the partition, and a switch over values that are not strings, which
+// is what both of the other switch shapes the backends emit look like.
+func TestMethodLabelSwitchReaderReadsWhatItClaims(t *testing.T) {
+	for _, tc := range []struct {
+		name, src string
+		want      []labelSwitch
+	}{
+		{
+			name: "a label switch a method writes in its own body",
+			src: `func (q *queries) ListActions() error {
+	switch rel.Type {
+	case "LIKES":
+	case "AUTHORED":
+	}
+	return nil
+}`,
+			// Sorted, so the reported set does not turn on the order the
+			// emitter happened to write the cases in.
+			want: []labelSwitch{{method: "ListActions", line: 4, labels: []string{"AUTHORED", "LIKES"}}},
+		},
+		{
+			name: "a default clause neither contributes a label nor disqualifies",
+			src: `func (q *queries) ListActions() error {
+	switch rel.Type {
+	case "LIKES":
+	default:
+	}
+	return nil
+}`,
+			want: []labelSwitch{{method: "ListActions", line: 4, labels: []string{"LIKES"}}},
+		},
+		{
+			// A switch naming no value at all bounds nothing, so it is not a
+			// guard on a closed alphabet either. Without this the reader
+			// reports it with an empty label set, which no EdgeUnion can
+			// equal, and the sweep above reddens on a switch that carries no
+			// claim.
+			name: "a switch holding nothing but a default",
+			src: `func (q *queries) ListActions() error {
+	switch rel.Type {
+	default:
+	}
+	return nil
+}`,
+		},
+		{
+			// The other half of the partition with the decoder census: a
+			// receiver-less function is what packageLevelFuncs yields, and
+			// comparedStrings reads its case clauses. Read here as well, its
+			// guards would be graded twice and against two different
+			// alphabets.
+			name: "a label switch a package-level function writes",
+			src: `func decodeLikes(rel any) error {
+	switch rel.Type {
+	case "LIKES":
+	}
+	return nil
+}`,
+		},
+		{
+			// The other half again, at the one place a query method reaches
+			// it: packageLevelFuncs walks a method for the literals it holds,
+			// so a dispatch moved into a closure is already the census's, and
+			// reading it here too would put one switch on two ledgers.
+			name: "a label switch a function literal inside a method writes",
+			src: `func (q *queries) ListActions() error {
+	run(func() {
+		switch rel.Type {
+		case "LIKES":
+		}
+	})
+	return nil
+}`,
+		},
+		{
+			// neo4j's db.run: a switch whose cases are qualified identifiers.
+			name: "a switch over values that are not literals at all",
+			src: `func (d *db) run(access neo4j.AccessMode) error {
+	switch access {
+	case neo4j.AccessModeRead:
+	case neo4j.AccessModeWrite:
+	}
+	return nil
+}`,
+		},
+		{
+			// AGE's agtype scanners: BasicLit cases of the wrong kind. The
+			// Kind check is the whole of what refuses these, and unquoting a
+			// char literal succeeds, so dropping it reads 't' as the label
+			// "t" rather than failing loudly.
+			name: "a switch over character literals",
+			src: `func (d *db) scan(b []byte, i int) error {
+	switch b[i] {
+	case 't':
+	case 'f':
+	}
+	return nil
+}`,
+		},
+		{
+			// One computed case is enough: the alphabet no longer bounds what
+			// the switch can reach, so grading the string cases against one
+			// would be a verdict about a switch this reader cannot read.
+			name: "a switch mixing a string with a computed value",
+			src: `func (q *queries) ListActions() error {
+	switch rel.Type {
+	case "LIKES":
+	case other:
+	}
+	return nil
+}`,
+		},
+		{
+			// A different node. Its cases name types, so there is no wire
+			// alphabet for them to be graded against.
+			name: "a type switch",
+			src: `func (q *queries) ListActions() error {
+	switch v := raw.(type) {
+	case string:
+	}
+	_ = v
+	return nil
+}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "queries.cypher.go", "package emitted\n\n"+tc.src+"\n", parser.SkipObjectResolution)
+			require.NoError(t, err)
+
+			require.Equal(t, tc.want, methodLabelSwitches(require.New(t), fset, file),
+				"methodLabelSwitches read %s differently than the rule it states. It claims every "+
+					"string-literal switch a method writes in its own body and nothing else: a switch a "+
+					"package-level function or a function literal holds belongs to the decoder census on the "+
+					"other side of that partition, and a switch whose cases are not all string literals is not "+
+					"a guard on a closed alphabet at all, so no alphabet bounds what it can reach",
+				tc.name)
+		})
+	}
+}
+
 // TestMultiLabelSchemaPostureIsRecorded holds each backend to a declared
 // verdict on a schema that declares an entity keyed on more than one label:
 // emit for it, or refuse it whole.
