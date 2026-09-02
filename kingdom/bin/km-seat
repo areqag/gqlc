@@ -315,6 +315,19 @@ while :; do
         # is run on its own, out of the pipeline, where pipefail cannot fold
         # the two together, and `|| true` swallows the code without discarding
         # the payload that tells them apart.
+        #
+        # Two modes, but THREE states. A ledger that is reachable and WRONG is
+        # the third, and no payload distinguishes it: against a store that
+        # simply does not hold the id, bd answers with the same error object it
+        # gives for a bead that never existed anywhere, so the miss arm below
+        # tells a blind seat its bead does not exist. That reads as a dispatch
+        # bug and sends the citizen looking in the wrong place — it is how
+        # gqlc-zpjuc stayed invisible for four hours across ten seats.
+        # Unfixable from the payload, and it does not need to be: both arms name
+        # $BEADS_DIR, which this script derived and guarded above and which no
+        # answer of bd's mentions. The reader who is genuinely missing a bead
+        # loses one clause; the reader on the wrong store gets the whole
+        # diagnosis (bd gqlc-i0y32).
         # shellcheck disable=SC2086 # deliberate word splitting: one call, all ids
         raw=$(bd show $bead_ids --json 2>/dev/null) || true
         beads_json=$(jq -c 'if type == "array" then . else [.] end' <<<"$raw" 2>/dev/null) || beads_json=""
@@ -395,7 +408,7 @@ while :; do
         if [ -z "$row" ]; then
             [ "$beads_read" -eq 1 ] || continue
             reasons="$reasons
-STALE: $b does not resolve on the ledger at wake time, so nothing said about it above can be acted on."
+STALE: $b does not resolve on the ledger at $BEADS_DIR, so nothing said about it above can be acted on. Either the bead is genuinely gone, or that is not the town's ledger: bd answers a bead that never existed and a bead absent from the WRONG store with the same line, so this path is the only thing separating them. Check that it names the town's main checkout before reading this as a dispatch bug — every bd call you make this session reads it too (bd gqlc-zpjuc)."
             continue
         fi
         read -r _ b_status b_assignee b_labels b_blockers <<<"$row"
@@ -414,9 +427,20 @@ STALE: $b is blocked by $b_blockers and is not on the ready queue — do not cla
     done
     # Fail loud. A silent fall-back to the old behaviour would retire this guard
     # exactly when the ledger is sick, which is when a reason is least trustworthy.
+    #
+    # Reachable, which was worth establishing before trusting it. Two inputs
+    # measured 2026-09-02, both leaving stdout EMPTY: `bd` absent from PATH
+    # (rc=127), and a BEADS_DIR bd cannot open as a database while no ledger is
+    # discoverable from the cwd. That second clause is the whole subtlety, and
+    # it is why the arm reads as dead code when probed by hand: bd falls back to
+    # discovery, so a bad BEADS_DIR under a cwd inside a checkout that HAS a
+    # ledger answers correctly and never reaches here. The cwd here is
+    # $KINGDOM_DIR, one level under the checkout this runner's own copy lives
+    # in, so what the fallback finds is that checkout's ledger — which is the
+    # same directory BEADS_DIR names whenever the two agree (bd gqlc-i0y32).
     if [ "$beads_read" -eq 0 ]; then
         reasons="$reasons
-The bead(s) named above could not be re-derived — the ledger query failed — so treat every claim in those lines as unverified."
+The bead(s) named above could not be re-derived: bd gave no answer at all for the ledger at $BEADS_DIR, so treat every claim in those lines as unverified. Read that path before anything else — it is where this runner was pointed, every bd call you make this session goes there too, and a store that answers nothing here answers nothing for you either (bd gqlc-zpjuc)."
     fi
 
     # A seat runs the hooks in its own checkout, so a parked one keeps running
