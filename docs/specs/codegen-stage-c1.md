@@ -222,8 +222,9 @@ package-level identifiers are: the C0 exported skeleton set (`Queries`,
 `New`, `WithTx`, `ReadQuerier`, `WriteQuerier`, `Querier`) plus the
 C1 additions below. C0's unexported items (`driverOrTx` /
 `driverDB` / `txDB`) stay unexported; C1 adds the unexported per-
-query `<methodName>QueryText` const per §5.3 / §5.5 — neither set
-participates in §4.4's exported-collision sweep.
+query `<methodName>QueryText` const per §5.3 / §5.5. Neither set
+participated in §4.4's exported-collision sweep at C1; the const
+joined it at C6 as source 7 (§4.4, `gqlc-igs4`).
 
 ### 3.1 Per-query method surface
 
@@ -486,11 +487,12 @@ The two-columns case is deterministic on first-appearance in
 
 After Phase B, sweep every emitted **exported** top-level identifier
 for duplicates. Unexported package-internal identifiers (currently
-`driverOrTx` / `driverDB` / `txDB` from the C0 skeleton and the
-per-query `<methodName>QueryText` const) are not swept here — the
-nested-module compile fence catches unexported redeclarations with a
-strictly-better diagnostic (§4.4 rationale below). The exported
-identifier set per generated package is:
+`driverOrTx` / `driverDB` / `txDB` from the C0 skeleton) are not swept
+here — the nested-module compile fence catches unexported
+redeclarations with a strictly-better diagnostic (§4.4 rationale
+below). The per-query `<methodName>QueryText` const was on that list
+until C6 and no longer is; the rationale below records why it left.
+The exported identifier set per generated package is:
 
 - The C0 exported skeleton set: `Queries`, `New`, `WithTx`,
   `ReadQuerier`, `WriteQuerier`, `Querier`.
@@ -514,8 +516,8 @@ identifier is not reserved and cannot collide. A separate query
 whose Row *does* have to be named `PersonNames` would be free to do
 so.
 
-**Why `<methodName>QueryText` consts do not participate in the
-exported-identifier sweep.** The per-query query-text const's name is
+**Why `<methodName>QueryText` consts were kept off the sweep, and why
+that stopped holding.** The per-query query-text const's name is
 `<methodName>QueryText` (lower-camel-case first rune, §5.3, §5.5) —
 unexported. The user calls the method, never the const; the const is
 a codegen implementation detail that no user code can name or shadow.
@@ -525,30 +527,40 @@ enforcement surface for unexported identifiers, and the fence error
 names the file and both declaration sites, which is a strictly
 better diagnostic than an `ErrIdentifierCollision` fail-message that
 only names the query pair. C5 extends the exported sweep with
-entity-struct and decode-helper identifiers, which are user-visible;
-unexported package-internal identifiers stay on the fence.
+entity-struct and decode-helper identifiers, which are user-visible.
 
-**The omission is a real hole, and this section used to deny it.**
-The denial was: the `<methodName>` prefix is deterministic in
-`Input.Queries` order (§4.1 verbatim method name → lowercase first
-rune), so a duplicate at this axis would already imply a duplicate
-method-name collision the exported sweep catches first. That is
-false. The const shares the unexported namespace with the
-`decode<Entity>` helpers, and those derive from **schema labels**,
-not from method names, so the two namespaces can meet with no method
-name duplicated anywhere: a node label `FooQueryText` alongside a
-query named `DecodeFoo` emits `decodeFooQueryText` as both a const
-and a func. Neither the method-name axis nor the parameter-name axis
-sees it — both colliding names are generator-owned, and the capture
-guards police author-chosen identifiers against generator-owned ones.
-Generation exits 0 and `go build` reports the redeclaration. That is
-`gqlc-igs4`, which owns the disambiguation. The counterexample above
-belongs here, because it is what refutes this section's old denial;
-the disambiguation does not, because restating it would leave two
-copies of an argument only one bead keeps current. Until it lands,
-the compile fence is the only thing
-standing between this axis and a shipped non-compiling package, and
-it is not reached by `gqlc generate` — only by the golden harness.
+**That argument had a hole, and this section used to deny it twice
+over.** The first denial was: the `<methodName>` prefix is
+deterministic in `Input.Queries` order (§4.1 verbatim method name →
+lowercase first rune), so a duplicate at this axis would already
+imply a duplicate method-name collision the exported sweep catches
+first. That is false. The const shares the unexported namespace with
+the `decode<Entity>` helpers, and those derive from **schema
+labels**, not from method names, so the two namespaces can meet with
+no method name duplicated anywhere: a node label `FooQueryText`
+alongside a query named `DecodeFoo` derives `decodeFooQueryText` as
+both a const and a func. Neither the method-name axis nor the
+parameter-name axis sees it — both colliding names are
+generator-owned, and the capture guards police author-chosen
+identifiers against generator-owned ones.
+
+The second denial was the appeal to the fence. The fence is not
+reached by `gqlc generate` — only by the golden harness — so for a
+user running the tool it stood between nothing and nothing:
+generation exited 0 and the redeclaration surfaced at that user's own
+`go build`, off any diagnostic this project controls.
+
+**Closed at C6 by `gqlc-igs4`.** The consts are swept, as source 7 of
+`sweepIdentifiers`, inserted last so that every earlier source reports
+the same side of a collision as "first". The choice was between a
+reserved suffix the derived decoder names cannot reach and a single
+sweep over all generator-owned package-level names; the sweep was
+taken because what it asserts is that those names are pairwise
+distinct, which is an equality check over the names actually emitted
+rather than a spelling convention a later source could quietly fail
+to honour. Unexported package-internal identifiers with a single
+derivation — `driverOrTx` / `driverDB` / `txDB` — stay on the fence,
+because no second axis can derive them.
 
 C5 hardens this sweep against additional identifier sources
 (entity structs, decode helpers) as C2/C3 add them (ADR 0010 D7).

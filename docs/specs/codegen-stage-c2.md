@@ -508,6 +508,15 @@ sites, a strictly better diagnostic than an
 type pair. Same discipline as C1's `<methodName>QueryText` const
 sitting on the fence, not the sweep.
 
+Both halves of that were later overturned, each by its own bead, and
+the paragraph above is left as written because it is the argument the
+promotions were made against. Decode helpers joined the sweep at C5
+(spec C5 §2, source 2). The query-text const joined it at C6 (spec C1
+§4.4, source 7, `gqlc-igs4`) — because it and the decode helpers
+derive from different author text, method names against schema
+labels, so the two can collide with no exported name duplicated
+anywhere. That is the case this section assumed away.
+
 ---
 
 ## 5. Emission templates and per-query files — C2 additions

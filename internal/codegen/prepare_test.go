@@ -862,6 +862,48 @@ func TestReservedScopeDecidesWhichEntityNamesCollide(t *testing.T) {
 	}
 }
 
+// TestQueryTextConstCollidesWithADecodeHelper pins source 7 of the
+// identifier sweep. Both colliding names are generator-owned — the const
+// is derived from a method name, the helper from a schema label — which
+// is why the capture guards do not reach it: those police author-chosen
+// identifiers against generator-owned ones, and here there is no author
+// identifier on either side to police.
+//
+// The pair is a boundary shift, like source 6's. A label FooQueryText
+// mangles to entity FooQueryText and so to helper decodeFooQueryText; a
+// query DecodeFoo takes the const decodeFooQueryText. Neither name is at
+// fault alone, so a message naming one of them leaves the reader without
+// the rename to make.
+//
+// Before this source existed the sweep passed and both declarations were
+// emitted into one package, so `gqlc generate` exited 0 over Go that
+// `go build` then refused with "decodeFooQueryText redeclared in this
+// block" (bd gqlc-igs4).
+func TestQueryTextConstCollidesWithADecodeHelper(t *testing.T) {
+	label := graph.LabelSetKey("FooQueryText")
+	in := codegen.Input{
+		Schema: schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				label: {KeyLabels: label, CompleteLabels: label, Properties: map[string]schema.Property{}},
+			},
+		},
+		Queries: []codegen.NamedQuery{
+			{Name: "DecodeFoo", Cardinality: codegen.CardinalityExec, SourceText: "MATCH (n) DELETE n"},
+		},
+	}
+
+	_, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.ErrorIs(t, err, codegen.ErrIdentifierCollision)
+	// One ordered substring, not two independent ones: source 7 inserts
+	// after source 2, so which construct lands on the message's "first"
+	// side is part of the contract. Two unordered contains would read the
+	// same either way round.
+	require.ErrorContains(t, err,
+		`emitted by both entity decode helper "decodeFooQueryText" for entity struct "FooQueryText" `+
+			`and query "DecodeFoo" query-text const "decodeFooQueryText"`)
+}
+
 // goldenCorpusGlob reaches the committed golden trees from this package.
 // The conformance suite reads the same corpus through its own root, which
 // an env var can redirect at a copy; this sweep wants the tracked trees

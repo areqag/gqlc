@@ -165,9 +165,7 @@ C2 introduced the sweep with four identifier sources (entity struct
 names + method names + `<Method>Params` + `<Method>Row`). C4 added
 no source (the two new sentinels `ErrExecOnProjection` /
 `ErrCardinalityShapeMismatch` gate cardinality × shape, not
-identifier collision). C5 grows the sweep to six sources, the full
-enumeration of every possible collision axis a generated package can
-produce:
+identifier collision). C5 grows the sweep to six sources:
 
 1. **Entity struct names** (introduced C2). Sorted by emission order
    (`Schema.Nodes` in `LabelSetKey` order then `Schema.Edges` in
@@ -211,6 +209,18 @@ sources (e.g. "edgeUnion interface `GetActionsAction` for query
 `GetActions` column `action` collides with entity struct `GetActionsAction`
 (schema labels `GetActionsAction`)"). The sweep is a single map
 insertion pass; the first duplicate wins across all six sources.
+C6 appends a seventh, the `<methodName>QueryText` const, last — so
+every source above keeps reporting the same side of a collision as
+"first" (C1 §4.4, `gqlc-igs4`).
+
+This section's opening sentence used to call those six "the full
+enumeration of every possible collision axis a generated package can
+produce". They were not, and that claim is withdrawn. The const was
+the seventh: a schema label meeting a method name derived one
+package-level name down two axes, and `gqlc generate` exited 0 over
+Go that does not compile. An enumeration here is complete against
+the axes that have been looked for, which is the only claim a count
+in this document can carry.
 
 **Why decode helpers now**, over C2's exclusion argument.
 C2's argument was correct-by-elimination: an unexported `decodePerson`
@@ -227,10 +237,18 @@ promoted an entity decode helper to *exported* (say the R7 resolver
 learned to type driver-side entity metadata and codegen exposed
 `Decode<Name>` as public API) would blow past the current sweep.
 Adding decode helpers to the sweep future-proofs the invariant at
-zero cost today (no legitimate fixture collides). Precedent: the C1
-`<methodName>QueryText` const sitting on the compile fence, not the
-sweep — same discipline as C2 §4.6 explains, but C5 goes the other
-way for decode helpers because the promotion-risk axis is real.
+zero cost today (no legitimate fixture collides). Precedent cited at
+the time: the C1 `<methodName>QueryText` const sitting on the compile
+fence, not the sweep — same discipline as C2 §4.6 explains, but C5
+goes the other way for decode helpers because the promotion-risk axis
+is real.
+
+C6 moved the const to the sweep as well, so that precedent no longer
+points anywhere. The reason is narrower than the promotion-risk one
+argued here and did not need a future change to bite: the const and
+the decode helpers derive from different author text — method names
+against schema labels — so they could already collide with no
+exported name duplicated anywhere (`gqlc-igs4`).
 
 ### 2.3 The edgeUnion emission — the C5 body
 
@@ -697,7 +715,8 @@ sweep, introduced at C5). The sweep order remains:
 
 Any duplicate → `ErrIdentifierCollision` naming both identifier
 sources. The sweep is a single map insertion pass; the first
-duplicate wins across all six sources.
+duplicate wins across all six sources, and across C6's seventh
+(`<methodName>QueryText`, appended last).
 
 - **Grill option: sweep the marker method names too.** Rejected.
   Marker methods are unexported; two edgeUnion interfaces with the
@@ -1081,6 +1100,10 @@ Phase B, in one map insertion pass, in the order:
 4. `<Method>Params`.
 5. `<Method>Row`.
 6. EdgeUnion interface names.
+
+C6 appends a seventh, the `<methodName>QueryText` const, after
+these — see §2.2. The six above keep their positions, so each
+still reports the same side of a collision as "first".
 
 Any duplicate → `ErrIdentifierCollision` naming both sources.
 
