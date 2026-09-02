@@ -419,12 +419,28 @@ var encodedParamText = map[string]string{
 //
 // The encoder is chosen by the carrier at the leaf, and nullability and
 // list nesting are carried by the two combinators wrapped around it, so
-// the four shapes a parameter of one of these widths can take are four
-// compositions of the same three names rather than four emitted helpers.
+// the shapes a parameter of one of these widths can take are compositions
+// of the same three names rather than one emitted helper each.
+//
+// The nesting is counted rather than stripped once, because ADR 0036
+// admits these widths at EVERY depth and both the type table and the
+// decode side already compose that way (listDepth, listHelperName). A
+// single CutPrefix here left a depth-2 parameter matching no leaf arm, so
+// it returned ok=false and the call site sent it through plain
+// json.Marshal — carriers that define no MarshalJSON, crossing as their Go
+// structs while decode expected ISO strings (bd gqlc-jc8mc).
 func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
-	elem, list := strings.CutPrefix(f.GoType, "[]")
+	leaf := f.GoType
+	depth := 0
+	for {
+		elem, ok := strings.CutPrefix(leaf, "[]")
+		if !ok {
+			break
+		}
+		depth, leaf = depth+1, elem
+	}
 	var encoder string
-	switch elem {
+	switch leaf {
 	case goDate:
 		encoder = "agtypeDateText"
 	case goLocalTime:
@@ -437,16 +453,38 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 		return "", false
 	}
 	switch {
-	case list && f.Nullable:
-		return fmt.Sprintf("agtypeEncodedNullable(%s, func(in []%s) ([]%s, error) {\n\t\treturn agtypeEncodedList(in, %s)\n\t})",
-			access, elem, encodedParamText[elem], encoder), true
-	case list:
-		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, encoder), true
+	case depth > 0 && f.Nullable:
+		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, listEncoder(depth, leaf, encoder, 1)), true
+	case depth > 0:
+		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, listEncoder(depth-1, leaf, encoder, 1)), true
 	case f.Nullable:
 		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, encoder), true
 	default:
 		return fmt.Sprintf("%s(%s)", encoder, access), true
 	}
+}
+
+// listEncoder is the encoder FUNCTION VALUE for a value nested levels deep
+// above leaf: the bare leaf encoder at 0, and one closure per level above
+// it, each wrapping agtypeEncodedList around the one below.
+//
+// indent is the tab depth of the line the closure opens on, so a nested
+// closure sits one level in from its parent's return statement. It is
+// carried explicitly because nothing gofmts the emission — what this
+// returns is what lands in the file — and at level 1 it must reproduce the
+// bytes the single-level composition emitted before this function existed,
+// or every depth-1 golden moves.
+func listEncoder(levels int, leaf, encoder string, indent int) string {
+	if levels == 0 {
+		return encoder
+	}
+	slices := strings.Repeat("[]", levels-1)
+	return fmt.Sprintf("func(in %s[]%s) (%s[]%s, error) {\n%sreturn agtypeEncodedList(in, %s)\n%s}",
+		slices, leaf,
+		slices, encodedParamText[leaf],
+		strings.Repeat("\t", indent+1),
+		listEncoder(levels-1, leaf, encoder, indent+1),
+		strings.Repeat("\t", indent))
 }
 
 // writeOneBody emits the :one arity check, the single row's decode, and

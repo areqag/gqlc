@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE NestedTemporalListProperty AS {
+    (:Roster {
+        id      :: INT64 NOT NULL,
+        dates   :: LIST<LIST<DATE NOT NULL> NOT NULL> NOT NULL,
+        windows :: LIST<LIST<DURATION(DAY TO SECOND) NOT NULL> NOT NULL>
+    })
+}

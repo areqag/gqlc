@@ -293,7 +293,7 @@ func TestDecodeVertexReadsNullableProperties(t *testing.T) {
 // to wrap: the decoder took the agtype carrier and converted at the
 // field, so a rank of 1<<40 reached the caller as 0 and a tally written
 // from a negative carrier as 18446744073709551615 (bd gqlc-awtb,
-// ADR 0036).
+// ADR 0037).
 //
 // The error text is asserted in full rather than merely for presence,
 // because this fixture already has a way for every one of these rows to
@@ -2349,6 +2349,84 @@ func TestEmittedMethodBindsListsOfCarriers(t *testing.T) {
 		}
 		if db.args != "" {
 			t.Errorf("%s: WriteSpans sent %s despite refusing the argument", tc.name, db.args)
+		}
+	}
+}
+
+// TestEmittedMethodBindsNestedListsOfCarriers asserts the WIRE BYTES of a
+// depth-2 list of carriers, which ADR 0036 admits at every depth and which
+// the encoder composed for only one level.
+//
+// The rows below are the runtime half of that ADR. The defect they witness is
+// not a wrong encoding but the ABSENCE of one: fallibleParamEncoder stripped a
+// single "[]", so a [][]Date matched no leaf arm, and the ("", false) it
+// returned is read by the call site as "this parameter crosses raw" — through
+// plain json.Marshal, over carriers that define no MarshalJSON. Nothing reds
+// in the emitter for that; the equality predicate simply never matches.
+//
+// Two carriers are bound because they encode to different agtype scalars — a
+// Date to a string, a Duration to an int64 — so a composition that reached for
+// one side of encodedParamText would pass on the other. The empty rows are
+// here because an empty OUTER list and a list holding an empty INNER list are
+// the two shapes that tell the levels apart: a walk that recursed the wrong
+// number of times produces the same bytes for both.
+func TestEmittedMethodBindsNestedListsOfCarriers(t *testing.T) {
+	mayRunOn := [][]Date{{{Year: 2024, Month: 1, Day: 2}}, {{Year: 2025, Month: 3, Day: 4}}}
+
+	cases := []struct {
+		name string
+		arg  WriteSchedulesParams
+		want string
+	}{
+		{
+			name: "each inner list crosses as an array of its element's scalar",
+			arg: WriteSchedulesParams{
+				RunsOn: [][]Date{
+					{{Year: 2024, Month: 1, Day: 2}, {Year: 1, Month: 1, Day: 1}},
+					{{Year: 2025, Month: 3, Day: 4}},
+				},
+				MayRunOn: &mayRunOn,
+				Windows: [][]Duration{
+					{{Seconds: 90}, {Days: 1, Seconds: 1}},
+					{{Seconds: 1}},
+				},
+			},
+			want: `{"mayRunOn":[["2024-01-02"],["2025-03-04"]],"runsOn":[["2024-01-02","0001-01-01"],["2025-03-04"]],"windows":[[90000000,86401000000],[1000000]]}`,
+		},
+		{
+			name: "an absent nullable nested list is the agtype null",
+			arg: WriteSchedulesParams{
+				RunsOn:  [][]Date{{{Year: 2024, Month: 1, Day: 2}}},
+				Windows: [][]Duration{{{Seconds: 90}}},
+			},
+			want: `{"mayRunOn":null,"runsOn":[["2024-01-02"]],"windows":[[90000000]]}`,
+		},
+		{
+			name: "an empty outer list is an empty array and not a null",
+			arg:  WriteSchedulesParams{},
+			want: `{"mayRunOn":null,"runsOn":[],"windows":[]}`,
+		},
+		{
+			// Distinct from the row above, and the pair is what pins the
+			// number of levels the walk descends: one empty array is an
+			// empty OUTER list, an array holding an empty array is an
+			// outer list of one empty INNER list.
+			name: "an empty inner list is an empty array inside the outer one",
+			arg: WriteSchedulesParams{
+				RunsOn:  [][]Date{{}},
+				Windows: [][]Duration{{}, {{Seconds: 1}}},
+			},
+			want: `{"mayRunOn":null,"runsOn":[[]],"windows":[[],[1000000]]}`,
+		},
+	}
+	for _, tc := range cases {
+		db := &recordingDB{}
+		if err := (&Queries{queries{db: db, graph: "corpus"}}).WriteSchedules(context.Background(), tc.arg); err != nil {
+			t.Errorf("%s: WriteSchedules = error %v", tc.name, err)
+			continue
+		}
+		if db.args != tc.want {
+			t.Errorf("%s: bound arguments =\n\t%s\nwant\n\t%s", tc.name, db.args, tc.want)
 		}
 	}
 }
