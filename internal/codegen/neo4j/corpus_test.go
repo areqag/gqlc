@@ -172,7 +172,7 @@ var corpusTables = map[string]corpusrun.Table{
 	"TestAnythingReadsWhatTheGraphHolds":                      {Rows: 7},
 	"TestDecodersRefuseAValueOfAnotherType":                   {Rows: 4},
 	"TestEdgeUnionColumnDispatchesOnTheWireLabel":             {Rows: 2},
-	"TestEdgyRefusesWhatTheSchemaDidNotDeclare":               {Rows: 13},
+	"TestEdgyRefusesWhatTheSchemaDidNotDeclare":               {Rows: 19},
 	"TestEntityColumnRefusalsCarryTheDriversError":            {Rows: 2},
 	"TestEntityColumnsDecodeWholeEntities":                    {Rows: 4},
 	"TestListColumnRefusalsCarryTheDriversError":              {Rows: 4},

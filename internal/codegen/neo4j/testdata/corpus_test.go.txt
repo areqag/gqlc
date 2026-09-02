@@ -380,13 +380,16 @@ func TestScalarNarrows(t *testing.T) {
 // Node's: a scalar and a list element that both arrive wider than the
 // schema declared, a nullable scalar and a nullable list that arrive
 // wider still, a list of no declared element shape holding the null such
-// a list exists to carry, and a property of no declared shape read as it
-// arrived. There is no list of lists among them, and there cannot be:
-// ADR 0035 leaves no neo4j stored property of that width to declare.
+// a list exists to carry, a list whose elements arrive as themselves and
+// are asserted rather than narrowed, and a property of no declared shape
+// read as it arrived. There is no list of lists among them, and there
+// cannot be: ADR 0035 leaves no neo4j stored property of that width to
+// declare.
 func TestEdgyNarrowsOverARelationship(t *testing.T) {
 	got, err := decodeEdgy(relationship(map[string]any{
 		"rank":    int64(-3),
 		"ranks":   []any{int64(1), int64(-2)},
+		"blobs":   []any{[]byte{1, 2}, []byte{}},
 		"payload": map[string]any{"k": "v"},
 		"loose":   []any{true, nil, 3.5},
 		"depths":  []any{0.5, 1.5},
@@ -400,6 +403,12 @@ func TestEdgyNarrowsOverARelationship(t *testing.T) {
 	}
 	if want := []int32{1, -2}; !reflect.DeepEqual(got.Ranks, want) {
 		t.Errorf("decodeEdgy().Ranks = %#v, want %#v", got.Ranks, want)
+	}
+	// The elements the driver hands back already the declared width. The
+	// walk asserts to []byte and appends what it asserted, and an empty
+	// element has to survive that as itself rather than as a nil slice.
+	if want := [][]byte{{1, 2}, {}}; !reflect.DeepEqual(got.Blobs, want) {
+		t.Errorf("decodeEdgy().Blobs = %#v, want %#v", got.Blobs, want)
 	}
 	if want := map[string]any{"k": "v"}; !reflect.DeepEqual(got.Payload, want) {
 		t.Errorf("decodeEdgy().Payload = %#v, want %#v", got.Payload, want)
@@ -432,7 +441,7 @@ func TestEdgyNarrowsOverARelationship(t *testing.T) {
 func TestEdgyRefusesWhatTheSchemaDidNotDeclare(t *testing.T) {
 	full := func() map[string]any {
 		return map[string]any{
-			"rank": int64(0), "ranks": []any{}, "payload": int64(1),
+			"rank": int64(0), "ranks": []any{}, "blobs": []any{}, "payload": int64(1),
 		}
 	}
 	with := func(key string, value any) map[string]any {
@@ -453,6 +462,18 @@ func TestEdgyRefusesWhatTheSchemaDidNotDeclare(t *testing.T) {
 	for _, want := range []string{"decode Edgy.Ranks", `"ranks"`, "element 1", "expected int64", "got string"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("decodeEdgy(ranks: [int, string]) = %q, want it to mention %s", err, want)
+		}
+	}
+
+	// An element the walk asserts to rather than narrows names its own
+	// carrier in the refusal, not the []any the property arrived as.
+	_, err = decodeEdgy(relationship(with("blobs", []any{[]byte{1}, "no"})))
+	if err == nil {
+		t.Fatalf("decodeEdgy(blobs: [bytes, string]) = no error, want a refusal")
+	}
+	for _, want := range []string{"decode Edgy.Blobs", `"blobs"`, "element 1", "expected []byte", "got string"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("decodeEdgy(blobs: [bytes, string]) = %q, want it to mention %s", err, want)
 		}
 	}
 
@@ -486,10 +507,10 @@ func TestEdgyRefusesWhatTheSchemaDidNotDeclare(t *testing.T) {
 	}
 
 	// The two non-nullable arms report a missing property through
-	// different code: rank/ranks reach neo4j.GetProperty and carry its own
-	// miss, payload is read off Props directly and carries the emission's
-	// own wording.
-	for _, key := range []string{"rank", "ranks", "payload"} {
+	// different code: rank/ranks/blobs reach neo4j.GetProperty and carry
+	// its own miss, payload is read off Props directly and carries the
+	// emission's own wording.
+	for _, key := range []string{"rank", "ranks", "blobs", "payload"} {
 		if _, err := decodeEdgy(relationship(without(key))); err == nil {
 			t.Errorf("decodeEdgy(no %s) = no error, want a refusal", key)
 		}
@@ -503,7 +524,7 @@ func TestEdgyRefusesWhatTheSchemaDidNotDeclare(t *testing.T) {
 // — its arm reads the Props map, where a key holding nil is present.
 func TestEdgyKeepsAbsentApartFromEmptyOverARelationship(t *testing.T) {
 	absent, err := decodeEdgy(relationship(map[string]any{
-		"rank": int64(0), "ranks": []any{}, "payload": nil,
+		"rank": int64(0), "ranks": []any{}, "blobs": []any{}, "payload": nil,
 	}))
 	if err != nil {
 		t.Fatalf("decodeEdgy(absent) = error %v", err)
@@ -525,7 +546,7 @@ func TestEdgyKeepsAbsentApartFromEmptyOverARelationship(t *testing.T) {
 	}
 
 	empty, err := decodeEdgy(relationship(map[string]any{
-		"rank": int64(0), "ranks": []any{}, "payload": int64(1),
+		"rank": int64(0), "ranks": []any{}, "blobs": []any{}, "payload": int64(1),
 		"loose": []any{}, "depths": []any{},
 	}))
 	if err != nil {
@@ -917,14 +938,14 @@ func scalarProps() map[string]any {
 
 func listyProps() map[string]any {
 	return map[string]any{
-		"tags": []any{"a"}, "ranks": []any{int64(1)}, "matrix": []any{},
+		"tags": []any{"a"}, "ranks": []any{int64(1)},
 		"blobs": []any{}, "stamps": []any{},
 	}
 }
 
 func edgyProps() map[string]any {
 	return map[string]any{
-		"rank": int64(-3), "ranks": []any{int64(1)}, "matrix": []any{}, "payload": int64(1),
+		"rank": int64(-3), "ranks": []any{int64(1)}, "blobs": []any{}, "payload": int64(1),
 	}
 }
 
