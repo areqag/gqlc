@@ -47,11 +47,11 @@ func decodeSample(node dbtype.Node) (Sample, error) {
 		}
 		out.Days = &narrowed
 	}
-	value1, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Sample{}, fmt.Errorf("decode Sample.Id: %w", err)
 	}
-	out.Id = value1
+	out.Id = value0
 	if v, ok := node.Props["stamps"]; ok {
 		s, ok := v.([]any)
 		if !ok {

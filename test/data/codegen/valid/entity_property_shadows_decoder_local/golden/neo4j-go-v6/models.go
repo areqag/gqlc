@@ -61,46 +61,46 @@ func decodeMarker(node dbtype.Node) (Marker, error) {
 		}
 		out.Narrowed = &narrowed
 	}
-	value3, err := neo4j.GetProperty[string](node, "node")
+	value2, err := neo4j.GetProperty[string](node, "node")
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.Node: %w", err)
 	}
-	out.Node = value3
-	value4, err := neo4j.GetProperty[string](node, "ok")
+	out.Node = value2
+	value3, err := neo4j.GetProperty[string](node, "ok")
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.Ok: %w", err)
 	}
-	out.Ok = value4
-	value5, err := neo4j.GetProperty[string](node, "out")
+	out.Ok = value3
+	value4, err := neo4j.GetProperty[string](node, "out")
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.Out: %w", err)
 	}
-	out.Out = value5
-	value6, err := neo4j.GetProperty[string](node, "props")
+	out.Out = value4
+	value5, err := neo4j.GetProperty[string](node, "props")
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.Props: %w", err)
 	}
-	out.Props = value6
-	value7, err := neo4j.GetProperty[string](node, "raw")
+	out.Props = value5
+	value6, err := neo4j.GetProperty[string](node, "raw")
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.Raw: %w", err)
 	}
-	out.Raw = value7
-	value8, err := neo4j.GetProperty[string](node, "s")
+	out.Raw = value6
+	value7, err := neo4j.GetProperty[string](node, "s")
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.S: %w", err)
 	}
-	out.S = value8
-	value9, err := neo4j.GetProperty[string](node, "v")
+	out.S = value7
+	value8, err := neo4j.GetProperty[string](node, "v")
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.V: %w", err)
 	}
-	out.V = value9
-	value10, err := neo4j.GetProperty[string](node, "value0")
+	out.V = value8
+	value9, err := neo4j.GetProperty[string](node, "value0")
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.Value0: %w", err)
 	}
-	out.Value0 = value10
+	out.Value0 = value9
 	return out, nil
 }
 
