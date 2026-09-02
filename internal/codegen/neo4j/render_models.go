@@ -101,25 +101,26 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
 
-	// math gates on the checked-narrowing helpers below, whose float arm
-	// is the only thing in this file that names it.
-	anyNarrow := narrowsANumericWidth(entities, prepared)
+	// Each checked-narrowing helper is emitted only where something calls
+	// it, so narrowFloat32 — the only thing in this file that names math —
+	// gates the math import with it.
+	narrowsInts, narrowsFloats := narrowsANumericWidth(entities, prepared)
 
 	// Imports: dbtype is unconditional (every helper's argument type);
-	// fmt gates on anyProp; math gates on anyNarrow; time gates on
+	// fmt gates on anyProp; math gates on narrowsFloats; time gates on
 	// anyTime (TIMESTAMP property); neo4j gates on anyNonNull.
 	// Alphabetical: fmt, math, time, then external neo4j / dbtype.
 	b.WriteString("import (\n")
 	if anyProp {
 		b.WriteString("\t\"fmt\"\n")
 	}
-	if anyNarrow {
+	if narrowsFloats {
 		b.WriteString("\t\"math\"\n")
 	}
 	if anyTime {
 		b.WriteString("\t\"time\"\n")
 	}
-	if anyProp || anyNarrow || anyTime {
+	if anyProp || narrowsFloats || anyTime {
 		b.WriteString("\n")
 	}
 	if anyNonNull {
@@ -143,9 +144,7 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 		writeEntityDecodeHelper(&b, e)
 	}
 
-	if anyNarrow {
-		writeNarrowHelpers(&b)
-	}
+	writeNarrowHelpers(&b, narrowsInts, narrowsFloats)
 
 	// EdgeUnion interface declarations, appended after entity blocks,
 	// one per synthesised per-query-column interface in emission order.
@@ -319,8 +318,15 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		narrowed := value + "s"
 		writeSliceNarrow(b, e, f, f.GoType, value, narrowed, "\t")
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowed)
-	case carrier != f.GoType:
+	case isTemporalCarrier(f.GoType):
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowExpr(f.GoType, value))
+	case carrier != f.GoType:
+		narrowed := value + "n"
+		fmt.Fprintf(b, "\t%s, err := %s\n", narrowed, narrowCall(f.GoType, value))
+		b.WriteString("\tif err != nil {\n")
+		fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)
+		b.WriteString("\t}\n")
+		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowed)
 	default:
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
 	}
@@ -415,9 +421,16 @@ func writeSliceNarrow(b *strings.Builder, e codegen.Entity, f codegen.EntityFiel
 	fmt.Fprintf(b, "%sif !ok {\n", body)
 	fmt.Fprintf(b, "%s\t%s element %%d: expected %s, got %%T\", %q, i0, elem0)\n", body, fail, carrier, f.PropName)
 	fmt.Fprintf(b, "%s}\n", body)
-	if carrier != elem {
+	switch {
+	case isTemporalCarrier(elem):
 		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, narrowExpr(elem, "v0"))
-	} else {
+	case carrier != elem:
+		fmt.Fprintf(b, "%sv0n, err := %s\n", body, narrowCall(elem, "v0"))
+		fmt.Fprintf(b, "%sif err != nil {\n", body)
+		fmt.Fprintf(b, "%s\t%s element %%d: %%w\", %q, i0, err)\n", body, fail, f.PropName)
+		fmt.Fprintf(b, "%s}\n", body)
+		fmt.Fprintf(b, "%s%s = append(%s, v0n)\n", body, dst, dst)
+	default:
 		fmt.Fprintf(b, "%s%s = append(%s, v0)\n", body, dst, dst)
 	}
 	fmt.Fprintf(b, "%s}\n", indent)

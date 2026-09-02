@@ -166,45 +166,52 @@ func narrowCall(goType, src string) string {
 	return fmt.Sprintf("narrowInt[%s](%s)", goType, src)
 }
 
-// narrowsANumericWidth reports whether this emission holds a site that
-// narrows a driver carrier to a numeric width, and so whether the two
-// helpers below have to be declared. They are emitted conditionally
-// because an unexported function nothing calls fails the emitted
-// package's own lint fence.
-func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) bool {
-	narrows := func(goType string) bool {
+// narrowsANumericWidth reports, separately for each helper, whether this
+// emission holds a site that calls it.
+//
+// Separately, because they are gated separately: a schema that narrows
+// only integers must not be handed narrowFloat32, and the `math` import
+// rides on the float helper alone. An unexported function nothing calls
+// fails the emitted package's own lint fence, so an over-broad gate
+// reds the fixture rather than merely emitting a dead line.
+func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) (ints, floats bool) {
+	visit := func(goType string) {
 		leaf := leafType(goType)
-		return driverCarrier(leaf) != leaf && !isTemporalCarrier(leaf)
+		if leaf == driverCarrier(leaf) || isTemporalCarrier(leaf) {
+			return
+		}
+		if leaf == "float32" {
+			floats = true
+			return
+		}
+		ints = true
 	}
 	for _, e := range entities {
 		for _, f := range e.Fields {
-			if narrows(f.GoType) {
-				return true
-			}
+			visit(f.GoType)
 		}
 	}
 	for _, p := range prepared {
 		for _, f := range p.RowFields {
-			if narrows(f.GoType) {
-				return true
-			}
+			visit(f.GoType)
 			for elem := f.ListElem; elem != nil; elem = elem.Nested {
-				if narrows(elem.GoType) {
-					return true
-				}
+				visit(elem.GoType)
 			}
 		}
 	}
-	return false
+	return ints, floats
 }
 
-// writeNarrowHelpers emits the two checked-narrowing helpers. Both answer
-// the same sentence, because to a caller they are one rule: a stored
-// value the declared width cannot hold fails the read, as a null on a
-// non-nullable column and a value of the wrong dynamic type already do
-// (ADR 0036).
-func writeNarrowHelpers(b *strings.Builder) {
-	b.WriteString(`
+// writeNarrowHelpers emits whichever checked-narrowing helpers this
+// emission calls. Both answer the same sentence, because to a caller they
+// are one rule: a stored value the declared width cannot hold fails the
+// read, as a null on a non-nullable column and a value of the wrong
+// dynamic type already do (ADR 0036). They are nonetheless emitted
+// independently, because a schema narrowing only integers calls only one
+// of them and the other would be an unexported function nothing calls.
+func writeNarrowHelpers(b *strings.Builder, ints, floats bool) {
+	if ints {
+		b.WriteString(`
 // narrowInt converts a driver's int64 down to the integer width the
 // schema declared, refusing a value that width cannot represent.
 //
@@ -222,7 +229,10 @@ func narrowInt[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
 	}
 	return out, nil
 }
-
+`)
+	}
+	if floats {
+		b.WriteString(`
 // narrowFloat32 converts a driver's float64 down to float32, refusing a
 // value that overflows to an infinity the carrier did not hold.
 //
@@ -240,6 +250,7 @@ func narrowFloat32(v float64) (float32, error) {
 	return out, nil
 }
 `)
+	}
 }
 
 // widenExpr renders the parameter-binding expression for a non-nullable

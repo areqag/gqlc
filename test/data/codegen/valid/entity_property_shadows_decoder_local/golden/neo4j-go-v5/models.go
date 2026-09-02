@@ -4,6 +4,7 @@ package entitypropertyshadowsdecoderlocal
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
@@ -54,7 +55,10 @@ func decodeMarker(node dbtype.Node) (Marker, error) {
 		if !ok {
 			return Marker{}, fmt.Errorf("decode Marker.Narrowed: property %q: expected float64, got %T", "narrowed", v)
 		}
-		narrowed := float32(s)
+		narrowed, err := narrowFloat32(s)
+		if err != nil {
+			return Marker{}, fmt.Errorf("decode Marker.Narrowed: %w", err)
+		}
 		out.Narrowed = &narrowed
 	}
 	value3, err := neo4j.GetProperty[string](node, "node")
@@ -136,5 +140,22 @@ func decodeLINKS(rel dbtype.Relationship) (LINKS, error) {
 		return LINKS{}, fmt.Errorf("decode LINKS.Value0: %w", err)
 	}
 	out.Value0 = value3
+	return out, nil
+}
+
+// narrowFloat32 converts a driver's float64 down to float32, refusing a
+// value that overflows to an infinity the carrier did not hold.
+//
+// Precision loss is NOT refused: FLOAT32 is approximate and every
+// in-range float64 rounds to reach it. The test is the invented infinity
+// rather than a comparison against math.MaxFloat32, because a float64
+// strictly greater than MaxFloat32 can still round DOWN to it — that
+// value is representable and a magnitude test would refuse it. An
+// infinity or a NaN the store already held passes through unchanged.
+func narrowFloat32(v float64) (float32, error) {
+	out := float32(v)
+	if math.IsInf(float64(out), 0) && !math.IsInf(v, 0) {
+		return 0, fmt.Errorf("value %g does not fit the declared float32 width", v)
+	}
 	return out, nil
 }

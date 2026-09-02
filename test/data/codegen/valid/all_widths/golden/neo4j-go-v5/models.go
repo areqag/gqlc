@@ -4,6 +4,7 @@ package allwidths
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
@@ -57,7 +58,11 @@ func decodeRow(node dbtype.Node) (Row, error) {
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.F32: %w", err)
 	}
-	out.F32 = float32(value2)
+	value2n, err := narrowFloat32(value2)
+	if err != nil {
+		return Row{}, fmt.Errorf("decode Row.F32: %w", err)
+	}
+	out.F32 = value2n
 	value3, err := neo4j.GetProperty[float64](node, "f64")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.F64: %w", err)
@@ -67,17 +72,29 @@ func decodeRow(node dbtype.Node) (Row, error) {
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.I: %w", err)
 	}
-	out.I = int(value4)
+	value4n, err := narrowInt[int](value4)
+	if err != nil {
+		return Row{}, fmt.Errorf("decode Row.I: %w", err)
+	}
+	out.I = value4n
 	value5, err := neo4j.GetProperty[int64](node, "i16")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.I16: %w", err)
 	}
-	out.I16 = int16(value5)
+	value5n, err := narrowInt[int16](value5)
+	if err != nil {
+		return Row{}, fmt.Errorf("decode Row.I16: %w", err)
+	}
+	out.I16 = value5n
 	value6, err := neo4j.GetProperty[int64](node, "i32")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.I32: %w", err)
 	}
-	out.I32 = int32(value6)
+	value6n, err := narrowInt[int32](value6)
+	if err != nil {
+		return Row{}, fmt.Errorf("decode Row.I32: %w", err)
+	}
+	out.I32 = value6n
 	value7, err := neo4j.GetProperty[int64](node, "i64")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.I64: %w", err)
@@ -87,7 +104,11 @@ func decodeRow(node dbtype.Node) (Row, error) {
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.I8: %w", err)
 	}
-	out.I8 = int8(value8)
+	value8n, err := narrowInt[int8](value8)
+	if err != nil {
+		return Row{}, fmt.Errorf("decode Row.I8: %w", err)
+	}
+	out.I8 = value8n
 	value9, err := neo4j.GetProperty[string](node, "s")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.S: %w", err)
@@ -97,26 +118,81 @@ func decodeRow(node dbtype.Node) (Row, error) {
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.U: %w", err)
 	}
-	out.U = uint(value10)
+	value10n, err := narrowInt[uint](value10)
+	if err != nil {
+		return Row{}, fmt.Errorf("decode Row.U: %w", err)
+	}
+	out.U = value10n
 	value11, err := neo4j.GetProperty[int64](node, "u16")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.U16: %w", err)
 	}
-	out.U16 = uint16(value11)
+	value11n, err := narrowInt[uint16](value11)
+	if err != nil {
+		return Row{}, fmt.Errorf("decode Row.U16: %w", err)
+	}
+	out.U16 = value11n
 	value12, err := neo4j.GetProperty[int64](node, "u32")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.U32: %w", err)
 	}
-	out.U32 = uint32(value12)
+	value12n, err := narrowInt[uint32](value12)
+	if err != nil {
+		return Row{}, fmt.Errorf("decode Row.U32: %w", err)
+	}
+	out.U32 = value12n
 	value13, err := neo4j.GetProperty[int64](node, "u64")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.U64: %w", err)
 	}
-	out.U64 = uint64(value13)
+	value13n, err := narrowInt[uint64](value13)
+	if err != nil {
+		return Row{}, fmt.Errorf("decode Row.U64: %w", err)
+	}
+	out.U64 = value13n
 	value14, err := neo4j.GetProperty[int64](node, "u8")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.U8: %w", err)
 	}
-	out.U8 = uint8(value14)
+	value14n, err := narrowInt[uint8](value14)
+	if err != nil {
+		return Row{}, fmt.Errorf("decode Row.U8: %w", err)
+	}
+	out.U8 = value14n
+	return out, nil
+}
+
+// narrowInt converts a driver's int64 down to the integer width the
+// schema declared, refusing a value that width cannot represent.
+//
+// The round-trip catches every width whose range is a strict subset of
+// int64's. uint64 is the one where it does not: the conversion is a
+// bijection there, so uint64(-1) round-trips back to -1 unchanged and
+// only the sign disagreement gives it away. A uint64 property's readable
+// range is [0, MaxInt64] — the wire integer is signed 64-bit — so a
+// negative carrier is always a violation rather than a large value.
+func narrowInt[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](v int64) (T, error) {
+	out := T(v)
+	if int64(out) != v || (out < T(0)) != (v < 0) {
+		return 0, fmt.Errorf("value %d does not fit the declared %T width", v, out)
+	}
+	return out, nil
+}
+
+// narrowFloat32 converts a driver's float64 down to float32, refusing a
+// value that overflows to an infinity the carrier did not hold.
+//
+// Precision loss is NOT refused: FLOAT32 is approximate and every
+// in-range float64 rounds to reach it. The test is the invented infinity
+// rather than a comparison against math.MaxFloat32, because a float64
+// strictly greater than MaxFloat32 can still round DOWN to it — that
+// value is representable and a magnitude test would refuse it. An
+// infinity or a NaN the store already held passes through unchanged.
+func narrowFloat32(v float64) (float32, error) {
+	out := float32(v)
+	if math.IsInf(float64(out), 0) && !math.IsInf(v, 0) {
+		return 0, fmt.Errorf("value %g does not fit the declared float32 width", v)
+	}
 	return out, nil
 }

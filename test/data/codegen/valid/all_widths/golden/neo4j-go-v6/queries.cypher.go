@@ -67,7 +67,11 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	if isNil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: column %q is non-nullable but arrived null", "r.i")
 	}
-	row.I = int(value2)
+	value2n, err := narrowInt[int](value2)
+	if err != nil {
+		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.i", err)
+	}
+	row.I = value2n
 	value3, isNil, err := neo4j.GetRecordValue[int64](records[0], "r.i8")
 	if err != nil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.i8", err)
@@ -75,7 +79,11 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	if isNil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: column %q is non-nullable but arrived null", "r.i8")
 	}
-	row.I8 = int8(value3)
+	value3n, err := narrowInt[int8](value3)
+	if err != nil {
+		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.i8", err)
+	}
+	row.I8 = value3n
 	value4, isNil, err := neo4j.GetRecordValue[int64](records[0], "r.i16")
 	if err != nil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.i16", err)
@@ -83,7 +91,11 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	if isNil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: column %q is non-nullable but arrived null", "r.i16")
 	}
-	row.I16 = int16(value4)
+	value4n, err := narrowInt[int16](value4)
+	if err != nil {
+		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.i16", err)
+	}
+	row.I16 = value4n
 	value5, isNil, err := neo4j.GetRecordValue[int64](records[0], "r.i32")
 	if err != nil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.i32", err)
@@ -91,7 +103,11 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	if isNil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: column %q is non-nullable but arrived null", "r.i32")
 	}
-	row.I32 = int32(value5)
+	value5n, err := narrowInt[int32](value5)
+	if err != nil {
+		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.i32", err)
+	}
+	row.I32 = value5n
 	value6, isNil, err := neo4j.GetRecordValue[int64](records[0], "r.i64")
 	if err != nil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.i64", err)
@@ -107,7 +123,11 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	if isNil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: column %q is non-nullable but arrived null", "r.u")
 	}
-	row.U = uint(value7)
+	value7n, err := narrowInt[uint](value7)
+	if err != nil {
+		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.u", err)
+	}
+	row.U = value7n
 	value8, isNil, err := neo4j.GetRecordValue[int64](records[0], "r.u8")
 	if err != nil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.u8", err)
@@ -115,7 +135,11 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	if isNil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: column %q is non-nullable but arrived null", "r.u8")
 	}
-	row.U8 = uint8(value8)
+	value8n, err := narrowInt[uint8](value8)
+	if err != nil {
+		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.u8", err)
+	}
+	row.U8 = value8n
 	value9, isNil, err := neo4j.GetRecordValue[int64](records[0], "r.u16")
 	if err != nil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.u16", err)
@@ -123,7 +147,11 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	if isNil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: column %q is non-nullable but arrived null", "r.u16")
 	}
-	row.U16 = uint16(value9)
+	value9n, err := narrowInt[uint16](value9)
+	if err != nil {
+		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.u16", err)
+	}
+	row.U16 = value9n
 	value10, isNil, err := neo4j.GetRecordValue[int64](records[0], "r.u32")
 	if err != nil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.u32", err)
@@ -131,7 +159,11 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	if isNil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: column %q is non-nullable but arrived null", "r.u32")
 	}
-	row.U32 = uint32(value10)
+	value10n, err := narrowInt[uint32](value10)
+	if err != nil {
+		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.u32", err)
+	}
+	row.U32 = value10n
 	value11, isNil, err := neo4j.GetRecordValue[int64](records[0], "r.u64")
 	if err != nil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.u64", err)
@@ -139,7 +171,11 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	if isNil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: column %q is non-nullable but arrived null", "r.u64")
 	}
-	row.U64 = uint64(value11)
+	value11n, err := narrowInt[uint64](value11)
+	if err != nil {
+		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.u64", err)
+	}
+	row.U64 = value11n
 	value12, isNil, err := neo4j.GetRecordValue[float64](records[0], "r.f")
 	if err != nil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.f", err)
@@ -155,7 +191,11 @@ func (q *queries) AllWidths(ctx context.Context) (AllWidthsRow, error) {
 	if isNil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: column %q is non-nullable but arrived null", "r.f32")
 	}
-	row.F32 = float32(value13)
+	value13n, err := narrowFloat32(value13)
+	if err != nil {
+		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.f32", err)
+	}
+	row.F32 = value13n
 	value14, isNil, err := neo4j.GetRecordValue[float64](records[0], "r.f64")
 	if err != nil {
 		return AllWidthsRow{}, fmt.Errorf("AllWidths: decode column %q: %w", "r.f64", err)
