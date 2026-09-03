@@ -287,7 +287,7 @@ func TestGuardedSumsAreNotAliased(t *testing.T) {
 					}
 					if name, ok := aliasedTypeName(ts.Type); ok && sums[name] {
 						require.Fail(t, "alias to a guarded sum",
-							"%s declares `type %s = ...%s`, and `exhaustive` skips a switch whose tag type is spelled through an alias — it reads *types.Alias, matches no case, and reports nothing at all. Every %s row above would keep passing over a switch the linter no longer checks. Name the sum through its declaring package instead (bd gqlc-ptz4t)",
+							"%s declares `%s` as a type alias of the guarded sum %s, and `exhaustive` skips a switch whose tag type is spelled through an alias — it reads *types.Alias, matches no case, and reports nothing at all. Every %s row above would keep passing over a switch the linter no longer checks. Name the sum through its declaring package instead (bd gqlc-ptz4t)",
 							fset.Position(ts.Pos()), ts.Name.Name, name, name)
 					}
 				}
