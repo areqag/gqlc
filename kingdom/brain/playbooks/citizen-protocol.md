@@ -383,7 +383,10 @@ destination by hand with `git branch -vv` (bd `gqlc-xtre`).
    bead is what wakes one. **File a ROUND-1 review UNASSIGNED and
    class-labelled**, which is the fresh pass's shape (see "How a bead reaches a
    seat" below): a pre-assigned review bead would go to that one seat and to
-   nobody else. **A round answering a FAIL is the opposite and is assigned** —
+   nobody else. What the label buys is routing, and only routing — a forgotten
+   one leaves the review unwoken, but it no longer hides a live reader from a
+   rebase, because clause 1's second pass derives judge-ness from the roster
+   rather than from the bead. **A round answering a FAIL is the opposite and is assigned** —
    the rule and its reason are three paragraphs down, and the word UNASSIGNED
    here is scoped to round 1 by that.
    Give it the priority of the work it reviews, and never below the
@@ -671,42 +674,67 @@ is cheap for the reader, and stays cheap only if all four of these hold.
    read on #1735).
 
    **If it returns nothing, run the second pass before you believe it.** The
-   query above filters on `class:judge`, which the filer of the review bead
-   had to remember to attach, and an absent label reads to it exactly like an
-   absent reader:
+   query above asks the BEAD what class it is, and `class:judge` is a label the
+   filer attaches by hand, so an absent label reads to it exactly like an absent
+   reader. The second pass asks the bead nothing. It asks the roster who the
+   judges are, and then whether any of them holds an unclosed bead citing your
+   PR:
 
+       judges=$(awk -F'[ ="]+' '/^\[/{s=$0} s=="[seats]" && $2 ~ /^judge:/ {print $1}' kingdom/kingdom.toml)
+       [ -n "$judges" ] || echo "roster parse found no judges — repair this query before believing it" >&2
        bd list --all -n 0 --json \
-         | jq -r '.[] | select(.status != "closed")
-                 | select([(.labels // [])[] | select(startswith("class:"))] | length == 0)
+         | jq -r --argjson js "$(printf '%s\n' $judges | jq -R . | jq -s .)" '
+             .[] | select(.status != "closed")
+                 | select(.assignee as $a | $js | index($a))
                  | select(((.title // "") + " " + (.description // "")) | contains("#<N>"))
-                 | "\(.id)  \(.status)  \(.assignee // "unassigned")  \(.title)"'
+                 | "\(.id)  \(.status)  \(.assignee)  \(.title)"'
 
-   It drops the label filter and asks instead for beads carrying **no `class:`
-   label at all**, which is the shape of the miss: a review bead somebody filed
-   by hand and did not classify. Read the titles it prints — that is why it
-   prints them and not bare ids. A hit that is plainly your own implementation
-   bead is noise; a hit that reads like a review is the reader the first pass
-   could not see, and it wants both your mail and its missing label.
+   **The empty check on `$judges` is not decoration.** The parse depends on how
+   the `[seats]` table is spelled in `kingdom/kingdom.toml`; change that
+   spelling and the awk yields nothing, `$js` becomes `[]`, and the pass prints
+   EMPTY against a ledger that does hold your reader. Measured 2026-09-03
+   against an altered roster: it fails silently and in the unsafe direction,
+   which is the one failure a rebase guard cannot afford. An empty roster is a
+   broken query, never a quiet town.
+
+   Read the titles it prints — that is why it prints them and not bare ids. A
+   hit that is plainly your own implementation bead is noise; a hit that reads
+   like a review is the reader the first pass could not see, and it wants your
+   mail — and, if pass 1 missed it, its missing label.
 
    Witnessed 2026-09-03 on PR #2305: `gqlc-fen2i` stood `in_progress` to Միհր
    and its title spelled `#2305`, and the first pass returned empty because the
-   bead carried no labels at all. Nothing had gone red — status, assignee and
-   title were all correct. Replayed over a ledger with that bead's labels
-   stripped, the first pass finds nothing and the second finds it (bd
-   gqlc-eei77).
+   bead carried **no labels at all**. Nothing had gone red — status, assignee
+   and title were all correct. That bead has since been labelled and closed, so
+   this is a replay over a ledger holding it as it stood: the roster pass finds
+   it, and finds it for the reason that matters — Միհր is a judge in
+   `kingdom.toml` whatever the bead says about itself.
 
-   Why `class:`-absent rather than simply dropping the filter: measured over
-   the ledger on 2026-09-03, the unfiltered predicate returns up to 6 beads for
-   a busy PR, nearly all of them ordinary work that merely cites the number,
-   and a check that cries wolf on every rebase is one people learn to skip.
-   Requiring the class label to be *absent* cut a 3-PR sample from 6 hits to 2
-   while still finding the witnessed miss, because a bead labelled
-   `class:warrior` was classified deliberately and is not a forgotten review.
+   That independence is the property purchased, and it was measured rather than
+   assumed (bd gqlc-0sxu6). Replayed 2026-09-03 over a ledger with a
+   judge-held bead's labels **stripped to `[]`**, the roster pass still finds
+   it. Every label-reading query is blind to a bead whose class is wrong,
+   including this playbook's own previous second pass, which asked for beads
+   carrying no `class:` label at all: that caught the forgotten label and
+   nothing else, and a review mislabelled `class:warrior` defeated it exactly
+   as it defeats pass 1. Control over the same ledger: the pass returns empty
+   for PR #2352, whose review nobody was holding.
 
-   **The limit, and it is real:** a review bead mislabelled as some *other*
-   class is invisible to both passes. That is a different error from the
-   measured one — omission, not miscategorisation — and no query here covers
-   it. The prose backstop below is what stands behind that case.
+   **The limits, and they are real.** Three, none of them closed by the query:
+
+   - An **unassigned** review is invisible to this pass whatever its labels.
+     That is by construction and it is the safe half — an unassigned review has
+     no live reader to strand, and round 1 is filed unassigned on purpose (step
+     8). This pass answers "is someone reading now", not "does a review exist".
+   - A reader who is **not a seat** — a human holding a review bead by hand —
+     is not in `[seats]`, so pass 1's label is the only thing that can reach
+     them. Both passes together still miss a human reader on an unlabelled bead.
+   - The citation test is a substring over title and description, so a bead
+     that merely mentions `#<N>` among other numbers matches. That error runs in
+     the safe direction — a false reader costs you one letter — and it is why
+     you read the titles rather than the ids.
+
+   The prose backstop below is what stands behind every one of these.
 
    Then `bd mail send <the judge's seat> -s "PR #<N>: forced rebase incoming"`,
    with the old and new SHA and the delta sentence from clause 2 in the body.
