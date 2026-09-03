@@ -107,11 +107,38 @@ func TestResolverValidCorpusStageBoundary(t *testing.T) {
 	slices.Sort(listedButAbsent)
 	require.Empty(t, listedButAbsent, "README lists schemas that are not in schemas/; a renamed or deleted schema left its declaration behind")
 
-	slices.Sort(actualOK)
-	slices.Sort(actualNo)
-	slices.Sort(declaredOK)
-	slices.Sort(declaredNo)
+	// Comparing the two lists whole would report a disagreement by printing
+	// both of them and leaving the reader to find the row that differs. The
+	// event worth catching is one schema changing sides, so name that schema
+	// and say which way it went.
+	side := func(names []string) map[string]struct{} {
+		m := make(map[string]struct{}, len(names))
+		for _, n := range names {
+			m[n] = struct{}{}
+		}
+		return m
+	}
+	inDeclaredOK, inDeclaredNo := side(declaredOK), side(declaredNo)
 
-	require.Equal(t, declaredOK, actualOK, "README's codegen-admissible list disagrees with what the backends admit")
-	require.Equal(t, declaredNo, actualNo, "README's codegen-inadmissible list disagrees with what the backends refuse")
+	var moved, undeclared []string
+	for _, name := range slices.Concat(actualOK, actualNo) {
+		_, sayOK := inDeclaredOK[name]
+		_, sayNo := inDeclaredNo[name]
+		admitted := slices.Contains(actualOK, name)
+		switch {
+		case !sayOK && !sayNo:
+			undeclared = append(undeclared, name)
+		case sayOK && sayNo:
+			moved = append(moved, name+": listed in both blocks")
+		case sayOK && !admitted:
+			moved = append(moved, name+": README says codegen admits it, both backends refuse it")
+		case sayNo && admitted:
+			moved = append(moved, name+": README says codegen refuses it, both backends admit it")
+		}
+	}
+	slices.Sort(moved)
+	slices.Sort(undeclared)
+
+	require.Empty(t, moved, "schemas changed codegen-admissibility side without the README moving with them")
+	require.Empty(t, undeclared, "schemas in schemas/ are in neither README block, so the partition does not cover the directory it describes")
 }
