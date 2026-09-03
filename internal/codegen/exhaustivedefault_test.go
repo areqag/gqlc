@@ -258,7 +258,17 @@ func TestStrayDefaultOKTagsAreNotSilent(t *testing.T) {
 //
 // The bound: this sees alias DECLARATIONS inside the scan roots. An alias
 // declared outside them and used inside is beyond a per-file AST scan,
-// and so is one that renames through an intermediate.
+// and so is one that renames through an intermediate. Both are still
+// unheld.
+//
+// A parenthesised RHS — `type C = (queryfile.Cardinality)` — was a third
+// such bound and is not one any more. It went unnamed because it reads
+// like a typo rather than an evasion, but it is legal, gofmt leaves the
+// parens alone, and `exhaustive` is blind through it exactly as through
+// the bare spelling: a judge measured 0 issues over a switch missing a
+// member while this test passed (bd gqlc-w7edb). TestAliasedTypeName
+// below pins it, since no file in the tree spells one that way and the
+// scan alone would never reach the case.
 func TestGuardedSumsAreNotAliased(t *testing.T) {
 	sums := map[string]bool{}
 	roots := map[string]bool{}
@@ -296,10 +306,60 @@ func TestGuardedSumsAreNotAliased(t *testing.T) {
 	}
 }
 
+// TestAliasedTypeName pins what the tripwire above recognises as an alias
+// RHS naming a type, one spelling per row.
+//
+// The parenthesised rows are the reason this exists as a table rather than
+// being covered incidentally by the scan: `type C = (queryfile.Cardinality)`
+// is an alias, `exhaustive` is just as blind through it, gofmt does not strip
+// the parens — measured on `type C = (int)`, plain and -s — and the tripwire
+// returned false for it until bd gqlc-w7edb. Nothing about the scan would have
+// revealed that, because no file in the tree spells one that way.
+func TestAliasedTypeName(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rhs  string // as written after `type X = `
+		want string
+		ok   bool
+	}{
+		{name: "bare identifier", rhs: "Cardinality", want: "Cardinality", ok: true},
+		{name: "qualified selector", rhs: "queryfile.Cardinality", want: "Cardinality", ok: true},
+		{name: "parenthesised identifier", rhs: "(Cardinality)", want: "Cardinality", ok: true},
+		{name: "parenthesised selector", rhs: "(queryfile.Cardinality)", want: "Cardinality", ok: true},
+		{name: "doubly parenthesised", rhs: "((queryfile.Cardinality))", want: "Cardinality", ok: true},
+
+		// Not evasions: an alias to a slice or a pointer is not an alias to
+		// the sum, and a switch cannot have the sum as its tag type through
+		// one. Refusing these is what keeps the tripwire from firing on a
+		// declaration that never blinds anything.
+		{name: "slice of the sum", rhs: "[]Cardinality", want: "", ok: false},
+		{name: "pointer to the sum", rhs: "*Cardinality", want: "", ok: false},
+		{name: "map keyed by the sum", rhs: "map[Cardinality]string", want: "", ok: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expr, err := parser.ParseExpr(tc.rhs)
+			require.NoError(t, err, "parsing %q", tc.rhs)
+
+			name, ok := aliasedTypeName(expr)
+			require.Equal(t, tc.ok, ok, "recognition of `type X = %s`", tc.rhs)
+			require.Equal(t, tc.want, name, "name read out of `type X = %s`", tc.rhs)
+		})
+	}
+}
+
 // aliasedTypeName returns the name an alias RHS refers to, for the two
 // spellings a guarded sum can take: bare within its declaring package,
-// qualified from outside it.
+// qualified from outside it. Either may be parenthesised to any depth —
+// that is legal, gofmt-stable, and blinds `exhaustive` exactly as the bare
+// spelling does (bd gqlc-w7edb).
 func aliasedTypeName(expr ast.Expr) (string, bool) {
+	for {
+		paren, ok := expr.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		expr = paren.X
+	}
 	switch rhs := expr.(type) {
 	case *ast.Ident:
 		return rhs.Name, true
