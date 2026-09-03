@@ -1274,6 +1274,44 @@ non-zero with nothing on stdout — a caller doing `x=$(seat_box_state "$s")`
 cannot distinguish an empty capture from a function that does not exist, and a
 harness row asserting the empty string passes on both.
 
+THAT CONFLATION WAS CHALLENGED AND RULED ON — gqlc-mfjgl's "should not answer
+`none` for a box it failed to read" against the paragraph above; the ruling is
+gqlc-tdb9a, and it stands with the paragraph, on measured grounds rather than
+asserted ones. The question that decides it is whether any consumer treats
+`none` as a LICENCE to act, rather than as a default that changes nothing.
+Enumerated over the shipped km at 83fc8743: the function has exactly two code
+consumers, both in cmd_status — the idle refinement and the NOWORK arm — and
+both use `none` only to LEAVE a seat in the population it already occupied;
+only a positive tag moves one. Neither acts on it. The remedies their lines
+recommend (`km sleep`, the recovery ladder's ask) route through send_line,
+which re-derives the box itself at act time and refuses when the read fails —
+rc=2 is fail-closed there since gqlc-mfjgl — and a refused ask is counted and
+escalates to sedrak at the recover_attempts cap with the refusal quoted. So a
+PERSISTENTLY unreadable pane surfaces through the acting path, on the ladder's
+cadence, even though the board never distinguishes it. The one non-code
+consumer, decision 0012's Tier 1 release, spells its precondition
+`seat_box_state ≠ none`, so a failed read BLOCKS that act rather than
+licensing it. The dispatcher does not read this function at all; its box guard
+is send_line's own read.
+
+Two limits, each a condition under which the ruling stops holding. It is a
+fact about the enumerated consumer set: a new consumer that acts on `none`
+without re-deriving the box at act time is not covered, and adding one reopens
+gqlc-tdb9a's question rather than inheriting its answer. And if `none` is
+ever split, every shipped predicate spells "boxed" as `!= none` — both
+cmd_status sites and decision 0012's precondition — so a fifth value
+satisfies all three as if it were a positive read of text unless every site
+moves in the same change; gqlc-tdb9a's acceptance item 3 governs that
+measurement.
+
+What survives of the objection is real and is filed, not absorbed: `none`
+warrants no claim that a read HAPPENED, and three of cmd_status's own
+sentences claim one anyway ("the composer was READ and found empty"; "has
+been read and found empty — the box is checked for every seat on this line";
+the BOXED line's reading of its own absence). On the failed-read path each is
+an observation nobody made — gqlc-3e4m5 F2/I1's class, in the board. The
+repair is those sentences (bd gqlc-6jp65), not this contract.
+
 box_one_line and not a bare `-n "$box"`, and the difference is one case, not
 the obvious one: seat_box_text's awk already drops a line that is EXACTLY `❯`
 or `>`, so a bare glyph never reaches here. What does reach here is a glyph
