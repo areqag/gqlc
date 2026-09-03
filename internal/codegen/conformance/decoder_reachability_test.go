@@ -3338,30 +3338,36 @@ func TestGuardsThatCannotHoldAtOnceAreRefused(t *testing.T) {
 		contains []string
 	}{
 		{
+			// The operand is spelled wireLabel, not label, in the two rows
+			// that assert on the report. The report's own prose contains
+			// the word "label" — "a label the axis carries" — so a row
+			// demanding "label" of it is satisfied whether or not the
+			// operand was named at all, and a report that dropped the
+			// operand passed this battery until the spelling changed.
 			name: "one label demanded twice over is a decoder no value reaches",
-			body: `	label := string(raw)
-	if label != "Person" {
+			body: `	wireLabel := string(raw)
+	if wireLabel != "Person" {
 		return Person{}, nil
 	}
-	if label != "Post" {
+	if wireLabel != "Post" {
 		return Person{}, nil
 	}
 	return Person{}, nil`,
 			read:     1,
-			contains: []string{"decodePerson", "label", "Person", "Post"},
+			contains: []string{"decodePerson", "wireLabel", "Person", "Post"},
 		},
 		{
 			name: "the literal is read on either side of the comparison",
-			body: `	label := string(raw)
-	if label != "Person" {
+			body: `	wireLabel := string(raw)
+	if wireLabel != "Person" {
 		return Person{}, nil
 	}
-	if "Post" != label {
+	if "Post" != wireLabel {
 		return Person{}, nil
 	}
 	return Person{}, nil`,
 			read:     1,
-			contains: []string{"decodePerson", "Person", "Post"},
+			contains: []string{"decodePerson", "wireLabel", "Person", "Post"},
 		},
 		{
 			name: "the same label demanded twice is one demand and holds",
