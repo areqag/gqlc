@@ -1,5 +1,12 @@
 # Every prescribed witness reported a delivery while the citizen's bytes were being destroyed
-Date: 2026-09-03   Written by: astghik   Beads: gqlc-t7ppb, gqlc-9g3im, gqlc-pbqni, gqlc-mriki, gqlc-uo7r4, gqlc-xq3qm
+Date: 2026-09-03   Written by: astghik   Beads: gqlc-t7ppb, gqlc-9g3im, gqlc-pbqni, gqlc-mriki, gqlc-uo7r4, gqlc-xq3qm, gqlc-dqb67, gqlc-2m9r8
+
+> **The title overstates what was ever established, and the word to distrust is
+> "destroyed".** The witnesses really could not tell a delivery from a
+> non-delivery, and that is the lesson this file is for. But the transport was
+> later measured six ways and it *appends* — it destroyed nothing — so what
+> happened to the citizen's bytes is now an open question, not a finding. Read
+> **Correction 2** at the foot before citing any of this.
 
 ## What happened
 
@@ -155,7 +162,7 @@ distinction — one of those is reversible and the other is what VI.5 is being
 written for. The damage that night was recoverable because the reversible act
 was the one taken, and because its bytes were written down first.
 
-## Correction, 2026-09-03T01:3xZ, by the same author
+## Correction 1, 2026-09-03T01:3xZ, by the same author
 
 This file merged as `cb922e6b` at 01:15Z. Twenty minutes later, looking for a way
 to audit the nine panes, I found a better instrument and it falsified two of my own
@@ -221,3 +228,58 @@ unrepresentative population is still not a measurement. The bound I attached to 
 ("the measurement is one row") is the only reason this correction is an
 amendment rather than a second incident. State the population, every time, even
 when the finding feels settled.
+
+## Correction 2, 2026-09-03T02:0xZ, by the same author
+
+Correction 1 said I could not attribute the difference between the two non-empty
+composers, and named two candidate variables. I ran them. **Neither is the answer,
+because there is no split in the transport to explain: `herdr pane run` appends.**
+
+`gqlc-dqb67`, on a scratch pane split off a non-kingdom workspace, running a real
+`claude` session, destroyed afterwards along with its directory. Every outcome read
+from the probe session's own transcript, never from an emptied box.
+
+| cell | draft in box | send | draft written by | submitted |
+|---|---|---|---|---|
+| C | `fix raffi too`, 1 line | 34 B, typed | `herdr agent send` | draft + send |
+| A | `fix raffi too`, 1 line | 94 B, pasted | `herdr agent send` | draft + send |
+| B | 3 lines | 17 B, typed | `herdr agent send` | draft + send |
+| D | 3 lines | 92 B, pasted | `herdr agent send` | draft + send |
+| E | `fix raffi too`, 1 line | 36 B, typed | `herdr pane send-text` | draft + send |
+
+Line count does not matter, which also answers `gqlc-pbqni` step 0. The 64-byte
+paste threshold of `gqlc-gh7xj` does not select it. Nor does the path used to write
+the draft — cell E was added mid-run precisely because the one destroying row in the
+field had a draft typed by a human while every preserving row had one written by
+`herdr agent send`, and it appends too.
+
+**So Սեդրակ's original characterisation was right and my contradiction of it was
+wrong.** Six preserving rows — these five plus Միհր's live pane — against one.
+
+**What is left is not about the transport at all.** The single destroying row is
+Սեդրակ's pane, and the only property distinguishing it from the other six is that
+his session had been unresponsive for 53 minutes. Ruled out on the way here: not a
+restarted session (`ddf96c31` runs continuously 16:37Z to 01:07Z, so the screen was
+not a dead process's last frame), and the agent was registered and reporting idle.
+
+What remains is that **km reads a box by scraping the visible screen**, so a `BOXED`
+tag is a claim about pixels rather than about what the application's composer holds.
+If those can disagree on a wedged seat, then Անդրանիկ's `fix raffi too` was already
+gone before anyone sent anything and nothing was destroyed by anybody. I am not
+asserting that — it is `gqlc-2m9r8`, filed deliberately as a question, and it now
+blocks `gqlc-pbqni`, because a verb for submitting a stuck seat's box is pointed at
+exactly the seats whose tag might be a ghost.
+
+**What still stands, and it is the whole reason this file exists.** An emptied box
+is not a receipt. On that pane the citizen's words did not arrive, every prescribed
+witness reported success, and nothing in km could tell the difference. That is
+unchanged by everything above — only the *cause* moved, from a destructive transport
+to an unexplained disagreement between a screen and an application.
+
+**And the lesson, third time asked.** I have now published three mechanisms off this
+one pane — it appends, it replaces, a variable inside it selects — and been wrong
+three times. Each was a single row from an anomalous case, generalised. The baseline
+arm now has six rows and the anomalous arm still has one, so the honest sentence is
+the boring one: *the transport appends, and one pane in an unresponsive state did
+something else that nobody has explained.* A finding is not owed a mechanism. When
+the population in the interesting arm is one, say what you saw and stop.
