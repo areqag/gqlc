@@ -898,8 +898,12 @@ func TestMarshalJSONEmitsReferencedInRequiredBarePatternWhenTrue(t *testing.T) {
 }
 
 // TestBindingDiscriminatorTracksEntityKind pins the binding "kind" tag to
-// graph.EntityKind.String, the single source it derives from, so the serialised
-// tag can never drift from Kind().
+// Kind().String(), so the serialised tag cannot drift from Kind().
+//
+// The name and this comment said graph.EntityKind.String until bd gqlc-r79zi.
+// They were wrong: Binding.Kind() returns a BindingKind, so what this test has
+// always pinned is BindingKind.String. The two agree on "node" and "edge" by
+// construction, which is why the mistake read true.
 func TestBindingDiscriminatorTracksEntityKind(t *testing.T) {
 	node, err := query.NewNodeBinding("p", nil)
 	require.NoError(t, err)

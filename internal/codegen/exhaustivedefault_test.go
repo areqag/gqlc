@@ -186,6 +186,21 @@ var guardedSums = []guardedSum{
 	{name: "ClauseSlot", declRoot: "../query", scanRoots: []string{"../query"}, sentinel: "ClauseSlotLimit", dirs: []string{"query"}},
 	{name: "ExprPosition", declRoot: "../query", scanRoots: []string{"../query", "../resolver"}, sentinel: "ExprInDeleteTarget", dirs: []string{"query", "resolver"}},
 	{name: "UnionKind", declRoot: "../query", scanRoots: []string{"../query"}, sentinel: "UnionAll", dirs: []string{"query"}},
+	// EntityKind arrives on bd gqlc-r79zi by the same route as the five above:
+	// its String defaulted to "node" for anything not Edge, so a third member
+	// would have serialised as a node, and the default was deleted and the
+	// answer hoisted below the switch unchanged.
+	//
+	// declRoot is ../graph and not ".", which is what keeps this row clear of
+	// internal/codegen's own type of the same name: the member scan reads Node
+	// and Edge and never sees EntityNode or EntityEdge. codegen's EntityKind is
+	// in no row here, and namesASumTwice refuses the list that would add it.
+	//
+	// dirs names "cypher" as well as "graph" because the sum is switched on
+	// outside its own package — internal/query/cypher/expr.go and listener.go
+	// both spell `case graph.Node:` — and naming only "graph" would let ../query
+	// stop being read without anything failing.
+	{name: "EntityKind", declRoot: "../graph", scanRoots: []string{"../graph", "../query"}, sentinel: "Node", dirs: []string{"graph", "cypher"}},
 }
 
 // sumSwitch is one switch whose case expressions name members of one
