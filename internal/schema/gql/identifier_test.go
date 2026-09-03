@@ -337,6 +337,37 @@ func TestAnAmpersandRefusalIsAboutTheAmpersand(t *testing.T) {
 		"the forgery the refusal prevents: if these ever differ, bd gqlc-yd4ba has landed and the refusal can be narrowed or dropped")
 }
 
+// TestTheNoEscapeRefusalIsAboutTheLEADINGMarker is ErrNoEscapeIdentifier's
+// negative control, and what it pins is the ANCHORING of that refusal rather than
+// the refusal itself. `@` opens a no-escape identifier only in the marker
+// position; inside a delimited body it is an ordinary character, matched by the
+// character representation fragment like any other.
+//
+// Every one of the eight rows above spells the marker as `@"…"`, so all eight
+// agree with a guard that merely asks whether an `@` appears ANYWHERE. Weakening
+// strings.HasPrefix to strings.Contains left the whole module suite green
+// (measured, bd gqlc-dlfvg) — and it is not an equivalent guard: it refuses this
+// name, so a valid schema would be rejected with a sentinel about an escape
+// convention its author did not use. The anchoring also carries the slice on the
+// next line, which assumes byte 0 is the delimiter.
+//
+// Both delimiter kinds are spelled because the guard is read before the delimiter
+// is known, and each body then decodes under a different delimiter byte.
+func TestTheNoEscapeRefusalIsAboutTheLEADINGMarker(t *testing.T) {
+	for _, tt := range []struct{ kind, src string }{
+		{"accent-quoted", "CREATE GRAPH TYPE G { (:`a@b`) }"},
+		{"double-quoted", `CREATE GRAPH TYPE G { (:"a@b") }`},
+	} {
+		t.Run(tt.kind, func(t *testing.T) {
+			got, err := parseSchema(t, tt.src)
+			require.NoError(t, err,
+				"an @ inside the body is content, not the no-escape marker")
+			require.NotErrorIs(t, err, gql.ErrNoEscapeIdentifier)
+			require.Contains(t, got.Nodes, graph.LabelSetKey("a@b"))
+		})
+	}
+}
+
 // TestTheCorpusDelimitedIdentifiersFixtureResolvesDecoded pins the model that
 // corpus file 12.6-graph-type-statement/delimited_identifiers.gql produces.
 //
