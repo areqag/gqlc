@@ -1140,10 +1140,14 @@ transcript_witness() { # <dir> <text> <t_send epoch> <timeout s> -> 0 witnessed,
     # A DIAGNOSTIC, NOT A VERDICT. A message submitted in this window that is not
     # the ask is the tell that something else reached the composer, and it is the
     # single most useful thing to put in front of whoever reads the UNKNOWN.
+    #
+    # "transcript search" and not "send witness": `km arrived` calls this to
+    # answer a question about a send some OTHER process made, and there the
+    # second label swore to a send this run had not performed.
     if [ -n "${rows:-}" ]; then
         other=$(printf '%s\n' "$rows" | jq -rs 'first(.[] | "\(.ts) \(.text[0:80])") // empty')
         [ -z "$other" ] ||
-            echo "km: send witness: something else was submitted in this window: $other" >&2
+            echo "km: transcript search: something else was submitted in this window: $other" >&2
     fi
     return 1
 }
