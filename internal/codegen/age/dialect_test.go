@@ -216,11 +216,13 @@ func TestEveryRefusedNamespaceIsNamedByItsProbeAnswer(t *testing.T) {
 // namespace are facts about two different spellings and no call can be
 // claimed by both.
 //
-// That argument is ARGUED here and measured nowhere. It carried a citation
-// naming a test that no commit has ever declared — the sentence and the name
-// arrived together in #1903 — so it read as evidence to anyone who did not
-// grep for it. bd gqlc-794sz holds the row, and until that lands the shape
-// argument is all there is.
+// TestNoCallIsClaimedByBothGaps below is where that is measured, and it
+// took bd gqlc-794sz to get there: the sentence originally cited a name no
+// commit has ever declared, and the correction that removed the citation
+// (gqlc-som6y) replaced it with "measured nowhere", which understated the
+// tree. One direction of the property was already held, by the ordering
+// pins in age_test.go — see the row below for which one, and for why the
+// other could not be held there.
 func TestTheNamespaceGapIsNotAFunctionCatalogue(t *testing.T) {
 	for _, cat := range functionCatalogues {
 		require.NotEqual(t, "namespace", cat.name,
@@ -234,6 +236,85 @@ func TestTheNamespaceGapIsNotAFunctionCatalogue(t *testing.T) {
 		require.NotContains(t, strings.ToLower(p.Answer()), "function",
 			"probe %q answers naming a function, so it belongs in a function catalogue "+
 				"after all and this exemption is stale", p.Text())
+	}
+}
+
+// TestNoCallIsClaimedByBothGaps measures the shape argument the exemption
+// above rests on: one name is in a function catalogue AND in the namespace
+// catalogue, and the two gaps still take one call each, because what
+// separates them is how the call is SPELLED and not what it is called.
+//
+// It runs on a collision the tree actually has rather than on a
+// constructed one, which is why the pairs are derived and the emptiness of
+// that derivation is fatal. `duration` is in both today — the temporal gap
+// probed `duration({days:1})` and the namespace gap probed
+// `duration.between(null, null)` — and if a future tree has no such name
+// then the property here is unreachable and this row would pass having
+// compared two sets that could not have overlapped anyway.
+//
+// WHY IT IS NOT ENOUGH THAT THE GATE HAS ORDERING PINS. age_test.go's
+// EmissionSuite pins a query spelling both, and its refusal quotes the
+// bare name alone, so a temporal gap that also took the namespaced call is
+// caught there — that direction has eleven rows and is not the gap.
+//
+// The mirror direction has none, and the ordering is exactly what hides
+// it. The namespace gap answers LAST, so on any text where both would fire
+// an earlier gap has already answered; a namespace gap that also took the
+// BARE call changes nothing any suite row can see. Measured on the tree
+// this arrived on, by teaching findUndefinedNamespaces to claim a bare call
+// whose name is a refused namespace: ./internal/codegen/... stays green.
+// That is a reader with no reader, and it is what this row is for.
+func TestNoCallIsClaimedByBothGaps(t *testing.T) {
+	type collision struct {
+		catalogue string
+		name      string
+		find      func(string) []age.Finding
+	}
+	var collisions []collision
+	for _, cat := range functionCatalogues {
+		for name := range cat.names {
+			if _, both := age.UndefinedNamespaces[name]; both {
+				collisions = append(collisions, collision{cat.name, name, cat.find})
+			}
+		}
+	}
+	require.NotEmpty(t, collisions,
+		"no name is in a function catalogue and in the namespace catalogue at once, so the two "+
+			"gaps could not have claimed one call whatever they did and this row measured nothing")
+
+	for _, c := range collisions {
+		t.Run(c.catalogue+"/"+c.name, func(t *testing.T) {
+			// One text spelling the name both ways. The qualified half
+			// calls `f` because the catalogue is of NAMESPACES: which
+			// function sits under the qualifier is a thing the server
+			// never reaches, so naming a real one would suggest the
+			// refusal turned on it.
+			src := "RETURN " + c.name + "(1), " + c.name + ".f(1)"
+			bare, qualified := c.name, c.name+".f"
+
+			byFunction := c.find(src)
+			require.Len(t, byFunction, 1,
+				"the %s gap claims %d calls in %q; it may claim the bare call and nothing else",
+				c.catalogue, len(byFunction), src)
+			require.Equal(t, bare, byFunction[0].Text(),
+				"the %s gap claims %q, which is the namespaced spelling: a call the namespace gap "+
+					"answers is being refused for a function name too", c.catalogue, byFunction[0].Text())
+
+			byNamespace := age.FindUndefinedNamespaces(src)
+			require.Len(t, byNamespace, 1,
+				"the namespace gap claims %d calls in %q; it may claim the qualified call and nothing else",
+				len(byNamespace), src)
+			require.Equal(t, qualified, byNamespace[0].Text(),
+				"the namespace gap claims %q, which is the bare spelling: a call the %s gap answers "+
+					"is being refused for a namespace too", byNamespace[0].Text(), c.catalogue)
+
+			// The positions, because the spellings alone do not settle it:
+			// a gap quoting the right text off the wrong call would satisfy
+			// everything above, and it is the CALL the argument is about.
+			require.NotEqual(t, byFunction[0].Column(), byNamespace[0].Column(),
+				"both gaps claim the call at column %d, so one call is being answered twice",
+				byFunction[0].Column())
+		})
 	}
 }
 

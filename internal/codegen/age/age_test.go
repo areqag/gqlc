@@ -1578,10 +1578,18 @@ func (s *EmissionSuite) TestRejectsTheUndefinedNamespace() {
 	}
 
 	// The two ordering pins. The namespace gap answers LAST, so a query
-	// spelling an earlier gap's construct as well is told about that one,
-	// and the pair is also where the call-shape partition is measured:
-	// each spelling is claimed by exactly one gap, so the two scans
-	// cannot both take one call.
+	// spelling an earlier gap's construct as well is told about that one.
+	//
+	// The pair carries ONE direction of the call-shape partition as well,
+	// and it is worth saying which: the quoted list below names the bare
+	// call alone, so an earlier gap that also claimed the namespaced call
+	// reddens here. The mirror — a namespace gap claiming the BARE call —
+	// is invisible from this suite for the very reason these rows exist.
+	// This gap answers last, so wherever both would fire an earlier one
+	// already has, and no assertion available here can tell a namespace
+	// gap that would have claimed the bare call from one that would not.
+	// TestNoCallIsClaimedByBothGaps holds that direction, over the
+	// finders themselves (bd gqlc-794sz).
 	s.Run("a query spelling a bare constructor and a namespaced one is answered by the temporal gap", func() {
 		batch := in
 		batch.Queries = []codegen.NamedQuery{textQuery("Both",
