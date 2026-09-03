@@ -1,0 +1,61 @@
+# Re-ask the ordinal question for every open PR when master moves (bd
+# gqlc-4plwf). ci.yml's tree check reads the PR's merge ref, which GitHub
+# assembles at the author's last push, so a collision that arrives afterwards
+# from master leaves the PR green with nothing to re-trigger it. No event fires
+# for "your base moved" — but the base moves BY a master push, and that is an
+# event we already receive, so this workflow answers on the push and delivers
+# the verdict as a commit status on each open PR's head SHA.
+#
+# NOT A MERGE GATE, and deliberately not a required context. Required demands a
+# green status on every head SHA at every event, so a PR opened after the last
+# master push would wait forever on a context nobody will post; the acceptance
+# for this bead asks that a collision read RED, not that the author be BLOCKED.
+# A collision that actually lands on master is still caught by the unconditional
+# tree check in ci.yml's tidy job.
+#
+# A SEPARATE WORKFLOW RATHER THAN A STEP IN ci.yml, on permission scope. This
+# needs statuses:write, and adding it to tidy would grant that write to tidy's
+# pull_request-triggered runs as well, which have no reason to hold it. Here the
+# write exists only where the writing happens.
+#
+# NO CONCURRENCY GROUP, and that is not an omission. Two master pushes racing
+# could post statuses out of order, which the next push heals; a group would let
+# a queued master run be coalesced or cancelled, and ci.yml's "never cancel a
+# master run" rule governs here for the same reason.
+name: ordinal-recheck
+
+on:
+  push:
+    branches: [master]
+  # For probing the body without waiting for a merge. A dispatch witnesses the
+  # logic, NOT this workflow's push arm — those are two different claims, and
+  # the push arm is watched separately (bd gqlc-4plwf's acceptance).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  ordinal-recheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Before any PR is examined, and cheap enough to pay for on every master
+      # push. This is the LATE copy: ci.yml's tidy job runs the same rows on
+      # every PR, which is where a break is still stoppable. Kept here as well
+      # because this workflow is the one that fails closed — if the rows red
+      # here, no status is posted to anybody, and the run says why rather than
+      # posting verdicts from logic it has just watched misbehave.
+      - name: the decision core behaves as designed
+        run: python3 .github/scripts/check-open-pr-ordinals.py --self-test
+      # The enrolled series are spelled at the call site, not inferred, per
+      # check-doc-ordinals.py's docstring. This is the third call site; the
+      # other two are ci.yml's tidy step and the `gates` recipe.
+      - name: no open PR claims an ordinal master has taken
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/check-open-pr-ordinals.py \
+            docs/adr kingdom/brain/decisions
