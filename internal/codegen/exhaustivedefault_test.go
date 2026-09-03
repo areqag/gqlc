@@ -94,9 +94,16 @@ type guardedSum struct {
 // therefore carry a tag naming that test.
 //
 // So ../resolver holds no still-guarded switch and appears in no sum's
-// dirs. What keeps it from going quietly unscanned is scanRoots' own
-// population check, and what keeps the two tags honest is
-// TestDeclaredDefaultsStillGuardADefault.
+// dirs. What keeps the two tags honest is
+// TestDeclaredDefaultsStillGuardADefault; what keeps the root itself from
+// going quietly unscanned is scanRoots' own population check, and nothing
+// else. Measured: a walk truncated to each sum's first root leaves all
+// three tests green as soon as that check is weakened to speak per sum
+// instead of per root, because a file the walk never reaches carries no
+// tag the stray scan can report. Dropping a root from a list here is the
+// other failure and is caught otherwise — the file is still walked for
+// the sum that kept the root, so the orphaned tag turns up in
+// TestStrayDefaultOKTagsAreNotSilent.
 var guardedSums = []guardedSum{
 	{name: "ColumnKind", declRoot: ".", scanRoots: []string{"."}, sentinel: "ColumnProperty", dirs: []string{"neo4j"}},
 	{name: "Scalar", declRoot: "../resolver", scanRoots: []string{".", "../resolver"}, sentinel: "ScalarNull", dirs: []string{"age", "neo4j"}},
