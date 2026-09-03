@@ -154,9 +154,16 @@ type Row struct {
 // Nested plan for the inner iteration.
 type ListElem struct {
 	// Kind is the same closed ColumnKind used at the top level. A future
-	// resolver variant lands in exactly one place — here and at the top
-	// level's Phase B assignment — and both switches fail to compile
-	// until it is handled.
+	// resolver variant lands at two Phase B assignment sites, this one
+	// and the top level's, and nothing at build time demands either:
+	// both are type switches on resolver.ResolvedType, Go does not
+	// require a switch to be exhaustive, and golangci-lint's exhaustive
+	// cannot read a type switch at all — its `check` setting accepts
+	// only `switch` and `map`. A missed arm is reported by the
+	// ErrOutOfC6Scope fallthrough instead, at generation time. Measured
+	// by deleting an arm from each: both build clean and lint green
+	// (gqlc-7hp5g). The render-side ColumnKind switches are guarded
+	// differently; see walkListElemPlan.
 	Kind ColumnKind
 	// GoType is the emitted Go type text for one element — a TypeMap
 	// entry, a schema-derived entity struct name, or a synthesised
