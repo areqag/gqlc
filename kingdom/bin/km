@@ -4126,6 +4126,12 @@ cmd_status() {
     # prints the UNJUDGED line below, rather than letting sixteen unanswered
     # questions render as sixteen healthy seats.
     target=$(git_at "$(main_root)" rev-parse --verify --quiet origin/master 2>/dev/null || true)
+    # One 3-second gap for the whole table rather than one per seat: the loop
+    # below asks seat_pane_idle of every awake seat, and unprimed that is a
+    # separate gap each time. Measured on the live town 2026-09-03, same board
+    # both runs: 43.1s without this line, 15.0s with it. Unlike dispatch's prime,
+    # placement here carries no send hazard — cmd_status types into nothing.
+    pane_still_prime
     printf '%-10s %-10s %-9s %-6s %-7s %-8s %-7s %-6s %-6s %s\n' SEAT CLASS STATE CTX HB WORK TREE LAUNCH MAIL BEADS
     for s in $(seats_all); do
         disp=$(seat_display "$s")
