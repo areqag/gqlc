@@ -110,7 +110,7 @@ func TestAGERefusesAUint64ParameterAboveMaxInt64(t *testing.T) {
 
 	for _, tc := range refusals {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err, sent := countersMatching(tc.params)
+			out, sent, err := countersMatching(tc.params)
 			require.False(t, sent,
 				"the bind accepted this value and the method went on to send it, so it was on its way to a server that cannot store it")
 			require.Error(t, err)
@@ -146,7 +146,7 @@ func TestAGERefusesAUint64ParameterAboveMaxInt64(t *testing.T) {
 
 	for _, tc := range reaches {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err, sent := countersMatching(tc.params)
+			_, sent, err := countersMatching(tc.params)
 			require.True(t, sent,
 				"the method returned before the send instead of reaching the wire, so nothing here witnesses that an accepted value crosses; it returned: %v", err)
 		})
@@ -165,7 +165,7 @@ func TestAGERefusesAUint64ParameterAboveMaxInt64(t *testing.T) {
 // Any other panic is re-raised. Swallowing them would turn a genuine
 // defect in the generated code into `sent`, which is a passing accepting
 // row.
-func countersMatching(params uint64age.CountersMatchingParams) (out []int64, err error, sent bool) {
+func countersMatching(params uint64age.CountersMatchingParams) (out []int64, sent bool, err error) {
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -177,7 +177,7 @@ func countersMatching(params uint64age.CountersMatchingParams) (out []int64, err
 		sent = true
 	}()
 	out, err = uint64age.New(nil, "g").CountersMatching(context.Background(), params)
-	return out, err, false
+	return out, false, err
 }
 
 func ptr[T any](v T) *T { return &v }
