@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen/age"
@@ -111,9 +112,9 @@ func TestEveryDialectGapCarriesItsWitness(t *testing.T) {
 	require.Len(t, ageLiveRecipes, 2,
 		"a name dropped from this list is a recipe nobody checks, and a witness "+
 			"can stop being run by it")
-	bodies := readLiveWitnessBodies(t)
+	bodies, methods := readLiveWitnessBodies(t)
 	recipes := readRecipes(t, ageLiveRecipes)
-	require.Empty(t, witnessGaps(age.DialectGaps, bodies, recipes),
+	require.Empty(t, witnessGaps(age.DialectGaps, bodies, methods, recipes),
 		"every refusal this backend makes on the query text has to rest on a live measurement")
 }
 
@@ -375,6 +376,11 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 	// The build tag is here because recipeRuns requires it — a command
 	// line that does not build liveBuildTag compiles no live test.
 	recipes := map[string]string{"run-it": "go test -tags " + liveBuildTag + " -run '^" + witness + "$'"}
+	// Written, and on a suite, so it is neither a witness nor an absence.
+	// Deliberately NOT in bodies as well: that split is the state under
+	// test, since witnessBodies puts a method in one map and not the
+	// other.
+	methods := map[string]string{witness + "AsAMethod": "*liveSuite"}
 	sound := age.DialectGapFields{
 		Sentinel: age.ErrRelationshipTypeAlternation,
 		Find:     findUndefinedFunctionsOrAlternations,
@@ -383,7 +389,7 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 		Refused:  []age.DialectProbe{age.NewDialectProbe("MATCH (:A)-[r:X|Y]->(:B) RETURN r", `syntax error at or near "|"`)},
 		Served:   []string{"MATCH (:A)-[r:X]->(:B) RETURN r"},
 	}.Build()
-	require.Empty(t, witnessGaps([]age.DialectGap{sound}, bodies, recipes),
+	require.Empty(t, witnessGaps([]age.DialectGap{sound}, bodies, methods, recipes),
 		"the row template must pass, or a complaint below could come from the template")
 
 	for _, tc := range []struct {
@@ -484,6 +490,20 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 			want: "is not declared in any live test file",
 		},
 		{
+			// The pair to the row above, and the reason both are here: a
+			// witness written as a suite method used to get that row's
+			// complaint, which is false — the file DOES declare it — and
+			// sends the author hunting for a test that is in front of
+			// them. The two rows together are what shows the sweep tells
+			// the worlds apart rather than collapsing them.
+			name: "a witness declared only as a method is written, and still cannot be a witness",
+			cut: func(g age.DialectGap) []age.DialectGap {
+				g.SetWitness(witness + "AsAMethod")
+				return []age.DialectGap{g}
+			},
+			want: "is declared as a method on *liveSuite",
+		},
+		{
 			name: "a witness no recipe runs never runs",
 			cut: func(g age.DialectGap) []age.DialectGap {
 				g.SetWitness("TestSomethingLiveButUnrun")
@@ -522,7 +542,7 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := witnessGaps(tc.cut(sound), bodies, recipes)
+			got := witnessGaps(tc.cut(sound), bodies, methods, recipes)
 			require.NotEmpty(t, got, "this binding is cut, so the sweep has to complain")
 			require.Contains(t, strings.Join(got, "\n"), tc.want)
 		})
@@ -541,7 +561,7 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 // other's probes, so a reader returning file text in place of body text
 // fails here and nowhere else.
 func TestWitnessBodiesAreScopedToTheirOwnTest(t *testing.T) {
-	bodies := readLiveWitnessBodies(t)
+	bodies, _ := readLiveWitnessBodies(t)
 	compared := 0
 	for _, g := range age.DialectGaps {
 		body, declared := bodies[g.Witness()]
@@ -560,6 +580,44 @@ func TestWitnessBodiesAreScopedToTheirOwnTest(t *testing.T) {
 	}
 	require.NotZero(t, compared,
 		"one gap, or two sharing a witness: this test compared nothing and would pass on any reader")
+}
+
+// TestAMethodIsReportedRatherThanDropped guards the reader's third axis,
+// and it is the one that decides whether the sweep can tell an unwritten
+// witness from a written-but-unselectable one.
+//
+// witnessBodies has always skipped methods, correctly: `go test -run`
+// selects a method as Suite/Method, so a recipe cannot run one whole and
+// recipeRuns is right to refuse it. What it did wrong was skip them
+// SILENTLY, which left the sweep with one answer for two worlds and made
+// it tell an author that a test they can see in their own file "is not
+// declared in any live test file" (bd gqlc-qw57d).
+//
+// The three assertions are separate claims about one parse, so they are
+// assert and not require: under require the first failure hides the rest,
+// and a reader that returned the method as a BODY would fail the first
+// two while the third — the one that says the skip still happens — never
+// ran.
+func TestAMethodIsReportedRatherThanDropped(t *testing.T) {
+	src := []byte(`package fixtures_test
+
+import "testing"
+
+type liveSuite struct{ t *testing.T }
+
+func (s *liveSuite) TestOnASuite(t *testing.T) { _ = "` + syntheticProbeText + `" }
+
+func TestTopLevel(t *testing.T) { _ = "top" }
+`)
+	bodies, methods, err := witnessBodies(token.NewFileSet(), "live_synthetic_test.go", src)
+	require.NoError(t, err, "the source this test writes has to parse")
+
+	assert.NotContains(t, bodies, "TestOnASuite",
+		"a method reached the bodies map, so recipeRuns would be asked to run a name -run cannot select whole")
+	assert.Equal(t, "*liveSuite", methods["TestOnASuite"],
+		"the method was dropped rather than reported, so the sweep cannot tell it from a witness nobody wrote")
+	assert.Contains(t, bodies, "TestTopLevel",
+		"the top-level test stopped being read, so this file's whole binding is gone")
 }
 
 // The bytes mutation M15 moved from code into a comment: one refused
@@ -764,7 +822,7 @@ func syntheticGap() (age.DialectGap, map[string]string) {
 // the parse failure surfaced as a test failure.
 func readSyntheticWitness(t *testing.T, src []byte) map[string]witnessBody {
 	t.Helper()
-	bodies, err := witnessBodies(token.NewFileSet(), "live_synthetic_test.go", src)
+	bodies, _, err := witnessBodies(token.NewFileSet(), "live_synthetic_test.go", src)
 	require.NoError(t, err, "the source this test writes has to parse")
 	require.Contains(t, bodies, syntheticWitness, "the witness this test declares has to be read back")
 	return bodies
@@ -1048,11 +1106,11 @@ func TestACommentedProbeReddensTheSweep(t *testing.T) {
 	gap, recipes := syntheticGap()
 
 	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow, ""))
-	require.Empty(t, witnessGaps([]age.DialectGap{gap}, run, recipes),
+	require.Empty(t, witnessGaps([]age.DialectGap{gap}, run, nil, recipes),
 		"the template must pass, or the complaints below could come from the template")
 
 	spelled := readSyntheticWitness(t, liveWitnessSource("", commentOut(syntheticProbeRow), ""))
-	got := strings.Join(witnessGaps([]age.DialectGap{gap}, spelled, recipes), "\n")
+	got := strings.Join(witnessGaps([]age.DialectGap{gap}, spelled, nil, recipes), "\n")
 	require.Contains(t, got, "is not carried by",
 		"a probe only a comment spells is measured by nothing")
 	require.Contains(t, got, "is not asserted by",
@@ -1080,11 +1138,11 @@ func TestAnUnassertedAnswerReddensTheSweep(t *testing.T) {
 	gap, recipes := syntheticGap()
 
 	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow, ""))
-	require.Empty(t, witnessGaps([]age.DialectGap{gap}, run, recipes),
+	require.Empty(t, witnessGaps([]age.DialectGap{gap}, run, nil, recipes),
 		"the template must pass, or the complaints below could come from the template")
 
 	spelled := readSyntheticWitness(t, liveWitnessSource("", syntheticUnassertedRow, ""))
-	got := strings.Join(witnessGaps([]age.DialectGap{gap}, spelled, recipes), "\n")
+	got := strings.Join(witnessGaps([]age.DialectGap{gap}, spelled, nil, recipes), "\n")
 	require.Contains(t, got, "is not asserted by",
 		"an answer no assertion reads is a claim about the server that nothing re-measures")
 	require.NotContains(t, got, "is not carried by",
@@ -1113,8 +1171,10 @@ func findUndefinedFunctionsOrAlternations(src string) []age.Finding {
 // and an untested sweep is exactly the guard this codebase keeps finding
 // green because it looks at nothing.
 //
-// bodies maps a live test's name to the source of its body; recipes maps
-// a recipe name to the commands it runs.
+// bodies maps a live test's name to the source of its body; methods maps
+// a name the live files declare as a METHOD to its receiver type, which
+// is not a witness but is not an absence either; recipes maps a recipe
+// name to the commands it runs.
 //
 // Per WITNESS and not over the live corpus as a whole, which is the
 // difference between a probe that is re-measured and a probe that is
@@ -1122,7 +1182,7 @@ func findUndefinedFunctionsOrAlternations(src string) []age.Finding {
 // an AGE test no recipe runs, is never run against the pinned image —
 // and a sweep reading every file at once cannot tell those apart from
 // the real thing.
-func witnessGaps(gaps []age.DialectGap, bodies map[string]witnessBody, recipes map[string]string) []string {
+func witnessGaps(gaps []age.DialectGap, bodies map[string]witnessBody, methods, recipes map[string]string) []string {
 	var complaints []string
 	say := func(format string, args ...any) {
 		complaints = append(complaints, fmt.Sprintf(format, args...))
@@ -1160,10 +1220,20 @@ func witnessGaps(gaps []age.DialectGap, bodies map[string]witnessBody, recipes m
 		// declares, so every binding below is reported unmeasured too —
 		// which is what it is.
 		body := bodies[g.Witness()]
+		recv, isMethod := methods[g.Witness()]
 		switch _, declared := bodies[g.Witness()]; {
 		case g.Witness() == "":
 			say("%s names no witness test, so nothing re-measures it against the pinned image", id)
-		case !declared:
+		case declared:
+			// Read as a top-level test. Every binding below is checked.
+		case isMethod:
+			// Written, and the author can see it — so saying it is not
+			// declared would send them hunting for a test that is in
+			// front of them. The remedy is what has to be said instead.
+			say("%s names witness %q, which is declared as a method on %s: a witness must be a "+
+				"top-level test function, because `go test -run` selects a method as Suite/Method "+
+				"and no recipe can then run the witness whole", id, g.Witness(), recv)
+		default:
 			say("%s names witness %q, which is not declared in any live test file", id, g.Witness())
 		}
 		if g.Witness() != "" {
@@ -1260,37 +1330,68 @@ type witnessBody struct {
 // reads the build-tagged file without honouring the tag, which is what
 // lets a test binary built without it read one.
 //
-// Methods are skipped: a witness is a top-level test function, and a
+// Methods are not bodies: a witness is a top-level test function, and a
 // method sharing its name would put a body under a name `go test -run`
-// cannot select.
+// cannot select whole — it selects one as Suite/Method. They are
+// REPORTED rather than dropped, in the second map, keyed by name and
+// holding the receiver type. The sweep needs them to tell two worlds
+// apart that it used to answer identically: a witness nobody wrote, and
+// a witness written as a method by an author who reasonably believes it
+// exists. Dropping them silently made the second one read as the first
+// (bd gqlc-qw57d).
 //
 // Split from readLiveWitnessBodies for the reason recipeBodies is split
 // from readRecipes: a reader that only ever runs over the repo's own
 // files cannot be shown to tell code from commentary, because the repo's
 // files comment nothing out. This one takes source a test can write.
-func witnessBodies(fset *token.FileSet, path string, src []byte) (map[string]witnessBody, error) {
+func witnessBodies(fset *token.FileSet, path string, src []byte) (map[string]witnessBody, map[string]string, error) {
 	file, err := parser.ParseFile(fset, path, src, 0)
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	helpers := assertionHelpers(file)
 	bodies := make(map[string]witnessBody)
+	methods := make(map[string]string)
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil || fn.Body == nil {
+		if !ok || fn.Body == nil {
+			continue
+		}
+		if fn.Recv != nil {
+			recv, err := receiverText(fset, fn.Recv)
+			if err != nil {
+				return nil, nil, fmt.Errorf("render %s's receiver in %s: %w", fn.Name.Name, path, err)
+			}
+			methods[fn.Name.Name] = recv
 			continue
 		}
 		var code strings.Builder
 		if err := format.Node(&code, fset, fn.Body); err != nil {
-			return nil, fmt.Errorf("render %s's body in %s: %w", fn.Name.Name, path, err)
+			return nil, nil, fmt.Errorf("render %s's body in %s: %w", fn.Name.Name, path, err)
 		}
 		asserted, err := assertedText(fset, fn.Body, helpers)
 		if err != nil {
-			return nil, fmt.Errorf("render %s's assertions in %s: %w", fn.Name.Name, path, err)
+			return nil, nil, fmt.Errorf("render %s's assertions in %s: %w", fn.Name.Name, path, err)
 		}
 		bodies[fn.Name.Name] = witnessBody{code: code.String(), asserted: asserted}
 	}
-	return bodies, nil
+	return bodies, methods, nil
+}
+
+// receiverText renders a method's receiver TYPE, so a complaint can name
+// the suite a witness was written on rather than merely saying it has
+// one. The pointer star is kept: `*AGESuite` is what the author reads in
+// their own file, and normalising it away would make the message name a
+// declaration that is not there.
+func receiverText(fset *token.FileSet, recv *ast.FieldList) (string, error) {
+	if recv == nil || len(recv.List) == 0 {
+		return "", nil
+	}
+	var text strings.Builder
+	if err := format.Node(&text, fset, recv.List[0].Type); err != nil {
+		return "", err
+	}
+	return text.String(), nil
 }
 
 // assertionPackages are the identifiers a call can be rooted at to count
@@ -1536,7 +1637,14 @@ func assertedText(fset *token.FileSet, body *ast.BlockStmt, helpers map[string]b
 // across the whole set, not merely within one file. The guard is for a
 // live file that later lands outside that package — liveGlob matches by
 // path and says nothing about a package clause.
-func readLiveWitnessBodies(t *testing.T) map[string]witnessBody {
+//
+// The method names carry no such guard, and must not: two suites may each
+// declare a method of the same name and that is legal Go, so requiring
+// uniqueness would red a correct pair of live files. The first wins, which
+// is arbitrary only in the message — the remedy a method-declared witness
+// gets is "make it top-level", and that does not turn on which suite
+// holds it.
+func readLiveWitnessBodies(t *testing.T) (map[string]witnessBody, map[string]string) {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join(repoRoot, liveGlob))
 	require.NoError(t, err)
@@ -1544,18 +1652,24 @@ func readLiveWitnessBodies(t *testing.T) map[string]witnessBody {
 
 	fset := token.NewFileSet()
 	bodies := make(map[string]witnessBody)
+	methods := make(map[string]string)
 	for _, p := range paths {
 		src, err := os.ReadFile(p) //nolint:gosec // a repo-relative path this test builds itself
 		require.NoError(t, err, "read %s", p)
-		read, err := witnessBodies(fset, p, src)
+		read, readMethods, err := witnessBodies(fset, p, src)
 		require.NoError(t, err, "read the test bodies in %s", p)
 		for name, body := range read {
 			require.NotContains(t, bodies, name,
 				"two live tests named %s: the sweep would read whichever was parsed last", name)
 			bodies[name] = body
 		}
+		for name, recv := range readMethods {
+			if _, seen := methods[name]; !seen {
+				methods[name] = recv
+			}
+		}
 	}
-	return bodies
+	return bodies, methods
 }
 
 // recipeRuns reports whether cmds actually runs the live top-level test
