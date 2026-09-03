@@ -18,6 +18,12 @@ type LabelSetKey string
 
 // Key canonicalises the set into its map key. The original slice is left
 // unmodified.
+//
+// The join does not quote, so the key is only an identity if no label contains
+// "&" — otherwise the one-label set {A&B} keys identically to the two-label set
+// {A, B}. That is a guarantee the producers give, not one enforced here: the GQL
+// front end refuses such a label at the token read (gql.ErrAmpersandInLabel).
+// Making one representable is bd gqlc-yd4ba.
 func (ls LabelSet) Key() LabelSetKey {
 	sorted := slices.Clone(ls)
 	slices.Sort(sorted)

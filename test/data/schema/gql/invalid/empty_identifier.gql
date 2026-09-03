@@ -1,0 +1,7 @@
+-- A delimited identifier may be empty, and an empty name is how this parser
+-- records an ABSENT one — the empty label set is what an unnamed node type has,
+-- so a node explicitly labelled "" could not be told apart from one carrying no
+-- label at all.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:"" { id :: INT })
+}
