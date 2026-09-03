@@ -50,11 +50,13 @@ type typeMap struct{}
 // DATE, LOCAL TIME and DURATION ride the neutral carriers temporal.go
 // declares — Date, LocalTime and Duration (ADR 0033). That is what
 // admits them here: the obstacle was never the encoding, which has been
-// settled on gqlc-35yu.11 since the spike, but the carrier. Every other
-// backend spells these three with a neo4j driver type, and a package
-// reaching Postgres through pgx cannot declare one without making the
-// surface a caller writes against vary by backend. It can declare the
-// neutral carriers, because the generated package declares them itself.
+// settled on gqlc-35yu.11 since the spike, but the carrier. Until PR
+// #1481 the neo4j targets spelled these three with a neo4j driver type,
+// and a package reaching Postgres through pgx cannot declare one without
+// making the surface a caller writes against vary by backend. ADR 0033
+// took that spelling off every backend rather than adding a second one
+// here, so what the surface names is the neutral carrier the generated
+// package declares itself — on neo4j as on AGE.
 //
 // DATE is the zero-padded ISO 'YYYY-MM-DD' string, the one temporal
 // spelling whose lexical order is its chronological order — across
@@ -209,17 +211,29 @@ func (typeMap) StorableProperty(graph.PropertyType) bool { return true }
 // method whose statement the server rejects at run time — the failure
 // mode ADR 0025 created this channel to prevent, one step worse.
 //
-// A carrier is missing too, for five of the six. The Go type the other
-// backends spell date, time, local time, local datetime and duration
-// with is a neo4j driver type, and a package that talks to Postgres
-// through pgx cannot declare it without making the caller-facing surface
-// vary by backend. The duration arm is doubly permanent: a calendar
-// duration counts months, which no fixed number of microseconds is.
+// The constructor ground is the whole of it. This comment carried a
+// second one until bd gqlc-kjtu7 — that five of the six kinds had no
+// carrier a pgx package could declare — and it was true when written,
+// the neo4j targets then spelling them dbtype.Date and its siblings. ADR
+// 0033 took that spelling off every backend (PR #1481), and temporal.go
+// carries the neutral carriers into the generated package of any target
+// whose surface names one — AGE among them since PR #1679, which is what
+// TestTemporalCarriersAreEmittedExactlyWhenReferenced holds. So every
+// kind clears the carrier question today and none of them clears the
+// constructor one.
 //
-// TemporalDateTime is the one kind that would clear the carrier bar —
-// its carrier is time.Time on every backend, and the encoding for it is
-// settled (epoch-micros, plus a <f>Offset sidecar for the zone; see
-// Property). It stays refused on the constructor ground alone.
+// One narrower fact outlives that ground, and it bears on the ENCODING
+// rather than on admitting a kind: a calendar duration counts months,
+// which no fixed count of microseconds is faithful to. The stored lane
+// lives with it by refusing a non-zero Months at run time (see
+// Property), so it is a limit on the value rather than a second bar
+// here.
+//
+// TemporalDateTime was once singled out as the only kind clearing the
+// carrier bar, its carrier being time.Time on every backend and its
+// encoding settled (epoch-micros, plus a <f>Offset sidecar for the zone;
+// see Property). Now that every kind clears it, what is left of that is
+// the constructor ground DateTime always also rested on.
 func (typeMap) Temporal(k resolver.Temporal) (string, bool) {
 	switch k {
 	case resolver.TemporalDate:
