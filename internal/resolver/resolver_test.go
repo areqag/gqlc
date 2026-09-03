@@ -611,7 +611,12 @@ var invalidFixtures = map[string]error{
 	// intersection over ALL touching edges is empty and Phase B's case 0 fires.
 	// The set the OPTIONAL hop is dropped from is NOT empty (it is
 	// {Company&Large}), so a widening that fired on an empty intersection would
-	// accept this and offer largeId. The sentinel is what says it does not.
+	// substitute that set here. It would not accept: HAS_DESK is still in the
+	// pattern and is not declared out of Company&Large, so edge validation
+	// refuses a step later. What this row holds is the SENTINEL — under that
+	// widening the refusal becomes ErrUnknownEdge "unknown edge:
+	// Company&Large-[HAS_DESK]->Desk", and this ErrorIs is the assertion that
+	// dies. commit()'s case 0 carries the sweep measurement behind that.
 	"unlabelled_optional_hop_empty_intersection.cypher": ErrUnknownLabel,
 	// The OTHER conjunct of the same gate, and the only fixture that separates
 	// it. Every touching edge here witnesses its endpoints — both hops are
