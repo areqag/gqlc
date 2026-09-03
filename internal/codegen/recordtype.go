@@ -6,7 +6,7 @@ import (
 	"github.com/areqag/gqlc/internal/graph"
 )
 
-// recordStructText renders the Go carrier text for a declared record's
+// RecordStructText renders the Go carrier text for a declared record's
 // fields: an anonymous struct, one field per declared field, in the
 // canonical order Fields returns (spec §2, the ruling for gqlc-x9tg7 in
 // docs/specs/codegen-record-union-carriers.md).
@@ -35,7 +35,7 @@ import (
 // recordFieldLegality answers that at each of the four preparation
 // sites, before any type map is asked, so that Property keeps its pure
 // (string, bool) signature and has no error channel to need.
-func recordStructText(fields []graph.RecordField, carrier func(graph.PropertyType) (string, bool)) (string, bool) {
+func RecordStructText(fields []graph.RecordField, carrier func(graph.PropertyType) (string, bool)) (string, bool) {
 	if len(fields) == 0 {
 		// A record with no declared fields is the unit type, and Go
 		// spells the unit type struct{}. Reached for RECORD<> only:

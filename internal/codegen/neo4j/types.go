@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
 )
@@ -34,6 +35,21 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 			return "", false
 		}
 		return "[]" + elemTy, true
+	}
+	if pt.Kind() == graph.KindRecord {
+		if pt == graph.TypeAnyRecord {
+			// Fields undeclared, so there is no struct to build: the
+			// record whose contents are unconstrained maps to Go's
+			// unconstrained string-keyed product, exactly as ANY maps
+			// to any and LIST<ANY> to []any (spec §3).
+			return "map[string]any", true
+		}
+		// Threading this Property in as the field carrier is what makes
+		// a record inherit neo4j's own refusals: a field of a width
+		// this table has no case for refuses the whole record, through
+		// the same ErrUnrepresentableWidth channel a bare property of
+		// that width would.
+		return codegen.RecordStructText(pt.Fields(), t.Property)
 	}
 	switch pt {
 	case graph.TypeString:
@@ -83,12 +99,12 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// Listed so the exhaustive linter sees the full constant set.
 		return "[]any", true
 	case graph.TypeAnyRecord:
-		// Refused by prepare.go's kind walk before any table is asked
-		// (ErrUnimplementedTypeKind, ADR 0039), so this is unreachable —
-		// listed for the exhaustive linter, as graph.TypeList is. The
-		// false is fail-closed rather than an answer: a record has no
-		// emission on any backend, so no width claim here would be true.
-		return "", false
+		// RECORD<ANY> spelled out, so the Kind() guard above intercepts
+		// it and this arm is unreachable. Listed so the exhaustive
+		// linter sees the full constant set, and answering
+		// "map[string]any" keeps it agreeing with the arm that does the
+		// work — the arrangement graph.TypeList already has.
+		return "map[string]any", true
 	case graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,

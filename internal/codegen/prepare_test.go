@@ -1874,17 +1874,25 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 		},
 	}}
 
+	// Stage 1 of gqlc-x9tg7 emits records, so the record rows that used
+	// to sit here have moved to `admitted` below. What remains refused
+	// is the union — and, the arm stage 1 adds, a union REACHED THROUGH
+	// a record, which is only refusable because the walk now descends
+	// Fields. Without that descent every row below carrying `union`
+	// inside a record passes the walk, reaches the table with a record
+	// it cannot spell a struct text for, and comes back a width error.
 	refused := []struct {
 		name string
 		pt   graph.PropertyType
 	}{
-		{"a record with fields", record},
-		{"a record whose fields are undeclared", graph.TypeAnyRecord},
-		{"a record with no fields", graph.RecordOf(nil)},
 		{"a union", union},
-		{"a record under a list", graph.ListOf(record, true)},
 		{"a union under a list", graph.ListOf(union, true)},
-		{"a record under two lists", graph.ListOf(graph.ListOf(record, true), true)},
+		{"a union inside a record", graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})},
+		{"a union under a list inside a record", graph.RecordOf([]graph.RecordField{{Name: "u", Type: graph.ListOf(union, true)}})},
+		{"a union inside a record inside a record", graph.RecordOf([]graph.RecordField{
+			{Name: "at", Type: graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})},
+		})},
+		{"a union inside a record under a list", graph.ListOf(graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}}), true)},
 	}
 
 	tables := []struct {
@@ -1919,8 +1927,15 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 	}
 
 	// The over-refusal fence. A walk that answered "not a scalar" rather
-	// than "a record or a union" refuses these too, and every row above
-	// stays green while lists stop generating.
+	// than "a union, or a record with one under it" refuses these too,
+	// and every row above stays green while lists and records stop
+	// generating.
+	//
+	// The record rows are stage 1's deliverable and they are here rather
+	// than in a test of their own on purpose: this is the table that
+	// knows all four positions, and spec §6 binds the carrier question
+	// at every one of them. A record admitted at three of four would
+	// otherwise be a hole nothing looks at.
 	admitted := []struct {
 		name string
 		pt   graph.PropertyType
@@ -1928,6 +1943,13 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 		{"a scalar", graph.TypeInt32},
 		{"a list of scalars", graph.ListOf(graph.TypeInt32, true)},
 		{"a list of lists of scalars", graph.ListOf(graph.ListOf(graph.TypeInt32, true), true)},
+		{"a record with fields", record},
+		{"a record whose fields are undeclared", graph.TypeAnyRecord},
+		{"a record with no fields", graph.RecordOf(nil)},
+		{"a record under a list", graph.ListOf(record, true)},
+		{"a record under two lists", graph.ListOf(graph.ListOf(record, true), true)},
+		{"a record inside a record", graph.RecordOf([]graph.RecordField{{Name: "at", Type: record}})},
+		{"a list inside a record", graph.RecordOf([]graph.RecordField{{Name: "xs", Type: graph.ListOf(graph.TypeInt32, true)}})},
 	}
 	for _, pos := range positions {
 		for _, a := range admitted {
@@ -1952,7 +1974,10 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 // noise no reader gains from.
 func TestUnimplementedTypeKindNamesTheKindAndTheSite(t *testing.T) {
 	person := graph.LabelSetKey("Person")
-	record := graph.RecordOf([]graph.RecordField{{Name: "a", Type: graph.TypeInt32}})
+	union := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})
+
+	inRecord := graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})
+	nested := graph.RecordOf([]graph.RecordField{{Name: "at", Type: inRecord}})
 
 	tests := []struct {
 		name    string
@@ -1960,13 +1985,31 @@ func TestUnimplementedTypeKindNamesTheKindAndTheSite(t *testing.T) {
 		wantErr string
 	}{{
 		name:    "the property is the unbuilt kind",
-		pt:      record,
-		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` + string(record),
+		pt:      union,
+		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` + string(union),
 	}, {
 		name: "the unbuilt kind is inside the declared width",
-		pt:   graph.ListOf(record, true),
+		pt:   graph.ListOf(union, true),
 		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` +
-			string(graph.ListOf(record, true)) + `, whose ` + string(record) + ` has no emission`,
+			string(graph.ListOf(union, true)) + `, whose ` + string(union) + ` has no emission`,
+	}, {
+		// Stage 1's arm. A record can declare the same unbuilt width at
+		// several fields, so naming the sub-type alone does not say
+		// which declaration to open — the field name is the part that
+		// locates the edit, and it is what the list rendering above has
+		// no equivalent of.
+		name: "the unbuilt kind is a record field",
+		pt:   inRecord,
+		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` +
+			string(inRecord) + `, whose field "u" has ` + string(union) + `, which has no emission`,
+	}, {
+		// The path accumulates outward rather than reporting the leaf,
+		// because "u" appears at both levels of this declaration and a
+		// message naming only the leaf would send the reader to either.
+		name: "the unbuilt kind is under two records",
+		pt:   nested,
+		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` +
+			string(nested) + `, whose field "at.u" has ` + string(union) + `, which has no emission`,
 	}}
 
 	for _, tt := range tests {
