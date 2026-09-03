@@ -1479,7 +1479,45 @@ func TestAllCapsEdgeLabelTitleCasesPerRule3(t *testing.T) {
 	}
 }
 
-// TestARawStringLiteralChangesNoTextPrepareAdmits is the fence over the two
+// TestPhaseAAdmitNamesTheByteItRefuses pins each refusal's MESSAGE, which the
+// fence below cannot: that test sorts a candidate into a bucket and then asks
+// only for ErrOutOfC6Scope, so a refusal naming the wrong byte — or one arm's
+// message emitted from another arm — passes it unchanged.
+//
+// The message is the whole of the remedy for the two unparseable bytes. What
+// the user is told without one is a go/format failure against a file they did
+// not write: `format failure: q.cypher.go: 14:8: illegal character NUL`,
+// measured 2026-09-03 by driving cmd/gqlc over a query carrying one. That
+// names a line in the GENERATED file and neither the query, the source byte,
+// nor where in the .cypher file it came from.
+func TestPhaseAAdmitNamesTheByteItRefuses(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mid  string
+		want string
+	}{
+		{"backtick", "`", `has a backtick in its source text`},
+		{"carriage return", "\r", `has a carriage return in its source text`},
+		{"NUL", "\x00", `has a NUL in its source text`},
+		{"lone invalid byte", "\xff", `is not valid UTF-8`},
+		{"truncated UTF-8 sequence", "\xc3(", `is not valid UTF-8`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := codegen.Prepare(codegen.Input{
+				Queries: []codegen.NamedQuery{{
+					Name:        "Q",
+					Cardinality: codegen.CardinalityExec,
+					SourceText:  "MATCH (p:Person)" + tc.mid + "RETURN 1",
+				}},
+			}, stubTypeMap{}, "p")
+
+			require.ErrorIs(t, err, codegen.ErrOutOfC6Scope)
+			require.EqualError(t, err, `out of C6 scope: query "Q" at position 0 `+tc.want)
+		})
+	}
+}
+
+// TestARawStringLiteralChangesNoTextPrepareAdmits is the fence over the four
 // refusals above it. Both backends emit SourceText through a Go RAW string
 // literal, and the byte that hurts is not the one such a literal cannot hold
 // but the one it holds DIFFERENTLY: a carriage return is dropped from the
@@ -1498,16 +1536,18 @@ func TestAllCapsEdgeLabelTitleCasesPerRule3(t *testing.T) {
 //	           corrupt query ships silently. \r is the only member, and this
 //	           is the bucket it was admitted from.
 //	unparsed — the emission is not Go at all. Nothing ships, so this is loud
-//	           rather than wrong and the refusal is a courtesy: the backtick
-//	           gets one, NUL and invalid UTF-8 do not (bd gqlc-32n53). Pinned
-//	           by name AND by that answer, so both a byte joining the bucket
-//	           and a refusal arriving for one already in it fail here.
+//	           rather than wrong and the refusal is a courtesy: every member
+//	           now gets one (bd gqlc-32n53). Pinned by name AND by that
+//	           answer, so both a byte joining the bucket and a refusal
+//	           leaving one already in it fail here.
 func TestARawStringLiteralChangesNoTextPrepareAdmits(t *testing.T) {
-	// Emission does not parse → whether Prepare refuses it today. NUL is a
+	// Emission does not parse → whether Prepare refuses it. NUL is a
 	// documented implementation restriction on Go source; the last two are a
 	// lone invalid byte and a truncated sequence, since Go source must be
-	// UTF-8. Fixing gqlc-32n53 flips its two false values to true.
-	unparseable := map[string]bool{"`": true, "\x00": false, "\xff": false, "\xc3(": false}
+	// UTF-8. All four are refused, so this map no longer distinguishes
+	// members — it is the roster the sweep checks it reached, and the
+	// per-byte MESSAGES are pinned by the test above.
+	unparseable := map[string]bool{"`": true, "\x00": true, "\xff": true, "\xc3(": true}
 
 	var carried, changed, unparsed int
 	for _, mid := range rawLiteralCandidates() {
