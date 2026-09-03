@@ -23,6 +23,20 @@ import (
 // binds the gate to the right method and the right column: a lane that
 // names a different column, or refuses in different words, is a failure
 // here rather than a silent pass.
+//
+// The sibling refusal this lane emits — "decode column %q: key not
+// found", for a key the driver never projected — is deliberately NOT
+// fenced here, and the asymmetry is a choice rather than an oversight
+// (bd gqlc-s6lif). What this fence protects is uniformity across lanes
+// and backends, and only the arrived-null phrase has any: measured
+// 2026-09-03 over emitter call sites, it is written from five sites in
+// this file and one in internal/codegen/age, while the absent-key phrase
+// is written from exactly one site, in one lane, on this backend alone.
+// Renaming a phrase with one writer regresses nothing, so a second const
+// here would forbid a free edit and vouch for a property that does not
+// exist. The behaviour that does matter — that the two refusals stay
+// distinguishable and each names its column — is pinned in the corpus by
+// requireDistinctRefusals (bd gqlc-h803), which names neither phrase.
 const gateLine = `return zeroValue, fmt.Errorf("SweepQuery: column %q is non-nullable but arrived null", "col")`
 
 // nonNullGateCase is one lane of the row-assembly dispatch, reached by a
