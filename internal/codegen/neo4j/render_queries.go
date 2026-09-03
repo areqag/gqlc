@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/queryfile"
 )
 
 // sourceGroup carries one <name>.cypher.go file's worth of prepared
@@ -58,7 +59,7 @@ func groupBySource(prepared []codegen.Query) []sourceGroup {
 // (spec §5.5).
 func groupImports(queries []codegen.Query) (needDbtype, needTime, needFmt bool) {
 	for _, p := range queries {
-		if p.Cardinality != codegen.CardinalityExec {
+		if p.Cardinality != queryfile.CardinalityExec {
 			// Row-assembly bodies emit fmt.Errorf decode wrappers.
 			needFmt = true
 		}
@@ -248,7 +249,7 @@ func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 	default:
 		fmt.Fprintf(b, ", %s %sParams", codegen.ParamArg, p.MethodName)
 	}
-	if p.Cardinality == codegen.CardinalityExec {
+	if p.Cardinality == queryfile.CardinalityExec {
 		b.WriteString(") error")
 		return
 	}
@@ -276,7 +277,7 @@ func returnTypeText(p codegen.Query) string {
 	} else {
 		elem = p.MethodName + "Row"
 	}
-	if p.Cardinality == codegen.CardinalityMany {
+	if p.Cardinality == queryfile.CardinalityMany {
 		return "[]" + elem
 	}
 	return elem
@@ -291,7 +292,7 @@ func returnTypeText(p codegen.Query) string {
 // (dbtype.Kind{} / time.Time{}), lists (nil), scalars (bool/int64/
 // float64/string), map (nil), and any (nil).
 func zeroValueText(p codegen.Query) string {
-	if p.Cardinality == codegen.CardinalityMany {
+	if p.Cardinality == queryfile.CardinalityMany {
 		return "nil"
 	}
 	if len(p.RowFields) == 1 {
@@ -354,7 +355,7 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	writeMethodSignature(b, p)
 	b.WriteString(" {\n")
 
-	if p.Cardinality == codegen.CardinalityExec {
+	if p.Cardinality == queryfile.CardinalityExec {
 		fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %s, %s, %s)\n", codegen.QueryTextConst(p), paramsMapText(p), accessModeText(p.IsWrite))
 		b.WriteString("\treturn err\n")
 		b.WriteString("}\n")
@@ -364,7 +365,7 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	// Body: build the params map, call run, decode.
 	writeRunCall(b, p)
 
-	if p.Cardinality == codegen.CardinalityOne {
+	if p.Cardinality == queryfile.CardinalityOne {
 		writeOneBody(b, p)
 	} else {
 		writeManyBody(b, p)

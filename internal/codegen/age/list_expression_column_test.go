@@ -11,6 +11,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 	"github.com/areqag/gqlc/internal/schema/gql"
@@ -34,7 +35,7 @@ func listColumnInput(t *testing.T, col resolver.Column) codegen.Input {
 		Schema: sch,
 		Queries: []codegen.NamedQuery{{
 			Name:        "Tags",
-			Cardinality: codegen.CardinalityMany,
+			Cardinality: queryfile.CardinalityMany,
 			SourceFile:  "q.cypher",
 			SourceText:  "MATCH (p:Person) RETURN collect(p.name) AS xs\n",
 			Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{col}},

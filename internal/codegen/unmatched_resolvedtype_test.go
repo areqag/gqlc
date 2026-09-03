@@ -9,6 +9,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/neo4j"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -132,7 +133,7 @@ func unmatchedSchema() schema.Schema {
 func unmatchedColumnQuery(col resolver.Column) codegen.NamedQuery {
 	return codegen.NamedQuery{
 		Name:        "Fetch",
-		Cardinality: codegen.CardinalityMany,
+		Cardinality: queryfile.CardinalityMany,
 		SourceFile:  "probe.cypher",
 		SourceText:  "MATCH (n) RETURN n",
 		Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{col}},

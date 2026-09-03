@@ -2,6 +2,7 @@ package age
 
 import (
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/queryfile"
 )
 
 // generate is the pure emission kernel. Determinism per §2.3: the output
@@ -60,7 +61,7 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	var h helpers
 	h.forEntities(entities)
 	for _, p := range prepared.Queries {
-		if p.Cardinality == codegen.CardinalityOne {
+		if p.Cardinality == queryfile.CardinalityOne {
 			hasOne = true
 		}
 		if len(p.ParamFields) > 0 {

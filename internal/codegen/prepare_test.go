@@ -16,6 +16,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -373,7 +374,7 @@ func TestPhaseBCommitsIsWrite(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			q := codegen.NamedQuery{
 				Name:        "Q",
-				Cardinality: codegen.CardinalityExec,
+				Cardinality: queryfile.CardinalityExec,
 				SourceText:  "MATCH (n) DELETE n",
 				Validated: resolver.ValidatedQuery{
 					Statement: tt.statement,
@@ -458,7 +459,7 @@ func TestEdgeUnionCandidatesMustCarryDistinctLabels(t *testing.T) {
 				Schema: sch,
 				Queries: []codegen.NamedQuery{{
 					Name:        "GetAction",
-					Cardinality: codegen.CardinalityOne,
+					Cardinality: queryfile.CardinalityOne,
 					SourceText:  "MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r",
 					Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "r", Type: tt.column}}},
 				}},
@@ -493,13 +494,13 @@ func TestEdgeUnionInterfaceNamesMustNotCoincideAcrossQueries(t *testing.T) {
 		Queries: []codegen.NamedQuery{
 			{
 				Name:        "Get",
-				Cardinality: codegen.CardinalityOne,
+				Cardinality: queryfile.CardinalityOne,
 				SourceText:  "MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r AS userName",
 				Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "userName", Type: column}}},
 			},
 			{
 				Name:        "GetUser",
-				Cardinality: codegen.CardinalityOne,
+				Cardinality: queryfile.CardinalityOne,
 				SourceText:  "MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r AS name",
 				Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "name", Type: column}}},
 			},
@@ -589,7 +590,7 @@ func TestTemporalKindRefusalReachesTheCaller(t *testing.T) {
 				Schema: schema.Schema{Name: "Test"},
 				Queries: []codegen.NamedQuery{{
 					Name:        "GetWhen",
-					Cardinality: codegen.CardinalityOne,
+					Cardinality: queryfile.CardinalityOne,
 					SourceText:  "MATCH (n) RETURN duration({days: 1}) AS t",
 					Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "t", Type: tt.column}}},
 				}},
@@ -677,7 +678,7 @@ func TestStorageRefusalReachesTheCallerAsItsOwnSentinel(t *testing.T) {
 	}{
 		{"a query column of the same width is not asked", []codegen.NamedQuery{{
 			Name:        "Nested",
-			Cardinality: codegen.CardinalityOne,
+			Cardinality: queryfile.CardinalityOne,
 			SourceText:  "RETURN [[1]] AS xss",
 			Validated: resolver.ValidatedQuery{Columns: []resolver.Column{{
 				Name: "xss",
@@ -686,7 +687,7 @@ func TestStorageRefusalReachesTheCallerAsItsOwnSentinel(t *testing.T) {
 		}}},
 		{"a query parameter of the same width is not asked", []codegen.NamedQuery{{
 			Name:        "Nested",
-			Cardinality: codegen.CardinalityOne,
+			Cardinality: queryfile.CardinalityOne,
 			SourceText:  "MATCH (p:Person) WHERE p.matrix = $xss RETURN p.matrix AS xss",
 			Validated: resolver.ValidatedQuery{
 				Columns: []resolver.Column{{Name: "xss", Type: resolver.ResolvedScalar{Kind: resolver.ScalarInt}}},
@@ -783,7 +784,7 @@ func TestReservedIdentifiersAreUniformAcrossBackends(t *testing.T) {
 
 			in := codegen.Input{
 				Schema:  schema.Schema{Name: "Test"},
-				Queries: []codegen.NamedQuery{{Name: row.name, Cardinality: codegen.CardinalityExec, SourceText: "MATCH (n) DELETE n"}},
+				Queries: []codegen.NamedQuery{{Name: row.name, Cardinality: queryfile.CardinalityExec, SourceText: "MATCH (n) DELETE n"}},
 			}
 			_, err := codegen.Prepare(in, stubTypeMap{}, "")
 			require.ErrorIs(t, err, codegen.ErrIdentifierCollision)
@@ -890,7 +891,7 @@ func TestQueryTextConstCollidesWithADecodeHelper(t *testing.T) {
 			},
 		},
 		Queries: []codegen.NamedQuery{
-			{Name: "DecodeFoo", Cardinality: codegen.CardinalityExec, SourceText: "MATCH (n) DELETE n"},
+			{Name: "DecodeFoo", Cardinality: queryfile.CardinalityExec, SourceText: "MATCH (n) DELETE n"},
 		},
 	}
 
@@ -1506,7 +1507,7 @@ func TestPhaseAAdmitNamesTheByteItRefuses(t *testing.T) {
 			_, err := codegen.Prepare(codegen.Input{
 				Queries: []codegen.NamedQuery{{
 					Name:        "Q",
-					Cardinality: codegen.CardinalityExec,
+					Cardinality: queryfile.CardinalityExec,
 					SourceText:  "MATCH (p:Person)" + tc.mid + "RETURN 1",
 				}},
 			}, stubTypeMap{}, "p")
@@ -1557,7 +1558,7 @@ func TestARawStringLiteralChangesNoTextPrepareAdmits(t *testing.T) {
 		_, err := codegen.Prepare(codegen.Input{
 			Queries: []codegen.NamedQuery{{
 				Name:        "Q",
-				Cardinality: codegen.CardinalityExec,
+				Cardinality: queryfile.CardinalityExec,
 				SourceText:  text,
 			}},
 		}, stubTypeMap{}, "p")
@@ -1718,7 +1719,7 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 				Schema: schema.Schema{Name: "Test"},
 				Queries: []codegen.NamedQuery{{
 					Name:        "GetP",
-					Cardinality: codegen.CardinalityOne,
+					Cardinality: queryfile.CardinalityOne,
 					SourceText:  "MATCH (n) RETURN n.p AS p",
 					Validated: resolver.ValidatedQuery{
 						Columns: []resolver.Column{{Name: "p", Type: resolver.ResolvedProperty{Type: pt}}},
@@ -1734,7 +1735,7 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 				Schema: schema.Schema{Name: "Test"},
 				Queries: []codegen.NamedQuery{{
 					Name:        "GetP",
-					Cardinality: codegen.CardinalityOne,
+					Cardinality: queryfile.CardinalityOne,
 					SourceText:  "MATCH (n) WHERE n.p = $p RETURN n.q AS q",
 					Validated: resolver.ValidatedQuery{
 						Columns:    []resolver.Column{{Name: "q", Type: resolver.ResolvedProperty{Type: graph.TypeInt32}}},

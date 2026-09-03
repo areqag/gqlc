@@ -16,6 +16,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
+	"github.com/areqag/gqlc/internal/queryfile"
 )
 
 // TestDollarTagClosesOnlyAtTheEnds pins the delimiter choice against the
@@ -99,7 +100,7 @@ func TestEmittedQueryTextIsTheBytesTheTagWasChosenOn(t *testing.T) {
 				NamedQuery: codegen.NamedQuery{
 					Name:        "Q",
 					SourceText:  text,
-					Cardinality: codegen.CardinalityExec,
+					Cardinality: queryfile.CardinalityExec,
 				},
 				MethodName: "Q",
 				Bare:       "q",
@@ -651,7 +652,7 @@ func TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind(t *testing.T) {
 				NamedQuery: codegen.NamedQuery{
 					Name:        "Q",
 					SourceText:  "MATCH (r:Row) WHERE r.u = $u RETURN r.id",
-					Cardinality: codegen.CardinalityExec,
+					Cardinality: queryfile.CardinalityExec,
 				},
 				MethodName: "Q",
 				Bare:       "q",

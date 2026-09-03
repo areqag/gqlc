@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/queryfile"
 )
 
 // nameBackend attributes a storage refusal to this backend.
@@ -56,7 +57,7 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	pkg := prepared.Package
 	hasOne := false
 	for _, p := range prepared.Queries {
-		if p.Cardinality == codegen.CardinalityOne {
+		if p.Cardinality == queryfile.CardinalityOne {
 			hasOne = true
 			break
 		}

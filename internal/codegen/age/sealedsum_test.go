@@ -29,6 +29,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -498,7 +499,7 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 					Schema: schemaWithPayload(graph.TypeString),
 					Queries: []codegen.NamedQuery{{
 						Name:        "Q",
-						Cardinality: codegen.CardinalityMany,
+						Cardinality: queryfile.CardinalityMany,
 						SourceFile:  "q.cypher",
 						SourceText:  "MATCH (b:Blob) RETURN b AS c\n",
 						Validated: resolver.ValidatedQuery{
@@ -652,7 +653,7 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 func probeColumnQuery(t resolver.ResolvedType) codegen.NamedQuery {
 	return codegen.NamedQuery{
 		Name:        "Actions",
-		Cardinality: codegen.CardinalityMany,
+		Cardinality: queryfile.CardinalityMany,
 		SourceText:  "MATCH (:Person)-[r:AUTHORED|LIKES]->(:Post) RETURN r\n",
 		Validated: resolver.ValidatedQuery{
 			Columns: []resolver.Column{{Name: "r", Type: t}},

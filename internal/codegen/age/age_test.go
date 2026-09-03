@@ -18,6 +18,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 	"github.com/areqag/gqlc/internal/schema/gql"
@@ -179,7 +180,7 @@ func scalarColumn(name string, pt graph.PropertyType) resolver.Column {
 func readQuery(name string, cols ...resolver.Column) codegen.NamedQuery {
 	return codegen.NamedQuery{
 		Name:        name,
-		Cardinality: codegen.CardinalityMany,
+		Cardinality: queryfile.CardinalityMany,
 		SourceFile:  "q.cypher",
 		SourceText:  "MATCH (p:Person) RETURN p.name\n",
 		Validated:   resolver.ValidatedQuery{Columns: cols},
@@ -193,7 +194,7 @@ func readQuery(name string, cols ...resolver.Column) codegen.NamedQuery {
 func execQuery(name string) codegen.NamedQuery {
 	return codegen.NamedQuery{
 		Name:        name,
-		Cardinality: codegen.CardinalityExec,
+		Cardinality: queryfile.CardinalityExec,
 		SourceFile:  "q.cypher",
 		SourceText:  "MATCH (p:Person) DELETE p\n",
 		Validated:   resolver.ValidatedQuery{Statement: resolver.StatementWrite},
@@ -222,7 +223,7 @@ var servedQuery = func() codegen.NamedQuery {
 // the corpus module compiles this file and no other query file.
 var instantParamQuery = codegen.NamedQuery{
 	Name:        "WriteEvent",
-	Cardinality: codegen.CardinalityExec,
+	Cardinality: queryfile.CardinalityExec,
 	SourceFile:  temporalSource,
 	SourceText:  "CREATE (e:Event {occurredAt: $occurredAt, seenAt: $seenAt})\n",
 	Validated: resolver.ValidatedQuery{
@@ -245,7 +246,7 @@ var instantParamQuery = codegen.NamedQuery{
 // form inside the args map and so is emitted as statements ahead of it.
 var carrierParamQuery = codegen.NamedQuery{
 	Name:        "WriteSpan",
-	Cardinality: codegen.CardinalityExec,
+	Cardinality: queryfile.CardinalityExec,
 	SourceFile:  temporalSource,
 	SourceText:  "CREATE (s:Span {startsOn: $startsOn, endsOn: $endsOn, opensAt: $opensAt, lasts: $lasts})\n",
 	Validated: resolver.ValidatedQuery{
@@ -269,7 +270,7 @@ var carrierParamQuery = codegen.NamedQuery{
 // arithmetic, which nothing on those two queries reaches.
 var zonedParamQuery = codegen.NamedQuery{
 	Name:        "WriteMeeting",
-	Cardinality: codegen.CardinalityExec,
+	Cardinality: queryfile.CardinalityExec,
 	SourceFile:  temporalSource,
 	SourceText:  "CREATE (m:Meeting {startsAt: $startsAt, endsAt: $endsAt})\n",
 	Validated: resolver.ValidatedQuery{
@@ -295,7 +296,7 @@ var zonedParamQuery = codegen.NamedQuery{
 // under test, and nothing in the tree compiles or runs it (bd gqlc-t0dp).
 var listCarrierParamQuery = codegen.NamedQuery{
 	Name:        "WriteSpans",
-	Cardinality: codegen.CardinalityExec,
+	Cardinality: queryfile.CardinalityExec,
 	SourceFile:  temporalSource,
 	SourceText:  "CREATE (s:Spans {startsOn: $startsOn, opensAt: $opensAt, lasts: $lasts, mayLast: $mayLast})\n",
 	Validated: resolver.ValidatedQuery{
@@ -327,7 +328,7 @@ var listCarrierParamQuery = codegen.NamedQuery{
 // would pass on the other.
 var nestedListCarrierParamQuery = codegen.NamedQuery{
 	Name:        "WriteSchedules",
-	Cardinality: codegen.CardinalityExec,
+	Cardinality: queryfile.CardinalityExec,
 	SourceFile:  temporalSource,
 	SourceText:  "CREATE (s:Schedules {runsOn: $runsOn, mayRunOn: $mayRunOn, windows: $windows})\n",
 	Validated: resolver.ValidatedQuery{
@@ -2921,7 +2922,7 @@ func (s *EmissionSuite) TestOneMethodsReturnMatchableSentinels() {
 
 	one := servedQuery
 	one.Name = "Solo"
-	one.Cardinality = codegen.CardinalityOne
+	one.Cardinality = queryfile.CardinalityOne
 	in := s.in
 	in.Queries = []codegen.NamedQuery{one}
 	files, err := age.New().Generate(in)

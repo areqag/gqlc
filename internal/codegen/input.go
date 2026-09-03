@@ -27,7 +27,7 @@ type NamedQuery struct {
 
 	// Cardinality is the author-declared row axis (spec §3.4). Zero
 	// value ("unset") is rejected by generate as ErrInvalidCardinality.
-	Cardinality Cardinality
+	Cardinality queryfile.Cardinality
 
 	// SourceFile is the query file's basename ("people.cypher"),
 	// carried forward as the grouping key for the per-source generated
@@ -44,19 +44,6 @@ type NamedQuery struct {
 	// it; C1+ derives Params, Row, and method surfaces from it.
 	Validated resolver.ValidatedQuery
 }
-
-// Cardinality is re-exported as a type alias from internal/queryfile so
-// internal/codegen consumers do not import queryfile just to name a
-// cardinality. One enum, two package-level identifiers.
-type Cardinality = queryfile.Cardinality
-
-// Cardinality constant re-exports, mirroring the alias so callers can
-// spell the constants without importing queryfile.
-const (
-	CardinalityOne  = queryfile.CardinalityOne
-	CardinalityMany = queryfile.CardinalityMany
-	CardinalityExec = queryfile.CardinalityExec
-)
 
 // File is one emitted file: its path relative to the caller's out
 // directory, and its complete, gofmt-clean contents. Path is the
