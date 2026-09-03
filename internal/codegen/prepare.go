@@ -657,6 +657,9 @@ func prepareEntityFields(entityName string, props map[string]schema.Property, tm
 		if kind, field, unbuilt := unimplementedTypeKind(p.Type); unbuilt {
 			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrUnimplementedTypeKind, entityName, p.Name, unimplementedKindDetail(p.Type, kind, field))
 		}
+		if record, reason, illegal := recordFieldLegality(p.Type); illegal {
+			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrRecordFieldCollision, entityName, p.Name, recordFieldDetail(p.Type, record, reason))
+		}
 		ty, ok := tm.Property(p.Type)
 		if !ok {
 			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrUnrepresentableWidth, entityName, p.Name, p.Type)
@@ -784,6 +787,9 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 				if kind, field, unbuilt := unimplementedTypeKind(t.Type); unbuilt {
 					return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnimplementedTypeKind, q.Name, ci, col.Name, unimplementedKindDetail(t.Type, kind, field))
 				}
+				if record, reason, illegal := recordFieldLegality(t.Type); illegal {
+					return fmt.Errorf("%w: query %q column %d %q has %s", ErrRecordFieldCollision, q.Name, ci, col.Name, recordFieldDetail(t.Type, record, reason))
+				}
 				if _, ok := tm.Property(t.Type); !ok {
 					return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnrepresentableWidth, q.Name, ci, col.Name, t.Type)
 				}
@@ -830,6 +836,9 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 			}
 			if kind, field, unbuilt := unimplementedTypeKind(prop.Type); unbuilt {
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnimplementedTypeKind, q.Name, pi, p.Name, unimplementedKindDetail(prop.Type, kind, field))
+			}
+			if record, reason, illegal := recordFieldLegality(prop.Type); illegal {
+				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrRecordFieldCollision, q.Name, pi, p.Name, recordFieldDetail(prop.Type, record, reason))
 			}
 			if _, ok := tm.Property(prop.Type); !ok {
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
@@ -1397,6 +1406,9 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 	case resolver.ResolvedProperty:
 		if kind, field, unbuilt := unimplementedTypeKind(tt.Type); unbuilt {
 			return nil, fmt.Errorf("%w: list element has %s", ErrUnimplementedTypeKind, unimplementedKindDetail(tt.Type, kind, field))
+		}
+		if record, reason, illegal := recordFieldLegality(tt.Type); illegal {
+			return nil, fmt.Errorf("%w: list element has %s", ErrRecordFieldCollision, recordFieldDetail(tt.Type, record, reason))
 		}
 		ty, ok := tm.Property(tt.Type)
 		if !ok {

@@ -29,8 +29,9 @@ func goCarrier(pt graph.PropertyType) (string, bool) {
 		return "bool", true
 	case graph.TypeBytes:
 		return "", false
+	default:
+		panic("goCarrier: no answer declared for " + string(pt))
 	}
-	panic("goCarrier: no answer declared for " + string(pt))
 }
 
 // TestRecordStructTextIsAFunctionOfTheEncoding is spec §8's first
@@ -229,4 +230,159 @@ func TestRecordStructTextIsAGoTypeExpression(t *testing.T) {
 	expr, err := parser.ParseExpr(text)
 	require.NoError(t, err)
 	require.IsType(t, &ast.StructType{}, expr, "the carrier text must be a struct type, not merely something that parses")
+}
+
+// TestRecordFieldLegalityAdmitsAndRefusesOnTheMangle is the guard
+// RecordStructText's doc comment names as its precondition: the builder
+// spells every field through paramFieldName and would otherwise emit a
+// struct with two fields of one name, or a field with no name at all.
+// Neither is Go, so without this check the refusal arrives from
+// go/format as ErrFormatFailure — a sentinel that names a template bug,
+// handed to an author whose schema is the thing at fault.
+//
+// Both halves are the mangle's doing rather than the author's spelling:
+// `min_age` and `minAge` are two distinct GQL field names, and a name of
+// underscores alone is a legal GQL field name that has no Go spelling.
+func TestRecordFieldLegalityAdmitsAndRefusesOnTheMangle(t *testing.T) {
+	refused := []struct {
+		name   string
+		fields []graph.RecordField
+		reason string
+	}{
+		{
+			"two spellings of one Go name",
+			[]graph.RecordField{
+				{Name: "min_age", Type: graph.TypeInt32},
+				{Name: "minAge", Type: graph.TypeInt32},
+			},
+			`fields "minAge" and "min_age" both mangle to "MinAge"`,
+		},
+		{
+			"a name of one underscore",
+			[]graph.RecordField{{Name: "_", Type: graph.TypeInt32}},
+			`field "_" mangles to no Go field name`,
+		},
+		{
+			"a name of underscores alone",
+			[]graph.RecordField{{Name: "___", Type: graph.TypeInt32}},
+			`field "___" mangles to no Go field name`,
+		},
+	}
+	for _, tc := range refused {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := graph.RecordOf(tc.fields)
+			offender, reason, illegal := codegen.RecordFieldLegality(rec)
+			require.True(t, illegal)
+			require.Equal(t, rec, offender, "the refusal must name the record that carries the offending fields")
+			require.Equal(t, tc.reason, reason)
+		})
+	}
+
+	// The controls. Each is the refused row with the one thing that
+	// makes it illegal taken away, so a check that refused every record
+	// could not pass both tables.
+	admitted := []struct {
+		name   string
+		fields []graph.RecordField
+	}{
+		{"two names that mangle apart", []graph.RecordField{
+			{Name: "min_age", Type: graph.TypeInt32},
+			{Name: "max_age", Type: graph.TypeInt32},
+		}},
+		{"a leading underscore that still leaves a name", []graph.RecordField{
+			{Name: "_a", Type: graph.TypeInt32},
+		}},
+		{"one field", []graph.RecordField{{Name: "city", Type: graph.TypeString}}},
+	}
+	for _, tc := range admitted {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, illegal := codegen.RecordFieldLegality(graph.RecordOf(tc.fields))
+			require.False(t, illegal)
+		})
+	}
+}
+
+// TestRecordFieldLegalityDescendsThroughContainers pins the reach of the
+// check. A record is legal at its own node and illegal three levels down
+// just as readily, and the position it is reached through — a list
+// element, another record's field, both at once — does not change the
+// answer, because every one of them is spelled as a Go struct in the
+// end.
+func TestRecordFieldLegalityDescendsThroughContainers(t *testing.T) {
+	bad := graph.RecordOf([]graph.RecordField{
+		{Name: "min_age", Type: graph.TypeInt32},
+		{Name: "minAge", Type: graph.TypeInt32},
+	})
+	good := graph.RecordOf([]graph.RecordField{{Name: "city", Type: graph.TypeString}})
+
+	refused := []struct {
+		name string
+		ty   graph.PropertyType
+	}{
+		{"the record itself", bad},
+		{"under a list", graph.ListOf(bad, false)},
+		{"under two lists", graph.ListOf(graph.ListOf(bad, false), false)},
+		{"a field of a record", graph.RecordOf([]graph.RecordField{{Name: "at", Type: bad}})},
+		{"a field of a field of a record", graph.RecordOf([]graph.RecordField{
+			{Name: "at", Type: graph.RecordOf([]graph.RecordField{{Name: "inner", Type: bad}})},
+		})},
+		{"a list-valued field of a record", graph.RecordOf([]graph.RecordField{
+			{Name: "ats", Type: graph.ListOf(bad, false)},
+		})},
+	}
+	for _, tc := range refused {
+		t.Run(tc.name, func(t *testing.T) {
+			offender, reason, illegal := codegen.RecordFieldLegality(tc.ty)
+			require.True(t, illegal)
+			require.Equal(t, bad, offender,
+				"the refusal names the record that carries the offending fields, not the type it was reached through")
+			require.Contains(t, reason, `both mangle to "MinAge"`)
+		})
+	}
+
+	admitted := []struct {
+		name string
+		ty   graph.PropertyType
+	}{
+		{"a scalar", graph.TypeString},
+		{"a list of scalars", graph.ListOf(graph.TypeString, false)},
+		{"a record whose fields are undeclared", graph.TypeAnyRecord},
+		{"a record with no fields", graph.RecordOf(nil)},
+		{"a legal record", good},
+		{"a legal record under a list", graph.ListOf(good, false)},
+		{"a legal record inside a legal record", graph.RecordOf([]graph.RecordField{{Name: "at", Type: good}})},
+	}
+	for _, tc := range admitted {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, illegal := codegen.RecordFieldLegality(tc.ty)
+			require.False(t, illegal)
+		})
+	}
+}
+
+// TestRecordFieldLegalityReportsTheOutermostOffender fixes the report
+// order where two levels are both illegal. The author is told about the
+// declaration they can see rather than one nested inside it, which is
+// why the check finishes an entire level before descending — a single
+// loop that checked and descended field by field would answer with
+// whichever offender sorted earlier, and the sort is over field names
+// that have nothing to do with depth.
+func TestRecordFieldLegalityReportsTheOutermostOffender(t *testing.T) {
+	inner := graph.RecordOf([]graph.RecordField{
+		{Name: "min_age", Type: graph.TypeInt32},
+		{Name: "minAge", Type: graph.TypeInt32},
+	})
+	// "at" sorts before "z_id"/"zId", so a field-by-field walk would
+	// descend into the inner offender before ever reaching the outer
+	// collision beside it.
+	outer := graph.RecordOf([]graph.RecordField{
+		{Name: "at", Type: inner},
+		{Name: "z_id", Type: graph.TypeInt32},
+		{Name: "zId", Type: graph.TypeInt32},
+	})
+
+	offender, reason, illegal := codegen.RecordFieldLegality(outer)
+	require.True(t, illegal)
+	require.Equal(t, outer, offender)
+	require.Equal(t, `fields "zId" and "z_id" both mangle to "ZId"`, reason)
 }

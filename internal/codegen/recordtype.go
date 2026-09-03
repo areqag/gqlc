@@ -1,10 +1,83 @@
 package codegen
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/graph"
 )
+
+// recordFieldLegality reports the outermost record under pt whose
+// declared fields have no legal Go spelling, with the reason. It is
+// asked at every position that asks a TypeMap for a property carrier,
+// AFTER unimplementedTypeKind and BEFORE the table, because it is the
+// precondition RecordStructText assumes and the table has no channel to
+// report it through — Property answers (string, bool), and "this record
+// cannot be spelled" is not the same claim as "this width has no
+// carrier".
+//
+// Two illegalities, both the mangle's doing rather than the author's
+// spelling (spec §2). Two fields whose paramFieldName mangles collide
+// would emit a struct declaring one Go name twice; a name of underscores
+// alone mangles to the empty string and would emit a field with no name.
+// Neither is Go, so without this the refusal arrives from go/format as
+// ErrFormatFailure, naming a template bug for a schema's fault. The
+// single-parameter form's standing exemption for $_ (prepare.go's Params
+// derivation) does not extend here: a record field is ALWAYS spelled as
+// a struct field, so there is no position where the empty mangle is
+// harmless.
+//
+// The recursion is through list elements and record fields, matching
+// unimplementedTypeKind, because those are the positions a record can be
+// reached through. A union is refused at its own node by the walk that
+// runs first, so nothing under one is reachable here.
+func recordFieldLegality(pt graph.PropertyType) (graph.PropertyType, string, bool) {
+	switch pt.Kind() {
+	case graph.KindRecord:
+		fields := pt.Fields()
+		// The whole level is checked before any descent, so that where
+		// two levels are both illegal the author is told about the
+		// declaration they can see. Checking and descending in one loop
+		// would answer with whichever offender sorted earlier, over
+		// field names that have nothing to do with depth.
+		seen := make(map[string]string, len(fields))
+		for _, f := range fields {
+			mangled := paramFieldName(f.Name)
+			if mangled == "" {
+				return pt, "field " + strconv.Quote(f.Name) + " mangles to no Go field name", true
+			}
+			if first, dup := seen[mangled]; dup {
+				return pt, "fields " + strconv.Quote(first) + " and " + strconv.Quote(f.Name) + " both mangle to " + strconv.Quote(mangled), true
+			}
+			seen[mangled] = f.Name
+		}
+		for _, f := range fields {
+			if offender, reason, illegal := recordFieldLegality(f.Type); illegal {
+				return offender, reason, true
+			}
+		}
+		return "", "", false
+	case graph.KindList:
+		return recordFieldLegality(pt.Elem())
+	case graph.KindScalar, graph.KindUnion:
+		// Neither declares fields: a scalar has none, and a union is
+		// refused before this is asked. Named rather than left to the
+		// default so a fourth kind cannot be added silently.
+	}
+	return "", "", false
+}
+
+// recordFieldDetail renders the tail every ErrRecordFieldCollision
+// message shares, so the four fail-sites differ only in how they name
+// themselves — the arrangement unimplementedKindDetail already has. When
+// the declared type IS the offending record the two arguments are the
+// same string and naming it twice would say nothing.
+func recordFieldDetail(declared, record graph.PropertyType, reason string) string {
+	if declared == record {
+		return string(declared) + ", whose " + reason
+	}
+	return string(declared) + ", whose " + string(record) + " has " + reason
+}
 
 // RecordStructText renders the Go carrier text for a declared record's
 // fields: an anonymous struct, one field per declared field, in the

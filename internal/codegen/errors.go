@@ -218,6 +218,22 @@ var (
 	// 5). The fail-message names both properties and the entity.
 	// Introduced at C2.
 	ErrPropertyFieldCollision = errors.New("property field collision")
+
+	// ErrRecordFieldCollision is returned when a declared record's
+	// fields have no legal Go spelling: two field names that mangle to
+	// one struct field, or a name of underscores alone that mangles to
+	// none at all. The fail-message names the position, the record
+	// encoding, and the source field names. It mirrors
+	// ErrPropertyFieldCollision one container in — a record is spelled
+	// as a struct wherever it appears, so the same mangle that decides
+	// an entity's fields decides a record's.
+	//
+	// It is separate from ErrPropertyFieldCollision because the two name
+	// different things to fix: that one names an entity and two of its
+	// properties, this one a record TYPE that may be declared far from
+	// the property carrying it, and renaming a field of it changes every
+	// position that type reaches. Introduced at stage 1 of gqlc-x9tg7.
+	ErrRecordFieldCollision = errors.New("record field collision")
 )
 
 // allSentinels is the canonical closed set of user-input-reachable
@@ -271,6 +287,7 @@ var allSentinels = []error{
 	ErrInvalidEntityName,
 	ErrUnnamedMultiLabelType,
 	ErrPropertyFieldCollision,
+	ErrRecordFieldCollision,
 	ErrUnrepresentableWidth,
 	ErrUnstorableProperty,
 	ErrUnimplementedTypeKind,
