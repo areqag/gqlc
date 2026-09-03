@@ -140,6 +140,27 @@ func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
 		require.True(t, use.EncodePtr, "the nullable field calls fromDatePtr, which is a separate declaration")
 	})
 
+	t.Run("a LIST of records reaches its fields too", func(t *testing.T) {
+		// The list level owes no temporal helper of its own — the record's
+		// encode<X>List is what walks it — but each element is encoded by
+		// encode<X>, which calls the field conversions by name. So a walk
+		// that tested the OUTER width would see KindList, descend into
+		// nothing, and emit a package naming fromDate undeclared.
+		listWidth := graph.ListOf(width, false)
+		listText, ok := neo4j.TypeMap{}.Property(listWidth)
+		require.True(t, ok)
+		uses := neo4j.TemporalUses(codegen.Prepared{
+			Queries: []codegen.Query{{ParamFields: []codegen.Param{
+				{RawName: "p", Field: "P", GoType: listText, Width: listWidth},
+			}}},
+		})
+		use := uses["Date"]
+		require.True(t, use.Encode, "encode<X>List calls encode<X> per element, which calls fromDate")
+		require.True(t, use.EncodePtr, "and fromDatePtr for the nullable field")
+		require.False(t, use.List,
+			"from<X>List is NOT owed: it is the record's list helper that walks the elements, not a temporal one")
+	})
+
 	t.Run("the undeclared record hides nothing", func(t *testing.T) {
 		uses := neo4j.TemporalUses(codegen.Prepared{
 			Entities: []codegen.Entity{{Name: "Place", Fields: []codegen.EntityField{

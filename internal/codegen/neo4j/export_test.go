@@ -42,6 +42,7 @@ func TemporalUses(prepared codegen.Prepared) map[string]TemporalUseFlags {
 var (
 	AccessModeText       = accessModeText
 	DriverCarrier        = driverCarrier
+	IsDeclaredRecord     = isDeclaredRecord
 	NarrowsANumericWidth = narrowsANumericWidth
 	ParamBindExpr        = paramBindExpr
 	// WriteMethod rather than renderCypherFile, which the AGE side's

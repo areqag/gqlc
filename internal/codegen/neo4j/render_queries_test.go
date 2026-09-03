@@ -420,3 +420,36 @@ func TestParamBindExprLeavesTheUndeclaredRecordBare(t *testing.T) {
 		})
 	}
 }
+
+// TestIsDeclaredRecordNeedsBothHalves screens the predicate every record
+// arm in this backend guards on, one falsified half per row.
+//
+// It is asked directly rather than through a call site because ONE of
+// the two halves is not reachable from any schema. typeMap.Property
+// produces a `struct`-prefixed carrier only from
+// codegen.RecordStructText, which it calls only for KindRecord, so no
+// input can present a struct text beside a non-record width — a mutant
+// dropping the kind half survives every emission-level test in this
+// package, measured. That does not make the half decorative: it is what
+// stops a future call site that pairs a carrier with the wrong width
+// from deriving a helper name off a non-record, which would name a
+// declaration codegen.RecordEncodings never emits. Since the hazard is a
+// caller's, the guard is screened at the predicate, where the mismatched
+// pair can be supplied.
+//
+// The text half is reachable and its falsifier is RECORD<ANY>, which is
+// KindRecord and carries as map[string]any.
+func TestIsDeclaredRecordNeedsBothHalves(t *testing.T) {
+	declared := graph.RecordOf([]graph.RecordField{{Name: "city", Type: graph.TypeString}})
+	structText, ok := neo4j.TypeMap{}.Property(declared)
+	require.True(t, ok)
+
+	require.True(t, neo4j.IsDeclaredRecord(structText, declared),
+		"the control: a declared record paired with its own carrier is the whole point")
+
+	require.False(t, neo4j.IsDeclaredRecord("map[string]any", graph.TypeAnyRecord),
+		"RECORD<ANY> is KindRecord, so the kind alone would admit it — and RecordEncodings emits it no helper to name")
+
+	require.False(t, neo4j.IsDeclaredRecord(structText, graph.TypeString),
+		"a struct text beside a non-record width is a caller's mistake; naming a helper off it would invent a declaration")
+}
