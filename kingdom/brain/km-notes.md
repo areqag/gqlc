@@ -1154,10 +1154,11 @@ judgement about which way to be wrong, not a measurement (gqlc-p7l0u).
 
 (`kingdom/bin/km`, `seat_pane_idle`)
 
-Idle == herdr's report says the seat is at an empty prompt, AND no work is
-running there. km still does no pane scraping of its own: no reconciling "esc to
-interrupt" strings, no false-idle on a mid-tool-call. The second half is a
-process-table witness, `seat_work_running`, not a read of the screen.
+Idle == herdr's report says the seat is at an empty prompt, AND the seat's
+visible pane buffer did not move across a 3-second gap. The enum arm is still
+herdr's report and not km's own scraping — no reconciling "esc to interrupt"
+strings, no false-idle on a mid-tool-call. The second witness IS a read of the
+screen, but it compares the screen to ITSELF rather than matching chrome.
 
 THE SECOND WITNESS, and why the enum alone was not enough (bd gqlc-y8puo). A
 seat whose turn ended with a BACKGROUND shell still running reads `done`: herdr
@@ -1173,21 +1174,66 @@ a LONG shell reads idle. It does not. Measured 2026-09-02 by sampling
 call — not-idle on all ten. Foreground work is `working` throughout. Only the
 background case reaches `done`.
 
-Why the process table and not the pane's "N shell still running" line: that line
-is Claude Code chrome and moves with its version. A claude process AT REST HAS
-NO CHILDREN, which is what makes the witness discriminate rather than exempt
-everyone — measured across the live town the same day, five seats held a live
-claude with zero children (stable across repeated samples) while six held
-children, and the one seat the bead was filed on held Claude Code's own
-`bash -c source .../shell-snapshots/...`.
+**THE PANE-DELTA WITNESS DOES NOT COVER THAT CASE, and it is the one thing the
+witness it replaced got right.** A seat parked at an empty prompt over a running
+background shell repaints only if its chrome does, and whether that chrome ticks
+was NOT measured — on 2026-09-03 no seat in the town was in that state, so there
+was nothing to read. What was measured first-party that day is the neighbouring
+fact, which is why the gap is 3 seconds: a LIVE turn's footer ticks at least
+once a second (`3h 42m 35s` -> `3h 42m 38s` across one gap on nvard's own pane),
+so a working seat reliably reads moving. The regression is declared in km's own
+header rather than argued away here, and it is bounded by `stalled_age`, which
+comes from seat_dry_age and is wholly independent of this function.
 
-A DEAD SEAT IS STILL REACHED, which is the property that keeps the ladder alive:
-when a session is killed its children are reparented to init and the pid this
-looks under is gone, so a seat that has genuinely stopped answers "no work" and
-stays in the idle population. Verified by blinding the enum arm so `seat-idle`
-reported the witness alone: five childless seats answered IDLE, six with
-children answered not-idle. A witness that answered not-idle for everyone would
-have silenced the ladder town-wide and is exactly what that screen was for.
+A DEAD SEAT IS STILL REACHED, and this property survives the replacement for a
+different reason than before. A killed session's pane is frozen, so it reads
+still, so it reads idle, so the ladder reaches it — where the old witness got
+there by finding no children under a pid that no longer existed. A witness that
+answered not-idle for everyone would silence the ladder town-wide; the harness
+row that guards this one is the resting-seat row, and it dies when the still/
+moving comparison is inverted.
+
+### history: why the process witness was replaced (bd gqlc-39nk9, gqlc-yq1vg)
+
+Until 2026-09-03 the second witness was `seat_work_running`: does a claude
+process whose cwd is the seat's worktree have a live child. Its premise — "a
+claude process at rest has no children" — is false, and the measurement once
+cited for it was a snapshot that did not generalise.
+
+Sampled twice on 2026-09-03, minutes apart: 15 live seat sessions of which 7
+held at least one child, then 14 of which 6 did. EVERY child observed on either
+pass was a DAEMON rather than work — gopls on every seat that held anything at
+all, aged 45m to 31.7h; a node language server on 4; background shells up to
+30.6h old, four of them on one seat. A language server attaches on the first Go
+file and never leaves, so what the predicate actually tracked was session age.
+
+Both samples are recorded because the population moved between them — one
+session ended in those minutes and took its gopls with it. That is the same
+error the original paragraph made: any single count is a snapshot, and writing
+one as a property is what put a false sentence here the first time.
+
+It failed in both polarities, and the fail-silent one was the common case:
+
+- FAIL-TOWARD-SILENT, near half the town. A seat holding a language server
+  reported work forever, so seat_pane_idle was permanently false, so cmd_dispatch
+  not only never nudged it but CLEARED its five idle markers every pass. Such a
+  seat could not accumulate an idle episode at all.
+- FAIL-TOWARD-NUDGEABLE. A thinking turn is not a process: streaming and
+  extended thinking run inside claude itself, so a seat mid-thought had zero
+  children and read exactly like a dead one.
+
+The single live tool call seen on either pass is the sharpest form of the defect
+rather than a counter-example: it sat on ayg beside a gopls and a node server,
+so the predicate answered `working` for a seat that genuinely was — and answered
+identically for the same seat on the pass where no tool call was running. The
+answer did not move with the thing it claimed to measure.
+
+Two repairs were considered and rejected before the replacement. An allowlist of
+shell shapes rots as Claude Code's chrome moves; a denylist of daemons rots
+faster, and nobody writing one on 2026-09-02 would have had `node` on it, which
+4 seats held a day later. claude's own CPU time does not separate them either:
+over 10s across 12 seats, seats with and without children interleaved throughout
+the range.
 
 BOTH `idle` AND `done` MEAN THAT, and taking only `idle` made this predicate
 blind to the steady state (bd gqlc-ymbw0). Measured 2026-08-30 against the
