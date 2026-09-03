@@ -12,13 +12,17 @@ const (
 
 // String is the lowercase name of the kind ("node" / "edge").
 //
-// It is not what the query model's JSON discriminator derives from, though this
-// comment claimed so until bd gqlc-r79zi. That tag comes from
-// query.BindingKind.String, a different sum in a different package, which
-// answers for three further kinds this one has no member for. The two share the
-// spellings "node" and "edge" by construction and nothing enforces the match.
-// Measured 2026-09-03: deleting this method leaves `go build ./...` clean, so it
-// has no production caller at all.
+// It is not itself the query model's JSON discriminator, though this comment
+// claimed so until bd gqlc-r79zi. That tag comes from query.BindingKind.String,
+// a different sum in a different package, which answers for three further kinds
+// this one has no member for — but that sum's "node" and "edge" arms call this
+// method rather than spelling the two words a second time (bd gqlc-avtrx). So
+// this method reaches the wire by way of that one, and its spellings are not
+// free to change: internal/query's suite reds if they do.
+//
+// Until gqlc-avtrx the two pairs of literals matched "by construction" alone.
+// Measured then, on the pair as it stood: rewriting "node" here left the whole
+// of internal/query green, with only this package's own test to catch it.
 func (k EntityKind) String() string {
 	switch k {
 	case Node:
