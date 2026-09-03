@@ -34,10 +34,10 @@
 // WHY ITS OWN FILE. live_age_dialect_test.go is bound by a sweep
 // (TestEveryDialectGapCarriesItsWitness) that reads gap witnesses out of the
 // bodies of the tests its gap table names, so a probe belonging to no dialect
-// gap sitting in there is text a witness could be mistaken for. And
-// live_age_ungated_test.go is titled for a measured REFUSAL that no gap acts
-// on, which the AGE half here is the opposite of. Both halves are one claim,
-// so they are one file rather than a row filed under each backend.
+// gap sitting in there is text a witness could be mistaken for. That rules out
+// the one AGE live file this row could plausibly have joined; the rest are
+// filed by topic and this is not their topic. Both halves are one claim, so
+// they are one file rather than a row filed under each backend.
 //
 // COST. The AGE half is nightly and manual only, like every AGE row. The
 // neo4j half rides live-smoke, which pull requests do block on, and it starts
