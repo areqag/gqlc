@@ -3003,10 +3003,20 @@ test-codegen-live:
 # deliberately NOT added to the AGE recipe, which no pull request pays for and
 # whose full battery already covers it.
 #
+# TestAGERefusesAUint64ParameterAboveMaxInt64 is the third of that kind, and the
+# AGE in its name is about the emission it reads, not about a container: the
+# refusal it executes is generated code that runs between cypherStmt and
+# q.db.Query, so it drives a handle over a nil DBTX and starts nothing. It is in
+# the PR-blocking half under the rule above, and hardest of the three: the
+# mutation battery of bd gqlc-tzjqu deleted that guard from the emitted helper,
+# regenerated the goldens, and every gate stayed green -- so the edit this row
+# has to catch is the ordinary one, and catching it nightly is catching it after
+# the merge (bd gqlc-l65y9).
+#
 # The alternation is a NAME LIST, not a pattern, for the reason the AGE recipe
 # below spells out: -run is unanchored, so a name here silently claims every
 # test that extends it. No name below is a prefix of another test in the module
-# (grepped 2026-08-30).
+# (grepped 2026-09-03).
 #
 # TestNeo4jRefusesANestedListStoredProperty is the one name here that starts a
 # container of its own, so this half now boots three rather than two. They boot
@@ -3016,7 +3026,7 @@ test-codegen-live:
 # because this server refuses the write, and a PR is where that had better be
 # still true.
 test-codegen-live-neo4j:
-    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty' -skip 'TestLiveSmoke/apache-age' ./...
+    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestAGERefusesAUint64ParameterAboveMaxInt64' -skip 'TestLiveSmoke/apache-age' ./...
 
 # the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
 # the dialect fact the AGE backend's edge-union refusal rests on, the offset
