@@ -691,12 +691,19 @@ func TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind(t *testing.T) {
 // backstop behind a gate, not the diagnostic a real input would meet.
 //
 // What is asserted is the observable the compile-failure half rests on, and
-// it is two halves rather than one. The method declares RESULTS and its body
-// holds NO statements — a function with results whose body cannot fall off
-// the end is a compile error by the Go spec, so pinning both is pinning
-// "missing return" without asking a test to invoke a compiler. Asserting the
-// empty body alone would pass just as well on an :exec-shaped signature
-// returning only error, which is a method that compiles.
+// it is two halves rather than one: the method declares RESULTS, and its body
+// holds NO statements. Neither alone is an error — a method declaring no
+// results may legally have an empty body, and a method with a body may return
+// from it. Together they are exactly Go's missing return, so pinning both pins
+// the claim without asking a test to invoke a compiler.
+//
+// Which half carries which was measured rather than assumed, and the first
+// guess was wrong. Mutating writeMethodSignature so every method returns only
+// `error` leaves this test green — correctly, because `error` is still a
+// result, so the empty body is still a missing return and the claim still
+// holds under that mutant. The mutation that reds the results half is the one
+// emitting no result list at all, which is the only shape where "no body"
+// stops meaning "does not compile".
 //
 // The generated corpus really is compiled, which is what makes that error
 // something this repository holds anyone to: test/data/codegen is a nested
