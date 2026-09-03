@@ -1358,10 +1358,14 @@ seat_pane() { # <seat> -> the pane's visible buffer
 # not a claim to have enumerated them all:
 #
 #   FALSE-STILL, a working seat read as idle: any live turn whose visible tail
-#   repaints more slowly than the gap. The known instance is a turn that ENDED
-#   while a background shell it launched is still running (bd gqlc-y8puo) — the
-#   case the process witness got right and this one does not. Future Claude Code
-#   chrome joins this list without announcing itself.
+#   repaints more slowly than the gap. Future Claude Code chrome joins this list
+#   without announcing itself, and it will not announce itself here either.
+#   The one known instance — a turn that ENDED while a background shell it
+#   launched is still running (bd gqlc-y8puo), the case the process witness got
+#   right — is no longer on this list: it is covered by
+#   pane_shell_outlives_turn below, which reads the count off the same buffer.
+#   That case does NOT repaint at all, so no gap length would have caught it
+#   (measured, bd gqlc-u47eu).
 #
 #   FALSE-MOVING, a resting seat read as working: anything that repaints an idle
 #   pane between the two reads. A concurrent km process is the real one — the
@@ -1377,6 +1381,41 @@ seat_pane() { # <seat> -> the pane's visible buffer
 # UNREADABLE IS NOT STILL. An unresolvable pane id, or either read failing,
 # lands on `moving` — the same polarity seat_agent_status takes for the same
 # reason: a seat km cannot read is a seat km must not type at.
+
+# The y8puo case, answered from the buffer the delta witness already holds
+# rather than from a second instrument. A turn that ENDED while a background
+# shell it launched is still running repaints NOTHING: measured 2026-09-03 on
+# this seat's own pane, 17 consecutive 3-second windows with the turn `done`
+# were byte-identical, and the elapsed timer that ticks once a second during a
+# live turn was frozen at the value it held when the turn ended. So no gap
+# length would have separated that seat from a stopped one.
+#
+# What separates them is on the screen: Claude Code prints the count of shells
+# outliving the turn on the same line as the elapsed time. Observed across 12
+# live panes the same day, four of them in exactly this state:
+#
+#   ✻ Cooked for 1h 47m 23s                          stopped
+#   ✻ Cogitated for 26m 9s · 1 shell still running    waiting on its own work
+#   ✻ Sautéed for 3m 3s · 4 shells still running      likewise
+#
+# THE GERUND IS RANDOMISED — Cooked, Churned, Sautéed, Baked, Cogitated and
+# Worked all appeared in that one sweep — so nothing may key on it.
+#
+# The match is END-ANCHORED and requires the middot, because the bare words are
+# something the town writes in prose: a seat whose turn output discusses this
+# very witness must not be read as running one. The two clauses cover different
+# prose, which is why both are here — the middot excludes a wrapped line ENDING
+# on the bare words, and the anchor excludes a verbatim quote of the whole
+# chrome line, middot included, that a sentence then continues past.
+#
+# Anchoring is not a security boundary. A quote landing at the END of a line
+# still trips it; that costs one pass of FALSE-MOVING, which self-heals, where
+# the polarity this replaces cost a nudge whose offered remedy is `km sleep` —
+# the end of a session that had not stopped.
+pane_shell_outlives_turn() { # <visible buffer> -> 0 if a background shell is declared
+    printf '%s\n' "$1" | grep -Eq '·[[:space:]]+[0-9]+[[:space:]]+shells?[[:space:]]+still[[:space:]]+running[[:space:]]*$'
+}
+
 PANE_STILL_MEMO=""
 seat_pane_still() { # <seat> -> 0 the visible buffer did not move across the gap
     local hps_s=$1 hps_pane hps_b1 hps_b2
@@ -1392,7 +1431,7 @@ seat_pane_still() { # <seat> -> 0 the visible buffer did not move across the gap
     sleep 3
     hps_b2=$(herdr pane read "$hps_pane" --source visible --lines 60 2>/dev/null) || {
         PANE_STILL_MEMO="$PANE_STILL_MEMO [$hps_s]=moving"; return 1; }
-    if [ "$hps_b1" = "$hps_b2" ]; then
+    if [ "$hps_b1" = "$hps_b2" ] && ! pane_shell_outlives_turn "$hps_b2"; then
         PANE_STILL_MEMO="$PANE_STILL_MEMO [$hps_s]=still"; return 0
     fi
     PANE_STILL_MEMO="$PANE_STILL_MEMO [$hps_s]=moving"; return 1
@@ -1431,7 +1470,7 @@ pane_still_prime() {
         psp_first=${psp_first#*$'\x1f'}; psp_first=${psp_first#*$'\x1f'}
         psp_second=$(herdr pane read "$psp_pane" --source visible --lines 60 2>/dev/null) || {
             PANE_STILL_MEMO="$PANE_STILL_MEMO [$psp_s]=moving"; continue; }
-        if [ "$psp_first" = "$psp_second" ]; then
+        if [ "$psp_first" = "$psp_second" ] && ! pane_shell_outlives_turn "$psp_second"; then
             PANE_STILL_MEMO="$PANE_STILL_MEMO [$psp_s]=still"
         else
             PANE_STILL_MEMO="$PANE_STILL_MEMO [$psp_s]=moving"
