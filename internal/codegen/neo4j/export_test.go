@@ -40,8 +40,12 @@ func TemporalUses(prepared codegen.Prepared) map[string]TemporalUseFlags {
 }
 
 var (
-	AccessModeText                = accessModeText
-	DriverCarrier                 = driverCarrier
-	ParamBindExpr                 = paramBindExpr
+	AccessModeText = accessModeText
+	DriverCarrier  = driverCarrier
+	ParamBindExpr  = paramBindExpr
+	// WriteMethod rather than renderCypherFile, which the AGE side's
+	// equivalent test calls: neo4j's takes a driverTarget, whose type is
+	// unexported, so an external test package cannot supply one.
+	WriteMethod                   = writeMethod
 	WriteSingleColumnDecodeIndent = writeSingleColumnDecodeIndent
 )

@@ -355,22 +355,42 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	writeMethodSignature(b, p)
 	b.WriteString(" {\n")
 
-	if p.Cardinality == queryfile.CardinalityExec {
-		fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %s, %s, %s)\n", codegen.QueryTextConst(p), paramsMapText(p), accessModeText(p.IsWrite))
-		b.WriteString("\treturn err\n")
-		b.WriteString("}\n")
-		return
-	}
-
-	// Body: build the params map, call run, decode.
-	writeRunCall(b, p)
-
-	if p.Cardinality == queryfile.CardinalityOne {
+	// Three named arms and no `default`, matching the AGE side, whose
+	// writeMethod carries the full account of what that buys and what it
+	// does not. The short version: `exhaustive` checks a switch carrying no
+	// `default` (.golangci.yml sets default-signifies-exhaustive), and the
+	// silence an unnamed member gets instead is a backstop behind
+	// codegen.Prepare's cardinality gate rather than a diagnostic anyone
+	// meets, because generate calls Prepare before it renders.
+	//
+	// This side was an if/else until bd gqlc-h08nx, so `exhaustive` could
+	// not see it at all and the trailing `else` answered for CardinalityMany
+	// and for any member added later alike. Measured 2026-09-03: deleting
+	// the CardinalityOne arm reds this line by name.
+	//
+	// :exec keeps its own body writer rather than an early return. The
+	// return was only there to skip writeRunCall, which the switch now does
+	// structurally, and an arm that returns from writeMethod would take the
+	// closing brace with it.
+	switch p.Cardinality {
+	case queryfile.CardinalityExec:
+		writeExecBody(b, p)
+	case queryfile.CardinalityOne:
+		writeRunCall(b, p)
 		writeOneBody(b, p)
-	} else {
+	case queryfile.CardinalityMany:
+		writeRunCall(b, p)
 		writeManyBody(b, p)
 	}
 	b.WriteString("}\n")
+}
+
+// writeExecBody writes the :exec body: run, discard the rows, return the
+// error. No Row-struct decoding, and no writeRunCall — an :exec method has
+// no rows to bind, so it calls run inline and keeps the error alone.
+func writeExecBody(b *strings.Builder, p codegen.Query) {
+	fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %s, %s, %s)\n", codegen.QueryTextConst(p), paramsMapText(p), accessModeText(p.IsWrite))
+	b.WriteString("\treturn err\n")
 }
 
 // accessModeText picks the fourth q.db.run argument (spec §1.1).
