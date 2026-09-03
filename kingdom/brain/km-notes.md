@@ -1252,11 +1252,71 @@ ask of km's stranded above a citizen's draft that must not be destroyed to
 clear it. It is also the direct evidence that km's asks strand and ACCUMULATE:
 a second ask was delivered into a box the first had already made non-empty.
 
-That correction moves gqlc-cj7hp's population, not its conclusion. The nine
-strings read that day were classified by their first line, so some counted as
-foreign were mixed; the hand-send reading is owed a re-read against this tag,
-which is bd gqlc-nypdt and is not yet done. Until it is, cite gqlc-cj7hp for
-what herdr does and not for how many boxes it accounts for.
+THAT RE-READ IS DONE (bd gqlc-nypdt, Այգ 2026-09-03) AND gqlc-cj7hp's COUNTS
+STAND. Cite it for its numbers again. The correction landed somewhere the
+filing did not expect, so the reason matters more than the verdict, and the
+reason is a DIRECTION rather than an absence.
+
+The old tag is applied in cj7hp four times, not once — the three-seat witness
+line at 15:44Z, Այգ at 16:13Z, Աստղիկ's pair at 16:40Z (the two live arrivals
+among the nine), and Նուարդ at 16:43Z — and for Միհր's 16:38Z string it is the
+only attribution recorded. So the re-count cannot rest on the tag being absent
+from the evidence. It rests on the tag being unable to err the way that would
+matter: classifying by the first line can hide km's own lines UNDERNEATH a
+citizen's, so a box that is really `mixed` reads `foreign`, but no line carrying
+the `[km] ` prefix can read `foreign`. The defect over-reports `foreign` and
+cannot manufacture one. Every string cj7hp quotes was quoted as the box's
+content — its first line — so each quoted attribution is sound, and what the
+defect could have concealed is km text BELOW a line nobody quoted.
+
+The corpus is the independent check, and it excludes as a CLASS rather than
+string by string, which is stronger than the per-string grep this note used to
+claim: km's whole send corpus is `/exit` plus four asks each carrying the
+literal `[km] ` prefix, and `git log -S'[km] '` reaches the founding commit, so
+no era of km sent unprefixed asks and any box text without that prefix is not
+km's on sight. Two of the nine were additionally grepped individually; the class
+exclusion is what covers all nine.
+
+An earlier version of this note said the tag appeared once and that each of the
+nine strings had its own corpus grep. Both were false against cj7hp's own
+record, and Անահիտ caught them in review (gqlc-xzn7a round 1).
+
+What was measured, both halves against a positive control:
+
+- The live population at 06:56Z, ten boxed seats read one pane at a time
+  through `seat_box_text`: every box ONE content line, every one `foreign`. On
+  a single-line box the two classifiers are identical by construction — "the
+  first line" and "every line" are the same line — so the mis-tag has zero
+  incidence there.
+- The historical record, which exists because the town's readers ran their
+  probes inside tool calls and the raw output survives in the transcripts. 108
+  executed pane and box reads; 14 composer regions recoverable; 2 of those are
+  reconstruction artifacts, tool outputs that concatenated several panes' dumps
+  so that "the last two rules" span two screens. Both classifiers agree on all
+  14. Zero disagreements.
+- THE CONTROL, without which that zero means nothing: fb8ip's own raffi
+  composer, replayed verbatim through the same two classifiers, reads `foreign`
+  under the old one and `mixed` under the new. The instrument can see a mixed
+  box, and it did not find one.
+
+That specimen is outside cj7hp's population twice over: measured at 22:4xZ,
+after every cj7hp reading (02:40Z to 15:44Z), on a seat appearing nowhere in
+cj7hp's table.
+
+WHAT IS NOT RESTORED, and it is small: those three tag witnesses at 15:44Z were
+computed by the defective classifier over panes that no longer exist, so they
+are unverifiable rather than wrong. Nothing rests on them, and nothing rests on
+Միհր's 16:38Z tag either, which is the one string the tag alone attributed: the
+class exclusion above reads off the string itself, so it does not need the pane
+back.
+
+THE RE-READ FOUND A DIFFERENT DEFECT, in the corrected tag rather than the old
+one: `box_authorship` asks authorship per RENDERED ROW, and a composer wraps.
+One stranded km ask alone in a box therefore tags `mixed`, because only its
+first row carries the prefix. Measured at the live width of 352 columns, km's
+530-character stall ask wraps to two rows and tags `mixed`. That is bd
+gqlc-mtfbz, and until it is fixed a `mixed` tag does not establish that a
+citizen's draft is present — which is the one thing its remedy turns on.
 
 IT READS THE COMPOSER'S BYTES AND NOTHING ELSE, which is the whole of its
 authority and the whole of its blindness. A citizen whose own draft happens to
