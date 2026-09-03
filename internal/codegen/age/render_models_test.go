@@ -258,7 +258,7 @@ func TestEmittedHelpersAreClosedOverWhatTheyCall(t *testing.T) {
 				}
 
 				src := age.RenderModels("models", entities, h)
-				require.Empty(t, undeclaredAgtypeIdents(t, src),
+				require.Empty(t, undeclaredHelperIdents(t, src),
 					"a %s batch of one %s property (nullable=%t) names an agtype helper it does not declare, so the emitted package does not compile",
 					d.name, row.goType, nullable)
 			}
@@ -266,11 +266,16 @@ func TestEmittedHelpersAreClosedOverWhatTheyCall(t *testing.T) {
 	}
 }
 
-// undeclaredAgtypeIdents parses one emitted models.go and returns every
-// agtype helper it names without declaring. A helper reaches the list
+// undeclaredHelperIdents parses one emitted models.go and returns every
+// generated helper it names without declaring. A helper reaches the list
 // whether it is called outright or passed by value as a decoder
 // argument, because either one is a reference the compiler resolves.
-func undeclaredAgtypeIdents(t *testing.T, src []byte) []string {
+//
+// The helper families are named rather than "every undeclared identifier"
+// because the file legitimately names identifiers it does not declare —
+// fmt, json, the language's own builtins — and resolving those is the
+// compiler's job, not this walk's.
+func undeclaredHelperIdents(t *testing.T, src []byte) []string {
 	t.Helper()
 
 	file, err := parser.ParseFile(token.NewFileSet(), "models.go", src, parser.SkipObjectResolution)
@@ -288,12 +293,17 @@ func undeclaredAgtypeIdents(t *testing.T, src []byte) []string {
 			// just as it resolves the helpers — the date layout is one —
 			// so a walk that reads only funcs reports them all missing.
 			for _, spec := range d.Specs {
-				vs, ok := spec.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				for _, name := range vs.Names {
-					declared[name.Name] = struct{}{}
+				switch spec := spec.(type) {
+				case *ast.ValueSpec:
+					for _, name := range spec.Names {
+						declared[name.Name] = struct{}{}
+					}
+				case *ast.TypeSpec:
+					// A record's carrier is an ALIAS, so it is a type
+					// declaration and not a func. A walk reading only funcs
+					// reports every alias the helper signatures name as
+					// missing.
+					declared[spec.Name.Name] = struct{}{}
 				}
 			}
 		}
@@ -307,7 +317,7 @@ func undeclaredAgtypeIdents(t *testing.T, src []byte) []string {
 			return true
 		}
 		// An identifier is a leaf, so the walk stops here either way.
-		if _, isDeclared := declared[id.Name]; isDeclared || !strings.HasPrefix(id.Name, "agtype") {
+		if _, isDeclared := declared[id.Name]; isDeclared || !isEmittedHelper(id.Name) {
 			return false
 		}
 		if _, dup := seen[id.Name]; !dup {
@@ -330,4 +340,29 @@ func undeclaredAgtypeIdents(t *testing.T, src []byte) []string {
 		return false
 	})
 	return missing
+}
+
+// isEmittedHelper reports whether a name belongs to one of the families
+// renderModels emits on demand, which are exactly the names that can go
+// missing: everything else the file spells is either declared beside its
+// use or is the standard library's.
+//
+// The record families are here and not only "agtype" because a record's
+// carrier and its helper pair are named from the ENCODING's digest —
+// record<h>, decodeRecord<h>, encodeRecord<h> — so a walk keyed on the
+// agtype prefix alone cannot see a record helper the emission names and
+// does not declare. Measured: mutating the width descent in helpers.need
+// so a list element's record went unmarked left the emission naming
+// decodeRecord<h> with no declaration, and this sweep called it a pass.
+//
+// An ENTITY decoder is decode<Entity>, which collides with this family
+// only for an entity actually named Record-something — and that one is
+// declared by writeEntities, so it never reaches the test.
+func isEmittedHelper(name string) bool {
+	for _, prefix := range []string{"agtype", "record", "decodeRecord", "encodeRecord"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
