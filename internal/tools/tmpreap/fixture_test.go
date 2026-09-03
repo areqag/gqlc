@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,6 +95,22 @@ func mkdir(t *testing.T, path string) string {
 
 // ageTree backdates every inode under path. mtimes drive the age gate, and a
 // fixture built a moment ago is inside every threshold worth testing.
+//
+// It does not follow symlinks, and that is the whole reason it does not use
+// os.Chtimes, which does. Following one backdates the TARGET — often outside
+// the fixture entirely — and leaves the link's own mtime at creation time. The
+// scan reads a top-level entry's age from the newest mtime in its subtree, so
+// one such link keeps the entire tree above the threshold and the fixture is
+// retained for a reason having nothing to do with what it was built to test
+// (bd gqlc-cp8o, where it cost a run that reaped nothing and reported it as a
+// deletion that had not happened).
+//
+// It shells out because Go's stdlib has no Lchtimes and its syscall package
+// wraps neither utimensat(2) nor AT_SYMLINK_NOFOLLOW. x/sys/unix has both and
+// cannot be used: an in-package test that imports third-party code takes the
+// whole package out of govulncheck's call graph, which `just vuln` refuses (bd
+// gqlc-m5rc). touch(1) is already a weaker dependency than the git binary every
+// other fixture here needs.
 func ageTree(t *testing.T, path string, when time.Time) {
 	t.Helper()
 	var paths []string
@@ -106,12 +123,15 @@ func ageTree(t *testing.T, path string, when time.Time) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Deepest first: setting a directory's mtime and then writing inside it
-	// would move the directory's mtime forward again.
-	for i := len(paths) - 1; i >= 0; i-- {
-		if err := os.Chtimes(paths[i], when, when); err != nil {
-			t.Fatal(err)
-		}
+	// One invocation for the whole tree: touch sets an inode's own timestamps
+	// and never its parent directory's, so the order of the arguments is free.
+	touch, err := exec.LookPath("touch")
+	if err != nil {
+		t.Fatalf("touch is not on PATH, and every fixture here needs it: %v", err)
+	}
+	args := append([]string{"-h", "-d", when.UTC().Format(time.RFC3339Nano)}, paths...)
+	if out, err := exec.CommandContext(t.Context(), touch, args...).CombinedOutput(); err != nil {
+		t.Fatalf("backdate %s: %v: %s", path, err, out)
 	}
 }
 
@@ -124,6 +144,50 @@ func stubOracle(states map[string]wtState) worktreeOracle {
 			return wtState{landed: true}, nil
 		}
 		return st, nil
+	}
+}
+
+// mkSocket leaves a bound unix socket inode at path, the way an exited
+// service leaves one in /tmp.
+//
+// It binds elsewhere and renames, because bind(2) carries the path in
+// sun_path, which is 108 bytes: a fixture under t.TempDir() with a long test
+// name in it overruns that and bind fails with EINVAL. Binding at the target
+// directly therefore turns a long test name into a SKIP, which is a test that
+// passes having asserted nothing. The short base is TMPDIR, which testtmp
+// redirects to this binary's own private directory, so the rename stays on one
+// filesystem.
+//
+// SetUnlinkOnClose(false) is what makes the inode outlive the listener: a
+// UnixListener removes its own socket file on Close by default.
+func mkSocket(t *testing.T, path string) {
+	t.Helper()
+	short, err := os.MkdirTemp("", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(short); err != nil {
+			t.Errorf("remove %s: %v", short, err)
+		}
+	})
+
+	bound := filepath.Join(short, "k")
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "unix", bound)
+	if err != nil {
+		t.Fatalf("bind a unix socket at %s: %v", bound, err)
+	}
+	ul, ok := l.(*net.UnixListener)
+	if !ok {
+		t.Fatalf("listening on unix gave %T, not *net.UnixListener", l)
+	}
+	ul.SetUnlinkOnClose(false)
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(bound, path); err != nil {
+		t.Fatalf("move the bound socket to %s: %v", path, err)
 	}
 }
 
