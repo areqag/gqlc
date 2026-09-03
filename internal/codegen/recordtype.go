@@ -1,6 +1,9 @@
 package codegen
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -138,4 +141,101 @@ func RecordStructText(fields []graph.RecordField, carrier func(graph.PropertyTyp
 	}
 	b.WriteString("}")
 	return b.String(), true
+}
+
+// RecordHelperSuffix is the identifier fragment naming one record
+// encoding, so a backend spells its encode/decode pair
+// "encode"+suffix / "decode"+suffix.
+//
+// A short hash of the canonical encoding rather than the encoding
+// itself, because the encoding is unbounded: RECORD<a RECORD<b
+// RECORD<...>>> nests as deep as an author writes, and a name derived
+// from the text would grow with it. The content-named
+// agtypeListOf<Type> helpers are the precedent for deriving a helper
+// name from what it decodes; the hash is what keeps that bounded (spec
+// §5).
+//
+// It is SHARED rather than per-backend for the same reason
+// RecordStructText is: the two backends must not drift on which
+// encodings they consider one. graph.RecordOf sorts fields, so two
+// spellings of one record are one string here and therefore one suffix
+// — the same structural identity the anonymous struct gives the Go
+// type.
+//
+// Eight hex digits is 32 bits, and NOTHING here checks for a collision
+// between two distinct encodings in one emission — which would declare
+// one helper twice and fail at go build of the emitted package. The
+// birthday bound over n distinct encodings is about n²/2³³: 3e-7 at
+// n=50, 1e-4 at n=1000. A guard would need a sentinel, a
+// //gqlc:unreachable tag and two taxonomy rows for a branch no input
+// can reach, so the bound is stated here instead of asserted anywhere.
+func RecordHelperSuffix(pt graph.PropertyType) string {
+	sum := sha256.Sum256([]byte(pt))
+	return "Record" + hex.EncodeToString(sum[:4])
+}
+
+// RecordEncodings is every distinct declared-record encoding one batch
+// reaches, in canonical-encoding order, so a backend emits one helper
+// pair per entry and a caller can look one up by width.
+//
+// TRANSITIVE, because a record's decode helper calls its record fields'
+// helpers rather than inlining them: the set is closed under list
+// elements and record fields, which are the two positions a record can
+// hide under. Without the closure a nested record would name a helper
+// nothing declared, which fails at go build of the EMITTED package —
+// a failure with no line in the schema to point at.
+//
+// graph.TypeAnyRecord is deliberately absent. It declares no fields, so
+// there is no struct to build and no field-wise decode to write: both
+// backends carry it as map[string]any, which is the driver's own shape
+// and needs no helper. RECORD<> is present, because struct{} is a Go
+// type a map still has to be checked into.
+//
+// The order is the encoding's own, so the emitted file is byte-stable
+// across runs — a map iteration here would reorder the helper block on
+// every generation and every golden would be noise.
+func RecordEncodings(entities []Entity, prepared []Query) []graph.PropertyType {
+	seen := make(map[graph.PropertyType]bool)
+	var walk func(graph.PropertyType)
+	walk = func(pt graph.PropertyType) {
+		switch pt.Kind() {
+		case graph.KindRecord:
+			if pt == graph.TypeAnyRecord || seen[pt] {
+				return
+			}
+			seen[pt] = true
+			for _, f := range pt.Fields() {
+				walk(f.Type)
+			}
+		case graph.KindList:
+			walk(pt.Elem())
+		case graph.KindScalar, graph.KindUnion:
+			// Neither can hide a record: a scalar has no contents, and a
+			// union is refused by the kind walk before any of this is
+			// reached. Named rather than defaulted so a fourth kind
+			// cannot be added silently.
+		}
+	}
+	for _, e := range entities {
+		for _, f := range e.Fields {
+			walk(f.Width)
+		}
+	}
+	for _, p := range prepared {
+		for _, f := range p.ParamFields {
+			walk(f.Width)
+		}
+		for _, f := range p.RowFields {
+			walk(f.Width)
+			for elem := f.ListElem; elem != nil; elem = elem.Nested {
+				walk(elem.Width)
+			}
+		}
+	}
+	out := make([]graph.PropertyType, 0, len(seen))
+	for pt := range seen {
+		out = append(out, pt)
+	}
+	slices.Sort(out)
+	return out
 }

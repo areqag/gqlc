@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/format"
 	"go/parser"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -385,4 +386,257 @@ func TestRecordFieldLegalityReportsTheOutermostOffender(t *testing.T) {
 	require.True(t, illegal)
 	require.Equal(t, outer, offender)
 	require.Equal(t, `fields "zId" and "z_id" both mangle to "ZId"`, reason)
+}
+
+// TestRecordHelperSuffixIsAFunctionOfTheEncoding is the naming half of
+// the claim TestRecordStructTextIsAFunctionOfTheEncoding holds for the
+// carrier text, and the two are one claim at the two ends of an
+// emission: the struct text is what a record field IS, the suffix is
+// what its codec is CALLED. A derivation that agreed on one and not the
+// other would emit a helper whose name did not match the type it
+// decodes into, in a package where the type has no declaration to
+// anchor it.
+//
+// It is derived from the canonical encoding alone, so the two author
+// spellings below — which RecordOf sorts into one PropertyType — must
+// name one helper. That is what lets the two backends share the name
+// without sharing any code, and what stops one schema declaring two
+// helpers for one struct type.
+//
+// The second half is the control, and it is what makes the first half
+// worth anything: records differing only in a field NAME, only in a
+// field TYPE, or only in NULLABILITY must get distinct suffixes. A
+// derivation that ignored its argument entirely passes the first half
+// alone.
+func TestRecordHelperSuffixIsAFunctionOfTheEncoding(t *testing.T) {
+	byName := graph.RecordOf([]graph.RecordField{
+		{Name: "city", Type: graph.TypeString},
+		{Name: "zip", Type: graph.TypeInt32},
+	})
+	reversed := graph.RecordOf([]graph.RecordField{
+		{Name: "zip", Type: graph.TypeInt32},
+		{Name: "city", Type: graph.TypeString},
+	})
+	require.Equal(t, byName, reversed, "RecordOf did not canonicalise the two spellings, so the row below tests nothing about the suffix")
+	require.Equal(t, codegen.RecordHelperSuffix(byName), codegen.RecordHelperSuffix(reversed),
+		"one canonical record %s spelled two ways names two helpers, so a backend would declare one struct type's codec twice", byName)
+
+	distinct := map[string]graph.PropertyType{}
+	for _, pt := range []graph.PropertyType{
+		byName,
+		graph.RecordOf([]graph.RecordField{{Name: "town", Type: graph.TypeString}, {Name: "zip", Type: graph.TypeInt32}}),
+		graph.RecordOf([]graph.RecordField{{Name: "city", Type: graph.TypeString}, {Name: "zip", Type: graph.TypeInt64}}),
+		graph.RecordOf([]graph.RecordField{{Name: "city", Type: graph.TypeString, NotNull: true}, {Name: "zip", Type: graph.TypeInt32}}),
+		graph.RecordOf(nil),
+		graph.TypeAnyRecord,
+	} {
+		suffix := codegen.RecordHelperSuffix(pt)
+		prior, clash := distinct[suffix]
+		require.False(t, clash, "%s and %s both name helper %q", prior, pt, suffix)
+		distinct[suffix] = pt
+	}
+	require.Len(t, distinct, 6, "six distinct encodings produced %d names", len(distinct))
+}
+
+// TestRecordHelperSuffixIsASpellableIdentifierFragment holds what the
+// emitted call sites need of the name and nothing more: "encode"+suffix
+// and "decode"+suffix have to be Go identifiers, and they have to be
+// EXPORTED-neutral — the helpers are package-private in the generated
+// package, so the fragment must not begin with a character that would
+// make the concatenation stop parsing.
+//
+// Parsed rather than pattern-matched, because a regexp over the name is
+// a second opinion about Go's identifier grammar and this test would
+// then be pinning the opinion rather than the grammar.
+func TestRecordHelperSuffixIsASpellableIdentifierFragment(t *testing.T) {
+	for _, pt := range []graph.PropertyType{
+		graph.RecordOf(nil),
+		graph.RecordOf([]graph.RecordField{{Name: "city", Type: graph.TypeString}}),
+		graph.TypeAnyRecord,
+	} {
+		for _, verb := range []string{"encode", "decode"} {
+			name := verb + codegen.RecordHelperSuffix(pt)
+			expr, err := parser.ParseExpr(name)
+			require.NoError(t, err, "%s names helper %q, which is not a Go expression", pt, name)
+			ident, ok := expr.(*ast.Ident)
+			require.True(t, ok, "%s names helper %q, which parses as %T rather than a bare identifier", pt, name, expr)
+			require.Equal(t, name, ident.Name)
+		}
+	}
+}
+
+// TestRecordEncodingsIsTransitiveThroughEveryHidingPosition is the
+// claim the emitted package's compilability rests on: a decode helper
+// calls its record fields' helpers rather than inlining them, so an
+// encoding the walk misses is a call to a function nothing declared.
+// That failure lands at go build of the GENERATED package, with no line
+// in the author's schema to point at, which is why it is asserted here
+// rather than left to a golden.
+//
+// One batch carries a record at every position the prepared surface has
+// — entity field, parameter, scalar column, list column and the
+// ListElem chain under it — and each of those records hides a further
+// one under a list element or a record field. The nesting is the point:
+// a walk that visited only the top level would find all five and still
+// miss all five of their children, so the count below distinguishes the
+// two.
+func TestRecordEncodingsIsTransitiveThroughEveryHidingPosition(t *testing.T) {
+	leaf := func(name string) graph.PropertyType {
+		return graph.RecordOf([]graph.RecordField{{Name: name, Type: graph.TypeString}})
+	}
+	// Each outer record hides its leaf one level down, by a different
+	// route per position, so a walk that closed over record fields but
+	// not list elements (or the reverse) leaves a named gap.
+	underField := func(name string, hidden graph.PropertyType) graph.PropertyType {
+		return graph.RecordOf([]graph.RecordField{{Name: name, Type: hidden}})
+	}
+	underList := func(name string, hidden graph.PropertyType) graph.PropertyType {
+		return graph.RecordOf([]graph.RecordField{{Name: name, Type: graph.ListOf(hidden, false)}})
+	}
+
+	entityLeaf, paramLeaf, colLeaf, listLeaf, nestedLeaf :=
+		leaf("e"), leaf("p"), leaf("c"), leaf("l"), leaf("n")
+	entityRec := underField("inner", entityLeaf)
+	paramRec := underList("inner", paramLeaf)
+	colRec := underField("inner", colLeaf)
+	listRec := underList("inner", listLeaf)
+	nestedRec := underField("inner", nestedLeaf)
+
+	entities := []codegen.Entity{{
+		Name: "Blob",
+		Fields: []codegen.EntityField{
+			{PropName: "rec", Field: "Rec", GoType: "struct{}", Width: entityRec},
+			{PropName: "plain", Field: "Plain", GoType: "*string", Width: graph.TypeString},
+		},
+	}}
+	prepared := []codegen.Query{{
+		MethodName: "Q",
+		ParamFields: []codegen.Param{
+			{RawName: "rec", Field: "Rec", GoType: "struct{}", Width: paramRec},
+			{RawName: "plain", Field: "Plain", GoType: "*string", Width: graph.TypeString},
+		},
+		RowFields: []codegen.Row{
+			{ColumnName: "rec", Field: "Rec", Kind: codegen.ColumnProperty, Width: colRec},
+			{ColumnName: "node", Field: "Node", Kind: codegen.ColumnNode, GoType: "Blob"},
+			{
+				ColumnName: "recs",
+				Field:      "Recs",
+				Kind:       codegen.ColumnList,
+				Width:      graph.ListOf(graph.ListOf(listRec, false), false),
+				ListElem: &codegen.ListElem{
+					Kind:  codegen.ColumnList,
+					Width: graph.ListOf(listRec, false),
+					Nested: &codegen.ListElem{
+						Kind:  codegen.ColumnProperty,
+						Width: nestedRec,
+					},
+				},
+			},
+		},
+	}}
+
+	got := codegen.RecordEncodings(entities, prepared)
+
+	want := []graph.PropertyType{
+		entityRec, entityLeaf,
+		paramRec, paramLeaf,
+		colRec, colLeaf,
+		listRec, listLeaf,
+		nestedRec, nestedLeaf,
+	}
+	for _, pt := range want {
+		require.Contains(t, got, pt, "%s is reachable from the batch and names a helper, but the walk did not report it", pt)
+	}
+	require.Len(t, got, len(want),
+		"the walk reported %d encodings for a batch declaring %d; the extras are %v", len(got), len(want), got)
+}
+
+// TestRecordEncodingsReportsEachEncodingOnce holds the property that
+// makes the result a declaration list rather than a visit log: one
+// encoding reached from three positions is one helper pair, and a
+// second entry would declare it twice in the emitted package.
+//
+// The control is the empty batch. Without it a walk that reported the
+// empty set unconditionally would pass every dedup assertion ever
+// written.
+func TestRecordEncodingsReportsEachEncodingOnce(t *testing.T) {
+	shared := graph.RecordOf([]graph.RecordField{{Name: "city", Type: graph.TypeString}})
+
+	require.Empty(t, codegen.RecordEncodings(nil, nil),
+		"a batch declaring nothing reached a record encoding")
+	require.Empty(t, codegen.RecordEncodings(
+		[]codegen.Entity{{Name: "Blob", Fields: []codegen.EntityField{{PropName: "s", Width: graph.TypeString}}}},
+		[]codegen.Query{{MethodName: "Q", RowFields: []codegen.Row{{ColumnName: "s", Kind: codegen.ColumnProperty, Width: graph.ListOf(graph.TypeString, false)}}}},
+	), "a batch of scalars and lists of scalars reached a record encoding")
+
+	got := codegen.RecordEncodings(
+		[]codegen.Entity{{Name: "Blob", Fields: []codegen.EntityField{
+			{PropName: "a", Width: shared},
+			{PropName: "b", Width: graph.ListOf(shared, false)},
+		}}},
+		[]codegen.Query{{
+			MethodName:  "Q",
+			ParamFields: []codegen.Param{{RawName: "c", Width: shared}},
+			RowFields:   []codegen.Row{{ColumnName: "d", Kind: codegen.ColumnProperty, Width: shared}},
+		}},
+	)
+	require.Equal(t, []graph.PropertyType{shared}, got,
+		"one encoding reached from four positions must be one helper pair")
+}
+
+// TestRecordEncodingsOmitsTheUndeclaredRecord holds the one exclusion
+// the walk makes, and holds it against its own neighbour so the row
+// cannot be read as "records are skipped".
+//
+// ANY_RECORD declares no fields, so there is no struct to build and no
+// field-wise decode to write: both backends carry it as map[string]any,
+// which is the driver's own shape. RECORD<> also declares no fields and
+// IS present, because struct{} is a Go type a driver map still has to
+// be checked into. The two are one keystroke apart in a schema and they
+// get opposite answers, so the pair is asserted together.
+//
+// The nested row is the one that matters: ANY_RECORD as a FIELD of a
+// declared record must not be reported either, or the walk would name a
+// helper for it while the field itself carries a map.
+func TestRecordEncodingsOmitsTheUndeclaredRecord(t *testing.T) {
+	empty := graph.RecordOf(nil)
+	holder := graph.RecordOf([]graph.RecordField{{Name: "loose", Type: graph.TypeAnyRecord}})
+
+	got := codegen.RecordEncodings([]codegen.Entity{{Name: "Blob", Fields: []codegen.EntityField{
+		{PropName: "any", Width: graph.TypeAnyRecord},
+		{PropName: "anylist", Width: graph.ListOf(graph.TypeAnyRecord, false)},
+		{PropName: "empty", Width: empty},
+		{PropName: "holder", Width: holder},
+	}}}, nil)
+
+	require.NotContains(t, got, graph.TypeAnyRecord,
+		"%s declares no fields and carries as a driver map, so a helper pair for it would decode a struct that does not exist", graph.TypeAnyRecord)
+	require.Contains(t, got, empty, "%s is a declared record with zero fields, and struct{} is a Go type a map has to be checked into", empty)
+	require.Contains(t, got, holder, "%s is a declared record and names a helper whatever its fields carry as", holder)
+	require.Len(t, got, 2, "the walk reported %v; only the two declared records name helpers", got)
+}
+
+// TestRecordEncodingsIsOrderedByEncoding holds what keeps a generated
+// file byte-stable across runs. The walk accumulates into a map, and Go
+// randomises map iteration, so without the sort the helper block would
+// reorder on every generation and every golden in the corpus would be
+// noise that no schema change explains.
+//
+// Asserted as the sorted order rather than as "equal to a previous
+// call", because repeating a call is a weak screen: two runs of a
+// randomised iteration agree by chance often enough at these lengths
+// that the row would pass a good fraction of the time against an
+// unsorted walk.
+func TestRecordEncodingsIsOrderedByEncoding(t *testing.T) {
+	var fields []codegen.EntityField
+	for _, name := range []string{"m", "d", "z", "a", "q", "f", "k", "w"} {
+		fields = append(fields, codegen.EntityField{
+			PropName: name,
+			Width:    graph.RecordOf([]graph.RecordField{{Name: name, Type: graph.TypeString}}),
+		})
+	}
+	got := codegen.RecordEncodings([]codegen.Entity{{Name: "Blob", Fields: fields}}, nil)
+
+	require.Len(t, got, len(fields), "the eight declared encodings are distinct; the walk reported %d", len(got))
+	require.True(t, slices.IsSorted(got), "the helper block is emitted in this order and must not move between runs; got %v", got)
 }
