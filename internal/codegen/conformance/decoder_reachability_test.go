@@ -3135,9 +3135,9 @@ type labelRequirement struct {
 // own statement list. Every narrowing is there because dropping it would
 // redden a correct emission:
 //
-//   - Directly in the body's list, not inside a `for`. This is the whole
-//     reason the rule is sound, and neo4j is the witness. Its decoders ask
-//     for label-set membership, one loop per label:
+//   - Directly in the body's list, not inside a `for`. neo4j is the witness
+//     for this one. Its decoders ask for label-set membership, one loop per
+//     label:
 //
 //     for _, label := range node.Labels { if label == "Employee" { … } }
 //     for _, label := range node.Labels { if label == "Person" { … } }
@@ -3148,6 +3148,14 @@ type labelRequirement struct {
 //     different loops, and a reader that grouped them by spelling would
 //     refuse a correct emission. Reading only the body's own straight line
 //     excludes them by construction rather than by a name check.
+//
+//     Two conditions hold that shape, not one, and each holds it alone. A
+//     mutant that grouped the whole body by spelling still let the
+//     multi-label emission through, because `label` is bound by two range
+//     statements and so fails the single-assignment condition below; only a
+//     mutant that dropped both conditions refused it. So neither is the
+//     reason the rule is sound — both are, and either is enough on its own
+//     for this shape.
 //
 //   - Inequality with an early return, not `==`. `if label == "Person"` sets
 //     a flag or takes a branch; it demands nothing of the rest of the body.
