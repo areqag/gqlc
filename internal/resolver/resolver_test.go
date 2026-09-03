@@ -742,6 +742,22 @@ var invalidFixtureContains = map[string]string{
 	// over both company types. A `c` pinned to the bare Company makes `x` the
 	// bare Person and the query resolve.
 	"unlabelled_optional_hop_next_hop_stays_wide.cypher": `candidate types: Employee&Person, Person`,
+	// The three below were waived, and the waiver was wrong for the reason the
+	// arm-A pins above exist: ErrAmbiguousBinding is raised from TWO arms —
+	// Phase B's terminal deferral, which spells "candidate types", and
+	// refProjectionType's widened whole-entity arm, which spells "satisfied by
+	// more than one declared node type" over the same sentinel. errors.Is
+	// cannot tell those apart, so without the "candidate types" prefix a
+	// refusal that moved between the two arms reads as unchanged. Measured by
+	// rewriting the deferral arm's format into the whole-entity arm's: the four
+	// pinned fixtures on these arms died and these three passed.
+	"ambiguous_unlabelled_binding.cypher": `candidate types: Author, Publisher`,
+	// The plural-endpoint pair reaches the deferral arm through an unlabelled
+	// hop rather than an unlabelled projection, and both spell the same
+	// candidate set: `c` left over both company types is what keeps the
+	// endpoint plural, so a `c` narrowed to the bare Company would resolve.
+	"plural_endpoint_unlabelled_hop_stays_plural.cypher":          `candidate types: Company, Company&Large`,
+	"plural_endpoint_unlabelled_hop_property_stays_plural.cypher": `candidate types: Company, Company&Large`,
 	// Names the type the property is MISSING on, not the one that carries it.
 	// ErrUnknownProperty is also what a `c` pinned to Company&Large would give,
 	// with the same variable and property in the message; the "plural-satisfying
@@ -817,7 +833,6 @@ var invalidFixtureContains = map[string]string{
 // carries no verdict.
 var invalidFixtureNoMessagePin = map[string]struct{}{
 	"ambiguous_edge_orientation_after_inference.cypher":              {},
-	"ambiguous_unlabelled_binding.cypher":                            {},
 	"anonymous_source_endpoint.cypher":                               {},
 	"call_arg_int_at_string.cypher":                                  {},
 	"call_arg_type_mismatch.cypher":                                  {},
@@ -869,8 +884,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"plural_endpoint_merged_edge_stays_plural.cypher":                {},
 	"plural_endpoint_narrows_to_smaller_plural_set.cypher":           {},
 	"plural_endpoint_optional_edge_stays_plural.cypher":              {},
-	"plural_endpoint_unlabelled_hop_property_stays_plural.cypher":    {},
-	"plural_endpoint_unlabelled_hop_stays_plural.cypher":             {},
 	"plural_endpoint_zero_hop_stays_plural.cypher":                   {},
 	"plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher":   {},
 	"plural_endpoint_zero_lower_bound_stays_plural.cypher":           {},
