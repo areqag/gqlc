@@ -279,9 +279,12 @@ func TestScanRoot_SymlinkRetained(t *testing.T) {
 	if e.reap {
 		t.Fatal("reaped a symlink, whose target was never measured")
 	}
-	// Asserted on the kind, not only on reap: os.Chtimes follows the link, so a
-	// symlink's own mtime stays recent and the age gate would retain it for a
-	// reason that has nothing to do with it being a symlink.
+	// Asserted on the kind, not only on reap. The link is now genuinely past the
+	// age gate — ageTree backdates the link's own inode rather than its target —
+	// so the retention above is attributable to the kind. Until bd gqlc-cp8o
+	// fixed the helper it was not: os.Chtimes followed the link, the link's own
+	// mtime stayed at creation time, and the age gate retained it regardless of
+	// what irregularReason did.
 	if e.kind != kindIrregular {
 		t.Errorf("kind = %q, want %q", e.kind, kindIrregular)
 	}

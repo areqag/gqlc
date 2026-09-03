@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -343,6 +345,133 @@ func TestRun_ApplyOnACleanReapPrintsNoUnarchivedHeading(t *testing.T) {
 	}
 	if strings.Contains(out, "NOT archived") {
 		t.Errorf("a reap that lost nothing printed the unrecoverable heading anyway:\n%s", out)
+	}
+}
+
+// The package doc promises that a non-regular entry NESTED inside a directory
+// being removed is skipped by the walk, deleted with its directory, and named
+// by no report line — and that removing a symlink removes the link alone. That
+// bound was asserted by nothing (bd gqlc-cp8o). The top-of-root cases are
+// witnessed by TestScanRoot_SocketRetained and TestScanRoot_SymlinkRetained,
+// which is a different claim: those entries are never candidates at all.
+//
+// The gap was measured, not assumed. Changing the walk's skip from
+// !d.Type().IsRegular() to d.IsDir() — links, FIFOs and sockets then reaching
+// the archive — left the whole package green (mutation row 3 of PR #1541, and
+// reproduced at 9c59a730 before this row was written).
+//
+// Reading the three entries costs nothing extra: the run this asserts over is
+// the same -apply every other row here drives.
+func TestRun_ApplyDeletesNestedNonRegularEntriesWithNoReportLine(t *testing.T) {
+	root, repo, archive := scratchWorld(t)
+
+	// The target sits OUTSIDE the scan root, so its survival is a statement
+	// about what the deletion followed and not about what the reap reached.
+	outside := filepath.Join(t.TempDir(), "target.txt")
+	writeFile(t, outside, "the link's target, which must survive\n")
+
+	nested := mkdir(t, filepath.Join(root, "factory", "nested"))
+	link := filepath.Join(nested, "pointer")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(nested, "pipe")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Fatalf("create a FIFO at %s: %v", fifo, err)
+	}
+	sock := filepath.Join(nested, "agent-socket")
+	mkSocket(t, sock)
+
+	// ageTree follows the symlink, so the link's own mtime stays recent. The
+	// age gate reads the top-level entry (factory), which this backdates, so
+	// nothing here turns on the nested mtimes.
+	ageTree(t, filepath.Join(root, "factory"), time.Now().Add(-72*time.Hour))
+
+	// The premise, before the run: all three exist, and Lstat is what asks —
+	// Stat on the symlink would answer about the target.
+	for _, path := range []string{link, fifo, sock} {
+		if _, statErr := os.Lstat(path); statErr != nil {
+			t.Fatalf("the fixture never exercised the case — %s was not created: %v", path, statErr)
+		}
+	}
+
+	out := runToolWithoutBlocking(t, fifo,
+		"-root", root, "-repo", repo, "-base", "master", "-age", "12h",
+		"-archive", archive, "-apply")
+
+	// Half one: deleted with the directory.
+	for _, path := range []string{link, fifo, sock} {
+		if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
+			t.Errorf("%s survived the reap (err=%v), so the deletion does not do what the package doc says", path, statErr)
+		}
+	}
+	// Half two: named by no report line. Asserted per entry — one Contains over
+	// the three would pass while two of them were being reported.
+	for _, path := range []string{link, fifo, sock} {
+		if strings.Contains(out, path) {
+			t.Errorf("%s is named in the report, but the package doc promises a nested non-regular entry goes unreported:\n%s", path, out)
+		}
+	}
+	// And in the archive by no member: the walk skipped them before the
+	// archive saw them, which is the mechanism the doc gives for the silence.
+	// Without this the d.IsDir() mutant passes the two halves above — a
+	// symlink read through follows to the target, archives its bytes under the
+	// link's name, and reports nothing.
+	for _, name := range archiveNames(t, archive) {
+		if strings.HasPrefix(name, filepath.Join("factory", "nested")) {
+			t.Errorf("the archive holds %q; a non-regular entry reached the archive, so the walk's skip is not doing the work", name)
+		}
+	}
+	// Half three: the link went, the target did not.
+	body, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatalf("the symlink's target %s did not survive, so the deletion followed the link: %v", outside, err)
+	}
+	if got := string(body); got != "the link's target, which must survive\n" {
+		t.Errorf("the symlink's target was rewritten through the link: %q", got)
+	}
+}
+
+// runToolWithoutBlocking runs the tool and fails if it does not return, rather
+// than hanging until the test binary's own panic timeout.
+//
+// This is not defensive padding — it is the only way the FIFO row above can
+// report. os.ReadFile on a FIFO blocks in open(2) until a writer appears, so a
+// walk that stops skipping non-regular entries does not fail the assertions
+// below it: it never reaches them. Opening the write end releases the blocked
+// reader with EOF so the failing run's cleanup is not fighting a live one.
+func runToolWithoutBlocking(t *testing.T, fifo string, args ...string) string {
+	t.Helper()
+
+	type result struct {
+		out, errOut string
+		err         error
+	}
+	done := make(chan result, 1)
+	go func() {
+		var out, errOut bytes.Buffer
+		err := run(context.WithoutCancel(t.Context()), args, &out, &errOut)
+		done <- result{out.String(), errOut.String(), err}
+	}()
+
+	select {
+	case r := <-done:
+		if r.errOut != "" {
+			t.Logf("stderr: %s", r.errOut)
+		}
+		t.Logf("stdout:\n%s", r.out)
+		if r.err != nil {
+			t.Fatalf("run: %v", r.err)
+		}
+		return r.out
+	case <-time.After(30 * time.Second):
+		if w, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+			if closeErr := w.Close(); closeErr != nil {
+				t.Logf("close fifo writer: %v", closeErr)
+			}
+		}
+		t.Fatalf("the run did not return in 30s. A reader is blocked on the FIFO %s, which means the archive walk stopped skipping non-regular entries and opened it", fifo)
+		return ""
 	}
 }
 
