@@ -3,6 +3,7 @@ package fixtures_test
 import (
 	"context"
 	"math"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -109,9 +110,10 @@ func TestAGERefusesAUint64ParameterAboveMaxInt64(t *testing.T) {
 
 	for _, tc := range refusals {
 		t.Run(tc.name, func(t *testing.T) {
-			q := uint64age.New(nil, "g")
-			out, err := q.CountersMatching(context.Background(), tc.params)
-			require.Error(t, err, "the bind returned no error, so this value was on its way to a server that cannot store it")
+			out, err, sent := countersMatching(tc.params)
+			require.False(t, sent,
+				"the bind accepted this value and the method went on to send it, so it was on its way to a server that cannot store it")
+			require.Error(t, err)
 			require.Nil(t, out)
 			for _, want := range tc.wants {
 				require.ErrorContains(t, err, want)
@@ -144,12 +146,38 @@ func TestAGERefusesAUint64ParameterAboveMaxInt64(t *testing.T) {
 
 	for _, tc := range reaches {
 		t.Run(tc.name, func(t *testing.T) {
-			q := uint64age.New(nil, "g")
-			require.Panics(t, func() {
-				_, _ = q.CountersMatching(context.Background(), tc.params) //nolint:errcheck // the panic is the assertion
-			}, "the bind refused a value agtype can carry, or the method returned before the send for some other reason; either way nothing here witnesses that an accepted value crosses")
+			_, err, sent := countersMatching(tc.params)
+			require.True(t, sent,
+				"the method returned before the send instead of reaching the wire, so nothing here witnesses that an accepted value crosses; it returned: %v", err)
 		})
 	}
+}
+
+// countersMatching runs the generated method over a nil DBTX and reports
+// which of the two things it did: returned, or reached the send.
+//
+// The nil handle turns the send into a panic, so recovering it here is what
+// lets both halves of this test read off ONE observation instead of two
+// differently-shaped assertions. It also keeps the battery running: a
+// panic escaping a subtest takes the whole binary down, so the first
+// refusal row to stop refusing would be the only row anybody saw.
+//
+// Any other panic is re-raised. Swallowing them would turn a genuine
+// defect in the generated code into `sent`, which is a passing accepting
+// row.
+func countersMatching(params uint64age.CountersMatchingParams) (out []int64, err error, sent bool) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		if _, ok := r.(runtime.Error); !ok {
+			panic(r)
+		}
+		sent = true
+	}()
+	out, err = uint64age.New(nil, "g").CountersMatching(context.Background(), params)
+	return out, err, false
 }
 
 func ptr[T any](v T) *T { return &v }
