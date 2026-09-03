@@ -30,6 +30,7 @@ import (
 	"go/token"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -77,6 +78,10 @@ type Report struct {
 	// Log is the run's output as a reader sees it, for the failure
 	// message. It is not a source of truth: see Run.
 	Log string
+	// Cover is the child run's coverage profile, verbatim. Empty when
+	// the run produced none, which a caller reading it must treat as an
+	// absence of evidence rather than as an absence of coverage.
+	Cover string
 }
 
 // Run runs the assembled corpus module's own tests in dir, reporting the
@@ -94,7 +99,9 @@ type Report struct {
 // the network fails rather than reaching for it. TZ is pinned to
 // ChildZone; see there for what that buys and what it costs.
 func Run(ctx context.Context, dir string) (Report, error) {
-	cmd := exec.CommandContext(ctx, "go", "test", "-json", "-count=1", ".")
+	profile := filepath.Join(dir, "cover.out")
+	cmd := exec.CommandContext(ctx, "go", "test", "-json", "-count=1",
+		"-covermode=set", "-coverprofile="+profile, ".")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOFLAGS=", "GOPROXY=off", "TZ="+ChildZone)
 	out, err := cmd.CombinedOutput()
@@ -122,6 +129,9 @@ func Run(ctx context.Context, dir string) (Report, error) {
 		}
 	}
 	report.Log = text.String()
+	if cover, readErr := os.ReadFile(profile); readErr == nil {
+		report.Cover = string(cover)
+	}
 	return report, err
 }
 
@@ -464,4 +474,127 @@ func union(a, b []string) []string {
 	out := append(slices.Clone(a), b...)
 	sort.Strings(out)
 	return slices.Compact(out)
+}
+
+// Entered names the top-level functions declared in dir's non-test Go
+// files that the child run executed at least one statement of.
+//
+// This is the fourth census, and it is the only one taken from the run
+// rather than from the fixture's syntax. The other three ask what the
+// driver declares; a helper the emission writes and the driver never
+// reaches is declared by nobody, so none of them can see it.
+//
+// It is a witness that a function was ENTERED, not that its behaviour
+// was checked: a call made for its side effect, or one whose result the
+// driver discards, counts here. What it refuses is the case the census
+// exists for — an emitted function no path in the run reaches at all.
+//
+// Reached-through-a-caller counts as entered, deliberately. Several
+// emitted helpers are reachable only via an emitted decoder, and a
+// census demanding a direct call from the driver would report those as
+// unexercised while their behaviour ran on every row.
+//
+// Profile lines are matched to files by BASENAME. The profile spells
+// each file under the child module's import path, which is assembled per
+// run, and a corpus module is one flat package by construction.
+func Entered(dir, profile string) (map[string]bool, error) {
+	type block struct{ start, end int }
+	covered := map[string][]block{}
+	for line := range strings.Lines(profile) {
+		line = strings.TrimSpace(line)
+		name, span, ok := strings.Cut(line, ":")
+		if !ok || line == "" || strings.HasPrefix(line, "mode:") {
+			continue
+		}
+		fields := strings.Fields(span)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("corpusrun: coverage line %q has %d fields, want 3", line, len(fields))
+		}
+		count, err := strconv.Atoi(fields[2])
+		if err != nil {
+			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable count: %w", line, err)
+		}
+		if count == 0 {
+			continue
+		}
+		from, to, ok := strings.Cut(fields[0], ",")
+		if !ok {
+			return nil, fmt.Errorf("corpusrun: coverage line %q has no block range", line)
+		}
+		start, err := strconv.Atoi(from[:strings.IndexByte(from, '.')])
+		if err != nil {
+			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable start line: %w", line, err)
+		}
+		end, err := strconv.Atoi(to[:strings.IndexByte(to, '.')])
+		if err != nil {
+			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable end line: %w", line, err)
+		}
+		base := filepath.Base(name)
+		covered[base] = append(covered[base], block{start, end})
+	}
+
+	sources, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	fset := token.NewFileSet()
+	for _, path := range sources {
+		base := filepath.Base(path)
+		if strings.HasSuffix(base, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return nil, fmt.Errorf("corpusrun: %s does not parse: %w", base, err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			from := fset.Position(fn.Body.Pos()).Line
+			to := fset.Position(fn.Body.End()).Line
+			for _, b := range covered[base] {
+				if b.start >= from && b.end <= to {
+					out[fn.Name.Name] = true
+					break
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// Functions names the top-level functions declared in dir's non-test Go
+// files whose name carries prefix, sorted.
+//
+// The counterpart to Entered: this is what the assembled module contains,
+// that is what the run reached. Methods are named by their own
+// identifier, without a receiver, because a corpus module is one flat
+// package and its emitted helpers are functions.
+func Functions(dir, prefix string) ([]string, error) {
+	sources, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	fset := token.NewFileSet()
+	for _, path := range sources {
+		base := filepath.Base(path)
+		if strings.HasSuffix(base, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return nil, fmt.Errorf("corpusrun: %s does not parse: %w", base, err)
+		}
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && strings.HasPrefix(fn.Name.Name, prefix) {
+				out = append(out, fn.Name.Name)
+			}
+		}
+	}
+	sort.Strings(out)
+	return slices.Compact(out), nil
 }
