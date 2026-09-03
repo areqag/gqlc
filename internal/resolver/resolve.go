@@ -1501,9 +1501,11 @@ type unlabelledInference struct {
 //     and 2 DIFFERENT SENTINEL over the corpus sweep, both of them
 //     invalid/unlabelled_optional_hop_empty_intersection.cypher going
 //     ErrUnknownLabel -> ErrUnknownEdge "unknown edge:
-//     Company&Large-[HAS_DESK]->Desk". 14068 cells is the whole population and
-//     it bounds the claim rather than proving it: no cell reaches an accept that
-//     way, and nothing here says none can.
+//     Company&Large-[HAS_DESK]->Desk". The sweep compares 14070 cells, which is
+//     all of them, and that bounds the claim rather than proving it: no cell
+//     reaches an accept that way, and nothing here says none can. The 0 is a
+//     measurement and not a blind instrument — substituting on length 0 INSTEAD
+//     of length 1 moves 14 verdicts through the same reader.
 //     The gate stays for the message and not for the answer. ErrUnknownLabel is
 //     the true diagnosis; the substituted lane refuses by naming an edge between
 //     a type nothing attested and a far end that was never in doubt. It also
