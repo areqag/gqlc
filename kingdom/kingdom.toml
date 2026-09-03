@@ -195,8 +195,28 @@ renudge_after_minutes = 30
 # 3 at the floor above is an hour and a half of asking. A citizen who has not
 # answered three times in ninety minutes is not being under-asked, and a fourth
 # line spends her quota to repeat what the first three said. Escalation is a
-# mail and never an act: nothing here ends a session (VI.2). A send herdr
-# REFUSED does not count — she was never asked, so it does not spend her budget.
+# mail and never an act: nothing here ends a session (VI.2).
+#
+# AN ASK km COULD NOT DELIVER COUNTS. This line said the opposite until
+# gqlc-y0zg7, and it was true when it was written: the increment lived inside
+# the delivered arm. Decision 0007 §5 was then amended deliberately (PR #1959),
+# and only this sentence failed to follow. The reason is that a refusal stopped
+# meaning km's own tty had failed: send_line refuses when it cannot WITNESS a
+# place to type, so a refusal is now a verdict about the SEAT — the machinery
+# could not reach her — and a verdict that spends nothing is retried in silence
+# forever. The escalation letter quotes the refusal. A boxed seat is what makes
+# it concrete, because send_line refuses every send into a non-empty box
+# (gqlc-6bnkw): under the old rule her budget could never be spent, so she could
+# never escalate, and that is the shape of the eleven hours of gqlc-5vp7.
+#
+# THE OTHER BUDGET ANSWERS THE OTHER WAY, and mixing them up is the likely
+# origin of the sentence this replaced. At most one DELIVERED ask leaves a whole
+# dispatch run, town-wide, and a refusal starts no turn, so it does not spend
+# THAT one. Both live in decision 0007 §5 — the run budget in its first bullet,
+# this episode cap in its second. Two budgets: the run's storm guard counts
+# deliveries, this episode cap counts ATTEMPTS. A refusal also sets no floor, so
+# the cadence stays fast and a pane that recovers is reached on the next pass.
+#
 # The counter and the escalation clear when the agent leaves `idle`: witnessed
 # work, not a pane that merely looks different.
 recover_attempts = 3
