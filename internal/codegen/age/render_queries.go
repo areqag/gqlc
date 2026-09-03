@@ -246,13 +246,27 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	b.WriteString("func (q *queries) ")
 	writeMethodSignature(b, p)
 	b.WriteString(" {\n")
+	// CardinalityMany is named rather than left to a `default`: it is a
+	// declared member, so the default answered for it and for any member
+	// added later alike — and Cardinality is documented as an open enum
+	// with :iter reserved, so such a member is expected. What a default
+	// would render for it is a method body in the generated driver, not a
+	// diagnostic anyone reads.
+	//
+	// What this buys here is NOT the `exhaustive` check, which does not see
+	// this switch at all: package codegen re-exports the members as its own
+	// constants, and measured 2026-09-03 a member added to queryfile reds
+	// only queryfile's own switch even when codegen re-exports it too
+	// (bd gqlc-51l6m). It buys the loud failure instead — an unnamed member
+	// now writes no body, so the generated method is missing its return and
+	// does not compile, where the default silently emitted a :many body.
 	switch p.Cardinality {
 	case codegen.CardinalityExec:
 		writeExecBody(b, p)
 	case codegen.CardinalityOne:
 		writeQueryCall(b, p)
 		writeOneBody(b, p)
-	default:
+	case codegen.CardinalityMany:
 		writeQueryCall(b, p)
 		writeManyBody(b, p)
 	}

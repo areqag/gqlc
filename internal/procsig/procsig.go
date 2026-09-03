@@ -51,15 +51,23 @@ const (
 // the input surface.
 func (t TypeToken) String() string {
 	switch t {
+	case TokenInteger:
+		return "INTEGER"
 	case TokenFloat:
 		return "FLOAT"
 	case TokenString:
 		return "STRING"
 	case TokenNumber:
 		return "NUMBER"
-	default:
-		return "INTEGER"
 	}
+	// TokenInteger used to be served by a `default`, which answered for it
+	// and for every token added later alike — so a fifth member would have
+	// rendered as INTEGER in the diagnostics this method is the single
+	// source of. Naming it leaves `exhaustive` live on the switch. The
+	// answer below is the old default's, unchanged, and is reachable only
+	// for a token outside the sum, which NewRegistry rejects
+	// (bd gqlc-51l6m).
+	return "INTEGER"
 }
 
 // Param is one signature input in declaration order. Name is the parameter

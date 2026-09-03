@@ -230,9 +230,14 @@ func findResultByName(results []procsig.Result, name string) (procsig.Result, bo
 // query.Type. NUMBER maps to TypeUnknown — the wire-honest translation
 // (Q3 ruling): NUMBER is a signature-time marker with no honest
 // result-column identity; codegen consults the registry
-// directly, so no information is lost. The default arm is a
-// belt-and-braces guard against a future TypeToken widening reaching
-// this bridge without a token addition here.
+// directly, so no information is lost.
+//
+// The widening guard is the absence of a `default`, not a default arm: as
+// a default it read as the guard while being the thing that disabled one,
+// since .golangci.yml sets exhaustive's default-signifies-exhaustive and
+// a defaulted switch is no longer checked for a missing arm. Below the
+// switch the answer for an unnamed token is unchanged and `exhaustive`
+// reds on the token addition instead (bd gqlc-51l6m).
 func typeForToken(tok procsig.TypeToken) query.Type {
 	switch tok {
 	case procsig.TokenFloat:
@@ -243,9 +248,8 @@ func typeForToken(tok procsig.TypeToken) query.Type {
 		return query.TypeUnknown{}
 	case procsig.TokenInteger:
 		return query.TypeInt{}
-	default:
-		return query.TypeUnknown{}
 	}
+	return query.TypeUnknown{}
 }
 
 // callArgs extracts the argument expression list from an explicit
