@@ -214,8 +214,13 @@ func TestEveryRefusedNamespaceIsNamedByItsProbeAnswer(t *testing.T) {
 // different argument: the two scans partition the calls by SHAPE, so
 // `duration` the refused function name and `duration` the refused
 // namespace are facts about two different spellings and no call can be
-// claimed by both. TestAQueryOfBothKindsIsAnsweredByTheEarlierGap is
-// where that is measured.
+// claimed by both.
+//
+// That argument is ARGUED here and measured nowhere. It carried a citation
+// naming a test that no commit has ever declared — the sentence and the name
+// arrived together in #1903 — so it read as evidence to anyone who did not
+// grep for it. bd gqlc-794sz holds the row, and until that lands the shape
+// argument is all there is.
 func TestTheNamespaceGapIsNotAFunctionCatalogue(t *testing.T) {
 	for _, cat := range functionCatalogues {
 		require.NotEqual(t, "namespace", cat.name,
