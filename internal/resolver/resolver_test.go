@@ -772,6 +772,29 @@ var invalidFixtureContains = map[string]string{
 	// satisfied by a `c` pinned to Company&Large — same variable, same property,
 	// same ErrUnknownProperty — which is the opposite reading of the same gate.
 	"unlabelled_hop_to_carried_far_end_stays_wide.cypher": `c.smallOnly missing on plural-satisfying type Company&Large`,
+	// The rest of the fixtures that reach the same plural-lane arm, waived until
+	// gqlc-yg5jl on no reasoning the entry above does not already supply. The
+	// argument is that one's, unchanged: a narrowing defect that pins the binding
+	// to the WRONG member refuses on the same variable and the same property with
+	// the same ErrUnknownProperty, through the generic arm, and only the phrase
+	// says which lane answered.
+	//
+	// Six of these seven are *_stays_plural fixtures, and their dedicated pairs in
+	// TestNarrowingLearnsOnlyFromEdgesEveryRowHas assert Require().Error alone —
+	// no sentinel and no message — so this map is the only place their message is
+	// read at all.
+	//
+	// The narrow-EVERYWHERE defect is not what these catch: witnessesItsEndpoints
+	// mutated to `return true` makes them RESOLVE, which TestInvalid's
+	// Require().Error already refuses. The mode that needs the phrase is the
+	// wrong-member one, which stays a refusal.
+	"label_satisfy_plural_property.cypher":                         `p.name missing on plural-satisfying type Employee&Person`,
+	"plural_endpoint_inline_endpoint_property_stays_plural.cypher": `p.personOnly missing on plural-satisfying type Employee&Person`,
+	"plural_endpoint_multi_hop_far_end_stays_plural.cypher":        `c.bOnly missing on plural-satisfying type A&Node`,
+	"plural_endpoint_multi_hop_range_stays_plural.cypher":          `p.bOnly missing on plural-satisfying type A&Node`,
+	"plural_endpoint_multi_hop_stays_plural.cypher":                `p.bOnly missing on plural-satisfying type A&Node`,
+	"plural_endpoint_optional_edge_property_stays_plural.cypher":   `p.employeeId missing on plural-satisfying type Person`,
+	"plural_endpoint_unbounded_hops_stays_plural.cypher":           `p.bOnly missing on plural-satisfying type A&Node`,
 }
 
 // invalidFixtureNoMessagePin names the invalid fixtures whose refusal message
@@ -780,12 +803,18 @@ var invalidFixtureContains = map[string]string{
 // by TestEveryInvalidFixtureDeclaresItsMessagePin, so a new fixture cannot
 // skip the message check by saying nothing about it.
 //
-// These entries are INHERITED, NOT AUDITED. They are the fixtures that carried
-// no pin on the day the requirement landed, and listing them records that
-// their omission was never a decision anyone took. Whether each is correctly
-// waived — whether errors.Is alone really does tell which arm fired — is
-// gqlc-9vpga. Do not read a name here as a finding that its message is not
-// worth pinning.
+// These entries are INHERITED, NOT AUDITED, with one axis excepted below. They
+// are the fixtures that carried no pin on the day the requirement landed, and
+// listing them records that their omission was never a decision anyone took.
+// Whether each is correctly waived — whether errors.Is alone really does tell
+// which arm fired — is gqlc-9vpga. Do not read a name here as a finding that
+// its message is not worth pinning.
+//
+// THE ONE AXIS SCREENED SO FAR (gqlc-yg5jl): every fixture reaching
+// ErrUnknownProperty's plural-lane arm was graded by mutating that arm to the
+// generic formatter, and the seven that survived moved to
+// invalidFixtureContains. Every other arm is unscreened, so a name here still
+// carries no verdict.
 var invalidFixtureNoMessagePin = map[string]struct{}{
 	"ambiguous_edge_orientation_after_inference.cypher":              {},
 	"ambiguous_unlabelled_binding.cypher":                            {},
@@ -808,7 +837,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"label_satisfy_ambiguous.cypher":                                 {},
 	"label_satisfy_none.cypher":                                      {},
 	"label_satisfy_plural_entity.cypher":                             {},
-	"label_satisfy_plural_property.cypher":                           {},
 	"list_of_edges_projection.cypher":                                {},
 	"list_of_nodes_projection.cypher":                                {},
 	"merge_endpoint_unknown_label.cypher":                            {},
@@ -837,16 +865,10 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"part_binding_type_conflict_edge.cypher":                         {},
 	"plural_endpoint_contradictory_edges_stay_plural.cypher":         {},
 	"plural_endpoint_created_edge_stays_plural.cypher":               {},
-	"plural_endpoint_inline_endpoint_property_stays_plural.cypher":   {},
 	"plural_endpoint_inline_endpoint_stays_plural.cypher":            {},
 	"plural_endpoint_merged_edge_stays_plural.cypher":                {},
-	"plural_endpoint_multi_hop_far_end_stays_plural.cypher":          {},
-	"plural_endpoint_multi_hop_range_stays_plural.cypher":            {},
-	"plural_endpoint_multi_hop_stays_plural.cypher":                  {},
 	"plural_endpoint_narrows_to_smaller_plural_set.cypher":           {},
-	"plural_endpoint_optional_edge_property_stays_plural.cypher":     {},
 	"plural_endpoint_optional_edge_stays_plural.cypher":              {},
-	"plural_endpoint_unbounded_hops_stays_plural.cypher":             {},
 	"plural_endpoint_unlabelled_hop_property_stays_plural.cypher":    {},
 	"plural_endpoint_unlabelled_hop_stays_plural.cypher":             {},
 	"plural_endpoint_zero_hop_stays_plural.cypher":                   {},
