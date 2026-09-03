@@ -2369,15 +2369,16 @@ fmt-check: ensure-golangci
 #                container images. Runnable here (bd gqlc-tez0 measured the
 #                live battery at ~30s), just not at the price the other arms
 #                are; run it by hand when you touch the live battery.
-#   tidy (part)  three of that job's nine steps read state that does not exist
+#   tidy (part)  three of that job's ten steps read state that does not exist
 #                before the PR: check-pr-closes.py wants the body,
 #                check-pr-authors.sh the commit list, check-cron-freshness.sh
 #                the Actions API. Unrunnable here by construction, not by
-#                choice. The other six DO run — tidy-check and
-#                check-doc-ordinals.py and check-open-pr-ordinals.py --self-test
-#                and bd-export-monotonic-local and check-label-lengths.py as
-#                their own arms, and `just lint-hooks .github/scripts` because
-#                `just lint` already depends on it.
+#                choice. The other seven DO run — tidy-check and
+#                check-doc-ordinals.py and check-adr-citations.py and
+#                check-open-pr-ordinals.py --self-test and
+#                bd-export-monotonic-local and check-label-lengths.py as their
+#                own arms, and `just lint-hooks .github/scripts` because `just
+#                lint` already depends on it.
 #
 # `just fmt-check` is an arm but is NOT a CI job: no workflow calls it. It is
 # here because it prints a diff where `golangci-lint run` prints issues, and it
