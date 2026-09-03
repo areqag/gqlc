@@ -19,12 +19,14 @@ const aboveMaxInt64 uint64 = math.MaxInt64 + 1
 // TestAGERefusesAUint64ParameterAboveMaxInt64 executes the refusal PR #2299
 // emitted and nothing ran.
 //
-// Its mutation battery measured the gap: deleting the guard from
-// agtypeUnsigned outright, and taking its comparison off by one, each left
-// the unit tests, the conformance suite and `just test-codegen-fence` all
-// green. The helper's BYTES are pinned by the golden comparison and its
-// BEHAVIOUR by nothing, so a regeneration carrying a gutted guard — the
-// ordinary way a generator is edited here — passed the whole gate set.
+// Its mutation battery measured the gap, and this branch re-measured it
+// rather than inheriting it: with the guard deleted from the emitted
+// agtypeUnsigned, and again with its comparison off by one, the goldens
+// regenerated each time, `just gates` reported all 13 arms passing
+// (2026-09-03). The helper's BYTES are pinned by the golden comparison and
+// its BEHAVIOUR by nothing, so a regeneration carrying a gutted guard —
+// the ordinary way a generator is edited here — crosses the whole
+// local gate set without a red cell.
 //
 // No container, by construction. The refusal is emitted into the generated
 // method between cypherStmt and q.db.Query, and cypherStmt reads q.graph
