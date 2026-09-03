@@ -15,15 +15,41 @@ import (
 	"github.com/areqag/gqlc/internal/graph"
 )
 
-// propertyWidths is every property type this backend carries, one row
-// per emitted Go type. Taken from the property table rather than written
-// out here, so a width the table gains is a row these sweeps gain.
-var propertyWidths = []graph.PropertyType{
-	graph.TypeString, graph.TypeBool, graph.TypeInt32, graph.TypeFloat32,
-	graph.TypeAnyPropertyValue, graph.ListOf(graph.TypeInt64, false),
-	graph.TypeTimestamp,
-	graph.TypeDate, graph.TypeLocalTime, graph.TypeDuration,
-	graph.ListOf(graph.TypeDate, false),
+// propertyCarriers is every Go type text the property table names, read
+// out of the package's AST rather than written out here — so a carrier
+// the table gains is a row the sweeps below gain, with no edit to this
+// file.
+//
+// It was a hand-written list of eleven graph.PropertyType values until bd
+// gqlc-4lkv, under a doc comment that claimed this derivation and did not
+// have it. Those eleven reached nine of the twenty-one carriers the table
+// names. TIME was among the twelve with no row, and it is the second of
+// the two carriers that keep a zone — the subject of the first sweep
+// below.
+//
+// The sweeps range over CARRIERS and not over widths because a carrier is
+// the whole of what any of them uses a width for: each maps its width
+// through the table and then names only the Go type that came back.
+// Ranging over the carrier is that same population one step shorter, and
+// it is the population typeTableGoTypes can derive; a width is not, since
+// graph.PropertyType is an open string type with no set to walk.
+//
+// What this inherits is that walk's reach, which is narrower than the
+// table's output: the texts are the ones the table returns as string
+// LITERALS, so the list arm's composed `"[]" + elem` contributes nothing
+// and LIST<ANY>'s own literal is the only list carrier here. That is why
+// the two hand-written list rows are gone rather than carried over.
+// Nothing is lost to these three invariants by that: helpers.need peels a
+// slice to its element before marking anything, so what a []Date row
+// asserted about the time import is what the Date row asserts.
+func propertyCarriers(t *testing.T) []string {
+	t.Helper()
+
+	carriers := typeTableGoTypes(t)["Property"]
+	require.NotEmpty(t, carriers,
+		"the walk read no Go type out of typeMap.Property, so every sweep keyed on this ranges over "+
+			"nothing and passes having asserted nothing")
+	return carriers
 }
 
 // TestZoneIsMarkedOnlyBesideTheInstant pins the invariant importsTime
@@ -32,15 +58,11 @@ var propertyWidths = []graph.PropertyType{
 // marked without one would answer importsTime false and leave models.go
 // naming time with no import for it.
 //
-// The rows are every emitted Go type an entity field can carry, taken
-// from the property table rather than written out here, so a width the
-// table gains is a row this sweep gains.
+// The rows are propertyCarriers, so a carrier the property table gains is
+// a row this sweep gains.
 func TestZoneIsMarkedOnlyBesideTheInstant(t *testing.T) {
 	sawInstant := false
-	for _, pt := range propertyWidths {
-		goType, ok := age.TypeMap{}.Property(pt)
-		require.True(t, ok, "%s", pt)
-
+	for _, goType := range propertyCarriers(t) {
 		var h age.Helpers
 		h.ForEntities([]age.WiredEntity{{Entity: codegen.Entity{
 			Name:   "E",
@@ -48,11 +70,11 @@ func TestZoneIsMarkedOnlyBesideTheInstant(t *testing.T) {
 		}}})
 
 		if h.Zone() {
-			require.True(t, h.Instant(), "%s marks the sidecar read with no instant beside it", pt)
+			require.True(t, h.Instant(), "%s marks the sidecar read with no instant beside it", goType)
 			sawInstant = true
 		}
 	}
-	require.True(t, sawInstant, "no width in the sweep marked the sidecar read, so the invariant went untested")
+	require.True(t, sawInstant, "no carrier in the sweep marked the sidecar read, so the invariant went untested")
 }
 
 // TestImportsTimeAgreesWithTheEmittedFile is the check that keeps the
@@ -69,11 +91,8 @@ func TestZoneIsMarkedOnlyBesideTheInstant(t *testing.T) {
 // are temporals whose helpers do int64 arithmetic and name no time at
 // all, so a gate written as "the batch carries a temporal" is red here.
 func TestImportsTimeAgreesWithTheEmittedFile(t *testing.T) {
-	for _, pt := range propertyWidths {
-		t.Run(string(pt), func(t *testing.T) {
-			goType, ok := age.TypeMap{}.Property(pt)
-			require.True(t, ok, "%s", pt)
-
+	for _, goType := range propertyCarriers(t) {
+		t.Run(goType, func(t *testing.T) {
 			entities := []age.WiredEntity{age.WiredEntity{
 				Entity: codegen.Entity{Name: "E", Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}}},
 			}.WithLabels("E", age.VertexAnnotation)}
@@ -137,11 +156,8 @@ func TestTheWireLabelsReachTheEmittedDecoder(t *testing.T) {
 // of them supplies the callee by some other route and none of them can
 // see that hole; a batch of exactly one width is what exposes it.
 func TestEmittedHelpersAreClosedOverWhatTheyCall(t *testing.T) {
-	for _, pt := range propertyWidths {
+	for _, goType := range propertyCarriers(t) {
 		for _, nullable := range []bool{false, true} {
-			goType, ok := age.TypeMap{}.Property(pt)
-			require.True(t, ok, "%s", pt)
-
 			e := age.WiredEntity{
 				Entity: codegen.Entity{
 					Name:   "E",
@@ -156,7 +172,7 @@ func TestEmittedHelpersAreClosedOverWhatTheyCall(t *testing.T) {
 			src := age.RenderModels("models", []age.WiredEntity{e}, h)
 			require.Empty(t, undeclaredAgtypeIdents(t, src),
 				"a batch of one %s property (nullable=%t) names an agtype helper it does not declare, so the emitted package does not compile",
-				pt, nullable)
+				goType, nullable)
 		}
 	}
 }
