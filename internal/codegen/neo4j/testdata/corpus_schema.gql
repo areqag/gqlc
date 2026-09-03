@@ -159,6 +159,7 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
         ranks  :: LIST<INT32> NOT NULL,
         blobs  :: LIST<BYTES> NOT NULL,
         stamps :: LIST<TIMESTAMP> NOT NULL,
+        marks  :: LIST<DATE> NOT NULL,
         depths :: LIST<FLOAT32>
     }),
     (:Bin {
