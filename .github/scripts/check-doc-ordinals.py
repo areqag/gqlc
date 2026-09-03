@@ -37,6 +37,16 @@ across every origin branch; the remedy printed below sends the author there
 rather than describing the manual scan it replaced. This file remains the
 backstop, because allocation cannot see a number that has never been pushed.
 
+It also cannot catch a collision that arrives AFTER the author's last push. On
+a pull request the tree this reads is the merge ref, which GitHub assembles at
+push time, so master taking the ordinal afterwards changes nothing this can
+see and the PR stays green on a number that is now taken (measured over a
+3h23m window, bd gqlc-4plwf). That half is check-open-pr-ordinals.py, which
+re-asks on every master push and posts a commit status onto each open PR's
+head SHA. It delegates the verdict back to THIS file rather than reimplementing
+the regex, so the three halves -- allocation, tree, moved base -- share one
+definition of the convention.
+
 WHICH SERIES ARE ENROLLED is decided by the call sites, not here, because "is
 this an ordinal series" is not a property this file can infer. Enrolled today:
 docs/adr and kingdom/brain/decisions -- both hand-allocated, both cited by
