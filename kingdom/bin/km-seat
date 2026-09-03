@@ -206,18 +206,35 @@ compose() { # $1 = wake reasons; $2 = km seat-refresh's exposure line, or empty;
                 printf 'hand with git branch -vv (bd gqlc-xtre).\n'
                 ;;
         esac
+        # A citizen reads the deployed documents as she runs the deployed km:
+        # the machinery/documents split KM_DOC_PATHS draws is only half honoured
+        # while her procedure is still opened by a path relative to a tree frozen
+        # at her branch's cut point (bd gqlc-gsjbs, gqlc-ez7gg). So this arm, and
+        # the ritual line at the end of the banner, name the deploy root.
+        #
+        # The deploy root is maintained, not guaranteed — ensure_deployed
+        # fast-forwards it per tick and escalates when it cannot, and it has
+        # measurably run 2.5h stale (bd gqlc-mv902). The git-show and rebase
+        # advice below is retained for exactly that corner, which makes the
+        # redirect monotone: at worst the citizen holds what she holds today,
+        # and otherwise a strictly fresher door.
         case "$3" in
             6 | 7)
-                printf '\nThe constitution and the playbooks here are that same old copy, and they\n'
-                printf 'are what you will read when you follow your procedure: every path in the\n'
-                printf 'ritual named below is relative to THIS tree, so a rule that landed after\n'
-                printf 'your branch was cut is not in the document you are about to open. This\n'
-                printf 'has already cost the town once — a citizen followed a protocol that had\n'
-                printf 'been superseded 91 minutes before her branch was cut, put the old rule\n'
-                printf 'in writing to another seat, and rerouted a judge bead off the judge\n'
-                printf 'entitled to it, with nothing in the town able to catch it. Read any\n'
-                printf 'governing text you are about to rely on from master first —\n'
-                printf 'git show origin/master:<path> — or rebase (bd gqlc-gsjbs).\n'
+                printf '\nThe constitution and the playbooks here are that same old copy, so a rule\n'
+                printf 'that landed after your branch was cut is not in the document you would\n'
+                printf 'otherwise open. This has already cost the town once — a citizen followed\n'
+                printf 'a protocol that had been superseded 91 minutes before her branch was cut,\n'
+                printf 'put the old rule in writing to another seat, and rerouted a judge bead\n'
+                printf 'off the judge entitled to it, with nothing in the town able to catch it.\n'
+                printf '\nSo read every governing document from the deployed checkout this session,\n'
+                printf 'not from this tree:\n'
+                printf '  %s/kingdom/CONSTITUTION.md\n' "$deploy_root"
+                printf '  %s/kingdom/brain/playbooks/\n' "$deploy_root"
+                printf '  %s/kingdom/brain/decisions/\n' "$deploy_root"
+                printf 'That checkout is fast-forwarded for you but can itself lag, so for the\n'
+                printf 'exact text of a rule you are about to rely on, git show origin/master:<path>\n'
+                printf 'still answers — and rebasing this tree onto origin/master fixes it at the\n'
+                printf 'source (bd gqlc-gsjbs).\n'
                 ;;
         esac
     fi
@@ -235,7 +252,20 @@ compose() { # $1 = wake reasons; $2 = km seat-refresh's exposure line, or empty;
         printf '%s\n' "$notes" | sed 's/^/  - /'
     fi
 
-    printf '\nBegin with the wake ritual: kingdom/brain/playbooks/citizen-protocol.md.\n'
+    # The entry door, and the only one most sessions ever use — so it is where
+    # the redirect has to land. Conditional on the exit code rather than on $2's
+    # wording, for the same reason the two paragraphs above are (bd gqlc-ez7gg).
+    # A seat whose documents are current keeps the relative spelling byte for
+    # byte: $3 is 0 whenever $2 is empty, so the default arm holds the fresh case
+    # and the parked seats km seat-refresh has already moved to master.
+    case "$3" in
+        6 | 7)
+            printf '\nBegin with the wake ritual: %s/kingdom/brain/playbooks/citizen-protocol.md — the deployed copy, because the one in this worktree is behind.\n' "$deploy_root"
+            ;;
+        *)
+            printf '\nBegin with the wake ritual: kingdom/brain/playbooks/citizen-protocol.md.\n'
+            ;;
+    esac
 }
 
 while :; do
