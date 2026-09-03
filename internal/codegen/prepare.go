@@ -134,6 +134,11 @@ type Param struct {
 	Field    string // mangle §4.2
 	GoType   string // §5.1
 	Nullable bool
+	// Width is the resolved property type GoType was derived from, so a
+	// render layer can dispatch on Width.Kind() rather than parse the
+	// carrier text back (spec §6, the ruling for gqlc-x9tg7). Always set
+	// here: Phase A guarantees every parameter is a ResolvedProperty.
+	Width graph.PropertyType
 }
 
 // Row is one derived Row-struct field: the driver record key, the
@@ -147,6 +152,17 @@ type Row struct {
 	Kind       ColumnKind       // property (C1) or entity — property/node/edge (C2); temporal/list/scalar/any (C3); edgeUnion (C5)
 	ListElem   *ListElem        // non-nil iff Kind == ColumnList — the committed element decode plan (spec §1.3)
 	EdgeKeys   []schema.EdgeKey // populated when Kind == ColumnEdgeUnion — the candidate edge keys in resolver-canonical order (§5.5)
+	// Width is the resolved property type GoType was derived from, so a
+	// render layer can dispatch on Width.Kind() rather than parse the
+	// carrier text back (spec §6). Set for the ResolvedProperty arms
+	// only — a whole-node column, a temporal expression and an
+	// unknown-typed projection resolved no property type at all, and
+	// Width stays the zero PropertyType there rather than carrying a
+	// plausible spelling Kind() would answer KindScalar for.
+	//
+	// A list column carries the width the AUTHOR declared, LIST<…> and
+	// all; the element's own width is on ListElem, one per depth.
+	Width graph.PropertyType
 }
 
 // ListElem is Phase B's committed list-element decode plan (spec §1.3).
@@ -184,6 +200,12 @@ type ListElem struct {
 	// Nested is the inner element plan for a nested list. Non-nil iff
 	// Kind == ColumnList.
 	Nested *ListElem
+	// Width is the resolved property type GoType was derived from, so a
+	// render layer can dispatch on Width.Kind() rather than parse the
+	// carrier text back (spec §6). Set for the ResolvedProperty arm
+	// only, on the same rule the top-level Row follows: an element that
+	// resolved no property type leaves it zero.
+	Width graph.PropertyType
 }
 
 // ColumnKind discriminates the row-assembly arm a backend runs for a
@@ -279,6 +301,11 @@ type EntityField struct {
 	Field    string // paramFieldName(PropName)
 	GoType   string // §5.1 property-side row (unchanged from C1)
 	Nullable bool
+	// Width is the declared property type GoType was derived from, so a
+	// render layer can dispatch on Width.Kind() rather than parse the
+	// carrier text back (spec §6). Always set: every entity field comes
+	// from a schema.Property, which has a declared width by definition.
+	Width graph.PropertyType
 }
 
 // Prepare runs every shared phase over one batch and returns the
@@ -672,6 +699,7 @@ func prepareEntityFields(entityName string, props map[string]schema.Property, tm
 			Field:    field,
 			GoType:   ty,
 			Nullable: p.Nullable,
+			Width:    p.Type,
 		})
 	}
 	return fields, nil
@@ -1070,6 +1098,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 				Field:    field,
 				GoType:   ty,
 				Nullable: prop.Nullable,
+				Width:    prop.Type,
 			})
 		}
 
@@ -1107,6 +1136,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 						Nullable:   t.Nullable,
 						Kind:       ColumnList,
 						ListElem:   plan,
+						Width:      t.Type,
 					})
 					break
 				}
@@ -1117,6 +1147,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 					GoType:     ty,
 					Nullable:   t.Nullable,
 					Kind:       ColumnProperty,
+					Width:      t.Type,
 				})
 			case resolver.ResolvedNode:
 				idx := entityIndex[entityLookupKey{Kind: EntityNode, Labels: t.Labels}]
@@ -1429,9 +1460,9 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 			if err != nil {
 				return nil, err
 			}
-			return &ListElem{Kind: ColumnList, GoType: ty, Nested: nested}, nil
+			return &ListElem{Kind: ColumnList, GoType: ty, Nested: nested, Width: tt.Type}, nil
 		}
-		return &ListElem{Kind: ColumnProperty, GoType: ty}, nil
+		return &ListElem{Kind: ColumnProperty, GoType: ty, Width: tt.Type}, nil
 	case resolver.ResolvedNode:
 		idx, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: tt.Labels}]
 		if !ok {

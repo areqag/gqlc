@@ -2078,3 +2078,131 @@ func TestUnimplementedKindOutranksRecordFieldLegality(t *testing.T) {
 		`record field collision: entity "Person" property "p" has `+string(legalKinds)+
 			`, whose fields "minAge" and "min_age" both mangle to "MinAge"`)
 }
+
+// TestPreparedWidthReachesEveryPropertyPosition holds the one prepared-
+// surface change stage 1 of gqlc-x9tg7 makes (spec §6): EntityField,
+// Param, Row and ListElem each carry the resolved graph.PropertyType
+// they were derived from, so the render layer dispatches on
+// Width.Kind() instead of growing a parallel enum beside ColumnKind.
+//
+// Why a field and not a new ColumnKind: a record-valued column is still
+// a property value, and the thing that changed about it is its WIDTH.
+// Minting ColumnRecord would put the same fact in two places and oblige
+// every switch over ColumnKind to answer a question about widths.
+//
+// The GoType rows beside each Width row are what stops this passing on a
+// surface that carries the width and derives nothing from it: GoType is
+// the stub's echo of the same PropertyType, so a Width wired to the
+// wrong position would still have to disagree with the GoType beside it.
+//
+// The four positions are asserted in ONE prepared batch rather than four
+// tests, because the claim is that no position was missed — four
+// separate greens cannot say that, and a fifth position added later
+// fails here only if this one sweeps them together.
+func TestPreparedWidthReachesEveryPropertyPosition(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{
+		{Name: "city", Type: graph.TypeString},
+		{Name: "zip", Type: graph.TypeInt32, NotNull: true},
+	})
+	person := graph.LabelSetKey("Person")
+
+	in := codegen.Input{
+		Schema: schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				person: {KeyLabels: person, CompleteLabels: person, Name: "Person", Properties: map[string]schema.Property{
+					"addr": {Name: "addr", Type: rec},
+				}},
+			},
+		},
+		Queries: []codegen.NamedQuery{{
+			Name:        "Fetch",
+			Cardinality: codegen.CardinalityMany,
+			SourceText:  "MATCH (n) RETURN n.addr AS addr, n.addrs AS addrs",
+			Validated: resolver.ValidatedQuery{
+				Statement:  resolver.StatementRead,
+				Parameters: []resolver.ResolvedParameter{{Name: "p", Type: resolver.ResolvedProperty{Type: rec}}},
+				Columns: []resolver.Column{
+					{Name: "addr", Type: resolver.ResolvedProperty{Type: rec}},
+					{Name: "addrs", Type: resolver.ResolvedProperty{Type: graph.ListOf(rec, true)}},
+				},
+			},
+		}},
+	}
+
+	prepared, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.NoError(t, err)
+
+	entityField := prepared.Entities[0].Fields[0]
+	require.Equal(t, "addr", entityField.PropName)
+	require.Equal(t, rec, entityField.Width, "the entity-property position drops the width")
+	require.Equal(t, "property:"+string(rec), entityField.GoType)
+
+	param := prepared.Queries[0].ParamFields[0]
+	require.Equal(t, "p", param.RawName)
+	require.Equal(t, rec, param.Width, "the query-parameter position drops the width")
+	require.Equal(t, "property:"+string(rec), param.GoType)
+
+	column := prepared.Queries[0].RowFields[0]
+	require.Equal(t, "addr", column.ColumnName)
+	require.Equal(t, codegen.ColumnProperty, column.Kind,
+		"a record column is still a property value; no new ColumnKind is minted for it (spec §6)")
+	require.Equal(t, rec, column.Width, "the query-column position drops the width")
+	require.Equal(t, "property:"+string(rec), column.GoType)
+
+	listCol := prepared.Queries[0].RowFields[1]
+	require.Equal(t, codegen.ColumnList, listCol.Kind)
+	require.Equal(t, graph.ListOf(rec, true), listCol.Width,
+		"a list column carries the width the AUTHOR declared, not its element's — the element's is on ListElem")
+	require.NotNil(t, listCol.ListElem)
+	require.Equal(t, rec, listCol.ListElem.Width, "the list-element position drops the width")
+	require.Equal(t, "property:"+string(rec), listCol.ListElem.GoType)
+}
+
+// TestPreparedWidthIsEmptyWhereNoPropertyTypeWasResolved is the negative
+// half, and it is the one that decides what render may READ off Width.
+// A whole-node column, a temporal expression and an unknown-typed
+// projection are not property values: no graph.PropertyType was ever
+// resolved for them, so Width is the zero PropertyType and a render arm
+// dispatching on Width.Kind() must not be reached for one.
+//
+// Without this, the natural mistake is to fill Width with something
+// plausible at those positions — the entity struct name, or a scalar
+// spelling — and a Kind() over that answers KindScalar, which is a
+// silent wrong answer rather than an absent one.
+func TestPreparedWidthIsEmptyWhereNoPropertyTypeWasResolved(t *testing.T) {
+	person := graph.LabelSetKey("Person")
+	in := codegen.Input{
+		Schema: schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				person: {KeyLabels: person, CompleteLabels: person, Name: "Person", Properties: map[string]schema.Property{
+					"name": {Name: "name", Type: graph.TypeString},
+				}},
+			},
+		},
+		Queries: []codegen.NamedQuery{{
+			Name:        "Fetch",
+			Cardinality: codegen.CardinalityMany,
+			SourceText:  "MATCH (n) RETURN n AS n, date() AS d, x AS u",
+			Validated: resolver.ValidatedQuery{
+				Statement: resolver.StatementRead,
+				Columns: []resolver.Column{
+					{Name: "n", Type: resolver.ResolvedNode{Labels: person}},
+					{Name: "d", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalDate}},
+					{Name: "u", Type: resolver.ResolvedUnknown{}},
+				},
+			},
+		}},
+	}
+
+	prepared, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.NoError(t, err)
+
+	for _, row := range prepared.Queries[0].RowFields {
+		require.Empty(t, row.Width,
+			"column %q has Kind %v, which resolved no property type, so Width must stay the zero value rather "+
+				"than carry a spelling Kind() would answer KindScalar for", row.ColumnName, row.Kind)
+		require.NotEmpty(t, row.GoType, "column %q lost its carrier text", row.ColumnName)
+	}
+}
