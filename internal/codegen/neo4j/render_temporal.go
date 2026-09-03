@@ -8,10 +8,18 @@ import (
 	"github.com/areqag/gqlc/internal/graph"
 )
 
-// temporalUse records which conversion directions one neutral carrier
-// needs in a given batch. Emitting only the used ones keeps dead
-// unexported functions out of the generated package.
-type temporalUse struct {
+// carrierUse records which conversion directions one carrier needs in a
+// given batch. Emitting only the used ones keeps dead unexported
+// functions out of the generated package.
+//
+// ONE type for both carrier kinds this backend converts — the neutral
+// temporals and the declared records — because the directions are the
+// same five and are decided by the same three facts: which position the
+// carrier was reached through, whether it was nullable there, and
+// whether a list level sat above it. Two structurally identical types
+// would be two places for those rules to be written and one place for
+// them to disagree.
+type carrierUse struct {
 	decode    bool // to<X>: a driver value read into the neutral carrier
 	encode    bool // from<X>: a carrier bound as a non-nullable parameter
 	encodePtr bool // from<X>Ptr: a carrier bound as a nullable parameter
@@ -30,44 +38,61 @@ type temporalUse struct {
 	listPtr bool
 }
 
-// temporalUses walks the prepared batch and answers, per carrier, which
-// directions the emission sites will reach for. Decode positions are
-// entity properties and row columns (models.go and the per-source
-// files); encode positions are query parameters. A parameter is the one
-// position whose nullability changes the helper, because a nil pointer
-// has to become a Cypher null rather than a zero-valued carrier.
+// conversionUses walks the prepared batch ONCE and answers, for both
+// carrier kinds, which directions the emission sites will reach for:
+// temporal keyed by the neutral carrier's name, records keyed by the
+// canonical encoding their helper suffix is derived from.
 //
-// Both walks descend into a DECLARED record rather than marking on its
-// own carrier text. A record's carrier is an anonymous struct, so the
-// leafType this marks on hands back the whole struct and no carrier
-// inside it is ever named — while the record's emitted helper pair calls
-// those carriers' conversions by name. The result was an emitted package
-// naming a function it did not declare, which `go build` of generated
-// code reports with no line in the schema to point at.
-func temporalUses(prepared codegen.Prepared) map[string]temporalUse {
-	uses := make(map[string]temporalUse)
-	mark := func(goType string, set func(*temporalUse)) {
+// Decode positions are entity properties and row columns (models.go and
+// the per-source files); encode positions are query parameters. A
+// parameter is the one position whose nullability changes the helper,
+// because a nil pointer has to become a Cypher null rather than a
+// zero-valued carrier.
+//
+// One walk rather than two, because the two answers are read off the
+// SAME three facts at the SAME positions — a second walk would be a
+// second copy of the nullable/list direction rules, and the emitted
+// package is where a disagreement between them would surface: as a name
+// no declaration answers, which `go build` of generated code reports
+// with no line in the schema to point at.
+//
+// Both directions descend into a DECLARED record rather than stopping at
+// its own carrier text. A record's carrier is an anonymous struct, so
+// the leafType the temporal side marks on hands back the whole struct
+// and no carrier inside it is ever named — while the record's emitted
+// helper pair calls those carriers' conversions by name.
+func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph.PropertyType]carrierUse) {
+	temporal := make(map[string]carrierUse)
+	records := make(map[graph.PropertyType]carrierUse)
+	markTemporal := func(goType string, set func(*carrierUse)) {
 		name := leafType(goType)
 		if !isTemporalCarrier(name) {
 			return
 		}
-		use := uses[name]
+		use := temporal[name]
 		set(&use)
-		uses[name] = use
+		temporal[name] = use
+	}
+	markRecord := func(encoding graph.PropertyType, set func(*carrierUse)) {
+		use := records[encoding]
+		set(&use)
+		records[encoding] = use
 	}
 
-	// A record's decode body reads every field, and nullability changes
-	// nothing there: to<X> is the same call either way, because a missing
-	// key is the field's own null rather than a different conversion.
+	// Decode needs no nullability, in either kind: to<X> and
+	// decode<Suffix> are the same call either way, because a missing key
+	// is the field's own null rather than a different conversion.
+	setDecode := func(u *carrierUse) { u.decode = true }
 	var markDecode func(goType string, width graph.PropertyType)
 	markDecode = func(goType string, width graph.PropertyType) {
 		if fields, ok := recordLeafFields(goType, width); ok {
+			markRecord(leafWidth(width), setDecode)
 			for _, f := range fields {
 				markDecode(f.GoType, f.Width)
 			}
 			return
 		}
-		mark(goType, func(u *temporalUse) { u.decode = true })
+		markTemporal(goType, setDecode)
 	}
 
 	// A record's encode body spells each field by the PARAMETER rules —
@@ -77,29 +102,30 @@ func temporalUses(prepared codegen.Prepared) map[string]temporalUse {
 	// then calls encode<X>, which builds every field the same way.
 	var markEncode func(goType string, width graph.PropertyType, nullable bool)
 	markEncode = func(goType string, width graph.PropertyType, nullable bool) {
+		set := func(u *carrierUse) {
+			switch {
+			case isSliceType(goType):
+				// A list parameter converts per element, so what it
+				// needs is the plain helper at the leaf plus the list
+				// helper that calls it — never the Ptr form, whose
+				// nil-to-Cypher-null job belongs to the list helper.
+				u.encode = true
+				u.list = true
+				u.listPtr = u.listPtr || nullable
+			case nullable:
+				u.encodePtr = true
+			default:
+				u.encode = true
+			}
+		}
 		if fields, ok := recordLeafFields(goType, width); ok {
+			markRecord(leafWidth(width), set)
 			for _, f := range fields {
 				markEncode(f.GoType, f.Width, f.Nullable)
 			}
 			return
 		}
-		// A list parameter converts per element, so what it needs is
-		// the plain from<X> at the leaf plus the list helper that
-		// calls it — never from<X>Ptr, whose nil-to-Cypher-null job
-		// belongs to the list helper instead.
-		if isSliceType(goType) {
-			mark(goType, func(u *temporalUse) {
-				u.encode = true
-				u.list = true
-				u.listPtr = u.listPtr || nullable
-			})
-			return
-		}
-		if nullable {
-			mark(goType, func(u *temporalUse) { u.encodePtr = true })
-			return
-		}
-		mark(goType, func(u *temporalUse) { u.encode = true })
+		markTemporal(goType, set)
 	}
 
 	for _, e := range prepared.Entities {
@@ -118,7 +144,7 @@ func temporalUses(prepared codegen.Prepared) map[string]temporalUse {
 			markEncode(f.GoType, f.Width, f.Nullable)
 		}
 	}
-	return uses
+	return temporal, records
 }
 
 // recordLeafFields answers the field plan of the DECLARED record at the
@@ -361,7 +387,7 @@ func widenExpr(goType string, width graph.PropertyType, access string) string {
 // so a local-zone construction would silently shift the very components
 // the carrier exists to hold. A fixed zone has no transitions and
 // nothing to resolve.
-func renderTemporalConversions(pkg string, uses map[string]temporalUse, target driverTarget) []byte {
+func renderTemporalConversions(pkg string, uses map[string]carrierUse, target driverTarget) []byte {
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package ")
@@ -450,7 +476,7 @@ func %[1]sPtr(v *[]%[2]s) any {
 // needsTimePackage reports whether any emitted conversion body names the
 // time package. Duration is the one carrier that does not: dbtype.Duration
 // is already a component struct, so both directions are a field copy.
-func needsTimePackage(uses map[string]temporalUse) bool {
+func needsTimePackage(uses map[string]carrierUse) bool {
 	for name, use := range uses {
 		if name == "Duration" {
 			continue

@@ -10,7 +10,7 @@ import (
 	"github.com/areqag/gqlc/internal/graph"
 )
 
-// paramsOf wraps parameter fields in the smallest Prepared temporalUses reads.
+// paramsOf wraps parameter fields in the smallest Prepared conversionUses reads.
 // Entities and RowFields are left empty so every flag the rows below assert can
 // only have come from the parameter walk.
 func paramsOf(params ...codegen.Param) codegen.Prepared {
@@ -56,10 +56,11 @@ func TestTemporalUsesAccumulatesListPtrRegardlessOfParameterOrder(t *testing.T) 
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			uses := neo4j.TemporalUses(paramsOf(tc.params...))
+			prepared := paramsOf(tc.params...)
 
-			use, ok := uses["Date"]
-			require.True(t, ok, "Date reached no emission site at all; uses = %v", uses)
+			require.Contains(t, neo4j.TemporalUseNames(prepared), "Date",
+				"Date reached no emission site at all")
+			use := neo4j.TemporalUseOf(prepared, "Date")
 			require.True(t, use.List, "the list helper is not reached, so there is nothing for listPtr to qualify")
 			require.True(t, use.ListPtr,
 				"listPtr is false, so from<X>ListPtr is not emitted while paramBindExpr still calls it. "+
@@ -78,12 +79,10 @@ func TestTemporalUsesAccumulatesListPtrRegardlessOfParameterOrder(t *testing.T) 
 // would only prove that ONE spelling was ignored, and the claim is that neither
 // reaches anything.
 func TestTemporalUsesIgnoresNonCarrierParameters(t *testing.T) {
-	uses := neo4j.TemporalUses(paramsOf(
+	require.Empty(t, neo4j.TemporalUseNames(paramsOf(
 		codegen.Param{RawName: "a", Field: "A", GoType: "[]any", Nullable: true},
 		codegen.Param{RawName: "b", Field: "B", GoType: "[]byte", Nullable: false},
-	))
-
-	require.Empty(t, uses, "a non-carrier leaf reached an emission site")
+	)), "a non-carrier leaf reached an emission site")
 }
 
 // TestTemporalUsesSeesACarrierHidingInsideARecord is a reproduction, and
@@ -120,22 +119,21 @@ func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
 	require.Contains(t, structText, "Date", "the premise: the carrier really is inside the emitted text")
 
 	t.Run("a record property owes the decode direction", func(t *testing.T) {
-		uses := neo4j.TemporalUses(codegen.Prepared{
+		use := neo4j.TemporalUseOf(codegen.Prepared{
 			Entities: []codegen.Entity{{Name: "Place", Fields: []codegen.EntityField{
 				{PropName: "addr", Field: "Addr", GoType: structText, Width: width},
 			}}},
-		})
-		require.True(t, uses["Date"].Decode,
+		}, "Date")
+		require.True(t, use.Decode,
 			"the record's decode helper calls toDate, so the bridge file owes it")
 	})
 
 	t.Run("a record parameter owes the encode direction", func(t *testing.T) {
-		uses := neo4j.TemporalUses(codegen.Prepared{
+		use := neo4j.TemporalUseOf(codegen.Prepared{
 			Queries: []codegen.Query{{ParamFields: []codegen.Param{
 				{RawName: "p", Field: "P", GoType: structText, Width: width},
 			}}},
-		})
-		use := uses["Date"]
+		}, "Date")
 		require.True(t, use.Encode, "the NOT NULL field calls fromDate, so the bridge file owes it")
 		require.True(t, use.EncodePtr, "the nullable field calls fromDatePtr, which is a separate declaration")
 	})
@@ -149,12 +147,11 @@ func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
 		listWidth := graph.ListOf(width, false)
 		listText, ok := neo4j.TypeMap{}.Property(listWidth)
 		require.True(t, ok)
-		uses := neo4j.TemporalUses(codegen.Prepared{
+		use := neo4j.TemporalUseOf(codegen.Prepared{
 			Queries: []codegen.Query{{ParamFields: []codegen.Param{
 				{RawName: "p", Field: "P", GoType: listText, Width: listWidth},
 			}}},
-		})
-		use := uses["Date"]
+		}, "Date")
 		require.True(t, use.Encode, "encode<X>List calls encode<X> per element, which calls fromDate")
 		require.True(t, use.EncodePtr, "and fromDatePtr for the nullable field")
 		require.False(t, use.List,
@@ -162,11 +159,10 @@ func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
 	})
 
 	t.Run("the undeclared record hides nothing", func(t *testing.T) {
-		uses := neo4j.TemporalUses(codegen.Prepared{
+		require.Empty(t, neo4j.TemporalUseNames(codegen.Prepared{
 			Entities: []codegen.Entity{{Name: "Place", Fields: []codegen.EntityField{
 				{PropName: "addr", Field: "Addr", GoType: "map[string]any", Width: graph.TypeAnyRecord},
 			}}},
-		})
-		require.Empty(t, uses, "RECORD<ANY> declares no fields, so no carrier can be hiding in one")
+		}), "RECORD<ANY> declares no fields, so no carrier can be hiding in one")
 	})
 }
