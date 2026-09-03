@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/queryfile"
 )
 
 // namesInstant reports whether one query's emitted surface spells the
@@ -156,7 +157,7 @@ func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 	default:
 		fmt.Fprintf(b, ", %s %sParams", codegen.ParamArg, p.MethodName)
 	}
-	if p.Cardinality == codegen.CardinalityExec {
+	if p.Cardinality == queryfile.CardinalityExec {
 		b.WriteString(") error")
 		return
 	}
@@ -167,7 +168,7 @@ func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 // :one → T or MethodRow; :many → []T or []MethodRow.
 func returnTypeText(p codegen.Query) string {
 	elem := rowElemText(p)
-	if p.Cardinality == codegen.CardinalityMany {
+	if p.Cardinality == queryfile.CardinalityMany {
 		return "[]" + elem
 	}
 	return elem
@@ -198,7 +199,7 @@ func pointerWrapped(f codegen.Row) bool {
 // zeroValueText composes the zero-value expression for a prepared
 // query's return type, matching the emitted method signature (§5.3).
 func zeroValueText(p codegen.Query) string {
-	if p.Cardinality == codegen.CardinalityMany {
+	if p.Cardinality == queryfile.CardinalityMany {
 		return "nil"
 	}
 	if len(p.RowFields) != 1 {
@@ -261,12 +262,12 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	// now writes no body, so the generated method is missing its return and
 	// does not compile, where the default silently emitted a :many body.
 	switch p.Cardinality {
-	case codegen.CardinalityExec:
+	case queryfile.CardinalityExec:
 		writeExecBody(b, p)
-	case codegen.CardinalityOne:
+	case queryfile.CardinalityOne:
 		writeQueryCall(b, p)
 		writeOneBody(b, p)
-	case codegen.CardinalityMany:
+	case queryfile.CardinalityMany:
 		writeQueryCall(b, p)
 		writeManyBody(b, p)
 	}
@@ -291,7 +292,7 @@ func writeDocComment(b *strings.Builder, p codegen.Query) {
 // itself. An :exec method returns error alone and so has nothing before
 // it; every other cardinality returns the zero of its row type first.
 func failPrefix(p codegen.Query) string {
-	if p.Cardinality == codegen.CardinalityExec {
+	if p.Cardinality == queryfile.CardinalityExec {
 		return ""
 	}
 	return zeroValueText(p) + ", "
