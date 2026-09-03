@@ -811,6 +811,60 @@ func TestARecordParameterBindsUnderTheSchemasFieldNames(t *testing.T) {
 		"the emitted encoder writes the Go field name, which is the defect this guards")
 }
 
+// TestANullableRecordListSpellsTheRecordsEncodedType pins the one shape
+// whose emission has to name what a record ENCODES TO, rather than only
+// the encoder that produces it.
+//
+// The nesting combinator emits a closure, and a closure has to spell its
+// own return type: `func(in []T) ([]U, error)`. For every other carrier U
+// comes from a table keyed by the Go leaf, and a record has no key there
+// — its carrier is a struct text the schema produced, not a name this
+// package could list — so encodedText answers map[string]any for it
+// instead. Emptying that answer emits `([], error)`, which is not Go.
+//
+// This is the only shape that reads it. A bare or nullable record binds
+// through its encoder directly, and a non-nullable list of records
+// composes at one level below the closure, so none of those three name
+// the encoded type at all — and each of them passes a substring check for
+// the encoder's name however badly the composition is assembled. Hence
+// the whole bind expression, matching how the unsigned rows are pinned
+// (measured, mutation row R8: blinding encodedText's record arm left
+// every other record guard green).
+func TestANullableRecordListSpellsTheRecordsEncodedType(t *testing.T) {
+	elem, ok := age.TypeMap{}.Property(recordWidth)
+	require.True(t, ok, "this backend carries %s", recordWidth)
+	suffix := codegen.RecordHelperSuffix(recordWidth)
+
+	q := codegen.Query{
+		NamedQuery: codegen.NamedQuery{
+			Name:        "Q",
+			SourceText:  "MATCH (r:Row) WHERE r.homes = $hs RETURN r.id",
+			Cardinality: codegen.CardinalityExec,
+		},
+		MethodName: "Q",
+		Bare:       "q",
+		ParamFields: []codegen.Param{{
+			RawName:  "hs",
+			Field:    "Hs",
+			GoType:   "[]" + elem,
+			Width:    graph.ListOf(recordWidth, true),
+			Nullable: true,
+		}},
+	}
+
+	// The flat form, not the indented one: renderCypherFile is reached ahead
+	// of codegen.Finalise, so what this sees is the emission's own whitespace
+	// rather than gofmt's, and listEncoder stopped carrying an indent
+	// argument in gqlc-swzh7. The indentation is not what this pins.
+	rendered := string(age.RenderCypherFile("p", []codegen.Query{q}))
+	require.Contains(t, rendered,
+		"err := agtypeEncodedNullable(arg, func(in []"+elem+") ([]map[string]any, error) {\n"+
+			"\treturn agtypeEncodedList(in, encode"+suffix+")\n"+
+			"})\n",
+		"the nullable record list does not compose the record's encoder under a closure "+
+			"returning the type a record encodes to")
+}
+
 // isTypeMapMethod reports whether a declaration is a method on typeMap.
 // Not every one is part of the Go-type table — namesAGoType is what
 // separates the carrier methods from StorableProperty's storage
