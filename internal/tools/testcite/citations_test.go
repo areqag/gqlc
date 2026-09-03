@@ -163,6 +163,9 @@ var pinned = map[string]map[string]string{
 	"internal/codegen/conformance/assembled_input_test.go": {
 		"TestTemporalScanFindsTheEnumEnd": "HISTORICAL. Names the derivation this suite replaced — the one that scanned for String's first default-arm value. Resolving it would mean the replacement never happened.",
 	},
+	"internal/query/query_test.go": {
+		"TestBindingDiscriminatorTracksEntityKind": "HISTORICAL. The name TestBindingDiscriminatorDerivesFromKind carried until bd gqlc-slde4, written in that test's own comment because the old name asserted something the body never did — it tracked BindingKind, not graph.EntityKind — and the record of that being the second correction to the same mistake is the point of the sentence. Resolving it would mean the rename never happened. The coarseness the doc comment above warns about is harmless here: a later REAL citation of this name in this file would itself be rot, since nothing will declare it again.",
+	},
 	"internal/resolver/undeclaredreltype_test.go": {
 		"TestEndpointNarrowedButDeclaredTypeIsSilent": "HISTORICAL. The row that asserted the opposite boundary, replaced deliberately rather than deleted; the comment is the record of that choice.",
 	},
