@@ -41,8 +41,19 @@ type guardedSum struct {
 	// name is the Go type the constant block is declared with.
 	name string
 	// declRoot is where to read that block, relative to this package.
-	// It is not where switches are scanned; see codegenTreeGoFiles.
+	// It is not where switches are scanned; see scanRoots.
 	declRoot string
+	// scanRoots are the directories switches over this sum are scanned in,
+	// relative to this package. Separate from declRoot because the two
+	// answer different questions — where the members are written, and
+	// where a switch over them may appear — and for a sum declared
+	// elsewhere the answers differ.
+	//
+	// Each root must yield at least one switch over the sum. A root that
+	// silently went unscanned would take its switches out of the fence
+	// while every remaining row still passed, which is the shape of
+	// blindness this whole file exists to refuse.
+	scanRoots []string
 	// sentinel is one member the derivation must find. Listed rather
 	// than derived on purpose: it is the only thing that can tell a
 	// broken derivation apart from a sum nothing switches on, and both
@@ -66,19 +77,37 @@ type guardedSum struct {
 }
 
 // guardedSums is the whole population this fence holds. Scalar and
-// Temporal are declared in internal/resolver, so their constants are
-// read from there — but switches are still scanned under
-// internal/codegen alone. That boundary is deliberate: the only
-// resolver-side default over either sum is its own String method's, which
-// is correct and is already fenced by name in
-// internal/resolver/sumdefaults_internal_test.go
-// (TestScalarStringAnswersForDeclaredKindsAlone and its Temporal twin).
-// A default added to some *other* resolver-side switch would be unheld;
-// that is bd gqlc-8z5ap, not a hole this file pretends to cover.
+// Temporal are declared in internal/resolver, and switches over them are
+// now scanned there as well as here (bd gqlc-8z5ap). The scan used to
+// stop at internal/codegen, so a `default` added to any *other*
+// resolver-side switch over either sum was unheld — and the sums are
+// exported, so nothing confined such a switch to this package.
+//
+// The two the widened scan finds are the sums' own String methods, and
+// both keep their default: the property `exhaustive` would give is
+// already held there by name, by
+// TestScalarStringAnswersForDeclaredKindsAlone in
+// internal/resolver/sumdefaults_internal_test.go and by
+// TestTemporalStringerAnswersForDeclaredKindsAlone in
+// internal/codegen/conformance, each of which fails when a declared
+// member loses its arm and starts rendering as the undeclared form. Both
+// therefore carry a tag naming that test.
+//
+// So ../resolver holds no still-guarded switch and appears in no sum's
+// dirs. What keeps the two tags honest is
+// TestDeclaredDefaultsStillGuardADefault; what keeps the root itself from
+// going quietly unscanned is scanRoots' own population check, and nothing
+// else. Measured: a walk truncated to each sum's first root leaves all
+// three tests green as soon as that check is weakened to speak per sum
+// instead of per root, because a file the walk never reaches carries no
+// tag the stray scan can report. Dropping a root from a list here is the
+// other failure and is caught otherwise — the file is still walked for
+// the sum that kept the root, so the orphaned tag turns up in
+// TestStrayDefaultOKTagsAreNotSilent.
 var guardedSums = []guardedSum{
-	{name: "ColumnKind", declRoot: ".", sentinel: "ColumnProperty", dirs: []string{"neo4j"}},
-	{name: "Scalar", declRoot: "../resolver", sentinel: "ScalarNull", dirs: []string{"age", "neo4j"}},
-	{name: "Temporal", declRoot: "../resolver", sentinel: "TemporalDate", dirs: []string{"age", "neo4j"}},
+	{name: "ColumnKind", declRoot: ".", scanRoots: []string{"."}, sentinel: "ColumnProperty", dirs: []string{"neo4j"}},
+	{name: "Scalar", declRoot: "../resolver", scanRoots: []string{".", "../resolver"}, sentinel: "ScalarNull", dirs: []string{"age", "neo4j"}},
+	{name: "Temporal", declRoot: "../resolver", scanRoots: []string{".", "../resolver"}, sentinel: "TemporalDate", dirs: []string{"age", "neo4j"}},
 }
 
 // sumSwitch is one switch whose case expressions name members of one
@@ -88,6 +117,7 @@ var guardedSums = []guardedSum{
 type sumSwitch struct {
 	sum        string
 	pos        string // path:line, as a reader would grep for it
+	root       string // the scanRoot the file was reached under
 	dir        string
 	hasDefault bool
 	reason     string
@@ -104,7 +134,7 @@ func TestGuardedSumDefaultsDeclareThemselves(t *testing.T) {
 			continue
 		}
 		require.NotEmpty(t, sw.reason,
-			"%s switches on %s and carries a `default`, so golangci-lint's exhaustive no longer checks it for a missing arm — .golangci.yml sets default-signifies-exhaustive — and a %s added later lands in that default silently, at run time, in generated code. If the default is wrong here, delete it and spell the arms out. If it is right, because a conservative answer suits every member this switch does not name, write `%s <why>` on the line directly above the switch",
+			"%s switches on %s and carries a `default`, so golangci-lint's exhaustive no longer checks it for a missing arm — .golangci.yml sets default-signifies-exhaustive — and a %s added later lands in that default silently, at run time — and for a switch under internal/codegen, in the generated output. If the default is wrong here, delete it and spell the arms out. If it is right, because a conservative answer suits every member this switch does not name, write `%s <why>` on the line directly above the switch",
 			sw.pos, sw.sum, sw.sum, defaultOKTag)
 	}
 }
@@ -135,8 +165,8 @@ func TestDeclaredDefaultsStillGuardADefault(t *testing.T) {
 				return sw.sum == sum.name && sw.dir == dir && !sw.hasDefault
 			})
 			require.True(t, found,
-				"the walk found no %s switch WITHOUT a `default` under internal/codegen/%s, so nothing in that package is being held to this rule for that sum. Either every such switch there has taken a default, which is the thing this fence exists to notice, or the walk stopped seeing the directory",
-				sum.name, dir)
+				"the walk found no %s switch WITHOUT a `default` in a directory named %q under this sum's scan roots (%s), so nothing there is being held to this rule for that sum. Either every such switch has taken a default, which is the thing this fence exists to notice, or the walk stopped seeing the directory",
+				sum.name, dir, strings.Join(sum.scanRoots, ", "))
 		}
 	}
 }
@@ -155,20 +185,49 @@ func TestStrayDefaultOKTagsAreNotSilent(t *testing.T) {
 	}
 }
 
-// scanSumSwitches walks every non-test Go file under internal/codegen
-// and returns the guarded-sum switches it found, plus the location of
-// every //gqlc:default-ok tag that sat above something else. One pass
-// returns both so the tag scan and the switch scan cannot disagree about
-// which tags were read.
+// scanTarget is one sum to look for in one file, and the scan root the
+// file was reached under. Attribution to a root is what lets the
+// population check below speak per root rather than per sum, so a root
+// that stopped yielding files fails instead of being covered by another.
+type scanTarget struct {
+	sum  string
+	root string
+}
+
+// scanSumSwitches walks every non-test Go file under the union of the
+// scan roots and returns the guarded-sum switches it found, plus the
+// location of every //gqlc:default-ok tag that sat above something else.
+// One pass returns both so the tag scan and the switch scan cannot
+// disagree about which tags were read.
+//
+// A file is only examined for the sums whose scanRoots reach it, so a sum
+// scanned narrowly does not acquire the wider sums' territory by sharing
+// this walk.
 func scanSumSwitches(t *testing.T) (switches []sumSwitch, stray []string) {
 	t.Helper()
 
 	members := make(map[string][]string, len(guardedSums))
+	targets := map[string][]scanTarget{}
+	var paths []string
 	for _, sum := range guardedSums {
 		members[sum.name] = sumMemberNames(t, sum)
-	}
 
-	for _, path := range codegenTreeGoFiles(t) {
+		require.NotEmpty(t, sum.scanRoots,
+			"guardedSums names %s but lists no scan root, so no file is examined for it and every row for that sum would pass on an empty set",
+			sum.name)
+
+		for _, root := range sum.scanRoots {
+			for _, path := range goFilesUnder(t, root) {
+				if targets[path] == nil {
+					paths = append(paths, path)
+				}
+				targets[path] = append(targets[path], scanTarget{sum: sum.name, root: root})
+			}
+		}
+	}
+	slices.Sort(paths)
+
+	for _, path := range paths {
 		fset := token.NewFileSet()
 		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 		require.NoError(t, err, "parsing %s", path)
@@ -197,14 +256,15 @@ func scanSumSwitches(t *testing.T) (switches []sumSwitch, stray []string) {
 				return true
 			}
 			line := fset.Position(sw.Pos()).Line
-			for _, sum := range guardedSums {
-				if !namesASumMember(sw, members[sum.name]) {
+			for _, target := range targets[path] {
+				if !namesASumMember(sw, members[target.sum]) {
 					continue
 				}
 				read[line] = true
 				switches = append(switches, sumSwitch{
-					sum:        sum.name,
+					sum:        target.sum,
 					pos:        path + ":" + strconv.Itoa(line),
+					root:       target.root,
 					dir:        dir,
 					hasDefault: carriesDefault(sw),
 					reason:     reasonFor[line],
@@ -220,14 +280,21 @@ func scanSumSwitches(t *testing.T) (switches []sumSwitch, stray []string) {
 		}
 	}
 
-	// Per sum, not on the total: one sum still switched on somewhere
-	// would satisfy a count and let another go unmeasured, which is the
-	// aggregate reading this fence exists to refuse.
+	// Per sum AND per root, not on the total and not on the sum alone:
+	// a sum still switched on in one of its roots would satisfy a count
+	// while another root went unread, and that root's switches would
+	// leave the fence with every remaining row still green. Which is the
+	// aggregate reading this file exists to refuse — and, before bd
+	// gqlc-8z5ap, exactly what ../resolver was.
 	for _, sum := range guardedSums {
-		require.True(t,
-			slices.ContainsFunc(switches, func(sw sumSwitch) bool { return sw.sum == sum.name }),
-			"the walk found no %s switch anywhere under internal/codegen, so every assertion reading this would pass over an empty set for that sum",
-			sum.name)
+		for _, root := range sum.scanRoots {
+			require.True(t,
+				slices.ContainsFunc(switches, func(sw sumSwitch) bool {
+					return sw.sum == sum.name && sw.root == root
+				}),
+				"the walk found no %s switch anywhere under %s, so every assertion reading this would pass over an empty set for that sum in that root. Either the switches there were deleted, or the walk stopped reaching the root — and if the sum genuinely is no longer switched on there, drop the root rather than leaving a check that passes on nothing",
+				sum.name, root)
+		}
 	}
 
 	slices.Sort(stray)
@@ -320,14 +387,6 @@ func carriesDefault(sw *ast.SwitchStmt) bool {
 		}
 	}
 	return false
-}
-
-// codegenTreeGoFiles returns every non-test Go file under this package's
-// directory, drivers included. It is the switch-scanning population, and
-// it is narrower than the set of directories constants are read from.
-func codegenTreeGoFiles(t *testing.T) []string {
-	t.Helper()
-	return goFilesUnder(t, ".")
 }
 
 // goFilesUnder returns every non-test Go file under root. Derived rather
