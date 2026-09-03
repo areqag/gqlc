@@ -1,0 +1,6 @@
+{
+  "package": "outofc6scopeinvalidutf8text",
+  "queryFiles": ["queries.cypher"],
+  "targets": ["neo4j-go-v5", "neo4j-go-v6", "apache-age-pgx-v5"],
+  "expectedError": "codegen.ErrOutOfC6Scope"
+}

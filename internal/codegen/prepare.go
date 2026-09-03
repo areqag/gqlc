@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
@@ -681,10 +682,10 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 			return fmt.Errorf("%w: query %q at position %d has cardinality %s but the query is a %s — annotate :exec or add a RETURN clause", ErrCardinalityShapeMismatch, q.Name, i, cardinalityAnnotation(q.Cardinality), shape)
 		}
 		// Both backends emit SourceText through a Go RAW string literal, so the
-		// two bytes such a literal cannot carry are refused here rather than
+		// bytes such a literal cannot carry are refused here rather than
 		// emitted. A backtick cannot appear in one at all; a carriage return
 		// can, and is DISCARDED from the literal's value (Go spec, "String
-		// literals"). The CR is the worse of the pair because the loss is
+		// literals"). The CR is the worst of the set because the loss is
 		// silent: generate exits 0 having written a constant whose value is not
 		// the text that was parsed and resolved. For AGE that forges the
 		// dollar-quote delimiter, dollarTag having scanned the bytes before
@@ -696,11 +697,35 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 		// bufio.ScanLines, which takes a CRLF's CR before SourceText exists,
 		// and a lone-CR file is one line the annotation grammar already
 		// rejects.
+		//
+		// The last two are not carried differently but make the emitted file
+		// unparseable: Go source must be valid UTF-8 and, by a documented
+		// implementation restriction, may not hold a NUL. So nothing ships
+		// wrong and these are a diagnostic remedy rather than a correctness
+		// one — without them the user is handed a go/format failure citing a
+		// line of a GENERATED file, naming neither the query nor the byte
+		// (bd gqlc-32n53).
+		//
+		// They are refused HERE, and not further upstream where a refusal
+		// could name the file and line, because neither byte is a defect in
+		// the query — only in its emission. Measured 2026-09-03 over
+		// cmd/gqlc: the openCypher lexer already refuses both where they
+		// stand in a token slot, and what survives to this point is the
+		// positions it has no reason to scan — inside a line comment, and
+		// inside a string literal, where a NUL is a value the server itself
+		// accepts. Refusing them in the grammar would refuse a query neo4j
+		// runs.
 		if strings.ContainsRune(q.SourceText, '`') {
 			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC6Scope, q.Name, i)
 		}
 		if strings.ContainsRune(q.SourceText, '\r') {
 			return fmt.Errorf("%w: query %q at position %d has a carriage return in its source text", ErrOutOfC6Scope, q.Name, i)
+		}
+		if strings.ContainsRune(q.SourceText, '\x00') {
+			return fmt.Errorf("%w: query %q at position %d has a NUL in its source text", ErrOutOfC6Scope, q.Name, i)
+		}
+		if !utf8.ValidString(q.SourceText) {
+			return fmt.Errorf("%w: query %q at position %d is not valid UTF-8", ErrOutOfC6Scope, q.Name, i)
 		}
 		for ci, col := range q.Validated.Columns {
 			// Shape check first (spec §4.3, §6.4): count(*), arithmetic
