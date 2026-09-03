@@ -568,6 +568,17 @@ func duplicateSumName(sums []guardedSum) (name, first, second string, ok bool) {
 // The duplicated row is the real collision rather than an invented one — the
 // two EntityKinds, with the declRoots and sentinels each would actually carry —
 // so a rename that made the guard pointless makes this test red and says so.
+//
+// WHAT A GREEN ROW HERE DOES NOT VOUCH FOR: that scanSumSwitches still consults
+// the detector. It tests duplicateSumName directly, so it is blind to the one
+// line that wires it in. Measured 2026-09-03: deleting
+// `requireDistinctSumNames(t, guardedSums)` from scanSumSwitches leaves this
+// whole package green, and a duplicate row then reverts to being reported as a
+// missing switch. That is worth naming rather than fencing, because the fence
+// would be a test asserting on this file's own AST and the loss is one grade of
+// diagnosis rather than a defect reaching the emitted output — but it is not
+// the ordinary "a test can be deleted", since the green row above outlives the
+// wiring and reads as if the check were live.
 func TestGuardedSumNamesMustBeDistinct(t *testing.T) {
 	graphKind := guardedSum{name: "EntityKind", declRoot: "../graph", scanRoots: []string{"../graph"}, sentinel: "Node"}
 	codegenKind := guardedSum{name: "EntityKind", declRoot: ".", scanRoots: []string{"."}, sentinel: "EntityNode"}
