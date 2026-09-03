@@ -9,6 +9,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/codegen/typescan"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -334,7 +335,7 @@ func TestTemporalProjectionIsRefusedNamingTheKind(t *testing.T) {
 				Schema: schemaWithPayload(graph.TypeString),
 				Queries: []codegen.NamedQuery{{
 					Name:        "When",
-					Cardinality: codegen.CardinalityMany,
+					Cardinality: queryfile.CardinalityMany,
 					SourceFile:  "q.cypher",
 					SourceText:  "MATCH (b:Blob) RETURN date() AS t\n",
 					Validated: resolver.ValidatedQuery{
@@ -386,7 +387,7 @@ func TestTemporalProjectionNamesThisBackend(t *testing.T) {
 		Schema: schemaWithPayload(graph.TypeString),
 		Queries: []codegen.NamedQuery{{
 			Name:        "When",
-			Cardinality: codegen.CardinalityMany,
+			Cardinality: queryfile.CardinalityMany,
 			SourceFile:  "q.cypher",
 			SourceText:  "MATCH (b:Blob) RETURN b.span AS t\n",
 			Validated: resolver.ValidatedQuery{

@@ -16,6 +16,7 @@ import (
 	"github.com/areqag/gqlc/internal/cli/backends"
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -589,14 +590,14 @@ func txProbeInput() codegen.Input {
 		Queries: []codegen.NamedQuery{
 			{
 				Name:        "GetPerson",
-				Cardinality: codegen.CardinalityOne,
+				Cardinality: queryfile.CardinalityOne,
 				SourceFile:  "txprobe.cypher",
 				SourceText:  "MATCH (n:Person) RETURN n",
 				Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{person}},
 			},
 			{
 				Name:        "TouchPerson",
-				Cardinality: codegen.CardinalityExec,
+				Cardinality: queryfile.CardinalityExec,
 				SourceFile:  "txprobe.cypher",
 				SourceText:  "MATCH (n:Person) SET n.seen = true",
 				Validated:   resolver.ValidatedQuery{},

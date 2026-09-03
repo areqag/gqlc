@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -642,13 +643,13 @@ func prepareEntityFields(entityName string, props map[string]schema.Property, tm
 // ":exec" annotation text — the caller-visible form Phase A's fail
 // messages use so the error line reads back the exact string the author
 // typed on the // name: line.
-func cardinalityAnnotation(c Cardinality) string {
+func cardinalityAnnotation(c queryfile.Cardinality) string {
 	switch c {
-	case CardinalityOne:
+	case queryfile.CardinalityOne:
 		return ":one"
-	case CardinalityMany:
+	case queryfile.CardinalityMany:
 		return ":many"
-	case CardinalityExec:
+	case queryfile.CardinalityExec:
 		return ":exec"
 	}
 	return "<invalid>"
@@ -671,17 +672,17 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 		if _, reserved := reservedIdentifiers[q.Name]; reserved {
 			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
 		}
-		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany && q.Cardinality != CardinalityExec {
+		if q.Cardinality != queryfile.CardinalityOne && q.Cardinality != queryfile.CardinalityMany && q.Cardinality != queryfile.CardinalityExec {
 			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 		}
 		// Cardinality × shape gate (spec §4.9). Runs before the column-type
 		// sweep so a fixture combining :exec-on-projection with an
 		// unrepresentable-width column fires ErrExecOnProjection first —
 		// the caller fixes the cardinality axis before revisiting widths.
-		if q.Cardinality == CardinalityExec && len(q.Validated.Columns) > 0 {
+		if q.Cardinality == queryfile.CardinalityExec && len(q.Validated.Columns) > 0 {
 			return fmt.Errorf("%w: query %q at position %d has cardinality :exec but projects %d column(s) (first column %q) — drop :exec or drop RETURN", ErrExecOnProjection, q.Name, i, len(q.Validated.Columns), q.Validated.Columns[0].Name)
 		}
-		if (q.Cardinality == CardinalityOne || q.Cardinality == CardinalityMany) && len(q.Validated.Columns) == 0 {
+		if (q.Cardinality == queryfile.CardinalityOne || q.Cardinality == queryfile.CardinalityMany) && len(q.Validated.Columns) == 0 {
 			shape := "zero-column read"
 			if q.Validated.Statement == resolver.StatementWrite {
 				shape = "zero-column write"

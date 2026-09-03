@@ -16,6 +16,7 @@ import (
 	"github.com/areqag/gqlc/internal/cli/backends"
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -515,7 +516,7 @@ func ghostEdge() schema.EdgeKey {
 func probeQuery(col resolver.Column) codegen.NamedQuery {
 	return codegen.NamedQuery{
 		Name:        "Fetch",
-		Cardinality: codegen.CardinalityMany,
+		Cardinality: queryfile.CardinalityMany,
 		SourceFile:  "probe.cypher",
 		SourceText:  "MATCH (n) RETURN n",
 		Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{col}},
@@ -585,7 +586,7 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 				Schema: probeSchema(),
 				Queries: []codegen.NamedQuery{{
 					Name:        "Fetch",
-					Cardinality: codegen.Cardinality(7),
+					Cardinality: queryfile.Cardinality(7),
 					SourceFile:  "probe.cypher",
 					SourceText:  "MATCH (n) RETURN n",
 				}},

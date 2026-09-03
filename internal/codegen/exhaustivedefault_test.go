@@ -146,19 +146,11 @@ var guardedSums = []guardedSum{
 	// a file reached under root "." by the base of its parent, and for a
 	// file directly in the root that is ".".
 	//
-	// For Cardinality, read the failure message below with one exception in
-	// mind: `exhaustive` does NOT check the switches this fence holds under
-	// "." — internal/codegen re-exports the members as its own constants
-	// (input.go: `type Cardinality = queryfile.Cardinality` and three
-	// `CardinalityX = queryfile.CardinalityX`), and measured 2026-09-03 a
-	// member added to queryfile reds only queryfile's own switch, even with
-	// the member re-exported here too and with golangci-lint's issue caps
-	// lifted; deleting a whole `case` arm from cardinalityAnnotation left
-	// the linter reporting zero issues. So under "." the property this fence
-	// asks for is bought by the compiler and by the tests, not by the
-	// linter, and this fence is what asks for it at all. Under ../queryfile
-	// the message is accurate. Blast radius measured: Cardinality is the
-	// only enum internal/codegen re-exports (bd gqlc-51l6m).
+	// The re-export that blinded `exhaustive` under "." — internal/codegen's
+	// `type Cardinality = queryfile.Cardinality` and its three constant
+	// mirrors — was deleted (bd gqlc-ptz4t), so the failure message below
+	// now reads true under both roots; TestGuardedSumsAreNotAliased refuses
+	// its return.
 	{name: "Cardinality", declRoot: "../queryfile", scanRoots: []string{".", "../queryfile"}, sentinel: "CardinalityExec", dirs: []string{".", "queryfile"}},
 	{name: "TypeToken", declRoot: "../procsig", scanRoots: []string{"../procsig", "../query", "../resolver"}, sentinel: "TokenNumber", dirs: []string{"procsig", "cypher", "resolver"}},
 	// The five below arrive together (bd gqlc-5225b, designed on gqlc-qr09l).
@@ -249,6 +241,72 @@ func TestStrayDefaultOKTagsAreNotSilent(t *testing.T) {
 		require.Fail(t, "inert //gqlc:default-ok tag",
 			"%s carries `%s` but no switch over a guarded sum begins on the line below it. The fence recognises such a switch by a case expression naming one of the sum's constants, so a tag above anything else is read by nothing",
 			loc, defaultOKTag)
+	}
+}
+
+// TestGuardedSumsAreNotAliased refuses a type alias to a guarded sum.
+//
+// `exhaustive` v0.12.0 resolves a switch's tag type by type-switching on
+// *types.Named with no *types.Alias arm and no types.Unalias call, and
+// go/types materialises aliases by default since Go 1.23. So a switch
+// whose tag type is spelled through an alias is skipped WHOLESALE — zero
+// issues, not every-member-missing — and every row in guardedSums above
+// keeps passing while the linter half of the property is gone. That is
+// what internal/codegen's `type Cardinality = queryfile.Cardinality` did
+// until bd gqlc-ptz4t deleted it; measured then, deleting a whole case
+// arm left the linter reporting nothing.
+//
+// The bound: this sees alias DECLARATIONS inside the scan roots. An alias
+// declared outside them and used inside is beyond a per-file AST scan,
+// and so is one that renames through an intermediate.
+func TestGuardedSumsAreNotAliased(t *testing.T) {
+	sums := map[string]bool{}
+	roots := map[string]bool{}
+	for _, sum := range guardedSums {
+		sums[sum.name] = true
+		for _, root := range sum.scanRoots {
+			roots[root] = true
+		}
+	}
+
+	for root := range roots {
+		for _, path := range goFilesUnder(t, root) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, path, nil, 0)
+			require.NoError(t, err, "parsing %s", path)
+
+			for _, decl := range file.Decls {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok || gen.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range gen.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok || ts.Assign == token.NoPos {
+						continue
+					}
+					if name, ok := aliasedTypeName(ts.Type); ok && sums[name] {
+						require.Fail(t, "alias to a guarded sum",
+							"%s declares `%s` as a type alias of the guarded sum %s, and `exhaustive` skips a switch whose tag type is spelled through an alias — it reads *types.Alias, matches no case, and reports nothing at all. Every %s row above would keep passing over a switch the linter no longer checks. Name the sum through its declaring package instead (bd gqlc-ptz4t)",
+							fset.Position(ts.Pos()), ts.Name.Name, name, name)
+					}
+				}
+			}
+		}
+	}
+}
+
+// aliasedTypeName returns the name an alias RHS refers to, for the two
+// spellings a guarded sum can take: bare within its declaring package,
+// qualified from outside it.
+func aliasedTypeName(expr ast.Expr) (string, bool) {
+	switch rhs := expr.(type) {
+	case *ast.Ident:
+		return rhs.Name, true
+	case *ast.SelectorExpr:
+		return rhs.Sel.Name, true
+	default:
+		return "", false
 	}
 }
 
