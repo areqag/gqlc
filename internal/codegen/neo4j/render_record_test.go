@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
@@ -359,9 +360,13 @@ func TestARecordPropertyGetsASiteNamedAlias(t *testing.T) {
 
 	src := string(neo4j.RenderModels("models", []codegen.Entity{e}, nil))
 
-	require.Contains(t, src, "type PlaceAddr = "+goType+"\n",
+	// assert and not require, for the reason the age twin records: under
+	// require the Contains failure aborts the NotContains arm, so a
+	// mutation screen of the alias `=` can never observe that arm and
+	// would carry it as screened having never exercised it.
+	assert.Contains(t, src, "type PlaceAddr = "+goType+"\n",
 		"the record property has no site-named alias, so a caller naming its type retypes the struct")
-	require.NotContains(t, src, "type PlaceAddr struct",
+	assert.NotContains(t, src, "type PlaceAddr struct",
 		"the site name is a DEFINED type, so it is not assignable to the anonymous spelling "+
 			"the Row and Params structs carry")
 }

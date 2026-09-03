@@ -3,6 +3,7 @@ package age_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
@@ -99,11 +100,18 @@ func TestARecordPropertyGetsASiteNamedAlias(t *testing.T) {
 	h.ForEntities([]age.WiredEntity{e})
 	src := string(age.RenderModels("models", []age.WiredEntity{e}, h))
 
-	require.Contains(t, src, "type PlaceAddr = "+goType+"\n",
+	// assert and not require, so that each of the three reports on its own
+	// run. They are three independent claims about one emitted text, and
+	// under require the first failure aborts the other two — which is not
+	// a reporting nicety here but a hole in the guard: a mutation screen
+	// of the alias `=` kills this test through the Contains arm and then
+	// cannot observe the NotContains arm at all, so that arm would be
+	// carried as screened when nothing had ever exercised it.
+	assert.Contains(t, src, "type PlaceAddr = "+goType+"\n",
 		"the record property has no site-named alias, so a caller naming its type retypes the struct")
-	require.NotContains(t, src, "type PlaceAddr struct",
+	assert.NotContains(t, src, "type PlaceAddr struct",
 		"the site name is a DEFINED type, so it is not assignable to the anonymous spelling "+
 			"the Row and Params structs carry and the record's own helpers refuse it")
-	require.NotContains(t, src, "PlaceExtra",
+	assert.NotContains(t, src, "PlaceExtra",
 		"RECORD<ANY> was given a site alias, naming a carrier RecordEncodings does not enrol")
 }
