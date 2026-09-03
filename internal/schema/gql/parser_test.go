@@ -1116,6 +1116,18 @@ var invalidFixtures = map[string]error{
 	// cannot check and which the manifest records being got wrong three times.
 	"endpoint_filler_properties.gql": gql.ErrEndpointFillerHasProperties,
 	"multi_label_edge.gql":           gql.ErrMultiLabelEdgeType,
+
+	// The four identifier declines, in invalid/ rather than the corpus for the
+	// reason argued above: each is a judgment about a SPELLING — an @ prefix, an
+	// empty decode, an escape denoting no character, a label carrying the key
+	// separator — and none of them is a construct that becomes supported later
+	// and takes its fixture with it. gqlc-yd4ba could make the ampersand one
+	// representable, and its fixture would then move to a valid one in the same
+	// commit; that is a rewrite of this row, not an orphan left behind.
+	"no_escape_identifier.gql": gql.ErrNoEscapeIdentifier,
+	"empty_identifier.gql":     gql.ErrEmptyIdentifier,
+	"identifier_escape.gql":    gql.ErrIdentifierEscape,
+	"ampersand_in_label.gql":   gql.ErrAmpersandInLabel,
 }
 
 // allSentinels is the canonical list of every Parse sentinel — the single source
@@ -1159,6 +1171,10 @@ var allSentinels = map[string]error{
 	"ErrPathValueType":               gql.ErrPathValueType,
 	"ErrReferenceValueType":          gql.ErrReferenceValueType,
 	"ErrImmaterialValueType":         gql.ErrImmaterialValueType,
+	"ErrNoEscapeIdentifier":          gql.ErrNoEscapeIdentifier,
+	"ErrEmptyIdentifier":             gql.ErrEmptyIdentifier,
+	"ErrIdentifierEscape":            gql.ErrIdentifierEscape,
+	"ErrAmpersandInLabel":            gql.ErrAmpersandInLabel,
 }
 
 // sentinelsWithoutAFile are the package's error values allSentinels deliberately

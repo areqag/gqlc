@@ -556,16 +556,23 @@ func TestRecordNotNullBindsWhereItIsSpelled(t *testing.T) {
 // TestRecordDelimitedFieldNameQuoted is the forgery guard at the layer that can
 // actually be forged. fieldName is an identifier (GQL.g4:2891) and identifier
 // admits a delimited one, so a legal field name may contain the encoding's own
-// separators. The name is carried verbatim, delimiters included, exactly as
-// propertyName is (propertytype.go:25) — undelimiting it here and nowhere else
-// would be an inconsistency invented by this bead.
+// separators, and RecordOf's quoting is what keeps a,b>c one field rather than
+// three.
+//
+// The pin is the DECODED name, and that is the whole strength of the row. It
+// used to be "`a,b>c`" with the argument that carrying the delimiters was
+// consistency with propertyName — true then, and the consistency it demanded is
+// what gqlc-tzu9r supplied by decoding at every identifier position instead. It
+// also made this row weaker than it read: while the backticks travelled with the
+// name they were themselves separator-free padding, so the two commas were never
+// the only thing the encoding had to survive. Now they are.
 func TestRecordDelimitedFieldNameQuoted(t *testing.T) {
 	got, err := parseFirstProperty(t, "RECORD { `a,b>c` :: INT, z :: STRING }")
 	require.NoError(t, err)
 
 	fields := got.Type.Fields()
 	require.Len(t, fields, 2, "the separators inside the delimited name must not split it")
-	require.Equal(t, "`a,b>c`", fields[0].Name)
+	require.Equal(t, "a,b>c", fields[0].Name, "the delimiters are syntax, and only the name they delimit is the field's")
 	require.Equal(t, graph.TypeInt, fields[0].Type)
 	require.Equal(t, "z", fields[1].Name)
 }

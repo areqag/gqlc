@@ -1,6 +1,9 @@
 package gql
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
@@ -33,21 +36,45 @@ type rawNode struct {
 
 // labelSet reads the labels off a label set phrase: either a single LABEL form
 // (`:Person`) or an ampersand-joined set (`:Person&Employee`).
-func labelSet(p gen.ILabelSetPhraseContext) graph.LabelSet {
+func labelSet(p gen.ILabelSetPhraseContext) (graph.LabelSet, error) {
 	if p == nil {
-		return nil
+		return nil, nil
 	}
-	if name := p.LabelName(); name != nil {
-		return graph.LabelSet{name.GetText()}
+	if n := p.LabelName(); n != nil {
+		label, err := labelName(n)
+		if err != nil {
+			return nil, err
+		}
+		return graph.LabelSet{label}, nil
 	}
 	spec := p.LabelSetSpecification()
 	if spec == nil {
-		return nil
+		return nil, nil
 	}
 	names := spec.AllLabelName()
 	labels := make(graph.LabelSet, len(names))
 	for i, n := range names {
-		labels[i] = n.GetText()
+		label, err := labelName(n)
+		if err != nil {
+			return nil, err
+		}
+		labels[i] = label
 	}
-	return labels
+	return labels, nil
+}
+
+// labelName reads one label as the name it denotes, refusing a decoded name that
+// carries the separator graph.LabelSet.Key joins on. See ErrAmpersandInLabel for
+// why the refusal is here — the label is the last place the two label sets are
+// still distinguishable — and bd gqlc-yd4ba for making such a label
+// representable instead.
+func labelName(n gen.ILabelNameContext) (string, error) {
+	label, err := identifierName(n.Identifier())
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(label, "&") {
+		return "", fmt.Errorf("%w: %q", ErrAmpersandInLabel, label)
+	}
+	return label, nil
 }

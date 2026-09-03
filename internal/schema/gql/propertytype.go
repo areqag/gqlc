@@ -17,13 +17,17 @@ import (
 // grammar-valid value type outside the families this model maps (ADR 0002),
 // or one of that error's five family leaves where ADR 0019 has named a reason.
 func property(ctx gen.IPropertyTypeContext, ts *antlr.CommonTokenStream) (schema.Property, error) {
+	name, err := identifierName(ctx.PropertyName().Identifier())
+	if err != nil {
+		return schema.Property{}, err
+	}
 	vt := ctx.PropertyValueType().ValueType()
 	pt, notNull, err := resolveValueType(vt, ts)
 	if err != nil {
 		return schema.Property{}, err
 	}
 	return schema.Property{
-		Name:     ctx.PropertyName().GetText(),
+		Name:     name,
 		Type:     pt,
 		Nullable: !notNull,
 	}, nil
@@ -104,10 +108,20 @@ func resolveRecordType(rt gen.IRecordTypeContext, ts *antlr.CommonTokenStream) (
 	fields := make([]graph.RecordField, 0, len(declared))
 	seen := make(map[string]bool, len(declared))
 	for _, ft := range declared {
-		// Verbatim, delimiters and all, exactly as property() takes a property
-		// name (:25). RecordOf quotes it for the encoding; the model keeps the
-		// name the author wrote.
-		name := ft.FieldName().GetText()
+		// Decoded, exactly as property() takes a property name. The decode is
+		// upstream of the seen map deliberately: the duplicate test is over names,
+		// and `city` and city are one name, so reading the source bytes here
+		// admitted the pair as two fields and RecordOf encoded both.
+		//
+		// RecordOf then quotes the decoded name for the encoding. That is the
+		// second, independent quoting layer (graph/propertytype.go
+		// quoteFieldName), and it is what lets a name that legitimately contains a
+		// comma or an angle bracket survive the encoding — see
+		// TestRecordDelimitedFieldNameQuoted.
+		name, err := identifierName(ft.FieldName().Identifier())
+		if err != nil {
+			return "", false, err
+		}
 		if seen[name] {
 			return "", false, fmt.Errorf("%w: %q", ErrDuplicateFieldName, name)
 		}

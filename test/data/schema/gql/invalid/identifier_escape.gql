@@ -1,0 +1,7 @@
+-- \uD800 is four hex digits, so ESCAPED_UNICODE4_DIGIT_VALUE matches it and the
+-- lexer is content. It denotes an unpaired surrogate, which is no character:
+-- Go would write it out as U+FFFD, a name shared with every other unreadable
+-- escape and equal to none of them.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:`Person\uD800` { id :: INT })
+}

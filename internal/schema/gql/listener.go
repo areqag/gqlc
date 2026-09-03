@@ -122,7 +122,12 @@ func (l *listener) EnterCreateGraphTypeStatement(c *gen.CreateGraphTypeStatement
 	// not one. ADR 0018 decides that; it also records that COPY OF (gqlc-h9n.1)
 	// references a graph type *by* catalogue path, at which point /a/b/G and
 	// /c/d/G stop being distinguishable here.
-	l.raw.name = c.CatalogGraphTypeParentAndName().GraphTypeName().Identifier().GetText()
+	name, err := identifierName(c.CatalogGraphTypeParentAndName().GraphTypeName().Identifier())
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	l.raw.name = name
 }
 
 // unsupportedSource names which rejected graphTypeSource alternative was written.
@@ -158,7 +163,12 @@ func (l *listener) EnterNodeTypePattern(c *gen.NodeTypePatternContext) {
 	}
 	n := rawNode{}
 	if name := c.NodeTypeName(); name != nil {
-		n.name = name.Identifier().GetText()
+		decoded, err := identifierName(name.Identifier())
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		n.name = decoded
 	}
 	// The alias is optional: `(p :Person)` binds `p`, `(:Person)` binds nothing.
 	// A node without an alias is fully supported — it just can't be referenced by
@@ -194,7 +204,12 @@ func (l *listener) EnterNodeTypePhrase(c *gen.NodeTypePhraseContext) {
 
 	n := rawNode{}
 	if name := filler.NodeTypeName(); name != nil {
-		n.name = name.Identifier().GetText()
+		decoded, err := identifierName(name.Identifier())
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		n.name = decoded
 	}
 	// As in the pattern form the alias is optional. A node type without one is
 	// still fully supported; it just leaves a CONNECTING endpoint nothing to name
@@ -256,7 +271,12 @@ func (l *listener) EnterEdgeTypePhrase(c *gen.EdgeTypePhraseContext) {
 	e := rawEdge{}
 	filler := c.EdgeTypePhraseFiller()
 	if name := filler.EdgeTypeName(); name != nil {
-		e.name = name.Identifier().GetText()
+		decoded, err := identifierName(name.Identifier())
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		e.name = decoded
 	}
 	// Both directed alternatives name their ends by role, so `(b <- a)` needs no
 	// swap here — the grammar already reports a as the source.
@@ -356,7 +376,12 @@ func (l *listener) EnterEdgeTypePattern(c *gen.EdgeTypePatternContext) {
 
 	e := rawEdge{}
 	if name := c.EdgeTypeName(); name != nil {
-		e.name = name.Identifier().GetText()
+		decoded, err := identifierName(name.Identifier())
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		e.name = decoded
 	}
 
 	// The edge type filler is the bracketed arc content `[:LABEL { props }]`: it
@@ -439,7 +464,11 @@ func (l *listener) nodeContent(f gen.INodeTypeFillerContext) (fillerContent, err
 	var fc fillerContent
 	if kls := f.NodeTypeKeyLabelSet(); kls != nil {
 		fc.hasKeyLabelSet = true
-		fc.keyLabels = labelSet(kls.LabelSetPhrase())
+		labels, err := labelSet(kls.LabelSetPhrase())
+		if err != nil {
+			return fillerContent{}, err
+		}
+		fc.keyLabels = labels
 	}
 
 	ic := f.NodeTypeImpliedContent()
@@ -447,7 +476,11 @@ func (l *listener) nodeContent(f gen.INodeTypeFillerContext) (fillerContent, err
 		return fc, nil
 	}
 	if ls := ic.NodeTypeLabelSet(); ls != nil {
-		fc.impliedLabels = labelSet(ls.LabelSetPhrase())
+		labels, err := labelSet(ls.LabelSetPhrase())
+		if err != nil {
+			return fillerContent{}, err
+		}
+		fc.impliedLabels = labels
 	}
 	var spec gen.IPropertyTypesSpecificationContext
 	if pts := ic.NodeTypePropertyTypes(); pts != nil {
@@ -472,7 +505,11 @@ func (l *listener) edgeContent(f gen.IEdgeTypeFillerContext) (fillerContent, err
 	var fc fillerContent
 	if kls := f.EdgeTypeKeyLabelSet(); kls != nil {
 		fc.hasKeyLabelSet = true
-		fc.keyLabels = labelSet(kls.LabelSetPhrase())
+		labels, err := labelSet(kls.LabelSetPhrase())
+		if err != nil {
+			return fillerContent{}, err
+		}
+		fc.keyLabels = labels
 	}
 
 	ic := f.EdgeTypeImpliedContent()
@@ -480,7 +517,11 @@ func (l *listener) edgeContent(f gen.IEdgeTypeFillerContext) (fillerContent, err
 		return fc, nil
 	}
 	if ls := ic.EdgeTypeLabelSet(); ls != nil {
-		fc.impliedLabels = labelSet(ls.LabelSetPhrase())
+		labels, err := labelSet(ls.LabelSetPhrase())
+		if err != nil {
+			return fillerContent{}, err
+		}
+		fc.impliedLabels = labels
 	}
 	var spec gen.IPropertyTypesSpecificationContext
 	if pts := ic.EdgeTypePropertyTypes(); pts != nil {

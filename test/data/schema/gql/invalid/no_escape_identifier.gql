@@ -1,0 +1,7 @@
+-- @ before a delimited identifier is <no escape> (GQL.g4:3129-3131), which
+-- suppresses escape processing. What the contents then denote is stated only in
+-- ISO 39075 prose gqlc has not bought, so the name is refused rather than
+-- guessed at.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:@"Person" { id :: INT })
+}
