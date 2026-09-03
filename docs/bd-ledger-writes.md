@@ -6,10 +6,16 @@ its source is not in this repository and none of this can be fixed by patching
 it. What follows is the write-side contract as measured against the deployed
 binary.
 
-All rows below were taken first-party on 2026-08-24 against **bd 1.0.4
-(`ce242a879`)**, in throwaway `bd init` workspaces — never against the live
-ledger. Binary unchanged on this host since 2026-05-09, so it is the same binary
-every seat has been running. bd `gqlc-o6kp`.
+Except where a section says otherwise, the rows below were taken first-party on
+2026-08-24 against **bd 1.0.4 (`ce242a879`)**, in throwaway `bd init` workspaces
+— never against the live ledger. Binary unchanged on this host since 2026-05-09,
+so it is the same binary every seat has been running. bd `gqlc-o6kp`.
+
+The one exception is the record-size ceiling, measured 2026-09-03 against the
+same binary but on a **probe bead in the live ledger**, created and deleted for
+it. It is called out here rather than left to the section because "never against
+the live ledger" is the kind of blanket assurance that should not quietly stop
+being true.
 
 ## The confirmation line means "accepted", not "changed"
 
@@ -96,6 +102,74 @@ exits 0**. Order does not matter — the bad id first or second gives the same
 result. Name one bead per `bd update` whose success you intend to check by exit
 status, or check each bead's state afterwards rather than the command's.
 
+## A bead that grows past ~65535 bytes stops accepting writes, permanently
+
+Measured 2026-09-03 against the same bd 1.0.4, on a throwaway bead created and
+deleted for it (bd `gqlc-a8j2i`). The live casualty, `gqlc-jffyz`, was not
+written to: reproducing the state on a probe costs nothing and testing it on a
+bead holding real handoff notes is the damage itself.
+
+Every write records an event, and the events row carries **the whole bead
+serialised as JSON, in a column named `old_value`** — the pre-image, not a
+delta. The column is a MySQL/Dolt `TEXT`, so once a bead's serialised record
+passes that type's 65535-byte ceiling the event can no longer be written and
+`bd update` fails:
+
+    Error updating <id>: failed to record event: record event in events:
+    Error 1105: string '{"id":"<id>","title":...}' is too large for column 'old_value'
+
+Three consequences, each measured rather than reasoned from the message:
+
+- **The size of the write is irrelevant.** Five bytes of note are refused for
+  the same reason fifty thousand are: what is too large is the pre-image, which
+  is the same either way.
+- **Shrinking does not recover it.** `bd update --notes` with a short body is
+  refused too. It cannot be otherwise: the event must record the oversized *old*
+  value before the smaller new one exists. There is no path back under the
+  ceiling through `bd update`.
+- **`bd close` still works** — it does not go through that path — but it is a
+  one-way door. A closed oversized bead cannot be reopened, and neither
+  `--status`, `--priority` nor `--append-notes` will move afterwards. So the
+  bead is closable but never again editable.
+
+**Reads are entirely unaffected**, which is why nothing shows it. `bd show`,
+`bd list` and `bd ready` all answer normally and the bead looks healthy on every
+board. The only symptom is on the stderr of a write, which is the failure mode
+the rest of this document is about.
+
+### Measuring how close a bead is
+
+The payload's field set, read out of the error text rather than guessed:
+
+    id, title, description, notes, status, priority,
+    issue_type, owner, created_at, created_by, updated_at
+
+    bd list --all --json -n 0 | jq -r '.[]
+      | [({id,title,description,notes,status,priority,
+           issue_type,owner,created_at,created_by,updated_at}|@json|length), .id]
+      | @tsv' | sort -rn | head
+
+**Two limits on that number.** The probe carried no assignee, labels or
+external_ref, so if bd omits empty fields the payload for a bead that *has* them
+is larger and this query is a lower bound. And the 65535 constant is inferred
+from a bracket, not read out of the engine: acceptance was observed at a
+computed payload of roughly 65500 and refusal at 65545, which brackets it.
+
+Do not use `bd show --json` for this. It populates `dependencies` and
+`dependents`, which the payload does not carry, and reports 91331 bytes for the
+bead `bd list` reports as 66067.
+
+**Ledger-wide on 2026-09-03: 1533 beads, one over the line.** The next largest
+was 42151 — no bead sits in the 45k–65k approach. This is not a fleet-wide
+cliff. But the distribution only grows in one direction, because notes append
+and nothing prunes them, so the beads that approach the ceiling are the ones
+worked over many sessions — which is exactly the population whose notes hold the
+handoff. It fires first where it costs most.
+
+`--append-notes` is still the right flag (a bare `--notes` replaces, silently
+losing the trail). The tension is real and unresolved here: the discipline that
+makes notes valuable is the one that eventually freezes the bead.
+
 ## Rules for a scripted write
 
 1. **Check the exit status.** It is load-bearing on every rejection path.
@@ -105,6 +179,9 @@ status, or check each bead's state afterwards rather than the command's.
 4. **Read back the field that matters**, and for routability read it back with
    `bd ready` — `bd show` will display a bead no dispatch pass can reach.
 5. **Never treat `✓` as a write.**
+6. **On a long-lived bead, do not assume `--append-notes` will keep working.**
+   Past the record-size ceiling every update is refused for good; see the
+   section above for how to measure the headroom.
 
 ## What is gated, and what is not
 
