@@ -936,9 +936,19 @@ func submoduleRefusals(path string, dumped justDump) []string {
 //
 // It is a function rather than a few lines in the test above because the
 // truncation at Priors is what makes the two readings agree about `&&`, and the
-// justfile in this repo does not exercise it: measured on the 29 recipes at this
-// commit, every one has Priors equal to its whole dependency list, so a run that
-// ignored Priors would read the same answer.
+// justfile in this repo does not exercise it: every recipe has Priors equal to
+// its whole dependency list, so a run that ignored Priors would read the same
+// answer. That is a property of the justfile as it stands rather than of just,
+// and it is spelled without a count on purpose — the recipe population moves,
+// and a number here rots into a claim nobody re-took. Derive it:
+//
+//	just --dump --dump-format json |
+//	  jq '[.recipes[] | select(.priors != (.dependencies | length))] | length'
+//
+// must answer 0. It also answers 0 when no recipe declares a dependency at all,
+// so the reading is only worth something alongside
+// `[.recipes[] | select((.dependencies | length) > 0)] | length`, which says how
+// many recipes put the first query to any work.
 func priorDependencies(dumped justDump) (map[string][]string, error) {
 	declared := make(map[string][]string, len(dumped.Recipes))
 	for name, r := range dumped.Recipes {
@@ -969,17 +979,25 @@ func priorDependencies(dumped justDump) (map[string][]string, error) {
 // on this repo's justfile the mention does not rest on it: every recipe whose
 // body names modscopePkg names it inside a single body line, and no adjacent
 // pair of lines runs together into a new one, so joining with "" selects the
-// same four recipes. That is a fact about this justfile, not about the join.
+// same recipes. That is a fact about this justfile, not about the join.
 //
-// Two more measurements on this repo's justfile at just 1.57.0, which bear on a
-// body comparison in opposite ways. The first is a further difference: the dump
-// drops each body line's leading indentation, which this reader keeps, and that
-// alone makes the text of all 29 recipes here differ, none of them having an
-// empty body. The second is a sameness worth stating because a comment is a
+// Two more measurements on this repo's justfile, which bear on a body
+// comparison in opposite ways. Both rest partly on the dump's shape, which is
+// an answer just gives rather than a fact about the file, and the just giving
+// it is whichever is on PATH — pinned for CI by
+// .github/actions/setup-just and named nowhere for a local run (bd gqlc-rnyit).
+//
+// The first is a further difference: the dump drops each body line's leading
+// indentation, which this reader keeps, and that alone makes every recipe's
+// text here differ, no recipe having an empty body.
+// One bodyless recipe falsifies that, and `jq '[.recipes[] |
+// select(((.body // []) | length) == 0)] | length'` over the dump is what says
+// it still holds. The second is a sameness worth stating because a comment is a
 // place a mention could hide — a commented-out `go run ./internal/tools/modscope`
-// is a mention — and both sides keep those lines: the dump carries the 469 body
-// lines opening with '#' and the '#!' of the 11 shebang recipes, as does this
-// reader.
+// is a mention — and both sides keep those lines: the dump carries the body
+// lines opening with '#' and the '#!' of the shebang recipes, as does this
+// reader. That one needs no count; it is a claim about which lines survive, and
+// counting them said nothing the claim did not.
 func recipeBodies(dumped justDump) map[string]string {
 	vars := dumpVars(dumped)
 	out := make(map[string]string, len(dumped.Recipes))
