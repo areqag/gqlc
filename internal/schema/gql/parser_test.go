@@ -346,6 +346,48 @@ func (s *ParserSuite) TestEndpointFillerMixedRejectionsReportTheSource() {
 	}
 }
 
+// TestEndpointFillerForwardsALabelRefusal pins the two arms by which fillerLabels
+// hands back labelSet's error instead of a label set. Both were unwitnessed:
+// swallowing either left the whole module suite green (bd gqlc-f89mg). The two
+// tests above do not reach them — they pin the sentinels fillerLabels RAISES,
+// which are returned before either of these arms is taken.
+//
+// Nothing invalid is accepted when an arm is swallowed, so the cost is diagnostic
+// only: the label read yields nil, nil keys as the empty label set, that matches
+// no declaration, and the parse fails as ErrUnknownEndpoint — the author is told
+// the endpoint names a type that does not exist rather than that the label they
+// wrote is malformed. Each row therefore asserts the absence of that sentinel as
+// well as the presence of the right one; asserting only "this source is refused"
+// would pass under both and could not see the defect at all.
+//
+// The two arms are the `=>` split: a filler written with `=>` is named by the key
+// label set before it, a `=>`-less one by its implied content. One row per
+// spelling is what reaches both.
+func (s *ParserSuite) TestEndpointFillerForwardsALabelRefusal() {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "`=>`-less filler, the implied-content arm",
+			src:  "(:Person), (:`A&B`) -[:AUTHORED]-> (:Person)",
+		},
+		{
+			name: "key-label-set filler, the `=>` arm",
+			src:  "(:Person), (:`A&B` =>) -[:AUTHORED]-> (:Person)",
+		},
+	}
+	for _, tt := range cases {
+		s.Run(tt.name, func() {
+			got, err := gql.New().Parse(strings.NewReader(graphType(tt.src)))
+			s.Require().ErrorIs(err, gql.ErrAmpersandInLabel)
+			s.Require().NotErrorIs(err, gql.ErrUnknownEndpoint,
+				"a swallowed arm degrades to this: nil labels key as the empty label set, which matches no declaration")
+			s.Equal(schema.Schema{}, got, "model must be the zero value on error")
+		})
+	}
+}
+
 // TestEdgeLeftPointingCanonicalised covers a left-pointing arc being normalised
 // to source->target: `(a) <-[:R]- (b)` is the edge b -> a, so its identity is
 // independent of the direction it was written in.
