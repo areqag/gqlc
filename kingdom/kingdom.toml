@@ -185,6 +185,17 @@ unresponsive_after_minutes = 30
 # hours of gqlc-5vp7 would have been 165 nudges at each of six seats. 30 minutes
 # is 15 passes: slow enough not to be a metronome, and the pass says out loud on
 # every tick that the slot is still held, so holding off is not going quiet.
+#
+# IT NOW PACES A SECOND, UNRELATED THING, and the sentence above is true only of
+# the first. dispatch's mail notice — the arm that tells a continuously-working
+# seat it has unread letters, which nothing else in the town does (gqlc-piae7) —
+# reads this same number as its own floor, and there it IS per seat, and it
+# applies precisely to the seats that ARE working. The two arms are severed by
+# ruling (gqlc-o3ni1) and share no state; they share only this duration, because
+# both are answering the same question — how often may km type at one citizen
+# without becoming a metronome — and one answer to it is easier to reason about
+# than two. Split the key if they ever need to diverge; do not quietly retune
+# this one for the arm you happen to be looking at.
 renudge_after_minutes = 30
 
 # How many times the dispatcher asks ONE seat in a single idle episode before it
