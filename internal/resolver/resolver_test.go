@@ -774,6 +774,128 @@ var invalidFixtureContains = map[string]string{
 	"unlabelled_hop_to_carried_far_end_stays_wide.cypher": `c.smallOnly missing on plural-satisfying type Company&Large`,
 }
 
+// invalidFixtureNoMessagePin names the invalid fixtures whose refusal message
+// this suite does not pin. It exists so that an absent pin is a declaration
+// someone wrote rather than a default: a fixture in neither map is named red
+// by TestEveryInvalidFixtureDeclaresItsMessagePin, so a new fixture cannot
+// skip the message check by saying nothing about it.
+//
+// These entries are INHERITED, NOT AUDITED. They are the fixtures that carried
+// no pin on the day the requirement landed, and listing them records that
+// their omission was never a decision anyone took. Whether each is correctly
+// waived — whether errors.Is alone really does tell which arm fired — is
+// gqlc-9vpga. Do not read a name here as a finding that its message is not
+// worth pinning.
+var invalidFixtureNoMessagePin = map[string]struct{}{
+	"ambiguous_edge_orientation_after_inference.cypher":              {},
+	"ambiguous_unlabelled_binding.cypher":                            {},
+	"anonymous_source_endpoint.cypher":                               {},
+	"call_arg_int_at_string.cypher":                                  {},
+	"call_arg_type_mismatch.cypher":                                  {},
+	"call_yield_property_lookup.cypher":                              {},
+	"certified_collect_unknown_property.cypher":                      {},
+	"certified_list_unknown_property.cypher":                         {},
+	"create_unknown_edge.cypher":                                     {},
+	"create_unknown_label.cypher":                                    {},
+	"delete_bare_property_unknown.cypher":                            {},
+	"delete_edge_property_unknown.cypher":                            {},
+	"delete_property_on_var_length_edge.cypher":                      {},
+	"delete_property_on_var_length_multi_type_edge.cypher":           {},
+	"delete_property_unknown_on_multi_type_edge.cypher":              {},
+	"delete_second_target_unknown_property.cypher":                   {},
+	"effect_order_first_failure_wins.cypher":                         {},
+	"empty_inline_endpoint.cypher":                                   {},
+	"label_satisfy_ambiguous.cypher":                                 {},
+	"label_satisfy_none.cypher":                                      {},
+	"label_satisfy_plural_entity.cypher":                             {},
+	"label_satisfy_plural_property.cypher":                           {},
+	"list_of_edges_projection.cypher":                                {},
+	"list_of_nodes_projection.cypher":                                {},
+	"merge_endpoint_unknown_label.cypher":                            {},
+	"merge_on_create_undeclared_label.cypher":                        {},
+	"merge_on_create_unknown_property.cypher":                        {},
+	"merge_on_match_second_effect_unknown_property.cypher":           {},
+	"merge_on_match_unknown_property.cypher":                         {},
+	"merge_unknown_edge.cypher":                                      {},
+	"parameter_across_with_alias_shadow_reversed.cypher":             {},
+	"parameter_conflict_via_multi_type_edge_property.cypher":         {},
+	"parameter_type_conflict_clause_slot_vs_string.cypher":           {},
+	"parameter_type_conflict_nullability.cypher":                     {},
+	"parameter_type_conflict_optional_edge_nullability.cypher":       {},
+	"parameter_type_conflict_optional_node_nullability.cypher":       {},
+	"parameter_type_conflict_property_vs_expr_bool.cypher":           {},
+	"parameter_type_conflict_scalar_kind.cypher":                     {},
+	"parameter_type_conflict_temporal_kind.cypher":                   {},
+	"parameter_type_conflict_two_properties.cypher":                  {},
+	"parameter_type_conflict_two_properties_same_nullability.cypher": {},
+	"parameter_use_on_var_length_edge_property.cypher":               {},
+	"parameter_use_unknown_edge_property.cypher":                     {},
+	"part_binding_type_conflict.cypher":                              {},
+	"part_binding_type_conflict_call_vs_edge.cypher":                 {},
+	"part_binding_type_conflict_call_vs_node.cypher":                 {},
+	"part_binding_type_conflict_call_vs_unlabelled.cypher":           {},
+	"part_binding_type_conflict_edge.cypher":                         {},
+	"plural_endpoint_contradictory_edges_stay_plural.cypher":         {},
+	"plural_endpoint_created_edge_stays_plural.cypher":               {},
+	"plural_endpoint_inline_endpoint_property_stays_plural.cypher":   {},
+	"plural_endpoint_inline_endpoint_stays_plural.cypher":            {},
+	"plural_endpoint_merged_edge_stays_plural.cypher":                {},
+	"plural_endpoint_multi_hop_far_end_stays_plural.cypher":          {},
+	"plural_endpoint_multi_hop_range_stays_plural.cypher":            {},
+	"plural_endpoint_multi_hop_stays_plural.cypher":                  {},
+	"plural_endpoint_narrows_to_smaller_plural_set.cypher":           {},
+	"plural_endpoint_optional_edge_property_stays_plural.cypher":     {},
+	"plural_endpoint_optional_edge_stays_plural.cypher":              {},
+	"plural_endpoint_unbounded_hops_stays_plural.cypher":             {},
+	"plural_endpoint_unlabelled_hop_property_stays_plural.cypher":    {},
+	"plural_endpoint_unlabelled_hop_stays_plural.cypher":             {},
+	"plural_endpoint_zero_hop_stays_plural.cypher":                   {},
+	"plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher":   {},
+	"plural_endpoint_zero_lower_bound_stays_plural.cypher":           {},
+	"remove_labels_undeclared.cypher":                                {},
+	"remove_property_on_var_length_edge.cypher":                      {},
+	"remove_property_on_var_length_multi_type_edge.cypher":           {},
+	"remove_property_unknown.cypher":                                 {},
+	"remove_property_unknown_on_multi_type_edge.cypher":              {},
+	"remove_property_unknown_on_single_type_edge.cypher":             {},
+	"set_entity_on_var_length_edge.cypher":                           {},
+	"set_entity_on_var_length_multi_type_edge.cypher":                {},
+	"set_labels_undeclared.cypher":                                   {},
+	"set_property_on_var_length_edge.cypher":                         {},
+	"set_property_on_var_length_multi_type_edge.cypher":              {},
+	"set_property_unknown_on_multi_type_edge.cypher":                 {},
+	"set_property_unknown_on_single_type_edge.cypher":                {},
+	"set_property_unknown_property.cypher":                           {},
+	"set_second_effect_unknown_property.cypher":                      {},
+	"union_column_count_mismatch.cypher":                             {},
+	"union_column_name_mismatch.cypher":                              {},
+	"union_column_name_only_mismatch.cypher":                         {},
+	"union_column_nullability_mismatch.cypher":                       {},
+	"union_edge_union_arity_prefix.cypher":                           {},
+	"union_edge_union_arity_prefix_reversed.cypher":                  {},
+	"union_edge_union_keys_mismatch.cypher":                          {},
+	"union_edge_union_nullability_mismatch.cypher":                   {},
+	"union_list_element_mismatch.cypher":                             {},
+	"union_node_type_mismatch.cypher":                                {},
+	"union_third_branch_mismatch.cypher":                             {},
+	"union_unknown_label_branch.cypher":                              {},
+	"union_writes_vs_returns_column_count.cypher":                    {},
+	"unknown_edge.cypher":                                            {},
+	"unknown_edge_multi_type_all_miss.cypher":                        {},
+	"unknown_edge_property.cypher":                                   {},
+	"unknown_edge_undirected.cypher":                                 {},
+	"unknown_label.cypher":                                           {},
+	"unknown_property.cypher":                                        {},
+	"unknown_property_union_missing.cypher":                          {},
+	"unknown_property_union_nullability_differs.cypher":              {},
+	"unknown_property_union_sibling_branch.cypher":                   {},
+	"unknown_property_union_type_differs.cypher":                     {},
+	"unknown_property_via_expr_use.cypher":                           {},
+	"unlabelled_binding_no_edge.cypher":                              {},
+	"untyped_edge.cypher":                                            {},
+	"var_length_edge_property_projection.cypher":                     {},
+}
+
 type ResolverSuite struct {
 	suite.Suite
 }
@@ -884,6 +1006,61 @@ func (s *ResolverSuite) TestInvalid() {
 			}
 		})
 	}
+}
+
+// TestEveryInvalidFixtureDeclaresItsMessagePin holds that every invalid
+// fixture says whether its refusal message is pinned, in exactly one of the
+// two maps. TestInvalid's message check is conditional on the pin being
+// present, so before this a fixture passed that check by saying nothing, and
+// the two things a reader cannot tell apart — a message nobody thought worth
+// pinning and a message nobody thought about — are the two this separates.
+//
+// It names the fixtures rather than counting them, because the totality
+// refusals in TestInvalid print the whole map and leave the reader to find the
+// one row that differs.
+func (s *ResolverSuite) TestEveryInvalidFixtureDeclaresItsMessagePin() {
+	files, err := filepath.Glob(filepath.Join(fixtureDir, "invalid", "*.cypher"))
+	s.Require().NoError(err)
+	s.Require().NotEmpty(files)
+
+	fixtures := make(map[string]struct{}, len(files))
+	var undeclared, declaredTwice []string
+	for _, path := range files {
+		name := filepath.Base(path)
+		fixtures[name] = struct{}{}
+		_, pinned := invalidFixtureContains[name]
+		_, waived := invalidFixtureNoMessagePin[name]
+		switch {
+		case pinned && waived:
+			declaredTwice = append(declaredTwice, name)
+		case !pinned && !waived:
+			undeclared = append(undeclared, name)
+		}
+	}
+
+	// A name in neither map is the shape this test exists for; a name in both
+	// is the way the pair rots once someone pins a waived fixture and leaves
+	// the waiver behind.
+	slices.Sort(undeclared)
+	slices.Sort(declaredTwice)
+	s.Empty(undeclared, "invalid fixtures declare no message pin: add the discriminating substring to invalidFixtureContains, or the name to invalidFixtureNoMessagePin")
+	s.Empty(declaredTwice, "invalid fixtures appear in both invalidFixtureContains and invalidFixtureNoMessagePin: remove the waiver")
+
+	// The other direction, so a renamed or deleted fixture cannot leave a
+	// declaration behind that goes on looking like one.
+	var stale []string
+	for name := range invalidFixtureContains {
+		if _, ok := fixtures[name]; !ok {
+			stale = append(stale, "invalidFixtureContains: "+name)
+		}
+	}
+	for name := range invalidFixtureNoMessagePin {
+		if _, ok := fixtures[name]; !ok {
+			stale = append(stale, "invalidFixtureNoMessagePin: "+name)
+		}
+	}
+	slices.Sort(stale)
+	s.Empty(stale, "declarations name no invalid fixture")
 }
 
 // TestDirectionMarkerIsInertOnAPluralOnlyUnion holds the claim the
