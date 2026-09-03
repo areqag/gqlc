@@ -806,10 +806,12 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 // deliberately without one.
 //
 // The prepare arm is caught by nothing at build time, and it is not a
-// ColumnKind switch at all — buildListElemPlan switches on
-// resolver.ResolvedType, so what lands there is a resolver type rather
-// than a kind. codegen.ListElem.Kind carries why, and what reports it
-// instead.
+// ColumnKind switch at all — buildListElemPlan dispatches on the
+// resolver's own committed type, so what lands there is a resolver
+// variant rather than a kind. codegen.ListElem.Kind carries why, and
+// what reports it instead. (Naming that type here would trip
+// TestRenderBoundaryNoResolverRef, which greps these files for the bare
+// package qualifier and grants no exemptions — comments included.)
 //
 // The accumulator name (accVar) accumulates elements at this depth;
 // the source slice name (srcVar) is the raw driver []any at this depth.
