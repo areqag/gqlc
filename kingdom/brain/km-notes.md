@@ -1254,12 +1254,32 @@ a second ask was delivered into a box the first had already made non-empty.
 
 THAT RE-READ IS DONE (bd gqlc-nypdt, Այգ 2026-09-03) AND gqlc-cj7hp's COUNTS
 STAND. Cite it for its numbers again. The correction landed somewhere the
-filing did not expect, so the reason matters more than the verdict: the tag was
-never what attributed cj7hp's nine strings. Each was tested by grepping it
-against km's five-template corpus, with `git log -S'[km] '` reaching the
-founding commit to show that no era of km sent unprefixed asks. The tag appears
-in cj7hp exactly once, as a three-seat witness line at 15:44Z, and a defect in
-one classifier cannot reach a conclusion drawn with a different instrument.
+filing did not expect, so the reason matters more than the verdict, and the
+reason is a DIRECTION rather than an absence.
+
+The old tag is applied in cj7hp four times, not once — the three-seat witness
+line at 15:44Z, Այգ at 16:13Z, Աստղիկ's pair at 16:40Z (the two live arrivals
+among the nine), and Նուարդ at 16:43Z — and for Միհր's 16:38Z string it is the
+only attribution recorded. So the re-count cannot rest on the tag being absent
+from the evidence. It rests on the tag being unable to err the way that would
+matter: classifying by the first line can hide km's own lines UNDERNEATH a
+citizen's, so a box that is really `mixed` reads `foreign`, but no line carrying
+the `[km] ` prefix can read `foreign`. The defect over-reports `foreign` and
+cannot manufacture one. Every string cj7hp quotes was quoted as the box's
+content — its first line — so each quoted attribution is sound, and what the
+defect could have concealed is km text BELOW a line nobody quoted.
+
+The corpus is the independent check, and it excludes as a CLASS rather than
+string by string, which is stronger than the per-string grep this note used to
+claim: km's whole send corpus is `/exit` plus four asks each carrying the
+literal `[km] ` prefix, and `git log -S'[km] '` reaches the founding commit, so
+no era of km sent unprefixed asks and any box text without that prefix is not
+km's on sight. Two of the nine were additionally grepped individually; the class
+exclusion is what covers all nine.
+
+An earlier version of this note said the tag appeared once and that each of the
+nine strings had its own corpus grep. Both were false against cj7hp's own
+record, and Անահիտ caught them in review (gqlc-xzn7a round 1).
 
 What was measured, both halves against a positive control:
 
@@ -1285,8 +1305,10 @@ cj7hp's table.
 
 WHAT IS NOT RESTORED, and it is small: those three tag witnesses at 15:44Z were
 computed by the defective classifier over panes that no longer exist, so they
-are unverifiable rather than wrong. Nothing rests on them — the strings they
-accompany were attributed by the corpus.
+are unverifiable rather than wrong. Nothing rests on them, and nothing rests on
+Միհր's 16:38Z tag either, which is the one string the tag alone attributed: the
+class exclusion above reads off the string itself, so it does not need the pane
+back.
 
 THE RE-READ FOUND A DIFFERENT DEFECT, in the corrected tag rather than the old
 one: `box_authorship` asks authorship per RENDERED ROW, and a composer wraps.
