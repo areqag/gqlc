@@ -168,9 +168,14 @@ func unwrap(text string) string {
 // corpus harnesses assemble into a module and run. Those are real tests, cited
 // by name from the census tables in internal/codegen/{age,neo4j}/corpus_test.go,
 // and a reader keyed on the `.go` suffix cannot see a single one of them: it
-// called four true citations dangling. Their own comments are NOT read for
-// citations — a fixture's prose is about the fixture, and this guard is about
-// this repository's prose.
+// called four true citations dangling.
+//
+// A fixture is read exactly like any other test source, comments included, and
+// the two are not separable here: a fixture's prose cites the fixture's own
+// tests, so a reader that collected the declarations and skipped the comments
+// would be holding the half that cannot rot. The skip was there for one
+// revision and no mutation could kill it — 1126 comment lines went unread and
+// every citation in them already resolved.
 func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []citation, files int) {
 	t.Helper()
 	declared = map[string]bool{}
@@ -217,9 +222,6 @@ func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []cita
 					declared[fn.Name.Name] = true
 				}
 			}
-		}
-		if fixture {
-			return nil
 		}
 
 		rel, relErr := filepath.Rel(root, path)
