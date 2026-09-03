@@ -3302,3 +3302,47 @@ It refuses exactly what the single-seat path refuses, seat by seat, and it
 moves nothing else — Constitution VI.2's no-forcing applies to a citizen's
 work in a tree as much as to their session. The failure this must never have
 is the convenient one: a sweep that treats "held" as "skip the guard".
+
+## unit_drift — why it detects instead of repairing, and why it scrubs KM_STATE_DIR
+
+`km deploy` fast-forwards the checkout and used to stop there: it never called
+`render_unit` and never touched `$HOME/.config/systemd/user`. So a merged change
+under `kingdom/systemd/` reached the tree and reached no unit, while deploy
+printed `deployed: <root> at <sha>` — a report true about the checkout and
+silent about the thing the checkout was supposed to change (bd gqlc-2a4go, found
+while landing gqlc-leq7, which edits kingdom-dispatch-alarm.service and needed a
+manual `km install-units` nothing asked for).
+
+**Why not re-render and reload.** The self-healing answer means nobody has to
+remember, and it was declined for two reasons. A `systemctl --user
+daemon-reload` issued from `cmd_deploy` runs inside the dispatch tick, so it is
+the tick asking its own manager to reload. And rendering WITHOUT the reload is
+worse than either: the files on disk would then match, so this very check reads
+clean while systemd still holds the old definition — the detector would be
+disarmed by the repair.
+
+**The gate is the doctor row, not deploy's line.** deploy exits 0 either way and
+its stdout is a journal nobody reads; `ensure_deployed` folds it into one line
+of stderr. A row that only prints is not a gate — measured on this change: with
+the row's `ok=1` removed, `km doctor` still printed the identical `FAIL:` text
+and exited **0**. The word FAIL is not the gate; `ok=1` is.
+
+**KM_STATE_DIR is scrubbed on purpose.** `@STATE@` appears in exactly one source
+(kingdom-dispatch-alarm.service). `KM_STATE_DIR` is exported into every seat
+session, while the units themselves run km WITHOUT it, so the render a real
+install produces for the town is the DERIVED one. Honouring the ambient value
+would call every unit drifted whenever a seat ran `km doctor` — a row that cries
+wolf from half the town's sessions is one operators learn to run past, which is
+the failure mode gqlc-d1jkv is open about elsewhere.
+
+**What it leans on.** The row renders with the RUNNING km's `kingdom.toml`, so it
+is a claim about the deployed tree only while that tree is certified against
+origin/master. That is why it is asked immediately after the `kingdom_drift`
+row, which reports exactly that.
+
+**One list, not two.** `unit_names` is the selection rule (`*.service`,
+`*.timer`) read by both the installer and this check. Two lists disagree
+silently, and a unit named by only one is either installed and never checked or
+checked and never installed. Replacing the installer's hardcoded five with the
+glob was verified behaviour-identical against the tree at the time: the derived
+set and the hardcoded set were the same five names.
