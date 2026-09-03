@@ -791,9 +791,25 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 // walkListElemPlan emits the per-element loop for a list column
 // (spec §1.3, §5.5). The loop iterates the driver's []any slice one
 // element at a time; the body dispatches on the plan's committed Kind
-// via walkListElemBody. Every future resolver variant lands as a new
-// codegen.ColumnKind arm handled once — prepare's buildListElemPlan and the
-// emission switch below both fail to compile until it is handled.
+// via walkListElemBody.
+//
+// A new resolver variant needs an arm in two places, and the compiler
+// demands neither: Go does not require a switch to be exhaustive, so
+// deleting an arm from either site builds clean. The two sites are not
+// guarded alike, and only one is guarded at all (gqlc-7hp5g).
+//
+// The emission arm is caught by golangci-lint's exhaustive, which reds
+// with `missing cases in switch of type codegen.ColumnKind`. That works
+// because walkListElemBody's switch carries no `default` and
+// .golangci.yml sets default-signifies-exhaustive — so adding a
+// `default` there would retire the check permanently, and the switch is
+// deliberately without one.
+//
+// The prepare arm is caught by nothing at build time, and it is not a
+// ColumnKind switch at all — buildListElemPlan switches on
+// resolver.ResolvedType, so what lands there is a resolver type rather
+// than a kind. codegen.ListElem.Kind carries why, and what reports it
+// instead.
 //
 // The accumulator name (accVar) accumulates elements at this depth;
 // the source slice name (srcVar) is the raw driver []any at this depth.
