@@ -1334,24 +1334,79 @@ seat_pane() { # <seat> -> the pane's visible buffer
 # pane's "N shell still running" line, because that line is Claude Code chrome
 # and moves with its version (bd gqlc-y8puo).
 #
-# A claude process AT REST HAS NO CHILDREN, which is what makes this
-# discriminate rather than exempt everyone: measured across the live town
-# 2026-09-02, sedrak (idle at an empty prompt) and artur and ayg held a live
-# claude with zero children, stable over repeated samples, while vahagn — the
-# seat this bead was filed on — held one child that was Claude Code's own
-# `bash -c source .../shell-snapshots/...`.
+# THE PREMISE "A CLAUDE PROCESS AT REST HAS NO CHILDREN" IS FALSE, and the
+# measurement once written here to support it was a snapshot that does not
+# generalise. It read sedrak, artur and ayg holding a live claude with zero
+# children on 2026-09-02 — sessions that had not yet opened a Go file. Sampled
+# twice on 2026-09-03, minutes apart: 15 live seat sessions of which 7 held at
+# least one child, then 14 of which 6 did. EVERY child observed on either pass
+# was a DAEMON rather than work — gopls on every seat that held anything at all,
+# aged 45m to 31.7h; a node language server on 4; background shells up to 30.6h
+# old, four of them on one seat. A language server attaches on the first Go file
+# and never leaves, so what this predicate tracks is session age.
+#
+# BOTH SAMPLES ARE GIVEN BECAUSE THE POPULATION MOVED BETWEEN THEM, which is the
+# same error this paragraph replaces: one session ended in those few minutes and
+# took its gopls with it. Any single count here is a snapshot, and writing one as
+# a property is what put a false sentence in this header the first time. What
+# does not move between the samples is the load-bearing part — the only child on
+# either pass that was a live tool call was the measuring command's own shell.
+#
+# THAT ONE EXCEPTION IS THE SHARPEST FORM OF THE DEFECT rather than a
+# counter-example. It sat on ayg beside a gopls and a node server, so the
+# predicate answered `working` for a seat that genuinely was — and would have
+# answered identically with the tool call absent, as it did for the same seat on
+# the pass where no tool call was running. The answer does not move with the
+# thing it claims to measure.
+#
+# The other half of that old measurement is unsafe too. It took vahagn's one
+# child, Claude Code's own `bash -c source .../shell-snapshots/...`, as the work
+# signal; four of exactly that shape were later found on a single seat aged
+# around 16h each. A snapshot bash is not evidence of a live tool call.
 #
 # Absent claude processes are NOT work: a seat killed mid-shell leaves its
 # children reparented to init and the pid this looks under is gone, so a dead
-# seat still answers "no work" and still reaches the ladder. That is arpine on
-# the same pass — `done`, no process, correctly still nudgeable.
+# seat still answers "no work" and still reaches the ladder. That was arpine on
+# the 2026-09-02 pass — `done`, no process, correctly still nudgeable. Read it
+# as the worked example it is and not as a current reading: on both 2026-09-03
+# samples above arpine held a LIVE claude with no children, which is the
+# fail-toward-nudgeable case below rather than this one, and the two are
+# indistinguishable to this predicate.
 #
-# There is deliberately NO fail-loud arm here, unlike seat_agent_status. Every
-# way this can fail to see work — an unreadable /proc entry, a pgrep that finds
-# nothing, a worktree that does not exist — lands on "no work running", which
-# leaves the seat in exactly the population it occupied before this predicate
-# existed. That is a return to the old behaviour rather than a new harm, and it
-# is the only direction that cannot silence the ladder town-wide.
+# THIS PREDICATE FAILS IN BOTH POLARITIES. The paragraph that stood here
+# enumerated one of them and then claimed to have enumerated all. There is
+# deliberately no fail-loud arm, which is still right, but that is an argument
+# about the fail-toward-NUDGEABLE directions alone — an unreadable /proc entry,
+# a pgrep that finds nothing, a worktree that does not exist all land on "no
+# work running", leaving the seat in exactly the population it occupied before
+# this predicate existed. The sentence that followed them, "the only direction
+# that cannot silence the ladder town-wide", was false of the direction that
+# actually occurs:
+#
+#   FAIL-TOWARD-SILENT is the common case — near half the town on both samples
+#   above, and every one of those seats held only daemons. A seat holding
+#   a language server reports work forever, so seat_pane_idle is permanently
+#   false, so cmd_dispatch not only never nudges it but CLEARS its five idle
+#   markers on every pass. Such a seat cannot accumulate an idle episode at all.
+#
+#   FAIL-TOWARD-NUDGEABLE is the rarer case, and this predicate never closed it.
+#   A thinking turn is not a process: streaming and extended thinking run inside
+#   claude itself, so a seat mid-thought has zero children and reads exactly
+#   like a dead one.
+#
+# THE BOUND, so this is not read as worse than it is: the fail-silent arm does
+# not disable the ladder. `stalled_age` comes from seat_dry_age, which reads the
+# hook-written progress witness and is wholly independent of this predicate, so
+# a daemon-holding seat that genuinely stalls is still caught by the dry arm.
+# What is lost is the idle arm and every idle episode's accumulated state.
+#
+# WHICH WITNESS REPLACES THIS IS NOT DECIDED — bd gqlc-39nk9 holds the ruling,
+# gqlc-yq1vg the ground it was measured on. Do not improvise one here. An
+# allowlist of shell shapes rots as Claude Code's chrome moves; a denylist of
+# daemons rots faster, and nobody writing one on 2026-09-02 would have had
+# `node` on it, which 4 seats held a day later. Do not reach for claude's own
+# CPU time either: over 10s across 12 seats, seats with and without children
+# interleaved throughout the range, so no threshold separates them.
 seat_work_running() { # <seat> -> 0 a claude process in the seat's worktree has a live child
     local wt p
     wt=$(seat_worktree "$1")
