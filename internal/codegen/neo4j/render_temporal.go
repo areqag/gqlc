@@ -151,15 +151,13 @@ func narrowExpr(goType, src string) string {
 // other arm here uses. width is the one the prepared surface carries
 // beside the carrier it was derived from (spec §6).
 //
-// RECORD<ANY> is KindRecord too and must not reach the record arm: it
-// would name a helper codegen.RecordEncodings never emits. The kind
-// alone does not exclude it, so the carrier text is asked as well —
-// RECORD<ANY> carries as map[string]any, not as a struct. Every call
-// site also guards on driverCarrier(goType) != goType, which excludes it
-// a second time; the belt here is what stops a new call site from having
-// to know that.
+// Which records the arm admits is isDeclaredRecord's question, asked in
+// the same words at every record arm in this backend so the three cannot
+// drift on it. Every call site here also guards on driverCarrier(goType)
+// != goType, which excludes RECORD<ANY> a second time; the belt is what
+// stops a new call site from having to know that.
 func narrowCall(goType string, width graph.PropertyType, src string) string {
-	if width.Kind() == graph.KindRecord && isRecordStruct(goType) {
+	if isDeclaredRecord(goType, width) {
 		return fmt.Sprintf("decode%s(%s)", codegen.RecordHelperSuffix(width), src)
 	}
 	if goType == "float32" {
@@ -278,7 +276,7 @@ func widenExpr(goType string, width graph.PropertyType, access string) string {
 	if isTemporalCarrier(goType) {
 		return fmt.Sprintf("from%s(%s)", goType, access)
 	}
-	if width.Kind() == graph.KindRecord && isRecordStruct(goType) {
+	if isDeclaredRecord(goType, width) {
 		return fmt.Sprintf("encode%s(%s)", codegen.RecordHelperSuffix(width), access)
 	}
 	return fmt.Sprintf("%s(%s)", driverCarrier(goType), access)
