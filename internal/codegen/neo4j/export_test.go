@@ -27,12 +27,34 @@ var (
 	IsDeclaredRecord     = isDeclaredRecord
 	NarrowsANumericWidth = narrowsANumericWidth
 	ParamBindExpr        = paramBindExpr
+	RecordAliasName      = recordAliasName
 	// WriteMethod rather than renderCypherFile, which the AGE side's
 	// equivalent test calls: neo4j's takes a driverTarget, whose type is
 	// unexported, so an external test package cannot supply one.
 	WriteMethod                   = writeMethod
 	WriteSingleColumnDecodeIndent = writeSingleColumnDecodeIndent
 )
+
+// RenderRecordHelpers emits record_neo4j.go for a chosen encoding set and
+// use record. The use map's element type is unexported, so a test states
+// the directions as CarrierUseFlags and this converts.
+//
+// The v5 target, because the only thing the target decides in this file is
+// the dbtype import path — which the corpus test already holds equal
+// across the two majors modulo that path.
+func RenderRecordHelpers(pkg string, encodings []graph.PropertyType, uses map[graph.PropertyType]CarrierUseFlags) []byte {
+	inner := make(map[graph.PropertyType]carrierUse, len(uses))
+	for pt, f := range uses {
+		inner[pt] = carrierUse{
+			decode:    f.Decode,
+			encode:    f.Encode,
+			encodePtr: f.EncodePtr,
+			list:      f.List,
+			listPtr:   f.ListPtr,
+		}
+	}
+	return renderRecordHelpers(pkg, encodings, inner, driverV5)
+}
 
 // CarrierUseFlags projects one carrier's use record for the external test
 // package, which cannot read carrierUse's unexported fields. A projection
