@@ -131,11 +131,25 @@ func declaredWidths() []graph.PropertyType {
 		graph.TypeDecimal, graph.TypeAnyPropertyValue, graph.TypeList,
 	}
 
-	widths := make([]graph.PropertyType, 0, 3*len(scalars))
+	widths := make([]graph.PropertyType, 0, 5*len(scalars)+2)
 	for _, pt := range scalars {
 		flat := graph.ListOf(pt, false)
 		widths = append(widths, pt, flat, graph.ListOf(flat, false))
+		// Each scalar also as the single field of a record, and that
+		// record as a list element. A record inherits its fields'
+		// refusals, so these carry the same contest the bare width does
+		// — and they carry one the bare width does NOT: the widths AGE
+		// admits as a property but refuses in a container, which is
+		// every zoned temporal one. Before records emitted, LIST<TIME>
+		// was the only encoding that divided the roster that way.
+		rec := graph.RecordOf([]graph.RecordField{{Name: "f", Type: pt, NotNull: true}})
+		widths = append(widths, rec, graph.ListOf(rec, false))
 	}
+	// The two records with no declared fields. Neither has a field to
+	// inherit a refusal from, so what divides the roster over them is
+	// whatever a backend says about records AS SUCH — which is where
+	// neo4j's storage answer lands.
+	widths = append(widths, graph.RecordOf(nil), graph.TypeAnyRecord)
 	return widths
 }
 
