@@ -563,8 +563,8 @@ func TestTheWindowHelpSaysNarrowingCannotManufactureAClose(t *testing.T) {
 
 // TestMainRegistersNoFlagOfItsOwn reads main.go's syntax tree and holds main()
 // to calling registerFlags and registering nothing itself. Without it,
-// TestTheWindowHelpNamesTheFlipNarrowingCanCause pins a function that main()
-// need not call: re-inlining flag.Duration("window", …, "narrows the predicate")
+// TestTheWindowHelpSaysNarrowingCannotManufactureAClose pins a function that
+// main() need not call: re-inlining flag.Duration("window", …, "narrows the predicate")
 // in main() leaves both green while `-h` prints the wording round 2 removed.
 // Measured — that mutation survived until this test existed.
 //
@@ -620,7 +620,7 @@ func TestMainRegistersNoFlagOfItsOwn(t *testing.T) {
 	}
 	if len(own) != 0 {
 		t.Errorf("main() registers %v itself; every flag goes through registerFlags, which is where "+
-			"TestTheWindowHelpNamesTheFlipNarrowingCanCause can see the usage text", own)
+			"TestTheWindowHelpSaysNarrowingCannotManufactureAClose can see the usage text", own)
 	}
 }
 
@@ -1440,7 +1440,7 @@ func TestDryRunOverTheRealCorpusMutatesNothingAndSaysWhatItWould(t *testing.T) {
 // until bd gqlc-mb8v's round-1 review — a claim about the flag surface printed
 // underneath a report the flags had already shaped, and false in both
 // directions per plan()'s ceiling comment and
-// TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose.
+// TestANarrowerWindowCannotTurnAnAmbiguousRefusalIntoAClose.
 //
 // Round 2 deleted the sentence and pinned the deletion by searching the line
 // for the token "flag". Round-2 review broke that pin: five rewordings of the
