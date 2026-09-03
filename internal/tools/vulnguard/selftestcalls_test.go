@@ -84,7 +84,7 @@ var selftestCases = []selftestCase{
 	},
 }
 
-// TestVulnRefusesATreeItsSelftestsAreThere_ToRefuse runs each case and requires
+// TestVulnRefusesATreeItsSelftestsAreThereToRefuse runs each case and requires
 // the recipe to refuse by name.
 //
 // Deleting the corresponding call from the justfile turns the matching row red

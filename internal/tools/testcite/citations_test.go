@@ -1,11 +1,13 @@
-// Package testcite holds one guard: a comment in a non-test source that names
-// a test must name a test that exists.
+// Package testcite holds one guard: a comment that names a test must name a
+// test that exists, or be pinned with the reason it is not a citation.
 //
 // This repository routinely settles a question in a comment and cites the test
 // holding the answer — "TestX pins the equality", "TestX is why this is `== 1`".
 // The citation is prose, so a rename or a deletion leaves it pointing at
 // nothing, and the next reader takes the name as evidence the claim is still
-// measured. Nothing noticed that until this file (bd gqlc-945h7).
+// measured. Nothing noticed that until this file (bd gqlc-945h7), and until bd
+// gqlc-som6y it read non-test sources alone — which left out the comments most
+// likely to name a test by name, the ones a test writes about its neighbours.
 //
 // It is a test rather than a command so that `just test` carries it. A separate
 // gate arm would be one more edge somebody can drop and leave the tree green.
@@ -36,25 +38,84 @@ const repoRoot = "../../.."
 // alone — the subtest is a string literal in a t.Run call, not a declaration
 // this guard can resolve, and demanding it would be a check on something the
 // AST does not answer.
-var citationRe = regexp.MustCompile(`\bTest[A-Z][A-Za-z0-9_]*`)
+//
+// A name reached through a dot is a SELECTOR on some value, not a citation, and
+// the leading group is what refuses it. RE2 has no lookbehind, so the separator
+// is captured and discarded rather than asserted. Measured over this checkout:
+// every dot-prefixed occurrence is a go/packages field or an embedded testify
+// type — `.TestImports`, `.TestGoFiles`, `.TestSuite` — and not one is a test
+// this guard could resolve. Pinning those as illustrative would have recorded
+// the wrong reason: they are not test-shaped names meaning something else, they
+// are not test names at all.
+var citationRe = regexp.MustCompile(`(^|[^.\w])(Test[A-Z][A-Za-z0-9_]*)`)
 
-// illustrative is the set of comment sites that write a test-shaped name
-// meaning something other than a test that exists. Each entry needs a reason,
-// and an entry naming a site that no longer writes the name fails the guard
-// below: a stale exemption is the same rot as a stale citation.
+// pinned is the set of comment sites that write a test-shaped name the guard
+// below must not demand a declaration for. Each entry needs a reason, and an
+// entry naming a site that no longer writes the name fails the guard: a stale
+// exemption is the same rot as a stale citation.
+//
+// Three kinds live here, and the reasons say which:
+//
+//   - ILLUSTRATIVE — the name denotes no test at all. A `go test -run` pattern,
+//     a stand-in in a sentence about naming, this file's own TestX.
+//   - HYPOTHETICAL — the name denotes a test nobody has written, and the prose
+//     is only true while it does not resolve.
+//   - HISTORICAL — the name denoted a real test, and the sentence is ABOUT its
+//     removal or replacement. These are the ones that make one map necessary
+//     rather than sufficient: a plain "does it resolve" reading calls them rot,
+//     and repairing them the way rot is repaired would delete the fact the
+//     sentence exists to record.
+//
+// The third kind arrived with this file's widening to _test.go comments, where
+// a test's own prose routinely says what it replaced. Nothing distinguishes it
+// syntactically from the first two, so it is not given its own map — the reason
+// text is where the distinction is kept, and a reader repairing a dangling
+// citation needs to read it either way.
 //
 // Pinning is deliberately explicit rather than syntactic. A rule like "a name
 // in backticks is illustrative" would be defeated by the most natural thing an
 // author can do to a real citation — put the identifier in backticks — and it
 // would be defeated SILENTLY, which is the failure mode this guard exists to
 // remove. Adding a name here is friction, and the friction is the point.
-var illustrative = map[string]map[string]string{
+//
+// The key is file plus name, not file plus line, so a pin covers every site in
+// its file that writes the name. That is coarser than the finding it excuses:
+// where a file writes one name in two roles, repairing the rotten site leaves a
+// pin that would silently excuse a real citation of that name written there
+// later. ghorphan's entry below is exactly that case and says so.
+var pinned = map[string]map[string]string{
 	"internal/liverecipes/recipes.go": {
 		"TestAGERefuses": "a `go test -run` PATTERN, not a test. Its whole point is that it is a proper prefix of TestAGERefusesTheFunctionsItDoesNotDefine and selects it anyway.",
 		"TestFoo":        "`TestFoo(A|B)`, a pattern illustrating the bracket-aware split this reader deliberately does not do.",
 	},
 	"internal/liverecipes/split.go": {
-		"TestLiveSmokeFoo": "a HYPOTHETICAL later test. The sentence is about an allowlist silently covering a test nobody has written yet, so the name must NOT resolve or the prose stops being true.",
+		"TestLiveSmokeFoo": "HYPOTHETICAL. The sentence is about an allowlist silently covering a test nobody has written yet, so the name must NOT resolve or the prose stops being true.",
+	},
+	"internal/codegen/age/dialect_test.go": {
+		"TestSomethingLive":         "ILLUSTRATIVE. The name of a test the harness WRITES into a throwaway source; `witness` is that literal. The comment is about `-run` being unanchored, so it must name both spellings.",
+		"TestSomethingLiveButUnrun": "ILLUSTRATIVE. The second synthetic test in the same throwaway source, named for the same reason.",
+	},
+	"internal/codegen/corpusrun/corpusrun_test.go": {
+		"TestA": "ILLUSTRATIVE. A `Declared.Tests` fixture value two lines above, quoted so the comment's claim about sort order is checkable against the bytes beside it.",
+		"TestB": "ILLUSTRATIVE. The other half of the same fixture pair.",
+	},
+	"internal/codegen/neo4j/corpus_test.go": {
+		"TestFoo": "ILLUSTRATIVE. A stand-in in `renaming TestFoo to Testfoo`, a sentence about what `go test`'s vet pass refuses to build.",
+	},
+	"internal/tools/testcite/citations_test.go": {
+		"TestX": "ILLUSTRATIVE. This guard's own prose, at three sites: the shapes a citation takes and the subtest form this reader deliberately does not resolve.",
+	},
+	"internal/cli/init_test.go": {
+		"TestInitRefusesMultiTargetEdit": "HISTORICAL. TestInitRefusalNamesAddFlag replaced it; the sentence records that the two were not kept side by side because they differ only in the expected message.",
+	},
+	"internal/codegen/conformance/assembled_input_test.go": {
+		"TestTemporalScanFindsTheEnumEnd": "HISTORICAL. Names the derivation this suite replaced — the one that scanned for String's first default-arm value. Resolving it would mean the replacement never happened.",
+	},
+	"internal/resolver/undeclaredreltype_test.go": {
+		"TestEndpointNarrowedButDeclaredTypeIsSilent": "HISTORICAL. The row that asserted the opposite boundary, replaced deliberately rather than deleted; the comment is the record of that choice.",
+	},
+	"internal/tools/ghorphan/main_test.go": {
+		"TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose": "HISTORICAL. The name this test carried before the ambiguity guard in plan(), when it pinned the flip as REACHABLE. NOTE the coarseness the doc comment above warns about: this file wrote the same name at a second site as genuine rot (a stale citation of the renamed test, repaired with this pin), so a real citation of it written here later would be excused silently.",
 	},
 }
 
@@ -95,13 +156,21 @@ func unwrap(text string) string {
 }
 
 // scanRepo walks the whole checkout and returns the test functions it declares
-// and the citations its non-test sources write.
+// and the citations its comments write.
 //
 // Declarations are collected across module boundaries on purpose. test/data/
 // codegen is its own module, and internal/liverecipes cites its TestLiveSmoke
 // by name — that citation is exactly as able to rot as a within-module one, and
 // skipping the submodule made the guard report it dangling (measured while
 // writing this).
+//
+// They are also collected out of `*_test.go.txt`, which is a source file the
+// corpus harnesses assemble into a module and run. Those are real tests, cited
+// by name from the census tables in internal/codegen/{age,neo4j}/corpus_test.go,
+// and a reader keyed on the `.go` suffix cannot see a single one of them: it
+// called four true citations dangling. Their own comments are NOT read for
+// citations — a fixture's prose is about the fixture, and this guard is about
+// this repository's prose.
 func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []citation, files int) {
 	t.Helper()
 	declared = map[string]bool{}
@@ -123,7 +192,8 @@ func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []cita
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") {
+		fixture := strings.HasSuffix(path, "_test.go.txt")
+		if !strings.HasSuffix(path, ".go") && !fixture {
 			return nil
 		}
 		fset := token.NewFileSet()
@@ -137,7 +207,7 @@ func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []cita
 		}
 		files++
 
-		if strings.HasSuffix(path, "_test.go") {
+		if strings.HasSuffix(path, "_test.go") || fixture {
 			for _, decl := range f.Decls {
 				if fn, ok := decl.(*ast.FuncDecl); ok {
 					// Suite methods count. A reader that took only
@@ -147,6 +217,8 @@ func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []cita
 					declared[fn.Name.Name] = true
 				}
 			}
+		}
+		if fixture {
 			return nil
 		}
 
@@ -161,7 +233,8 @@ func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []cita
 			// citation to repair, and reporting it three times only buries the
 			// other findings.
 			seen := map[string]bool{}
-			for _, name := range citationRe.FindAllString(unwrap(group.Text()), -1) {
+			for _, m := range citationRe.FindAllStringSubmatch(unwrap(group.Text()), -1) {
+				name := m[2]
 				if seen[name] {
 					continue
 				}
@@ -181,11 +254,13 @@ func scanRepo(t *testing.T, root string) (declared map[string]bool, cites []cita
 // names a test names one that is declared, or the site is pinned above with a
 // reason.
 //
-// Test sources are out of scope, and not because their comments cannot rot.
-// Measured 2026-09-02 on 95935159: extending the same reading to _test.go
-// comments takes the unresolved population from 3 to 20, most of them
-// hypothetical names in census tables and in prose about `go test -run`. That
-// is a different and larger job, filed rather than smuggled in here.
+// Test sources are in scope. They were not until bd gqlc-som6y: the reading
+// stopped at non-test sources, and a test's own prose is where this repository
+// most often says what a neighbouring test replaced, so it is where a rename
+// most often rots. Widening it took the unresolved population to 22 on master,
+// of which 6 were the reader's own blindness (four census names cited out of
+// `*_test.go.txt` fixtures, two `.TestImports` selectors), 4 were real rot, and
+// 12 are pinned above.
 func TestEveryCitedTestExists(t *testing.T) {
 	declared, cites, files := scanRepo(t, repoRoot)
 
@@ -206,24 +281,25 @@ func TestEveryCitedTestExists(t *testing.T) {
 		if declared[c.name] {
 			continue
 		}
-		if _, pinned := illustrative[c.file][c.name]; pinned {
+		if _, ok := pinned[c.file][c.name]; ok {
 			continue
 		}
-		t.Errorf("%s:%d cites %s, which no _test.go in this checkout declares.\n"+
-			"Either the test was renamed or deleted — repair or remove the citation, and say so if the test is gone —\n"+
-			"or the name is illustrative, in which case pin it in `illustrative` with the reason it is not a citation.",
+		t.Errorf("%s:%d cites %s, which no test in this checkout declares.\n"+
+			"Either the test was renamed or deleted — repair the citation, or remove it and say so if the test is gone —\n"+
+			"or the name is not a live citation, in which case add it to `pinned` with the reason: illustrative,\n"+
+			"hypothetical, or historical (a sentence ABOUT a test that was deliberately replaced).",
 			c.file, c.line, c.name)
 	}
 
-	t.Logf("examined %d Go files: %d declared test functions, %d citations in non-test sources, %d pinned as illustrative",
+	t.Logf("examined %d Go files: %d declared test functions, %d citations, %d pinned",
 		files, len(declared), len(cites), pinCount())
 }
 
-// TestEveryIllustrativePinIsStillWritten refuses a pin whose site no longer
-// writes the name. Without it the map only ever grows: a prose edit that drops
-// an illustrative name leaves an exemption behind that quietly excuses the next
-// author who writes a real citation of that name in that file.
-func TestEveryIllustrativePinIsStillWritten(t *testing.T) {
+// TestEveryPinIsStillWritten refuses a pin whose site no longer writes the
+// name. Without it the map only ever grows: a prose edit that drops a pinned
+// name leaves an exemption behind that quietly excuses the next author who
+// writes a real citation of that name in that file.
+func TestEveryPinIsStillWritten(t *testing.T) {
 	_, cites, _ := scanRepo(t, repoRoot)
 
 	written := map[string]map[string]bool{}
@@ -234,13 +310,13 @@ func TestEveryIllustrativePinIsStillWritten(t *testing.T) {
 		written[c.file][c.name] = true
 	}
 
-	if len(illustrative) == 0 {
+	if len(pinned) == 0 {
 		t.Fatal("with no pins this test proves nothing")
 	}
-	for file, names := range illustrative {
+	for file, names := range pinned {
 		for name := range names {
 			if !written[file][name] {
-				t.Errorf("%s is pinned as illustrative in %s, but no comment there writes it — drop the pin", name, file)
+				t.Errorf("%s is pinned in %s, but no comment there writes it — drop the pin", name, file)
 			}
 		}
 	}
@@ -248,7 +324,7 @@ func TestEveryIllustrativePinIsStillWritten(t *testing.T) {
 
 func pinCount() int {
 	n := 0
-	for _, names := range illustrative {
+	for _, names := range pinned {
 		n += len(names)
 	}
 	return n
