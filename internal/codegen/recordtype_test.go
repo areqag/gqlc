@@ -440,10 +440,18 @@ func TestRecordHelperSuffixIsAFunctionOfTheEncoding(t *testing.T) {
 
 // TestRecordHelperSuffixIsASpellableIdentifierFragment holds what the
 // emitted call sites need of the name and nothing more: "encode"+suffix
-// and "decode"+suffix have to be Go identifiers, and they have to be
-// EXPORTED-neutral — the helpers are package-private in the generated
-// package, so the fragment must not begin with a character that would
-// make the concatenation stop parsing.
+// and "decode"+suffix have to be Go identifiers, because the emitted
+// package declares and calls them as functions.
+//
+// The live hazard is a suffix carrying a character Go's grammar does
+// not admit mid-identifier, which is exactly what a derivation that
+// stopped hashing and interpolated the encoding itself would produce —
+// RECORD<city STRING> is full of them. It is NOT the fragment's leading
+// character: the verb prefix means the concatenation never starts with
+// it, so a suffix beginning with a digit is a perfectly good name and
+// this test says nothing about it. Measured, not reasoned — a mutant
+// prefixing the fragment with "1" SURVIVED this test, and the sentence
+// it falsified used to be here.
 //
 // Parsed rather than pattern-matched, because a regexp over the name is
 // a second opinion about Go's identifier grammar and this test would
