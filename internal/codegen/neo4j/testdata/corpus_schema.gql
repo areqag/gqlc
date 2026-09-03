@@ -3,8 +3,8 @@
 // declare a width that narrows from its driver carrier, a nullable
 // property, a FLAT list, a list over a narrow element width, a list over
 // each of the two slice shapes the driver hands back as themselves, a
-// list of no declared element shape, and a property of no declared shape
-// at all.
+// list over a neutral temporal carrier, a list of no declared element
+// shape, and a property of no declared shape at all.
 //
 // ONE nesting depth, where there were three. Under ADR 0035 the neo4j
 // server will not hold a list of lists as a stored property, so a
@@ -45,8 +45,8 @@
 // carries two more. ranks used to share the non-nullable walked-slice
 // arm with matrix, the two differing only in how deep writeSliceNarrow
 // recursed; with matrix gone ranks reaches that arm alone, and the
-// recursion depth is no longer varied here by anything. blobs shares
-// that arm too, and what it varies is one level down: which of
+// recursion depth is no longer varied here by anything. blobs and marks
+// share that arm too, and what they vary is one level down: which of
 // writeSliceNarrow's three ELEMENT cases the walk that arm emits then
 // takes. No arm of the eight now stands reached off dbtype.Node alone.
 // The last one that did was the nullable shapeless read (out.Maybe = &v
@@ -92,10 +92,36 @@
 // in the emission at once (anyTime, render_models.go), so Listy.stamps
 // already sets it and no edge property can move it.
 //
-// The third element case — a temporal carrier, narrowed through the
-// emitted to<X> helper — is reached by no DECODED property here at all.
-// Slot.days is this fixture's only list of one, and Slot exists for the
-// encode direction; nothing projects it. bd gqlc-abf6t carries that.
+// marks is the row for the walk's THIRD element case, a temporal carrier
+// crossing through the emitted to<X> helper (bd gqlc-abf6t). Slot.days
+// was this fixture's only list of one until it, and Slot is declared for
+// the encode direction — nothing projects it — so the case was reached by
+// no decoded property here at all.
+//
+// It is also the only place in this repository that runs a to<X> helper's
+// DECODE direction without a container. Every other call site outside the
+// generator is a golden, which compares TEXT: temporal_list_param and
+// schema_list_temporal_property hold the emitted append, and no test
+// imports either package. The live neo4j suite does round-trip the scalar
+// carriers, and it needs Docker.
+//
+// Measured 2026-09-02, each row with the goldens REGENERATED first, since
+// regenerating is how the generator is edited here and a row that leans on
+// stale golden text is measuring the text rather than the walk. Emitting
+// this case's append as `append(dst, toDate(v0), toDate(v0))`, and again
+// as `_ = toDate(v0)`, each redden TestListyNarrowsEachElement on the
+// Marks assertion. So does a defect one level down, in the helper rather
+// than in the walk: swapping Month and Day in temporalDecodeBody's Date
+// arm. That last one was run a second time with marks itself reverted and
+// the mutant verified present in the tree, and all 14 local gate arms
+// passed — which is the state this row ends.
+//
+// LIST<DATE> and not LIST<DURATION> leaves toDuration's decode direction
+// standing on golden text alone. The walk's temporal case is one case
+// whichever carrier reaches it, so nothing here is left unreached by the
+// choice, but the helpers are emitted per carrier and toDuration is
+// emitted into this corpus and called by nothing. bd gqlc-0apvv carries
+// that.
 //
 // Edgier is declared for the query columns rather than for a width the
 // node types had left unreached. A whole-entity column commits to a
@@ -159,6 +185,7 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
         ranks  :: LIST<INT32> NOT NULL,
         blobs  :: LIST<BYTES> NOT NULL,
         stamps :: LIST<TIMESTAMP> NOT NULL,
+        marks  :: LIST<DATE> NOT NULL,
         depths :: LIST<FLOAT32>
     }),
     (:Bin {

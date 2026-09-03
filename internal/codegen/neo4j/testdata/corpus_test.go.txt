@@ -186,6 +186,14 @@ func TestBinNullabilityAndShape(t *testing.T) {
 // []any whatever the schema said, so int32 arrives as int64 and float32
 // as float64. []byte and time.Time are the two element carriers that do
 // arrive as themselves.
+//
+// marks is the walk's third element case, the one that neither narrows a
+// width nor appends what it asserted: a dbtype.Date is a time.Time
+// newtype and a Date is four ints, so the element crosses through the
+// emitted toDate. Its two elements are chosen against that helper — one
+// date after the epoch and one before it, year, month and day all
+// distinct — so a toDate reading the wrong component, or dividing the
+// packed epoch-day the wrong way, has a value here that disagrees.
 func TestListyNarrowsEachElement(t *testing.T) {
 	stamp := time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)
 	got, err := decodeListy(node("Listy", map[string]any{
@@ -193,6 +201,10 @@ func TestListyNarrowsEachElement(t *testing.T) {
 		"ranks":  []any{int64(1), int64(-2)},
 		"blobs":  []any{[]byte{1, 2}, []byte{}},
 		"stamps": []any{stamp},
+		"marks": []any{
+			dbtype.Date(time.Date(2026, time.August, 29, 0, 0, 0, 0, time.UTC)),
+			dbtype.Date(time.Date(1969, time.December, 31, 0, 0, 0, 0, time.UTC)),
+		},
 		"depths": []any{0.5, 1.5},
 	}))
 	if err != nil {
@@ -210,6 +222,9 @@ func TestListyNarrowsEachElement(t *testing.T) {
 	if want := []time.Time{stamp}; !reflect.DeepEqual(got.Stamps, want) {
 		t.Errorf("decodeListy().Stamps = %#v, want %#v", got.Stamps, want)
 	}
+	if want := ([]Date{{Year: 2026, Month: 8, Day: 29}, {Year: 1969, Month: 12, Day: 31}}); !reflect.DeepEqual(got.Marks, want) {
+		t.Errorf("decodeListy().Marks = %#v, want %#v", got.Marks, want)
+	}
 	if got.Depths == nil {
 		t.Fatalf("decodeListy().Depths = nil, want a list")
 	}
@@ -226,7 +241,7 @@ func TestListyNarrowsEachElement(t *testing.T) {
 func TestListyEmptyIsNotAbsent(t *testing.T) {
 	empty, err := decodeListy(node("Listy", map[string]any{
 		"tags": []any{}, "ranks": []any{},
-		"blobs": []any{}, "stamps": []any{}, "depths": []any{},
+		"blobs": []any{}, "stamps": []any{}, "marks": []any{}, "depths": []any{},
 	}))
 	if err != nil {
 		t.Fatalf("decodeListy(empty) = error %v", err)
@@ -249,7 +264,7 @@ func TestListyEmptyIsNotAbsent(t *testing.T) {
 	}
 
 	absent, err := decodeListy(node("Listy", map[string]any{
-		"tags": []any{}, "ranks": []any{}, "blobs": []any{}, "stamps": []any{},
+		"tags": []any{}, "ranks": []any{}, "blobs": []any{}, "stamps": []any{}, "marks": []any{},
 	}))
 	if err != nil {
 		t.Fatalf("decodeListy(absent depths) = error %v", err)
@@ -265,7 +280,7 @@ func TestListyEmptyIsNotAbsent(t *testing.T) {
 func TestListyRefusesAMisTypedElement(t *testing.T) {
 	_, err := decodeListy(node("Listy", map[string]any{
 		"tags": []any{}, "ranks": []any{int64(1), "no"},
-		"blobs": []any{}, "stamps": []any{},
+		"blobs": []any{}, "stamps": []any{}, "marks": []any{},
 	}))
 	if err == nil {
 		t.Fatalf("decodeListy(ranks: [int, string]) = no error, want a refusal")
@@ -939,7 +954,7 @@ func scalarProps() map[string]any {
 func listyProps() map[string]any {
 	return map[string]any{
 		"tags": []any{"a"}, "ranks": []any{int64(1)},
-		"blobs": []any{}, "stamps": []any{},
+		"blobs": []any{}, "stamps": []any{}, "marks": []any{},
 	}
 }
 
@@ -2123,7 +2138,7 @@ func TestScalarColumnsRefuseAValueTheDeclaredWidthCannotHold(t *testing.T) {
 func TestListyRefusesAnOutOfRangeElement(t *testing.T) {
 	_, err := decodeListy(node("Listy", map[string]any{
 		"tags": []any{}, "ranks": []any{int64(1), int64(1) << 40},
-		"blobs": []any{}, "stamps": []any{},
+		"blobs": []any{}, "stamps": []any{}, "marks": []any{},
 	}))
 	if err == nil {
 		t.Fatalf("decodeListy(ranks: [1, 1<<40]) = no error, want a refusal")
@@ -2136,7 +2151,7 @@ func TestListyRefusesAnOutOfRangeElement(t *testing.T) {
 	// The same width, one nesting of plumbing away: the nullable list
 	// arm, whose elements narrow inside a different branch.
 	_, err = decodeListy(node("Listy", map[string]any{
-		"tags": []any{}, "ranks": []any{}, "blobs": []any{}, "stamps": []any{},
+		"tags": []any{}, "ranks": []any{}, "blobs": []any{}, "stamps": []any{}, "marks": []any{},
 		"depths": []any{0.5, math.MaxFloat64},
 	}))
 	if err == nil {
