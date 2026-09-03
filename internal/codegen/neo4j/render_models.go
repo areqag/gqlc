@@ -144,6 +144,19 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 		writeEntityDecodeHelper(&b, e)
 	}
 
+	// The site-named record aliases (spec §2.1), after the entity blocks
+	// they are named from and not in record_neo4j.go beside the digest
+	// carriers: that file is emitted from the encoding set alone, which
+	// has no entity in it to take a name from.
+	for _, s := range codegen.RecordSiteAliases(entities) {
+		text, ok := codegen.RecordStructText(s.Width.Fields(), typeMap{}.Property)
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(&b, "\n// %s is the record type of %s property %s.\n", s.Name, s.Entity, s.Property)
+		fmt.Fprintf(&b, "type %s = %s\n", s.Name, text)
+	}
+
 	writeNarrowHelpers(&b, narrowsInts, narrowsFloats)
 
 	// EdgeUnion interface declarations, appended after entity blocks,

@@ -54,6 +54,13 @@ func RenderRecordHelpers(pkg string, encodings []graph.PropertyType, uses map[gr
 	return renderRecordHelpers(pkg, encodings, inner, driverV5)
 }
 
+// RenderModels emits models.go for a chosen entity set. The v5 target,
+// for the reason RenderRecordHelpers takes it: the target decides only
+// the dbtype import path in this file.
+func RenderModels(pkg string, entities []codegen.Entity, prepared []codegen.Query) []byte {
+	return renderModels(pkg, entities, prepared, driverV5)
+}
+
 // CarrierUseFlags projects one carrier's use record for the external test
 // package, which cannot read carrierUse's unexported fields. A projection
 // rather than exported fields on the production type: which directions a

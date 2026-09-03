@@ -55,6 +55,9 @@ func decodeBlob(raw []byte) (Blob, error) {
 // recordd25fb0e0 is the carrier for RECORD<>.
 type recordd25fb0e0 = struct{}
 
+// BlobBlank is the record type of Blob property blank.
+type BlobBlank = struct{}
+
 // agtypeString decodes an agtype string scalar. AGE renders one as a
 // JSON string, escapes included, so the JSON decoder reads it back
 // exactly; it also refuses every other agtype scalar, which is what

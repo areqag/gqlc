@@ -89,6 +89,35 @@ func writeRecordCarriers(b *strings.Builder, plans []recordPlan) {
 	}
 }
 
+// writeRecordSiteAliases emits the exported <Entity><Field> alias each
+// record-typed entity property is additionally spelled as (spec §2.1).
+//
+// The ergonomics layer, and severable: every type it names is already
+// denoted by the anonymous struct beside it, so an emission without this
+// block is complete. What it buys is that a caller declaring a variable
+// of a record property's type writes PlaceAddr instead of retyping the
+// fields.
+//
+// An ALIAS for the same reason the digest carrier is one, and the reason
+// bites harder here because this name is the one a caller actually
+// holds: a defined type would not be assignable to the anonymous
+// spelling the Row and Params structs carry, so the value a caller named
+// with it could not be passed back to the query that produced it.
+//
+// Spelled with the struct text rather than as an alias to the digest
+// carrier, so the fields are legible at the name a caller reads. Two
+// aliases to one underlying type, which is what keeps them assignable.
+func writeRecordSiteAliases(b *strings.Builder, sites []codegen.RecordSiteAlias) {
+	for _, s := range sites {
+		text, ok := typeMap{}.Property(s.Width)
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(b, "\n// %s is the record type of %s property %s.\n", s.Name, s.Entity, s.Property)
+		fmt.Fprintf(b, "type %s = %s\n", s.Name, text)
+	}
+}
+
 // writeRecordDecoders emits decode<Suffix> for each record: the
 // field-by-field read of a split agtype map.
 //

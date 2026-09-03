@@ -83,6 +83,24 @@ type recordf3273f80 = struct {
 	OpenedOn Date
 }
 
+// DwellingHome is the record type of Dwelling property home.
+type DwellingHome = struct {
+	Note    *string
+	ZipCode int32
+}
+
+// DwellingOpened is the record type of Dwelling property opened.
+type DwellingOpened = struct {
+	Label    string
+	OpenedOn Date
+}
+
+// DwellingPrior is the record type of Dwelling property prior.
+type DwellingPrior = struct {
+	Note    *string
+	ZipCode int32
+}
+
 // agtypeString decodes an agtype string scalar. AGE renders one as a
 // JSON string, escapes included, so the JSON decoder reads it back
 // exactly; it also refuses every other agtype scalar, which is what

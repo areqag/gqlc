@@ -631,6 +631,12 @@ func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	records := recordPlans(h)
 	writeRecordCarriers(&b, records)
 
+	plain := make([]codegen.Entity, 0, len(entities))
+	for _, e := range entities {
+		plain = append(plain, e.Entity)
+	}
+	writeRecordSiteAliases(&b, codegen.RecordSiteAliases(plain))
+
 	if h.args {
 		b.WriteString(`
 // agtypeArgs renders a query's bound parameters as the single agtype

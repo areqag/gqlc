@@ -1429,6 +1429,23 @@ func sweepIdentifiers(entities []Entity, prepared []Query) error {
 			}
 		}
 	}
+	// Source 9: site-named record aliases, one per record-typed entity
+	// property, in entity then field order.
+	//
+	// The one source whose name is derived from TWO pieces of author text
+	// at once — an entity's labels and a property's name — so it is the
+	// only one an author can collide without writing either colliding
+	// name: a node labelled PlaceAddr beside a node Place carrying a
+	// record property addr. That makes it the mirror of sources 7 and 8
+	// rather than a repeat of them. There, neither side was author-chosen
+	// and the capture guards were blind because they police author text
+	// against generator text; here BOTH sides are author-chosen, and the
+	// guards are blind for the same structural reason from the other end.
+	for _, a := range RecordSiteAliases(entities) {
+		if err := insert(a.Name, fmt.Sprintf("record site alias %q for entity %q property %q", a.Name, a.Entity, a.Property)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

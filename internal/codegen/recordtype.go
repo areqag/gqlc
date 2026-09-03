@@ -405,3 +405,56 @@ func RecordEncodings(entities []Entity, prepared []Query) []graph.PropertyType {
 	slices.Sort(out)
 	return out
 }
+
+// RecordSiteAlias is one site-named record alias: the exported name, the
+// entity property it is named from, and the encoding it stands for.
+type RecordSiteAlias struct {
+	Name     string
+	Entity   string
+	Property string
+	Width    graph.PropertyType
+}
+
+// RecordSiteAliases is the site-named alias each record-typed entity
+// property gets, in entity order and then field order (spec §2.1).
+//
+// The ergonomics layer, and the only emitted name derived from two
+// pieces of author text at once. An anonymous struct is the correct type
+// — it is what keeps two declarations of one record assignable — but it
+// is a poor thing to make a caller type out, so the property's own site
+// supplies a name for it.
+//
+// ENTITY properties only. A record reached at a query column or a
+// parameter has no pair of author names to derive from: the column is
+// positional and the parameter's name is the query's, so a site name
+// there would either collide across queries or restate the digest alias
+// under a longer spelling.
+//
+// The population is exactly the properties whose width already has a
+// digest carrier alias — RecordEncodings' membership rule, applied at
+// the top level and not transitively. That is one rule and not two: a
+// site alias names a carrier, so it exists where the carrier does.
+// graph.TypeAnyRecord is therefore absent here as it is there, and
+// RECORD<> is present, because struct{} is still a type a caller writes.
+//
+// Nested records get no site name even though they have a carrier,
+// because the site that would name one is a FIELD of a record, not a
+// property of an entity, and the entity's own name would have to be
+// joined through a path to reach it.
+func RecordSiteAliases(entities []Entity) []RecordSiteAlias {
+	var out []RecordSiteAlias
+	for _, e := range entities {
+		for _, f := range e.Fields {
+			if f.Width.Kind() != graph.KindRecord || f.Width == graph.TypeAnyRecord {
+				continue
+			}
+			out = append(out, RecordSiteAlias{
+				Name:     e.Name + f.Field,
+				Entity:   e.Name,
+				Property: f.PropName,
+				Width:    f.Width,
+			})
+		}
+	}
+	return out
+}

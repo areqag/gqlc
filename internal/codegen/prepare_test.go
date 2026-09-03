@@ -950,6 +950,46 @@ func TestRecordHelperCollidesWithADecodeHelper(t *testing.T) {
 			`and record `+string(rec)+` decode helper "decode`+string(collide)+`"`)
 }
 
+// TestRecordSiteAliasCollidesWithAnEntityStruct pins source 9, the
+// site-named record alias, against source 1.
+//
+// The site-named alias is the one emitted name derived from TWO pieces
+// of author text at once — an entity's labels and a property's name — so
+// it is the source whose collisions an author can provoke without
+// writing either colliding name. Here a node labelled PlaceAddr and a
+// node Place carrying a record property addr are both ordinary
+// declarations, and nothing in either one spells the identifier they
+// both produce.
+//
+// The capture guards cannot reach it, for the mirror of the reason they
+// cannot reach sources 7 and 8: those police an author-chosen identifier
+// against a generator-owned one, and here BOTH sides are author-chosen.
+func TestRecordSiteAliasCollidesWithAnEntityStruct(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{
+		{Name: "zip", Type: graph.TypeInt32, NotNull: true},
+	})
+	carrier := graph.LabelSetKey("Place")
+	collide := graph.LabelSetKey("PlaceAddr")
+
+	in := codegen.Input{
+		Schema: schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				carrier: {KeyLabels: carrier, CompleteLabels: carrier, Properties: map[string]schema.Property{
+					"addr": {Name: "addr", Type: rec, Nullable: false},
+				}},
+				collide: {KeyLabels: collide, CompleteLabels: collide, Properties: map[string]schema.Property{}},
+			},
+		},
+	}
+
+	_, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.ErrorIs(t, err, codegen.ErrIdentifierCollision)
+	require.ErrorContains(t, err,
+		`emitted by both entity struct "PlaceAddr" (schema labels "PlaceAddr") `+
+			`and record site alias "PlaceAddr" for entity "Place" property "addr"`)
+}
+
 // goldenCorpusGlob reaches the committed golden trees from this package.
 // The conformance suite reads the same corpus through its own root, which
 // an env var can redirect at a copy; this sweep wants the tracked trees

@@ -327,3 +327,41 @@ func countVerbs(format string) int {
 	}
 	return n
 }
+
+// TestARecordPropertyGetsASiteNamedAlias is AGE's guard of the same name,
+// one backend over: spec §2.1's site alias is emitted by "the backend's
+// models.go", so both emit it and neither may derive the name its own
+// way — codegen.RecordSiteAliases is what they share.
+//
+// The `=` carries the same weight here as there. A defined type would
+// not be assignable to the anonymous spelling this backend's Row and
+// Params structs carry, so the value a caller named with it could not be
+// handed back to the query that produced it.
+//
+// It lands in models.go and not in record_neo4j.go beside the digest
+// carriers, because the site name is derived from an ENTITY and models.go
+// is where the entity surface lives; record_neo4j.go is emitted from the
+// encoding set alone and has no entity to name one from.
+func TestARecordPropertyGetsASiteNamedAlias(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{
+		{Name: "zip", Type: graph.TypeInt32, NotNull: true},
+		{Name: "note", Type: graph.TypeString},
+	})
+	goType, ok := neo4j.TypeMap{}.Property(rec)
+	require.True(t, ok, "this backend carries %s", rec)
+
+	e := codegen.Entity{
+		Name: "Place", Kind: codegen.EntityNode, Labels: graph.LabelSetKey("Place"),
+		Fields: []codegen.EntityField{
+			{PropName: "addr", Field: "Addr", GoType: goType, Width: rec},
+		},
+	}
+
+	src := string(neo4j.RenderModels("models", []codegen.Entity{e}, nil))
+
+	require.Contains(t, src, "type PlaceAddr = "+goType+"\n",
+		"the record property has no site-named alias, so a caller naming its type retypes the struct")
+	require.NotContains(t, src, "type PlaceAddr struct",
+		"the site name is a DEFINED type, so it is not assignable to the anonymous spelling "+
+			"the Row and Params structs carry")
+}

@@ -58,3 +58,52 @@ func TestARecordPropertyRendersItsCarrierAndItsDecode(t *testing.T) {
 	require.Contains(t, src, "decode"+suffix+")",
 		"the entity's record field does not read through the record's own decoder")
 }
+
+// TestARecordPropertyGetsASiteNamedAlias pins the ergonomics layer of
+// spec §2.1: the property's own site names the anonymous struct, so a
+// caller declaring a variable of that type writes PlaceAddr rather than
+// retyping the fields.
+//
+// The `=` is asserted rather than assumed, and it is the whole of what
+// separates this from a bug. A DEFINED type — `type PlaceAddr struct{…}`
+// — is a different Go type from the anonymous spelling the Row and
+// Params structs carry, so the record's own helpers would stop accepting
+// the values the rest of the package holds, and two properties declaring
+// one record would no longer share a type. The alias adds a name and
+// must add nothing else.
+//
+// RECORD<ANY> gets no site alias and is asserted here rather than left
+// to the reader: it carries map[string]any, which already has a short
+// spelling and no digest carrier alias either, so naming it would be the
+// one place a site alias stood for something RecordEncodings does not
+// know about.
+func TestARecordPropertyGetsASiteNamedAlias(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{
+		{Name: "zip", Type: graph.TypeInt32, NotNull: true},
+		{Name: "note", Type: graph.TypeString},
+	})
+	goType, ok := age.TypeMap{}.Property(rec)
+	require.True(t, ok, "this backend carries %s", rec)
+	loose, ok := age.TypeMap{}.Property(graph.TypeAnyRecord)
+	require.True(t, ok, "this backend carries %s", graph.TypeAnyRecord)
+
+	e := age.WiredEntity{Entity: codegen.Entity{
+		Name: "Place", Kind: codegen.EntityNode,
+		Fields: []codegen.EntityField{
+			{PropName: "addr", Field: "Addr", GoType: goType, Width: rec},
+			{PropName: "extra", Field: "Extra", GoType: loose, Width: graph.TypeAnyRecord},
+		},
+	}}.WithLabels("Place", age.VertexAnnotation)
+
+	var h age.Helpers
+	h.ForEntities([]age.WiredEntity{e})
+	src := string(age.RenderModels("models", []age.WiredEntity{e}, h))
+
+	require.Contains(t, src, "type PlaceAddr = "+goType+"\n",
+		"the record property has no site-named alias, so a caller naming its type retypes the struct")
+	require.NotContains(t, src, "type PlaceAddr struct",
+		"the site name is a DEFINED type, so it is not assignable to the anonymous spelling "+
+			"the Row and Params structs carry and the record's own helpers refuse it")
+	require.NotContains(t, src, "PlaceExtra",
+		"RECORD<ANY> was given a site alias, naming a carrier RecordEncodings does not enrol")
+}
