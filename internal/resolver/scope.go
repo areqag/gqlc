@@ -530,17 +530,22 @@ func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
 }
 
 // writtenBindings is the set of variable names this Part's CREATE and MERGE
-// clauses introduce, read off s.effects. An anonymous position enters as the
-// empty string, exactly as CreateEffect.Variables / MergeEffect.Variables
-// record it, so an anonymous edge in a Part that writes an anonymous edge
-// tests positive whether or not it is the same one. That over-approximates,
-// and it is the safe direction: the only consumer, witnessesItsEndpoints,
-// treats membership as "do not learn from this edge", which lands on the
-// pre-narrowing answer.
+// clauses introduce, read off s.effects. An anonymous EDGE enters as the empty
+// string, exactly as CreateEffect.Variables / MergeEffect.Variables record it,
+// so a matched anonymous edge in a Part that writes an anonymous edge tests
+// positive whether or not it is the same one. That over-approximates, and it is
+// the safe direction: the only consumer, witnessesItsEndpoints, treats
+// membership as "do not learn from this edge", which lands on the pre-narrowing
+// answer.
 //
-// Node bindings are in the set too. They cost nothing — the consumer only ever
-// asks about edges, and a Part's named bindings have unique variables, so a
-// written node's name can never be a matched edge's name.
+// An anonymous NODE contributes nothing at all — it is not a binding (C3), so
+// it never reaches either Variables list. The empty string therefore has
+// exactly one source, and it is an edge; a CREATE carrying no edge cannot
+// silence a matched one however it spells its nodes.
+//
+// Named node bindings are in the set. They cost nothing, but not for the reason
+// above: a Part's named bindings have unique variables, so a written node's
+// name can never equal a matched edge's name.
 func (s *scope) writtenBindings() map[string]struct{} {
 	out := make(map[string]struct{})
 	for _, eff := range s.effects {
