@@ -214,4 +214,17 @@ func TestSubtractLeavesLocalRecipesOnlyCIDoesNotReach(t *testing.T) {
 	if left := subtract([]Invocation{one, two}, []Invocation{one, two}); len(left) != 0 {
 		t.Fatalf("subtract: got %v, want none left", left)
 	}
+	// The empty-taken path. Complaints' vacuity-guard comment leans on it: an
+	// empty CI is the state where every live invocation sits in Local, not one
+	// where there are none. The two rows above pass a partial and a full taken,
+	// so a short-circuit returning nil for an empty one satisfies both while
+	// falsifying that sentence. Asserted by membership rather than by count,
+	// for the reason Complaints gives about its own guards.
+	all := []Invocation{one, two}
+	left := subtract(all, nil)
+	if !slices.EqualFunc(left, all, func(a, b Invocation) bool {
+		return a.Recipe == b.Recipe && slices.Equal(a.Fields, b.Fields)
+	}) {
+		t.Fatalf("subtract(all, nil): got %v, want all of them", left)
+	}
 }
