@@ -670,15 +670,53 @@ is cheap for the reader, and stays cheap only if all four of these hold.
    to (bd gqlc-2k1m; the same miss nearly cost a force-push over a live P0
    read on #1735).
 
+   **If it returns nothing, run the second pass before you believe it.** The
+   query above filters on `class:judge`, which the filer of the review bead
+   had to remember to attach, and an absent label reads to it exactly like an
+   absent reader:
+
+       bd list --all -n 0 --json \
+         | jq -r '.[] | select(.status != "closed")
+                 | select([(.labels // [])[] | select(startswith("class:"))] | length == 0)
+                 | select(((.title // "") + " " + (.description // "")) | contains("#<N>"))
+                 | "\(.id)  \(.status)  \(.assignee // "unassigned")  \(.title)"'
+
+   It drops the label filter and asks instead for beads carrying **no `class:`
+   label at all**, which is the shape of the miss: a review bead somebody filed
+   by hand and did not classify. Read the titles it prints — that is why it
+   prints them and not bare ids. A hit that is plainly your own implementation
+   bead is noise; a hit that reads like a review is the reader the first pass
+   could not see, and it wants both your mail and its missing label.
+
+   Witnessed 2026-09-03 on PR #2305: `gqlc-fen2i` stood `in_progress` to Միհր
+   and its title spelled `#2305`, and the first pass returned empty because the
+   bead carried no labels at all. Nothing had gone red — status, assignee and
+   title were all correct. Replayed over a ledger with that bead's labels
+   stripped, the first pass finds nothing and the second finds it (bd
+   gqlc-eei77).
+
+   Why `class:`-absent rather than simply dropping the filter: measured over
+   the ledger on 2026-09-03, the unfiltered predicate returns up to 6 beads for
+   a busy PR, nearly all of them ordinary work that merely cites the number,
+   and a check that cries wolf on every rebase is one people learn to skip.
+   Requiring the class label to be *absent* cut a 3-PR sample from 6 hits to 2
+   while still finding the witnessed miss, because a bead labelled
+   `class:warrior` was classified deliberately and is not a forgotten review.
+
+   **The limit, and it is real:** a review bead mislabelled as some *other*
+   class is invisible to both passes. That is a different error from the
+   measured one — omission, not miscategorisation — and no query here covers
+   it. The prose backstop below is what stands behind that case.
+
    Then `bd mail send <the judge's seat> -s "PR #<N>: forced rebase incoming"`,
    with the old and new SHA and the delta sentence from clause 2 in the body.
 
-   If that query returns nothing, what it licenses is narrow: no UNCLOSED
-   review bead spells `#<N>` in its title or description. It is a search over
-   bead text, so a review filed without the number is invisible to it, and
-   empty is not the same finding as nobody reading. Rebase on it, but if the
-   PR has a review round you remember and no bead names it, find that bead
-   before you push rather than reading the silence as consent.
+   If **both** passes return nothing, what that licenses is narrow: no UNCLOSED
+   bead spells `#<N>` in its title or description. It is a search over bead
+   text, so a review filed without the number is invisible to it, and empty is
+   not the same finding as nobody reading. Rebase on it, but if the PR has a
+   review round you remember and no bead names it, find that bead before you
+   push rather than reading the silence as consent.
 
 2. **State the delta as a merge-base comparison, never a commit list.** A
    rebase makes `git log <old>..<new>` read as fix work, and `git diff <old>
