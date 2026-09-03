@@ -36,6 +36,35 @@ import (
 	"strings"
 )
 
+// ChildZone is the time zone Run pins the child run to, and it is
+// deliberately not UTC.
+//
+// A decoder that reads calendar or clock components off a driver value
+// has a whole defect class that is invisible under UTC: a helper
+// consulting time.Local where it should not is, when time.Local IS UTC,
+// behaviourally identical to the correct one for EVERY input. No fixture
+// kills it, however the instants are chosen. Measured 2026-09-03 on
+// render_temporal.go's toDate — rewriting `time.Time(v).Date()` as
+// `time.Time(v).In(time.Local).Date()` SURVIVES the neo4j corpus under
+// TZ=UTC and is KILLED under TZ=America/New_York, where the UTC-midnight
+// fixture slips a day. No workflow in .github pins a zone and
+// GitHub-hosted runners default to UTC, so that mutant crossed the whole
+// gate while a user in any non-UTC zone would decode the previous day
+// (bd gqlc-u3zbg).
+//
+// Etc/GMT+5 rather than a populated-place zone: it is a fixed UTC-5
+// offset with no DST transitions, so a fixture instant means the same
+// thing in every month and a corpus cannot acquire a seasonal fixture
+// dependency. Note the POSIX sign inversion — Etc/GMT+5 is UTC MINUS
+// five hours.
+//
+// The pin is fail-silent by itself and is not left that way. Go resolves
+// time.Local from TZ at startup and falls back to UTC without complaint
+// when the zone will not load, so on a host with no tzdata the child
+// would quietly go back to the state this exists to leave.
+// TestRunPinsANonUTCZoneInTheChild is the witness that it took.
+const ChildZone = "Etc/GMT+5"
+
 // Report is what one child run says about itself.
 type Report struct {
 	// Passed names the top-level tests that passed, with repeats, so a
@@ -62,11 +91,12 @@ type Report struct {
 // parent that ran it, so a tree nested two deep reports as one entry.
 //
 // GOPROXY is off and GOFLAGS is cleared, so a corpus module that needs
-// the network fails rather than reaching for it.
+// the network fails rather than reaching for it. TZ is pinned to
+// ChildZone; see there for what that buys and what it costs.
 func Run(ctx context.Context, dir string) (Report, error) {
 	cmd := exec.CommandContext(ctx, "go", "test", "-json", "-count=1", ".")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOFLAGS=", "GOPROXY=off")
+	cmd.Env = append(os.Environ(), "GOFLAGS=", "GOPROXY=off", "TZ="+ChildZone)
 	out, err := cmd.CombinedOutput()
 
 	var text strings.Builder

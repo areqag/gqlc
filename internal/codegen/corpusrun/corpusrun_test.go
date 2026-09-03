@@ -1,6 +1,8 @@
 package corpusrun_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -229,4 +231,51 @@ func TestTestsCensusMessageDisclaimsOrderAndDisclosesItsSort(t *testing.T) {
 	// The disclosure has to be true of the bytes beside it: declared in
 	// the order TestB, TestA, printed sorted.
 	require.Contains(t, err.Error(), "declared: [TestA TestB]")
+}
+
+// TestRunPinsANonUTCZoneInTheChild is the witness that Run's TZ pin took.
+//
+// The pin exists so that a decoder consulting time.Local where it should
+// not can be killed by a fixture; under UTC no fixture can kill one,
+// because time.Local IS UTC and the wrong code and the right code agree
+// on every input (corpusrun.ChildZone). But Go resolves time.Local from
+// TZ at startup and silently falls back to UTC when the zone will not
+// load — a host with no tzdata puts every corpus back in the state the
+// pin repairs, with nothing red to say so.
+//
+// So this asks the CHILD, which is the only process whose time.Local is
+// the one the corpora run under, and it asks for the offset rather than
+// the zone's name: a name is what was requested, an offset is what was
+// resolved. It also runs with TZ=UTC exported into the parent, so a
+// green here is not the ambient zone leaking through — it is Run's own
+// entry winning over the inherited one.
+func TestRunPinsANonUTCZoneInTheChild(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600))
+	}
+	write("go.mod", "module zoneprobe\n\ngo 1.26.2\n")
+	write("zone_test.go", `package zoneprobe
+
+import (
+	"testing"
+	"time"
+)
+
+func TestChildZoneIsNotUTC(t *testing.T) {
+	_, offset := time.Now().In(time.Local).Zone()
+	if offset == 0 {
+		t.Fatalf("child time.Local has a zero UTC offset (%s); the TZ pin did not resolve", time.Local)
+	}
+	if want := -5 * 60 * 60; offset != want {
+		t.Fatalf("child time.Local offset = %d, want %d", offset, want)
+	}
+}
+`)
+
+	t.Setenv("TZ", "UTC")
+	report, err := corpusrun.Run(t.Context(), dir)
+	require.NoError(t, err, "child run failed:\n%s", report.Log)
+	require.Equal(t, []string{"TestChildZoneIsNotUTC"}, report.Passed, "child run:\n%s", report.Log)
 }
