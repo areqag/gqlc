@@ -244,6 +244,72 @@ func TestStrayDefaultOKTagsAreNotSilent(t *testing.T) {
 	}
 }
 
+// TestGuardedSumsAreNotAliased refuses a type alias to a guarded sum.
+//
+// `exhaustive` v0.12.0 resolves a switch's tag type by type-switching on
+// *types.Named with no *types.Alias arm and no types.Unalias call, and
+// go/types materialises aliases by default since Go 1.23. So a switch
+// whose tag type is spelled through an alias is skipped WHOLESALE — zero
+// issues, not every-member-missing — and every row in guardedSums above
+// keeps passing while the linter half of the property is gone. That is
+// what internal/codegen's `type Cardinality = queryfile.Cardinality` did
+// until bd gqlc-ptz4t deleted it; measured then, deleting a whole case
+// arm left the linter reporting nothing.
+//
+// The bound: this sees alias DECLARATIONS inside the scan roots. An alias
+// declared outside them and used inside is beyond a per-file AST scan,
+// and so is one that renames through an intermediate.
+func TestGuardedSumsAreNotAliased(t *testing.T) {
+	sums := map[string]bool{}
+	roots := map[string]bool{}
+	for _, sum := range guardedSums {
+		sums[sum.name] = true
+		for _, root := range sum.scanRoots {
+			roots[root] = true
+		}
+	}
+
+	for root := range roots {
+		for _, path := range goFilesUnder(t, root) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, path, nil, 0)
+			require.NoError(t, err, "parsing %s", path)
+
+			for _, decl := range file.Decls {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok || gen.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range gen.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok || ts.Assign == token.NoPos {
+						continue
+					}
+					if name, ok := aliasedTypeName(ts.Type); ok && sums[name] {
+						require.Fail(t, "alias to a guarded sum",
+							"%s declares `type %s = ...%s`, and `exhaustive` skips a switch whose tag type is spelled through an alias — it reads *types.Alias, matches no case, and reports nothing at all. Every %s row above would keep passing over a switch the linter no longer checks. Name the sum through its declaring package instead (bd gqlc-ptz4t)",
+							fset.Position(ts.Pos()), ts.Name.Name, name, name)
+					}
+				}
+			}
+		}
+	}
+}
+
+// aliasedTypeName returns the name an alias RHS refers to, for the two
+// spellings a guarded sum can take: bare within its declaring package,
+// qualified from outside it.
+func aliasedTypeName(expr ast.Expr) (string, bool) {
+	switch rhs := expr.(type) {
+	case *ast.Ident:
+		return rhs.Name, true
+	case *ast.SelectorExpr:
+		return rhs.Sel.Name, true
+	default:
+		return "", false
+	}
+}
+
 // scanTarget is one sum to look for in one file, and the scan root the
 // file was reached under. Attribution to a root is what lets the
 // population check below speak per root rather than per sum, so a root

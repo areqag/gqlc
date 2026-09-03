@@ -254,13 +254,16 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	// would render for it is a method body in the generated driver, not a
 	// diagnostic anyone reads.
 	//
-	// What this buys here is NOT the `exhaustive` check, which does not see
-	// this switch at all: package codegen re-exports the members as its own
-	// constants, and measured 2026-09-03 a member added to queryfile reds
-	// only queryfile's own switch even when codegen re-exports it too
-	// (bd gqlc-51l6m). It buys the loud failure instead — an unnamed member
-	// now writes no body, so the generated method is missing its return and
-	// does not compile, where the default silently emitted a :many body.
+	// This buys two things. `exhaustive` checks this switch: it carries no
+	// `default`, and .golangci.yml sets default-signifies-exhaustive, so a
+	// `default` would take it out of the check entirely. Measured 2026-09-03
+	// on bd gqlc-ptz4t — deleting the CardinalityOne arm reds this line by
+	// name. It did not before that bead, when codegen re-exported the
+	// members through a type alias `exhaustive` could not resolve.
+	//
+	// And it buys the loud failure independently of the linter — an unnamed
+	// member writes no body, so the generated method is missing its return
+	// and does not compile, where the default silently emitted a :many body.
 	switch p.Cardinality {
 	case queryfile.CardinalityExec:
 		writeExecBody(b, p)
