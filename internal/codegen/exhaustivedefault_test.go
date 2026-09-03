@@ -108,6 +108,20 @@ var guardedSums = []guardedSum{
 	{name: "ColumnKind", declRoot: ".", scanRoots: []string{"."}, sentinel: "ColumnProperty", dirs: []string{"neo4j"}},
 	{name: "Scalar", declRoot: "../resolver", scanRoots: []string{".", "../resolver"}, sentinel: "ScalarNull", dirs: []string{"age", "neo4j"}},
 	{name: "Temporal", declRoot: "../resolver", scanRoots: []string{".", "../resolver"}, sentinel: "TemporalDate", dirs: []string{"age", "neo4j"}},
+	// Cardinality and TypeToken carry no tag between them: every switch
+	// over either names its members outright and answers for an undeclared
+	// value below the switch instead of in a `default`, which is what
+	// cardinalityAnnotation and validToken already did in the two
+	// declaring packages (bd gqlc-51l6m). So each names a dir per scan
+	// root — every root here holds a still-guarded switch, and naming them
+	// all is what makes a root that stopped being read fail rather than
+	// lean on a sibling.
+	//
+	// Cardinality's dir "." is this package's own directory: the walk names
+	// a file reached under root "." by the base of its parent, and for a
+	// file directly in the root that is ".".
+	{name: "Cardinality", declRoot: "../queryfile", scanRoots: []string{".", "../queryfile"}, sentinel: "CardinalityExec", dirs: []string{".", "queryfile"}},
+	{name: "TypeToken", declRoot: "../procsig", scanRoots: []string{"../procsig", "../query", "../resolver"}, sentinel: "TokenNumber", dirs: []string{"procsig", "cypher", "resolver"}},
 }
 
 // sumSwitch is one switch whose case expressions name members of one
