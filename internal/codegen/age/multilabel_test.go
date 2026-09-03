@@ -117,6 +117,74 @@ func withoutMultiLabelTypes(sch schema.Schema) schema.Schema {
 	return out
 }
 
+// multiLabelFixtures is every fixture the multi-label sweeps run over,
+// selected by the naming convention rather than listed. A third
+// multi-label fixture is swept by having been named for what it is,
+// which is the property a hand-maintained slice does not have.
+//
+// A bare glob over testdata would be wrong: the directory holds fixtures
+// for other tests, and a schema with no multi-label type fails the
+// sweep's own preconditions. So the convention carries the selection —
+// and a convention is only as good as its exhaustiveness, because a glob
+// cannot see the fixture that should have matched and does not. That
+// half is TestEveryMultiLabelFixtureIsNamedByTheConvention, and neither
+// is worth having without the other.
+func (s *EmissionSuite) multiLabelFixtures() []string {
+	matches, err := filepath.Glob(filepath.Join("testdata", "multi_label_*.gql"))
+	s.Require().NoError(err)
+	s.Require().NotEmpty(matches, "the multi-label sweeps would run over no fixture at all")
+	names := make([]string, 0, len(matches))
+	for _, m := range matches {
+		names = append(names, filepath.Base(m))
+	}
+	slices.Sort(names)
+	return names
+}
+
+// TestEveryMultiLabelFixtureIsNamedByTheConvention is what makes the glob
+// in multiLabelFixtures safe to rely on: it holds the convention to a
+// biconditional over the parsed schema, not over the file's name. Every
+// .gql in testdata that declares a multi-label type must be named
+// multi_label_*, and every fixture so named must declare one.
+//
+// The reverse direction is not decoration. A fixture renamed INTO the
+// convention and then emptied of its offenders would leave the sweeps
+// asserting over a schema that cannot refuse, and the sweeps' own
+// NotEmpty precondition reports that as their failure rather than as the
+// fixture's. Reading the schema rather than grepping the source is what
+// lets this answer for a multi-label type spelled in some way a text
+// search does not anticipate.
+func (s *EmissionSuite) TestEveryMultiLabelFixtureIsNamedByTheConvention() {
+	all, err := filepath.Glob(filepath.Join("testdata", "*.gql"))
+	s.Require().NoError(err)
+	s.Require().NotEmpty(all, "testdata holds no schema fixture, so this proves nothing")
+
+	var named, plain int
+	for _, path := range all {
+		fixture := filepath.Base(path)
+		offenders, _ := multiLabelOffenders(s.inputFrom(path).Schema)
+		conforms := strings.HasPrefix(fixture, "multi_label_")
+
+		if len(offenders) > 0 {
+			s.Require().True(conforms,
+				"fixture %s declares %d multi-label type(s) but is not named multi_label_*, so the sweeps never see it",
+				fixture, len(offenders))
+			named++
+			continue
+		}
+		s.Require().False(conforms,
+			"fixture %s is named multi_label_* but declares no multi-label type, so the sweeps assert over a schema that cannot refuse",
+			fixture)
+		plain++
+	}
+
+	// Both populations non-empty, asserted separately: a run where every
+	// fixture landed in one arm would satisfy every assertion above while
+	// testing only one direction of the biconditional.
+	s.Require().NotZero(named, "no fixture exercises the conforming arm")
+	s.Require().NotZero(plain, "no fixture exercises the non-conforming arm")
+}
+
 // TestMultiLabelDiagnosticNamesEveryOffenderAndItsLabels holds the
 // diagnostic to the facts an author needs to act on it: which types are
 // refused, and which labels each is keyed on. Both are read off the
@@ -128,7 +196,7 @@ func withoutMultiLabelTypes(sch schema.Schema) schema.Schema {
 // its labels and satisfy the sweep, so the representable type beside
 // them must not appear.
 func (s *EmissionSuite) TestMultiLabelDiagnosticNamesEveryOffenderAndItsLabels() {
-	for _, fixture := range []string{"multi_label_with_collateral.gql", "multi_label_pair.gql"} {
+	for _, fixture := range s.multiLabelFixtures() {
 		s.Run(fixture, func() {
 			in := s.inputFrom(filepath.Join("testdata", fixture))
 			_, err := age.New().Generate(in)
@@ -139,6 +207,14 @@ func (s *EmissionSuite) TestMultiLabelDiagnosticNamesEveryOffenderAndItsLabels()
 			s.Require().NotEmpty(offenders, "fixture %s declares no multi-label type", fixture)
 			s.Require().NotEmpty(single, "fixture %s declares no representable type to be left out", fixture)
 			s.requireLabelsDistinguishable(fixture, offenders)
+
+			// The top-level count, not just the per-offender label counts
+			// below. The two fixtures declare different numbers of
+			// offenders, so a message spelling a constant cannot pass both
+			// rows — the same thing that separates the query-count test
+			// from asserting a literal the source and the test both write.
+			s.Require().Contains(msg, strconv.Itoa(len(offenders))+" of them",
+				"the diagnostic does not say how many types the schema declares")
 
 			for _, o := range offenders {
 				s.Require().Contains(msg, o.name, "the diagnostic does not name refused type %s", o.name)
@@ -174,7 +250,15 @@ func (s *EmissionSuite) TestMultiLabelDiagnosticStatesWhatRefusingTheSchemaCosts
 
 			_, err := age.New().Generate(in)
 			s.Require().ErrorIs(err, age.ErrUnsupportedSchema)
-			s.Require().Contains(err.Error(), strconv.Itoa(queries)+" quer",
+			// The whole noun, not the "quer" prefix both spellings share.
+			// A prefix cannot see the singular/plural branch at all, so
+			// deleting it survived; the rows carry 1 and not-1 precisely
+			// so that this assertion has both sides to distinguish.
+			noun := "queries"
+			if queries == 1 {
+				noun = "query"
+			}
+			s.Require().Contains(err.Error(), strconv.Itoa(queries)+" "+noun,
 				"the diagnostic does not say how many queries the schema refusal takes with it")
 		})
 	}
