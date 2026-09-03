@@ -19,11 +19,25 @@ import (
 )
 
 // TestDollarTagClosesOnlyAtTheEnds pins the delimiter choice against the
-// string the SQL parser actually scans, tag + text + tag. Each row is a
-// text whose final bytes interact with a candidate: an interior
-// occurrence, a straddle across the text/tag boundary, a bare dollar
-// that opens no delimiter, and a straddle on the escalated candidate so
-// the second turn of the loop is exercised.
+// scan an SQL parser performs: having consumed the opening tag, it closes
+// on the FIRST occurrence after it, so the property is that the first
+// match in text+tag lands at len(text). Each row is a text whose final
+// bytes interact with a candidate: an interior occurrence, a straddle
+// across the text/tag boundary, a bare dollar that opens no delimiter,
+// and a straddle on the escalated candidate so the second turn of the
+// loop is exercised.
+//
+// First-match is not interchangeable with counting the delimiter in
+// tag+text+tag, which is how this read until bd gqlc-vqx87.
+// strings.Count is non-overlapping: for the straddling row under the tag
+// $gqlc$, the two counted matches are the opening tag and the straddle
+// across the text/tag boundary, the emission's own closing tag one byte
+// later is never counted, and LastIndex still lands at the end. So both
+// of the assertions this replaces passed on a delimiter closing five
+// bytes early — the B1 failure gqlc-35yu.7 exists to prevent. The `want`
+// column caught it and still does; what changed is that the assertions
+// past `want` now state the property too, in the one spelling
+// TestEmittedQueryTextIsTheBytesTheTagWasChosenOn already uses.
 func TestDollarTagClosesOnlyAtTheEnds(t *testing.T) {
 	tests := []struct {
 		name string
@@ -42,11 +56,8 @@ func TestDollarTagClosesOnlyAtTheEnds(t *testing.T) {
 			tag := age.DollarTag(tt.text)
 			require.Equal(t, tt.want, tag)
 
-			body := tag + tt.text + tag
-			require.Equal(t, 2, strings.Count(body, tag),
-				"the delimiter occurs somewhere other than the two ends of %q", body)
-			require.Equal(t, len(body)-len(tag), strings.LastIndex(body, tag),
-				"the scanner would close %q before the end", body)
+			require.Equal(t, len(tt.text), strings.Index(tt.text+tag, tag),
+				"the scanner closes %q before the end", tt.text+tag)
 		})
 	}
 }
