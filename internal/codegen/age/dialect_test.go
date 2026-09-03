@@ -678,6 +678,43 @@ const syntheticInertHelperRow = "\trecordRefusal(t, \"" + syntheticProbeAns + "\
 const syntheticInertHelperDecl = "\nfunc recordRefusal(t *testing.T, note string) {\n" +
 	"\tt.Log(note)\n}\n"
 
+// syntheticBoundHelperRow is the answer asserted through a helper that
+// binds its OWN assertion object — the helper form and the bound-object
+// form composed. It is the shape neither call site of isAssertionCall saw
+// on its own: assertionHelpers decides what the helpers are before any
+// body has been read, so it asks with no bases, and the only call inside
+// this helper is a method on a local (bd gqlc-k9v3k).
+const syntheticBoundHelperRow = "\tassertRefusalBound(t, msg, \"" + syntheticProbeAns + "\")\n"
+
+// syntheticBoundHelperDecl is syntheticHelperDecl with the assertion
+// routed through a bound object instead of through the package, and
+// nothing else changed, so what separates it from the inert helper is
+// still the one thing this reader decides on.
+const syntheticBoundHelperDecl = "\nfunc assertRefusalBound(t *testing.T, msg, want string) {\n" +
+	"\tr := require.New(t)\n" +
+	"\tr.Contains(msg, want)\n}\n"
+
+// syntheticInertBoundHelperRow is the widening the row above must not be,
+// and the one it was until bd gqlc-k9v3k: the helper BINDS an assertion
+// object and then asserts nothing through it. Constructing an assertion
+// object is not asserting, so a witness handing this helper the answer has
+// not checked it.
+//
+// This is the FALSE GREEN direction — an unasserted answer passing — which
+// is why it is spelled out rather than left to the inert helper above. That
+// one is inert by having no assertion package in it at all; this one is
+// inert while naming the package on its first line, which is what the
+// constructor rule had to be taught to tell apart.
+const syntheticInertBoundHelperRow = "\trecordRefusalBound(t, \"" + syntheticProbeAns + "\")\n"
+
+// syntheticInertBoundHelperDecl is syntheticBoundHelperDecl with the
+// assertion taken out and the binding left standing, so the pair differs
+// in the one thing this reader decides on.
+const syntheticInertBoundHelperDecl = "\nfunc recordRefusalBound(t *testing.T, note string) {\n" +
+	"\tr := require.New(t)\n" +
+	"\t_ = r\n" +
+	"\tt.Log(note)\n}\n"
+
 // liveWitnessSource is a live test file declaring one witness, with the
 // served text always in code and the refused probe wherever row puts it.
 //
@@ -949,6 +986,33 @@ func TestAssertedTextIsWhatAnAssertionReads(t *testing.T) {
 			name:    "a helper that asserts nothing reads nothing",
 			row:     syntheticInertHelperRow,
 			decls:   syntheticInertHelperDecl,
+			spelled: true,
+		},
+		{
+			// bd gqlc-k9v3k, the helper form and the bound-object form
+			// composed. Each was already read on its own; the composition
+			// was not, because assertionHelpers asks isAssertionCall with
+			// no bases while it is still deciding what the helpers are.
+			// So the only call inside this helper — a method on a local it
+			// bound itself — answered no, the helper went unregistered,
+			// and a witness calling it read nothing.
+			name:     "an answer asserted through a helper that binds its own assertion object is read",
+			row:      syntheticBoundHelperRow,
+			decls:    syntheticBoundHelperDecl,
+			asserted: true,
+			spelled:  true,
+		},
+		{
+			// The widening the row above must not be, and the one this
+			// reader was: binding an assertion object is not asserting
+			// through it. Registering this helper laundered its caller's
+			// answer into the asserted text, which is the false GREEN
+			// direction and the reason the row above is not enough on its
+			// own — the two differ only in what the helper does with the
+			// object it bound.
+			name:    "a helper that binds an assertion object and asserts nothing reads nothing",
+			row:     syntheticInertBoundHelperRow,
+			decls:   syntheticInertBoundHelperDecl,
 			spelled: true,
 		},
 	} {
@@ -1251,10 +1315,20 @@ var assertionGateways = map[string]bool{"Require": true, "Assert": true}
 // isAssertionCall reports whether call is one this reader takes the
 // arguments of. Four shapes: a call on an assertion package, a call on a
 // local an assertion object was bound to, a call through a suite gateway,
-// and a call to a helper that reaches any of those. helpers and bases may
-// both be nil — that is how assertionHelpers asks the question, while it
-// is still deciding what the helpers are.
+// and a call to a helper that reaches any of those. helpers may be nil —
+// that is how assertionHelpers asks the question, while it is still
+// deciding what the helpers are.
 func isAssertionCall(call *ast.CallExpr, helpers, bases map[string]bool) bool {
+	// A constructor is not an assertion, though it is rooted at an
+	// assertion package and the rule below would otherwise take it for
+	// one. That let a helper which only BINDS an object and asserts
+	// nothing through it register as an assertion helper, so a witness
+	// calling such a helper had its answer laundered into the asserted
+	// text — an unasserted answer passing the sweep, which is the one
+	// direction this fence exists to deny (bd gqlc-k9v3k).
+	if isAssertionConstructor(call) {
+		return false
+	}
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
 		return helpers[fun.Name]
@@ -1349,12 +1423,12 @@ func assertionHelpers(file *ast.File) map[string]bool {
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
-			// nil bases: a helper that binds its OWN assertion object is
-			// not recognised as one, so a witness calling it still reads
-			// nothing. A false RED of the same family as the one above,
-			// one call site over, and empty in this repo today — bd
-			// gqlc-k9v3k holds it with the measurement.
-			if !ok || !isAssertionCall(call, nil, nil) {
+			// nil helpers, because that is the question being answered;
+			// but the body's OWN bases, because a helper may assert
+			// through an object it bound itself, and since a constructor
+			// stopped counting as an assertion nothing else in such a
+			// helper reaches one (bd gqlc-k9v3k).
+			if !ok || !isAssertionCall(call, nil, assertionBases(fn.Body)) {
 				return true
 			}
 			helpers[fn.Name.Name] = true
