@@ -1682,21 +1682,40 @@ func (s *ResolverSuite) TestAnAnonymousWrittenBindingSilencesAnAnonymousMatchedE
 	s.Require().NoError(err, "an anonymous single-hop mandatory edge is a witness when nothing is written")
 	s.Require().Equal(employeePerson, got)
 
-	// The over-approximation. The CREATE's pattern shares no binding with the
-	// MATCH — it writes a different edge between two freshly created nodes — so
-	// the only thing it has in common with the MATCHed edge is anonymity.
-	_, err = resolve(matched + "CREATE (:Person:Employee)-[:WORKS_AT]->(:Company) RETURN p")
+	// The over-approximation, isolated. Both CREATEd NODES are named, so the
+	// only anonymous position the CREATE contributes is its EDGE. The CREATE's
+	// pattern shares no binding with the MATCH — it writes a different edge
+	// between two freshly created nodes — so the only thing it has in common
+	// with the MATCHed edge is that anonymity.
+	_, err = resolve(matched + "CREATE (a:Person:Employee)-[:WORKS_AT]->(b:Company) RETURN p")
 	s.Require().ErrorIs(err, ErrAmbiguousLabel,
 		"the CREATE writes an anonymous edge, which enters writtenBindings as the empty string; "+
 			"the MATCHed edge is anonymous too, so it tests written and stops being a witness, and p stays plural")
 	s.Require().ErrorContains(err, "p is satisfied by more than one declared node type: Employee&Person, Person",
 		"the refusal must be p staying plural — refused for any other reason, the row passes its sentinel and pins nothing")
 
-	// One edit from the row above: the same CREATE with its bindings NAMED.
+	// One edit from the row above, and it is one edit: the edge is NAMED and
+	// nothing else moves. That is what makes the pair evidence about the edge
+	// rather than about anonymity in general.
 	got, err = resolve(matched + "CREATE (a:Person:Employee)-[w:WORKS_AT]->(b:Company) RETURN p")
 	s.Require().NoError(err,
-		"naming the CREATE's bindings takes the empty string out of the written set, so the same "+
+		"naming the written EDGE takes the empty string out of the written set, so the same "+
 			"anonymous MATCHed edge becomes a witness again — the answer turns on the WRITTEN side alone")
+	s.Require().Equal(employeePerson, got)
+
+	// The control for the other half of writtenBindings' doc comment, and the
+	// row that says WHICH half does the work. The empty string has exactly one
+	// source: an anonymous node is not a binding at all (C3), so it never
+	// reaches CreateEffect.Variables, and only an anonymous EDGE puts the
+	// empty string in the written set. So a CREATE carrying no edge cannot
+	// silence a matched one however it spells its nodes — which is what
+	// separates this row from the refusal above, where the sole edit was the
+	// edge. Without this row the distinction is an argument; with it, a
+	// measurement.
+	got, err = resolve(matched + "CREATE (:Company) RETURN p")
+	s.Require().NoError(err,
+		"an anonymous node is not a binding, so it contributes nothing to the written set — "+
+			"only an anonymous EDGE enters it as the empty string")
 	s.Require().Equal(employeePerson, got)
 }
 
