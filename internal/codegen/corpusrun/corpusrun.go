@@ -521,11 +521,11 @@ func Entered(dir, profile string) (map[string]bool, error) {
 		if !ok {
 			return nil, fmt.Errorf("corpusrun: coverage line %q has no block range", line)
 		}
-		start, err := strconv.Atoi(from[:strings.IndexByte(from, '.')])
+		start, err := lineOf(from)
 		if err != nil {
 			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable start line: %w", line, err)
 		}
-		end, err := strconv.Atoi(to[:strings.IndexByte(to, '.')])
+		end, err := lineOf(to)
 		if err != nil {
 			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable end line: %w", line, err)
 		}
@@ -564,6 +564,18 @@ func Entered(dir, profile string) (map[string]bool, error) {
 		}
 	}
 	return out, nil
+}
+
+// lineOf reads the line out of a profile's line.column position. A
+// position carrying no separator is refused rather than sliced: Go's
+// IndexByte answers -1 there, which panics the slice instead of
+// erroring.
+func lineOf(pos string) (int, error) {
+	dot := strings.IndexByte(pos, '.')
+	if dot < 0 {
+		return 0, fmt.Errorf("position %q has no line.column separator", pos)
+	}
+	return strconv.Atoi(pos[:dot])
 }
 
 // Functions names the top-level functions declared in dir's non-test Go
