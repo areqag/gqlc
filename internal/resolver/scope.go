@@ -467,9 +467,20 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 // the deferred-close loop in CloseEdges rather than above it, which
 // TestDeferredEdgesCloseBeforeTheNarrowing pins.
 func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
-	// Changes no answer — endpointNarrowing gives an entry only to a plural
-	// binding, so with none it returns an empty map — and no test can pin it. It
-	// stays because the work it skips is not free: writtenBindings walks the
+	// A pure optimization. No test can pin the RETURN, and not for want of a
+	// constructible state: with nodeCands empty the two implementations answer
+	// identically. endpointNarrowing gives an entry only to a plural binding, so
+	// it hands back an empty map, the loop below never runs, and the work the
+	// body does before reaching it only reads. Delete the return and every
+	// package stays green — which the reading above says is what to expect,
+	// rather than a gap in the corpus.
+	//
+	// Its PREMISE is ordinary to assert, and
+	// TestEndpointNarrowingGivesNoEntryWhenNothingIsPlural does, both ways round:
+	// the row where p IS plural is what stops the empty answer being read as an
+	// edge that would never have contributed anything.
+	//
+	// It stays because the work it skips is not free: writtenBindings walks the
 	// effects and every surviving edge re-runs edgeCandidates over the schema,
 	// on the common scope where nothing is plural.
 	if len(s.nodeCands) == 0 {
@@ -511,10 +522,14 @@ func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
 			// ones no matching row can have. The survivor is still a superset of
 			// the attainable types, so the entry stays covered.
 			//
-			// Changes no answer today and no test can pin it: this pass applies
-			// its effects from a snapshot taken before the loop, CloseEdges
-			// returns immediately after it, and resolvedCovers is not carried, so
-			// nothing reads the lane between this write and the end of the Part.
+			// Changes no answer on any QUERY: this pass applies its effects from
+			// a snapshot taken before the loop, CloseEdges returns immediately
+			// after it, and resolvedCovers is not carried, so nothing reads the
+			// lane between this write and the end of the Part. A test does pin
+			// it, by reading the lane back off a scope rather than by asking a
+			// query: TestScopeNarrowingToASingletonMarksTheBindingCovering. Drop
+			// the write and no query test moves, which is the first sentence
+			// again, measured.
 			// It stays because the lane's contract is one-directional —
 			// membership implies covers, and only that direction is load-bearing
 			// — so omitting the write is sound but false, and the moment a reader

@@ -454,6 +454,129 @@ func TestScopeNarrowingToASingletonLeavesThePluralLane(t *testing.T) {
 	require.NotContains(t, sc.nodeCands, "p", "and the plural lane is vacated, so no consumer can still see p as plural")
 }
 
+// narrowingFixture builds the schema and bindings the two tests below share: `p`
+// touched by one WORKS_AT edge declared from Employee only, so a plural `p` over
+// {Person, Employee} has exactly one survivor and the collapse arm fires.
+func narrowingFixture(t *testing.T) (schema.Schema, query.NodeBinding, query.NodeBinding, query.EdgeBinding) {
+	t.Helper()
+	person := graph.LabelSet{"Person"}.Key()
+	employee := graph.LabelSet{"Employee", "Person"}.Key()
+	company := graph.LabelSet{"Company"}.Key()
+	worksAt := graph.LabelSet{"WORKS_AT"}.Key()
+	sch := schema.Schema{
+		Nodes: map[graph.LabelSetKey]schema.NodeType{
+			person:   {KeyLabels: person, CompleteLabels: person},
+			employee: {KeyLabels: employee, CompleteLabels: employee},
+			company:  {KeyLabels: company, CompleteLabels: company},
+		},
+		Edges: map[schema.EdgeKey]schema.EdgeType{
+			{Source: employee, KeyLabels: worksAt, Target: company}: {},
+		},
+	}
+	np, err := query.NewNodeBinding("p", graph.LabelSet{"Person"})
+	require.NoError(t, err)
+	nc, err := query.NewNodeBinding("c", graph.LabelSet{"Company"})
+	require.NoError(t, err)
+	epP, err := query.NewVarEndpoint("p")
+	require.NoError(t, err)
+	epC, err := query.NewVarEndpoint("c")
+	require.NoError(t, err)
+	eb, err := query.NewEdgeBinding("w", graph.LabelSet{"WORKS_AT"}, epP, epC, true)
+	require.NoError(t, err)
+	return sch, np, nc, eb
+}
+
+// TestScopeNarrowingToASingletonMarksTheBindingCovering pins the third write in
+// the collapse arm — s.resolvedCovers[v] — which its sibling above does not
+// assert: that one is about lane exclusivity, this one about precision. The lane
+// qualifies `resolved`, and a collapse earns the mark because v was plural, so
+// cands was a satisfying set and the survivor is still a superset of the
+// attainable types.
+//
+// The applier is called DIRECTLY rather than through CloseEdges, because the
+// comment this replaces claimed no test could pin the write, and reaching it
+// through a query is not what makes that false — reading the lane back off a
+// scope is. Nothing here is a query.
+//
+// It changes no answer today: CloseEdges returns immediately after this call and
+// resolvedCovers is not carried, so no reader sits between the write and the end
+// of the Part. That is why the guard asserts the table rather than a resolved
+// column, and it is what the write is FOR — the moment a reader appears after
+// this point, omitting the mark is a precision bug with nothing else to catch it.
+func TestScopeNarrowingToASingletonMarksTheBindingCovering(t *testing.T) {
+	sch, np, nc, eb := narrowingFixture(t)
+	employee := graph.LabelSet{"Employee", "Person"}.Key()
+	company := graph.LabelSet{"Company"}.Key()
+	person := graph.LabelSet{"Person"}.Key()
+
+	sc := newScope(branchState{})
+	sc.Ingest(query.Part{Bindings: []query.Binding{np, nc, eb}})
+	require.NoError(t, sc.BindNodeCands(np, []schema.NodeType{
+		{KeyLabels: person, CompleteLabels: person},
+		{KeyLabels: employee, CompleteLabels: employee},
+	}))
+	require.NoError(t, sc.BindNode(nc, schema.NodeType{KeyLabels: company, CompleteLabels: company}))
+	require.NoError(t, sc.BindEdge(eb))
+	require.NotContains(t, sc.resolvedCovers, "p", "the mark must be absent before the call, or the assertion below reads a seed")
+
+	sc.NarrowPluralEndpoints(sch)
+
+	// Tripwire: the arm that writes the mark is the len(narrowed)==1 arm, and the
+	// other two write no mark for an honest reason. Without these the assertion
+	// below could fail for a run that never collapsed anything.
+	require.Equal(t, employee, sc.nodeTypes["p"].KeyLabels, "the collapse arm must run, or nothing under test was reached")
+	require.NotContains(t, sc.nodeCands, "p", "and it must vacate the plural lane")
+
+	require.Contains(t, sc.resolvedCovers, "p",
+		"a binding the narrowing collapsed to one type is covered by it, and the lane must say so")
+}
+
+// TestEndpointNarrowingGivesNoEntryWhenNothingIsPlural pins the premise
+// NarrowPluralEndpoints' early return rests on. The return itself is not
+// observable — see its comment — but the reason it is safe is a claim about
+// endpointNarrowing, and that is ordinary to assert.
+//
+// The plural row is not decoration. Without it an empty map proves nothing: the
+// same emptiness is what an edge skipped for any other reason gives, and the
+// singular row alone cannot tell "no plural binding" from "this fixture's edge
+// never contributes". The two rows differ in one thing, how `p` is bound.
+func TestEndpointNarrowingGivesNoEntryWhenNothingIsPlural(t *testing.T) {
+	sch, np, nc, eb := narrowingFixture(t)
+	employee := graph.LabelSet{"Employee", "Person"}.Key()
+	company := graph.LabelSet{"Company"}.Key()
+	person := graph.LabelSet{"Person"}.Key()
+
+	bind := func(t *testing.T, plural bool) *scope {
+		t.Helper()
+		sc := newScope(branchState{})
+		sc.Ingest(query.Part{Bindings: []query.Binding{np, nc, eb}})
+		if plural {
+			require.NoError(t, sc.BindNodeCands(np, []schema.NodeType{
+				{KeyLabels: person, CompleteLabels: person},
+				{KeyLabels: employee, CompleteLabels: employee},
+			}))
+		} else {
+			require.NoError(t, sc.BindNode(np, schema.NodeType{KeyLabels: employee, CompleteLabels: employee}))
+		}
+		require.NoError(t, sc.BindNode(nc, schema.NodeType{KeyLabels: company, CompleteLabels: company}))
+		require.NoError(t, sc.BindEdge(eb))
+		return sc
+	}
+
+	t.Run("plural", func(t *testing.T) {
+		sc := bind(t, true)
+		require.Contains(t, endpointNarrowing([]query.EdgeBinding{eb}, sc.nodeTable(), sch, sc.writtenBindings()), "p",
+			"this edge does contribute, so the singular row's empty map is about pluralness and nothing else")
+	})
+
+	t.Run("singular", func(t *testing.T) {
+		sc := bind(t, false)
+		require.Empty(t, sc.nodeCands, "nothing is plural, which is the state the early return guards")
+		require.Empty(t, endpointNarrowing([]query.EdgeBinding{eb}, sc.nodeTable(), sch, sc.writtenBindings()),
+			"with no plural binding the rule contributes nothing, so the guarded body could only have written a no-op")
+	})
+}
+
 func TestScopeIngestSingleShot(t *testing.T) {
 	sc := newScope(branchState{})
 	sc.Ingest(query.Part{})
