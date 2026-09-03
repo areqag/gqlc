@@ -208,6 +208,7 @@ func zeroValueText(p codegen.Query) string {
 	if pointerWrapped(f) {
 		return "nil"
 	}
+	//gqlc:default-ok every non-entity kind zeroes through its Go type
 	switch f.Kind {
 	case codegen.ColumnNode, codegen.ColumnEdge:
 		return f.GoType + "{}"

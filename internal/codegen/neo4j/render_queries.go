@@ -864,6 +864,7 @@ func elemLocal(name string, depth int) string {
 // would fail the whole column on exactly that element, while AGE, whose
 // agtypeValue maps null to nil, hands the same graph value back intact.
 func carriesElemBare(e *codegen.ListElem) bool {
+	//gqlc:default-ok a kind this switch does not name rides a carrier
 	switch e.Kind {
 	case codegen.ColumnAny, codegen.ColumnScalarNull:
 		return true
