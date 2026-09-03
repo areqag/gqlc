@@ -961,7 +961,13 @@ seat_box_emptied() { # <pane> -> 0 emptied, 1 holds text, 2 no box, 3 could not 
         if [ "$rc" -eq 2 ]; then return 3; fi
         # history: kingdom/brain/km-notes.md#seat_box_emptied
         if [ "$rc" -eq 1 ]; then return 2; fi
-        [ -n "$box" ] || return 0
+        # Emptiness through box_one_line, not a raw -n. seat_box_text's awk trims
+        # POSIX space, and U+00A0 is not POSIX space, so a composer the TUI pads
+        # with one survives its bare-glyph drop as a two-character line. A raw -n
+        # calls that occupied, and every one of these ten turns would, so a send
+        # that WAS submitted gets reported as typed-and-never-submitted
+        # (bd gqlc-051cj).
+        [ -n "$(box_one_line "$box")" ] || return 0
     done
     return 1
 }
@@ -1194,7 +1200,13 @@ send_line_to_pane() { # <target> <text> -> 0 submitted per the box, 1 not
         echo "km: send to $seat (pane $pane): the pane renders no input box, so this text has nowhere to land and the Enter would press whatever that surface does answer; nothing was sent (VI.2, bd gqlc-3evsn)" >&2
         return 1
     fi
-    if [ -n "$box" ]; then
+    # Through box_one_line for the reason seat_box_emptied's test gives: a
+    # composer padded with U+00A0 outlives the awk's bare-glyph drop, and a raw
+    # -n would refuse to type into a box that is in fact empty. cmd_wake,
+    # cmd_sleep, cmd_down and dispatch's recovery all route through here, so
+    # that refusal reports a reachable seat as unreachable by every transport
+    # (bd gqlc-051cj).
+    if [ -n "$(box_one_line "$box")" ]; then
         echo "km: send to $seat (pane $pane): the input box already holds text, and typing appends, so this would be pasted onto the end of a citizen's draft and submitted as one message; nothing was sent and the draft is untouched (bd gqlc-6bnkw)" >&2
         return 1
     fi
