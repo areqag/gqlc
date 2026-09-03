@@ -1487,14 +1487,25 @@ type unlabelledInference struct {
 	// innerJoined records that some folded edge drops the rows that lack it, so
 	// the types it points at are types the SURVIVING rows have.
 	//
-	// It is spelled !e.Nullable() and NOT witnessesItsEndpoints, which answers a
-	// stricter question for `attainable` and also returns false for a
-	// variable-length hop. A `*1..2` hop still filters: measured on social_r1,
-	// master accepts `MATCH (c)-[a:AUTHORED*1..2]->(x:Post) RETURN c.name` as
-	// STRING NOT NULL and `c` is the source of an AUTHORED edge on every row it
-	// returns, so that answer is sound and reusing the stricter predicate here
-	// would refuse it. What a multi-hop's far end licenses is a separate and
-	// pre-existing question (gqlc-3uof), deliberately not widened here.
+	// It is spelled `!e.Nullable() || demoted[e.OptionalGroup()]` and NOT
+	// witnessesItsEndpoints, which answers a stricter question for `attainable`
+	// and also returns false for a variable-length hop. A `*1..2` hop still
+	// filters: measured on social_r1, master accepts
+	// `MATCH (c)-[a:AUTHORED*1..2]->(x:Post) RETURN c.name` as STRING NOT NULL
+	// and `c` is the source of an AUTHORED edge on every row it returns, so that
+	// answer is sound and reusing the stricter predicate here would refuse it.
+	// What a multi-hop's far end licenses is a separate and pre-existing question
+	// (gqlc-3uof), deliberately not widened here.
+	//
+	// The demotedGroups exemption is the one part shared with the family's other
+	// two guards, added by bd gqlc-lixuz to complete it. Until then this was the
+	// blunt `!e.Nullable()`, and the refusal that produced said "every edge
+	// reaching it is an OPTIONAL match, which drops no row" of a group that was
+	// PROVEN — false in its own terms, since a proven group's rows without the
+	// hop are exactly the rows the query does not return. Nothing in the corpus
+	// reached the difference: the widening left the whole package and all 14070
+	// sweep cells unchanged, so TestAProvenOptionalGroupInnerJoinsPhaseB's pair
+	// is the only thing holding it.
 	//
 	// attested cannot stand in for this either: its far-end conjunct decides
 	// WHICH types the evidence points at, not WHETHER there is any.
@@ -1695,7 +1706,7 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 			attainable.fold(e, side, other, otherKeys, s, narrowing)
 			inf.attested = true
 		}
-		if !e.Nullable() {
+		if !e.Nullable() || demoted[e.OptionalGroup()] {
 			inf.innerJoined = true
 		}
 		all.fold(e, side, other, otherKeys, s, narrowing)
