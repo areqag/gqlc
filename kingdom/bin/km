@@ -261,7 +261,10 @@ KM_GATE_PATHS=(kingdom/ .githooks/ .claude/)
 # does it. The distinction is the whole point of the split: a seat runs the
 # DEPLOYED km, so stale machinery in its worktree costs it nothing — but it
 # READS its procedure by relative path from its own cwd, so a stale document is
-# followed (bd gqlc-gsjbs).
+# followed (bd gqlc-gsjbs). km-seat now closes that asymmetry where it is felt:
+# a seat whose documents are behind and whose work cannot be moved is pointed at
+# the deploy root's copies of these very paths, so she reads the deployed
+# documents as she runs the deployed km (bd gqlc-ez7gg).
 KM_DOC_PATHS=(kingdom/CONSTITUTION.md kingdom/brain/playbooks/ kingdom/brain/decisions/)
 
 # history: kingdom/brain/km-notes.md#master_holder
