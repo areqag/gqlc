@@ -511,7 +511,12 @@ func declaredMarkers(t *testing.T, marker string) []string {
 //
 // Methods reached only by embedding are not read here: the walk skips every
 // interface field that is not a method declaration, named embed and anonymous
-// interface literal alike. SetEffect has an entry of its own because it names
+// interface literal alike. It does so by ranging over field.Names, which is
+// the whole test — Go's grammar gives names only to method fields, so an
+// embed, a qualified embed, an anonymous interface literal and a type-set
+// element all arrive with none. An explicit *ast.FuncType arm was removed here
+// as redundant rather than as wrong (bd gqlc-5ckc); do not restore it without
+// a row that fails without it. SetEffect has an entry of its own because it names
 // isSetEffect in its own body, not because it embeds Effect. An interface that
 // named no unexported method of its own and obtained one solely by embedding
 // would therefore go unreported — a limit of this reading, not a claim that no
@@ -540,9 +545,6 @@ func sealedInterfaces(t *testing.T) map[string][]string {
 					continue
 				}
 				for _, field := range iface.Methods.List {
-					if _, isMethod := field.Type.(*ast.FuncType); !isMethod {
-						continue // an embedded interface, not a method
-					}
 					for _, name := range field.Names {
 						if !name.IsExported() {
 							got[ts.Name.Name] = append(got[ts.Name.Name], name.Name)
