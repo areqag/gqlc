@@ -123,8 +123,27 @@ type guardedSum struct {
 //     record defect twice (bd gqlc-osuz). Deleting that default to satisfy
 //     this fence would re-open the defect it exists to end.
 //
-// A fourth, graph.EntityKind, stays out on a different ground entirely — the
-// two-types-one-name collision of bd gqlc-pw6yj — and not on this one.
+// A fourth, graph.EntityKind, stays out — but NOT for the reason this comment
+// gave until bd gqlc-pw6yj, which was the two-types-one-name collision with
+// internal/codegen's own EntityKind. Measured 2026-09-03, adding the single row
+// {name: "EntityKind", declRoot: "../graph", scanRoots: ["../graph"], sentinel:
+// "Node", dirs: ["graph"]}: the fence holds it correctly. declRoot confines the
+// member scan to ../graph, so it reads Node and Edge and never sees EntityNode
+// or EntityEdge, and codegen's EntityKind is in no row to be conflated with.
+// Nothing was misattributed. The collision bites only if BOTH types are listed,
+// and scanSumSwitches now refuses that outright rather than reporting it as a
+// missing switch.
+//
+// What actually keeps it out is the cost of the row, which is the ordinary cost
+// every other sum here paid: graph.EntityKind.String's `default` returns "node"
+// for anything not Edge, so a third member would serialise as a node — the
+// invent-a-plausible-answer shape this fence is for, and one its own doc comment
+// contradicts by calling String "the single source the query model's JSON
+// discriminator derives from, so the serialised tag can never drift". Bringing
+// it in means deleting that default or tagging it, and measuring the dirs: there
+// is a second still-guarded switch over the sum at internal/query/cypher/
+// expr.go:290, outside ../graph, so the roots are not just ../graph. That is bd
+// gqlc-r79zi, filed rather than ridden here.
 //
 // Adding a row here is the only way to bring such a sum in. A
 // //gqlc:default-ok tag alone cannot do it: on a switch over a sum this list
@@ -394,7 +413,39 @@ func scanSumSwitches(t *testing.T) (switches []sumSwitch, stray []string) {
 	members := make(map[string][]string, len(guardedSums))
 	targets := map[string][]scanTarget{}
 	var paths []string
+	declaredBy := make(map[string]string, len(guardedSums))
 	for _, sum := range guardedSums {
+		// A sum is identified here by its bare type name, and two Go types
+		// in this tree already share one: internal/graph's EntityKind
+		// (Node, Edge) and internal/codegen's (EntityNode, EntityEdge).
+		// Everything below keys on that name — the members map here, the
+		// scanTarget, and the per-sum-per-root check at the end — so a
+		// second row naming a type the first already named silently takes
+		// the first's member set out of this map and scans its roots for
+		// the wrong members.
+		//
+		// That collapse is already caught, and this check exists because
+		// of what it is caught BY. Measured 2026-09-03 with both EntityKind
+		// rows added: the run reds, but on the per-sum-per-root check,
+		// saying "the walk found no EntityKind switch anywhere under
+		// ../graph ... Either the switches there were deleted, or the walk
+		// stopped reaching the root". Both halves of that remedy are false
+		// — the switch is sitting in ../graph/entitykind.go and the walk
+		// reached it — so the message sends its reader to look at a file
+		// that is not the problem. The verdict was right and the reason was
+		// a lie, which is the failure this fence's own style refuses
+		// everywhere else.
+		//
+		// The remedy in this message is deliberately two-branched, because
+		// which one is right is not this fence's call to make. bd
+		// gqlc-pw6yj put the rename first for a reason that survives it:
+		// graph.EntityKind and codegen.EntityKind are different concepts,
+		// and the collision confuses a reader who never opens this file.
+		require.NotContains(t, declaredBy, sum.name,
+			"guardedSums names the sum %q twice, declared under %s and under %s. This list keys every sum on its bare type name, so the second row overwrites the first's member set and then scans the first's roots for members that are not there. Either name the two Go types apart — which is the repair that makes this problem stop existing rather than being worked around — or give guardedSum a qualified identity (declRoot plus name) and key members, scanTarget and the per-root check on that instead. Measured on bd gqlc-pw6yj: the two sets here are disjoint and their roots do not overlap, so the qualified key alone is enough and namesASumMember does not need to resolve operand types to tell them apart",
+			sum.name, declaredBy[sum.name], sum.declRoot)
+		declaredBy[sum.name] = sum.declRoot
+
 		members[sum.name] = sumMemberNames(t, sum)
 
 		require.NotEmpty(t, sum.scanRoots,
