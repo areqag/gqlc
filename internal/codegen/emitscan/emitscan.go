@@ -107,6 +107,37 @@ type Sweep struct {
 // reports two different falsehoods — a constructor resolved only from
 // another file reads as captured, while a string-typed const declared
 // in one file and captured out of another's body reads as fine.
+//
+// Two halves is not two independent measurements, and a reader
+// deciding what a green sweep licenses needs that distinction. The
+// reachability half compares two emissions of ONE batch differing only
+// in a parameter's name, so emitter behaviour that is not a function of
+// that name is present on both sides and moves neither differential.
+// What is left is derivation: a package-level name taken from the
+// parameter, or a body local taken from it that shadows one. That is
+// the class ArgName closes upstream and the per-file half guards
+// directly, so these are two layers over one invariant.
+//
+// The per-file half is the wider of the two, which is the part that is
+// easy to get backwards. Its shadow arm fires just as well when the
+// EMITTER names a local of its own ArgName, with no query author
+// involved.
+//
+// Measured on the AGE emitter, one fixture, each row naming the arm it
+// fired (gqlc-9o4t). Deriving the query-text const's name from the
+// author's parameter fires both differentials; naming a body local
+// after the parameter fires the resolved one alone; naming a
+// generator-owned local ArgName fires the per-file shadow arm and
+// neither differential. Two emitter changes fired nothing: renaming
+// that const by a fixed suffix, and dropping the const entirely to
+// inline its text — the declaration this sweep exists to protect,
+// deleted, is absent from both sides of every differential. A backend's
+// goldens catch that; this does not.
+//
+// The two emptiness pins in that half are not a third axis. They are
+// over the whole package, so any emitted file still declaring a type or
+// resolving one keeps them silent, and no mutation confined to query
+// rendering reached either.
 func (s Sweep) Run() []Finding {
 	var found []Finding
 
