@@ -897,14 +897,22 @@ func TestMarshalJSONEmitsReferencedInRequiredBarePatternWhenTrue(t *testing.T) {
 	require.Contains(t, string(outE), `"optionalGroup":1,"referencedInRequiredBarePattern":true`)
 }
 
-// TestBindingDiscriminatorTracksEntityKind pins the binding "kind" tag to
-// Kind().String(), so the serialised tag cannot drift from Kind().
+// TestBindingDiscriminatorDerivesFromKind pins the binding "kind" tag to
+// Kind().String(), so the serialised tag cannot drift from Kind(). That is the
+// claim, and it is why this asserts against b.Kind().String() rather than
+// against the five literals: TestBindingKindString pins those, and a test that
+// spelled them a second time here would pass while the derivation was broken.
 //
-// The name and this comment said graph.EntityKind.String until bd gqlc-r79zi.
-// They were wrong: Binding.Kind() returns a BindingKind, so what this test has
-// always pinned is BindingKind.String. The two agree on "node" and "edge" by
-// construction, which is why the mistake read true.
-func TestBindingDiscriminatorTracksEntityKind(t *testing.T) {
+// It was called TestBindingDiscriminatorTracksEntityKind until bd gqlc-slde4,
+// and its comment said graph.EntityKind.String until bd gqlc-r79zi. Both were
+// wrong the same way: Binding.Kind() returns a BindingKind, so what this has
+// always pinned is BindingKind.String — a different sum, in a different
+// package, answering for three kinds graph.EntityKind has no member for. The
+// old name read true because the two sums agree on "node" and "edge", and until
+// bd gqlc-avtrx they agreed by two files carrying the same literals. They no
+// longer do: BindingKind.String's node and edge arms call graph's method, so
+// the agreement is structural and this test would still be misnamed.
+func TestBindingDiscriminatorDerivesFromKind(t *testing.T) {
 	node, err := query.NewNodeBinding("p", nil)
 	require.NoError(t, err)
 	src := must(query.NewVarEndpoint("a"))
