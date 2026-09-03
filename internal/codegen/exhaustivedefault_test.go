@@ -123,27 +123,22 @@ type guardedSum struct {
 //     record defect twice (bd gqlc-osuz). Deleting that default to satisfy
 //     this fence would re-open the defect it exists to end.
 //
-// A fourth, graph.EntityKind, stays out — but NOT for the reason this comment
-// gave until bd gqlc-pw6yj, which was the two-types-one-name collision with
-// internal/codegen's own EntityKind. Measured 2026-09-03, adding the single row
-// {name: "EntityKind", declRoot: "../graph", scanRoots: ["../graph"], sentinel:
-// "Node", dirs: ["graph"]}: the fence holds it correctly. declRoot confines the
-// member scan to ../graph, so it reads Node and Edge and never sees EntityNode
-// or EntityEdge, and codegen's EntityKind is in no row to be conflated with.
-// Nothing was misattributed. The collision bites only if BOTH types are listed,
-// and scanSumSwitches now refuses that outright rather than reporting it as a
-// missing switch.
+// A fourth candidate, graph.EntityKind, was named here as staying out until bd
+// gqlc-r79zi brought it in; its row is below. Two claims from that period are
+// worth keeping, because both were measured and neither is obvious from the row.
 //
-// What actually keeps it out is the cost of the row, which is the ordinary cost
-// every other sum here paid: graph.EntityKind.String's `default` returns "node"
-// for anything not Edge, so a third member would serialise as a node — the
-// invent-a-plausible-answer shape this fence is for, and one its own doc comment
-// contradicts by calling String "the single source the query model's JSON
-// discriminator derives from, so the serialised tag can never drift". Bringing
-// it in means deleting that default or tagging it, and measuring the dirs: there
-// is a second still-guarded switch over the sum at internal/query/cypher/
-// expr.go:290, outside ../graph, so the roots are not just ../graph. That is bd
-// gqlc-r79zi, filed rather than ridden here.
+// The two-types-one-name collision with internal/codegen's own EntityKind does
+// not bite: declRoot confines the member scan to ../graph, so the row reads Node
+// and Edge and never sees EntityNode or EntityEdge, and codegen's EntityKind is
+// in no row to be conflated with. The collision bites only if BOTH types are
+// listed, and scanSumSwitches refuses that outright.
+//
+// What kept it out was the ordinary cost every other sum here paid:
+// graph.EntityKind.String's `default` returned "node" for anything not Edge.
+// Measured on gqlc-r79zi by adding a third member: under that default
+// `exhaustive` reported nothing and the new member serialised as "node"; with
+// the default deleted `exhaustive` names it. That is the drift this fence exists
+// to catch, caught.
 //
 // Adding a row here is the only way to bring such a sum in. A
 // //gqlc:default-ok tag alone cannot do it: on a switch over a sum this list
@@ -186,6 +181,21 @@ var guardedSums = []guardedSum{
 	{name: "ClauseSlot", declRoot: "../query", scanRoots: []string{"../query"}, sentinel: "ClauseSlotLimit", dirs: []string{"query"}},
 	{name: "ExprPosition", declRoot: "../query", scanRoots: []string{"../query", "../resolver"}, sentinel: "ExprInDeleteTarget", dirs: []string{"query", "resolver"}},
 	{name: "UnionKind", declRoot: "../query", scanRoots: []string{"../query"}, sentinel: "UnionAll", dirs: []string{"query"}},
+	// EntityKind arrives on bd gqlc-r79zi by the same route as the five above:
+	// its String defaulted to "node" for anything not Edge, so a third member
+	// would have serialised as a node, and the default was deleted and the
+	// answer hoisted below the switch unchanged.
+	//
+	// declRoot is ../graph and not ".", which is what keeps this row clear of
+	// internal/codegen's own type of the same name: the member scan reads Node
+	// and Edge and never sees EntityNode or EntityEdge. codegen's EntityKind is
+	// in no row here, and namesASumTwice refuses the list that would add it.
+	//
+	// dirs names "cypher" as well as "graph" because the sum is switched on
+	// outside its own package — internal/query/cypher/expr.go and listener.go
+	// both spell `case graph.Node:` — and naming only "graph" would let ../query
+	// stop being read without anything failing.
+	{name: "EntityKind", declRoot: "../graph", scanRoots: []string{"../graph", "../query"}, sentinel: "Node", dirs: []string{"graph", "cypher"}},
 }
 
 // sumSwitch is one switch whose case expressions name members of one
