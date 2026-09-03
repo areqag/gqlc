@@ -210,16 +210,31 @@
 #
 # Accepted limitations, fail-open unless the entry says otherwise (server-side
 # branch protection and repo pre-commit hooks are the backstop):
-#   - paths that need expansion (cd "$WT", git -C ~/x) are unresolvable
-#     statically -> allow
-#   - cd/pushd with flags (cd -P x) or no argument lose tracking -> allow
+#   - paths that need expansion (cd "$WT") are unresolvable statically. No
+#     longer a SILENT SKIP since gqlc-2cylz, and the two arms answer it
+#     differently. `git commit` is asked about the process cwd, because a `cd`
+#     to a path that does not exist leaves the shell where it was and the
+#     command really does run here — so it refuses only while THIS checkout is
+#     on master, and from a feature branch it still allows, which is what keeps
+#     the mandated `cd "$scratch"` fixture idiom working. `git stash clear`
+#     refuses outright: "is this namespace private" has no answer at all from a
+#     directory nobody can name, and refusal is already that arm's policy for no
+#     answer. A bare `cd`, `~` and `~/x` are answered rather than refused (they
+#     are HOME); `~user`, `~+`, `~-`, `cd -` and `cd -P x` are not. `git -C ~/x`
+#     is still unresolvable, so it refuses where it could answer (bd gqlc-sy1ey)
+#   - the refusal above is scoped to those two arms. merge/pull/push carry no
+#     branch guard and reach only the drift arm, which keeps failing open on a
+#     directory it cannot identify — it must not block the session repairing
+#     the drift
 #   - nested interpreters (bash -c '...') are not recursed into
 #   - a substitution's cwd is read from the text before its span, which is
 #     normally an unterminated fragment (`--body "`). One closing quote of each
 #     kind is tried and then the enclosing directory is kept, which is the
 #     pre-existing answer and errs toward naming a directory on master, i.e.
 #     toward refusing. `cd "$WT"` stays unresolvable there as everywhere else
-#   - --git-dir / --work-tree redirection is not resolved -> allow
+#   - --git-dir / --work-tree redirection is not resolved -> the two arms above
+#     see it as an unknown directory and answer it as such (commit: the process
+#     cwd, so refused only on master; stash clear: refused), allowed elsewhere
 #   - inside an unquoted heredoc body this hook has actually stripped, the
 #     substitution extractor is the only thing looking, because the prose
 #     around it has to stay data. A command it does not match is therefore not
@@ -611,14 +626,13 @@ def flag_value(tokens, j):
     anyway. redirect_skip below already had to learn this rule for `cmd > ; x`;
     this is the same rule for its other six consumers.
 
-    Five of those six change a verdict. The `cd`/`pushd` one cannot yet: a bare
-    `cd` leaves the directory unresolvable either way — this answers None
-    directly, resolve()'s own is_op guard answered None by a longer route — and
-    an unresolvable cwd fails OPEN in the git arms, so no row can tell the two
-    routes apart until that fail-open is closed (gqlc-2cylz). It is changed for
-    locality, not for a verdict. Revert this site AND resolve()'s guard together
-    and `cd ; git stash clear` DENIES against the joined path `<cwd>/;`, which
-    is the distant guard being the only thing holding the site up.
+    All six change a verdict, the `cd`/`pushd` one since gqlc-2cylz. It could
+    not before: a bare `cd` left the directory unresolvable either way — this
+    answers None directly, resolve()'s own is_op guard answered None by a longer
+    route — and an unresolvable cwd was ALLOWED by the git arms, so no row could
+    tell the two routes apart. Now a bare `cd` answers HOME through cd_cwd()
+    while a swallowed `;` still answers None, and None refuses, so the two
+    routes end in opposite verdicts and `cd ; git commit -m x` witnesses it.
 
     Found independently at the scan_bd site, where `bd update x --status ; bd
     reopen y` ate the `;` so the reopen arm never saw a reopen while the shell
@@ -827,9 +841,9 @@ def cd_target(text, cwd):
     i, n = 0, len(tokens)
     while i < n:
         if tokens[i] in ("cd", "pushd"):
-            arg = tokens[i + 1] if i + 1 < n else None
-            cwd = None if (arg is None or arg.startswith("-")) else resolve(cwd, arg)
-            i += 2
+            arg, step = flag_value(tokens, i)
+            cwd = cd_cwd(cwd, arg)
+            i += step
             continue
         i += 1
     return cwd
@@ -903,6 +917,43 @@ def resolve(base, path):
     if os.path.isabs(path):
         return path
     return os.path.join(base, path) if base else None
+
+
+def cd_cwd(base, arg):
+    """Where a `cd`/`pushd` carrying `arg` leaves the shell, or None for unknown.
+
+    A bare `cd` is `cd "$HOME"`, and `~` / `~/x` name that same directory, so
+    all three are answers rather than unknowns. That is what lets a row tell a
+    bare `cd` apart from flag_value() swallowing the command boundary after it:
+    while an unknown cwd was allowed through, both routes ended in an allow and
+    the cd site was the one consumer of that guard no row could witness
+    (bd gqlc-0328j, gqlc-2cylz).
+
+    `cd -` is $OLDPWD and `cd -P x` puts the directory behind a flag walk this
+    file does not do, so both stay unknown — and unknown now refuses in the
+    guarded arms rather than passing.
+
+    Expansion is deliberately NOT done inside resolve(). It would also decide
+    `bd close --reason-file ~/x`, which resolve() answers None for today and
+    which close_verdict() turns into deny-unreadable-reason; expanding it there
+    makes that arm read the file and allow a close it refuses now (measured,
+    both directions). That is a different guard with its own failure direction
+    and its own rows to write (bd gqlc-sy1ey).
+    """
+    if arg is None:
+        arg = "~"
+    if arg == "~" or arg.startswith("~/"):
+        # expanduser hands "~" back unchanged when the uid has no passwd entry
+        # and HOME is unset. Not special-cased: "~" is not a directory, and both
+        # arms below already answer a non-directory the way they answer an
+        # unknown one. A row asserting that costs a passwd database this host
+        # will not give (uid 65534 resolves to /), so it is left to the arms.
+        home = os.path.expanduser("~")
+        return home if arg == "~" else os.path.join(home, arg[2:])
+    # ~user, ~+ and ~- are HOME only by accident of who is running.
+    if arg.startswith("~") or arg.startswith("-"):
+        return None
+    return resolve(base, arg)
 
 
 def shorthand_arg(opt, tokens, j):
@@ -1089,7 +1140,7 @@ def scan_tokens(tokens, cwd, wanted, closes=None, labels=None, reopens=None):
             continue
         if tok in ("cd", "pushd"):
             arg, step = flag_value(tokens, i)
-            cwd = None if (arg is None or arg.startswith("-")) else resolve(cwd, arg)
+            cwd = cd_cwd(cwd, arg)
             i += step
             continue
         if tok == "git" or tok.endswith("/git"):
@@ -1121,9 +1172,13 @@ def scan_tokens(tokens, cwd, wanted, closes=None, labels=None, reopens=None):
                 else:
                     sub = opt
                     break
-            if sub in wanted and target is not None:
+            # An unresolved target is carried rather than dropped. Dropping it
+            # here is what let every arm skip the command in silence, which is
+            # an allow that no arm ever decided (bd gqlc-2cylz); each arm now
+            # says what it does with None for itself.
+            if sub in wanted:
                 targets.append((sub, target))
-            elif sub == "stash" and target is not None and stash_clear_follows(tokens, j + 1):
+            elif sub == "stash" and stash_clear_follows(tokens, j + 1):
                 targets.append((STASH_CLEAR, target))
             i = j + 1
             continue
@@ -1910,16 +1965,48 @@ def main():
         targets.append(("commit", cwd))
     if need_fallback and STASH_CLEAR_FALLBACK_RE.search(command):
         targets.append((STASH_CLEAR, cwd))
+    # An unresolved directory used to leave this arm with nothing to ask about,
+    # so the command passed — an allow no arm ever decided (bd gqlc-2cylz). It
+    # is asked about the process cwd instead, which is the same substitution
+    # main() already makes above for a command the tokenizer could not read.
+    #
+    # That is the accurate answer far more often than it is a conservative one.
+    # A `cd` to a path that does not exist leaves the shell exactly where it
+    # was, so `cd /nonexistent ; git commit` commits HERE; and `--work-tree`
+    # moves the tree while HEAD stays the one discovered from here. What it
+    # over-refuses is a commit that really would land elsewhere — `--git-dir`,
+    # and a `cd` into another repo this hook cannot spell — and it over-refuses
+    # those only while THIS checkout is on master, which is the state in which
+    # nothing should be committing from it anyway.
     for sub, directory in targets:
         if sub != "commit":
             continue
-        branch = branch_of(directory)
-        if branch in PROTECTED:
+        known = directory is not None and os.path.isdir(directory)
+        branch = branch_of(directory if known else cwd)
+        if branch not in PROTECTED:
+            continue
+        if known:
             deny(
                 "Direct commits to %s are blocked (target: %s). "
                 "Create a feature branch with: git switch -c <branch>" % (branch, directory)
             )
-            return
+        else:
+            deny(
+                "Direct commits to %s are blocked — this hook could not tell which "
+                "directory this would run in (%s), so it asked about the one it was "
+                "invoked from (%s), which is on %s. A `cd` to a path that does not "
+                "exist leaves the shell where it was, so the command would commit "
+                "HERE (bd gqlc-2cylz). Create a feature branch with: git switch -c "
+                "<branch>, or name the directory literally: git -C <absolute path> "
+                "commit ..."
+                % (
+                    branch,
+                    "unresolved" if directory is None else "not a directory: %s" % directory,
+                    cwd,
+                    branch,
+                )
+            )
+        return
 
     # Fail-CLOSED on an unverifiable probe, following the bd-close arm rather
     # than the master guard's fail-open: what a clear destroys is unbounded and
@@ -1929,13 +2016,29 @@ def main():
     for sub, directory in targets:
         if sub != STASH_CLEAR:
             continue
-        shared, error = stash_namespace_shared(directory)
-        if error is not None:
+        # This arm does NOT take the commit arm's process-cwd substitution. The
+        # question there is "would this land on master HERE", which the cwd
+        # answers; the question here is "is this namespace private", which a
+        # directory nobody can name has no answer to at all — and this arm's
+        # policy for no answer is already refusal (bd gqlc-2cylz).
+        if directory is None or not os.path.isdir(directory):
+            detail = (
+                "unresolved" if directory is None
+                else "%s: not a directory" % directory
+            )
+        else:
+            shared, error = stash_namespace_shared(directory)
+            detail = None if error is None else "%s: %s" % (directory, error)
+        if detail is not None:
             deny(
                 "git stash clear refused — could not verify the target's stash namespace "
-                "is private (%s: %s), refused rather than allowed unverified. refs/stash "
+                "is private (%s), refused rather than allowed unverified. refs/stash "
                 "is shared across a repository's worktrees and a clear is unrecoverable "
-                "(bd gqlc-753g3)." % (directory, error)
+                "(bd gqlc-753g3). A directory named by a variable or a substitution is "
+                "unreadable here, so a probe clearing inside `cd \"$scratch\"` lands on "
+                "this refusal: print the path and issue the clear as its own command with "
+                "it spelled out — `git -C /tmp/… stash clear` is checked and allowed for a "
+                "repo with one worktree (bd gqlc-2cylz)." % detail
             )
             return
         if shared:
@@ -2025,6 +2128,8 @@ def main():
     # other command — `just init` included — still runs, which is what keeps a
     # broken repo config from wedging the session that has to repair it.
     for sub, directory in targets:
+        if directory is None:
+            continue
         reason = hooks_drift(directory)
         if reason is not None:
             deny("git %s refused — %s" % (sub, reason))
