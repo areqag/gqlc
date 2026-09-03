@@ -270,16 +270,19 @@ const (
 
 // String is the canonical lowercase name of the kind ("node" / "edge" /
 // "path" / "unwind" / "call"). It is the single source the JSON
-// discriminator derives from; two of the five tags match
-// graph.EntityKind.String() by construction, so pre-Stage-8 wire shapes
-// for node/edge bindings are preserved verbatim. "path" (Stage 8),
-// "unwind" (Stage 9), and "call" (Stage 14) are query-side only.
+// discriminator derives from. Two of the five tags are graph.EntityKind's
+// own, taken from it rather than spelled again here, so pre-Stage-8 wire
+// shapes for node/edge bindings are preserved verbatim and cannot drift:
+// until bd gqlc-avtrx these were a second pair of literals matching the
+// first "by construction", and changing graph's pair left this package's
+// whole suite green. "path" (Stage 8), "unwind" (Stage 9), and "call"
+// (Stage 14) are query-side only and have no counterpart to defer to.
 func (k BindingKind) String() string {
 	switch k {
 	case BindingNode:
-		return "node"
+		return graph.Node.String()
 	case BindingEdge:
-		return "edge"
+		return graph.Edge.String()
 	case BindingPath:
 		return "path"
 	case BindingUnwind:
@@ -291,7 +294,7 @@ func (k BindingKind) String() string {
 	// checks this stringer for a missing arm. Every declared member has an
 	// arm above, so this answers only for a value outside the enum — which
 	// is what the deleted `default` answered for it too (bd gqlc-qr09l).
-	return "node"
+	return graph.Node.String()
 }
 
 // Binding is a query variable bound to a graph entity, a named path, an
@@ -1965,8 +1968,12 @@ const (
 
 // MarshalJSON renders a NodeBinding as a tagged union member discriminated by
 // "kind", so the Binding sum marshals to a stable, self-describing shape across
-// both variants. The tag derives from graph.EntityKind, so it cannot drift from
-// Kind(). Mirrors schema.Schema's determinism discipline: the encoding is fixed
+// both variants. The tag derives from Kind().String(), so it cannot drift from
+// Kind() — and that arm defers to graph.Node.String(), so it cannot drift from
+// the graph vocabulary either (bd gqlc-avtrx). Until then this sentence named
+// only the second of those and was wrong about the first: the tag has never
+// come from graph.EntityKind directly.
+// Mirrors schema.Schema's determinism discipline: the encoding is fixed
 // and independent of any map iteration order. "optionalGroup" is
 // omit-when-zero-value per the wire convention (ay9 per ADR 0008
 // amendment 2026-07-07). "referencedInRequiredBarePattern" is
