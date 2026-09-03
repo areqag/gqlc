@@ -2588,11 +2588,11 @@ func (d decoders) decodePostOnTheWire(raw []byte) (Post, error) {
 // and reds a correct emission.
 //
 // That collision is unreachable through the corpus in both directions and
-// the measurement is what says so: of the 188 golden emissions, 52 methods
-// name exactly one prepared entity and not one of them writes a
+// the measurement is what says so: the 57 method decoders the sweep
+// classifies compare no string at all, so none of them writes a
 // string-literal switch, and every in-method label switch any backend emits
 // is written in a method that names no entity. So neither reader can be
-// shown to stop where it says it does by running the corpus, and both rows
+// shown to stop where it says it does by running the corpus, and the rows
 // below are synthetic for that reason.
 func TestAMethodDecodersDispatchIsLeftToTheEdgeUnionReader(t *testing.T) {
 	alphabet := labelAlphabet{
@@ -2854,30 +2854,33 @@ func packageLevelFuncs(fset *token.FileSet, file *ast.File) []emittedFunc {
 //
 // # Why these are graded and not reconciled or counted
 //
-// Both exclusions below are measured rather than argued, over the 188
-// golden emissions under test/data/codegen/valid on 2026-09-02.
+// Both exclusions below are measured rather than argued, and measured
+// through this reader on the sweep's own population — every registered
+// backend over every valid fixture — rather than off the goldens, which are
+// written only for the targets a fixture enrols.
 //
-// 52 methods there already name exactly one prepared entity in their
-// results, and every one of them is a *query* method — OnePerson returns
-// Person, BinById returns Bin — because a query selecting a whole entity
-// returns that entity's struct rather than a row struct of its own. So
-// naming one entity does not distinguish a decoder from a query method, and
-// two of the three things the package-level census does with a decoder
-// cannot be done with these:
+// It classifies 57 method decoders there (2026-09-02): 20 distinct method
+// names over 20 fixtures, on all three targets. Every one is a *query*
+// method — OneActor returns Actor, OneActedIn returns ActedIn — because a
+// query selecting a whole entity returns that entity's struct rather than a
+// row struct of its own. So naming one entity does not distinguish a
+// decoder from a query method, and two of the three things the
+// package-level census does with a decoder cannot be done with these:
 //
-//   - The one-decoder-per-entity reconciliation. Each of those 52 names an
-//     entity a package-level decoder already fills, so entering them there
-//     would refuse 52 emissions the gate accepts, on the duplicate arm, for
-//     a shape that is not a duplicate decoder at all.
+//   - The one-decoder-per-entity reconciliation. Each of the 57 names an
+//     entity a package-level decoder already fills. Yielding methods out of
+//     packageLevelFuncs instead — the one-word fix, `fn.Recv == nil`
+//     dropped — reds the corpus on the duplicate arm, for a shape that is
+//     not a duplicate decoder at all.
 //   - The per-axis decoders/guarded census. Its labelGuardingTargets arm
 //     asserts those two counts are *equal* — every counted decoder compares
-//     some string — and none of the 52 compares a string in its own body.
-//     Counting them makes guarded fall short of decoders and reds both
-//     guarding backends over the whole corpus.
+//     some string — and not one of the 57 compares a string in its own
+//     body. Counting them reds with 86 of a target's node decoders testing
+//     no string.
 //
 // Grading is the third thing, and it is the one that is sound here: a guard
 // is held to the axis of what the function fills whatever spelling the
-// emission wrote it in. The 52 contribute no guard today, so this widening
+// emission wrote it in. The 57 contribute no guard today, so this widening
 // grades nothing new in the corpus and cannot be the reason a fixture reds;
 // it is reached the day an emission writes a string comparison in a method
 // that fills an entity, which is exactly the shape nothing read before.
