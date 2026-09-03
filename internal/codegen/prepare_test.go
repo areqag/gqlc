@@ -993,14 +993,23 @@ func eachDecl(file *ast.File, record func(name string, scope codegen.IdentifierS
 // sweepIdentifiers reads to seed source 0; a query taking a method-scope
 // name is refused at Phase A on membership, which does not read scope.
 //
-// Check 1 is a biconditional and not an equality over every declaration,
-// because one name can be declared at both scopes: Queries is the handle
-// type and, since the Tx block, an accessor on *Tx. Recording it
-// scopePackage is right, so demanding that no golden declare it at
-// scopeMethod would fail a corpus that is correct. The strict half is
-// preserved whole — a scopeMethod row must have no package-level
-// declaration anywhere, which is the direction that, wrong, would let
-// sources 1-6 take a name the package block holds.
+// Check 1 is an equality over every declaration, in both directions: a
+// scopePackage row is declared package-level and nowhere as a method, a
+// scopeMethod row nowhere package-level. PR #1489 relaxed the first half
+// to a biconditional for the one corpus declaration that needed it,
+// (*Tx).Queries — the handle accessor it introduced — and gqlc-f4hf then
+// removed that accessor, which reservedIdentifiers' comment on the
+// Queries row records. No corpus name is declared at both scopes today,
+// so the relaxation permits nothing and costs a direction.
+//
+// The two halves catch opposite faults, and only one of them is about
+// miscompilation. A scopeMethod row declared package-level lets sources
+// 1-6 take a name the package block holds. A scopePackage row declared
+// as a method compiles and collides correctly — Phase A reads membership
+// — but it means the emitter grew an exported method reusing a reserved
+// name, and no other guard over these goldens reports that: txsurface
+// skips non-Begin *Queries methods by design, and the fixed-declaration
+// sweep does not force a name that is already a row (gqlc-5ask).
 func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 	paths, err := filepath.Glob(goldenCorpusGlob)
 	require.NoError(t, err)
@@ -1046,10 +1055,14 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 				"no golden declares %q, so its columns rest on nothing; either the corpus lost the fixture that emitted it or the name is no longer emitter-fixed and belongs out of reservedIdentifiers",
 				row.name)
 			pkgPath, atPackage := at[codegen.ScopePackage]
+			methPath, atMethod := at[codegen.ScopeMethod]
 			if row.scope == codegen.ScopePackage {
 				require.True(t, atPackage,
 					"the reserved set records %q at scopePackage, but no golden declares it package-level — %s declares it as a method; seeding source 0 with it reserves the package block against a name that does not hold it",
 					row.name, at[codegen.ScopeMethod])
+				require.False(t, atMethod,
+					"%s declares %q as a method while the reserved set records it scopePackage; the name stays reserved, so nothing collides and nothing else over these goldens reports it — decide here whether the emitter should be reusing a package-scope reserved name at method scope",
+					methPath, row.name)
 			} else {
 				require.False(t, atPackage,
 					"%s declares %q package-level, but the reserved set records it %s, which lets sources 1-6 take a name the package block already holds",
