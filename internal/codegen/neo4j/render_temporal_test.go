@@ -7,6 +7,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/neo4j"
+	"github.com/areqag/gqlc/internal/graph"
 )
 
 // paramsOf wraps parameter fields in the smallest Prepared temporalUses reads.
@@ -83,4 +84,68 @@ func TestTemporalUsesIgnoresNonCarrierParameters(t *testing.T) {
 	))
 
 	require.Empty(t, uses, "a non-carrier leaf reached an emission site")
+}
+
+// TestTemporalUsesSeesACarrierHidingInsideARecord is a reproduction, and
+// it fails today.
+//
+// temporalUses marks on the emitted Go type TEXT, through
+// leafType, which strips "[]" prefixes and nothing else. A declared
+// record's carrier text is an anonymous struct, so leafType hands back
+// the whole struct and isTemporalCarrier says no — the DATE field inside
+// it is never marked.
+//
+// The consequence is not a missing optimisation. renderModels emits the
+// record's decode helper with a toDate call in it, and
+// renderTemporalConversions is handed a use set that never asked for
+// toDate, so the emitted package names a function it does not declare and
+// `go build` of generated code fails with no line in the schema to point
+// at. The encode direction fails the same way through fromDate and
+// fromDatePtr.
+//
+// RECORD<ANY> is the control: its fields are undeclared, so no carrier
+// can be hiding in one and nothing should be marked for it.
+func TestTemporalUsesSeesACarrierHidingInsideARecord(t *testing.T) {
+	// Both nullabilities, because they owe DIFFERENT helpers: the record's
+	// encode body spells its fields by the parameter rules, so the NOT
+	// NULL field calls fromDate and the nullable one calls fromDatePtr. A
+	// record with only one of them could not tell a walk that marks the
+	// right direction from one that marks whichever it happens to.
+	width := graph.RecordOf([]graph.RecordField{
+		{Name: "at", Type: graph.TypeDate, NotNull: true},
+		{Name: "seen", Type: graph.TypeDate},
+	})
+	structText, ok := neo4j.TypeMap{}.Property(width)
+	require.True(t, ok)
+	require.Contains(t, structText, "Date", "the premise: the carrier really is inside the emitted text")
+
+	t.Run("a record property owes the decode direction", func(t *testing.T) {
+		uses := neo4j.TemporalUses(codegen.Prepared{
+			Entities: []codegen.Entity{{Name: "Place", Fields: []codegen.EntityField{
+				{PropName: "addr", Field: "Addr", GoType: structText, Width: width},
+			}}},
+		})
+		require.True(t, uses["Date"].Decode,
+			"the record's decode helper calls toDate, so the bridge file owes it")
+	})
+
+	t.Run("a record parameter owes the encode direction", func(t *testing.T) {
+		uses := neo4j.TemporalUses(codegen.Prepared{
+			Queries: []codegen.Query{{ParamFields: []codegen.Param{
+				{RawName: "p", Field: "P", GoType: structText, Width: width},
+			}}},
+		})
+		use := uses["Date"]
+		require.True(t, use.Encode, "the NOT NULL field calls fromDate, so the bridge file owes it")
+		require.True(t, use.EncodePtr, "the nullable field calls fromDatePtr, which is a separate declaration")
+	})
+
+	t.Run("the undeclared record hides nothing", func(t *testing.T) {
+		uses := neo4j.TemporalUses(codegen.Prepared{
+			Entities: []codegen.Entity{{Name: "Place", Fields: []codegen.EntityField{
+				{PropName: "addr", Field: "Addr", GoType: "map[string]any", Width: graph.TypeAnyRecord},
+			}}},
+		})
+		require.Empty(t, uses, "RECORD<ANY> declares no fields, so no carrier can be hiding in one")
+	})
 }

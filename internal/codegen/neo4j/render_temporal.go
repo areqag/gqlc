@@ -36,6 +36,14 @@ type temporalUse struct {
 // files); encode positions are query parameters. A parameter is the one
 // position whose nullability changes the helper, because a nil pointer
 // has to become a Cypher null rather than a zero-valued carrier.
+//
+// Both walks descend into a DECLARED record rather than marking on its
+// own carrier text. A record's carrier is an anonymous struct, so the
+// leafType this marks on hands back the whole struct and no carrier
+// inside it is ever named — while the record's emitted helper pair calls
+// those carriers' conversions by name. The result was an emitted package
+// naming a function it did not declare, which `go build` of generated
+// code reports with no line in the schema to point at.
 func temporalUses(prepared codegen.Prepared) map[string]temporalUse {
 	uses := make(map[string]temporalUse)
 	mark := func(goType string, set func(*temporalUse)) {
@@ -47,39 +55,93 @@ func temporalUses(prepared codegen.Prepared) map[string]temporalUse {
 		set(&use)
 		uses[name] = use
 	}
+
+	// A record's decode body reads every field, and nullability changes
+	// nothing there: to<X> is the same call either way, because a missing
+	// key is the field's own null rather than a different conversion.
+	var markDecode func(goType string, width graph.PropertyType)
+	markDecode = func(goType string, width graph.PropertyType) {
+		if fields, ok := recordLeafFields(goType, width); ok {
+			for _, f := range fields {
+				markDecode(f.GoType, f.Width)
+			}
+			return
+		}
+		mark(goType, func(u *temporalUse) { u.decode = true })
+	}
+
+	// A record's encode body spells each field by the PARAMETER rules —
+	// it is paramBindExpr that renders them — so the marks a field owes
+	// are the marks the same shape would owe as a parameter. The outer
+	// nullability does not reach the fields: encode<X>Ptr nil-checks and
+	// then calls encode<X>, which builds every field the same way.
+	var markEncode func(goType string, width graph.PropertyType, nullable bool)
+	markEncode = func(goType string, width graph.PropertyType, nullable bool) {
+		if fields, ok := recordLeafFields(goType, width); ok {
+			for _, f := range fields {
+				markEncode(f.GoType, f.Width, f.Nullable)
+			}
+			return
+		}
+		// A list parameter converts per element, so what it needs is
+		// the plain from<X> at the leaf plus the list helper that
+		// calls it — never from<X>Ptr, whose nil-to-Cypher-null job
+		// belongs to the list helper instead.
+		if isSliceType(goType) {
+			mark(goType, func(u *temporalUse) {
+				u.encode = true
+				u.list = true
+				u.listPtr = u.listPtr || nullable
+			})
+			return
+		}
+		if nullable {
+			mark(goType, func(u *temporalUse) { u.encodePtr = true })
+			return
+		}
+		mark(goType, func(u *temporalUse) { u.encode = true })
+	}
+
 	for _, e := range prepared.Entities {
 		for _, f := range e.Fields {
-			mark(f.GoType, func(u *temporalUse) { u.decode = true })
+			markDecode(f.GoType, f.Width)
 		}
 	}
 	for _, q := range prepared.Queries {
 		for _, f := range q.RowFields {
-			mark(f.GoType, func(u *temporalUse) { u.decode = true })
+			markDecode(f.GoType, f.Width)
 			for elem := f.ListElem; elem != nil; elem = elem.Nested {
-				mark(elem.GoType, func(u *temporalUse) { u.decode = true })
+				markDecode(elem.GoType, elem.Width)
 			}
 		}
 		for _, f := range q.ParamFields {
-			// A list parameter converts per element, so what it needs is
-			// the plain from<X> at the leaf plus the list helper that
-			// calls it — never from<X>Ptr, whose nil-to-Cypher-null job
-			// belongs to the list helper instead.
-			if isSliceType(f.GoType) {
-				mark(f.GoType, func(u *temporalUse) {
-					u.encode = true
-					u.list = true
-					u.listPtr = u.listPtr || f.Nullable
-				})
-				continue
-			}
-			if f.Nullable {
-				mark(f.GoType, func(u *temporalUse) { u.encodePtr = true })
-				continue
-			}
-			mark(f.GoType, func(u *temporalUse) { u.encode = true })
+			markEncode(f.GoType, f.Width, f.Nullable)
 		}
 	}
 	return uses
+}
+
+// recordLeafFields answers the field plan of the DECLARED record at the
+// leaf of a carrier, if there is one.
+//
+// The leaf rather than the carrier itself, because a LIST<RECORD<...>>
+// reaches its fields' conversions too: the emitted encode<X>List calls
+// encode<X> per element, which calls each field's conversion by name. A
+// test on the outer width alone would see KindList and descend into
+// nothing.
+//
+// ok=false covers three different negatives on purpose — not a record,
+// RECORD<ANY> (no declared fields, so nothing hides inside it), and a
+// record some field of which this backend cannot carry. The third cannot
+// arrive here, because a refused record fails preparation before any
+// emission walk runs; it is folded in rather than distinguished so that
+// a caller has one question to ask and no unreachable arm to write.
+func recordLeafFields(goType string, width graph.PropertyType) ([]codegen.RecordFieldPlan, bool) {
+	leaf, elem := leafType(goType), leafWidth(width)
+	if !isDeclaredRecord(leaf, elem) {
+		return nil, false
+	}
+	return codegen.RecordFields(elem.Fields(), typeMap{}.Property)
 }
 
 // isTemporalCarrier reports whether a Go type text is exactly one of the
