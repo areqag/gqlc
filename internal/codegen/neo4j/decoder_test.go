@@ -38,13 +38,19 @@ type decoderProbeWidth struct {
 	spelling string
 }
 
-// decoderProbeScalars is one entry per scalar graph.PropertyType this
+// decoderProbeLeaves is one entry per non-list graph.PropertyType this
 // backend has a Go carrier for. It is held to being exactly that set by
 // TestDecoderProbeCoversTheTypeTable, which reads the constants off
 // internal/graph's own source: a width added there that this backend
 // admits fails that test naming the constant, rather than joining the
 // type table with no probe property behind it.
-var decoderProbeScalars = []decoderProbeWidth{
+//
+// Non-list rather than scalar, which is what these were until RECORD<ANY>
+// arrived. What the entries owe is that the list constructor has not been
+// applied to them already, since decoderProbeWidths applies it below and
+// a pre-derived entry would nest a level deeper than this table claims.
+// A record is a leaf as far as that derivation is concerned.
+var decoderProbeLeaves = []decoderProbeWidth{
 	{graph.TypeString, "STRING"},
 	{graph.TypeBytes, "BYTES"},
 	{graph.TypeBool, "BOOL"},
@@ -67,6 +73,12 @@ var decoderProbeScalars = []decoderProbeWidth{
 	{graph.TypeFloat32, "FLOAT32"},
 	{graph.TypeFloat64, "FLOAT64"},
 	{graph.TypeAnyPropertyValue, "ANY VALUE"},
+	// The braceless RECORD, which is the spelling that lowers to this
+	// width: a record whose fields are undeclared. A record that DECLARES
+	// its fields is a different width per field list, so it is not a row
+	// this census could carry — that family is unbounded, and what sweeps
+	// it is the corpus rather than a spelling written here.
+	{graph.TypeAnyRecord, "RECORD"},
 }
 
 // decoderProbeWidths is every width the probe declares: each scalar
@@ -103,8 +115,8 @@ var decoderProbeScalars = []decoderProbeWidth{
 // This width table is what the per-width sweeps below read; the closure
 // test builds its own narrow schema.
 func decoderProbeWidths() []decoderProbeWidth {
-	out := make([]decoderProbeWidth, 0, 2*len(decoderProbeScalars))
-	for _, w := range decoderProbeScalars {
+	out := make([]decoderProbeWidth, 0, 2*len(decoderProbeLeaves))
+	for _, w := range decoderProbeLeaves {
 		list := decoderProbeWidth{pt: graph.ListOf(w.pt, false), spelling: "LIST<" + w.spelling + ">"}
 		out = append(out, w, list)
 	}
@@ -193,13 +205,13 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	//
 	// This is also what stops either walk passing vacuously: every entry
 	// of the scalar table has to come back out of both of them.
-	for _, w := range decoderProbeScalars {
+	for _, w := range decoderProbeLeaves {
 		name, known := declared[w.pt]
-		require.True(t, known, "decoderProbeScalars names %s, which %s declares no constant for", w.pt, graphPropertyTypeSource)
-		require.Equal(t, graph.KindScalar, w.pt.Kind(),
-			"decoderProbeScalars names graph.%s, which is a list type: the list arms are derived, not listed", name)
+		require.True(t, known, "decoderProbeLeaves names %s, which %s declares no constant for", w.pt, graphPropertyTypeSource)
+		require.NotEqual(t, graph.KindList, w.pt.Kind(),
+			"decoderProbeLeaves names graph.%s, which is a list type: the list arms are derived, not listed", name)
 		require.Contains(t, arms, name,
-			"decoderProbeScalars names graph.%s, which Property has no arm for", name)
+			"decoderProbeLeaves names graph.%s, which Property has no arm for", name)
 	}
 
 	// Every width Property names is one graphPropertyTypes found. The two
@@ -231,7 +243,7 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 		}
 		require.True(t, covered[pt],
 			"this backend emits a carrier for graph.%s (%s) and no probe entity declares it, so the decode "+
-				"arms that width reaches are unswept: add it to decoderProbeScalars with the spelling a "+
+				"arms that width reaches are unswept: add it to decoderProbeLeaves with the spelling a "+
 				"schema writes it as", name, pt)
 	}
 
@@ -255,7 +267,7 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	// width that WERE declared would be refused at generation and the
 	// whole probe schema would fail to parse, so the two halves cannot
 	// both be true by accident.
-	for _, w := range decoderProbeScalars {
+	for _, w := range decoderProbeLeaves {
 		nested := graph.ListOf(graph.ListOf(w.pt, false), false)
 		require.False(t, neo4j.TypeMap{}.StorableProperty(nested),
 			"%s is not refused by the storage axis, so a probe entity could declare it as a stored "+
