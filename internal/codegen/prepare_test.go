@@ -2027,3 +2027,54 @@ func TestUnimplementedTypeKindNamesTheKindAndTheSite(t *testing.T) {
 		})
 	}
 }
+
+// TestUnimplementedKindOutranksRecordFieldLegality fixes the order of
+// the two refusals a record can draw at once, which the taxonomy's §2
+// row for ErrRecordFieldCollision states and nothing else measures.
+//
+// A record with BOTH an unbuilt kind under it and a pair of fields that
+// mangle together is refused for the KIND. That is the edit that can
+// help: a record carrying a union has no emission at any spelling, so
+// renaming its fields moves nothing, while the reverse reading sends
+// the author to rename a field and meet the second refusal after.
+func TestUnimplementedKindOutranksRecordFieldLegality(t *testing.T) {
+	person := graph.LabelSetKey("Person")
+	union := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})
+
+	// Illegal on both axes at once: "minAge"/"min_age" mangle together,
+	// and "u" carries a kind no backend emits.
+	both := graph.RecordOf([]graph.RecordField{
+		{Name: "min_age", Type: graph.TypeInt32},
+		{Name: "minAge", Type: graph.TypeInt32},
+		{Name: "u", Type: union},
+	})
+
+	admit := func(pt graph.PropertyType) error {
+		_, _, err := codegen.PhaseZAdmit(schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{
+					"p": {Name: "p", Type: pt},
+				}},
+			},
+		}, stubTypeMap{})
+		return err
+	}
+
+	err := admit(both)
+	require.ErrorIs(t, err, codegen.ErrUnimplementedTypeKind)
+	require.NotErrorIs(t, err, codegen.ErrRecordFieldCollision)
+
+	// The control, and it is what stops this passing on a build where
+	// the legality check was never wired in at all: the same record with
+	// the union field taken away is refused, and refused for the fields.
+	legalKinds := graph.RecordOf([]graph.RecordField{
+		{Name: "min_age", Type: graph.TypeInt32},
+		{Name: "minAge", Type: graph.TypeInt32},
+	})
+	err = admit(legalKinds)
+	require.ErrorIs(t, err, codegen.ErrRecordFieldCollision)
+	require.EqualError(t, err,
+		`record field collision: entity "Person" property "p" has `+string(legalKinds)+
+			`, whose fields "minAge" and "min_age" both mangle to "MinAge"`)
+}
