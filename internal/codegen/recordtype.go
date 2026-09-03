@@ -19,16 +19,26 @@ import (
 // cannot be spelled" is not the same claim as "this width has no
 // carrier".
 //
-// Two illegalities, both the mangle's doing rather than the author's
+// Three illegalities, all the mangle's doing rather than the author's
 // spelling (spec §2). Two fields whose paramFieldName mangles collide
 // would emit a struct declaring one Go name twice; a name of underscores
-// alone mangles to the empty string and would emit a field with no name.
-// Neither is Go, so without this the refusal arrives from go/format as
-// ErrFormatFailure, naming a template bug for a schema's fault. The
-// single-parameter form's standing exemption for $_ (prepare.go's Params
-// derivation) does not extend here: a record field is ALWAYS spelled as
-// a struct field, so there is no position where the empty mangle is
-// harmless.
+// alone mangles to the empty string and would emit a field with no name;
+// and a name holding a character paramFieldName does not drop — a
+// hyphen, a space, a '%', a leading digit — mangles to a spelling that
+// is not a Go identifier. None is Go, so without this the refusal
+// arrives from go/format as ErrFormatFailure, naming a template bug for
+// a schema's fault. The single-parameter form's standing exemption for
+// $_ (prepare.go's Params derivation) does not extend here: a record
+// field is ALWAYS spelled as a struct field, so there is no position
+// where the empty mangle is harmless.
+//
+// The third is reachable because a GQL field name is only obliged to be
+// a legal GQL identifier, and a DELIMITED one holds anything: the parser
+// accepts an accent-quoted field name spelled pct%s. It is checked
+// against the unicode
+// Go identifier grammar rather than an ASCII one, because paramFieldName
+// deliberately keeps the author's script — a schema written in Armenian
+// mangles to a legal struct field and is admitted (see goFieldName).
 //
 // The recursion is through list elements and record fields, matching
 // unimplementedTypeKind, because those are the positions a record can be
@@ -48,6 +58,9 @@ func recordFieldLegality(pt graph.PropertyType) (graph.PropertyType, string, boo
 			mangled := paramFieldName(f.Name)
 			if mangled == "" {
 				return pt, "field " + strconv.Quote(f.Name) + " mangles to no Go field name", true
+			}
+			if !goFieldName(mangled) {
+				return pt, "field " + strconv.Quote(f.Name) + " mangles to " + strconv.Quote(mangled) + ", which is not a Go field name", true
 			}
 			if first, dup := seen[mangled]; dup {
 				return pt, "fields " + strconv.Quote(first) + " and " + strconv.Quote(f.Name) + " both mangle to " + strconv.Quote(mangled), true
