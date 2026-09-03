@@ -827,8 +827,10 @@ func requireCensusFloors(t fenceT, written map[string]int, observed map[string]i
 }
 
 // requireCensus reconciles a written census against what a sweep
-// actually observed, in both directions, naming the offending entry in
-// the failure (ADR 0029 decision 2).
+// actually observed, naming the offending entry in the failure (ADR 0029
+// decision 2). It refuses a census that declares nothing, a name declared
+// twice, a declared entry the sweep did not produce, and an observed entry
+// nobody declared.
 //
 // Declared and unobserved is the case this file exists for one level up:
 // a document that still prints the surface and no longer contributes to
@@ -841,17 +843,24 @@ func requireCensusFloors(t fenceT, written map[string]int, observed map[string]i
 // A name declared twice is refused: either copy could then be deleted
 // under cover of the other.
 //
-// A census that declares nothing is refused before either direction is
-// consulted. Both directions are quantified over a set, so neither one
-// has an entry to report when the written census and the sweep are
-// empty together — emptying the census literals and blanking the swept
-// documents in a single edit reconciles clean without this arm.
+// A census that declares nothing is refused before any of the other three
+// is consulted, and require.Fail ends the run, so an empty census reports
+// as one rather than as whatever it would have reconciled to. Each of the
+// three is quantified over a set, so none has an entry to report when the
+// written census and the sweep are empty together — emptying the census
+// literals and blanking the swept documents in a single edit reconciles
+// clean without this arm. The precedence is pinned as far as it can be:
+// TestSpecFailuresAreWired's row "requireCensus refuses an empty census
+// ahead of the undeclared arm" drives the only input that trips this arm
+// and another at once. An empty census cannot also trip the duplicate or
+// the lost arm — both are quantified over the declared names, and there
+// are none — so their order against this one is not observable at all.
 func requireCensus(t fenceT, written []string, observed map[string]bool, census, why string) {
 	t.Helper()
 
 	if len(written) == 0 {
 		require.Fail(t, census+" declares no entry",
-			"a census that declares nothing reconciles clean against a sweep that observed nothing, so the\n"+
+			"a census that declares nothing reconciles clean against a sweep that observed nothing, so every\n"+
 				"comparison below is satisfied by a sweep that read none of the text it grades:\n\n"+why)
 	}
 
@@ -996,6 +1005,22 @@ func TestSpecFailuresAreWired(t *testing.T) {
 		},
 		wantFail: true,
 		wantMsg:  []string{"census names the same entry twice"},
+	}, {
+		// The empty-census arm's precedence, which its comment asserts and
+		// nothing observed: require.Fail ends the run, so only the first arm
+		// to fire is ever seen. This input trips two — the census is empty AND
+		// the sweep produced an entry nobody declared — so the arm that
+		// answers is the arm that ran first.
+		//
+		// It takes moving the empty check past EVERY other arm to redden this.
+		// Moving it below reconcile alone does not: reconcile has no failure of
+		// its own, so the arm still runs first among those that can fail.
+		name: "requireCensus refuses an empty census ahead of the undeclared arm",
+		call: func(ft fenceT) {
+			requireCensus(ft, nil, map[string]bool{"b": true}, "census", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares no entry"},
 	}, {
 		name: "requireCensusFloors passes a document at its floor",
 		call: func(ft fenceT) {
