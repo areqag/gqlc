@@ -346,8 +346,9 @@ func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
 }
 
 // requireProbeReachesEverySite is the guard's own positive control: it
-// requires the probe emission to name the checked narrowing at every
-// width, at each of the three sites a bare conversion could replace it.
+// requires the probe emission to contain, at every width, the body that
+// each of the three sites writes — so the walk above is looking at
+// somewhere the defect could be rather than at nothing.
 //
 // Without this the guard's green is worth nothing, and the way it goes
 // worthless is not exotic. Measuring this gap, the first mutation planted
@@ -355,6 +356,14 @@ func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
 // whole tree green — not because the site was guarded but because no
 // fixture reached it at an integer width. A guard whose fixture stops
 // reaching a site fails in exactly that shape, and reports success.
+//
+// What it looks for is deliberately blind to HOW each site decodes. An
+// earlier version asked for the checked helper by name, which is the
+// guard's own question, and that made this a second detector rather than
+// a control: planting the real defect tripped this require — which calls
+// FailNow — before the walk ran even once, so the battery scored three
+// rows in which the thing under test never executed. A control that can
+// pre-empt what it certifies is not certifying it.
 func requireProbeReachesEverySite(t *testing.T, files map[string]string) {
 	t.Helper()
 
@@ -365,11 +374,11 @@ func requireProbeReachesEverySite(t *testing.T, files map[string]string) {
 
 	var missing []string
 	for goType := range narrowingWidths {
-		decoder := age.DecodeFunc(goType)
+		exported := strings.ToUpper(goType[:1]) + goType[1:]
 		for _, site := range []struct{ what, in, want string }{
-			{"entity property", models, "agtypeProperty(props, \"req_" + goType + "\", " + decoder + ")"},
-			{"list element", models, "agtypeList(raw, " + decoder + ")"},
-			{"query column", queries, decoder + "(raw0)"},
+			{"entity property", models, `agtypeProperty(props, "req_` + goType + `", `},
+			{"list element", models, "func agtypeListOf" + exported + "(raw []byte) ([]" + goType + ", error) {"},
+			{"query column", queries, "func (q *queries) Column" + exported + "("},
 		} {
 			if !strings.Contains(site.in, site.want) {
 				missing = append(missing, fmt.Sprintf("%s at %s: no %q", goType, site.what, site.want))
