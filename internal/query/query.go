@@ -177,14 +177,20 @@ const (
 
 // String is the canonical wire name of the combinator ("union" / "unionAll").
 // It is the single source the JSON value derives from, so the serialised name
-// can never drift from the enum. The default arm is UnionDistinct (plain UNION).
+// can never drift from the enum. A value outside the enum falls through to
+// "union" (plain UNION) below the switch.
 func (k UnionKind) String() string {
 	switch k {
+	case UnionDistinct:
+		return "union"
 	case UnionAll:
 		return "unionAll"
-	default:
-		return "union"
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks this stringer for a missing arm. Every declared member has an
+	// arm above, so this answers only for a value outside the enum — which
+	// is what the deleted `default` answered for it too (bd gqlc-qr09l).
+	return "union"
 }
 
 // MarshalJSON renders a UnionKind as its wire string (derived from String, the
@@ -270,6 +276,8 @@ const (
 // "unwind" (Stage 9), and "call" (Stage 14) are query-side only.
 func (k BindingKind) String() string {
 	switch k {
+	case BindingNode:
+		return "node"
 	case BindingEdge:
 		return "edge"
 	case BindingPath:
@@ -278,9 +286,12 @@ func (k BindingKind) String() string {
 		return "unwind"
 	case BindingCall:
 		return "call"
-	default:
-		return "node"
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks this stringer for a missing arm. Every declared member has an
+	// arm above, so this answers only for a value outside the enum — which
+	// is what the deleted `default` answered for it too (bd gqlc-qr09l).
+	return "node"
 }
 
 // Binding is a query variable bound to a graph entity, a named path, an
@@ -1593,10 +1604,12 @@ const (
 
 // String is the canonical lowercase name of the aggregate. It is the single
 // source the JSON "func" discriminator derives from, so the serialised name can
-// never drift from the enum. The default arm is AggCount, the degenerate
-// count(*) case.
+// never drift from the enum. A value outside the enum falls through to "count",
+// the degenerate count(*) case, below the switch.
 func (f AggregateFunc) String() string {
 	switch f {
+	case AggCount:
+		return "count"
 	case AggSum:
 		return "sum"
 	case AggCollect:
@@ -1611,9 +1624,12 @@ func (f AggregateFunc) String() string {
 		return "stdev"
 	case AggPercentile:
 		return "percentile"
-	default:
-		return "count"
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks this stringer for a missing arm. Every declared member has an
+	// arm above, so this answers only for a value outside the enum — which
+	// is what the deleted `default` answered for it too (bd gqlc-qr09l).
+	return "count"
 }
 
 // Parameter is a query input. Uses are the value-positions where the parameter
@@ -1734,22 +1750,32 @@ const (
 // single source the JSON discriminator's "slot" field derives from.
 func (s ClauseSlot) String() string {
 	switch s {
+	case ClauseSlotSkip:
+		return "skip"
 	case ClauseSlotLimit:
 		return "limit"
-	default:
-		return "skip"
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks this stringer for a missing arm. Every declared member has an
+	// arm above, so this answers only for a value outside the enum — which
+	// is what the deleted `default` answered for it too (bd gqlc-qr09l).
+	return "skip"
 }
 
 // ClauseName is the uppercase clause name for use in an error message
 // ("SKIP" / "LIMIT"). Derived from String so the two names share one source.
 func (s ClauseSlot) ClauseName() string {
 	switch s {
+	case ClauseSlotSkip:
+		return "SKIP"
 	case ClauseSlotLimit:
 		return "LIMIT"
-	default:
-		return "SKIP"
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks this method for a missing arm. Every declared member has an
+	// arm above, so this answers only for a value outside the enum — which
+	// is what the deleted `default` answered for it too (bd gqlc-qr09l).
+	return "SKIP"
 }
 
 // ExprPosition names where a rich-expression parameter use appears (Stage 6,
@@ -1789,15 +1815,20 @@ const (
 // derives from.
 func (p ExprPosition) String() string {
 	switch p {
+	case ExprInProjection:
+		return "projection"
 	case ExprInPredicate:
 		return "predicate"
 	case ExprInSetValue:
 		return "setValue"
 	case ExprInDeleteTarget:
 		return "deleteTarget"
-	default:
-		return "projection"
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks this stringer for a missing arm. Every declared member has an
+	// arm above, so this answers only for a value outside the enum — which
+	// is what the deleted `default` answered for it too (bd gqlc-qr09l).
+	return "projection"
 }
 
 // ExprUse is a parameter use that appears inside a rich scalar expression

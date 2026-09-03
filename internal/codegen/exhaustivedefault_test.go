@@ -104,6 +104,31 @@ type guardedSum struct {
 // other failure and is caught otherwise — the file is still walked for
 // the sum that kept the root, so the orphaned tag turns up in
 // TestStrayDefaultOKTagsAreNotSilent.
+//
+// THREE CLOSED SUMS ARE DELIBERATELY OUTSIDE THIS FENCE, on the ground that
+// their defaults are loud or accounted rather than silent (bd gqlc-5225b,
+// designed on gqlc-qr09l). The deciding line is what a default does for a
+// member added later: invent a plausible answer nobody sees, or say the value
+// is unhandled. Only the first is this fence's quarry.
+//
+//   - config.SchemaLang and config.QueryLang (internal/config/config.go).
+//     Their one switch each, in runTarget in internal/cli/pipeline/pipeline.go,
+//     keeps a default returning "internal: no pipeline mapping for ... %q" —
+//     it names the unmapped value and fails the run. Member-add is also red
+//     before that: SchemaLangValues/QueryLangValues are pinned by name in
+//     internal/config/config_test.go.
+//   - takeVerdict (internal/tools/tmpreap/archive.go). account()'s default
+//     routes an unknown verdict into the `unreadable` bucket by design; its
+//     own comment records that a silent default shipped the deleted-with-no-
+//     record defect twice (bd gqlc-osuz). Deleting that default to satisfy
+//     this fence would re-open the defect it exists to end.
+//
+// A fourth, graph.EntityKind, stays out on a different ground entirely — the
+// two-types-one-name collision of bd gqlc-pw6yj — and not on this one.
+//
+// Adding a row here is the only way to bring such a sum in. A
+// //gqlc:default-ok tag alone cannot do it: on a switch over a sum this list
+// does not name, TestStrayDefaultOKTagsAreNotSilent reports the tag as stray.
 var guardedSums = []guardedSum{
 	{name: "ColumnKind", declRoot: ".", scanRoots: []string{"."}, sentinel: "ColumnProperty", dirs: []string{"neo4j"}},
 	{name: "Scalar", declRoot: "../resolver", scanRoots: []string{".", "../resolver"}, sentinel: "ScalarNull", dirs: []string{"age", "neo4j"}},
@@ -136,6 +161,20 @@ var guardedSums = []guardedSum{
 	// only enum internal/codegen re-exports (bd gqlc-51l6m).
 	{name: "Cardinality", declRoot: "../queryfile", scanRoots: []string{".", "../queryfile"}, sentinel: "CardinalityExec", dirs: []string{".", "queryfile"}},
 	{name: "TypeToken", declRoot: "../procsig", scanRoots: []string{"../procsig", "../query", "../resolver"}, sentinel: "TokenNumber", dirs: []string{"procsig", "cypher", "resolver"}},
+	// The five below arrive together (bd gqlc-5225b, designed on gqlc-qr09l).
+	// Every switch over each defaulted, so `exhaustive` checked them nowhere
+	// and this fence could not hold them: its dirs invariant demands a
+	// still-guarded switch per sum and none existed. Each default was SILENT
+	// — it returned the zero member's wire name for a member added later, the
+	// drift this fence was built for (bd gqlc-7hp5g) — so each was deleted
+	// and its answer hoisted below the switch unchanged, behaviour-identical
+	// for every value in range and out. goFilesUnder recurses, so "../query"
+	// reaches query/cypher, which is why AggregateFunc names dir "cypher".
+	{name: "AggregateFunc", declRoot: "../query", scanRoots: []string{"../query"}, sentinel: "AggPercentile", dirs: []string{"cypher", "query"}},
+	{name: "BindingKind", declRoot: "../query", scanRoots: []string{"../query"}, sentinel: "BindingUnwind", dirs: []string{"query"}},
+	{name: "ClauseSlot", declRoot: "../query", scanRoots: []string{"../query"}, sentinel: "ClauseSlotLimit", dirs: []string{"query"}},
+	{name: "ExprPosition", declRoot: "../query", scanRoots: []string{"../query", "../resolver"}, sentinel: "ExprInDeleteTarget", dirs: []string{"query", "resolver"}},
+	{name: "UnionKind", declRoot: "../query", scanRoots: []string{"../query"}, sentinel: "UnionAll", dirs: []string{"query"}},
 }
 
 // sumSwitch is one switch whose case expressions name members of one
