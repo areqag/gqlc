@@ -120,10 +120,10 @@ func fillerLabels(f gen.INodeTypeFillerContext) (graph.LabelSet, error) {
 		if impliedLabels != nil {
 			return nil, ErrEndpointFillerImpliesLabels
 		}
-		return labelSet(kls.LabelSetPhrase()), nil
+		return labelSet(kls.LabelSetPhrase())
 	}
 	if impliedLabels == nil {
 		return nil, nil
 	}
-	return labelSet(impliedLabels.LabelSetPhrase()), nil
+	return labelSet(impliedLabels.LabelSetPhrase())
 }

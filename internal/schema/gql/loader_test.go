@@ -127,6 +127,23 @@ func TestLoaderResolvesChains(t *testing.T) {
 			entry: "root.gql",
 			want:  "Copied",
 		},
+		{
+			// The name-drift check at loader.go:70 compares the referenced file's
+			// DECLARED name against the reference's last segment, and the two sides
+			// are read by different helpers: segment() refuses a delimited path
+			// element outright, so a reference is always regular, while the target's
+			// declaration may be delimited. Before gqlc-tzu9r the declaration side
+			// carried its delimiters into the comparison, so this file resolved to
+			// ErrReferenceNameMismatch reporting that Source.gql declares "`Source`"
+			// — a drift diagnostic against a file whose name had not drifted.
+			name: "a target may declare its name delimited and still match the reference",
+			fsys: fstest.MapFS{
+				"root.gql":   file(copyOf("Copied", "Source")),
+				"Source.gql": file("CREATE GRAPH TYPE `Source` { (a:A) }"),
+			},
+			entry: "root.gql",
+			want:  "Copied",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := gql.NewLoader(tc.fsys).Load(tc.entry)

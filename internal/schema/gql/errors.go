@@ -60,6 +60,40 @@ var ErrDuplicatePropertyName = errors.New("property name declared more than once
 // it.
 var ErrDuplicateFieldName = errors.New("field name declared more than once in one record type")
 
+// The three ways a delimited identifier names nothing this parser can carry.
+// They narrow what Parse accepts relative to gqlc-tzu9r's predecessor, which
+// carried every delimited spelling through undecoded and so had no opinion about
+// any of them; each is a decline of a name the decoder can read the shape of but
+// not the meaning of.
+//
+// They stand alone rather than wrapping a class. ErrUnsupportedSource's leaves
+// share a caller question ("was the source rejected") that is worth answering in
+// one errors.Is; there is no such question here — an identifier is refused, and
+// which of the three applies is the whole of what a reader needs.
+var (
+	ErrNoEscapeIdentifier = errors.New("@-prefixed identifier suppresses escape processing, and what its contents then denote is stated only in ISO 39075 prose gqlc has not bought: the candidate readings differ on whether a doubled delimiter and a reverse solidus keep their meaning, so either choice mints a name from a guess")
+	ErrEmptyIdentifier    = errors.New("delimited identifier decodes to nothing: an empty name is how this parser records an ABSENT one, so a declaration that spells one would be indistinguishable from a declaration that omitted it")
+	ErrIdentifierEscape   = errors.New("delimited identifier carries an escape denoting no character: a \\u or \\U value that is an unpaired surrogate or above the Unicode maximum has no encoding, and writing it as U+FFFD would give it a name it shares with every other unreadable escape")
+)
+
+// ErrAmpersandInLabel refuses a label whose decoded name contains an ampersand.
+// graph.LabelSet.Key joins labels with "&" and does not quote them
+// (graph/labelset.go:25), so the one-label set {A&B} and the two-label set {A, B}
+// produce the same key — and the key IS the type's identity, so the forgery
+// reaches every map keyed by it. It is the same hazard quoteFieldName already
+// prevents inside a record encoding, here in the key that identifies the element
+// type itself.
+//
+// A delimited label is the only way to write one: an ampersand cannot appear in
+// a regular identifier. Before gqlc-tzu9r the delimiters travelled with the name
+// and kept the two keys apart by accident, so nothing was forgeable and nothing
+// guarded it.
+//
+// Refusing is the fail-closed half of a choice with a second half not taken:
+// quoting LabelSetKey would make such labels representable, but the key reaches
+// schema JSON, EdgeKey and codegen, which is a design of its own — bd gqlc-yd4ba.
+var ErrAmpersandInLabel = errors.New("label contains an ampersand, which is the separator LabelSet.Key joins on: such a label would key identically to the multi-label set spelling it")
+
 // ErrUnsupportedSource is the class of rejected <graph type source> alternatives
 // rather than a leaf sentinel: the two reachable rejections below wrap it, so a
 // caller that only asks "was the source rejected" still matches with errors.Is,

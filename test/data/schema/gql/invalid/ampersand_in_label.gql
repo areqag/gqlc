@@ -1,0 +1,7 @@
+-- graph.LabelSet.Key joins labels with "&" and does not quote them, so this
+-- one-label set would key identically to the two-label set (:Person&Employee).
+-- The key is the node type's identity, so admitting it would let one type forge
+-- another's.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:`Person&Employee` { id :: INT })
+}
