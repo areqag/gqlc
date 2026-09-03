@@ -3158,6 +3158,60 @@ func (s *ResolverSuite) TestAProvenOptionalGroupWitnessesItsEndpoints() {
 	})
 }
 
+// TestAProvenOptionalGroupInnerJoinsPhaseB is the same distinction one guard
+// over: `innerJoined`, the conjunct Phase B's unconstrained() gate reads. It is
+// the third and last member of the endpoint-witness family (bd gqlc-lixuz);
+// DemoteNullability and witnessesItsEndpoints already honour proven groups.
+//
+// What decided it was master's own refusal text. `innerJoined` exists to record
+// that some folded edge "drops the rows that lack it, so the types it points at
+// are types the SURVIVING rows have", and when it is unset Phase B refuses with
+//
+//	every edge reaching it is an OPTIONAL match, which drops no row, so its
+//	type is unconstrained
+//
+// That sentence is FALSE of row 1 below. The group is proven, so the rows
+// lacking the hop are exactly the rows the query does not return, and `c` is an
+// AUTHORED source on every row it does. The message asserted the opposite in so
+// many words, which is a stronger reason to widen than the symmetry with the
+// other two guards.
+//
+// The widening is spelled `!(e.Nullable() && !demoted[e.OptionalGroup()])` and
+// deliberately NOT `witnessesItsEndpoints`, which the unlabelledInference doc
+// comment gives a measured reason for: that predicate also refuses a
+// variable-length hop, and a `*1..2` hop still filters. This change adds the
+// proven-group exemption and touches nothing else about the spelling.
+//
+// The pair is one clause apart — row 2 is row 1 without `MATCH (x)`, the bare
+// re-reference that proves the group. `c` is unlabelled and introduced by a
+// required bare MATCH, so it is group 0 and not itself nullable; that keeps
+// bindingNullable out of the answer and leaves innerJoined as the only thing
+// separating the two rows.
+func (s *ResolverSuite) TestAProvenOptionalGroupInnerJoinsPhaseB() {
+	sch := s.loadSchema("valid", "social_r1.gql")
+	resolve := func(src string) (ValidatedQuery, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		return New(sch, WithRegistry(regR7)).Resolve(q)
+	}
+
+	// Subtests for the same reason the pair above uses them: a change to the
+	// guard must report BOTH rows rather than abort on the first.
+	s.Run("the group is proven", func() {
+		vq, err := resolve("MATCH (c) OPTIONAL MATCH (c)-[a:AUTHORED]->(x:Post) MATCH (x) RETURN c.name")
+		s.Require().NoError(err,
+			"the bare MATCH (x) proves the group, so every returned row carries the AUTHORED and `c` is its source — the edge does drop the rows that lack it (bd gqlc-lixuz)")
+		s.Require().Equal([]Column{{Name: "c.name", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, vq.Columns,
+			"`c` infers to Person, whose name is STRING NOT NULL, and `c` is bound by a required MATCH so nothing renullifies the column")
+	})
+
+	s.Run("nothing proves the group", func() {
+		_, err := resolve("MATCH (c) OPTIONAL MATCH (c)-[a:AUTHORED]->(x:Post) RETURN c.name")
+		s.Require().ErrorIs(err, ErrUnknownLabel,
+			"this is the shape unlabelledInference's own comment names: master accepted it as STRING NOT NULL for a `c` that is a Post on most rows. With the group unproven the OPTIONAL really does drop no row, so the refusal is correct and permanent")
+	})
+}
+
 // TestDeferredEdgesCloseBeforeTheNarrowing pins the position of the narrowing
 // inside Phase C: it runs after the deferred-close loop, so a deferred edge is
 // closed against the pre-narrowing binding tables.
