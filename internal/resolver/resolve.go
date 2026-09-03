@@ -1492,11 +1492,26 @@ type unlabelledInference struct {
 // and each would be a different verdict under a wider set:
 //
 //   - 0: the touching edges agree on nothing, and master refuses with
-//     ErrUnknownLabel. attainable can be non-empty there (the dropped edge is
-//     what emptied the intersection), so substituting would ACCEPT a query
-//     master refuses — a widening with no soundness case behind it, and the
-//     opposite of this change's direction.
-//     Pinned by invalid/unlabelled_optional_hop_empty_intersection.cypher.
+//     ErrUnknownLabel. attainable can be non-empty there — the dropped edge is
+//     what emptied the intersection — so substituting really would write a type.
+//     It changes no VERDICT: the edge that emptied the intersection is still in
+//     the pattern and is not declared out of whatever got substituted, so edge
+//     validation refuses a step later and only the SENTINEL moves. Measured, not
+//     argued: substituting on length 0 as well as 1 gives 0 DIFFERENT VERDICT
+//     and 2 DIFFERENT SENTINEL over the corpus sweep, both of them
+//     invalid/unlabelled_optional_hop_empty_intersection.cypher going
+//     ErrUnknownLabel -> ErrUnknownEdge "unknown edge:
+//     Company&Large-[HAS_DESK]->Desk". 14068 cells is the whole population and
+//     it bounds the claim rather than proving it: no cell reaches an accept that
+//     way, and nothing here says none can.
+//     The gate stays for the message and not for the answer. ErrUnknownLabel is
+//     the true diagnosis; the substituted lane refuses by naming an edge between
+//     a type nothing attested and a far end that was never in doubt. It also
+//     leaves the refusal resting entirely on a downstream check that has no
+//     stated obligation to this one.
+//     Pinned by invalid/unlabelled_optional_hop_empty_intersection.cypher,
+//     whose ErrorIs(ErrUnknownLabel) is what that substitution kills — the
+//     sentinel, which is what this bullet used to call a verdict.
 //   - 2 or more: master defers to the next round and eventually refuses with
 //     ErrAmbiguousBinding over the wide set. Committing the wider set instead
 //     would turn every such refusal into a plural binding, which is a change to
