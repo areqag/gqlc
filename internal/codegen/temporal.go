@@ -128,10 +128,27 @@ func typeTextNamesCarrier(text string) bool {
 	if err != nil {
 		return true
 	}
+	return exprNamesCarrier(expr)
+}
+
+// exprNamesCarrier is typeTextNamesCarrier's walk, named so the *ast.Field
+// arm can re-enter it for one field's type alone.
+//
+// A field's Names are declarations, never type references, so walking them
+// reads an identifier that names nothing. The arm keys on *ast.Field rather
+// than on *ast.StructType because ast.Inspect reaches that node kind in
+// three places — StructType.Fields, InterfaceType.Methods and
+// FuncType.Params/Results — and the property is the same at all three.
+func exprNamesCarrier(expr ast.Expr) bool {
 	found := false
 	ast.Inspect(expr, func(n ast.Node) bool {
 		switch node := n.(type) {
 		case *ast.SelectorExpr:
+			return false
+		case *ast.Field:
+			if node.Type != nil && exprNamesCarrier(node.Type) {
+				found = true
+			}
 			return false
 		case *ast.Ident:
 			if _, isCarrier := temporalCarrierSet[node.Name]; isCarrier {
