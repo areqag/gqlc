@@ -108,9 +108,17 @@ own call sites: [docs/bd-ledger-queries.md](docs/bd-ledger-queries.md).
 - **Name one bead per `bd update` whose success you check by exit status.** Given
   several ids it is best-effort — it exits 0 having skipped the ones it could not
   resolve. `bd close` differs: it refuses the whole command and writes nothing.
+- **A bead whose serialised record passes ~65535 bytes never accepts another
+  `bd update`.** Every write first records the *whole previous bead* as JSON in a
+  `TEXT` column, so the size of your write is irrelevant and shrinking the notes
+  does not recover it. Reads stay healthy, so the bead looks fine on every board;
+  the only symptom is on the stderr of a write. `bd close` still works, but a
+  closed oversized bead can never be reopened. One bead of 1533 was over the line
+  on 2026-09-03 and the next largest was 42151, so this is a hazard for
+  heavily-worked beads rather than a fleet-wide one.
 
-Measured 2026-08-24 against bd 1.0.4 and 1.2.2, with the falsifiers and this
-repository's write call-site audit:
+Measured 2026-08-24 against bd 1.0.4 and 1.2.2, and the size ceiling on
+2026-09-03, with the falsifiers and this repository's write call-site audit:
 [docs/bd-ledger-writes.md](docs/bd-ledger-writes.md).
 
 ## Working directory
