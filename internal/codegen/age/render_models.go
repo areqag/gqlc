@@ -373,7 +373,7 @@ func (h *helpers) need(goType string, width graph.PropertyType) {
 		return
 	}
 	if codegen.IsDeclaredRecord(goType, width) {
-		h.needRecord(goType, width)
+		h.needRecord(width)
 		return
 	}
 	if goType == "any" || goType == "map[string]any" {
@@ -437,7 +437,13 @@ func (h *helpers) needValue() {
 // function the record's own struct text was built from, so a field whose
 // width this backend declines cannot reach here: the whole record would
 // have been declined at Property and never admitted.
-func (h *helpers) needRecord(goType string, width graph.PropertyType) {
+//
+// The WIDTH alone, with no carrier text beside it, matching
+// needRecordEncode. Everything below is derived from the encoding —
+// the alias, the helper suffix, the field walk — and the struct text
+// does not run backwards, so a carrier passed here could only be
+// ignored or disagreed with.
+func (h *helpers) needRecord(width graph.PropertyType) {
 	if h.recordDecoders[width] {
 		return
 	}
