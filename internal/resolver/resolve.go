@@ -265,20 +265,36 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 		}
 	}
 
+	// Phase D (§4.6) runs ABOVE Phase C, which is not the order R4 §2.2 states.
+	// R4 gives a reason for the old one — "the demotion algorithm reads
+	// committed edge shapes … by their committed resolvedEdgeKey /
+	// resolvedEdgeCand / edgeBindings state" — and describes a helper
+	// `demoteNullable(bindings, edgeBindings, edgeKeys, edgeCands)` taking those
+	// tables. The shipped DemoteNullability takes none of them: ay9 and 5xg
+	// rewrote it around OPTIONAL-group membership and qualifiedDemoter, which
+	// reads the binding's own Hops() off the parse. It therefore reads no table
+	// Phase C writes, and the constraint the old order was built around stopped
+	// binding when that rewrite landed (bd gqlc-o8oc; R4 §2.2 corrected in the
+	// same change).
+	//
+	// The move is what makes the refinement in witnessesItsEndpoints reachable
+	// at all. sc.demotedGroups is nil until this runs, so under the old order
+	// the widened guard is a no-op on every input — measured, and the reason
+	// this is not a two-line change.
+	//
+	// Nullability seed already ran at newScope (the carry's nullable bindings
+	// landed in sc.nullableBinding). Local Bindings override the carry before
+	// demotion runs so Part K+1 that re-MATCHes an OPTIONAL-carried `b` sees
+	// sc.nullableBinding["b"] = false.
+	sc.SeedLocalNullability()
+	sc.DemoteNullability()
+
 	// Phase A2 (defer unfulfilled endpoint edges) + Phase B (infer
 	// unlabelled nodes) + Phase C (retry deferred edges), all
 	// scope-internal per spec §2.2.
 	if err := sc.CloseEdges(s); err != nil {
 		return nil, branchState{}, nil, orientationEvidence{}, err
 	}
-
-	// Phase D (§4.6): seed with carry, override with local, then demote.
-	// Nullability seed already ran at newScope (the carry's nullable
-	// bindings landed in sc.nullableBinding). Local Bindings override
-	// the carry before demotion runs so Part K+1 that re-MATCHes an
-	// OPTIONAL-carried `b` sees sc.nullableBinding["b"] = false.
-	sc.SeedLocalNullability()
-	sc.DemoteNullability()
 
 	// Phase E (R6 §4.1): effect validation. Runs after Phase D so effect
 	// targets see the same schema-committed binding tables and
@@ -1086,10 +1102,10 @@ func describeTriedEdges(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey) str
 // its one key to every reading it has, so an entry for it could only ever be
 // that same key: including them would change no answer, and the restriction is
 // written here so it is stated once rather than left to each caller.
-func endpointNarrowing(edges []query.EdgeBinding, t nodeTable, s schema.Schema, written map[string]struct{}) map[string]map[graph.LabelSetKey]struct{} {
+func endpointNarrowing(edges []query.EdgeBinding, t nodeTable, s schema.Schema, written map[string]struct{}, demoted map[int]bool) map[string]map[graph.LabelSetKey]struct{} {
 	acc := make(map[string]map[graph.LabelSetKey]struct{}, len(t.cands))
 	for _, e := range edges {
-		if !witnessesItsEndpoints(e, written) {
+		if !witnessesItsEndpoints(e, written, demoted) {
 			continue
 		}
 		srcEnd, srcOK := endpointLabels(e.Source(), t, s)
@@ -1171,7 +1187,7 @@ func endpointNarrowing(edges []query.EdgeBinding, t nodeTable, s schema.Schema, 
 // inferUnlabelled is Phase B. `written` is the caller's scope.writtenBindings
 // set, which candidateTypes needs to ask witnessesItsEndpoints of each edge it
 // folds in — see there.
-func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}) error {
+func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}, demoted map[int]bool) error {
 	resolved, nodeCands := t.resolved, t.cands
 	if len(pending) == 0 {
 		return nil
@@ -1199,7 +1215,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 		pending = filtered
 	}
 	for len(pending) > 0 {
-		next, committed, err := commitUnlabelledRound(pending, edges, s, t, callTypes, written, nil)
+		next, committed, err := commitUnlabelledRound(pending, edges, s, t, callTypes, written, nil, demoted)
 		if err != nil {
 			return err
 		}
@@ -1230,8 +1246,8 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 			// Recomputed per round rather than hoisted: a round that commits
 			// changes the binding tables endpointNarrowing reads, so a hoisted
 			// answer would be the one a stale table gave.
-			narrowing := endpointNarrowing(edges, t, s, written)
-			next, committed, err = commitUnlabelledRound(pending, edges, s, t, callTypes, written, narrowing)
+			narrowing := endpointNarrowing(edges, t, s, written, demoted)
+			next, committed, err = commitUnlabelledRound(pending, edges, s, t, callTypes, written, narrowing, demoted)
 			if err != nil {
 				return err
 			}
@@ -1243,7 +1259,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 				// return that leaves `inferred` alone. The call is spelled the
 				// way the round spells it so the message and the decision read
 				// one function.
-				cands, _, _ := candidateTypes(n, edges, s, t, written, narrowing).commit()
+				cands, _, _ := candidateTypes(n, edges, s, t, written, narrowing, demoted).commit()
 				return fmt.Errorf("%w: cannot uniquely infer type of unlabelled binding %q — candidate types: %s", ErrAmbiguousBinding, n.Variable(), joinCandidates(cands))
 			}
 		}
@@ -1260,12 +1276,12 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 // The two lanes differ in nothing but that argument, so the widened lane cannot
 // drift from master's on any question other than which types a far end can
 // still have.
-func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}) ([]query.NodeBinding, int, error) {
+func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}, demoted map[int]bool) ([]query.NodeBinding, int, error) {
 	resolved := t.resolved
 	var next []query.NodeBinding
 	committed := 0
 	for _, n := range pending {
-		inf := candidateTypes(n, edges, s, t, written, narrowing)
+		inf := candidateTypes(n, edges, s, t, written, narrowing, demoted)
 		cands, covered, widened := inf.commit()
 		switch len(cands) {
 		case 0:
@@ -1639,7 +1655,7 @@ func (i unlabelledInference) unconstrained() bool {
 // — which is the same argument NarrowPluralEndpoints makes when it keeps
 // resolvedCovers on a collapse, and the same one that lets `attainable` be read
 // as covering.
-func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}) unlabelledInference {
+func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}, demoted map[int]bool) unlabelledInference {
 	var all, attainable candidateAcc
 	inf := unlabelledInference{bindingNullable: n.Nullable()}
 	for _, e := range edges {
@@ -1661,7 +1677,7 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 		// commitment derived from an edge some returned row does not have is not
 		// a statement about that row's type, however well enumerated the edge's
 		// far end was.
-		if otherCovers && witnessesItsEndpoints(e, written) {
+		if otherCovers && witnessesItsEndpoints(e, written, demoted) {
 			attainable.fold(e, side, other, otherKeys, s, narrowing)
 			inf.attested = true
 		}
@@ -2030,8 +2046,8 @@ func singleHopPattern(e query.EdgeBinding) bool {
 // exempts an OPTIONAL edge whose group is already proven (ay9). Such an edge
 // genuinely is a witness, so honouring demotedGroups would narrow more — but
 // that is a further widening, and it is filed rather than taken here.
-func witnessesItsEndpoints(e query.EdgeBinding, written map[string]struct{}) bool {
-	if e.Nullable() || !singleHopPattern(e) {
+func witnessesItsEndpoints(e query.EdgeBinding, written map[string]struct{}, demoted map[int]bool) bool {
+	if (e.Nullable() && !demoted[e.OptionalGroup()]) || !singleHopPattern(e) {
 		return false
 	}
 	_, isWritten := written[e.Variable()]

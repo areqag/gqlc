@@ -2006,7 +2006,7 @@ func (s *ResolverSuite) TestPhaseBsPluralCommitLeavesNoResolvedCoversMark() {
 	}
 	s.Require().NoError(inferUnlabelled(
 		[]query.NodeBinding{c}, []query.EdgeBinding{worksAt, hasDesk},
-		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}))
+		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}, nil))
 
 	// The tripwire. Without these the assertion below passes for a `c` that
 	// never reached the plural arm at all.
@@ -2061,7 +2061,7 @@ func (s *ResolverSuite) TestPhaseBsUncoveredSingularCommitClearsAResolvedCoversM
 	}
 	s.Require().NoError(inferUnlabelled(
 		[]query.NodeBinding{d}, []query.EdgeBinding{hasDesk},
-		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}))
+		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}, nil))
 
 	// Tripwires. Without them the assertion below passes for a `d` that took the
 	// plural arm — already pinned above — or that never committed at all, and it
@@ -3084,6 +3084,42 @@ func (s *ResolverSuite) TestNarrowingToASmallerPluralSetIsWhatTheSetSaysItIs() {
 	got, err := resolve("MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p.staffId")
 	s.Require().NoError(err, "staffId is on both survivors, so the intersection over the narrowed set has it")
 	s.Require().Equal([]Column{{Name: "p.staffId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}}, got)
+}
+
+// TestAProvenOptionalGroupWitnessesItsEndpoints is bd gqlc-o8oc's pair.
+//
+// witnessesItsEndpoints refuses every nullable edge, so an OPTIONAL edge never
+// narrows. DemoteNullability asks the same question about the same shape one
+// clause wider — `e.Nullable() && !demotedGroups[e.OptionalGroup()]` — because an
+// OPTIONAL edge inside a PROVEN group is a witness after all: the group's
+// demotion is exactly the finding that every surviving row carries it.
+//
+// The two rows are the whole point and neither stands alone. They are one token
+// apart: the second query is the first with `MATCH (d)` removed. That bare
+// re-reference is what proves the group (§4.6, the 5xg pre-pass), so the pair
+// isolates provenness and nothing else — same schema, same OPTIONAL hop, same
+// projection.
+//
+// smallOnly is declared on the bare Company and not on Company&Large, so it is
+// the column that exists only if `c` narrowed. Unnarrowed, ADR 0022 intersects
+// the two satisfying types and the property is not in the intersection, so the
+// unproven row is a refusal rather than a differently-typed column.
+func (s *ResolverSuite) TestAProvenOptionalGroupWitnessesItsEndpoints() {
+	sch := s.loadSchema("valid", "satisfy_plural_edges_inline_subtype.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	got, err := resolve("OPTIONAL MATCH (c:Company)-[h:HAS_DESK]->(d:Desk) MATCH (d) RETURN c.smallOnly")
+	s.Require().NoError(err, "the bare MATCH (d) proves the group, so every returned row carries the HAS_DESK and its source is the bare Company")
+	s.Require().Equal([]Column{{Name: "c.smallOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
+
+	_, err = resolve("OPTIONAL MATCH (c:Company)-[h:HAS_DESK]->(d:Desk) RETURN c.smallOnly")
+	s.Require().ErrorIs(err, ErrUnknownProperty,
+		"with nothing proving the group the outer join returns a Company&Large row with h and d null, so the hop is no evidence about c and the plural set stands (bd gqlc-0tft)")
 }
 
 // TestDeferredEdgesCloseBeforeTheNarrowing pins the position of the narrowing

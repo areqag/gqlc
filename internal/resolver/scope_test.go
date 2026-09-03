@@ -565,14 +565,14 @@ func TestEndpointNarrowingGivesNoEntryWhenNothingIsPlural(t *testing.T) {
 
 	t.Run("plural", func(t *testing.T) {
 		sc := bind(t, true)
-		require.Contains(t, endpointNarrowing([]query.EdgeBinding{eb}, sc.nodeTable(), sch, sc.writtenBindings()), "p",
+		require.Contains(t, endpointNarrowing([]query.EdgeBinding{eb}, sc.nodeTable(), sch, sc.writtenBindings(), sc.demotedGroups), "p",
 			"this edge does contribute, so the singular row's empty map is about pluralness and nothing else")
 	})
 
 	t.Run("singular", func(t *testing.T) {
 		sc := bind(t, false)
 		require.Empty(t, sc.nodeCands, "nothing is plural, which is the state the early return guards")
-		require.Empty(t, endpointNarrowing([]query.EdgeBinding{eb}, sc.nodeTable(), sch, sc.writtenBindings()),
+		require.Empty(t, endpointNarrowing([]query.EdgeBinding{eb}, sc.nodeTable(), sch, sc.writtenBindings(), sc.demotedGroups),
 			"with no plural binding the rule contributes nothing, so the guarded body could only have written a no-op")
 	})
 }
