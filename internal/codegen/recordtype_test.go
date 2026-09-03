@@ -6,6 +6,7 @@ import (
 	"go/format"
 	"go/parser"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -647,4 +648,123 @@ func TestRecordEncodingsIsOrderedByEncoding(t *testing.T) {
 
 	require.Len(t, got, len(fields), "the eight declared encodings are distinct; the walk reported %d", len(got))
 	require.True(t, slices.IsSorted(got), "the helper block is emitted in this order and must not move between runs; got %v", got)
+}
+
+// TestRecordFieldsAgreesWithTheStructTextItRenders is the claim that
+// makes the walk worth sharing at all.
+//
+// A backend's encode/decode helper bodies assign and read the Go fields
+// of the very struct RecordStructText declared. If the plan named a
+// field the struct does not have, spelled a pointer where the struct
+// spelled a value, or ordered its entries differently, the emitted
+// package would not compile — and the failure would arrive from `go
+// build` of generated code, with no line in the schema to point at. So
+// the plan is checked against the text rather than against a second
+// hand-written expectation: a hand-written one could drift with it.
+//
+// The record deliberately mixes both nullabilities, a mangled name and
+// an already-Go name, so a plan that got any single decision wrong is
+// visible as a disagreement rather than absorbed by uniformity.
+func TestRecordFieldsAgreesWithTheStructTextItRenders(t *testing.T) {
+	fields := []graph.RecordField{
+		{Name: "city", Type: graph.TypeString},
+		{Name: "ok", Type: graph.TypeBool, NotNull: true},
+		{Name: "zip_code", Type: graph.TypeInt32},
+	}
+	declared := graph.RecordOf(fields)
+
+	plan, ok := codegen.RecordFields(declared.Fields(), goCarrier)
+	require.True(t, ok)
+	text, ok := codegen.RecordStructText(declared.Fields(), goCarrier)
+	require.True(t, ok)
+
+	var rebuilt strings.Builder
+	rebuilt.WriteString("struct {\n")
+	for _, f := range plan {
+		rebuilt.WriteString("\t" + f.Field + " ")
+		if f.Nullable {
+			rebuilt.WriteString("*")
+		}
+		rebuilt.WriteString(f.GoType + "\n")
+	}
+	rebuilt.WriteString("}")
+	require.Equal(t, text, rebuilt.String(),
+		"the plan must spell the same fields, in the same order, with the same nullability as the struct the helpers assign into")
+}
+
+// TestRecordFieldsCarriesTheWireKeyUnmangled separates the two names a
+// record field has, because the emitted helper needs BOTH and they are
+// not the same string.
+//
+// Key is what the driver's map is subscripted at — the name the author
+// declared, which the server stores verbatim. Field is the Go struct
+// field, which the mangle produced. A helper that read the map at the
+// mangled name would compile cleanly and find nothing at run time, which
+// is the failure this separation exists to make impossible: `m["ZipCode"]`
+// against a map holding `zip_code`.
+func TestRecordFieldsCarriesTheWireKeyUnmangled(t *testing.T) {
+	declared := graph.RecordOf([]graph.RecordField{
+		{Name: "zip_code", Type: graph.TypeInt32},
+	})
+	plan, ok := codegen.RecordFields(declared.Fields(), goCarrier)
+	require.True(t, ok)
+	require.Len(t, plan, 1)
+	require.Equal(t, "zip_code", plan[0].Key, "the wire key is the declared name; the server never saw the mangle")
+	require.Equal(t, "ZipCode", plan[0].Field)
+	require.NotEqual(t, plan[0].Key, plan[0].Field,
+		"the premise: a field whose two names coincide could not falsify a helper that used the wrong one")
+}
+
+// TestRecordFieldsCarriesTheDeclaredWidth pins the field the plan holds
+// purely for the nested case. A record field that is itself a record is
+// emitted as a call to that record's own helper, whose name is hashed
+// from the canonical encoding — and the carrier text, an anonymous
+// struct, does not run backwards into a PropertyType. Without Width the
+// nested helper could not be named at all.
+func TestRecordFieldsCarriesTheDeclaredWidth(t *testing.T) {
+	inner := graph.RecordOf([]graph.RecordField{{Name: "city", Type: graph.TypeString}})
+	declared := graph.RecordOf([]graph.RecordField{
+		{Name: "at", Type: inner},
+		{Name: "n", Type: graph.TypeInt32},
+	})
+	carrier := func(pt graph.PropertyType) (string, bool) {
+		if pt.Kind() == graph.KindRecord {
+			return codegen.RecordStructText(pt.Fields(), goCarrier)
+		}
+		return goCarrier(pt)
+	}
+	plan, ok := codegen.RecordFields(declared.Fields(), carrier)
+	require.True(t, ok)
+	require.Len(t, plan, 2)
+
+	byField := map[string]codegen.RecordFieldPlan{}
+	for _, f := range plan {
+		byField[f.Field] = f
+	}
+	require.Equal(t, inner, byField["At"].Width,
+		"the nested helper is named from this, so it must be the encoding and not a re-derivation from the text")
+	require.Equal(t, graph.TypeInt32, byField["N"].Width)
+}
+
+// TestRecordFieldsRefusesWholeWhenAFieldIsRefused mirrors the rule
+// RecordStructText already holds, at the plan the helper bodies are
+// built from: one refused field refuses the whole record, and there is
+// no partial plan to hand back. A partial one would be worse than the
+// refusal — the emitter would write a helper for a struct missing the
+// very field the backend could not carry.
+//
+// The control is the same record with the refused field removed, so this
+// cannot pass against a walk that had stopped answering at all.
+func TestRecordFieldsRefusesWholeWhenAFieldIsRefused(t *testing.T) {
+	refused := []graph.RecordField{
+		{Name: "city", Type: graph.TypeString},
+		{Name: "img", Type: graph.TypeBytes},
+	}
+	plan, ok := codegen.RecordFields(refused, goCarrier)
+	require.False(t, ok, "BYTES is refused by this carrier, so the record has no representation")
+	require.Nil(t, plan, "a partial plan would emit a helper for fields the backend cannot carry")
+
+	admitted, ok := codegen.RecordFields(refused[:1], goCarrier)
+	require.True(t, ok, "the control: the same record without the refused field is representable")
+	require.Len(t, admitted, 1)
 }

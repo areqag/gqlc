@@ -82,6 +82,63 @@ func recordFieldDetail(declared, record graph.PropertyType, reason string) strin
 	return string(declared) + ", whose " + string(record) + " has " + reason
 }
 
+// RecordFieldPlan is one field of a declared record as an emitter needs
+// it: the key the wire map carries the value at, the Go struct field
+// name the mangle produced, the backend's carrier text for the declared
+// width, and the nullability that decides both the leading '*' and
+// whether a missing key is an error.
+//
+// Width is kept beside GoType for the reason the prepared surface keeps
+// it beside every other carrier (spec §6): a nested record's helper is
+// named from its canonical encoding, and the struct text does not run
+// backwards into a PropertyType.
+type RecordFieldPlan struct {
+	Key      string
+	Field    string
+	GoType   string
+	Nullable bool
+	Width    graph.PropertyType
+}
+
+// RecordFields renders the per-field emission plan for one declared
+// record — RecordStructText's own walk, exposed, so a backend's
+// encode/decode helper bodies read the SAME field names in the SAME
+// order with the SAME nullability the struct text declared. Two walks
+// would be two chances to disagree about which Go field a declared name
+// mangles to, and the disagreement emits a helper assigning a field the
+// struct does not have: a package that does not compile, with no line in
+// the schema to point at. It is shared between the backends for the
+// reason RecordStructText is (spec §5, "the record-field mangle walk").
+//
+// carrier is the backend's own Property, threaded in rather than
+// imported, so a field inherits that backend's refusals. One refusal
+// refuses the whole record and is reported as ok=false with no partial
+// plan, because a struct with a hole in it is not a carrier.
+//
+// It assumes its fields are already LEGAL — distinct non-empty mangles —
+// exactly as RecordStructText does, and for the same reason:
+// recordFieldLegality answers that at each preparation site before any
+// type map is asked.
+func RecordFields(fields []graph.RecordField, carrier func(graph.PropertyType) (string, bool)) ([]RecordFieldPlan, bool) {
+	out := make([]RecordFieldPlan, 0, len(fields))
+	for _, f := range fields {
+		fieldTy, ok := carrier(f.Type)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, RecordFieldPlan{
+			Key:   f.Name,
+			Field: paramFieldName(f.Name),
+			// GQL record fields are nullable by default, so NotNull is
+			// the exception and the plan states the common case.
+			GoType:   fieldTy,
+			Nullable: !f.NotNull,
+			Width:    f.Type,
+		})
+	}
+	return out, true
+}
+
 // RecordStructText renders the Go carrier text for a declared record's
 // fields: an anonymous struct, one field per declared field, in the
 // canonical order Fields returns (spec §2, the ruling for gqlc-x9tg7 in
@@ -120,23 +177,22 @@ func RecordStructText(fields []graph.RecordField, carrier func(graph.PropertyTyp
 		// fields are a different claim from no fields.
 		return "struct{}", true
 	}
+	plan, ok := RecordFields(fields, carrier)
+	if !ok {
+		return "", false
+	}
 	var b strings.Builder
 	b.WriteString("struct {\n")
-	for _, f := range fields {
-		fieldTy, ok := carrier(f.Type)
-		if !ok {
-			return "", false
-		}
+	for _, f := range plan {
 		b.WriteString("\t")
-		b.WriteString(paramFieldName(f.Name))
+		b.WriteString(f.Field)
 		b.WriteString(" ")
-		if !f.NotNull {
-			// GQL record fields are nullable by default, and a
-			// nullable carrier is spelled with a leading * here for
+		if f.Nullable {
+			// A nullable carrier is spelled with a leading * here for
 			// the same reason a nullable property is.
 			b.WriteString("*")
 		}
-		b.WriteString(fieldTy)
+		b.WriteString(f.GoType)
 		b.WriteString("\n")
 	}
 	b.WriteString("}")
