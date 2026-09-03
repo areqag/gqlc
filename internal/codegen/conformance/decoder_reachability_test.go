@@ -350,9 +350,13 @@ type entityDecoder struct {
 //
 // It is not a reachability analysis. It says nothing about guards that are
 // not string equality — no arithmetic, no length, no nil check, no
-// interprocedural condition. It says nothing about a conjunction: two
-// guards each in the axis's alphabet can still be jointly unsatisfiable,
-// and this reads them one at a time (gqlc-eo74). And it decides
+// interprocedural condition. Two guards each in the axis's alphabet can
+// still be jointly unsatisfiable, and the grading described above reads
+// them one at a time; that conjunction is decided instead by a second
+// reader, straightLineLabelRequirements, on terms of its own — and it is
+// blind in one direction worth naming here, since a contradiction written
+// inside a loop or any nested block is read by neither (gqlc-eo74). And it
+// decides
 // satisfiability against the labels gqlc's own write path stamps for that
 // axis; a graph a foreign writer populated is outside its terms.
 //
@@ -454,6 +458,11 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 	// it would report "this gate examined a guard" on the strength of an
 	// entry in a map rather than of a comparison this sweep performed.
 	graded := 0
+	// required counts the straight-line guards read for the conjunction
+	// verdict, on the same argument as graded: a conjunction is refused by
+	// finding a second literal, so a reader that recognised no guard at all
+	// would refuse nothing and say so with silence.
+	required := 0
 
 	for _, dir := range s.validFixtures() {
 		fixture := filepath.Base(dir)
@@ -487,6 +496,12 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 				for _, d := range emittedMethodDecoders(s.Require(), files, decoderShapes) {
 					graded += gradeDecoderGuards(s.Require(), target, fixture, d, alphabet)
 				}
+				// The conjunction verdict, which needs neither the axis
+				// nor the alphabet and so reads every function body the
+				// emission writes rather than the decoders alone.
+				reqs := straightLineLabelRequirements(s.Require(), files)
+				required += len(reqs)
+				requireSatisfiableGuards(s.Require(), target, fixture, reqs)
 			}
 		})
 	}
@@ -529,6 +544,12 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 		"no emitted decoder in the whole corpus compared a string for equality, so this gate held nothing to an "+
 			"alphabet: every assertion above is about counts and ledgers, and the reachability claim itself was "+
 			"never exercised")
+	s.Require().NotZero(required,
+		"no emitted function in the whole corpus writes a straight-line early return on a single-valued local, so "+
+			"the conjunction verdict examined nothing: a contradiction is found by reading a second literal for one "+
+			"operand, and a reader that read no first literal anywhere passes every emission in silence. Either the "+
+			"guard moved into a loop or a nested block, where straightLineLabelRequirements deliberately does not "+
+			"follow it, or the emission stopped writing the shape entirely")
 }
 
 // TestEmittedClosuresNameNoEntityAndCompareNoString is the corpus census of
@@ -2251,6 +2272,30 @@ func recordedGrading(
 	return rec.msgs
 }
 
+// recordedConjunction runs the conjunction verdict over a synthetic
+// emission and returns both what it refused and how many guards it read.
+// The count is half the answer: an emission accepted because the reader
+// declined to read its guards at all is not the same as one accepted
+// because its guards can hold together, and only the count tells them
+// apart.
+func recordedConjunction(files []codegen.File) ([]string, int) {
+	rec := &recordingT{}
+	read := 0
+	func() {
+		defer func() {
+			if v := recover(); v != nil {
+				if _, ok := v.(failedNow); !ok {
+					panic(v)
+				}
+			}
+		}()
+		reqs := straightLineLabelRequirements(require.New(rec), files)
+		read = len(reqs)
+		requireSatisfiableGuards(require.New(rec), "probe-backend", "probe-fixture", reqs)
+	}()
+	return rec.msgs, read
+}
+
 // recordedSweepRefusal runs the sweep over a synthetic emission and returns
 // what it reported instead of failing the caller's test, empty for one it
 // accepted.
@@ -3017,6 +3062,443 @@ func gradeDecoderGuards(
 		r.True(alphabet[d.shape][guard], unstampableReport(target, fixture, d, guard, alphabet))
 	}
 	return len(d.guards)
+}
+
+// requireSatisfiableGuards refuses every emitted body whose own
+// straight-line guards cannot hold at once. It is the whole conjunction
+// verdict of
+// TestEmittedDecodersGuardOnlyOnStampableLabels, lifted out of that sweep
+// for the same reason gradeDecoderGuards is: no emission in the corpus
+// writes a contradiction, so every row that shows one refused is synthetic,
+// and a synthetic row is worth nothing unless it runs the shipped verdict
+// rather than a second copy of it written beside the test.
+// It takes what was read rather than the files it was read from, because a
+// refusal here stops the caller: a count returned past the assertions is a
+// count no failing run ever produces, and a row asserting on one would read
+// zero whenever it refused.
+func requireSatisfiableGuards(r *require.Assertions, target, fixture string, reqs []labelRequirement) {
+	for _, req := range reqs {
+		r.Len(req.literals, 1, contradictoryGuardReport(target, fixture, req))
+	}
+}
+
+// contradictoryGuardReport names a body whose own straight-line guards
+// cannot hold at once. It states the operand rather than only the literals,
+// because the defect is not that two labels appear — a multi-label node
+// decoder demands two and is correct — but that one value is asked to be
+// both.
+func contradictoryGuardReport(target, fixture string, req labelRequirement) string {
+	return fmt.Sprintf(
+		"%s emitted %s in %s for fixture %s, and it returns early unless %s equals each of %q. %s holds one "+
+			"string and every one of those guards is written directly in the body's own statement list, so no "+
+			"value reaches the code after them: every call takes one of the early returns and the function is "+
+			"dead however it is called. Each literal alone may well be a label the axis carries, which is why "+
+			"the per-literal grading above passes it — the contradiction is only visible in the conjunction",
+		target, req.fn, req.file, fixture, req.operand, req.literals, req.operand)
+}
+
+// labelRequirement is one demand an emitted function body makes of a local
+// it holds a single string in: from the guard on, this identifier equals
+// every literal in literals, because each of them was written as an early
+// return on inequality.
+//
+//	label, props, err := agtypeEntity(raw, "::vertex")
+//	if label != "Person" { return Person{}, … }   // requires label == "Person"
+//	if label != "Post"   { return Person{}, … }   // and label == "Post"
+//
+// Two literals for one operand is the contradiction. literals is in source
+// order and carries no duplicate, so len > 1 names distinct demands.
+type labelRequirement struct {
+	fn       string
+	file     string
+	operand  string
+	literals []string
+}
+
+// straightLineLabelRequirements reads every emitted function body's own
+// straight-line early-return guards on a single-valued local.
+//
+// # Why it is a separate reader
+//
+// The per-literal grader asks whether a string is a label some value on the
+// decoder's axis carries. That question needs the decoder classification,
+// the entity's axis and the schema's alphabet. This one asks whether two
+// guards can hold at once, which needs none of the three: an identifier
+// cannot equal both "Person" and "Post" whatever the schema declares. So it
+// is not restricted to decoders — every function body an emission writes is
+// read, because a helper whose guards contradict is as dead as a decoder
+// whose guards do, and holding it needs nothing the classification supplies.
+//
+// # What makes a demand, and why each condition is load-bearing
+//
+// Only `if <ident> != "<literal>" { … return }` written directly in a body's
+// own statement list. Every narrowing is there because dropping it would
+// redden a correct emission:
+//
+//   - Directly in the body's list, not inside a `for`. This is the whole
+//     reason the rule is sound, and neo4j is the witness. Its decoders ask
+//     for label-set membership, one loop per label:
+//
+//     for _, label := range node.Labels { if label == "Employee" { … } }
+//     for _, label := range node.Labels { if label == "Person" { … } }
+//
+//     A node carries a *set* of labels, so a multi-label entity demanding
+//     both is correct and satisfiable — entity_multi_label_named emits
+//     exactly that. The two `label`s are different variables bound by
+//     different loops, and a reader that grouped them by spelling would
+//     refuse a correct emission. Reading only the body's own straight line
+//     excludes them by construction rather than by a name check.
+//
+//   - Inequality with an early return, not `==`. `if label == "Person"` sets
+//     a flag or takes a branch; it demands nothing of the rest of the body.
+//     Only the early return says "past this point, label is this string".
+//
+//   - No else, no init. Either makes the guard conditional on a second
+//     thing, and this reads no control flow beyond the straight line.
+//
+//   - The operand assigned exactly once in the whole body and never
+//     address-taken. A local reassigned between two guards can satisfy both,
+//     and one whose address escapes can be written through a pointer this
+//     reader does not follow. Both are then left with no verdict.
+//
+// # What it does not decide
+//
+// It is not a reachability analysis either, and it is deliberately blind in
+// the direction that cannot produce a false refusal. A guard written inside
+// a loop, an if, or any nested block is not read at all, so a contradiction
+// buried one level down passes — the per-literal grader still holds each of
+// its literals to the alphabet, and only their conjunction goes unjudged.
+// Two guards on *different* single-valued locals that a third statement ties
+// together are outside it for the same reason.
+func straightLineLabelRequirements(r *require.Assertions, files []codegen.File) []labelRequirement {
+	fset := token.NewFileSet()
+	var out []labelRequirement
+	for _, f := range files {
+		file, err := parser.ParseFile(fset, f.Path, f.Contents, parser.SkipObjectResolution)
+		r.NoError(err, "parsing emitted %s", f.Path)
+		for _, fn := range everyFuncBody(fset, file) {
+			for _, req := range bodyLabelRequirements(r, fn.body) {
+				req.fn, req.file = fn.name, f.Path
+				out = append(out, req)
+			}
+		}
+	}
+	return out
+}
+
+// funcBody is one function body an emitted file writes, under whatever
+// spelling it wrote it.
+type funcBody struct {
+	name string
+	body *ast.BlockStmt
+}
+
+// everyFuncBody is every function body in one emitted file: each
+// declaration with a body, receiver or not, and each function literal at any
+// depth. Unlike packageLevelFuncs it excludes nothing, because the reader it
+// feeds needs no classification — see straightLineLabelRequirements. A
+// literal's body is yielded as its own straight line and is not read as part
+// of the declaration holding it, so no guard is attributed twice.
+func everyFuncBody(fset *token.FileSet, file *ast.File) []funcBody {
+	var out []funcBody
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Body != nil {
+			out = append(out, funcBody{name: fn.Name.Name, body: fn.Body})
+		}
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.FuncLit)
+		if ok {
+			out = append(out, funcBody{
+				name: fmt.Sprintf("the function literal at line %d", fset.Position(lit.Pos()).Line),
+				body: lit.Body,
+			})
+		}
+		return true
+	})
+	return out
+}
+
+// bodyLabelRequirements reads one body's own statement list, in order, and
+// answers what each single-valued local is required to equal. An operand
+// with one literal is an ordinary guard and is returned all the same, so a
+// caller can count what was read rather than infer it from silence.
+func bodyLabelRequirements(r *require.Assertions, body *ast.BlockStmt) []labelRequirement {
+	stable := singleAssignmentIdents(body)
+	required := make(map[string][]string)
+	var order []string
+	for _, stmt := range body.List {
+		ifStmt, ok := stmt.(*ast.IfStmt)
+		if !ok || ifStmt.Init != nil || ifStmt.Else != nil || !endsInReturn(ifStmt.Body) {
+			continue
+		}
+		cond, ok := ifStmt.Cond.(*ast.BinaryExpr)
+		if !ok || cond.Op != token.NEQ {
+			continue
+		}
+		name, text, ok := identComparedToString(r, cond)
+		if !ok || !stable[name] {
+			continue
+		}
+		if _, seen := required[name]; !seen {
+			order = append(order, name)
+		}
+		if !slices.Contains(required[name], text) {
+			required[name] = append(required[name], text)
+		}
+	}
+	out := make([]labelRequirement, 0, len(order))
+	for _, name := range order {
+		out = append(out, labelRequirement{operand: name, literals: required[name]})
+	}
+	return out
+}
+
+// singleAssignmentIdents is every identifier a body binds exactly once and
+// never takes the address of. Every form that writes a name is counted —
+// assignment, declaration, increment and a range clause's own key and value
+// — because a name bound twice holds two values, and two guards on it are
+// then not a claim about one string.
+func singleAssignmentIdents(body *ast.BlockStmt) map[string]bool {
+	writes := make(map[string]int)
+	escaped := make(map[string]bool)
+	count := func(exprs ...ast.Expr) {
+		for _, expr := range exprs {
+			if id, ok := expr.(*ast.Ident); ok {
+				writes[id.Name]++
+			}
+		}
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.AssignStmt:
+			count(node.Lhs...)
+		case *ast.ValueSpec:
+			for _, id := range node.Names {
+				writes[id.Name]++
+			}
+		case *ast.IncDecStmt:
+			count(node.X)
+		case *ast.RangeStmt:
+			count(node.Key, node.Value)
+		case *ast.UnaryExpr:
+			if node.Op == token.AND {
+				if id, ok := node.X.(*ast.Ident); ok {
+					escaped[id.Name] = true
+				}
+			}
+		}
+		return true
+	})
+	out := make(map[string]bool, len(writes))
+	for name, n := range writes {
+		if n == 1 && !escaped[name] {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// identComparedToString reads a comparison of a bare identifier against a
+// string literal, in either operand order.
+func identComparedToString(r *require.Assertions, cond *ast.BinaryExpr) (string, string, bool) {
+	for _, side := range [][2]ast.Expr{{cond.X, cond.Y}, {cond.Y, cond.X}} {
+		id, isIdent := side[0].(*ast.Ident)
+		lit, isLit := side[1].(*ast.BasicLit)
+		if !isIdent || !isLit || lit.Kind != token.STRING {
+			continue
+		}
+		text, err := strconv.Unquote(lit.Value)
+		r.NoError(err, "emitted string literal %s does not unquote", lit.Value)
+		return id.Name, text, true
+	}
+	return "", "", false
+}
+
+// TestGuardsThatCannotHoldAtOnceAreRefused is the conjunction verdict's
+// whole battery, and every row of it is synthetic because no backend emits
+// any of these shapes: the corpus reaches this reader only through AGE's
+// single `if label != "X"` per decoder, which is one guard and cannot
+// contradict itself. Each emission below is parsed and never compiled, so a
+// row may name types nothing declares.
+//
+// Each row states what the reader READ as well as what it refused, and the
+// two are not the same claim. An emission is accepted either because its
+// guards can hold together or because the reader declined to read them, and
+// only a row that pins the count distinguishes an allow-by-verdict from an
+// allow-by-blindness. The rows reading zero are the interesting ones: three
+// of them are the deliberate exclusions that keep a correct emission green,
+// and one is the blind side the gate's doc states rather than hides.
+func TestGuardsThatCannotHoldAtOnceAreRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		body     string
+		read     int
+		contains []string
+	}{
+		{
+			name: "one label demanded twice over is a decoder no value reaches",
+			body: `	label := string(raw)
+	if label != "Person" {
+		return Person{}, nil
+	}
+	if label != "Post" {
+		return Person{}, nil
+	}
+	return Person{}, nil`,
+			read:     1,
+			contains: []string{"decodePerson", "label", "Person", "Post"},
+		},
+		{
+			name: "the literal is read on either side of the comparison",
+			body: `	label := string(raw)
+	if label != "Person" {
+		return Person{}, nil
+	}
+	if "Post" != label {
+		return Person{}, nil
+	}
+	return Person{}, nil`,
+			read:     1,
+			contains: []string{"decodePerson", "Person", "Post"},
+		},
+		{
+			name: "the same label demanded twice is one demand and holds",
+			body: `	label := string(raw)
+	if label != "Person" {
+		return Person{}, nil
+	}
+	if label != "Person" {
+		return Person{}, nil
+	}
+	return Person{}, nil`,
+			read: 1,
+		},
+		{
+			// The reason the rule is written about a body's own straight
+			// line rather than about the literals it holds. A node carries
+			// a set of labels, so demanding two of them is correct, and
+			// entity_multi_label_named emits exactly this.
+			name: "a multi-label decoder demanding two labels of a label set holds",
+			body: `	has0 := false
+	for _, label := range node.Labels {
+		if label == "Employee" {
+			has0 = true
+			break
+		}
+	}
+	if !has0 {
+		return PersonEmployee{}, nil
+	}
+	has1 := false
+	for _, label := range node.Labels {
+		if label == "Person" {
+			has1 = true
+			break
+		}
+	}
+	if !has1 {
+		return PersonEmployee{}, nil
+	}
+	return PersonEmployee{}, nil`,
+			read: 0,
+		},
+		{
+			name: "an operand written twice can satisfy both and is left alone",
+			body: `	label := string(raw)
+	if label != "Person" {
+		return Person{}, nil
+	}
+	label = string(raw[1:])
+	if label != "Post" {
+		return Person{}, nil
+	}
+	return Person{}, nil`,
+			read: 0,
+		},
+		{
+			name: "an operand whose address escapes is left alone",
+			body: `	label := string(raw)
+	sink(&label)
+	if label != "Person" {
+		return Person{}, nil
+	}
+	if label != "Post" {
+		return Person{}, nil
+	}
+	return Person{}, nil`,
+			read: 0,
+		},
+		{
+			// The blind side, stated in the gate's doc and pinned here so
+			// that widening the reader to nested blocks reddens this row
+			// rather than passing unnoticed.
+			name: "a contradiction one block down is not read",
+			body: `	label := string(raw)
+	{
+		if label != "Person" {
+			return Person{}, nil
+		}
+		if label != "Post" {
+			return Person{}, nil
+		}
+	}
+	return Person{}, nil`,
+			read: 0,
+		},
+		{
+			name: "a guard that does not return demands nothing of what follows",
+			body: `	label := string(raw)
+	if label != "Person" {
+		_ = label
+	}
+	if label != "Post" {
+		return Person{}, nil
+	}
+	return Person{}, nil`,
+			read: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := []codegen.File{{
+				Path:     "models.go",
+				Contents: []byte("package emitted\n\nfunc decodePerson(raw []byte) (Person, error) {\n" + tc.body + "\n}\n"),
+			}}
+
+			msgs, read := recordedConjunction(files)
+
+			require.Equal(t, tc.read, read,
+				"the conjunction reader read %d straight-line guards from this emission, not %d. The refusal "+
+					"assertion below is only meaningful alongside this one: a row reading zero guards is accepted "+
+					"by every rule this reader could hold, so it would pass whatever verdict shipped",
+				read, tc.read)
+			if len(tc.contains) == 0 {
+				require.Empty(t, msgs,
+					"the conjunction reader refused an emission whose guards can all hold at once: %s",
+					strings.Join(msgs, "\n"))
+				return
+			}
+			require.Len(t, msgs, 1,
+				"one contradiction should produce exactly one refusal, naming the operand once rather than once "+
+					"per literal")
+			for _, want := range tc.contains {
+				require.Contains(t, msgs[0], want,
+					"the refusal does not name %q, so a reader cannot tell which operand is being asked to be two "+
+						"things: %s", want, msgs[0])
+			}
+		})
+	}
+}
+
+// endsInReturn answers whether a block's last statement returns, which is
+// what makes a guard a demand on everything after it rather than a branch.
+func endsInReturn(block *ast.BlockStmt) bool {
+	if len(block.List) == 0 {
+		return false
+	}
+	_, ok := block.List[len(block.List)-1].(*ast.ReturnStmt)
+	return ok
 }
 
 // labelSwitch is one switch statement an emitted method writes directly in
