@@ -319,3 +319,104 @@ func TestNarrowsANumericWidthIgnoresRecords(t *testing.T) {
 		})
 	}
 }
+
+// TestParamBindExprRecords pins the bind expression for a declared
+// record in all four shapes a parameter can take it in, and two of the
+// four were WRONG before this test existed.
+//
+// The reason is the one TestParamBindExprSlices already states, now with
+// a second kind making it true. packV's reflect.Struct arm and packX's
+// reflect.Ptr->Struct arm both hand off to packStruct, whose cases are
+// dbtype.Point2D/3D, time.Time and the five dbtype temporals and whose
+// default raises UnsupportedTypeError. The anonymous struct a declared
+// record carries as is not among them. So a record owes a conversion in
+// every position the driver would otherwise reach it as a struct —
+// exactly the position gqlc's neutral temporal carriers are in, which is
+// why the helper set mirrors from<X>/from<X>Ptr/from<X>List/from<X>ListPtr
+// one for one.
+//
+// What the driver DOES take is map[string]any: packX's reflect.Map arm
+// dispatches it to packMap, which packs each value back through packX,
+// so a record encoded to a map nests to any depth with no further help.
+// Both directions read off v5.28.4 and v6.2.0.
+//
+// The two rows that were broken:
+//
+//   - the NULLABLE record, because paramBindExpr's nullable arm passes
+//     every non-temporal pointer through bare, and *struct{...} reaches
+//     packStruct one indirection later;
+//   - the LIST of records, because sliceParamBindExpr returns bare for
+//     any leaf that is not a temporal carrier, and packV walks the slice
+//     into packStruct element by element.
+//
+// Neither failed at generation. Both emitted a package that compiled and
+// then refused the write at run time, which is the shape of defect this
+// bead's spec §1 constraint 3 forbids.
+func TestParamBindExprRecords(t *testing.T) {
+	width := graph.RecordOf([]graph.RecordField{
+		{Name: "city", Type: graph.TypeString},
+		{Name: "zip", Type: graph.TypeInt32},
+	})
+	suffix := codegen.RecordHelperSuffix(width)
+	// Pinned as a literal, and the literal is CROSS-CHECKED rather than
+	// copied out of a run: the canonical encoding is
+	// "RECORD<city STRING,zip INT32>", and an independent
+	// sha256 of those bytes gives 77890bd035f2... whose first four bytes
+	// are this suffix. A pin lifted from whatever the code printed would
+	// agree with any hash the code happened to compute; this one fails if
+	// either the digest or the canonical encoding moves, and every golden
+	// naming these helpers is downstream of it.
+	require.Equal(t, "Record77890bd0", suffix)
+
+	structText, ok := neo4j.TypeMap{}.Property(width)
+	require.True(t, ok)
+	listWidth := graph.ListOf(width, false)
+	listText, ok := neo4j.TypeMap{}.Property(listWidth)
+	require.True(t, ok)
+
+	tests := []struct {
+		name     string
+		goType   string
+		width    graph.PropertyType
+		nullable bool
+		want     string
+	}{
+		{"record", structText, width, false, "encode" + suffix + "(arg)"},
+		{"nullable record", structText, width, true, "encode" + suffix + "Ptr(arg)"},
+		{"record list", listText, listWidth, false, "encode" + suffix + "List(arg)"},
+		{"nullable record list", listText, listWidth, true, "encode" + suffix + "ListPtr(arg)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := codegen.Param{RawName: "p", Field: "P", GoType: tt.goType, Width: tt.width, Nullable: tt.nullable}
+			require.Equal(t, tt.want, neo4j.ParamBindExpr(f, "arg"))
+		})
+	}
+}
+
+// TestParamBindExprLeavesTheUndeclaredRecordBare is the control the four
+// rows above need. RECORD<ANY> is KindRecord too, and a bind that routed
+// on the kind alone would name a helper codegen.RecordEncodings
+// deliberately emits nothing for — a package that does not compile.
+//
+// It binds bare and is right to: its carrier IS map[string]any, which is
+// the shape packX's reflect.Map arm already takes. LIST<RECORD<ANY>>
+// likewise: []map[string]any walks element by element into that same arm.
+func TestParamBindExprLeavesTheUndeclaredRecordBare(t *testing.T) {
+	tests := []struct {
+		name     string
+		goType   string
+		width    graph.PropertyType
+		nullable bool
+	}{
+		{"undeclared record", "map[string]any", graph.TypeAnyRecord, false},
+		{"nullable undeclared record", "map[string]any", graph.TypeAnyRecord, true},
+		{"list of undeclared records", "[]map[string]any", graph.ListOf(graph.TypeAnyRecord, false), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := codegen.Param{RawName: "p", Field: "P", GoType: tt.goType, Width: tt.width, Nullable: tt.nullable}
+			require.Equal(t, "arg", neo4j.ParamBindExpr(f, "arg"))
+		})
+	}
+}
