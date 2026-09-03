@@ -3086,6 +3086,61 @@ func (s *ResolverSuite) TestNarrowingToASmallerPluralSetIsWhatTheSetSaysItIs() {
 	s.Require().Equal([]Column{{Name: "p.staffId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}}, got)
 }
 
+// TestAnOptionalEdgeNeverWitnessesItsEndpoints pins TODAY'S answer on both
+// sides of a distinction the resolver does not currently draw, because bd
+// gqlc-o8oc's root-cause finding is that there was no coverage of it at all.
+//
+// witnessesItsEndpoints refuses every nullable edge outright. DemoteNullability
+// asks the same question about the same shape one clause wider —
+// `e.Nullable() && !demotedGroups[e.OptionalGroup()]` — on the argument that an
+// OPTIONAL edge inside a PROVEN group is a witness after all: the group's
+// demotion is exactly the finding that every surviving row carries the hop.
+//
+// The two rows are one token apart. The second query is the first with
+// `MATCH (d)` removed, and that bare re-reference is what proves the group
+// (§4.6, the 5xg pre-pass). So the pair isolates provenness and nothing else:
+// same schema, same OPTIONAL hop, same projection.
+//
+// smallOnly is declared on the bare Company and not on Company&Large, so it is
+// the column that exists only if `c` narrowed. Unnarrowed, ADR 0022 intersects
+// the two satisfying types and the property is not in the intersection, so a
+// row that does not narrow is a refusal rather than a differently-typed column.
+//
+// Row 2 is permanent and must not regress: nothing proves the group, the outer
+// join really can return a Company&Large with `h` and `d` null, so the hop is
+// no evidence about `c` (bd gqlc-0tft).
+//
+// Row 1 is a CHARACTERISATION, not an endorsement. It records that the proven
+// group is refused identically, which is the defect gqlc-o8oc names. Adopting
+// DemoteNullability's wider guard flips it to the resolved STRING column —
+// measured, and measured to need Phase D hoisted above Phase C as well, since
+// the demoted-group set does not exist yet when the narrowing runs. Whoever
+// takes that change edits this row and says so; that is the point of pinning it.
+func (s *ResolverSuite) TestAnOptionalEdgeNeverWitnessesItsEndpoints() {
+	sch := s.loadSchema("valid", "satisfy_plural_edges_inline_subtype.gql")
+	resolve := func(src string) error {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+		return err
+	}
+
+	// Subtests, not two statements, so that a change touching the guard reports
+	// BOTH rows: under s.Require() the first failure aborts and the second row
+	// would go unmeasured, which is the one thing this pair exists to show.
+	s.Run("the group is proven", func() {
+		err := resolve("OPTIONAL MATCH (c:Company)-[h:HAS_DESK]->(d:Desk) MATCH (d) RETURN c.smallOnly")
+		s.Require().ErrorIs(err, ErrUnknownProperty,
+			"the bare MATCH (d) proves the group, so every surviving row does carry the HAS_DESK and its source is the bare Company — the narrowing refuses it anyway, which is bd gqlc-o8oc")
+	})
+
+	s.Run("nothing proves the group", func() {
+		err := resolve("OPTIONAL MATCH (c:Company)-[h:HAS_DESK]->(d:Desk) RETURN c.smallOnly")
+		s.Require().ErrorIs(err, ErrUnknownProperty,
+			"with nothing proving the group the outer join returns a Company&Large row with h and d null, so the hop is no evidence about c and the plural set stands (bd gqlc-0tft)")
+	})
+}
+
 // TestDeferredEdgesCloseBeforeTheNarrowing pins the position of the narrowing
 // inside Phase C: it runs after the deferred-close loop, so a deferred edge is
 // closed against the pre-narrowing binding tables.
