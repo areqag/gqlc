@@ -544,12 +544,34 @@ const syntheticChainedNonAssertionRow = "\ts.harness().loadSchema(\"" + syntheti
 const syntheticBoundObjectRow = "\tr := require.New(t)\n" +
 	"\tr.Contains(msg, \"" + syntheticProbeAns + "\")\n"
 
-// syntheticBoundNonAssertionRow binds a local the same way and calls the
-// same method name on it, and differs in the one thing the reader decides
-// on: what the local was bound TO. It is the widening the row above must
-// not be — a reader taking every method call on every local would put the
-// arguments of every call in the body into the corpus.
+// The three rows below are the negative half of the row above, one per
+// condition isAssertionConstructor tests. They are three and not one
+// because a single negative can only kill a single mutation: dropping any
+// one of the three checks leaves the other two answering, so a lone row
+// certifies a lone condition and infers the rest.
+//
+// Each binds a local, calls the same method name on it, and puts the
+// answer in that call's arguments. They differ only in the right-hand
+// side, which is the thing the reader is supposed to be deciding on.
+
+// syntheticBoundNonAssertionRow is bound to a bare call — no selector at
+// all. It holds the requirement that the right-hand side be a call
+// through a package.
 const syntheticBoundNonAssertionRow = "\tr := newHarness(t)\n" +
+	"\tr.Contains(msg, \"" + syntheticProbeAns + "\")\n"
+
+// syntheticBoundForeignPackageRow is a New, on a package that is not an
+// assertion package. It holds the assertionPackages check: `New` is an
+// unremarkable constructor name and any package may have one.
+const syntheticBoundForeignPackageRow = "\tr := harness.New(t)\n" +
+	"\tr.Contains(msg, \"" + syntheticProbeAns + "\")\n"
+
+// syntheticBoundNonConstructorRow is an assertion package, and not New.
+// It holds the method-name check. The binding call is itself an assertion
+// by the package rule, so its OWN arguments are read — and they are not
+// the answer, which is what makes this row about the local rather than
+// about the call it is bound to.
+const syntheticBoundNonConstructorRow = "\tr := assert.ObjectsAreEqual(msg, want)\n" +
 	"\tr.Contains(msg, \"" + syntheticProbeAns + "\")\n"
 
 // syntheticHelperRow is the answer asserted through a helper the witness
@@ -808,8 +830,25 @@ func TestAssertedTextIsWhatAnAssertionReads(t *testing.T) {
 			// The widening the row above must not be. What makes a local
 			// an assertion base is the call it was bound to, not that a
 			// method was called on it.
-			name:    "a local bound to something other than require.New reads nothing",
+			name:    "a local bound to a call with no package reads nothing",
 			row:     syntheticBoundNonAssertionRow,
+			spelled: true,
+		},
+		{
+			// The same widening, one condition over: New alone is not the
+			// signal, or every package's constructor would hand out
+			// assertion bases.
+			name:    "a local bound to a New on a foreign package reads nothing",
+			row:     syntheticBoundForeignPackageRow,
+			spelled: true,
+		},
+		{
+			// And the third: the assertion package alone is not the
+			// signal either. The binding call here is a real assertion by
+			// the package rule, so this row also holds that reading a
+			// call's own arguments does not make its RESULT a base.
+			name:    "a local bound to an assertion package call that is not New reads nothing",
+			row:     syntheticBoundNonConstructorRow,
 			spelled: true,
 		},
 		{
