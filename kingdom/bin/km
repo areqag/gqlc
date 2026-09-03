@@ -3076,6 +3076,115 @@ This counter clears by itself the moment one of her tool calls finishes — witn
         fi
     done
 
+    # THE MAIL NOTICE. Deliberately its own pass, SEVERED from the ladder above
+    # by ruling (bd gqlc-o3ni1): the ladder asks whether a seat needs
+    # RECOVERING, and every trigger and marker it reads is about an episode of
+    # not answering. This asks the much smaller question of whether anyone is
+    # home to read a line. So it shares none of the five idle markers, reads
+    # neither the idle nor the stalled trigger, and touches no state but its
+    # own — which is what makes the severance structural rather than a promise.
+    #
+    # WHAT IT IS FOR: km-seat announces unread mail once per WAKE, and until
+    # this arm existed that was the town's only announcement outside the
+    # recovery ladder — which by construction reaches only seats it is trying to
+    # recover. So a seat that stayed awake and working across many beads heard
+    # about its mail exactly never, and delivery degraded in proportion to how
+    # continuously a seat worked: the seats doing the most work were the least
+    # reachable (bd gqlc-piae7). A line typed at a WORKING claude queues and is
+    # read when its turn ends, so this interrupts nothing, and the wording says
+    # so — it is a delivery notice and must not read like the ladder's asks,
+    # which mean something is wrong.
+    #
+    # PACED ON TWO FACTS, both held in one marker as "<count last announced>
+    # <epoch of last attempt>": the count must have RISEN since the last
+    # announcement, so a seat sitting on mail she has decided not to read yet is
+    # told once rather than every floor; and at most one attempt per [welfare]
+    # renudge_after_minutes per seat. The clock is the last ATTEMPT and not the
+    # last delivery, so a pane whose consent gate keeps refusing — a modal, a
+    # half-written draft — is retried on the floor rather than on every pass.
+    # That is the same reading of a refusal decision 0007 §5 takes for the
+    # recovery budget, and it matters here because a refusal is not always free:
+    # some send_line refusals leave the typed text sitting in the composer.
+    #
+    # The announced count is lowered in place when it drops, leaving the clock
+    # alone, because otherwise RISEN would be measured against a high-water
+    # mark: a seat who read three letters and then received one would never be
+    # told about it. That lowering is also why nothing has to clear this marker
+    # on sleep, wake or release — it converges by itself on the next pass.
+    #
+    # WHAT IT DOES NOT DO: dedupe against the ladder. A seat that is pane-idle,
+    # has mail, and is the one seat drawing a delivered ask this run hears about
+    # the same letters twice, once inside that ask and once here. Both lines are
+    # true, it costs at most one extra line per floor, and the alternative is
+    # exactly the coupling the ruling forbids.
+    # Its own s, mail_pending and mail_since rather than the ladder's: the
+    # severance is worth nothing if a later edit to the block above can reach
+    # in here through a shared variable.
+    local s mail_marker announced last_try mail_pending mail_since
+    local mail_status mail_rc mail_err mailed=0
+    for s in $(seats_all); do
+        # Awake is asked before agent_status because a slept seat's pane can
+        # outlive its session, and typing at a pane whose claude has exited
+        # types into whatever replaced it.
+        [ "$(seat_status "$s")" = awake ] || continue
+        mail_marker="$(seat_home "$s")/mail-notice"
+        announced=0
+        last_try=0
+        if [ -f "$mail_marker" ]; then
+            read -r announced last_try <"$mail_marker" || true
+            case "$announced" in '' | *[!0-9]*) announced=0 ;; esac
+            case "$last_try" in '' | *[!0-9]*) last_try=0 ;; esac
+        fi
+        mail_pending=$(unread_count "$s")
+        if [ "$mail_pending" -lt "$announced" ]; then
+            printf '%s %s\n' "$mail_pending" "$last_try" >"$mail_marker"
+            continue
+        fi
+        [ "$mail_pending" -gt "$announced" ] || continue
+        mail_since=$(($(date +%s) - last_try))
+        if [ "$mail_since" -lt "$floor" ]; then
+            echo "dispatch: $s has $mail_pending unread, up from the $announced she was last told about, but that was only $(fmt_age "$mail_since") ago; holding the notice until $(fmt_age "$floor") has passed rather than typing at her twice in one window"
+            continue
+        fi
+        # Asked last, and only of a seat about to be written to: it costs a
+        # herdr round trip per seat and the answer is worthless a moment later.
+        # working and idle are the two states the ruling names — `blocked`,
+        # `done`, `unknown` and `unreadable` are all seats where nobody is
+        # established to be home, and no marker is written for them, so nothing
+        # is spent and the next pass asks again.
+        mail_status=$(seat_agent_status "$s")
+        case "$mail_status" in
+            working | idle) ;;
+            *)
+                echo "dispatch: $s has $mail_pending unread, up from $announced, but her agent reports $mail_status rather than working or idle, so there is nobody established to read a line; no notice sent and nothing spent"
+                continue
+                ;;
+        esac
+        mail_rc=0
+        mail_err=$(seat_nudge "$s" "[km] you have $mail_pending unread letter(s) — bd mail inbox. This is a delivery notice and not a nudge: nothing is wrong and nothing is being asked of you. Read them at the end of the turn you are in" 2>&1 >/dev/null) || mail_rc=$?
+        # rc 2 takes the SAME bookkeeping as rc 0, on send_line's own contract:
+        # an unwitnessed send is UNKNOWN rather than failed, and a marker not
+        # written is a notice re-sent on the next pass, which is the double
+        # delivery that verdict exists to prevent.
+        if [ "$mail_rc" -eq 0 ] || [ "$mail_rc" -eq 2 ]; then
+            printf '%s %s\n' "$mail_pending" "$(date +%s)" >"$mail_marker"
+            mailed=$((mailed + 1))
+            if [ "$mail_rc" -eq 0 ]; then
+                echo "dispatch: told $s about mail — $mail_pending unread, up from $announced, typed and submitted while she was $mail_status"
+            else
+                echo "dispatch: mail notice UNWITNESSED for $s — $mail_pending unread, up from $announced; typed and submitted, but no transcript row carried it, so whether she has it is UNKNOWN. Counted as told and not repeated (bd gqlc-m4e57)"
+            fi
+            # Captured rather than streamed so the two lines above stay
+            # adjacent; re-emitted so the journal loses nothing by that.
+            [ -z "$mail_err" ] || echo "dispatch: $s: $mail_err"
+        else
+            # The count is deliberately NOT advanced: nothing was announced, so
+            # the next attempt after the floor still has a rise to report.
+            printf '%s %s\n' "$announced" "$(date +%s)" >"$mail_marker"
+            echo "dispatch: mail notice REFUSED for $s ($mail_pending unread, up from $announced) — $mail_err"
+        fi
+    done
+
     # history: kingdom/brain/km-notes.md#cmd_dispatch-10
     local max active=0 s slots
     max=$(cfg concurrency max_active)
@@ -3352,7 +3461,11 @@ This counter clears by itself the moment one of her tool calls finishes — witn
     # The escalation, after every pass has had its chance at the queue, so the
     # marker describes the run's final state and not an intermediate one.
     record_stalled_p0 "$stalled_beads"
-    echo "dispatch: done ($wakes wake(s) this run, $held held, $epic_n epic, $skipped below max_priority $maxprio, $inferred class inferred, $withheld owner-withheld, $unroutable unroutable ($stalled at P0))"
+    # The mail notices are counted apart from the wakes, and not folded into
+    # them, because they are not wakes: every one of them went to a seat that
+    # was already awake and running, and a summary that added them to $wakes
+    # would report the town being resumed when nothing was.
+    echo "dispatch: done ($wakes wake(s) this run, $mailed mail notice(s), $held held, $epic_n epic, $skipped below max_priority $maxprio, $inferred class inferred, $withheld owner-withheld, $unroutable unroutable ($stalled at P0))"
 }
 
 # history: kingdom/brain/km-notes.md#hold_fetch_master
