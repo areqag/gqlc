@@ -1639,8 +1639,8 @@ func assertedText(fset *token.FileSet, body *ast.BlockStmt, helpers map[string]b
 // path and says nothing about a package clause.
 //
 // The method names carry no such guard, and must not: two suites may each
-// declare a TestFoo and that is legal Go, so requiring uniqueness would
-// red a correct pair of live files. The first receiver read wins, which
+// declare a method of the same name and that is legal Go, so requiring
+// uniqueness would red a correct pair of live files. The first wins, which
 // is arbitrary only in the message — the remedy a method-declared witness
 // gets is "make it top-level", and that does not turn on which suite
 // holds it.
