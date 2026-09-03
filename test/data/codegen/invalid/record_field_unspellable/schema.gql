@@ -1,0 +1,28 @@
+// Every enrolled target, for the reason record_field_collision gives: the
+// legality check runs before any type table is asked, so a target that
+// admitted this would be the surprise.
+//
+// The sibling fixture carries the COLLISION half of ErrRecordFieldCollision
+// — two GQL names that mangle to one Go field. This one carries the
+// spelling half: `pct%s` mangles to a name that is not a Go identifier at
+// all, so the struct it would be emitted into does not parse. Without the
+// check the refusal arrives from go/format as ErrFormatFailure naming
+// models.go and a line number, which is a template bug reported to an
+// author whose schema is at fault.
+//
+// The name is written delimited because that is the only way to write it:
+// a regular GQL identifier cannot hold a '%'. A '%' rather than a hyphen
+// or a space because it is the one that would still be dangerous if the
+// file did parse — the emitted decode helper's failure wording carries the
+// field name, and a name holding a verb the call has no argument for is
+// what `go vet` of the generated package fails on.
+//
+// SEE gqlc-tzu9r: the field name arrives here with its accent quotes still
+// attached, so the reported mangle carries them too. That is a separate
+// front-end defect and fixing it does not admit this schema — `pct%s` has
+// no Go spelling with or without the delimiters.
+CREATE PROPERTY GRAPH TYPE RecordFieldUnspellable AS {
+    (:Person {
+        home :: RECORD { `pct%s` :: INT64 NOT NULL }
+    })
+}
