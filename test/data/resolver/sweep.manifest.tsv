@@ -127,6 +127,7 @@ msg	7584d110577b	"unknown label: Node, A is not declared on any node type"
 msg	75c0eb48cea9	"unknown edge: Engineer&Person&Staff-[KNOWS]->Engineer&Person&Staff, Engineer&Person&Staff-[KNOWS]->Manager&Person&Staff, Manager&Person&Staff-[KNOWS]->Engineer&Person&Staff, Engineer&Person&Staff-[KNOWS]->Person, Person-[KNOWS]->Engineer&Person&Staff, Manager&Person&Staff-[KNOWS]->Manager&Person&Staff, Manager&Person&Staff-[KNOWS]->Person, Person-[KNOWS]->Manager&Person&Staff, Person-[KNOWS]->Person"
 msg	764fc93e1f14	"unknown edge: Post-[AUTHORED]->Person"
 msg	77f9894f6426	"ambiguous label: n is satisfied by more than one declared node type: Employee&Person, Person"
+msg	781198b8c13a	"ambiguous label: d is satisfied by more than one declared node type: Employee&Person, Person"
 msg	7b2810a056fd	"unknown property: n.notAProp"
 msg	7ed4a730f902	"ambiguous edge orientation: edge \"r\" matches Employee&Person-[REVIEWED]->Company left-to-right and Company-[REVIEWED]->Person right-to-left"
 msg	7fbc388270b1	"unknown label: cannot infer type of unlabelled binding \"b\" — no edge in the pattern reaches a compatible schema node type"
@@ -8746,7 +8747,7 @@ cell	valid/demote_group_cascade.cypher	valid/schemas/satisfy_plural_edges.gql	re
 cell	valid/demote_group_cascade.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	6f457e5bb08a
 cell	valid/demote_group_cascade.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	c504839fd900
 cell	valid/demote_group_cascade.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/demote_group_cascade.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrAmbiguousLabel	2da29fcc911f
+cell	valid/demote_group_cascade.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrAmbiguousLabel	781198b8c13a
 cell	valid/demote_group_cascade.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	6f457e5bb08a
 cell	valid/demote_group_cascade.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	5b7767c8f09c
 cell	valid/demote_group_cascade.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	5b7767c8f09c

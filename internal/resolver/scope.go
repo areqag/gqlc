@@ -61,7 +61,14 @@ type scope struct {
 	edgeCands         map[string][]schema.EdgeKey
 	edgeBindings      map[string]query.EdgeBinding
 	nullableBinding   map[string]bool
-	callTypes         map[string]callBindingSlot
+	// demotedGroups is DemoteNullability's ay9 group-closure result, kept
+	// because NarrowPluralEndpoints asks the same question of the same shape:
+	// an OPTIONAL edge whose group is proven IS a witness about its endpoints,
+	// and the two guards must not drift (bd gqlc-o8oc). Nil until
+	// DemoteNullability has run, and a nil map reads false for every id, which
+	// is the pre-refinement answer.
+	demotedGroups map[int]bool
+	callTypes     map[string]callBindingSlot
 
 	// orientation is CloseEdges' diagnostic by-product: which relationship
 	// types the closure kept and which it dropped in the wrong-orientation
@@ -492,7 +499,7 @@ func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
 			edges = append(edges, e)
 		}
 	}
-	for v, keep := range endpointNarrowing(edges, s.nodeTable(), sch, s.writtenBindings()) {
+	for v, keep := range endpointNarrowing(edges, s.nodeTable(), sch, s.writtenBindings(), s.demotedGroups) {
 		cands := s.nodeCands[v]
 		narrowed := make([]schema.NodeType, 0, len(cands))
 		for _, nt := range cands {
@@ -607,7 +614,7 @@ func (s *scope) InferUnlabelled(sch schema.Schema) error {
 	// writtenBindings is computed after the early return, for the same reason
 	// NarrowPluralEndpoints computes it after its own: it walks the effects, and
 	// a Part with nothing to infer has no use for the answer.
-	return inferUnlabelled(pending, edges, sch, s.nodeTable(), s.callTypes, s.writtenBindings())
+	return inferUnlabelled(pending, edges, sch, s.nodeTable(), s.callTypes, s.writtenBindings(), s.demotedGroups)
 }
 
 // SeedLocalNullability writes each binding's own Nullable() bit into the
@@ -714,6 +721,7 @@ func (s *scope) DemoteNullability() {
 		}
 	}
 	demotedGroups := map[int]bool{}
+	s.demotedGroups = demotedGroups
 	demoteGroup := func(g int) bool {
 		if g == 0 || demotedGroups[g] {
 			return false

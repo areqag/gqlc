@@ -2006,7 +2006,7 @@ func (s *ResolverSuite) TestPhaseBsPluralCommitLeavesNoResolvedCoversMark() {
 	}
 	s.Require().NoError(inferUnlabelled(
 		[]query.NodeBinding{c}, []query.EdgeBinding{worksAt, hasDesk},
-		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}))
+		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}, nil))
 
 	// The tripwire. Without these the assertion below passes for a `c` that
 	// never reached the plural arm at all.
@@ -2061,7 +2061,7 @@ func (s *ResolverSuite) TestPhaseBsUncoveredSingularCommitClearsAResolvedCoversM
 	}
 	s.Require().NoError(inferUnlabelled(
 		[]query.NodeBinding{d}, []query.EdgeBinding{hasDesk},
-		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}))
+		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}, nil))
 
 	// Tripwires. Without them the assertion below passes for a `d` that took the
 	// plural arm — already pinned above — or that never committed at all, and it
@@ -2938,11 +2938,23 @@ func (s *ResolverSuite) TestPhaseBAsksTheWholeWitnessPredicateNotOneArmOfIt() {
 // additionally hold the COLUMN and its nullability, which `-update` would
 // rewrite.
 //
-// The refusing row is the control. One token — HAS_DESK made OPTIONAL — leaves
-// no edge that both witnesses its endpoints and pins `c`, so `attainable` is
-// the plural set and the widening commits it to the plural lane instead. Both
-// accepts therefore rest on the mandatory hop being evidence, not on Phase B
-// having stopped discriminating.
+// The refusing row is the control, and it is TWO tokens from the accepts, not
+// one: HAS_DESK is made OPTIONAL, and a bare `MATCH (c) ` is prepended. Neither
+// token contributes an edge, so `attainable` is still the plural set and the
+// widening still commits it to the plural lane — which is all the control was
+// ever for.
+//
+// The prepended `MATCH (c) ` is what keeps the control refusing under gqlc-o8oc,
+// and a one-token control cannot exist in this clause order any more. Once an
+// OPTIONAL edge in a PROVEN group witnesses its endpoints, the required
+// `MATCH (c)<-[w]-(x:Person)` at the end proves the group `c` would otherwise
+// introduce, so the OPTIONAL HAS_DESK becomes a witness and the row resolves.
+// Introducing `c` in a required bare MATCH instead puts it in group 0 forever —
+// the parser honours optionalGroup only on FIRST introduction, and pattern.go's
+// mergeBinding never touches it — so h and d keep a group of their own that
+// nothing proves, and the hop stays a non-witness. So the control now pins one
+// thing more than it used to: the unproven-group LIMIT of that widening, in the
+// Phase B attainable-set context rather than the Phase C narrowing one.
 func (s *ResolverSuite) TestACommitmentFromTheAttainableSetIsLEARNEDFrom() {
 	tests := []struct {
 		name  string
@@ -2972,7 +2984,8 @@ func (s *ResolverSuite) TestACommitmentFromTheAttainableSetIsLEARNEDFrom() {
 			want: []Column{{Name: "y.smallOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
 		},
 	}
-	const control = "OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) " +
+	const control = "MATCH (c) " +
+		"OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) " +
 		"OPTIONAL MATCH (p:Person)-[q:WORKS_AT]->(c) " +
 		"MATCH (c)<-[w:WORKS_AT]-(x:Person) RETURN x.personOnly"
 	sch := s.loadSchema("valid", "satisfy_plural_edges_inline_subtype.gql")
@@ -2992,7 +3005,7 @@ func (s *ResolverSuite) TestACommitmentFromTheAttainableSetIsLEARNEDFrom() {
 	s.Run("the control with no witnessing hop", func() {
 		_, err := resolve(control)
 		s.Require().ErrorIs(err, ErrUnknownProperty,
-			"with HAS_DESK optional no edge both witnesses its endpoints and pins `c`, so the widening commits the plural set and `x` stays over both person types")
+			"`c` is introduced by the bare MATCH so it is group 0, the HAS_DESK group is proven by nothing, and with HAS_DESK optional no edge both witnesses its endpoints and pins `c` — so the widening commits the plural set and `x` stays over both person types")
 	})
 }
 
@@ -3086,15 +3099,19 @@ func (s *ResolverSuite) TestNarrowingToASmallerPluralSetIsWhatTheSetSaysItIs() {
 	s.Require().Equal([]Column{{Name: "p.staffId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}}, got)
 }
 
-// TestAnOptionalEdgeNeverWitnessesItsEndpoints pins TODAY'S answer on both
-// sides of a distinction the resolver does not currently draw, because bd
-// gqlc-o8oc's root-cause finding is that there was no coverage of it at all.
+// TestAProvenOptionalGroupWitnessesItsEndpoints pins both sides of the
+// distinction the narrowing draws about an OPTIONAL hop: whether its group is
+// PROVEN. It arrived under bd gqlc-o8oc as a characterisation pair — named
+// TestAnOptionalEdgeNeverWitnessesItsEndpoints, both rows refusing — because
+// that bead's root-cause finding was that nothing covered the distinction at
+// all. gqlc-o8oc then drew it, and row 1 flipped exactly as that pin's own
+// comment said whoever took the change would have to make it flip.
 //
-// witnessesItsEndpoints refuses every nullable edge outright. DemoteNullability
-// asks the same question about the same shape one clause wider —
-// `e.Nullable() && !demotedGroups[e.OptionalGroup()]` — on the argument that an
-// OPTIONAL edge inside a PROVEN group is a witness after all: the group's
-// demotion is exactly the finding that every surviving row carries the hop.
+// witnessesItsEndpoints now asks what DemoteNullability asks about the same
+// shape — `e.Nullable() && !demotedGroups[e.OptionalGroup()]` — on the argument
+// that an OPTIONAL edge inside a proven group is a witness after all: the
+// group's demotion is exactly the finding that every surviving row carries the
+// hop.
 //
 // The two rows are one token apart. The second query is the first with
 // `MATCH (d)` removed, and that bare re-reference is what proves the group
@@ -3106,36 +3123,36 @@ func (s *ResolverSuite) TestNarrowingToASmallerPluralSetIsWhatTheSetSaysItIs() {
 // the two satisfying types and the property is not in the intersection, so a
 // row that does not narrow is a refusal rather than a differently-typed column.
 //
+// Row 1 is also the witness for the phase ORDER, and is the only thing that is:
+// regress Phase D back below Phase C and s.demotedGroups is nil when the
+// narrowing runs, so the widened guard answers the pre-refinement answer on
+// every input and this row refuses again. Row 2 cannot see that — it refuses
+// under either order.
+//
 // Row 2 is permanent and must not regress: nothing proves the group, the outer
 // join really can return a Company&Large with `h` and `d` null, so the hop is
 // no evidence about `c` (bd gqlc-0tft).
-//
-// Row 1 is a CHARACTERISATION, not an endorsement. It records that the proven
-// group is refused identically, which is the defect gqlc-o8oc names. Adopting
-// DemoteNullability's wider guard flips it to the resolved STRING column —
-// measured, and measured to need Phase D hoisted above Phase C as well, since
-// the demoted-group set does not exist yet when the narrowing runs. Whoever
-// takes that change edits this row and says so; that is the point of pinning it.
-func (s *ResolverSuite) TestAnOptionalEdgeNeverWitnessesItsEndpoints() {
+func (s *ResolverSuite) TestAProvenOptionalGroupWitnessesItsEndpoints() {
 	sch := s.loadSchema("valid", "satisfy_plural_edges_inline_subtype.gql")
-	resolve := func(src string) error {
+	resolve := func(src string) (ValidatedQuery, error) {
 		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
 		s.Require().NoError(err)
-		_, err = New(sch, WithRegistry(regR7)).Resolve(q)
-		return err
+		return New(sch, WithRegistry(regR7)).Resolve(q)
 	}
 
 	// Subtests, not two statements, so that a change touching the guard reports
 	// BOTH rows: under s.Require() the first failure aborts and the second row
 	// would go unmeasured, which is the one thing this pair exists to show.
 	s.Run("the group is proven", func() {
-		err := resolve("OPTIONAL MATCH (c:Company)-[h:HAS_DESK]->(d:Desk) MATCH (d) RETURN c.smallOnly")
-		s.Require().ErrorIs(err, ErrUnknownProperty,
-			"the bare MATCH (d) proves the group, so every surviving row does carry the HAS_DESK and its source is the bare Company — the narrowing refuses it anyway, which is bd gqlc-o8oc")
+		vq, err := resolve("OPTIONAL MATCH (c:Company)-[h:HAS_DESK]->(d:Desk) MATCH (d) RETURN c.smallOnly")
+		s.Require().NoError(err,
+			"the bare MATCH (d) proves the group, so every surviving row does carry the HAS_DESK and its source is the bare Company — the narrowing honours that (bd gqlc-o8oc)")
+		s.Require().Equal([]Column{{Name: "c.smallOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, vq.Columns,
+			"narrowed to the bare Company, so smallOnly is in scope rather than intersected away by ADR 0022")
 	})
 
 	s.Run("nothing proves the group", func() {
-		err := resolve("OPTIONAL MATCH (c:Company)-[h:HAS_DESK]->(d:Desk) RETURN c.smallOnly")
+		_, err := resolve("OPTIONAL MATCH (c:Company)-[h:HAS_DESK]->(d:Desk) RETURN c.smallOnly")
 		s.Require().ErrorIs(err, ErrUnknownProperty,
 			"with nothing proving the group the outer join returns a Company&Large row with h and d null, so the hop is no evidence about c and the plural set stands (bd gqlc-0tft)")
 	})
