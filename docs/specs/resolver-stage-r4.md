@@ -129,24 +129,64 @@ ordering:
    consistently with projection.
 9. StatementKind copy (unchanged, R0 §4.7 step 6).
 
-Phase D runs after Phase C because the demotion algorithm reads committed
+~~Phase D runs after Phase C because the demotion algorithm reads committed
 edge shapes (single-hop directed, undirected, var-length, multi-type) —
 Phase C's verdict fixes those shapes, and the demotion rule §4.2 references
 them by their committed `resolvedEdgeKey` / `resolvedEdgeCand` /
-`edgeBindings` state.
+`edgeBindings` state.~~
+
+**[Corrected 2026-09-03, bd `gqlc-o8oc`: the order is the reverse, and the
+reason above stopped holding when ay9/5xg rewrote the demotion.]** Phase D
+runs **above** Phases A2/B/C. The invariant:
+
+> Phase D is parse-local. It reads each binding's own `Nullable` /
+> `OptionalGroup` / `Hops` / `ReferencedIn*` flags and the carry
+> (`nullableBinding` seed, `carriedGroups`), and no table Phases A2/B/C
+> write. Phases B and C consume Phase D's `demotedGroups` through
+> `witnessesItsEndpoints`, so Phase D completes before `CloseEdges` runs.
+
+The struck reason described an algorithm that is no longer the shipped one:
+ay9 and 5xg rewrote the demotion around OPTIONAL-group membership and
+`qualifiedDemoter`, which reads the binding's own `Hops()` off the parse.
+The shipped `DemoteNullability` (`scope.go`) references none of
+`resolvedEdgeKey` / `resolvedEdgeCand` / `edgeBindings`, so the constraint
+the old order was built around had stopped binding, silently, at that
+rewrite. Nothing depended on the old order in either direction; `gqlc-o8oc`
+needed the new one, because `witnessesItsEndpoints` must see
+`demotedGroups`.
+
+A future demotion regime that genuinely does need committed edge shapes
+must run as a **separate later pass**. Moving Phase D back is not available
+to it: `demotedGroups` would then be nil at the narrowing, and a nil map
+reads `false` for every group id, so the guard would answer the
+pre-refinement answer on every input rather than fail. That regression is
+witnessed by `TestAProvenOptionalGroupWitnessesItsEndpoints`' proven row and
+by nothing else.
 
 ### 2.2 Kernel helpers — one new; no revisions
 
 One new helper in `resolve.go`:
 
-- **`demoteNullable(bindings []query.Binding, edgeBindings
+- ~~**`demoteNullable(bindings []query.Binding, edgeBindings
   map[string]query.EdgeBinding, edgeKeys map[string]schema.EdgeKey,
-  edgeCands map[string][]schema.EdgeKey) map[string]bool`** (new).
+  edgeCands map[string][]schema.EdgeKey) map[string]bool`** (new).~~
   Produces the effective-nullability table per §4.4. Deterministic —
   one pass over the parser's `Part.Bindings` in first-appearance order
   suffices for regime (a) (§4.4.2's termination argument): the loop
   only writes `false` to node-binding entries, edges are never demoted
   in R4, so a single walk over the bindings closes the algorithm.
+
+  **[Corrected 2026-09-03, bd `gqlc-o8oc`: the three edge tables in that
+  signature were never taken.]** The shipped helper is the method
+  `(*scope).DemoteNullability()`, which takes no arguments and writes
+  `s.nullableBinding` and `s.demotedGroups` in place. It reads `Part`
+  bindings and the carry only — no `edgeBindings`, `edgeKeys` or
+  `edgeCands` — which is the same fact that makes the phase order above
+  correct, and it is why R4's stated reason for the old order stopped
+  holding without any spec text changing. `demotedGroups` is the ay9
+  group-closure result, retained on the scope rather than local so that
+  `witnessesItsEndpoints` can ask the same question of the same shape;
+  the two guards must not drift.
 
 R3's existing helpers (`edgeCandidates`, `closeEdge`, `endpointLabels`,
 `candidateTypes`, `touchingSide`, `intersect`, `refProjectionType`,

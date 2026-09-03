@@ -166,6 +166,9 @@ var pinned = map[string]map[string]string{
 	"internal/query/query_test.go": {
 		"TestBindingDiscriminatorTracksEntityKind": "HISTORICAL. The name TestBindingDiscriminatorDerivesFromKind carried until bd gqlc-slde4, written in that test's own comment because the old name asserted something the body never did — it tracked BindingKind, not graph.EntityKind — and the record of that being the second correction to the same mistake is the point of the sentence. Resolving it would mean the rename never happened. The coarseness the doc comment above warns about is harmless here: a later REAL citation of this name in this file would itself be rot, since nothing will declare it again.",
 	},
+	"internal/resolver/resolver_test.go": {
+		"TestAnOptionalEdgeNeverWitnessesItsEndpoints": "HISTORICAL. The name TestAProvenOptionalGroupWitnessesItsEndpoints carried while it was a CHARACTERISATION pair — both rows refusing, pinning a distinction the resolver did not yet draw. bd gqlc-o8oc drew it, row 1 flipped, and the old name became an assertion of a falsehood, so it had to go. Its own comment had instructed whoever took that change to edit the row and say so, and the sentence naming what it used to be called is that saying-so. Resolving it would mean the flip never happened.",
+	},
 	"internal/resolver/undeclaredreltype_test.go": {
 		"TestEndpointNarrowedButDeclaredTypeIsSilent": "HISTORICAL. The row that asserted the opposite boundary, replaced deliberately rather than deleted; the comment is the record of that choice.",
 	},
