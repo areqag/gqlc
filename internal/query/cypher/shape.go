@@ -353,9 +353,14 @@ func aggregateResultType(fn query.AggregateFunc, operand query.Type) query.Type 
 		return query.TypeUnknown{}
 	case query.AggStdev, query.AggPercentile:
 		return query.TypeUnknown{}
-	default:
-		return query.TypeUnknown{}
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks this table for a missing arm. Every declared member has an arm
+	// above, so this answers only for a value outside the enum — which is
+	// what the deleted `default` answered for it too (bd gqlc-qr09l). The
+	// inner type-switches keep their defaults: query.Type is an open
+	// interface, not a closed sum.
+	return query.TypeUnknown{}
 }
 
 // functionArgRefs mines the bindings a function/aggregate call references: each

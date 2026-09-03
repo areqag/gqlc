@@ -1455,9 +1455,14 @@ func (sc partScope) WitnessUse(u query.Use, s schema.Schema) ([]ResolvedType, er
 				return nil, err
 			}
 			return []ResolvedType{w}, nil
-		default:
-			return nil, fmt.Errorf("%w: unknown ExprUse position", ErrOutOfR0Scope)
 		}
+		// Below the inner switch rather than in a `default`, so `exhaustive`
+		// still checks it for a missing ExprPosition arm. Every declared
+		// member is named above, so this answers only for a position outside
+		// the enum — which is what the deleted `default` answered for it too
+		// (bd gqlc-qr09l). The OUTER default stays: query.Use is an open
+		// interface, not a closed sum.
+		return nil, fmt.Errorf("%w: unknown ExprUse position", ErrOutOfR0Scope)
 	default:
 		return nil, fmt.Errorf("%w: unknown Use variant (%T)", ErrOutOfR0Scope, u)
 	}
