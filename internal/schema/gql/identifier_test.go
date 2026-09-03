@@ -190,9 +190,23 @@ func TestDelimitedIdentifierEscapes(t *testing.T) {
 //
 // Every source here parses — the lexer admits all four — so before this bead each
 // produced a name, silently. The rows are per position as well as per refusal
-// because the refusal must reach every identifier read: nine sites were converted
-// and a conversion missed at one of them leaves that position minting the old
-// name while the others refuse.
+// because the refusal must reach every identifier read: a conversion missed at
+// one site leaves that position minting the old name while the others refuse,
+// and the module suite stays green, so only a row per site can see it.
+//
+// The nine converted sites, each of which some row below reaches:
+//
+//	listener.go     graph type name; node type name (pattern, phrase);
+//	                edge type name (pattern, phrase)
+//	nodetype.go     label, LABEL spelling; label, labelSetSpecification spelling
+//	propertytype.go property name; record field name
+//
+// That list is the claim, and it is checkable: reverting any one of the nine to
+// a raw .GetText() read must red a row here and nothing else. Five of the nine
+// were unwitnessed when this test was first written — the four type-name sites
+// (found in review, bd gqlc-izn02) and the LABEL spelling (found while adding
+// rows for the other four). If a site is ever added, add its row or narrow this
+// list; prose must not promise rows the table does not hold.
 func TestDelimitedIdentifierRefusals(t *testing.T) {
 	for _, tt := range []struct {
 		name string
@@ -253,6 +267,50 @@ func TestDelimitedIdentifierRefusals(t *testing.T) {
 			"an edge label carrying the key separator",
 			"CREATE GRAPH TYPE G { (:A), (:B), (:A)-[:`E&F`]->(:B) }",
 			gql.ErrAmpersandInLabel,
+		},
+		// The four rows below are the node-type and edge-type NAME positions, one
+		// per listener site: EnterNodeTypePattern, EnterNodeTypePhrase,
+		// EnterEdgeTypePattern, EnterEdgeTypePhrase. Each was converted to
+		// identifierName by this branch and each was reachable by no test until
+		// now: reverting either node site to GetText() left the whole module suite
+		// green while a raw delimited name reached NodeType.Name through the public
+		// Parse, and the same held for both edge sites and Edge.Name (found in
+		// review, bd gqlc-izn02). These names are not cosmetic — the node name keys
+		// temporalCarrierSet and lands in the resolver's declared index — so a site
+		// reverting silently is this bead's own defect returning at a position with
+		// every gate green.
+		{
+			"a no-escape node type name in the pattern form",
+			`CREATE PROPERTY GRAPH TYPE T AS { NODE TYPE @"N" (:A) }`,
+			gql.ErrNoEscapeIdentifier,
+		},
+		{
+			"a no-escape node type name in the phrase form",
+			`CREATE PROPERTY GRAPH TYPE T AS { NODE TYPE @"N" :A }`,
+			gql.ErrNoEscapeIdentifier,
+		},
+		{
+			"a no-escape edge type name in the pattern form",
+			`CREATE PROPERTY GRAPH TYPE T AS { (:A), (:B), DIRECTED EDGE TYPE @"E" (:A)-[:R]->(:B) }`,
+			gql.ErrNoEscapeIdentifier,
+		},
+		{
+			"a no-escape edge type name in the phrase form",
+			`CREATE PROPERTY GRAPH TYPE T AS { NODE TYPE :A AS a, NODE TYPE :B AS b,
+				DIRECTED EDGE TYPE @"E" :R CONNECTING (a -> b) }`,
+			gql.ErrNoEscapeIdentifier,
+		},
+		// The LABEL spelling is a SEPARATE read from every other label row above.
+		// labelSetPhrase has three alternatives (GQL.g4:1679) and only `LABEL
+		// labelName` reaches labelSet's single-name branch; `:A` and `:A&B` both
+		// route through labelSetSpecification's loop instead. So the four label
+		// rows above all exercise the loop, and reverting the single-name branch to
+		// GetText() left the entire module suite green. This row is the one that
+		// reds it.
+		{
+			"a no-escape label in the LABEL spelling",
+			`CREATE PROPERTY GRAPH TYPE T AS { NODE TYPE N (LABEL @"A") }`,
+			gql.ErrNoEscapeIdentifier,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
