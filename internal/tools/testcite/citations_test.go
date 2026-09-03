@@ -69,9 +69,15 @@ var citationRe = regexp.MustCompile(`(^|[^.\w])(Test[A-Z][A-Za-z0-9_]*)`)
 // right. Prose here spells the same file at least four ways — bare
 // (`split_test.go`), package-relative (`testdata/corpus_test.go.txt`),
 // repo-relative, and brace-expanded (`internal/codegen/{age,neo4j}/
-// corpus_test.go`) — and a reader keyed on the path calls three correct
-// citations dangling. Measured: adding `/` to this class takes the unresolved
-// population from 1 to 3, and both additions are spellings rather than rot.
+// corpus_test.go`) — and a reader keyed on the path calls the last two
+// dangling.
+//
+// Measured against the tree this arrived on, by admitting `/` here and
+// resolving a token that contains one with a stat under the repo root: the
+// unresolved population goes from 1 distinct name to 3. Neither addition is
+// rot. `testdata/corpus_test.go.txt` is correct relative to the two packages
+// that write it, and `/corpus_test.go` is the tail of the brace-expanded
+// spelling above, which is not a path any reader can stat.
 //
 // The hole that leaves is real and is a base-name collision: 36 of this
 // checkout's 150 test files share a base name with another (`main_test.go`,
@@ -240,10 +246,16 @@ func scanRepo(t *testing.T, root string) (declared, present map[string]bool, cit
 		}
 		if !d.IsDir() {
 			// Every file's base name, recorded before the parse filter below
-			// drops the ones this reader has no citations to collect from. The
-			// filter answers "can this file be READ for citations"; what a
-			// cited file name has to be resolved against is "does this file
-			// EXIST", and those are not the same set.
+			// drops the ones this reader has no citations to collect from,
+			// because the question a cited name is resolved against is "does
+			// this file EXIST" and the filter answers "can this file be READ".
+			//
+			// Today those two sets coincide over everything filenameRe can
+			// produce, since a token it matches ends `_test.go` or
+			// `_test.go.txt` and the filter admits both: moving this line below
+			// the filter is a mutation that survives, measured. It is here for
+			// the question it answers and not for a difference it currently
+			// makes.
 			present[d.Name()] = true
 		}
 		if d.IsDir() {
