@@ -29,7 +29,7 @@ const (
 	scopePackage identifierScope = iota
 	// scopeMethod is a method, on whichever receiver: WithTx and Begin on
 	// *Queries, the Apache AGE graph lifecycle pair on *Queries, and
-	// Commit / Rollback / Queries on *Tx. The receiver is not part of the
+	// Commit and Rollback on *Tx. The receiver is not part of the
 	// distinction — what this value says is that the name occupies no
 	// package block, so a package-level declaration may take it.
 	scopeMethod
