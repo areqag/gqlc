@@ -34,6 +34,18 @@ func recordText(t *testing.T, pt graph.PropertyType) string {
 // and a row's list element. Each position carries a DIFFERENT record, so
 // a walk that missed one position would come up short rather than be
 // covered by another position's answer.
+//
+// The last row is the one that is not merely a fifth copy. A list column
+// comes from two different sites, and they differ in a way no other
+// fixture here would show: a list PROPERTY (prepare.go's ResolvedProperty
+// arm) sets the row's own Width to the whole list type, so a walk that
+// only ever looked at Width would still reach the element by stripping
+// the list levels off it — while a list the QUERY builds, collect(...)
+// over a record-valued property, leaves the row's Width empty and hands
+// the element type to ListElem alone. Only that second shape can witness
+// the ListElem descent: measured 2026-09-02, deleting the descent from
+// conversionUses changed no test outcome anywhere in internal/codegen
+// until this row existed.
 func richPrepared(t *testing.T) (codegen.Prepared, []graph.PropertyType) {
 	t.Helper()
 	inner := graph.RecordOf([]graph.RecordField{
@@ -53,6 +65,9 @@ func richPrepared(t *testing.T) (codegen.Prepared, []graph.PropertyType) {
 		{Name: "note", Type: graph.TypeString, NotNull: true},
 	})
 	elemList := graph.ListOf(elemRec, true)
+	collectRec := graph.RecordOf([]graph.RecordField{
+		{Name: "seen", Type: graph.TypeBool, NotNull: true},
+	})
 
 	prepared := codegen.Prepared{
 		Entities: []codegen.Entity{{Name: "Person", Fields: []codegen.EntityField{
@@ -71,10 +86,21 @@ func richPrepared(t *testing.T) (codegen.Prepared, []graph.PropertyType) {
 					Kind:     codegen.ColumnList,
 					ListElem: &codegen.ListElem{GoType: recordText(t, elemRec), Width: elemRec},
 				},
+				{
+					// No Width, deliberately: this is the collect(...)
+					// shape, and prepare.go leaves the row's own width
+					// empty there. Stripping list levels off it reaches
+					// nothing, so only the ListElem descent finds this
+					// record.
+					ColumnName: "seenAll", Field: "SeenAll",
+					GoType:   "[]" + recordText(t, collectRec),
+					Kind:     codegen.ColumnList,
+					ListElem: &codegen.ListElem{GoType: recordText(t, collectRec), Width: collectRec},
+				},
 			},
 		}},
 	}
-	return prepared, []graph.PropertyType{inner, entityRec, paramRec, rowRec, elemRec}
+	return prepared, []graph.PropertyType{inner, entityRec, paramRec, rowRec, elemRec, collectRec}
 }
 
 // TestRecordUseAnswersForExactlyTheSharedEncodingSet binds the two halves
@@ -114,6 +140,17 @@ func TestRecordUseAnswersForExactlyTheSharedEncodingSet(t *testing.T) {
 // The imports are asserted with the same rows because they are gated on
 // the same reading: an encode-only file names fmt nowhere, since only a
 // decode reports a failure through it.
+//
+// Every row keys on a helper's PARAMETER, never on its name. The four
+// encode helpers are named by extending the plain one — encodeRecord<h>,
+// then ...Ptr, ...List, ...ListPtr — so "func encodeRecord" is a prefix
+// of all four and is satisfied by any one of them. Asserting it would
+// have made this test blind to the very gate it guards: dropping the
+// encodePtr and list disjuncts, so that a Ptr wrapper is emitted calling
+// a plain helper nothing declares, left every row green (measured
+// 2026-09-02). The parameter distinguishes them — record, *record,
+// []record, *[]record are four different texts with no prefix among
+// them.
 func TestRecordHelpersAreEmittedOnlyWhereCalled(t *testing.T) {
 	pt := graph.RecordOf([]graph.RecordField{
 		{Name: "tag", Type: graph.TypeString, NotNull: true},
@@ -131,14 +168,14 @@ func TestRecordHelpersAreEmittedOnlyWhereCalled(t *testing.T) {
 			name:    "decode only",
 			use:     neo4j.CarrierUseFlags{Decode: true},
 			present: []string{"func decodeRecord"},
-			absent:  []string{"func encodeRecord"},
+			absent:  []string{"(v record", "Ptr(v *record", "List(v []record"},
 			wantFmt: true,
 		},
 		{
 			name:    "encode only",
 			use:     neo4j.CarrierUseFlags{Encode: true},
-			present: []string{"func encodeRecord"},
-			absent:  []string{"func decodeRecord", "func encodeRecord" + "d0d0d0Ptr"},
+			present: []string{"(v record"},
+			absent:  []string{"func decodeRecord", "Ptr(v *record", "List(v []record"},
 			wantFmt: false,
 		},
 		{
@@ -147,21 +184,21 @@ func TestRecordHelpersAreEmittedOnlyWhereCalled(t *testing.T) {
 			// The plain encode stands under the Ptr wrapper, which calls
 			// it — so EncodePtr alone owes BOTH, and a gate that emitted
 			// only the wrapper would name an undeclared function.
-			present: []string{"func encodeRecord", "Ptr(v *record"},
+			present: []string{"(v record", "Ptr(v *record"},
 			absent:  []string{"func decodeRecord", "List(v []record"},
 			wantFmt: false,
 		},
 		{
 			name:    "list parameter only",
 			use:     neo4j.CarrierUseFlags{List: true},
-			present: []string{"func encodeRecord", "List(v []record"},
+			present: []string{"(v record", "List(v []record"},
 			absent:  []string{"func decodeRecord", "ListPtr(v *[]record"},
 			wantFmt: false,
 		},
 		{
 			name:    "nullable list parameter",
 			use:     neo4j.CarrierUseFlags{Encode: true, List: true, ListPtr: true},
-			present: []string{"List(v []record", "ListPtr(v *[]record"},
+			present: []string{"(v record", "List(v []record", "ListPtr(v *[]record"},
 			absent:  []string{"func decodeRecord"},
 			wantFmt: false,
 		},
@@ -203,20 +240,28 @@ func TestRecordHelpersAreEmittedOnlyWhereCalled(t *testing.T) {
 // — a substring sweep would be reading the schema's spelling back to
 // itself.
 func TestRecordHelperErrorsBalanceTheirVerbs(t *testing.T) {
-	inner := graph.RecordOf([]graph.RecordField{
-		{Name: "zip", Type: graph.TypeInt32, NotNull: true},
-	})
+	// Read off the declarations below rather than restated, so a field
+	// added to the fixture is a field the format is held against.
+	var fieldNames []string
+	record := func(fields ...graph.RecordField) graph.PropertyType {
+		for _, f := range fields {
+			fieldNames = append(fieldNames, f.Name)
+		}
+		return graph.RecordOf(fields)
+	}
+
+	inner := record(graph.RecordField{Name: "zip", Type: graph.TypeInt32, NotNull: true})
 	// Every arm of writeRecordValueDecode at once: a nested record, a
 	// list (which is the arm that carries a depth), a narrowed width, a
 	// temporal carrier, an ANY leaf and a nullable field.
-	pt := graph.RecordOf([]graph.RecordField{
-		{Name: "addr", Type: inner, NotNull: true},
-		{Name: "born", Type: graph.TypeDate, NotNull: true},
-		{Name: "misc", Type: graph.TypeAnyPropertyValue},
-		{Name: "rank", Type: graph.TypeInt32, NotNull: true},
-		{Name: "tags", Type: graph.ListOf(graph.TypeString, true), NotNull: true},
-		{Name: "nick", Type: graph.TypeString},
-	})
+	pt := record(
+		graph.RecordField{Name: "addr", Type: inner, NotNull: true},
+		graph.RecordField{Name: "born", Type: graph.TypeDate, NotNull: true},
+		graph.RecordField{Name: "misc", Type: graph.TypeAnyPropertyValue},
+		graph.RecordField{Name: "rank", Type: graph.TypeInt32, NotNull: true},
+		graph.RecordField{Name: "tags", Type: graph.ListOf(graph.TypeString, true), NotNull: true},
+		graph.RecordField{Name: "nick", Type: graph.TypeString},
+	)
 	use := neo4j.CarrierUseFlags{Decode: true, Encode: true}
 	out := neo4j.RenderRecordHelpers("db", []graph.PropertyType{pt, inner},
 		map[graph.PropertyType]neo4j.CarrierUseFlags{pt: use, inner: use})
@@ -244,6 +289,19 @@ func TestRecordHelperErrorsBalanceTheirVerbs(t *testing.T) {
 		require.Equal(t, countVerbs(format), len(call.Args)-1,
 			"%s: format %q takes %d verbs and the call supplies %d arguments",
 			fset.Position(call.Pos()), format, countVerbs(format), len(call.Args)-1)
+		// The balance above cannot witness the thing recordFail's doc
+		// actually claims. Pasting an author-derived half into the format
+		// removes a verb and its argument together, so the count still
+		// agrees — measured 2026-09-02: rendering the field name into the
+		// format instead of passing it left this test green. What the
+		// paste costs is the escaping: a field named pct%s becomes a verb
+		// the call has no value for, which `go vet` of the emitted package
+		// fails on. So the format is held to naming neither half.
+		for _, half := range append(fieldNames, "RECORD") {
+			require.NotContains(t, format, half,
+				"%s: %q is author-derived and must reach the message as an ARGUMENT, not inside the format",
+				fset.Position(call.Pos()), half)
+		}
 		return true
 	})
 	require.Positive(t, calls,
