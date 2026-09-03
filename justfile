@@ -2425,6 +2425,12 @@ gates:
     run lint           just lint-cache-check
     run lint           just vuln-root-residual
     run test           just test
+    # Deliberately NOT the bare context "live-smoke". These tests run in CI only
+    # inside that job, but this arm is its Docker-free slice and cannot boot a
+    # container, so collecting "live-smoke" here would make the summary below
+    # claim a required context this recipe does not cover. The suffixed name
+    # sorts and prints beside it and cannot be mistaken for it (bd gqlc-lw1j8).
+    run 'live-smoke[docker-free]' just test-codegen
     run codegen-fence  just test-codegen-fence
     run actionlint     just actionlint
     run tidy           just tidy-check
@@ -2464,7 +2470,9 @@ gates:
     echo "gates: ran ${ran} arm(s) over required context(s):" \
          "$(printf '%s\n' "${contexts[@]}" | sort -u | tr '\n' ' ')"
     echo "gates: NOT covered, and CI still decides —"
-    echo "       live-smoke        needs Docker: just test-codegen-live-neo4j"
+    echo "       live-smoke        its CONTAINER half only. The Docker-free half"
+    echo "                         of that job ran above as live-smoke[docker-free];"
+    echo "                         what is left needs Docker: just test-codegen-live-neo4j"
     echo "       tidy (3 steps)    check-pr-closes.py, check-pr-authors.sh and"
     echo "                         check-cron-freshness.sh read a PR body, a PR's"
     echo "                         commit list and the Actions API. None exist here."
@@ -2939,6 +2947,25 @@ check-codegen-external-tests: sweep-discovery-probes
             exit 1
         fi
     done
+
+# the codegen module's Docker-free tests. `just test` is the ROOT module and
+# cannot reach a separate module at all, and every other recipe that reaches
+# this one passes -tags codegen_live and boots containers — so until bd
+# gqlc-lw1j8 the only way to run a Docker-free guard here was to have Docker.
+#
+# TestTxMethodSet is why that mattered: under bd gqlc-eunj4 it was one of only
+# two witnesses of *Tx's promoted surface, and the one that caught the missing
+# DropGraph row when the other did not. A witness costing a container boot is
+# one a local loop skips.
+#
+# Selection is BY BUILD TAG and by nothing else. There is no -run allowlist
+# here on purpose: every live file carries `//go:build codegen_live`, so an
+# untagged run is exactly the Docker-free set, and it stays exact as the module
+# grows without anyone maintaining a list (an allowlist is what let a live test
+# run in no recipe at all — bd gqlc-df3d). A new test needing Docker but
+# missing the tag fails HERE, loudly, which is the direction that costs least.
+test-codegen:
+    cd test/data/codegen && go test ./...
 
 # runs every live test in the codegen module against real testcontainers:
 # the smoke battery on all three arms plus the AGE session-init contract.
