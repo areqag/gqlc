@@ -269,6 +269,43 @@ func TestRecordFieldLegalityAdmitsAndRefusesOnTheMangle(t *testing.T) {
 			[]graph.RecordField{{Name: "___", Type: graph.TypeInt32}},
 			`field "___" mangles to no Go field name`,
 		},
+		// The third illegality, and the one a delimited identifier makes
+		// reachable: paramFieldName capitalises and drops underscores and
+		// does nothing else, so every character the author wrote survives
+		// into the struct field name. A GQL field name is only obliged to
+		// be a legal GQL identifier, and `x-y` / `a b` / `pct%s` are all
+		// of those when written delimited — the schema parser admits each.
+		//
+		// A '%' is called out separately because it does not merely fail
+		// to compile: the decode helper's failure wording carries the
+		// field name, and a name holding a verb the call has no argument
+		// for is what `go vet` of the generated package would fail on if
+		// the file got that far. It is refused here instead.
+		{
+			"a name holding a hyphen",
+			[]graph.RecordField{{Name: "x-y", Type: graph.TypeInt32}},
+			`field "x-y" mangles to "X-y", which is not a Go field name`,
+		},
+		{
+			"a name holding a space",
+			[]graph.RecordField{{Name: "a b", Type: graph.TypeInt32}},
+			`field "a b" mangles to "A b", which is not a Go field name`,
+		},
+		{
+			"a name holding a format verb",
+			[]graph.RecordField{{Name: "pct%s", Type: graph.TypeInt32}},
+			`field "pct%s" mangles to "Pct%s", which is not a Go field name`,
+		},
+		{
+			"a name holding a quote",
+			[]graph.RecordField{{Name: `we"ird`, Type: graph.TypeInt32}},
+			`field "we\"ird" mangles to "We\"ird", which is not a Go field name`,
+		},
+		{
+			"a name beginning with a digit",
+			[]graph.RecordField{{Name: "1st", Type: graph.TypeInt32}},
+			`field "1st" mangles to "1st", which is not a Go field name`,
+		},
 	}
 	for _, tc := range refused {
 		t.Run(tc.name, func(t *testing.T) {
@@ -295,6 +332,17 @@ func TestRecordFieldLegalityAdmitsAndRefusesOnTheMangle(t *testing.T) {
 			{Name: "_a", Type: graph.TypeInt32},
 		}},
 		{"one field", []graph.RecordField{{Name: "city", Type: graph.TypeString}}},
+		// The control for the spelling clause, and the reason it cannot be
+		// an ASCII test: a Go field name is any unicode letter followed by
+		// letters, digits and underscores, so a schema written in a
+		// non-Latin script mangles to a perfectly legal struct field. A
+		// check that swept for [A-Za-z] would refuse this one.
+		{"a name in a non-Latin script", []graph.RecordField{
+			{Name: "քաղաք", Type: graph.TypeString},
+		}},
+		{"a name holding a digit after the first rune", []graph.RecordField{
+			{Name: "line2", Type: graph.TypeString},
+		}},
 	}
 	for _, tc := range admitted {
 		t.Run(tc.name, func(t *testing.T) {
