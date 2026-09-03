@@ -479,11 +479,13 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 					if len(d.guards) > 0 {
 						guarded[target][d.shape]++
 					}
-					for _, guard := range d.guards {
-						graded++
-						s.Require().True(alphabet[d.shape][guard],
-							unstampableReport(target, fixture, d, guard, alphabet))
-					}
+					graded += gradeDecoderGuards(s.Require(), target, fixture, d, alphabet)
+				}
+				// A decoder written as a method is graded and neither
+				// reconciled nor counted; emittedMethodDecoders states which
+				// of the three each measurement admits and why.
+				for _, d := range emittedMethodDecoders(s.Require(), files, decoderShapes) {
+					graded += gradeDecoderGuards(s.Require(), target, fixture, d, alphabet)
 				}
 			}
 		})
@@ -2211,6 +2213,44 @@ func decodePerson(raw []byte) (Person, error) {
 	}
 }
 
+// recordedGrading runs the whole verdict — both censuses and the alphabet
+// comparison each of them feeds — over a synthetic emission, and returns
+// what it reported instead of failing the caller's test.
+//
+// It differs from recordedSweep in what it can witness rather than in how
+// it records. recordedSweep stops at classification, so it sees the arms
+// that refuse an emission the sweep cannot read and never reaches the one
+// that refuses a guard no value can satisfy. That is the verdict a decoder
+// written as a method is here to be held to, so a test about one has to run
+// the grading as well.
+//
+// The package-level census runs first and its refusals abort the run, so a
+// row about a method must write an emission the package-level half accepts
+// — which is what the acceptance asks for anyway: the reconciliation
+// satisfied, and the new reader the only thing left that can refuse.
+func recordedGrading(
+	files []codegen.File, shapes map[string]codegen.EntityKind, alphabet labelAlphabet,
+) []string {
+	rec := &recordingT{}
+	r := require.New(rec)
+	func() {
+		defer func() {
+			if v := recover(); v != nil {
+				if _, ok := v.(failedNow); !ok {
+					panic(v)
+				}
+			}
+		}()
+		for _, d := range emittedEntityDecoders(r, "probe-backend", files, shapes) {
+			gradeDecoderGuards(r, "probe-backend", "probe-fixture", d, alphabet)
+		}
+		for _, d := range emittedMethodDecoders(r, files, shapes) {
+			gradeDecoderGuards(r, "probe-backend", "probe-fixture", d, alphabet)
+		}
+	}()
+	return rec.msgs
+}
+
 // recordedSweepRefusal runs the sweep over a synthetic emission and returns
 // what it reported instead of failing the caller's test, empty for one it
 // accepted.
@@ -2387,6 +2427,214 @@ func personDecoder() func([]byte) (Person, error) {
 	}
 }
 
+// TestADecoderWrittenAsAMethodIsGradedOnItsEntitysAxis is the acceptance of
+// gqlc-37lrd: the receiver form is no longer a way out of the reachability
+// gate.
+//
+// The corpus cannot reach any of it. No backend writes a decoder as a
+// method today — every emission's decoders are package-level — so this is a
+// claim's edge rather than a live defect, and the rows are synthetic source
+// parsed and never compiled, which is what lets one spell a shape the
+// emitters do not write.
+//
+// Each row puts a *live* package-level decoder for the same entity beside
+// the relocated one. That is the configuration in which nothing else can
+// refuse: the reconciliation against codegen.Prepare balances on the
+// package-level decoder, so an emission carrying a second, unsatisfiable
+// decoder on a receiver went green through every gate, and the guards of
+// the one on the receiver were read by nothing at all.
+//
+// The absent assertion is the other half of that and is what makes the row
+// witness this reader rather than some neighbour. Were method decoders
+// entered into the one-decoder-per-entity reconciliation, every row here
+// would refuse — on the duplicate arm, before any guard was graded — and
+// the test would pass while witnessing nothing about an alphabet.
+func TestADecoderWrittenAsAMethodIsGradedOnItsEntitysAxis(t *testing.T) {
+	alphabet := labelAlphabet{
+		codegen.EntityNode: {"Post": true},
+		codegen.EntityEdge: {"AUTHORED": true},
+	}
+	shapes := map[string]codegen.EntityKind{"Post": codegen.EntityNode}
+	const prologue = `package emitted
+
+func decodePost(raw []byte) (Post, error) {
+	label := string(raw)
+	if label != "Post" {
+		return Post{}, nil
+	}
+	return Post{}, nil
+}
+
+type decoders struct{}
+`
+
+	for _, tc := range []struct {
+		name, method, want string
+	}{
+		{
+			name: "a guard no value on the entity's axis carries",
+			method: `
+func (d decoders) decodePostOnTheWire(raw []byte) (Post, error) {
+	label := string(raw)
+	if label != "NoSuchLabelAnywhere" {
+		return Post{}, nil
+	}
+	return Post{}, nil
+}
+`,
+			want: `tested for equality against "NoSuchLabelAnywhere"`,
+		},
+		{
+			// The cross-axis arm, and the reason grading on the entity the
+			// method fills is the whole point rather than a detail of where
+			// the guard is read. "AUTHORED" is a label this schema declares,
+			// so a reader holding a method to the union of both axes accepts
+			// it; held to the axis of what it fills, it is a relationship
+			// type on a node decoder and no value reaching it carries one.
+			name: "a guard the schema declares on the other axis",
+			method: `
+func (d decoders) decodePostFromEdge(raw []byte) (Post, error) {
+	label := string(raw)
+	if label != "AUTHORED" {
+		return Post{}, nil
+	}
+	return Post{}, nil
+}
+`,
+			want: "The schema does declare that label — but on the other axis",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + tc.method)}}
+
+			msgs := recordedGrading(files, shapes, alphabet)
+
+			require.NotEmpty(t, msgs,
+				"the gate accepted an emission whose decoder is written as a method and carries %s. The "+
+					"package-level decoder beside it balances the reconciliation, so nothing else was ever "+
+					"going to refuse this emission", tc.name)
+			joined := strings.Join(msgs, "\n")
+			require.Contains(t, joined, tc.want,
+				"the gate refused the emission, but on some other arm than the one %s is meant to reach", tc.name)
+			require.NotContains(t, joined, "holds two candidates for one entity's decoder",
+				"the refusal came from the duplicate arm, so this row witnesses the reconciliation rather than "+
+					"the guard: a method decoder must be graded on its entity's axis without being counted as a "+
+					"second decoder for that entity")
+		})
+	}
+
+	t.Run("a satisfiable guard is accepted", func(t *testing.T) {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
+func (d decoders) decodePostOnTheWire(raw []byte) (Post, error) {
+	label := string(raw)
+	if label != "Post" {
+		return Post{}, nil
+	}
+	return Post{}, nil
+}
+`)}}
+
+		require.Empty(t, recordedGrading(files, shapes, alphabet),
+			"the gate refused a method decoder guarding on the key label of the very entity it fills. Without "+
+				"this row the widening could refuse every method it reads and every row above would still pass")
+	})
+}
+
+// TestAMethodDecodersDispatchIsLeftToTheEdgeUnionReader is the partition
+// line of gqlc-37lrd, and it is the constraint the widening had to satisfy
+// rather than a property that fell out of it.
+//
+// The two readers can meet on one method: a query that selects a whole
+// entity returns that entity's struct, so it names a prepared entity and is
+// read here, and if it also dispatches on a wire label its cases are read
+// by TestEveryLabelSwitchAMethodWritesIsAnEdgeUnionItsQueryDeclares. Graded
+// twice, a relationship type is held to the node axis its result sits on
+// and reds a correct emission.
+//
+// That collision is unreachable through the corpus in both directions and
+// the measurement is what says so: of the 188 golden emissions, 52 methods
+// name exactly one prepared entity and not one of them writes a
+// string-literal switch, and every in-method label switch any backend emits
+// is written in a method that names no entity. So neither reader can be
+// shown to stop where it says it does by running the corpus, and both rows
+// below are synthetic for that reason.
+func TestAMethodDecodersDispatchIsLeftToTheEdgeUnionReader(t *testing.T) {
+	alphabet := labelAlphabet{
+		codegen.EntityNode: {"Post": true},
+		codegen.EntityEdge: {"AUTHORED": true},
+	}
+	shapes := map[string]codegen.EntityKind{"Post": codegen.EntityNode}
+	const prologue = `package emitted
+
+func decodePost(raw []byte) (Post, error) {
+	label := string(raw)
+	if label != "Post" {
+		return Post{}, nil
+	}
+	return Post{}, nil
+}
+
+type queries struct{}
+`
+
+	t.Run("a label switch's case values are not graded here", func(t *testing.T) {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
+func (q queries) OnePost(relType string) (Post, error) {
+	switch relType {
+	case "AUTHORED":
+		return Post{}, nil
+	default:
+		return Post{}, nil
+	}
+}
+`)}}
+
+		require.Empty(t, recordedGrading(files, shapes, alphabet),
+			"a relationship type in an edge-union dispatch was graded against the node axis of the entity the "+
+				"query returns. Those case values belong to the reader that holds them to the candidates the "+
+				"query declares, and holding them here too refuses an emission both readers should accept")
+	})
+
+	t.Run("a comparison beneath a case arm is still graded here", func(t *testing.T) {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
+func (q queries) OnePost(relType string, kind string) (Post, error) {
+	switch relType {
+	case "AUTHORED":
+		if kind == "NoSuchLabelAnywhere" {
+			return Post{}, nil
+		}
+	}
+	return Post{}, nil
+}
+`)}}
+
+		require.Contains(t, strings.Join(recordedGrading(files, shapes, alphabet), "\n"),
+			`tested for equality against "NoSuchLabelAnywhere"`,
+			"skipping a label switch whole leaves every comparison written under one of its case arms read by "+
+				"neither reader: this one stopped at the switch, and the edge-union reader looks at what the "+
+				"cases hold and at nothing beneath them")
+	})
+
+	t.Run("a switch this gate cannot read as a dispatch is graded here", func(t *testing.T) {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
+func (q queries) OnePost(relType string, computed string) (Post, error) {
+	switch relType {
+	case "NoSuchLabelAnywhere", computed:
+		return Post{}, nil
+	}
+	return Post{}, nil
+}
+`)}}
+
+		require.Contains(t, strings.Join(recordedGrading(files, shapes, alphabet), "\n"),
+			`tested for equality against "NoSuchLabelAnywhere"`,
+			"a switch mixing a string case with a computed one is not a dispatch on a closed alphabet, so the "+
+				"edge-union reader refuses to read it whole and nothing grades its string cases unless this "+
+				"reader does — the same verdict comparedStrings reaches for that switch in a package-level "+
+				"function, for the same reason")
+	})
+}
+
 // recordingT collects what a require reported instead of failing the test,
 // so that a helper asserting on its caller's behalf can be tested rather
 // than only run. It is the same device internal/schema/gql's
@@ -2555,6 +2803,181 @@ func packageLevelFuncs(fset *token.FileSet, file *ast.File) []emittedFunc {
 		literals(decl)
 	}
 	return out
+}
+
+// emittedMethodDecoders is every method of an emission whose results name
+// exactly one prepared entity, carried as that entity's decoder so its own
+// body's guards are graded on that entity's axis (gqlc-37lrd).
+//
+// It is the far side of the exclusion packageLevelFuncs draws. That census
+// reads a receiver form as a decoder's *holder* and never as a decoder, so
+// a backend that moved decodePost onto a receiver took it out of the census
+// and its guards were read by nothing: comparedStrings never saw them, and
+// the in-method switch reader grades string-literal switches against a
+// *query's* alphabet, which a decoder has no key in.
+//
+// # Why these are graded and not reconciled or counted
+//
+// Both exclusions below are measured rather than argued, over the 188
+// golden emissions under test/data/codegen/valid on 2026-09-02.
+//
+// 52 methods there already name exactly one prepared entity in their
+// results, and every one of them is a *query* method — OnePerson returns
+// Person, BinById returns Bin — because a query selecting a whole entity
+// returns that entity's struct rather than a row struct of its own. So
+// naming one entity does not distinguish a decoder from a query method, and
+// two of the three things the package-level census does with a decoder
+// cannot be done with these:
+//
+//   - The one-decoder-per-entity reconciliation. Each of those 52 names an
+//     entity a package-level decoder already fills, so entering them there
+//     would refuse 52 emissions the gate accepts, on the duplicate arm, for
+//     a shape that is not a duplicate decoder at all.
+//   - The per-axis decoders/guarded census. Its labelGuardingTargets arm
+//     asserts those two counts are *equal* — every counted decoder compares
+//     some string — and none of the 52 compares a string in its own body.
+//     Counting them makes guarded fall short of decoders and reds both
+//     guarding backends over the whole corpus.
+//
+// Grading is the third thing, and it is the one that is sound here: a guard
+// is held to the axis of what the function fills whatever spelling the
+// emission wrote it in. The 52 contribute no guard today, so this widening
+// grades nothing new in the corpus and cannot be the reason a fixture reds;
+// it is reached the day an emission writes a string comparison in a method
+// that fills an entity, which is exactly the shape nothing read before.
+//
+// # The partition line
+//
+// A string a label switch's cases hold is the in-method reader's
+// (TestEveryLabelSwitchAMethodWritesIsAnEdgeUnionItsQueryDeclares), graded
+// against the edge-union candidates the query declares. That reader and
+// this one meet on the same method the moment a query returning a whole
+// entity also dispatches on a wire label, and grading a relationship type
+// against the node axis its result sits on would red on a correct
+// emission. So methodOwnGuards drops exactly those case values and takes
+// everything else, and the two readers are disjoint by construction rather
+// than by the corpus happening not to write that method today — no emission
+// in the corpus does, which is why the collision cannot be witnessed there
+// and is pinned synthetically instead.
+func emittedMethodDecoders(
+	r *require.Assertions, files []codegen.File, shapes map[string]codegen.EntityKind,
+) []entityDecoder {
+	fset := token.NewFileSet()
+	var out []entityDecoder
+	for _, f := range files {
+		file, err := parser.ParseFile(fset, f.Path, f.Contents, parser.SkipObjectResolution)
+		r.NoError(err, "parsing emitted %s", f.Path)
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || fn.Body == nil {
+				continue
+			}
+			// Exactly one, and the other two arities are left alone rather
+			// than refused. Naming none is the ordinary query method, whose
+			// dispatch the in-method reader owns; naming two or more is
+			// refused for a package-level function because an axis has to be
+			// picked to grade against, and there is no axis to pick here
+			// either — but a method is not a decoder by construction the way
+			// a receiver-less entity-returning function is, so refusing one
+			// would be a verdict about a shape this reader cannot tell from a
+			// query returning two entities.
+			entities := resultEntities(fn.Type, shapes)
+			if len(entities) != 1 {
+				continue
+			}
+			out = append(out, entityDecoder{
+				fn:     fn.Name.Name,
+				file:   f.Path,
+				entity: entities[0],
+				shape:  shapes[entities[0]],
+				guards: methodOwnGuards(r, fn.Body),
+			})
+		}
+	}
+	return out
+}
+
+// methodOwnGuards is comparedStrings for a method body: the same three
+// guard shapes, minus the case values of every label switch written there.
+//
+// Those are the in-method reader's, and dropping them is what keeps a
+// method that both fills an entity and dispatches on a wire label from
+// being held to two alphabets at once. It drops the case *values* and keeps
+// walking the case bodies, so a comparison written beneath a case arm is
+// still this reader's — the other reader looks at what the cases hold and
+// at nothing under them, so stopping at the switch whole would leave that
+// comparison read by neither.
+//
+// A switch mixing a string case with a computed one is not a label switch
+// (switchedLabels refuses it whole), so its string cases are collected
+// here. That is the same verdict comparedStrings reaches for the identical
+// switch written in a package-level function, and the same reason: no
+// reader grades it against a closed alphabet, so the axis of the function
+// it sits in is the only alphabet there is.
+func methodOwnGuards(r *require.Assertions, body *ast.BlockStmt) []string {
+	dispatch := map[*ast.CaseClause]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.SwitchStmt:
+			if _, dispatches := switchedLabels(r, node); dispatches {
+				for _, clause := range node.Body.List {
+					if cc, ok := clause.(*ast.CaseClause); ok {
+						dispatch[cc] = true
+					}
+				}
+			}
+		}
+		return true
+	})
+
+	var out []string
+	add := func(expr ast.Expr) {
+		lit, ok := expr.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return
+		}
+		text, err := strconv.Unquote(lit.Value)
+		r.NoError(err, "emitted string literal %s does not unquote", lit.Value)
+		out = append(out, text)
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.BinaryExpr:
+			if node.Op == token.EQL || node.Op == token.NEQ {
+				add(node.X)
+				add(node.Y)
+			}
+		case *ast.CaseClause:
+			if dispatch[node] {
+				return true
+			}
+			for _, expr := range node.List {
+				add(expr)
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// gradeDecoderGuards holds one decoder's guards to the alphabet of its own
+// axis and answers how many it graded. It is the whole verdict of
+// TestEmittedDecodersGuardOnlyOnStampableLabels, lifted out of that sweep
+// so the same comparison runs over a decoder however the emission spelled
+// it — a receiver-less function, a literal at any depth, or a method — and
+// so a synthetic emission can be put through the real one rather than
+// through a second copy of it written in a test.
+func gradeDecoderGuards(
+	r *require.Assertions, target, fixture string, d entityDecoder, alphabet labelAlphabet,
+) int {
+	for _, guard := range d.guards {
+		r.True(alphabet[d.shape][guard], unstampableReport(target, fixture, d, guard, alphabet))
+	}
+	return len(d.guards)
 }
 
 // labelSwitch is one switch statement an emitted method writes directly in
