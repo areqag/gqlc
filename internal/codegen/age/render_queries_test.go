@@ -672,3 +672,107 @@ func TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind(t *testing.T) {
 		})
 	}
 }
+
+// TestACardinalityNamingNoMemberEmitsAMethodWithNoBody witnesses the claim
+// writeMethod's own comment makes about what naming CardinalityMany bought
+// (bd gqlc-f5dkc). The claim was shipped in PR #2445 unwitnessed, and it is
+// load-bearing in the comment's telling because `exhaustive` was blind to
+// that switch until bd gqlc-ptz4t.
+//
+// The input is assembled here rather than parsed, because TWO walls stand
+// between query text and this switch and each of them is closed:
+// queryfile.parseCardinality yields the three members or refuses the
+// annotation, and codegen's phaseAAdmit then admits those same three by name
+// and routes anything else through ErrInvalidCardinality (prepare.go, and
+// conformance's assembled_input_test.go row "cardinality-not-in-set" is its
+// witness). age.generate calls codegen.Prepare before renderCypherFile, so a
+// Cardinality naming no member cannot reach writeMethod through generation at
+// all. That is the correction this test carries: the switch's silence is a
+// backstop behind a gate, not the diagnostic a real input would meet.
+//
+// What is asserted is the observable the compile-failure half rests on, and
+// it is two halves rather than one: the method declares RESULTS, and its body
+// holds NO statements. Neither alone is an error — a method declaring no
+// results may legally have an empty body, and a method with a body may return
+// from it. Together they are exactly Go's missing return, so pinning both pins
+// the claim without asking a test to invoke a compiler.
+//
+// Which half carries which was measured rather than assumed, and the first
+// guess was wrong. Mutating writeMethodSignature so every method returns only
+// `error` leaves this test green — correctly, because `error` is still a
+// result, so the empty body is still a missing return and the claim still
+// holds under that mutant. The mutation that reds the results half is the one
+// emitting no result list at all, which is the only shape where "no body"
+// stops meaning "does not compile".
+//
+// The generated corpus really is compiled, which is what makes that error
+// something this repository holds anyone to: test/data/codegen is a nested
+// module whose golden packages `just test-codegen-fence` builds and vets, and
+// codegen-fence is a required CI context. Measured 2026-09-03 by appending
+// `func nvardFalsifier() int { return }` to one apache-age-pgx-v5 golden — the
+// fence failed with "not enough return values", the same diagnostic class the
+// claim predicts.
+//
+// The named-member row is the control, and it is CardinalityOne rather than
+// CardinalityExec deliberately: it renders the SAME signature shape, results
+// plus error, so the two rows differ only in whether a body was written.
+func TestACardinalityNamingNoMemberEmitsAMethodWithNoBody(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		cardinality queryfile.Cardinality
+		wantBody    bool
+	}{
+		{"a cardinality naming no member", queryfile.Cardinality(7), false},
+		{"a named member, for contrast", queryfile.CardinalityOne, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := codegen.Query{
+				NamedQuery: codegen.NamedQuery{
+					Name:        "Q",
+					SourceText:  "MATCH (p:Person) RETURN p.name",
+					Cardinality: tt.cardinality,
+				},
+				MethodName: "Q",
+				Bare:       "q",
+				RowFields: []codegen.Row{
+					{ColumnName: "name", Field: "Name", GoType: "string", Kind: codegen.ColumnProperty},
+				},
+			}
+			fn := methodDecl(t, age.RenderCypherFile("p", []codegen.Query{p}), "Q")
+
+			require.NotNil(t, fn.Type.Results,
+				"the emitted method declares no results, so an empty body would compile "+
+					"and the claim's whole mechanism is absent")
+			require.NotEmpty(t, fn.Type.Results.List,
+				"the emitted method's result list is empty, so an empty body would compile")
+
+			if !tt.wantBody {
+				require.Empty(t, fn.Body.List,
+					"the emission wrote a body for a Cardinality naming no member, so the "+
+						"switch answered for it — which is what the `default` arm did before "+
+						"PR #2445 and what naming CardinalityMany was meant to stop")
+				return
+			}
+			require.NotEmpty(t, fn.Body.List,
+				"a named member emitted no body either, so the row above is measuring the "+
+					"renderer being broken rather than the unnamed member being unanswered")
+		})
+	}
+}
+
+// methodDecl returns the named method declaration from one rendered file. It
+// fails rather than returning nil, so a caller's assertions are never read
+// against a method the emission did not write.
+func methodDecl(t *testing.T, src []byte, name string) *ast.FuncDecl {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "rendered.go", src, 0)
+	require.NoError(t, err, "the emission is not parseable Go:\n%s", src)
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Recv != nil && fn.Name.Name == name {
+			return fn
+		}
+	}
+	t.Fatalf("the emission declares no method %s:\n%s", name, src)
+	return nil
+}

@@ -261,9 +261,17 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	// name. It did not before that bead, when codegen re-exported the
 	// members through a type alias `exhaustive` could not resolve.
 	//
-	// And it buys the loud failure independently of the linter — an unnamed
-	// member writes no body, so the generated method is missing its return
-	// and does not compile, where the default silently emitted a :many body.
+	// What it does NOT buy is a second, linter-independent failure. This
+	// comment used to claim one — that an unnamed member writes no body, so
+	// the generated method is missing its return and does not compile, where
+	// the default silently emitted a :many body. The mechanism is real and is
+	// witnessed by TestACardinalityNamingNoMemberEmitsAMethodWithNoBody. The
+	// failure is not reachable: phaseAAdmit admits One, Many and Exec by name
+	// and routes every other value through ErrInvalidCardinality, and generate
+	// calls codegen.Prepare before renderCypherFile — so a member added
+	// upstream is refused two phases earlier, no file is emitted, and nothing
+	// gets as far as failing to compile. The silence below is a backstop
+	// behind that gate, not a diagnostic anyone meets (bd gqlc-f5dkc).
 	switch p.Cardinality {
 	case queryfile.CardinalityExec:
 		writeExecBody(b, p)
