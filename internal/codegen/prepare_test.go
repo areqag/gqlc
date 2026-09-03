@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/stretchr/testify/require"
 
@@ -1081,6 +1082,113 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 				"%q is declared by a different target set than the reserved set records; a name that changed which backends emit it changes whether reserving it on the others is a false refusal",
 				row.name)
 		})
+	}
+}
+
+// scopeConstDocNames lifts, from one identifierScope constant's doc
+// comment, every reservedIdentifiers key the comment offers as an
+// example of that scope.
+//
+// A name written with a leading `*` is a receiver type, not a
+// declaration the constant is claiming — "WithTx and Begin on *Queries"
+// names two methods and the handle they hang off — so those are skipped.
+// That leaves this reading the enumeration alone. Whether the receiver
+// types themselves still exist is a different claim, held by the golden
+// sweep above rather than here.
+func scopeConstDocNames(doc string) []string {
+	identRune := func(r rune) bool { return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) }
+
+	var out []string
+	runes := []rune(doc)
+	for i := 0; i < len(runes); {
+		if !identRune(runes[i]) {
+			i++
+			continue
+		}
+		start := i
+		for i < len(runes) && identRune(runes[i]) {
+			i++
+		}
+		if start > 0 && runes[start-1] == '*' {
+			continue
+		}
+		if word := string(runes[start:i]); isReservedIdentifier(word) {
+			out = append(out, word)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// isReservedIdentifier reports membership in the reserved set, which is
+// the filter that keeps scopeConstDocNames off the ordinary English in
+// the same sentence — "Apache" and "AGE" are capitalised words, not
+// names the table has an opinion about.
+func isReservedIdentifier(name string) bool {
+	_, ok := codegen.ReservedIdentifiers[name]
+	return ok
+}
+
+// TestScopeConstantDocsMatchTheReservedSet holds each identifierScope
+// constant's doc comment to the map declared below it: a reserved name
+// the comment offers as an example of that scope must be recorded at
+// that scope.
+//
+// Nothing else in this package reads a doc comment, so this drift is
+// otherwise unreportable. gqlc-f4hf removed the (*Tx).Queries accessor
+// and updated the map's own prose, but scopeMethod's comment went on
+// offering Queries as a method example while the map recorded it
+// scopePackage — so a reader who met the constant first was told the
+// opposite of the table, and every gate stayed green (gqlc-3peuo).
+//
+// Each constant is asserted on its own and required to name at least one
+// reserved identifier. A comment rewritten into prose that enumerates
+// nothing would otherwise pass by asserting nothing, and a count taken
+// over both constants together would let one go silent behind the other.
+func TestScopeConstantDocsMatchTheReservedSet(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "prepare.go", nil, parser.ParseComments)
+	require.NoError(t, err, "prepare.go is the file this pins; without it there is no claim to check")
+
+	want := map[string]codegen.IdentifierScope{
+		"scopePackage": codegen.ScopePackage,
+		"scopeMethod":  codegen.ScopeMethod,
+	}
+	seen := map[string]bool{}
+
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			value, ok := spec.(*ast.ValueSpec)
+			if !ok || len(value.Names) != 1 {
+				continue
+			}
+			constName := value.Names[0].Name
+			scope, ours := want[constName]
+			if !ours {
+				continue
+			}
+			seen[constName] = true
+
+			named := scopeConstDocNames(value.Doc.Text())
+			require.NotEmpty(t, named,
+				"%s's doc comment names no reserved identifier, so it enumerates nothing and this check passes over it without asserting anything",
+				constName)
+			for _, name := range named {
+				require.Equal(t, scope, codegen.ReservedIdentifiers[name],
+					"%s's doc comment offers %q as an example of %s, but the reserved set records it %s; the comment sits on the declaration a reader meets first, so it is the half that gets believed",
+					constName, name, scopeName(scope), scopeName(codegen.ReservedIdentifiers[name]))
+			}
+		}
+	}
+
+	for _, constName := range slices.Sorted(maps.Keys(want)) {
+		require.True(t, seen[constName],
+			"prepare.go declares no const %s, so this check silently stopped covering it; a renamed scope constant takes its guard with it",
+			constName)
 	}
 }
 
