@@ -25,6 +25,7 @@ var (
 	BuildListElemPlan    = buildListElemPlan
 	PhaseBDerive         = phaseBDerive
 	PhaseZAdmit          = phaseZAdmit
+	RecordStructText     = recordStructText
 	ReservedIdentifiers  = reservedIdentifiers
 	TypeTextNamesCarrier = typeTextNamesCarrier
 )
