@@ -703,6 +703,64 @@ holds no real rule the widest is also zero, so `0 * 2 >= 0` promotes it:
 two `--------` lines in a pane with no composer at all then report an
 EMPTY box, which is the single answer that makes send_line type (VI.2).
 
+## seat_box_text-3 — a located region is not a located composer
+
+(`kingdom/bin/km`, `seat_box_text`)
+
+Everything above decides WHICH lines are edges. This decides what to answer
+when the region between the last two of them is not a composer's interior.
+Until bd gqlc-mfjgl the answer was rc=0 and an empty string — the same answer
+as a genuinely empty box, which is the one answer that makes send_line type
+(VI.2). So the function was safe exactly when it found NO box, and unsafe when
+it found a box whose contents it could not locate. That is backwards for a
+guard, and the width heuristic above cannot close it: `## seat_box_text-2`
+already concedes that a full-width rule pasted from another pane's render is
+byte-identical to a real edge, and nothing in this file can reject one.
+
+MEASURED 2026-09-02 by extracting the function and feeding it synthetic
+buffers, herdr stubbed:
+
+  a real composer holding km's ask       rc=0 box=[❯ [km] an ask nobody submitted]
+  two ADJACENT rules, nothing between    rc=0 box=[]     <- was a lie
+  real box, then one extra rule below    rc=0 box=[]     <- was a lie
+  no composer rendered                   rc=1 box=[]
+
+Row 3 is the shape that bites: the pane holds a composer with a stranded ask
+in it and ONE further rule below, so edge[n-1] and edge[n] become that box's
+bottom border and the stray rule, with nothing between them. Row 2 is the same
+fault reached differently — adjacent edges make the print loop's range empty.
+
+THE DISCRIMINATOR IS THE PROMPT GLYPH, and it is not a widening of the edge
+rule: which lines are edges does not change. A composer's interior always
+carries a line whose first character is `❯` or `>`, because the bare glyph IS
+the empty box (`## seat_box_text`, above). Measured across all 16 live panes
+the same day: 12 rendered a box, and every one of the 12 had exactly one
+interior line carrying the glyph — 11 bare and one holding raffi's stranded
+ask. Replaying both versions of the function over those 16 buffers moved no
+verdict, so the fail-closed arm is inert on the healthy population.
+
+Absent that glyph the region is not the composer, and the function now exits 2
+with its own sentence on stderr. It shares rc=2 with a pane herdr could not
+read because every caller wants the SAME direction from both — refuse, do not
+claim — and a distinct code would have bought four more arms that all did the
+same thing. What the two causes do not share is the sentence, so the callers
+no longer say "herdr's own account of it is above" when the account above is
+km's; they say "the account of it is above", which is true of both.
+
+THE LIMIT. A render with no prompt glyph in the composer would now be refused
+rather than typed into. That is the intended direction and it is loud — every
+refusal prints why — but it is a real behaviour change and no such render has
+been observed. If one exists, the repair is to widen the glyph set here, never
+to restore the empty-string answer.
+
+WHAT THIS DOES NOT ESTABLISH. It does not prove the raffi incident of
+2026-09-02, where two of km's asks accumulated in one composer. That pane was
+re-read while taking this fix and by then held ONE ask, hand-delivered by
+Սեդրակ, which the function reads correctly (rc=0, non-empty) and which
+send_line would refuse. The incident buffer is gone: a composer's past states
+are not in the scrollback. So this closes a measured fail-open path that COULD
+produce that accumulation; it does not demonstrate that it did.
+
 ## seat_wedge_reason — why a tool call has not come back: MARK, never act
 
 (`kingdom/bin/km`, `seat_wedge_reason`)
