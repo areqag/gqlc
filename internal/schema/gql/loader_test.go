@@ -199,6 +199,24 @@ func TestLoaderResolutionFailures(t *testing.T) {
 			want:    gql.ErrReferenceNameMismatch,
 			message: `liar.gql declares "NotLiar"`,
 		},
+		{
+			// The row above differs from its reference in more than case, and so does
+			// every other pair this package owns, so a byte-exact comparison and a
+			// case-folding one agree on all of them and neither is witnessed. This
+			// pair differs ONLY in case, which is what separates them: the lookup is
+			// case-sensitive and found Target.gql, and Target.gql declares a name that
+			// merely folds to the one that found it. Replacing the comparison with
+			// strings.EqualFold leaves the rest of the package green and reds this row
+			// alone (bd gqlc-952q).
+			name: "a file whose declaration differs from the lookup only in case",
+			fsys: fstest.MapFS{
+				"root.gql":   file(copyOf("Copied", "Target")),
+				"Target.gql": file(body("target")),
+			},
+			entry:   "root.gql",
+			want:    gql.ErrReferenceNameMismatch,
+			message: `Target.gql declares "target"`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := gql.NewLoader(tc.fsys).Load(tc.entry)
