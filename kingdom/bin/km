@@ -3004,9 +3004,12 @@ cmd_dispatch() {
     # HERE, and not inside the loop: every pane witness this pass will use is
     # read before the pass types into any pane, because km's own send repaints
     # the pane it lands in and would manufacture false-moving for a seat km
-    # itself disturbed. The one send above this line is the mayor's mail wake,
-    # which is safe by construction — cmd_wake targets a seat whose status is
-    # not awake, and pane_still_prime only considers awake ones.
+    # itself disturbed. Two sends can reach a pane above this line — the mayor's
+    # mail wake, and reconcile's /exit re-send to a seat that is asleep-pending
+    # with a live session — and what makes them safe is not their number but the
+    # state they both target: pane_still_prime's first act is to skip every seat
+    # that is not awake, and neither of those seats is. Check that property, not
+    # this list; an enumeration here has already been wrong once (gqlc-r66gq).
     # A DIFFERENT km process can still send between the two reads: the guard
     # sweep runs on its own cadence and there is deliberately no lock between km
     # processes. That costs one pass of false-working for one seat and clears
