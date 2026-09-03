@@ -279,6 +279,58 @@ func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 	s.Require().NoError(err, "the emitted helpers do not satisfy the captured corpus:\n%s", report.Log)
 	declared := corpusrun.Declared{Tests: corpusTests, Subtests: corpusSubtests, Tables: corpusTables}
 	s.Require().NoError(declared.Check(report, "corpus_test.go", string(driver)), report.Log)
+	s.requireEveryAgtypeHelperRan(dir, report)
+}
+
+// requireEveryAgtypeHelperRan holds the corpus template against the
+// emission it drives: every agtype* helper the assembled module declares
+// has to be entered by the child run.
+//
+// The three censuses beside it ask what the DRIVER declares — its test
+// names, its subtest counts, its table row counts — so all three are
+// satisfied by a driver that is internally consistent and reaches only
+// half the emission. A helper the emission gains and the driver never
+// calls is declared by nobody, and every one of them stays green (bd
+// gqlc-5et5).
+//
+// Entry comes from the child's own coverage profile rather than from
+// call sites in the driver's syntax. A call site is not a run: it can sit
+// in a table row nothing selects. It is also the wrong question — several
+// emitted helpers are reached only through an emitted decoder, and a
+// census demanding a direct call would report those unexercised while
+// their behaviour ran on every row.
+//
+// What this does NOT claim is that the helper's behaviour was checked.
+// Coverage witnesses entry; an assertion is what witnesses a verdict, and
+// the corpus driver is where those live.
+func (s *EmissionSuite) requireEveryAgtypeHelperRan(dir string, report corpusrun.Report) {
+	// Not a detector: measured, removing this leaves the census red
+	// anyway, because a missing profile makes every helper read as
+	// unreached. It is here for the REASON. Without it a broken
+	// instrument reports as "38 emitted helpers no test enters", which
+	// blames the corpus for a gap in the measurement of it.
+	s.Require().NotEmpty(report.Cover,
+		"the child run produced no coverage profile, so this census cannot tell an unexercised helper "+
+			"from an unmeasured one")
+
+	entered, err := corpusrun.Entered(dir, report.Cover)
+	s.Require().NoError(err)
+
+	helpers, err := corpusrun.Functions(dir, "agtype")
+	s.Require().NoError(err)
+	s.Require().NotEmpty(helpers,
+		"the assembled module declares no agtype* helper at all, so this census has nothing to hold")
+
+	var unreached []string
+	for _, name := range helpers {
+		if !entered[name] {
+			unreached = append(unreached, name)
+		}
+	}
+	s.Require().Empty(unreached,
+		"these emitted agtype* helpers are compiled by the corpus module and no test in the run enters "+
+			"them, so the corpus is green on an emission it does not exercise; each one needs a corpus "+
+			"test that reaches it")
 }
 
 // declarations prints the named top-level declarations of an emitted
