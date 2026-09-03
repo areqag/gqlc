@@ -120,6 +120,20 @@ var guardedSums = []guardedSum{
 	// Cardinality's dir "." is this package's own directory: the walk names
 	// a file reached under root "." by the base of its parent, and for a
 	// file directly in the root that is ".".
+	//
+	// For Cardinality, read the failure message below with one exception in
+	// mind: `exhaustive` does NOT check the switches this fence holds under
+	// "." — internal/codegen re-exports the members as its own constants
+	// (input.go: `type Cardinality = queryfile.Cardinality` and three
+	// `CardinalityX = queryfile.CardinalityX`), and measured 2026-09-03 a
+	// member added to queryfile reds only queryfile's own switch, even with
+	// the member re-exported here too and with golangci-lint's issue caps
+	// lifted; deleting a whole `case` arm from cardinalityAnnotation left
+	// the linter reporting zero issues. So under "." the property this fence
+	// asks for is bought by the compiler and by the tests, not by the
+	// linter, and this fence is what asks for it at all. Under ../queryfile
+	// the message is accurate. Blast radius measured: Cardinality is the
+	// only enum internal/codegen re-exports (bd gqlc-51l6m).
 	{name: "Cardinality", declRoot: "../queryfile", scanRoots: []string{".", "../queryfile"}, sentinel: "CardinalityExec", dirs: []string{".", "queryfile"}},
 	{name: "TypeToken", declRoot: "../procsig", scanRoots: []string{"../procsig", "../query", "../resolver"}, sentinel: "TokenNumber", dirs: []string{"procsig", "cypher", "resolver"}},
 }
