@@ -217,6 +217,15 @@ func TestTheWireLabelsReachTheEmittedDecoder(t *testing.T) {
 // schema fixture in this package carries several widths at once, so each
 // of them supplies the callee by some other route and none of them can
 // see that hole; a batch of exactly one width is what exposes it.
+//
+// The two DIRECTIONS are separate batches for the same reason the widths
+// are. A batch that both reads and binds the width supplies each
+// direction's helpers to the other, so it cannot see an emission that
+// writes one direction's helper on the other direction's evidence — which
+// is precisely the hole a record opened: a record READ but never bound
+// emitted an encoder naming agtypeDateText, a helper only the bind path
+// marks. Read-only and bind-only are the batches a real schema has, and
+// they are the two that expose it.
 func TestEmittedHelpersAreClosedOverWhatTheyCall(t *testing.T) {
 	for _, row := range propertyRows(t) {
 		for _, nullable := range []bool{false, true} {
@@ -227,14 +236,32 @@ func TestEmittedHelpersAreClosedOverWhatTheyCall(t *testing.T) {
 					Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: row.goType, Width: row.width, Nullable: nullable}},
 				},
 			}.WithLabels("E", age.VertexAnnotation)
-			var h age.Helpers
-			h.ForEntities([]age.WiredEntity{e})
-			age.HelpersForParams(&h, []codegen.Param{{RawName: "p", Field: "P", GoType: row.goType, Width: row.width, Nullable: nullable}})
+			param := codegen.Param{RawName: "p", Field: "P", GoType: row.goType, Width: row.width, Nullable: nullable}
 
-			src := age.RenderModels("models", []age.WiredEntity{e}, h)
-			require.Empty(t, undeclaredAgtypeIdents(t, src),
-				"a batch of one %s property (nullable=%t) names an agtype helper it does not declare, so the emitted package does not compile",
-				row.goType, nullable)
+			for _, d := range []struct {
+				name string
+				read bool
+				bind bool
+			}{
+				{"read only", true, false},
+				{"bind only", false, true},
+				{"both", true, true},
+			} {
+				var h age.Helpers
+				var entities []age.WiredEntity
+				if d.read {
+					entities = []age.WiredEntity{e}
+					h.ForEntities(entities)
+				}
+				if d.bind {
+					age.HelpersForParams(&h, []codegen.Param{param})
+				}
+
+				src := age.RenderModels("models", entities, h)
+				require.Empty(t, undeclaredAgtypeIdents(t, src),
+					"a %s batch of one %s property (nullable=%t) names an agtype helper it does not declare, so the emitted package does not compile",
+					d.name, row.goType, nullable)
+			}
 		}
 	}
 }
