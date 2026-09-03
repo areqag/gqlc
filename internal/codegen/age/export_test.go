@@ -29,6 +29,7 @@ var (
 	EdgeUnionReason                  = edgeUnionReason
 	FindRelationshipTypeAlternations = findRelationshipTypeAlternations
 	FindUndefinedFunctions           = findUndefinedFunctions
+	FindUndefinedNamespaces          = findUndefinedNamespaces
 	FindUndefinedSpatialFunctions    = findUndefinedSpatialFunctions
 	Generate                         = generate
 	NamespaceProbes                  = namespaceProbes
