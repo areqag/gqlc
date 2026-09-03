@@ -1,12 +1,17 @@
 package neo4j_test
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/neo4j"
+	"github.com/areqag/gqlc/internal/queryfile"
 )
 
 // TestParamBindExprSlices pins the driver-binding expression for every
@@ -152,4 +157,94 @@ func TestParamBindExprUnsignedWidthsReachTheDriverUnconverted(t *testing.T) {
 			require.Equal(t, tt.want, neo4j.ParamBindExpr(f, "arg"))
 		})
 	}
+}
+
+// TestACardinalityNamingNoMemberEmitsAMethodWithNoBody is the neo4j half of
+// what gqlc-f5dkc witnessed on the AGE side, and it is written against the
+// dispatch this bead replaced: an if/else chain whose final `else` answered
+// for CardinalityMany and, identically, for every member added after it.
+//
+// `exhaustive` cannot see an if/else, so the AGE switch's linter cover had no
+// counterpart here — one backend was checked and the other only looked it.
+// That is the asymmetry gqlc-h08nx is about, and this test is the part of the
+// claim that does not depend on a linter running.
+//
+// The input is assembled rather than parsed, because the same two closed walls
+// stand in front of this switch as in front of AGE's: queryfile's cardinality
+// annotation yields the three members or is refused, and codegen's phaseAAdmit
+// admits those three by name and routes every other value through
+// ErrInvalidCardinality (prepare.go:675). neo4j's generate calls
+// codegen.Prepare (generate.go:52) before it renders, so a Cardinality naming
+// no member cannot reach writeMethod through Generate at all. What is pinned
+// here is a backstop behind that gate, not a diagnostic a real input meets.
+//
+// The observable is two halves, for the reason the AGE test records: a method
+// with no body compiles fine unless it declares results, so "no body" only
+// means "does not compile" alongside "declares results". Both are asserted.
+//
+// The named-member row is the control, and it is CardinalityOne rather than
+// CardinalityExec deliberately — :one renders the same results-plus-error
+// signature shape, so the two rows differ only in whether a body was written.
+func TestACardinalityNamingNoMemberEmitsAMethodWithNoBody(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		cardinality queryfile.Cardinality
+		wantBody    bool
+	}{
+		{"a cardinality naming no member", queryfile.Cardinality(7), false},
+		{"a named member, for contrast", queryfile.CardinalityOne, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := codegen.Query{
+				NamedQuery: codegen.NamedQuery{
+					Name:        "Q",
+					SourceText:  "MATCH (p:Person) RETURN p.name",
+					Cardinality: tt.cardinality,
+				},
+				MethodName: "Q",
+				Bare:       "q",
+				RowFields: []codegen.Row{
+					{ColumnName: "name", Field: "Name", GoType: "string", Kind: codegen.ColumnProperty},
+				},
+			}
+			var b strings.Builder
+			neo4j.WriteMethod(&b, p)
+			fn := methodDecl(t, "package p\n\n"+b.String(), "Q")
+
+			require.NotNil(t, fn.Type.Results,
+				"the emitted method declares no results, so an empty body would compile "+
+					"and the claim's whole mechanism is absent")
+			require.NotEmpty(t, fn.Type.Results.List,
+				"the emitted method's result list is empty, so an empty body would compile")
+
+			if !tt.wantBody {
+				require.Empty(t, fn.Body.List,
+					"the emission wrote a body for a Cardinality naming no member, so the "+
+						"dispatch answered for it — which is what the if/else chain's final "+
+						"`else` did, silently giving it the :many body")
+				return
+			}
+			require.NotEmpty(t, fn.Body.List,
+				"a named member emitted no body either, so the row above is measuring the "+
+					"renderer being broken rather than the unnamed member being unanswered")
+		})
+	}
+}
+
+// methodDecl returns the named method declaration from one rendered method,
+// wrapped in a package clause so it parses. It fails rather than returning
+// nil, so a caller's assertions are never read against a method the emission
+// did not write.
+func methodDecl(t *testing.T, src, name string) *ast.FuncDecl {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "rendered.go", src, 0)
+	require.NoError(t, err, "the emission is not parseable Go:\n%s", src)
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Recv != nil && fn.Name.Name == name {
+			return fn
+		}
+	}
+	t.Fatalf("the emission declares no method %s:\n%s", name, src)
+	return nil
 }
