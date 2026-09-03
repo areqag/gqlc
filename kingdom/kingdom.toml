@@ -217,6 +217,28 @@ recover_attempts = 3
 # below the pre-push suite makes every push look like a wedge.
 stalled_after_minutes = 20
 
+[send]
+# How long send_line waits for the bytes it just submitted to appear in the
+# receiving seat's own transcript before it reports the send UNWITNESSED (exit 2
+# — sent, arrival UNKNOWN, do not re-send). The pane can only say the box
+# emptied; this is the only witness in this town that the session RECEIVED
+# anything, and it is what a send that vanishes looks like from outside
+# (gqlc-m4e57).
+#
+# 20 seconds against a measured lag of 0.137–0.347s (mean 0.229s over 14 rows on
+# 4 seats, 2026-09-03) — roughly sixty times the worst observation, because the
+# cost of the two errors is not symmetric. Waiting too long delays one dispatch
+# line; giving up too early declares a delivered ask UNKNOWN, and an UNKNOWN is
+# deliberately never retried. Those rows were of any type, not user rows
+# specifically, so read the figure as the order of magnitude it is.
+#
+# A malformed or missing value falls back to 20 rather than stopping the
+# dispatcher. 0 is legal and gives the transcript one look with no wait, so all
+# but the luckiest send reports UNWITNESSED; there is no value that turns the
+# witness OFF, by design — a send whose arrival nobody checked is the failure
+# this exists for.
+transcript_witness_seconds = 20
+
 [claude]
 # The factory runs unattended; the constitution, git hooks, and
 # claude-pre-bash remain the guardrails. Set to "acceptEdits" to supervise —
