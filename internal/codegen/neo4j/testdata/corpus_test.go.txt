@@ -872,13 +872,54 @@ func TestAnythingColumnsCarryTheirNull(t *testing.T) {
 	// The non-nullable one refuses it instead. Every other width gets
 	// this for free — its Go type has no nil to return — so the refusal
 	// is the whole of what NOT NULL means for a column typed `any`.
-	_, err = queriesOver([]string{"payload", "maybe"}, []any{nil, nil}).AnythingColumns(t.Context())
-	if err == nil {
-		t.Fatalf("AnythingColumns(payload: null) = no error, want a refusal")
+	//
+	// Both refusals are taken over the SAME column and held against each
+	// other rather than against words. The emitter authors both strings,
+	// so asserting either phrase pins a rename and not a regression; what
+	// the emitter cannot rename its way out of is that a caller can tell
+	// an absent key from a null value, and that each refusal names the
+	// column it is about. The wording itself is fenced once, at the
+	// emitter, by TestEveryColumnKindGatesArrivedNull — measured on bd
+	// gqlc-h803, where collapsing the two refusals onto one message was
+	// invisible to the assertions this replaces.
+	requireDistinctRefusals(t, "AnythingColumns", "payload",
+		errFrom(queriesOver([]string{"maybe"}, []any{nil}).AnythingColumns(t.Context())),
+		errFrom(queriesOver([]string{"payload", "maybe"}, []any{nil, nil}).AnythingColumns(t.Context())))
+}
+
+// errFrom drops a decode call's rows so its error can be passed along.
+func errFrom[T any](_ []T, err error) error { return err }
+
+// requireDistinctRefusals holds a lane's two refusals — the key the
+// record did not hold, and the value that arrived null — against each
+// other. Both must name column, and the two must not read alike: a
+// caller that cannot separate them cannot tell the driver disagreeing
+// with the plan from a null the graph held, which is the distinction
+// this lane's two gates exist to draw.
+//
+// It names neither phrase, deliberately, so a deliberate rewording of
+// either gate leaves it silent and only the emitter's own wording fence
+// asks to be updated.
+func requireDistinctRefusals(t *testing.T, method, column string, absent, null error) {
+	t.Helper()
+	if absent == nil {
+		t.Fatalf("%s(no %s) = no error, want a refusal", method, column)
 	}
-	if !strings.Contains(err.Error(), "non-nullable but arrived null") ||
-		!strings.Contains(err.Error(), "payload") {
-		t.Errorf("AnythingColumns(payload: null) = error %v, want it to name payload and its non-nullability", err)
+	if null == nil {
+		t.Fatalf("%s(%s: null) = no error, want a refusal", method, column)
+	}
+	for _, e := range []struct {
+		what string
+		err  error
+	}{{"absent key", absent}, {"arrived null", null}} {
+		if !strings.Contains(e.err.Error(), column) {
+			t.Errorf("%s %s refusal = %v, want it to name column %q", method, e.what, e.err, column)
+		}
+	}
+	if absent.Error() == null.Error() {
+		t.Errorf("%s refuses an absent %s and a null %s with the same message %q, "+
+			"so a caller cannot tell the driver disagreeing with the plan from a null the graph held",
+			method, column, column, absent.Error())
 	}
 }
 
@@ -952,14 +993,9 @@ func TestAnyPropertyValueColumnsCarryTheirNull(t *testing.T) {
 		t.Errorf("AnyPropColumns(no tag) = no error, want a refusal")
 	}
 
-	_, err = queriesOver([]string{"badge", "tag"}, []any{nil, nil}).AnyPropColumns(t.Context())
-	if err == nil {
-		t.Fatalf("AnyPropColumns(badge: null) = no error, want a refusal")
-	}
-	if !strings.Contains(err.Error(), "non-nullable but arrived null") ||
-		!strings.Contains(err.Error(), "badge") {
-		t.Errorf("AnyPropColumns(badge: null) = error %v, want it to name badge and its non-nullability", err)
-	}
+	requireDistinctRefusals(t, "AnyPropColumns", "badge",
+		errFrom(queriesOver([]string{"tag"}, []any{nil}).AnyPropColumns(t.Context())),
+		errFrom(queriesOver([]string{"badge", "tag"}, []any{nil, nil}).AnyPropColumns(t.Context())))
 }
 
 // scalarProps, listyProps and edgyProps are the driver values the three
