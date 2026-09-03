@@ -243,6 +243,54 @@ func RecordHelperSuffix(pt graph.PropertyType) string {
 	return "Record" + hex.EncodeToString(sum[:4])
 }
 
+// RecordAliasName is the unexported type alias one declared record's
+// carrier is spelled as inside the emitted package.
+//
+// An ALIAS, never a definition. The struct text is what every model
+// field, row field and parameter of that record is declared with, and a
+// defined type would be a DIFFERENT Go type from all of them — the
+// helpers would not accept the values the rest of the package holds. The
+// alias exists only so the helper signatures and the `var out` line do
+// not carry a fifth and sixth copy of a multi-line struct text.
+//
+// Derived from RecordHelperSuffix rather than hashing again, so the
+// carrier and its helpers cannot come from different digests: the suffix
+// is "Record"+hex, and lowering its first byte is what makes the name
+// unexported.
+//
+// Shared for the reason the suffix is, plus one the suffix does not have:
+// sweepIdentifiers enrols these names, and a sweep that derived the alias
+// by its own copy of the lowering rule could pass over a name the
+// backends actually emit.
+func RecordAliasName(pt graph.PropertyType) string {
+	suffix := RecordHelperSuffix(pt)
+	return strings.ToLower(suffix[:1]) + suffix[1:]
+}
+
+// RecordHelperNames is every package-level identifier the record
+// emission owns for one encoding: the carrier alias and the five
+// conversion helpers.
+//
+// All five helpers, not the subset a given batch reaches. Which
+// directions are emitted is a per-backend reading of the same batch, and
+// the sweep runs before any backend has made it — so a sweep over the
+// reached subset would admit a name today and refuse it tomorrow when a
+// query added elsewhere reached one more direction. The names are
+// generator-owned and pairwise distinct by construction; reserving all
+// of them costs nothing an author can observe except the refusal, which
+// is the point.
+func RecordHelperNames(pt graph.PropertyType) []string {
+	suffix := RecordHelperSuffix(pt)
+	return []string{
+		RecordAliasName(pt),
+		"encode" + suffix,
+		"encode" + suffix + "Ptr",
+		"encode" + suffix + "List",
+		"encode" + suffix + "ListPtr",
+		"decode" + suffix,
+	}
+}
+
 // RecordEncodings is every distinct declared-record encoding one batch
 // reaches, in canonical-encoding order, so a backend emits one helper
 // pair per entry and a caller can look one up by width.

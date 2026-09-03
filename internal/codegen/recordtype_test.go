@@ -816,3 +816,56 @@ func TestRecordFieldsRefusesWholeWhenAFieldIsRefused(t *testing.T) {
 	require.True(t, ok, "the control: the same record without the refused field is representable")
 	require.Len(t, admitted, 1)
 }
+
+// TestRecordAliasNameIsTheHelperSuffixUnexported holds the carrier's name
+// to its helpers'. They must come from one digest: the alias is what
+// every helper signature names, so a second hash here would emit
+// encodeRecord<a> taking a record<b> that nothing declares.
+func TestRecordAliasNameIsTheHelperSuffixUnexported(t *testing.T) {
+	for _, pt := range []graph.PropertyType{
+		graph.RecordOf(nil),
+		graph.RecordOf([]graph.RecordField{{Name: "a", Type: graph.TypeInt32}}),
+		graph.RecordOf([]graph.RecordField{{Name: "b", Type: graph.TypeString, NotNull: true}}),
+	} {
+		suffix := codegen.RecordHelperSuffix(pt)
+		alias := codegen.RecordAliasName(pt)
+		require.Equal(t, strings.ToLower(suffix[:1])+suffix[1:], alias)
+		require.NotEqual(t, suffix, alias,
+			"the alias must be unexported: it is an implementation detail of the emitted package, not part of its surface")
+		require.Equal(t, strings.ToLower(suffix), strings.ToLower(alias),
+			"one digest, differing only in the first byte's case")
+	}
+}
+
+// TestRecordHelperNamesAreTheNamesEmitted binds what the identifier sweep
+// reserves to what a backend actually writes.
+//
+// The sweep is the only reader of RecordHelperNames, and it runs before
+// any file is rendered — so nothing else would notice if the two drifted.
+// A name the sweep reserves that no backend emits is a schema refused for
+// no reason; a name a backend emits that the sweep does not reserve is
+// the redeclaration the sweep exists to prevent, reaching the author as
+// `go build` of generated code.
+//
+// Held against the one derivation both come from, and asserted distinct,
+// because the group's whole job is to occupy six separate identifiers.
+func TestRecordHelperNamesAreTheNamesEmitted(t *testing.T) {
+	pt := graph.RecordOf([]graph.RecordField{{Name: "zip", Type: graph.TypeInt32}})
+	suffix := codegen.RecordHelperSuffix(pt)
+
+	names := codegen.RecordHelperNames(pt)
+	require.ElementsMatch(t, []string{
+		codegen.RecordAliasName(pt),
+		"encode" + suffix,
+		"encode" + suffix + "Ptr",
+		"encode" + suffix + "List",
+		"encode" + suffix + "ListPtr",
+		"decode" + suffix,
+	}, names)
+
+	seen := make(map[string]bool, len(names))
+	for _, n := range names {
+		require.False(t, seen[n], "%q is reserved twice, so the group occupies fewer identifiers than it declares", n)
+		seen[n] = true
+	}
+}

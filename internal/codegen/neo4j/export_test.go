@@ -27,7 +27,6 @@ var (
 	IsDeclaredRecord     = isDeclaredRecord
 	NarrowsANumericWidth = narrowsANumericWidth
 	ParamBindExpr        = paramBindExpr
-	RecordAliasName      = recordAliasName
 	// WriteMethod rather than renderCypherFile, which the AGE side's
 	// equivalent test calls: neo4j's takes a driverTarget, whose type is
 	// unexported, so an external test package cannot supply one.

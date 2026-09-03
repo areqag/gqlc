@@ -907,6 +907,49 @@ func TestQueryTextConstCollidesWithADecodeHelper(t *testing.T) {
 			`and query "DecodeFoo" query-text const "decodeFooQueryText"`)
 }
 
+// TestRecordHelperCollidesWithADecodeHelper pins source 8 of the
+// identifier sweep, and it is source 7's situation exactly one namespace
+// over: both colliding names are generator-owned, so no capture guard can
+// reach the pair.
+//
+// A record's helpers are named from a digest of its canonical encoding,
+// "decode" + "Record" + eight hex digits. An entity's decode helper is
+// named "decode" + the entity struct name, and that struct name comes
+// from a schema label the author writes. So a label spelled exactly
+// Record<the digest of some record the same batch reaches> produces the
+// two declarations under one name — and neither declaration is at fault
+// alone, which is why the message has to name both.
+//
+// The digest is read from RecordHelperSuffix rather than written down.
+// A literal would pin today's hash of today's encoding, so a change to
+// either would leave the label naming nothing and the test passing while
+// witnessing no collision at all — green because the premise evaporated.
+func TestRecordHelperCollidesWithADecodeHelper(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{
+		{Name: "zip", Type: graph.TypeInt32, NotNull: true},
+	})
+	collide := graph.LabelSetKey(codegen.RecordHelperSuffix(rec))
+	carrier := graph.LabelSetKey("Person")
+
+	in := codegen.Input{
+		Schema: schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				carrier: {KeyLabels: carrier, CompleteLabels: carrier, Properties: map[string]schema.Property{
+					"home": {Name: "home", Type: rec, Nullable: false},
+				}},
+				collide: {KeyLabels: collide, CompleteLabels: collide, Properties: map[string]schema.Property{}},
+			},
+		},
+	}
+
+	_, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.ErrorIs(t, err, codegen.ErrIdentifierCollision)
+	require.ErrorContains(t, err,
+		`emitted by both entity decode helper "decode`+string(collide)+`" for entity struct "`+string(collide)+`" `+
+			`and record `+string(rec)+` decode helper "decode`+string(collide)+`"`)
+}
+
 // goldenCorpusGlob reaches the committed golden trees from this package.
 // The conformance suite reads the same corpus through its own root, which
 // an env var can redirect at a copy; this sweep wants the tracked trees

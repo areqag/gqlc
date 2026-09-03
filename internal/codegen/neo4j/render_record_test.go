@@ -327,23 +327,3 @@ func countVerbs(format string) int {
 	}
 	return n
 }
-
-// TestRecordAliasNameIsTheHelperSuffixUnexported holds the carrier's name
-// to its helpers'. They must come from one digest: the alias is what
-// every helper signature names, so a second hash here would emit
-// encodeRecord<a> taking a record<b> that nothing declares.
-func TestRecordAliasNameIsTheHelperSuffixUnexported(t *testing.T) {
-	for _, pt := range []graph.PropertyType{
-		graph.RecordOf(nil),
-		graph.RecordOf([]graph.RecordField{{Name: "a", Type: graph.TypeInt32}}),
-		graph.RecordOf([]graph.RecordField{{Name: "b", Type: graph.TypeString, NotNull: true}}),
-	} {
-		suffix := codegen.RecordHelperSuffix(pt)
-		alias := neo4j.RecordAliasName(pt)
-		require.Equal(t, strings.ToLower(suffix[:1])+suffix[1:], alias)
-		require.NotEqual(t, suffix, alias,
-			"the alias must be unexported: it is an implementation detail of the emitted package, not part of its surface")
-		require.Equal(t, strings.ToLower(suffix), strings.ToLower(alias),
-			"one digest, differing only in the first byte's case")
-	}
-}

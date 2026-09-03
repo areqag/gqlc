@@ -9,25 +9,6 @@ import (
 	"github.com/areqag/gqlc/internal/graph"
 )
 
-// recordAliasName is the unexported type alias one declared record's
-// carrier is spelled as inside the emitted package.
-//
-// An ALIAS, never a definition. The struct text is what every model
-// field, row field and parameter of that record is declared with, and a
-// defined type would be a DIFFERENT Go type from all of them — the
-// helpers would not accept the values the rest of the package holds. The
-// alias exists only so the helper signatures and the `var out` line do
-// not carry a fifth and sixth copy of a multi-line struct text.
-//
-// Derived from RecordHelperSuffix rather than hashing again, so the
-// carrier and its two helpers cannot come from different digests: the
-// suffix is "Record"+hex, and lowering its first byte is what makes the
-// name unexported.
-func recordAliasName(pt graph.PropertyType) string {
-	suffix := codegen.RecordHelperSuffix(pt)
-	return strings.ToLower(suffix[:1]) + suffix[1:]
-}
-
 // renderRecordHelpers emits record_neo4j.go: one carrier alias per
 // declared record encoding the batch reaches, plus whichever of the five
 // conversion helpers the emission sites call.
@@ -42,7 +23,7 @@ func renderRecordHelpers(pkg string, encodings []graph.PropertyType, uses map[gr
 	var body strings.Builder
 	for _, pt := range encodings {
 		use := uses[pt]
-		alias := recordAliasName(pt)
+		alias := codegen.RecordAliasName(pt)
 		suffix := codegen.RecordHelperSuffix(pt)
 		// Every encoding in the set is reached from some position, so
 		// every alias is named by some signature below and none is a

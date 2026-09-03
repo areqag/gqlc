@@ -1277,7 +1277,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 }
 
 // sweepIdentifiers runs spec §4.6's exported-identifier collision sweep
-// across every emitted top-level identifier. Eight sources, in insertion
+// across every emitted top-level identifier. Nine sources, in insertion
 // order (§2.2 / §5.7):
 //
 //  0. the emitter's own scopePackage declarations
@@ -1288,6 +1288,8 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 //  5. `<Method>Row` for two-plus-column queries (C1)
 //  6. edgeUnion interface names, per-query-column (C5)
 //  7. `<bareMethod>QueryText` consts, one per query (C6)
+//  8. record carrier aliases and their five conversion helpers, one
+//     group per declared-record encoding the batch reaches
 //
 // First insertion-order duplicate wins, so a batch-derived name that
 // lands on a fixed declaration reports the fixed declaration. Source 0
@@ -1311,6 +1313,24 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 // author-chosen identifiers against generator-owned ones, and here
 // neither side is author-chosen. Until gqlc-igs4 that meant generate
 // exited 0 and go build reported the redeclaration.
+//
+// Source 8 is the same shape one namespace over. A record's helpers are
+// "decode"/"encode" + "Record" + eight hex digits of its canonical
+// encoding, and source 2's are "decode" + an entity struct name that
+// comes from a schema label — so a label spelled Record<that digest>
+// declares decodeRecord<digest> twice. Neither side is author-chosen
+// either, so again no capture guard reaches it.
+//
+// It is swept per ENCODING rather than per emission site, because the
+// same record reached from four positions is one carrier and one helper
+// group; RecordEncodings has already made that set distinct, so a
+// duplicate arriving here is a collision with another SOURCE and never a
+// record with itself.
+//
+// The sweep is shared, so it enrols the names both backends emit and
+// takes them from codegen.RecordHelperNames rather than re-deriving the
+// spelling — a second copy of the "Record"+hex rule here could pass over
+// a name a backend actually writes.
 //
 // Swept rather than made disjoint by a reserved suffix, because what
 // this sweep asserts is that the generator-owned package-level names are
@@ -1389,6 +1409,24 @@ func sweepIdentifiers(entities []Entity, prepared []Query) error {
 		ident := QueryTextConst(p)
 		if err := insert(ident, fmt.Sprintf("query %q query-text const %q", p.Name, ident)); err != nil {
 			return err
+		}
+	}
+	// Source 8: record carrier aliases and conversion helpers, in
+	// RecordEncodings' canonical-encoding order so the side a collision
+	// reports as "first" does not move between runs.
+	for _, pt := range RecordEncodings(entities, prepared) {
+		alias := RecordAliasName(pt)
+		for _, ident := range RecordHelperNames(pt) {
+			what := "decode helper"
+			switch {
+			case ident == alias:
+				what = "carrier alias"
+			case strings.HasPrefix(ident, "encode"):
+				what = "encode helper"
+			}
+			if err := insert(ident, fmt.Sprintf("record %s %s %q", string(pt), what, ident)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
