@@ -304,8 +304,14 @@ func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 // Coverage witnesses entry; an assertion is what witnesses a verdict, and
 // the corpus driver is where those live.
 func (s *EmissionSuite) requireEveryAgtypeHelperRan(dir string, report corpusrun.Report) {
+	// Not a detector: measured, removing this leaves the census red
+	// anyway, because a missing profile makes every helper read as
+	// unreached. It is here for the REASON. Without it a broken
+	// instrument reports as "38 emitted helpers no test enters", which
+	// blames the corpus for a gap in the measurement of it.
 	s.Require().NotEmpty(report.Cover,
-		"the child run produced no coverage profile, so this census would pass having measured nothing")
+		"the child run produced no coverage profile, so this census cannot tell an unexercised helper "+
+			"from an unmeasured one")
 
 	entered, err := corpusrun.Entered(dir, report.Cover)
 	s.Require().NoError(err)
