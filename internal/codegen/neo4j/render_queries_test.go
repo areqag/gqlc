@@ -11,6 +11,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/neo4j"
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/queryfile"
 )
 
@@ -247,4 +248,74 @@ func methodDecl(t *testing.T, src, name string) *ast.FuncDecl {
 	}
 	t.Fatalf("the emission declares no method %s:\n%s", name, src)
 	return nil
+}
+
+// TestNarrowsANumericWidthIgnoresRecords holds the gate that decides
+// whether the emitted package declares narrowInt and narrowFloat32 at
+// all, against the one shape that looks like a narrowing and is not.
+//
+// A declared record carries WIDER than it is spelled — struct{...} on
+// the emitted surface, map[string]any on the wire — which is the exact
+// test every arm of this gate uses to recognise an integer that needs
+// checking. But a record's narrowing is its own emitted helper, so a
+// schema whose only wide width is a record must be handed neither
+// numeric helper. This is not a cosmetic over-emission: an unexported
+// function nothing calls fails the emitted package's own lint fence, so
+// the wrong answer reds a fixture rather than adding a dead line.
+//
+// The controls are the whole test. A gate that had stopped answering
+// yes to anything would pass the record rows alone, so int32 and
+// float32 are asserted beside them, and each of the two helpers is
+// asserted separately because they are gated separately — the `math`
+// import rides on the float one.
+func TestNarrowsANumericWidthIgnoresRecords(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{{Name: "zip", Type: graph.TypeInt32, NotNull: true}})
+	recText, ok := neo4j.TypeMap{}.Property(rec)
+	require.True(t, ok, "this driver carries a record, or the rows below are about an unrepresentable width")
+
+	field := func(goType string, width graph.PropertyType) []codegen.Entity {
+		return []codegen.Entity{{Name: "Blob", Fields: []codegen.EntityField{
+			{PropName: "p", Field: "P", GoType: goType, Width: width},
+		}}}
+	}
+
+	tests := []struct {
+		name     string
+		entities []codegen.Entity
+		ints     bool
+		floats   bool
+	}{{
+		// The row this test exists for. The record's own field is an
+		// INT32, and a record does NOT narrow it through narrowInt at
+		// the property site — the emitted decode helper for the record
+		// does, and it is emitted with its own gate.
+		name:     "a record does not demand either numeric helper",
+		entities: field(recText, rec),
+	}, {
+		name:     "a list of records does not either",
+		entities: field("[]"+recText, graph.ListOf(rec, false)),
+	}, {
+		name:     "an integer width still demands narrowInt",
+		entities: field("int32", graph.TypeInt32),
+		ints:     true,
+	}, {
+		name:     "float32 still demands narrowFloat32 and not narrowInt",
+		entities: field("float32", graph.TypeFloat32),
+		floats:   true,
+	}, {
+		// A width already equal to its own carrier has never demanded
+		// either, and it is here as the negative control that is NOT a
+		// record: it proves the two record rows above are not simply
+		// riding the "nothing to narrow" answer everything gets.
+		name:     "a width that is its own carrier demands neither",
+		entities: field("string", graph.TypeString),
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ints, floats := neo4j.NarrowsANumericWidth(tt.entities, nil)
+			require.Equal(t, tt.ints, ints, "narrowInt")
+			require.Equal(t, tt.floats, floats, "narrowFloat32")
+		})
+	}
 }

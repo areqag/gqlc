@@ -492,7 +492,7 @@ func paramBindExpr(f codegen.Param, access string) string {
 	}
 	carrier := driverCarrier(f.GoType)
 	if carrier != f.GoType {
-		return widenExpr(f.GoType, access)
+		return widenExpr(f.GoType, f.Width, access)
 	}
 	return access
 }
@@ -681,7 +681,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
 		if checked {
 			fmt.Fprintf(b, "%sif !isNil {\n", indent)
-			fmt.Fprintf(b, "%s\tv, err := %s\n", indent, narrowCall(f.GoType, varName))
+			fmt.Fprintf(b, "%s\tv, err := %s\n", indent, narrowCall(f.GoType, f.Width, varName))
 			fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\t%s\n%s\t}\n", indent, indent, fail, indent)
 			fmt.Fprintf(b, "%s\t%sPtr = &v\n%s}\n", indent, varName, indent)
 		} else {
@@ -698,7 +698,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	if checked {
 		valueExpr = varName + "n"
-		fmt.Fprintf(b, "%s%s, err := %s\n", indent, valueExpr, narrowCall(f.GoType, varName))
+		fmt.Fprintf(b, "%s%s, err := %s\n", indent, valueExpr, narrowCall(f.GoType, f.Width, varName))
 		fmt.Fprintf(b, "%sif err != nil {\n%s\t%s\n%s}\n", indent, indent, fail, indent)
 	}
 	b.WriteString(indent)
@@ -918,7 +918,7 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		case isTemporalCarrier(e.GoType):
 			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, narrowExpr(e.GoType, "v"))
 		case carrier != e.GoType:
-			fmt.Fprintf(b, "%svn, err := %s\n", indent, narrowCall(e.GoType, "v"))
+			fmt.Fprintf(b, "%svn, err := %s\n", indent, narrowCall(e.GoType, e.Width, "v"))
 			fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 			fmt.Fprintf(b, "%s%s = append(%s, vn)\n", indent, accVar, accVar)
 		default:

@@ -545,6 +545,29 @@ func TestDriverCarrier(t *testing.T) {
 		// what the element is would answer these two differently.
 		{"[][]byte", "[]any"},
 		{"[][]any", "[]any"},
+
+		// The record family. A DECLARED record carries as the anonymous
+		// struct and widens to map[string]any, which is the shape the
+		// driver hands a Cypher map back as — the same relationship
+		// every slice above has to []any, and for the same reason: the
+		// driver has no narrower carrier, so the declared shape is the
+		// emission's to build.
+		//
+		// RECORD<ANY> is the pair to it and reaches the DEFAULT arm
+		// instead: map[string]any is already what it carries as, so its
+		// carrier is itself and every decode site assigns it bare. Its
+		// row is up with the pass-through carriers rather than repeated
+		// here, because it is not a record decision — the default arm
+		// answers it, and it would answer a MAP scalar the same way.
+		// What makes the pair worth naming is that the two are one
+		// keystroke apart in a schema and isRecordStruct is the whole of
+		// what separates them.
+		{"struct {\n\tF *string\n}", "map[string]any"},
+		// Both in a list, where the "[]" prefix outranks everything: a
+		// list is walked per element, so what the elements were is not a
+		// carrier question here.
+		{"[]struct {\n\tF *string\n}", "[]any"},
+		{"[]map[string]any", "[]any"},
 	}
 
 	// The obligation is membership over what the TABLE can emit, not a
@@ -591,6 +614,20 @@ func TestDriverCarrier(t *testing.T) {
 // The property walk reuses graphPropertyTypes, the AST read of
 // internal/graph's own const specs (decoder_test.go), so a width declared
 // upstream reaches this obligation without anyone adding it here.
+//
+// A DECLARED record is the one axis that walk cannot reach, and it is
+// added by hand below. graph.RecordOf builds a width at run time out of
+// fields an author wrote, so there is no const spec to read and no
+// vocabulary to enumerate — a table over every declared record is a
+// table over every schema anyone will ever write. One record is enough
+// for what this obligation is for: driverCarrier answers records on the
+// SHAPE of the carrier text (isRecordStruct) and not on the fields, so
+// a second record with different fields would exercise the same branch
+// and owe a second hand-written row for it.
+//
+// RECORD<ANY> is not here because it needs no help: it is a graph const,
+// so the walk above already reaches it, and its carrier is
+// map[string]any either way.
 func emittedGoTypes(t *testing.T) []string {
 	t.Helper()
 	seen := map[string]bool{}
@@ -609,6 +646,11 @@ func emittedGoTypes(t *testing.T) []string {
 	for _, k := range resolver.TemporalValues() {
 		add(neo4j.TypeMap{}.Temporal(k))
 	}
+	// The declared-record axis, one row, for the reason in the doc
+	// comment above: there is no vocabulary of declared records to walk.
+	sweptRecord := graph.RecordOf([]graph.RecordField{{Name: "f", Type: graph.TypeString}})
+	add(neo4j.TypeMap{}.Property(sweptRecord))
+	add(neo4j.TypeMap{}.Property(graph.ListOf(sweptRecord, false)))
 	require.NotEmpty(t, seen,
 		"the derivation read no carrier off the type table, so the obligation it feeds is satisfied by any table at all")
 	out := make([]string, 0, len(seen))

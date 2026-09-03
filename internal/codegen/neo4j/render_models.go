@@ -307,7 +307,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 			fmt.Fprintf(b, "\t\tnarrowed := %s\n", narrowExpr(f.GoType, "s"))
 			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
 		case carrier != f.GoType:
-			fmt.Fprintf(b, "\t\tnarrowed, err := %s\n", narrowCall(f.GoType, "s"))
+			fmt.Fprintf(b, "\t\tnarrowed, err := %s\n", narrowCall(f.GoType, f.Width, "s"))
 			fmt.Fprintf(b, "\t\tif err != nil {\n")
 			fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)
 			b.WriteString("\t\t}\n")
@@ -332,7 +332,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowExpr(f.GoType, value))
 	case carrier != f.GoType:
 		narrowed := value + "n"
-		fmt.Fprintf(b, "\t%s, err := %s\n", narrowed, narrowCall(f.GoType, value))
+		fmt.Fprintf(b, "\t%s, err := %s\n", narrowed, narrowCall(f.GoType, f.Width, value))
 		b.WriteString("\tif err != nil {\n")
 		fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)
 		b.WriteString("\t}\n")
@@ -388,6 +388,34 @@ func isSliceType(goType string) bool {
 	return strings.HasPrefix(goType, "[]") && goType != "[]byte" && goType != "[]any"
 }
 
+// isRecordStruct reports whether a Go type text is the anonymous struct
+// a DECLARED record carries as. It is the shape question — "does this
+// value arrive as a driver map that has to be checked into a struct" —
+// and it is asked of the text because that is the currency this whole
+// render layer trades in, alongside isSliceType and isTemporalCarrier.
+//
+// What it deliberately does NOT answer is WHICH record, because the text
+// cannot say: the mapping does not run backwards, and there is no
+// PropertyType to recover from `struct {\n\tCity *string\n}` and
+// therefore no helper name. That is why narrowCall and widenExpr take
+// the width the prepared surface carries rather than sniffing it out of
+// here.
+//
+// RECORD<ANY> is NOT a record struct by this test, and that is the whole
+// point of the distinction. It carries as map[string]any, which is
+// already the driver's own shape, so it needs no check and no helper —
+// driverCarrier answers it through the default arm and the decode sites
+// see carrier == goType and assign it bare.
+//
+// A prefix test rather than a parse: codegen.RecordStructText is the
+// only producer of a `struct`-prefixed type text in this pipeline, and
+// recordtype_test.go pins the two forms it emits (`struct{}` for a
+// record with no fields, `struct {\n...` otherwise). Every other
+// emitted Go type is an identifier, a slice of one, or a qualified name.
+func isRecordStruct(goType string) bool {
+	return strings.HasPrefix(goType, "struct")
+}
+
 // ridesADriverCarrier reports whether a property's decode reaches the
 // driver's constrained generics at all. A property of no declared shape
 // does not. `any` is a member of neither neo4j.PropertyValue nor
@@ -435,7 +463,7 @@ func writeSliceNarrow(b *strings.Builder, e codegen.Entity, f codegen.EntityFiel
 	case isTemporalCarrier(elem):
 		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, narrowExpr(elem, "v0"))
 	case carrier != elem:
-		fmt.Fprintf(b, "%sv0n, err := %s\n", body, narrowCall(elem, "v0"))
+		fmt.Fprintf(b, "%sv0n, err := %s\n", body, narrowCall(elem, f.Width.Elem(), "v0"))
 		fmt.Fprintf(b, "%sif err != nil {\n", body)
 		fmt.Fprintf(b, "%s\t%s element %%d: %%w\", %q, i0, err)\n", body, fail, f.PropName)
 		fmt.Fprintf(b, "%s}\n", body)

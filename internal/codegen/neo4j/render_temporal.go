@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/graph"
 )
 
 // temporalUse records which conversion directions one neutral carrier
@@ -136,11 +137,31 @@ func narrowExpr(goType, src string) string {
 // The caller emits the error plumbing, because what a failed decode
 // returns and how it is worded differ per site.
 //
-// Only the numeric widths reach here. A temporal carrier is a shape
-// change rather than a range question — a dbtype.Date holds exactly what
-// a Date holds — so narrowExpr keeps those and they have no failure to
-// report.
-func narrowCall(goType, src string) string {
+// The numeric widths and the declared records reach here, and they are
+// one lane at every call site because they answer the same shape: the
+// driver hands back something wider than the schema declared, and the
+// check can fail. A temporal carrier is a shape change rather than a
+// range question — a dbtype.Date holds exactly what a Date holds — so
+// narrowExpr keeps those and they have no failure to report.
+//
+// The record arm is why this takes a width at all. Its helper is named
+// from the canonical encoding (codegen.RecordHelperSuffix), and goType
+// is the anonymous struct text, which does not run backwards into a
+// PropertyType — so the name cannot be derived from the argument every
+// other arm here uses. width is the one the prepared surface carries
+// beside the carrier it was derived from (spec §6).
+//
+// RECORD<ANY> is KindRecord too and must not reach the record arm: it
+// would name a helper codegen.RecordEncodings never emits. The kind
+// alone does not exclude it, so the carrier text is asked as well —
+// RECORD<ANY> carries as map[string]any, not as a struct. Every call
+// site also guards on driverCarrier(goType) != goType, which excludes it
+// a second time; the belt here is what stops a new call site from having
+// to know that.
+func narrowCall(goType string, width graph.PropertyType, src string) string {
+	if width.Kind() == graph.KindRecord && isRecordStruct(goType) {
+		return fmt.Sprintf("decode%s(%s)", codegen.RecordHelperSuffix(width), src)
+	}
 	if goType == "float32" {
 		return fmt.Sprintf("narrowFloat32(%s)", src)
 	}
@@ -159,6 +180,14 @@ func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) (
 	visit := func(goType string) {
 		leaf := leafType(goType)
 		if leaf == driverCarrier(leaf) || isTemporalCarrier(leaf) {
+			return
+		}
+		if isRecordStruct(leaf) {
+			// A record also carries wider than it is declared, so it
+			// reaches this far — but its narrowing is its own emitted
+			// helper, not narrowInt. Without this arm every schema
+			// declaring a record would be handed narrowInt with no
+			// caller, which the emitted package's lint fence fails.
 			return
 		}
 		if leaf == "float32" {
@@ -237,10 +266,20 @@ func narrowFloat32(v float64) (float32, error) {
 // widenExpr renders the parameter-binding expression for a non-nullable
 // value of the emitted Go type. The mirror of narrowExpr: narrow
 // integers and float32 widen by a Go conversion into the carrier the
-// driver marshals; neutral temporals route through from<X>.
-func widenExpr(goType, access string) string {
+// driver marshals; neutral temporals route through from<X>; a declared
+// record routes through its own encode helper.
+//
+// The record arm is not a conversion and could not be one. map[string]any
+// is not convertible from an anonymous struct in Go — the widening is a
+// field-by-field build, which is what the helper holds. It takes the
+// width for the reason narrowCall does: the helper's name comes from the
+// canonical encoding, and the struct text cannot be read back into one.
+func widenExpr(goType string, width graph.PropertyType, access string) string {
 	if isTemporalCarrier(goType) {
 		return fmt.Sprintf("from%s(%s)", goType, access)
+	}
+	if width.Kind() == graph.KindRecord && isRecordStruct(goType) {
+		return fmt.Sprintf("encode%s(%s)", codegen.RecordHelperSuffix(width), access)
 	}
 	return fmt.Sprintf("%s(%s)", driverCarrier(goType), access)
 }

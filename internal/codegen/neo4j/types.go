@@ -211,9 +211,21 @@ func (typeMap) Scalar(k resolver.Scalar) string {
 // as []any holding strings, and narrowing it is per element rather than
 // whole. []byte is the exception because BYTES is the one width the
 // driver does hand back as a Go slice of its own.
+//
+// A declared record widens to map[string]any, the shape the driver
+// already hands a Cypher map back as, and the struct is built from it
+// field by field — the same relationship a slice has to []any, and for
+// the same reason: the driver has no narrower carrier to offer, so the
+// declared shape is this package's to build. RECORD<ANY> needs no arm
+// because map[string]any is what it already carries as, and the default
+// arm answering it with itself is what tells every decode site to assign
+// it bare.
 func driverCarrier(goType string) string {
 	if isSliceType(goType) {
 		return "[]any"
+	}
+	if isRecordStruct(goType) {
+		return "map[string]any"
 	}
 	switch goType {
 	case "int", "int8", "int16", "int32", "int64",
