@@ -328,6 +328,7 @@ func ScalarValues() []Scalar {
 // it. Every declared member now has its own arm, so the default answers for
 // the undeclared alone.
 func (s Scalar) String() string {
+	//gqlc:default-ok it answers for undeclared values alone, and the arm every declared member needs is checked by name in TestScalarStringAnswersForDeclaredKindsAlone rather than by exhaustive
 	switch s {
 	case ScalarBool:
 		return "bool"
@@ -428,6 +429,7 @@ func TemporalValues() []Temporal {
 // declared member now has its own arm, so the default answers for the
 // undeclared alone.
 func (t Temporal) String() string {
+	//gqlc:default-ok it answers for undeclared values alone, and the arm every declared member needs is checked by name in TestTemporalStringerAnswersForDeclaredKindsAlone rather than by exhaustive
 	switch t {
 	case TemporalDate:
 		return "date"
