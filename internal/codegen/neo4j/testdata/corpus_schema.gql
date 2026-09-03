@@ -116,12 +116,34 @@
 // the mutant verified present in the tree, and all 14 local gate arms
 // passed — which is the state this row ends.
 //
-// LIST<DATE> and not LIST<DURATION> leaves toDuration's decode direction
-// standing on golden text alone. The walk's temporal case is one case
-// whichever carrier reaches it, so nothing here is left unreached by the
-// choice, but the helpers are emitted per carrier and toDuration is
-// emitted into this corpus and called by nothing. bd gqlc-0apvv carries
-// that.
+// lapses is the SECOND carrier through that same third element case, and
+// it is a row about the HELPER rather than about the walk (bd gqlc-0apvv).
+// marks discharged the walk: its temporal case is one case whichever
+// carrier reaches it. What marks left standing is that the to<X> bodies
+// are emitted PER CARRIER (temporalDecodeBody, render_temporal.go), so a
+// helper shown to work for one carrier has not been run for another.
+// Slot.spans already made temporalUses mark Duration decode=true, so
+// toDuration was emitted into this corpus and compiled here — and called
+// by nothing, because nothing projects Slot.
+//
+// Measured 2026-09-03, goldens REGENERATED first on every row. Before
+// lapses, swapping Months and Days in temporalDecodeBody's Duration arm
+// ran the WHOLE suite green — 28 packages, no failures — and the six
+// neo4j temporal goldens simply absorbed the mutant's text, which is what
+// a golden does. After lapses that same swap reddens
+// TestListyNarrowsEachElement on the Lapses assertion.
+//
+// The two elements are chosen against the four components toDuration
+// copies. The first has Months, Days, Seconds and Nanos pairwise distinct
+// and all non-zero, so any component read off the wrong field disagrees,
+// and so does a dropped one. The second reverses the order of Months and
+// Days (14 > 3, then 1 < 200) so a swap cannot be masked by a coincidental
+// ordering, and puts the largest legal Nanos beside a small Seconds, so a
+// helper folding nanos into seconds or truncating them disagrees too.
+//
+// The three remaining carriers — LocalTime, Time, LocalDateTime — are not
+// emitted by this corpus at all, so there is nothing here to call. That is
+// a different gap from this one and is not filed as this row's residue.
 //
 // Edgier is declared for the query columns rather than for a width the
 // node types had left unreached. A whole-entity column commits to a
@@ -186,6 +208,7 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
         blobs  :: LIST<BYTES> NOT NULL,
         stamps :: LIST<TIMESTAMP> NOT NULL,
         marks  :: LIST<DATE> NOT NULL,
+        lapses :: LIST<DURATION(DAY TO SECOND)> NOT NULL,
         depths :: LIST<FLOAT32>
     }),
     (:Bin {
