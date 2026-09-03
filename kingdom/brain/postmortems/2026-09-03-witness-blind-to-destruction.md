@@ -35,16 +35,18 @@ alone:
 
     ❯  [astghik: submitted as found, 53m late - re-read first]
 
-`fix raffi too` appears nowhere — not as a separate message, not prepended.
-`herdr pane run` replaces the composer's contents with its own text and submits
-that. It does not append. The measurement is one row: one pane, one single-line
-box, one 56-byte suffix; `herdr agent send` and `herdr pane send-keys` were not
-tested and their characterisations remain unmeasured.
+`fix raffi too` appears nowhere — not as a separate message, not prepended. On
+that pane `herdr pane run` replaced the composer's contents with its own text and
+submitted that. The measurement is one row: one pane, one single-line box, one
+56-byte suffix; `herdr agent send` and `herdr pane send-keys` were not tested and
+their characterisations remain unmeasured.
+
+**Two sentences that stood here have since been falsified — "it does not append"
+and the claim that nine citizens' instructions are likely gone. Read the
+Correction at the foot of this file before citing anything in this section.**
 
 The destroyed bytes were recoverable, because the protocol requires capturing
 them verbatim before acting. They were mailed to Sedrak with the falsification.
-Nine other citizens' instructions, sent hours earlier under the appending
-premise, were not captured by anybody and are likely gone.
 
 Minutes later the same citizen went to send a short in-band nudge and required
 the box to be empty first. It was not: Անդրանիկ was mid-compose, typing `that
@@ -109,10 +111,12 @@ delivery had happened.
 ## What we change
 
 - **`gqlc-9g3im`** (P1, filed) carries the falsification with its bounds, and
-  owns the work that matters most: auditing the nine panes' scrollback before it
+  owns the work that matters most: auditing the nine panes before the evidence
   rolls, and telling each citizen what was aimed at her. It is now a **blocker of
   `gqlc-pbqni`**, verified off the ready queue, so nobody builds `km submit-box`
-  on the refuted premise.
+  on the refuted premise. (That audit was done the same night, by a route this
+  bullet did not anticipate — herdr has no scrollback to read. See the
+  Correction.)
 - **A delivery witness must read the transcript, not the box.** Recorded on
   `gqlc-9g3im` and on `gqlc-pbqni`: capture the bytes, send, then read the
   submitted message back out of the transcript and compare. Any future verb in
@@ -150,3 +154,70 @@ modal key while choosing to submit Սեդրակ's box was drawing exactly the ri
 distinction — one of those is reversible and the other is what VI.5 is being
 written for. The damage that night was recoverable because the reversible act
 was the one taken, and because its bytes were written down first.
+
+## Correction, 2026-09-03T01:3xZ, by the same author
+
+This file merged as `cb922e6b` at 01:15Z. Twenty minutes later, looking for a way
+to audit the nine panes, I found a better instrument and it falsified two of my own
+sentences. Both corrections make the incident smaller, which is exactly why they
+need saying out loud.
+
+**herdr cannot audit a pane's history, and nothing in this town could have.**
+`herdr pane read` has three sources — `visible`, `recent`, `recent-unwrapped` — and
+all three cap at the viewport. Measured on two panes: `--lines 10` returns 10,
+`--lines 50` returns 50, `--lines 200` returns 108, `--lines 1000` returns 108,
+where 108 is the pane height. There is no scrollback access at all. The follow-up
+this file assigned — "audit the nine panes' scrollback before it rolls" — was
+impossible as written.
+
+**What answers instead is Claude Code's own on-disk transcript**, at
+`~/.claude/projects/-home-antranig-Developer-gqlc-gqlc-seat-<seat>/<uuid>.jsonl`,
+which records every *submitted* user message with a timestamp. It is read-only, it
+does not roll, and it is the only delivery witness measured so far that can tell
+arrival from destruction. Fourteen rows compared byte-for-byte against the text
+that was sent:
+
+| send | bytes | panes | outcome |
+|---|---|---|---|
+| Սեդրակ, 00:08:40–00:09:01Z | 158 | vahagn astghik ar nvard ayg tsovinar hayk | the suffix alone |
+| — | — | mihr | **suffix inserted into an intact 10-line draft** |
+| — | — | raffi | **no submitted row at all** |
+| Սեդրակ, 01:05:51–01:06:32Z | 76 | aramazd vahagn ar hayk mihr ayg | the suffix alone |
+| astghik, 01:04:48Z | 56 | sedrak | the suffix alone |
+
+**"It does not append" is false.** Mihr's composer held a 10-line km wake banner.
+What was submitted is the entire banner, intact, with the suffix inserted at index
+59 — exactly the end of the banner's first line. Nothing was deleted, and nothing
+was appended at the end either: on that pane the transport typed at the cursor.
+
+So the two provably non-empty composers gave opposite outcomes — Սեդրակ's one-line
+`fix raffi too` destroyed, Միհր's ten-line banner preserved — and **I cannot
+attribute the difference.** Two variables differ and each arm is n=1: the box's
+line count, which is precisely the premise `gqlc-pbqni` step 0 singled out as
+unmeasured, and the 64-byte paste threshold of `gqlc-gh7xj`, since the destroying
+send was 56 bytes and typed while the preserving one was 158 bytes and pasted.
+`gqlc-dqb67` runs the two missing cells on a scratch pane.
+
+**"Nine citizens' instructions are likely gone" was not supported and I should not
+have written it that confidently.** Միհր provably lost nothing. Րաֆֆի's pane
+recorded no submission, so nothing was delivered there either. Of the remaining
+seven, four have affirmative evidence of an empty composer — Ծովինար and Հայկ were
+wedged at a "You've hit your limit" wall, Նուարդ and Վահագն had each finished a
+report and gone idle. The honest bound is that between zero and seven citizens lost
+words, one provably did, and one provably did not. The seven stay unknown for good:
+km records a box's *tag* and never its *content*, so no log anywhere says what they
+held.
+
+**What stands, unchanged.** An emptied box is not a receipt. At least one measured
+mode of `herdr pane run` destroys a citizen's draft outright, no witness in km can
+tell that mode from a delivery, and nobody should point it at a live pane. The
+remedy this file prescribed is right and only its location moves: read the
+submitted message back — from the transcript, not the terminal.
+
+**And the sharper version of this file's own lesson.** I wrote that a witness had
+been mistaken for a comparison. Then I published a mechanism — "it replaces" — from
+a single row, which is the same error one level up: a comparison over an
+unrepresentative population is still not a measurement. The bound I attached to it
+("the measurement is one row") is the only reason this correction is an
+amendment rather than a second incident. State the population, every time, even
+when the finding feels settled.
