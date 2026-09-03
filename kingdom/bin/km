@@ -61,6 +61,9 @@ km — the machinery of the Թագաւորութիւն
   km up | down                   raise / close the town's herdr workspace and its per-seat agents
   km wake <seat> [--bead ID] [--reason TEXT]
   km sleep [--seat NAME]         end the current seat's workday
+  km arrived <seat> [--text T] [--since WHEN]
+                                 did what you sent reach her? read-only, from her
+                                 own transcript; no --text lists her last 5 asks
   km mail send <to> -s SUBJ [-m BODY]   (body on stdin if no -m)
   km mail inbox [--seat NAME] | read <id> | sent
   km dispatch                    route ready beads to free seats (timer)
@@ -1047,8 +1050,115 @@ box_authorship() { # <raw box text> -> km | foreign | mixed
     echo foreign
 }
 
+# Where the seat's own Claude transcripts live. The munge replaces every '/'
+# and '.' in the working directory with '-'. Measured on this host against two
+# real paths: /home/antranig/Developer/gqlc/gqlc-seat-arpine and
+# /tmp/tmp.59bModBpxO. Underscore behaviour is unmeasured, and no seat path
+# carries one.
+seat_transcript_dir() { # <seat> -> path, which need not exist
+    echo "$HOME/.claude/projects/$(seat_worktree "$1" | sed 's|[/.]|-|g')"
+}
+
+# Every SUBMITTED user message in the seat's transcripts at or after <iso>, one
+# compact JSON object per line: {ts, text, file}.
+#
+# The text is extracted the way Claude writes it: a string content is itself, an
+# array content is the concatenated .text of its type=="text" blocks. So a
+# tool_result row extracts empty and can never match a non-empty ask, which is
+# why the empty ones are dropped here rather than at the comparison.
+#
+# THE CANDIDATE FILES ARE RE-LISTED ON EVERY CALL, deliberately, and no single
+# file is resolved up front. herdr's agent_session pointer was measured stale on
+# 3 of 14 panes — each naming a session that had ended while a live successor was
+# being written — and newest-mtime is an inference any stray `claude` run in the
+# seat's cwd defeats. A file that gains the row also gains the mtime, so the ROW
+# identifies the session rather than the other way round (bd gqlc-m4e57 D1).
+transcript_user_rows() { # <dir> <t_send epoch> <iso since> -> JSON lines
+    local dir=$1 t_send=$2 iso=$3 f
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        jq -c --arg since "$iso" --arg f "$f" '
+            select(.type == "user" and .timestamp >= $since)
+            | (.message.content) as $c
+            | (if ($c | type) == "string" then $c
+               else [($c[]? | select(.type == "text") | .text)] | join("")
+               end) as $t
+            | select($t != "")
+            | {ts: .timestamp, text: $t, file: $f}
+        ' "$f" 2>/dev/null
+    done < <(find "$dir" -maxdepth 1 -type f -name '*.jsonl' \
+        -newermt "@$(awk -v t="$t_send" 'BEGIN { printf "%d", t - 1 }')" 2>/dev/null)
+}
+
+# Did these exact bytes reach the RECEIVING process? Prints "<ts>\t<file>" and
+# returns 0 when a matching row appears inside the window.
+#
+# The directory is a PARAMETER so a fixture needs no HOME mocking.
+#
+# THE TIMESTAMP WINDOW IS LOAD-BEARING, not a tidiness. Identical asks recur
+# verbatim — one nudge string appears 41 times across the roster's transcripts —
+# so content equality alone would happily witness an OLD delivery of the same
+# text and report a send that never arrived as delivered. t_send is captured
+# before the typing starts, and the row's timestamp is written by the receiving
+# process after km's Enter on the same host clock, so ts >= t_send needs no skew
+# allowance. The 1s slack on the mtime filter covers mtime's whole-second
+# granularity and nothing else.
+#
+# THE COMPARISON IS WHOLE-STRING EQUALITY. Never a substring or glob test: a
+# `*"$want"*` shape passes over MANGLED-$want, which is the standing town rule.
+# No trailing-newline tolerance is needed either — measured over all 138 '[km] '
+# rows in every seat transcript, from 52B to 582B, ZERO end with a newline,
+# because km sends the text burst and the Enter separately so the CR never rides
+# the burst.
+#
+# String comparison on the timestamps is correct because they are fixed-width
+# UTC ISO8601 to milliseconds; that shape is what every row measured on this
+# host carries.
+transcript_witness() { # <dir> <text> <t_send epoch> <timeout s> -> 0 witnessed, 1 not
+    local dir=$1 text=$2 t_send=$3 timeout=$4
+    local iso deadline rows hit other
+    [ -d "$dir" ] || return 1
+    iso=$(date -u -d "@$t_send" +%Y-%m-%dT%H:%M:%S.%3NZ 2>/dev/null) || return 1
+    deadline=$(awk -v a="$t_send" -v b="$timeout" 'BEGIN { printf "%.3f", a + b }')
+    while :; do
+        rows=$(transcript_user_rows "$dir" "$t_send" "$iso")
+        if [ -n "$rows" ]; then
+            # `first(...)` and not `(.[0] | ...) // empty`: interpolating a null
+            # yields the four-character string "null", which is truthy, so that
+            # spelling reports a hit on every miss. Measured — it made the
+            # witness certify a send it had never seen.
+            hit=$(printf '%s\n' "$rows" | jq -rs --arg want "$text" '
+                first(.[] | select(.text == $want) | "\(.ts)\t\(.file)") // empty')
+            if [ -n "$hit" ]; then
+                printf '%s\n' "$hit"
+                return 0
+            fi
+        fi
+        awk -v a="$(date +%s.%N)" -v b="$deadline" 'BEGIN { exit !(a < b) }' || break
+        sleep 0.5
+    done
+    # A DIAGNOSTIC, NOT A VERDICT. A message submitted in this window that is not
+    # the ask is the tell that something else reached the composer, and it is the
+    # single most useful thing to put in front of whoever reads the UNKNOWN.
+    #
+    # "transcript search" and not "send witness": `km arrived` calls this to
+    # answer a question about a send some OTHER process made, and there the
+    # second label swore to a send this run had not performed.
+    if [ -n "${rows:-}" ]; then
+        other=$(printf '%s\n' "$rows" | jq -rs 'first(.[] | "\(.ts) \(.text[0:80])") // empty')
+        [ -z "$other" ] ||
+            echo "km: transcript search: something else was submitted in this window: $other" >&2
+    fi
+    return 1
+}
+
 # history: kingdom/brain/km-notes.md#send_line
-send_line() { # <target> <text> -> 0 delivered, 1 not
+#
+# The TRANSPORT half: everything up to and including the Enter, and every refusal
+# that can be decided from the pane alone. Every verdict it reaches is a claim
+# about the TERMINAL. send_line wraps it with the claim about the RECEIVING
+# PROCESS, which is a different question and was the one nobody could answer.
+send_line_to_pane() { # <target> <text> -> 0 submitted per the box, 1 not
     local target=$1 text=$2 seat pane out witnessed box boxrc echoed
     seat=${target##*:}
     # Before the pane is resolved: this is about km's own text, not the seat.
@@ -1163,6 +1273,49 @@ send_line() { # <target> <text> -> 0 delivered, 1 not
     return 1
 }
 
+# <target> <text> -> 0 DELIVERED, 1 NOT SENT, 2 SENT-UNWITNESSED
+#
+# EXIT 2 IS NEW AND IT IS NOT A FAILURE. Every witness inside send_line_to_pane
+# watches the terminal, and an emptied box is the one observation a delivery and
+# a send that vanished have in common: on 2026-09-02 one pane's box emptied,
+# every witness km had reported success, and nothing whatever reached that
+# session's transcript (kingdom/brain/postmortems/2026-09-03-witness-blind-to-
+# destruction.md, bd gqlc-m4e57). So a 0 from the pane half is only a claim about
+# the terminal, and the transcript decides.
+#
+# CALLERS MUST BRANCH ON 2 EXPLICITLY. `if send_line ...` reads 2 as falsy, and
+# the else-arm of every such caller says some version of "nothing was sent" —
+# which is precisely the false sentence this change exists to stop. Non-delivery
+# that IS positively witnessed still returns 1, from the pane half, because there
+# the box itself is the evidence and the transcript adds nothing.
+#
+# UNKNOWN RATHER THAN FAILED, because absence of the row has at least three
+# causes — flush latency past the timeout, a session writing somewhere this
+# search does not cover, and genuine loss — and declaring failure commands a
+# re-send, which on the first two causes delivers the ask twice.
+send_line() {
+    local target=$1 text=$2 seat t_send rc dir timeout
+    seat=${target##*:}
+    # Before the typing, so no row written during the send can fall outside the
+    # window that is supposed to contain it.
+    t_send=$(date +%s.%N)
+    send_line_to_pane "$target" "$text"
+    rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+    # /exit IS EXEMPT, on a measured negative: across every transcript of all 15
+    # seats, and against hundreds of km sleeps, ZERO user rows hold a bare
+    # "/exit". A submitted slash command writes no user row at all, so the
+    # transcript cannot witness one and its absence would be reported as UNKNOWN
+    # every single time. Its witness stays what cmd_sleep and cmd_down already
+    # poll: the session ends.
+    [ "$text" = "/exit" ] && return 0
+    timeout=$(cfg_seconds send transcript_witness_seconds 20)
+    dir=$(seat_transcript_dir "$seat")
+    transcript_witness "$dir" "$text" "$t_send" "$timeout" >/dev/null && return 0
+    echo "km: send to $seat: the text was typed, the Enter was pressed, and the box emptied, but no transcript row holding these bytes appeared in $dir within ${timeout}s — delivery is UNKNOWN, not failed. Do not re-send blind: a delivered-but-unwitnessed ask re-sent is a double delivery. Read the pane, or run 'km arrived $seat --text \"$text\"' once the seat has had a moment (bd gqlc-m4e57)" >&2
+    return 2
+}
+
 # Kept as a query name for callers that want to render the pane to a human.
 # Under herdr the pane's visible buffer is what the operator sees in the TUI.
 seat_pane() { # <seat> -> the pane's visible buffer
@@ -1255,7 +1408,7 @@ seat_prompt_holds_nudge() { return 1; }
 # Send + confirm was the tty-workaround shape. The confirmation lives inside
 # send_line now: it types, submits, and says which of the two failed. This is a
 # naming wrapper over that and nothing more.
-seat_nudge() { # <seat> <text> -> 0 delivered, 1 refused
+seat_nudge() { # <seat> <text> -> 0 delivered, 1 refused, 2 sent-unwitnessed
     send_line "$1" "$2"
 }
 
@@ -1269,6 +1422,17 @@ cfg_minutes() { # <section> <key> <default minutes> -> seconds
     v=$(cfg "$1" "$2")
     case "$v" in '' | *[!0-9]*) v=$3 ;; esac
     echo $((v * 60))
+}
+
+# The same reader in the unit the send witness is written in. Fail-open for the
+# same reason: a config typo that stopped the dispatcher would be a far larger
+# failure than a wait of the wrong length, and the worst a wrong value does here
+# is widen or narrow that wait.
+cfg_seconds() { # <section> <key> <default seconds> -> seconds
+    local v
+    v=$(cfg "$1" "$2")
+    case "$v" in '' | *[!0-9]*) v=$3 ;; esac
+    echo "$v"
 }
 
 # How many times the idle pass asks ONE seat in a single episode before it stops
@@ -1538,7 +1702,7 @@ wake_queue_add() { # <seat> <reason>
 }
 
 cmd_wake() {
-    local seat=${1:-} rc
+    local seat=${1:-} rc nudge_rc
     shift || true
     is_seat "$seat" || die "wake: unknown seat ${seat:-<none>}"
     local reason=""
@@ -1560,11 +1724,23 @@ cmd_wake() {
             # costs a delay and not the message.
             wake_queue_add "$seat" "$reason"
             echo "wake: $seat is awake but its pane shows no prompt to type at — a modal covers the input box, or the pane cannot be read. NOT nudged: Enter there would choose whichever option is highlighted, and a modal is not consent (VI.2). Queued instead — $reason"
-        elif seat_nudge "$seat" "[km] $reason — check bd mail inbox when convenient"; then
-            echo "wake: $seat is already awake; nudged instead — typed and submitted"
         else
-            wake_queue_add "$seat" "$reason"
-            echo "wake: NUDGE UNDELIVERED to $seat — see the diagnosis above for which half failed, and read the pane by hand. Queued to the wake file so the reason outlives the failed send — $reason"
+            # Three outcomes, not two. `if seat_nudge` read SENT-UNWITNESSED as
+            # falsy and fell into the undelivered arm, which both SAYS the send
+            # failed and QUEUES the reason — so an ask that did arrive would be
+            # delivered a second time by km-seat reading the queue. That is the
+            # double delivery the UNKNOWN verdict exists to prevent, so 2 is
+            # branched explicitly here (bd gqlc-m4e57 D4).
+            nudge_rc=0
+            seat_nudge "$seat" "[km] $reason — check bd mail inbox when convenient" || nudge_rc=$?
+            if [ "$nudge_rc" -eq 0 ]; then
+                echo "wake: $seat is already awake; nudged instead — typed and submitted"
+            elif [ "$nudge_rc" -eq 2 ]; then
+                echo "wake: $seat is already awake; the nudge was typed and submitted, but no transcript row witnessed it — see the account above. Delivery is UNKNOWN, not failed, so this is neither queued nor retried: queueing it would hand $seat the same reason twice if it did arrive. Read the pane, or ask 'km arrived $seat', then wake again by hand if it truly did not land — $reason"
+            else
+                wake_queue_add "$seat" "$reason"
+                echo "wake: NUDGE UNDELIVERED to $seat — see the diagnosis above for which half failed, and read the pane by hand. Queued to the wake file so the reason outlives the failed send — $reason"
+            fi
         fi
     else
         wake_queue_add "$seat" "$reason"
@@ -1588,6 +1764,112 @@ cmd_wake() {
             esac
         fi
     fi
+}
+
+# The session id herdr believes a seat's pane is running. Keyed on cwd rather
+# than pane id: the seat's worktree IS the identity, and it survives a pane being
+# recreated. Empty means herdr knows of no session there, which is not an error.
+seat_agent_session() { # <seat> -> uuid on stdout, empty if none; rc 1 unreadable
+    local wt out
+    wt=$(seat_worktree "$1")
+    out=$(herdr agent list |
+        python3 -c "import json,sys; d=json.load(sys.stdin); print(next((((a.get('agent_session') or {}).get('value') or '') for a in d['result']['agents'] if a.get('cwd')==sys.argv[1]), ''))" "$wt" 2>/dev/null) || return 1
+    printf '%s\n' "$out"
+}
+
+# The read half of the send witness (bd gqlc-m4e57): "did what I sent arrive?",
+# answerable after the fact by anyone, where before this the only answer was to
+# read the pane and guess. It never writes, and it reads nothing but rows of type
+# `user` — see the --help text below, which is the privacy statement.
+cmd_arrived() {
+    local seat="" text="" since="" dir since_epoch hit newest herdr_id file_id
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h | --help | help) arrived_help; return 0 ;;
+            --text) text=${2:?arrived: --text needs a value}; shift 2 ;;
+            --since) since=${2:?arrived: --since needs a value}; shift 2 ;;
+            -*) die "arrived: unknown flag $1 (km arrived --help)" ;;
+            *) seat=$1; shift ;;
+        esac
+    done
+    is_seat "$seat" || die "arrived: unknown seat ${seat:-<none>} (km arrived <seat> [--text T] [--since WHEN])"
+
+    # Default window: 15 minutes. Long enough to cover an ask sent before a
+    # coffee, short enough that the answer is about the ask you have in mind.
+    if [ -z "$since" ]; then
+        since_epoch=$(($(date +%s) - 900))
+    elif ! since_epoch=$(date -d "$since" +%s 2>/dev/null); then
+        die "arrived: --since '$since' is not a time date(1) can read; try an ISO 8601 stamp or @<epoch>"
+    fi
+
+    dir=$(seat_transcript_dir "$seat")
+    [ -d "$dir" ] || die "arrived: $seat has no transcript directory at $dir, so nothing can be said about what reached her — this is an unreadable answer, not a 'did not arrive' one"
+
+    if [ -n "$text" ]; then
+        # Timeout 0: one pass over the window that has already happened. This is
+        # a question about the past, so there is nothing to wait for.
+        if hit=$(transcript_witness "$dir" "$text" "$since_epoch" 0); then
+            echo "arrived: YES — $seat submitted these exact bytes at $(echo "$hit" | cut -f1), in $(echo "$hit" | cut -f2)"
+            return 0
+        fi
+        echo "arrived: NOT FOUND — no row of $seat's submitted between $(date -u -d "@$since_epoch" +%Y-%m-%dT%H:%M:%SZ) and now carries these exact bytes. That is not proof she never got them: the match is whole-string and byte-exact, so a prefix, a trailing space, or an ask she edited before submitting all read as absent here. If a line above says something ELSE was submitted in that window, read it — that is the case where the text was typed into a box that already held words and went out as part of a longer message."
+        return 2
+    fi
+
+    newest=$(find "$dir" -maxdepth 1 -type f -name '*.jsonl' -printf '%T@ %p\n' 2>/dev/null |
+        sort -rn | head -1 | cut -d' ' -f2-)
+    [ -n "$newest" ] || die "arrived: no transcript files in $dir"
+    # Disclosed, never preferred. herdr's pointer was measured stale on 3 of 14
+    # seats when this was designed, and on this author's own seat while it was
+    # being written: a `claude --resume` in the same pane leaves the pointer on
+    # the session it replaced. Newest-mtime is the file being written NOW, which
+    # is the one the question is about — but a reader who is holding herdr's id
+    # deserves to be told the two disagree rather than quietly given one.
+    herdr_id=$(seat_agent_session "$seat" 2>/dev/null || true)
+    file_id=$(basename "$newest" .jsonl)
+    if [ -n "$herdr_id" ] && [ "$herdr_id" != "$file_id" ]; then
+        echo "km: arrived: herdr names session $herdr_id for $seat's pane, but the most recently written transcript there is $file_id. Reading the latter, because it is the file rows are landing in. If she was resumed, herdr's pointer is simply stale; if she was NOT, one of these is another session in the same worktree." >&2
+    fi
+
+    echo "arrived: the last 5 messages $seat submitted, newest last, from $newest"
+    jq -rs --arg f "$newest" '
+        [ .[]
+          | select(.type == "user")
+          | (.message.content) as $c
+          | (if ($c | type) == "string" then $c
+             else [($c[]? | select(.type == "text") | .text)] | join("")
+             end) as $t
+          | select($t != "")
+          | select($t | test("^(<command-name>|<local-command-stdout>|<task-notification>|This session is being continued)") | not)
+          | {ts: .timestamp, text: $t} ]
+        | .[-5:] | .[]
+        | "\n  \(.ts)\n\(.text)"
+    ' "$newest" 2>/dev/null ||
+        die "arrived: $newest could not be read as transcript rows"
+}
+
+arrived_help() {
+    cat <<'EOF'
+km arrived <seat> [--text TEXT] [--since WHEN]
+
+Answers "did what I sent actually reach her?" after the fact, from the seat's own
+transcript — the record of what her session RECEIVED, which is the only witness in
+this town that a pane read cannot fake.
+
+  --text TEXT   did she submit exactly these bytes? Whole-string and byte-exact.
+                exit 0 found (prints the row's time and file), 2 not found,
+                1 the question could not be asked at all.
+  --since WHEN  anything date(1) reads; default 15 minutes ago.
+  no --text     print the last 5 messages she submitted, machinery lines omitted.
+
+WHAT IT READS: files under $HOME/.claude/projects/<the seat's munged worktree>/,
+and within them only rows of type `user` — what was SUBMITTED. Assistant replies,
+thinking, and tool output are never read out. It writes, deletes and truncates
+nothing. Without --text it prints citizen text verbatim, which is the whole point
+of the verb and the same trust domain as reading her pane; with --text it prints a
+verdict, a timestamp, and — when something else was submitted in the window — the
+first 80 bytes of that row, because that row is the evidence.
+EOF
 }
 
 cmd_sleep() {
@@ -2549,8 +2831,9 @@ cmd_dispatch() {
 
     # history: kingdom/brain/km-notes.md#cmd_dispatch-2
     local s idle_marker nudged_marker attempts_file escalated_marker refusal_file
+    local unwitnessed_marker
     local pending ask floor since cap tries before_unread
-    local dry idle_now stalled_age trigger age nudge_err delivered=0
+    local dry idle_now stalled_age trigger age nudge_err nudge_rc delivered=0
     floor=$(cfg_minutes welfare renudge_after_minutes 30)
     cap=$(recover_cap)
     dry=$(status_stalled_after)
@@ -2560,6 +2843,7 @@ cmd_dispatch() {
         attempts_file="$(seat_home "$s")/idle-attempts"
         escalated_marker="$(seat_home "$s")/idle-escalated"
         refusal_file="$(seat_home "$s")/idle-refusal"
+        unwitnessed_marker="$(seat_home "$s")/idle-unwitnessed"
         # history: kingdom/brain/km-notes.md#cmd_dispatch-3
         idle_now=0
         stalled_age=""
@@ -2569,7 +2853,8 @@ cmd_dispatch() {
             if age=$(seat_dry_age "$s") && [ "$age" -ge "$dry" ]; then stalled_age=$age; fi
         fi
         if [ "$idle_now" -eq 0 ] && [ -z "$stalled_age" ]; then
-            rm -f "$idle_marker" "$nudged_marker" "$attempts_file" "$escalated_marker" "$refusal_file"
+            rm -f "$idle_marker" "$nudged_marker" "$attempts_file" "$escalated_marker" \
+                "$refusal_file" "$unwitnessed_marker"
             continue
         fi
         # Escalated: the mayor has been told, so this pass says nothing further
@@ -2638,7 +2923,8 @@ She is awake and holding one of $(cfg concurrency max_active) slots while answer
 
 Unread mail: $pending
 Last delivered ask: $(fmt_age "$(($(date +%s) - $(stat -c %Y "$nudged_marker" 2>/dev/null || date +%s)))") ago
-Last refusal: $(cat "$refusal_file" 2>/dev/null || echo "none — every attempt was delivered and she did not act on it")
+Last refusal: $(cat "$refusal_file" 2>/dev/null || echo "none — no attempt in this episode was refused")
+Unwitnessed asks: $([ -f "$unwitnessed_marker" ] && echo "AT LEAST ONE, most recently $(fmt_age "$(($(date +%s) - $(stat -c %Y "$unwitnessed_marker")))") ago — typed and submitted, and then no transcript row of hers ever carried it. Read that as she may never have been asked at all, rather than as $cap asks ignored" || echo "none — every ask in this episode was typed, submitted, and then seen arriving in her transcript, so she has them and has not acted")
 
 An attempt km could not DELIVER counts here too, and that is the case worth reading the pane for: it means the machinery could not witness a place to type at all, which is what a covered pane looks like from outside.
 
@@ -2660,19 +2946,36 @@ This counter clears by itself the moment one of her tool calls finishes — witn
         fi
         # The reason is captured rather than streamed so the escalation letter can
         # quote it, and re-emitted here so the journal loses nothing by that.
-        if nudge_err=$(seat_nudge "$s" "$ask" 2>&1 >/dev/null); then
-            tries=$((tries + 1))
-            echo "$tries" >"$attempts_file"
+        nudge_rc=0
+        nudge_err=$(seat_nudge "$s" "$ask" 2>&1 >/dev/null) || nudge_rc=$?
+        tries=$((tries + 1))
+        echo "$tries" >"$attempts_file"
+        if [ "$nudge_rc" -eq 0 ]; then
             rm -f "$refusal_file"
             : >"$nudged_marker"
             delivered=1
             echo "dispatch: nudged $s (ask $tries of $cap) — $trigger, $pending unread; the ask was typed and submitted"
             [ -z "$nudge_err" ] || echo "dispatch: $s: $nudge_err"
             wakes=$((wakes + 1))
+        elif [ "$nudge_rc" -eq 2 ]; then
+            # An ask that was typed and submitted but never appeared in the
+            # seat's transcript. It gets the SAME bookkeeping as a delivered
+            # one, deliberately: an UNKNOWN that left no `nudged at T` mark is
+            # re-asked on every sweep, so a seat that did receive it gets N
+            # copies — the double delivery this verdict exists to prevent. The
+            # cost of the other error is a delay of one floor, and it is the
+            # error to prefer.
+            rm -f "$refusal_file"
+            : >"$nudged_marker"
+            # Not cleared by a later witnessed ask: it is a true fact about the
+            # EPISODE, and the escalation letter reports the episode.
+            : >"$unwitnessed_marker"
+            delivered=1
+            echo "dispatch: ask UNWITNESSED for $s (ask $tries of $cap) — $trigger, $pending unread; typed and submitted, but no transcript row carried it, so whether she has it is UNKNOWN. Counted as asked and not repeated: read the pane, or 'km arrived $s' (bd gqlc-m4e57)"
+            [ -z "$nudge_err" ] || echo "dispatch: $s: $nudge_err"
+            wakes=$((wakes + 1))
         else
             # history: kingdom/brain/km-notes.md#cmd_dispatch-9
-            tries=$((tries + 1))
-            echo "$tries" >"$attempts_file"
             printf '%s\n' "$nudge_err" >"$refusal_file"
             echo "dispatch: ASK REFUSED for $s (attempt $tries of $cap, $trigger) — $nudge_err"
         fi
@@ -4545,6 +4848,7 @@ case "$cmd" in
     down)            cmd_down "$@" ;;
     wake)            cmd_wake "$@" ;;
     sleep)           cmd_sleep "$@" ;;
+    arrived)         cmd_arrived "$@" ;;
     mail)            cmd_mail "$@" ;;
     dispatch)        cmd_dispatch "$@" ;;
     hold-verdict)    cmd_hold_verdict "$@" ;;
