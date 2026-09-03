@@ -104,10 +104,10 @@ status, or check each bead's state afterwards rather than the command's.
 
 ## A bead that grows past ~65535 bytes stops accepting writes, permanently
 
-Measured 2026-09-03 against the same bd 1.0.4, on a throwaway bead created and
-deleted for it (bd `gqlc-a8j2i`). The live casualty, `gqlc-jffyz`, was not
-written to: reproducing the state on a probe costs nothing and testing it on a
-bead holding real handoff notes is the damage itself.
+Measured 2026-09-03 against the same bd 1.0.4, on a throwaway bead `gqlc-zniam`
+created and deleted for it. The live casualty, `gqlc-jffyz`, was not written to:
+reproducing the state on a probe costs nothing and testing it on a bead holding
+real handoff notes is the damage itself. bd `gqlc-a8j2i`.
 
 Every write records an event, and the events row carries **the whole bead
 serialised as JSON, in a column named `old_value`** — the pre-image, not a
