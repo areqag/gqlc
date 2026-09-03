@@ -2658,7 +2658,9 @@ func argAssignable(token procsig.TypeToken, argType query.Type) bool {
 		_, isFloat := argType.(query.TypeFloat)
 		_, isInt := argType.(query.TypeInt)
 		return isFloat || isInt
-	default:
-		return false
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks this bridge for a missing arm; the answer for an unnamed
+	// token is unchanged (bd gqlc-51l6m).
+	return false
 }

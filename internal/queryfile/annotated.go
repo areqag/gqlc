@@ -42,7 +42,10 @@ func (c Cardinality) String() string {
 		return "many"
 	case CardinalityExec:
 		return "exec"
-	default:
-		return "invalid"
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks this stringer for a missing arm — the members start at iota+1
+	// and only the unset zero reaches here, so the answer is unchanged
+	// (bd gqlc-51l6m).
+	return "invalid"
 }
