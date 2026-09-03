@@ -486,6 +486,19 @@ cmd_deploy() {
         } >&2
         return 1
     fi
+    # Said here because this is the moment the change arrives, and deploy's
+    # silence about it is the defect (bd gqlc-2a4go). It does NOT fail the
+    # deploy: the checkout genuinely moved, and returning non-zero for a
+    # successful fast-forward would put ensure_deployed's ladder into a refusal
+    # episode over a unit file. Nor does it re-render and reload: a
+    # `systemctl --user daemon-reload` issued from inside the dispatch tick is
+    # a reload of the manager running the caller, and rendering WITHOUT the
+    # reload is worse than either — the files on disk would then match, so this
+    # very check would read clean while systemd still held the old definition.
+    # The gate is the km doctor row, which fails; this line is the courtesy.
+    local udrift
+    udrift=$(unit_drift)
+    [ -z "$udrift" ] || echo "deploy: the checkout moved but the systemd units did NOT — ${udrift//$'\n'/; }; run 'just kingdom-install' to render and reload them" >&2
     echo "deployed: $root at $(git_at "$root" rev-parse --short HEAD)"
 }
 
@@ -3846,6 +3859,22 @@ cmd_doctor() {
         echo "      ${drift//$'\n'/$'\n      '}"
         ok=1
     fi
+    # Asked AFTER the row above and leaning on it: this one renders with the
+    # running km's kingdom.toml, so it is a claim about the DEPLOYED tree only
+    # while that tree is certified against origin/master, which is exactly what
+    # the row above reports. It is a hard row rather than a line in deploy's
+    # output because deploy exits 0 either way and its stdout is a journal
+    # nobody reads — the whole defect was a report that was true about the
+    # checkout and silent about the units (bd gqlc-2a4go).
+    local udrift
+    udrift=$(unit_drift)
+    if [ -z "$udrift" ]; then
+        echo "ok:   every installed systemd unit matches what the deployed tree renders"
+    else
+        echo "FAIL: a systemd unit on this host is not what the deployed tree renders, so the timers keep running a definition nobody merged ('just kingdom-install'):"
+        echo "      ${udrift//$'\n'/$'\n      '}"
+        ok=1
+    fi
     # Not a `check` row either, and for the same reason twice over: this one has
     # three outcomes, and the failing one has to NAME the beads. A gate an
     # operator cannot act on is a warning wearing a gate's clothes.
@@ -4424,7 +4453,7 @@ cmd_seat_refresh() {
     return "$rc"
 }
 
-render_unit() { # <src> <dst>
+render_unit() { # <src> -> the rendered unit on stdout
     # @STATE@ is resolved here, at install time, for the same reason @REPO@ is:
     # the alarm unit's fallback append must reach the wake file without running
     # km, so it cannot ask km where the state dir is (bd gqlc-leq7).
@@ -4432,16 +4461,61 @@ render_unit() { # <src> <dst>
         -e "s|@STATE@|$(state_dir)|g" \
         -e "s|@DISPATCH_MIN@|$(cfg cadence dispatch_minutes)|g" \
         -e "s|@GUARD_MIN@|$(cfg cadence guard_minutes)|g" \
-        "$1" >"$2"
+        "$1"
+}
+
+# The rule for what counts as a unit, written once. The installer below and
+# unit_drift both read it: two lists disagree silently, and a unit named by only
+# one of them is either installed and never checked, or checked and never
+# installed (bd gqlc-2a4go).
+unit_names() { # <dir> -> one unit file name per line
+    local f
+    for f in "$1"/*.service "$1"/*.timer; do
+        [ -e "$f" ] || continue
+        printf '%s\n' "${f##*/}"
+    done | sort
+}
+
+# history: kingdom/brain/km-notes.md#unit_drift
+unit_drift() { # -> one line per unit whose installed copy is not what the deployed tree renders
+    local srcdir unitdir u installed fresh rc
+    srcdir="$(deploy_root)/kingdom/systemd"
+    unitdir="$HOME/.config/systemd/user"
+    # No unit directory at all is "never installed anywhere", which is a
+    # different finding and belongs to the per-unit rows in km status. Saying
+    # "drift" over it would put a second and worse-worded name on it.
+    [ -d "$srcdir" ] && [ -d "$unitdir" ] || return 0
+    while IFS= read -r u; do
+        [ -n "$u" ] || continue
+        installed="$unitdir/$u"
+        if [ ! -f "$installed" ]; then
+            echo "$u — no installed copy, so nothing on this host runs it"
+            continue
+        fi
+        # KM_STATE_DIR is scrubbed deliberately. It is exported into every seat
+        # session, while the units themselves run km WITHOUT it, so the render a
+        # real install produces for the town is the derived one. Honouring the
+        # ambient value would call every unit drifted whenever a seat ran this
+        # check, and a row that cries wolf from half the town's sessions is one
+        # operators learn to run past.
+        rc=0
+        fresh=$(unset KM_STATE_DIR; render_unit "$srcdir/$u") || rc=$?
+        if [ "$rc" != 0 ]; then
+            echo "$u — its source under $srcdir could not be rendered, so whether it drifted is UNKNOWN"
+        elif [ "$fresh" != "$(cat "$installed")" ]; then
+            echo "$u — the installed copy is not what $srcdir renders"
+        fi
+    done <<<"$(unit_names "$srcdir")"
 }
 
 cmd_install_units() {
     no_args install-units "$@"
     local unitdir="$HOME/.config/systemd/user" u
     mkdir -p "$unitdir"
-    for u in kingdom-dispatch.service kingdom-dispatch-alarm.service kingdom-dispatch.timer kingdom-guard.service kingdom-guard.timer; do
-        render_unit "$KINGDOM_DIR/systemd/$u" "$unitdir/$u"
-    done
+    while IFS= read -r u; do
+        [ -n "$u" ] || continue
+        render_unit "$KINGDOM_DIR/systemd/$u" >"$unitdir/$u"
+    done <<<"$(unit_names "$KINGDOM_DIR/systemd")"
     systemctl --user daemon-reload
     systemctl --user enable --now kingdom-dispatch.timer kingdom-guard.timer
     bd config set mail.delegate "$(main_root)/kingdom/bin/km mail"
