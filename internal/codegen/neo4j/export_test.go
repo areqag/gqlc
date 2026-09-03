@@ -7,10 +7,37 @@ package neo4j
 // asserting them from `package neo4j` put those rows, and the testify they use,
 // outside govulncheck's call graph (bd gqlc-m5rc).
 //
-// No imports here, deliberately: vuln-root-residual reads a package's blindness
-// off its in-package test files' imports, so a third-party import in this file
-// would return internal/codegen/neo4j to the blind set.
+// No THIRD-PARTY imports here, deliberately: vuln-root-residual reads a
+// package's blindness off its in-package test files' imports, so a testify
+// import in this file would return internal/codegen/neo4j to the blind set. The
+// first-party one below is what the gate does not read.
+import "github.com/areqag/gqlc/internal/codegen"
+
 type TypeMap = typeMap
+
+// TemporalUseFlags is temporalUse with its decisions readable from the external
+// test package, whose own fields are unexported.
+type TemporalUseFlags struct {
+	Decode, Encode, EncodePtr, List, ListPtr bool
+}
+
+// TemporalUses re-keys temporalUses' result so each decision can be asserted by
+// name. The whole map is returned rather than one carrier's flags because its
+// EMPTINESS is a claim too: a parameter whose leaf is not a temporal carrier
+// must reach no site at all.
+func TemporalUses(prepared codegen.Prepared) map[string]TemporalUseFlags {
+	out := make(map[string]TemporalUseFlags)
+	for name, u := range temporalUses(prepared) {
+		out[name] = TemporalUseFlags{
+			Decode:    u.decode,
+			Encode:    u.encode,
+			EncodePtr: u.encodePtr,
+			List:      u.list,
+			ListPtr:   u.listPtr,
+		}
+	}
+	return out
+}
 
 var (
 	AccessModeText                = accessModeText
