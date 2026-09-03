@@ -536,6 +536,22 @@ const syntheticSuiteNonAssertionRow = "\ts.loadSchema(\"" + syntheticProbeAns + 
 // than "any call in selector position".
 const syntheticChainedNonAssertionRow = "\ts.harness().loadSchema(\"" + syntheticProbeAns + "\")\n"
 
+// syntheticBoundObjectRow is the answer asserted through an assertion
+// object bound to an ordinary local, which is the spelling testify's own
+// documentation opens with. Neither shape above sees it: the selector
+// base is the identifier `r`, which is not an assertion package, and no
+// gateway call stands between that base and the assertion.
+const syntheticBoundObjectRow = "\tr := require.New(t)\n" +
+	"\tr.Contains(msg, \"" + syntheticProbeAns + "\")\n"
+
+// syntheticBoundNonAssertionRow binds a local the same way and calls the
+// same method name on it, and differs in the one thing the reader decides
+// on: what the local was bound TO. It is the widening the row above must
+// not be — a reader taking every method call on every local would put the
+// arguments of every call in the body into the corpus.
+const syntheticBoundNonAssertionRow = "\tr := newHarness(t)\n" +
+	"\tr.Contains(msg, \"" + syntheticProbeAns + "\")\n"
+
 // syntheticHelperRow is the answer asserted through a helper the witness
 // declares itself, so the answer reaches require one call deeper than the
 // witness's own body goes.
@@ -777,6 +793,23 @@ func TestAssertedTextIsWhatAnAssertionReads(t *testing.T) {
 			// so it is what the gateway list itself is holding.
 			name:    "a chained call through a non-gateway reads nothing",
 			row:     syntheticChainedNonAssertionRow,
+			spelled: true,
+		},
+		{
+			// bd gqlc-qo6ul, the spelling testify documents first. The
+			// selector base is an ordinary local, so neither the package
+			// rule nor the gateway rule reaches it.
+			name:     "an answer asserted through an assertion object bound to a local is read",
+			row:      syntheticBoundObjectRow,
+			asserted: true,
+			spelled:  true,
+		},
+		{
+			// The widening the row above must not be. What makes a local
+			// an assertion base is the call it was bound to, not that a
+			// method was called on it.
+			name:    "a local bound to something other than require.New reads nothing",
+			row:     syntheticBoundNonAssertionRow,
 			spelled: true,
 		},
 		{
@@ -1096,17 +1129,18 @@ var assertionPackages = map[string]bool{"require": true, "assert": true}
 var assertionGateways = map[string]bool{"Require": true, "Assert": true}
 
 // isAssertionCall reports whether call is one this reader takes the
-// arguments of. Three shapes: a call on an assertion package, a call
-// through a suite gateway, and a call to a helper that reaches one of the
-// first two. helpers may be nil, which is how assertionHelpers asks the
-// question while it is still deciding what the helpers are.
-func isAssertionCall(call *ast.CallExpr, helpers map[string]bool) bool {
+// arguments of. Four shapes: a call on an assertion package, a call on a
+// local an assertion object was bound to, a call through a suite gateway,
+// and a call to a helper that reaches any of those. helpers and bases may
+// both be nil — that is how assertionHelpers asks the question, while it
+// is still deciding what the helpers are.
+func isAssertionCall(call *ast.CallExpr, helpers, bases map[string]bool) bool {
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
 		return helpers[fun.Name]
 	case *ast.SelectorExpr:
 		if pkg, ok := fun.X.(*ast.Ident); ok {
-			return assertionPackages[pkg.Name]
+			return assertionPackages[pkg.Name] || bases[pkg.Name]
 		}
 		gateway, ok := fun.X.(*ast.CallExpr)
 		if !ok {
@@ -1116,6 +1150,66 @@ func isAssertionCall(call *ast.CallExpr, helpers map[string]bool) bool {
 		return ok && assertionGateways[sel.Sel.Name]
 	}
 	return false
+}
+
+// assertionBases are the names a body binds an assertion OBJECT to, so a
+// call on one of them is an assertion however the local is spelled. This
+// is testify's first-documented form, `r := require.New(t)`, where the
+// selector base is an ordinary local: no package identifier to root the
+// call at and no gateway call to reach it through (bd gqlc-qo6ul).
+//
+// Keyed on what the name was bound TO, never on the name itself. A rule
+// reading `r` or `req` would take every method call on any local that
+// happened to be spelled that way, which is the widening the gateway list
+// is already holding one shape over.
+//
+// It is syntax and not types, like everything else here: the live files
+// are in another module behind a build tag, so a reader has their source
+// and no method sets. That bounds it — an object returned by anything but
+// a literal require.New/assert.New call, or handed across a function
+// boundary, is not followed, and stays the false RED bd gqlc-bpew
+// describes rather than a way for an unasserted answer to pass.
+func assertionBases(body *ast.BlockStmt) map[string]bool {
+	bases := make(map[string]bool)
+	bind := func(names []ast.Expr, values []ast.Expr) {
+		for i, name := range names {
+			id, ok := name.(*ast.Ident)
+			if !ok || i >= len(values) || !isAssertionConstructor(values[i]) {
+				continue
+			}
+			bases[id.Name] = true
+		}
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.AssignStmt:
+			bind(v.Lhs, v.Rhs)
+		case *ast.ValueSpec:
+			names := make([]ast.Expr, len(v.Names))
+			for i, name := range v.Names {
+				names[i] = name
+			}
+			bind(names, v.Values)
+		}
+		return true
+	})
+	return bases
+}
+
+// isAssertionConstructor reports whether expr is a literal call to an
+// assertion package's New — the only right-hand side that earns a name a
+// place in assertionBases.
+func isAssertionConstructor(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "New" {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && assertionPackages[pkg.Name]
 }
 
 // assertionHelpers are the functions this file declares that reach an
@@ -1135,7 +1229,12 @@ func assertionHelpers(file *ast.File) map[string]bool {
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
-			if !ok || !isAssertionCall(call, nil) {
+			// nil bases: a helper that binds its OWN assertion object is
+			// not recognised as one, so a witness calling it still reads
+			// nothing. A false RED of the same family as the one above,
+			// one call site over, and empty in this repo today — bd
+			// gqlc-k9v3k holds it with the measurement.
+			if !ok || !isAssertionCall(call, nil, nil) {
 				return true
 			}
 			helpers[fn.Name.Name] = true
@@ -1184,12 +1283,14 @@ func assertedText(fset *token.FileSet, body *ast.BlockStmt, helpers map[string]b
 		out.WriteByte('\n')
 	}
 
+	bases := assertionBases(body)
+
 	// The names an assertion reads, which is what makes the second pass
 	// a hop rather than a second copy of the body.
 	read := make(map[string]bool)
 	ast.Inspect(body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
-		if !ok || !isAssertionCall(call, helpers) {
+		if !ok || !isAssertionCall(call, helpers, bases) {
 			return true
 		}
 		for _, arg := range call.Args {
