@@ -3448,6 +3448,23 @@ func TestGuardsThatCannotHoldAtOnceAreRefused(t *testing.T) {
 			read: 0,
 		},
 		{
+			// An early return on equality says the operand is NOT that
+			// string past this point, which is the opposite demand and
+			// contradicts nothing. Reading it as a requirement to equal
+			// would make these two rule each other out and refuse an
+			// emission that is merely selective.
+			name: "an early return on equality demands the operand is not that string",
+			body: `	label := string(raw)
+	if label == "Person" {
+		return Person{}, nil
+	}
+	if label == "Post" {
+		return Person{}, nil
+	}
+	return Person{}, nil`,
+			read: 0,
+		},
+		{
 			name: "a guard that does not return demands nothing of what follows",
 			body: `	label := string(raw)
 	if label != "Person" {
