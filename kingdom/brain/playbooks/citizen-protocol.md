@@ -680,7 +680,7 @@ is cheap for the reader, and stays cheap only if all four of these hold.
    judges are, and then whether any of them holds an unclosed bead citing your
    PR:
 
-       judges=$(awk -F'[ ="]+' '/^\[/{s=$0} s=="[seats]" && $2 ~ /^judge:/ {print $1}' kingdom/kingdom.toml)
+       judges=$(awk '/^\[/{s=$0} s=="[seats]" && /=[[:space:]]*"judge:/ {sub(/[[:space:]]*=.*/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print}' kingdom/kingdom.toml)
        [ -n "$judges" ] || echo "roster parse found no judges — repair this query before believing it" >&2
        bd list --all -n 0 --json \
          | jq -r --argjson js "$(printf '%s\n' $judges | jq -R . | jq -s .)" '
@@ -696,6 +696,16 @@ is cheap for the reader, and stays cheap only if all four of these hold.
    against an altered roster: it fails silently and in the unsafe direction,
    which is the one failure a rebase guard cannot afford. An empty roster is a
    broken query, never a quiet town.
+
+   **It catches total failure and cannot catch partial failure**, which is why
+   the parse anchors on the *value* — `= "judge:` — and takes the key as
+   whatever precedes the `=`, rather than counting fields. A field-position
+   parse loses one seat per line it mis-splits and prints the rest, so a roster
+   where two judges of three still parse looks healthy. Measured 2026-09-03: an
+   earlier `-F'[ ="]+'` form, given a single seat line indented by two spaces —
+   which TOML permits — silently returned two judges instead of three, and the
+   empty check saw nothing wrong with that. If you ever edit this parse, test it
+   against an indented roster and not only against today's alignment.
 
    Read the titles it prints — that is why it prints them and not bare ids. A
    hit that is plainly your own implementation bead is noise; a hit that reads
