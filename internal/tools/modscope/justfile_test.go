@@ -981,18 +981,20 @@ func priorDependencies(dumped justDump) (map[string][]string, error) {
 // pair of lines runs together into a new one, so joining with "" selects the
 // same recipes. That is a fact about this justfile, not about the join.
 //
-// Two more measurements on this repo's justfile, which bear on a body
-// comparison in opposite ways. Both rest partly on the dump's shape, which is
-// an answer just gives rather than a fact about the file, and the just giving
-// it is whichever is on PATH — pinned for CI by
-// .github/actions/setup-just and named nowhere for a local run (bd gqlc-rnyit).
+// Two more measurements on this repo's justfile at just 1.57.0, which bear on a
+// body comparison in opposite ways. The version is part of the measurement, not
+// decoration: both rest partly on the dump's SHAPE, which is an answer just
+// gives rather than a fact about the file. CI pins 1.55.1 and a local run takes
+// whatever is on PATH, so the two can disagree here in the direction nobody
+// watches — red in CI, green on every seat. bd gqlc-rnyit carries that.
 //
 // The first is a further difference: the dump drops each body line's leading
-// indentation, which this reader keeps, and that alone makes every recipe's
-// text here differ, no recipe having an empty body.
-// One bodyless recipe falsifies that, and `jq '[.recipes[] |
-// select(((.body // []) | length) == 0)] | length'` over the dump is what says
-// it still holds. The second is a sameness worth stating because a comment is a
+// indentation, which this reader keeps, and that alone makes every recipe's text
+// here differ, no recipe having an empty body. One bodyless recipe falsifies
+// that, and `jq '[.recipes[] | select(((.body // []) | length) == 0)] | length'`
+// over the dump is what says it still holds.
+//
+// The second is a sameness worth stating because a comment is a
 // place a mention could hide — a commented-out `go run ./internal/tools/modscope`
 // is a mention — and both sides keep those lines: the dump carries the body
 // lines opening with '#' and the '#!' of the shebang recipes, as does this
