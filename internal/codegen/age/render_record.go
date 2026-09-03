@@ -114,6 +114,17 @@ func writeRecordDecoders(b *strings.Builder, plans []recordPlan) {
 		fmt.Fprintf(b, "\n// decode%s checks an agtype map into a %s.\n", p.suffix, p.alias)
 		fmt.Fprintf(b, "func decode%s(raw []byte) (%s, error) {\n", p.suffix, p.alias)
 		fmt.Fprintf(b, "\tvar out %s\n", p.alias)
+		// `RECORD { }` declares no fields, so nothing reads the split map
+		// — and a bound name nothing reads is not Go. The split still
+		// happens: the record says its fields are none, not that its
+		// value may be any shape, so a text that is not a map is as much
+		// a decode failure here as anywhere.
+		if len(p.fields) == 0 {
+			fmt.Fprintf(b, "\tif _, err := agtypeObject(raw); err != nil {\n\t\treturn out, fmt.Errorf(%q, err)\n\t}\n",
+				"decode "+string(p.pt)+": %w")
+			b.WriteString("\treturn out, nil\n}\n")
+			continue
+		}
 		fmt.Fprintf(b, "\tfields, err := agtypeObject(raw)\n")
 		fmt.Fprintf(b, "\tif err != nil {\n\t\treturn out, fmt.Errorf(%q, err)\n\t}\n",
 			"decode "+string(p.pt)+": %w")

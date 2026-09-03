@@ -261,8 +261,7 @@ func agtypeRecordField[T any](fields map[string][]byte, key string, decode func(
 // decodeRecordd25fb0e0 checks an agtype map into a recordd25fb0e0.
 func decodeRecordd25fb0e0(raw []byte) (recordd25fb0e0, error) {
 	var out recordd25fb0e0
-	fields, err := agtypeObject(raw)
-	if err != nil {
+	if _, err := agtypeObject(raw); err != nil {
 		return out, fmt.Errorf("decode RECORD<>: %w", err)
 	}
 	return out, nil
