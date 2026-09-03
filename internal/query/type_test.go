@@ -2,6 +2,13 @@ package query_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -321,37 +328,158 @@ func TestTypeMarshalJSON(t *testing.T) {
 	}
 }
 
-// TestScalarAndEntityTypeString pins the lowercase wire name of each variant
-// in the table below. String is the single source the JSON discriminator
-// derives from, so the serialised name can never drift from the Go type.
-// Stage 7 extended the table to the temporal variants.
+// scalarAndEntityTypeStrings is the wire tag each variant it names must
+// stringify to. It is a package-level var rather than a literal inside the
+// test below because a second reader walks it: the membership of this table
+// is itself a claim, and TestEveryTypeVariantIsStringPinned holds it against
+// the sum.
+var scalarAndEntityTypeStrings = []struct {
+	t    query.Type
+	want string
+}{
+	{query.TypeBool{}, "bool"},
+	{query.TypeInt{}, "int"},
+	{query.TypeFloat{}, "float"},
+	{query.TypeString{}, "string"},
+	{query.TypeNull{}, "null"},
+	{query.TypeMap{}, "map"},
+	{query.TypeNode{}, "node"},
+	{query.TypeEdge{}, "edge"},
+	{query.TypeUnknown{}, "unknown"},
+	{query.TypeDate{}, "date"},
+	{query.TypeTime{}, "time"},
+	{query.TypeLocalTime{}, "localtime"},
+	{query.TypeDateTime{}, "datetime"},
+	{query.TypeLocalDateTime{}, "localdatetime"},
+	{query.TypeDuration{}, "duration"},
+}
+
+// stringPinnedElsewhere is the Type variants scalarAndEntityTypeStrings does
+// NOT carry, each naming the test that carries it instead. An entry is an
+// assertion about another test and not a waiver: the guard below requires the
+// named test to exist, and requires the variant to be genuinely absent from
+// the table, so an exemption cannot outlive either half of its reason.
 //
-// The table is a selection and nothing here holds it to the sum, so a
-// variant's absence from it is not a statement about that variant. TypeList's
-// tag is pinned by TestTypeListString, TypePath's by TestTypePathString.
+// Both entries are here because their variant is awkward as a row rather than
+// because it is unpinned. TypeList's zero value carries no element, so the
+// row that would sit in the table is a constructed one and its own test says
+// so; TypePath arrived in Stage 8 with its test beside it.
+var stringPinnedElsewhere = map[string]string{
+	"TypeList": "TestTypeListString",
+	"TypePath": "TestTypePathString",
+}
+
+// TestScalarAndEntityTypeString pins the lowercase wire name of each variant
+// in scalarAndEntityTypeStrings. String is the single source the JSON
+// discriminator derives from, so the serialised name can never drift from the
+// Go type. Stage 7 extended the table to the temporal variants.
 func TestScalarAndEntityTypeString(t *testing.T) {
-	for _, tc := range []struct {
-		t    query.Type
-		want string
-	}{
-		{query.TypeBool{}, "bool"},
-		{query.TypeInt{}, "int"},
-		{query.TypeFloat{}, "float"},
-		{query.TypeString{}, "string"},
-		{query.TypeNull{}, "null"},
-		{query.TypeMap{}, "map"},
-		{query.TypeNode{}, "node"},
-		{query.TypeEdge{}, "edge"},
-		{query.TypeUnknown{}, "unknown"},
-		{query.TypeDate{}, "date"},
-		{query.TypeTime{}, "time"},
-		{query.TypeLocalTime{}, "localtime"},
-		{query.TypeDateTime{}, "datetime"},
-		{query.TypeLocalDateTime{}, "localdatetime"},
-		{query.TypeDuration{}, "duration"},
-	} {
+	require.NotEmpty(t, scalarAndEntityTypeStrings,
+		"the table is empty, so this test ranges over nothing and passes having pinned no tag")
+	for _, tc := range scalarAndEntityTypeStrings {
 		require.Equal(t, tc.want, tc.t.String())
 	}
+}
+
+// TestEveryTypeVariantIsStringPinned holds the table above to the sum. Until
+// bd gqlc-zmyz its membership was a selection nothing checked, so a variant
+// added to Type could be left out of it and every test in this package still
+// passed — the same class PR #965 closed for TypeList's field declaration.
+//
+// The variants come off the isType marker through declaredMarkers, which is
+// an AST walk and not a grep, so a variant cannot be hidden behind a comment.
+// The tabled names come off the ROWS' own Go types rather than off a written
+// list, so the two sides cannot drift by an edit to one of them: a row added
+// to the table is a name this reader gains with no edit here.
+//
+// A count would not do. Fifteen tabled variants and fifteen declared ones
+// agree on size while disagreeing on membership, and swapping a variant for
+// another is exactly the edit a count cannot see, so the comparison is on the
+// SETS.
+func TestEveryTypeVariantIsStringPinned(t *testing.T) {
+	declared := declaredMarkers(t, "isType")
+	require.NotEmpty(t, declared,
+		"the walk found no isType declaration, so every variant below would read as pinned")
+
+	tabled := map[string]struct{}{}
+	for _, tc := range scalarAndEntityTypeStrings {
+		// The row's own Go type, so the name this reader compares is the one
+		// the compiler resolved and not one written down beside it.
+		name := strings.TrimPrefix(fmt.Sprintf("%T", tc.t), "query.")
+		tabled[name] = struct{}{}
+	}
+	require.NotEmpty(t, tabled, "no row yielded a type name, so no variant could fail the sweep below")
+
+	tests := declaredTestFuncs(t)
+	require.NotEmpty(t, tests, "the walk found no test function, so every exemption would read as honoured")
+
+	for _, variant := range declared {
+		// A marker on a pointer receiver is a variant too, and the name is
+		// what this guard compares; the receiver form is TestQuerySumsAreNotClosed's.
+		name := strings.TrimPrefix(variant, "*")
+		_, inTable := tabled[name]
+		pin, exempt := stringPinnedElsewhere[name]
+
+		switch {
+		case inTable && exempt:
+			t.Errorf("%s is in scalarAndEntityTypeStrings AND exempted to %s. One of the two is stale:\n"+
+				"drop the exemption if the table now carries it, or drop the row if %s is where the tag is pinned.",
+				name, pin, pin)
+		case !inTable && !exempt:
+			t.Errorf("%s declares isType but no test in this package pins its String().\n"+
+				"Add a row to scalarAndEntityTypeStrings, or — if the variant is awkward as a row, as TypeList is —\n"+
+				"pin it in a test of its own and name that test in stringPinnedElsewhere.", name)
+		case exempt:
+			require.Containsf(t, tests, pin,
+				"%s is exempted to %s, which no test in this package declares: the exemption points at a "+
+					"test that was renamed or deleted, so the variant's tag is pinned by nothing", name, pin)
+		}
+	}
+
+	// The other direction, and it is not implied by the loop: an exemption
+	// naming a variant the sum does not have is never reached above, so it
+	// would sit there indefinitely reading as a live account of one.
+	declaredSet := map[string]struct{}{}
+	for _, v := range declared {
+		declaredSet[strings.TrimPrefix(v, "*")] = struct{}{}
+	}
+	for name, pin := range stringPinnedElsewhere {
+		require.Containsf(t, declaredSet, name,
+			"stringPinnedElsewhere exempts %s to %s, but no type in package query declares isType on it, "+
+				"so the exemption describes a variant that no longer exists", name, pin)
+	}
+}
+
+// declaredTestFuncs is the name of every top-level Test function declared in
+// this directory, in either package clause.
+//
+// It is a second walk rather than parseQueryPackage, which filters to package
+// `query` on purpose — the markers it reads are unexported, so a method of
+// that name in query_test would not satisfy the interface. The tests an
+// exemption names live in query_test, which is precisely the half that filter
+// drops.
+func declaredTestFuncs(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err)
+
+	fset := token.NewFileSet()
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(".", e.Name()), nil, parser.SkipObjectResolution)
+		require.NoErrorf(t, err, "parsing %s", e.Name())
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+				continue
+			}
+			names = append(names, fn.Name.Name)
+		}
+	}
+	return names
 }
 
 // TestTemporalTypesSealed pins that each Stage-7 temporal variant satisfies
