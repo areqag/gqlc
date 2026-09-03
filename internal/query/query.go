@@ -395,12 +395,6 @@ func (b NodeBinding) Labels() graph.LabelSet { return b.labels }
 // Kind reports that a NodeBinding is a node.
 func (NodeBinding) Kind() BindingKind { return BindingNode }
 
-// EntityKind returns the graph-vocabulary kind of the entity this binding
-// refers to (graph.Node). Only entity bindings (NodeBinding, EdgeBinding)
-// expose EntityKind — a path is not a graph entity, so PathBinding has no
-// equivalent method. The resolver reads EntityKind to form the schema key.
-func (NodeBinding) EntityKind() graph.EntityKind { return graph.Node }
-
 // Nullable reports whether the binding was first introduced inside an OPTIONAL
 // MATCH clause (ADR 0006).
 func (b NodeBinding) Nullable() bool { return b.nullable }
@@ -592,11 +586,6 @@ func (b EdgeBinding) Hops() *EdgeHops { return b.hops }
 
 // Kind reports that an EdgeBinding is an edge.
 func (EdgeBinding) Kind() BindingKind { return BindingEdge }
-
-// EntityKind returns the graph-vocabulary kind of the entity this binding
-// refers to (graph.Edge). The resolver reads EntityKind to form the schema
-// EdgeKey (source label, edge label, target label triple).
-func (EdgeBinding) EntityKind() graph.EntityKind { return graph.Edge }
 
 // Nullable reports whether the binding was first introduced inside an OPTIONAL
 // MATCH clause (ADR 0006).
@@ -987,9 +976,9 @@ func (b PathBinding) MarshalJSON() ([]byte, error) {
 // honest "cannot tell" instead of guessing, and the resolver upgrades from
 // the schema). UNWIND is a reading clause distinct from MATCH,
 // so an UnwindBinding is not a graph entity — it has no labels, no
-// endpoints, no EntityKind(). Never nullable at Stage 9: an empty or null
-// source list yields zero rows at runtime, a row-cardinality fact below
-// the type-interface boundary (ADR 0005).
+// endpoints, no graph.EntityKind counterpart. Never nullable at Stage 9: an
+// empty or null source list yields zero rows at runtime, a row-cardinality
+// fact below the type-interface boundary (ADR 0005).
 type UnwindBinding struct {
 	variable string // the AS name; always non-empty
 	elemType Type   // the source list's Stage-6 element type; TypeUnknown when the parser cannot commit

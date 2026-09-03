@@ -19,7 +19,6 @@ func TestNewNodeBinding(t *testing.T) {
 	require.Equal(t, "p", b.Variable())
 	require.Equal(t, graph.LabelSet{"Person"}, b.Labels())
 	require.Equal(t, query.BindingNode, b.Kind())
-	require.Equal(t, graph.Node, b.EntityKind())
 }
 
 func TestNewNodeBindingAllowsEmptyLabels(t *testing.T) {
@@ -95,7 +94,6 @@ func TestNewEdgeBinding(t *testing.T) {
 	require.Equal(t, src, b.Source())
 	require.Equal(t, tgt, b.Target())
 	require.Equal(t, query.BindingEdge, b.Kind())
-	require.Equal(t, graph.Edge, b.EntityKind())
 }
 
 func TestNewEdgeBindingAllowsAnonymousVariableAndUntyped(t *testing.T) {
@@ -1034,19 +1032,16 @@ func TestNodeBindingKindReturnsBindingNode(t *testing.T) {
 	b, err := query.NewNodeBinding("n", nil)
 	require.NoError(t, err)
 	require.Equal(t, query.BindingNode, b.Kind())
-	require.Equal(t, graph.Node, b.EntityKind())
 }
 
 // TestEdgeBindingKindReturnsBindingEdge pins the edge side: an edge binding's
-// Kind() is BindingEdge; its EntityKind() (only on entity bindings, not on
-// PathBinding) is graph.Edge for schema-key formation.
+// Kind() is BindingEdge.
 func TestEdgeBindingKindReturnsBindingEdge(t *testing.T) {
 	src := must(query.NewVarEndpoint("a"))
 	tgt := must(query.NewVarEndpoint("b"))
 	b, err := query.NewEdgeBinding("r", nil, src, tgt, true)
 	require.NoError(t, err)
 	require.Equal(t, query.BindingEdge, b.Kind())
-	require.Equal(t, graph.Edge, b.EntityKind())
 }
 
 // TestNewPathBinding pins the Stage-8 PathBinding variant: a path variable
