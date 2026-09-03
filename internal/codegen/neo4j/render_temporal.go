@@ -164,7 +164,7 @@ func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph
 // a caller has one question to ask and no unreachable arm to write.
 func recordLeafFields(goType string, width graph.PropertyType) ([]codegen.RecordFieldPlan, bool) {
 	leaf, elem := leafType(goType), leafWidth(width)
-	if !isDeclaredRecord(leaf, elem) {
+	if !codegen.IsDeclaredRecord(leaf, elem) {
 		return nil, false
 	}
 	return codegen.RecordFields(elem.Fields(), typeMap{}.Property)
@@ -239,13 +239,13 @@ func narrowExpr(goType, src string) string {
 // other arm here uses. width is the one the prepared surface carries
 // beside the carrier it was derived from (spec §6).
 //
-// Which records the arm admits is isDeclaredRecord's question, asked in
+// Which records the arm admits is codegen.IsDeclaredRecord's question, asked in
 // the same words at every record arm in this backend so the three cannot
 // drift on it. Every call site here also guards on driverCarrier(goType)
 // != goType, which excludes RECORD<ANY> a second time; the belt is what
 // stops a new call site from having to know that.
 func narrowCall(goType string, width graph.PropertyType, src string) string {
-	if isDeclaredRecord(goType, width) {
+	if codegen.IsDeclaredRecord(goType, width) {
 		return fmt.Sprintf("decode%s(%s)", codegen.RecordHelperSuffix(width), src)
 	}
 	if goType == "float32" {
@@ -268,7 +268,7 @@ func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) (
 		if leaf == driverCarrier(leaf) || isTemporalCarrier(leaf) {
 			return
 		}
-		if isRecordStruct(leaf) {
+		if codegen.IsRecordStruct(leaf) {
 			// A record also carries wider than it is declared, so it
 			// reaches this far — but its narrowing is its own emitted
 			// helper, not narrowInt. Without this arm every schema
@@ -364,7 +364,7 @@ func widenExpr(goType string, width graph.PropertyType, access string) string {
 	if isTemporalCarrier(goType) {
 		return fmt.Sprintf("from%s(%s)", goType, access)
 	}
-	if isDeclaredRecord(goType, width) {
+	if codegen.IsDeclaredRecord(goType, width) {
 		return fmt.Sprintf("encode%s(%s)", codegen.RecordHelperSuffix(width), access)
 	}
 	return fmt.Sprintf("%s(%s)", driverCarrier(goType), access)

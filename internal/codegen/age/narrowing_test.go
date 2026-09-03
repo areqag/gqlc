@@ -57,7 +57,7 @@ var narrowingWidths = map[string]graph.PropertyType{
 // emission actually decides.
 func narrowsThroughACheck(t *testing.T, goType string) bool {
 	t.Helper()
-	decoder := decodeFuncOf(t, goType)
+	decoder := decodeFuncOf(t, goType, "")
 	return strings.HasPrefix(decoder, "agtypeIntAs[") || decoder == "agtypeFloat32"
 }
 

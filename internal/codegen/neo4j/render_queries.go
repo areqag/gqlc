@@ -484,7 +484,7 @@ func paramBindExpr(f codegen.Param, access string) string {
 		if isTemporalCarrier(f.GoType) {
 			return fmt.Sprintf("from%sPtr(%s)", f.GoType, access)
 		}
-		if isDeclaredRecord(f.GoType, f.Width) {
+		if codegen.IsDeclaredRecord(f.GoType, f.Width) {
 			// A declared record is in the temporal carriers' position
 			// rather than in the pass-the-pointer-through one: packX's
 			// reflect.Ptr arm indirects to a struct and hands it to
@@ -554,7 +554,7 @@ func sliceParamBindExpr(goType string, width graph.PropertyType, nullable bool, 
 	switch {
 	case isTemporalCarrier(leaf):
 		helper = temporalListHelper(leaf)
-	case isDeclaredRecord(leaf, leafWidth):
+	case codegen.IsDeclaredRecord(leaf, leafWidth):
 		// The second leaf packStruct refuses, and it arrives here for
 		// exactly the reason the paragraph above gives: packV walks the
 		// slice element by element, and each element is a struct the
@@ -582,22 +582,6 @@ func leafWidth(pt graph.PropertyType) graph.PropertyType {
 		pt = pt.Elem()
 	}
 	return pt
-}
-
-// isDeclaredRecord reports whether a Go type text and the width beside it
-// are a record this emission declares a helper pair for — that is, a
-// record with DECLARED fields, which codegen.RecordEncodings collects and
-// RECORD<ANY> is deliberately absent from.
-//
-// Both halves are asked, and neither alone is the test. The kind admits
-// RECORD<ANY>, whose carrier is map[string]any and which needs no helper;
-// the text is a struct for every declared record but says nothing about
-// which, and a bare-struct test would also admit a carrier some future
-// arm spells as a struct for an unrelated reason. Together they are the
-// exact set RecordEncodings emits for, which is what makes a name derived
-// here resolve to a declaration.
-func isDeclaredRecord(goType string, width graph.PropertyType) bool {
-	return width.Kind() == graph.KindRecord && isRecordStruct(goType)
 }
 
 // writeOneBody emits the :one arity-check + per-column decode + return.

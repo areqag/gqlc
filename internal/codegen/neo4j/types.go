@@ -224,7 +224,7 @@ func driverCarrier(goType string) string {
 	if isSliceType(goType) {
 		return "[]any"
 	}
-	if isRecordStruct(goType) {
+	if codegen.IsRecordStruct(goType) {
 		return "map[string]any"
 	}
 	switch goType {

@@ -422,7 +422,15 @@ func TestParamBindExprLeavesTheUndeclaredRecordBare(t *testing.T) {
 }
 
 // TestIsDeclaredRecordNeedsBothHalves screens the predicate every record
-// arm in this backend guards on, one falsified half per row.
+// arm guards on, one falsified half per row.
+//
+// The predicate is codegen's and shared by both backends. It is screened
+// from here rather than from beside its declaration because the carrier
+// the control row is asked about is THIS backend's: that row runs
+// typeMap.Property, so a table that stopped answering a declared record
+// with a struct text fails here rather than leaving a green row about a
+// text no emission produces. The age package holds the same row over its
+// own table.
 //
 // It is asked directly rather than through a call site because ONE of
 // the two halves is not reachable from any schema. typeMap.Property
@@ -444,12 +452,12 @@ func TestIsDeclaredRecordNeedsBothHalves(t *testing.T) {
 	structText, ok := neo4j.TypeMap{}.Property(declared)
 	require.True(t, ok)
 
-	require.True(t, neo4j.IsDeclaredRecord(structText, declared),
+	require.True(t, codegen.IsDeclaredRecord(structText, declared),
 		"the control: a declared record paired with its own carrier is the whole point")
 
-	require.False(t, neo4j.IsDeclaredRecord("map[string]any", graph.TypeAnyRecord),
+	require.False(t, codegen.IsDeclaredRecord("map[string]any", graph.TypeAnyRecord),
 		"RECORD<ANY> is KindRecord, so the kind alone would admit it — and RecordEncodings emits it no helper to name")
 
-	require.False(t, neo4j.IsDeclaredRecord(structText, graph.TypeString),
+	require.False(t, codegen.IsDeclaredRecord(structText, graph.TypeString),
 		"a struct text beside a non-record width is a caller's mistake; naming a helper off it would invent a declaration")
 }

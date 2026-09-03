@@ -388,34 +388,6 @@ func isSliceType(goType string) bool {
 	return strings.HasPrefix(goType, "[]") && goType != "[]byte" && goType != "[]any"
 }
 
-// isRecordStruct reports whether a Go type text is the anonymous struct
-// a DECLARED record carries as. It is the shape question — "does this
-// value arrive as a driver map that has to be checked into a struct" —
-// and it is asked of the text because that is the currency this whole
-// render layer trades in, alongside isSliceType and isTemporalCarrier.
-//
-// What it deliberately does NOT answer is WHICH record, because the text
-// cannot say: the mapping does not run backwards, and there is no
-// PropertyType to recover from `struct {\n\tCity *string\n}` and
-// therefore no helper name. That is why narrowCall and widenExpr take
-// the width the prepared surface carries rather than sniffing it out of
-// here.
-//
-// RECORD<ANY> is NOT a record struct by this test, and that is the whole
-// point of the distinction. It carries as map[string]any, which is
-// already the driver's own shape, so it needs no check and no helper —
-// driverCarrier answers it through the default arm and the decode sites
-// see carrier == goType and assign it bare.
-//
-// A prefix test rather than a parse: codegen.RecordStructText is the
-// only producer of a `struct`-prefixed type text in this pipeline, and
-// recordtype_test.go pins the two forms it emits (`struct{}` for a
-// record with no fields, `struct {\n...` otherwise). Every other
-// emitted Go type is an identifier, a slice of one, or a qualified name.
-func isRecordStruct(goType string) bool {
-	return strings.HasPrefix(goType, "struct")
-}
-
 // ridesADriverCarrier reports whether a property's decode reaches the
 // driver's constrained generics at all. A property of no declared shape
 // does not. `any` is a member of neither neo4j.PropertyValue nor

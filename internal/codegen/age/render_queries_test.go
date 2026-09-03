@@ -16,6 +16,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/queryfile"
 )
 
@@ -197,11 +198,28 @@ func constValue(t *testing.T, src []byte, name string) string {
 // sides of that split are rows here: int64 and float64 are the widths
 // that ARE their carrier and still name the plain helper, so a change
 // that routed everything through the narrowing would go red too.
+// Every row but the record ones leaves width empty, and that is an
+// assertion rather than a convenience: those arms key on the text alone,
+// so a switch that began consulting the width for them would answer
+// these rows differently.
 func TestDecodeFuncNamesTheHelperForEveryServedCarrier(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{{Name: "zip", Type: graph.TypeInt32, NotNull: true}})
+	recText, ok := age.TypeMap{}.Property(rec)
+	require.True(t, ok, "this backend carries %s", rec)
+	recSuffix := codegen.RecordHelperSuffix(rec)
+
 	tests := []struct {
+		name   string
 		goType string
+		width  graph.PropertyType
 		want   string
 	}{
+		{name: "a declared record", goType: recText, width: rec, want: "decode" + recSuffix},
+		{
+			name: "a list of declared records", goType: "[]" + recText, width: graph.ListOf(rec, true),
+			want: "agtypeListOf" + recSuffix,
+		},
+		{name: "RECORD<ANY>", goType: "map[string]any", width: graph.TypeAnyRecord, want: "agtypeMap"},
 		{goType: "bool", want: "agtypeBool"},
 		{goType: "string", want: "agtypeString"},
 		{goType: "int64", want: "agtypeInt64"},
@@ -216,8 +234,12 @@ func TestDecodeFuncNamesTheHelperForEveryServedCarrier(t *testing.T) {
 		{goType: "[]string", want: "agtypeListOfString"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.goType, func(t *testing.T) {
-			require.Equal(t, tt.want, decodeFuncOf(t, tt.goType))
+		name := tt.name
+		if name == "" {
+			name = tt.goType
+		}
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tt.want, decodeFuncOf(t, tt.goType, tt.width))
 		})
 	}
 }
@@ -231,11 +253,39 @@ func TestDecodeFuncNamesTheHelperForEveryServedCarrier(t *testing.T) {
 // its rewrites are the fixed numeric-width list, and every target of one
 // has an arm — so the two slots hold the same text here and the rows do
 // not tell them apart. What tells them apart is the format string.
+//
+// The last two rows are the record arm's two halves falsified one at a
+// time, and they are refusals rather than answers because a helper name
+// derived from half a record would name a declaration no emission
+// writes. A struct carrier with no width has no digest to name; a record
+// width beside a carrier that is not its struct is a caller holding two
+// unrelated things. Both reach the panic and say which text they could
+// not place — the same failure a carrier the table gained without an arm
+// gets, which is the point: there is one refusal here, not a special one
+// for records.
 func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{{Name: "zip", Type: graph.TypeInt32, NotNull: true}})
+	recText, ok := age.TypeMap{}.Property(rec)
+	require.True(t, ok, "this backend carries %s", rec)
+
 	tests := []struct {
+		name   string
 		goType string
+		width  graph.PropertyType
 		want   string
 	}{
+		{
+			name:   "a record carrier with no width",
+			goType: recText,
+			want: `age codegen bug: Go type ` + strconv.Quote(recText) +
+				` carries as ` + strconv.Quote(recText) + `, which decodeFunc has no arm for`,
+		},
+		{
+			name:   "a record width beside a carrier that is not its struct",
+			goType: "decimal.Decimal",
+			width:  rec,
+			want:   `age codegen bug: Go type "decimal.Decimal" carries as "decimal.Decimal", which decodeFunc has no arm for`,
+		},
 		{
 			goType: "decimal.Decimal",
 			want:   `age codegen bug: Go type "decimal.Decimal" carries as "decimal.Decimal", which decodeFunc has no arm for`,
@@ -250,8 +300,12 @@ func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.goType, func(t *testing.T) {
-			require.PanicsWithValue(t, tt.want, func() { age.DecodeFunc(tt.goType) })
+		name := tt.name
+		if name == "" {
+			name = tt.goType
+		}
+		t.Run(name, func(t *testing.T) {
+			require.PanicsWithValue(t, tt.want, func() { age.DecodeFunc(tt.goType, tt.width) })
 		})
 	}
 
@@ -265,7 +319,7 @@ func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
 	// TestListExpressionColumnDecodesThroughTheSliceWrapper, both of which
 	// go red when the wrapper is written with the slice type instead.
 	t.Run("a slice names a wrapper without asking about its element", func(t *testing.T) {
-		require.NotPanics(t, func() { age.DecodeFunc("[]byte") })
+		require.NotPanics(t, func() { age.DecodeFunc("[]byte", "") })
 	})
 }
 
@@ -335,7 +389,11 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 		}
 	}
 
-	require.Len(t, byMethod["Property"], 21, "typeMap.Property named %v", byMethod["Property"])
+	// 21 until RECORD<ANY> began to carry. It is the twenty-second, and
+	// it is a literal rather than a member of the record FAMILY: a record
+	// whose fields are undeclared has no struct to build, so that arm
+	// returns map[string]any outright and the census can hold it.
+	require.Len(t, byMethod["Property"], 22, "typeMap.Property named %v", byMethod["Property"])
 	require.Len(t, byMethod["Scalar"], 6, "typeMap.Scalar named %v", byMethod["Scalar"])
 	require.Empty(t, byMethod["Temporal"], "typeMap.Temporal named %v, so this backend now carries a temporal "+
 		"width: read it against decodeFunc before moving this number", byMethod["Temporal"])
@@ -344,10 +402,17 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 // requireCarrierHasAnArm requires decodeFunc to name a helper for one Go
 // type text and, where that text is a slice, for the element it decodes
 // through at every depth.
+//
+// The width is empty at every call, which is what makes this the census
+// it claims to be: the texts come from the table with no value beside
+// them, and a text that needed a width to be placed would be one this
+// sweep cannot vouch for. No such text reaches here — the record arm,
+// the one arm keyed on a width, contributes no text at all (see
+// returnedGoType).
 func requireCarrierHasAnArm(t *testing.T, goType string) {
 	t.Helper()
 	for {
-		decodeFuncOf(t, goType,
+		decodeFuncOf(t, goType, "",
 			"the type table names Go type %q, which decodeFunc has no arm for the carrier of", goType)
 		elem, ok := strings.CutPrefix(goType, "[]")
 		if !ok {
@@ -387,13 +452,19 @@ func requireCarrierHasAnArm(t *testing.T, goType string) {
 // — that provenance is the diagnosis, since it tells a reader whether an arm
 // was deleted or a table row was added. So it is passed in rather than
 // asserted here, where it would be true of one caller and false of another.
-func decodeFuncOf(t *testing.T, goType string, msgAndArgs ...any) string {
+//
+// width is separate from goType because a declared record and RECORD<ANY>
+// share the carrier text map[string]any; the width is the only thing that
+// tells them apart. Callers sweeping string LITERALS out of the type table
+// pass the zero width, which is right for them — no record carrier is
+// among those literals.
+func decodeFuncOf(t *testing.T, goType string, width graph.PropertyType, msgAndArgs ...any) string {
 	t.Helper()
 	if len(msgAndArgs) == 0 {
 		msgAndArgs = []any{"decodeFunc has no arm for the carrier of Go type %q", goType}
 	}
 	var helper string
-	require.NotPanics(t, func() { helper = age.DecodeFunc(goType) }, msgAndArgs...)
+	require.NotPanics(t, func() { helper = age.DecodeFunc(goType, width) }, msgAndArgs...)
 	return helper
 }
 
@@ -519,6 +590,24 @@ func collectTypeMapGoTypes(t *testing.T, fset *token.FileSet, file *ast.File, by
 			byMethod[fn.Name.Name] = nil
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			// A return inside a nested function literal is that
+			// literal's, not the method's, so the walk does not descend
+			// into one. The record arm is why there is a literal to
+			// descend into at all: it passes the field carrier as a
+			// closure, and that closure returns `text` — a VALUE, which
+			// the reader below refuses. Refusing it there would be
+			// refusing a return the method never makes.
+			//
+			// This narrows what is read and so it is worth saying what
+			// it cannot hide. A carrier method's OWN returns are still
+			// every one of them, because a method returns from its own
+			// body; a closure cannot return on its behalf. What a
+			// closure could do is compute a text the method then returns
+			// — and that return is in the body, is a VALUE, and is
+			// refused there.
+			if _, isLit := n.(*ast.FuncLit); isLit {
+				return false
+			}
 			ret, ok := n.(*ast.ReturnStmt)
 			if !ok {
 				return true
@@ -545,8 +634,9 @@ func returnedGoType(t *testing.T, fset *token.FileSet, method string, ret *ast.R
 	t.Helper()
 
 	const cannotRead = "this walk cannot read the return at %s: %s returns %s, and this reads a string " +
-		"literal or the list arm's `\"[]\" + elem` and nothing else — a Go type named any other way is " +
-		"invisible here, so the walk refuses rather than skip it"
+		"literal, the list arm's `\"[]\" + elem`, or the record arm's codegen.RecordStructText call, and " +
+		"nothing else — a Go type named any other way is invisible here, so the walk refuses rather than " +
+		"skip it"
 	where := fset.Position(ret.Pos())
 
 	require.NotEmpty(t, ret.Results, cannotRead, where, method, "no value")
@@ -577,10 +667,54 @@ func returnedGoType(t *testing.T, fset *token.FileSet, method string, ret *ast.R
 		elem, err := strconv.Unquote(rhs.Value)
 		require.NoError(t, err, "%s returns a literal this walk cannot read as a Go type text: %s", method, rhs.Value)
 		return "[]" + elem, true
+	case *ast.CallExpr:
+		// The record arm, and the third shape this walk accepts. It
+		// returns codegen.RecordStructText(pt.Fields(), carrier), which
+		// names not a Go type but a FAMILY of them: one anonymous struct
+		// per declared record, each built from the carriers of its
+		// fields — which are the literals of the arms beside it, already
+		// swept. So there is nothing here for this census to add, and
+		// nothing it could add, since the family is unbounded.
+		//
+		// Accepted rather than refused, and that is the one place this
+		// walk stops being the closure pin it is everywhere else. What
+		// makes that sound is that decodeFunc's record arm is not keyed
+		// on a TEXT at all: it is keyed on the width, so a carrier
+		// reaching it through this arm cannot be one decodeFunc has no
+		// case for. The arm is held instead by
+		// TestDecodeFuncNamesTheHelperForEveryServedCarrier's record
+		// rows, which name the helper, and by
+		// TestARecordPropertyRendersItsCarrierAndItsDecode, which
+		// requires the emission to declare it.
+		//
+		// Pinned to that one callee by name. Any other call is a return
+		// this walk cannot read and falls through to the refusal below,
+		// so an arm that began composing its text some other way is a
+		// failure here rather than a silent hole.
+		require.True(t, isRecordStructTextCall(first),
+			cannotRead, where, method, types.ExprString(first))
+		return "", false
 	default:
 		require.Fail(t, "unreadable return in the type table", cannotRead, where, method, types.ExprString(first))
 		return "", false
 	}
+}
+
+// isRecordStructTextCall reports whether an expression is the record
+// arm's call to codegen.RecordStructText, read off the syntax alone.
+//
+// Syntax and not types, because the walk parses files rather than
+// type-checking a package, so "codegen" here is the identifier written
+// at the call site. An import alias would defeat it — and would fail the
+// walk at the refusal rather than pass silently, which is the safe
+// direction.
+func isRecordStructTextCall(call *ast.CallExpr) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "RecordStructText" {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "codegen"
 }
 
 // namesAGoType reports whether a typeMap method is one of the carrier
@@ -623,6 +757,58 @@ func namesAGoType(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl) bool {
 			"skipping one would drop a carrier method out of the arm census in silence",
 		fn.Name.Name, fset.Position(fn.Pos()), first.Name)
 	return false
+}
+
+// TestARecordParameterBindsUnderTheSchemasFieldNames witnesses the encode
+// half of the record work, and it is a wrong-output guard rather than a
+// missing-feature one.
+//
+// A record parameter is ADMITTED — typeMap.Property answers a struct text
+// for one, so prepare wires it and generation exits 0 — and before this
+// it crossed BARE, inside the args map, to be written by json.Marshal.
+// What that marshals is the Go struct: the GO field names the mangle
+// produced, not the field names the schema declared, and a JSON null for
+// a nullable field the store spells by leaving the key out. The server is
+// then handed a map whose every key is wrong, and nothing anywhere fails.
+//
+// Both halves are asserted because either alone is satisfiable by an
+// emission that is still wrong. A bind that merely stops crossing bare
+// says nothing about what the encoder writes; an encoder with the right
+// keys that no method routes through changes nothing that reaches a
+// database. The negative on the Go field name is what separates this from
+// a test the json.Marshal path would also pass, since that path writes
+// "ZipCode" into the very same map.
+func TestARecordParameterBindsUnderTheSchemasFieldNames(t *testing.T) {
+	goType, ok := age.TypeMap{}.Property(recordWidth)
+	require.True(t, ok, "this backend carries %s", recordWidth)
+	suffix := codegen.RecordHelperSuffix(recordWidth)
+
+	param := codegen.Param{RawName: "h", Field: "H", GoType: goType, Width: recordWidth}
+	q := codegen.Query{
+		NamedQuery: codegen.NamedQuery{
+			Name:        "Q",
+			SourceText:  "MATCH (r:Row) WHERE r.home = $h RETURN r.id",
+			Cardinality: queryfile.CardinalityExec,
+		},
+		MethodName:  "Q",
+		Bare:        "q",
+		ParamFields: []codegen.Param{param},
+	}
+
+	rendered := string(age.RenderCypherFile("p", []codegen.Query{q}))
+	require.NotContains(t, rendered, `map[string]any{"h": arg}`,
+		"the record parameter crosses bare, so json.Marshal writes the Go field names onto the wire")
+	require.Contains(t, rendered, "err := encode"+suffix+"(arg)\n",
+		"the bind does not route the record through its own encoder")
+
+	var h age.Helpers
+	age.HelpersForParams(&h, []codegen.Param{param})
+	models := string(age.RenderModels("models", nil, h))
+
+	require.Contains(t, models, `out["zip_code"]`,
+		"the emitted encoder does not write the field name the schema declared")
+	require.NotContains(t, models, `out["ZipCode"]`,
+		"the emitted encoder writes the Go field name, which is the defect this guards")
 }
 
 // isTypeMapMethod reports whether a declaration is a method on typeMap.

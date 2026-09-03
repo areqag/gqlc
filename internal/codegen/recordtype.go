@@ -212,6 +212,55 @@ func RecordStructText(fields []graph.RecordField, carrier func(graph.PropertyTyp
 	return b.String(), true
 }
 
+// IsRecordStruct reports whether a Go type text is the anonymous struct
+// a DECLARED record carries as. It is the shape question — "does this
+// value arrive as a keyed collection that has to be checked into a
+// struct" — and it is asked of the text because that is the currency
+// every backend's render layer trades in.
+//
+// What it deliberately does NOT answer is WHICH record, because the text
+// cannot say: the mapping does not run backwards, and there is no
+// PropertyType to recover from `struct {\n\tCity *string\n}` and
+// therefore no helper name. That is why the sites that need a NAME take
+// the width the prepared surface carries rather than sniffing it out of
+// here.
+//
+// RECORD<ANY> is NOT a record struct by this test, and that is the whole
+// point of the distinction. It carries as map[string]any, which both
+// backends already read as a value of no declared shape, so it needs no
+// check and no helper of its own.
+//
+// A prefix test rather than a parse: RecordStructText is the only
+// producer of a `struct`-prefixed type text in this pipeline, and
+// recordtype_test.go pins the two forms it emits (`struct{}` for a
+// record with no fields, `struct {\n...` otherwise). Every other emitted
+// Go type is an identifier, a slice of one, or a qualified name.
+//
+// Shared rather than per-backend because it is the inverse of
+// RecordStructText and belongs beside its producer. Two copies of it
+// would be two chances to disagree about whether RECORD<ANY> is a
+// record, and a backend that answered yes would name a helper no
+// emission declares.
+func IsRecordStruct(goType string) bool {
+	return strings.HasPrefix(goType, "struct")
+}
+
+// IsDeclaredRecord reports whether a Go type text and the width beside it
+// are a record an emission declares a helper pair for — that is, a record
+// with DECLARED fields, which RecordEncodings collects and RECORD<ANY> is
+// deliberately absent from.
+//
+// Both halves are asked, and neither alone is the test. The kind admits
+// RECORD<ANY>, whose carrier is map[string]any and which needs no helper;
+// the text is a struct for every declared record but says nothing about
+// which, and a bare-struct test would also admit a carrier some future
+// arm spells as a struct for an unrelated reason. Together they are the
+// exact set RecordEncodings emits for, which is what makes a name derived
+// at a call site resolve to a declaration.
+func IsDeclaredRecord(goType string, width graph.PropertyType) bool {
+	return width.Kind() == graph.KindRecord && IsRecordStruct(goType)
+}
+
 // RecordHelperSuffix is the identifier fragment naming one record
 // encoding, so a backend spells its encode/decode pair
 // "encode"+suffix / "decode"+suffix.

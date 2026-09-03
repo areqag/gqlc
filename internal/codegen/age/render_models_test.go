@@ -52,25 +52,87 @@ func propertyCarriers(t *testing.T) []string {
 	return carriers
 }
 
+// propertyRow is one row of the three sweeps below: a carrier and the
+// width it came from. The width is what helpers.need dispatches the
+// record arm on, and it is the zero value for every derived row —
+// which is what those rows carried implicitly before records existed,
+// since a zero width is neither a list nor a record.
+type propertyRow struct {
+	goType string
+	width  graph.PropertyType
+}
+
+// propertyRows is propertyCarriers plus the record rows that walk cannot
+// reach.
+//
+// The derivation reads the texts typeMap.Property returns as string
+// LITERALS. A record's carrier is not one: it is composed per encoding
+// from the field list, exactly as the list arm's `"[]" + elem` is, so no
+// record row can appear in the derived population however many records
+// the table learns to carry. Hand-writing the record rows here is the
+// same concession the doc above records for lists — and unlike a list,
+// it is not covered by peeling to an element, because what a record row
+// asserts is about helpers named from the ENCODING.
+//
+// The carriers are asked of the table rather than spelled, so a row is
+// dropped rather than faked if this backend stops carrying the width.
+func propertyRows(t *testing.T) []propertyRow {
+	t.Helper()
+
+	var rows []propertyRow
+	for _, goType := range propertyCarriers(t) {
+		rows = append(rows, propertyRow{goType: goType})
+	}
+	for _, width := range []graph.PropertyType{
+		recordWidth, graph.ListOf(recordWidth, false), graph.TypeAnyRecord,
+	} {
+		goType, ok := age.TypeMap{}.Property(width)
+		require.True(t, ok, "this backend no longer carries %s, so the record rows are stale", width)
+		rows = append(rows, propertyRow{goType: goType, width: width})
+	}
+	return rows
+}
+
+// recordWidth is the record these sweeps carry. Its fields are chosen so
+// that the row is not a restatement of the scalar rows above it:
+//
+//   - the DATE marks a helper the record's own decoder names, so a
+//     record that marked nothing but itself renders a file naming
+//     agtypeDate without declaring it, and the closure sweep says so;
+//   - the nullable field is the arm that writes no key on the encode
+//     side and reads absence as null on the decode side, and it is the
+//     only one of the two arms a record of all-NOT NULL fields reaches;
+//   - the field names are not the Go field names they mangle to, so an
+//     emission that spelled the Go name on the wire is visible.
+//
+// It is a package-level var rather than a literal in each sweep because
+// two spellings of "the record" would be two encodings, and the helper
+// suffix is derived from the encoding.
+var recordWidth = graph.RecordOf([]graph.RecordField{
+	{Name: "zip_code", Type: graph.TypeInt32, NotNull: true},
+	{Name: "seen_on", Type: graph.TypeDate, NotNull: true},
+	{Name: "note", Type: graph.TypeString},
+})
+
 // TestZoneIsMarkedOnlyBesideTheInstant pins the invariant importsTime
 // leans on. The sidecar read is marked on an entity field whose Go type
 // is the instant, and that same field marks the instant decode; a zone
 // marked without one would answer importsTime false and leave models.go
 // naming time with no import for it.
 //
-// The rows are propertyCarriers, so a carrier the property table gains is
-// a row this sweep gains.
+// The rows are propertyRows, so a carrier the property table gains is a
+// row this sweep gains.
 func TestZoneIsMarkedOnlyBesideTheInstant(t *testing.T) {
 	sawInstant := false
-	for _, goType := range propertyCarriers(t) {
+	for _, row := range propertyRows(t) {
 		var h age.Helpers
 		h.ForEntities([]age.WiredEntity{{Entity: codegen.Entity{
 			Name:   "E",
-			Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}},
+			Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: row.goType, Width: row.width}},
 		}}})
 
 		if h.Zone() {
-			require.True(t, h.Instant(), "%s marks the sidecar read with no instant beside it", goType)
+			require.True(t, h.Instant(), "%s marks the sidecar read with no instant beside it", row.goType)
 			sawInstant = true
 		}
 	}
@@ -91,10 +153,10 @@ func TestZoneIsMarkedOnlyBesideTheInstant(t *testing.T) {
 // are temporals whose helpers do int64 arithmetic and name no time at
 // all, so a gate written as "the batch carries a temporal" is red here.
 func TestImportsTimeAgreesWithTheEmittedFile(t *testing.T) {
-	for _, goType := range propertyCarriers(t) {
-		t.Run(goType, func(t *testing.T) {
+	for _, row := range propertyRows(t) {
+		t.Run(row.goType, func(t *testing.T) {
 			entities := []age.WiredEntity{age.WiredEntity{
-				Entity: codegen.Entity{Name: "E", Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}}},
+				Entity: codegen.Entity{Name: "E", Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: row.goType, Width: row.width}}},
 			}.WithLabels("E", age.VertexAnnotation)}
 			var h age.Helpers
 			h.ForEntities(entities)
@@ -156,23 +218,23 @@ func TestTheWireLabelsReachTheEmittedDecoder(t *testing.T) {
 // of them supplies the callee by some other route and none of them can
 // see that hole; a batch of exactly one width is what exposes it.
 func TestEmittedHelpersAreClosedOverWhatTheyCall(t *testing.T) {
-	for _, goType := range propertyCarriers(t) {
+	for _, row := range propertyRows(t) {
 		for _, nullable := range []bool{false, true} {
 			e := age.WiredEntity{
 				Entity: codegen.Entity{
 					Name:   "E",
 					Kind:   codegen.EntityNode,
-					Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType, Nullable: nullable}},
+					Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: row.goType, Width: row.width, Nullable: nullable}},
 				},
 			}.WithLabels("E", age.VertexAnnotation)
 			var h age.Helpers
 			h.ForEntities([]age.WiredEntity{e})
-			age.HelpersForParams(&h, []codegen.Param{{RawName: "p", Field: "P", GoType: goType, Nullable: nullable}})
+			age.HelpersForParams(&h, []codegen.Param{{RawName: "p", Field: "P", GoType: row.goType, Width: row.width, Nullable: nullable}})
 
 			src := age.RenderModels("models", []age.WiredEntity{e}, h)
 			require.Empty(t, undeclaredAgtypeIdents(t, src),
 				"a batch of one %s property (nullable=%t) names an agtype helper it does not declare, so the emitted package does not compile",
-				goType, nullable)
+				row.goType, nullable)
 		}
 	}
 }
