@@ -1339,94 +1339,104 @@ seat_pane() { # <seat> -> the pane's visible buffer
     herdr pane read "$pane" --source visible --lines 40 2>/dev/null
 }
 
-# A seat whose turn ended with a BACKGROUND shell still running reads `done`:
-# herdr derives its state from the screen and cannot see the shell, while Claude
-# Code re-invokes the agent the moment that shell finishes. Such a seat has not
-# stopped, so it is not idle. The witness is the process table and not the
-# pane's "N shell still running" line, because that line is Claude Code chrome
-# and moves with its version (bd gqlc-y8puo).
+# The second witness behind seat_pane_idle: a seat is still only if its visible
+# pane buffer is byte-identical across a 3-second gap. It replaces a process
+# witness (`does the seat's claude have a live child`) that was wrong in both
+# polarities — a language server attaches on the first Go file and never leaves,
+# so near half the town read `working` forever, while a thinking turn runs inside
+# claude itself with no child at all and read exactly like a dead seat. The
+# ruling to replace rather than repair it is bd gqlc-39nk9; the ground it was
+# measured on is gqlc-yq1vg, and km-notes.md#seat_pane_idle keeps the history.
 #
-# THE PREMISE "A CLAUDE PROCESS AT REST HAS NO CHILDREN" IS FALSE, and the
-# measurement once written here to support it was a snapshot that does not
-# generalise. It read sedrak, artur and ayg holding a live claude with zero
-# children on 2026-09-02 — sessions that had not yet opened a Go file. Sampled
-# twice on 2026-09-03, minutes apart: 15 live seat sessions of which 7 held at
-# least one child, then 14 of which 6 did. EVERY child observed on either pass
-# was a DAEMON rather than work — gopls on every seat that held anything at all,
-# aged 45m to 31.7h; a node language server on 4; background shells up to 30.6h
-# old, four of them on one seat. A language server attaches on the first Go file
-# and never leaves, so what this predicate tracks is session age.
+# 3 SECONDS, and 60 lines, are both hardcoded on purpose. A live turn repaints
+# its timer at least once a second, so a 3s gap spans two or more ticks; 60
+# lines is what the sibling pane readers take (seat_box_text, seat_wedge_reason).
+# Neither is a knob, because a wrong value is a silent mis-read rather than an
+# error and a knob would let one be set without measuring.
 #
-# BOTH SAMPLES ARE GIVEN BECAUSE THE POPULATION MOVED BETWEEN THEM, which is the
-# same error this paragraph replaces: one session ended in those few minutes and
-# took its gopls with it. Any single count here is a snapshot, and writing one as
-# a property is what put a false sentence in this header the first time. What
-# does not move between the samples is the load-bearing part — the only child on
-# either pass that was a live tool call was the measuring command's own shell.
+# THIS WITNESS FAILS IN BOTH POLARITIES TOO, and this list is what was measured,
+# not a claim to have enumerated them all:
 #
-# THAT ONE EXCEPTION IS THE SHARPEST FORM OF THE DEFECT rather than a
-# counter-example. It sat on ayg beside a gopls and a node server, so the
-# predicate answered `working` for a seat that genuinely was — and would have
-# answered identically with the tool call absent, as it did for the same seat on
-# the pass where no tool call was running. The answer does not move with the
-# thing it claims to measure.
+#   FALSE-STILL, a working seat read as idle: any live turn whose visible tail
+#   repaints more slowly than the gap. The known instance is a turn that ENDED
+#   while a background shell it launched is still running (bd gqlc-y8puo) — the
+#   case the process witness got right and this one does not. Future Claude Code
+#   chrome joins this list without announcing itself.
 #
-# The other half of that old measurement is unsafe too. It took vahagn's one
-# child, Claude Code's own `bash -c source .../shell-snapshots/...`, as the work
-# signal; four of exactly that shape were later found on a single seat aged
-# around 16h each. A snapshot bash is not evidence of a live tool call.
+#   FALSE-MOVING, a resting seat read as working: anything that repaints an idle
+#   pane between the two reads. A concurrent km process is the real one — the
+#   guard sweep runs on its own cadence and there is deliberately no flock
+#   between km processes — and a human focusing or typing in the pane is the
+#   other. Both cost one pass and self-heal on the next.
 #
-# Absent claude processes are NOT work: a seat killed mid-shell leaves its
-# children reparented to init and the pid this looks under is gone, so a dead
-# seat still answers "no work" and still reaches the ladder. That was arpine on
-# the 2026-09-02 pass — `done`, no process, correctly still nudgeable. Read it
-# as the worked example it is and not as a current reading: on both 2026-09-03
-# samples above arpine held a LIVE claude with no children, which is the
-# fail-toward-nudgeable case below rather than this one, and the two are
-# indistinguishable to this predicate.
+# THE BOUND, carried forward from the witness this replaces, and it is what makes
+# both polarities survivable: `stalled_age` comes from seat_dry_age, which reads
+# the hook-written progress witness and is wholly independent of this function.
+# A seat mis-read in either direction is still caught by the stalled arm.
 #
-# THIS PREDICATE FAILS IN BOTH POLARITIES. The paragraph that stood here
-# enumerated one of them and then claimed to have enumerated all. There is
-# deliberately no fail-loud arm, which is still right, but that is an argument
-# about the fail-toward-NUDGEABLE directions alone — an unreadable /proc entry,
-# a pgrep that finds nothing, a worktree that does not exist all land on "no
-# work running", leaving the seat in exactly the population it occupied before
-# this predicate existed. The sentence that followed them, "the only direction
-# that cannot silence the ladder town-wide", was false of the direction that
-# actually occurs:
+# UNREADABLE IS NOT STILL. An unresolvable pane id, or either read failing,
+# lands on `moving` — the same polarity seat_agent_status takes for the same
+# reason: a seat km cannot read is a seat km must not type at.
+PANE_STILL_MEMO=""
+seat_pane_still() { # <seat> -> 0 the visible buffer did not move across the gap
+    local hps_s=$1 hps_pane hps_b1 hps_b2
+    case "$PANE_STILL_MEMO" in
+        *"[$hps_s]=still"*) return 0 ;;
+        *"[$hps_s]=moving"*) return 1 ;;
+    esac
+    if ! hps_pane=$(seat_pane_id "$hps_s") || [ -z "$hps_pane" ]; then
+        PANE_STILL_MEMO="$PANE_STILL_MEMO [$hps_s]=moving"; return 1
+    fi
+    hps_b1=$(herdr pane read "$hps_pane" --source visible --lines 60 2>/dev/null) || {
+        PANE_STILL_MEMO="$PANE_STILL_MEMO [$hps_s]=moving"; return 1; }
+    sleep 3
+    hps_b2=$(herdr pane read "$hps_pane" --source visible --lines 60 2>/dev/null) || {
+        PANE_STILL_MEMO="$PANE_STILL_MEMO [$hps_s]=moving"; return 1; }
+    if [ "$hps_b1" = "$hps_b2" ]; then
+        PANE_STILL_MEMO="$PANE_STILL_MEMO [$hps_s]=still"; return 0
+    fi
+    PANE_STILL_MEMO="$PANE_STILL_MEMO [$hps_s]=moving"; return 1
+}
+
+# One 3-second gap for the whole town instead of one per seat: read every
+# candidate, sleep once, read them all again. Only seats seat_pane_idle could
+# possibly call idle are primed, so a full pass costs two herdr reads per
+# candidate and a single sleep.
 #
-#   FAIL-TOWARD-SILENT is the common case — near half the town on both samples
-#   above, and every one of those seats held only daemons. A seat holding
-#   a language server reports work forever, so seat_pane_idle is permanently
-#   false, so cmd_dispatch not only never nudges it but CLEARS its five idle
-#   markers on every pass. Such a seat cannot accumulate an idle episode at all.
-#
-#   FAIL-TOWARD-NUDGEABLE is the rarer case, and this predicate never closed it.
-#   A thinking turn is not a process: streaming and extended thinking run inside
-#   claude itself, so a seat mid-thought has zero children and reads exactly
-#   like a dead one.
-#
-# THE BOUND, so this is not read as worse than it is: the fail-silent arm does
-# not disable the ladder. `stalled_age` comes from seat_dry_age, which reads the
-# hook-written progress witness and is wholly independent of this predicate, so
-# a daemon-holding seat that genuinely stalls is still caught by the dry arm.
-# What is lost is the idle arm and every idle episode's accumulated state.
-#
-# WHICH WITNESS REPLACES THIS IS NOT DECIDED — bd gqlc-39nk9 holds the ruling,
-# gqlc-yq1vg the ground it was measured on. Do not improvise one here. An
-# allowlist of shell shapes rots as Claude Code's chrome moves; a denylist of
-# daemons rots faster, and nobody writing one on 2026-09-02 would have had
-# `node` on it, which 4 seats held a day later. Do not reach for claude's own
-# CPU time either: over 10s across 12 seats, seats with and without children
-# interleaved throughout the range, so no threshold separates them.
-seat_work_running() { # <seat> -> 0 a claude process in the seat's worktree has a live child
-    local wt p
-    wt=$(seat_worktree "$1")
-    for p in $(pgrep -x claude 2>/dev/null); do
-        [ "$(readlink "/proc/$p/cwd" 2>/dev/null)" = "$wt" ] || continue
-        pgrep -P "$p" >/dev/null 2>&1 && return 0
+# CALL THIS BEFORE THE PASS TYPES ANYTHING INTO A PANE. km's own send repaints
+# the pane it lands in, so a witness read after a send manufactures false-moving
+# for a seat km itself disturbed.
+pane_still_prime() {
+    local psp_s psp_pane psp_first psp_second
+    local psp_seats="" psp_panes=""
+    for psp_s in $(seats_all); do
+        [ "$(seat_status "$psp_s")" = awake ] || continue
+        case "$(seat_agent_status "$psp_s")" in idle | done) ;; *) continue ;; esac
+        if ! psp_pane=$(seat_pane_id "$psp_s") || [ -z "$psp_pane" ]; then
+            PANE_STILL_MEMO="$PANE_STILL_MEMO [$psp_s]=moving"; continue
+        fi
+        psp_first=$(herdr pane read "$psp_pane" --source visible --lines 60 2>/dev/null) || {
+            PANE_STILL_MEMO="$PANE_STILL_MEMO [$psp_s]=moving"; continue; }
+        psp_seats="$psp_seats $psp_s"
+        # Held as one record per seat rather than in a file: the buffers are at
+        # most 60 lines each and never leave this function.
+        psp_panes="$psp_panes$psp_s"$'\x1f'"$psp_pane"$'\x1f'"$psp_first"$'\x1e'
     done
-    return 1
+    [ -n "$psp_seats" ] || return 0
+    sleep 3
+    while IFS= read -r -d $'\x1e' psp_first; do
+        [ -n "$psp_first" ] || continue
+        psp_s=${psp_first%%$'\x1f'*}
+        psp_pane=${psp_first#*$'\x1f'}; psp_pane=${psp_pane%%$'\x1f'*}
+        psp_first=${psp_first#*$'\x1f'}; psp_first=${psp_first#*$'\x1f'}
+        psp_second=$(herdr pane read "$psp_pane" --source visible --lines 60 2>/dev/null) || {
+            PANE_STILL_MEMO="$PANE_STILL_MEMO [$psp_s]=moving"; continue; }
+        if [ "$psp_first" = "$psp_second" ]; then
+            PANE_STILL_MEMO="$PANE_STILL_MEMO [$psp_s]=still"
+        else
+            PANE_STILL_MEMO="$PANE_STILL_MEMO [$psp_s]=moving"
+        fi
+    done <<<"$psp_panes"
 }
 
 # history: kingdom/brain/km-notes.md#seat_pane_idle
@@ -1440,7 +1450,7 @@ seat_pane_idle() { # <seat>
     # seat wears forever. Narrowing the enum back to `idle` is not the fix and
     # was already tried: it made this blind to the steady state (bd gqlc-ymbw0).
     # The second witness separates the two instead.
-    ! seat_work_running "$1"
+    seat_pane_still "$1"
 }
 
 # history: kingdom/brain/km-notes.md#seat_box_state
@@ -2991,6 +3001,18 @@ cmd_dispatch() {
         echo "dispatch: the reconcile pass failed (diagnosis above); routing continues on a possibly stale ledger, because a failed repair must not cost the town its routing" >&2
     fi
 
+    # HERE, and not inside the loop: every pane witness this pass will use is
+    # read before the pass types into any pane, because km's own send repaints
+    # the pane it lands in and would manufacture false-moving for a seat km
+    # itself disturbed. The one send above this line is the mayor's mail wake,
+    # which is safe by construction — cmd_wake targets a seat whose status is
+    # not awake, and pane_still_prime only considers awake ones.
+    # A DIFFERENT km process can still send between the two reads: the guard
+    # sweep runs on its own cadence and there is deliberately no lock between km
+    # processes. That costs one pass of false-working for one seat and clears
+    # itself on the next.
+    pane_still_prime
+
     # history: kingdom/brain/km-notes.md#cmd_dispatch-2
     local s idle_marker nudged_marker attempts_file escalated_marker refusal_file
     local unwitnessed_marker
@@ -3050,7 +3072,7 @@ cmd_dispatch() {
             if [ "$pending" -gt 0 ]; then
                 ask="[km] you have $pending unread letter(s) — bd mail inbox, and km sleep when you are done for the day (it is what makes you reachable)"
             else
-                ask="[km] you are awake at an empty prompt with no unread mail: that holds one of the town's slots AND makes you unroutable, because every dispatch pass wakes asleep seats only. Pick up work, or run km sleep if you are done for the day"
+                ask="[km] you are awake at an empty prompt with no unread mail: that holds one of the town's slots AND makes you unroutable, because every dispatch pass wakes asleep seats only. Pick up work, or run km sleep if you are done for the day. If you are waiting on a background task you started, carry on — this is a check-in, not a verdict"
             fi
         else
             # Self-reconciling, because the seat this reaches may have lost a
