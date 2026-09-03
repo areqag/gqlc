@@ -2179,6 +2179,7 @@ func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
 	s.Require().Greater(len(schemas), 10, "corpus glob found too few schemas")
 
 	swept := 0
+	matched := map[string]bool{}
 	for _, path := range schemas {
 		fixture := filepath.Base(filepath.Dir(path))
 		in := s.inputFrom(path)
@@ -2190,12 +2191,17 @@ func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
 			if err != nil {
 				continue
 			}
+			byPath := make(map[string]string, len(files))
 			qualified := 0
 			for _, f := range files {
+				byPath[f.Path] = string(f.Contents)
 				qualified += s.assertQualified(fixture+"/"+f.Path, string(f.Contents))
 			}
 			s.Require().Positive(qualified,
 				"%s: the sweep found no AGE identifier at all, so it proved nothing about this emission", fixture)
+			for kind := range s.requireSweptWitnesses(fixture, byPath) {
+				matched[kind] = true
+			}
 			swept++
 		}
 	}
@@ -2204,23 +2210,149 @@ func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
 	goldens, err := filepath.Glob(filepath.Join(corpusRoot, "valid", "*", "golden", ageTarget, "*.go"))
 	s.Require().NoError(err)
 	s.Require().NotEmpty(goldens, "no golden files committed for target %s", ageTarget)
+	// The golden tree is grouped back into per-fixture batches because the
+	// witness table asks a question about a batch, not about a file: db.go
+	// carries its cypher( witness only where that fixture also emitted a
+	// query file. It is also the only population that carries the query
+	// file under its SOURCE's name — the fresh emission above serves one
+	// synthetic query, so every fixture's query file there is q.cypher.go.
+	byFixture := map[string]map[string]string{}
 	qualified := 0
 	for _, path := range goldens {
 		body, err := os.ReadFile(path)
 		s.Require().NoError(err)
+		fixture := filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(path))))
+		if byFixture[fixture] == nil {
+			byFixture[fixture] = map[string]string{}
+		}
+		byFixture[fixture][filepath.Base(path)] = string(body)
 		qualified += s.assertQualified(path, string(body))
 	}
 	s.Require().Positive(qualified, "the sweep found no AGE identifier in the whole golden tree")
+	for fixture, files := range byFixture {
+		for kind := range s.requireSweptWitnesses("golden/"+fixture, files) {
+			matched[kind] = true
+		}
+	}
+
+	// A kind that matched no swept file is the defect this table carried
+	// for as long as it was keyed on literal paths (bd gqlc-coa5): its
+	// witnesses were asserted over the test's own skeleton and over
+	// nothing either population holds, while the counts above stayed
+	// green. A count cannot see this, because the other kinds keep it
+	// positive.
+	var unmatched []string
+	for _, kind := range sweptWitnesses {
+		if !matched[kind.name] {
+			unmatched = append(unmatched, kind.name)
+		}
+	}
+	s.Require().Empty(unmatched,
+		"these witness kinds matched no file the corpus emits or commits, so their witnesses are asserted "+
+			"over the skeleton alone and the corpus emission carries them unguarded")
 }
 
-// sweptWitnesses are qualified occurrences the emission is known to
-// place, per file that carries any SQL at all. They are spelled here
-// rather than read off the emission, so the region and the bytes it has
-// to hold cannot drift together.
-var sweptWitnesses = map[string][]string{
-	"db.go":       {"ag_catalog.cypher("},
-	"graph.go":    {"'1'::ag_catalog.agtype", "ag_catalog.create_graph", "ag_catalog.drop_graph", "ag_catalog.ag_graph"},
-	"q.cypher.go": {"ag_catalog.agtype"},
+// sweptFileKind is one kind of emitted file and the qualified
+// occurrences the emission places in it.
+//
+// The key is a KIND rather than a literal path because a batch's query
+// file is named for its source — the corpus emits queries.cypher.go,
+// people.cypher.go and directory.cypher.go — so a literal key matches
+// whichever name the test's own skeleton happens to use and no corpus
+// fixture at all. That was the state of this table until bd gqlc-coa5:
+// its third key was q.cypher.go, which only emitReadBatch produces, so
+// the query file's witness was never once asserted over the corpus.
+//
+// The witness BYTES stay hand-written, for the reason the table always
+// gave: read off the emission, the region and what it has to hold would
+// drift together.
+type sweptFileKind struct {
+	name      string
+	matches   func(path string) bool
+	witnesses []string
+	// onlyWithQueries marks a kind that carries its witnesses only when
+	// the batch had queries to place them for. db.go's cypher( call is
+	// emitted per query, so a schema with none emits a db.go holding no
+	// AGE identifier at all: measured over the committed goldens, the
+	// nine corpus fixtures that emit no *.cypher.go are exactly the nine
+	// whose db.go carries zero ag_catalog occurrences.
+	onlyWithQueries bool
+}
+
+var sweptWitnesses = []sweptFileKind{
+	{
+		name:            "db.go",
+		matches:         func(p string) bool { return p == "db.go" },
+		witnesses:       []string{"ag_catalog.cypher("},
+		onlyWithQueries: true,
+	},
+	{
+		name:      "graph.go",
+		matches:   func(p string) bool { return p == "graph.go" },
+		witnesses: []string{"'1'::ag_catalog.agtype", "ag_catalog.create_graph", "ag_catalog.drop_graph", "ag_catalog.ag_graph"},
+	},
+	{
+		name:      "*.cypher.go",
+		matches:   func(p string) bool { return strings.HasSuffix(p, ".cypher.go") },
+		witnesses: []string{"ag_catalog.agtype"},
+	},
+}
+
+// requireSweptWitnesses holds one emission's files to the witness table:
+// every file matching a kind carries that kind's occurrences inside the
+// swept region, and every file matching no kind carries no AGE
+// identifier at all. It answers per file and per spelling, so a failure
+// names the bytes that went missing rather than reporting a count that
+// moved.
+//
+// The kinds it matched are returned so a caller sweeping many emissions
+// can require each kind to have matched something somewhere. That is the
+// assertion whose absence let a key naming a file nothing emits sit in
+// this table unnoticed.
+func (s *EmissionSuite) requireSweptWitnesses(label string, files map[string]string) map[string]bool {
+	hasQueries := false
+	for path := range files {
+		if strings.HasSuffix(path, ".cypher.go") {
+			hasQueries = true
+			break
+		}
+	}
+
+	matched := map[string]bool{}
+	for path, body := range files {
+		where := label + "/" + path
+		var kind *sweptFileKind
+		for i := range sweptWitnesses {
+			if sweptWitnesses[i].matches(path) {
+				kind = &sweptWitnesses[i]
+				break
+			}
+		}
+		// A file that matches no kind has to carry no AGE identifier,
+		// or it could be emptied out of the swept region with nothing to
+		// notice.
+		if kind == nil {
+			s.Require().Zero(s.assertQualified(where, body),
+				"%s carries an AGE identifier but matches no witness kind", where)
+			continue
+		}
+		if kind.onlyWithQueries && !hasQueries {
+			s.Require().Zero(s.assertQualified(where, body),
+				"%s carries an AGE identifier for a batch with no queries, so its witnesses are owed after all", where)
+			continue
+		}
+		matched[kind.name] = true
+
+		region := s.keepServerText(where, body)
+		s.Require().NotEmpty(strings.TrimSpace(region), "%s: the swept region is empty", where)
+		for _, w := range kind.witnesses {
+			s.Require().Contains(region, w,
+				"%s: the swept region no longer holds the emission's own %q", where, w)
+		}
+		s.Require().Positive(s.assertQualified(where, body),
+			"%s: the sweep found no AGE identifier in a file that carries SQL", where)
+	}
+	return matched
 }
 
 // TestTheSweptRegionStillHoldsWhatItPolices is the qualification sweep's
@@ -2230,29 +2362,14 @@ var sweptWitnesses = map[string][]string{
 // sweep passes vacuously and the defect it exists to catch ships. So the
 // region is held to still carrying the qualified occurrences the
 // emission is known to place, named here by their bytes.
+//
+// This runs the table over the hand-built skeleton. The corpus half is
+// in TestEveryAgeIdentifierIsSchemaQualified, which is where a kind that
+// matches nothing at all is caught.
 func (s *EmissionSuite) TestTheSweptRegionStillHoldsWhatItPolices() {
-	files := s.emitReadBatch()
-	for path, witnesses := range sweptWitnesses {
-		s.Require().Contains(files, path)
-		region := s.keepServerText(path, files[path])
-		s.Require().NotEmpty(strings.TrimSpace(region), "%s: the swept region is empty", path)
-		for _, w := range witnesses {
-			s.Require().Contains(region, w,
-				"%s: the swept region no longer holds the emission's own %q", path, w)
-		}
-		s.Require().Positive(s.assertQualified(path, files[path]),
-			"%s: the sweep found no AGE identifier in a file that carries SQL", path)
-	}
-	// Closing the table the other way keeps it from going stale: a file
-	// that acquires SQL has to be named above, or it could be emptied out
-	// of the region with nothing to notice.
-	for path := range files {
-		if _, named := sweptWitnesses[path]; named {
-			continue
-		}
-		s.Require().Zero(s.assertQualified(path, files[path]),
-			"%s carries an AGE identifier but names no witness", path)
-	}
+	matched := s.requireSweptWitnesses("skeleton", s.emitReadBatch())
+	s.Require().Len(matched, len(sweptWitnesses),
+		"the read batch did not produce a file of every witnessed kind, so this guard ran short of the table")
 }
 
 // TestTheSweepJudgesGeneratedIdentifiersOnly holds the qualification
