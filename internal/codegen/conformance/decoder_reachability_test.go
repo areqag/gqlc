@@ -2523,6 +2523,42 @@ func (d decoders) decodePostFromEdge(raw []byte) (Post, error) {
 		})
 	}
 
+	t.Run("a method naming two entities is skipped rather than graded on the first", func(t *testing.T) {
+		// Author gets a package-level decoder of its own: the reconciliation
+		// names every prepared entity, so without one this row would read
+		// non-empty on an undecoded entity and witness nothing about arity.
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
+func decodeAuthor(raw []byte) (Author, error) {
+	label := string(raw)
+	if label != "Author" {
+		return Author{}, nil
+	}
+	return Author{}, nil
+}
+
+func (d decoders) decodeBoth(raw []byte) (Post, Author, error) {
+	label := string(raw)
+	if label != "NoSuchLabelAnywhere" {
+		return Post{}, Author{}, nil
+	}
+	return Post{}, Author{}, nil
+}
+`)}}
+		both := map[string]codegen.EntityKind{"Post": codegen.EntityNode, "Author": codegen.EntityNode}
+		declaresBoth := labelAlphabet{
+			codegen.EntityNode: {"Post": true, "Author": true},
+			codegen.EntityEdge: {"AUTHORED": true},
+		}
+
+		require.Empty(t, recordedGrading(files, both, declaresBoth),
+			"a method whose results name two prepared entities was graded against one of their axes. Which one "+
+				"is whichever the derivation happened to name first, so the verdict turns on an ordering rather "+
+				"than on the emission, and a guard the other axis carries passes on a coin toss. The "+
+				"package-level census refuses that shape outright; a method cannot be refused the same way, "+
+				"because a query returning two entities is not a defect — so it is left ungraded, and a guard "+
+				"written there is read by nothing")
+	})
+
 	t.Run("a satisfiable guard is accepted", func(t *testing.T) {
 		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
 func (d decoders) decodePostOnTheWire(raw []byte) (Post, error) {
