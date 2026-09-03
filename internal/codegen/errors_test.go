@@ -340,6 +340,23 @@ func (s *SentinelTaxonomySuite) TestUnreachedBranchesAreTagged() {
 // reach a branch no parser can produce, which is how three unreachable
 // branches came to sit in §2. §5.1 of the taxonomy document carries the
 // argument.
+//
+// Both arms are shown to fail rather than assumed to (bd gqlc-yqx8).
+// Moving a tag onto a reachable return of the same sentinel reds the
+// Zero arm, naming that site and how many binaries reach it — run once
+// per live tag, because the sites are sorted and Require aborts at the
+// first, so one run witnesses one site and says nothing about the sites
+// after it. Deleting a tag and leaving the branch dead reds
+// TestUnreachedBranchesAreTagged. Both of those also red the mirror
+// below, which is the vacated branch being dead and now untagged, and
+// not a second reading of the tag that moved. Making the branch
+// genuinely execute reds the corpus too, and the site is still named:
+// a sweep whose fixtures fail still writes the profile. That is not the
+// build failure TestCorpusRunsGreen is about, and this battery did not
+// produce one, so the case where nothing is written stays argued rather
+// than measured. Blinding the profile lookup key reds the True(ok) arm,
+// which is the only thing between a coverage path that moved and a
+// fence that keeps passing on a lookup miss.
 func (s *SentinelTaxonomySuite) TestUnreachedBranchesAreUnreached() {
 	counts := s.corpusCoverage()
 
