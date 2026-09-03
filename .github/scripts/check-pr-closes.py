@@ -1049,6 +1049,60 @@ def main():
                 + ("it" if len(unheld) == 1 else "them")
             )
             sys.exit(0)
+
+        # An empty `unheld` does not mean the author claimed nothing. GitHub
+        # acts on a closing keyword only outside code, and claimable_prose()
+        # models exactly that, so a body whose keyword a fence swallowed arrives
+        # here spelling "claimed nothing" identically to a body that claimed
+        # nothing. The warning above cannot cover it, because that warning is
+        # reached only when the claim is VISIBLE: the very condition creating
+        # the miss is the condition suppressing the report of it (bd
+        # gqlc-2lx3r).
+        #
+        # Measured on PR #2029's merged body: GH_CLOSES finds 1460, 9999 and
+        # 2016 raw and nothing whatever through claimable_prose(); its bead was
+        # a day old and absent from the export, so the run took this exit,
+        # printed the bare line below, and #2016 was still OPEN after the merge
+        # with nothing red on the PR, in this log, or on the issue.
+        #
+        # This does NOT restore the demand, and must not be read as doing so.
+        # The demand needs the bead's mirror NUMBER, which lives in the export
+        # this run has already failed to find the bead in — and it is not
+        # recoverable from the id either: a mirror issue does not contain the id
+        # of the bead it mirrors, so asking GitHub for one returns the beads
+        # that CITE it. Measured 2026-09-03 on this incident's own pair —
+        # searching gqlc-2cmhl returns issues #2040, #2031, #2032 and PR #2029,
+        # while its actual mirror #2016 contains the string zero times, so a
+        # gate built that way would have demanded `Closes #2040` here. What is
+        # reported instead is the author's own claim read back to them, which
+        # needs no mapping at all.
+        #
+        # A warning and not a refusal, deliberately. gqlc-2cmhl was filed
+        # because this file REFUSED over a keyword inside backticks in
+        # explanatory prose, and the fix was to stop reading the raw body; a
+        # refusal here would reintroduce that on any PR discussing a closing
+        # line, including the one that carried this incident. So the skip keeps
+        # its contract of never refusing, and only stops being silent.
+        swallowed = list(dict.fromkeys(GH_CLOSES.findall(pr_body)))
+        if swallowed:
+            # unheld is empty on this path, so every raw number is a swallowed
+            # one and no subtraction is needed to say so.
+            numbers = f"#{', #'.join(swallowed)}"
+            one = len(swallowed) == 1
+            print(
+                "::warning title=check-pr-closes unverified::"
+                f"{bead_id} is not in the export at this commit, so this "
+                f"check held nothing against it. The body writes {numbers} "
+                "inside code, where GitHub does not read a closing keyword, so "
+                f"{'that issue' if one else 'those issues'} will NOT close at "
+                "merge - unfence the line, or close by hand after merging."
+            )
+            print(
+                f"[check-pr-closes] bead {bead_id!r} not in export - "
+                f"skipping; {numbers} {'is' if one else 'are'} written inside "
+                f"code and {'closes' if one else 'close'} nothing at merge"
+            )
+            sys.exit(0)
         print(f"[check-pr-closes] bead {bead_id!r} not in export - skipping")
         sys.exit(0)
 
