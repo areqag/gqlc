@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Claude Code PreToolUse hook for the Bash tool. Five jobs:
+# Claude Code PreToolUse hook for the Bash tool. Six jobs:
 #
 #   1. Denies `git commit` when the command's EFFECTIVE target repo is on
 #      master/main.
@@ -13,6 +13,24 @@
 #   5. Denies the `bd` command that would reopen a bead in bd alone while its
 #      GitHub mirror is still closed, because the next pull destroys it
 #      (bd gqlc-e9huy, decision 0011).
+#   6. Denies `git stash clear` when the target repo's stash namespace is
+#      shared — refs/stash lives in the common git dir, so one clear destroys
+#      every worktree's entries at once (bd gqlc-753g3). `pop` and `drop` are
+#      never captured, so the recovery path this refusal recommends stays open.
+#
+# On (6): a reference-transaction git hook was measured and declined, with its
+# crux solved rather than open — the surviving-reflog count at the `preparing`
+# phase does distinguish a clear from a pop of the last entry. It was rejected
+# because core.hooksPath lives in the shared config and agent spawns have been
+# observed rewriting it, so that guard is weakest in exactly the abnormal
+# windows this one has to hold; because the reflog-empties-first ordering it
+# depends on is an undocumented implementation detail that would fail toward
+# refusing the recovery path on a git upgrade; and because what it adds over
+# this arm is the human shell, which is zero of the observed incidents. The
+# design and its measurements are on bd gqlc-fp2c7 if the town ever wants that
+# coverage. Alternate spellings (`git update-ref -d refs/stash`, `git reflog
+# expire`) are consciously out of scope: habit spells the command one way, and
+# an actor determined to delete a ref can unhook any guard.
 #
 # On (5): a mirror's CLOSED state carries two different events that arrive as
 # the same byte. A GitHub-NATIVE closure — a merge resolving `Closes #N`, or a
@@ -329,8 +347,9 @@
 #   - a close the tokenizer never sees -> NOT reached, fail-open. `sh -c '...'`,
 #     `bash -lc "..."` and `eval "..."` are nested interpreters this hook does
 #     not recurse into, and a command shlex cannot tokenize at all falls back to
-#     FALLBACK_RE, which matches `git commit` and nothing else. A `bd close`
-#     inside any of those runs unchecked. Left as is: the close arm's fallback
+#     the two patterns that have one, FALLBACK_RE and STASH_CLEAR_FALLBACK_RE;
+#     neither matches a `bd close`, so one inside any of those runs unchecked.
+#     Left as is: the close arm's fallback
 #     would have to re-derive the reason text from raw bytes, which is the
 #     parser this file declines to become.
 #
@@ -396,8 +415,21 @@ HOOKS_DIRNAME = ".githooks"
 # too — the conservative side of a distinction this hook cannot make before the
 # fact.
 HOOK_GATED = ("commit", "merge", "pull", "push")
+# The pseudo-subcommand a captured `git stash clear` is recorded under. Two
+# words, so it can never collide with a real subcommand token, and it is what
+# the deny arm keys on rather than the bare verb: `stash` alone would put pop
+# and drop in targets, and targets is also what the hooks_drift loop refuses
+# over, so the recovery operations would start failing for a reason that has
+# nothing to do with stashes (bd gqlc-753g3).
+STASH_CLEAR = "stash clear"
 HEREDOC_RE = re.compile(r"(?<!<)<<(-?)\s*([\"']?)(\w+)\2")
 FALLBACK_RE = re.compile(r"(?:^|[^A-Za-z-])git\s+commit(?:$|\s)")
+# Parity with FALLBACK_RE for the stash arm: text shlex cannot tokenize is
+# still screened, by pattern rather than by walk. Deliberately requires the
+# three words adjacent, so `git stash -q clear` is NOT matched here — the same
+# answer the tokenized path gives, since a guard whose two paths disagree is
+# worse than either alone.
+STASH_CLEAR_FALLBACK_RE = re.compile(r"(?:^|[^A-Za-z-])git\s+stash\s+clear(?:$|\s)")
 OPERATOR_CHARS = set("();<>|&")
 GIT_OPTS_WITH_ARG = ("-c", "--namespace", "--exec-path", "--super-prefix")
 # The shell accepts a redirection ANYWHERE in a simple command, including
@@ -564,6 +596,39 @@ UNEXPANDED_RE = re.compile(r"\$[({A-Za-z_]|`")
 
 def is_op(tok):
     return bool(tok) and all(c in OPERATOR_CHARS for c in tok)
+
+
+def flag_value(tokens, j):
+    """(value, tokens consumed) for a value-taking flag at tokens[j].
+
+    The shell never hands a command-boundary operator to a program as an
+    argument, so a flag standing last before one is VALUELESS and the operator
+    has to stay visible to the caller's walk. Consuming it hides every command
+    after it: `bd update x --add-label ; git stash clear` was walked as bd
+    positionals, reached no git arm, and allowed (bd gqlc-0328j). The shape is
+    ordinary rather than adversarial — an unquoted empty shell variable spells
+    it, bd exits non-zero on the malformed flag, and `;` runs the next command
+    anyway. redirect_skip below already had to learn this rule for `cmd > ; x`;
+    this is the same rule for its other six consumers.
+
+    Five of those six change a verdict. The `cd`/`pushd` one cannot yet: a bare
+    `cd` leaves the directory unresolvable either way — this answers None
+    directly, resolve()'s own is_op guard answered None by a longer route — and
+    an unresolvable cwd fails OPEN in the git arms, so no row can tell the two
+    routes apart until that fail-open is closed (gqlc-2cylz). It is changed for
+    locality, not for a verdict. Revert this site AND resolve()'s guard together
+    and `cd ; git stash clear` DENIES against the joined path `<cwd>/;`, which
+    is the distant guard being the only thing holding the site up.
+
+    Found independently at the scan_bd site, where `bd update x --status ; bd
+    reopen y` ate the `;` so the reopen arm never saw a reopen while the shell
+    ran it anyway. Measured ALLOW where DENY was owed on `;`, `&&` and `|`, and
+    on --status/--add-label/--reason alike, so the close arm was exposed by the
+    same token (bd gqlc-e9huy, Տիր's round-1 read of PR #2068).
+    """
+    if j + 1 < len(tokens) and not is_op(tokens[j + 1]):
+        return tokens[j + 1], 2
+    return None, 1
 
 
 def redirect_skip(tokens, j):
@@ -861,12 +926,8 @@ def shorthand_arg(opt, tokens, j):
             return name, rest[1:], 1
         if rest:
             return name, rest, 1
-        # The shorthand half of scan_bd's operator rule; see the note there.
-        # `-s ;` and `-r ;` swallowed the terminator the same way.
-        nxt = tokens[j + 1] if j + 1 < len(tokens) else None
-        if nxt is not None and is_op(nxt):
-            return name, None, 1
-        return name, nxt, 2
+        val, step = flag_value(tokens, j)
+        return name, val, step
     return None, None, 1
 
 
@@ -903,24 +964,8 @@ def scan_bd(tokens, i, cwd):
             if inline:
                 j += 1
             else:
-                # A flag whose next token is an OPERATOR consumes the flag
-                # alone, exactly as redirect_skip does above and for the same
-                # reason: swallowing the operator as a value hides the command
-                # after it. Here that is not a missed filename but a missed
-                # INVOCATION — `bd update x --status ; bd reopen y` ate the `;`,
-                # so `bd`, `reopen` and `y` became positionals of the update and
-                # the reopen arm never saw a reopen, while the shell ran it
-                # anyway. Measured ALLOW where DENY was owed on `;`, `&&` and
-                # `|`, and on --status/--add-label/--reason alike, so the close
-                # arm was exposed by the same token (bd gqlc-e9huy, found by
-                # Տիր's round-1 read of PR #2068).
-                nxt = tokens[j + 1] if j + 1 < n else None
-                if nxt is not None and is_op(nxt):
-                    val = None
-                    j += 1
-                else:
-                    val = nxt
-                    j += 2
+                val, step = flag_value(tokens, j)
+                j += step
             if name in ("-C", "--directory"):
                 target = resolve(target, val)
             elif name in ("-r", "--reason"):
@@ -1010,6 +1055,24 @@ def split_labels(value):
     return [part for part in value.split(",") if part]
 
 
+def stash_clear_follows(tokens, j):
+    """True when the stash verb starting at tokens[j] is exactly `clear`.
+
+    Every other spelling answers False — pop, drop, push, list, a shorthand
+    option, an operator, end of input. That is not one deny arm declining to
+    fire: it keeps the recovery operations out of `targets` altogether, so the
+    ALLOW half of this guard holds by construction rather than by a test
+    remembering to assert it.
+    """
+    n = len(tokens)
+    while j < n:
+        step = redirect_skip(tokens, j)
+        if not step:
+            return tokens[j] == "clear"
+        j += step
+    return False
+
+
 def scan_tokens(tokens, cwd, wanted, closes=None, labels=None, reopens=None):
     targets = []
     i, n = 0, len(tokens)
@@ -1025,9 +1088,9 @@ def scan_tokens(tokens, cwd, wanted, closes=None, labels=None, reopens=None):
                 reopens.extend(opens)
             continue
         if tok in ("cd", "pushd"):
-            arg = tokens[i + 1] if i + 1 < n else None
+            arg, step = flag_value(tokens, i)
             cwd = None if (arg is None or arg.startswith("-")) else resolve(cwd, arg)
-            i += 2
+            i += step
             continue
         if tok == "git" or tok.endswith("/git"):
             target = cwd
@@ -1042,13 +1105,14 @@ def scan_tokens(tokens, cwd, wanted, closes=None, labels=None, reopens=None):
                 if is_op(opt):
                     break
                 if opt == "-C":
-                    target = resolve(target, tokens[j + 1] if j + 1 < n else None)
-                    j += 2
+                    val, step = flag_value(tokens, j)
+                    target = resolve(target, val)
+                    j += step
                 elif opt in GIT_OPTS_WITH_ARG:
-                    j += 2
+                    j += flag_value(tokens, j)[1]
                 elif opt in ("--git-dir", "--work-tree"):
                     target = None
-                    j += 2
+                    j += flag_value(tokens, j)[1]
                 elif opt.startswith(("--git-dir=", "--work-tree=")):
                     target = None
                     j += 1
@@ -1059,6 +1123,8 @@ def scan_tokens(tokens, cwd, wanted, closes=None, labels=None, reopens=None):
                     break
             if sub in wanted and target is not None:
                 targets.append((sub, target))
+            elif sub == "stash" and target is not None and stash_clear_follows(tokens, j + 1):
+                targets.append((STASH_CLEAR, target))
             i = j + 1
             continue
         i += 1
@@ -1314,6 +1380,50 @@ def git_env():
     # Repo-discovery env (set e.g. inside git hooks) would override -C and
     # resolve the wrong repo; strip it so the target directory is authoritative.
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def stash_namespace_shared(directory):
+    """(shared, error) for the repo at `directory`; exactly one is not None.
+
+    refs/stash lives in the COMMON git dir, so `git stash clear` run anywhere
+    deletes every linked worktree's entries at once. Shared iff this is a
+    linked worktree (git-dir != git-common-dir) OR the common dir registers any
+    linked worktree. The second disjunct is the load-bearing one: in the
+    primary checkout the two paths are equal, and a clear there destroys every
+    seat's work just the same.
+
+    rev-parse prints `.git` relative to the cwd inside a primary worktree and
+    an absolute path from a linked one (both measured 2026-08-30), so both
+    outputs are resolved against `directory` before comparison.
+    """
+    try:
+        proc = subprocess.run(
+            ("git", "-C", directory, "rev-parse", "--git-dir", "--git-common-dir"),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env=git_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, "%s: %s" % (type(exc).__name__, exc)
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip().splitlines()
+        return None, stderr[-1] if stderr else "git rev-parse exited %d" % proc.returncode
+    paths = [p for p in proc.stdout.splitlines() if p.strip()]
+    if len(paths) != 2:
+        return None, "git rev-parse printed %d path(s), expected 2" % len(paths)
+    git_dir = os.path.realpath(os.path.join(directory, paths[0]))
+    common = os.path.realpath(os.path.join(directory, paths[1]))
+    if git_dir != common:
+        return True, None
+    try:
+        registered = bool(os.listdir(os.path.join(common, "worktrees")))
+    except OSError:
+        # Absent or unreadable worktrees/ is "no linked worktree", not an error:
+        # a repo that never created one has no such directory at all, and that
+        # is the ordinary private-repo case this arm must let through.
+        registered = False
+    return registered, None
 
 
 def object_types(directory, shas):
@@ -1798,6 +1908,8 @@ def main():
         command, cwd, HOOK_GATED, closes=closes, labels=labels, reopens=reopens)
     if need_fallback and FALLBACK_RE.search(command):
         targets.append(("commit", cwd))
+    if need_fallback and STASH_CLEAR_FALLBACK_RE.search(command):
+        targets.append((STASH_CLEAR, cwd))
     for sub, directory in targets:
         if sub != "commit":
             continue
@@ -1806,6 +1918,34 @@ def main():
             deny(
                 "Direct commits to %s are blocked (target: %s). "
                 "Create a feature branch with: git switch -c <branch>" % (branch, directory)
+            )
+            return
+
+    # Fail-CLOSED on an unverifiable probe, following the bd-close arm rather
+    # than the master guard's fail-open: what a clear destroys is unbounded and
+    # unrecoverable, the workaround is one sentence, and no bootstrap path here
+    # needs one — nothing in .githooks, kingdom/, the justfile or .github runs
+    # `git stash` at all (witnessed 2026-08-30, bd gqlc-753g3).
+    for sub, directory in targets:
+        if sub != STASH_CLEAR:
+            continue
+        shared, error = stash_namespace_shared(directory)
+        if error is not None:
+            deny(
+                "git stash clear refused — could not verify the target's stash namespace "
+                "is private (%s: %s), refused rather than allowed unverified. refs/stash "
+                "is shared across a repository's worktrees and a clear is unrecoverable "
+                "(bd gqlc-753g3)." % (directory, error)
+            )
+            return
+        if shared:
+            deny(
+                "git stash clear refused — refs/stash is one namespace shared by every "
+                "worktree of this repo (target: %s). A clear deletes every seat's stashed "
+                "work at once, unrecoverably (bd gqlc-753g3). Drop your own entry by index "
+                "after reading its subject (git stash list; git stash drop 'stash@{n}'), or "
+                "pop your own last entry — both stay allowed. See CLAUDE.md, "
+                '"The shared stash namespace".' % directory
             )
             return
 
