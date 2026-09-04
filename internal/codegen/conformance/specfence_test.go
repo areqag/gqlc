@@ -14,6 +14,13 @@ import (
 	"github.com/areqag/gqlc/internal/codegen"
 )
 
+// This file is the SPEC fence, and it is not what the required CI
+// context named `codegen-fence` runs. That context runs `just
+// test-codegen-fence`, the nested-module COMPILE fence over
+// test/data/codegen (docs/specs/codegen-stage-c1.md §8). This file is
+// an ordinary Go test and is PR-blocking through `test`. Two gates, two
+// contexts, and the name matches the other one (bd gqlc-gmz6).
+//
 // Every `Name(ctx context.Context, …)` the documentation prints is a
 // claim about bytes this package emits. This file holds those claims to
 // codegen.ParamArg, read from the emitter, so that renaming the constant
