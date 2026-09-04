@@ -227,7 +227,7 @@ var corpusTables = map[string]corpusrun.Table{
 	"TestEmittedMethodBindsATimeAsNormalisedMicroseconds":     {Rows: 4},
 	"TestEmittedMethodBindsAnInstantAsMicroseconds":           {Rows: 4},
 	"TestEmittedMethodBindsListsOfCarriers":                   {Rows: 7},
-	"TestEmittedMethodBindsNestedListsOfCarriers":             {Rows: 4},
+	"TestEmittedMethodBindsNestedListsOfCarriers":             {Rows: 5},
 	"TestEmittedMethodBindsTheCarriersAsTheirScalars":         {Rows: 6},
 }
 

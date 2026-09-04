@@ -310,9 +310,9 @@ var listCarrierParamQuery = codegen.NamedQuery{
 	},
 }
 
-// nestedListCarrierParamQuery binds DEPTH-2 lists of non-zoned carriers,
-// nullable and not, which is the shape ADR 0036 admits and the encoder does
-// not yet compose for.
+// nestedListCarrierParamQuery binds NESTED lists of non-zoned carriers,
+// nullable and not, which is the shape ADR 0036 admits and the encoder did
+// not compose for.
 //
 // It is a separate query from listCarrierParamQuery because depth 2 does not
 // fail more than depth 1, it fails DIFFERENTLY. At depth 1 the single
@@ -326,17 +326,32 @@ var listCarrierParamQuery = codegen.NamedQuery{
 // Two carriers rather than one: Date encodes to a string and Duration to an
 // int64, so a composition that hard-coded either side of encodedParamText
 // would pass on the other.
+//
+// seasons is the depth-3 parameter, and it is NULLABLE for the reason that
+// decides which depths are reachable at all. fallibleParamEncoder hands a
+// non-nullable list of depth d to listEncoder(d-1) — agtypeEncodedList takes
+// the outermost level itself — and a nullable one to listEncoder(d), because
+// agtypeEncodedNullable needs an encoder for the whole value. So mayRunOn,
+// nullable at depth 2, already reaches levels=2, and a non-nullable depth-3
+// parameter would reach the same one. Nullable at depth 3 is the smallest
+// declaration that reaches levels=3, which is the first level no other
+// parameter here composes (bd gqlc-p7ypi).
+//
+// Its bytes are the ones the out-of-tree probe on PR #2130 produced, so the
+// witness this fixture now carries is the one that verdict measured and
+// left outside the tree.
 var nestedListCarrierParamQuery = codegen.NamedQuery{
 	Name:        "WriteSchedules",
 	Cardinality: queryfile.CardinalityExec,
 	SourceFile:  temporalSource,
-	SourceText:  "CREATE (s:Schedules {runsOn: $runsOn, mayRunOn: $mayRunOn, windows: $windows})\n",
+	SourceText:  "CREATE (s:Schedules {runsOn: $runsOn, mayRunOn: $mayRunOn, windows: $windows, seasons: $seasons})\n",
 	Validated: resolver.ValidatedQuery{
 		Statement: resolver.StatementWrite,
 		Parameters: []resolver.ResolvedParameter{
 			{Name: "runsOn", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.ListOf(graph.TypeDate, true), true)}},
 			{Name: "mayRunOn", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.ListOf(graph.TypeDate, true), true), Nullable: true}},
 			{Name: "windows", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.ListOf(graph.TypeDuration, true), true)}},
+			{Name: "seasons", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.ListOf(graph.ListOf(graph.TypeDate, true), true), true), Nullable: true}},
 		},
 	},
 }

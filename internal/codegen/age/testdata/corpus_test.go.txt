@@ -2370,8 +2370,29 @@ func TestEmittedMethodBindsListsOfCarriers(t *testing.T) {
 // here because an empty OUTER list and a list holding an empty INNER list are
 // the two shapes that tell the levels apart: a walk that recursed the wrong
 // number of times produces the same bytes for both.
+//
+// Seasons carries the same argument one level deeper, and it is the only
+// parameter here whose encoder composes three closures. The reason it is
+// nullable is in nestedListCarrierParamQuery's comment: a nullable list of
+// depth d reaches listEncoder(d) while a non-nullable one reaches
+// listEncoder(d-1), so nullable-at-3 is the smallest declaration that
+// composes a level mayRunOn does not already.
+//
+// It is what stands between the tree and an emitter that special-cases
+// levels above 2. Measured 2026-09-04 with the goldens regenerated first:
+// clamping listEncoder's levels to 2 moved no golden in the conformance
+// corpus and left all 29 packages green, because nothing bound a level
+// above 2 for the clamp to reach.
 func TestEmittedMethodBindsNestedListsOfCarriers(t *testing.T) {
 	mayRunOn := [][]Date{{{Year: 2024, Month: 1, Day: 2}}, {{Year: 2025, Month: 3, Day: 4}}}
+	seasons := [][][]Date{
+		{{{Year: 2024, Month: 1, Day: 2}, {Year: 1, Month: 1, Day: 1}}, {{Year: 2025, Month: 3, Day: 4}}},
+		{},
+		{{}},
+	}
+	noSeasons := [][][]Date{}
+	emptyOuterSeason := [][][]Date{{}}
+	emptyInnerSeason := [][][]Date{{{}}}
 
 	cases := []struct {
 		name string
@@ -2390,8 +2411,9 @@ func TestEmittedMethodBindsNestedListsOfCarriers(t *testing.T) {
 					{{Seconds: 90}, {Days: 1, Seconds: 1}},
 					{{Seconds: 1}},
 				},
+				Seasons: &seasons,
 			},
-			want: `{"mayRunOn":[["2024-01-02"],["2025-03-04"]],"runsOn":[["2024-01-02","0001-01-01"],["2025-03-04"]],"windows":[[90000000,86401000000],[1000000]]}`,
+			want: `{"mayRunOn":[["2024-01-02"],["2025-03-04"]],"runsOn":[["2024-01-02","0001-01-01"],["2025-03-04"]],"seasons":[[["2024-01-02","0001-01-01"],["2025-03-04"]],[],[[]]],"windows":[[90000000,86401000000],[1000000]]}`,
 		},
 		{
 			name: "an absent nullable nested list is the agtype null",
@@ -2399,12 +2421,12 @@ func TestEmittedMethodBindsNestedListsOfCarriers(t *testing.T) {
 				RunsOn:  [][]Date{{{Year: 2024, Month: 1, Day: 2}}},
 				Windows: [][]Duration{{{Seconds: 90}}},
 			},
-			want: `{"mayRunOn":null,"runsOn":[["2024-01-02"]],"windows":[[90000000]]}`,
+			want: `{"mayRunOn":null,"runsOn":[["2024-01-02"]],"seasons":null,"windows":[[90000000]]}`,
 		},
 		{
 			name: "an empty outer list is an empty array and not a null",
-			arg:  WriteSchedulesParams{},
-			want: `{"mayRunOn":null,"runsOn":[],"windows":[]}`,
+			arg:  WriteSchedulesParams{Seasons: &noSeasons},
+			want: `{"mayRunOn":null,"runsOn":[],"seasons":[],"windows":[]}`,
 		},
 		{
 			// Distinct from the row above, and the pair is what pins the
@@ -2415,8 +2437,20 @@ func TestEmittedMethodBindsNestedListsOfCarriers(t *testing.T) {
 			arg: WriteSchedulesParams{
 				RunsOn:  [][]Date{{}},
 				Windows: [][]Duration{{}, {{Seconds: 1}}},
+				Seasons: &emptyOuterSeason,
 			},
-			want: `{"mayRunOn":null,"runsOn":[[]],"windows":[[],[1000000]]}`,
+			want: `{"mayRunOn":null,"runsOn":[[]],"seasons":[[]],"windows":[[],[1000000]]}`,
+		},
+		{
+			// The third member of that pair, which only a depth-3
+			// parameter can hold: [] is an empty outermost list, [[]] one
+			// empty list inside it, [[[]]] one empty list inside THAT. A
+			// walk that descends twice where it should descend three
+			// times cannot tell the last two apart, and the rows above
+			// cannot ask it to.
+			name: "an empty innermost list is an empty array two levels in",
+			arg:  WriteSchedulesParams{Seasons: &emptyInnerSeason},
+			want: `{"mayRunOn":null,"runsOn":[],"seasons":[[[]]],"windows":[]}`,
 		},
 	}
 	for _, tc := range cases {
