@@ -680,10 +680,10 @@ is cheap for the reader, and stays cheap only if all four of these hold.
    judges are, and then whether any of them holds an unclosed bead citing your
    PR:
 
-       judges=$(awk '/^\[/{s=$0} s=="[seats]" && /=[[:space:]]*"judge:/ {sub(/[[:space:]]*=.*/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print}' kingdom/kingdom.toml)
+       judges=$(awk '/^\[/{s=$0} s=="[seats]" && /=[[:space:]]*"judge:/ {sub(/[[:space:]]*=.*/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); gsub(/^"|"$/, ""); print}' kingdom/kingdom.toml)
        [ -n "$judges" ] || echo "roster parse found no judges — repair this query before believing it" >&2
        bd list --all -n 0 --json \
-         | jq -r --argjson js "$(printf '%s\n' $judges | jq -R . | jq -s .)" '
+         | jq -r --argjson js "$(printf '%s\n' $judges | jq -R . | jq -s 'map(select(. != ""))')" '
              .[] | select(.status != "closed")
                  | select(.assignee as $a | $js | index($a))
                  | select(((.title // "") + " " + (.description // "")) | contains("#<N>"))
@@ -697,6 +697,15 @@ is cheap for the reader, and stays cheap only if all four of these hold.
    which is the one failure a rebase guard cannot afford. An empty roster is a
    broken query, never a quiet town.
 
+   **`map(select(. != ""))` is what makes the sentence above true**, so do not
+   simplify it away. `printf '%s\n'` with no arguments prints one empty line, so
+   without the filter a dark roster yields `[""]`, not `[]`. That is harmless
+   only by accident: `[""] | index(null)` is `null`, and every bead today has a
+   null or a real assignee. But `[""] | index("")` is `0`, and **`0` is truthy in
+   jq** — the day one bead carries an empty-string assignee, a dark roster stops
+   printing empty and starts naming a reader. Measured 2026-09-03 by Անահիտ on
+   PR #2382, over 666 null and 810 string assignees.
+
    **It catches total failure and cannot catch partial failure**, which is why
    the parse anchors on the *value* — `= "judge:` — and takes the key as
    whatever precedes the `=`, rather than counting fields. A field-position
@@ -706,6 +715,24 @@ is cheap for the reader, and stays cheap only if all four of these hold.
    which TOML permits — silently returned two judges instead of three, and the
    empty check saw nothing wrong with that. If you ever edit this parse, test it
    against an indented roster and not only against today's alignment.
+
+   **The same species survives one spelling over, which is why the key is
+   unquoted too.** `"tir" = "judge:…"` is legal TOML, and without the
+   `gsub(/^"|"$/, "")` it parses to a key carrying literal quotes that can never
+   match the assignee `tir` — while the printed list still reads `mihr anahit
+   "tir"`, three entries to a human eye and two to the membership test. Silent,
+   partial, unsafe: exactly the shape the paragraph above is about. That
+   normalisation is the one `km`'s own `cfg` applies to values, and it is copied
+   rather than improved on purpose.
+
+   **What is still not handled, and it is the same family:** a single-quoted key
+   (`'tir' = …`) or a single-quoted VALUE (`tir = 'judge:…'`) — both legal TOML.
+   The value form is worse, because the line match `= "judge:` never fires and
+   the seat vanishes with no quotes in the output to notice. The roster has been
+   double-quoted since it was written and nothing generates it, so this is a
+   disclosed limit rather than a live hazard; `gqlc-04rgn` carries the real
+   question, which is that the town now has three hand-rolled `[seats]` readers
+   and `km`'s `roster_names` comment exists to forbid the second.
 
    Read the titles it prints — that is why it prints them and not bare ids. A
    hit that is plainly your own implementation bead is noise; a hit that reads
