@@ -120,12 +120,21 @@ scalar kinds is a decode helper, which is a different fix — below.
   That refusal is load-bearing, but not for the reason first recorded here. It
   is not propping up a missing helper. `decodeFunc` answers both texts — `"any"`
   with `agtypeValue`, `"map[string]any"` with `agtypeMap` — and both helpers are
-  emitted, gated together on `helpers.value`. Three goldens carry them:
-  `schema_any_property`, `schema_any_property_alone` and
-  `schema_list_any_property`, whose schemas declare an ANY-width *property* or a
-  list of one — not a scalar column. In each of the three, the only mention of
-  `agtypeMap` outside its own declaration is `agtypeValue`'s call on the `'{'`
-  arm. `agtypeMap` returns `map[string]any`, the same text the
+  emitted, gated together on `helpers.value`. Six goldens carry them, and they
+  arrive by two routes rather than one. Four declare an ANY width in the SCHEMA,
+  as a property or inside a list of one: `schema_any_property`,
+  `schema_any_property_alone`, `schema_list_any_property` and
+  `nested_list_property`. Two declare no ANY width at all —
+  `certified_list_element`, whose widest declared property is `INT64`, and
+  `list_unknown`, which declares one `INT64` property and nothing else — and get
+  the carrier from a list expression whose element type the resolver does not
+  fix: `RETURN [foo(p.id)]`, an unknown function's result, and `RETURN [p.id +
+  p.age]`, a fold over two declared `INT64` properties that mints no element
+  certificate. Neither route is a scalar column, which is the thing this bullet
+  is about. In each of the six, `agtypeMap` is named three times: its own
+  declaration, that declaration's doc comment, and `agtypeValue`'s call on the
+  `'{'` arm, which is the only CALL outside the helper.
+  `agtypeMap` returns `map[string]any`, the same text the
   table names for `ScalarMap`, and `agtypeValue` reads an agtype inline `null`
   as Go `nil` rather than refusing it.
 
@@ -139,8 +148,24 @@ scalar kinds is a decode helper, which is a different fix — below.
   `TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces` reads the Go type
   texts `typeMap` returns out of the package's own AST and requires an arm for
   each; `TestDecodeFuncNamesTheHelperForEveryServedCarrier` names the helper per
-  text. Deleting either arm reddens both, at the subtest for the text that lost
-  it. So the `map[string]any` arm is held up by that pin and not by this bullet:
+  text. Deleting either arm reddens both — but the closure pin's count is not
+  one subtest per mutation, and the two pins do not redden in the same run.
+  Measured at `bc9d7acc`: deleting the `map[string]any` arm reddens one closure
+  subtest, `Scalar/map[string]any`; deleting the `any` arm reddens three,
+  `Property/any`, `Property/[]any` and `Scalar/any`, because the table names
+  that text on both halves and once more as a list element.
+
+  Both counts are readable only under a `-run` that selects the closure pin
+  alone. `decodeFunc` answers an unknown carrier by panicking, and a panic in a
+  subtest takes the whole test binary rather than that subtest, so in any run
+  that reaches an earlier caller the closure pin never executes. Under `go test
+  ./internal/codegen/age/` the `map[string]any` mutation dies in
+  `TestDecodeFuncNamesTheHelperForEveryServedCarrier`, which precedes it in this
+  file, and the `any` mutation dies earlier still, in
+  `TestNarrowingWidthsAgreesWithTheTypeTable`. A reader reproducing "reddens
+  both" the obvious way sees neither count.
+
+  So the `map[string]any` arm is held up by that pin and not by this bullet:
   the one place the table produces that text is `Scalar`'s `ScalarMap` arm,
   which the gate above refuses.
 
