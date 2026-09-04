@@ -486,11 +486,13 @@ func TestEveryRootDocIsSweptOrDeclaredOutOfScope(t *testing.T) {
 	requireReasoned(t, nonSpecRootDocs, "nonSpecRootDocs")
 
 	// A docRoots entry accounts for a root document only by being that
-	// document: `docs` is a tree and answers for nothing here, and a
-	// nested path like `docs/specs/x.md` names no root file either.
+	// document, so the tree entries answer for nothing here. A nested
+	// entry naming a document rather than a tree would be reported below
+	// as declared and unobserved; none exists, and `docs` covers the
+	// case that would motivate one.
 	var declared []string
 	for _, root := range docRoots {
-		if !strings.Contains(root, "/") && strings.HasSuffix(root, ".md") {
+		if strings.HasSuffix(root, ".md") {
 			declared = append(declared, root)
 		}
 	}
