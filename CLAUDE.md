@@ -248,11 +248,26 @@ Beads IDs alone don't auto-close linked GitHub issues on merge — GitHub only r
 
 - **Direct 1:1 bd↔GH issue:** put `Closes #N` in the PR body. Find N via `bd show <id>` (External link).
 - **Umbrella / epic GH issues** (multi-stage tracking): child PRs must NOT `Close` them. Either the final PR of the epic writes `Closes #N`, or run `gh issue close N` manually when the beads mirror closes.
-- **A `Bead: <id>` line does not satisfy this.** It answers a different question
-  (which bead holds the PR) and CI's `tidy` gate reads it only to find the bead —
-  then, if that bead has a GH mirror, `.github/scripts/check-pr-closes.py` still
-  demands `Closes #N` with the mirror's number. A body carrying `Bead:` alone
-  fails `tidy` (measured 2026-08-29, PR #1614).
+- **A `Bead: <id>` line does not satisfy this.** It answers a different question —
+  which bead this PR **resolves** — and CI's `tidy` gate reads it only to find the
+  bead; then, if that bead has a GH mirror, `.github/scripts/check-pr-closes.py`
+  still demands `Closes #N` with the mirror's number. A body carrying `Bead:`
+  alone fails `tidy` (measured 2026-08-29, PR #1614).
+- **A PR that advances a mirrored bead without resolving it says so**, on a line
+  whose first character is the `R` of `Refs: <bead-id> #N`. That is the opt-out:
+  no `Closes` is demanded, the issue stays open at merge, and the pass is
+  reported as a warning annotation on the check. The `#N` is required, and it is
+  held against that bead's own mirror rather than taken on trust. Do not write
+  both forms for one id — `Bead:` asserts the PR resolves the bead and `Refs:`
+  asserts it leaves the bead open, so the gate refuses a body claiming both.
+  Take the exact spelling from the refusal the gate printed, not from this
+  paragraph: both refusals that demand a `Closes` also spell out the opt-out as
+  the other answer, and that text is the copy that cannot go stale. Worth one
+  careful read before you edit, because a body edit re-runs the check **and
+  cancels the CI run already in flight** (`ci.yml` fires on `edited` under
+  `cancel-in-progress`), so each guess costs a full round of gates. Seats have a
+  second statement of the same three forms in `citizen-protocol.md` step 5; if
+  the two ever disagree, the script's error text settles it.
 - **The mirror lives in JSON field `external_ref`, not `external_link`.**
   `jq '.[0].external_link'` on a misnamed key prints `null` with exit 0, which
   reads exactly like "no mirror, so no Closes needed" — the same probe that
