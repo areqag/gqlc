@@ -1741,6 +1741,9 @@ func TestDocFilesRefusesAMissingRoot(t *testing.T) {
 	t.Run("a root that does not exist is refused, by name", func(t *testing.T) {
 		_, err := collectDocs(base, []string{"docs", "gone.md"})
 		require.Error(t, err, "a docRoots entry that is not on disk was walked past in silence")
+		// Either half of the refusal satisfies this: measured, dropping the
+		// %q leaves the name in the wrapped os.Stat error. What must hold is
+		// that a reader sees which entry went, not where the message got it.
 		require.ErrorContains(t, err, "gone.md",
 			"the refusal must name the root that is missing; a reader cannot repair a docRoots "+
 				"list from a message that does not say which entry went")
