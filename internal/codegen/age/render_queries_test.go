@@ -217,7 +217,7 @@ func TestDecodeFuncNamesTheHelperForEveryServedCarrier(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.goType, func(t *testing.T) {
-			require.Equal(t, tt.want, age.DecodeFunc(tt.goType))
+			require.Equal(t, tt.want, decodeFuncOf(t, tt.goType))
 		})
 	}
 }
@@ -347,7 +347,7 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 func requireCarrierHasAnArm(t *testing.T, goType string) {
 	t.Helper()
 	for {
-		require.NotPanics(t, func() { age.DecodeFunc(goType) },
+		decodeFuncOf(t, goType,
 			"the type table names Go type %q, which decodeFunc has no arm for the carrier of", goType)
 		elem, ok := strings.CutPrefix(goType, "[]")
 		if !ok {
@@ -355,6 +355,46 @@ func requireCarrierHasAnArm(t *testing.T, goType string) {
 		}
 		goType = elem
 	}
+}
+
+// decodeFuncOf names the helper decodeFunc answers for one Go type, and is
+// how every test in this package asks. decodeFunc refuses a carrier it was
+// not taught by panicking, and a panic is not confined to the subtest that
+// raised it: the testing package marks that subtest failed and then takes
+// the whole binary down with it, so every pin after it in the package never
+// runs at all.
+//
+// The pin that is silenced that way is the one that would have localised
+// the regression. Deleting decodeFunc's `map[string]any` arm and running
+// the package used to die in TestDecodeFuncNamesTheHelperForEveryServedCarrier,
+// and deleting the `any` arm in TestNarrowingWidthsAgreesWithTheTypeTable —
+// in both cases before TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces,
+// whose whole job is to name WHICH carrier lost its arm, had run. Worse than
+// the missing name: a SECOND regression introduced by the same change is
+// invisible until the first is fixed, because no other pin in the package
+// reports at all (bd gqlc-adgrp).
+//
+// So the panic is recovered here rather than removed. It is load-bearing
+// where it fires in earnest — a carrier reaching the emission with no arm
+// must not produce a package that compiles and reads the wrong Go type at
+// run time — and TestDecodeFuncRefusesACarrierItWasNotTaught pins it,
+// deliberately calling decodeFunc bare through require.PanicsWithValue.
+//
+// The default message says only what this helper observes. Where the CALLER
+// knows how the Go type reached it — requireCarrierHasAnArm swept it out of
+// the type table, while the rows of
+// TestDecodeFuncNamesTheHelperForEveryServedCarrier are written out by hand
+// — that provenance is the diagnosis, since it tells a reader whether an arm
+// was deleted or a table row was added. So it is passed in rather than
+// asserted here, where it would be true of one caller and false of another.
+func decodeFuncOf(t *testing.T, goType string, msgAndArgs ...any) string {
+	t.Helper()
+	if len(msgAndArgs) == 0 {
+		msgAndArgs = []any{"decodeFunc has no arm for the carrier of Go type %q", goType}
+	}
+	var helper string
+	require.NotPanics(t, func() { helper = age.DecodeFunc(goType) }, msgAndArgs...)
+	return helper
 }
 
 // typeTableGoTypes is every Go type text the type table names as a

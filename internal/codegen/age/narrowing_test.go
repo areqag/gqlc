@@ -55,8 +55,9 @@ var narrowingWidths = map[string]graph.PropertyType{
 // one of the two checked narrowings. It reads decodeFunc's answer rather
 // than a second list of widths, so the question this asks is the one the
 // emission actually decides.
-func narrowsThroughACheck(goType string) bool {
-	decoder := age.DecodeFunc(goType)
+func narrowsThroughACheck(t *testing.T, goType string) bool {
+	t.Helper()
+	decoder := decodeFuncOf(t, goType)
 	return strings.HasPrefix(decoder, "agtypeIntAs[") || decoder == "agtypeFloat32"
 }
 
@@ -70,7 +71,7 @@ func TestNarrowingWidthsAgreesWithTheTypeTable(t *testing.T) {
 	for _, carrier := range propertyCarriers(t) {
 		t.Run(carrier, func(t *testing.T) {
 			_, listed := narrowingWidths[carrier]
-			require.Equal(t, narrowsThroughACheck(carrier), listed,
+			require.Equal(t, narrowsThroughACheck(t, carrier), listed,
 				"%s decodes through the checked narrowing but narrowingWidths does not list it (or the reverse); "+
 					"the guard reads that map, so an unlisted narrowing width is one it cannot see", carrier)
 		})
