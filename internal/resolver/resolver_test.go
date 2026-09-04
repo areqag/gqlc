@@ -811,6 +811,37 @@ var invalidFixtureContains = map[string]string{
 	"plural_endpoint_multi_hop_stays_plural.cypher":                `p.bOnly missing on plural-satisfying type A&Node`,
 	"plural_endpoint_optional_edge_property_stays_plural.cypher":   `p.employeeId missing on plural-satisfying type Person`,
 	"plural_endpoint_unbounded_hops_stays_plural.cypher":           `p.bOnly missing on plural-satisfying type A&Node`,
+	// ErrAmbiguousLabel's whole-entity refusal, screened as a second axis under
+	// gqlc-9vpga. It is built at one site — refProjectionType's nodeCands arm in
+	// scope.go — and its only variable content is the enumerated candidate set,
+	// which errors.Is cannot see. So for the eleven fixtures that reach it the
+	// waiver's question is exactly "does anything hold this one's set".
+	//
+	// Ten of the eleven stay waived on a measurement rather than on inheritance:
+	// each has its OWN subtest here reddened by at least one mutation of the
+	// narrowing, because the binding then determines and the query RESOLVES, so
+	// Require().Error is the whole check and no message is needed. Four fall to
+	// blinding the nullability/single-hop half of witnessesItsEndpoints, two more
+	// to blinding its written half, and the remaining four to demanding a PROPER
+	// superset in satisfyingNodeTypes, which drops the bare Person type and
+	// leaves a singleton.
+	//
+	// Two mutations reddened NO subtest in the family, and neither is a gap.
+	// Suppressing CloseEdges' plural-to-plural write-back is caught by
+	// TestNarrowingToASmallerPluralSetIsWhatTheSetSaysItIs, which reads its
+	// fixture from disk and asserts the narrowed set by content and by length;
+	// collapsing the empty-narrowing arm is caught by
+	// TestEdgeClosureNarrowingCannotOutrunTheFacts, which asks for the surviving
+	// keys off a scope rather than through a message.
+	//
+	// The entry below is the one fixture no row reddened. Its schema declares no
+	// bare Person, so the proper-superset mutation leaves it plural and refused,
+	// and both blindings of the message site and a reversal of the enumeration
+	// order left it green too. The set is what says WHICH ambiguity it is: a
+	// label satisfied only by proper supersets, against
+	// label_satisfy_plural_entity — byte-identical query text on a schema that
+	// declares Person itself.
+	"label_satisfy_ambiguous.cypher": `p is satisfied by more than one declared node type: Contractor&Person, Employee&Person`,
 }
 
 // invalidFixtureNoMessagePin names the invalid fixtures whose refusal message
@@ -826,11 +857,18 @@ var invalidFixtureContains = map[string]string{
 // which arm fired — is gqlc-9vpga. Do not read a name here as a finding that
 // its message is not worth pinning.
 //
-// THE ONE AXIS SCREENED SO FAR (gqlc-yg5jl): every fixture reaching
-// ErrUnknownProperty's plural-lane arm was graded by mutating that arm to the
-// generic formatter, and the seven that survived moved to
-// invalidFixtureContains. Every other arm is unscreened, so a name here still
-// carries no verdict.
+// THE AXES SCREENED SO FAR, and there are two:
+//
+//   - gqlc-yg5jl: every fixture reaching ErrUnknownProperty's plural-lane arm
+//     was graded by mutating that arm to the generic formatter, and the seven
+//     that survived moved to invalidFixtureContains.
+//   - gqlc-9vpga: the eleven reaching ErrAmbiguousLabel's whole-entity arm were
+//     graded against nine mutations, of the narrowing and of the message site.
+//     Ten had their own subtest reddened by at least one and stay here; the one
+//     that survived every row moved to invalidFixtureContains, where what each
+//     of the ten rests on is recorded.
+//
+// Every other arm is unscreened, so a name here still carries no verdict.
 var invalidFixtureNoMessagePin = map[string]struct{}{
 	"ambiguous_edge_orientation_after_inference.cypher":              {},
 	"anonymous_source_endpoint.cypher":                               {},
@@ -849,7 +887,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"delete_second_target_unknown_property.cypher":                   {},
 	"effect_order_first_failure_wins.cypher":                         {},
 	"empty_inline_endpoint.cypher":                                   {},
-	"label_satisfy_ambiguous.cypher":                                 {},
 	"label_satisfy_none.cypher":                                      {},
 	"label_satisfy_plural_entity.cypher":                             {},
 	"list_of_edges_projection.cypher":                                {},
