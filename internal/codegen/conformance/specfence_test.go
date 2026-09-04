@@ -49,20 +49,43 @@ import (
 // A root is held here only by what the censuses below name beneath it.
 // Deleting `docs` is red — every censused document is under it, and each
 // is reported by name. So is narrowing it to `docs/specs`, because
-// specBareListExhibits names a document under `docs/adr/`. Deleting
-// `README.md` or `CONTEXT.md` is green, because no census names a
-// document under either. A root that stops existing on disk fails in
-// docFiles.
+// specBareListExhibits names a document under `docs/adr/`. A root that
+// stops existing on disk fails in docFiles.
 //
-// This file cannot close that: everything it observes is walked out of
-// docRoots, so a census over what a sweep produced is derived from the
-// list being audited. Catching a root that shrank, or one that should
-// have grown, needs candidate roots from outside the list — the
-// repository's own markdown — which is gqlc-jfwo. `AGENTS.md`,
-// `CLAUDE.md` and `CONTRIBUTING.md` sit beside the two files named here,
-// are not swept, and print no query method and no driver-binding literal
-// today.
+// Deleting `README.md` or `CONTEXT.md` is red as well, but from nothing
+// below: no census names a document under either, so the sweep would
+// produce exactly what it produced before. It is caught one level out, by
+// TestEveryRootDocIsSweptOrDeclaredOutOfScope, whose candidate set is the
+// repository root's own markdown rather than whatever this list reached.
+// That direction is the whole point — a census over what a sweep produced
+// is derived from the list being audited, so it cannot see the list
+// shrink: a root the walk stops reaching contributes no document there is
+// then anything to miss (gqlc-jfwo).
+//
+// What that test does not reach is a top-level DIRECTORY of markdown
+// nobody added here, because it censuses root files alone: a new `spec/`
+// tree would go unswept and say nothing. The unswept trees that exist
+// today — `kingdom/`, `internal/`, `test/`, `.beads/`, `.claude/`, 56
+// documents between them — print no query method signature and no
+// driver-binding literal, measured 2026-09-04.
 var docRoots = []string{"docs", "README.md", "CONTEXT.md"}
+
+// nonSpecRootDocs are the repository-root markdown documents deliberately
+// left unswept, each mapped to why. A root document is red until it is
+// named either here or in docRoots, so leaving one out stops being
+// something that happens and becomes something somebody writes down.
+//
+// The reason is required rather than conventional: a census of bare names
+// records that a decision was taken and none of what it was taken on, and
+// an exemption whose argument is not written cannot be checked when the
+// document changes under it. Nothing here re-reads these documents, so a
+// reason that goes false goes false silently — which is the price of the
+// exemption and the argument for keeping this map short.
+var nonSpecRootDocs = map[string]string{
+	"AGENTS.md":       "instructions to coding agents about this repository; states nothing about the emitted surface",
+	"CLAUDE.md":       "the same, addressed to Claude Code",
+	"CONTRIBUTING.md": "contribution process; prints no generated-code example",
+}
 
 // repoRoot is where this package sits relative to the tree above. Swept
 // documents are named relative to it — a failure that says
@@ -87,8 +110,11 @@ const repoRoot = "../../../"
 // two-part edit whose second part is the record of it.
 //
 // A document these censuses are never pointed at: the sets below name
-// documents, not roots, so they are silent about anything docRoots does
-// not reach (gqlc-jfwo).
+// documents, not roots, so they stay silent about anything docRoots does
+// not reach. What answers for the repository root's own markdown is
+// TestEveryRootDocIsSweptOrDeclaredOutOfScope, one level out from these;
+// what answers for an undeclared top-level directory of markdown is
+// nothing (gqlc-jfwo).
 //
 // A site swapped for another inside one document. specSigDocs and
 // specBindDocs carry a per-document FLOOR — how many graded sites the
@@ -435,6 +461,58 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 			"reads (gqlc-offa). The entries here are the spans printed as exhibits of that limit rather than as\n"+
 			"claims about the emitted surface, and each covers exactly one site — a second span spelled the same\n"+
 			"way in the same document is graded")
+}
+
+// TestEveryRootDocIsSweptOrDeclaredOutOfScope reconciles the repository
+// root's own markdown against the two lists that may account for it:
+// docRoots, which sweeps a document, and nonSpecRootDocs, which exempts
+// one with a reason. A document in neither is red, and the failure names
+// both remedies.
+//
+// It is the only check in this file whose candidate set is not derived
+// from docRoots, and that is what it is for. Every other assertion here
+// reads what the sweep produced, and a root dropped from the list
+// produces nothing — so the evidence a shrinking walk would be caught by
+// is exactly what the shrinking removes. Measured on gqlc-jfwo: a
+// markdown document added at the repository root printing both graded
+// anchors, `(ctx context.Context, id int64)` and a `map[string]any{`
+// binding, left all of this package green before this test existed.
+//
+// The reconciliation runs in both directions, so it also refuses a
+// declared document that has left the disk, and — through requireCensus'
+// duplicate arm — one named as swept and exempt at once, where either
+// line could later be deleted under cover of the other.
+func TestEveryRootDocIsSweptOrDeclaredOutOfScope(t *testing.T) {
+	// A docRoots entry accounts for a root document only by being that
+	// document, so the tree entries answer for nothing here. A nested
+	// entry naming a document rather than a tree would be reported below
+	// as declared and unobserved; none exists, and `docs` covers the
+	// case that would motivate one.
+	var declared []string
+	for _, root := range docRoots {
+		if strings.HasSuffix(root, ".md") {
+			declared = append(declared, root)
+		}
+	}
+	declared = append(declared, reasonedNames(t, nonSpecRootDocs, "nonSpecRootDocs")...)
+	sort.Strings(declared)
+
+	entries, err := os.ReadDir(repoRoot)
+	require.NoError(t, err, "the repository root is unreadable, so this census has no candidate set")
+
+	observed := make(map[string]bool)
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+			observed[entry.Name()] = true
+		}
+	}
+
+	requireCensus(t, declared, observed, "docRoots and nonSpecRootDocs together",
+		"a markdown document at the repository root is either swept for spec drift — name it in docRoots —\n"+
+			"or deliberately out of scope — name it in nonSpecRootDocs, with the reason. A document in neither\n"+
+			"list is in a third state nobody chose: unswept because nobody was asked. That is how README.md and\n"+
+			"CONTEXT.md came to be swept while AGENTS.md, CLAUDE.md and CONTRIBUTING.md came not to be, and it\n"+
+			"is the state this test exists to make impossible to reach quietly")
 }
 
 // sigSweep is one pass of the signature scanners over a set of
@@ -884,6 +962,41 @@ func requireCensus(t fenceT, written []string, observed map[string]bool, census,
 	}
 }
 
+// reasonedNames returns the names an exemption census declares, refusing
+// any written down without the reason it rests on. A bare name records
+// that somebody decided and not what they decided on, so the next reader
+// has nothing to check the decision against — which is how an exemption
+// outlives its argument.
+//
+// It returns the names rather than only inspecting them so that the
+// caller must route the census through it. Written as its own statement
+// beside the loop that reads the map, the check was a line whose deletion
+// changed nothing else, and a mutation deleting it survived. Here that
+// deletion takes the exempt names out of the reconciliation with it, and
+// each is then reported as a root document nobody declared.
+func reasonedNames(t fenceT, written map[string]string, census string) []string {
+	t.Helper()
+
+	names := make([]string, 0, len(written))
+	var bare []string
+	for name, why := range written {
+		names = append(names, name)
+		if strings.TrimSpace(why) == "" {
+			bare = append(bare, "  "+name)
+		}
+	}
+	sort.Strings(names)
+	sort.Strings(bare)
+
+	if len(bare) > 0 {
+		require.Fail(t, census+" exempts an entry without saying why",
+			"an exemption with no reason cannot be checked against the document later and cannot be seen to\n"+
+				"expire, so it reads as a decision while recording none of it. Write down what it rests on:\n"+
+				strings.Join(bare, "\n"))
+	}
+	return names
+}
+
 // requireSwept refuses a run that read nothing, ahead of any comparison
 // quantified over what it read. requireCensus covers the case where one
 // side is a written literal; this one covers the case where both sides are
@@ -1021,6 +1134,22 @@ func TestSpecFailuresAreWired(t *testing.T) {
 		},
 		wantFail: true,
 		wantMsg:  []string{"census declares no entry"},
+	}, {
+		name: "reasonedNames passes an exemption that states its reason",
+		call: func(ft fenceT) {
+			require.Equal(t, []string{"a"},
+				reasonedNames(ft, map[string]string{"a": "prints no emitted surface"}, "census"))
+		},
+	}, {
+		// Whitespace is not a reason. A line kept syntactically populated
+		// is the shape an exemption takes when its argument is deleted and
+		// the entry is not.
+		name: "reasonedNames fails an exemption whose reason is blank",
+		call: func(ft fenceT) {
+			reasonedNames(ft, map[string]string{"a": "why", "b": "  \n\t"}, "census")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census exempts an entry without saying why", "b"},
 	}, {
 		name: "requireCensusFloors passes a document at its floor",
 		call: func(ft fenceT) {
