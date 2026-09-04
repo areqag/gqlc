@@ -756,7 +756,12 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error
   seam returned (§5.6).
 
 **The argument name and the binding values in this document are
-fenced.** `TestSpecMethodArgIsGeneratorOwned` and
+fenced.** This is the *spec* fence, and it is a different gate from the
+*compile* fence of §8 despite the shared word. It is an ordinary Go
+test, so it blocks a PR through the required `test` context — not
+through `codegen-fence`, which runs §8's recipe and never loads this
+package (bd `gqlc-gmz6`).
+`TestSpecMethodArgIsGeneratorOwned` and
 `TestSpecParamsMapBindsGeneratorOwnedValue`
 (`internal/codegen/conformance/specfence_test.go`) read every
 markdown document under `docs/`, plus `README.md` and `CONTEXT.md`,
@@ -1649,6 +1654,14 @@ unchanged), the compile fence (§7 unchanged).
 ---
 
 ## 8. Compile fence (unchanged)
+
+This is the gate the required CI context `codegen-fence`
+(`.github/workflows/ci.yml`) runs, and it is the only one. The *spec*
+fence of §5.3 — `internal/codegen/conformance/specfence_test.go`, which
+holds this document's argument name and binding values to
+`codegen.ParamArg` — is a different gate that shares the word, runs
+under `test`, and is never loaded by the recipe below. A reader
+narrowing this recipe is not touching the spec fence (bd `gqlc-gmz6`).
 
 The C0 `just test-codegen-fence` recipe (`cd test/data/codegen && go
 build ./... && go vet ./...`) covers C1's emissions without change:
