@@ -1711,36 +1711,116 @@ func TestSpecScannersReportUnreadableSites(t *testing.T) {
 	})
 }
 
+// TestDocFilesRefusesAMissingRoot is the witness for docFiles' existence
+// guard, which ADR 0029 decision 7 leaves out of its enumeration of
+// witnessed plumbing and which no other test stands in for.
+//
+// The guard is structurally unable to fail on a clean tree, so the
+// corpus cannot pin it: an independent review of PR #804 replaced it
+// with `continue` and the whole package stayed green. Synthetic roots
+// are what make the failing direction reachable at all.
+//
+// Both directions are asserted, because the guard is only worth having
+// if the walk it guards still does its job. A refusal that also stopped
+// collecting the roots that DO exist would satisfy the first half alone.
+func TestDocFilesRefusesAMissingRoot(t *testing.T) {
+	base := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "docs", "adr"), 0o755))
+	for _, path := range []string{"README.md", "docs/one.md", "docs/adr/two.md", "docs/skipped.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(base, filepath.FromSlash(path)), []byte("x\n"), 0o644))
+	}
+
+	t.Run("a root that exists is walked", func(t *testing.T) {
+		found, err := collectDocs(base, []string{"docs", "README.md"})
+		require.NoError(t, err)
+		require.Equal(t, []string{"README.md", "docs/adr/two.md", "docs/one.md"}, slashAll(found),
+			"a directory root contributes its .md files at any depth and nothing else, "+
+				"and a file root contributes itself")
+	})
+
+	t.Run("a root that does not exist is refused, by name", func(t *testing.T) {
+		_, err := collectDocs(base, []string{"docs", "gone.md"})
+		require.Error(t, err, "a docRoots entry that is not on disk was walked past in silence")
+		// Either half of the refusal satisfies this: measured, dropping the
+		// %q leaves the name in the wrapped os.Stat error. What must hold is
+		// that a reader sees which entry went, not where the message got it.
+		require.ErrorContains(t, err, "gone.md",
+			"the refusal must name the root that is missing; a reader cannot repair a docRoots "+
+				"list from a message that does not say which entry went")
+	})
+
+	t.Run("the refusal is not a blanket give-up", func(t *testing.T) {
+		found, err := collectDocs(base, []string{"docs"})
+		require.NoError(t, err)
+		require.NotEmpty(t, found,
+			"the walk collects nothing even for a root that exists, so the refusal above proves nothing")
+	})
+}
+
+// slashAll rewrites collectDocs' output to forward slashes so the
+// expectations above read as paths rather than as host separators.
+func slashAll(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = filepath.ToSlash(p)
+	}
+	return out
+}
+
 // docFiles lists every markdown document under docRoots, named relative
 // to repoRoot so the censuses and the failure output speak in paths a
 // reader can open.
 func docFiles(t *testing.T) []string {
 	t.Helper()
+	out, err := collectDocs(repoRoot, docRoots)
+	require.NoError(t, err)
+	return out
+}
+
+// collectDocs is docFiles' walk, over an arbitrary base and root list so
+// the refusals below can be witnessed on synthetic input.
+//
+// A root that does not exist is refused rather than skipped. Skipping it
+// would be silent in the direction that matters: the censuses redden when
+// a root a census NAMES vanishes, so what a skip loses is exactly the
+// roots no census names — README.md and CONTEXT.md today — which would
+// stop being swept with nothing anywhere reporting it (bd gqlc-ipx6).
+//
+// Split out as a plain function rather than left as require calls on a
+// *testing.T because a require cannot be observed failing: it is
+// structurally unable to fail on a clean tree, and an independent review
+// of PR #804 measured that replacing it with `continue` left the whole
+// package green.
+func collectDocs(base string, roots []string) ([]string, error) {
 	var out []string
-	for _, root := range docRoots {
-		full := filepath.Join(repoRoot, root)
+	for _, root := range roots {
+		full := filepath.Join(base, root)
 		info, err := os.Stat(full)
-		require.NoErrorf(t, err, "docRoots entry %q does not exist", root)
+		if err != nil {
+			return nil, fmt.Errorf("docRoots entry %q does not exist: %w", root, err)
+		}
 		if !info.IsDir() {
 			out = append(out, root)
 			continue
 		}
-		require.NoError(t, filepath.WalkDir(full, func(path string, entry os.DirEntry, err error) error {
+		if err := filepath.WalkDir(full, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
 			if !entry.IsDir() && strings.HasSuffix(path, ".md") {
-				rel, relErr := filepath.Rel(repoRoot, path)
+				rel, relErr := filepath.Rel(base, path)
 				if relErr != nil {
 					return relErr
 				}
 				out = append(out, rel)
 			}
 			return nil
-		}))
+		}); err != nil {
+			return nil, fmt.Errorf("walk docRoots entry %q: %w", root, err)
+		}
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
 // scanSpecSigs extracts every documented single-argument method
