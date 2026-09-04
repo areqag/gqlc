@@ -483,8 +483,6 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 // duplicate arm — one named as swept and exempt at once, where either
 // line could later be deleted under cover of the other.
 func TestEveryRootDocIsSweptOrDeclaredOutOfScope(t *testing.T) {
-	requireReasoned(t, nonSpecRootDocs, "nonSpecRootDocs")
-
 	// A docRoots entry accounts for a root document only by being that
 	// document, so the tree entries answer for nothing here. A nested
 	// entry naming a document rather than a tree would be reported below
@@ -496,9 +494,7 @@ func TestEveryRootDocIsSweptOrDeclaredOutOfScope(t *testing.T) {
 			declared = append(declared, root)
 		}
 	}
-	for doc := range nonSpecRootDocs {
-		declared = append(declared, doc)
-	}
+	declared = append(declared, reasonedNames(t, nonSpecRootDocs, "nonSpecRootDocs")...)
 	sort.Strings(declared)
 
 	entries, err := os.ReadDir(repoRoot)
@@ -966,19 +962,30 @@ func requireCensus(t fenceT, written []string, observed map[string]bool, census,
 	}
 }
 
-// requireReasoned refuses an exemption written down without the reason it
-// rests on. A list of bare names records that somebody decided and not
-// what they decided on, so the next reader has nothing to check the
-// decision against — which is how an exemption outlives its argument.
-func requireReasoned(t fenceT, written map[string]string, census string) {
+// reasonedNames returns the names an exemption census declares, refusing
+// any written down without the reason it rests on. A bare name records
+// that somebody decided and not what they decided on, so the next reader
+// has nothing to check the decision against — which is how an exemption
+// outlives its argument.
+//
+// It returns the names rather than only inspecting them so that the
+// caller must route the census through it. Written as its own statement
+// beside the loop that reads the map, the check was a line whose deletion
+// changed nothing else, and a mutation deleting it survived. Here that
+// deletion takes the exempt names out of the reconciliation with it, and
+// each is then reported as a root document nobody declared.
+func reasonedNames(t fenceT, written map[string]string, census string) []string {
 	t.Helper()
 
+	names := make([]string, 0, len(written))
 	var bare []string
 	for name, why := range written {
+		names = append(names, name)
 		if strings.TrimSpace(why) == "" {
 			bare = append(bare, "  "+name)
 		}
 	}
+	sort.Strings(names)
 	sort.Strings(bare)
 
 	if len(bare) > 0 {
@@ -987,6 +994,7 @@ func requireReasoned(t fenceT, written map[string]string, census string) {
 				"expire, so it reads as a decision while recording none of it. Write down what it rests on:\n"+
 				strings.Join(bare, "\n"))
 	}
+	return names
 }
 
 // requireSwept refuses a run that read nothing, ahead of any comparison
@@ -1127,17 +1135,18 @@ func TestSpecFailuresAreWired(t *testing.T) {
 		wantFail: true,
 		wantMsg:  []string{"census declares no entry"},
 	}, {
-		name: "requireReasoned passes an exemption that states its reason",
+		name: "reasonedNames passes an exemption that states its reason",
 		call: func(ft fenceT) {
-			requireReasoned(ft, map[string]string{"a": "prints no emitted surface"}, "census")
+			require.Equal(t, []string{"a"},
+				reasonedNames(ft, map[string]string{"a": "prints no emitted surface"}, "census"))
 		},
 	}, {
 		// Whitespace is not a reason. A line kept syntactically populated
 		// is the shape an exemption takes when its argument is deleted and
 		// the entry is not.
-		name: "requireReasoned fails an exemption whose reason is blank",
+		name: "reasonedNames fails an exemption whose reason is blank",
 		call: func(ft fenceT) {
-			requireReasoned(ft, map[string]string{"a": "why", "b": "  \n\t"}, "census")
+			reasonedNames(ft, map[string]string{"a": "why", "b": "  \n\t"}, "census")
 		},
 		wantFail: true,
 		wantMsg:  []string{"census exempts an entry without saying why", "b"},
