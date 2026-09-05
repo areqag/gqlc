@@ -3,7 +3,7 @@
 # schema under test/data/resolver/{valid,invalid}/schemas/*.gql. Generated
 # file: edit internal/resolver/sweep_test.go, not this.
 #
-# corpus: 335 queries, 42 schemas. 14070 cells: 4256 accept, 9814 refuse.
+# corpus: 336 queries, 42 schemas. 14112 cells: 4256 accept, 9856 refuse.
 #
 # cell rows: query, schema, verdict, sentinel, detail. A refusing cell's
 # detail digests the error text and is expanded by the strconv.Quote'd msg
@@ -26,6 +26,7 @@ msg	054d70336fa3	"unknown label: Author is not declared on any node type"
 msg	06951febdcc9	"ambiguous label: n is satisfied by more than one declared node type: Contractor&Person, Employee&Person"
 msg	0714e2c7f541	"unknown label: cannot infer type of target endpoint of edge \"r\""
 msg	0928cf093593	"unknown edge: Contractor&Person-[FOUNDED]->Company, Company-[FOUNDED]->Contractor&Person, Employee&Person-[FOUNDED]->Company, Company-[FOUNDED]->Employee&Person, Person-[FOUNDED]->Company, Company-[FOUNDED]->Person"
+msg	09386cd19247	"union column mismatch: column \"x\" projects list (nullable) of edge Person-[KNOWS]->Person (not null) in branch 1 but list (not null) of edge Person-[KNOWS]->Person (not null) in branch 0"
 msg	098c7b93b40f	"unknown property: p.rank missing on plural-satisfying type Engineer&Person&Staff"
 msg	0b375b3b8c1d	"unknown property: p.nosuch missing on plural-satisfying type Contractor&Person"
 msg	0b7410ed84ee	"query construct not supported at resolver stage R0: path binding"
@@ -100,6 +101,7 @@ msg	598c1820ae9d	"unknown label: Hub is not declared on any node type"
 msg	5a4241bcc7d2	"query construct not supported at resolver stage R0: list-of-edges projection"
 msg	5b7767c8f09c	"unknown edge: Person-[KNOWS]->Person"
 msg	5e967e07ea59	"unknown label: Tag is not declared on any node type"
+msg	5eb8891d3b98	"union column mismatch: column \"x\" projects list (nullable) of edgeUnion {Person-[KNOWS]->Employee&Person, Person-[KNOWS]->Person} (not null) in branch 1 but list (not null) of edgeUnion {Person-[KNOWS]->Employee&Person, Person-[KNOWS]->Person} (not null) in branch 0"
 msg	5f2655e9e2d3	"unknown label: no node type satisfies Contractor&Employee; declared types carrying these labels: Contractor&Person, Employee&Person"
 msg	5f6ac7ed60b0	"ambiguous edge orientation: edge \"r\" matches Person-[REVIEWED]->Employee&Person left-to-right and Employee&Person-[REVIEWED]->Person right-to-left"
 msg	60111750d1b9	"unknown edge: Company-[REVIEWED]->Contractor&Person, Company-[REVIEWED]->Employee&Person, Company-[REVIEWED]->Person"
@@ -5148,6 +5150,48 @@ cell	invalid/union_unknown_label_branch.cypher	valid/schemas/social_r5.gql	refus
 cell	invalid/union_unknown_label_branch.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownLabel	f81bb33a3ff0
 cell	invalid/union_unknown_label_branch.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownLabel	f81bb33a3ff0
 cell	invalid/union_unknown_label_branch.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	f81bb33a3ff0
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownEdge	de3c63991da1
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownEdge	57fc44a4696d
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/social.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnionColumnMismatch	09386cd19247
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnionColumnMismatch	09386cd19247
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnionColumnMismatch	09386cd19247
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnionColumnMismatch	09386cd19247
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/certificate.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	c504839fd900
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnionColumnMismatch	5eb8891d3b98
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social_r3.gql	refuse	ErrUnionColumnMismatch	09386cd19247
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social_r4.gql	refuse	ErrUnionColumnMismatch	09386cd19247
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social_r5.gql	refuse	ErrUnionColumnMismatch	09386cd19247
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social_r6.gql	refuse	ErrUnionColumnMismatch	09386cd19247
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social_r7.gql	refuse	ErrUnionColumnMismatch	09386cd19247
+cell	invalid/union_var_length_binding_optionality_mismatch.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnionColumnMismatch	09386cd19247
 cell	invalid/union_writes_vs_returns_column_count.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/union_writes_vs_returns_column_count.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnionColumnMismatch	c06ea4ec3ccd
 cell	invalid/union_writes_vs_returns_column_count.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb

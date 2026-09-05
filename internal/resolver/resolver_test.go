@@ -245,10 +245,11 @@ var invalidFixtures = map[string]error{
 	// resolvedTypeEqual is reachable only from compareBranchColumns, and no
 	// fixture unioned two branches projecting different whole-entity or list
 	// types under a common column name. One fixture per unpinned arm.
-	"union_node_type_mismatch.cypher":              ErrUnionColumnMismatch,
-	"union_edge_union_nullability_mismatch.cypher": ErrUnionColumnMismatch,
-	"union_edge_union_keys_mismatch.cypher":        ErrUnionColumnMismatch,
-	"union_list_element_mismatch.cypher":           ErrUnionColumnMismatch,
+	"union_node_type_mismatch.cypher":                      ErrUnionColumnMismatch,
+	"union_edge_union_nullability_mismatch.cypher":         ErrUnionColumnMismatch,
+	"union_edge_union_keys_mismatch.cypher":                ErrUnionColumnMismatch,
+	"union_list_element_mismatch.cypher":                   ErrUnionColumnMismatch,
+	"union_var_length_binding_optionality_mismatch.cypher": ErrUnionColumnMismatch,
 	// Two edge-union columns where one key list is a strict prefix of the other.
 	// resolvedTypeEqual's arity check is the only thing separating them, and the
 	// two orderings fail differently without it — see the comment on
@@ -999,6 +1000,7 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"union_edge_union_keys_mismatch.cypher":                          {},
 	"union_edge_union_nullability_mismatch.cypher":                   {},
 	"union_list_element_mismatch.cypher":                             {},
+	"union_var_length_binding_optionality_mismatch.cypher":           {},
 	"union_node_type_mismatch.cypher":                                {},
 	"union_third_branch_mismatch.cypher":                             {},
 	"union_unknown_label_branch.cypher":                              {},
@@ -4303,6 +4305,18 @@ var unionTypeArmRows = []unionTypeArmRow{
 		// because both positions exist and each is spelled on both settings.
 		fixture: "union_list_element_mismatch.cypher",
 		failing: "list (not null) of edge Person-[AUTHORED]->Post (not null)",
+		branch0: "list (not null) of edge Person-[KNOWS]->Person (not null)",
+	},
+	{
+		// The only row whose two branches share an element outright: one
+		// var-length KNOWS binding under OPTIONAL MATCH and one not, so the
+		// LIST's own note is the whole of the difference. It is what holds
+		// both halves of that bit — resolvedTypeEqual comparing the list's
+		// Nullable, and describeColumnType spelling it — because dropping
+		// either makes the two renderings identical and the collision check
+		// fires.
+		fixture: "union_var_length_binding_optionality_mismatch.cypher",
+		failing: "list (nullable) of edge Person-[KNOWS]->Person (not null)",
 		branch0: "list (not null) of edge Person-[KNOWS]->Person (not null)",
 	},
 }

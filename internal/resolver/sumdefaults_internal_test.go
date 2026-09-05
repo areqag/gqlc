@@ -294,6 +294,46 @@ func TestCompareBranchColumnsSurvivesANilListElement(t *testing.T) {
 		"the message must name what the failing branch actually projected")
 }
 
+// TestUnifyKeepsTheListsOwnNullability pins the answer unify's list arm
+// gives for the field, for the reason the fillLeaf pin below gives about
+// its own site: unify serves parameter witnesses, whose lists all come
+// from resolveType and so never carry the bit, and a mutant that drops
+// it from the rebuilt literal passes the whole suite (bd gqlc-lgbjy).
+//
+// Taking the left side's answer is what the arm did before the field
+// existed — it returned aa.Element from the recursive call, so aa's
+// nullability won — and it is what the ResolvedEdge and ResolvedNode
+// arms beside it do. Whether it should instead refuse the disagreement,
+// as the ResolvedProperty arm does, is a question about unify's contract
+// and not about this bead: bd gqlc-8e1sy.
+func TestUnifyKeepsTheListsOwnNullability(t *testing.T) {
+	elem := ResolvedProperty{Type: graph.TypeInt}
+	for _, tt := range []struct {
+		name string
+		a, b ResolvedType
+		want ResolvedType
+	}{
+		{
+			name: "left nullable",
+			a:    ResolvedList{Element: elem, Nullable: true},
+			b:    ResolvedList{Element: elem},
+			want: ResolvedList{Element: elem, Nullable: true},
+		},
+		{
+			name: "left mandatory",
+			a:    ResolvedList{Element: elem},
+			b:    ResolvedList{Element: elem, Nullable: true},
+			want: ResolvedList{Element: elem},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := unify(tt.a, tt.b)
+			require.True(t, ok)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // TestFillLeafKeepsTheListsOwnNullability pins the one field fillLeaf
 // rebuilds a list around, and it is called directly because no query can
 // reach the site with the field set. fillLeaf's only caller hands it a
