@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/queryfile"
 )
 
@@ -459,27 +460,37 @@ var encodedParamText = map[string]string{
 // it returned ok=false and the call site sent it through plain
 // json.Marshal — carriers that define no MarshalJSON, crossing as their Go
 // structs while decode expected ISO strings (bd gqlc-jc8mc).
+// A declared RECORD is on the fallible list for a reason unlike either of
+// the two above: not a shape change and not a range one, but that its Go
+// value is not an agtype value at all. Left alone it crosses through
+// json.Marshal as the struct, which writes the GO field names the mangle
+// produced rather than the field names the schema declared, and a JSON
+// null for a nullable field this store spells by absence. Every key on
+// the wire is wrong and nothing fails, which is why it is guarded by an
+// assertion on what the encoder WRITES and not only on what it is named.
 func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
-	leaf := f.GoType
+	leaf, leafWidth := f.GoType, f.Width
 	depth := 0
 	for {
 		elem, ok := strings.CutPrefix(leaf, "[]")
 		if !ok {
 			break
 		}
-		depth, leaf = depth+1, elem
+		depth, leaf, leafWidth = depth+1, elem, elemWidth(leafWidth)
 	}
 	var encoder string
-	switch leaf {
-	case goDate:
+	switch {
+	case codegen.IsDeclaredRecord(leaf, leafWidth):
+		encoder = "encode" + codegen.RecordHelperSuffix(leafWidth)
+	case leaf == goDate:
 		encoder = "agtypeDateText"
-	case goLocalTime:
+	case leaf == goLocalTime:
 		encoder = "agtypeLocalTimeMicros"
-	case goTime:
+	case leaf == goTime:
 		encoder = "agtypeTimeMicros"
-	case goDuration:
+	case leaf == goDuration:
 		encoder = "agtypeDurationMicros"
-	case "uint64", "uint":
+	case leaf == "uint64" || leaf == "uint":
 		// Not a shape change like the four above, but a range one: an
 		// agtype integer is signed 64-bit, so these two widths are the
 		// only ones carrying values the wire cannot hold at all. They
@@ -491,14 +502,33 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 	}
 	switch {
 	case depth > 0 && f.Nullable:
-		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, listEncoder(depth, leaf, encoder)), true
+		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, listEncoder(depth, leaf, leafWidth, encoder)), true
 	case depth > 0:
-		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, listEncoder(depth-1, leaf, encoder)), true
+		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, listEncoder(depth-1, leaf, leafWidth, encoder)), true
 	case f.Nullable:
 		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, encoder), true
 	default:
 		return fmt.Sprintf("%s(%s)", encoder, access), true
 	}
+}
+
+// encodedText is the agtype-side Go type one carrier encodes to. A
+// function and not the bare map lookup because a record's key would be
+// its whole struct text: the table is written per NAMED carrier, and a
+// record's carrier is a text the schema produced rather than one this
+// file could list. Every record encodes to the same map whatever its
+// fields, so there is one answer to give and no table to grow.
+//
+// A miss still answers the empty string, as the map alone did. That is
+// not a silent default: the only caller is the closure listEncoder
+// spells, which is reached for a leaf fallibleParamEncoder already named
+// an encoder for, so a miss here would be a leaf on that list and absent
+// from this one — and it emits `([], error)`, which does not compile.
+func encodedText(leaf string, width graph.PropertyType) string {
+	if codegen.IsDeclaredRecord(leaf, width) {
+		return "map[string]any"
+	}
+	return encodedParamText[leaf]
 }
 
 // listEncoder is the encoder FUNCTION VALUE for a value nested levels deep
@@ -525,15 +555,18 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 // (TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind), and that is
 // the cost of dropping the argument — a whole-expression assertion now
 // spells the flat form.
-func listEncoder(levels int, leaf, encoder string) string {
+//
+// leafWidth reaches encodedText because a record's agtype-side type is its
+// whole struct text rather than a name the table could key on.
+func listEncoder(levels int, leaf string, leafWidth graph.PropertyType, encoder string) string {
 	if levels == 0 {
 		return encoder
 	}
 	slices := strings.Repeat("[]", levels-1)
 	return fmt.Sprintf("func(in %s[]%s) (%s[]%s, error) {\n\treturn agtypeEncodedList(in, %s)\n}",
 		slices, leaf,
-		slices, encodedParamText[leaf],
-		listEncoder(levels-1, leaf, encoder))
+		slices, encodedText(leaf, leafWidth),
+		listEncoder(levels-1, leaf, leafWidth, encoder))
 }
 
 // writeOneBody emits the :one arity check, the single row's decode, and
@@ -653,14 +686,32 @@ func columnDecoder(f codegen.Row) string {
 	if f.Kind == codegen.ColumnNode || f.Kind == codegen.ColumnEdge {
 		return "decode" + f.GoType
 	}
-	return decodeFunc(f.GoType)
+	return decodeFunc(f.GoType, f.Width)
 }
 
 // decodeFunc names the models.go helper that decodes one value of an
 // emitted Go type. A slice goes through the named wrapper emitted for
-// it, a type of no declared shape through the agtype value vocabulary,
-// and a scalar through the helper for the agtype scalar its carrier is —
-// the caller narrows.
+// it, a declared record through its own helper, a type of no declared
+// shape through the agtype value vocabulary, and a scalar through the
+// helper for the agtype scalar its carrier is — the caller narrows.
+//
+// The record arm is why this takes a width at all, and the width is the
+// SECOND argument rather than the only one because every other arm keys
+// on the text. A declared record's carrier is the anonymous struct
+// codegen.RecordStructText builds, which does not run backwards into a
+// PropertyType, so the helper's name — derived from the canonical
+// encoding's digest — cannot be recovered from the argument the rest of
+// this switch reads. width is the one the prepared surface carries
+// beside the carrier it was derived from, and it is available at every
+// call site: Param.Width and Row.Width are set for every value this
+// backend serves, and the one Row construction that leaves Width empty
+// is the list EXPRESSION column unservedColumn refuses here.
+//
+// A width that is empty or that disagrees with the text takes no arm and
+// falls through to the panic below, which is the right failure: the
+// alternative is naming a helper picked for some other shape, which
+// emits a package that compiles and reads the value as the wrong Go type
+// at run time.
 //
 // Every carrier the type table produces has an arm here, and a carrier
 // with none panics. This is the first panic in the non-test code of
@@ -715,9 +766,12 @@ func columnDecoder(f codegen.Row) string {
 // returns a literal fails a subtest of its own, and most other spellings
 // fail the walk's refusal. The one spelling it reads without sweeping is
 // named where the walk is, at typeTableGoTypes.
-func decodeFunc(goType string) string {
+func decodeFunc(goType string, width graph.PropertyType) string {
 	if strings.HasPrefix(goType, "[]") {
-		return listHelperName(goType)
+		return listHelperName(goType, width)
+	}
+	if codegen.IsDeclaredRecord(goType, width) {
+		return "decode" + codegen.RecordHelperSuffix(width)
 	}
 	switch goType {
 	case "any":

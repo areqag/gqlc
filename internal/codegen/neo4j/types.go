@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
 )
@@ -34,6 +35,21 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 			return "", false
 		}
 		return "[]" + elemTy, true
+	}
+	if pt.Kind() == graph.KindRecord {
+		if pt == graph.TypeAnyRecord {
+			// Fields undeclared, so there is no struct to build: the
+			// record whose contents are unconstrained maps to Go's
+			// unconstrained string-keyed product, exactly as ANY maps
+			// to any and LIST<ANY> to []any (spec §3).
+			return "map[string]any", true
+		}
+		// Threading this Property in as the field carrier is what makes
+		// a record inherit neo4j's own refusals: a field of a width
+		// this table has no case for refuses the whole record, through
+		// the same ErrUnrepresentableWidth channel a bare property of
+		// that width would.
+		return codegen.RecordStructText(pt.Fields(), t.Property)
 	}
 	switch pt {
 	case graph.TypeString:
@@ -83,12 +99,12 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// Listed so the exhaustive linter sees the full constant set.
 		return "[]any", true
 	case graph.TypeAnyRecord:
-		// Refused by prepare.go's kind walk before any table is asked
-		// (ErrUnimplementedTypeKind, ADR 0039), so this is unreachable —
-		// listed for the exhaustive linter, as graph.TypeList is. The
-		// false is fail-closed rather than an answer: a record has no
-		// emission on any backend, so no width claim here would be true.
-		return "", false
+		// RECORD<ANY> spelled out, so the Kind() guard above intercepts
+		// it and this arm is unreachable. Listed so the exhaustive
+		// linter sees the full constant set, and answering
+		// "map[string]any" keeps it agreeing with the arm that does the
+		// work — the arrangement graph.TypeList already has.
+		return "map[string]any", true
 	case graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
@@ -100,8 +116,8 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	return "", false
 }
 
-// StorableProperty refuses a list whose element is itself a list, and
-// admits everything else.
+// StorableProperty refuses a record, a list of records, and a list whose
+// element is itself a list, and admits everything else.
 //
 // This is the storage axis, not the carrier axis: Property answers
 // "[][]int16" for LIST<LIST<INT16>> and is right to, and this backend
@@ -121,11 +137,40 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 // caught for the same reason. LIST<ANY VALUE> is ADMITTED and can carry
 // a nested list at runtime, which no static check can see — that write
 // fails at the server as it does today (ADR 0035 names the limit).
+//
+// The RECORD arms rest on the same kind of measurement, taken against the
+// pinned image by TestNeo4jRefusesAMapValuedStoredProperty rather than
+// assumed. The server answered:
+//
+//	Neo.ClientError.Statement.TypeError (Property values can only be of
+//	primitive types or arrays thereof. Encountered: Map{…}.)
+//
+// with two controls green in the same run — a scalar property on the same
+// session was stored, and the identical map came back as a projected
+// column — so the refusal is about the property slot rather than about
+// maps in general. That asymmetry is why only this axis refuses a record
+// while Property still carries one: a record arriving as a query VALUE
+// decodes fine, and §6 of the spec turns on the difference.
+//
+// THE LIST ARM IS NOT AN INFERENCE FROM THE BARE ONE. The rule the server
+// states admits "arrays thereof", and a flat list of scalars IS stored —
+// ADR 0035 turns on exactly that — so an array of maps had to be asked
+// about separately. It was, in the same test, and is refused by the same
+// rule. Without this arm a LIST<RECORD<…>> would reach the server through
+// the list arm above, which asks only whether the element is a list.
+//
+// KindRecord covers RECORD<ANY> and the fieldless RECORD<> too: Kind()
+// tests the "RECORD<" prefix, which all three spellings share. A depth-3
+// list of records is already refused one level out by the nested-list arm.
 func (typeMap) StorableProperty(pt graph.PropertyType) bool {
+	if pt.Kind() == graph.KindRecord {
+		return false
+	}
 	if pt.Kind() != graph.KindList {
 		return true
 	}
-	return pt.Elem().Kind() != graph.KindList
+	elem := pt.Elem().Kind()
+	return elem != graph.KindList && elem != graph.KindRecord
 }
 
 // Temporal maps a resolver Temporal kind to the Go type text C3 emits
@@ -195,9 +240,21 @@ func (typeMap) Scalar(k resolver.Scalar) string {
 // as []any holding strings, and narrowing it is per element rather than
 // whole. []byte is the exception because BYTES is the one width the
 // driver does hand back as a Go slice of its own.
+//
+// A declared record widens to map[string]any, the shape the driver
+// already hands a Cypher map back as, and the struct is built from it
+// field by field — the same relationship a slice has to []any, and for
+// the same reason: the driver has no narrower carrier to offer, so the
+// declared shape is this package's to build. RECORD<ANY> needs no arm
+// because map[string]any is what it already carries as, and the default
+// arm answering it with itself is what tells every decode site to assign
+// it bare.
 func driverCarrier(goType string) string {
 	if isSliceType(goType) {
 		return "[]any"
+	}
+	if codegen.IsRecordStruct(goType) {
+		return "map[string]any"
 	}
 	switch goType {
 	case "int", "int8", "int16", "int32", "int64",

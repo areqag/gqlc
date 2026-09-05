@@ -32,6 +32,23 @@
 // case where the round-trip is a bijection, so uint64(-1) survives it and
 // only the sign comparison refuses. Without an unsigned property the
 // clause has no test that dies when it is deleted (bd gqlc-awtb).
+//
+// Dwelling carries the RECORD width, and carries it TWICE at one
+// encoding, because both facts are only checkable by running the
+// emission. What a record decode does with a NOT NULL field that arrives
+// with no value is a refusal written into the emitted body, so no
+// assertion on the source can say it fires; and that `home` and `prior`
+// share one carrier and one helper pair — the emission is per ENCODING,
+// not per site — is a claim about assignability that only a compiler
+// settles. The two differ in nullability so the property read is
+// exercised in both shapes over the same encoding.
+//
+// The agtype texts the driver decodes for this label are CONSTRUCTED,
+// not captured, and they are the only ones here that are. What is under
+// test is gqlc's decoder given a map, which is well defined for a map a
+// writer built by hand; whether AGE will STORE a record-typed property
+// as a nested object is a different question that no measurement here
+// answers, and gqlc-jffyz step 5 owes it.
 CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
     (:Event {
         id         :: INT64     NOT NULL,
@@ -73,6 +90,11 @@ CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
         payload :: ANY VALUE NOT NULL,
         maybe   :: ANY VALUE,
         tag     :: ANY PROPERTY VALUE
+    }),
+    (:Dwelling {
+        id    :: INT64 NOT NULL,
+        home  :: RECORD { zip_code :: INT32 NOT NULL, note :: STRING } NOT NULL,
+        prior :: RECORD { zip_code :: INT32 NOT NULL, note :: STRING }
     }),
     (:Person) -[:ACTED_IN { since :: INT64 NOT NULL }]-> (:Person)
 }

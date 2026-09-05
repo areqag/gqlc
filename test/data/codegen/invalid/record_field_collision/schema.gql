@@ -1,0 +1,18 @@
+// Every enrolled target, for the reason unimplemented_kind_union_property
+// gives: the refusal is gqlc's own rather than a backend's answer. The
+// legality check runs before any type table is asked, so a target that
+// admitted this would be the surprise, and dropping one here is how that
+// stops being measured.
+//
+// `min_age` and `minAge` are two distinct GQL field names that the
+// paramFieldName mangle spells as one Go field, which is the same
+// collision property_field_collision carries one container out. It is
+// here as well as there because a record's fields are checked by
+// different code on a different axis: those are an entity's properties,
+// these are the fields of a TYPE that may be declared far from the
+// property carrying it.
+CREATE PROPERTY GRAPH TYPE RecordFieldCollision AS {
+    (:Person {
+        home :: RECORD { min_age :: INT64 NOT NULL, minAge :: INT64 NOT NULL }
+    })
+}

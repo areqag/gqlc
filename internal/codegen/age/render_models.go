@@ -170,7 +170,50 @@ type helpers struct {
 	// which takes a named wrapper around the generic walk. A nested list
 	// registers its element type too, because the outer wrapper's element
 	// decoder is the inner wrapper.
-	lists []string
+	//
+	// Each carries the width it was derived from, and not because the
+	// wrapper's own name needs it at only one site: writeListHelper
+	// names its element's decoder, and a record element's decoder is
+	// named from a digest the Go type text cannot yield. This is the one
+	// place a width has to be CARRIED rather than passed down a call
+	// chain, because the wrappers are emitted from this list long after
+	// the value that named them was in hand.
+	lists []listPlan
+
+	// records holds every declared record encoding the batch reaches, in
+	// first-marked order and deduplicated by canonical encoding. It is
+	// what renderModels emits a carrier ALIAS for, whichever direction
+	// reached it, so a name decodeFunc or the args map derives resolves to
+	// a declaration.
+	records []graph.PropertyType
+
+	// recordDecoders and recordEncoders are the subsets of records that
+	// are read out of the store and bound as parameters. Two sets and not
+	// one bool, because the two directions mark different helpers
+	// underneath: a record READ but never bound would still emit an
+	// encoder, and that encoder names its fields' encode-side helpers —
+	// agtypeDateText for a DATE field — which nothing in a read-only
+	// batch marks. The emission then calls a helper it does not declare.
+	//
+	// Measured by the closure sweep in render_models_test.go, on a record
+	// carrying a DATE: that is the field width whose two directions are
+	// two different helper names.
+	recordDecoders map[graph.PropertyType]bool
+	recordEncoders map[graph.PropertyType]bool
+
+	// agtypeRecordField — some record decodes, so its fields are read out
+	// of a split map. One mark and one helper for both nullabilities:
+	// the helper answers a pointer either way, and what a NOT NULL field
+	// does with a nil is fail naming itself and the record it is in,
+	// which is an error message the caller has and the helper does not.
+	recordField bool
+}
+
+// listPlan is one named list wrapper: the Go slice type it decodes into
+// and the width that type was derived from.
+type listPlan struct {
+	goType string
+	width  graph.PropertyType
 }
 
 // importsTime reports whether models.go names the time package, which
@@ -195,7 +238,7 @@ func (h helpers) importsTime() bool {
 func (h *helpers) forEntities(entities []wiredEntity) {
 	for _, e := range entities {
 		for _, f := range e.Fields {
-			h.need(f.GoType)
+			h.need(f.GoType, f.Width)
 			// The offset sidecar is a second property of the same
 			// vertex, so only an entity decode has it in hand. Which
 			// re-zoning helper reads it depends on the carrier: an
@@ -235,14 +278,30 @@ func (h *helpers) forParams(params []codegen.Param) {
 		// for one whose encode cannot fail and neither the leaf encoder
 		// nor agtypeEncodedList was ever marked — an emission calling
 		// helpers it does not define (bd gqlc-vhvz7).
-		leaf := p.GoType
+		leaf, leafWidth := p.GoType, p.Width
 		list := false
 		for {
 			elem, ok := strings.CutPrefix(leaf, "[]")
 			if !ok {
 				break
 			}
-			leaf, list = elem, true
+			leaf, leafWidth, list = elem, elemWidth(leafWidth), true
+		}
+		if codegen.IsDeclaredRecord(leaf, leafWidth) {
+			// Marked here and not in the switch below because a record's
+			// encoder is not one of the fixed helper names: it is emitted
+			// per encoding, and marking it is what puts that encoding on
+			// the list renderModels emits from. It is fallible for the
+			// same reason the temporals are, so it falls through to the
+			// two combinator marks rather than continuing past them.
+			h.needRecordEncode(leafWidth)
+			if p.Nullable {
+				h.encNullable = true
+			}
+			if list {
+				h.encList = true
+			}
+			continue
 		}
 		if leaf == goInstant {
 			// The instant predates the combinators and keeps its own
@@ -292,13 +351,29 @@ func (h *helpers) forParams(params []codegen.Param) {
 // A slice marks the generic list walk plus a named wrapper
 // of its own, and recurses so the element's helper is marked too; a Go
 // type of no declared shape marks the agtype value vocabulary.
-func (h *helpers) need(goType string) {
+//
+// A declared record marks its own helper pair and then recurses into its
+// FIELDS, because a record's decoder calls its fields' decoders and a
+// field width the batch reaches nowhere else would otherwise mark
+// nothing. The recursion terminates for the reason the list one does:
+// graph.RecordOf builds a finite encoding, so the field carriers are
+// strictly smaller texts than the struct they sit in.
+//
+// width is what tells a record from any other struct-shaped carrier and
+// what names its helpers; it descends with the text through both the
+// list arm and the record arm. A call site with no width in hand marks
+// exactly what it marked before records existed.
+func (h *helpers) need(goType string, width graph.PropertyType) {
 	if elem, ok := strings.CutPrefix(goType, "[]"); ok {
 		h.list = true
-		if !slices.Contains(h.lists, goType) {
-			h.lists = append(h.lists, goType)
+		if !slices.ContainsFunc(h.lists, func(p listPlan) bool { return p.goType == goType }) {
+			h.lists = append(h.lists, listPlan{goType: goType, width: width})
 		}
-		h.need(elem)
+		h.need(elem, elemWidth(width))
+		return
+	}
+	if codegen.IsDeclaredRecord(goType, width) {
+		h.needRecord(width)
 		return
 	}
 	if goType == "any" || goType == "map[string]any" {
@@ -349,18 +424,96 @@ func (h *helpers) needValue() {
 	h.integer, h.float, h.list = true, true, true
 }
 
+// needRecord marks one declared record's carrier alias and its DECODER,
+// then the helpers its fields decode through.
+//
+// Marked before the recursion, so a record that contains itself would
+// terminate here rather than run away. graph.RecordOf cannot build one
+// today — the encoding is a finite string and a field's type is written
+// inside it — but the mark is free and a guard placed after the
+// recursion would be no guard at all.
+//
+// The fields are asked through typeMap.Property, the same carrier
+// function the record's own struct text was built from, so a field whose
+// width this backend declines cannot reach here: the whole record would
+// have been declined at Property and never admitted.
+//
+// The WIDTH alone, with no carrier text beside it, matching
+// needRecordEncode. Everything below is derived from the encoding —
+// the alias, the helper suffix, the field walk — and the struct text
+// does not run backwards, so a carrier passed here could only be
+// ignored or disagreed with.
+func (h *helpers) needRecord(width graph.PropertyType) {
+	if h.recordDecoders[width] {
+		return
+	}
+	h.markRecord(width)
+	h.recordDecoders[width] = true
+	h.recordField = true
+	for _, f := range width.Fields() {
+		fieldTy, ok := typeMap{}.Property(f.Type)
+		if !ok {
+			continue
+		}
+		h.need(fieldTy, f.Type)
+	}
+}
+
+// needRecordEncode marks one declared record's carrier alias and its
+// ENCODER, then the helpers its fields encode through.
+//
+// The fields are marked by asking forParams, one synthesised parameter
+// per field, because that is literally the question: a record field
+// crosses the way a bound parameter of the same width crosses, through
+// the same leaf encoder and the same two combinators. Asking it in the
+// same words is what keeps the two from drifting into disagreement about
+// which helper a width needs — the same reason fieldEncoder composes the
+// expression through fallibleParamEncoder rather than its own switch.
+//
+// The nullability is dropped, matching fieldEncoder: the emission writes
+// no key for a nil rather than encoding through agtypeEncodedNullable,
+// so a nullable field marks nothing the combinator would need.
+func (h *helpers) needRecordEncode(width graph.PropertyType) {
+	if h.recordEncoders[width] {
+		return
+	}
+	h.markRecord(width)
+	h.recordEncoders[width] = true
+	for _, f := range width.Fields() {
+		fieldTy, ok := typeMap{}.Property(f.Type)
+		if !ok {
+			continue
+		}
+		h.forParams([]codegen.Param{{GoType: fieldTy, Width: f.Type}})
+	}
+}
+
+// markRecord registers one encoding for a carrier alias and readies the
+// two direction sets. Both directions call it, and the alias is emitted
+// once however many of them did: the carrier is what a schema position
+// of this width is typed with, not something either helper owns.
+func (h *helpers) markRecord(width graph.PropertyType) {
+	if !slices.Contains(h.records, width) {
+		h.records = append(h.records, width)
+	}
+	if h.recordDecoders == nil {
+		h.recordDecoders = map[graph.PropertyType]bool{}
+		h.recordEncoders = map[graph.PropertyType]bool{}
+	}
+}
+
 // listHelpers is the batch's named list wrappers, shallowest first and
 // then by name. The order the batch reaches them is already a function
 // of the schema, so this is not what makes the emission deterministic:
 // it is what makes it readable, since a wrapper's element decoder is the
 // wrapper one level in and reading inner before outer follows the decode.
-func (h helpers) listHelpers() []string {
+func (h helpers) listHelpers() []listPlan {
 	out := slices.Clone(h.lists)
-	slices.SortFunc(out, func(a, b string) int {
-		if d := cmp.Compare(listDepth(a), listDepth(b)); d != 0 {
+	slices.SortFunc(out, func(a, b listPlan) int {
+		if d := cmp.Compare(listDepth(a.goType), listDepth(b.goType)); d != 0 {
 			return d
 		}
-		return cmp.Compare(a, b)
+		return cmp.Compare(a.goType, b.goType)
 	})
 	return out
 }
@@ -378,10 +531,23 @@ func listDepth(goType string) int {
 }
 
 // listHelperName is the wrapper emitted for one Go slice type:
-// agtypeListOf per level of nesting, then the element type exported.
-// Every type that reaches here came out of the property table, whose
-// leaves are Go identifiers.
-func listHelperName(goType string) string {
+// agtypeListOf per level of nesting, then the element named.
+//
+// The element is named by exporting its Go type text, which every leaf
+// the property table produces admits because those leaves are Go
+// identifiers — except one. A declared record's leaf carrier is an
+// anonymous struct, and exporting its first letter would spell
+// `agtypeListOfStruct {`, which is not an identifier at all. That leaf
+// is named from its width's digest instead, the same name its own
+// helpers carry, so a list of records reads agtypeListOfRecord<digest>.
+//
+// width descends in step with the text, one Elem per `[]` stripped, and
+// is consulted only at the leaf. A width that runs out before the text
+// does — an empty one, or a list shallower than its carrier — leaves the
+// leaf non-record and the name is built from the text as before; that is
+// the pre-record behaviour and it is what a caller with no width in hand
+// still gets.
+func listHelperName(goType string, width graph.PropertyType) string {
 	name := "agtype"
 	for {
 		elem, ok := strings.CutPrefix(goType, "[]")
@@ -389,8 +555,26 @@ func listHelperName(goType string) string {
 			break
 		}
 		name, goType = name+"ListOf", elem
+		width = elemWidth(width)
+	}
+	if codegen.IsDeclaredRecord(goType, width) {
+		return name + codegen.RecordHelperSuffix(width)
 	}
 	return name + strings.ToUpper(goType[:1]) + goType[1:]
+}
+
+// elemWidth strips one list level off a width, and answers the empty
+// width for anything that is not a list.
+//
+// The empty answer is deliberate rather than a pass-through: a text that
+// nests deeper than its width does is a caller that has lost track of
+// which value it holds, and carrying the width down unchanged would let
+// the leaf match a record it is not. Empty matches nothing.
+func elemWidth(width graph.PropertyType) graph.PropertyType {
+	if width.Kind() != graph.KindList {
+		return ""
+	}
+	return width.Elem()
 }
 
 // agtypeCarrier picks the decode helper's return type for a Go type the
@@ -441,6 +625,17 @@ func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	b.WriteString(")\n")
 
 	writeEntities(&b, entities)
+
+	// The carriers sit with the entity structs because they are part of
+	// the type surface; their helpers sit below with the other decoders.
+	records := recordPlans(h)
+	writeRecordCarriers(&b, records)
+
+	plain := make([]codegen.Entity, 0, len(entities))
+	for _, e := range entities {
+		plain = append(plain, e.Entity)
+	}
+	writeRecordSiteAliases(&b, codegen.RecordSiteAliases(plain))
 
 	if h.args {
 		b.WriteString(`
@@ -1254,6 +1449,15 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 	for _, goType := range h.listHelpers() {
 		writeListHelper(&b, goType)
 	}
+	// The field helper is gated on a record having a field to read, not on
+	// a record existing: a record of no fields declares no call site, and
+	// an emitted helper nothing calls is a compile error in the generated
+	// package.
+	if h.recordField {
+		writeRecordFieldHelper(&b)
+	}
+	writeRecordDecoders(&b, records)
+	writeRecordEncoders(&b, records)
 	if h.value {
 		b.WriteString(`
 // agtypeValue decodes a value of no declared shape through agtype's own
@@ -1375,11 +1579,21 @@ func agtypeNullableProperty[T any](props map[string][]byte, key string, decode f
 // wrapper rather than the generic at each call site because a nested
 // list's element decoder is the wrapper one level in, and a function
 // value is what agtypeList takes.
-func writeListHelper(b *strings.Builder, goType string) {
-	elem := strings.TrimPrefix(goType, "[]")
-	fmt.Fprintf(b, "\n// %s decodes an agtype list of %s elements.\n", listHelperName(goType), elem)
-	fmt.Fprintf(b, "func %s(raw []byte) (%s, error) {\n", listHelperName(goType), goType)
-	fmt.Fprintf(b, "\treturn agtypeList(raw, %s)\n}\n", decodeFunc(elem))
+func writeListHelper(b *strings.Builder, p listPlan) {
+	elem := strings.TrimPrefix(p.goType, "[]")
+	elemW := elemWidth(p.width)
+	name := listHelperName(p.goType, p.width)
+
+	// The doc line names the element by its carrier alias where it has
+	// one, because a record element's carrier is a multi-line anonymous
+	// struct and pasting it into a // comment breaks the line.
+	shown := elem
+	if codegen.IsDeclaredRecord(elem, elemW) {
+		shown = codegen.RecordAliasName(elemW)
+	}
+	fmt.Fprintf(b, "\n// %s decodes an agtype list of %s elements.\n", name, shown)
+	fmt.Fprintf(b, "func %s(raw []byte) (%s, error) {\n", name, p.goType)
+	fmt.Fprintf(b, "\treturn agtypeList(raw, %s)\n}\n", decodeFunc(elem, elemW))
 }
 
 // writeEntities emits the schema's entity surface: one exported struct
@@ -1457,7 +1671,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	if f.Nullable {
 		reader = "agtypeNullableProperty"
 	}
-	fmt.Fprintf(b, "\t%s, err := %s(props, %q, %s)\n", value, reader, f.PropName, decodeFunc(f.GoType))
+	fmt.Fprintf(b, "\t%s, err := %s(props, %q, %s)\n", value, reader, f.PropName, decodeFunc(f.GoType, f.Width))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s{}, fmt.Errorf(%q, err)\n\t}\n",
 		e.Name, "decode "+e.Name+"."+f.Field+": %w")
 	if sidecar, ok := offsetSidecar(f); ok {

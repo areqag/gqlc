@@ -20,10 +20,11 @@ import (
 // temporal widths join the eight oversized numeric widths on the reject
 // side, and a caller hitting any of them gets ErrUnrepresentableWidth
 // naming the width. TIMESTAMP is the one temporal width that crosses, on
-// an encoding this package owns. The two structured widths are on the
+// an encoding this package owns. The three structured widths are on the
 // admit side, emitting what every other backend emits for them — agtype
-// has a list and a map of its own, so a list of a carried element width
-// and Go's any (ADR 0020) both have something to decode from. The rows
+// has a list and a map of its own, so a list of a carried element width,
+// Go's any (ADR 0020) and an undeclared record all have something to
+// decode from. The rows
 // pin each width's mapping; the constant set they range over is held by
 // Property's switch, which has no default arm and so fails the
 // exhaustive linter when internal/graph grows one.
@@ -51,6 +52,12 @@ func TestTypeMapProperty(t *testing.T) {
 		// LIST<ANY> spelled out, so it maps through the list arm.
 		{graph.TypeAnyPropertyValue, "any"},
 		{graph.TypeList, "[]any"},
+		// RECORD<ANY>, the third structured width, admitted since stage 1
+		// of gqlc-x9tg7. Its arm is unreachable for the same reason
+		// TypeList's is — Kind() reports KindRecord, so the guard at the
+		// top of Property answers it — and the row pins what a caller
+		// declaring one gets however it is reached.
+		{graph.TypeAnyRecord, "map[string]any"},
 		{graph.TypeTimestamp, "time.Time"},
 		// The three widths that ride the neutral carriers temporal.go
 		// declares, which is what a Postgres-through-pgx backend can
@@ -69,11 +76,6 @@ func TestTypeMapProperty(t *testing.T) {
 	}
 
 	unrepresentable := []graph.PropertyType{
-		// Not a width claim: a record is refused a step earlier, by
-		// prepare.go's kind walk (codegen.ErrUnimplementedTypeKind,
-		// ADR 0039), so this arm is unreachable. The row pins that it is
-		// fail-closed — reached, it must not hand back a carrier.
-		graph.TypeAnyRecord,
 		// agtype has no byte-string scalar.
 		graph.TypeBytes,
 		// No faithful Go carrier on any backend (§9).
@@ -174,6 +176,71 @@ func TestTypeMapProperty(t *testing.T) {
 			for _, pt := range []graph.PropertyType{
 				graph.ListOf(elem, false),
 				graph.ListOf(graph.ListOf(elem, false), false),
+			} {
+				got, ok := age.TypeMap{}.Property(pt)
+				require.False(t, ok, "%s", pt)
+				require.Empty(t, got)
+			}
+		}
+	})
+
+	// A record is spelled as an anonymous struct whose fields carry
+	// through this same table, so what it admits is decided field-wise
+	// and not by a row of its own. RECORD<> is the unit type; RECORD<ANY>
+	// declares no fields and is answered by the guard above rather than
+	// here, so it is in the width table and not in this map.
+	t.Run("a record rides its fields' carriers", func(t *testing.T) {
+		cases := map[graph.PropertyType]string{
+			graph.RecordOf(nil): "struct{}",
+			graph.RecordOf([]graph.RecordField{
+				{Name: "city", Type: graph.TypeString},
+				{Name: "zip", Type: graph.TypeInt32, NotNull: true},
+			}): "struct {\n\tCity *string\n\tZip int32\n}",
+			// A field of a container width, and a record inside a record:
+			// the recursion is the same one a list's element takes.
+			graph.RecordOf([]graph.RecordField{
+				{Name: "tags", Type: graph.ListOf(graph.TypeString, false), NotNull: true},
+			}): "struct {\n\tTags []string\n}",
+			graph.RecordOf([]graph.RecordField{
+				{Name: "at", Type: graph.RecordOf([]graph.RecordField{{Name: "lat", Type: graph.TypeFloat64, NotNull: true}}), NotNull: true},
+			}): "struct {\n\tAt struct {\n\tLat float64\n}\n}",
+			// The three zone-free temporal widths ride a record for the
+			// same reason they ride a list.
+			graph.RecordOf([]graph.RecordField{
+				{Name: "d", Type: graph.TypeDate, NotNull: true},
+				{Name: "lt", Type: graph.TypeLocalTime, NotNull: true},
+				{Name: "dur", Type: graph.TypeDuration, NotNull: true},
+			}): "struct {\n\tD Date\n\tDur Duration\n\tLt LocalTime\n}",
+		}
+		for pt, want := range cases {
+			got, ok := age.TypeMap{}.Property(pt)
+			require.True(t, ok, "%s", pt)
+			require.Equal(t, want, got, "%s", pt)
+		}
+	})
+
+	// The container rule generalises from lists to records, and these
+	// rows are what makes that a measured claim rather than a comment.
+	// BYTES has no carrier at all here, so it refuses a record for the
+	// reason it refuses a list. TIMESTAMP and TIME are the interesting
+	// half: both carry as PROPERTIES on this backend, and both are
+	// refused inside a record, because the zone sidecar is named after
+	// the property and a record field is not a property — there is no
+	// name for it to hang on, exactly as a list has one name for every
+	// element.
+	t.Run("a record of an uncarried field width is rejected", func(t *testing.T) {
+		for _, field := range []graph.PropertyType{graph.TypeBytes, graph.TypeTime, graph.TypeTimestamp, graph.TypeDecimal} {
+			for _, pt := range []graph.PropertyType{
+				// The width at the record's own field.
+				graph.RecordOf([]graph.RecordField{{Name: "f", Type: field, NotNull: true}}),
+				// One container deeper each way: a record field that is a
+				// list of it, and a record inside a record. Neither is
+				// reached by a check that only reads the top level.
+				graph.RecordOf([]graph.RecordField{{Name: "f", Type: graph.ListOf(field, false), NotNull: true}}),
+				graph.RecordOf([]graph.RecordField{{Name: "inner", Type: graph.RecordOf([]graph.RecordField{{Name: "f", Type: field, NotNull: true}}), NotNull: true}}),
+				// And the record under a list, which is the LIST<RECORD>
+				// position the prepared surface carries on ListElem.
+				graph.ListOf(graph.RecordOf([]graph.RecordField{{Name: "f", Type: field, NotNull: true}}), false),
 			} {
 				got, ok := age.TypeMap{}.Property(pt)
 				require.False(t, ok, "%s", pt)

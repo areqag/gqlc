@@ -38,13 +38,34 @@ type decoderProbeWidth struct {
 	spelling string
 }
 
-// decoderProbeScalars is one entry per scalar graph.PropertyType this
-// backend has a Go carrier for. It is held to being exactly that set by
-// TestDecoderProbeCoversTheTypeTable, which reads the constants off
-// internal/graph's own source: a width added there that this backend
-// admits fails that test naming the constant, rather than joining the
-// type table with no probe property behind it.
-var decoderProbeScalars = []decoderProbeWidth{
+// decoderProbeLeaves is one entry per non-list graph.PropertyType this
+// backend both carries a Go type for AND will store as a property. It is
+// held to being exactly that set by TestDecoderProbeCoversTheTypeTable,
+// which reads the constants off internal/graph's own source: a width
+// added there that this backend admits fails that test naming the
+// constant, rather than joining the type table with no probe property
+// behind it.
+//
+// BOTH AXES ARE REQUIRED because this probe is schema-driven. Every entry
+// is declared below as a stored property, so a width the storage axis
+// refuses cannot appear here at all — generation refuses the schema and
+// the probe fails to build rather than measuring any decode arm.
+//
+// That is why RECORD<ANY> is absent while typeMap.Property carries it. It
+// was listed here briefly, before the fork in the carrier design's §5 was
+// answered: the pinned neo4j image refuses a map-valued stored property
+// (TestNeo4jRefusesAMapValuedStoredProperty), so StorableProperty refuses
+// every record width and no schema on this backend can reach a record
+// decode arm. That arm is not unwitnessed — it is witnessed WITHOUT a
+// schema, in render_record_test.go, whose widths are built with
+// graph.RecordOf. §5 anticipates exactly this: unreachable from a schema
+// is not unreachable.
+//
+// Non-list rather than scalar. What the entries owe is that the list
+// constructor has not been applied to them already, since
+// decoderProbeWidths applies it below and a pre-derived entry would nest
+// a level deeper than this table claims.
+var decoderProbeLeaves = []decoderProbeWidth{
 	{graph.TypeString, "STRING"},
 	{graph.TypeBytes, "BYTES"},
 	{graph.TypeBool, "BOOL"},
@@ -103,8 +124,8 @@ var decoderProbeScalars = []decoderProbeWidth{
 // This width table is what the per-width sweeps below read; the closure
 // test builds its own narrow schema.
 func decoderProbeWidths() []decoderProbeWidth {
-	out := make([]decoderProbeWidth, 0, 2*len(decoderProbeScalars))
-	for _, w := range decoderProbeScalars {
+	out := make([]decoderProbeWidth, 0, 2*len(decoderProbeLeaves))
+	for _, w := range decoderProbeLeaves {
 		list := decoderProbeWidth{pt: graph.ListOf(w.pt, false), spelling: "LIST<" + w.spelling + ">"}
 		out = append(out, w, list)
 	}
@@ -193,13 +214,17 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	//
 	// This is also what stops either walk passing vacuously: every entry
 	// of the scalar table has to come back out of both of them.
-	for _, w := range decoderProbeScalars {
+	for _, w := range decoderProbeLeaves {
 		name, known := declared[w.pt]
-		require.True(t, known, "decoderProbeScalars names %s, which %s declares no constant for", w.pt, graphPropertyTypeSource)
-		require.Equal(t, graph.KindScalar, w.pt.Kind(),
-			"decoderProbeScalars names graph.%s, which is a list type: the list arms are derived, not listed", name)
+		require.True(t, known, "decoderProbeLeaves names %s, which %s declares no constant for", w.pt, graphPropertyTypeSource)
+		require.NotEqual(t, graph.KindList, w.pt.Kind(),
+			"decoderProbeLeaves names graph.%s, which is a list type: the list arms are derived, not listed", name)
 		require.Contains(t, arms, name,
-			"decoderProbeScalars names graph.%s, which Property has no arm for", name)
+			"decoderProbeLeaves names graph.%s, which Property has no arm for", name)
+		require.True(t, neo4j.TypeMap{}.StorableProperty(w.pt),
+			"decoderProbeLeaves names graph.%s, which this backend refuses as a stored property: every "+
+				"entry here is declared as one, so this makes the probe schema unbuildable rather than "+
+				"measuring the decode arms that width reaches", name)
 	}
 
 	// Every width Property names is one graphPropertyTypes found. The two
@@ -229,9 +254,23 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 		if _, ok := (neo4j.TypeMap{}).Property(pt); !ok {
 			continue
 		}
+		// A carried width the STORAGE axis refuses is one no schema on this
+		// backend can declare, so the obligation below cannot apply to it.
+		// RECORD<ANY> is the one width taking this arm today.
+		//
+		// The exclusion is narrow rather than a general skip: what stops a
+		// width leaving the probe for any reason OTHER than a measured
+		// storage refusal is the leaf loop above, which requires every
+		// entry of decoderProbeLeaves to be storable. This arm is not given
+		// a converse assertion because that loop makes one unreachable —
+		// covered is built from the leaves and their single list
+		// derivation, and no non-list storable leaf has an unstorable list.
+		if !(neo4j.TypeMap{}).StorableProperty(pt) {
+			continue
+		}
 		require.True(t, covered[pt],
 			"this backend emits a carrier for graph.%s (%s) and no probe entity declares it, so the decode "+
-				"arms that width reaches are unswept: add it to decoderProbeScalars with the spelling a "+
+				"arms that width reaches are unswept: add it to decoderProbeLeaves with the spelling a "+
 				"schema writes it as", name, pt)
 	}
 
@@ -255,7 +294,7 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	// width that WERE declared would be refused at generation and the
 	// whole probe schema would fail to parse, so the two halves cannot
 	// both be true by accident.
-	for _, w := range decoderProbeScalars {
+	for _, w := range decoderProbeLeaves {
 		nested := graph.ListOf(graph.ListOf(w.pt, false), false)
 		require.False(t, neo4j.TypeMap{}.StorableProperty(nested),
 			"%s is not refused by the storage axis, so a probe entity could declare it as a stored "+

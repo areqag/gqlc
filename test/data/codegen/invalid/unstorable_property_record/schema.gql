@@ -1,0 +1,19 @@
+// neo4j targets only, and that is the fixture's point rather than an
+// omission: the refusal is the SERVER's storage rule, not a gap in the
+// schema language or a missing Go carrier. The pinned neo4j image answers
+// a map-valued property write with "Property values can only be of
+// primitive types or arrays thereof" — measured by
+// TestNeo4jRefusesAMapValuedStoredProperty — while Apache AGE stores and
+// reads back the same record, so the same declaration is VALID there and
+// lives in valid/record_property with AGE as its only target (ADR 0040).
+//
+// This is the KindRecord arm of the guard. Its sibling next door,
+// unstorable_property_record_list, is the LIST-of-records arm, which is
+// a separate refusal rather than this one restated: the server's rule
+// admits "arrays thereof", so a list of maps had to be measured on its
+// own and was.
+CREATE PROPERTY GRAPH TYPE UnstorablePropertyRecord AS {
+    (:Dwelling {
+        home :: RECORD { zip_code :: INT32 NOT NULL, note :: STRING } NOT NULL
+    })
+}

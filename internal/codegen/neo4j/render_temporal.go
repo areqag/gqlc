@@ -5,12 +5,21 @@ import (
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/graph"
 )
 
-// temporalUse records which conversion directions one neutral carrier
-// needs in a given batch. Emitting only the used ones keeps dead
-// unexported functions out of the generated package.
-type temporalUse struct {
+// carrierUse records which conversion directions one carrier needs in a
+// given batch. Emitting only the used ones keeps dead unexported
+// functions out of the generated package.
+//
+// ONE type for both carrier kinds this backend converts — the neutral
+// temporals and the declared records — because the directions are the
+// same five and are decided by the same three facts: which position the
+// carrier was reached through, whether it was nullable there, and
+// whether a list level sat above it. Two structurally identical types
+// would be two places for those rules to be written and one place for
+// them to disagree.
+type carrierUse struct {
 	decode    bool // to<X>: a driver value read into the neutral carrier
 	encode    bool // from<X>: a carrier bound as a non-nullable parameter
 	encodePtr bool // from<X>Ptr: a carrier bound as a nullable parameter
@@ -29,56 +38,136 @@ type temporalUse struct {
 	listPtr bool
 }
 
-// temporalUses walks the prepared batch and answers, per carrier, which
-// directions the emission sites will reach for. Decode positions are
-// entity properties and row columns (models.go and the per-source
-// files); encode positions are query parameters. A parameter is the one
-// position whose nullability changes the helper, because a nil pointer
-// has to become a Cypher null rather than a zero-valued carrier.
-func temporalUses(prepared codegen.Prepared) map[string]temporalUse {
-	uses := make(map[string]temporalUse)
-	mark := func(goType string, set func(*temporalUse)) {
+// conversionUses walks the prepared batch ONCE and answers, for both
+// carrier kinds, which directions the emission sites will reach for:
+// temporal keyed by the neutral carrier's name, records keyed by the
+// canonical encoding their helper suffix is derived from.
+//
+// Decode positions are entity properties and row columns (models.go and
+// the per-source files); encode positions are query parameters. A
+// parameter is the one position whose nullability changes the helper,
+// because a nil pointer has to become a Cypher null rather than a
+// zero-valued carrier.
+//
+// One walk rather than two, because the two answers are read off the
+// SAME three facts at the SAME positions — a second walk would be a
+// second copy of the nullable/list direction rules, and the emitted
+// package is where a disagreement between them would surface: as a name
+// no declaration answers, which `go build` of generated code reports
+// with no line in the schema to point at.
+//
+// Both directions descend into a DECLARED record rather than stopping at
+// its own carrier text. A record's carrier is an anonymous struct, so
+// the leafType the temporal side marks on hands back the whole struct
+// and no carrier inside it is ever named — while the record's emitted
+// helper pair calls those carriers' conversions by name.
+func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph.PropertyType]carrierUse) {
+	temporal := make(map[string]carrierUse)
+	records := make(map[graph.PropertyType]carrierUse)
+	markTemporal := func(goType string, set func(*carrierUse)) {
 		name := leafType(goType)
 		if !isTemporalCarrier(name) {
 			return
 		}
-		use := uses[name]
+		use := temporal[name]
 		set(&use)
-		uses[name] = use
+		temporal[name] = use
 	}
+	markRecord := func(encoding graph.PropertyType, set func(*carrierUse)) {
+		use := records[encoding]
+		set(&use)
+		records[encoding] = use
+	}
+
+	// Decode needs no nullability, in either kind: to<X> and
+	// decode<Suffix> are the same call either way, because a missing key
+	// is the field's own null rather than a different conversion.
+	setDecode := func(u *carrierUse) { u.decode = true }
+	var markDecode func(goType string, width graph.PropertyType)
+	markDecode = func(goType string, width graph.PropertyType) {
+		if fields, ok := recordLeafFields(goType, width); ok {
+			markRecord(leafWidth(width), setDecode)
+			for _, f := range fields {
+				markDecode(f.GoType, f.Width)
+			}
+			return
+		}
+		markTemporal(goType, setDecode)
+	}
+
+	// A record's encode body spells each field by the PARAMETER rules —
+	// it is paramBindExpr that renders them — so the marks a field owes
+	// are the marks the same shape would owe as a parameter. The outer
+	// nullability does not reach the fields: encode<X>Ptr nil-checks and
+	// then calls encode<X>, which builds every field the same way.
+	var markEncode func(goType string, width graph.PropertyType, nullable bool)
+	markEncode = func(goType string, width graph.PropertyType, nullable bool) {
+		set := func(u *carrierUse) {
+			switch {
+			case isSliceType(goType):
+				// A list parameter converts per element, so what it
+				// needs is the plain helper at the leaf plus the list
+				// helper that calls it — never the Ptr form, whose
+				// nil-to-Cypher-null job belongs to the list helper.
+				u.encode = true
+				u.list = true
+				u.listPtr = u.listPtr || nullable
+			case nullable:
+				u.encodePtr = true
+			default:
+				u.encode = true
+			}
+		}
+		if fields, ok := recordLeafFields(goType, width); ok {
+			markRecord(leafWidth(width), set)
+			for _, f := range fields {
+				markEncode(f.GoType, f.Width, f.Nullable)
+			}
+			return
+		}
+		markTemporal(goType, set)
+	}
+
 	for _, e := range prepared.Entities {
 		for _, f := range e.Fields {
-			mark(f.GoType, func(u *temporalUse) { u.decode = true })
+			markDecode(f.GoType, f.Width)
 		}
 	}
 	for _, q := range prepared.Queries {
 		for _, f := range q.RowFields {
-			mark(f.GoType, func(u *temporalUse) { u.decode = true })
+			markDecode(f.GoType, f.Width)
 			for elem := f.ListElem; elem != nil; elem = elem.Nested {
-				mark(elem.GoType, func(u *temporalUse) { u.decode = true })
+				markDecode(elem.GoType, elem.Width)
 			}
 		}
 		for _, f := range q.ParamFields {
-			// A list parameter converts per element, so what it needs is
-			// the plain from<X> at the leaf plus the list helper that
-			// calls it — never from<X>Ptr, whose nil-to-Cypher-null job
-			// belongs to the list helper instead.
-			if isSliceType(f.GoType) {
-				mark(f.GoType, func(u *temporalUse) {
-					u.encode = true
-					u.list = true
-					u.listPtr = u.listPtr || f.Nullable
-				})
-				continue
-			}
-			if f.Nullable {
-				mark(f.GoType, func(u *temporalUse) { u.encodePtr = true })
-				continue
-			}
-			mark(f.GoType, func(u *temporalUse) { u.encode = true })
+			markEncode(f.GoType, f.Width, f.Nullable)
 		}
 	}
-	return uses
+	return temporal, records
+}
+
+// recordLeafFields answers the field plan of the DECLARED record at the
+// leaf of a carrier, if there is one.
+//
+// The leaf rather than the carrier itself, because a LIST<RECORD<...>>
+// reaches its fields' conversions too: the emitted encode<X>List calls
+// encode<X> per element, which calls each field's conversion by name. A
+// test on the outer width alone would see KindList and descend into
+// nothing.
+//
+// ok=false covers three different negatives on purpose — not a record,
+// RECORD<ANY> (no declared fields, so nothing hides inside it), and a
+// record some field of which this backend cannot carry. The third cannot
+// arrive here, because a refused record fails preparation before any
+// emission walk runs; it is folded in rather than distinguished so that
+// a caller has one question to ask and no unreachable arm to write.
+func recordLeafFields(goType string, width graph.PropertyType) ([]codegen.RecordFieldPlan, bool) {
+	leaf, elem := leafType(goType), leafWidth(width)
+	if !codegen.IsDeclaredRecord(leaf, elem) {
+		return nil, false
+	}
+	return codegen.RecordFields(elem.Fields(), typeMap{}.Property)
 }
 
 // isTemporalCarrier reports whether a Go type text is exactly one of the
@@ -136,11 +225,29 @@ func narrowExpr(goType, src string) string {
 // The caller emits the error plumbing, because what a failed decode
 // returns and how it is worded differ per site.
 //
-// Only the numeric widths reach here. A temporal carrier is a shape
-// change rather than a range question — a dbtype.Date holds exactly what
-// a Date holds — so narrowExpr keeps those and they have no failure to
-// report.
-func narrowCall(goType, src string) string {
+// The numeric widths and the declared records reach here, and they are
+// one lane at every call site because they answer the same shape: the
+// driver hands back something wider than the schema declared, and the
+// check can fail. A temporal carrier is a shape change rather than a
+// range question — a dbtype.Date holds exactly what a Date holds — so
+// narrowExpr keeps those and they have no failure to report.
+//
+// The record arm is why this takes a width at all. Its helper is named
+// from the canonical encoding (codegen.RecordHelperSuffix), and goType
+// is the anonymous struct text, which does not run backwards into a
+// PropertyType — so the name cannot be derived from the argument every
+// other arm here uses. width is the one the prepared surface carries
+// beside the carrier it was derived from (spec §6).
+//
+// Which records the arm admits is codegen.IsDeclaredRecord's question, asked in
+// the same words at every record arm in this backend so the three cannot
+// drift on it. Every call site here also guards on driverCarrier(goType)
+// != goType, which excludes RECORD<ANY> a second time; the belt is what
+// stops a new call site from having to know that.
+func narrowCall(goType string, width graph.PropertyType, src string) string {
+	if codegen.IsDeclaredRecord(goType, width) {
+		return fmt.Sprintf("decode%s(%s)", codegen.RecordHelperSuffix(width), src)
+	}
 	if goType == "float32" {
 		return fmt.Sprintf("narrowFloat32(%s)", src)
 	}
@@ -159,6 +266,14 @@ func narrowsANumericWidth(entities []codegen.Entity, prepared []codegen.Query) (
 	visit := func(goType string) {
 		leaf := leafType(goType)
 		if leaf == driverCarrier(leaf) || isTemporalCarrier(leaf) {
+			return
+		}
+		if codegen.IsRecordStruct(leaf) {
+			// A record also carries wider than it is declared, so it
+			// reaches this far — but its narrowing is its own emitted
+			// helper, not narrowInt. Without this arm every schema
+			// declaring a record would be handed narrowInt with no
+			// caller, which the emitted package's lint fence fails.
 			return
 		}
 		if leaf == "float32" {
@@ -237,10 +352,20 @@ func narrowFloat32(v float64) (float32, error) {
 // widenExpr renders the parameter-binding expression for a non-nullable
 // value of the emitted Go type. The mirror of narrowExpr: narrow
 // integers and float32 widen by a Go conversion into the carrier the
-// driver marshals; neutral temporals route through from<X>.
-func widenExpr(goType, access string) string {
+// driver marshals; neutral temporals route through from<X>; a declared
+// record routes through its own encode helper.
+//
+// The record arm is not a conversion and could not be one. map[string]any
+// is not convertible from an anonymous struct in Go — the widening is a
+// field-by-field build, which is what the helper holds. It takes the
+// width for the reason narrowCall does: the helper's name comes from the
+// canonical encoding, and the struct text cannot be read back into one.
+func widenExpr(goType string, width graph.PropertyType, access string) string {
 	if isTemporalCarrier(goType) {
 		return fmt.Sprintf("from%s(%s)", goType, access)
+	}
+	if codegen.IsDeclaredRecord(goType, width) {
+		return fmt.Sprintf("encode%s(%s)", codegen.RecordHelperSuffix(width), access)
 	}
 	return fmt.Sprintf("%s(%s)", driverCarrier(goType), access)
 }
@@ -262,7 +387,7 @@ func widenExpr(goType, access string) string {
 // so a local-zone construction would silently shift the very components
 // the carrier exists to hold. A fixed zone has no transitions and
 // nothing to resolve.
-func renderTemporalConversions(pkg string, uses map[string]temporalUse, target driverTarget) []byte {
+func renderTemporalConversions(pkg string, uses map[string]carrierUse, target driverTarget) []byte {
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package ")
@@ -351,7 +476,7 @@ func %[1]sPtr(v *[]%[2]s) any {
 // needsTimePackage reports whether any emitted conversion body names the
 // time package. Duration is the one carrier that does not: dbtype.Duration
 // is already a component struct, so both directions are a field copy.
-func needsTimePackage(uses map[string]temporalUse) bool {
+func needsTimePackage(uses map[string]carrierUse) bool {
 	for name, use := range uses {
 		if name == "Duration" {
 			continue
