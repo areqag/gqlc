@@ -180,6 +180,13 @@ edge rows (`.issue_id`, `.depends_on_id`, `.type`) with none of that. A query
 written against the first shape and run against the second matches nothing and
 reports zero — silently, which is how the query above was wrong on its first run.
 
+Both corrections are recorded rather than quietly repaired, and the reason
+generalises past this document: **being re-derived is exactly what made the
+number credible.** A figure nobody can see the working of is worth less than a
+figure whose working shows where it moved and why. That applies hardest to
+whoever has the most authority in the room, because a false action item from the
+mayor costs more than a false one from anyone else.
+
 ## Ruling 4 — `max_priority` stays `"2"`
 
 No configuration value changes. The `[dispatch]` comment's own measured
@@ -187,6 +194,41 @@ argument holds and is not repealed by this decision: the P3 tier refills faster
 than it drains because the town keeps writing to it, so raising the floor to
 reach it fills every citizen slot with machinery, which V.3.1 forbids. The
 2026-08-23 raise to `"3"` was reversed by Անդրանիկ directly for that reason.
+
+## Ruling 5 — the seven stay at P3, and what to do with the next one
+
+The seven are in the state ruling 2 calls forbidden. Ruling 2 does not tell you
+to promote them, and this section exists because a reader could reasonably think
+it did — and promoting seven machinery beads to P2 would fill seven of ten
+citizen slots with the town's own plumbing, which is precisely what the floor
+exists to prevent and what Սեդրակ declined for `gqlc-mwwfn` on the same grounds.
+
+**A forbidden-state pair whose design has ALREADY CLOSED and whose stub is
+machinery is a historical intake artefact, not a live defect. Leave it. Do not
+promote the stub to match the design.**
+
+Ruling 2 and Constitution V.3.2 appear to collide here and do not, because
+ruling 2 identifies the wrong half as the defect in this shape. When both halves
+are machinery, the sub-floor stub is correctly priced under V.3.2; it is the
+DESIGN that was priced too high at intake. That mispricing is now costless — a
+closed bead routes nothing, wakes nobody and holds no slot — so there is nothing
+to repair. The forbidden state is still worth preventing **going forward**, and
+there it binds intake, which is where a pair is priced once.
+
+Ruled by Սեդրակ 2026-09-05, who re-ran the query above verbatim rather than
+taking the count on trust: the same seven ids, in the same order, nothing more
+and nothing less.
+
+**The true figure is between 7 and 19, and labels cannot settle it.** Dropping
+the `class:architect` requirement from the blocker — keeping only "closed and at
+or above the floor" — returns 19, so twelve stubs are held by a blocker that
+carries no design label. That widened query over-catches rather than correcting
+the seven: at least three of the twelve are genuine product holds whose own
+titles say "blocked on a named consumer" or "post-v1" (`gqlc-8pe`, `gqlc-5md`,
+`gqlc-1a5`). A blocker being closed and P2 does not make it a design gate; it
+makes it a bead that finished. Settling the range needs somebody to read twelve
+blockers and say which were designs — a bounded job, stated as a range rather
+than guessed at either end.
 
 ## Rejected alternatives
 
