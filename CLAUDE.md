@@ -113,12 +113,20 @@ own call sites: [docs/bd-ledger-queries.md](docs/bd-ledger-queries.md).
   `TEXT` column, so the size of your write is irrelevant and shrinking the notes
   does not recover it. Reads stay healthy, so the bead looks fine on every board;
   the only symptom is on the stderr of a write. `bd close` still works, but a
-  closed oversized bead can never be reopened. One bead of 1533 was over the line
-  on 2026-09-03 and the next largest was 42151, so this is a hazard for
+  closed oversized bead can never be reopened. Two beads of 1656 were over the
+  line on 2026-09-05 and the next largest was 44095, so this is a hazard for
   heavily-worked beads rather than a fleet-wide one.
+- **What is measured is the stored pre-image, and eyeballing it goes wrong in
+  both directions.** It is the bead record minus `dependencies`, `dependents`
+  and `parent`, compact, HTML-escaped, counted in *bytes*. `bd show --json |
+  jq -c` reads high for a bead with dependencies (by 75438 bytes on one) and low
+  for the 1132 of 1656 that have none. Reading high wastes a bead; reading low
+  tells you to keep appending to one that is already dead. The validated query
+  is in the doc below — do not improvise one.
 
-Measured 2026-08-24 against bd 1.0.4 and 1.2.2, and the size ceiling on
-2026-09-03, with the falsifiers and this repository's write call-site audit:
+Measured 2026-08-24 against bd 1.0.4 and 1.2.2, the size ceiling on 2026-09-03,
+and the pre-image's shape and census on 2026-09-05, with the falsifiers and this
+repository's write call-site audit:
 [docs/bd-ledger-writes.md](docs/bd-ledger-writes.md).
 
 ## Working directory
