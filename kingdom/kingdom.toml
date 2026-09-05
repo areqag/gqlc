@@ -254,6 +254,18 @@ recover_attempts = 3
 # below the pre-push suite makes every push look like a wedge.
 stalled_after_minutes = 20
 
+# How long a boxed seat's input box must hold the SAME bytes before `km release`
+# will end that session (Constitution VI.5, decision 0012). Two readings this
+# far apart, taken by two invocations of the command itself — nothing fires when
+# the window elapses, and no timer or dispatch pass ever calls it.
+#
+# 30: the one entity a release must not interrupt is a citizen composing right
+# now, and a human mid-draft edits or submits within minutes; a send stranded by
+# the herdr TUI is frozen bytes that never move again. Lower it and a slow
+# drafter starts looking like a stranded send; raise it and a frozen seat holds
+# a slot against concurrency.max_active for longer.
+release_box_persist_minutes = 30
+
 [send]
 # How long send_line waits for the bytes it just submitted to appear in the
 # receiving seat's own transcript before it reports the send UNWITNESSED (exit 2
