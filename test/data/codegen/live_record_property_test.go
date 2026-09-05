@@ -75,16 +75,36 @@ const (
 	// session, a width nobody disputes.
 	scalarPropertyWrite = "CREATE (:RecordPropertyProbe {city: 'Yerevan'})"
 
+	// mapListPropertyWrite is the SIBLING WIDTH, and it is measured here
+	// because §5's arm as drafted does not name it. That arm refuses
+	// KindRecord and TypeAnyRecord; a LIST<RECORD<…>> is neither, so it
+	// would reach the server through StorableProperty's existing list arm,
+	// which asks only whether the ELEMENT is itself a list. The AGE-only
+	// record fixture already declares a list of records, so this is a width
+	// the language reaches today rather than a hypothetical.
+	//
+	// A flat list of scalars is stored — that is ADR 0035's premise and
+	// TestNeo4jRefusesANestedListStoredProperty's own control — so "arrays
+	// are fine" cannot be assumed to carry to arrays OF MAPS. Measuring is
+	// cheaper than reasoning about it.
+	mapListPropertyWrite = "CREATE (:RecordPropertyProbe {addrs: [{city: 'Yerevan'}, {city: 'Gyumri'}]})"
+
 	// mapValueProjection is the storage-versus-value control. The server
 	// composes and returns the identical map; only the property slot is in
 	// question.
 	mapValueProjection = "RETURN {city: 'Yerevan', zip: 1} AS addr"
 
 	// mapPropertyRefusal is the fragment of neo4j's answer that names the
-	// rule rather than the statement. UNMEASURED FROM THE SEAT THAT WROTE IT
-	// — docker.service is disabled host-wide (bd gqlc-p9g2i), so the first
-	// real run of this file is on the live-smoke runner and this string is a
-	// prediction until then. Its row says so in its own failure message.
+	// rule rather than the statement. MEASURED 2026-09-05 on the live-smoke
+	// runner against the pinned image, which answered:
+	//
+	//	Neo.ClientError.Statement.TypeError (Property values can only be of
+	//	primitive types or arrays thereof. Encountered: Map{zip -> Long(1),
+	//	city -> String("Yerevan")}.)
+	//
+	// The rule it states — primitives, or arrays of primitives — is why the
+	// list-of-maps row above expects the same refusal rather than a
+	// different one.
 	mapPropertyRefusal = "can only be of primitive types"
 )
 
@@ -148,6 +168,26 @@ func TestNeo4jRefusesAMapValuedStoredProperty(t *testing.T) {
 				"refuses and it is this file's predicted wording that is wrong — take the real "+
 				"text from the verbatim log line above and correct the constant, do not widen "+
 				"this row into one that any error satisfies")
+	})
+
+	// The sibling width. It is asserted to take the SAME refusal, and the
+	// wording is checked in the same breath rather than in a row of its own,
+	// because this row is not answering a fork — the row above already
+	// settled that maps are unstorable, so all this asks is whether wrapping
+	// one in an array escapes the rule the server just stated.
+	t.Run("a list of maps is refused for the same reason", func(t *testing.T) {
+		err := writeProperty(ctx, t, driver, mapListPropertyWrite)
+		if err != nil {
+			t.Logf("the server's answer to the list of maps, verbatim: %v", err)
+		}
+		require.Error(t, err,
+			"THIS RED IS A FINDING about the SIBLING width, not about the fork: the server "+
+				"stores an array of maps even though it refuses a bare one, so a LIST<RECORD<…>> "+
+				"stored property is legal on neo4j and StorableProperty must refuse the record "+
+				"widths WITHOUT refusing a list of them")
+		require.Contains(t, err.Error(), mapPropertyRefusal,
+			"a list of maps must be refused by the same storage rule; a different refusal "+
+				"means this row is measuring something other than the property-value rule")
 	})
 }
 
