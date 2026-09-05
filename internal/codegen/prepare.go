@@ -1262,6 +1262,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 					ColumnName: col.Name,
 					Field:      field,
 					GoType:     "[]" + plan.GoType,
+					Nullable:   t.Nullable,
 					Kind:       ColumnList,
 					ListElem:   plan,
 				})

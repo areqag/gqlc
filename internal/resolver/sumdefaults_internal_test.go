@@ -254,7 +254,7 @@ func TestDescribeColumnTypeRendersANilListElement(t *testing.T) {
 		want string
 	}{
 		{"bare", nil, "<nil>"},
-		{"nested in a list", ResolvedList{Element: nil}, "list of <nil>"},
+		{"nested in a list", ResolvedList{Element: nil}, "list (not null) of <nil>"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			require.NotPanics(t, func() { describeColumnType(tt.in) },
@@ -290,6 +290,85 @@ func TestCompareBranchColumnsSurvivesANilListElement(t *testing.T) {
 	require.NotPanics(t, func() { err = compareBranchColumns(branchCols) },
 		"a nil element on one branch must reach the mismatch message, not a crash")
 	require.ErrorIs(t, err, ErrUnionColumnMismatch)
-	require.Contains(t, err.Error(), "list of <nil>",
+	require.Contains(t, err.Error(), "list (not null) of <nil>",
 		"the message must name what the failing branch actually projected")
+}
+
+// TestUnifyKeepsTheListsOwnNullability pins the answer unify's list arm
+// gives for the field, for the reason the fillLeaf pin below gives about
+// its own site: unify serves parameter witnesses, whose lists all come
+// from resolveType and so never carry the bit, and a mutant that drops
+// it from the rebuilt literal passes the whole suite (bd gqlc-lgbjy).
+//
+// Taking the left side's answer is what the arm did before the field
+// existed — it returned aa.Element from the recursive call, so aa's
+// nullability won — and it is what the ResolvedEdge and ResolvedNode
+// arms beside it do. Whether it should instead refuse the disagreement,
+// as the ResolvedProperty arm does, is a question about unify's contract
+// and not about this bead: bd gqlc-8e1sy.
+func TestUnifyKeepsTheListsOwnNullability(t *testing.T) {
+	elem := ResolvedProperty{Type: graph.TypeInt}
+	for _, tt := range []struct {
+		name string
+		a, b ResolvedType
+		want ResolvedType
+	}{
+		{
+			name: "left nullable",
+			a:    ResolvedList{Element: elem, Nullable: true},
+			b:    ResolvedList{Element: elem},
+			want: ResolvedList{Element: elem, Nullable: true},
+		},
+		{
+			name: "left mandatory",
+			a:    ResolvedList{Element: elem},
+			b:    ResolvedList{Element: elem, Nullable: true},
+			want: ResolvedList{Element: elem},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := unify(tt.a, tt.b)
+			require.True(t, ok)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestFillLeafKeepsTheListsOwnNullability pins the one field fillLeaf
+// rebuilds a list around, and it is called directly because no query can
+// reach the site with the field set. fillLeaf's only caller hands it a
+// base from resolveType, whose list arm never assigns Nullable, so a
+// mutant that drops the field from the rebuilt literal passes the whole
+// suite (measured, bd gqlc-lgbjy). The field is not decoration: a list
+// carries binding optionality now, and the first nullable list to reach
+// this site through a future certified projection would have it silently
+// cleared — which is the exact defect this bead was filed for, one
+// rebuild-site further down.
+func TestFillLeafKeepsTheListsOwnNullability(t *testing.T) {
+	leaf := ResolvedProperty{Type: graph.TypeInt}
+	for _, tt := range []struct {
+		name string
+		in   ResolvedType
+		want ResolvedType
+	}{
+		{
+			name: "nullable list",
+			in:   ResolvedList{Element: ResolvedUnknown{}, Nullable: true},
+			want: ResolvedList{Element: leaf, Nullable: true},
+		},
+		{
+			name: "mandatory list",
+			in:   ResolvedList{Element: ResolvedUnknown{}},
+			want: ResolvedList{Element: leaf},
+		},
+		{
+			name: "nested list keeps each level's own answer",
+			in:   ResolvedList{Element: ResolvedList{Element: ResolvedUnknown{}}, Nullable: true},
+			want: ResolvedList{Element: ResolvedList{Element: leaf}, Nullable: true},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, fillLeaf(tt.in, leaf, false))
+		})
+	}
 }

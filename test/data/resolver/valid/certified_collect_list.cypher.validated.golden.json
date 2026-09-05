@@ -10,8 +10,10 @@
             "kind": "property",
             "type": "INT",
             "nullable": true
-          }
-        }
+          },
+          "nullable": false
+        },
+        "nullable": false
       },
       "groupingKey": false
     }
