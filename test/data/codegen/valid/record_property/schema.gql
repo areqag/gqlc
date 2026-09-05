@@ -1,0 +1,9 @@
+CREATE PROPERTY GRAPH TYPE RecordProperty AS {
+    (:Dwelling {
+        id      :: INT64 NOT NULL,
+        home    :: RECORD { zip_code :: INT32 NOT NULL, note :: STRING } NOT NULL,
+        prior   :: RECORD { zip_code :: INT32 NOT NULL, note :: STRING },
+        moves   :: LIST<RECORD { zip_code :: INT32 NOT NULL, note :: STRING }>,
+        opened  :: RECORD { opened_on :: DATE NOT NULL, label :: STRING NOT NULL } NOT NULL
+    })
+}

@@ -1,0 +1,18 @@
+// The sibling width, and it earns a fixture of its own because it is NOT
+// the bare record's refusal restated. The rule the neo4j server states —
+// "Property values can only be of primitive types or arrays thereof" —
+// admits arrays, and a flat list of scalars IS stored, which is ADR
+// 0035's premise and its control. So "an array of maps is refused too"
+// could not be inferred from the bare case; it was asked separately in
+// TestNeo4jRefusesAMapValuedStoredProperty and takes the same refusal
+// with the same wording (ADR 0040).
+//
+// Without the arm this fixture pins, a LIST<RECORD<…>> would reach the
+// server through StorableProperty's nested-list arm, which asks only
+// whether the ELEMENT is itself a list. Apache AGE stores it, so the same
+// declaration is valid there — valid/record_property declares one.
+CREATE PROPERTY GRAPH TYPE UnstorablePropertyRecordList AS {
+    (:Dwelling {
+        moves :: LIST<RECORD { zip_code :: INT32 NOT NULL, note :: STRING }> NOT NULL
+    })
+}

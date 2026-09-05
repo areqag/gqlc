@@ -227,6 +227,8 @@ func sentinelIdent(err error) string {
 		return "ErrUnnamedMultiLabelType"
 	case codegen.ErrPropertyFieldCollision:
 		return "ErrPropertyFieldCollision"
+	case codegen.ErrRecordFieldCollision:
+		return "ErrRecordFieldCollision"
 	case queryfile.ErrMissingAnnotation:
 		return "ErrMissingAnnotation"
 	case queryfile.ErrUnknownCardinality:

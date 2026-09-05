@@ -1,6 +1,7 @@
 package age
 
 import (
+	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
 )
@@ -93,13 +94,18 @@ type typeMap struct{}
 // fills OffsetSeconds so the reading comes back in the zone it was
 // written in.
 //
-// A zoned width is admitted as a property and refused as a list element,
-// at every depth: the offset rides a sidecar named after the property,
-// and a list has one name for all of its elements, so a list of them has
-// nowhere to put the zone of any element but the first. carriesZone is
-// the one answer to which widths those are, and the same predicate
-// offsetSidecar derives a name from. The widths admitted above carry no
-// zone, so they ride a list on the ordinary rule.
+// A zoned width is admitted as a property and refused inside a
+// CONTAINER, at every depth: the offset rides a sidecar named after the
+// property, and a container gives its contents no property names of
+// their own to hang a sidecar on — a list has one name for all of its
+// elements, and a record field is not a property. carriesZone is the one
+// answer to which widths those are, and the same predicate offsetSidecar
+// derives a name from. The widths admitted above carry no zone, so they
+// ride a container on the ordinary rule.
+//
+// The rule was written for list elements and generalised to any
+// container position when records began to emit (spec §2, the ruling for
+// gqlc-x9tg7); the reason never was about lists in particular.
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
 		elemTy, ok := t.Property(pt.Elem())
@@ -107,6 +113,22 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 			return "", false
 		}
 		return "[]" + elemTy, true
+	}
+	if pt.Kind() == graph.KindRecord {
+		if pt == graph.TypeAnyRecord {
+			// Fields undeclared, so there is no struct to build: the
+			// record whose contents are unconstrained maps to Go's
+			// unconstrained string-keyed product, exactly as ANY maps
+			// to any and LIST<ANY> to []any (spec §3).
+			return "map[string]any", true
+		}
+		return codegen.RecordStructText(pt.Fields(), func(fieldTy graph.PropertyType) (string, bool) {
+			text, ok := t.Property(fieldTy)
+			if !ok || carriesZone(text) {
+				return "", false
+			}
+			return text, true
+		})
 	}
 	switch pt {
 	case graph.TypeString:
@@ -156,12 +178,12 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	case graph.TypeDuration:
 		return "Duration", true
 	case graph.TypeAnyRecord:
-		// Refused by prepare.go's kind walk before any table is asked
-		// (ErrUnimplementedTypeKind, ADR 0039), so this is unreachable —
-		// listed for the exhaustive linter, as graph.TypeList is. The
-		// false is fail-closed rather than an answer: a record has no
-		// emission on any backend, so no width claim here would be true.
-		return "", false
+		// RECORD<ANY> spelled out, so the Kind() guard above intercepts
+		// it and this arm is unreachable. Listed so the exhaustive
+		// linter sees the full constant set, and answering
+		// "map[string]any" keeps it agreeing with the arm that does the
+		// work — the arrangement graph.TypeList already has.
+		return "map[string]any", true
 	case graph.TypeBytes,
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,

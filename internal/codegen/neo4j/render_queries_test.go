@@ -11,6 +11,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/neo4j"
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/queryfile"
 )
 
@@ -247,4 +248,216 @@ func methodDecl(t *testing.T, src, name string) *ast.FuncDecl {
 	}
 	t.Fatalf("the emission declares no method %s:\n%s", name, src)
 	return nil
+}
+
+// TestNarrowsANumericWidthIgnoresRecords holds the gate that decides
+// whether the emitted package declares narrowInt and narrowFloat32 at
+// all, against the one shape that looks like a narrowing and is not.
+//
+// A declared record carries WIDER than it is spelled — struct{...} on
+// the emitted surface, map[string]any on the wire — which is the exact
+// test every arm of this gate uses to recognise an integer that needs
+// checking. But a record's narrowing is its own emitted helper, so a
+// schema whose only wide width is a record must be handed neither
+// numeric helper. This is not a cosmetic over-emission: an unexported
+// function nothing calls fails the emitted package's own lint fence, so
+// the wrong answer reds a fixture rather than adding a dead line.
+//
+// The controls are the whole test. A gate that had stopped answering
+// yes to anything would pass the record rows alone, so int32 and
+// float32 are asserted beside them, and each of the two helpers is
+// asserted separately because they are gated separately — the `math`
+// import rides on the float one.
+func TestNarrowsANumericWidthIgnoresRecords(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{{Name: "zip", Type: graph.TypeInt32, NotNull: true}})
+	recText, ok := neo4j.TypeMap{}.Property(rec)
+	require.True(t, ok, "this driver carries a record, or the rows below are about an unrepresentable width")
+
+	field := func(goType string, width graph.PropertyType) []codegen.Entity {
+		return []codegen.Entity{{Name: "Blob", Fields: []codegen.EntityField{
+			{PropName: "p", Field: "P", GoType: goType, Width: width},
+		}}}
+	}
+
+	tests := []struct {
+		name     string
+		entities []codegen.Entity
+		ints     bool
+		floats   bool
+	}{{
+		// The row this test exists for. The record's own field is an
+		// INT32, and a record does NOT narrow it through narrowInt at
+		// the property site — the emitted decode helper for the record
+		// does, and it is emitted with its own gate.
+		name:     "a record does not demand either numeric helper",
+		entities: field(recText, rec),
+	}, {
+		name:     "a list of records does not either",
+		entities: field("[]"+recText, graph.ListOf(rec, false)),
+	}, {
+		name:     "an integer width still demands narrowInt",
+		entities: field("int32", graph.TypeInt32),
+		ints:     true,
+	}, {
+		name:     "float32 still demands narrowFloat32 and not narrowInt",
+		entities: field("float32", graph.TypeFloat32),
+		floats:   true,
+	}, {
+		// A width already equal to its own carrier has never demanded
+		// either, and it is here as the negative control that is NOT a
+		// record: it proves the two record rows above are not simply
+		// riding the "nothing to narrow" answer everything gets.
+		name:     "a width that is its own carrier demands neither",
+		entities: field("string", graph.TypeString),
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ints, floats := neo4j.NarrowsANumericWidth(tt.entities, nil)
+			require.Equal(t, tt.ints, ints, "narrowInt")
+			require.Equal(t, tt.floats, floats, "narrowFloat32")
+		})
+	}
+}
+
+// TestParamBindExprRecords pins the bind expression for a declared
+// record in all four shapes a parameter can take it in, and two of the
+// four were WRONG before this test existed.
+//
+// The reason is the one TestParamBindExprSlices already states, now with
+// a second kind making it true. packV's reflect.Struct arm and packX's
+// reflect.Ptr->Struct arm both hand off to packStruct, whose cases are
+// dbtype.Point2D/3D, time.Time and the five dbtype temporals and whose
+// default raises UnsupportedTypeError. The anonymous struct a declared
+// record carries as is not among them. So a record owes a conversion in
+// every position the driver would otherwise reach it as a struct —
+// exactly the position gqlc's neutral temporal carriers are in, which is
+// why the helper set mirrors from<X>/from<X>Ptr/from<X>List/from<X>ListPtr
+// one for one.
+//
+// What the driver DOES take is map[string]any: packX's reflect.Map arm
+// dispatches it to packMap, which packs each value back through packX,
+// so a record encoded to a map nests to any depth with no further help.
+// Both directions read off v5.28.4 and v6.2.0.
+//
+// The two rows that were broken:
+//
+//   - the NULLABLE record, because paramBindExpr's nullable arm passes
+//     every non-temporal pointer through bare, and *struct{...} reaches
+//     packStruct one indirection later;
+//   - the LIST of records, because sliceParamBindExpr returns bare for
+//     any leaf that is not a temporal carrier, and packV walks the slice
+//     into packStruct element by element.
+//
+// Neither failed at generation. Both emitted a package that compiled and
+// then refused the write at run time, which is the shape of defect this
+// bead's spec §1 constraint 3 forbids.
+func TestParamBindExprRecords(t *testing.T) {
+	width := graph.RecordOf([]graph.RecordField{
+		{Name: "city", Type: graph.TypeString},
+		{Name: "zip", Type: graph.TypeInt32},
+	})
+	suffix := codegen.RecordHelperSuffix(width)
+	// Pinned as a literal, and the literal is CROSS-CHECKED rather than
+	// copied out of a run: the canonical encoding is
+	// "RECORD<city STRING,zip INT32>", and an independent
+	// sha256 of those bytes gives 77890bd035f2... whose first four bytes
+	// are this suffix. A pin lifted from whatever the code printed would
+	// agree with any hash the code happened to compute; this one fails if
+	// either the digest or the canonical encoding moves, and every golden
+	// naming these helpers is downstream of it.
+	require.Equal(t, "Record77890bd0", suffix)
+
+	structText, ok := neo4j.TypeMap{}.Property(width)
+	require.True(t, ok)
+	listWidth := graph.ListOf(width, false)
+	listText, ok := neo4j.TypeMap{}.Property(listWidth)
+	require.True(t, ok)
+
+	tests := []struct {
+		name     string
+		goType   string
+		width    graph.PropertyType
+		nullable bool
+		want     string
+	}{
+		{"record", structText, width, false, "encode" + suffix + "(arg)"},
+		{"nullable record", structText, width, true, "encode" + suffix + "Ptr(arg)"},
+		{"record list", listText, listWidth, false, "encode" + suffix + "List(arg)"},
+		{"nullable record list", listText, listWidth, true, "encode" + suffix + "ListPtr(arg)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := codegen.Param{RawName: "p", Field: "P", GoType: tt.goType, Width: tt.width, Nullable: tt.nullable}
+			require.Equal(t, tt.want, neo4j.ParamBindExpr(f, "arg"))
+		})
+	}
+}
+
+// TestParamBindExprLeavesTheUndeclaredRecordBare is the control the four
+// rows above need. RECORD<ANY> is KindRecord too, and a bind that routed
+// on the kind alone would name a helper codegen.RecordEncodings
+// deliberately emits nothing for — a package that does not compile.
+//
+// It binds bare and is right to: its carrier IS map[string]any, which is
+// the shape packX's reflect.Map arm already takes. LIST<RECORD<ANY>>
+// likewise: []map[string]any walks element by element into that same arm.
+func TestParamBindExprLeavesTheUndeclaredRecordBare(t *testing.T) {
+	tests := []struct {
+		name     string
+		goType   string
+		width    graph.PropertyType
+		nullable bool
+	}{
+		{"undeclared record", "map[string]any", graph.TypeAnyRecord, false},
+		{"nullable undeclared record", "map[string]any", graph.TypeAnyRecord, true},
+		{"list of undeclared records", "[]map[string]any", graph.ListOf(graph.TypeAnyRecord, false), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := codegen.Param{RawName: "p", Field: "P", GoType: tt.goType, Width: tt.width, Nullable: tt.nullable}
+			require.Equal(t, "arg", neo4j.ParamBindExpr(f, "arg"))
+		})
+	}
+}
+
+// TestIsDeclaredRecordNeedsBothHalves screens the predicate every record
+// arm guards on, one falsified half per row.
+//
+// The predicate is codegen's and shared by both backends. It is screened
+// from here rather than from beside its declaration because the carrier
+// the control row is asked about is THIS backend's: that row runs
+// typeMap.Property, so a table that stopped answering a declared record
+// with a struct text fails here rather than leaving a green row about a
+// text no emission produces. The age package holds the same row over its
+// own table.
+//
+// It is asked directly rather than through a call site because ONE of
+// the two halves is not reachable from any schema. typeMap.Property
+// produces a `struct`-prefixed carrier only from
+// codegen.RecordStructText, which it calls only for KindRecord, so no
+// input can present a struct text beside a non-record width — a mutant
+// dropping the kind half survives every emission-level test in this
+// package, measured. That does not make the half decorative: it is what
+// stops a future call site that pairs a carrier with the wrong width
+// from deriving a helper name off a non-record, which would name a
+// declaration codegen.RecordEncodings never emits. Since the hazard is a
+// caller's, the guard is screened at the predicate, where the mismatched
+// pair can be supplied.
+//
+// The text half is reachable and its falsifier is RECORD<ANY>, which is
+// KindRecord and carries as map[string]any.
+func TestIsDeclaredRecordNeedsBothHalves(t *testing.T) {
+	declared := graph.RecordOf([]graph.RecordField{{Name: "city", Type: graph.TypeString}})
+	structText, ok := neo4j.TypeMap{}.Property(declared)
+	require.True(t, ok)
+
+	require.True(t, codegen.IsDeclaredRecord(structText, declared),
+		"the control: a declared record paired with its own carrier is the whole point")
+
+	require.False(t, codegen.IsDeclaredRecord("map[string]any", graph.TypeAnyRecord),
+		"RECORD<ANY> is KindRecord, so the kind alone would admit it — and RecordEncodings emits it no helper to name")
+
+	require.False(t, codegen.IsDeclaredRecord(structText, graph.TypeString),
+		"a struct text beside a non-record width is a caller's mistake; naming a helper off it would invent a declaration")
 }

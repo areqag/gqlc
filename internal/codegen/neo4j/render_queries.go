@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/queryfile"
 )
 
@@ -477,11 +478,21 @@ func paramsMapText(p codegen.Query) string {
 // parameter emitted a package that did not compile (bd gqlc-hrls).
 func paramBindExpr(f codegen.Param, access string) string {
 	if isSliceType(f.GoType) {
-		return sliceParamBindExpr(f.GoType, f.Nullable, access)
+		return sliceParamBindExpr(f.GoType, f.Width, f.Nullable, access)
 	}
 	if f.Nullable {
 		if isTemporalCarrier(f.GoType) {
 			return fmt.Sprintf("from%sPtr(%s)", f.GoType, access)
+		}
+		if codegen.IsDeclaredRecord(f.GoType, f.Width) {
+			// A declared record is in the temporal carriers' position
+			// rather than in the pass-the-pointer-through one: packX's
+			// reflect.Ptr arm indirects to a struct and hands it to
+			// packStruct, which raises UnsupportedTypeError for a struct
+			// it does not know. So the nil-to-Cypher-null job belongs to
+			// an emitted wrapper here too, one indirection earlier than
+			// the shape below survives.
+			return fmt.Sprintf("encode%sPtr(%s)", codegen.RecordHelperSuffix(f.Width), access)
 		}
 		// Uniform: pass the pointer through as-is. A nil pointer binds
 		// Cypher null via the driver's parameter marshalling.
@@ -492,7 +503,7 @@ func paramBindExpr(f codegen.Param, access string) string {
 	}
 	carrier := driverCarrier(f.GoType)
 	if carrier != f.GoType {
-		return widenExpr(f.GoType, access)
+		return widenExpr(f.GoType, f.Width, access)
 	}
 	return access
 }
@@ -537,15 +548,40 @@ func outrangesTheSignedCarrier(goType string) bool {
 // is the sole list shape still owing a conversion — per element, into the
 // driver's own array carrier, mirroring the per-element narrow the decode
 // side has had since walkListElemBody.
-func sliceParamBindExpr(goType string, nullable bool, access string) string {
-	if !isTemporalCarrier(leafType(goType)) {
+func sliceParamBindExpr(goType string, width graph.PropertyType, nullable bool, access string) string {
+	leaf, leafWidth := leafType(goType), leafWidth(width)
+	var helper string
+	switch {
+	case isTemporalCarrier(leaf):
+		helper = temporalListHelper(leaf)
+	case codegen.IsDeclaredRecord(leaf, leafWidth):
+		// The second leaf packStruct refuses, and it arrives here for
+		// exactly the reason the paragraph above gives: packV walks the
+		// slice element by element, and each element is a struct the
+		// driver has no encoding for. LIST<RECORD<ANY>> is excluded by
+		// isDeclaredRecord rather than by the kind, because its elements
+		// are map[string]any and packV's default reaches packX's map arm
+		// unaided.
+		helper = "encode" + codegen.RecordHelperSuffix(leafWidth) + "List"
+	default:
 		return access
 	}
-	helper := temporalListHelper(leafType(goType))
 	if nullable {
 		helper += "Ptr"
 	}
 	return fmt.Sprintf("%s(%s)", helper, access)
+}
+
+// leafWidth strips the list levels off a declared width, yielding the
+// element width the per-element helpers are NAMED from. The width-side
+// mirror of leafType, and the two are asked together at every site: a
+// disagreement between them would name a helper for one width while the
+// carrier text held another.
+func leafWidth(pt graph.PropertyType) graph.PropertyType {
+	for pt.Kind() == graph.KindList {
+		pt = pt.Elem()
+	}
+	return pt
 }
 
 // writeOneBody emits the :one arity-check + per-column decode + return.
@@ -681,7 +717,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
 		if checked {
 			fmt.Fprintf(b, "%sif !isNil {\n", indent)
-			fmt.Fprintf(b, "%s\tv, err := %s\n", indent, narrowCall(f.GoType, varName))
+			fmt.Fprintf(b, "%s\tv, err := %s\n", indent, narrowCall(f.GoType, f.Width, varName))
 			fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\t%s\n%s\t}\n", indent, indent, fail, indent)
 			fmt.Fprintf(b, "%s\t%sPtr = &v\n%s}\n", indent, varName, indent)
 		} else {
@@ -698,7 +734,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	if checked {
 		valueExpr = varName + "n"
-		fmt.Fprintf(b, "%s%s, err := %s\n", indent, valueExpr, narrowCall(f.GoType, varName))
+		fmt.Fprintf(b, "%s%s, err := %s\n", indent, valueExpr, narrowCall(f.GoType, f.Width, varName))
 		fmt.Fprintf(b, "%sif err != nil {\n%s\t%s\n%s}\n", indent, indent, fail, indent)
 	}
 	b.WriteString(indent)
@@ -934,7 +970,7 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		case isTemporalCarrier(e.GoType):
 			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, narrowExpr(e.GoType, "v"))
 		case carrier != e.GoType:
-			fmt.Fprintf(b, "%svn, err := %s\n", indent, narrowCall(e.GoType, "v"))
+			fmt.Fprintf(b, "%svn, err := %s\n", indent, narrowCall(e.GoType, e.Width, "v"))
 			fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 			fmt.Fprintf(b, "%s%s = append(%s, vn)\n", indent, accVar, accVar)
 		default:

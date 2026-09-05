@@ -907,6 +907,89 @@ func TestQueryTextConstCollidesWithADecodeHelper(t *testing.T) {
 			`and query "DecodeFoo" query-text const "decodeFooQueryText"`)
 }
 
+// TestRecordHelperCollidesWithADecodeHelper pins source 8 of the
+// identifier sweep, and it is source 7's situation exactly one namespace
+// over: both colliding names are generator-owned, so no capture guard can
+// reach the pair.
+//
+// A record's helpers are named from a digest of its canonical encoding,
+// "decode" + "Record" + eight hex digits. An entity's decode helper is
+// named "decode" + the entity struct name, and that struct name comes
+// from a schema label the author writes. So a label spelled exactly
+// Record<the digest of some record the same batch reaches> produces the
+// two declarations under one name — and neither declaration is at fault
+// alone, which is why the message has to name both.
+//
+// The digest is read from RecordHelperSuffix rather than written down.
+// A literal would pin today's hash of today's encoding, so a change to
+// either would leave the label naming nothing and the test passing while
+// witnessing no collision at all — green because the premise evaporated.
+func TestRecordHelperCollidesWithADecodeHelper(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{
+		{Name: "zip", Type: graph.TypeInt32, NotNull: true},
+	})
+	collide := graph.LabelSetKey(codegen.RecordHelperSuffix(rec))
+	carrier := graph.LabelSetKey("Person")
+
+	in := codegen.Input{
+		Schema: schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				carrier: {KeyLabels: carrier, CompleteLabels: carrier, Properties: map[string]schema.Property{
+					"home": {Name: "home", Type: rec, Nullable: false},
+				}},
+				collide: {KeyLabels: collide, CompleteLabels: collide, Properties: map[string]schema.Property{}},
+			},
+		},
+	}
+
+	_, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.ErrorIs(t, err, codegen.ErrIdentifierCollision)
+	require.ErrorContains(t, err,
+		`emitted by both entity decode helper "decode`+string(collide)+`" for entity struct "`+string(collide)+`" `+
+			`and record `+string(rec)+` decode helper "decode`+string(collide)+`"`)
+}
+
+// TestRecordSiteAliasCollidesWithAnEntityStruct pins source 9, the
+// site-named record alias, against source 1.
+//
+// The site-named alias is the one emitted name derived from TWO pieces
+// of author text at once — an entity's labels and a property's name — so
+// it is the source whose collisions an author can provoke without
+// writing either colliding name. Here a node labelled PlaceAddr and a
+// node Place carrying a record property addr are both ordinary
+// declarations, and nothing in either one spells the identifier they
+// both produce.
+//
+// The capture guards cannot reach it, for the mirror of the reason they
+// cannot reach sources 7 and 8: those police an author-chosen identifier
+// against a generator-owned one, and here BOTH sides are author-chosen.
+func TestRecordSiteAliasCollidesWithAnEntityStruct(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{
+		{Name: "zip", Type: graph.TypeInt32, NotNull: true},
+	})
+	carrier := graph.LabelSetKey("Place")
+	collide := graph.LabelSetKey("PlaceAddr")
+
+	in := codegen.Input{
+		Schema: schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				carrier: {KeyLabels: carrier, CompleteLabels: carrier, Properties: map[string]schema.Property{
+					"addr": {Name: "addr", Type: rec, Nullable: false},
+				}},
+				collide: {KeyLabels: collide, CompleteLabels: collide, Properties: map[string]schema.Property{}},
+			},
+		},
+	}
+
+	_, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.ErrorIs(t, err, codegen.ErrIdentifierCollision)
+	require.ErrorContains(t, err,
+		`emitted by both entity struct "PlaceAddr" (schema labels "PlaceAddr") `+
+			`and record site alias "PlaceAddr" for entity "Place" property "addr"`)
+}
+
 // goldenCorpusGlob reaches the committed golden trees from this package.
 // The conformance suite reads the same corpus through its own root, which
 // an env var can redirect at a copy; this sweep wants the tracked trees
@@ -1874,17 +1957,25 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 		},
 	}}
 
+	// Stage 1 of gqlc-x9tg7 emits records, so the record rows that used
+	// to sit here have moved to `admitted` below. What remains refused
+	// is the union — and, the arm stage 1 adds, a union REACHED THROUGH
+	// a record, which is only refusable because the walk now descends
+	// Fields. Without that descent every row below carrying `union`
+	// inside a record passes the walk, reaches the table with a record
+	// it cannot spell a struct text for, and comes back a width error.
 	refused := []struct {
 		name string
 		pt   graph.PropertyType
 	}{
-		{"a record with fields", record},
-		{"a record whose fields are undeclared", graph.TypeAnyRecord},
-		{"a record with no fields", graph.RecordOf(nil)},
 		{"a union", union},
-		{"a record under a list", graph.ListOf(record, true)},
 		{"a union under a list", graph.ListOf(union, true)},
-		{"a record under two lists", graph.ListOf(graph.ListOf(record, true), true)},
+		{"a union inside a record", graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})},
+		{"a union under a list inside a record", graph.RecordOf([]graph.RecordField{{Name: "u", Type: graph.ListOf(union, true)}})},
+		{"a union inside a record inside a record", graph.RecordOf([]graph.RecordField{
+			{Name: "at", Type: graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})},
+		})},
+		{"a union inside a record under a list", graph.ListOf(graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}}), true)},
 	}
 
 	tables := []struct {
@@ -1919,8 +2010,15 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 	}
 
 	// The over-refusal fence. A walk that answered "not a scalar" rather
-	// than "a record or a union" refuses these too, and every row above
-	// stays green while lists stop generating.
+	// than "a union, or a record with one under it" refuses these too,
+	// and every row above stays green while lists and records stop
+	// generating.
+	//
+	// The record rows are stage 1's deliverable and they are here rather
+	// than in a test of their own on purpose: this is the table that
+	// knows all four positions, and spec §6 binds the carrier question
+	// at every one of them. A record admitted at three of four would
+	// otherwise be a hole nothing looks at.
 	admitted := []struct {
 		name string
 		pt   graph.PropertyType
@@ -1928,6 +2026,13 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 		{"a scalar", graph.TypeInt32},
 		{"a list of scalars", graph.ListOf(graph.TypeInt32, true)},
 		{"a list of lists of scalars", graph.ListOf(graph.ListOf(graph.TypeInt32, true), true)},
+		{"a record with fields", record},
+		{"a record whose fields are undeclared", graph.TypeAnyRecord},
+		{"a record with no fields", graph.RecordOf(nil)},
+		{"a record under a list", graph.ListOf(record, true)},
+		{"a record under two lists", graph.ListOf(graph.ListOf(record, true), true)},
+		{"a record inside a record", graph.RecordOf([]graph.RecordField{{Name: "at", Type: record}})},
+		{"a list inside a record", graph.RecordOf([]graph.RecordField{{Name: "xs", Type: graph.ListOf(graph.TypeInt32, true)}})},
 	}
 	for _, pos := range positions {
 		for _, a := range admitted {
@@ -1952,7 +2057,10 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 // noise no reader gains from.
 func TestUnimplementedTypeKindNamesTheKindAndTheSite(t *testing.T) {
 	person := graph.LabelSetKey("Person")
-	record := graph.RecordOf([]graph.RecordField{{Name: "a", Type: graph.TypeInt32}})
+	union := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})
+
+	inRecord := graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})
+	nested := graph.RecordOf([]graph.RecordField{{Name: "at", Type: inRecord}})
 
 	tests := []struct {
 		name    string
@@ -1960,13 +2068,31 @@ func TestUnimplementedTypeKindNamesTheKindAndTheSite(t *testing.T) {
 		wantErr string
 	}{{
 		name:    "the property is the unbuilt kind",
-		pt:      record,
-		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` + string(record),
+		pt:      union,
+		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` + string(union),
 	}, {
 		name: "the unbuilt kind is inside the declared width",
-		pt:   graph.ListOf(record, true),
+		pt:   graph.ListOf(union, true),
 		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` +
-			string(graph.ListOf(record, true)) + `, whose ` + string(record) + ` has no emission`,
+			string(graph.ListOf(union, true)) + `, whose ` + string(union) + ` has no emission`,
+	}, {
+		// Stage 1's arm. A record can declare the same unbuilt width at
+		// several fields, so naming the sub-type alone does not say
+		// which declaration to open — the field name is the part that
+		// locates the edit, and it is what the list rendering above has
+		// no equivalent of.
+		name: "the unbuilt kind is a record field",
+		pt:   inRecord,
+		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` +
+			string(inRecord) + `, whose field "u" has ` + string(union) + `, which has no emission`,
+	}, {
+		// The path accumulates outward rather than reporting the leaf,
+		// because "u" appears at both levels of this declaration and a
+		// message naming only the leaf would send the reader to either.
+		name: "the unbuilt kind is under two records",
+		pt:   nested,
+		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` +
+			string(nested) + `, whose field "at.u" has ` + string(union) + `, which has no emission`,
 	}}
 
 	for _, tt := range tests {
@@ -1982,5 +2108,184 @@ func TestUnimplementedTypeKindNamesTheKindAndTheSite(t *testing.T) {
 			require.ErrorIs(t, err, codegen.ErrUnimplementedTypeKind)
 			require.EqualError(t, err, tt.wantErr)
 		})
+	}
+}
+
+// TestUnimplementedKindOutranksRecordFieldLegality fixes the order of
+// the two refusals a record can draw at once, which the taxonomy's §2
+// row for ErrRecordFieldCollision states and nothing else measures.
+//
+// A record with BOTH an unbuilt kind under it and a pair of fields that
+// mangle together is refused for the KIND. That is the edit that can
+// help: a record carrying a union has no emission at any spelling, so
+// renaming its fields moves nothing, while the reverse reading sends
+// the author to rename a field and meet the second refusal after.
+func TestUnimplementedKindOutranksRecordFieldLegality(t *testing.T) {
+	person := graph.LabelSetKey("Person")
+	union := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})
+
+	// Illegal on both axes at once: "minAge"/"min_age" mangle together,
+	// and "u" carries a kind no backend emits.
+	both := graph.RecordOf([]graph.RecordField{
+		{Name: "min_age", Type: graph.TypeInt32},
+		{Name: "minAge", Type: graph.TypeInt32},
+		{Name: "u", Type: union},
+	})
+
+	admit := func(pt graph.PropertyType) error {
+		_, _, err := codegen.PhaseZAdmit(schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{
+					"p": {Name: "p", Type: pt},
+				}},
+			},
+		}, stubTypeMap{})
+		return err
+	}
+
+	err := admit(both)
+	require.ErrorIs(t, err, codegen.ErrUnimplementedTypeKind)
+	require.NotErrorIs(t, err, codegen.ErrRecordFieldCollision)
+
+	// The control, and it is what stops this passing on a build where
+	// the legality check was never wired in at all: the same record with
+	// the union field taken away is refused, and refused for the fields.
+	legalKinds := graph.RecordOf([]graph.RecordField{
+		{Name: "min_age", Type: graph.TypeInt32},
+		{Name: "minAge", Type: graph.TypeInt32},
+	})
+	err = admit(legalKinds)
+	require.ErrorIs(t, err, codegen.ErrRecordFieldCollision)
+	require.EqualError(t, err,
+		`record field collision: entity "Person" property "p" has `+string(legalKinds)+
+			`, whose fields "minAge" and "min_age" both mangle to "MinAge"`)
+}
+
+// TestPreparedWidthReachesEveryPropertyPosition holds the one prepared-
+// surface change stage 1 of gqlc-x9tg7 makes (spec §6): EntityField,
+// Param, Row and ListElem each carry the resolved graph.PropertyType
+// they were derived from, so the render layer dispatches on
+// Width.Kind() instead of growing a parallel enum beside ColumnKind.
+//
+// Why a field and not a new ColumnKind: a record-valued column is still
+// a property value, and the thing that changed about it is its WIDTH.
+// Minting ColumnRecord would put the same fact in two places and oblige
+// every switch over ColumnKind to answer a question about widths.
+//
+// The GoType rows beside each Width row are what stops this passing on a
+// surface that carries the width and derives nothing from it: GoType is
+// the stub's echo of the same PropertyType, so a Width wired to the
+// wrong position would still have to disagree with the GoType beside it.
+//
+// The four positions are asserted in ONE prepared batch rather than four
+// tests, because the claim is that no position was missed — four
+// separate greens cannot say that, and a fifth position added later
+// fails here only if this one sweeps them together.
+func TestPreparedWidthReachesEveryPropertyPosition(t *testing.T) {
+	rec := graph.RecordOf([]graph.RecordField{
+		{Name: "city", Type: graph.TypeString},
+		{Name: "zip", Type: graph.TypeInt32, NotNull: true},
+	})
+	person := graph.LabelSetKey("Person")
+
+	in := codegen.Input{
+		Schema: schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				person: {KeyLabels: person, CompleteLabels: person, Name: "Person", Properties: map[string]schema.Property{
+					"addr": {Name: "addr", Type: rec},
+				}},
+			},
+		},
+		Queries: []codegen.NamedQuery{{
+			Name:        "Fetch",
+			Cardinality: queryfile.CardinalityMany,
+			SourceText:  "MATCH (n) RETURN n.addr AS addr, n.addrs AS addrs",
+			Validated: resolver.ValidatedQuery{
+				Statement:  resolver.StatementRead,
+				Parameters: []resolver.ResolvedParameter{{Name: "p", Type: resolver.ResolvedProperty{Type: rec}}},
+				Columns: []resolver.Column{
+					{Name: "addr", Type: resolver.ResolvedProperty{Type: rec}},
+					{Name: "addrs", Type: resolver.ResolvedProperty{Type: graph.ListOf(rec, true)}},
+				},
+			},
+		}},
+	}
+
+	prepared, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.NoError(t, err)
+
+	entityField := prepared.Entities[0].Fields[0]
+	require.Equal(t, "addr", entityField.PropName)
+	require.Equal(t, rec, entityField.Width, "the entity-property position drops the width")
+	require.Equal(t, "property:"+string(rec), entityField.GoType)
+
+	param := prepared.Queries[0].ParamFields[0]
+	require.Equal(t, "p", param.RawName)
+	require.Equal(t, rec, param.Width, "the query-parameter position drops the width")
+	require.Equal(t, "property:"+string(rec), param.GoType)
+
+	column := prepared.Queries[0].RowFields[0]
+	require.Equal(t, "addr", column.ColumnName)
+	require.Equal(t, codegen.ColumnProperty, column.Kind,
+		"a record column is still a property value; no new ColumnKind is minted for it (spec §6)")
+	require.Equal(t, rec, column.Width, "the query-column position drops the width")
+	require.Equal(t, "property:"+string(rec), column.GoType)
+
+	listCol := prepared.Queries[0].RowFields[1]
+	require.Equal(t, codegen.ColumnList, listCol.Kind)
+	require.Equal(t, graph.ListOf(rec, true), listCol.Width,
+		"a list column carries the width the AUTHOR declared, not its element's — the element's is on ListElem")
+	require.NotNil(t, listCol.ListElem)
+	require.Equal(t, rec, listCol.ListElem.Width, "the list-element position drops the width")
+	require.Equal(t, "property:"+string(rec), listCol.ListElem.GoType)
+}
+
+// TestPreparedWidthIsEmptyWhereNoPropertyTypeWasResolved is the negative
+// half, and it is the one that decides what render may READ off Width.
+// A whole-node column, a temporal expression and an unknown-typed
+// projection are not property values: no graph.PropertyType was ever
+// resolved for them, so Width is the zero PropertyType and a render arm
+// dispatching on Width.Kind() must not be reached for one.
+//
+// Without this, the natural mistake is to fill Width with something
+// plausible at those positions — the entity struct name, or a scalar
+// spelling — and a Kind() over that answers KindScalar, which is a
+// silent wrong answer rather than an absent one.
+func TestPreparedWidthIsEmptyWhereNoPropertyTypeWasResolved(t *testing.T) {
+	person := graph.LabelSetKey("Person")
+	in := codegen.Input{
+		Schema: schema.Schema{
+			Name: "Test",
+			Nodes: map[graph.LabelSetKey]schema.NodeType{
+				person: {KeyLabels: person, CompleteLabels: person, Name: "Person", Properties: map[string]schema.Property{
+					"name": {Name: "name", Type: graph.TypeString},
+				}},
+			},
+		},
+		Queries: []codegen.NamedQuery{{
+			Name:        "Fetch",
+			Cardinality: queryfile.CardinalityMany,
+			SourceText:  "MATCH (n) RETURN n AS n, date() AS d, x AS u",
+			Validated: resolver.ValidatedQuery{
+				Statement: resolver.StatementRead,
+				Columns: []resolver.Column{
+					{Name: "n", Type: resolver.ResolvedNode{Labels: person}},
+					{Name: "d", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalDate}},
+					{Name: "u", Type: resolver.ResolvedUnknown{}},
+				},
+			},
+		}},
+	}
+
+	prepared, err := codegen.Prepare(in, stubTypeMap{}, "")
+	require.NoError(t, err)
+
+	for _, row := range prepared.Queries[0].RowFields {
+		require.Empty(t, row.Width,
+			"column %q has Kind %v, which resolved no property type, so Width must stay the zero value rather "+
+				"than carry a spelling Kind() would answer KindScalar for", row.ColumnName, row.Kind)
+		require.NotEmpty(t, row.GoType, "column %q lost its carrier text", row.ColumnName)
 	}
 }

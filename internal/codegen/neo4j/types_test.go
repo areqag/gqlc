@@ -65,6 +65,13 @@ func TestTypeMapProperty(t *testing.T) {
 		// however it is reached; the arm's own text is pinned by
 		// TestTypeMapPropertyListArmIsUnreachable below.
 		{graph.TypeList, "[]any"},
+		// RECORD<ANY>, whose arm is unreachable for the same reason
+		// TypeList's is: Kind() reports KindRecord, so the guard at the
+		// top of Property answers it and the switch is never reached.
+		// The row pins what a caller declaring one gets however it is
+		// reached; the arm's own text is pinned by
+		// TestTypeMapPropertyAnyRecordArmIsUnreachable below.
+		{graph.TypeAnyRecord, "map[string]any"},
 	}
 	for _, tt := range representable {
 		t.Run("representable/"+string(tt.pt), func(t *testing.T) {
@@ -75,14 +82,11 @@ func TestTypeMapProperty(t *testing.T) {
 	}
 
 	// The rows below all answer ("", false), which is the only thing this
-	// table asserts. TypeAnyRecord is here for that answer and not for the
-	// claim the slice's name makes: a record is refused a step earlier, by
-	// prepare.go's kind walk (codegen.ErrUnimplementedTypeKind, ADR 0039),
-	// and its arm is unreachable for the same reason TypeList's is. What
-	// the row pins is that the unreachable arm is fail-closed — were it
-	// ever reached, it must not hand back a carrier.
+	// table asserts. They are the widths with no Go carrier at all on
+	// this driver — the numeric ones the driver has no type for. Until
+	// stage 1 of gqlc-x9tg7 TypeAnyRecord sat here too, fail-closed under
+	// an unreachable arm; it now has a carrier and has moved above.
 	unrepresentable := []graph.PropertyType{
-		graph.TypeAnyRecord,
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
@@ -140,6 +144,56 @@ func TestTypeMapProperty(t *testing.T) {
 	t.Run("list of unrepresentable element fails", func(t *testing.T) {
 		_, ok := neo4j.TypeMap{}.Property(graph.ListOf(graph.TypeDecimal, false))
 		require.False(t, ok)
+	})
+
+	// A record is spelled field-wise through this same table, so what it
+	// admits it admits for the field's own reason and nothing else. The
+	// two rows carrying BYTES and TIME are the point: this driver has a
+	// carrier for both, so both ride a record — and AGE refuses both
+	// inside one, BYTES for having no carrier at all and TIME for being
+	// zoned in a container. That disagreement is what makes AGE's refusal
+	// contingent and so obliges it to name itself (ADR 0035), which
+	// TestAContingentRefusalNamesItsBackend holds from the composition
+	// root. Asserting it here would be asserting it in the one package
+	// that cannot see the other backend.
+	t.Run("record rides its fields' carriers", func(t *testing.T) {
+		cases := map[graph.PropertyType]string{
+			graph.RecordOf(nil): "struct{}",
+			graph.RecordOf([]graph.RecordField{
+				{Name: "img", Type: graph.TypeBytes, NotNull: true},
+			}): "struct {\n\tImg []byte\n}",
+			graph.RecordOf([]graph.RecordField{
+				{Name: "t", Type: graph.TypeTime, NotNull: true},
+			}): "struct {\n\tT Time\n}",
+			graph.RecordOf([]graph.RecordField{
+				{Name: "city", Type: graph.TypeString},
+				{Name: "zip", Type: graph.TypeInt32, NotNull: true},
+			}): "struct {\n\tCity *string\n\tZip int32\n}",
+			graph.RecordOf([]graph.RecordField{
+				{Name: "at", Type: graph.RecordOf([]graph.RecordField{{Name: "lat", Type: graph.TypeFloat64, NotNull: true}}), NotNull: true},
+			}): "struct {\n\tAt struct {\n\tLat float64\n}\n}",
+		}
+		for pt, want := range cases {
+			got, ok := neo4j.TypeMap{}.Property(pt)
+			require.True(t, ok, "%s", pt)
+			require.Equal(t, want, got, "%s", pt)
+		}
+	})
+
+	// The refusal a record DOES inherit here, at every container depth: a
+	// width this driver has no carrier for refuses the whole record,
+	// because a struct with a hole in it is not a carrier.
+	t.Run("record of an unrepresentable field width fails", func(t *testing.T) {
+		for _, pt := range []graph.PropertyType{
+			graph.RecordOf([]graph.RecordField{{Name: "f", Type: graph.TypeDecimal, NotNull: true}}),
+			graph.RecordOf([]graph.RecordField{{Name: "f", Type: graph.ListOf(graph.TypeInt128, false), NotNull: true}}),
+			graph.RecordOf([]graph.RecordField{{Name: "inner", Type: graph.RecordOf([]graph.RecordField{{Name: "f", Type: graph.TypeFloat16, NotNull: true}}), NotNull: true}}),
+			graph.ListOf(graph.RecordOf([]graph.RecordField{{Name: "f", Type: graph.TypeUint256, NotNull: true}}), false),
+		} {
+			got, ok := neo4j.TypeMap{}.Property(pt)
+			require.False(t, ok, "%s", pt)
+			require.Empty(t, got)
+		}
 	})
 }
 
@@ -229,6 +283,67 @@ func TestStorablePropertyRefusesANestedList(t *testing.T) {
 	}
 }
 
+// TestStorablePropertyRefusesARecord is the nested-list test's sibling one
+// kind over, and it rests on the same kind of evidence rather than on the
+// symmetry: TestNeo4jRefusesAMapValuedStoredProperty measured the pinned
+// image, which answered a map-valued property write with
+//
+//	Neo.ClientError.Statement.TypeError (Property values can only be of
+//	primitive types or arrays thereof. Encountered: Map{…}.)
+//
+// and did so with two controls green in the same run — a scalar property
+// on the same session was stored, and the identical map came back as a
+// projected column. So the refusal is about the property SLOT, not about
+// the server's ability to handle a map.
+//
+// EVERY ROW ASSERTS BOTH AXES, for the reason the nested-list test states
+// and one more that is specific to records: §6 of the carrier design turns
+// on a record arriving as a query VALUE still decoding, and the four
+// positions it enumerates collapse to zero on this backend precisely
+// because the refusal is the storage axis alone. A row asserting only
+// StorableProperty==false would stay green if someone moved the refusal
+// onto Property, which would take the query-value positions with it.
+//
+// THE LIST ROWS ARE NOT THE BARE ROW RESTATED. The rule the server states
+// admits "arrays thereof", and a flat list of scalars IS stored — that is
+// ADR 0035's premise — so an array of maps had to be asked about
+// separately. It was, in the same live run, and takes the same refusal.
+// Without those rows a LIST<RECORD<…>> would reach the server through the
+// list arm, which asks only whether the element is itself a list.
+func TestStorablePropertyRefusesARecord(t *testing.T) {
+	declared := graph.RecordOf([]graph.RecordField{
+		{Name: "city", Type: graph.TypeString, NotNull: true},
+		{Name: "zip", Type: graph.TypeInt32},
+	})
+	refused := []graph.PropertyType{
+		// The braceless RECORD, whose fields are undeclared.
+		graph.TypeAnyRecord,
+		// RECORD<>, which declares that it has none. A guard keyed on
+		// Fields() being non-empty rather than on Kind() would miss it.
+		graph.RecordOf(nil),
+		declared,
+		graph.ListOf(graph.TypeAnyRecord, false),
+		graph.ListOf(declared, false),
+		// The qualifier sits on the list's element, which Elem() strips —
+		// the same shape the nested-list test carries a row for.
+		graph.ListOf(declared, true),
+	}
+	for _, pt := range refused {
+		t.Run("refused/"+string(pt), func(t *testing.T) {
+			require.False(t, neo4j.TypeMap{}.StorableProperty(pt),
+				"the neo4j server answers a map-valued property write with \"Property values can only be "+
+					"of primitive types or arrays thereof\", so the table must refuse %s rather than emit "+
+					"a struct field no write could ever fill", pt)
+
+			got, ok := neo4j.TypeMap{}.Property(pt)
+			require.Truef(t, ok,
+				"%s must stay CARRIED: a record arriving as a query VALUE decodes on this backend, and "+
+					"putting the refusal on the carrier axis would take that decode with it", pt)
+			require.NotEmpty(t, got)
+		})
+	}
+}
+
 // TestNestedListPropertyRejectionReachesTheCaller pins what an author
 // actually sees, which is the half of the refusal that has to be right:
 // a table returning ok=false is only useful if the failure travels out
@@ -265,6 +380,39 @@ func TestNestedListPropertyRejectionReachesTheCaller(t *testing.T) {
 		`entity "Blob" property "payload" has `+string(nested)+
 			`, which the neo4j backend cannot store as a property`)
 	require.Nil(t, files)
+}
+
+// TestRecordPropertyRejectionReachesTheCaller is the same obligation for
+// the record widths, and it is not the nested-list test with a different
+// type substituted in. Both refusals ride ErrUnstorableProperty, so what
+// this adds is that the record widths reach that sentinel AT ALL: they
+// travel a different route to it — Property answers before
+// StorableProperty is asked (prepare.go), and a record's carrier is built
+// by a recursive walk over its fields rather than looked up — so a
+// mistake that routed a record to the carrier channel instead would leave
+// the nested-list test green.
+//
+// The NotErrorIs carries that: ErrUnrepresentableWidth is the channel a
+// record with an unrepresentable FIELD takes, which is a real refusal of a
+// real record and would be the wrong one here.
+func TestRecordPropertyRejectionReachesTheCaller(t *testing.T) {
+	declared := graph.RecordOf([]graph.RecordField{{Name: "city", Type: graph.TypeString, NotNull: true}})
+	for _, pt := range []graph.PropertyType{graph.TypeAnyRecord, declared, graph.ListOf(declared, false)} {
+		t.Run(string(pt), func(t *testing.T) {
+			files, err := neo4j.New().Generate(codegen.Input{Schema: schemaWithPayload(pt)})
+
+			require.ErrorIs(t, err, codegen.ErrUnstorableProperty,
+				"a record-valued stored property is refused by the neo4j SERVER's property-value rule, "+
+					"so it rides the storage sentinel the nested list rides")
+			require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth,
+				"every field of %s has a faithful Go carrier and the record itself carries as a struct "+
+					"this backend emits, so claiming the carrier channel would be false", pt)
+			require.ErrorContains(t, err,
+				`entity "Blob" property "payload" has `+string(pt)+
+					`, which the neo4j backend cannot store as a property`)
+			require.Nil(t, files)
+		})
+	}
 }
 
 // schemaWithPayload is a one-node schema whose single property carries
@@ -304,6 +452,27 @@ func TestTypeMapPropertyListArmIsUnreachable(t *testing.T) {
 	require.Equal(t, graph.TypeAnyPropertyValue, graph.TypeList.Elem(),
 		"a bare LIST's element type is no longer the open property-value union, so the recursion answers "+
 			"through some other arm than the one this table's row was written against")
+}
+
+// TestTypeMapPropertyAnyRecordArmIsUnreachable is the same claim one
+// kind over, and it needs its own test for a reason the list arm does
+// not have: the Kind() guard answers TypeAnyRecord in a BRANCH OF ITS
+// OWN rather than by recursing, so the two paths could drift apart
+// without either one disappearing.
+//
+// The row in TestTypeMapProperty's table asks what a caller gets and
+// both paths give "map[string]any", so it cannot see which one ran. What
+// this pins is the upstream fact the arm's comment rests on — that
+// TypeAnyRecord reports KindRecord and so never reaches the switch — and
+// that the arm still agrees with the guard, so the arrangement stays the
+// one graph.TypeList already has rather than a stale second answer.
+func TestTypeMapPropertyAnyRecordArmIsUnreachable(t *testing.T) {
+	require.Equal(t, graph.KindRecord, graph.TypeAnyRecord.Kind(),
+		"graph.TypeAnyRecord no longer reports KindRecord, so typeMap.Property's guard no longer intercepts "+
+			"it and the case arm types.go documents as unreachable is now the one that answers")
+	require.Nil(t, graph.TypeAnyRecord.Fields(),
+		"RECORD<ANY> now declares fields, so the guard's TypeAnyRecord branch is no longer the reason it "+
+			"answers map[string]any — it would build a struct from those fields instead")
 }
 
 // TestTypeMapTemporal pins the temporal column-shape row of the table
@@ -470,6 +639,29 @@ func TestDriverCarrier(t *testing.T) {
 		// what the element is would answer these two differently.
 		{"[][]byte", "[]any"},
 		{"[][]any", "[]any"},
+
+		// The record family. A DECLARED record carries as the anonymous
+		// struct and widens to map[string]any, which is the shape the
+		// driver hands a Cypher map back as — the same relationship
+		// every slice above has to []any, and for the same reason: the
+		// driver has no narrower carrier, so the declared shape is the
+		// emission's to build.
+		//
+		// RECORD<ANY> is the pair to it and reaches the DEFAULT arm
+		// instead: map[string]any is already what it carries as, so its
+		// carrier is itself and every decode site assigns it bare. Its
+		// row is up with the pass-through carriers rather than repeated
+		// here, because it is not a record decision — the default arm
+		// answers it, and it would answer a MAP scalar the same way.
+		// What makes the pair worth naming is that the two are one
+		// keystroke apart in a schema and isRecordStruct is the whole of
+		// what separates them.
+		{"struct {\n\tF *string\n}", "map[string]any"},
+		// Both in a list, where the "[]" prefix outranks everything: a
+		// list is walked per element, so what the elements were is not a
+		// carrier question here.
+		{"[]struct {\n\tF *string\n}", "[]any"},
+		{"[]map[string]any", "[]any"},
 	}
 
 	// The obligation is membership over what the TABLE can emit, not a
@@ -516,6 +708,20 @@ func TestDriverCarrier(t *testing.T) {
 // The property walk reuses graphPropertyTypes, the AST read of
 // internal/graph's own const specs (decoder_test.go), so a width declared
 // upstream reaches this obligation without anyone adding it here.
+//
+// A DECLARED record is the one axis that walk cannot reach, and it is
+// added by hand below. graph.RecordOf builds a width at run time out of
+// fields an author wrote, so there is no const spec to read and no
+// vocabulary to enumerate — a table over every declared record is a
+// table over every schema anyone will ever write. One record is enough
+// for what this obligation is for: driverCarrier answers records on the
+// SHAPE of the carrier text (isRecordStruct) and not on the fields, so
+// a second record with different fields would exercise the same branch
+// and owe a second hand-written row for it.
+//
+// RECORD<ANY> is not here because it needs no help: it is a graph const,
+// so the walk above already reaches it, and its carrier is
+// map[string]any either way.
 func emittedGoTypes(t *testing.T) []string {
 	t.Helper()
 	seen := map[string]bool{}
@@ -534,6 +740,11 @@ func emittedGoTypes(t *testing.T) []string {
 	for _, k := range resolver.TemporalValues() {
 		add(neo4j.TypeMap{}.Temporal(k))
 	}
+	// The declared-record axis, one row, for the reason in the doc
+	// comment above: there is no vocabulary of declared records to walk.
+	sweptRecord := graph.RecordOf([]graph.RecordField{{Name: "f", Type: graph.TypeString}})
+	add(neo4j.TypeMap{}.Property(sweptRecord))
+	add(neo4j.TypeMap{}.Property(graph.ListOf(sweptRecord, false)))
 	require.NotEmpty(t, seen,
 		"the derivation read no carrier off the type table, so the obligation it feeds is satisfied by any table at all")
 	out := make([]string, 0, len(seen))

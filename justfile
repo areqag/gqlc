@@ -3054,23 +3054,36 @@ test-codegen-live:
 #
 # The alternation is a NAME LIST, not a pattern, for the reason the AGE recipe
 # below spells out: -run is unanchored, so a name here silently claims every
-# test that extends it. No name below is a prefix of another test in the module
-# (grepped 2026-09-03).
+# test that extends it. No name in EITHER recipe is a prefix of another test in
+# the module -- re-derived 2026-09-05 over all 1028 test functions, not carried
+# forward from the previous grep.
 #
-# TestNeo4jRefusesANestedListStoredProperty is the one name here that starts a
-# container of its own, so this half now boots three rather than two. They boot
-# concurrently and TestLiveSmoke's header measures three at ~4GB peak. It earns
-# the PR-blocking half rather than the nightly one because it is the tripwire
-# under ADR 0035: the ruling refuses a declaration at generation time solely
-# because this server refuses the write, and a PR is where that had better be
-# still true.
+# TestNeo4jRefusesANestedListStoredProperty and
+# TestNeo4jRefusesAMapValuedStoredProperty each start a container of their own,
+# so this half boots FOUR rather than the three the paragraph here used to
+# describe. They boot concurrently and TestLiveSmoke's header measures three at
+# ~4GB peak; a fourth of the same image is ~5.3GB by that arithmetic, which is
+# inside a standard runner's 7GB and is NOT measured -- the seat that added the
+# fourth could not run any of them (docker.service disabled host-wide, bd
+# gqlc-p9g2i), so the first real reading is this job. If it dies for memory
+# rather than for an assertion, the remedy is to drop t.Parallel from the
+# map-property probe: that trades one container boot of wall time for a peak of
+# three, and changes no claim the row makes.
+#
+# Both earn the PR-blocking half rather than the nightly one for one reason.
+# Each is the tripwire under a generation-time refusal that exists SOLELY
+# because this server refuses a write -- nested lists for ADR 0035, map-valued
+# properties for the record carriers' storage ruling -- and a pull request is
+# where that had better still be true.
 test-codegen-live-neo4j:
-    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestAGERefusesAUint64ParameterAboveMaxInt64' -skip 'TestLiveSmoke/apache-age' ./...
+    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestNeo4jRefusesAMapValuedStoredProperty|TestAGERefusesAUint64ParameterAboveMaxInt64' -skip 'TestLiveSmoke/apache-age' ./...
 
 # the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
 # the dialect fact the AGE backend's edge-union refusal rests on, the offset
-# sidecar's two live branches, and the AGE half of the nested-list divergence
-# ADR 0035 rests on — each on its own apache/age container. Nightly and manual
+# sidecar's two live branches, the AGE half of the nested-list divergence
+# ADR 0035 rests on, and the AGE half of the record-storage measurement the
+# RECORD carrier design demands before either backend's StorableProperty is
+# written — each on its own apache/age container. Nightly and manual
 # only — these containers are cost this project does not charge to a pull
 # request. -count=1 because this is the AGE arm's only gate and no pull request
 # pays for it, so the run it reports on has to be a real
@@ -3092,7 +3105,7 @@ test-codegen-live-neo4j:
 # runs nowhere else actually executed. It goes on the whole recipe rather than a
 # second `go test` invocation, which would start a second AGE container.
 test-codegen-live-age:
-    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGERefusesTheSpatialConstructor|TestAGERefusesTheNamespaceItHasNoSchemaFor|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEStoresANestedListProperty' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGERefusesTheSpatialConstructor|TestAGERefusesTheNamespaceItHasNoSchemaFor|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEStoresANestedListProperty|TestAGEStoresARecordProperty' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than

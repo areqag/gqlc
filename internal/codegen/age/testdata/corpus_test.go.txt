@@ -2501,3 +2501,84 @@ func TestBoundGraphCountsBytes(t *testing.T) {
 		}
 	}
 }
+
+// The Dwelling texts are the only CONSTRUCTED ones in this file.
+// Everything above was captured by writing the value through cypher()
+// and reading back what pgx scans; these were written here. The
+// distinction matters and is not a shortcut: what a record decode does
+// with the map it is handed is gqlc's own contract, well defined for a
+// map a writer built by hand, and it is what these rows test. Whether
+// AGE will STORE a record-typed property as a nested object is a
+// separate claim that nothing here measures — gqlc-jffyz step 5 owes
+// that measurement, and until it lands no row in this file asserts it.
+//
+// dwellingNoZip is the row the emitted refusal exists for. `zip_code` is
+// declared NOT NULL and the map carries no key for it, which is how this
+// store spells a null, so the decode must fail rather than hand back a
+// zero-valued int32 the schema says cannot occur.
+const (
+	dwelling = `{"id": 1407374883553281, "label": "Dwelling", "properties": {"id": 1, "home": {"zip_code": 94110, "note": "top floor"}, "prior": {"zip_code": 10001, "note": "walk-up"}}}::vertex`
+	// No "prior" key and no "note" inside "home": a nullable property and
+	// a nullable field are both absent, which is one spelling, not two.
+	dwellingSparse = `{"id": 1407374883553282, "label": "Dwelling", "properties": {"id": 2, "home": {"zip_code": 94110}}}::vertex`
+	dwellingNoZip  = `{"id": 1407374883553283, "label": "Dwelling", "properties": {"id": 3, "home": {"note": "top floor"}}}::vertex`
+)
+
+func TestDecodeVertexReadsARecordProperty(t *testing.T) {
+	got, err := decodeDwelling([]byte(dwelling))
+	if err != nil {
+		t.Fatalf("decodeDwelling = error %v", err)
+	}
+	if got.Home.ZipCode != 94110 {
+		t.Errorf("decodeDwelling().Home.ZipCode = %d, want 94110", got.Home.ZipCode)
+	}
+	if got.Home.Note == nil {
+		t.Fatalf("decodeDwelling().Home.Note = nil, want %q", "top floor")
+	}
+	if *got.Home.Note != "top floor" {
+		t.Errorf("decodeDwelling().Home.Note = %q, want %q", *got.Home.Note, "top floor")
+	}
+	// The nullable property carries the SAME encoding as the NOT NULL one
+	// above. Reading a field off it is what makes the emission's "one
+	// carrier per encoding, not per site" claim a compiled fact rather
+	// than an assertion about the source: were they two defined types,
+	// this file would not build.
+	if got.Prior == nil {
+		t.Fatalf("decodeDwelling().Prior = nil, want the record the text carries")
+	}
+	if got.Prior.ZipCode != 10001 {
+		t.Errorf("decodeDwelling().Prior.ZipCode = %d, want 10001", got.Prior.ZipCode)
+	}
+	// Assignable across the two positions, which is the whole point of
+	// the carrier being an alias.
+	got.Home = *got.Prior
+}
+
+func TestDecodeVertexReadsAbsenceInsideAndAroundARecord(t *testing.T) {
+	got, err := decodeDwelling([]byte(dwellingSparse))
+	if err != nil {
+		t.Fatalf("decodeDwelling = error %v", err)
+	}
+	if got.Prior != nil {
+		t.Errorf("decodeDwelling().Prior = %+v, want nil for an absent property", *got.Prior)
+	}
+	if got.Home.Note != nil {
+		t.Errorf("decodeDwelling().Home.Note = %q, want nil for an absent field", *got.Home.Note)
+	}
+	if got.Home.ZipCode != 94110 {
+		t.Errorf("decodeDwelling().Home.ZipCode = %d, want 94110", got.Home.ZipCode)
+	}
+}
+
+func TestDecodeVertexRefusesARecordMissingANotNullField(t *testing.T) {
+	got, err := decodeDwelling([]byte(dwellingNoZip))
+	if err == nil {
+		t.Fatalf("decodeDwelling(dwellingNoZip) = %+v, want an error", got)
+	}
+	// The message has to name the field, because a record's fields are
+	// the only thing separating this failure from any other decode
+	// failure on the same vertex.
+	if !strings.Contains(err.Error(), "zip_code") {
+		t.Errorf("decodeDwelling(dwellingNoZip) = error %v, which does not name the field that has no value", err)
+	}
+}

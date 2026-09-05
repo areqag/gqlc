@@ -69,7 +69,7 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 		}
 		h.forParams(p.ParamFields)
 		for _, f := range p.RowFields {
-			h.need(f.GoType)
+			h.need(f.GoType, f.Width)
 		}
 	}
 

@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE RecordAnyAndEmpty AS {
+    (:Blob {
+        id      :: INT64 NOT NULL,
+        loose   :: RECORD NOT NULL,
+        maybe   :: RECORD,
+        blank   :: RECORD { } NOT NULL
+    })
+}

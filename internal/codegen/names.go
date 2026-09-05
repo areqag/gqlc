@@ -60,6 +60,34 @@ func paramFieldName(raw string) string {
 	return b.String()
 }
 
+// goFieldName reports whether s can be written as a struct field name,
+// by the Go identifier grammar rather than by the ASCII one
+// exportedGoIdent pins: letter { letter | unicode_digit }, where a letter
+// is any unicode letter or '_'.
+//
+// Unicode-aware DELIBERATELY, and that is the whole reason it is not a
+// regexp beside the others above. paramFieldName's escape hatch is that a
+// field name keeps whatever script the author wrote it in, so a schema
+// written in Armenian or Japanese mangles to a legal struct field and
+// must be admitted. What it does not do is drop characters, so a name a
+// delimited identifier can hold — a hyphen, a space, a '%' — survives
+// into a spelling that is not Go at all.
+//
+// The empty string answers false, though recordFieldLegality reports that
+// case separately: "mangles to no Go field name" tells the author
+// something different from a name it can quote back at them.
+func goFieldName(s string) bool {
+	for i, r := range s {
+		switch {
+		case r == '_' || unicode.IsLetter(r):
+		case i > 0 && unicode.IsDigit(r):
+		default:
+			return false
+		}
+	}
+	return s != ""
+}
+
 // edgeLabelFieldName derives the entity struct name for an edge type's
 // label (spec §4.5 Rule 3: `ACTED_IN` → `ActedIn`, `KNOWS` → `Knows`).
 //

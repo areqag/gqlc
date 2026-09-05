@@ -63,10 +63,27 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 		}
 	}
 
+	// One walk answers both conversion kinds, so models.go's record
+	// helpers and temporal_neo4j.go's carrier bridges are gated off the
+	// same reading of the batch (see conversionUses).
+	temporalUse, recordUse := conversionUses(prepared)
+
 	files := []codegen.File{
 		{Path: "db.go", Contents: renderDB(pkg, hasOne, target)},
 		{Path: "querier.go", Contents: renderQuerier(pkg, prepared.Queries, target)},
 		{Path: "models.go", Contents: renderModels(pkg, prepared.Entities, prepared.Queries, target)},
+	}
+
+	// The declared records' carriers and helpers, in their own file for
+	// the reason the temporal bridge has one: they are emitted only when
+	// the batch reaches a record, and a batch can reach one through a
+	// query parameter alone — which models.go, whose whole body is gated
+	// on the schema declaring an entity, would emit nothing for.
+	if encodings := codegen.RecordEncodings(prepared.Entities, prepared.Queries); len(encodings) > 0 {
+		files = append(files, codegen.File{
+			Path:     "record_neo4j.go",
+			Contents: renderRecordHelpers(pkg, encodings, recordUse, target),
+		})
 	}
 
 	// The neutral temporal carriers and their driver bridge, emitted as
@@ -77,7 +94,7 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	if codegen.ReferencesTemporalCarrier(prepared) {
 		files = append(files,
 			codegen.File{Path: "temporal.go", Contents: codegen.RenderTemporal(pkg)},
-			codegen.File{Path: "temporal_neo4j.go", Contents: renderTemporalConversions(pkg, temporalUses(prepared), target)},
+			codegen.File{Path: "temporal_neo4j.go", Contents: renderTemporalConversions(pkg, temporalUse, target)},
 		)
 	}
 

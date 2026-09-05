@@ -52,25 +52,87 @@ func propertyCarriers(t *testing.T) []string {
 	return carriers
 }
 
+// propertyRow is one row of the three sweeps below: a carrier and the
+// width it came from. The width is what helpers.need dispatches the
+// record arm on, and it is the zero value for every derived row —
+// which is what those rows carried implicitly before records existed,
+// since a zero width is neither a list nor a record.
+type propertyRow struct {
+	goType string
+	width  graph.PropertyType
+}
+
+// propertyRows is propertyCarriers plus the record rows that walk cannot
+// reach.
+//
+// The derivation reads the texts typeMap.Property returns as string
+// LITERALS. A record's carrier is not one: it is composed per encoding
+// from the field list, exactly as the list arm's `"[]" + elem` is, so no
+// record row can appear in the derived population however many records
+// the table learns to carry. Hand-writing the record rows here is the
+// same concession the doc above records for lists — and unlike a list,
+// it is not covered by peeling to an element, because what a record row
+// asserts is about helpers named from the ENCODING.
+//
+// The carriers are asked of the table rather than spelled, so a row is
+// dropped rather than faked if this backend stops carrying the width.
+func propertyRows(t *testing.T) []propertyRow {
+	t.Helper()
+
+	var rows []propertyRow
+	for _, goType := range propertyCarriers(t) {
+		rows = append(rows, propertyRow{goType: goType})
+	}
+	for _, width := range []graph.PropertyType{
+		recordWidth, graph.ListOf(recordWidth, false), graph.TypeAnyRecord,
+	} {
+		goType, ok := age.TypeMap{}.Property(width)
+		require.True(t, ok, "this backend no longer carries %s, so the record rows are stale", width)
+		rows = append(rows, propertyRow{goType: goType, width: width})
+	}
+	return rows
+}
+
+// recordWidth is the record these sweeps carry. Its fields are chosen so
+// that the row is not a restatement of the scalar rows above it:
+//
+//   - the DATE marks a helper the record's own decoder names, so a
+//     record that marked nothing but itself renders a file naming
+//     agtypeDate without declaring it, and the closure sweep says so;
+//   - the nullable field is the arm that writes no key on the encode
+//     side and reads absence as null on the decode side, and it is the
+//     only one of the two arms a record of all-NOT NULL fields reaches;
+//   - the field names are not the Go field names they mangle to, so an
+//     emission that spelled the Go name on the wire is visible.
+//
+// It is a package-level var rather than a literal in each sweep because
+// two spellings of "the record" would be two encodings, and the helper
+// suffix is derived from the encoding.
+var recordWidth = graph.RecordOf([]graph.RecordField{
+	{Name: "zip_code", Type: graph.TypeInt32, NotNull: true},
+	{Name: "seen_on", Type: graph.TypeDate, NotNull: true},
+	{Name: "note", Type: graph.TypeString},
+})
+
 // TestZoneIsMarkedOnlyBesideTheInstant pins the invariant importsTime
 // leans on. The sidecar read is marked on an entity field whose Go type
 // is the instant, and that same field marks the instant decode; a zone
 // marked without one would answer importsTime false and leave models.go
 // naming time with no import for it.
 //
-// The rows are propertyCarriers, so a carrier the property table gains is
-// a row this sweep gains.
+// The rows are propertyRows, so a carrier the property table gains is a
+// row this sweep gains.
 func TestZoneIsMarkedOnlyBesideTheInstant(t *testing.T) {
 	sawInstant := false
-	for _, goType := range propertyCarriers(t) {
+	for _, row := range propertyRows(t) {
 		var h age.Helpers
 		h.ForEntities([]age.WiredEntity{{Entity: codegen.Entity{
 			Name:   "E",
-			Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}},
+			Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: row.goType, Width: row.width}},
 		}}})
 
 		if h.Zone() {
-			require.True(t, h.Instant(), "%s marks the sidecar read with no instant beside it", goType)
+			require.True(t, h.Instant(), "%s marks the sidecar read with no instant beside it", row.goType)
 			sawInstant = true
 		}
 	}
@@ -91,10 +153,10 @@ func TestZoneIsMarkedOnlyBesideTheInstant(t *testing.T) {
 // are temporals whose helpers do int64 arithmetic and name no time at
 // all, so a gate written as "the batch carries a temporal" is red here.
 func TestImportsTimeAgreesWithTheEmittedFile(t *testing.T) {
-	for _, goType := range propertyCarriers(t) {
-		t.Run(goType, func(t *testing.T) {
+	for _, row := range propertyRows(t) {
+		t.Run(row.goType, func(t *testing.T) {
 			entities := []age.WiredEntity{age.WiredEntity{
-				Entity: codegen.Entity{Name: "E", Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType}}},
+				Entity: codegen.Entity{Name: "E", Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: row.goType, Width: row.width}}},
 			}.WithLabels("E", age.VertexAnnotation)}
 			var h age.Helpers
 			h.ForEntities(entities)
@@ -155,33 +217,65 @@ func TestTheWireLabelsReachTheEmittedDecoder(t *testing.T) {
 // schema fixture in this package carries several widths at once, so each
 // of them supplies the callee by some other route and none of them can
 // see that hole; a batch of exactly one width is what exposes it.
+//
+// The two DIRECTIONS are separate batches for the same reason the widths
+// are. A batch that both reads and binds the width supplies each
+// direction's helpers to the other, so it cannot see an emission that
+// writes one direction's helper on the other direction's evidence — which
+// is precisely the hole a record opened: a record READ but never bound
+// emitted an encoder naming agtypeDateText, a helper only the bind path
+// marks. Read-only and bind-only are the batches a real schema has, and
+// they are the two that expose it.
 func TestEmittedHelpersAreClosedOverWhatTheyCall(t *testing.T) {
-	for _, goType := range propertyCarriers(t) {
+	for _, row := range propertyRows(t) {
 		for _, nullable := range []bool{false, true} {
 			e := age.WiredEntity{
 				Entity: codegen.Entity{
 					Name:   "E",
 					Kind:   codegen.EntityNode,
-					Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: goType, Nullable: nullable}},
+					Fields: []codegen.EntityField{{PropName: "p", Field: "P", GoType: row.goType, Width: row.width, Nullable: nullable}},
 				},
 			}.WithLabels("E", age.VertexAnnotation)
-			var h age.Helpers
-			h.ForEntities([]age.WiredEntity{e})
-			age.HelpersForParams(&h, []codegen.Param{{RawName: "p", Field: "P", GoType: goType, Nullable: nullable}})
+			param := codegen.Param{RawName: "p", Field: "P", GoType: row.goType, Width: row.width, Nullable: nullable}
 
-			src := age.RenderModels("models", []age.WiredEntity{e}, h)
-			require.Empty(t, undeclaredAgtypeIdents(t, src),
-				"a batch of one %s property (nullable=%t) names an agtype helper it does not declare, so the emitted package does not compile",
-				goType, nullable)
+			for _, d := range []struct {
+				name string
+				read bool
+				bind bool
+			}{
+				{"read only", true, false},
+				{"bind only", false, true},
+				{"both", true, true},
+			} {
+				var h age.Helpers
+				var entities []age.WiredEntity
+				if d.read {
+					entities = []age.WiredEntity{e}
+					h.ForEntities(entities)
+				}
+				if d.bind {
+					age.HelpersForParams(&h, []codegen.Param{param})
+				}
+
+				src := age.RenderModels("models", entities, h)
+				require.Empty(t, undeclaredHelperIdents(t, src),
+					"a %s batch of one %s property (nullable=%t) names an agtype helper it does not declare, so the emitted package does not compile",
+					d.name, row.goType, nullable)
+			}
 		}
 	}
 }
 
-// undeclaredAgtypeIdents parses one emitted models.go and returns every
-// agtype helper it names without declaring. A helper reaches the list
+// undeclaredHelperIdents parses one emitted models.go and returns every
+// generated helper it names without declaring. A helper reaches the list
 // whether it is called outright or passed by value as a decoder
 // argument, because either one is a reference the compiler resolves.
-func undeclaredAgtypeIdents(t *testing.T, src []byte) []string {
+//
+// The helper families are named rather than "every undeclared identifier"
+// because the file legitimately names identifiers it does not declare —
+// fmt, json, the language's own builtins — and resolving those is the
+// compiler's job, not this walk's.
+func undeclaredHelperIdents(t *testing.T, src []byte) []string {
 	t.Helper()
 
 	file, err := parser.ParseFile(token.NewFileSet(), "models.go", src, parser.SkipObjectResolution)
@@ -199,12 +293,17 @@ func undeclaredAgtypeIdents(t *testing.T, src []byte) []string {
 			// just as it resolves the helpers — the date layout is one —
 			// so a walk that reads only funcs reports them all missing.
 			for _, spec := range d.Specs {
-				vs, ok := spec.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				for _, name := range vs.Names {
-					declared[name.Name] = struct{}{}
+				switch spec := spec.(type) {
+				case *ast.ValueSpec:
+					for _, name := range spec.Names {
+						declared[name.Name] = struct{}{}
+					}
+				case *ast.TypeSpec:
+					// A record's carrier is an ALIAS, so it is a type
+					// declaration and not a func. A walk reading only funcs
+					// reports every alias the helper signatures name as
+					// missing.
+					declared[spec.Name.Name] = struct{}{}
 				}
 			}
 		}
@@ -218,7 +317,7 @@ func undeclaredAgtypeIdents(t *testing.T, src []byte) []string {
 			return true
 		}
 		// An identifier is a leaf, so the walk stops here either way.
-		if _, isDeclared := declared[id.Name]; isDeclared || !strings.HasPrefix(id.Name, "agtype") {
+		if _, isDeclared := declared[id.Name]; isDeclared || !isEmittedHelper(id.Name) {
 			return false
 		}
 		if _, dup := seen[id.Name]; !dup {
@@ -241,4 +340,29 @@ func undeclaredAgtypeIdents(t *testing.T, src []byte) []string {
 		return false
 	})
 	return missing
+}
+
+// isEmittedHelper reports whether a name belongs to one of the families
+// renderModels emits on demand, which are exactly the names that can go
+// missing: everything else the file spells is either declared beside its
+// use or is the standard library's.
+//
+// The record families are here and not only "agtype" because a record's
+// carrier and its helper pair are named from the ENCODING's digest —
+// record<h>, decodeRecord<h>, encodeRecord<h> — so a walk keyed on the
+// agtype prefix alone cannot see a record helper the emission names and
+// does not declare. Measured: mutating the width descent in helpers.need
+// so a list element's record went unmarked left the emission naming
+// decodeRecord<h> with no declaration, and this sweep called it a pass.
+//
+// An ENTITY decoder is decode<Entity>, which collides with this family
+// only for an entity actually named Record-something — and that one is
+// declared by writeEntities, so it never reaches the test.
+func isEmittedHelper(name string) bool {
+	for _, prefix := range []string{"agtype", "record", "decodeRecord", "encodeRecord"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
