@@ -17,6 +17,11 @@ it. It is called out here rather than left to the section because "never against
 the live ledger" is the kind of blanket assurance that should not quietly stop
 being true.
 
+The pre-image census of 2026-09-05 is also live-ledger work, but read-only: it
+reconstructs `gqlc-jffyz`'s freeze-time record from its current one rather than
+provoking a fresh refusal, precisely so that no bead had to be written to in
+order to measure the thing that punishes writes.
+
 ## The confirmation line means "accepted", not "changed"
 
     $ bd update <id> --status blocked --assignee somebody   # already both
@@ -139,32 +144,75 @@ the rest of this document is about.
 
 ### Measuring how close a bead is
 
-The payload's field set, read out of the error text rather than guessed:
+The pre-image is **the whole bead record with `dependencies`, `dependents` and
+`parent` removed** — not a fixed list of keys. bd omits null fields, so the key
+set varies per bead: an open bead carries no `closed_at` or `close_reason`, a
+closed one carries both, and `close_reason` in this town is often several
+paragraphs. Counting a fixed subset is what made the previous version of this
+section read low, by up to 15310 bytes (`gqlc-h9n.7`: 23636 actual, 8326
+reported — 65% low).
 
-    id, title, description, notes, status, priority,
-    issue_type, owner, created_at, created_by, updated_at
+Three properties decide the number, and each was worth hundreds to thousands of
+bytes when it was left out:
 
-    bd list --all --json -n 0 | jq -r '.[]
-      | [({id,title,description,notes,status,priority,
-           issue_type,owner,created_at,created_by,updated_at}|@json|length), .id]
+- It is **compact** — no whitespace between tokens.
+- It carries Go `encoding/json`'s **HTML escaping**: the three characters `<`,
+  `>` and `&` are each rewritten to their six-byte `\uXXXX` JSON escape form —
+  the exact three strings are in the query below. 1139 of 1656 beads carry at
+  least one, and the largest
+  such delta on the ledger is 1050 bytes (`gqlc-35yu.5`).
+- The ceiling is on **bytes**. jq's `length` on a string counts codepoints, so
+  against this town's Armenian prose it reads low — 232 bytes low on
+  `gqlc-jffyz` alone. Use `utf8bytelength`.
+
+<!-- Validated byte-for-byte against the refusal dump; see the paragraph below
+     before changing any of the three transforms. -->
+
+    bd list --all --json -n 0 | jq -r '
+      .[] | del(.dependencies, .dependency_count, .dependent_count,
+                .comment_count, .parent)
+      | [ (tojson | gsub("<";"\\u003c") | gsub(">";"\\u003e")
+                  | gsub("&";"\\u0026") | utf8bytelength), .id ]
       | @tsv' | sort -rn | head
 
-**Two limits on that number.** The probe carried no assignee, labels or
-external_ref, so if bd omits empty fields the payload for a bead that *has* them
-is larger and this query is a lower bound. And the 65535 constant is inferred
-from a bracket, not read out of the engine: acceptance was observed at a
-computed payload of roughly 65500 and refusal at 65545, which brackets it.
+**Validated against the only first-party measurement of a pre-image there is,
+which is the refusal's own dump.** `gqlc-jffyz` froze at a dumped 66492 bytes.
+It has since been closed, which added `closed_at` and `close_reason` and
+shortened `status` from `in_progress` to `closed`; reconstructing that
+freeze-time record from today's reproduces **66492 exactly**, and **65917** with
+the HTML escaping alone removed — both figures matching an independent
+derivation on bd `gqlc-budsa`. The escaping is therefore live and load-bearing
+at 575 bytes on that bead, and the whole question at the ceiling is decided in
+the last few hundred. One bead is the whole validation set, because it is the
+only one whose dump was recorded.
 
-Do not use `bd show --json` for this. It populates `dependencies` and
-`dependents`, which the payload does not carry, and reports 91331 bytes for the
-bead `bd list` reports as 66067.
+The 65535 constant is still inferred from a bracket rather than read out of the
+engine: acceptance at a computed payload of roughly 65500 and refusal at 65545.
 
-**Ledger-wide on 2026-09-03: 1533 beads, one over the line.** The next largest
-was 42151 — no bead sits in the 45k–65k approach. This is not a fleet-wide
-cliff. But the distribution only grows in one direction, because notes append
-and nothing prunes them, so the beads that approach the ceiling are the ones
-worked over many sessions — which is exactly the population whose notes hold the
-handoff. It fires first where it costs most.
+**The direction of the error is not fixed, so no shortcut is safe in one
+direction.** `bd show --json | jq -c '.[0]'` inlines `dependencies` and
+`dependents` as whole objects and so reads *high* for a bead that has them — by
+75438 bytes on `gqlc-3evsn`. But 1132 of 1656 beads have no dependencies,
+dependents or parent at all, and for every one of those the same command reads
+*low*, by exactly the escaping delta. Reading high wastes a bead; reading low
+tells a citizen to keep appending to a bead that is already dead, and the
+appends are what is lost. Do not trade one for the other — measure the
+pre-image.
+
+**Ledger-wide on 2026-09-05: 1656 beads, two over the line** — `gqlc-jffyz` at
+68146 and `gqlc-2m9r8` at 66962. The next largest is 44095 (`gqlc-3evsn`), so
+nothing sits in the 45k–65k approach and this is still not a fleet-wide cliff.
+The previous census here — 1533 beads, one over, next largest 42151 — was taken
+with the under-reading query above; its 42151 is `gqlc-3evsn` measured that way,
+and reproduces today, so that figure was not stale but understated. Both
+instruments happen to name the same beads today, and that agreement is thin
+rather than reassuring: the old query put `gqlc-jffyz` at 65540 against a 65535
+ceiling, five bytes of margin on a bead 2611 bytes over.
+
+The distribution only grows in one direction, because notes append and nothing
+prunes them, so the beads that approach the ceiling are the ones worked over
+many sessions — which is exactly the population whose notes hold the handoff. It
+fires first where it costs most.
 
 `--append-notes` is still the right flag (a bare `--notes` replaces, silently
 losing the trail). The tension is real and unresolved here: the discipline that
