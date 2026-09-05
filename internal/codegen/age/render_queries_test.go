@@ -629,6 +629,12 @@ func isTypeMapMethod(fn *ast.FuncDecl) bool {
 // from a table entry no other assertion here reads, and emptying that
 // entry emits `([], error)` — invalid Go that the substring form still
 // called a pass (measured, mutation row C1).
+//
+// That row's closure is spelled flat because this reads renderCypherFile
+// directly, ahead of the codegen.Finalise that gofmts it, so the layout
+// here is the emitter's rather than the file's. It is not a contract:
+// what this pins is the COMPOSITION, and gqlc-swzh7 moved the emitted
+// whitespace without moving a single golden.
 func TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
@@ -643,8 +649,8 @@ func TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind(t *testing.T) {
 		{
 			"nullable uint64 list", "[]uint64", true,
 			"agtypeEncodedNullable(arg, func(in []uint64) ([]int64, error) {\n" +
-				"\t\treturn agtypeEncodedList(in, agtypeUnsigned)\n" +
-				"\t})",
+				"\treturn agtypeEncodedList(in, agtypeUnsigned)\n" +
+				"})",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
