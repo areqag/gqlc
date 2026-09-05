@@ -254,7 +254,7 @@ func TestDescribeColumnTypeRendersANilListElement(t *testing.T) {
 		want string
 	}{
 		{"bare", nil, "<nil>"},
-		{"nested in a list", ResolvedList{Element: nil}, "list of <nil>"},
+		{"nested in a list", ResolvedList{Element: nil}, "list (not null) of <nil>"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			require.NotPanics(t, func() { describeColumnType(tt.in) },
@@ -290,6 +290,6 @@ func TestCompareBranchColumnsSurvivesANilListElement(t *testing.T) {
 	require.NotPanics(t, func() { err = compareBranchColumns(branchCols) },
 		"a nil element on one branch must reach the mismatch message, not a crash")
 	require.ErrorIs(t, err, ErrUnionColumnMismatch)
-	require.Contains(t, err.Error(), "list of <nil>",
+	require.Contains(t, err.Error(), "list (not null) of <nil>",
 		"the message must name what the failing branch actually projected")
 }

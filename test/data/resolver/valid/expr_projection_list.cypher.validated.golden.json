@@ -7,7 +7,8 @@
         "element": {
           "kind": "scalar",
           "scalar": "int"
-        }
+        },
+        "nullable": false
       },
       "groupingKey": false
     }

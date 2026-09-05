@@ -1639,6 +1639,54 @@ func TestVarLengthEdgeColumnDecodesEveryElement(t *testing.T) {
 	}
 }
 
+// The same list column under OPTIONAL MATCH, which is where the LIST's
+// own nullability is the answer. An unmatched optional pattern binds the
+// whole binding to null, so the column arrives nil and the caller reads a
+// nil *[]Edgy; the elements of a path that did match are edges and are
+// never individually null, which is why the row below carries two decoded
+// edges rather than a slice with a hole in it.
+func TestOptionalVarLengthEdgeColumnCarriesItsNull(t *testing.T) {
+	got, err := queriesOver([]string{"e"},
+		[]any{[]any{relationship(edgyProps()), relationship(edgyProps())}},
+		[]any{nil},
+	).OptionalVarLengthEdgeColumn(t.Context())
+	if err != nil {
+		t.Fatalf("OptionalVarLengthEdgeColumn = error %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("OptionalVarLengthEdgeColumn returned %d rows, want 2", len(got))
+	}
+	if got[0] == nil {
+		t.Fatalf("OptionalVarLengthEdgeColumn()[0] = nil, want the matched path's edges")
+	}
+	if len(*got[0]) != 2 {
+		t.Fatalf("OptionalVarLengthEdgeColumn()[0] = %#v, want two edges", *got[0])
+	}
+	for i, edgy := range *got[0] {
+		if edgy.Rank != int32(-3) {
+			t.Errorf("OptionalVarLengthEdgeColumn()[0][%d].Rank = %#v, want -3", i, edgy.Rank)
+		}
+	}
+	if got[1] != nil {
+		t.Errorf("OptionalVarLengthEdgeColumn()[1] = %#v, want nil", got[1])
+	}
+
+	// Nullable buys the null and nothing else: an element that is not a
+	// relationship is still refused, inside the branch the non-nil value
+	// took, and the refusal still names the element's position.
+	_, err = queriesOver([]string{"e"}, []any{
+		[]any{relationship(edgyProps()), node("Scalar", scalarProps())},
+	}).OptionalVarLengthEdgeColumn(t.Context())
+	if err == nil {
+		t.Fatalf("OptionalVarLengthEdgeColumn(element 1: node) = no error, want a refusal")
+	}
+	for _, want := range []string{`"e"`, "element 1", "expected dbtype.Relationship"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("OptionalVarLengthEdgeColumn(element 1: node) = %q, want it to mention %s", err, want)
+		}
+	}
+}
+
 // The same list column over a pattern admitting two edge types, which
 // dispatches on the wire label per element. The column-level dispatch is
 // TestEdgeUnionColumnDispatchesOnTheWireLabel's; this one is emitted by

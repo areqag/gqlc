@@ -24,7 +24,8 @@
             }
           ],
           "nullable": false
-        }
+        },
+        "nullable": false
       },
       "groupingKey": false
     }

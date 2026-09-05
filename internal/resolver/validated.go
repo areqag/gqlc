@@ -468,20 +468,27 @@ func (ResolvedTemporal) isResolvedType() {}
 // ResolvedList is a list of elements. Element is the recursive resolved type
 // of the list's element position. Introduced at R2 (§3.3); R3 widens the
 // element vocabulary when the schema gains list-typed columns.
+//
+// Nullable is the LIST's own nullability and never its elements'. The two
+// are independent positions: an unmatched OPTIONAL MATCH binds a whole
+// var-length edge binding to null, while the elements of a path that did
+// match are edges and are never individually null.
 type ResolvedList struct {
-	Element ResolvedType `json:"element"`
+	Element  ResolvedType `json:"element"`
+	Nullable bool         `json:"nullable"`
 }
 
 // String is the wire tag "list".
 func (ResolvedList) String() string { return "list" }
 
 // MarshalJSON emits a tagged-union object with a "kind" discriminator plus
-// the element type (itself tagged-union).
+// the element type (itself tagged-union) and the R4 nullable bit.
 func (r ResolvedList) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind    string       `json:"kind"`
-		Element ResolvedType `json:"element"`
-	}{Kind: r.String(), Element: r.Element})
+		Kind     string       `json:"kind"`
+		Element  ResolvedType `json:"element"`
+		Nullable bool         `json:"nullable"`
+	}{Kind: r.String(), Element: r.Element, Nullable: r.Nullable})
 }
 
 func (ResolvedList) isResolvedType() {}

@@ -11,8 +11,9 @@
             "key_labels": "KNOWS",
             "target": "Person"
           },
-          "nullable": true
-        }
+          "nullable": false
+        },
+        "nullable": true
       },
       "groupingKey": false
     }
