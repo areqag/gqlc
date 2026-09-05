@@ -283,6 +283,67 @@ func TestStorablePropertyRefusesANestedList(t *testing.T) {
 	}
 }
 
+// TestStorablePropertyRefusesARecord is the nested-list test's sibling one
+// kind over, and it rests on the same kind of evidence rather than on the
+// symmetry: TestNeo4jRefusesAMapValuedStoredProperty measured the pinned
+// image, which answered a map-valued property write with
+//
+//	Neo.ClientError.Statement.TypeError (Property values can only be of
+//	primitive types or arrays thereof. Encountered: Map{…}.)
+//
+// and did so with two controls green in the same run — a scalar property
+// on the same session was stored, and the identical map came back as a
+// projected column. So the refusal is about the property SLOT, not about
+// the server's ability to handle a map.
+//
+// EVERY ROW ASSERTS BOTH AXES, for the reason the nested-list test states
+// and one more that is specific to records: §6 of the carrier design turns
+// on a record arriving as a query VALUE still decoding, and the four
+// positions it enumerates collapse to zero on this backend precisely
+// because the refusal is the storage axis alone. A row asserting only
+// StorableProperty==false would stay green if someone moved the refusal
+// onto Property, which would take the query-value positions with it.
+//
+// THE LIST ROWS ARE NOT THE BARE ROW RESTATED. The rule the server states
+// admits "arrays thereof", and a flat list of scalars IS stored — that is
+// ADR 0035's premise — so an array of maps had to be asked about
+// separately. It was, in the same live run, and takes the same refusal.
+// Without those rows a LIST<RECORD<…>> would reach the server through the
+// list arm, which asks only whether the element is itself a list.
+func TestStorablePropertyRefusesARecord(t *testing.T) {
+	declared := graph.RecordOf([]graph.RecordField{
+		{Name: "city", Type: graph.TypeString, NotNull: true},
+		{Name: "zip", Type: graph.TypeInt32},
+	})
+	refused := []graph.PropertyType{
+		// The braceless RECORD, whose fields are undeclared.
+		graph.TypeAnyRecord,
+		// RECORD<>, which declares that it has none. A guard keyed on
+		// Fields() being non-empty rather than on Kind() would miss it.
+		graph.RecordOf(nil),
+		declared,
+		graph.ListOf(graph.TypeAnyRecord, false),
+		graph.ListOf(declared, false),
+		// The qualifier sits on the list's element, which Elem() strips —
+		// the same shape the nested-list test carries a row for.
+		graph.ListOf(declared, true),
+	}
+	for _, pt := range refused {
+		t.Run("refused/"+string(pt), func(t *testing.T) {
+			require.False(t, neo4j.TypeMap{}.StorableProperty(pt),
+				"the neo4j server answers a map-valued property write with \"Property values can only be "+
+					"of primitive types or arrays thereof\", so the table must refuse %s rather than emit "+
+					"a struct field no write could ever fill", pt)
+
+			got, ok := neo4j.TypeMap{}.Property(pt)
+			require.Truef(t, ok,
+				"%s must stay CARRIED: a record arriving as a query VALUE decodes on this backend, and "+
+					"putting the refusal on the carrier axis would take that decode with it", pt)
+			require.NotEmpty(t, got)
+		})
+	}
+}
+
 // TestNestedListPropertyRejectionReachesTheCaller pins what an author
 // actually sees, which is the half of the refusal that has to be right:
 // a table returning ok=false is only useful if the failure travels out
@@ -319,6 +380,39 @@ func TestNestedListPropertyRejectionReachesTheCaller(t *testing.T) {
 		`entity "Blob" property "payload" has `+string(nested)+
 			`, which the neo4j backend cannot store as a property`)
 	require.Nil(t, files)
+}
+
+// TestRecordPropertyRejectionReachesTheCaller is the same obligation for
+// the record widths, and it is not the nested-list test with a different
+// type substituted in. Both refusals ride ErrUnstorableProperty, so what
+// this adds is that the record widths reach that sentinel AT ALL: they
+// travel a different route to it — Property answers before
+// StorableProperty is asked (prepare.go), and a record's carrier is built
+// by a recursive walk over its fields rather than looked up — so a
+// mistake that routed a record to the carrier channel instead would leave
+// the nested-list test green.
+//
+// The NotErrorIs carries that: ErrUnrepresentableWidth is the channel a
+// record with an unrepresentable FIELD takes, which is a real refusal of a
+// real record and would be the wrong one here.
+func TestRecordPropertyRejectionReachesTheCaller(t *testing.T) {
+	declared := graph.RecordOf([]graph.RecordField{{Name: "city", Type: graph.TypeString, NotNull: true}})
+	for _, pt := range []graph.PropertyType{graph.TypeAnyRecord, declared, graph.ListOf(declared, false)} {
+		t.Run(string(pt), func(t *testing.T) {
+			files, err := neo4j.New().Generate(codegen.Input{Schema: schemaWithPayload(pt)})
+
+			require.ErrorIs(t, err, codegen.ErrUnstorableProperty,
+				"a record-valued stored property is refused by the neo4j SERVER's property-value rule, "+
+					"so it rides the storage sentinel the nested list rides")
+			require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth,
+				"every field of %s has a faithful Go carrier and the record itself carries as a struct "+
+					"this backend emits, so claiming the carrier channel would be false", pt)
+			require.ErrorContains(t, err,
+				`entity "Blob" property "payload" has `+string(pt)+
+					`, which the neo4j backend cannot store as a property`)
+			require.Nil(t, files)
+		})
+	}
 }
 
 // schemaWithPayload is a one-node schema whose single property carries

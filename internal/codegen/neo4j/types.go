@@ -116,8 +116,8 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	return "", false
 }
 
-// StorableProperty refuses a list whose element is itself a list, and
-// admits everything else.
+// StorableProperty refuses a record, a list of records, and a list whose
+// element is itself a list, and admits everything else.
 //
 // This is the storage axis, not the carrier axis: Property answers
 // "[][]int16" for LIST<LIST<INT16>> and is right to, and this backend
@@ -137,11 +137,40 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 // caught for the same reason. LIST<ANY VALUE> is ADMITTED and can carry
 // a nested list at runtime, which no static check can see — that write
 // fails at the server as it does today (ADR 0035 names the limit).
+//
+// The RECORD arms rest on the same kind of measurement, taken against the
+// pinned image by TestNeo4jRefusesAMapValuedStoredProperty rather than
+// assumed. The server answered:
+//
+//	Neo.ClientError.Statement.TypeError (Property values can only be of
+//	primitive types or arrays thereof. Encountered: Map{…}.)
+//
+// with two controls green in the same run — a scalar property on the same
+// session was stored, and the identical map came back as a projected
+// column — so the refusal is about the property slot rather than about
+// maps in general. That asymmetry is why only this axis refuses a record
+// while Property still carries one: a record arriving as a query VALUE
+// decodes fine, and §6 of the spec turns on the difference.
+//
+// THE LIST ARM IS NOT AN INFERENCE FROM THE BARE ONE. The rule the server
+// states admits "arrays thereof", and a flat list of scalars IS stored —
+// ADR 0035 turns on exactly that — so an array of maps had to be asked
+// about separately. It was, in the same test, and is refused by the same
+// rule. Without this arm a LIST<RECORD<…>> would reach the server through
+// the list arm above, which asks only whether the element is a list.
+//
+// KindRecord covers RECORD<ANY> and the fieldless RECORD<> too: Kind()
+// tests the "RECORD<" prefix, which all three spellings share. A depth-3
+// list of records is already refused one level out by the nested-list arm.
 func (typeMap) StorableProperty(pt graph.PropertyType) bool {
+	if pt.Kind() == graph.KindRecord {
+		return false
+	}
 	if pt.Kind() != graph.KindList {
 		return true
 	}
-	return pt.Elem().Kind() != graph.KindList
+	elem := pt.Elem().Kind()
+	return elem != graph.KindList && elem != graph.KindRecord
 }
 
 // Temporal maps a resolver Temporal kind to the Go type text C3 emits

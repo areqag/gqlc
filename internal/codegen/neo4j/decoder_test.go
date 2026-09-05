@@ -39,17 +39,32 @@ type decoderProbeWidth struct {
 }
 
 // decoderProbeLeaves is one entry per non-list graph.PropertyType this
-// backend has a Go carrier for. It is held to being exactly that set by
-// TestDecoderProbeCoversTheTypeTable, which reads the constants off
-// internal/graph's own source: a width added there that this backend
-// admits fails that test naming the constant, rather than joining the
-// type table with no probe property behind it.
+// backend both carries a Go type for AND will store as a property. It is
+// held to being exactly that set by TestDecoderProbeCoversTheTypeTable,
+// which reads the constants off internal/graph's own source: a width
+// added there that this backend admits fails that test naming the
+// constant, rather than joining the type table with no probe property
+// behind it.
 //
-// Non-list rather than scalar, which is what these were until RECORD<ANY>
-// arrived. What the entries owe is that the list constructor has not been
-// applied to them already, since decoderProbeWidths applies it below and
-// a pre-derived entry would nest a level deeper than this table claims.
-// A record is a leaf as far as that derivation is concerned.
+// BOTH AXES ARE REQUIRED because this probe is schema-driven. Every entry
+// is declared below as a stored property, so a width the storage axis
+// refuses cannot appear here at all — generation refuses the schema and
+// the probe fails to build rather than measuring any decode arm.
+//
+// That is why RECORD<ANY> is absent while typeMap.Property carries it. It
+// was listed here briefly, before the fork in the carrier design's §5 was
+// answered: the pinned neo4j image refuses a map-valued stored property
+// (TestNeo4jRefusesAMapValuedStoredProperty), so StorableProperty refuses
+// every record width and no schema on this backend can reach a record
+// decode arm. That arm is not unwitnessed — it is witnessed WITHOUT a
+// schema, in render_record_test.go, whose widths are built with
+// graph.RecordOf. §5 anticipates exactly this: unreachable from a schema
+// is not unreachable.
+//
+// Non-list rather than scalar. What the entries owe is that the list
+// constructor has not been applied to them already, since
+// decoderProbeWidths applies it below and a pre-derived entry would nest
+// a level deeper than this table claims.
 var decoderProbeLeaves = []decoderProbeWidth{
 	{graph.TypeString, "STRING"},
 	{graph.TypeBytes, "BYTES"},
@@ -73,12 +88,6 @@ var decoderProbeLeaves = []decoderProbeWidth{
 	{graph.TypeFloat32, "FLOAT32"},
 	{graph.TypeFloat64, "FLOAT64"},
 	{graph.TypeAnyPropertyValue, "ANY VALUE"},
-	// The braceless RECORD, which is the spelling that lowers to this
-	// width: a record whose fields are undeclared. A record that DECLARES
-	// its fields is a different width per field list, so it is not a row
-	// this census could carry — that family is unbounded, and what sweeps
-	// it is the corpus rather than a spelling written here.
-	{graph.TypeAnyRecord, "RECORD"},
 }
 
 // decoderProbeWidths is every width the probe declares: each scalar
@@ -212,6 +221,10 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 			"decoderProbeLeaves names graph.%s, which is a list type: the list arms are derived, not listed", name)
 		require.Contains(t, arms, name,
 			"decoderProbeLeaves names graph.%s, which Property has no arm for", name)
+		require.True(t, neo4j.TypeMap{}.StorableProperty(w.pt),
+			"decoderProbeLeaves names graph.%s, which this backend refuses as a stored property: every "+
+				"entry here is declared as one, so this makes the probe schema unbuildable rather than "+
+				"measuring the decode arms that width reaches", name)
 	}
 
 	// Every width Property names is one graphPropertyTypes found. The two
@@ -239,6 +252,20 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 
 	for pt, name := range declared {
 		if _, ok := (neo4j.TypeMap{}).Property(pt); !ok {
+			continue
+		}
+		// A carried width the STORAGE axis refuses is one no schema on this
+		// backend can declare, so the obligation below cannot apply to it.
+		// RECORD<ANY> is the one width taking this arm today.
+		//
+		// The exclusion is narrow rather than a general skip: what stops a
+		// width leaving the probe for any reason OTHER than a measured
+		// storage refusal is the leaf loop above, which requires every
+		// entry of decoderProbeLeaves to be storable. This arm is not given
+		// a converse assertion because that loop makes one unreachable —
+		// covered is built from the leaves and their single list
+		// derivation, and no non-list storable leaf has an unstorable list.
+		if !(neo4j.TypeMap{}).StorableProperty(pt) {
 			continue
 		}
 		require.True(t, covered[pt],
