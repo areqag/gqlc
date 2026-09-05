@@ -25,7 +25,8 @@ until a person renumbers the bead. Nothing goes red when you get
 this wrong: the design closes cleanly and the stub sits on the board looking
 like every other P3. It happened twice in the week before the rule was written
 (`gqlc-az1rj` and `gqlc-0sxu6`, both hand-promoted by Սեդրակ two days later,
-two seconds apart), and only one of the two was ever noticed, by its stall.
+two seconds apart), and only one ever stalled — the other was claimed by hand
+within four minutes of its release, which is initiative rather than machinery.
 
 The design bead is ready immediately and routes to a Ճարտարապետ. The
 execution bead stays hidden from `bd ready` until the design bead closes —

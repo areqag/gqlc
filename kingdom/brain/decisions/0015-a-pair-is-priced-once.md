@@ -38,31 +38,36 @@ Measured 2026-09-05T00:00Z from `bd history <id>`, whose every entry carries a
 `[P<n> - <status>]` snapshot, so the priority a bead was FILED at is
 recoverable and not a matter of anyone's recollection.
 
+`bd history` prints the **host-local** clock with no marker; every time below is
+converted to UTC, and every ordering below is taken from that one renderer rather
+than compared across two (`bd show --json` prints true UTC with a `Z`). Mixing the
+two inverted an earlier draft of this section by four hours; the renderer defect
+is `gqlc-3e3ww`.
+
 | bead | design | filed | promoted by hand |
 | --- | --- | --- | --- |
-| `gqlc-az1rj` | `gqlc-dakzu` (P2) | P3-open 2026-09-02T20:54:52Z | 2026-09-04T19:32:42Z |
-| `gqlc-0sxu6` | `gqlc-d8ghh` (P2) | P3-open 2026-09-02T21:02:02Z | 2026-09-04T19:32:44Z |
+| `gqlc-az1rj` | `gqlc-dakzu` (P2) | P3-open 2026-09-03T00:54:52Z | 2026-09-04T23:32:42Z |
+| `gqlc-0sxu6` | `gqlc-d8ghh` (P2) | P3-open 2026-09-03T01:02:02Z | 2026-09-04T23:32:44Z |
 
 Both promotions are two seconds apart: one person, one sweep, after the fact.
 
-**The harm landed on one of the two, and that is the finding, not a caveat.**
-`gqlc-az1rj` is the clean case — open, unassigned and sub-floor from its
-design's close at 2026-09-03T00:56:19Z until the promotion 42h36m later, and
-still open today. `gqlc-0sxu6` was already `in_progress` at 2026-09-02T21:06:53Z,
-*before* its design closed at 2026-09-03T01:02:59Z, so it was held by a citizen
-and no unroutable window ever opened; it was worked and closed at P3, which
-Constitution III.3 expressly permits, and the blanket sweep promoted it
-afterwards for tidiness rather than in answer to a stall.
+**Both stubs entered the no-queue the moment their designs closed. What
+separates them is four minutes of one citizen's initiative.** `gqlc-az1rj` is the
+plain case — open, unassigned and sub-floor from its design's close at
+2026-09-03T00:56:19Z until the promotion 46h36m later, and still open today.
+`gqlc-0sxu6` entered the same state at its design's close, 2026-09-03T01:02:59Z,
+and left it 3m54s later when a citizen claimed it at 01:06:53Z: an assigned bead
+routes on the owned pass and an in-progress one on resume, so the claim — not the
+priority — is what carried it. It then ran at P3 for about 46 of its roughly 47
+held hours, which Constitution III.3 expressly permits, and closed at P2 at
+2026-09-04T23:48:40Z, sixteen minutes after the sweep promoted it.
 
-That asymmetry is why this ruling is prose in a playbook rather than a stall
-detector. The forbidden state occurred twice and produced a visible symptom
-once. Anything that waits for someone to notice a stalled bead catches half of
-these, and catches that half two days late.
-
-(The bound on that evidence: `bd history` renders title, priority and status,
-so the dependency edge cannot be dated from it. Nothing here claims a citizen
-claimed a blocked bead — only that the stub was in progress before its design
-closed.)
+That is why this ruling is prose in a playbook rather than a stall detector. The
+forbidden state occurred twice and produced a visible symptom once — and the
+instance that stayed harmless was rescued by an unprompted manual claim inside
+four minutes, not by anything the town built. A mechanism that waits for someone
+to notice a stalled bead is betting on that reflex firing every time; here it
+fired once out of two, and the miss cost 46h36m.
 
 Ready histogram, for the doctrine below: P1=3 P2=15 P3=178 P4=10 measured
 2026-09-05T00:00:43Z, against P1=3 P2=13 P3=176 P4=10 measured by the design
@@ -89,9 +94,11 @@ ready and unassigned. An assigned sub-floor bead still routes on the owned
 pass, and an in-progress one on resume; Constitution III.3 is the right to
 finish your own work whatever its number. So the tier is a no-queue for a bead
 nobody holds, which is precisely the condition of a freshly released execution
-stub, and precisely why the two incidents below came out differently: the stub
-nobody had claimed sat for two days, and the stub a citizen was already holding
-was carried to close at P3 without difficulty.
+stub, and precisely why the two incidents above came out differently. Both
+entered the no-queue at their designs' close. One was claimed 3m54s later and
+carried to close at P3 without difficulty, because a claim moves a bead onto the
+owned and resume passes where the floor does not reach. The other was claimed by
+nobody and sat 46h36m.
 
 ## Ruling 2 — a pair is priced once
 
@@ -137,12 +144,41 @@ carve-out that routed any sub-floor bead reading `Execution of …` would also
 route the ones that are correctly parked, and it would site the fix at dispatch
 time when the defect happens at filing time. Ruling 2 is the fix.
 
-Current orphan stock, re-derived 2026-09-05T00:00Z over the ready queue:
-**exactly one** sub-floor execution stub of a closed design — `gqlc-rm5cs`, P3,
-unassigned, the herdr composer-clear lever. Named to Սեդրակ for hand-promotion;
-no machinery chases it. (The query returns 3 execution stubs before the
-priority filter, so the answer of one is not an artefact of a query that finds
-nothing.)
+Current orphan stock, re-derived 2026-09-05T00:51:12Z over the ready queue:
+**seven** unassigned sub-floor stubs whose closed design sat at or above the
+floor — `gqlc-6grh5`, `gqlc-zptd0`, `gqlc-h9ig1`, `gqlc-mrf89`, `gqlc-ng7qv`,
+`gqlc-p6wd`, `gqlc-f8ny`. All seven are kingdom machinery; none is product work.
+No machinery chases any of them.
+
+The query, so the falsifier travels with the number — `-n 0` is load-bearing and
+is the whole reason this figure is seven:
+
+```sh
+A=$(bd list --all --json -n 0 | jq -c 'map({key:.id,value:{status,priority,labels:(.labels//[])}})|from_entries')
+bd ready --json -n 0 | jq -r --argjson all "$A" '
+  [ .[] | select(.assignee==null and .priority > 2) | . as $s
+        | select([ $s.dependencies[]? | select(.type=="blocks")
+                   | $all[.depends_on_id] // empty
+                   | select(.status=="closed" and .priority <= 2
+                            and (.labels|index("class:architect"))) ] | length > 0) ]
+  | length'
+```
+
+An earlier draft of this section reported **one**, and named `gqlc-rm5cs`. That
+was an artefact of omitting `-n 0`: `bd ready --json` caps at 100 rows and the
+queue holds 208, and the same query over the truncated window returns exactly 1.
+The draft even carried a guard against the mistake — it checked that the query
+found something before the priority filter — and that guard is blind to this
+failure, because a truncated query is not an empty one. Recorded rather than
+quietly fixed, because the number moved by 7× and the wrong number was the
+reassuring one. `bd`'s row caps are documented in `CLAUDE.md` and in
+`docs/bd-ledger-queries.md`; both say to pass `-n 0` at every scripted call site.
+
+Note also that `dependencies[]` has two different shapes: `bd show --json` returns
+full issue records (`.id`, `.status`, `.labels`), while `bd ready --json` returns
+edge rows (`.issue_id`, `.depends_on_id`, `.type`) with none of that. A query
+written against the first shape and run against the second matches nothing and
+reports zero — silently, which is how the query above was wrong on its first run.
 
 ## Ruling 4 — `max_priority` stays `"2"`
 
