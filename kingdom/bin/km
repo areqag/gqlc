@@ -1920,10 +1920,21 @@ cmd_arrived() {
     # coffee, short enough that the answer is about the ask you have in mind.
     #
     # --box asks a question about the PAST rather than about an ask just sent —
-    # a ghost is old by construction; the one field candidate was rendered two
-    # hours after the row it may be an echo of — so 15 minutes there would
-    # return NOT FOUND for the window rather than for the bytes, which is the
-    # fail-silent shape this whole verb exists to close.
+    # an ECHO ghost is old by construction, and the one candidate for one the
+    # field has offered was rendered two hours after the row it may echo — so
+    # 15 minutes there would return NOT FOUND for the window rather than for
+    # the bytes, which is the fail-silent shape this whole verb exists to close.
+    #
+    # The CONFIRMED field ghost of gqlc-i8dlp does not move this number, and it
+    # is worth saying so here rather than leaving the next reader to re-derive
+    # it: its text was never submitted, so it is out of reach of every window
+    # and sizes none of them. It is a second ghost, and a confirmed one where
+    # the other is only a candidate — but it is not a second instance of that
+    # candidate's KIND, and that kind is the only one this default is sized
+    # against. So the trade is unchanged: reach for the echo ghost on one side,
+    # and on the other the YES arm's false match against an older delivery of a
+    # repeated string, which the same reach is what puts in range (bd
+    # gqlc-wnwls). 24h stands, and this finding is not evidence in it.
     if [ -n "$since" ]; then
         since_epoch=$(date -d "$since" +%s 2>/dev/null) ||
             die "arrived: --since '$since' is not a time date(1) can read; try an ISO 8601 stamp or @<epoch>"
@@ -1982,7 +1993,7 @@ cmd_arrived() {
                 return 0
             fi
         done < <(transcript_user_rows "$dir" "$since_epoch" "$iso")
-        echo "arrived: NOT FOUND — nothing $seat submitted since $(date -u -d "@$since_epoch" +%Y-%m-%dT%H:%M:%SZ) collapses to the same text as her rendered box. This detector is ONE-SIDED: a YES is strong evidence of a ghost, bounded as 'km arrived --help' states, and a NOT FOUND is no evidence whatever in the other direction — so this is not evidence that the box holds live words. It is consistent both with a real unsent draft and with a ghost older than the window."
+        echo "arrived: NOT FOUND — nothing $seat submitted since $(date -u -d "@$since_epoch" +%Y-%m-%dT%H:%M:%SZ) collapses to the same text as her rendered box. This detector is ONE-SIDED: a YES is strong evidence of a ghost, bounded as 'km arrived --help' states, and a NOT FOUND is no evidence whatever in the other direction — so this is not evidence that the box holds live words. It is consistent with THREE things and not two: a real unsent draft; an ECHO ghost older than the window; and a ghost of text that was NEVER SUBMITTED at all, which is the one reproduced in the field (bd gqlc-i8dlp). The third is out of this verb's reach at ANY window — it searches submitted rows, and that ghost has no row of its own to find — so do not try to close it by widening --since. Closing the second escape and reading a NOT FOUND as binding is exactly the reasoning that produced a wrong finding on that bead."
         return 2
     fi
 
@@ -2059,8 +2070,30 @@ opens with one. --box collapses BOTH sides, which also makes it insensitive to
 the composer's line wrapping. It is still whole-string, never a substring test.
 
 THE DETECTOR IS ONE-SIDED and stays that way, and NEITHER verdict is proof. NOT
-FOUND proves nothing at all: it is consistent with a real unsent draft AND with a
-ghost older than the window. Do not read it as "no ghost here" (bd gqlc-2c88r).
+FOUND proves nothing at all. It is consistent with THREE things, not two: a real
+unsent draft; an ECHO ghost older than the window; and a ghost of text that was
+NEVER SUBMITTED at all. Do not read it as "no ghost here" (bd gqlc-2c88r).
+
+THE THIRD IS THE ONE THAT HAPPENED, and it is the one you must not try to close.
+This verb searches SUBMITTED rows, so the only ghost it can ever SEE is one that
+echoes a row. Text that reached the composer's rendered region and was then lost
+from the application's state without a repaint was never submitted, so no row of
+its own exists, and NOT FOUND is what this verb returns for it at every window —
+the blindness is structural and not a matter of reach. Widening --since is the
+available, checkable, tempting move, and it closes the SECOND possibility while
+leaving the third exactly where it was.
+
+That is not a hypothetical: on 2026-09-05 `km arrived sedrak --box` returned NOT
+FOUND over 24h against a box that was a ghost, proved independently by keystroke
+(bd gqlc-i8dlp). The reader bounded the window correctly, concluded the NOT FOUND
+therefore DID bind, and acted on it — a wrong answer reached by correct reasoning
+from an earlier version of this paragraph that named only two possibilities.
+
+One thing this does NOT say, because the YES arm's own bound already covers it: a
+never-submitted ghost can still draw a YES, if its bytes happen to match a
+DIFFERENT delivery of the same string. That is the false match described below,
+not an echo of these pixels, and it is a reason to distrust a YES rather than a
+reason to expect one here.
 
 YES IS STRONG BUT BOUNDED, and the bound INVERTS the remedy, so it is worth the
 paragraph. The match is on the TEXT, not on the submission. A box holding a string
