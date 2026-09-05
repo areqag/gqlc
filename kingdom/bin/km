@@ -879,6 +879,7 @@ seat_box_text() { # <pane> -> 0 read it, 1 the buffer holds no box, 2 could not 
     }
     # history: kingdom/brain/km-notes.md#seat_box_text-2
     # history: kingdom/brain/km-notes.md#seat_box_text-3
+    # history: kingdom/brain/km-notes.md#seat_box_text-4
     printf '%s\n' "$buf" | awk '
         {
             line[NR] = $0
@@ -894,12 +895,13 @@ seat_box_text() { # <pane> -> 0 read it, 1 the buffer holds no box, 2 could not 
             for (j = 1; j <= m; j++) if (wide[j] * 2 >= w) edge[++n] = cand[j]
             if (n < 2) exit 1
             for (i = edge[n - 1] + 1; i < edge[n]; i++) {
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", line[i])
-                if (index(line[i], "❯") == 1 || index(line[i], ">") == 1) located = 1
+                bare[i] = line[i]
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", bare[i])
+                if (index(bare[i], "❯") == 1 || index(bare[i], ">") == 1) located = 1
             }
             if (!located) exit 2
             for (i = edge[n - 1] + 1; i < edge[n]; i++)
-                if (line[i] != "" && line[i] != "❯" && line[i] != ">") print line[i]
+                if (bare[i] != "" && bare[i] != "❯" && bare[i] != ">") print line[i]
         }' || {
         rc=$?
         [ "$rc" -eq 2 ] && echo "km: pane $1 rendered, and the region between its last two full-width rules holds no prompt glyph, so that region is not the composer's interior and what the composer holds is unknown; treating it as empty is what types onto a citizen's draft (bd gqlc-mfjgl)" >&2
