@@ -143,6 +143,10 @@ max_active = 10
 # tick is the noise it complained of, and it returns with this change. That is a
 # defect in the report, not an argument for the floor — gqlc-ag4g's finding is
 # what governs, and the fix belongs in km's unroutable summary.
+#
+# The pair-pricing consequence of this number is decision 0015: below the floor is
+# not a slow queue but a no-queue, so a design at or above it must not carry an
+# execution stub below it.
 max_priority = "2"
 
 # How long a P0 may sit unroutable before `km doctor` stops calling it a warning
