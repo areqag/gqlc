@@ -116,8 +116,15 @@ edgeUnion candidate lookup). This is the biggest re-derivation site.
 render time. Every other list-element arm maps 1:1 to an existing
 `columnKind`. There is **one** closed enum for both the top-level column
 shape and the list-element shape. A future resolver variant is added exactly
-once, in `columnKind`, and both the top-level switch and the list-element
-switch fail to compile until the new arm is handled.
+once, in `columnKind`.
+
+**Correction (2026-09-05, bd `gqlc-80vvp`).** This paragraph used to end "and
+both the top-level switch and the list-element switch fail to compile until the
+new arm is handled." That is false and always was: Go does not require a
+`switch` over a named integer type to be exhaustive, so a missing arm builds
+clean. What the tree actually enforces is written out in §5.4 below, and it is
+partial. The decision above does not rest on the claim — one point of addition
+and one shared vocabulary is the value, and it survives the weaker mechanism.
 
 `columnKind` after this stage:
 
@@ -510,11 +517,45 @@ silently miscompile through render's `default:`. After this deepening: any
 render_*.go walk only sees `preparedListElem.Kind` and `preparedRow.Kind`
 (the shared closed `columnKind`) and `preparedQuery.AccessMode` (the closed
 `accessMode`). Adding a resolver variant means adding a `columnKind` arm — a
-prepare-side change — and every render switch on `columnKind` gets flagged
-by the compiler if it lacks a case (exhaustive-switch discipline via
-gochecksumtype / go vet's exhaustive analyser on request). The mechanical
-closure alone kills the silent-miscompile mode: one enum, one place to add
-a variant, every switch on it gets reviewed at the same time.
+prepare-side change — and the render switches on `columnKind` are the ones
+that then have to grow a case. The mechanical closure is what kills the
+silent-miscompile mode: one enum, one place to add a variant, every switch on
+it gets reviewed at the same time.
+
+**What enforces that, exactly — and where nothing does.** This paragraph used
+to say a missing case "gets flagged by the compiler … via gochecksumtype / go
+vet's exhaustive analyser on request". Every clause of that was false:
+`gochecksumtype` is not in `.golangci.yml`'s enable list, `go vet` has no
+exhaustive analyser, and the compiler does not reject a non-exhaustive switch.
+Measured against this tree (bd `gqlc-80vvp`, re-derived 2026-09-05 by deleting
+one arm at a time from a restored tree), the enforcement is **partial**, in
+three parts:
+
+- A missing arm in a **value** switch over `columnKind` is caught by
+  **golangci-lint's `exhaustive`** (in `.golangci.yml`'s enable list), not by
+  the compiler.
+  Deleting `walkListElemBody`'s `codegen.ColumnEdge` arm
+  (`internal/codegen/neo4j/render_queries.go`) leaves `go build ./...` at exit
+  0 and reds the linter with `missing cases in switch of type
+  codegen.ColumnKind`.
+- `exhaustive` **cannot read a type switch at all** — its `check` setting takes
+  only `switch` and `map`, and rejects `typeswitch` as an `invalid program
+  element` (golangci-lint 2.13.1). So the two **type** switches over
+  `resolver.ResolvedType` — `buildListElemPlan` and the Phase B assignment
+  switch, both in `prepare.go` — are guarded by **neither compiler nor
+  linter**: deleting an arm from either leaves `go build ./...` at exit 0 *and*
+  the full lint config at `0 issues`. That hole is open as bd `gqlc-69cox`;
+  this paragraph records it as it stands and does not promise its outcome.
+- Even the value-switch half holds **only while the switch carries no bare
+  `default`**: `.golangci.yml` sets `default-signifies-exhaustive: true` under
+  `linters.settings.exhaustive`, so a `default` retires the check silently.
+  `internal/codegen/exhaustivedefault_test.go`
+  is what keeps that from happening unnoticed — it requires any such `default`
+  to carry a `//gqlc:default-ok <why>` tag.
+
+The decision this section argues for does not rest on compile-time
+enforcement, and stands at the two sites where enforcement is nothing: the
+value is one point of addition and one shared vocabulary.
 
 The `TestPhaseBCommitsListElemPlan` synthetic-variant negative row (§4.1)
 seals this: even if a variant sneaks past Phase A somehow, the plan-builder
