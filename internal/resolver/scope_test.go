@@ -951,3 +951,57 @@ func TestCertifiedBareUnknownIsNotFilled(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ResolvedUnknown{}, bare, "a certified BARE unknown must stay unknown")
 }
+
+// TestCertifiedEmptyRefSetDoesNotFill pins unifiedRefPropertyType's
+// `len(refs) > 0` (bead gqlc-4s5t0, R7). No query reaches it: both mint sites
+// guarantee at least one ref leaf, so no certified projection arrives with an
+// empty ref set, and the mutant returning an unconditional true survives the
+// whole suite. It is built by hand for the same reason
+// TestCertifiedBareUnknownIsNotFilled is.
+//
+// What the guard buys is not a refusal but the difference between unfilled and
+// WRONG. With no refs the unification loop never runs, so `unified` is still
+// the zero ResolvedProperty — a concrete type nobody looked up. Reporting that
+// as unified hands fillLeaf a zero property to write into the committed
+// unknown leaf, which is the confidently-wrong-concrete outcome the whole
+// certificate design refuses; reporting it as not unified leaves the honest
+// unknown standing.
+//
+// "Unreachable" here is a claim about the mint sites, not about this function.
+// A third mint site, or a grammar change admitting an aggregate with no
+// ref-bearing argument, makes it reachable — and on that day this test is what
+// says so, because nothing else would go red.
+func TestCertifiedEmptyRefSetDoesNotFill(t *testing.T) {
+	sc := newScope(branchState{})
+	sc.Ingest(query.Part{})
+
+	nb, err := query.NewNodeBinding("p", graph.LabelSet{"Person"})
+	require.NoError(t, err)
+	require.NoError(t, sc.BindNode(nb, schema.NodeType{
+		KeyLabels:      graph.LabelSet{"Person"}.Key(),
+		CompleteLabels: graph.LabelSet{"Person"}.Key(),
+		Properties:     map[string]schema.Property{"id": {Name: "id", Type: graph.PropertyType("INT64")}},
+	}))
+
+	spine := query.NewTypeList(query.TypeUnknown{})
+
+	// The control, load-bearing exactly as its sibling's is: the same spine and
+	// the same certificate WITH a ref does fill. Without it, an empty ref set
+	// leaving the leaf unknown would also be satisfied by the certificate being
+	// ignored outright, or by fillLeaf never firing on this shape at all.
+	filled, err := sc.certifiedProjectionType(spine, []query.Ref{{Variable: "p", Property: "id"}}, true, schema.Schema{})
+	require.NoError(t, err)
+	require.Equal(t, ResolvedList{Element: ResolvedProperty{Type: graph.PropertyType("INT64")}}, filled,
+		"one ref under a list spine fills, or the row below cannot mean anything")
+
+	empty, err := sc.certifiedProjectionType(spine, nil, true, schema.Schema{})
+	require.NoError(t, err, "an empty ref set is a degrade, never an error")
+	require.Equal(t, ResolvedList{Element: ResolvedUnknown{}}, empty,
+		"no refs means nothing was looked up, so the committed unknown must stand")
+
+	// A non-nil empty slice travels a different path to the same place, and the
+	// mint sites are free to produce either.
+	emptySlice, err := sc.certifiedProjectionType(spine, []query.Ref{}, true, schema.Schema{})
+	require.NoError(t, err)
+	require.Equal(t, empty, emptySlice, "nil and empty refs must agree")
+}
