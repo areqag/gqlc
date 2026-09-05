@@ -1269,12 +1269,22 @@ before treating this predicate as a safety boundary. It is not one. It answers
 (`kingdom/bin/km`, `seat_box_state`)
 
 An idle seat's composer is not always empty, and the difference decides whether
-anything can still reach the seat. send_line refuses every send into a
-non-empty box — typing appends, so it would paste onto the end of a citizen's
-draft and submit the pair as one message (gqlc-6bnkw) — and cmd_wake,
-cmd_sleep, cmd_down and dispatch's recovery ask all route through it. So a seat
-holding any text is unreachable by all four transports at once while
-seat_agent_status still says `idle` (gqlc-gv7dw).
+anything can still reach the seat. send_line refuses a send into a box it has
+PROBED and found holding a draft — typing appends, so it would paste onto the
+end of a citizen's draft and submit the pair as one message (gqlc-6bnkw) — and
+cmd_wake, cmd_sleep, cmd_down and dispatch's recovery ask all route through it.
+So a seat holding a real draft is unreachable by all four transports at once
+while seat_agent_status still says `idle` (gqlc-gv7dw).
+
+READ, THOUGH, IS NOT HELD. A box read non-empty was that refusal's whole verdict
+until gqlc-2ohck, and gqlc-i8dlp reproduced a GHOST — pixels over an empty
+composer — on a seat that was responsive throughout, which cost the mayor about
+an hour of every transport at once. The verdict is now an ACT: type one
+character, ask what the box holds, Backspace it away. A ghost has its rendered
+line replaced, a real composer appends. It is fail-closed, so every state it
+cannot establish refuses exactly as before. `seat_box_state` below is unchanged
+by that and is still a read, so its tag is a claim about pixels; the send path
+is where the claim gets tested.
 
 THIS ANSWERS BY WHOSE TEXT, which the predicate it replaces
 (`seat_box_holds_text`, yes/no) could not. The tag narrows how the text got
