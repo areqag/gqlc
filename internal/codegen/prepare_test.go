@@ -1384,7 +1384,7 @@ func querySourceOf(path string) (string, bool) {
 // justifiedByQuerySource reports whether src, the query source
 // querySourceOf named, is one a per-source golden may be admitted on.
 // Only a regular file is. Mere existence is not enough: a DIRECTORY of
-// that name enrolls no query, so a golden admitted on one owes no
+// that name enrols no query, so a golden admitted on one owes no
 // reserved row and never enters the sweep, which reopens gqlc-laoy
 // through a dirent (gqlc-lb472).
 //
@@ -1584,26 +1584,25 @@ func TestFixedDeclarationSweepEqualsTheReservedSet(t *testing.T) {
 // charges that, and no test here replaces it, because the sweep globs
 // the committed corpus and a test must not plant in it.
 func TestOnlyAQuerySourceFileJustifiesAPerSourceGolden(t *testing.T) {
+	// A nil create is the absent-source arm: nothing is written, so the
+	// path names no dirent at all.
 	cases := []struct {
 		name    string
-		create  func(t *testing.T, src string)
+		create  func(src string) error
 		want    bool
 		because string
 	}{{
-		name: "a regular file is the query source the golden is named after",
-		create: func(t *testing.T, src string) {
-			require.NoError(t, os.WriteFile(src, []byte("MATCH (n) RETURN n;\n"), 0o600))
-		},
+		name:    "a regular file is the query source the golden is named after",
+		create:  func(src string) error { return os.WriteFile(src, []byte("MATCH (n) RETURN n;\n"), 0o600) },
 		want:    true,
 		because: "a query source file justifies the per-source golden emitted from it; refusing one empties this arm of the partition",
 	}, {
-		name:    "a directory of the source's name enrolls no query",
-		create:  func(t *testing.T, src string) { require.NoError(t, os.Mkdir(src, 0o700)) },
+		name:    "a directory of the source's name enrols no query",
+		create:  func(src string) error { return os.Mkdir(src, 0o700) },
 		want:    false,
 		because: "a directory satisfies mere existence and justifies nothing, so a golden admitted on one owes no reserved row (gqlc-laoy, reopened through a dirent by gqlc-lb472)",
 	}, {
 		name:    "an absent source justifies nothing",
-		create:  func(t *testing.T, src string) {},
 		want:    false,
 		because: "this is the arm the sweep already held, and it must survive the directory arm being added beside it",
 	}}
@@ -1611,7 +1610,9 @@ func TestOnlyAQuerySourceFileJustifiesAPerSourceGolden(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			src := filepath.Join(t.TempDir(), "people.cypher")
-			tc.create(t, src)
+			if tc.create != nil {
+				require.NoError(t, tc.create(src))
+			}
 			require.Equal(t, tc.want, justifiedByQuerySource(src), tc.because)
 		})
 	}
