@@ -839,7 +839,7 @@ func TestANullableRecordListSpellsTheRecordsEncodedType(t *testing.T) {
 		NamedQuery: codegen.NamedQuery{
 			Name:        "Q",
 			SourceText:  "MATCH (r:Row) WHERE r.homes = $hs RETURN r.id",
-			Cardinality: codegen.CardinalityExec,
+			Cardinality: queryfile.CardinalityExec,
 		},
 		MethodName: "Q",
 		Bare:       "q",

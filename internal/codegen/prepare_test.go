@@ -2200,7 +2200,7 @@ func TestPreparedWidthReachesEveryPropertyPosition(t *testing.T) {
 		},
 		Queries: []codegen.NamedQuery{{
 			Name:        "Fetch",
-			Cardinality: codegen.CardinalityMany,
+			Cardinality: queryfile.CardinalityMany,
 			SourceText:  "MATCH (n) RETURN n.addr AS addr, n.addrs AS addrs",
 			Validated: resolver.ValidatedQuery{
 				Statement:  resolver.StatementRead,
@@ -2266,7 +2266,7 @@ func TestPreparedWidthIsEmptyWhereNoPropertyTypeWasResolved(t *testing.T) {
 		},
 		Queries: []codegen.NamedQuery{{
 			Name:        "Fetch",
-			Cardinality: codegen.CardinalityMany,
+			Cardinality: queryfile.CardinalityMany,
 			SourceText:  "MATCH (n) RETURN n AS n, date() AS d, x AS u",
 			Validated: resolver.ValidatedQuery{
 				Statement: resolver.StatementRead,
