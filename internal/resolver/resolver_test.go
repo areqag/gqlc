@@ -727,6 +727,37 @@ var invalidFixtureContains = map[string]string{
 	// the mismatching COLUMN rather than the branch, or the constant a
 	// coincidence made look right.
 	"union_column_name_mismatch_nonzero_index.cypher": `branch 1 column 2 named "q"; branch 0 named "p"`,
+	// gqlc-9vpga, the count arm — the third of compareBranchColumns' three and
+	// the one nothing asserted. Its two fixtures were both waived, and the type
+	// and name arms each have a guard these did not: nine type-arm fixtures are
+	// read by TestUnionColumnMismatchNamesEachArm, and the name arm's format is
+	// held by the pin above.
+	//
+	// Measured, and the measurement is the reason these are pinned rather than
+	// left: swapping the two counts, so each is attributed to the other branch,
+	// and printing the failing branch as 0, both reddened the package — and both
+	// went ENTIRELY GREEN once TestCorpusSweepManifest was regenerated with the
+	// command its own failure prints. That test digests err.Error() for every
+	// refusing cell, so it fires on any reworded message in the package; what it
+	// says is that the text moved, not that the new text is right. These two
+	// pins are invalid-fixture pins, which carry no golden, so -update cannot
+	// reach them — the same property resolve.go's note on unionColumnTypeArm
+	// relies on. Blinding the name arm stays red through a regeneration, which
+	// is what says the difference is the pin and not the mutation.
+	//
+	// Both counts and the branch index are spelled, so what is held is also the
+	// arm's DIRECTION: compareBranchColumns' comment calls naming the failing
+	// side before branch 0 settled and says all three arms move together. The
+	// type arm's direction is asserted by TestUnionColumnMismatchNamesEachArm
+	// and the name arm's by the pin above; this is the third.
+	//
+	// The two fixtures carry different numbers on purpose. The first mismatches
+	// 2 against 1, so no digit in it is repeated. The second is a write-only
+	// branch, whose column count is 0 — the only fixture where a count is zero,
+	// and where a message that dropped a count entirely would still read as a
+	// sentence about a branch that projects nothing.
+	"union_column_count_mismatch.cypher":          `branch 1 has 2 columns; branch 0 has 1`,
+	"union_writes_vs_returns_column_count.cypher": `branch 1 has 1 columns; branch 0 has 0`,
 	// h6h7's stays-wide direction. ErrAmbiguousBinding says only that Phase B
 	// declined to pick; this says it declined over BOTH person types, i.e. that
 	// the OPTIONAL hop narrowed nothing. A narrowing that fired here would list
@@ -857,7 +888,7 @@ var invalidFixtureContains = map[string]string{
 // which arm fired — is gqlc-9vpga. Do not read a name here as a finding that
 // its message is not worth pinning.
 //
-// THE AXES SCREENED SO FAR, and there are two:
+// THE AXES SCREENED SO FAR, and there are three:
 //
 //   - gqlc-yg5jl: every fixture reaching ErrUnknownProperty's plural-lane arm
 //     was graded by mutating that arm to the generic formatter, and the seven
@@ -867,6 +898,27 @@ var invalidFixtureContains = map[string]string{
 //     Ten had their own subtest reddened by at least one and stay here; the one
 //     that survived every row moved to invalidFixtureContains, where what each
 //     of the ten rests on is recorded.
+//   - gqlc-9vpga, second pass: all fourteen refusing with ErrUnionColumnMismatch,
+//     arm by arm — errors.Is cannot separate its three, so the arms had to be
+//     graded rather than the sentinel. The two on the COUNT arm moved; the ten
+//     that stay are held, and by two different things. The eight on the TYPE arm
+//     rest on TestUnionColumnMismatchNamesEachArm, which reads all nine type-arm
+//     fixtures and pins both renderings a message names — a correct waiver whose
+//     claim is held where no reader of this map could find it, which is the only
+//     reason it is written down here. The two on the NAME arm rest on the
+//     nonzero-index pin, which holds that arm's one format string.
+//
+// THE SCREEN THAT AXIS NEEDED, because it applies to every axis left and
+// nothing above it says so. TestCorpusSweepManifest digests err.Error() for
+// every refusing cell of the corpus, so ANY reworded refusal in this package
+// reddens it — including a rewording that is wrong. A mutation row that reads
+// KILLED therefore says nothing on its own about whether the message is
+// asserted. What separates the two is to do what the failure tells you to:
+// regenerate the manifest with the command it prints, and re-run. A mutation
+// still red after that is held by an assertion; one that goes green was held
+// by a digest that regenerates. Both maps here are invalid-fixture maps and so
+// carry no golden, which is why -update cannot reach them and why they are the
+// right place for a claim about a message.
 //
 // Every other arm is unscreened, so a name here still carries no verdict.
 var invalidFixtureNoMessagePin = map[string]struct{}{
@@ -939,7 +991,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"set_property_unknown_on_single_type_edge.cypher":                {},
 	"set_property_unknown_property.cypher":                           {},
 	"set_second_effect_unknown_property.cypher":                      {},
-	"union_column_count_mismatch.cypher":                             {},
 	"union_column_name_mismatch.cypher":                              {},
 	"union_column_name_only_mismatch.cypher":                         {},
 	"union_column_nullability_mismatch.cypher":                       {},
@@ -951,7 +1002,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"union_node_type_mismatch.cypher":                                {},
 	"union_third_branch_mismatch.cypher":                             {},
 	"union_unknown_label_branch.cypher":                              {},
-	"union_writes_vs_returns_column_count.cypher":                    {},
 	"unknown_edge.cypher":                                            {},
 	"unknown_edge_multi_type_all_miss.cypher":                        {},
 	"unknown_edge_property.cypher":                                   {},
