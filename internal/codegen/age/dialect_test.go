@@ -1149,6 +1149,39 @@ func TestAnUnassertedAnswerReddensTheSweep(t *testing.T) {
 		"only the answer's binding is cut here — a complaint about the probe means this row measured something else")
 }
 
+// TestADeclaredWitnessOutranksTheSameNameOnASuite pins the order of the
+// two middle arms of witnessGaps' witness switch. Both can match at once —
+// a name declared top-level in one live file and, legally, declared again
+// as a method on a suite in another — and only the arm order decides which
+// speaks.
+//
+// Nothing held that order. Swapping `case declared:` and `case isMethod:`
+// compiles and, before this row, left every witness test green, because no
+// fixture and no live file writes a name into both maps. Under the swap
+// such a witness draws the "declared as a method on ..." complaint while a
+// runnable top-level test sits right there — a false RED, which is the
+// class bd gqlc-qw57d's fix existed to remove rather than to introduce
+// (bd gqlc-j35oz, a surviving mutant the round-1 battery of PR #2440 did
+// not declare).
+//
+// The methods map is handed in directly rather than parsed out of a
+// fixture: witnessGaps is a pure function of it, and building a two-file
+// corpus to produce the collision would measure witnessBodies again
+// instead of the arm order this row is about.
+func TestADeclaredWitnessOutranksTheSameNameOnASuite(t *testing.T) {
+	gap, recipes := syntheticGap()
+	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow, ""))
+
+	require.Empty(t, witnessGaps([]age.DialectGap{gap}, run, nil, recipes),
+		"the template must pass, or the complaint below could come from the template")
+
+	require.Empty(t, witnessGaps([]age.DialectGap{gap}, run, map[string]string{syntheticWitness: "*liveSuite"}, recipes),
+		"the witness is declared as a top-level test AND named as a method on a suite, and the sweep "+
+			"complained. The top-level declaration is what `go test -run` can select whole, so it is the "+
+			"one that answers; sending the author to make a method top-level when their top-level test "+
+			"already exists is the false RED this arm order exists to prevent")
+}
+
 // findUndefinedFunctionsOrAlternations is the test template's find: it
 // reads the alternation the template probes and the function names the
 // real table refuses, so a row can cut either binding without needing a
@@ -1640,10 +1673,14 @@ func assertedText(fset *token.FileSet, body *ast.BlockStmt, helpers map[string]b
 //
 // The method names carry no such guard, and must not: two suites may each
 // declare a method of the same name and that is legal Go, so requiring
-// uniqueness would red a correct pair of live files. The first wins, which
-// is arbitrary only in the message — the remedy a method-declared witness
-// gets is "make it top-level", and that does not turn on which suite
-// holds it.
+// uniqueness would red a correct pair of live files. Which one wins is
+// arbitrary only in the message — the remedy a method-declared witness
+// gets is "make it top-level", and that does not turn on which suite holds
+// it. Across files the first wins, by the !seen guard below; within one
+// file the last does, because witnessBodies assigns into its map without
+// one. Both are unobservable in the remedy, and neither is reached at all
+// when the name is also declared top-level: that case is answered before
+// the receiver is read.
 func readLiveWitnessBodies(t *testing.T) (map[string]witnessBody, map[string]string) {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join(repoRoot, liveGlob))
