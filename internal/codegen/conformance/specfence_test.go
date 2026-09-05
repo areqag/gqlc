@@ -1,8 +1,11 @@
 package conformance_test
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -69,12 +72,13 @@ import (
 // shrink: a root the walk stops reaching contributes no document there is
 // then anything to miss (gqlc-jfwo).
 //
-// What that test does not reach is a top-level DIRECTORY of markdown
-// nobody added here, because it censuses root files alone: a new `spec/`
-// tree would go unswept and say nothing. The unswept trees that exist
-// today — `kingdom/`, `internal/`, `test/`, `.beads/`, `.claude/`, 56
-// documents between them — print no query method signature and no
-// driver-binding literal, measured 2026-09-04.
+// A top-level DIRECTORY of markdown nobody added here is caught the same
+// way, by TestEveryDocTreeIsSweptOrDeclaredOutOfScope: `docs` is the only
+// tree this list sweeps, and dropping it leaves that tree's documents
+// tracked and declared by nothing. The trees deliberately left unswept are
+// named in nonSpecDocTrees, with the reason for each; all 56 documents
+// between them print no query method signature and no driver-binding
+// literal, measured 2026-09-05.
 var docRoots = []string{"docs", "README.md", "CONTEXT.md"}
 
 // nonSpecRootDocs are the repository-root markdown documents deliberately
@@ -92,6 +96,31 @@ var nonSpecRootDocs = map[string]string{
 	"AGENTS.md":       "instructions to coding agents about this repository; states nothing about the emitted surface",
 	"CLAUDE.md":       "the same, addressed to Claude Code",
 	"CONTRIBUTING.md": "contribution process; prints no generated-code example",
+}
+
+// nonSpecDocTrees are the top-level directories holding markdown that the
+// fence deliberately does not sweep, each mapped to why. nonSpecRootDocs
+// answers for the repository root's own files; this answers for the trees
+// standing beside them, so a `spec/` or `guides/` tree added tomorrow is
+// red until somebody decides which of the two states it is in.
+//
+// Only TRACKED markdown reaches the census below, and that is what makes
+// this list checkable in every clone rather than in some of them. Seats
+// here leave untracked scratch trees at the repository root, so a
+// candidate set read off the filesystem would redden in the worktree that
+// happens to hold one and nowhere else — a failure only its owner can see,
+// and the reason this census was not written alongside its sibling
+// (gqlc-tn88a, gqlc-jfwo).
+//
+// The reason is required on the same terms as nonSpecRootDocs, and expires
+// the same way: nothing here re-reads these trees, so a reason that goes
+// false goes false silently.
+var nonSpecDocTrees = map[string]string{
+	".beads":   "the beads tracker's own README, written by `bd init`; it describes the issue tracker and states nothing about this repository's emitted surface",
+	".claude":  "one Claude Code skill document, instructing an agent how to end a workday; it addresses the agent and not the generator",
+	"internal": "three SOURCE.md provenance notes for the vendored GQL grammar and the two ISO BNF extracts; they record where those artefacts came from, not what codegen emits from them",
+	"kingdom":  "the agent society's charter, playbooks, decisions and seat souls; it governs who takes the work rather than what the generator produces",
+	"test":     "one README stating what the resolver corpus's valid/ claim covers; it is explicit that codegen is outside that claim, and prints no emitted signature or binding",
 }
 
 // repoRoot is where this package sits relative to the tree above. Swept
@@ -119,9 +148,10 @@ const repoRoot = "../../../"
 // A document these censuses are never pointed at: the sets below name
 // documents, not roots, so they stay silent about anything docRoots does
 // not reach. What answers for the repository root's own markdown is
-// TestEveryRootDocIsSweptOrDeclaredOutOfScope, one level out from these;
-// what answers for an undeclared top-level directory of markdown is
-// nothing (gqlc-jfwo).
+// TestEveryRootDocIsSweptOrDeclaredOutOfScope, one level out from these,
+// and what answers for an undeclared top-level directory of it is
+// TestEveryDocTreeIsSweptOrDeclaredOutOfScope beside it (gqlc-jfwo,
+// gqlc-tn88a).
 //
 // A site swapped for another inside one document. specSigDocs and
 // specBindDocs carry a per-document FLOOR — how many graded sites the
@@ -520,6 +550,79 @@ func TestEveryRootDocIsSweptOrDeclaredOutOfScope(t *testing.T) {
 			"list is in a third state nobody chose: unswept because nobody was asked. That is how README.md and\n"+
 			"CONTEXT.md came to be swept while AGENTS.md, CLAUDE.md and CONTRIBUTING.md came not to be, and it\n"+
 			"is the state this test exists to make impossible to reach quietly")
+}
+
+// TestEveryDocTreeIsSweptOrDeclaredOutOfScope is the same reconciliation one
+// level up: the repository's top-level DIRECTORIES holding markdown, against
+// docRoots — which sweeps a tree — and nonSpecDocTrees, which exempts one
+// with a reason.
+//
+// Its sibling above censuses root FILES and nothing else, so until this
+// existed a whole TREE added beside them was unswept and silent about it.
+// Measured 2026-09-05 on master 5aa2cdbd: a tracked `spec/drift.md` printing
+// both graded anchors, `(ctx context.Context, id int64)` and a
+// `map[string]any{` binding, left every test in this package green
+// (gqlc-tn88a).
+//
+// The candidate set is the tracked paths rather than a directory listing,
+// which is the whole of why this was not written with its sibling. The
+// listing sees untracked scratch trees, and those exist in some checkouts
+// and not others.
+//
+// A candidate set that arrives empty does not pass quietly, and needs no
+// separate guard to say so: every declared name is then unobserved, and
+// requireCensus reports each by name. So the reconciliation is its own
+// control for having read anything at all — `docs` is tracked and full of
+// markdown, so an index this cannot read cannot look like a clean census.
+func TestEveryDocTreeIsSweptOrDeclaredOutOfScope(t *testing.T) {
+	// A docRoots entry answers for a tree here only by being one. Its
+	// `.md` entries are the sibling census's business, exactly as the
+	// tree entries are none of that one's.
+	var declared []string
+	for _, root := range docRoots {
+		if !strings.HasSuffix(root, ".md") {
+			declared = append(declared, root)
+		}
+	}
+	declared = append(declared, reasonedNames(t, nonSpecDocTrees, "nonSpecDocTrees")...)
+	sort.Strings(declared)
+
+	observed := make(map[string]bool)
+	for _, path := range trackedFiles(t) {
+		if dir, _, nested := strings.Cut(path, "/"); nested && strings.HasSuffix(path, ".md") {
+			observed[dir] = true
+		}
+	}
+
+	requireCensus(t, declared, observed, "docRoots and nonSpecDocTrees together",
+		"a top-level directory holding markdown is either swept for spec drift — name it in docRoots —\n"+
+			"or deliberately out of scope — name it in nonSpecDocTrees, with the reason. A tree in neither\n"+
+			"list is unswept because nobody was asked, which is the state a `spec/` or `guides/` tree added\n"+
+			"tomorrow arrives in: printing emitted signatures, graded by nothing, and saying so nowhere")
+}
+
+// trackedFiles lists the repository's tracked paths, named relative to
+// repoRoot. It reads the index rather than the filesystem so that untracked
+// scratch trees are invisible to the census above.
+//
+// git is a dependency the rest of this package does not have, and an absent
+// or unreadable one fails the run rather than skipping it. A fence that
+// could not read its candidate set has not established that anything is
+// declared, and reporting that as a pass is the single answer it must not
+// give — the same call os.ReadDir's error makes in the sibling above.
+func trackedFiles(t *testing.T) []string {
+	t.Helper()
+
+	cmd := exec.CommandContext(t.Context(), "git", "ls-files", "-z")
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		err = fmt.Errorf("%w: %s", err, bytes.TrimSpace(exit.Stderr))
+	}
+	require.NoError(t, err, "the repository index is unreadable, so this census has no candidate set")
+
+	return strings.FieldsFunc(string(out), func(r rune) bool { return r == 0 })
 }
 
 // sigSweep is one pass of the signature scanners over a set of
