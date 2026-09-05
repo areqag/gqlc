@@ -271,9 +271,22 @@ func moduleGoDirs(ctx context.Context, root, module string) ([]string, error) {
 	return goDirs(module, abs, nested)
 }
 
-// goDirs returns every directory at or under moduleRoot that holds a Go file,
-// absolute and sorted, stopping at each of the nested module roots so their
-// files are not filed under this module.
+// goDirs returns the directories at or under moduleRoot holding a Go file,
+// absolute and sorted, minus the ones excluded by NAME and minus the nested
+// module roots, whose files belong to their own module rather than to this one.
+//
+// The name exclusions are skipName, and it applies twice: to directory names,
+// where it prunes the whole subtree, and again to file names, so a directory
+// whose Go files are all skipName'd is absent from the answer rather than
+// present and empty. moduleRoot itself is exempt, so a module rooted at a dot-
+// or underscore-named directory still walks. Sharing skipName with the `go
+// list` side is the only sense in which this walk tracks `go list`; the
+// paragraph below is the sense in which it deliberately does not.
+//
+// Stated as a property rather than as a list of steps because the list form
+// rots: the sentence that stood here described the answer as every directory
+// holding a Go file, stopping at the nested module roots, and was falsified by
+// the skipName calls immediately beneath it (bd gqlc-2woz).
 //
 // Off disk rather than out of `go list`, because the `./...` wildcard does not
 // match a directory whose Go files are ALL excluded by build constraints: no
