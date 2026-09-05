@@ -219,16 +219,34 @@ Ruled by Սեդրակ 2026-09-05, who re-ran the query above verbatim rather tha
 taking the count on trust: the same seven ids, in the same order, nothing more
 and nothing less.
 
-**The true figure is between 7 and 19, and labels cannot settle it.** Dropping
-the `class:architect` requirement from the blocker — keeping only "closed and at
-or above the floor" — returns 19, so twelve stubs are held by a blocker that
-carries no design label. That widened query over-catches rather than correcting
-the seven: at least three of the twelve are genuine product holds whose own
-titles say "blocked on a named consumer" or "post-v1" (`gqlc-8pe`, `gqlc-5md`,
-`gqlc-1a5`). A blocker being closed and P2 does not make it a design gate; it
-makes it a bead that finished. Settling the range needs somebody to read twelve
-blockers and say which were designs — a bounded job, stated as a range rather
-than guessed at either end.
+**Seven is a floor, and nineteen is a second floor rather than a ceiling.**
+Dropping the `class:architect` requirement from the blocker — keeping only
+"closed and at or above the floor" — returns 19, so twelve further stubs are held
+by a blocker carrying no design label. That widened query over-catches rather
+than correcting the seven: at least three of the twelve are genuine product holds
+whose own titles say "blocked on a named consumer" or "post-v1" (`gqlc-8pe`,
+`gqlc-5md`, `gqlc-1a5`). A blocker being closed and P2 does not make it a design
+gate; it makes it a bead that finished.
+
+Neither number bounds the population from above, and the reason is not the label
+but the **edge**. Both queries require a `blocks` dependency, and the type of
+that dependency is a choice made at intake rather than a fact about the work: bd
+permits one type per pair, and this town has already measured a design gate
+living purely in bead prose with an empty `blocked_by`. Relax only the edge type
+— delete `| select(.type=="blocks")` from the query above and change nothing else
+— and the seven become **eight**, the addition being `gqlc-6jp65`, held to the
+closed design `gqlc-tdb9a` by `discovered-from` (re-derived 2026-09-05). Սեդրակ's own sweep is the wider form of the same measurement:
+over all 92 closed at-or-above-floor `class:architect` beads, 24 of 105 dependent
+edges are not `blocks`. So the honest statement is Անահիտ's on `gqlc-ctgp7`: **at
+least N, unbounded above by any label- or edge-shaped query.**
+
+Two limits on the eighth, so it is not read as a settled reclassification.
+`gqlc-tdb9a`'s own close reason calls `gqlc-6jp65` residue rather than an
+execution stub, which is precisely the reading job the twelve need and not its
+answer; and `bd dep list --json` returns `type: null` on every row, so any sweep
+of this shape must come off the plain renderer. Settling N needs somebody to read
+the delta blockers and say which were designs — a bounded job, and one that will
+still not produce a ceiling.
 
 ## Rejected alternatives
 
