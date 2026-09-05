@@ -1381,6 +1381,30 @@ func querySourceOf(path string) (string, bool) {
 	return filepath.Join(fixtureDir, strings.TrimSuffix(base, ".go")), true
 }
 
+// justifiedByQuerySource reports whether src, the query source
+// querySourceOf named, is one a per-source golden may be admitted on.
+// Only a regular file is. Mere existence is not enough: a DIRECTORY of
+// that name enrols no query, so a golden admitted on one owes no
+// reserved row and never enters the sweep, which reopens gqlc-laoy
+// through a dirent (gqlc-lb472).
+//
+// An absent source is likewise unjustified, and that is the arm the
+// sweep already relied on.
+//
+// It does not demand the source be enrolled in its fixture's
+// manifest.json queryFiles, so an unenrolled stray .cypher still
+// justifies a golden here. That is charged in the same CI run by
+// TestConformanceSuite/TestValid, which reds with `golden
+// "helpers.cypher.go" has no emitted counterpart` — any golden reaching
+// this hole is one a fresh emitter run does not emit. Parsing the
+// manifest to close it here was weighed and declined: it would add
+// manifest reading to a test that has done without it, to re-charge a
+// case that is already charged.
+func justifiedByQuerySource(src string) bool {
+	info, err := os.Stat(src)
+	return err == nil && !info.IsDir()
+}
+
 // TestFixedDeclarationSweepEqualsTheReservedSet reads the exported
 // declarations of the goldens fixedDeclarationFiles names and holds that
 // set equal to reservedIdentifiers, in both directions.
@@ -1413,12 +1437,16 @@ func querySourceOf(path string) (string, bool) {
 // Which side of the partition a file sits on is measured, not only
 // declared, and the queryFileSuffix arm is measured twice over. The
 // suffix says only what SHAPE a file has; what admits it is a query
-// source of that name in its own fixture (querySourceOf). So the arm
-// admits exactly the per-source files the batch's own sources justify,
-// and an emitted file that merely ends in the suffix is unclassified —
-// which is what closes gqlc-laoy. That evidence is per file rather than
-// counted across fixtures, so a file one fixture alone emits is held to
-// it like any other.
+// source FILE of that name in its own fixture (querySourceOf, then
+// justifiedByQuerySource). So an emitted file that merely ends in the
+// suffix is unclassified — which is what closes gqlc-laoy. That
+// evidence is per file rather than counted across fixtures, so a file
+// one fixture alone emits is held to it like any other.
+//
+// What the arm admits is bounded by a dirent, not by the manifest: it
+// does not reach enrollment in queryFiles, so an unenrolled stray
+// .cypher still justifies a golden here. See justifiedByQuerySource for
+// what charges that case instead and why closing it here was declined.
 //
 // The second measurement is the older one and still earns its place on
 // what the first does not cover: a basename more than one fixture emits,
@@ -1458,7 +1486,7 @@ func TestFixedDeclarationSweepEqualsTheReservedSet(t *testing.T) {
 	for _, path := range paths {
 		base, fixture := filepath.Base(path), goldenFixture(t, path)
 		if src, isQueryFile := querySourceOf(path); isQueryFile {
-			if _, err := os.Stat(src); err == nil {
+			if justifiedByQuerySource(src) {
 				perSource++
 			} else if _, seen := unjustified[base]; !seen {
 				unjustified[base] = [2]string{path, src}
@@ -1539,6 +1567,54 @@ func TestFixedDeclarationSweepEqualsTheReservedSet(t *testing.T) {
 		require.True(t, swept,
 			"no golden this sweep read declares reserved %q, so the file declaring it is classified out of fixedDeclarationFiles and owes nothing here",
 			name)
+	}
+}
+
+// TestOnlyAQuerySourceFileJustifiesAPerSourceGolden holds the predicate
+// the sweep above admits per-source goldens on. The sweep tested mere
+// dirent existence until gqlc-lb472, so a DIRECTORY named people.cypher
+// justified a golden named people.cypher.go — and that golden's exported
+// names then owed no reserved row, which is the gqlc-laoy escape reached
+// through a dirent rather than through the suffix.
+//
+// It pins the predicate, not the wiring. A rewrite that stops calling
+// justifiedByQuerySource and stats inline again leaves this green; the
+// re-runnable falsifier on gqlc-lb472 — plant a golden, then a directory
+// of the source's name, and watch the named sweep go green — is what
+// charges that, and no test here replaces it, because the sweep globs
+// the committed corpus and a test must not plant in it.
+func TestOnlyAQuerySourceFileJustifiesAPerSourceGolden(t *testing.T) {
+	// A nil create is the absent-source arm: nothing is written, so the
+	// path names no dirent at all.
+	cases := []struct {
+		name    string
+		create  func(src string) error
+		want    bool
+		because string
+	}{{
+		name:    "a regular file is the query source the golden is named after",
+		create:  func(src string) error { return os.WriteFile(src, []byte("MATCH (n) RETURN n;\n"), 0o600) },
+		want:    true,
+		because: "a query source file justifies the per-source golden emitted from it; refusing one empties this arm of the partition",
+	}, {
+		name:    "a directory of the source's name enrols no query",
+		create:  func(src string) error { return os.Mkdir(src, 0o700) },
+		want:    false,
+		because: "a directory satisfies mere existence and justifies nothing, so a golden admitted on one owes no reserved row (gqlc-laoy, reopened through a dirent by gqlc-lb472)",
+	}, {
+		name:    "an absent source justifies nothing",
+		want:    false,
+		because: "this is the arm the sweep already held, and it must survive the directory arm being added beside it",
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := filepath.Join(t.TempDir(), "people.cypher")
+			if tc.create != nil {
+				require.NoError(t, tc.create(src))
+			}
+			require.Equal(t, tc.want, justifiedByQuerySource(src), tc.because)
+		})
 	}
 }
 
