@@ -1806,6 +1806,76 @@ PYEOF
   fi
 fi
 
+# Plant the mirror marker on every issue this run minted (bd gqlc-gxcf7).
+#
+# .github/scripts/check-pr-closes.py learns the bead -> issue mapping from
+# .beads/issues.jsonl, a committed export that only reaches master by riding
+# other PRs. A bead created today is absent from the copy CI reads, so the gate
+# takes its absent-bead path and verifies nothing — and the population it misses
+# is exactly this one, the beads whose mirrors were minted here. So the mapping
+# is written where the gate can always reach it: on the issue, at mint time. The
+# export covers history; this covers the gap between the ledger and the export.
+#
+# A COMMENT and not the issue body, because the pull pass's ordering proxy
+# (header, :55-78) copies the GH body back over the bead description when GH
+# looks the more recent of the two — a marker in the body would echo into the
+# ledger as description noise on every bead, forever. Comments sit outside bd's
+# sync surface entirely. The hazard that a GH comment moves the issue's own
+# timestamp is documented and accepted for the close comment below (bd
+# gqlc-o22k), and it is smaller here: this posts seconds after the mint, while
+# the body still equals the description, so a pull it provokes copies bytes
+# identical to the ones already there.
+#
+# Idempotence is structural rather than checked: the selection only offers beads
+# carrying no external_ref, so a bead is offered — and commented — at most once
+# in its life. The residue is a run that mints and then dies before commenting,
+# which leaves a markerless mirror forever; the gate then falls back to its
+# skip-and-warn for that bead, which is where every bead was before this pass
+# existed. Fail-open by construction, and no failure here fails the push.
+#
+# Gated on the verify pass having succeeded: with $_unverified set the post-push
+# snapshot is unusable, which is the one input this needs, and that case already
+# has its own report above.
+_marked=0
+_unmarked=0
+if [ "$_pushed" -gt 0 ] && [ -z "$_unverified" ]; then
+  # Beads with no external_ref are skipped rather than reported: the verify pass
+  # above has already named each of them as MISSING, and a second line per bead
+  # would say the same thing in weaker words.
+  python3 - "$_tmp/new.txt" "$_tmp/beads_after.json" \
+    >"$_tmp/markers.txt" 9>&- 2>/dev/null <<'PYEOF' || : >"$_tmp/markers.txt"
+import json, re, sys
+
+pat = re.compile(r"/issues/(\d+)$")
+with open(sys.argv[1], encoding="utf-8") as fh:
+    offered = [ln.rstrip("\n") for ln in fh if ln.strip()]
+with open(sys.argv[2], encoding="utf-8") as fh:
+    beads = json.load(fh)
+ref = {b.get("id"): (b.get("external_ref") or "") for b in beads}
+for bid in offered:
+    m = pat.search(ref.get(bid) or "")
+    if m:
+        print("%s %s" % (m.group(1), bid))
+PYEOF
+  while read -r _n _bid; do
+    # First line EXACTLY 'bd-mirror: <bead-id>' — check-pr-closes.py anchors on
+    # it at both ends of the line, so a prefix or a trailing word breaks the
+    # mapping silently. The rest is for the human who opens the issue and finds
+    # a machine talking.
+    if GITHUB_TOKEN="$_token" gh issue comment "$_n" --body "bd-mirror: ${_bid}
+
+This issue is the GitHub mirror of the bead named above. Automation
+(.github/scripts/check-pr-closes.py) reads the first line of this comment to
+check that a pull request closing this issue is about that bead; please do not
+edit it." 9>&- >/dev/null 2>&1; then
+      _marked=$((_marked + 1))
+    else
+      _unmarked=$((_unmarked + 1))
+      echo "bd-gh-sync: could not comment the bd-mirror marker on GH #${_n} (bead ${_bid}); a PR for that bead whose bead is not yet in .beads/issues.jsonl will have its 'Closes #${_n}' passed unchecked." >&2
+    fi
+  done <"$_tmp/markers.txt"
+fi
+
 # Close GH mirrors for beads that are closed locally but still open on GH.
 # One bulk `gh issue list` + one `gh issue close` per mismatch. Idempotent:
 # closing an already-closed GH issue is a no-op.
@@ -2022,6 +2092,17 @@ if [ "$_mirrored" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] ||
   _summary="${_summary}."
 else
   _summary="bd-gh-sync: pushed ${_mirrored} new bead(s), closed ${_closed} stale GH mirror(s)."
+fi
+# Appended to whichever arm was built, rather than folded into the failure
+# condition above. A marker that could not be posted costs this push nothing —
+# it costs check-pr-closes.py its check on that one bead's next PR, which is
+# where every bead already was — so it is reported and does not turn a good push
+# red. Printed only when the pass actually ran: "0 of 0" off a pass that was
+# skipped is the same fail-open the arms above are written against.
+if [ "$((_marked + _unmarked))" -gt 0 ]; then
+  _summary="${_summary} ${_marked} of $((_marked + _unmarked)) new mirror(s) carry a bd-mirror marker."
+  [ "$_unmarked" -gt 0 ] &&
+    _summary="${_summary} The unmarked one(s) are named above; until the export catches up, check-pr-closes.py has nothing to hold a 'Closes' line against for them."
 fi
 echo "$_summary" >&2
 exit "$_rc"
