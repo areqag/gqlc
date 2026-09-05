@@ -513,7 +513,7 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 // only enough whitespace to keep the closure parseable is owed here.
 //
 // This threaded an explicit indent argument until gqlc-swzh7, whose
-// premise was that nothing gofmts the emission. Measured on 468bbedd:
+// premise was that nothing gofmts the emission. Measured on 3ebea6e8:
 // widening the tab run moved no golden, while renaming agtypeEncodedList
 // inside this same format string moved three — so the regeneration
 // pipeline was rewriting exactly the files an indent change would have
