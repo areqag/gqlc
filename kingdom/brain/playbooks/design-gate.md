@@ -14,6 +14,20 @@ bd create "<thing>"            --label class:warrior    -p <P>
 bd dep add <execution-id> <design-id>      # execution blocked-by design
 ```
 
+**`<P>` is the same letter on both lines because that is a rule, not a
+coincidence: a pair is priced once, at intake, at one number** (decision 0015).
+The forbidden state is a design at or above the dispatch floor whose execution
+stub is below it — that pair promises a handoff and guarantees it cannot
+happen, because the floor binds the fresh dispatch pass, and a stub released by
+its design's close is exactly what that pass looks at: ready and unassigned.
+Below the floor that is not a slow queue, it is a no-queue, and it stays one
+until a person renumbers the bead. Nothing goes red when you get
+this wrong: the design closes cleanly and the stub sits on the board looking
+like every other P3. It happened twice in the week before the rule was written
+(`gqlc-az1rj` and `gqlc-0sxu6`, both hand-promoted by Սեդրակ two days later,
+two seconds apart), and only one ever stalled — the other was claimed by hand
+within four minutes of its release, which is initiative rather than machinery.
+
 The design bead is ready immediately and routes to a Ճարտարապետ. The
 execution bead stays hidden from `bd ready` until the design bead closes —
 the dispatcher cannot route it early, no matter what.
@@ -119,6 +133,11 @@ execution bead (`bd update <exec-id> --append-notes`), covering:
 - files/packages touched; new files by path
 - observable behaviour changes; what tests prove them
 - risks, and what to check before calling it done
+- **the execution bead's priority, re-derived and stated.** It was priced at
+  intake from a guess at the scope; you now know the scope. The number may move
+  either way, but it is re-derived rather than merely left — and it may not be
+  left below the dispatch floor while the design sits at or above it
+  (decision 0015).
 
 The test of a good design note: a Ռազմիկ who has never discussed the work
 can execute it without asking the architect anything. If the plan is too
