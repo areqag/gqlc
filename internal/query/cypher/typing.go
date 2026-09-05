@@ -895,11 +895,30 @@ func (l *listener) classifyRichExpression(e gen.IOC_ExpressionContext) query.Pro
 		}
 		l.addParameterUse(name, p, query.NewExprUse(t, query.ExprInProjection))
 	}
-	// Depth ≥ 1 rather than ok alone: a depth-0 bare ref classifies as a
-	// RefProjection before reaching this function, so a depth-0 ok here would
-	// certify something that cannot arrive.
 	depth, refValued := refValuedShape(e)
-	return query.NewExprProjectionWithAxes(refs, t, subtreeContainsAggregate(e), refValued && depth >= 1)
+	return query.NewExprProjectionWithAxes(refs, t, subtreeContainsAggregate(e), certifiesAtDepth(refValued, depth))
+}
+
+// certifiesAtDepth is the certificate's depth clause, over refValuedShape's two
+// return values. Depth ≥ 1 rather than ok alone: a depth-0 bare ref classifies
+// as a RefProjection before reaching classifyRichExpression, so a depth-0 ok
+// there would certify something that cannot arrive.
+//
+// It is a named function rather than an expression at the call site so the
+// bound can be pinned without a parse tree, which is what
+// TestCertifiedDepthClause does — the grammar cannot deliver a depth-0
+// expression to the caller, so the bound is otherwise observable nowhere and
+// the mutant relaxing it survives the whole suite (bd gqlc-4s5t0, P5).
+//
+// Certifying a depth-0 expression would assert that a bare `p.id` has
+// ref-valued LEAVES when it has none — it IS the ref. Nothing red follows
+// today, because the certificate's consumer refuses to fill a bare unknown
+// (resolver.TestCertifiedBareUnknownIsNotFilled) and absorbs the false
+// certificate one layer down. That is a belt catching a severed brace, not a
+// reason the brace is spare: the day a mint site certifies a depth-0
+// expression whose committed type IS a list, the belt does not apply.
+func certifiesAtDepth(refValued bool, depth int) bool {
+	return refValued && depth >= 1
 }
 
 // subtreeContainsAggregate reports whether the expression subtree contains at
