@@ -491,9 +491,9 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 	}
 	switch {
 	case depth > 0 && f.Nullable:
-		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, listEncoder(depth, leaf, encoder, 1)), true
+		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, listEncoder(depth, leaf, encoder)), true
 	case depth > 0:
-		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, listEncoder(depth-1, leaf, encoder, 1)), true
+		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, listEncoder(depth-1, leaf, encoder)), true
 	case f.Nullable:
 		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, encoder), true
 	default:
@@ -505,23 +505,35 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 // above leaf: the bare leaf encoder at 0, and one closure per level above
 // it, each wrapping agtypeEncodedList around the one below.
 //
-// indent is the tab depth of the line the closure opens on, so a nested
-// closure sits one level in from its parent's return statement. It is
-// carried explicitly because nothing gofmts the emission — what this
-// returns is what lands in the file — and at level 1 it must reproduce the
-// bytes the single-level composition emitted before this function existed,
-// or every depth-1 golden moves.
-func listEncoder(levels int, leaf, encoder string, indent int) string {
+// The single tab below is not the emitted indentation. generate's only
+// non-error return is codegen.Finalise, which runs format.Source over
+// every file and is fail-closed — a rejection returns (nil, err), so
+// there is no path that writes these bytes unformatted. What lands on
+// disk is gofmt's indentation of this text rather than this text, and
+// only enough whitespace to keep the closure parseable is owed here.
+//
+// This threaded an explicit indent argument until gqlc-swzh7, whose
+// premise was that nothing gofmts the emission. Measured on 3ebea6e8:
+// widening the tab run moved no golden, while renaming agtypeEncodedList
+// inside this same format string moved three — so the regeneration
+// pipeline was rewriting exactly the files an indent change would have
+// touched, and the argument reached none of them.
+//
+// It was not dead, though, which is the correction the bead did not have:
+// tests calling renderCypherFile reach it directly, ahead of Finalise, so
+// they see this text. One of them pins it as a literal
+// (TestUnsignedParamsAboveTheAgtypeRangeAreRefusedAtBind), and that is
+// the cost of dropping the argument — a whole-expression assertion now
+// spells the flat form.
+func listEncoder(levels int, leaf, encoder string) string {
 	if levels == 0 {
 		return encoder
 	}
 	slices := strings.Repeat("[]", levels-1)
-	return fmt.Sprintf("func(in %s[]%s) (%s[]%s, error) {\n%sreturn agtypeEncodedList(in, %s)\n%s}",
+	return fmt.Sprintf("func(in %s[]%s) (%s[]%s, error) {\n\treturn agtypeEncodedList(in, %s)\n}",
 		slices, leaf,
 		slices, encodedParamText[leaf],
-		strings.Repeat("\t", indent+1),
-		listEncoder(levels-1, leaf, encoder, indent+1),
-		strings.Repeat("\t", indent))
+		listEncoder(levels-1, leaf, encoder))
 }
 
 // writeOneBody emits the :one arity check, the single row's decode, and
