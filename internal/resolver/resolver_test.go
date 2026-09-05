@@ -245,10 +245,11 @@ var invalidFixtures = map[string]error{
 	// resolvedTypeEqual is reachable only from compareBranchColumns, and no
 	// fixture unioned two branches projecting different whole-entity or list
 	// types under a common column name. One fixture per unpinned arm.
-	"union_node_type_mismatch.cypher":              ErrUnionColumnMismatch,
-	"union_edge_union_nullability_mismatch.cypher": ErrUnionColumnMismatch,
-	"union_edge_union_keys_mismatch.cypher":        ErrUnionColumnMismatch,
-	"union_list_element_mismatch.cypher":           ErrUnionColumnMismatch,
+	"union_node_type_mismatch.cypher":                      ErrUnionColumnMismatch,
+	"union_edge_union_nullability_mismatch.cypher":         ErrUnionColumnMismatch,
+	"union_edge_union_keys_mismatch.cypher":                ErrUnionColumnMismatch,
+	"union_list_element_mismatch.cypher":                   ErrUnionColumnMismatch,
+	"union_var_length_binding_optionality_mismatch.cypher": ErrUnionColumnMismatch,
 	// Two edge-union columns where one key list is a strict prefix of the other.
 	// resolvedTypeEqual's arity check is the only thing separating them, and the
 	// two orderings fail differently without it — see the comment on
@@ -999,6 +1000,7 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"union_edge_union_keys_mismatch.cypher":                          {},
 	"union_edge_union_nullability_mismatch.cypher":                   {},
 	"union_list_element_mismatch.cypher":                             {},
+	"union_var_length_binding_optionality_mismatch.cypher":           {},
 	"union_node_type_mismatch.cypher":                                {},
 	"union_third_branch_mismatch.cypher":                             {},
 	"union_unknown_label_branch.cypher":                              {},
@@ -2572,6 +2574,81 @@ func (s *ResolverSuite) TestAnEmptyHopRangeIsNotAWitness() {
 	got, err := resolve("MATCH (p:Node)-[w:X*1..1]->(c:Node:C) RETURN p.bOnly")
 	s.Require().NoError(err, "`*1..1` is the non-empty range of exactly one hop, so the closure really is the pattern")
 	s.Require().Equal([]Column{{Name: "p.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
+}
+
+// TestVarLengthBindingOptionalityIsTheListsOwn pins WHICH position of a
+// var-length edge projection carries OPTIONAL MATCH's nullability.
+//
+// A var-length binding resolves to a list, and the two positions are not
+// interchangeable. An unmatched OPTIONAL pattern binds the WHOLE list to null;
+// the elements of a list that did match are edges of a real path and are never
+// individually null. Parking the bit on the element said the opposite, and it
+// said it to a consumer that reads only the outer position: codegen's list
+// column derives its Row.Nullable from the ResolvedList and its element plan
+// from the element's KIND alone, so the bit was dropped end to end and the
+// emitted decode refused a legal null column at runtime (bd gqlc-lgbjy).
+//
+// The single-hop rows are the control that says this test is about the LIST
+// and not about OPTIONAL MATCH: the same query without the quantifier still
+// puts the bit on the edge, because there is no list for it to belong to.
+func (s *ResolverSuite) TestVarLengthBindingOptionalityIsTheListsOwn() {
+	sch := s.loadSchema("valid", "social_r3.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+	knows := ResolvedEdge{EdgeKey: schema.EdgeKey{Source: "Person", KeyLabels: "KNOWS", Target: "Person"}}
+	authoredOrLikes := ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
+		{Source: "Person", KeyLabels: "AUTHORED", Target: "Post"},
+		{Source: "Person", KeyLabels: "LIKES", Target: "Post"},
+	}}
+
+	tests := []struct {
+		name  string
+		query string
+		want  ResolvedType
+	}{
+		{
+			name:  "optional var-length single candidate",
+			query: "MATCH (p:Person) OPTIONAL MATCH (p)-[r:KNOWS*1..3]->(q:Person) RETURN r",
+			want:  ResolvedList{Element: knows, Nullable: true},
+		},
+		{
+			name:  "mandatory var-length single candidate",
+			query: "MATCH (p:Person)-[r:KNOWS*1..3]->(q:Person) RETURN r",
+			want:  ResolvedList{Element: knows},
+		},
+		{
+			name:  "optional var-length multi candidate",
+			query: "MATCH (p:Person) OPTIONAL MATCH (p)-[r:AUTHORED|LIKES*1..3]->(post:Post) RETURN r",
+			want:  ResolvedList{Element: authoredOrLikes, Nullable: true},
+		},
+		{
+			name:  "mandatory var-length multi candidate",
+			query: "MATCH (p:Person)-[r:AUTHORED|LIKES*1..3]->(post:Post) RETURN r",
+			want:  ResolvedList{Element: authoredOrLikes},
+		},
+		{
+			// No list, so the bit stays where it always was.
+			name:  "optional single hop single candidate",
+			query: "MATCH (p:Person) OPTIONAL MATCH (p)-[r:KNOWS]->(q:Person) RETURN r",
+			want:  ResolvedEdge{EdgeKey: knows.EdgeKey, Nullable: true},
+		},
+		{
+			name:  "optional single hop multi candidate",
+			query: "MATCH (p:Person) OPTIONAL MATCH (p)-[r:AUTHORED|LIKES]->(post:Post) RETURN r",
+			want:  ResolvedEdgeUnion{EdgeKeys: authoredOrLikes.EdgeKeys, Nullable: true},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			got, err := resolve(tt.query)
+			s.Require().NoError(err, tt.query)
+			s.Require().Equal([]Column{{Name: "r", Type: tt.want}}, got, tt.query)
+		})
+	}
 }
 
 // TestANonWitnessEdgeSilencesItselfNotTheBinding pins that
@@ -4223,9 +4300,24 @@ var unionTypeArmRows = []unionTypeArmRow{
 		branch0: "property:STRING (not null)",
 	},
 	{
+		// The list carries a nullability note of its own, ahead of " of ", so
+		// the reader can tell the LIST's bit from its ELEMENT's. Both are here
+		// because both positions exist and each is spelled on both settings.
 		fixture: "union_list_element_mismatch.cypher",
-		failing: "list of edge Person-[AUTHORED]->Post (not null)",
-		branch0: "list of edge Person-[KNOWS]->Person (not null)",
+		failing: "list (not null) of edge Person-[AUTHORED]->Post (not null)",
+		branch0: "list (not null) of edge Person-[KNOWS]->Person (not null)",
+	},
+	{
+		// The only row whose two branches share an element outright: one
+		// var-length KNOWS binding under OPTIONAL MATCH and one not, so the
+		// LIST's own note is the whole of the difference. It is what holds
+		// both halves of that bit — resolvedTypeEqual comparing the list's
+		// Nullable, and describeColumnType spelling it — because dropping
+		// either makes the two renderings identical and the collision check
+		// fires.
+		fixture: "union_var_length_binding_optionality_mismatch.cypher",
+		failing: "list (nullable) of edge Person-[KNOWS]->Person (not null)",
+		branch0: "list (not null) of edge Person-[KNOWS]->Person (not null)",
 	},
 }
 

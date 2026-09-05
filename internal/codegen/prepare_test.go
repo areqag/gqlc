@@ -476,6 +476,63 @@ func TestEdgeUnionCandidatesMustCarryDistinctLabels(t *testing.T) {
 	}
 }
 
+// TestListColumnCarriesItsOwnNullability pins the list column's binding
+// optionality onto the Row the render layer reads. A var-length edge
+// binding under OPTIONAL MATCH is null as a whole when the pattern does
+// not match, and the decode path branches on Row.Nullable alone: drop the
+// bit here and the emitted body refuses the very null the query asked
+// for. The mandatory rows are the control — the same column with the bit
+// clear must stay non-nullable.
+func TestListColumnCarriesItsOwnNullability(t *testing.T) {
+	sch, fwd, wrote, _ := sharedEdgeLabelFixture()
+
+	tests := []struct {
+		name   string
+		column resolver.ResolvedType
+		want   bool
+	}{
+		{
+			name:   "optional list of edge",
+			column: resolver.ResolvedList{Element: resolver.ResolvedEdge{EdgeKey: fwd}, Nullable: true},
+			want:   true,
+		},
+		{
+			name:   "mandatory list of edge",
+			column: resolver.ResolvedList{Element: resolver.ResolvedEdge{EdgeKey: fwd}},
+			want:   false,
+		},
+		{
+			name:   "optional list of edge union",
+			column: resolver.ResolvedList{Element: resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{fwd, wrote}}, Nullable: true},
+			want:   true,
+		},
+		{
+			name:   "mandatory list of edge union",
+			column: resolver.ResolvedList{Element: resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{fwd, wrote}}},
+			want:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := codegen.Input{
+				Schema: sch,
+				Queries: []codegen.NamedQuery{{
+					Name:        "GetAction",
+					Cardinality: queryfile.CardinalityOne,
+					SourceText:  "MATCH (x:Person) OPTIONAL MATCH (x)-[r:LIKES*1..3]->(y:Post) RETURN r",
+					Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "r", Type: tt.column}}},
+				}},
+			}
+			prepared, err := codegen.Prepare(in, stubTypeMap{}, "")
+			require.NoError(t, err)
+			require.Len(t, prepared.Queries, 1)
+			require.Len(t, prepared.Queries[0].RowFields, 1)
+			require.Equal(t, codegen.ColumnList, prepared.Queries[0].RowFields[0].Kind)
+			require.Equal(t, tt.want, prepared.Queries[0].RowFields[0].Nullable, "Row.Nullable")
+		})
+	}
+}
+
 // TestEdgeUnionInterfaceNamesMustNotCoincideAcrossQueries pins source 6
 // of the identifier sweep in the words the caller reads. The interface
 // name derives from author text on both halves — the query's method name

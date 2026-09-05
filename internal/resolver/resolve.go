@@ -483,7 +483,10 @@ func describeColumnType(t ResolvedType) string {
 	case ResolvedProperty:
 		return v.String() + nullabilityNote(v.Nullable)
 	case ResolvedList:
-		return v.String() + " of " + describeColumnType(v.Element)
+		// The list's own note goes BEFORE " of ", so each note sits against
+		// the position it qualifies. Trailing it would put two notes in a row
+		// with nothing to say which is the list's and which the element's.
+		return v.String() + nullabilityNote(v.Nullable) + " of " + describeColumnType(v.Element)
 	default:
 		return t.String()
 	}
@@ -541,7 +544,7 @@ func resolvedTypeEqual(a, b ResolvedType) bool {
 		return ok && aa == bb
 	case ResolvedList:
 		bb, ok := b.(ResolvedList)
-		return ok && resolvedTypeEqual(aa.Element, bb.Element)
+		return ok && aa.Nullable == bb.Nullable && resolvedTypeEqual(aa.Element, bb.Element)
 	case ResolvedUnknown:
 		_, ok := b.(ResolvedUnknown)
 		return ok
@@ -2124,7 +2127,7 @@ func unify(a, b ResolvedType) (ResolvedType, bool) {
 		if !ok {
 			return nil, false
 		}
-		return ResolvedList{Element: el}, true
+		return ResolvedList{Element: el, Nullable: aa.Nullable}, true
 	case ResolvedNode:
 		bb, ok := b.(ResolvedNode)
 		if !ok || bb.Labels != aa.Labels {

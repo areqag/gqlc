@@ -57,6 +57,15 @@ MATCH (s:Scalar)-[e:Edgy|Edgier]->(l:Listy) RETURN e AS e
 //                             pattern (resolveType refuses list-of-nodes
 //                             projection as out of R0 scope, and nodes(p)
 //                             needs a path binding the resolver refuses).
+//   OptionalVarLengthEdgeColumn
+//                             writeListColumnDecodeIndent's nullable arm
+//                             over a list the QUERY made optional. The
+//                             arm was reachable before only from a
+//                             nullable schema list PROPERTY; a var-length
+//                             binding under OPTIONAL MATCH is the shape
+//                             that carries binding optionality, and it
+//                             reached codegen with the bit dropped
+//                             (gqlc-lgbjy).
 //   VarLengthEdgeUnionColumn  walkListElemBody's ColumnEdgeUnion case,
 //                             which dispatches on the wire label per
 //                             element, default arm included.
@@ -76,6 +85,9 @@ MATCH (s:Scalar) OPTIONAL MATCH (s)-[e:Edgy|Edgier]->(l:Listy) RETURN s AS s, e 
 
 // name: VarLengthEdgeColumn :many
 MATCH (s:Scalar)-[e:Edgy*1..3]->(l:Listy) RETURN e AS e
+
+// name: OptionalVarLengthEdgeColumn :many
+MATCH (s:Scalar) OPTIONAL MATCH (s)-[e:Edgy*1..3]->(l:Listy) RETURN e AS e
 
 // name: VarLengthEdgeUnionColumn :many
 MATCH (s:Scalar)-[e:Edgy|Edgier*1..3]->(l:Listy) RETURN e AS e

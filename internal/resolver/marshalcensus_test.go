@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/resolver"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 // resolvedTypeInterface is the one interface nonZero knows how to inhabit.
@@ -139,6 +140,50 @@ func TestMarshalJSONEmitsEveryDeclaredField(t *testing.T) {
 						"short, so this field is invisible to the corpus sweep's accept digest and to "+
 						"the validated goldens. Emitted: %s", name, tag, name, raw)
 			}
+		})
+	}
+}
+
+// TestResolvedListMarshalsItsOwnNullability holds the VALUE of the one
+// field gqlc-lgbjy added, which the census above cannot see.
+//
+// The census is a census of NAMES. Deleting `Nullable: r.Nullable` from
+// the value literal while leaving the field in the anonymous struct still
+// emits "nullable", now always false, and the census demands the key and
+// passes. The wire's only other readers regenerate: measured, that mutant
+// reddens the package and then goes ENTIRELY GREEN once the goldens and
+// the sweep manifest are rebuilt with the commands their own failures
+// print. So without this, a var-length binding's optionality could be
+// dropped from the wire by a regeneration and nothing would say so —
+// which is this bead's own defect, one level down.
+//
+// It is a local test rather than a second direction on the census because
+// the same hole is open on four sibling variants and closing it for all
+// of them is one census extension, not five local tests: bd gqlc-xpwox.
+func TestResolvedListMarshalsItsOwnNullability(t *testing.T) {
+	elem := resolver.ResolvedEdge{EdgeKey: schema.EdgeKey{
+		Source: "Person", KeyLabels: "KNOWS", Target: "Person",
+	}}
+	for _, tt := range []struct {
+		name string
+		in   resolver.ResolvedList
+		want bool
+	}{
+		{"nullable", resolver.ResolvedList{Element: elem, Nullable: true}, true},
+		{"mandatory", resolver.ResolvedList{Element: elem}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(tt.in)
+			require.NoError(t, err)
+
+			var got struct {
+				Nullable *bool `json:"nullable"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &got))
+			require.NotNilf(t, got.Nullable,
+				"ResolvedList.MarshalJSON emitted no \"nullable\" key at all: %s", raw)
+			require.Equalf(t, tt.want, *got.Nullable,
+				"ResolvedList.MarshalJSON carried the wrong nullability onto the wire: %s", raw)
 		})
 	}
 }

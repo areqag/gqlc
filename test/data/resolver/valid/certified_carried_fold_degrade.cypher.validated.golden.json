@@ -6,7 +6,8 @@
         "kind": "list",
         "element": {
           "kind": "unknown"
-        }
+        },
+        "nullable": false
       },
       "groupingKey": false
     }

@@ -1068,7 +1068,7 @@ func (s *scope) unifiedRefPropertyType(refs []query.Ref, sch schema.Schema) (Res
 func fillLeaf(t, leaf ResolvedType, underList bool) ResolvedType {
 	switch tt := t.(type) {
 	case ResolvedList:
-		return ResolvedList{Element: fillLeaf(tt.Element, leaf, true)}
+		return ResolvedList{Element: fillLeaf(tt.Element, leaf, true), Nullable: tt.Nullable}
 	case ResolvedUnknown:
 		if underList {
 			return leaf
@@ -1143,14 +1143,22 @@ func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedTyp
 	edgeNullable := s.nullableBinding[ref.Variable]
 
 	if ref.Property == "" {
+		// A var-length binding is a LIST, and binding optionality is the
+		// list's own rather than its elements'. An unmatched OPTIONAL pattern
+		// binds the whole list to null; the elements of a path that did match
+		// are edges and are never individually null.
+		elemNullable := edgeNullable
+		if varLength {
+			elemNullable = false
+		}
 		var element ResolvedType
 		if singleCand {
-			element = ResolvedEdge{EdgeKey: s.edgeKeys[ref.Variable], Nullable: edgeNullable}
+			element = ResolvedEdge{EdgeKey: s.edgeKeys[ref.Variable], Nullable: elemNullable}
 		} else {
-			element = ResolvedEdgeUnion{EdgeKeys: cands, Nullable: edgeNullable}
+			element = ResolvedEdgeUnion{EdgeKeys: cands, Nullable: elemNullable}
 		}
 		if varLength {
-			return ResolvedList{Element: element}, nil
+			return ResolvedList{Element: element, Nullable: edgeNullable}, nil
 		}
 		return element, nil
 	}

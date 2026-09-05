@@ -12,7 +12,8 @@
             "target": "Person"
           },
           "nullable": false
-        }
+        },
+        "nullable": false
       },
       "groupingKey": false
     }
