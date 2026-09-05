@@ -1306,12 +1306,24 @@ send_line_to_pane() { # <target> <text> -> 0 submitted per the box, 1 refused or
     # acting on the pane, and reports "not empty" for everything it cannot
     # establish, so the refusal below still fires on every state that reached it
     # before.
+    #
+    # THIS REFUSAL NAMES NO PANE STATE, because rc 1 is four exits and only one
+    # of them — the real draft, restored to what it held — leaves the pane as it
+    # was found. It used to say "the draft is untouched" on all four. On the
+    # Backspace-failure exit km's own probe character is positively still in that
+    # composer, and seat_composer_empty says exactly that on the line immediately
+    # above: two adjacent contradicting sentences in one operator's terminal, and
+    # the false one is the clause that tells a reader a retry is free. It also
+    # collapsed that function's "a draft, OR unknown" into an observation. rc
+    # cannot carry the difference and splitting it is a change to
+    # seat_composer_empty's contract, so the sentence stops asserting what it did
+    # not observe and points at the account that did (bd gqlc-v7rdp).
     one=$(box_one_line "$box")
     if [ -n "$one" ]; then
         proberc=0
         seat_composer_empty "$pane" "$one" || proberc=$?
         if [ "$proberc" -ne 0 ]; then
-            echo "km: send to $seat (pane $pane): the composer holds a draft — probed, not read off the screen — and typing appends, so this would be pasted onto the end of it and submitted as one message; nothing was sent and the draft is untouched (bd gqlc-6bnkw)" >&2
+            echo "km: send to $seat (pane $pane): the composer did not probe empty — it holds a draft, or km could not establish what it holds — and typing appends, so this would be pasted onto the end of it and submitted as one message; nothing was sent. Whether the probe left the pane as it found it is its own account, above where it has one; read the pane before sending again (bd gqlc-6bnkw, gqlc-v7rdp)" >&2
             return 1
         fi
     fi
