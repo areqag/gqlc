@@ -862,6 +862,22 @@ func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 //
 // Depth 0 is unsuffixed because spec §5.5 spells out the loop a
 // single-level list column emits.
+//
+// Only the ACCUMULATOR's suffix is load-bearing for the compiler, which
+// is narrower than this function's blanket name suggests. Measured
+// 2026-09-05 by fixing one name at a time and building the corpus, whose
+// deepest fixture is valid/list_list_list_int:
+//
+//	innerAcc fixed -> BREAKS, `cannot use innerAcc (variable of type
+//	                  []int64) as int64 value in argument to append`
+//	inner    fixed -> compiles and vets
+//	elem     fixed -> compiles and vets
+//
+// The other two shadow harmlessly, because each nesting level's body is
+// its own block and everything downstream of the shadow wants the inner
+// binding anyway. They are still suffixed, and should stay so: all three
+// rows moved five goldens, so the committed corpus reds on any of them
+// and readability is the reason, not compilation.
 func elemLocal(name string, depth int) string {
 	if depth == 0 {
 		return name
@@ -973,6 +989,18 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: unexpected relationship type %%q\", %q, i, rel.Type)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	case codegen.ColumnList:
 		// Nested list: type-assert to []any, then recurse.
+		//
+		// `ok` is fixed while the two locals beside it are suffixed, and
+		// the asymmetry is safe for a reason worth stating: a nested
+		// list's loop is emitted inside the enclosing loop's BODY, so
+		// every declaration here lands in a fresh block. A repeated `ok`
+		// shadows rather than redeclares, and `:=`'s one-new-name rule —
+		// which binds only within a single block — is never reached.
+		// gqlc-w1xz expected the opposite, that dropping the suffix on
+		// `inner` would emit `no new variables on left side of :=`. It
+		// does not: measured on the whole corpus, that emission compiles
+		// and vets clean. See elemLocal for which suffix does carry
+		// weight.
 		inner := elemLocal("inner", depth+1)
 		innerAcc := elemLocal("innerAcc", depth+1)
 		fmt.Fprintf(b, "%s%s, ok := %s.([]any)\n", indent, inner, iterVar)
