@@ -29,6 +29,17 @@ commit after the PR merges -- so it passes, names the numbers going unheld,
 and annotates the check run with them (bd gqlc-7i3g). Refusing is for a claim
 the author can withdraw; naming is for one nobody can currently verify.
 
+The export is not the only place the mapping can live, though, and that
+neighbour is now smaller than it was. .githooks/bd-gh-sync plants a
+'bd-mirror: <bead-id>' comment on each mirror it mints, so a bead too new for
+the export can still be held against its own number by asking GitHub for the
+comments on the number the body claims (bd gqlc-gxcf7). Where that recovers
+the mapping the run continues into the ordinary extras check and can refuse;
+where it does not, the skip above is what happens, and it says which of the
+two it looked at. The recovery is fail-open in every direction -- no marker,
+several markers, no network, no `gh` -- because its absence is the state the
+whole of that neighbour was written for.
+
 A closing keyword the body's own bead does not mirror is refused on both the
 demand and the opt-out path, rather than the bead's own number being looked
 for and the rest of the body left unread. GitHub acts on every one of them at
@@ -106,7 +117,9 @@ annotation, which GitHub attaches to the check run itself.
 Exits 0 (pass) or 1 (fail with diagnostic).
 """
 import json
+import os
 import re
+import subprocess
 import sys
 from typing import NoReturn
 
@@ -268,6 +281,26 @@ GH_CLOSES = re.compile(
 )
 ISSUE_N = re.compile(r"/issues/(\d+)$")
 HASH_N = re.compile(r"#(\d+)")
+# The mirror marker .githooks/bd-gh-sync posts as the first comment on every
+# issue it mints. Anchored at both ends of a line, because a comment quoting
+# the marker mid-sentence is discussing it rather than being it -- and a PR
+# about this gate is exactly where such a comment gets written.
+#
+# '\s*$' rather than '$': GitHub stores comment bodies with CRLF line endings,
+# so the line the hook wrote as 'bd-mirror: gqlc-x\n' comes back through
+# `gh api` as 'bd-mirror: gqlc-x\r\n'. Without the '\s*' the trailing '\r' is
+# a character the id charset does not admit, no line matches, and every marker
+# reads as absent -- a fail-open that would leave this whole path inert while
+# every row of a fixture suite written with Unix endings stayed green.
+#
+# The id charset is bd-gh-sync's own gate on an id it will pass to the shell,
+# minus the leading-dash case, which cannot arise after 'bd-mirror: '.
+MIRROR_MARKER = re.compile(r"(?m)^bd-mirror:[ \t]*([A-Za-z0-9._-]+)\s*$")
+# How many of a body's closing numbers are looked up before the marker search
+# gives up. A body closing more numbers than this is not the case this path is
+# for; the cap is what stops a body full of numbers from spending an API call
+# on each one.
+MARKER_LOOKUP_CAP = 10
 
 
 def refuse(headline, *detail) -> NoReturn:
@@ -333,6 +366,60 @@ def load_bead(jsonl_path, bead_id):
             if d.get("id") == bead_id:
                 return d
     return None
+
+
+def mirror_marker_bead(n):
+    """The bead id issue #n's mirror marker names, or None.
+
+    The export's answer to "which bead does this issue mirror" is the one
+    load_bead() reads, and it is the one that goes stale: the export is a
+    committed file landing after the PR it would have held. This asks the
+    issue instead, which cannot be stale, because .githooks/bd-gh-sync writes
+    the marker in the same run that mints the mirror.
+
+    None on every failure, and the callers treat None as "the export was the
+    only source and it did not have it", which is the behaviour this path had
+    before markers existed. That is not defensiveness for its own sake -- an
+    unmarked mirror is the ordinary state of every issue minted before
+    gqlc-gxcf7 landed, and of any issue whose minting run died between the
+    push and the comment. So there is no configuration in which raising here
+    would be reporting a fault: it would be reporting history.
+
+    Several distinct ids is also None. Two markers on one issue is a claim
+    this cannot adjudicate, and picking either would hold a PR's number
+    against a bead nobody can show it belongs to.
+
+    A PR author can post a marker comment by hand and be believed. That is
+    accepted rather than overlooked: this is a hygiene gate against a wrong
+    number, in a repository every citizen can already push to, and it holds
+    nothing an author could not have got by writing the right number in the
+    first place. It is not a security boundary and must not be cited as one.
+    """
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not repo:
+        return None
+    try:
+        r = subprocess.run(
+            [
+                "gh",
+                "api",
+                f"repos/{repo}/issues/{n}/comments",
+                "--paginate",
+                "--jq",
+                ".[].body",
+            ],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # No `gh` on PATH, and a timeout, which is SubprocessError's.
+        return None
+    if r.returncode != 0:
+        return None
+    body = r.stdout.decode("utf-8", "replace")
+    ids = set(MIRROR_MARKER.findall(body))
+    return ids.pop() if len(ids) == 1 else None
 
 
 def comments_blanked(text):
@@ -835,6 +922,39 @@ def avowed_numbers(body):
     return avowed
 
 
+def refuse_extras(pr_body, bead_id, expected_n, extra) -> NoReturn:
+    """The refusal for closing keywords beyond the bead's own number.
+
+    A function rather than a block, because two paths reach it with the same
+    facts and must answer them identically: the ordinary one, where the export
+    supplied expected_n, and the absent-bead one, where a mirror marker did
+    (bd gqlc-gxcf7). Identical is the whole property -- the marker path exists
+    to make a fresh bead's PR checked the way an old bead's PR is, so a second
+    copy of this text drifting by one sentence would make the two paths
+    answerable to different rules while every test of either stayed green.
+    """
+    refuse(
+        f"the PR body also closes #{', #'.join(extra)}, which "
+        f"{bead_id} does not mirror.",
+        f"{bead_id} mirrors #{expected_n}, the body closes it, and that "
+        "much is",
+        "what this gate demanded. The numbers above are the ones it "
+        "demanded",
+        "nothing of: a closing keyword is GitHub's to act on at merge, "
+        "so each",
+        "of them closes an issue with nothing left here to hold the "
+        "number",
+        "against.",
+        "Drop the keyword for any issue this PR does not resolve.",
+        "If that issue is done, close it by hand; if it is not, give it "
+        "its own",
+        "bead and PR.",
+        *avowal_advice(pr_body, extra),
+        "Editing the body re-runs this check on its own; you do",
+        "not need to push a commit or reopen the PR.",
+    )
+
+
 def avowal_advice(pr_body, extra):
     """The closing lines of a refusal over `extra`, as detail arguments.
 
@@ -1032,6 +1152,68 @@ def main():
         # overstate what this run did.
         unheld = list(dict.fromkeys(GH_CLOSES.findall(claimable_prose(pr_body))))
         if unheld:
+            # The export could not supply this bead's number, so ask each
+            # number the body claims whether it says it mirrors this bead (bd
+            # gqlc-gxcf7). A hit recovers exactly what the export would have
+            # given -- expected_n -- and the run continues into the ordinary
+            # tail below, refusals included.
+            #
+            # Looked up in the body's own order and stopped at the first hit:
+            # a mirror carries the marker of one bead, so a second hit is not
+            # a thing a correct ledger can produce, and searching on past the
+            # answer would only spend API calls to find that out.
+            marker_says = {}
+            expected_n = None
+            for n in unheld[:MARKER_LOOKUP_CAP]:
+                marker_says[n] = mirror_marker_bead(n)
+                if (marker_says[n] or "").lower() == bead_id.lower():
+                    expected_n = n
+                    break
+
+            if expected_n is not None:
+                print(
+                    "::notice title=check-pr-closes marker::"
+                    f"{bead_id} is not in the export at this commit, but "
+                    f"issue #{expected_n} carries a mirror marker naming it, "
+                    "so the number was checked against the bead after all."
+                )
+                # No membership test: expected_n came out of the body, so the
+                # body closes it by construction. What is left is the half a
+                # membership test never covered -- every OTHER number the body
+                # closes (bd gqlc-7i3g) -- and it is the same call the
+                # fresh-export path makes, on the same function, so an extra
+                # is refused here on the terms it is refused there.
+                extra = extra_closes(pr_body, expected_n)
+                if extra:
+                    refuse_extras(pr_body, bead_id, expected_n, extra)
+                print(f"[check-pr-closes] {bead_id} -> Closes #{expected_n} (ok)")
+                sys.exit(0)
+
+            # No marker named this bead. Still a pass, and still for the
+            # reason the whole exit exists -- nothing the author writes puts
+            # their bead in the committed export, and an unmarked mirror is
+            # the ordinary state of every issue minted before markers existed.
+            # What changes is that the warning now reports what was looked at,
+            # so a wrong number is legible as one rather than arriving inside
+            # a sentence that reads the same however wrong the body is.
+            looked = []
+            for n in unheld[:MARKER_LOOKUP_CAP]:
+                other = marker_says.get(n)
+                if other:
+                    looked.append(
+                        f"#{n} carries a mirror marker for {other}, not "
+                        f"{bead_id} - likely a wrong number"
+                    )
+                else:
+                    looked.append(
+                        f"no mirror marker on #{n} (minted before markers "
+                        "existed, or a wrong number)"
+                    )
+            if len(unheld) > MARKER_LOOKUP_CAP:
+                looked.append(
+                    f"the remaining {len(unheld) - MARKER_LOOKUP_CAP} "
+                    "number(s) were not looked up"
+                )
             # One number is the common case here, so the verb agrees with the
             # count rather than reading "#901 close at merge" at the exact
             # moment the line is asking someone to act on it.
@@ -1039,13 +1221,15 @@ def main():
             verb = "closes" if len(unheld) == 1 else "close"
             print(
                 "::warning title=check-pr-closes unverified::"
-                f"{bead_id} is not in the export at this commit, so this "
-                f"check held nothing against it. {numbers} {verb} at merge "
+                f"{bead_id} is not in the export at this commit and no "
+                f"mirror marker names it, so this check held nothing against "
+                f"it: {'; '.join(looked)}. {numbers} {verb} at merge "
                 "unexamined - confirm by hand before merging."
             )
             print(
-                f"[check-pr-closes] bead {bead_id!r} not in export - "
-                f"skipping; {numbers} {verb} at merge with no bead holding "
+                f"[check-pr-closes] bead {bead_id!r} not in export and no "
+                f"mirror marker names it - skipping; {numbers} {verb} at "
+                "merge with no bead holding "
                 + ("it" if len(unheld) == 1 else "them")
             )
             sys.exit(0)
@@ -1066,16 +1250,23 @@ def main():
         # with nothing red on the PR, in this log, or on the issue.
         #
         # This does NOT restore the demand, and must not be read as doing so.
-        # The demand needs the bead's mirror NUMBER, which lives in the export
-        # this run has already failed to find the bead in — and it is not
-        # recoverable from the id either: a mirror issue does not contain the id
-        # of the bead it mirrors, so asking GitHub for one returns the beads
-        # that CITE it. Measured 2026-09-03 on this incident's own pair —
-        # searching gqlc-2cmhl returns issues #2040, #2031, #2032 and PR #2029,
-        # while its actual mirror #2016 contains the string zero times, so a
-        # gate built that way would have demanded `Closes #2040` here. What is
-        # reported instead is the author's own claim read back to them, which
-        # needs no mapping at all.
+        # The demand needs the bead's mirror NUMBER, and no number is
+        # recoverable HERE: the branch above reaches the marker lookup because
+        # the body named a number to ask about, and this branch is the one
+        # where it named none. What is reported instead is the author's own
+        # claim read back to them, which needs no mapping at all.
+        #
+        # Searching GitHub for the bead id is what that lookup is not, and the
+        # measurement is why. A mirror issue minted before gqlc-gxcf7 does not
+        # contain the id of the bead it mirrors, so asking GitHub for one
+        # returns the beads that CITE it: measured 2026-09-03 on this
+        # incident's own pair, searching gqlc-2cmhl returns issues #2040,
+        # #2031, #2032 and PR #2029, while its actual mirror #2016 contains the
+        # string zero times, so a gate built that way would have demanded
+        # `Closes #2040` here. That remains true of every mirror that predates
+        # the marker. A marked mirror does now contain its bead's id — but it
+        # is fetched BY NUMBER, from a number the body supplied, so no search
+        # is involved and this measurement is not weakened by it.
         #
         # A warning and not a refusal, deliberately. gqlc-2cmhl was filed
         # because this file REFUSED over a keyword inside backticks in
@@ -1103,6 +1294,19 @@ def main():
                 f"code and {'closes' if one else 'close'} nothing at merge"
             )
             sys.exit(0)
+        # The last absent-bead exit, and until bd gqlc-gxcf7 the only one with
+        # no annotation at all. It is the quietest pass this file has -- the
+        # bead could not be checked AND the body claims nothing -- so from the
+        # check UI it was indistinguishable from the gate not having run.
+        # Nothing here is wrong and nothing is being asked of anybody; the
+        # annotation exists so that no absent-bead exit is invisible, which is
+        # the half of gqlc-ibg46 the warnings above do not reach.
+        print(
+            "::notice title=check-pr-closes unverified::"
+            f"{bead_id} is not in the export at this commit, so this check "
+            "held nothing against it. The body claims nothing that closes at "
+            "merge, so there is nothing going unheld either."
+        )
         print(f"[check-pr-closes] bead {bead_id!r} not in export - skipping")
         sys.exit(0)
 
@@ -1219,26 +1423,7 @@ def main():
     # keyword in the body reached merge unexamined.
     extra = extra_closes(pr_body, expected_n)
     if extra:
-        refuse(
-            f"the PR body also closes #{', #'.join(extra)}, which "
-            f"{bead_id} does not mirror.",
-            f"{bead_id} mirrors #{expected_n}, the body closes it, and that "
-            "much is",
-            "what this gate demanded. The numbers above are the ones it "
-            "demanded",
-            "nothing of: a closing keyword is GitHub's to act on at merge, "
-            "so each",
-            "of them closes an issue with nothing left here to hold the "
-            "number",
-            "against.",
-            "Drop the keyword for any issue this PR does not resolve.",
-            "If that issue is done, close it by hand; if it is not, give it "
-            "its own",
-            "bead and PR.",
-            *avowal_advice(pr_body, extra),
-            "Editing the body re-runs this check on its own; you do",
-            "not need to push a commit or reopen the PR.",
-        )
+        refuse_extras(pr_body, bead_id, expected_n, extra)
 
     # Correct number present, and it is the only one the body closes
     print(f"[check-pr-closes] {bead_id} -> Closes #{expected_n} (ok)")
