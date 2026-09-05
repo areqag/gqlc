@@ -2142,6 +2142,54 @@ by mail that its cause is over (gqlc-ozfr). A walled town cannot hear anything,
 and waking Սեդրակ into a wall freezes the one seat the whole recovery chain
 routes through.
 
+## ladder_evidence — the terminal rung's account of the seat, rendered once for two readers
+
+(`kingdom/bin/km`, `ladder_evidence`)
+
+This was fifteen lines of prose inlined in the mail rung's `-m`, and it was
+the only account the ladder ever gave of why it stopped: the trigger, the
+slot the seat is holding, its unread count, the age of the last delivered
+ask, the last refusal, and whether any ask went unwitnessed. That list is
+the evidence, and it does not depend on who reads it — so when a second
+terminal rung appeared that reaches a bead rather than an inbox
+(`cmd_dispatch-7a`), the body had to stop being a property of the letter.
+
+It is a function rather than a variable because it shells out — `stat` on
+the nudge marker, `seat_agent_status`, `cfg concurrency max_active` — and
+the cap arm is reached at most once per seat per pass, so there is nothing
+to amortise.
+
+The extraction is byte-for-byte: the letter a non-sedrak seat's escalation
+renders under this function is diffed against the letter master renders for
+the same scenario, and they are identical. That is the whole claim being
+made here, and it is the one worth a regression test, because a rewrite of
+shared prose is exactly where a "harmless" reflow silently changes what the
+mayor is told (bd gqlc-bwmst).
+
+## ladder_escalate_bead — the other terminal rung, for when the ladder's only recipient is its subject
+
+(`kingdom/bin/km`, `ladder_escalate_bead`)
+
+Files the bead the letter would have been. Unassigned and with no `class:`
+label, so it routes to a Ռազմիկ by inference and the seat woken for it IS
+the remedy — a bead addressed to Սեդրակ would reproduce the defect it
+exists to fix. `-p 1` because the subject is holding a `max_active` slot
+while answering no pass, and the fresh pass has a `max_priority` floor that
+a lower number could sit under.
+
+Three return codes, because "filed" and "routed" are different claims and
+the caller must be able to say which one it has. 0 is filed AND on the
+ready queue; 2 is filed but the queue could not be shown to hold it; 1 is
+refused, nothing written. The readback through `bd ready` is the same
+standard the mail rung is held to in `cmd_dispatch-7`: a bead can be
+created and still reach no pass, and the fresh pass reads the ready queue,
+not the ledger — so `bd create` exiting 0 is an attempt, not a delivery.
+
+The id is parsed out of `bd create`'s human line rather than taken on
+trust. An exit of 0 with no id in the output is code 2 and not 0: the
+caller can still write a marker (something was probably filed) but must not
+claim a routable bead by name it never read.
+
 ## cmd_dispatch — read the world before anything is counted or chosen
 
 (`kingdom/bin/km`, `cmd_dispatch`)
@@ -2303,6 +2351,39 @@ marker and restores the permanent silence this code exists to end.
 A read by Սեդրակ racing between the two counts reports UNDELIVERED
 for a mail that did land; the cost is one retried escalation on the
 next pass, which is the direction to be wrong in.
+
+## cmd_dispatch-7a — a letter about Սեդրակ goes to Սեդրակ, so the subject branch files a bead
+
+(`kingdom/bin/km`, `cmd_dispatch`)
+
+The rung above mails Սեդրակ unconditionally, and the one case where that is
+guaranteed useless is the one it cannot see: when the exhausted seat IS
+Սեդրակ. The letter lands in the box its own subject is not draining. Worse,
+it lands SUCCESSFULLY — the unread count rises, which is exactly the witness
+`cmd_dispatch-7` demands, so the arm reads DELIVERED, writes the marker, and
+suppresses every retry for the episode. The mayor's mail wake cannot rescue
+it either: that fires only when sedrak is NOT awake, and this seat is awake
+by definition of the arm it reached. Measured over 48h on 2026-09: 17
+escalation letters, two of them sedrak-about-sedrak, inside a 46-hour freeze
+(bd gqlc-bwmst, filed by Արթուր).
+
+So the branch is on the SUBJECT, not on the state of the mayor's box. That
+is the narrow form the bead asked for and the widest one that is obviously
+right. Whether a boxed-but-not-subject Սեդրակ should also take the bead rung
+is a live design question and is deliberately not answered here — that arm
+would branch on a pane read rather than on a seat name, and it can be wrong
+in a direction this one cannot.
+
+Mail is not the fallback when `bd create` refuses. The `*)` arm writes NO
+marker and says UNFILED, so the next pass retries: a letter is not a
+degraded bead here, it is the defect. The `2)` arm does write the marker,
+because the bead exists — refiling it every two minutes would fill the
+ready queue with duplicates of a bead that is already there.
+
+The marker's CONTENT is what distinguishes the two rungs afterwards, and the
+report line reads it back. An empty marker means a letter, which is both the
+old shape and what every marker already on disk in the town holds — state
+outlives a deploy, so the empty case cannot be treated as malformed.
 
 ## cmd_dispatch-8 — one delivered ask per run, because the cohort that went down comes back together
 

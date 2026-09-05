@@ -3002,6 +3002,60 @@ wall_guard() { # -> 0 carry on with the pass, 1 the town is walled and this pass
     return 1
 }
 
+# history: kingdom/brain/km-notes.md#ladder_evidence
+ladder_evidence() { # <seat> <trigger> <stalled-age> <unread> <cap> — what a terminal rung reports
+    local s=$1 trigger=$2 stalled_age=$3 pending=$4 cap=$5 h
+    h=$(seat_home "$s")
+    cat <<EOF
+Trigger: $trigger — $([ "$trigger" = idle ] && echo "her agent reports idle and she is sitting at an empty prompt" || echo "no tool call has FINISHED in her session for $(fmt_age "$stalled_age"); her agent reports $(seat_agent_status "$s")")
+
+She is awake and holding one of $(cfg concurrency max_active) slots while answering no dispatch pass — every pass wakes ASLEEP seats only.
+
+Unread mail: $pending
+Last delivered ask: $(fmt_age "$(($(date +%s) - $(stat -c %Y "$h/idle-nudged" 2>/dev/null || date +%s)))") ago
+Last refusal: $(cat "$h/idle-refusal" 2>/dev/null || echo "none — no attempt in this episode was refused")
+Unwitnessed asks: $([ -f "$h/idle-unwitnessed" ] && echo "AT LEAST ONE, most recently $(fmt_age "$(($(date +%s) - $(stat -c %Y "$h/idle-unwitnessed")))") ago — typed and submitted, and then no transcript row of hers ever carried it. Read that as she may never have been asked at all, rather than as $cap asks ignored" || echo "none — every ask in this episode was typed, submitted, and then seen arriving in her transcript, so she has them and has not acted")
+
+An attempt km could not DELIVER counts here too, and that is the case worth reading the pane for: it means the machinery could not witness a place to type at all, which is what a covered pane looks like from outside.
+
+Nothing here ends a session and nothing should: a seat that has not asked to leave has not consented (VI.2). Read her pane before deciding. 'km sleep --seat $s' frees the slot if she is genuinely done; if her turn died mid-work, she needs a person, not another line of text.
+
+This counter clears by itself the moment one of her tool calls finishes — witnessed work, not a pane that merely looks different.
+EOF
+}
+
+# history: kingdom/brain/km-notes.md#ladder_escalate_bead
+ladder_escalate_bead() { # <seat> <trigger> <cap> <evidence> — id on stdout; rc 0 routable, 2 unverified, 1 unfiled
+    local s=$1 trigger=$2 cap=$3 evidence=$4 out id rc=0 ready
+    out=$(bd create "km ladder: $s is $trigger after $cap unanswered asks, and mail cannot say so" \
+        -p 1 \
+        -d "Filed by km dispatch's recovery ladder, which had nowhere to send this. Nobody is assigned and no class label is set, so this routes to a Ռազմիկ by inference: whoever is woken for it IS the remedy.
+
+WHY A BEAD AND NOT A LETTER. The ladder's terminal rung mails Սեդրակ, and Սեդրակ is the seat this one is ABOUT. Mail wakes exactly one seat in this town and it is his, so the letter would have been delivered to the unreachable seat it reports on, counted as delivered, and would then have suppressed every retry — the report of the mayor's unreachability, addressed to the unreachable mayor, marked done (bd gqlc-bwmst; kingdom/brain/playbooks/mail.md, 'When a letter goes unanswered').
+
+WHAT TO DO. Read his pane — that is the only thing that tells a dead turn from a finished day, and nothing here should end a session for him (VI.2). 'km status' names what his input box holds: a BOXED tag means every ask in this ladder was refused by construction, because send_line refuses to type into a non-empty composer, and no transport in this town can reach him until that box is cleared by a hand. Without that tag the pane is reachable and 'km wake $s --reason \"<text>\"' types, submits, and witnesses the box emptied.
+
+WHAT IS AT STAKE while this stands: he holds a slot against [concurrency] max_active, he answers no dispatch pass because every pass wakes ASLEEP seats only, and he is the seat that clears other seats' boxes — so the town's other recovery paths are down with him.
+
+$evidence" 2>&1) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        printf 'bd create refused: %s\n' "${out//$'\n'/ }" >&2
+        return 1
+    fi
+    id=$(printf '%s\n' "$out" | sed -n 's/.*Created issue: \([^ ]*\).*/\1/p' | head -1)
+    [ -n "$id" ] || {
+        printf 'bd create exited 0 and named no id: %s\n' "${out//$'\n'/ }" >&2
+        return 2
+    }
+    printf '%s\n' "$id"
+    # The DELIVERY, not the attempt — the same standard the mail rung is held to
+    # (km-notes#cmd_dispatch-7). Filed is not routed: a bead can be created and
+    # still reach no pass, and the fresh pass reads the ready queue.
+    ready=$(bd ready -n 0 --json 2>/dev/null) || return 2
+    jq -e --arg id "$id" 'any(.[]; .id == $id)' >/dev/null 2>&1 <<<"$ready" || return 2
+    return 0
+}
+
 cmd_dispatch() {
     # Above ensure_deployed, not below it: on a drifted tree ensure_deployed
     # deploys and then re-execs the deployed km with this argv, so a --help
@@ -3060,6 +3114,7 @@ cmd_dispatch() {
     local unwitnessed_marker
     local pending ask floor since cap tries before_unread
     local dry idle_now stalled_age trigger age nudge_err nudge_rc delivered=0
+    local evidence bead bead_rc how
     floor=$(cfg_minutes welfare renudge_after_minutes 30)
     cap=$(recover_cap)
     dry=$(status_stalled_after)
@@ -3089,7 +3144,16 @@ cmd_dispatch() {
         # with every board reading healthy. Only witnessed work clears it — the
         # branch above.
         if [ -f "$escalated_marker" ]; then
-            echo "dispatch: $s is awake and $([ -n "$stalled_age" ] && echo "has finished no tool call for $(fmt_age "$stalled_age")" || echo "idle"), ESCALATED to sedrak $(fmt_age "$(($(date +%s) - $(stat -c %Y "$escalated_marker")))") ago after $cap unanswered asks; not typing at her again this episode — read the pane"
+            # The marker names HOW the episode was escalated, because the two
+            # rungs reach different readers and only one of them is an inbox. An
+            # EMPTY marker is a letter: markers written before this line existed
+            # are on disk in the live town, and state outlives a deploy.
+            how=$(head -1 "$escalated_marker" 2>/dev/null || true)
+            case "$how" in
+                bead\ *) how="by $how" ;;
+                *) how="to sedrak" ;;
+            esac
+            echo "dispatch: $s is awake and $([ -n "$stalled_age" ] && echo "has finished no tool call for $(fmt_age "$stalled_age")" || echo "idle"), ESCALATED $how $(fmt_age "$(($(date +%s) - $(stat -c %Y "$escalated_marker")))") ago after $cap unanswered asks; not typing at her again this episode — read the pane"
             continue
         fi
         pending=$(unread_count "$s")
@@ -3137,26 +3201,33 @@ cmd_dispatch() {
         tries=$(cat "$attempts_file" 2>/dev/null || true)
         case "$tries" in '' | *[!0-9]*) tries=0 ;; esac
         if [ "$tries" -ge "$cap" ]; then
+            evidence=$(ladder_evidence "$s" "$trigger" "$stalled_age" "$pending" "$cap")
+            if [ "$s" = sedrak ]; then
+                # history: kingdom/brain/km-notes.md#cmd_dispatch-7a
+                bead_rc=0
+                bead=$(ladder_escalate_bead "$s" "$trigger" "$cap" "$evidence") || bead_rc=$?
+                case "$bead_rc" in
+                    0)
+                        printf 'bead %s\n' "$bead" >"$escalated_marker"
+                        echo "dispatch: ESCALATED $s BY BEAD $bead — mail cannot carry this one, because $s is both the ladder's only recipient and its subject; the bead is on the ready queue, so a seat is woken for it. Not typing at her again this episode"
+                        ;;
+                    2)
+                        printf 'bead %s\n' "${bead:-<unnamed>}" >"$escalated_marker"
+                        echo "dispatch: ESCALATED $s BY BEAD ${bead:-<unnamed>}, ROUTABILITY UNVERIFIED — bd created it and the ready queue could not be shown to hold it, so it may reach no dispatch pass at all. It is NOT refiled, because it exists; check it by hand ('bd ready -n 0'), and read $s's pane meanwhile"
+                        ;;
+                    *)
+                        echo "dispatch: ESCALATION UNFILED for $s — bd refused the bead (diagnosis above), so nothing was recorded and the next pass will try again; $s is at her $cap-ask cap and is not being typed at meanwhile. Mail is not the fallback here: a letter about $s goes to $s"
+                        ;;
+                esac
+                continue
+            fi
             # history: kingdom/brain/km-notes.md#cmd_dispatch-7
             before_unread=$(mail_unread_from sedrak andranik)
             if mail_send sedrak --from andranik \
                 -s "$s is $trigger after $cap unanswered asks" \
                 -m "km dispatch's recovery ladder spent $cap attempts on $s in one episode and got nothing back, so it has stopped and is telling you instead. It will not mail you about this episode again.
 
-Trigger: $trigger — $([ "$trigger" = idle ] && echo "her agent reports idle and she is sitting at an empty prompt" || echo "no tool call has FINISHED in her session for $(fmt_age "$stalled_age"); her agent reports $(seat_agent_status "$s")")
-
-She is awake and holding one of $(cfg concurrency max_active) slots while answering no dispatch pass — every pass wakes ASLEEP seats only.
-
-Unread mail: $pending
-Last delivered ask: $(fmt_age "$(($(date +%s) - $(stat -c %Y "$nudged_marker" 2>/dev/null || date +%s)))") ago
-Last refusal: $(cat "$refusal_file" 2>/dev/null || echo "none — no attempt in this episode was refused")
-Unwitnessed asks: $([ -f "$unwitnessed_marker" ] && echo "AT LEAST ONE, most recently $(fmt_age "$(($(date +%s) - $(stat -c %Y "$unwitnessed_marker")))") ago — typed and submitted, and then no transcript row of hers ever carried it. Read that as she may never have been asked at all, rather than as $cap asks ignored" || echo "none — every ask in this episode was typed, submitted, and then seen arriving in her transcript, so she has them and has not acted")
-
-An attempt km could not DELIVER counts here too, and that is the case worth reading the pane for: it means the machinery could not witness a place to type at all, which is what a covered pane looks like from outside.
-
-Nothing here ends a session and nothing should: a seat that has not asked to leave has not consented (VI.2). Read her pane before deciding. 'km sleep --seat $s' frees the slot if she is genuinely done; if her turn died mid-work, she needs a person, not another line of text.
-
-This counter clears by itself the moment one of her tool calls finishes — witnessed work, not a pane that merely looks different." \
+$evidence" \
                 && [ "$(mail_unread_from sedrak andranik)" -gt "$before_unread" ]; then
                 : >"$escalated_marker"
                 echo "dispatch: ESCALATED $s to sedrak — $cap asks in this episode changed nothing; not typing at her again this episode"
