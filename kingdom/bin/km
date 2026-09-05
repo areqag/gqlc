@@ -3018,7 +3018,7 @@ Unwitnessed asks: $([ -f "$h/idle-unwitnessed" ] && echo "AT LEAST ONE, most rec
 
 An attempt km could not DELIVER counts here too, and that is the case worth reading the pane for: it means the machinery could not witness a place to type at all, which is what a covered pane looks like from outside.
 
-Nothing here ends a session and nothing should: a seat that has not asked to leave has not consented (VI.2). Read her pane before deciding. 'km sleep --seat $s' frees the slot if she is genuinely done; if her turn died mid-work, she needs a person, not another line of text.
+Nothing here ends a session and nothing should: a seat that has not asked to leave has not consented (VI.2). Read her pane, then match the state. If her box holds text, no km transport reaches her and this report has no remedy — that path is decision 0012's (km release, once gqlc-hqxqc lands). If her turn died inside a usage wall, WAIT: the reset gives the session back and /exit would take it (decision 0013). If she is present and choosing to sit, speak to her on the record — 'km wake $s --reason "..."' — and her session stays hers. 'km sleep --seat $s' fits none of these: refused into a box, destructive across a wall, and not yours to run over a present citizen.
 
 This counter clears by itself the moment one of her tool calls finishes — witnessed work, not a pane that merely looks different.
 EOF
@@ -3178,7 +3178,7 @@ cmd_dispatch() {
             if [ "$pending" -gt 0 ]; then
                 ask="[km] you have $pending unread letter(s) — bd mail inbox, and km sleep when you are done for the day (it is what makes you reachable)"
             else
-                ask="[km] you are awake at an empty prompt with no unread mail: that holds one of the town's slots AND makes you unroutable, because every dispatch pass wakes asleep seats only. Pick up work, or run km sleep if you are done for the day. If you are waiting on a background task you started, carry on — this is a check-in, not a verdict"
+                ask="[km] you are awake at an empty prompt with no unread mail: that holds one of the town's slots AND makes you unroutable, because every dispatch pass wakes asleep seats only. Pick up work, or run km sleep if you are done for the day. If you are waiting on another citizen's answer, file the wait: a question bead assigned to them, a blocks dep on your held bead, then km sleep - the close of that bead is what wakes you. If you are waiting on a background task you started, carry on — this is a check-in, not a verdict"
             fi
         else
             # Self-reconciling, because the seat this reaches may have lost a

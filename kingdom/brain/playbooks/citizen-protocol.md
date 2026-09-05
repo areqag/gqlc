@@ -970,10 +970,33 @@ gqlc-n97e).
 
 `.githooks/claude-pre-ask` refuses those tools whenever `KINGDOM_SEAT` is
 set. The refusal is the protocol speaking, not an obstacle to route around.
-When you need someone else's judgment: write the question and its options
-onto the bead (`--append-notes`), mail whoever decides (unread mail wakes
-Սեդրակ; other seats read at their next wake), then sleep or carry on with
-other work. The answer is waiting at your next wake.
+
+**When you need someone else's judgment, FILE THE WAIT** (decision 0016).
+Do not stay awake for the answer, and do not leave the question in an inbox:
+
+1. `bd create` a **question bead** assigned to the decider, carrying the
+   question and its options in the description.
+2. `bd dep add <your-held-bead> <question-bead>` — your held bead depends on
+   (is blocked by) the question.
+3. If the decider is Սեդրակ, **also** send the letter: no dispatch pass routes
+   the mayor, and unread mail is his wake. For any worker decider the bead
+   alone suffices.
+4. `km sleep`, or carry on with other work you hold.
+
+Why that reaches you and mail does not. The resume pass selects in-progress
+beads with **zero open `blocks` dependencies**, so while your question stands
+you are not woken to rediscover that you are still waiting. The owned pass
+routes an assigned bead ahead of the priority floor, so the question reaches
+its decider whatever priority you gave it. And when the decider closes it,
+your held bead loses its blocker, re-enters the resume pass, and you are
+woken — **the close is the wake**, and no new machinery is involved in any of
+it. This is the review-bead precedent (step 8) generalised from reviews to
+every blocking wait.
+
+The failure it replaces: the old advice was to mail the decider and let "the
+answer wait at your next wake". Nothing wakes you when that answer comes. A
+non-mayor decider's reply sits unread for as long as you sleep — or you stay
+awake "waiting for mail" and hold a slot no dispatch pass can use.
 
 Waiting is not the cautious choice. In gqlc-n97e both options the seat was
 offering had been falsified by the time anyone could have answered — a late
@@ -985,6 +1008,10 @@ arrived at slowly.
 End your workday when your assignment is done, when you are blocked with
 nothing else assigned, or when you feel tired — Րաֆֆի may gently remind
 you, and the reminder is yours to act on when ready.
+
+Sleeping is what makes you REACHABLE, not what makes you absent: every
+dispatch pass wakes asleep seats only, so a seat left awake at an empty
+prompt answers no pass while still spending one of the town's slots.
 
 1. Update your bead(s): state, `--append-notes` with where things stand.
 2. If work is mid-flight, write a handoff (`handoff.md` playbook — or just
