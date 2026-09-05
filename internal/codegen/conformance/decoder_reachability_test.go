@@ -2568,11 +2568,24 @@ func (d decoders) decodePostFromEdge(raw []byte) (Post, error) {
 		})
 	}
 
-	t.Run("a method naming two entities is skipped rather than graded on the first", func(t *testing.T) {
-		// Author gets a package-level decoder of its own: the reconciliation
-		// names every prepared entity, so without one this row would read
-		// non-empty on an undecoded entity and witness nothing about arity.
-		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
+	// The two arities-above-one rows are a pair and only mean anything as a
+	// pair. Both write the same two-entity method; they differ in one thing,
+	// whether its body carries a string comparison of its own. That is the
+	// whole of the boundary gqlc-ebkbs draws, so a single row on either side
+	// of it witnesses the verdict without witnessing what the verdict turns
+	// on: without the guardless row, `len(guards) > 0` could be deleted and
+	// the refusal would still fire everywhere it is asked to.
+	//
+	// Author gets a package-level decoder of its own in both, because the
+	// reconciliation names every prepared entity — without one, either row
+	// would read non-empty on an undecoded entity and witness nothing about
+	// arity.
+	both := map[string]codegen.EntityKind{"Post": codegen.EntityNode, "Author": codegen.EntityNode}
+	declaresBoth := labelAlphabet{
+		codegen.EntityNode: {"Post": true, "Author": true},
+		codegen.EntityEdge: {"AUTHORED": true},
+	}
+	const authorDecoder = `
 func decodeAuthor(raw []byte) (Author, error) {
 	label := string(raw)
 	if label != "Author" {
@@ -2580,7 +2593,26 @@ func decodeAuthor(raw []byte) (Author, error) {
 	}
 	return Author{}, nil
 }
+`
 
+	t.Run("a method naming two entities and guarding on nothing is skipped", func(t *testing.T) {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + authorDecoder + `
+func (d decoders) decodeBoth(raw []byte) (Post, Author, error) {
+	_ = string(raw)
+	return Post{}, Author{}, nil
+}
+`)}}
+
+		require.Empty(t, recordedGrading(files, both, declaresBoth),
+			"a method whose results name two prepared entities, and which compares no string of its own, was "+
+				"refused or graded. There is nothing here going unread: grading it would pick whichever entity "+
+				"the derivation named first, so the verdict would turn on an ordering rather than on the "+
+				"emission, and refusing it would be a verdict about a query returning two whole entities, which "+
+				"is not a defect")
+	})
+
+	t.Run("a method naming two entities and carrying a guard is refused", func(t *testing.T) {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + authorDecoder + `
 func (d decoders) decodeBoth(raw []byte) (Post, Author, error) {
 	label := string(raw)
 	if label != "NoSuchLabelAnywhere" {
@@ -2589,19 +2621,22 @@ func (d decoders) decodeBoth(raw []byte) (Post, Author, error) {
 	return Post{}, Author{}, nil
 }
 `)}}
-		both := map[string]codegen.EntityKind{"Post": codegen.EntityNode, "Author": codegen.EntityNode}
-		declaresBoth := labelAlphabet{
-			codegen.EntityNode: {"Post": true, "Author": true},
-			codegen.EntityEdge: {"AUTHORED": true},
-		}
 
-		require.Empty(t, recordedGrading(files, both, declaresBoth),
-			"a method whose results name two prepared entities was graded against one of their axes. Which one "+
-				"is whichever the derivation happened to name first, so the verdict turns on an ordering rather "+
-				"than on the emission, and a guard the other axis carries passes on a coin toss. The "+
-				"package-level census refuses that shape outright; a method cannot be refused the same way, "+
-				"because a query returning two entities is not a defect — so it is left ungraded, and a guard "+
-				"written there is read by nothing")
+		msgs := recordedGrading(files, both, declaresBoth)
+
+		require.NotEmpty(t, msgs,
+			"the gate accepted a method whose results name two prepared entities and whose body compares a "+
+				"string. No axis grades that comparison — a decoder's guards are held to the alphabet of the "+
+				"one entity it fills, and this method fills two — so it is read by nothing, which is the hazard "+
+				"this whole gate exists to catch, reached by a shape it cannot grade")
+		joined := strings.Join(msgs, "\n")
+		require.Contains(t, joined, "read by nothing",
+			"the gate refused the emission on some other arm than the ungradeable-guard one. A refusal that "+
+				"reaches this row by way of the alphabet or the reconciliation would pass while the arm under "+
+				"test does nothing")
+		require.Contains(t, joined, "NoSuchLabelAnywhere",
+			"the refusal did not name the guard it is about, so a reader cannot tell which comparison went "+
+				"ungraded and the report is unactionable on an emission carrying more than one")
 	})
 
 	t.Run("a satisfiable guard is accepted", func(t *testing.T) {
@@ -2956,17 +2991,34 @@ func emittedMethodDecoders(
 			if !ok || fn.Recv == nil || fn.Body == nil {
 				continue
 			}
-			// Exactly one, and the other two arities are left alone rather
-			// than refused. Naming none is the ordinary query method, whose
-			// dispatch the in-method reader owns; naming two or more is
-			// refused for a package-level function because an axis has to be
-			// picked to grade against, and there is no axis to pick here
-			// either — but a method is not a decoder by construction the way
-			// a receiver-less entity-returning function is, so refusing one
-			// would be a verdict about a shape this reader cannot tell from a
-			// query returning two entities.
+			// Exactly one is graded. Naming none is the ordinary query
+			// method, whose dispatch the in-method reader owns, and it is
+			// left alone.
+			//
+			// Naming two or more is refused for a package-level function
+			// because an axis has to be picked to grade against and there is
+			// none to pick here either. A method cannot be refused on that
+			// ground alone: a method is not a decoder by construction the way
+			// a receiver-less entity-returning function is, so refusing every
+			// one would be a verdict about a shape this reader cannot tell
+			// from a query returning two whole entities, which is not a
+			// defect.
+			//
+			// So the boundary is the GUARD, not the arity. A multi-entity
+			// method carrying no string comparison of its own has nothing
+			// going ungraded and is skipped. One that carries a comparison is
+			// refused, because that comparison is read by nothing: no axis
+			// exists to hold it to, and picking one would turn the verdict on
+			// whichever entity the derivation named first. The refusal
+			// declines to pretend the guard was read; it does not answer
+			// which axis should grade it. The day it fires on a real emission
+			// is the day that design question arrives with a specimen
+			// (bd gqlc-ebkbs, ruled by Արեգակ 2026-09-04).
 			entities := resultEntities(fn.Type, shapes)
 			if len(entities) != 1 {
+				if guards := methodOwnGuards(r, fn.Body); len(entities) >= 2 && len(guards) > 0 {
+					r.Fail(multiEntityGuardReport(f.Path, fn.Name.Name, entities, guards))
+				}
 				continue
 			}
 			out = append(out, entityDecoder{
@@ -2979,6 +3031,34 @@ func emittedMethodDecoders(
 		}
 	}
 	return out
+}
+
+// multiEntityGuardReport is the refusal for a method whose results name two
+// or more prepared entities and whose body carries a guard of its own.
+//
+// It is careful in the same place unstampableReport is, and for the same
+// reason: methodOwnGuards collects an operand of == or != and a case value
+// alike and never reads the other side, so this cannot say the method tests
+// the wire value against these strings. What was observed is that strings
+// appear in comparisons in this body. Which values they are compared with
+// is the reader's to check.
+//
+// It is also careful about what it does NOT claim. It does not say the
+// guard is wrong, or unsatisfiable, or that the method should name one
+// entity — a query returning two whole entities is not a defect. It says
+// the guard is read by nothing, which is a statement about this gate and
+// not about the emission, and it names the design question rather than
+// answering it: which axis should grade such a guard is undecided, and
+// deliberately so until an emission exists to decide it against.
+func multiEntityGuardReport(file, fn string, entities, guards []string) string {
+	return fmt.Sprintf("the emission writes %s in %s as a method whose results name %d prepared entities (%s), "+
+		"and strings appear in comparisons in its body (%q). No axis grades those comparisons: a decoder's "+
+		"guards are held to the alphabet of the one entity it fills, and this method fills several, so "+
+		"whichever axis were picked would be whichever entity the derivation named first. They are therefore "+
+		"read by nothing — the hazard this gate exists to catch, reached by a shape it cannot grade. This "+
+		"refusal declines to pretend they were read; it does not say which axis should hold them. If this "+
+		"emission is correct, that question now has its first specimen and wants deciding (bd gqlc-ebkbs)",
+		fn, file, len(entities), strings.Join(entities, ", "), guards)
 }
 
 // methodOwnGuards is comparedStrings for a method body: the same three
