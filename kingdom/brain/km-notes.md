@@ -753,6 +753,54 @@ refusal prints why — but it is a real behaviour change and no such render has
 been observed. If one exists, the repair is to widen the glyph set here, never
 to restore the empty-string answer.
 
+## seat_box_text-4 — the strip is for locating, and it used to leak into the value
+
+(`kingdom/bin/km`, `seat_box_text`)
+
+The loop above strips POSIX space off each interior line to find the prompt
+glyph, because the glyph test is anchored at position 1 and a padded row would
+otherwise stop locating the composer at all. Until bd gqlc-3oth5 it did that
+`gsub` on `line[i]` IN PLACE, and the print loop below prints that same array —
+so a normalisation done for DETECTION was also the answer. The fix is one
+scratch array: `bare[i]` carries the stripped copy, the glyph test and the
+emptiness and bare-glyph tests all read `bare[i]`, and `print` gets the
+untouched `line[i]`. Deleting the `gsub` would have been the wrong repair; the
+locating loop needs it.
+
+Found by Ծովինար, confirmed by Նուարդ and by Վահագն against the function
+extracted out of km. It reproduces exactly — `❯ hello `, `❯ hello` and
+`❯ hello  ` all render `❯ hello`, sha256 d3d76cd8ef394fcb, against a control
+`❯ hell` at c091c1b2dc340ace which differs.
+
+WHAT THE FIX DOES NOT DO, and this is the half worth reading. **It does not
+make Backspace-invariance sound as a ghost test, because the awk was never what
+made it unsound.** The TRANSPORT strips trailing whitespace before the awk sees
+anything. Measured 2026-09-05 on a real herdr pane, `--source visible`, the same
+read the production path takes: a row rendered as `AYGMARKA hello` followed by
+three EXPLICITLY WRITTEN space cells reads back byte-identical to the same row
+written without them, and a trailing tab goes the same way. So no fixture
+built on trailing whitespace can distinguish a real composer from a ghost, at
+this reader or at any other read-only check — which is what `cmd_status`'s own
+prose has said all along, and it is right. Use the typed-character test: a ghost
+has its whole rendered line REPLACED, a real composer comes back holding the
+draft AND the character.
+
+The CONTROL in that same measurement is what makes this section worth having.
+Leading whitespace SURVIVES the transport — `   AYGLEAD indented` reads back
+with its three leading spaces — and reached the awk intact, where this `gsub`
+destroyed it. So the two halves of that character class were never symmetric on
+real input: the trailing half was dead code, and the leading half was the live
+defect. The bead was filed for the half that cannot fire.
+
+ITS BLAST RADIUS IS NIL TODAY, deliberately stated so nobody reads a merged fix
+as a behaviour change. Every consumer of this function normalises through
+`box_one_line` before using the value — `seat_box_emptied`, `send_line_to_pane`,
+`seat_box_state`, `cmd_arrived --box` — and `box_authorship`, the only caller
+handed the RAW text, runs `box_one_line` itself per line. `box_one_line`
+collapses space runs and drops the leader, so no caller in km can observe the
+difference either way. What this buys is a reader whose answer means what it
+says for the NEXT caller, not a repair to any present one.
+
 WHAT THIS DOES NOT ESTABLISH. It does not prove the raffi incident of
 2026-09-02, where two of km's asks accumulated in one composer. That pane was
 re-read while taking this fix and by then held ONE ask, hand-delivered by
