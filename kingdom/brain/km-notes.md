@@ -2352,6 +2352,24 @@ A read by Սեդրակ racing between the two counts reports UNDELIVERED
 for a mail that did land; the cost is one retried escalation on the
 next pass, which is the direction to be wrong in.
 
+The remedy sentence in `ladder_evidence` used to read `km sleep --seat
+$s` frees the slot if she is genuinely done. That was false in all
+three branches a terminal rung can fire for, which is why it is now a
+trichotomy that matches the state instead. Against a BOXED seat the
+command is vacuous — send_line refuses into a non-empty composer, and
+the rung fires precisely when asks were being refused, which is what
+a box looks like from outside. Against a walled or dead-turn session
+it is destructive: `/exit` is client-side and WOULD deliver, taking
+the resume-at-reset continuation decision 0013 exists to protect, so
+the one branch where the command works is the branch where it
+destroys. And against a present citizen who is choosing to sit it is
+not the mayor's act at all (VI.2). Ruled by gqlc-b5x22 and written
+down as decision 0016; the boxed path is decision 0012's.
+
+That block says "this report", not "this letter", because
+`cmd_dispatch-7a` gave it a second reader: the same evidence is now
+carried by the bead rung, where the word letter would be false.
+
 ## cmd_dispatch-7a — a letter about Սեդրակ goes to Սեդրակ, so the subject branch files a bead
 
 (`kingdom/bin/km`, `cmd_dispatch`)
