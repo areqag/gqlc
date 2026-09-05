@@ -3445,13 +3445,14 @@ $evidence" \
             [ -z "$nudge_err" ] || echo "dispatch: $s: $nudge_err"
             wakes=$((wakes + 1))
         elif [ "$nudge_rc" -eq 2 ]; then
-            # An ask that was typed and submitted but never appeared in the
-            # seat's transcript. It gets the SAME bookkeeping as a delivered
-            # one, deliberately: an UNKNOWN that left no `nudged at T` mark is
-            # re-asked on every sweep, so a seat that did receive it gets N
-            # copies — the double delivery this verdict exists to prevent. The
-            # cost of the other error is a delay of one floor, and it is the
-            # error to prefer.
+            # An ask that was typed and then went unwitnessed — no transcript
+            # row carried it, or the box never echoed it back, so whether the
+            # Enter landed is itself in doubt. It gets the SAME bookkeeping as
+            # a delivered one, deliberately: an UNKNOWN that left no
+            # `nudged at T` mark is re-asked on every sweep, so a seat that did
+            # receive it gets N copies — the double delivery this verdict
+            # exists to prevent. The cost of the other error is a delay of one
+            # floor, and it is the error to prefer.
             rm -f "$refusal_file"
             : >"$nudged_marker"
             # Not cleared by a later witnessed ask: it is a true fact about the
