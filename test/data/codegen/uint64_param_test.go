@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -167,13 +168,24 @@ func TestAGERefusesAUint64ParameterAboveMaxInt64(t *testing.T) {
 // Any other panic is re-raised. Swallowing them would turn a genuine
 // defect in the generated code into `sent`, which is a passing accepting
 // row.
+//
+// So the recovered value is pinned to the message the nil handle actually
+// produces, not merely to runtime.Error. A genuine defect in generated Go
+// throws runtime errors too — nil map write, index out of range — and the
+// window they can hide in is the code between the last parameter guard and
+// the send, today agtypeArgs: place one there and every accepting row
+// panics before reaching a send while the whole test still reads green
+// (measured, bd gqlc-53c98). The pin narrows that masked class to
+// nil-deref defects in the same window; it does not empty it. Emptying it
+// needs a real server, which is gqlc-lr0v6's standard and not this test's.
 func countersMatching(params uint64age.CountersMatchingParams) (out []int64, sent bool, err error) {
 	defer func() {
 		r := recover()
 		if r == nil {
 			return
 		}
-		if _, ok := r.(runtime.Error); !ok {
+		re, ok := r.(runtime.Error)
+		if !ok || !strings.Contains(re.Error(), "nil pointer dereference") {
 			panic(r)
 		}
 		sent = true
