@@ -2639,6 +2639,37 @@ func (d decoders) decodeBoth(raw []byte) (Post, Author, error) {
 				"ungraded and the report is unactionable on an emission carrying more than one")
 	})
 
+	// The lower edge of the same boundary, and the pair above cannot reach
+	// it. Inside `len(entities) != 1` the count is 0 or two-or-more, so the
+	// only work `>= 2` still does is excluding the zero case — and with no
+	// row spelling that shape, `>= 2` could read `>= 0` and every row above
+	// would still pass. What the comparison excludes is the ordinary query
+	// method: one naming no prepared entity, comparing a string for reasons
+	// of its own. Refusing that reds a correct emission, which is the exact
+	// harm this gate exists to prevent rather than to cause.
+	//
+	// No fixture in the corpus writes the shape — the method decoders the
+	// sweep classifies compare no string at all — which is why the survival
+	// was invisible to every gate (bd gqlc-lndks, a charged survivor from
+	// the round-1 battery of PR #2619).
+	t.Run("a method naming no entity and carrying a guard of its own is left alone", func(t *testing.T) {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
+func (d decoders) postLabelIsInteresting(raw []byte) (string, error) {
+	label := string(raw)
+	if label != "NoSuchLabelAnywhere" {
+		return "", nil
+	}
+	return label, nil
+}
+`)}}
+
+		require.Empty(t, recordedGrading(files, shapes, alphabet),
+			"a method whose results name no prepared entity was refused or graded because its body compares "+
+				"a string. No entity here has an alphabet that could grade that comparison, and the method's "+
+				"dispatch belongs to the in-method reader — so this is an ordinary query method and a correct "+
+				"emission. Refusing it is this gate redding the very thing it exists to protect")
+	})
+
 	t.Run("a satisfiable guard is accepted", func(t *testing.T) {
 		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
 func (d decoders) decodePostOnTheWire(raw []byte) (Post, error) {
