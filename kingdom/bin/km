@@ -66,6 +66,14 @@ km — the machinery of the Թագաւորութիւն
                                  own transcript; no --text lists her last 5 asks
                                  --box asks whether her RENDERED box was already
                                  submitted — a YES is proof the tag is a ghost
+  km release <seat> [--by NAME] [--concurrence NAME]
+                                 end a session no send can reach WITHOUT submitting the
+                                 citizen's own unsubmitted draft in her name — which is
+                                 why km's send refuses one (Constitution VI.5). Refuses
+                                 unless the box has held the
+                                 same bytes across two of its own readings; run it once to
+                                 record a sighting, again after the window to act. Discloses
+                                 to the citizen and the crown, quoting the box verbatim.
   km mail send <to> -s SUBJ [-m BODY]   (body on stdin if no -m)
   km mail inbox [--seat NAME] | read <id> | sent
   km dispatch                    route ready beads to free seats (timer)
@@ -1655,10 +1663,17 @@ seat_nudge() { # <seat> <text> -> 0 delivered, 1 refused, 2 unwitnessed (may be 
 }
 
 # Minutes from the config, in seconds, with a default that survives a missing or
-# malformed value. Fail-open and quiet is right for these two: both govern a
-# REPORT and neither ends a session, so the worst a wrong value does is print a
-# marker early or late, and a config typo that stopped the dispatcher would be
-# the larger failure by far.
+# malformed value. Fail-open and quiet was right while every caller governed a
+# REPORT: the worst a wrong value did was print a marker early or late, and a
+# config typo that stopped the dispatcher would have been the larger failure.
+#
+# release_box_persist_minutes is the third caller and it is not a report — it
+# paces `km release`. The fail-open direction is worth stating for it: a
+# malformed value LARGER than the default silently shortens the window to the
+# default rather than lengthening it, so a typo makes the wait shorter, never
+# longer. That is survivable only because the window is a precondition on an act
+# a named citizen invokes by hand — nothing fires when it elapses — and because
+# the two-sighting requirement stands whatever the number is.
 cfg_minutes() { # <section> <key> <default minutes> -> seconds
     local v
     v=$(cfg "$1" "$2")
@@ -2275,6 +2290,389 @@ cmd_sleep() {
         echo "sleep: $(seat_display "$seat") is recorded asleep-pending, and the /exit was typed but may be stranded — in the pty, or unsubmitted in her composer — so whether it submits is UNKNOWN (diagnosis above). End your session normally; km reconcile settles the ledger. Do not re-send the /exit by hand: if it is queued, a second one appends to it"
     else
         echo "sleep: $(seat_display "$seat") is recorded asleep-pending, but the /exit was NOT delivered (diagnosis above) — end your session normally; km reconcile settles the ledger"
+    fi
+}
+
+# ---------- release (Constitution VI.5) ----------
+
+# The seat whose class is `mayor`, empty if the roster carries none. Emptiness
+# is deliberately not an error: it opens the act to any non-guard citizen
+# rather than closing it, because a town without a mayor must still be able to
+# free a frozen seat.
+mayor_seat() {
+    local s
+    for s in $(seats_all); do
+        if [ "$(seat_class "$s")" = mayor ]; then
+            echo "$s"
+            return 0
+        fi
+    done
+    echo ""
+}
+
+# Does the seat's own record witness a finished day (VI.5.2)? Prints the
+# witness it found and returns 0; prints nothing and returns 1 when there is
+# none, which is the tier-2 case. Every arm is re-derived here, never read from
+# a status snapshot.
+release_tier1_witness() { # <seat>
+    local seat=$1 home statf st f sm hm
+    home=$(seat_home "$seat")
+    statf="$home/status"
+    st=$(seat_status "$seat")
+
+    # The citizen ran `km sleep` and their own box refused the /exit it typed.
+    # That circularity is resolved in the citizen's favour: they asked to go.
+    if [ "$st" = asleep-pending ]; then
+        echo "the seat's status file reads asleep-pending — the citizen ran km sleep and the /exit was refused by this same box"
+        return 0
+    fi
+
+    # km-seat writes `awake` at session start, so the status file's mtime IS
+    # this session's start; a handoff note at least that new was written during
+    # it. An older note is a previous day's and witnesses nothing about this
+    # one. The archive/ subdirectory is below this glob's depth on purpose.
+    if [ "$st" = awake ] && [ -f "$statf" ]; then
+        sm=$(stat -c %Y "$statf" 2>/dev/null || echo "")
+        if [ -n "$sm" ]; then
+            for f in "$home/handoff"/*.md; do
+                [ -f "$f" ] || continue
+                hm=$(stat -c %Y "$f" 2>/dev/null || echo "")
+                [ -n "$hm" ] || continue
+                [ "$hm" -ge "$sm" ] || continue
+                echo "a handoff note written this session sits in the seat's handoff directory: ${f##*/}"
+                return 0
+            done
+        fi
+    fi
+
+    # A parked-clean worktree with an empty desk is NOT a third witness, though
+    # decision 0012 listed it as one. It cannot tell a finished day from an
+    # unstarted one: Միհր held exactly that shape at wake on 2026-09-03, in the
+    # minutes before claiming a bead, and a judge on patrol holds hours of
+    # read-only findings behind the same clean tree and empty desk — which is
+    # precisely the context tier 2's second signature exists to protect. So it
+    # falls through to tier 2, where a genuinely finished day costs one
+    # concurrence (bd gqlc-j3uht F3).
+    return 1
+}
+
+# The seat's own claude session, identified by the environment km-seat launched
+# it with rather than by its cwd: a claude a person started by hand in the seat
+# worktree carries no KINGDOM_SEAT, and must not be the process this ends.
+release_claude_pids() { # <seat> -> one pid per line
+    local d p comm
+    for d in /proc/[0-9]*; do
+        [ -d "$d" ] || continue
+        p=${d#/proc/}
+        comm=$(cat "$d/comm" 2>/dev/null) || continue
+        [ "$comm" = claude ] || continue
+        tr '\0' '\n' <"$d/environ" 2>/dev/null | grep -qx "KINGDOM_SEAT=$1" || continue
+        echo "$p"
+    done
+}
+
+cmd_release() {
+    local seat=${1:-} actor="${KINGDOM_SEAT:-}" by="" concur=""
+    shift || true
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --by | --concurrence)
+                [ $# -ge 2 ] || die "release: $1 needs a citizen's name after it"
+                case "$1" in --by) by=$2 ;; *) concur=$2 ;; esac
+                shift 2 ;;
+            -h | --help) usage; exit 0 ;;
+            -*) die "release: unknown flag $1" ;;
+            *) die "release: takes ONE seat and then flags — got a second bare word: $1" ;;
+        esac
+    done
+
+    # 1. the seat
+    is_seat "$seat" || die "release: unknown seat ${seat:-<none>}"
+
+    # 2. the actor. A seat session names itself; nothing lets it name someone
+    # else, because the disclosure this composes is the record of who acted.
+    if [ -n "$actor" ]; then
+        [ -z "$by" ] || [ "$by" = "$actor" ] ||
+            die "release: --by cannot rename a seat session — this session is $actor"
+    else
+        actor=$by
+    fi
+    [ -n "$actor" ] ||
+        die "release: no named actor — this session has no KINGDOM_SEAT, so say who is acting: $(verb release) $seat --by <citizen>"
+    case "$actor" in
+        andranik) ;;
+        *) is_seat "$actor" || die "release: unknown actor $actor" ;;
+    esac
+    if [ "$actor" != andranik ] && [ "$(seat_class "$actor")" = guard ]; then
+        die "release: the guard never releases (VI.5) — report the boxed seat and let a citizen who is not the guard act on it"
+    fi
+    local mayor
+    mayor=$(mayor_seat)
+    # Any citizen but the guard may act when the mayor is himself the boxed
+    # seat, and the crown may always act (VI.5.7). Otherwise it is the mayor's.
+    if [ "$actor" != andranik ] && [ -n "$mayor" ] &&
+        [ "$actor" != "$mayor" ] && [ "$seat" != "$mayor" ]; then
+        die "release: only the mayor releases while the mayor is reachable — $mayor is not the boxed seat here, so this is his act (VI.5.7)"
+    fi
+
+    # 3. a session to end
+    seat_session_live "$seat" ||
+        die "release: no live session for $seat — nothing to release"
+
+    # 4/5. the box, read ONCE. The bytes hashed against the marker, compared
+    # across the window and quoted in the disclosure must be the same bytes;
+    # asking seat_box_state and then re-reading for the text opens a window
+    # between the two reads, and that window is what this command measures.
+    #
+    # TWO forms are kept from that one read, and they answer different questions.
+    # box_raw is what the disclosure quotes, because VI.5.1 says verbatim and a
+    # box that renders a pasted CR as a real newline (gqlc-gh7xj) holds lines the
+    # collapsed form destroys. Since #2670 seat_box_text returns the line raw, so
+    # LEADING indentation reaches this disclosure where it used to be stripped;
+    # trailing whitespace still cannot, being gone at the pane read (gqlc-3oth5).
+    # box is the normalized form, and only the hash and the window comparison use
+    # it — persistence must survive render jitter in whitespace without calling
+    # the bytes changed.
+    local pane box box_raw rc=0
+    pane=$(seat_pane_id "$seat") ||
+        die "release: no live session for $seat — its pane could not be resolved (herdr's account is above)"
+    [ -n "$pane" ] ||
+        die "release: no live session for $seat — it has no pane"
+    box_raw=$(seat_box_text "$pane") || rc=$?
+    # rc=2 has TWO causes and this sentence must not pick one: herdr failing the
+    # read, and a pane that rendered whose composer km could not locate in what
+    # came back (bd gqlc-mfjgl). Whichever it was has already put its own account
+    # on stderr. An earlier draft said "no live session … could not be read",
+    # which under the second cause asserts two things that are false at once —
+    # there is a live session and the pane was read — in the one refusal that
+    # stands between a citizen and a SIGTERM.
+    [ "$rc" -ne 2 ] ||
+        die "release: what $seat's box holds could not be established on pane $pane (the account of it is above), so km cannot say whether anything is stranded in it, and it will not end a session over a box it never saw"
+    # rc=1 is a buffer carrying no composer structure at all — fewer than two
+    # full-width rules — which is a different thing from a composer that is
+    # empty, and a different thing again from rc=2's unlocatable one.
+    [ "$rc" -ne 1 ] ||
+        die "release: no input box on pane $pane — the buffer holds no composer at all, so nothing is stranded in one"
+    box=$(box_one_line "$box_raw")
+    [ -n "$box" ] ||
+        die "release: box is empty — use km sleep, which this seat can still be reached by"
+
+    # seat_pane_idle carries TWO witnesses and this refusal must not name only
+    # the first: the agent's own status, and — since #2512 replaced the child-
+    # process check — whether the pane's visible buffer moved across a three
+    # second gap, or declares a background shell outliving the turn (#2529). A
+    # release must not land on live work, and a moving pane is live work whatever
+    # the agent reports.
+    seat_pane_idle "$seat" ||
+        die "release: not at rest — $seat's agent reports $(seat_agent_status "$seat"), or its pane is still moving (or declares a background shell outliving the turn), and a release must not land on live work"
+
+    # 6. the persistence window. The marker is written by this command and by
+    # nothing else in km, so a release can only proceed on a sighting this
+    # command itself took.
+    #
+    # It also carries the session it was taken in, as the mtime of the status
+    # file km-seat writes at session start. Bytes alone are not enough: the
+    # recurring texts are exactly the ones that recur byte-identically — /exit is
+    # what every stranded `km sleep` leaves, and a hand-sender who believes they
+    # delivered re-sends the same instruction next week — so a marker from a dead
+    # session plus one reading of a live one would satisfy an equality check and
+    # produce a disclosure claiming two readings that never straddled this
+    # session at all. Two readings cannot witness persistence across a sleep,
+    # because during the sleep there is no box (bd gqlc-j3uht F1).
+    local marker window mins hash now sess m_hash m_epoch m_sess
+    marker="$(seat_home "$seat")/box-sighting"
+    window=$(cfg_minutes welfare release_box_persist_minutes 30)
+    mins=$((window / 60))
+    hash=$(printf '%s' "$box" | sha256sum | cut -d' ' -f1)
+    now=$(date +%s)
+    sess=$(stat -c %Y "$(seat_home "$seat")/status" 2>/dev/null || echo "")
+    [ -n "$sess" ] ||
+        die "release: session start unreadable — $seat's status file could not be stat'd, and without it km cannot tell a sighting taken in this session from one left by a dead one (VI.5.4)"
+    m_hash=""
+    m_epoch=""
+    m_sess=""
+    if [ -f "$marker" ]; then
+        read -r m_hash m_epoch m_sess _ <"$marker" || true
+        case "$m_epoch" in '' | *[!0-9]*) m_hash="" ;; esac
+    fi
+    mkdir -p "$(seat_home "$seat")"
+    if [ -z "$m_hash" ]; then
+        printf '%s %s %s %s\n' "$hash" "$now" "$sess" "$actor" >"$marker"
+        die "release: first sighting recorded — return after $mins minutes. Nothing was ended: VI.5 wants the same bytes seen twice that far apart, and one reading cannot tell a stranded send from a citizen composing right now"
+    fi
+    if [ "$m_sess" != "$sess" ]; then
+        printf '%s %s %s %s\n' "$hash" "$now" "$sess" "$actor" >"$marker"
+        die "release: sighting belongs to another session — $seat has started a session since it was taken, so the window restarts from this reading. Identical bytes across two sessions are not one box held; they are the same text stranded twice"
+    fi
+    if [ "$m_hash" != "$hash" ]; then
+        printf '%s %s %s %s\n' "$hash" "$now" "$sess" "$actor" >"$marker"
+        die "release: box changed since last sighting — the window restarts from this reading. A box whose bytes move is a citizen at the keyboard, not a stranded send"
+    fi
+    if [ $((now - m_epoch)) -lt "$window" ]; then
+        die "release: window not elapsed — $((( window - (now - m_epoch) + 59) / 60)) more minute(s) of the same bytes are wanted (welfare.release_box_persist_minutes = $mins)"
+    fi
+
+    # 7. the tier, re-derived now
+    local tier witness
+    if witness=$(release_tier1_witness "$seat"); then
+        tier=1
+    else
+        tier=2
+        witness="none — no record of $seat's witnesses a finished day"
+        [ -n "$concur" ] ||
+            die "release: tier 2 needs written concurrence — no record of $seat's witnesses a finished day, so one other citizen must concur in writing before this act and be named here: --concurrence <citizen> (VI.5.5)"
+        case "$concur" in
+            andranik) ;;
+            *) is_seat "$concur" || die "release: unknown citizen named as concurrence: $concur" ;;
+        esac
+        [ "$concur" != "$actor" ] ||
+            die "release: the actor cannot concur with themselves — tier 2 wants a SECOND citizen (VI.5.5)"
+        if [ "$concur" != andranik ] && [ "$(seat_class "$concur")" = guard ]; then
+            die "release: the guard cannot concur (VI.5) — care and force never share a hand"
+        fi
+        witness="$witness; $concur concurs in writing"
+    fi
+
+    # 8. the process, resolved BEFORE the disclosure is sent. The act is still
+    # disclosed before it happens (VI.5.6); what this ordering prevents is a
+    # disclosure announcing a release that then refuses, which would put a
+    # release in the record that never occurred.
+    local pids n
+    pids=$(release_claude_pids "$seat")
+    n=$(printf '%s' "$pids" | grep -c . || true)
+    [ "$n" -ne 0 ] ||
+        die "release: no claude child found — herdr reports a session for $seat but no process on this host carries KINGDOM_SEAT=$seat, so km cannot tell which process to end"
+    [ "$n" -eq 1 ] ||
+        die "release: ambiguous claude process — $n processes carry KINGDOM_SEAT=$seat ($(printf '%s' "$pids" | tr '\n' ' ')); km will not guess which one is the session"
+
+    # 8b. the last look, immediately before the disclosure. VI.5.4 wants every
+    # condition re-derived at the moment of the act, and everything above this
+    # line was derived before a tier resolution, a /proc walk and whatever
+    # latency they carried. This conjunct can only refuse: the window is still
+    # measured and quoted from the single read at step 4/5, and a citizen who
+    # submitted their box and went back to work inside that gap is exactly whom
+    # a SIGTERM must not land on (bd gqlc-j3uht F2).
+    local box_now rc2=0
+    box_now=$(seat_box_text "$pane") || rc2=$?
+    # Every non-zero rc refuses, and the sentence is written to be true of all of
+    # them: herdr failing the read, a composer km cannot locate (bd gqlc-mfjgl),
+    # and a buffer that has lost its box structure since step 4/5. Naming a cause
+    # here would be guessing, and the earlier draft's "the pane answered then and
+    # does not now" is false of the middle one.
+    [ "$rc2" -eq 0 ] ||
+        die "release: the box could not be read back at the last look — km established what pane $pane held when it took its evidence and cannot establish it now (the account of it is above), and km will not end a session on evidence it can no longer see"
+    [ "$(printf '%s' "$(box_one_line "$box_now")" | sha256sum | cut -d' ' -f1)" = "$hash" ] ||
+        die "release: box changed between the evidence and the act — it no longer holds the bytes this release was authorised for, and nothing was ended"
+    # seat_pane_idle's two halves do NOT both re-derive on their own. The agent
+    # status is read fresh every call; the pane-stillness half memoises per seat
+    # in PANE_STILL_MEMO for the life of the process and is never invalidated, so
+    # this second call would answer from the reading taken at step 5 — a snapshot,
+    # which is the one thing VI.5.4 forbids here. Measured: with the memo intact a
+    # second call for the same seat performs ZERO herdr reads; with its two case
+    # arms deleted it performs two. Dropping the memo costs one 3-second gap and
+    # buys the only witness that the pane did not start moving while km was
+    # composing the disclosure.
+    PANE_STILL_MEMO=""
+    seat_pane_idle "$seat" ||
+        die "release: $seat left rest between the evidence and the act — its agent now reports $(seat_agent_status "$seat"), or its pane has started moving (or declares a background shell outliving the turn), and nothing was ended"
+
+    # 8c. A redirected state dir sandboxes the RECORD and not the ACT: mail and
+    # the sighting marker follow KM_STATE_DIR, the /proc walk and the SIGTERM
+    # below cannot and never could. Under a redirect the in-code oath "an
+    # undisclosed release is a breach" is satisfiable vacuously — the release IS
+    # disclosed, into a directory that is not the town. Measured on a real
+    # session, 2026-09-03 (bd gqlc-oj4l4).
+    #
+    # What refuses is a MISMATCH, not a set variable. KM_STATE_DIR is exported
+    # into every seat session (seat_runner_start threads it at km:864, and
+    # cmd_units states the same at km:4860), so every release any citizen ever
+    # runs carries it, and refusing on its mere presence would make VI.5 inert
+    # on arrival. The condition is that the record lands where the town reads.
+    #
+    # Placed here so that every arm above stays drivable under a sandbox, which
+    # is what a battery needs; the act itself is not sandboxable.
+    local sd_town sd_now
+    sd_town=$(unset KM_STATE_DIR; state_dir)
+    sd_now=$(state_dir)
+    [ ! -d "$sd_town" ] || sd_town=$(cd "$sd_town" && pwd -P)
+    [ ! -d "$sd_now" ] || sd_now=$(cd "$sd_now" && pwd -P)
+    [ "$sd_now" = "$sd_town" ] ||
+        die "release: state is redirected to $sd_now — the disclosures this act owes would be written there while the SIGTERM lands on the real session, so the record VI.5.6 requires would never reach the town at $sd_town, and nothing was ended"
+
+    # 9. the disclosure
+    local body
+    body=$(
+        cat <<EOF
+$(seat_display "$seat")'s session was released under Constitution VI.5. The seat
+is untouched: what ended is one session, and this is the ordinary end of a
+workday, not a reap and not a punishment.
+
+  actor:    $actor
+  tier:     $tier
+  evidence: $witness
+  pane:     $pane
+  window:   the box held the same bytes across two readings of THIS session, at
+            least $mins minutes apart, and still held them at the moment of the act
+
+The box held this, verbatim as extracted — indented by four spaces here and
+otherwise untouched. The extraction is faithful to each line's text but not to its
+layout: it trims every line's outer whitespace and drops blank and glyph-only
+lines, so the composer's own indentation and blank lines do not survive to here,
+and the first line still carries the prompt glyph the composer draws rather than
+the hand typed. It was neither submitted nor executed:
+
+$(printf '%s\n' "$box_raw" | sed 's/^/    /')
+
+Those bytes are nobody's words (VI.5.1) — km cannot attribute them, so they are
+not read as anyone's consent and were not pressed. They are quoted here because
+an instruction stranded in a box has otherwise arrived nowhere: if it was meant
+for $(seat_display "$seat"), say it again with '$(verb wake) $seat --reason "<text>"',
+which refuses to type into a box that is not already empty and so can press
+nobody's draft. Do not read the box emptying afterwards as the receipt: a box
+empties whether or not what you sent is what arrived, and the only witness that
+tells them apart is the recipient's own transcript (gqlc-dqb67).
+EOF
+    )
+    # The crown is written FIRST. Either letter may fail, and whichever is
+    # written before a failure describes a release that then did not happen. In
+    # the crown's inbox that is an audit line about someone else, addressed to
+    # the one citizen who can go and check; in the citizen's own it is a letter
+    # telling them their session was ended when it was not, which is the false
+    # record the whole ordering of this command exists to prevent.
+    mail_send andranik --from "$actor" -s "release of $seat under VI.5 by $actor (tier $tier)" -m "$body" >/dev/null ||
+        die "release: the disclosure to the crown could not be sent, so nothing was ended — an undisclosed release is a breach whatever its evidence (VI.5.6)"
+    mail_send "$seat" --from "$actor" -s "released under VI.5 by $actor (tier $tier)" -m "$body" >/dev/null ||
+        die "release: the disclosure to $seat could not be sent, so nothing was ended — an undisclosed release is a breach whatever its evidence (VI.5.6). The crown's copy was already written and names a release that did not happen; say so to andranik"
+    echo "release: disclosed to $seat and to andranik — actor $actor, tier $tier"
+
+    # 10. the act. The claude child only: km-seat traps TERM and would take the
+    # runner with it, and `herdr pane close` takes both. Ending claude alone
+    # lets km-seat's own loop write `asleep`, clear the heartbeat and re-park,
+    # so the aftermath is the ordinary end-of-day path.
+    kill -TERM "$pids" 2>/dev/null || true
+    local left=10
+    while [ "$left" -gt 0 ] && kill -0 "$pids" 2>/dev/null; do
+        sleep 1
+        left=$((left - 1))
+    done
+    if kill -0 "$pids" 2>/dev/null; then
+        kill -KILL "$pids" 2>/dev/null || true
+        echo "release: $seat's session (pid $pids) did not answer SIGTERM in 10s; SIGKILL sent"
+    else
+        echo "release: $seat's session (pid $pids) ended on SIGTERM"
+    fi
+
+    left=30
+    while [ "$left" -gt 0 ]; do
+        if [ "$(seat_status "$seat")" = asleep ]; then break; fi
+        sleep 1
+        left=$((left - 1))
+    done
+    rm -f "$marker"
+    if [ "$(seat_status "$seat")" = asleep ]; then
+        echo "release: $seat is asleep — km-seat re-parked it, and the next dispatch pass can reach it"
+    else
+        echo "release: $seat's status still reads $(seat_status "$seat") after 30s. The session is ended; what has not happened is km-seat writing the seat down as asleep — check that a runner is parked on the seat ($(verb reconcile) settles the ledger)."
     fi
 }
 
@@ -4650,7 +5048,7 @@ cmd_status() {
         echo "UNRESPONSIVE:$frozen — no heartbeat for over $(fmt_age "$stale"); read the pane before believing the STATE column. A frozen seat holds its slot, answers no mail, and reports as healthy. Do not end the session: a modal is not consent (VI.2)."
     fi
     if [ -n "$boxed" ]; then
-        echo "BOXED:$boxed — awake, with TEXT SITTING UNSUBMITTED in the input box. That is a claim about PIXELS, and since gqlc-i8dlp it is a claim that can be false, so it is no longer send_line's verdict: send_line PROBES a box it reads non-empty — types one character, asks what the box then holds, and Backspaces it away — and refuses only when the probe says a draft is really there (gqlc-2ohck). Where one is, the refusal is correct: typing APPENDS, so it would paste onto the end of a citizen's draft and submit the pair as one message (gqlc-6bnkw). cmd_wake, cmd_sleep, cmd_down and dispatch's recovery ask all route through that one function, so a seat whose draft is real cannot be woken, nudged, slept or brought down, while each still holds one of $(cfg concurrency max_active) slots and every dispatch pass wakes ASLEEP seats only. EACH SEAT CARRIES A TAG for what its box holds, which says how the text got there. (km) is a box EVERY line of which km itself typed — /exit, or an ask carrying the '[km] ' prefix, which send_line now refuses to send without — so read gqlc-gh7xj first: a burst of 64 characters or more is read as a paste and its trailing CR renders as a literal newline. (foreign) is a box NO line of which carries either shape, so no code path in this town typed any of it: it is a citizen composing right now, or a hand-send. The hand-send is settled (gqlc-cj7hp, 2026-09-02): 'herdr agent send' writes literal text and presses no Enter, and a person typing at the herdr TUI leaves the same thing — so a (foreign) box is most often a CORRECT instruction that somebody believes they delivered, and the seat it froze is the receipt nobody got. That reading was taken over boxes classified by their first line, before (mixed) existed, and the re-read it was owed is done: its counts STAND (bd gqlc-nypdt, 2026-09-03). That old tag is applied four times in that bead, and once it is the only attribution a string got — but it cannot err in the direction that would matter: classifying by the first line hides km's lines UNDER a citizen's, so a mixed box reads (foreign), while no '[km] ' line can read (foreign). It over-reports (foreign) and cannot manufacture one, and every string quoted there was its box's first line. The corpus excludes them independently and as a CLASS: km sends /exit and four asks each carrying '[km] ', with git log -S'[km] ' reaching the founding commit, so box text without that prefix is not km's on sight. Ten live boxes plus every composer read recoverable from the town's transcript record classify identically under the old rule and this one, against a control in which the raffi box of gqlc-fb8ip does not. Do not hunt the sender in herdr's log: it records a send only when the send FAILS — of 136 successful api requests logged since 2026-06-13, not one is a send — so a delivered one leaves no trace, by design. Say it with 'km wake <seat> --reason \"<text>\"' instead, which types, presses Enter, and witnesses the box emptied. The nine strings measured that day ran 8 to 61 characters against gh7xj's threshold of 64, so gh7xj explains none of them — but 61 is close enough that the next may land the other side of it, and a string over 64 is NOT thereby km's. (mixed) is both shapes in one box, and it is the tag that says an ask of km's own is STRANDED: km typed into a composer somebody had already made non-empty, so that ask never arrived and the citizen's draft is still sitting under it. Neither pure remedy fits — clearing the box destroys a citizen's words, leaving it holds a slot and loses the ask — so read the pane before you touch it. WEIGH THAT TAG BEFORE ACTING ON IT: authorship is asked per RENDERED row and a composer wraps, so ONE km ask long enough to wrap tags (mixed) with no citizen's draft under it at all — km's 530-character stall ask does exactly that at the 352-column width measured on every live pane, which means the words this sentence warns you not to destroy need not exist (bd gqlc-mtfbz). Until this tag existed a box was named by its FIRST line alone: Սեդրակ measured a three-line composer on raffi holding a three-word draft above two '[km] ' asks, km called it (foreign), and this very sentence asserted of it that nothing in the town had typed it (bd gqlc-fb8ip). The tag reads the composer's rendered bytes and nothing else, so a citizen whose own draft opens with '[km] ' is still tagged km. RENDERED is the word to weigh: seat_box_text reads the VISIBLE SCREEN, so every tag on this line is a claim about pixels and not about what the application's composer holds, and the two are the same thing only while the seat's application is still repainting. They HAVE now been made to come apart, and so far only in the direction that costs nothing here: a seat whose process is STOPPED while its pane still renders and its agent still reports \`done\` goes on reading as an EMPTY box for text herdr has already accepted, which the seat then consumes when it resumes — the screen showing LESS than the application will hold, not more (bd gqlc-2m9r8, measured 2026-09-03 on a scratch pane whose claude had no parent shell, so SIGSTOP was not job control and the TUI stayed up). That direction is harmless to this tag and was NOT harmless to the send path, which reported those queued bytes as NOT SENT — the branch a caller may retry on, and a retry APPENDS to the copy already queued. It now reports them UNWITNESSED instead, which forbids the blind re-send; km still cannot see the bytes, and only the seat's resume settles whether they arrived (bd gqlc-e5t8c). The GHOST direction — the screen showing MORE than the composer holds — IS reproduced: bd gqlc-i8dlp, 2026-09-05, on seat sedrak, six rows of keystrokes against a rendered 41-character line. Weigh the SCOPE and not only the fact: that seat was RESPONSIVE throughout — in the foreground, repainting within 3s, agent_status moving under the probe — so this tag is UNVERIFIED on a live seat exactly as much as on a wedged one, and a reader who confines the suspicion to unresponsive seats has excluded the one population the ghost was actually found in. What it cost is measured: the refusal above fired on a phantom and took down wake, sleep, down and all three rungs of dispatch's recovery ladder at once, on the MAYOR's seat, for about an hour, while he sat idle and reachable (bd gqlc-2ohck). THE FIELD CHECK IS THE TYPED CHARACTER AND NOT THE BACKSPACE. i8dlp's Backspace-invariance row is what PROVED the ghost, and it is unsound as a test: nothing km can read separates a draft whose last character is a space from the same draft without it, so such a draft renders identically before and after the Backspace that ate it. THOSE BYTES ARE LOST UPSTREAM OF km AND NO REPAIR HERE RECOVERS THEM — 'herdr pane read' trims trailing whitespace AT THE READ, so seat_box_text never receives it and its own trailing strip fires only on input that does not occur, measured end to end against a real pane, the mutant deleting that strip SURVIVING, with a positive control on the LEADING strip that does change behaviour (bd gqlc-3oth5). Do not read that as three seats agreeing: the same claim was confirmed three times through one harness that stubbed herdr, which is the precise layer doing the trimming, and one apparatus reported three times is one measurement (bd gqlc-f0451, gqlc-7onv9). A rendered screen cannot show trailing whitespace at all either, so no read-only check closes this. Type one character and read the box back instead: a ghost has its whole rendered line REPLACED, having nothing to append to, while a real composer comes back holding the draft AND the character. Backspace once to put it back. Two panes now carry the signature: a box read non-empty, a send moments later submitting the sender's own text ALONE, and the draft still rendered afterwards — Սեդրակ's on 2026-09-03, and aramazd's the same night, where the send was an append whose leading separator space reached the transcript while the draft it was meant to follow did not. Run 'km arrived <seat> --box' before trusting a tag you are about to act on: it asks whether the box's own text appears in that seat's transcript as a SUBMITTED user row, which would mean the application consumed it and the screen kept it — strong evidence of a ghost, though NOT proof, and the bound inverts this remedy: the match is on the TEXT, so a box holding a string this town sends repeatedly — a '[km] ' nudge, a recurring ask — matches an older delivery of that same string as well as it matches an echo of itself, and over --box's 24h window that older delivery is in reach. Where that is possible the box may instead be a FRESH ask whose Enter was swallowed by gh7xj above, and acting on 'already delivered' is what loses it; the (km) and (mixed) tags are where this bites and (foreign) is not (bd gqlc-wnwls). Absence proves nothing in the other direction — it cannot tell 'the composer holds it' from 'the composer never held it'. Use the verb and do not wire the two commands together by hand: piping seat_box_text into 'km arrived --text' returns NOT FOUND for EVERY box in the town, because the box carries the prompt glyph a submitted row never has, and stripping the glyph first does not repair it either — the normaliser drops a leading space with the glyph, so a row opening with one is still missed. Both of those spell their failure exactly like the honest NOT FOUND, so a sweep wired that way reports a clean town having tested nothing (bd gqlc-2c88r). Seven panes sat like this through the eleven-hour freeze of 2026-09-01, every one of them reporting as awake-idle, and the ESCALATED tags on that board were asks that never arrived rather than citizens ignoring them (gqlc-5vp7). It refines TWO populations, and an absent line is bounded by both: the IDLE seats below, and the NOWORK ones, whose agent still reports \`working\` and which therefore never reach the idle check at all — that second half is why Վահագն could sit provably boxed and be named merely stalled (gqlc-u5w1e). What neither read covers is a seat that is working AND whose work witness is still fresh, so an ABSENT BOXED line says that no idle pane and no stalled one holds a stranded ask, and says nothing whatever about the working majority, which is deliberately never read. These are NOT on the IDLE line below, because IDLE's remedy — 'km sleep --seat <seat>' — is itself a send, and the probe above is what settles it: refused where the draft is real, delivered where the pixels were stale. They ARE still on NOWORK when they qualify, tagged there: that line carries the dry age and the escalation tag, which exist nowhere else. DO NOT RELAX THAT GUARD: appending to a live draft and submitting it is a worse failure than a held slot. gqlc-2ohck changed that guard's INPUT and not its policy — the probe is fail-closed, calling a box empty on one exact observation and refusing on every other, including every state it could not establish. km neither clears nor submits the text, because it cannot tell a stale line from work in progress — reading the pane and deciding is an operator's, and ending or unblocking a session is not km's to do on a timer (VI.2)."
+        echo "BOXED:$boxed — awake, with TEXT SITTING UNSUBMITTED in the input box. That is a claim about PIXELS, and since gqlc-i8dlp it is a claim that can be false, so it is no longer send_line's verdict: send_line PROBES a box it reads non-empty — types one character, asks what the box then holds, and Backspaces it away — and refuses only when the probe says a draft is really there (gqlc-2ohck). Where one is, the refusal is correct: typing APPENDS, so it would paste onto the end of a citizen's draft and submit the pair as one message (gqlc-6bnkw). cmd_wake, cmd_sleep, cmd_down and dispatch's recovery ask all route through that one function, so a seat whose draft is real cannot be woken, nudged, slept or brought down, while each still holds one of $(cfg concurrency max_active) slots and every dispatch pass wakes ASLEEP seats only. Where the draft is real, no transport in this town reaches that seat WITHOUT submitting her words in her name; the release paragraph at the end of this line names the one lawful end there is and what it costs. EACH SEAT CARRIES A TAG for what its box holds, which says how the text got there. (km) is a box EVERY line of which km itself typed — /exit, or an ask carrying the '[km] ' prefix, which send_line now refuses to send without — so read gqlc-gh7xj first: a burst of 64 characters or more is read as a paste and its trailing CR renders as a literal newline. (foreign) is a box NO line of which carries either shape, so no code path in this town typed any of it: it is a citizen composing right now, or a hand-send. The hand-send is settled (gqlc-cj7hp, 2026-09-02): 'herdr agent send' writes literal text and presses no Enter, and a person typing at the herdr TUI leaves the same thing — so a (foreign) box is most often a CORRECT instruction that somebody believes they delivered, and the seat it froze is the receipt nobody got. That reading was taken over boxes classified by their first line, before (mixed) existed, and the re-read it was owed is done: its counts STAND (bd gqlc-nypdt, 2026-09-03). That old tag is applied four times in that bead, and once it is the only attribution a string got — but it cannot err in the direction that would matter: classifying by the first line hides km's lines UNDER a citizen's, so a mixed box reads (foreign), while no '[km] ' line can read (foreign). It over-reports (foreign) and cannot manufacture one, and every string quoted there was its box's first line. The corpus excludes them independently and as a CLASS: km sends /exit and four asks each carrying '[km] ', with git log -S'[km] ' reaching the founding commit, so box text without that prefix is not km's on sight. Ten live boxes plus every composer read recoverable from the town's transcript record classify identically under the old rule and this one, against a control in which the raffi box of gqlc-fb8ip does not. Do not hunt the sender in herdr's log: it records a send only when the send FAILS — of 136 successful api requests logged since 2026-06-13, not one is a send — so a delivered one leaves no trace, by design. Say it with 'km wake <seat> --reason \"<text>\"' instead, which types, presses Enter, and witnesses the box emptied. The nine strings measured that day ran 8 to 61 characters against gh7xj's threshold of 64, so gh7xj explains none of them — but 61 is close enough that the next may land the other side of it, and a string over 64 is NOT thereby km's. (mixed) is both shapes in one box, and it is the tag that says an ask of km's own is STRANDED: km typed into a composer somebody had already made non-empty, so that ask never arrived and the citizen's draft is still sitting under it. Neither pure remedy fits — clearing the box destroys a citizen's words, leaving it holds a slot and loses the ask — so read the pane before you touch it. WEIGH THAT TAG BEFORE ACTING ON IT: authorship is asked per RENDERED row and a composer wraps, so ONE km ask long enough to wrap tags (mixed) with no citizen's draft under it at all — km's 530-character stall ask does exactly that at the 352-column width measured on every live pane, which means the words this sentence warns you not to destroy need not exist (bd gqlc-mtfbz). Until this tag existed a box was named by its FIRST line alone: Սեդրակ measured a three-line composer on raffi holding a three-word draft above two '[km] ' asks, km called it (foreign), and this very sentence asserted of it that nothing in the town had typed it (bd gqlc-fb8ip). The tag reads the composer's rendered bytes and nothing else, so a citizen whose own draft opens with '[km] ' is still tagged km. RENDERED is the word to weigh: seat_box_text reads the VISIBLE SCREEN, so every tag on this line is a claim about pixels and not about what the application's composer holds, and a still-repainting application does NOT make the two the same thing — they have been measured coming apart in BOTH directions, one of those on live seats repainting within 3s, as the two passages below set out. ONE of those directions costs nothing here: a seat whose process is STOPPED while its pane still renders and its agent still reports \`done\` goes on reading as an EMPTY box for text herdr has already accepted, which the seat then consumes when it resumes — the screen showing LESS than the application will hold, not more (bd gqlc-2m9r8, measured 2026-09-03 on a scratch pane whose claude had no parent shell, so SIGSTOP was not job control and the TUI stayed up). That direction is harmless to this tag and was NOT harmless to the send path, which reported those queued bytes as NOT SENT — the branch a caller may retry on, and a retry APPENDS to the copy already queued. It now reports them UNWITNESSED instead, which forbids the blind re-send; km still cannot see the bytes, and only the seat's resume settles whether they arrived (bd gqlc-e5t8c). The GHOST direction — the screen showing MORE than the composer holds — is REPRODUCED, on a scratch pane AND IN THE FIELD. On the scratch pane, four drafts whose Enter the application had already TAKEN — witnessed clock-free by TIOCINQ on its own pty slave, and by each draft's arrival as a SUBMITTED user row in that session's transcript — went on rendering in the composer, while three withheld-Enter controls rendered THE SAME WAY and reached no transcript row at all, so this reader cannot tell the two apart (bd gqlc-2m9r8, M7; first shown by M6). Those rows held all three of the TUI rendered, the agent registered and reporting done, and the keystrokes reaching claude — the second of which M6 could not test. The 5-15 ms of the earliest rows was the repaint's latency and not the ghost's life: with the process stopped inside that window the same box read byte-identical for three minutes with the agent reporting done at every reading. IN THE FIELD it was reproduced on two live citizen panes on 2026-09-05, where this reader went on rendering a sentence over a composer that was EMPTY, and the row that carries it is the TYPED CHARACTER: on sedrak's pane one typed character replaced the WHOLE rendered line and deleting that character brought the sentence back, which a real composer cannot do, because typing APPENDS and a real draft comes back holding the draft AND the character (gqlc-6bnkw). astghik's pane answered the same two-sided control the same way, three rows to sedrak's six, and the full rows for both seats are on bd gqlc-i8dlp. NEITHER PROCESS WAS STOPPED: sedrak's was Sl+ in the foreground, alive 2d08h, repainting under keystrokes within 3s and its agent status moving under the probe, while the ghost line held for about an hour; astghik has no process-table reading at all, and what her record carries instead is a render that moved under keystrokes inside 3s and an agent_status that moved under the probe. So a field ghost does NOT require the repaint non-progress the scratch rows were made under, that necessary condition is dead as a field claim, and HOW the pixels got there is still unestablished (gqlc-i8dlp, open; what the divergence costs the send path is gqlc-2ohck). So this tag is UNVERIFIED on ANY seat, responsive or not — as is any remedy that sends a citizen to read a pane and decide about bytes that may no longer exist — and BOTH field seats were responsive throughout, which is the population an UNRESPONSIVE scoping would have sent the reader away from. What it cost is measured: the refusal above fired on a phantom and took down wake, sleep, down and all three rungs of dispatch's recovery ladder at once, on the MAYOR's seat, for about an hour, while he sat idle and reachable (bd gqlc-2ohck). THE FIELD CHECK IS THE TYPED CHARACTER AND NOT THE BACKSPACE. i8dlp's Backspace-invariance row is what FIRST proved the ghost, and it is unsound as a test: nothing km can read separates a draft whose last character is a space from the same draft without it, so such a draft renders identically before and after the Backspace that ate it. THOSE BYTES ARE LOST UPSTREAM OF km AND NO REPAIR HERE RECOVERS THEM — 'herdr pane read' trims trailing whitespace AT THE READ, so seat_box_text never receives it and its own trailing strip fires only on input that does not occur, measured end to end against a real pane, the mutant deleting that strip SURVIVING, with a positive control on the LEADING strip that does change behaviour (bd gqlc-3oth5). Do not read that as three seats agreeing: the same claim was confirmed three times through one harness that stubbed herdr, which is the precise layer doing the trimming, and one apparatus reported three times is one measurement (bd gqlc-f0451, gqlc-7onv9). A rendered screen cannot show trailing whitespace at all either, so no read-only check closes this. DO NOT CARRY THE ROW OVER AS A RULE: an operator who reads Backspace-invariance as proof of a ghost will meet a live draft ending in a space and type over a citizen's words (gqlc-3oth5). Type one character and read the box back instead: a ghost has its whole rendered line REPLACED, having nothing to append to, while a real composer comes back holding the draft AND the character. Backspace once to put it back. Two panes now carry the signature: a box read non-empty, a send moments later submitting the sender's own text ALONE, and the draft still rendered afterwards — Սեդրակ's on 2026-09-03, and aramazd's the same night, where the send was an append whose leading separator space reached the transcript while the draft it was meant to follow did not. Run 'km arrived <seat> --box' before trusting a tag you are about to act on: it asks whether the box's own text appears in that seat's transcript as a SUBMITTED user row, which would mean the application consumed it and the screen kept it — strong evidence of a ghost, though NOT proof, and the bound inverts this remedy: the match is on the TEXT, so a box holding a string this town sends repeatedly — a '[km] ' nudge, a recurring ask — matches an older delivery of that same string as well as it matches an echo of itself, and over --box's 24h window that older delivery is in reach. Where that is possible the box may instead be a FRESH ask whose Enter was swallowed by gh7xj above, and acting on 'already delivered' is what loses it; the (km) and (mixed) tags are where this bites and (foreign) is not (bd gqlc-wnwls). Absence proves nothing in the other direction — it cannot tell 'the composer holds it' from 'the composer never held it'. Use the verb and do not wire the two commands together by hand: piping seat_box_text into 'km arrived --text' returns NOT FOUND for EVERY box in the town, because the box carries the prompt glyph a submitted row never has, and stripping the glyph first does not repair it either — the normaliser drops a leading space with the glyph, so a row opening with one is still missed. Both of those spell their failure exactly like the honest NOT FOUND, so a sweep wired that way reports a clean town having tested nothing (bd gqlc-2c88r). Seven panes sat like this through the eleven-hour freeze of 2026-09-01, every one of them reporting as awake-idle, and the ESCALATED tags on that board were asks that never arrived rather than citizens ignoring them (gqlc-5vp7). It refines TWO populations, and an absent line is bounded by both: the IDLE seats below, and the NOWORK ones, whose agent still reports \`working\` and which therefore never reach the idle check at all — that second half is why Վահագն could sit provably boxed and be named merely stalled (gqlc-u5w1e). What neither read covers is a seat that is working AND whose work witness is still fresh, so an ABSENT BOXED line says that no idle pane and no stalled one holds a stranded ask, and says nothing whatever about the working majority, which is deliberately never read. These are NOT on the IDLE line below, because IDLE's remedy — 'km sleep --seat <seat>' — is itself a send, and the probe above is what settles it: refused where the draft is real, delivered where the pixels were stale. They ARE still on NOWORK when they qualify, tagged there: that line carries the dry age and the escalation tag, which exist nowhere else. DO NOT RELAX THAT GUARD: appending to a live draft and submitting it is a worse failure than a held slot. gqlc-2ohck changed that guard's INPUT and not its policy — the probe is fail-closed, calling a box empty on one exact observation and refusing on every other, including every state it could not establish. km neither clears nor submits the text, because it cannot tell a stale line from work in progress. THE REMEDY WHERE THE DRAFT IS REAL IS '$(verb release) <seat>', not an operator: Article VI.5 defines the release of an unreachable seat, and the operator this line used to point at does not exist. It is the HEAVIEST lever, and it is not the only one: 'herdr pane run' does reach a boxed session, at the price of submitting the citizen's draft in her name along with what is sent (gqlc-dqb67, six responsive rows). A lighter verb that does only that is DESIGNED and NOT BUILT — km submit-box, gqlc-pbqni, blocked on gqlc-2m9r8 — so until it exists the choice here is between speaking in her name and ending the session without pressing her words. What was measured is narrower and is about send-keys alone: at the deployed herdr 0.6.10 the parser accepts no modifier form at all, and of the keys it does accept the only one with a visible effect makes the box worse — Up recalls history over the citizen's own draft (gqlc-mriki). RELEASE ends the session and nothing else, leaving the bytes above unpressed and quoting them verbatim in a disclosure to the citizen and to the crown — verbatim in every dimension the reader can carry, which excludes TRAILING WHITESPACE, for the reason the Backspace passage above gives (gqlc-3oth5). It is the mayor's act — any citizen but Րաֆֆի when the mayor is himself the boxed seat — and it refuses until the box has held the SAME TEXT across two of its own readings $(cfg welfare release_box_persist_minutes) minutes apart WITHIN ONE SESSION, so run it once to record a sighting and again after the window; a sighting the seat has since restarted past is refused, because identical bytes on either side of a sleep are the same text stranded twice rather than one box held. SAME is the READER'S sameness and deliberately not the composer's: the comparison runs on the whitespace-normalised form, and trailing whitespace is gone at the read before km sees it at all, so a draft that changed in whitespace ALONE reads as held. The two witnesses are ASYMMETRIC about that rather than independent: for LEADING and INTERNAL text the rest-check reads the raw visible buffer, so an indent-only edit already reads as MOVING and the release refuses on that alone — but for TRAILING whitespace it reads through the SAME pane read that already deleted those bytes, so both are blind by ONE mechanism and nothing in km can see them, because nothing in km is ever shown them. What carries the citizen is the disclosure, which quotes the box RAW: whoever decides is reading what was in the box and not what the gate hashed. Where the seat's own record witnesses a finished day — its status reading asleep-pending, or a handoff note written this session — it acts on that alone; every other case, including a merely parked and idle seat, wants a second citizen's written concurrence first. Nothing fires when the window elapses: no timer and no dispatch pass ever calls it (VI.5.3)."
     fi
     if [ -n "$idle" ]; then
         echo "IDLE:$idle — awake, alive, and sitting at an empty prompt — the composer was READ and found empty, so these are the ones a send can still reach; a seat whose box held text is on the BOXED line above instead, and is not reachable at all. Unroutable, because every dispatch pass wakes ASLEEP seats only, while the live session still spends one of $(cfg concurrency max_active) slots. Six of these stalled the whole town for eleven hours with every board reading healthy (gqlc-5vp7). One capture of a TUI is not proof — read the pane first, and 'km sleep --seat <seat>' frees the slot if the citizen is done. Nothing here ends a session: a seat that has not asked to leave has not consented (VI.2, gqlc-971s)."
@@ -5459,6 +5857,7 @@ case "$cmd" in
     wake)            cmd_wake "$@" ;;
     sleep)           cmd_sleep "$@" ;;
     arrived)         cmd_arrived "$@" ;;
+    release)         cmd_release "$@" ;;
     mail)            cmd_mail "$@" ;;
     dispatch)        cmd_dispatch "$@" ;;
     hold-verdict)    cmd_hold_verdict "$@" ;;
