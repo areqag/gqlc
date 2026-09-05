@@ -14,8 +14,18 @@ type typeMap struct{}
 // §5.1). Returns (typeText, ok): ok=false for the eight unrepresentable
 // widths (INT128 / INT256 / UINT128 / UINT256 / FLOAT16 / FLOAT128 /
 // FLOAT256 / DECIMAL) — caller routes to ErrUnrepresentableWidth naming
-// the width. Callers append a leading '*' for nullable columns and
-// parameters at emission time. FLOAT32 returns "float32" (the
+// the width.
+//
+// The two '*' positions belong to different owners. The WHOLE-VALUE star
+// is the caller's: a nullable column, field or parameter gets its
+// leading '*' at emission time, as before. The ELEMENT star is this
+// table's own, applied by the list arm from the width's ElemNotNull
+// qualifier, so every position carrying a list — Row, EntityField, Param
+// and the nested text under each — reads one answer rather than four
+// re-derivations of it. A nullable column of LIST<INT64> is therefore
+// `*[]*int64`: one star from each owner.
+//
+// FLOAT32 returns "float32" (the
 // carrier-widens-on-encode / narrow-on-decode contract is enforced at
 // the emission sites, spec §5.5 / §5.7).
 //
@@ -33,6 +43,21 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		elemTy, ok := t.Property(pt.Elem())
 		if !ok {
 			return "", false
+		}
+		// An element the schema permits to be NULL carries the star, the
+		// same rule every other nullable position obeys. `any` is the one
+		// exemption: it already carries null as nil, and this backend
+		// deliberately does not walk a []any at all (isSliceType), so a
+		// star there would force the walk and add a second spelling of
+		// the same null.
+		//
+		// Folded into the element text rather than written as
+		// `"[]*" + elemTy` so this method keeps exactly one list return of
+		// the form `"[]" + elem` — the only shape render_queries_test.go's
+		// type-table walk can read, and it refuses what it cannot read
+		// rather than skipping it.
+		if !pt.ElemNotNull() && elemTy != "any" {
+			elemTy = "*" + elemTy
 		}
 		return "[]" + elemTy, true
 	}

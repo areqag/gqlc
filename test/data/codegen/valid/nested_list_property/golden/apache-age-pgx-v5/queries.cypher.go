@@ -51,9 +51,9 @@ func (q *queries) GridWhole(ctx context.Context) (Grid, error) {
 const gridColumnsQueryText = `MATCH (g:Grid) RETURN g.matrix AS matrix, g.grid AS grid, g.piles AS piles`
 
 type GridColumnsRow struct {
-	Matrix *[][]float32
-	Grid   *[][]int16
-	Piles  *[][]any
+	Matrix *[]*[]*float32
+	Grid   *[][]*int16
+	Piles  *[]*[]any
 }
 
 // GridColumns executes the GridColumns query.
@@ -77,25 +77,25 @@ func (q *queries) GridColumns(ctx context.Context) ([]GridColumnsRow, error) {
 		if err := rows.Scan(&raw0, &raw1, &raw2); err != nil {
 			return nil, fmt.Errorf("GridColumns: scan row: %w", err)
 		}
-		var value0 *[][]float32
+		var value0 *[]*[]*float32
 		if raw0 != nil {
-			decoded, err := agtypeListOfListOfFloat32(raw0)
+			decoded, err := agtypeListOfNullableListOfNullableFloat32(raw0)
 			if err != nil {
 				return nil, fmt.Errorf("GridColumns: decode column %q: %w", "matrix", err)
 			}
 			value0 = &decoded
 		}
-		var value1 *[][]int16
+		var value1 *[][]*int16
 		if raw1 != nil {
-			decoded, err := agtypeListOfListOfInt16(raw1)
+			decoded, err := agtypeListOfListOfNullableInt16(raw1)
 			if err != nil {
 				return nil, fmt.Errorf("GridColumns: decode column %q: %w", "grid", err)
 			}
 			value1 = &decoded
 		}
-		var value2 *[][]any
+		var value2 *[]*[]any
 		if raw2 != nil {
-			decoded, err := agtypeListOfListOfAny(raw2)
+			decoded, err := agtypeListOfNullableListOfAny(raw2)
 			if err != nil {
 				return nil, fmt.Errorf("GridColumns: decode column %q: %w", "piles", err)
 			}

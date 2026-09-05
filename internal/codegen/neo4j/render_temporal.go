@@ -36,6 +36,12 @@ type carrierUse struct {
 	// nullable somewhere in the batch, which owes the from<X>ListPtr
 	// wrapper beside the plain helper.
 	listPtr bool
+	// listElem and listElemPtr are the same two bits one level in, for a
+	// list whose ELEMENTS are nullable ([]*X, *[]*X). They are separate
+	// bits rather than a flag on list because the two helpers have
+	// different parameter types and neither can stand for the other: a
+	// batch binding both shapes owes both bodies.
+	listElem, listElemPtr bool
 }
 
 // conversionUses walks the prepared batch ONCE and answers, for both
@@ -110,6 +116,15 @@ func conversionUses(prepared codegen.Prepared) (map[string]carrierUse, map[graph
 				// helper that calls it — never the Ptr form, whose
 				// nil-to-Cypher-null job belongs to the list helper.
 				u.encode = true
+				// A nullable ELEMENT owes a DIFFERENT list helper, not a
+				// flag on this one: the two take incompatible parameter
+				// types ([]X and []*X), so marking both would emit a
+				// helper nothing calls.
+				if listElemIsNullable(goType) {
+					u.listElem = true
+					u.listElemPtr = u.listElemPtr || nullable
+					return
+				}
 				u.list = true
 				u.listPtr = u.listPtr || nullable
 			case nullable:
@@ -182,11 +197,21 @@ func isTemporalCarrier(goType string) bool {
 	return false
 }
 
-// leafType strips the slice prefixes off an emitted Go type text,
-// yielding the element type the decode sites narrow one at a time.
+// leafType strips the slice prefixes AND the element-nullability stars
+// off an emitted Go type text, yielding the element type the decode
+// sites narrow one at a time.
+//
+// Both, alternating, because they alternate in the text: a nullable
+// column of LIST<LIST<INT32>> is `*[]*[]*int32` and its leaf is `int32`.
+// Stopping at a star would hand narrowsANumericWidth a leaf of
+// `*[]*int32`, which is neither its own driver carrier nor a temporal
+// carrier nor "float32", so the gate would claim narrowInt is called
+// where it is not — and an unexported helper nothing calls fails the
+// emitted package's own lint fence, reddening the fixture rather than
+// merely emitting a dead line.
 func leafType(goType string) string {
 	for {
-		elem := strings.TrimPrefix(goType, "[]")
+		elem := strings.TrimPrefix(strings.TrimPrefix(goType, "*"), "[]")
 		if elem == goType {
 			return goType
 		}
@@ -194,8 +219,44 @@ func leafType(goType string) string {
 	}
 }
 
+// elemBase strips the element-nullability star off one emitted element
+// type, yielding the type the driver value is asserted to. The star is
+// this codebase's spelling of "the schema permits this element to be
+// NULL" (bd gqlc-dxhwp); no Bolt wire value is a pointer, so every site
+// that asks the driver a question asks it about the base.
+//
+// One star, not a loop: the star belongs to a single element position,
+// and the levels beneath it carry their own, stripped by their own
+// recursion. leafType is the one that walks all of them at once.
+func elemBase(goType string) string {
+	return strings.TrimPrefix(goType, "*")
+}
+
+// listElemIsNullable reports whether the elements of a list type text
+// are themselves nullable.
+//
+// A parameter's GoType never carries the whole-value star — that one is
+// written from Param.Nullable at struct emission — so every star in this
+// text belongs to an element. The prefix is stripped once because a
+// temporal list is depth 1: ADR 0035 refuses a nested DECLARED list as a
+// stored property, and a parameter's type is its property's.
+func listElemIsNullable(goType string) bool {
+	_, nullable := strings.CutPrefix(strings.TrimPrefix(goType, "[]"), "*")
+	return nullable
+}
+
 // temporalListHelper names the from<X>List helper for one carrier.
-func temporalListHelper(leaf string) string {
+//
+// The Nullable token sits where the star sits in the type text — []*Date
+// stars the element, so fromNullableDateList reads as "a list of
+// nullable Date". That leaves the Ptr SUFFIX its existing meaning, the
+// whole value, so *[]*Date composes as fromNullableDateListPtr with each
+// position spelled once. It is also the spelling AGE arrived at
+// independently for the same question (agtypeListOfNullableDate).
+func temporalListHelper(leaf string, elemNullable bool) string {
+	if elemNullable {
+		return "fromNullable" + leaf + "List"
+	}
 	return "from" + leaf + "List"
 }
 
@@ -428,10 +489,18 @@ func from%[1]sPtr(v *%[1]s) any {
 		}
 		if use.list {
 			b.WriteString("\n")
-			b.WriteString(temporalListEncodeBody(name))
+			b.WriteString(temporalListEncodeBody(name, false))
 			if use.listPtr {
 				b.WriteString("\n")
-				b.WriteString(temporalListEncodePtrBody(name))
+				b.WriteString(temporalListEncodePtrBody(name, false))
+			}
+		}
+		if use.listElem {
+			b.WriteString("\n")
+			b.WriteString(temporalListEncodeBody(name, true))
+			if use.listElemPtr {
+				b.WriteString("\n")
+				b.WriteString(temporalListEncodePtrBody(name, true))
 			}
 		}
 	}
@@ -444,7 +513,25 @@ func from%[1]sPtr(v *%[1]s) any {
 // because dbtype has no list type to build: []any is the driver's own
 // array carrier, the one its hydrator produces on the way back, and the
 // one packX packs element by element on the way out.
-func temporalListEncodeBody(name string) string {
+func temporalListEncodeBody(name string, elemNullable bool) string {
+	if elemNullable {
+		return fmt.Sprintf(`// %[1]s widens a list of nullable %[2]s parameters element by
+// element. A nil element binds the Cypher null the schema's element
+// nullability declared: packV packs a nil interface as null, so the
+// conversion the other elements owe is simply the one it does not.
+func %[1]s(v []*%[2]s) []any {
+	out := make([]any, len(v))
+	for i := range v {
+		if v[i] == nil {
+			out[i] = nil
+			continue
+		}
+		out[i] = from%[2]s(*v[i])
+	}
+	return out
+}
+`, temporalListHelper(name, true), name)
+	}
 	return fmt.Sprintf(`// %[1]s widens a list of %[2]s parameters element by element. The
 // driver marshals no gqlc struct, so each element converts before the
 // list reaches the wire.
@@ -455,13 +542,21 @@ func %[1]s(v []%[2]s) []any {
 	}
 	return out
 }
-`, temporalListHelper(name), name)
+`, temporalListHelper(name, false), name)
 }
 
 // temporalListEncodePtrBody returns the nullable wrapper for one
 // from<X>List helper. A nil pointer is the schema's declared null; an
 // empty non-nil list is an empty array, which is a different value.
-func temporalListEncodePtrBody(name string) string {
+//
+// elemNullable selects which helper is wrapped, and only that: the
+// pointer this body indirects is the WHOLE list's, one position out from
+// the element stars, so its own body is the same either way.
+func temporalListEncodePtrBody(name string, elemNullable bool) string {
+	elem := name
+	if elemNullable {
+		elem = "*" + name
+	}
 	return fmt.Sprintf(`// %[1]sPtr binds a nullable list of %[2]s: a nil pointer is the
 // Cypher null the schema's nullability declared, not an empty list.
 func %[1]sPtr(v *[]%[2]s) any {
@@ -470,7 +565,7 @@ func %[1]sPtr(v *[]%[2]s) any {
 	}
 	return %[1]s(*v)
 }
-`, temporalListHelper(name), name)
+`, temporalListHelper(name, elemNullable), elem)
 }
 
 // needsTimePackage reports whether any emitted conversion body names the

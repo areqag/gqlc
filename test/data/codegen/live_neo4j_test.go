@@ -17,6 +17,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcneo4j "github.com/testcontainers/testcontainers-go/modules/neo4j"
 
+	certelemv5 "github.com/areqag/gqlc/test/data/codegen/valid/certified_list_element/golden/neo4j-go-v5"
+	certelemv6 "github.com/areqag/gqlc/test/data/codegen/valid/certified_list_element/golden/neo4j-go-v6"
 	edgeunionv5 "github.com/areqag/gqlc/test/data/codegen/valid/edge_union_undeclared_relationship_type/golden/neo4j-go-v5"
 	edgeunionv6 "github.com/areqag/gqlc/test/data/codegen/valid/edge_union_undeclared_relationship_type/golden/neo4j-go-v6"
 	entityedgev5 "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/neo4j-go-v5"
@@ -90,6 +92,7 @@ type neo4jV5 struct {
 	mixed      mixedReadWriteBatchV5
 	many       manyColManyV5
 	nestedList nestedListV5
+	nullElem   nullListElemV5
 	deepList   deepNestedListV5
 	entityNode entityNodeV5
 	entityEdge entityEdgeV5
@@ -142,6 +145,7 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 		mixed:      mixedReadWriteBatchV5{q: mixedv5.New(driver)},
 		many:       manyColManyV5{q: manycolmanyv5.New(driver)},
 		nestedList: nestedListV5{q: listlistv5.New(driver)},
+		nullElem:   nullListElemV5{q: certelemv5.New(driver)},
 		deepList:   deepNestedListV5{q: deeplistv5.New(driver)},
 		entityNode: entityNodeV5{q: entitynodev5.New(driver)},
 		entityEdge: entityEdgeV5{q: entityedgev5.New(driver)},
@@ -443,6 +447,8 @@ func (s neo4jV5Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 
 func (s neo4jV5Scenario) nestedList() nestedListQuerier { return s.arm.nestedList }
 
+func (s neo4jV5Scenario) nullListElem() nullListElemQuerier { return s.arm.nullElem }
+
 func (s neo4jV5Scenario) deepNestedList() deepNestedListQuerier { return s.arm.deepList }
 
 func (s neo4jV5Scenario) entityNodeProjectedOne() entityNodeQuerier { return s.arm.entityNode }
@@ -573,6 +579,16 @@ func (a nestedListV5) nestedList(ctx context.Context) ([][]int64, error) {
 	return a.q.NestedList(ctx)
 }
 
+// nullListElemV5 binds the certified_list_element fixture. Like the nested-list
+// adapters there is nothing to convert: [][]*int64 is the signature the fix
+// under bd gqlc-dxhwp gave the emitted method, and the point of the row is
+// that a real server can fill it.
+type nullListElemV5 struct{ q *certelemv5.Queries }
+
+func (a nullListElemV5) nullablePair(ctx context.Context) ([][]*int64, error) {
+	return a.q.PersonNullablePair(ctx)
+}
+
 // deepNestedListV5 binds the list_list_list_int fixture, the one whose
 // emission carries depth-suffixed decoder locals.
 type deepNestedListV5 struct{ q *deeplistv5.Queries }
@@ -610,6 +626,7 @@ type neo4jV6 struct {
 	mixed      mixedReadWriteBatchV6
 	many       manyColManyV6
 	nestedList nestedListV6
+	nullElem   nullListElemV6
 	deepList   deepNestedListV6
 	entityNode entityNodeV6
 	entityEdge entityEdgeV6
@@ -641,6 +658,7 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 		mixed:      mixedReadWriteBatchV6{q: mixedv6.New(driver)},
 		many:       manyColManyV6{q: manycolmanyv6.New(driver)},
 		nestedList: nestedListV6{q: listlistv6.New(driver)},
+		nullElem:   nullListElemV6{q: certelemv6.New(driver)},
 		deepList:   deepNestedListV6{q: deeplistv6.New(driver)},
 		entityNode: entityNodeV6{q: entitynodev6.New(driver)},
 		entityEdge: entityEdgeV6{q: entityedgev6.New(driver)},
@@ -923,6 +941,8 @@ func (s neo4jV6Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 
 func (s neo4jV6Scenario) nestedList() nestedListQuerier { return s.arm.nestedList }
 
+func (s neo4jV6Scenario) nullListElem() nullListElemQuerier { return s.arm.nullElem }
+
 func (s neo4jV6Scenario) deepNestedList() deepNestedListQuerier { return s.arm.deepList }
 
 func (s neo4jV6Scenario) entityNodeProjectedOne() entityNodeQuerier { return s.arm.entityNode }
@@ -1044,6 +1064,12 @@ type nestedListV6 struct{ q *listlistv6.Queries }
 
 func (a nestedListV6) nestedList(ctx context.Context) ([][]int64, error) {
 	return a.q.NestedList(ctx)
+}
+
+type nullListElemV6 struct{ q *certelemv6.Queries }
+
+func (a nullListElemV6) nullablePair(ctx context.Context) ([][]*int64, error) {
+	return a.q.PersonNullablePair(ctx)
 }
 
 type deepNestedListV6 struct{ q *deeplistv6.Queries }

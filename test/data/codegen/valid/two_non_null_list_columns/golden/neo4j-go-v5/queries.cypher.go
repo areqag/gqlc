@@ -12,8 +12,8 @@ import (
 const listyColumnsQueryText = `MATCH (l:Listy) RETURN l.tags AS tags, l.ranks AS ranks`
 
 type ListyColumnsRow struct {
-	Tags  []string
-	Ranks []int32
+	Tags  []*string
+	Ranks []*int32
 }
 
 // ListyColumns executes the ListyColumns query.
@@ -34,13 +34,17 @@ func (q *queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
 		if isNil {
 			return nil, fmt.Errorf("ListyColumns: column %q is non-nullable but arrived null", "tags")
 		}
-		acc0 := make([]string, 0, len(value0))
+		acc0 := make([]*string, 0, len(value0))
 		for i, elem := range value0 {
+			if elem == nil {
+				acc0 = append(acc0, nil)
+				continue
+			}
 			v, ok := elem.(string)
 			if !ok {
 				return nil, fmt.Errorf("ListyColumns: decode column %q element %d: expected string, got %T", "tags", i, elem)
 			}
-			acc0 = append(acc0, v)
+			acc0 = append(acc0, &v)
 		}
 		row.Tags = acc0
 		value1, isNil, err := neo4j.GetRecordValue[[]any](record, "ranks")
@@ -50,8 +54,12 @@ func (q *queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
 		if isNil {
 			return nil, fmt.Errorf("ListyColumns: column %q is non-nullable but arrived null", "ranks")
 		}
-		acc1 := make([]int32, 0, len(value1))
+		acc1 := make([]*int32, 0, len(value1))
 		for i, elem := range value1 {
+			if elem == nil {
+				acc1 = append(acc1, nil)
+				continue
+			}
 			v, ok := elem.(int64)
 			if !ok {
 				return nil, fmt.Errorf("ListyColumns: decode column %q element %d: expected int64, got %T", "ranks", i, elem)
@@ -60,7 +68,7 @@ func (q *queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
 			if err != nil {
 				return nil, fmt.Errorf("ListyColumns: decode column %q element %d: %w", "ranks", i, err)
 			}
-			acc1 = append(acc1, vn)
+			acc1 = append(acc1, &vn)
 		}
 		row.Ranks = acc1
 		out = append(out, row)
@@ -71,8 +79,8 @@ func (q *queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
 const listyRowQueryText = `MATCH (l:Listy) RETURN l.tags AS tags, l.ranks AS ranks`
 
 type ListyRowRow struct {
-	Tags  []string
-	Ranks []int32
+	Tags  []*string
+	Ranks []*int32
 }
 
 // ListyRow executes the ListyRow query.
@@ -97,13 +105,17 @@ func (q *queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
 	if isNil {
 		return ListyRowRow{}, fmt.Errorf("ListyRow: column %q is non-nullable but arrived null", "tags")
 	}
-	acc0 := make([]string, 0, len(value0))
+	acc0 := make([]*string, 0, len(value0))
 	for i, elem := range value0 {
+		if elem == nil {
+			acc0 = append(acc0, nil)
+			continue
+		}
 		v, ok := elem.(string)
 		if !ok {
 			return ListyRowRow{}, fmt.Errorf("ListyRow: decode column %q element %d: expected string, got %T", "tags", i, elem)
 		}
-		acc0 = append(acc0, v)
+		acc0 = append(acc0, &v)
 	}
 	row.Tags = acc0
 	value1, isNil, err := neo4j.GetRecordValue[[]any](records[0], "ranks")
@@ -113,8 +125,12 @@ func (q *queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
 	if isNil {
 		return ListyRowRow{}, fmt.Errorf("ListyRow: column %q is non-nullable but arrived null", "ranks")
 	}
-	acc1 := make([]int32, 0, len(value1))
+	acc1 := make([]*int32, 0, len(value1))
 	for i, elem := range value1 {
+		if elem == nil {
+			acc1 = append(acc1, nil)
+			continue
+		}
 		v, ok := elem.(int64)
 		if !ok {
 			return ListyRowRow{}, fmt.Errorf("ListyRow: decode column %q element %d: expected int64, got %T", "ranks", i, elem)
@@ -123,7 +139,7 @@ func (q *queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
 		if err != nil {
 			return ListyRowRow{}, fmt.Errorf("ListyRow: decode column %q element %d: %w", "ranks", i, err)
 		}
-		acc1 = append(acc1, vn)
+		acc1 = append(acc1, &vn)
 	}
 	row.Ranks = acc1
 	return row, nil
@@ -132,9 +148,9 @@ func (q *queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
 const listyMixedQueryText = `MATCH (l:Listy) RETURN l.tags AS tags, l.spare AS spare, l.ranks AS ranks`
 
 type ListyMixedRow struct {
-	Tags  []string
-	Spare *[]string
-	Ranks []int32
+	Tags  []*string
+	Spare *[]*string
+	Ranks []*int32
 }
 
 // ListyMixed executes the ListyMixed query.
@@ -155,28 +171,36 @@ func (q *queries) ListyMixed(ctx context.Context) ([]ListyMixedRow, error) {
 		if isNil {
 			return nil, fmt.Errorf("ListyMixed: column %q is non-nullable but arrived null", "tags")
 		}
-		acc0 := make([]string, 0, len(value0))
+		acc0 := make([]*string, 0, len(value0))
 		for i, elem := range value0 {
+			if elem == nil {
+				acc0 = append(acc0, nil)
+				continue
+			}
 			v, ok := elem.(string)
 			if !ok {
 				return nil, fmt.Errorf("ListyMixed: decode column %q element %d: expected string, got %T", "tags", i, elem)
 			}
-			acc0 = append(acc0, v)
+			acc0 = append(acc0, &v)
 		}
 		row.Tags = acc0
 		value1, isNil, err := neo4j.GetRecordValue[[]any](record, "spare")
 		if err != nil {
 			return nil, fmt.Errorf("ListyMixed: decode column %q: %w", "spare", err)
 		}
-		var value1Ptr *[]string
+		var value1Ptr *[]*string
 		if !isNil {
-			acc1 := make([]string, 0, len(value1))
+			acc1 := make([]*string, 0, len(value1))
 			for i, elem := range value1 {
+				if elem == nil {
+					acc1 = append(acc1, nil)
+					continue
+				}
 				v, ok := elem.(string)
 				if !ok {
 					return nil, fmt.Errorf("ListyMixed: decode column %q element %d: expected string, got %T", "spare", i, elem)
 				}
-				acc1 = append(acc1, v)
+				acc1 = append(acc1, &v)
 			}
 			value1Ptr = &acc1
 		}
@@ -188,8 +212,12 @@ func (q *queries) ListyMixed(ctx context.Context) ([]ListyMixedRow, error) {
 		if isNil {
 			return nil, fmt.Errorf("ListyMixed: column %q is non-nullable but arrived null", "ranks")
 		}
-		acc2 := make([]int32, 0, len(value2))
+		acc2 := make([]*int32, 0, len(value2))
 		for i, elem := range value2 {
+			if elem == nil {
+				acc2 = append(acc2, nil)
+				continue
+			}
 			v, ok := elem.(int64)
 			if !ok {
 				return nil, fmt.Errorf("ListyMixed: decode column %q element %d: expected int64, got %T", "ranks", i, elem)
@@ -198,7 +226,7 @@ func (q *queries) ListyMixed(ctx context.Context) ([]ListyMixedRow, error) {
 			if err != nil {
 				return nil, fmt.Errorf("ListyMixed: decode column %q element %d: %w", "ranks", i, err)
 			}
-			acc2 = append(acc2, vn)
+			acc2 = append(acc2, &vn)
 		}
 		row.Ranks = acc2
 		out = append(out, row)

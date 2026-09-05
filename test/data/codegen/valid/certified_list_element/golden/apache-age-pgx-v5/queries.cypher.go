@@ -166,7 +166,7 @@ const personNullablePairQueryText = `MATCH (p:Person) RETURN [p.score, p.score] 
 // PersonNullablePair executes the PersonNullablePair query.
 //
 //	MATCH (p:Person) RETURN [p.score, p.score] AS scores
-func (q *queries) PersonNullablePair(ctx context.Context) ([][]int64, error) {
+func (q *queries) PersonNullablePair(ctx context.Context) ([][]*int64, error) {
 	stmt, err := q.cypherStmt("$gqlc$", personNullablePairQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -176,7 +176,7 @@ func (q *queries) PersonNullablePair(ctx context.Context) ([][]int64, error) {
 		return nil, fmt.Errorf("PersonNullablePair: %w", err)
 	}
 	defer rows.Close()
-	out := make([][]int64, 0)
+	out := make([][]*int64, 0)
 	for rows.Next() {
 		var raw0 []byte
 		if err := rows.Scan(&raw0); err != nil {
@@ -185,7 +185,7 @@ func (q *queries) PersonNullablePair(ctx context.Context) ([][]int64, error) {
 		if raw0 == nil {
 			return nil, fmt.Errorf("PersonNullablePair: column %q is non-nullable but arrived null", "scores")
 		}
-		value0, err := agtypeListOfInt64(raw0)
+		value0, err := agtypeListOfNullableInt64(raw0)
 		if err != nil {
 			return nil, fmt.Errorf("PersonNullablePair: decode column %q: %w", "scores", err)
 		}

@@ -10,9 +10,9 @@ import (
 const readingColumnsQueryText = `MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.marks AS marks`
 
 type ReadingColumnsRow struct {
-	Tags  *[]string
-	Ranks *[]int32
-	Flags *[]bool
+	Tags  *[]*string
+	Ranks *[]*int32
+	Flags *[]*bool
 	Marks *[]string
 }
 
@@ -38,25 +38,25 @@ func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		if err := rows.Scan(&raw0, &raw1, &raw2, &raw3); err != nil {
 			return nil, fmt.Errorf("ReadingColumns: scan row: %w", err)
 		}
-		var value0 *[]string
+		var value0 *[]*string
 		if raw0 != nil {
-			decoded, err := agtypeListOfString(raw0)
+			decoded, err := agtypeListOfNullableString(raw0)
 			if err != nil {
 				return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "tags", err)
 			}
 			value0 = &decoded
 		}
-		var value1 *[]int32
+		var value1 *[]*int32
 		if raw1 != nil {
-			decoded, err := agtypeListOfInt32(raw1)
+			decoded, err := agtypeListOfNullableInt32(raw1)
 			if err != nil {
 				return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "ranks", err)
 			}
 			value1 = &decoded
 		}
-		var value2 *[]bool
+		var value2 *[]*bool
 		if raw2 != nil {
-			decoded, err := agtypeListOfBool(raw2)
+			decoded, err := agtypeListOfNullableBool(raw2)
 			if err != nil {
 				return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "flags", err)
 			}
@@ -129,7 +129,7 @@ const dropTaggedQueryText = `MATCH (r:Reading {tags: $tags}) DELETE r`
 // DropTagged executes the DropTagged query.
 //
 //	MATCH (r:Reading {tags: $tags}) DELETE r
-func (q *queries) DropTagged(ctx context.Context, arg *[]string) error {
+func (q *queries) DropTagged(ctx context.Context, arg *[]*string) error {
 	stmt, err := q.cypherStmt("$gqlc$", dropTaggedQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err

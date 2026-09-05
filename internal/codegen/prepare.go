@@ -206,6 +206,14 @@ type ListElem struct {
 	// only, on the same rule the top-level Row follows: an element that
 	// resolved no property type leaves it zero.
 	Width graph.PropertyType
+	// Nullable is element-position nullability: the schema permits this
+	// element to be NULL, so the decode has to admit one.
+	//
+	// GoType ALREADY CARRIES the leading '*' when this is set, so every
+	// composition of the form `"[]" + plan.GoType` stays correct with no
+	// further edit. The field exists so a render layer can ask the
+	// question instead of parsing the star back out of the text.
+	Nullable bool
 }
 
 // ColumnKind discriminates the row-assembly arm a backend runs for a
@@ -1501,6 +1509,24 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 		if !ok {
 			return nil, fmt.Errorf("%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
 		}
+		// An element the schema permits to be NULL is emitted as a pointer,
+		// the rule every other nullable position already obeys. Without it
+		// the resolver's committed nullability is discarded here and the
+		// emitted decode asserts a driver value straight to the bare
+		// carrier, which no NULL element can ever satisfy — the decode
+		// fails on a value the schema declared legal (bd gqlc-sokgc).
+		//
+		// `any` is the one exemption: it carries null as nil already, so a
+		// star would be a second spelling of the same absence.
+		//
+		// Applied before the two returns below so both take it. The nested
+		// arm's `ty` is the TypeMap's text for the WHOLE inner list, which
+		// carries its own element's star already, so `*` here is this
+		// level's alone and the two compose.
+		elemNullable := tt.Nullable && ty != "any"
+		if elemNullable {
+			ty = "*" + ty
+		}
 		// A list element that is itself a list gets a nested plan, the same
 		// shape the ResolvedList arm below builds. Without it the element
 		// carries the whole slice type on a ColumnProperty plan, and the
@@ -1516,9 +1542,9 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 			if err != nil {
 				return nil, err
 			}
-			return &ListElem{Kind: ColumnList, GoType: ty, Nested: nested, Width: tt.Type}, nil
+			return &ListElem{Kind: ColumnList, GoType: ty, Nested: nested, Width: tt.Type, Nullable: elemNullable}, nil
 		}
-		return &ListElem{Kind: ColumnProperty, GoType: ty, Width: tt.Type}, nil
+		return &ListElem{Kind: ColumnProperty, GoType: ty, Width: tt.Type, Nullable: elemNullable}, nil
 	case resolver.ResolvedNode:
 		idx, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: tt.Labels}]
 		if !ok {

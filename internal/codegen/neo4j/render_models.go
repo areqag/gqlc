@@ -434,27 +434,46 @@ func ridesADriverCarrier(goType string) bool {
 // digit is a fixed part of the name, not a depth counter.
 func writeSliceNarrow(b *strings.Builder, e codegen.Entity, f codegen.EntityField, sliceType, src, dst, indent string) {
 	elem := strings.TrimPrefix(sliceType, "[]")
+	// Nullability is read off the text here rather than off a plan,
+	// because this path has no plan to read: an entity field's type comes
+	// from TypeMap.Property whole, and the star it folds into the element
+	// IS the statement that the schema permits a NULL there.
+	base := elemBase(elem)
+	nullable := base != elem
 	fail := fmt.Sprintf("return %s{}, fmt.Errorf(\"decode %s.%s: property %%q", e.Name, e.Name, f.Field)
 
 	fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, dst, sliceType, src)
 	fmt.Fprintf(b, "%sfor i0, elem0 := range %s {\n", indent, src)
 	body := indent + "\t"
-	carrier := driverCarrier(elem)
+	// Before the assertion, or the assertion is still what runs: the
+	// driver hands a NULL element back as a nil `any`, which satisfies no
+	// carrier and would fail the whole property on a legal value.
+	if nullable {
+		writeNilElemArm(b, dst, "elem0", body)
+	}
+	carrier := driverCarrier(base)
 	fmt.Fprintf(b, "%sv0, ok := elem0.(%s)\n", body, carrier)
 	fmt.Fprintf(b, "%sif !ok {\n", body)
 	fmt.Fprintf(b, "%s\t%s element %%d: expected %s, got %%T\", %q, i0, elem0)\n", body, fail, carrier, f.PropName)
 	fmt.Fprintf(b, "%s}\n", body)
 	switch {
-	case isTemporalCarrier(elem):
-		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, narrowExpr(elem, "v0"))
-	case carrier != elem:
-		fmt.Fprintf(b, "%sv0n, err := %s\n", body, narrowCall(elem, f.Width.Elem(), "v0"))
+	case isTemporalCarrier(base):
+		if nullable {
+			fmt.Fprintf(b, "%sv0n := %s\n", body, narrowExpr(base, "v0"))
+			fmt.Fprintf(b, "%s%s = append(%s, &v0n)\n", body, dst, dst)
+			break
+		}
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, narrowExpr(base, "v0"))
+	case carrier != base:
+		fmt.Fprintf(b, "%sv0n, err := %s\n", body, narrowCall(base, f.Width.Elem(), "v0"))
 		fmt.Fprintf(b, "%sif err != nil {\n", body)
 		fmt.Fprintf(b, "%s\t%s element %%d: %%w\", %q, i0, err)\n", body, fail, f.PropName)
 		fmt.Fprintf(b, "%s}\n", body)
-		fmt.Fprintf(b, "%s%s = append(%s, v0n)\n", body, dst, dst)
+		// The address taken is the NARROWED local's: the field holds
+		// *int32 and &v0 would be an *int64.
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, addrIf(nullable, "v0n"))
 	default:
-		fmt.Fprintf(b, "%s%s = append(%s, v0)\n", body, dst, dst)
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, addrIf(nullable, "v0"))
 	}
 	fmt.Fprintf(b, "%s}\n", indent)
 }
