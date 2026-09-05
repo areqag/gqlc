@@ -177,5 +177,6 @@ Ruling 2 removes one reason a seat sits awake. It does not remove the others,
 and it cannot: a citizen who simply does not run `km sleep` at the end of her
 protocol still holds a slot, and the only thing standing between that and a
 saturated town is the ladder's ask and her own reading of it. This decision
-makes the *waiting* case unnecessary and the escalation letter honest. The
+makes the *waiting* case unnecessary and the terminal rung's account of a
+stuck seat honest — in the letter and in the bead alike, since both render it. The
 *forgot to sleep* case is still prose asking a citizen to act.
