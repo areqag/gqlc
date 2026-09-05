@@ -2166,6 +2166,31 @@ made here, and it is the one worth a regression test, because a rewrite of
 shared prose is exactly where a "harmless" reflow silently changes what the
 mayor is told (bd gqlc-bwmst).
 
+Its remedy sentence used to read `km sleep --seat $s` frees the slot if
+she is genuinely done. That was false in all three branches a terminal
+rung can fire for, which is why it is now a trichotomy that matches the
+state instead. Against a BOXED seat the command is vacuous — `send_line`
+refuses into a non-empty composer, and the rung fires precisely when asks
+were being refused, which is what a box looks like from outside. Against
+a walled or dead-turn session it is destructive: `/exit` is client-side
+and WOULD deliver, taking the resume-at-reset continuation decision 0013
+exists to protect, so the one branch where the command works is the branch
+where it destroys. And against a present citizen who is choosing to sit it
+is not the mayor's act at all (VI.2). Ruled by gqlc-b5x22 and written down
+as decision 0016; the boxed path is decision 0012's.
+
+That paragraph says "this report", not "this letter", and the word is
+load-bearing for the reason this section exists: the block is rendered
+once for two readers, and on the bead rung there is no letter. It is also
+the reason the trichotomy carries bare `"` around `km wake`'s reason
+rather than `\"` — this body is an UNQUOTED heredoc, where a backslash is
+special only before `` $ ` \ `` and a newline, so `\"` would reach the
+mayor as a literal backslash-quote. The sentence was written at the old
+inlined site, where `\"` was correct, and moving it here inverted that.
+Nothing catches this: `bash -n` parses both, no test reads the string, and
+the gates are green either way — it is visible only in a render (bd
+gqlc-7ninj, caught by Միհր in review).
+
 ## ladder_escalate_bead — the other terminal rung, for when the ladder's only recipient is its subject
 
 (`kingdom/bin/km`, `ladder_escalate_bead`)
