@@ -75,13 +75,23 @@ Relative to `[dispatch] max_priority`, which is `"2"`:
 
 - **P0–P2 is a queue.** The dispatcher will hand the bead to somebody.
 - **P3–P4 is not a slow queue. It is a no-queue** — a parked, searchable
-  record that will never route until a person renumbers it.
+  record that will never be handed to anybody until a person renumbers it.
 
 So pricing a bead P3 is not an estimate of its urgency. It is the decision that
-nobody will ever be woken for it, and the filer must mean exactly that. This is
-not a complaint about the tier: P3 is where the town's adversarial review of
+nobody will ever be *woken* for it, and the filer must mean exactly that. This
+is not a complaint about the tier: P3 is where the town's adversarial review of
 its own machinery is *supposed* to deposit findings, by Constitution V.3.2 and
 by the measured argument in `kingdom.toml`'s own `[dispatch]` comment.
+
+**Read "never routes" precisely, because the imprecise reading is falsified by
+this decision's own evidence.** The floor binds the FRESH dispatch pass only —
+ready and unassigned. An assigned sub-floor bead still routes on the owned
+pass, and an in-progress one on resume; Constitution III.3 is the right to
+finish your own work whatever its number. So the tier is a no-queue for a bead
+nobody holds, which is precisely the condition of a freshly released execution
+stub, and precisely why the two incidents below came out differently: the stub
+nobody had claimed sat for two days, and the stub a citizen was already holding
+was carried to close at P3 without difficulty.
 
 ## Ruling 2 — a pair is priced once
 

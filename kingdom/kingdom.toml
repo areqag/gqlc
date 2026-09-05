@@ -144,9 +144,11 @@ max_active = 10
 # defect in the report, not an argument for the floor — gqlc-ag4g's finding is
 # what governs, and the fix belongs in km's unroutable summary.
 #
-# The pair-pricing consequence of this number is decision 0015: below the floor is
-# not a slow queue but a no-queue, so a design at or above it must not carry an
-# execution stub below it.
+# The pair-pricing consequence of this number is decision 0015. This floor binds
+# the fresh pass — ready and unassigned — which is exactly what an execution
+# stub is when its design closes, so below the floor is not a slow queue for it
+# but a no-queue: a design at or above this number must not carry an execution
+# stub below it.
 max_priority = "2"
 
 # How long a P0 may sit unroutable before `km doctor` stops calling it a warning

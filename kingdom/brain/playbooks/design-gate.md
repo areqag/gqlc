@@ -18,8 +18,10 @@ bd dep add <execution-id> <design-id>      # execution blocked-by design
 coincidence: a pair is priced once, at intake, at one number** (decision 0015).
 The forbidden state is a design at or above the dispatch floor whose execution
 stub is below it — that pair promises a handoff and guarantees it cannot
-happen, because a sub-floor bead is not a slow queue, it is a no-queue that
-routes to nobody until a person renumbers it. Nothing goes red when you get
+happen, because the floor binds the fresh dispatch pass, and a stub released by
+its design's close is exactly what that pass looks at: ready and unassigned.
+Below the floor that is not a slow queue, it is a no-queue, and it stays one
+until a person renumbers the bead. Nothing goes red when you get
 this wrong: the design closes cleanly and the stub sits on the board looking
 like every other P3. It happened twice in the week before the rule was written
 (`gqlc-az1rj` and `gqlc-0sxu6`, both hand-promoted by Սեդրակ two days later,
