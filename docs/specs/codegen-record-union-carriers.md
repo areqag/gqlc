@@ -288,6 +288,24 @@ which unions exist at all, never in what an admitted union accepts.
   the divergence ADR mirrors 0035 with the backends' roles reversed
   from expectation.
 
+- **In the refuses branch the divergence ADR owes a consequence
+  paragraph**, because the refusal costs more than one declaration and
+  a reader who is not told will read what remains as dead code. It must
+  say: §6's four positions collapse to zero on neo4j, so no schema can
+  reach that backend's record carrier or its render arms; the carrier
+  and render half nevertheless **stays in the tree**, on the
+  sentinel-honesty ground. `prepareEntityFields` asks `tm.Property`
+  *before* `tm.StorableProperty` (prepare.go:690, :694), so a
+  `Property` that refused records would fire
+  `ErrUnrepresentableWidth` — whose taxonomy meaning is "no faithful Go
+  carrier on this driver, permanently" — against a width the driver
+  carries perfectly well. The honest `ErrUnstorableProperty` fires only
+  because `Property` answered truthfully on the way to it. So the
+  record arm has a reachable consumer in this branch too: the refusal
+  path itself. The code is unreachable *from a schema*, which is not
+  the same as unreachable, and it stays unit-witnessed and
+  mutation-screened where it stands.
+
 - **Encode/decode helpers are emitted per backend in `models.go`**,
   one per distinct record or union encoding reachable from the
   schema and queries, collected the way temporal helper uses already
@@ -304,13 +322,54 @@ which unions exist at all, never in what an admitted union accepts.
 The carrier question binds every position a `PropertyType` reaches:
 stored property, query column, query parameter, list element. The
 storage question binds stored properties only — prepareEntityFields
-asks it (prepare.go:620) and the column and parameter sweeps do not.
-This asymmetry is ADR 0035's, inherited deliberately: on neo4j a
-record *property* is refused (the store will not keep it) while a
-record *column* and a record *parameter* work — the server happily
-projects and binds map values it will not store, which is the same
-sentence ADR 0035 wrote about nested lists, now with a second kind
-making it true.
+asks it (prepare.go:694, after the carrier question at :690) and the
+column and parameter sweeps do not. This asymmetry is ADR 0035's,
+inherited deliberately.
+
+Those four are positions a width is **consumed** at, and they must not
+be read as four places one can *arise*. A record width has exactly one
+**derivation root**: a property or field type in the schema.
+`property()` (propertytype.go:19) is the only caller of
+`resolveValueType` (:46), whose `RecordTypeLabelContext` arm (:66) is
+the only caller of `resolveRecordType` (:93), and nothing outside
+`internal/graph` and `internal/schema/gql` constructs a record width:
+every mention of `RecordOf` or `TypeAnyRecord` in `internal/codegen`
+*compares* against one it was handed. There is no standalone type
+declaration and no cast.
+
+The list-element descents (:50, :57), the record-field descent (:130)
+and the union-member descent (:146) are recursive calls back **into**
+that root, not alternatives to it. So `LIST<RECORD<…>>`,
+`RECORD<a RECORD<…>>` and `UNION<RECORD<…> | INT32>` mint their record
+widths through the same two functions and the same canonical encoding.
+That answers the question §4 otherwise leaves open — a union with a
+record member needs no derivation rule of its own, and stage 2 inherits
+one rather than writing a second.
+
+**The consequence, in one branch of §5's fork.** If the pinned neo4j
+server refuses a map-valued stored property, §5's `StorableProperty`
+arm refuses the *declaration*: prepare rejects the whole schema, which
+is the shape `invalid/unstorable_property_nested_list` already
+witnesses. With
+no legal declaration there is no property for a column to project or a
+parameter to be compared against, so **no valid input reaches a neo4j
+record column or parameter** and the four positions collapse to zero on
+that backend. The server would serve them — `live_neo4j_test.go`'s
+`mapColumn` scenario round-trips a map column against the pinned image
+today — but the language never offers it one. In the other branch of
+the fork the declaration is legal and all four positions carry, with
+nothing here to decide.
+
+**The nested-list disanalogy**, named because the analogy is the one a
+reader of ADR 0035 will reach for and it does not carry this far.
+`collect()` derives `LIST<LIST<T>>` from a flat list that *is*
+storable, so ADR 0035's carrier arm keeps a schema-reachable consumer
+on neo4j even with the stored-property declaration refused. Nothing
+derives a record: a map literal (`RETURN {a: 1} AS m`, the
+`valid/scalar_map` fixture) is typed as a map, not as a declared
+record, so it is not the record case in different clothes. This is why
+ADR 0035's refusal costs neo4j one declaration and a record refusal
+costs it the whole position set.
 
 The prepared surface changes once, in stage 1: `EntityField`,
 `Param`, `Row`, and `ListElem` each gain a `Width
@@ -344,8 +403,17 @@ claim, premise tripwires where the claim is about the server):
    the `StorableProperty` refusal; fork condition in §5).
 2. AGE stores and round-trips a record property, nested record
    included.
-3. neo4j round-trips a record **column** and a record **parameter**
-   (the positions storage does not bind).
+
+A third was demanded here and is **struck in the refuses branch of
+§5's fork**: a neo4j round-trip of a record **column** and a record
+**parameter**. §6's derivation root is what withdraws it — with the
+declaration refused, no fixture can express those positions, so the
+measurement asks for an input that cannot be written rather than for a
+fact about the server. Its witness at the only level that exists is the
+unit and mutation coverage of the neo4j carrier and render arms, which
+stay in the tree on the sentinel-honesty ground §5's fork paragraph and
+the divergence ADR carry. In the accepts branch the measurement is
+expressible and stands as written.
 
 **Stage 2 — closed unions** (new warrior bead, blocked by
 `gqlc-jffyz`): the `KindUnion` carrier per §4, the wire-family
@@ -384,10 +452,21 @@ Checks that FAIL if this design is wrong, named per the design gate:
   that FAILS if the server accepts the write — the refusal is
   contingent on a measured behaviour, not on this document.
 - **Round-trip scope matches prose:** the stage-1 live tests cover
-  exactly the positions §6 claims work (columns and parameters on
-  neo4j, properties on AGE) — a passing suite that skipped one of
-  those would be a scope mismatch a reader of §6 can catch by
-  grepping the test names against the table.
+  exactly the positions §6 claims a *declaration* can reach on each
+  backend — a passing suite that skipped one would be a scope mismatch
+  a reader of §6 can catch by grepping the test names against the
+  table. In the refuses branch that set is AGE's properties alone, per
+  §7's struck measurement; in the accepts branch it is columns and
+  parameters on neo4j beside them. Reading this falsifier against the
+  wrong branch of the fork is itself the mismatch to watch for.
+
+- **The derivation root is a claim about the tree, not a reading of
+  it:** §6 rests on `resolveRecordType` having exactly one caller and
+  on nothing outside `internal/graph` and `internal/schema/gql`
+  constructing a record width. Both are greppable, and either failing
+  re-opens §6 — a resolver that grows a width constructor, or a cast,
+  gives a record column an origin the declaration refusal does not
+  close. Re-run the grep, do not trust this paragraph.
 
 ## 9. Vocabulary
 
@@ -396,3 +475,12 @@ spec): the equivalence class of declared widths a backend's driver
 delivers as one indistinguishable wire shape. It is the load-bearing
 term of §4's admission rule and the first word of the union refusal
 messages, so it must mean one thing.
+
+*Derivation root* stays spec-local — it names a fact about this
+codebase rather than about GQL, so it belongs here and not in
+CONTEXT.md. It is the set of syntactic positions a width family can
+**originate** from, as against the positions it is consumed at. §6's
+whole argument is that for records the two sets differ: four
+consumption positions, one derivation root. Keeping the words apart is
+what stops "the carrier binds all four positions" from being read as
+"a record can arrive at any of the four".
