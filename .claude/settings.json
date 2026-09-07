@@ -1,57 +1,10 @@
 {
-  "permissions": {
-    "defaultMode": "bypassPermissions"
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "kingdom/bin/km-statusline"
-  },
   "hooks": {
     "PreCompact": [
       {
         "hooks": [
           {
             "command": "bd prime",
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "command": ".githooks/claude-pre-bash",
-            "type": "command"
-          }
-        ],
-        "matcher": "Bash"
-      },
-      {
-        "hooks": [
-          {
-            "command": ".githooks/claude-pre-ask",
-            "type": "command"
-          }
-        ],
-        "matcher": "AskUserQuestion|EnterPlanMode"
-      },
-      {
-        "hooks": [
-          {
-            "command": ".githooks/claude-tool-witness",
-            "type": "command"
-          }
-        ],
-        "matcher": ""
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "command": ".githooks/claude-tool-witness",
             "type": "command"
           }
         ],

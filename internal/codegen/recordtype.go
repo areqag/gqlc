@@ -37,7 +37,7 @@ import (
 // accepts an accent-quoted field name spelled pct%s. It is checked
 // against the unicode
 // Go identifier grammar rather than an ASCII one, because paramFieldName
-// deliberately keeps the author's script — a schema written in Armenian
+// deliberately keeps the author's script — a schema written in Cyrillic
 // mangles to a legal struct field and is admitted (see goFieldName).
 //
 // The recursion is through list elements and record fields, matching

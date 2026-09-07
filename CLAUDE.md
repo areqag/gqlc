@@ -2,29 +2,6 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
-## This repository runs Claude Code in bypassPermissions
-
-The checked-in `.claude/settings.json` sets `permissions.defaultMode` to
-`bypassPermissions`, so a Claude Code session opened here does not ask before
-running a tool. Every clone inherits it — the file is tracked, and it is not
-scoped to this town's seats. An interactive session still meets Claude Code's
-workspace-trust dialog before project settings apply; whether that dialog gates
-this particular setting is undocumented and we have not measured it. A run that
-gets no dialog at all, and so inherits the mode silently, is a wider set than
-just `claude -p`: its `--help` says the dialog is skipped "via -p, or when
-stdout is not a TTY, e.g. piped or redirected output".
-
-It is set because a seat resumed by hand is launched as `claude --resume <uuid>`,
-which replays no `--permission-mode` flag, and an unattended agent that stops on
-a permission prompt waits until someone kills it (bd `gqlc-keaz`). Under this
-mode `PreToolUse` hooks still run and still block on exit 2, so the refusals in
-`.githooks/` are unaffected.
-
-To opt out, set your own `permissions.defaultMode` in `.claude/settings.local.json`,
-which is untracked and outranks the project file, or take the mode away from the
-whole host with `permissions.disableBypassPermissionsMode: "disable"` in managed
-settings, which the shipped binary honours above every file here.
-
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker
 
@@ -131,11 +108,9 @@ repository's write call-site audit:
 
 ## Working directory
 
-**No session modifies files in the shared repo cwd** (`/home/antranig/Developer/gqlc/gqlc`). It is for read-only research work (grep, read, `bd show`, `git log`) — the moment intent shifts to modification (any `bd create/close/update`, any file write, any branch creation), you work somewhere else. WHERE depends on who you are, and there are two answers.
+**No session modifies files in the shared repo cwd** (`/home/antranig/Developer/gqlc/gqlc`). It is for read-only research work (grep, read, `bd show`, `git log`) — the moment intent shifts to modification (any `bd create/close/update`, any file write, any branch creation), you work somewhere else.
 
-**If you are a seat of the Թագաւորութիւն** (`KINGDOM_SEAT` is set), you already have one: `../gqlc-seat-<you>`, and it is PERMANENT. Do not create another and do not remove it; cut a branch per bead inside it. Under bd `gqlc-w5bh` a seat's directory becomes its own full clone rather than a linked worktree of this checkout, one seat at a time, so a given seat may still be either — the recipe is identical for both, but the shared-namespace warnings below (stash, refs, local config) stop describing a seat once it converts. Your recipe is `kingdom/brain/playbooks/citizen-protocol.md`, "Working a bead" step 1, which is authoritative for seats — the rest of this section is deliberately not a second copy of it, so the two cannot drift apart again (bd `gqlc-wuax`).
-
-**Everyone else** — a human, or a one-off agent like a `/tdd` run or a factory session — has no seat worktree, so make an ephemeral sibling one per session, at bead-claim time, before any modification:
+Make an ephemeral sibling worktree per session, at bead-claim time, before any modification:
 
 ```bash
 git worktree add --no-track -b <branch-name> ../<repo>-<bead-slug> origin/master
@@ -162,7 +137,7 @@ After the PR merges and beads are closed:
 git worktree remove ../<repo>-<bead-slug>
 ```
 
-**That removal is best-effort, and the leak it fails to prevent is expected.** It runs only if the session survives to run it, and sessions here are killed without warning by quota walls and stall watchdogs, so it is frequently never reached: 70 stale worktrees were removed by hand once, and a later sweep found 93 registered worktrees among 621 stale `/tmp` directories (bd `gqlc-osuz`). So do not read the line above as the mechanism that keeps the disk clean. The mechanisms are `git worktree prune` for the registrations, and `just tmp-report` / `just tmp-reap apply` for the directories — run them when you find yourself in the shared checkout, not only when you leaked one. The per-seat model has none of this failure mode, because there is nothing to reap; that is the argument for it, and the reason a seat must not adopt the recipe above.
+**That removal is best-effort, and the leak it fails to prevent is expected.** It runs only if the session survives to run it, and sessions here are killed without warning by quota walls and stall watchdogs, so it is frequently never reached: 70 stale worktrees were removed by hand once, and a later sweep found 93 registered worktrees among 621 stale `/tmp` directories (bd `gqlc-osuz`). So do not read the line above as the mechanism that keeps the disk clean. `git worktree prune` clears the registrations; the abandoned `/tmp` directories are nobody's job since the reaping recipes were removed, so clean up your own — run the prune when you find yourself in the shared checkout, not only when you leaked one.
 
 **Why a worktree at all:** two agent sessions sharing one cwd share one HEAD, one index, one working tree. Whichever ran `git checkout` last wins — the other session's `git status` / `git log --oneline master..HEAD` silently report the wrong branch. Staged files bleed across branches. `MERGE_HEAD` / `CHERRY_PICK_HEAD` state confuses hook logic. All observed 2026-07-18 (bd `gqlc-2fi`).
 
@@ -180,13 +155,13 @@ scratch=$(mktemp -d)                    # a directory
 orig=$(mktemp)                          # a single file
 ```
 
-Never a fixed path — no `/tmp/km.orig`, no `/tmp/probe.jsonl`, no
-`/tmp/verdict.md`. A chosen name is not yours: sixteen seats doing the same kind
+Never a fixed path — no `/tmp/script.orig`, no `/tmp/probe.jsonl`, no
+`/tmp/verdict.md`. A chosen name is not yours: many sessions doing the same kind
 of work pick the same obvious name, and the loser of the race reads the winner's
 bytes.
 
 Measured 2026-08-22 (bd `gqlc-b8gd`): two sessions ran the same mutation ritual
-over `kingdom/bin/km` — copy aside to `/tmp/km.orig`, mutate, copy back. The
+over one shell script — copy aside to a fixed `/tmp` path, mutate, copy back. The
 second write landed on the first, and the restore copied one session's
 uncommitted work into the other's worktree. Both branches shared a base, so it
 applied cleanly with no conflict to raise an alarm; `git diff` was the only thing
@@ -202,12 +177,12 @@ scratch=$(mktemp -d); trap 'rm -rf "$scratch"' EXIT
 ```
 
 `/tmp` here is a 16 GiB tmpfs capped at 1048576 inodes. On 2026-08-22 it hit 99%
-of that cap and began refusing writes town-wide with ENOSPC while `df -h` still
+of that cap and began refusing writes host-wide with ENOSPC while `df -h` still
 showed 5.9 G free — a third of the inode budget was held by abandoned agent
 scratch directories nobody ever reaped (bd `gqlc-vze6`). If you ever see ENOSPC
-with free space, run `df -i` before anything else. `just tmp-report` shows what
-is holding the filesystem in both currencies; `just tmp-reap apply` reclaims what
-it can prove is abandoned. Neither is a substitute for cleaning up your own.
+with free space, run `df -i` before anything else: the filesystem is exhausted in
+inodes, not in bytes, and only one of the two currencies is on `df -h`. Nothing
+reaps `/tmp` here, so rule 2 is the whole defence.
 
 Both rules still hold the older one they replace: scratch goes outside the tree
 you are working on or judging, never a transient file dropped into it.
@@ -216,7 +191,7 @@ you are working on or judging, never a transient file dropped into it.
 
 The worktree rule isolates the tree, and the section above says `/tmp` is not
 isolated either. Neither is the stash. It lives in the common git dir, so it is
-ONE namespace shared by the main checkout and every seat worktree at once.
+ONE namespace shared by the main checkout and every linked worktree at once.
 
 - `git stash list` in your worktree lists **every** worktree's stashes. It is a
   read and it is safe; read it freely.
@@ -229,17 +204,17 @@ you must drop an entry, read its subject first and drop it by index only once
 the branch it names carries your own bead id. A bare `git stash drop` takes
 `stash@{0}`, which is whoever stashed most recently.
 
-Measured 2026-08-29, both halves. Անահիտ found the hazard: `git rev-parse
---git-common-dir` returns the shared `.git` from every seat, and in her own list
-`stash@{0}` read `WIP on fix/gqlc-m5rc-root-in-package-tests` — another seat's
-branch, on a bead that was in progress — then vanished as its owner popped it,
-which is how she knew it was live work rather than an abandoned entry. Anyone
-running the cleanup step in that window would have destroyed it silently, with a
-green cleanup conscience. Confirmed from seat `ayg` by writing rather than
-watching: one stash pushed in `../gqlc-seat-ayg` was then listed verbatim by
-`git -C ../gqlc stash list` and by `git -C ../gqlc-seat-anahit stash list`, and
-`refs/stash` with its reflog exists only under the common `.git` — the
-per-worktree `refs/` directory is empty (bd `gqlc-96lf0`).
+Measured 2026-08-29, both halves. The hazard was found by reading: `git rev-parse
+--git-common-dir` returns the shared `.git` from every worktree, and in one
+session's list `stash@{0}` read `WIP on fix/gqlc-m5rc-root-in-package-tests` —
+another session's branch, on a bead that was in progress — then vanished as its
+owner popped it, which is how the reader knew it was live work rather than an
+abandoned entry. Anyone running the cleanup step in that window would have
+destroyed it silently, with a green cleanup conscience. Confirmed afterwards by
+writing rather than watching: one stash pushed in a sibling worktree was then
+listed verbatim from two other worktrees, and `refs/stash` with its reflog exists
+only under the common `.git` — the per-worktree `refs/` directory is empty (bd
+`gqlc-96lf0`).
 
 The other half of that cleanup sentence, `prune remote branches`, is over a
 shared namespace too, since remote-tracking refs also live in the common dir. It
@@ -273,9 +248,7 @@ Beads IDs alone don't auto-close linked GitHub issues on merge — GitHub only r
   the other answer, and that text is the copy that cannot go stale. Worth one
   careful read before you edit, because a body edit re-runs the check **and
   cancels the CI run already in flight** (`ci.yml` fires on `edited` under
-  `cancel-in-progress`), so each guess costs a full round of gates. Seats have a
-  second statement of the same three forms in `citizen-protocol.md` step 5; if
-  the two ever disagree, the script's error text settles it.
+  `cancel-in-progress`), so each guess costs a full round of gates.
 - **The mirror lives in JSON field `external_ref`, not `external_link`.**
   `jq '.[0].external_link'` on a misnamed key prints `null` with exit 0, which
   reads exactly like "no mirror, so no Closes needed" — the same probe that
@@ -292,29 +265,6 @@ Do not add AI-authorship attribution to commits or PR bodies:
 - **No `🤖 Generated with [Claude Code]` footer** in PR bodies.
 
 The commit-trailer half is enforced at commit time by `.githooks/commit-msg`, which rejects any `Co-Authored-By` value mentioning `claude` or an `@anthropic.com` email. The PR-body footer half cannot be hook-enforced (PR bodies bypass local git); follow the rule.
-
-## The Թագաւորութիւն (agent society)
-
-This repo is also worked by an autonomous agent society — seats with souls,
-file-based mail, a beads-routed dispatcher, and a constitution. Charter and
-machinery live in `kingdom/` (start with `kingdom/README.md`). If you are a
-seat (`KINGDOM_SEAT` is set), your procedure is
-`kingdom/brain/playbooks/citizen-protocol.md`; all Armenian prose in this
-repo is Western Armenian, classical orthography. `just kingdom` shows the
-town at a glance.
-
-**This model supersedes the earlier ephemeral-team pattern.** Previously,
-work was executed by spawning per-bead agent teams (implementer +
-adversarial reviewer, the "Carmack + Linus" shape). Under the kingdom,
-work is taken by the persistent seats instead: Ճարտարապետներ design and hand
-off, Ռազմիկներ execute test-driven (`/tdd`), and the Դատաւորներ review
-(`/thermo-nuclear-code-quality-review`). Review follows the design gate: a PR
-is read by a judge if its bead was blocked by a design bead, if it amends the
-constitution, or if a citizen asks — everything else merges on green gates
-(Constitution V.2, `kingdom/brain/decisions/0003-the-restart.md`).
-The disciplines carry over — tests first, adversarial review where it is
-owed — the ephemeral instances do not. Humans do not block: citizens
-decide, merge, and amend their own constitution.
 
 ## Build & Test
 

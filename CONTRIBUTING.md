@@ -5,9 +5,7 @@
 Run `just init` once after cloning. This configures git to use the project's
 `.githooks/` directory (`git config core.hooksPath .githooks`), which activates
 a pre-commit hook that blocks accidental direct commits to `master` or `main`.
-The same guard is wired into Claude Code as a `PreToolUse` hook so AI agents are
-blocked at the conversation level too. The recipe is idempotent — running it
-multiple times is safe.
+The recipe is idempotent — running it multiple times is safe.
 
 `just test` and `just doctor` **fail** when `core.hooksPath` has drifted away
 from `.githooks`. That drift deactivates every hook in `.githooks/` at once and,
@@ -28,8 +26,8 @@ push time, which is when it matters.
 It has to live outside the working tree. A check at the top of
 `.githooks/pre-commit` cannot report that `.githooks/` is unwired, because a
 dead hook does not run; and a checkout parked on a branch predating a fix has
-every *tracked* file at that commit, which is why the `PreToolUse` detector in
-`.claude/settings.json` was inert in the one repository it was written for. The
+every *tracked* file at that commit, which is how a detector shipped as a
+tracked file came to be inert in the one repository it was written for. The
 git common dir is shared by every linked worktree, so one `just init` anywhere
 arms all of them, and it is the same directory whichever branch you are parked
 on.
@@ -76,39 +74,6 @@ That is one usable key among several rather than the only door — `$#`, stdin,
 `GIT_PREFIX` are set by git for all five names and do reach the recipe when it
 runs from `pre-push`. Executing the hooks removes the accidental shapes — a
 stub, a `cp` truncation — and raises the price of a deliberate one.
-
-Those recipes only run when someone runs them, so `.githooks/claude-pre-bash`
-runs a stricter version of the check on every Bash tool call. Drifted here means
-a repo that *ships* `.githooks/` and whose `core.hooksPath` does not point live
-at it; a repo without that directory is not distinguishable from any unrelated
-repo and neither half fires. Given that, the two halves key on different
-directories: while the hook's **own** working directory is inside a drifted repo
-it warns on any command it does not refuse outright, and it refuses
-`git commit`, `git merge`, `git pull` and `git push` whose **effective target**
-repo is drifted — including a `git -C <drifted>` issued from a healthy directory
-— until the config is repaired. Those four were picked by measuring which
-subcommands run one of the four hooks this repo ships (`pre-commit`,
-`commit-msg`, `pre-push`, `post-merge`); `revert`, `cherry-pick`, `rebase` and
-`am` ran none of them. Some `merge` and `pull` *shapes* run none either — a
-rebasing pull of an already-diverged branch, for one — but the subcommand does
-not determine the shape: `pull` alone spans invocations running two of those
-hooks, one, and none, depending on its options and on remote state at run time.
-The gate keys on the subcommand anyway and over-refuses that last group.
-Stricter because `just doctor` compares the configured value and nothing else — with
-`core.hooksPath` set to `.githooks` but the directory holding only `*.sample`
-files, or a hook file left non-executable, `just doctor` prints `ok` and exits
-0 where the Bash hook refuses. In a plain terminal `just doctor` is what you
-have, and on those two states it reports nothing. The Bash hook has silent
-states of its own: a cwd outside any repo; a repo that ships no `.githooks/` at
-all, per the definition above, even with `core.hooksPath` unset; and a
-*non-gated* command aimed at a drifted repo from a healthy directory
-(`git -C <drifted> status`), because the warn half keys on the hook's own
-directory — resolved up to that directory's repo root, so a subdirectory warns
-too — and never follows the command's target. Each was a pinned row in
-`.githooks/tests/claude-pre-bash-test.sh`, which PR #1595 (f6dc4c7b) deleted
-along with the rest of `.githooks/tests/` and the `test-hooks` recipe that ran
-it. Nothing holds these states today, so the list above is a dated reading of
-the hook rather than something a gate keeps honest.
 
 ## Development
 

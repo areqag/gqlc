@@ -9,7 +9,7 @@ binary.
 Except where a section says otherwise, the rows below were taken first-party on
 2026-08-24 against **bd 1.0.4 (`ce242a879`)**, in throwaway `bd init` workspaces
 — never against the live ledger. Binary unchanged on this host since 2026-05-09,
-so it is the same binary every seat has been running. bd `gqlc-o6kp`.
+so it is the same binary everyone here has been running. bd `gqlc-o6kp`.
 
 The one exception is the record-size ceiling, measured 2026-09-03 against the
 same binary but on a **probe bead in the live ledger**, created and deleted for
@@ -30,7 +30,7 @@ order to measure the thing that punishes writes.
 
 `✓ Updated issue` reports that the command was accepted, not that a row changed.
 There is no separate rendering for an update that was a no-op. **A success line
-is not evidence of a write**, so a citizen who watches for one and stops there
+is not evidence of a write**, so anyone who watches for one and stops there
 has checked nothing. Read the field back.
 
 ## A refused flag or value discards the whole update — loudly
@@ -43,9 +43,9 @@ reason on stderr, and **no field written, including the fields that were valid**
 | `--status open` | 0 | `✓ Updated issue` | status |
 | `--assignee ""` | 0 | `✓ Updated issue` | assignee |
 | `--assignee "" --status open` | 0 | `✓ Updated issue` | both |
-| `--status open --set-labels class:warrior` | 0 | `✓ Updated issue` | both |
-| `-l class:warrior` | 1 | *empty* | nothing |
-| `--status open -l class:warrior` | 1 | *empty* | nothing |
+| `--status open --set-labels <label>` | 0 | `✓ Updated issue` | both |
+| `-l <label>` | 1 | *empty* | nothing |
+| `--status open -l <label>` | 1 | *empty* | nothing |
 | `--status open --frobnicate x` | 1 | *empty* | nothing |
 | `--status bogus` | 1 | *empty* | nothing |
 | `--assignee "" --status bogus` | 1 | *empty* | nothing |
@@ -147,7 +147,7 @@ the rest of this document is about.
 The pre-image is **the whole bead record with `dependencies`, `dependents` and
 `parent` removed** — not a fixed list of keys. bd omits null fields, so the key
 set varies per bead: an open bead carries no `closed_at` or `close_reason`, a
-closed one carries both, and `close_reason` in this town is often several
+closed one carries both, and `close_reason` in this ledger is often several
 paragraphs. Counting a fixed subset is what made the previous version of this
 section read low, by up to 15310 bytes (`gqlc-h9n.7`: 23636 actual, 8326
 reported — 65% low).
@@ -162,8 +162,8 @@ bytes when it was left out:
   least one, and the largest
   such delta on the ledger is 1050 bytes (`gqlc-35yu.5`).
 - The ceiling is on **bytes**. jq's `length` on a string counts codepoints, so
-  against this town's Armenian prose it reads low — 232 bytes low on
-  `gqlc-jffyz` alone. Use `utf8bytelength`.
+  against any non-ASCII prose in a bead it reads low, and it reads low by more
+  the further outside Latin-1 that prose sits. Use `utf8bytelength`.
 
 <!-- Validated byte-for-byte against the refusal dump; see the paragraph below
      before changing any of the three transforms. -->
@@ -195,7 +195,7 @@ direction.** `bd show --json | jq -c '.[0]'` inlines `dependencies` and
 75438 bytes on `gqlc-3evsn`. But 1132 of 1656 beads have no dependencies,
 dependents or parent at all, and for every one of those the same command reads
 *low*, by exactly the escaping delta. Reading high wastes a bead; reading low
-tells a citizen to keep appending to a bead that is already dead, and the
+tells an author to keep appending to a bead that is already dead, and the
 appends are what is lost. Do not trade one for the other — measure the
 pre-image.
 
@@ -225,7 +225,7 @@ makes notes valuable is the one that eventually freezes the bead.
    branch; a bare `2>/dev/null` throws away the only account of what refused.
 3. **One id per `bd update`** you intend to verify by exit status.
 4. **Read back the field that matters**, and for routability read it back with
-   `bd ready` — `bd show` will display a bead no dispatch pass can reach.
+   `bd ready` — `bd show` will display a bead that `bd ready` will not return.
 5. **Never treat `✓` as a write.**
 6. **On a long-lived bead, do not assume `--append-notes` will keep working.**
    Past the record-size ceiling every update is refused for good; see the
@@ -234,43 +234,44 @@ makes notes valuable is the one that eventually freezes the bead.
 ## What is gated, and what is not
 
 `.github/workflows/bd-behaviour.yml` runs these claims against the **latest
-released** bd, in its own job, so the town learns that a future bd has changed
-its mind before it upgrades. That workflow is an ALARM, not a merge gate, for
-the reasons its own header gives — the claims are about a binary this repository
+released** bd, in its own job, so this repository learns that a future bd has
+changed its mind before it upgrades. That workflow is an ALARM, not a merge gate,
+for the reasons its own header gives — the claims are about a binary this repository
 neither owns nor vendors.
 
 Nothing gates the write call sites themselves, and that is a deliberate
 omission rather than an oversight. The query side has a sweep because it has
-eleven call sites; the write side has **one**.
+eleven call sites; when this was taken, the write side had **one**.
 
 ## Audit of this repository's write call sites
 
 Taken 2026-08-24 with the same scanner shape the query sweep uses (comments cut,
 quoted spans blanked, command position required).
 
+The site the 2026-08-24 and 2026-08-29 (bd `gqlc-u2nim`) readings both named has
+since been deleted with the script that held it, so neither reading can be
+reproduced. Every other match at that time was fixture text in a hook test under
+`.githooks/tests/` — `bd close` command strings handed to a hook as data and
+never executed — and PR #1595 deleted that directory too. Re-grepped for this
+document's own removal, one scripted write survives:
+
 | Site | Call | Verdict |
 | --- | --- | --- |
-| `kingdom/bin/km` 2370 | `bd create ... >/dev/null 2>&1` inside `if !` | correct — exit status checked, and the failure branch prints its own diagnostic, so the discarded stderr costs the reason rather than the detection |
+| `.githooks/bd-gh-sync` 1313 | `bd update --append-notes ... >/dev/null 2>&1 \|\| _notes_failed=...` | correct — exit status is the whole evidence an append needs, per the rule above, and the count it feeds is reported |
 
-Every other match, when this was taken, was fixture text in
-`.githooks/tests/claude-pre-bash-test.sh` — `bd close` command strings handed to
-a hook as data and never executed. PR #1595 deleted that file, so those matches
-are gone from the tree rather than reclassified.
+That re-grep is a grep and not the scanner: the scanner shape described above
+cuts comments and blanks quoted spans, and no such tool survives in this tree to
+re-run. So the table is a dated reading with nothing re-deriving it.
 
-Re-measured 2026-08-29 (bd `gqlc-u2nim`): the row above is still the only write
-call site discarding stderr, and it has moved to `kingdom/bin/km` 3246 — which is
-what the drift warning in the query-side audit is about. That re-measure was a
-grep, not the scanner: the scanner shape described above cuts comments and blanks
-quoted spans, and no such tool survives in this tree to re-run.
-
-The exposure this document addresses is therefore in the **recipes citizens type
-by hand**, not in the scripts. See `kingdom/brain/playbooks/citizen-protocol.md`.
+The exposure this document addresses is therefore mostly in the **recipes people
+type by hand**, not in the scripts — "Rules for a scripted write" above is the
+whole of the discipline, and it applies to a recipe typed once just as much.
 
 ## What could not be reproduced
 
 `gqlc-o6kp` was filed on the observation that
 
-    bd update <id> --assignee "" --status open -l class:warrior
+    bd update <id> --assignee "" --status open -l <label>
 
 printed `✓ Updated issue:` and changed nothing, and it asked whether an
 unhonoured flag discards its siblings while still reporting success. Half of

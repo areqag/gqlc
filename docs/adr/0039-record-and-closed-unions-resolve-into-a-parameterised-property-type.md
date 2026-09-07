@@ -17,7 +17,7 @@ gqlc could not *model* a record; now it models one and has not built its
 emission. Those are different repairs for a reader, and the second is the true
 one.
 
-Written 2026-09-02 by Ար, executing the design ruled by Արփինէ on bead
+Written 2026-09-02, executing the design ruled on bead
 `gqlc-be1me` (`gqlc-h9n.33`), with two deviations recorded below.
 
 ## The encoding: parameters in the string, not a struct beside it
@@ -255,5 +255,5 @@ constructs — is filed as `gqlc-ke7ox` rather than ridden here.
 - Emission is **not** in this change and is not this bead's. It is filed as a
   design-plus-stub pair under epic `h9n`, because the shape of a Go carrier for
   a record — a generated struct, a `map[string]any`, or per-backend — is a
-  design question, and answering it inside an execution bead would be the
-  design gate skipped.
+  design question, and answering it inside an execution bead would settle it
+  by implementation accident rather than on the merits.

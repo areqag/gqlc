@@ -240,7 +240,7 @@ func parseJustfile(src string) ([]justRecipe, []string) {
 // dependencies just runs before the body. A plain token names a recipe. A
 // parenthesised group carries arguments — just runs the recipe the group's
 // first token names, so that token is the dependency and the arguments are
-// dropped; the dump reads it the same way, listing `(lint-hooks "kingdom/bin")`
+// dropped; the dump reads it the same way, listing `(lint-hooks ".github/scripts")`
 // under Dependencies as Recipe "lint-hooks". Reading stops at a top-level
 // `&&`: what follows runs after the body. A `&&` inside a group's arguments
 // is the group's business, not a stop — under the old whole-line cut it would
@@ -2163,7 +2163,7 @@ func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 			// dependency, and the plain tokens around it keep their places —
 			// order matters to the closure comparison, which is ordered.
 			name: "a parenthesised dependency is named by its first token",
-			src:  "lint: ensure (lint-hooks \"kingdom/bin\") check\n    echo hi\n",
+			src:  "lint: ensure (lint-hooks \".github/scripts\") check\n    echo hi\n",
 			want: []justRecipe{{name: "lint", deps: []string{"ensure", "lint-hooks", "check"}, body: "    echo hi\n"}},
 		},
 		{

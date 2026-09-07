@@ -12,16 +12,18 @@
 # lock per machine and refuses to start while another instance holds it. The
 # lock is the file /tmp/golangci-lint.lock and it is NOT per-cache-directory:
 # measured 2026-08-29 against the pinned 2.13.1, a second run under a different
-# GOLANGCI_LINT_CACHE is refused just the same. That is why a neighbouring SEAT
-# contends at all, since every worktree has its own cache by design (justfile).
-# With one worker this is unreachable; the town runs sixteen seats, so it is
-# routine and gets worse as the town gets busier.
+# GOLANGCI_LINT_CACHE is refused just the same. That is why a neighbouring
+# WORKTREE contends at all, since every worktree has its own cache by design
+# (justfile). With one worker this is unreachable; with several sibling
+# worktrees linting at once it is routine, and it gets worse the more of them
+# are running.
 #
 # The wait used to live only in .githooks/pre-push, which is the wrong way
-# round: CLAUDE.md and citizen-protocol.md both tell a citizen to run the gates
-# BEFORE opening a PR, so a hand-run `just lint` is the FIRST place anyone meets
-# the lock and the hook was the second. Three seats were observed on 2026-08-29
-# each spinning a private `for i in 1..6; sleep 40` loop around `just lint`.
+# round: CLAUDE.md's session-completion workflow puts the quality gates before
+# the push, so a hand-run `just lint` is the FIRST place anyone meets the lock
+# and the hook was the second. Three concurrent workers were observed on
+# 2026-08-29 each spinning a private `for i in 1..6; sleep 40` loop around
+# `just lint`.
 #
 # THE RETRY IS NARROW IN BOTH DIRECTIONS, which is the whole safety argument:
 #   - it requires the lock's own sentence in the output, AND
@@ -73,8 +75,8 @@ while :; do
     echo "       go debugging a tree this run never looked at." >&2
     echo "       Correct response: wait for the other lint to finish and run again." >&2
     echo "       Who holds it:  ps -eo pid,etimes,args= | grep '[g]olangci-lint'" >&2
-    echo "       Do NOT push with --no-verify (Constitution IV.4) and do NOT sleep with" >&2
-    echo "       work unpushed — unpushed work here is lost work (bd gqlc-hg61)." >&2
+    echo "       Do NOT push with --no-verify, and do NOT end a session with work" >&2
+    echo "       unpushed — unpushed work here is lost work (bd gqlc-hg61)." >&2
     exit "${rc}"
   fi
 

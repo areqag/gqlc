@@ -67,17 +67,16 @@ esac
 # WHAT PASSED, NAMED RATHER THAN QUANTIFIED. "every gate PASSED" was true of the
 # gates in this hook and false as the clearance it gets read as: pre-push mirrors
 # three of the seven required contexts, and one of those three only over the
-# lines the push touched. A citizen read it the second way on PR #1633 — green
-# here, and codegen-fence then reddened on two ireturn findings that had been in
-# the tree throughout (bd gqlc-s9bx, gqlc-n54t).
+# lines the push touched. A contributor read it the second way on PR #1633 —
+# green here, and codegen-fence then reddened on two ireturn findings that had
+# been in the tree throughout (bd gqlc-s9bx, gqlc-n54t).
 #
 # The list is the CALLER'S, and its absence is not filled in with a guess: a
 # notice invoked without one says the gates passed and declines to name them,
 # which is weaker and still true. Deriving "what did not run" instead would need
-# the required set spelled out here, i.e. a third copy of a list that drifts
-# every time CI grows a job — citizen-protocol.md refuses to hold one for that
-# reason and points at the `gates` comment in the justfile, which is where this
-# points too.
+# the required set spelled out here, i.e. another copy of a list that drifts
+# every time CI grows a job. The `gates` comment in the justfile is the one
+# place that holds it, which is where this points.
 gates="${GQLC_PREPUSH_GATES:-}"
 
 if [ -n "${elapsed}" ]; then
@@ -115,7 +114,7 @@ case "${transport}" in
     # 2026-08-23, and core.sshCommand governs no part of an HTTPS push — git does
     # not spawn ssh at all, so there is nothing for the keepalive to attach to
     # and no equivalent config key to set. Every remote in this repository is ssh
-    # today (measured 2026-08-23 over the shared config and all 17 seat
+    # today (measured 2026-08-23 over the shared config and all 17 linked
     # worktrees, with no url.insteadOf rewrite; remotes live in the shared config,
     # so a per-worktree difference is not reachable), which means this arm belongs
     # to a clone made over https. Saying nothing to that operator would leave the

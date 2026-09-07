@@ -88,9 +88,9 @@ a field copy the caller writes. Nobody has asked for more, and the decision
 is reversible without breakage — a later runtime module can declare the
 canonical types and generated packages can alias them. The Tx design
 (bead `gqlc-h0lw`) reached per-target emission independently, and its ruling
-states the shared posture this ADR adopts: the
-town decides at most once whether gqlc grows a runtime module, and neither
-design creates one.
+states the shared posture this ADR adopts: this
+repository decides at most once whether gqlc grows a runtime module, and
+neither design creates one.
 
 `typeMap.Property` switches DATE/TIME/LOCALTIME/DURATION to the neutral names;
 decode/encode converts to and from `dbtype.*` inside the generated helpers.

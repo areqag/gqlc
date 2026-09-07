@@ -6,10 +6,10 @@
 #
 # THE INVERSION. Every other drift check in this repo lives somewhere the drift
 # kills. `.githooks/pre-commit` cannot report that `.githooks/` is unwired — a
-# dead hook does not run (bd gqlc-4thl). `.claude/settings.json` runs the
-# WORKING-TREE copy of `.githooks/claude-pre-bash`, so a checkout parked on a
-# branch predating that detector runs a copy that has never heard of it (bd
-# gqlc-pyk2). `just check-hooks` sees everything and runs only when invoked.
+# dead hook does not run (bd gqlc-4thl). A detector carried by a tracked file is
+# run from the WORKING TREE, so a checkout parked on a branch predating that
+# detector runs a copy that has never heard of it (bd gqlc-pyk2).
+# `just check-hooks` sees everything and runs only when invoked.
 #
 # The observed drift points core.hooksPath at `$GIT_COMMON_DIR/hooks` — either
 # spelled absolutely, or by being unset, which is the same directory by default.
@@ -125,7 +125,7 @@ esac
     echo "       hunting. The known writer is a worktree-isolated agent spawn, which"
     echo "       rewrites the shared value while it builds its worktree and puts it"
     echo "       back afterwards — measured 2026-09-02 at 13s and 14s for one spawn"
-    echo "       and 54s for two overlapping, and any seat's spawn unhooks yours."
+    echo "       and 54s for two overlapping, and any worktree's spawn unhooks yours."
     echo "       Four occurrences on record never cleared, so if it stands, repair."
     echo ""
     echo "       Repair (idempotent, arms every worktree at once): just init"

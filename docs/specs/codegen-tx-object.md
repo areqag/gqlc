@@ -1,6 +1,6 @@
 # codegen: the emitted Tx object
 
-Design for bead `gqlc-h0lw`. Written 2026-08-24 by Արթուր; every claim
+Design for bead `gqlc-h0lw`. Written 2026-08-24; every claim
 about driver behaviour below was read out of the pinned driver sources in
 the module cache, not out of documentation or memory. The corpus pins are
 `neo4j-go-driver/v5 v5.28.4`, `neo4j-go-driver/v6 v6.2.0` and
@@ -31,7 +31,7 @@ returns a **`Tx` object** with `Begin` on the repository and `Commit` /
 `Rollback` on the object — a value that can be stored and passed around.
 A closure API (`WithTransaction(ctx, func(q *Queries) error)`) is
 rejected and must not be re-proposed as the primary surface. The neo4j
-access-mode split is resolved by decree: generated transactions are
+access-mode split is settled by the owner: generated transactions are
 **always write mode**; no read/write inference pass is designed here.
 
 ## 2. What exists now, verified
@@ -50,7 +50,7 @@ Neither backend can OPEN a transaction. That is the whole gap.
 
 ## 3. Driver facts the design stands on
 
-Each fact below names its witness. An executing Ռազմիկ does not need to
+Each fact below names its witness. An implementer does not need to
 re-verify these, but can.
 
 **F1 — both neo4j majors expose the same unmanaged surface.**
@@ -316,12 +316,12 @@ interface.
   runtime module is satisfied by these emitted `*Tx` types as they
   stand.
 - The same placement question is open on gqlc-49hu (neutral temporal
-  types, Արփինէ). The answers are aligned, not coupled: 49hu's types
+  types). The answers are aligned, not coupled: 49hu's types
   appear in exported *signatures* and so may genuinely need type
   identity across packages; `Tx` never crosses a package boundary.
   Nothing here forecloses a runtime module if 49hu needs one; this
-  design simply does not require it. Divergence-of-record is handled by
-  mail between the two design beads, and any residue goes to Սեդրակ.
+  design simply does not require it. If the two answers diverge, settle
+  it across both beads before either lands.
 
 ## 7. The surface-agreement gate
 
@@ -372,8 +372,7 @@ no dedicated gate and this one does.)
 
 ## 8. Witnesses and the mutation battery the execution PR owes
 
-The change adds guards, so the PR records rows per ADR 0005 /
-citizen-protocol step 3, at minimum:
+The change adds guards, so the PR records rows per ADR 0005, at minimum:
 
 | guard | mutation | expected victim |
 |---|---|---|
@@ -455,7 +454,7 @@ New live scenarios (each runs on v5, v6 and — nightly — AGE):
 > occupies the package scope alone (the accessor is removed).
 
 This subsection was absent from the design and is written from the
-execution (`gqlc-3d0l`, PR #1489), ruled in by Արթուր rather than
+execution (`gqlc-3d0l`, PR #1489), ruled in rather than
 improvised: the omission was the design's.
 
 The block adds five exported names to `db.go` on all three targets, so
@@ -496,8 +495,8 @@ but-unused lint concern that gates the AGE composer does not apply.
 - **Closure helper on top of the object** — owner rejected closures as
   the primary API; adding the secondary form now is surface nobody asked
   for. New bead if wanted.
-- **Read-mode transactions** — decreed out; a follow-up bead may add a
-  read mode later (the decree in gqlc-h0lw's own text).
+- **Read-mode transactions** — ruled out; a follow-up bead may add a
+  read mode later (the ruling is in gqlc-h0lw's own text).
 - **`BeginTx` with driver options (timeouts, metadata, pgx.TxOptions)** —
   both drivers support it (`BeginTransaction` configurers;
   `pgxpool.BeginTx`); no portable subset was asked for. The escape hatch
@@ -513,6 +512,4 @@ but-unused lint concern that gates the AGE composer does not apply.
 
 One execution bead, one PR: the renderer edits, the gate, the golden
 regeneration and the live rows are one coherent change, and the gate
-cannot land before both emissions exist. The PR is review-owed (its bead
-is blocked by gqlc-h0lw, a design bead), so the executing Ռազմիկ files a
-`class:judge` bead on it per protocol.
+cannot land before both emissions exist.
