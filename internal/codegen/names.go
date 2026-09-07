@@ -68,7 +68,7 @@ func paramFieldName(raw string) string {
 // Unicode-aware DELIBERATELY, and that is the whole reason it is not a
 // regexp beside the others above. paramFieldName's escape hatch is that a
 // field name keeps whatever script the author wrote it in, so a schema
-// written in Armenian or Japanese mangles to a legal struct field and
+// written in Cyrillic or Japanese mangles to a legal struct field and
 // must be admitted. What it does not do is drop characters, so a name a
 // delimited identifier can hold — a hyphen, a space, a '%' — survives
 // into a spelling that is not Go at all.

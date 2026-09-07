@@ -124,5 +124,4 @@ settled in one sitting.
 ## Provenance
 
 Decided under `gqlc-oowt`, implemented under `gqlc-4np`. Filed as a numbered ADR
-here in `docs/adr/` rather than in `kingdom/brain/decisions/`, which holds the
-society's own constitutional decisions; this is a decision about the compiler.
+here in `docs/adr/`, which holds decisions about the compiler.

@@ -391,7 +391,7 @@ def mirror_marker_bead(n):
 
     A PR author can post a marker comment by hand and be believed. That is
     accepted rather than overlooked: this is a hygiene gate against a wrong
-    number, in a repository every citizen can already push to, and it holds
+    number, in a repository every contributor can already push to, and it holds
     nothing an author could not have got by writing the right number in the
     first place. It is not a security boundary and must not be cited as one.
     """
@@ -904,8 +904,8 @@ def extra_closes(pr_body, expected_n):
     close, the export mirrors 0, including the one extra that is beyond
     argument (#1194's own 'Closes #1159'). The third of the three is the
     accident this check is for, and the same measurement narrows what it
-    was: GitHub links only #1159 from #1194, so its 'Վահագն closed #1184'
-    line is narration GitHub does not act on. The avowal is what separates
+    was: GitHub links only #1159 from #1194, so its 'closed #1184' line
+    is narration GitHub does not act on. The avowal is what separates
     those two populations, and nothing in the export can.
     """
     seen = dict.fromkeys(GH_CLOSES.findall(claimable_prose(pr_body)))

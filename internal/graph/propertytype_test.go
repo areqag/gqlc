@@ -308,8 +308,8 @@ func TestRecordAnyAndEmptyAreDistinct(t *testing.T) {
 // a trailing ">" and then a trailing " NOT NULL", which is only safe because
 // TrimSuffix(">") removes exactly one byte and a parameterised element still
 // ends in ">" afterwards, so the NOT NULL trim cannot fire on the element's own
-// interior qualifier. Արփինէ predicted this was broken and a scratch probe
-// falsified the prediction; these rows exist so a later refactor to TrimRight —
+// interior qualifier. This chain was predicted to be broken and a scratch
+// probe falsified the prediction; these rows exist so a later refactor to TrimRight —
 // which strips every trailing ">" — cannot break it silently.
 func TestElemTrimChainSurvivesParameterisedElements(t *testing.T) {
 	for _, row := range []struct {

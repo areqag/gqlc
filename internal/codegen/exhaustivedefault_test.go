@@ -105,7 +105,7 @@ type guardedSum struct {
 // the sum that kept the root, so the orphaned tag turns up in
 // TestStrayDefaultOKTagsAreNotSilent.
 //
-// THREE CLOSED SUMS ARE DELIBERATELY OUTSIDE THIS FENCE, on the ground that
+// TWO CLOSED SUMS ARE DELIBERATELY OUTSIDE THIS FENCE, on the ground that
 // their defaults are loud or accounted rather than silent (bd gqlc-5225b,
 // designed on gqlc-qr09l). The deciding line is what a default does for a
 // member added later: invent a plausible answer nobody sees, or say the value
@@ -117,13 +117,8 @@ type guardedSum struct {
 //     it names the unmapped value and fails the run. Member-add is also red
 //     before that: SchemaLangValues/QueryLangValues are pinned by name in
 //     internal/config/config_test.go.
-//   - takeVerdict (internal/tools/tmpreap/archive.go). account()'s default
-//     routes an unknown verdict into the `unreadable` bucket by design; its
-//     own comment records that a silent default shipped the deleted-with-no-
-//     record defect twice (bd gqlc-osuz). Deleting that default to satisfy
-//     this fence would re-open the defect it exists to end.
 //
-// A fourth candidate, graph.EntityKind, was named here as staying out until bd
+// A third candidate, graph.EntityKind, was named here as staying out until bd
 // gqlc-r79zi brought it in; its row is below. Two claims from that period are
 // worth keeping, because both were measured and neither is obvious from the row.
 //
@@ -294,7 +289,7 @@ func TestStrayDefaultOKTagsAreNotSilent(t *testing.T) {
 // such bound and is not one any more. It went unnamed because it reads
 // like a typo rather than an evasion, but it is legal, gofmt leaves the
 // parens alone, and `exhaustive` is blind through it exactly as through
-// the bare spelling: a judge measured 0 issues over a switch missing a
+// the bare spelling: a review measured 0 issues over a switch missing a
 // member while this test passed (bd gqlc-w7edb). TestAliasedTypeName
 // below pins it, since no file in the tree spells one that way and the
 // scan alone would never reach the case.

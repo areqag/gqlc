@@ -13,7 +13,7 @@ import (
 // repository, with `gh` stubbed on PATH, and ask what it CONCLUDES. The
 // question is not whether the recipe consults GitHub but whether an absent
 // remote head branch is still reported as a failed push, which is the state a
-// squash merge leaves behind and the state a citizen is in at session close
+// squash merge leaves behind and the state an author is in at session close
 // (bd gqlc-97rxk).
 //
 // WHAT THE STUB IS MODELLED ON. The three payloads below are the real

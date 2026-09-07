@@ -3044,7 +3044,7 @@ func emittedMethodDecoders(
 			// declines to pretend the guard was read; it does not answer
 			// which axis should grade it. The day it fires on a real emission
 			// is the day that design question arrives with a specimen
-			// (bd gqlc-ebkbs, ruled by Արեգակ 2026-09-04).
+			// (bd gqlc-ebkbs, ruled 2026-09-04).
 			entities := resultEntities(fn.Type, shapes)
 			if len(entities) != 1 {
 				if guards := methodOwnGuards(r, fn.Body); len(entities) >= 2 && len(guards) > 0 {

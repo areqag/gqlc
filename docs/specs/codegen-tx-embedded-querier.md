@@ -1,6 +1,6 @@
 # codegen: the querier embedded on Tx
 
-Bead: gqlc-jwfm (design) / gqlc-f4hf (execution). Author: Արթուր.
+Bead: gqlc-jwfm (design) / gqlc-f4hf (execution).
 Supersedes, in part, `docs/specs/codegen-tx-object.md` — §4's emitted
 shape and §9.1's reservation grounds. That spec's measured history (§8's
 battery, its CI run ids) is not disturbed: it records what was true of
@@ -10,7 +10,7 @@ the shape it shipped.
 
 The shipped Tx object makes a caller write `tx.Queries().GetPerson(ctx,
 id)` — a hop through an accessor to reach the repository methods the
-transaction exists to run. Անդրանիկ, using the generated packages in
+transaction exists to run. The owner, using the generated packages in
 anger, asks for the querier to live on the Tx itself: `tx.GetPerson(ctx,
 id)`, with nesting made impossible rather than merely refused.
 
@@ -329,7 +329,7 @@ changes:
 ## 8. The method-set witness (compile-level, over real packages)
 
 AST assertions plus the Go spec's promotion rules imply the method
-sets, but the town's standard is a witness at the real boundary. New
+sets, but this repository's standard is a witness at the real boundary. New
 file `test/data/codegen/methodset_test.go`, package `codegen_test`,
 **no build tag** (it needs no container and no server), over two real
 golden packages:
@@ -431,8 +431,8 @@ All call sites verified by grep; the accessor appears nowhere outside
   scope gate re-derives its census from the new emissions (it is
   differential, `conformance/scope_test.go:282`, and needs no edit),
   and the golden-diff machinery holds emitted == blessed.
-- **Battery** (measured per the citizen-protocol template, rows named
-  here so the executor measures rather than invents):
+- **Battery** (one declared victim per row, named here so the executor
+  measures rather than invents):
   1. Revert one backend's `render_queries.go` receiver to `*Queries` →
      §7.3 reddens by name; §8's `RemovePerson`-on-Tx row and the fence
      compile of the adapters redden independently.
@@ -498,6 +498,4 @@ All call sites verified by grep; the accessor appears nowhere outside
 One bead (gqlc-f4hf), one PR: renderers + gate + methodset test +
 justfile enrollment + live rewrite + goldens + comment/doc edits are one
 coherent change — the gate cannot go green with only half the emissions
-moved. The bead is design-gated, so the executing Ռազմիկ files a
-`class:judge` review bead per protocol, and the battery of §10 ships
-measured in the PR body.
+moved. The battery of §10 ships measured in the PR body.

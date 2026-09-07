@@ -93,7 +93,7 @@ Following the hk0 / fvo additive-axis convention (ADR 0008 amendments
   `leavesAreRefs bool` field and a `LeavesAreRefs() bool` accessor.
 - One new constructor per variant carrying every axis; the existing
   constructors are preserved verbatim as zero-value-safe shorthands
-  delegating `leavesAreRefs=false`. Exact names are the warrior's within this
+  delegating `leavesAreRefs=false`. Exact names are the implementer's within this
   convention; suggested: `NewExprProjectionWithAxes(refs, t,
   containsAggregate, leavesAreRefs)` and
   `NewAggregateProjectionWithLeafRefs(fn, refs, distinct, t)`.
@@ -128,7 +128,7 @@ is `ok` (any depth — `collect(p.id)` and `collect([p.id, p.age])` both
 qualify). No other aggregate ever mints (§1 answer 3). `DISTINCT` is
 orthogonal and does not block minting.
 
-ANTLR caution for the predicate (measured town knowledge): a non-nil accessor
+ANTLR caution for the predicate (measured here before): a non-nil accessor
 does not mean non-empty — walk to the leaf and check lengths, and pair every
 refusal row in the test table with an ALLOW pin beside it.
 
@@ -172,7 +172,7 @@ refs — verified: the only resolver `Refs()` walk is the effects path,
 `ErrUnknownProperty: p.nosuch`, exactly as bare `RETURN p.nosuch` already
 does. Same for the plural-candidate intersection miss. This is the
 "rejects anything the schema does not support" posture of ADR 0003 applied
-consistently, and it is deliberate. The warrior must sweep existing resolver
+consistently, and it is deliberate. The implementer must sweep existing resolver
 fixtures for certified-shape queries over undeclared properties and move any
 found from valid to invalid fixtures. (`RETURN [d.year]` on a carried alias is
 **not** in this class — the parser's referential-integrity sweep already
@@ -183,7 +183,7 @@ rejects a property lookup on a non-binding name, per the note at
 
 Expected **zero code change**. `buildListElemPlan` (`prepare.go:1239`) already
 renders `ResolvedProperty` elements with width mapping, nested lists, and the
-`ErrUnrepresentableWidth` refusal. Two things the warrior verifies rather than
+`ErrUnrepresentableWidth` refusal. Two things the implementer verifies rather than
 assumes:
 
 - What `ResolvedList{ResolvedProperty{Nullable: true}}` renders as — element
@@ -226,8 +226,8 @@ not just "not unknown":
 - Uncertified control: `[p.id + p.age]` still `list<any>` — the row that
   witnesses the resolver never infers from the flat ref set alone.
 
-The mint predicate and the fill rule are **guards**; the PR owes the mutation
-battery of citizen-protocol step 3 (declared victims: the mixed-depth row for
+The mint predicate and the fill rule are **guards**; the PR owes a mutation
+battery with a declared victim per row (the mixed-depth row for
 the predicate's depth check; the `[p.id, p.name]` degrade row for strict
 unification; the `sum(p.id)` row for the collect-only mint; the bare-unknown
 belt via a synthetic certified bare-unknown projection if constructible, else

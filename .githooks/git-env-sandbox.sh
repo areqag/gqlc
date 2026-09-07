@@ -11,10 +11,10 @@
 # SHARED repo's config and leaves the fixture's own config empty, and
 # `git -C fixture commit` lands the commit in the shared repo.
 #
-# That is how `fixture <fixture@example.invalid>` came to author two citizens'
+# That is how `fixture <fixture@example.invalid>` came to author two people's
 # commits on two different branches (gqlc-7iea): one suite's fixture identity,
-# written into the config every linked worktree in the town reads. A suite is
-# the last place anyone looks for a writer to the repo it is gating.
+# written into the config every linked worktree of this repository reads. A
+# suite is the last place anyone looks for a writer to the repo it is gating.
 #
 # Sourcing this IS a convention to remember, and it did not used to be:
 # .githooks/tests/git-env-sandbox-test.sh ran every suite in .githooks/tests/

@@ -4,7 +4,7 @@ Refuse two documents claiming one ordinal in a hand-numbered series (bd gqlc-lsl
 
 Usage: check-doc-ordinals.py DIR [DIR ...]
 
-MEASURED 2026-09-02 by Ար, publishing gqlc-awtb. PR #2105 was cut when 0036 was
+MEASURED 2026-09-02, publishing gqlc-awtb. PR #2105 was cut when 0036 was
 the next free ADR number and took it. While it was in flight, PR #2093 merged
 docs/adr/0036-age-admits-non-zoned-temporal-list-elements-at-every-depth.md. The
 branch then rebased onto master CLEANLY, passed `just gates` (all 11 arms) and
@@ -23,7 +23,7 @@ comments, from bead notes and from designs. Two documents under one number makes
 every one of those citations ambiguous, and the ambiguity is silent at the point
 of reading: whoever follows "see ADR 0036" gets whichever file they happen to
 open. That is how the collision above was found -- by accident, one bead later,
-by a warrior whose design cited "ADR 0036" meaning the other document.
+by an author whose design cited "ADR 0036" meaning the other document.
 
 WHAT THIS DOES NOT CATCH, and it is the half that bites first. This reads a
 TREE, so it sees a collision only once both documents are in one. It cannot warn
@@ -49,20 +49,19 @@ definition of the convention.
 
 WHICH SERIES ARE ENROLLED is decided by the call sites, not here, because "is
 this an ordinal series" is not a property this file can infer. Enrolled today:
-docs/adr and kingdom/brain/decisions -- both hand-allocated, both cited by
-number, both colliding in exactly the way above.
+docs/adr alone -- hand-allocated, cited by number, colliding in exactly the way
+above.
 
-kingdom/brain/postmortems is deliberately NOT enrolled, and stating that is the
-point of this paragraph: it is DATE-prefixed, and its dates are meant to repeat
-(two documents dated 2026-08-21 and two dated 2026-08-22 coexist correctly
-today). Enrolling it would refuse a tree that is right. An omission nobody wrote
-down reads later as an oversight, and the next person re-derives it.
+A DATE-PREFIXED DIRECTORY MUST NOT BE ENROLLED, and stating that is the point of
+this paragraph: dates there are meant to repeat, so two documents sharing one
+prefix are correct and enrolling the directory would refuse a tree that is
+right. An omission nobody wrote down reads later as an oversight, and the next
+person re-derives it.
 
 A DIRECTORY WHOSE FILES DO NOT ALL CARRY AN ORDINAL IS A FAILURE, not a skip.
-Both enrolled series are 100%% conforming (47 of 47 files on the day this
-landed), so there is no legitimate mixed directory to accommodate -- and a gate
-that quietly ignores what it cannot parse is a gate that passes over exactly the
-files a rename would hide from it.
+The enrolled series is 100%% conforming, so there is no legitimate mixed
+directory to accommodate -- and a gate that quietly ignores what it cannot parse
+is a gate that passes over exactly the files a rename would hide from it.
 """
 
 import re

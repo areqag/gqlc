@@ -9,9 +9,9 @@ generation for the neo4j targets:
 The same declaration still generates for Apache AGE. Before this, both
 backends generated, and the neo4j write could never succeed.
 
-Written 2026-08-30 by Արամազդ, executing the design ruled by Արթուր on bead
-`gqlc-v0gk` and amended by him on `gqlc-nxcj9` after two measurements below
-falsified parts of the original mechanism.
+Written 2026-08-30, executing the design ruled on bead `gqlc-v0gk` and amended
+on `gqlc-nxcj9` after two measurements below falsified parts of the original
+mechanism.
 
 ## The two measurements
 
@@ -29,8 +29,8 @@ Both are live rows, not recollections:
 `TestNeo4jRefusesANestedListStoredProperty` and
 `TestAGEStoresANestedListProperty` in
 `test/data/codegen/live_nested_list_property_test.go`. The first is the
-premise's tripwire — if an image bump ever serves the write, it reds and the
-town re-opens the question with evidence rather than with this document.
+premise's tripwire — if an image bump ever serves the write, it reds and
+re-opens the question with evidence rather than with this document.
 
 ## The subtlety that shaped the whole design: storage, not values
 
@@ -201,10 +201,9 @@ counter, and every golden byte is unchanged.
 The deletion rides here rather than a follow-up because the tests that reached
 that arm are retired by this same change. Shipping the refusal alone would
 publish a code path that is both unreachable and unguarded, and the follow-up
-had been filed at P3 — below the dispatcher's `max_priority`, so it would have
-routed to nobody and the gap would have been permanent rather than brief
-(ruled by Սեդրակ, correcting the application of his own scope rule; `gqlc-52w8l`
-keeps only its documentation half).
+had been filed at P3 — low enough that nothing would have picked it up, so the
+gap would have been permanent rather than brief (a scope-rule call corrected on
+review; `gqlc-52w8l` keeps only its documentation half).
 
 This is worth stating because the obvious repair is wrong. Re-pointing the
 property path's tests at query columns would not relocate the same coverage —

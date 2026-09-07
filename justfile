@@ -47,33 +47,8 @@ fence_probe := "fenceprobe"
 xtest_probe := "xtestprobe"
 discovery_probes := vuln_probe + " " + fence_probe + " " + xtest_probe
 
-# The scratch filesystem every agent working on this repo shares, and where the
-# Go toolchain is told to put its work directories while it reports on it.
-#
-# `go run` writes its work directory under os.TempDir(), so the tool that
-# diagnoses a full /tmp could not be built at the one moment anyone wants it —
-# and neither could `go build`, which is what "build failed with no error text
-# on a different package set each run" actually was (bd gqlc-osuz). Pointing
-# GOTMPDIR at .bin/ (already gitignored, and not on the tmpfs) makes the
-# diagnostic survive the condition it diagnoses. Set per recipe rather than
-# exported here: the go command refuses a GOTMPDIR that does not exist, and a
-# global export would break every recipe in a fresh clone until something
-# created it.
+# Where recipes that need a scratch directory allocate one.
 scratch_root := "/tmp"
-gotmpdir := justfile_directory() + "/.bin/gotmp"
-
-# The pressure at which the unattended cadence (`tmp-reap-cadence`, invoked by
-# km's guard sweep) starts deleting, in whichever of bytes and inodes is fuller.
-#
-# 75 and not 95. The `check-tmp` gate warns at 85 and fails at 95, and those are
-# thresholds for a HUMAN who is present: a suite that stops and names the cause
-# is a good outcome at 95%. The cadence exists to stop anyone reaching them, so
-# it has to act below the warning — a reaper whose trigger is the same number as
-# the alarm has conceded the incident before it starts. It is also the number
-# with headroom: the reap itself writes an archive, and 2026-08-22's incident
-# went from comfortable to town-wide ENOSPC inside one working night with
-# sixteen seats allocating scratch (bd gqlc-vze6).
-reap_threshold := "75"
 
 # Configures local git settings required after a fresh clone.
 # Idempotent: safe to run multiple times.
@@ -147,19 +122,19 @@ init: check-push-keepalive
 # local pre-commit/pre-push gate at once (CI cannot see local git config).
 # Sub-ms; wired into `test` so developers hit it naturally.
 #
-# This recipe is what a plain terminal has, but it only runs when someone runs
-# it. .githooks/claude-pre-bash runs a superset of it on every Bash tool call
-# inside a Claude Code session, which is what closes the window between the
-# drifting write and the next `just test` (bd gqlc-nzwa). A superset in latency,
-# no longer in coverage: this recipe compared the configured value and nothing
-# else, so with core.hooksPath = .githooks but .githooks/ holding only *.sample
-# files, or a hook file left non-executable, it exited 0 without a word (and
-# `doctor`, which depends on it, printed "ok") where claude-pre-bash refuses.
-# Both states were fixtures in .githooks/tests/claude-pre-bash-test.sh, deleted
-# with the rest of .githooks/tests/ by PR #1595 (f6dc4c7b). The verify-hooks-live
-# arm below still closes them by running a hook rather than reading about one,
-# and closes the environment-override state neither of them had — so here the
-# coverage outlived the suite.
+# This recipe only runs when someone runs it, and NOTHING now closes the window
+# between the drifting write and the next `just test`. A Claude Code bash hook
+# used to run a superset of this check on every tool call (bd gqlc-nzwa); it has
+# been deleted, so the window is open again and `.githooks/hooks-drift-tripwire`
+# — which fires only once the drift has already redirected git's hook lookup — is
+# the only thing left that catches drift you did not go looking for.
+#
+# What this recipe compares is the configured VALUE and nothing else, so with
+# core.hooksPath = .githooks but .githooks/ holding only *.sample files, or a
+# hook file left non-executable, it exits 0 without a word and `doctor`, which
+# depends on it, prints "ok". The verify-hooks-live arm below closes both states
+# by running a hook rather than reading about one, and closes the
+# environment-override state as well.
 #
 # Skipped under CI, which has no local hooks by design and runs the equivalent
 # gates as workflow jobs; without the skip this would fail every CI `just test`.
@@ -381,12 +356,13 @@ check-worktree-upstream dir=".":
 #     main worktree     git status -> fatal, rc=128
 #     linked worktree   git status -> rc=0, clean
 #
-# So every seat is green while the shared cwd is bricked. The probe has to be
-# chosen with that in mind: from the linked worktree
+# So every linked worktree is green while the shared cwd is bricked. The probe
+# has to be chosen with that in mind: from the linked worktree
 # `git rev-parse --is-bare-repository` answers FALSE while
 # `git config --get core.bare` answers TRUE. A detector built on the former is
 # blind from every worktree except the one that is already broken — and `just
-# test` runs in the seats. The config read is the arm that reaches.
+# test` usually runs in a linked worktree. The config read is the arm that
+# reaches.
 #
 # The set is named rather than swept. Both keys here are legitimate git
 # configuration in other repositories, so there is no general rule to apply; a
@@ -441,84 +417,12 @@ check-shared-config dir=".":
             echo "       Allowed: ${allowed//|/, }." >&2
             [ -n "$origin" ] && echo "       Set in: $origin" >&2
             echo "       This disables the MAIN worktree only — every linked worktree, and so" >&2
-            echo "       every seat, keeps working while the shared cwd answers 'fatal: this" >&2
-            echo "       operation must be run in a work tree' to every command." >&2
+            echo "       every session in one, keeps working while the shared cwd answers" >&2
+            echo "       'fatal: this operation must be run in a work tree' to every command." >&2
             echo "       Repair: git -C '$dir' config --unset-all $key" >&2
         done
     done
     exit "$rc"
-
-# the checked-in project settings must carry permissions.defaultMode, because a
-# seat resumed by hand gets no launch flags: `claude --resume <uuid>` replays
-# none of them, and a running session's permission mode cannot be changed by any
-# means. Settings FILES are re-read at every launch, so the project file is the
-# only carrier that reaches a launch nobody configured (bd gqlc-keaz).
-#
-# MEASURED 2026-08-29 over four throwaway trees, each asked for one Write:
-#   A  no permissions key                          → DENIED, no file
-#   B  permissions.defaultMode=bypassPermissions   → allowed
-#   C  B plus a settings.local.json of the shape every seat here has (an
-#      allow list, no defaultMode)                 → allowed
-#   D  C's local file, project key removed         → DENIED
-# B against A is that project scope carries the mode at all; C against D is that
-# the per-seat settings.local.json MERGES field-wise rather than replacing the
-# permissions object. Without C this fix would have been inert in the only trees
-# it exists for, and green here regardless.
-#
-# It does not weaken the hooks: under bypassPermissions a PreToolUse hook still
-# runs and still blocks on exit 2 (measured the same day — the model issued the
-# Write, the hook fired, the tool_result read `PreToolUse:Write hook error`, no
-# file appeared). claude-pre-ask's refusal of interactive tools in an unattended
-# seat stands.
-#
-# A PARSE FAILURE IS REFUSED, NOT SKIPPED. `claude -p` silently ignores a
-# settings file that fails validation — no error and no dialog, as its own
-# --help says. A malformed file is therefore indistinguishable at launch from an
-# absent key, so treating it as anything but a failure would hide exactly the
-# regression this guard is for.
-#
-# Its limit: it judges the CHECKED-IN file. A settings.local.json is untracked
-# and per-seat, so a citizen who sets a weaker defaultMode in theirs is not seen
-# here, and deliberately — that file is where a local choice belongs.
-#
-# The directory is an argument so a mutation can be run over a throwaway copy
-# rather than the tree under test.
-[private]
-check-claude-permission-mode dir=".":
-    #!/usr/bin/env bash
-    set -uo pipefail
-    settings="{{ dir }}/.claude/settings.json"
-    want="bypassPermissions"
-    if [ ! -f "$settings" ]; then
-        echo "error: $settings does not exist, so no seat launched without an explicit" >&2
-        echo "       --permission-mode gets one at all (bd gqlc-keaz)." >&2
-        exit 1
-    fi
-    # one line because an unindented continuation is parsed as justfile syntax,
-    # not as recipe body. A parse failure arrives as a non-zero exit with the
-    # traceback on stdout, which is the branch below.
-    if ! got="$(python3 -c 'import json,sys;v=json.load(open(sys.argv[1])).get("permissions",{}).get("defaultMode");print("ABSENT" if v is None else v)' "$settings" 2>&1)"; then
-        echo "error: $settings is not valid JSON, so Claude Code ignores it in full and" >&2
-        echo "       silently — a seat then comes up permission-gated with no diagnostic" >&2
-        echo "       anywhere (bd gqlc-keaz). python said:" >&2
-        printf '%s\n' "$got" | sed 's/^/       /' >&2
-        exit 1
-    fi
-    case "$got" in
-        "$want") exit 0 ;;
-        ABSENT)
-            echo "error: $settings carries no permissions.defaultMode (bd gqlc-keaz)." >&2
-            echo "       A seat resumed by hand — 'claude --resume <uuid>', which replays no" >&2
-            echo "       launch flags — then comes up gated on a human who is not there, and" >&2
-            echo "       waits until someone kills the session." >&2
-            echo "       Repair: set permissions.defaultMode to \"${want}\" in that file." >&2
-            exit 1 ;;
-        *)
-            echo "error: $settings sets permissions.defaultMode to '${got}', not '${want}'" >&2
-            echo "       (bd gqlc-keaz). Only bypassPermissions leaves an unattended seat able" >&2
-            echo "       to act; every other mode prompts for a human at some tool." >&2
-            exit 1 ;;
-    esac
 
 # puts ssh keepalives in the repository's own git config, so an ordinary
 # `git push` survives .githooks/pre-push — bd gqlc-ehgg / GH #1414.
@@ -526,7 +430,7 @@ check-claude-permission-mode dir=".":
 # THE DEFECT. git opens the transport to the remote BEFORE it runs pre-push,
 # then this repository's pre-push holds it idle for the whole gate chain: the
 # full go suite, every shell suite, golangci-lint. Twelve to fifteen minutes on
-# a loaded machine, and longer the more seats are pushing. GitHub's server-side
+# a loaded machine, and longer the more sessions are pushing. GitHub's server-side
 # idle timeout closes the connection during that window, so git exits 141
 # (SIGPIPE, "Connection to github.com closed by remote host") or 143 AFTER every
 # gate has passed. Four independent lanes hit it in one night on 2026-08-23.
@@ -552,7 +456,7 @@ check-claude-permission-mode dir=".":
 # else, and rc=141 was measured over HTTPS too on 2026-08-23 by a second lane —
 # git spawns no ssh there, so there is nothing for the keepalive to attach to
 # and no equivalent key to set. It covers every push from this repository as it
-# is configured: all 17 seat worktrees and the shared checkout resolve origin to
+# is configured: every worktree and the shared checkout resolve origin to
 # git@github.com:areqag/gqlc.git, with no url.insteadOf rewrite, and remotes live
 # in the shared config so a per-worktree difference is not reachable (measured
 # 2026-08-23). A clone made over https is the uncovered case, and
@@ -561,7 +465,7 @@ check-claude-permission-mode dir=".":
 #
 # WHY IT SELF-HEALS RATHER THAN REFUSING, unlike check-hooks above. The key is
 # absent on every fresh clone and in every worktree registered before this
-# landed, so a refusal would have failed every push in the town on the day it
+# landed, so a refusal would have failed every push in the repository on the day it
 # shipped — and the obvious answer to a push refused for a reason unrelated to
 # the commits is `git push --no-verify`, which is the exact behaviour this whole
 # recipe exists to remove the pressure for. This follows check-hooks' tripwire
@@ -637,7 +541,7 @@ check-push-keepalive dir=".":
 # sets delete_branch_on_merge, which is what makes the claim below a fact
 # rather than a habit: `gh api repos/areqag/gqlc --jq .delete_branch_on_merge`
 # answered true on 2026-09-02. So absence is the ordinary successful end state
-# as well as the never-arrived one — and absence is what a citizen meets at
+# as well as the never-arrived one — and absence is what an author meets at
 # session close, which is the one moment this recipe is advertised. Measured
 # the same day: three branches, all pushed, all merged, all told their push had
 # failed and to retry it. Re-pushing there recreates a head branch for a merged
@@ -725,7 +629,7 @@ push-landed branch="":
 # refuses to run when bd's auto-export cannot stage its own output — bd
 # gqlc-c2ch / GH #1170.
 #
-# The defect, measured 2026-08-22 from a seat worktree: every `bd update` ended
+# The defect, measured 2026-08-22 from a linked worktree: every `bd update` ended
 # with
 #
 #     ✓ Updated issue: gqlc-cn8e — ...
@@ -746,9 +650,10 @@ push-landed branch="":
 # repository, at the MAIN worktree's root, and stages the export THERE no matter
 # which worktree you invoke it from. Measured on the live repo 2026-08-23: after
 # a bd write from the shared checkout the export was rewritten and staged there,
-# while gqlc-seat-sedrak's checked-out copy still carried its worktree-creation
-# mtime, 1.9 MB smaller. So a seat's own `.beads/issues.jsonl` never moves, and
-# a seat looking at its own tree can see neither the staleness nor the failure.
+# while a linked worktree's checked-out copy still carried its worktree-creation
+# mtime, 1.9 MB smaller. So a linked worktree's own `.beads/issues.jsonl` never
+# moves, and a session looking at its own tree can see neither the staleness nor
+# the failure.
 # The probe has to reach across into the main checkout to see anything at all —
 # which is the same asymmetry that made check-shared-config read the config.
 #
@@ -819,13 +724,13 @@ check-beads-export dir=".":
     exit "$rc"
 
 # This check is the acceptance of bd gqlc-bc26w, not a new instrument — it
-# verifies the fix itself and does not surveil for anything else (Սեդրակ,
-# 2026-09-01, ruling that the gate freeze does not reach a regression test for a
-# defect being shipped).
+# verifies the fix itself and does not surveil for anything else: a gate freeze
+# in force at the time was ruled, 2026-09-01, not to reach a regression test for
+# a defect being shipped.
 #
 # What it holds: bd-gh-sync's push selection asked only whether a bead already
 # had a mirror, never what its status was, so a bead that CLOSED before it was
-# ever mirrored was offered to GitHub on every push, by every citizen, forever.
+# ever mirrored was offered to GitHub on every push, by everyone, forever.
 # The fix is one `continue`. This is the row that reddens when it is edited away.
 #
 # It runs the REAL selection, cut out of .githooks/bd-gh-sync between its own
@@ -868,9 +773,9 @@ check-bd-gh-sync-selection:
     # processing on a `-v` assignment, and a lone trailing backslash is where
     # the awks disagree: gawk 5.4 keeps it, mawk — /usr/bin/awk on the CI
     # runners — does not. Measured on this branch: with the backslash the anchor
-    # matched once in every seat worktree and 0 times on the runner. That was
+    # matched once in every local worktree and 0 times on the runner. That was
     # the fail-closed refusal below rather than a false pass, but it is still a
-    # red no seat can reproduce. With no backslash the escape processing is a
+    # red no local checkout can reproduce. With no backslash the escape processing is a
     # no-op by construction rather than by luck, and ENVIRON does none at all.
     anchor='python3 - "$_tmp/beads.json" "$_label_gate"'
     erc=0
@@ -948,7 +853,7 @@ check-bd-gh-sync-selection:
             sed 's/^/       /' "$scratch/plan.err" >&2
         fi
         echo "       A closed bead reappearing here is offered to GitHub on every push by" >&2
-        echo "       every citizen, forever, and mints an issue for finished work." >&2
+        echo "       everyone, forever, and mints an issue for finished work." >&2
         exit 1
     fi
 
@@ -966,11 +871,12 @@ check-bd-gh-sync-selection:
 # verifies that fix and surveils for nothing else.
 #
 # What it holds: every "the bead list came back empty" line bd-gh-sync prints is
-# equally true of a town with no beads and of a bd aimed at a ledger nobody
-# meant, and none of them named the path. Measured 2026-09-02 on the push arm:
-# an empty ledger and BEADS_DIR pointed at another seat's .beads produced BYTE-
-# IDENTICAL output. That ambiguity ran four hours across ten seats with this
-# script's own empty-list line as the only tell (gqlc-zpjuc). `_ledger` is what
+# equally true of a repository with no beads and of a bd aimed at a ledger
+# nobody meant, and none of them named the path. Measured 2026-09-02 on the push
+# arm: an empty ledger and BEADS_DIR pointed at another checkout's .beads
+# produced BYTE-IDENTICAL output. That ambiguity ran four hours across ten
+# concurrent sessions with this script's own empty-list line as the only tell
+# (gqlc-zpjuc). `_ledger` is what
 # separates them, and these are the rows that redden when it is edited away.
 #
 # It runs the REAL `_ledger`, cut out of .githooks/bd-gh-sync, rather than a
@@ -986,7 +892,7 @@ check-bd-gh-sync-selection:
 # against stubbed bd/gh while fixing gqlc-xpgdc and is deliberately not
 # committed: PR #1595 deleted the stub-driven hook suite because a stub encodes
 # belief rather than witness, and `just test` is also the pre-push hook, where
-# wall-time is paid by every citizen on every push.
+# wall-time is paid by everyone on every push.
 [private]
 check-bd-gh-sync-ledger:
     #!/usr/bin/env bash
@@ -1041,8 +947,8 @@ check-bd-gh-sync-ledger:
         *"$probe"*) ;;
         *) echo "error: _ledger did not name the BEADS_DIR it was given (bd gqlc-xpgdc)." >&2
            echo "       BEADS_DIR=$probe produced: $named" >&2
-           echo "       A diagnosis that omits the path cannot tell an empty town from a" >&2
-           echo "       bd aimed somewhere nobody meant; that is the defect this fixes." >&2
+           echo "       A diagnosis that omits the path cannot tell an empty ledger from" >&2
+           echo "       a bd aimed somewhere nobody meant; that is the defect this fixes." >&2
            exit 1 ;;
     esac
 
@@ -1112,7 +1018,7 @@ check-bd-gh-sync-ledger:
         ' "$scratch/nocomments.sh"; then
             echo "error: the $what diagnosis no longer names its ledger within 4 lines of" >&2
             echo "       \"$anchor\" (bd gqlc-xpgdc). That diagnosis is now true of an empty" >&2
-            echo "       town and of a bd aimed at the wrong ledger alike, which is exactly" >&2
+            echo "       ledger and of a bd aimed at the wrong ledger alike, which is exactly" >&2
             echo "       the four-hour ambiguity of gqlc-zpjuc." >&2
             missing=1
         fi
@@ -1122,196 +1028,9 @@ check-bd-gh-sync-ledger:
     ANCHORS
     [ "$missing" -eq 0 ] || exit 1
 
-# The single entry point to internal/tools/tmpreap, so GOTMPDIR and the raw-df
-# fallback below are spelled once rather than once per caller.
-#
-# The fallback is the point. Every way this tool can fail — a full scratch
-# filesystem the Go toolchain cannot build in, a permission wall, a bug in the
-# tool — ends with the two `df` invocations that answer the question anyway, and
-# with `-i` beside `-h` because inodes are the currency that ran out and `df -h`
-# is green while they do (bd gqlc-osuz).
-[private]
-tmpreap root *args:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    mkdir -p {{quote(gotmpdir)}}
-    rc=0
-    GOTMPDIR={{quote(gotmpdir)}} go run ./internal/tools/tmpreap \
-        -root {{quote(root)}} -repo {{quote(justfile_directory())}} {{args}} || rc=$?
-    if [ "$rc" -ne 0 ]; then
-        echo >&2
-        echo "tmpreap exited $rc over {{root}}. The raw numbers, in case it was the scratch" >&2
-        echo "filesystem that stopped it — a full one takes the Go toolchain down with it:" >&2
-        df -h {{quote(root)}} >&2 || true
-        df -i {{quote(root)}} >&2 || true
-        exit "$rc"
-    fi
-
-# refuses to run the suite over a scratch filesystem that is about to make it
-# lie. Wired into `test` and `doctor`; ~50ms warm.
-#
-# It is a GATE and not a warning because of what the failure looks like from the
-# other side: `just test` reporting a build failure with no error text, on a
-# DIFFERENT package set each run, because the build harness could not write its
-# work directory. One author read that as a real test failure, and two others
-# read `git worktree add` failing "No space left on device" with gigabytes free
-# as a broken tree (bd gqlc-osuz). A run that stops here with the real cause
-# named costs less than any of those.
-#
-# Skipped under CI: a hosted runner's /tmp is the root disk of a preinstalled
-# image, routinely past these thresholds and reset for every job, so the local
-# multi-agent exhaustion this guards against cannot happen there and the
-# thresholds would only fail honest runs. GQLC_SKIP_TMP_CHECK is the local
-# escape hatch, for the developer who has decided the pressure is fine.
-[private]
-check-tmp root=scratch_root:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    if [ -n "${CI:-}" ] || [ -n "${GQLC_SKIP_TMP_CHECK:-}" ]; then
-        exit 0
-    fi
-    just tmpreap {{quote(root)}} -check
-
 # health check for local dev environment; extend as new drift modes emerge
-doctor: check-hooks check-worktree-upstream check-shared-config check-beads-export check-tmp check-push-keepalive
+doctor: check-hooks check-worktree-upstream check-shared-config check-beads-export check-push-keepalive
     @echo "ok"
-
-# what is holding the shared scratch filesystem, in bytes AND inodes, with the
-# decision this tool would take over every top-level entry and the reason for it.
-#
-# Read-only by construction: it cannot be handed -apply. The reporting half is
-# the half that pays, because the recurring cost of this failure is that it gets
-# MISDIAGNOSED — three agents, three different wrong diagnoses, before anyone
-# looked at `df -i` (bd gqlc-osuz).
-tmp-report root=scratch_root:
-    @just tmpreap {{quote(root)}}
-
-# reclaims the entries `just tmp-report` proved abandoned. Dry run by default;
-# `just tmp-reap apply` is what deletes.
-#
-# What it will not touch, each for its own reason: a worktree with uncommitted or
-# untracked changes, a worktree whose content is not already equal on origin/master,
-# anything a live process has as its cwd or holds an fd on, anything written to
-# inside the age threshold, anything holding a git repository this repo does not
-# track, and anything belonging to the machine. Under `apply` the text artifacts
-# under -archive-max-file that it is about to destroy are tarred to a file outside
-# the scan root first, up to a total of -archive-max-total — 690 MiB of agent logs
-# came to 43 MiB in the manual remediation this replaces — and what it could NOT
-# archive is reported on stdout as unrecoverable, because those files are deleted
-# all the same: every one of them counted under a reason, and the first few of
-# each reason named. Hitting the total instead refuses the deletion outright,
-# since the record it would delete over is incomplete.
-#
-# The root is positional, so `apply ~` is one typo away from the home directory.
-# `apply` is refused over any root outside /tmp and /var/tmp — $TMPDIR is not
-# consulted, because an environment variable on that list is an authorisation to
-# delete that anything in the shell can set — and over anything on the same path
-# chain as $HOME. A dry run, which is read-only, stays available over any
-# directory.
-#
-# The mode is refused rather than defaulted when it is neither of the two: a typo
-# that silently dry-runs is a reap somebody thinks they performed.
-tmp-reap mode="dry-run" root=scratch_root:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    # Shell-quoted into one variable rather than pasted raw into the case head
-    # and the message: `{{{{mode}}}}` interpolates verbatim, so a value carrying a
-    # quote or a `)` is shell syntax there rather than data (bd gqlc-4seg).
-    mode={{quote(mode)}}
-    case "$mode" in
-        dry-run) just tmpreap {{quote(root)}} ;;
-        apply)   just tmpreap {{quote(root)}} -apply ;;
-        *)
-            echo "error: unknown mode '$mode' — expected 'dry-run' or 'apply'." >&2
-            exit 1
-            ;;
-    esac
-
-# the unattended half: what km's guard sweep runs once per cadence, and the only
-# thing in this town that reclaims scratch without a person typing (bd gqlc-u078).
-#
-# Everything above this line is a REMEDY — a report someone reads, a gate that
-# stops a suite, an apply someone types. Each one needs a citizen to already
-# suspect the filesystem, and the state that motivated the whole tool is the one
-# where nobody does: /tmp reached 99% of its inode cap overnight and began
-# refusing writes town-wide while `df -h` still showed 5.9G free, so the error
-# and the obvious diagnostic pointed at different resources (bd gqlc-vze6). The
-# gqlc-vze6 close said it plainly: "A reaper nobody invokes is the state we were
-# already in."
-#
-# It is `-apply` with a threshold rather than a conditional around `tmp-reap`,
-# so the decision to delete is taken by the process that took the measurement,
-# in the same run. A shell that measured with one invocation and deleted with a
-# second would have to decide what a non-zero exit meant, and the only
-# unrecoverable way to be wrong here is to delete because you could not measure.
-# tmpreap returns an error and touches nothing on every unmeasurable filesystem.
-#
-# Under the threshold the tool stops at the statfs, so a tick costs microseconds
-# and does not walk half a million inodes to conclude it has nothing to do.
-tmp-reap-cadence root=scratch_root threshold=reap_threshold:
-    @just tmpreap {{quote(root)}} -apply -apply-above {{quote(threshold)}}
-
-# The single entry point to the -worktrees mode, and a second one rather than an
-# argument to `tmpreap` above because that recipe passes -root, which this mode
-# refuses: it decides over the worktrees -repo has REGISTERED, wherever on disk
-# they live, so there is no scan root to name. The df fallback is gone for the
-# same reason — nothing this mode reports is a measurement of a filesystem, so
-# printing one after a failure would answer a question nobody asked.
-[private]
-wtreap *args:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    mkdir -p {{quote(gotmpdir)}}
-    GOTMPDIR={{quote(gotmpdir)}} go run ./internal/tools/tmpreap \
-        -worktrees -repo {{quote(justfile_directory())}} {{args}}
-
-# which of the worktrees this repository has registered can be removed, with a
-# verdict and a checkable reason for every one of them.
-#
-# Read-only by construction: it cannot be handed -apply. It is the companion to
-# `tmp-report`, which answers about a scan root's children and so cannot see a
-# worktree living beside the main checkout under $HOME — which is where every
-# seat and every hand-made sibling worktree in this town lives.
-worktree-report:
-    @just wtreap
-
-# removes the worktrees `just worktree-report` proved abandoned. Dry run by
-# default; `just worktree-reap apply` is what removes.
-#
-# What it will not touch, each for its own reason: the main checkout, any
-# permanent seat worktree (matched by NAME, so an ad-hoc tree named like a seat
-# leaks rather than dies), a worktree git reports as locked, one with
-# uncommitted or untracked changes, one whose content is not already present and
-# equal on origin/master, one a live process has as its cwd or holds an fd on,
-# and one written to inside the age threshold.
-#
-# `git worktree remove` is the actuator and it is never given --force, so git
-# re-asks its own dirt question at the moment of removal. Nothing is archived:
-# a candidate is clean by construction, so what dies with the checkout is
-# gitignored build output.
-#
-# The occupancy gate is the one this mode exists for. The only worktree sweep
-# this town ever ran deleted a live agent's working directory while every safety
-# question it asked answered safe, because all of them were about the CONTENT of
-# the tree and the harm was to the OCCUPANT (bd gqlc-24wf).
-#
-# The mode is refused rather than defaulted when it is neither of the two: a typo
-# that silently dry-runs is a reap somebody thinks they performed.
-worktree-reap mode="dry-run":
-    #!/usr/bin/env bash
-    set -uo pipefail
-    # Shell-quoted into one variable rather than pasted raw into the case head
-    # and the message: `{{{{mode}}}}` interpolates verbatim, so a value carrying a
-    # quote or a `)` is shell syntax there rather than data (bd gqlc-4seg).
-    mode={{quote(mode)}}
-    case "$mode" in
-        dry-run) just wtreap ;;
-        apply)   just wtreap -apply ;;
-        *)
-            echo "error: unknown mode '$mode' — expected 'dry-run' or 'apply'." >&2
-            exit 1
-            ;;
-    esac
 
 # provisions the pinned golangci-lint into the gitignored .bin/ when missing
 # or version-mismatched (~3s; official release binary — golangci-lint does not
@@ -1340,12 +1059,12 @@ worktree-reap mode="dry-run":
 # branch based before the last pin bump provisions the OLD linter — and a
 # go1.N-built golangci-lint cannot load go1.(N+1) source. It dies inside
 # go/types with a stack trace that names neither the pin nor the branch base,
-# and nothing anywhere says "your base is old". Measured by Նուարդ across three
-# trees: same branch, panic before `git merge origin/master` and green after.
-# It cost her most of a session and cost the mayor two wrong town-wide
-# broadcasts — the second of which told seats to declare a WORKING gate unrun in
-# their PR bodies, which is the real loss, because a gate everyone ritually
-# disclaims can no longer be told apart from one that genuinely did not run.
+# and nothing anywhere says "your base is old". Measured across three trees:
+# same branch, panic before `git merge origin/master` and green after. It cost
+# most of a session, and then cost two wrong repository-wide announcements — the
+# second of which told people to declare a WORKING gate unrun in their PR
+# bodies, which is the real loss, because a gate everyone ritually disclaims can
+# no longer be told apart from one that genuinely did not run.
 #
 # The pin is deliberately read from the tree under test rather than from
 # origin/master, so that a branch can test a linter change; that is why this
@@ -1524,11 +1243,10 @@ lint-python dir=".github/scripts": ensure-ruff
         exit 1
     fi
     # Selected by suffix OR by shebang, because a hook cannot carry a suffix:
-    # git and Claude Code invoke .githooks entries by name. Suffix alone left
-    # .githooks/claude-pre-bash — the largest Python file in the repo, and the
-    # one running ahead of every Bash tool call — read by no linter at all,
-    # while sitting inside a directory lint-hooks already scans and a language
-    # this recipe already lints. It fell between the two selectors (gqlc-tmxex).
+    # git invokes .githooks entries by name. Suffix alone once left the largest
+    # Python file in the repo read by no linter at all, while it sat inside a
+    # directory lint-hooks already scans and in a language this recipe already
+    # lints. It fell between the two selectors (gqlc-tmxex).
     #
     # Unclassified files are NOT refused here, unlike lint-hooks. That refusal
     # is already made over both directories this recipe is pointed at, so
@@ -1651,14 +1369,14 @@ lint-hooks dir=".githooks": ensure-shellcheck
 # token. Errors and warnings are not artefacts of the substitution.
 #
 # No check is excluded. SC2194 (a constant case word) was the one candidate,
-# raised by `case "{{{{mode}}}}" in` in tmp-reap — and that reading was right: the
-# value was pasted in raw, so a mode carrying a `)` was shell syntax there
-# rather than data. Binding it through `{{{{quote(mode)}}}}` fixed the recipe and
-# retired the exclusion with it (bd gqlc-4seg).
+# raised by a recipe that pasted a mode argument raw into its case head, so a
+# value carrying a `)` was shell syntax there rather than data. Binding it
+# through `{{{{quote(...)}}}}` fixed the recipe and retired the exclusion with it
+# (bd gqlc-4seg).
 #
 # The justfile read is an argument so the recipe can be exercised over a
 # throwaway one, the same way lint-hooks takes its directory. The half about
-# lint-hooks still holds — `lint` calls it three times with three directories.
+# lint-hooks still holds — `lint` calls it twice with two directories.
 # This parameter's own exerciser was internal/tools/ciguard/justbodies_test.go,
 # deleted with the CI scaffolding in PR #1595, and nothing passes an argument
 # here today: `lint` is the only caller and it takes the default. So the
@@ -2305,7 +2023,7 @@ sweep-discovery-probes:
     done
 
 # full static analysis: golangci-lint over the Go tree (.golangci.yml) and
-# shellcheck over the hooks + kingdom + CI-script trees, as linters + formatter
+# shellcheck over the hooks + CI-script trees, as linters + formatter
 # diffs as issues
 #
 # .github/scripts is here because a developer must see the same verdict as CI
@@ -2317,12 +2035,18 @@ sweep-discovery-probes:
 # bd gqlc-tqi4 no linter of any kind read the two .py files in .github/scripts,
 # one of which is the PR-body merge gate.
 #
+# It runs over .github/scripts alone. A second arm over .githooks was dropped
+# with the last Python hook there (bd gqlc-7dkxl): lint-python REFUSES a
+# directory holding no Python rather than passing vacuously, so the arm did not
+# go quiet when its files left — it reddened `lint`, which is how we found it.
+# Restore the arm if a .py or python-shebang hook is ever added back.
+#
 # check-golangci-formatters-report rides here rather than anywhere else because
 # `lint` is what the required context runs, and the property it holds is a
 # property of the very next line: that `golangci-lint run` reddens on gofumpt
 # and gci. Ahead of the lint, so a tree whose formatter enforcement has gone
 # quiet says so before spending eighty seconds.
-lint: ensure-golangci lint-hooks (lint-hooks "kingdom/bin") (lint-hooks ".github/scripts") lint-python (lint-python ".githooks") lint-just check-golangci-formatters-report check-golangci-build-tags
+lint: ensure-golangci lint-hooks (lint-hooks ".github/scripts") lint-python lint-just check-golangci-formatters-report check-golangci-build-tags
     {{lint_lock}} {{golangci}} run
 
 # Guard: the golangci-lint analysis cache must be non-empty after lint.
@@ -2346,14 +2070,13 @@ fmt-check: ensure-golangci
 # THE PRE-PR GATE SET: every required CI context that can run on this machine.
 #
 # It exists because a hand-written list of gates drifts and nothing tells you.
-# citizen-protocol.md step 4 named three recipes — fmt-check, lint, test — while
-# master required seven contexts, six of them reachable here across eleven arms.
-# A citizen who ran the
-# documented three and pushed then learned the rest one CI round trip at a time:
-# measured on PR #1643, where all three were green and codegen-fence failed on
-# three ireturn findings the root lint cannot reach by construction (bd
-# gqlc-jq50, gqlc-s9bx). Naming ONE recipe in the playbook moves that drift here,
-# next to the recipes it is about and in front of everyone who edits them.
+# The procedure everyone followed named three recipes — fmt-check, lint, test —
+# while master required seven contexts, six of them reachable here across eleven
+# arms. Anyone who ran the documented three and pushed then learned the rest one
+# CI round trip at a time: measured on PR #1643, where all three were green and
+# codegen-fence failed on three ireturn findings the root lint cannot reach by
+# construction (bd gqlc-jq50, gqlc-s9bx). Naming ONE recipe moves that drift
+# here, next to the recipes it is about and in front of everyone who edits them.
 #
 # EVERY ARM RUNS EVEN AFTER ONE FAILS, and the failures are reported together at
 # the end. Stopping at the first is precisely what a pre-PR check must not do:
@@ -2369,12 +2092,12 @@ fmt-check: ensure-golangci
 #                container images. Runnable here (bd gqlc-tez0 measured the
 #                live battery at ~30s), just not at the price the other arms
 #                are; run it by hand when you touch the live battery.
-#   tidy (part)  three of that job's ten steps read state that does not exist
+#   tidy (part)  three of that job's nine steps read state that does not exist
 #                before the PR: check-pr-closes.py wants the body,
 #                check-pr-authors.sh the commit list, check-cron-freshness.sh
 #                the Actions API. Unrunnable here by construction, not by
-#                choice. The other seven DO run — tidy-check and
-#                check-doc-ordinals.py and check-adr-citations.py and
+#                choice. The other six DO run — tidy-check and
+#                check-doc-ordinals.py and
 #                check-open-pr-ordinals.py --self-test and
 #                bd-export-monotonic-local and check-label-lengths.py as their
 #                own arms, and `just lint-hooks .github/scripts` because `just
@@ -2387,7 +2110,7 @@ fmt-check: ensure-golangci
 # check-golangci-formatters-report (bd gqlc-sh4j).
 #
 # Every arm here runs on a clean master. The `just vuln` arm used to be red on
-# the town's own machine, whose default Go is a distro build
+# this project's own development machine, whose default Go is a distro build
 # (`go1.27.0-X:nodwarf5`) that govulncheck cannot place a stdlib version on, so
 # it scanned the largest attack surface in the binary and reported nothing (bd
 # gqlc-u91z). CI never hit that, because .github/actions/setup-go exports
@@ -2441,11 +2164,7 @@ gates:
     # fact about the directory, not one the script can infer, and a default
     # would let a new series be added with nobody deciding it should be covered.
     # All three lists must move together; the checker names them when it refuses.
-    run tidy           python3 .github/scripts/check-doc-ordinals.py docs/adr kingdom/brain/decisions
-    # Enrolled directory listed HERE and in ci.yml, same reasoning as the
-    # ordinal check above: which trees reserve the bare "ADR NNNN" form for
-    # docs/adr is a convention decision, not one the script can infer.
-    run tidy           python3 .github/scripts/check-adr-citations.py kingdom
+    run tidy           python3 .github/scripts/check-doc-ordinals.py docs/adr
     # The moved-base half's decision core (bd gqlc-4plwf). Its own rows, not a
     # scan of the tree — the network path cannot run here, and it is the LOGIC
     # that would otherwise be exercised by nothing until a real collision. This
@@ -2454,7 +2173,7 @@ gates:
     # ci.yml's tidy job runs the same command, unlike `fmt-check` above: an arm
     # that reds only here lets the break merge, and ordinal-recheck.yml's own
     # copy fires on master PUSH, which is after the merge it should have
-    # stopped (Միհր, verdict-a0lyz-r1 F1).
+    # stopped.
     run tidy           python3 .github/scripts/check-open-pr-ordinals.py --self-test
     run govulncheck    just vuln
 
@@ -2493,7 +2212,7 @@ gates:
 # test-binary args, so every run misses), and inter-test coupling in a codegen
 # dev tool is a low-value gate relative to a ~2m40s tax on every push. Revisit
 # if ordering coupling actually bites us.
-test: check-hooks check-worktree-upstream check-shared-config check-claude-permission-mode check-beads-export check-bd-gh-sync-selection check-bd-gh-sync-ledger check-tmp check-push-keepalive
+test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-bd-gh-sync-selection check-bd-gh-sync-ledger check-push-keepalive
     go build ./...
     go test ./...
 
@@ -2517,7 +2236,7 @@ tidy-check:
 # It fetches, and refuses if it cannot: an answer from stale refs is the defect
 # wearing the fix's name. Series default to the two the gate enrols; pass a
 # directory to ask about another.
-adr-next *dirs="docs/adr kingdom/brain/decisions":
+adr-next *dirs="docs/adr":
     python3 .github/scripts/next-doc-ordinal.py {{dirs}}
 
 # fails when .beads/issues.jsonl regresses vs base (dropped or reopened issues).
@@ -2542,7 +2261,7 @@ bd-export-monotonic base:
 # a malformed recipe rather than as a fact about the repository. It reaches the
 # operator under the arm name `tidy`, which says nothing either. Measured
 # 2026-08-29 (bd gqlc-yzk1h): a shallow graft in the SHARED git dir put every
-# seat worktree's `just gates` on this message at once.
+# linked worktree's `just gates` on this message at once.
 #
 # The causes are separated because their remedies are different commands, and an
 # operator who hits this has no reason to suspect their git dir at all. A bare
@@ -3063,7 +2782,7 @@ test-codegen-live:
 # so this half boots FOUR rather than the three the paragraph here used to
 # describe. They boot concurrently and TestLiveSmoke's header measures three at
 # ~4GB peak; a fourth of the same image is ~5.3GB by that arithmetic, which is
-# inside a standard runner's 7GB and is NOT measured -- the seat that added the
+# inside a standard runner's 7GB and is NOT measured -- whoever added the
 # fourth could not run any of them (docker.service disabled host-wide, bd
 # gqlc-p9g2i), so the first real reading is this job. If it dies for memory
 # rather than for an assertion, the remedy is to drop t.Parallel from the
@@ -3171,11 +2890,11 @@ vuln: sweep-discovery-probes vuln-root-residual
 
     # Scan under the toolchain go.mod names, which is what CI already does via
     # .github/actions/setup-go. Without this the recipe was red on a clean
-    # master for every seat on a box whose default Go is a distribution build:
+    # master on any box whose default Go is a distribution build:
     # govulncheck cannot match such a version to a released one, so it places no
     # version on the standard library and refuse_unplaced_stdlib below fires (bd
     # gqlc-irvs). That refusal is correct — it is the asymmetry that was the
-    # defect, a gate red by default being a gate citizens learn to ignore.
+    # defect, a gate red by default being a gate people learn to ignore.
     #
     # The derivation is the same script setup-go reads, not a second copy; see
     # the note in it for why that matters more than the four lines it saves.
@@ -4181,76 +3900,3 @@ iso-drift-check:
         echo "ok: both artefacts match their pinned checksums"
     fi
     exit "$fail"
-
-# ---------- Թագաւորութիւն — the software factory (kingdom/README.md) ----------
-#
-# Herdr is the observation surface: `herdr` opens the town's TUI, with every
-# citizen a tab in the "kingdom" workspace. `just kingdom`, `just herratsayn`
-# and `just kingdom-attach` were tmux-era wrappers around `tmux
-# attach-session`; they were deleted when herdr became HQ (bd gqlc-98br).
-# Mechanical readout (mail counts, unroutable beads, unit health) still lives
-# in `km status`.
-
-# create state dir, seat worktrees, and the herdr workspace with its per-seat
-# agents (all asleep). Requires the herdr server to be running.
-kingdom-up:
-    kingdom/bin/km up
-
-# graceful stop: notice by mail, then close the herdr workspace
-kingdom-down:
-    kingdom/bin/km down
-
-# mechanical readout: mail counts, unroutable beads, stalled P0s, unit health.
-# For the pane view, open `herdr`.
-kingdom-status:
-    kingdom/bin/km status
-
-# check deps, install+enable the systemd user timers, point bd mail at km
-kingdom-install:
-    kingdom/bin/km doctor
-    kingdom/bin/km install-units
-
-# the full off-switch: disable and remove the systemd user timers, so nothing
-# fires again after logout or reboot. State, mail and seat worktrees are left
-# alone, so kingdom-install puts it back.
-#
-# kingdom-halt is the SOFT stop — the timers keep firing, they just wake
-# nobody, and Սեդրակ or Անդրանիկ can lower it (Constitution VI.4; twelve of
-# the other citizens can raise a halt but none of them may resume). This is
-# the hard one, and it
-# is the half that had no recipe: turning the town on was a documented
-# one-liner and turning it off was not (bd gqlc-yxnf).
-kingdom-uninstall:
-    kingdom/bin/km uninstall-units
-
-# raise the halt flag: the dispatcher wakes nobody until kingdom-resume. The
-# raise is recorded against whoever made it, so like kingdom-resume it needs an
-# identity: KINGDOM_SEAT=andranik just kingdom-halt "reason"
-kingdom-halt reason="":
-    kingdom/bin/km halt {{reason}}
-
-# lower the halt flag. Constitution VI.4 reserves this to Սեդրակ or Անդրանիկ, so
-# it needs an identity: KINGDOM_SEAT=andranik just kingdom-resume
-kingdom-resume:
-    kingdom/bin/km resume
-
-# health checks for the kingdom machinery
-kingdom-doctor:
-    kingdom/bin/km doctor
-
-# fast-forward the checkout the systemd timers execute; merging a km fix does not deploy it
-kingdom-deploy:
-    kingdom/bin/km deploy
-
-# who else has an open PR touching a file (bd gqlc-zgka). Bare: the census of
-# every contested path. `path <PATH>` before routing a bead, `pr <N>` for your
-# own branch.
-#
-# Exit 1 means overlap was FOUND, so just prints `error: recipe ... failed` on
-# the ordinary result. That line is the finding, not a fault. The status is
-# passed through rather than swallowed because the third state matters: 2 means
-# the query could not run, and a recipe that flattened all three to 0 would
-# answer "nothing touches this file" for "I never looked" — the fail-open this
-# whole tool exists to refuse.
-kingdom-overlap *args="census":
-    kingdom/bin/km-overlap {{args}}

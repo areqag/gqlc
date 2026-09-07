@@ -10,7 +10,7 @@ canonical string encoding makes `==` mean type identity, and
 `internal/codegen` refuses both kinds wholesale through
 `ErrUnimplementedTypeKind`, asked before any type map sees the value.
 This document rules on the emission that retires that refusal.
-Execution is staged into two warrior beads — records first
+Execution is staged into two execution beads — records first
 (`gqlc-jffyz`), closed unions second — whose implementation-ready
 plans live in the beads' own notes and cite the sections here.
 
@@ -148,8 +148,8 @@ sweep's whole purpose.
 
 This layer is **severable**: the emission is correct and complete
 without it, because the alias adds no type the anonymous spelling
-does not already denote. The stage-1 plan orders it last and a
-Ռազմիկ who finds it fighting the identifier sweep may land the
+does not already denote. The stage-1 plan orders it last, and an
+implementer who finds it fighting the identifier sweep may land the
 carrier without it and file the alias as a follow-up bead — the
 design is not hostage to its ergonomics.
 
@@ -415,7 +415,7 @@ stay in the tree on the sentinel-honesty ground §5's fork paragraph and
 the divergence ADR carry. In the accepts branch the measurement is
 expressible and stands as written.
 
-**Stage 2 — closed unions** (new warrior bead, blocked by
+**Stage 2 — closed unions** (new execution bead, blocked by
 `gqlc-jffyz`): the `KindUnion` carrier per §4, the wire-family
 admission rule and its per-backend refusal tests, bind-time
 validation and decode dispatch, `LIST<UNION<…>>` storage on neo4j
@@ -434,7 +434,7 @@ that lies about a union.
 
 ## 8. Falsifiers
 
-Checks that FAIL if this design is wrong, named per the design gate:
+Checks that FAIL if this design is wrong:
 
 - **Structural identity:** a test declaring the same record under two
   field spellings asserts the two prepared `GoType` texts are

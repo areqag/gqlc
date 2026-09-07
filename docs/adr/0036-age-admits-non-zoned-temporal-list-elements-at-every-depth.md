@@ -7,7 +7,7 @@ list of `TIME` or `TIMESTAMP` is refused at every depth with
 first half, which drifted onto master without a ruling, and gives the second
 half the reason it has so far carried only in a code comment.
 
-Written 2026-09-01 by Արփինէ, ruling bead `gqlc-iahs`. The one code change
+Written 2026-09-01, ruling bead `gqlc-iahs`. The one code change
 this ruling mandates — an encoder defect at depth ≥ 2, below — is executed
 under `gqlc-vhvz7` and tracked as bug `gqlc-jc8mc`, not here.
 

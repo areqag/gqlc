@@ -21,7 +21,7 @@ moves BY a master push, which is an event we already receive. So the master
 push re-asks the question for every PR still open and delivers the answer as a
 commit status on each PR's head SHA, where its checks list already is. The
 collision reads as a red X within minutes, with no author push and no cron.
-Alternatives and why they lost are in gqlc-4plwf's design note (Արփինէ).
+Alternatives and why they lost are in gqlc-4plwf's design note.
 
 WHAT IS COMPARED, and this is the subtle part. Per PR, a THREE-DOT compare of
 the pushed master against the PR head, taking only files the PR ADDS (status
@@ -238,7 +238,7 @@ def check_open_prs(directories):
         if not any(added.values()):
             # Silent by design. Most PRs touch no enrolled series, and a
             # success status on every one of them would put a context on every
-            # PR in the town to say nothing happened.
+            # PR in the repository to say nothing happened.
             print(f"PR #{pr['number']}: adds no enrolled document, no status posted")
             continue
 
@@ -267,7 +267,7 @@ def self_test_claimed_by():
     CLAIMING_STATUSES survives every one of them -- the verdict never sees a
     file the filter dropped, so it cannot report the collision it hides.
     """
-    enrolled = ["docs/adr", "kingdom/brain/decisions"]
+    enrolled = ["docs/adr"]
     doc = "0012-something.md"
     rows = [
         ("an added document claims its ordinal", "added", f"docs/adr/{doc}", True),
@@ -276,9 +276,9 @@ def self_test_claimed_by():
         ("modifying 0012 leaves it claimed once, not twice", "modified", f"docs/adr/{doc}", False),
         ("deleting 0012 frees the number, it does not take it", "removed", f"docs/adr/{doc}", False),
         (
-            "a date-prefixed series is not enrolled, so it claims nothing",
+            "a directory outside the enrolled series claims nothing",
             "added",
-            f"kingdom/brain/postmortems/{doc}",
+            f"docs/postmortems/{doc}",
             False,
         ),
         (
@@ -345,12 +345,12 @@ def self_test():
     the ones the design named as owed, plus the status-filter rows a mutation
     battery showed were owed and missing.
     """
-    taken = "0012-release-of-an-unreachable-seat.md"
+    taken = "0012-an-ordinal-master-already-holds.md"
     rows = [
         (
             "the reconstructed window: master took the ordinal after the last push",
             [taken],
-            ["0012-conduct-of-a-seat-that-cannot-reach-the-remote.md"],
+            ["0012-a-different-document-under-the-same-number.md"],
             False,
         ),
         (

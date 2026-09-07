@@ -1,7 +1,7 @@
 # Graph type references resolve against a file catalogue rooted at the schema path
 
 Design for bead `gqlc-pwly`, unblocking `gqlc-h9n.1` (`COPY OF` support).
-Written 2026-08-24 by Արթուր. Every file:line below was read in a worktree at
+Written 2026-08-24. Every file:line below was read in a worktree at
 `origin/master` (44ee6224), not recalled.
 Amended 2026-08-24 (`gqlc-pyc6`): §2's identifier inventory omitted
 `nonReservedWords`, and §3.3 named the `REGULAR_IDENTIFIER` token where it

@@ -28,15 +28,20 @@
 #
 # Design: human works through GitHub issues; agents work through bd.
 #
-# One premise this file depends on is not enforced in it. Because a single
+# One premise this file depends on is not enforced in it, and as of the removal
+# of the agent-society tooling it is not enforced ANYWHERE. Because a single
 # GitHub account operates both sides, a mirror closed under a bead still open
 # here is ambiguous — GitHub speaking, or this script's own push echoing back —
-# and the pull applies it either way. Decision 0011 resolves the ambiguity by fixing
-# the ORDER a reopen is expressed in (GitHub first, bd second), which
-# .githooks/claude-pre-bash arm 5 refuses to let a citizen get wrong. Under that
-# order a closed mirror over an open bead is always GitHub-native and the pull
-# is always right to take it. See the CLOSING record below and the drift
-# section's "Deliberately NOT gated" for what each half of this file owes it.
+# and the pull applies it either way. The ambiguity is resolved by fixing the
+# ORDER a reopen is expressed in (GitHub first, bd second): under that order a
+# closed mirror over an open bead is always GitHub-native and the pull is always
+# right to take it.
+#
+# That order used to be enforced at the keyboard by a PreToolUse hook. The hook
+# is gone, so the order is now a CONVENTION a person can get wrong, and getting
+# it wrong makes the pull undo a reopen (gqlc-e9huy). Reopen on GitHub first.
+# See the CLOSING record below and the drift section's "Deliberately NOT gated"
+# for what each half of this file owes it.
 #
 #   - pull:  mirror GH state into bd for the beads where GitHub is capable of
 #            holding the local value and is not behind it. `bd github sync`
@@ -130,16 +135,17 @@
 #            ordinary work. "Resolves" is the whole claim on the first of those,
 #            and it holds only where the mirror's closure came from GitHub. Where
 #            it is instead the echo of this script's own push, the same state
-#            means the opposite — a citizen reopened the bead and the pull is
+#            means the opposite — an author reopened the bead and the pull is
 #            about to undo them — and applying it destroys rather than resolves
 #            (gqlc-e9huy). Nothing in the state distinguishes the two, because
 #            one GitHub account operates both sides; what distinguishes them is
-#            the ORDER the reopen was expressed in, which is enforced before this
-#            script runs (.githooks/claude-pre-bash arm 5) and recorded in
-#            decision 0011. So the gate stays off here for the reason it always did,
-#            and the premise that makes that safe now lives somewhere this file
-#            can name but cannot check. Nothing in this repository calls it yet: it needs
-#            `gh`, so it cannot live in the offline `just test` (gqlc-x98l).
+#            the ORDER the reopen was expressed in — GitHub first, bd second.
+#            That order was enforced at the keyboard until the agent-society
+#            tooling was removed; it is now an unchecked convention, so the gate
+#            stays off here for the reason it always did while the premise that
+#            makes it safe is held by nothing. Nothing in this repository calls
+#            it yet: it needs `gh`, so it cannot live in the offline `just test`
+#            (gqlc-x98l).
 #
 # Payloads reach python through temp files, never argv or the environment. The
 # bead listing alone is ~1MB, and execve caps any single argument or
@@ -213,13 +219,13 @@ _count() {
 }
 
 # Names the ledger the diagnoses below were read from. Every "the bead list came
-# back empty" line here is equally true of a town that has no beads and of a bd
+# back empty" line here is equally true of a ledger that has no beads and of a bd
 # pointed somewhere nobody intended, and the two are otherwise byte-identical:
 # measured 2026-09-02 on this script's own push arm, an empty ledger and
-# BEADS_DIR aimed at another seat's .beads produced the same nine lines. That
-# ambiguity ran for four hours across ten seats with this script's empty-list
-# line as the only tell (bd gqlc-xpgdc, gqlc-zpjuc). The path is the one byte
-# that separates them.
+# BEADS_DIR aimed at another checkout's .beads produced the same nine lines. That
+# ambiguity ran for four hours across ten concurrent sessions with this script's
+# empty-list line as the only tell (bd gqlc-xpgdc, gqlc-zpjuc). The path is the
+# one byte that separates them.
 #
 # Environment only, and deliberately NOT `bd info`: against a BEADS_DIR that
 # holds no database, bd CREATES one rather than refusing (bd gqlc-5smcw), which
@@ -511,7 +517,7 @@ for b in beads:
     if desc == gh_body and status == gh_state:
         continue
 
-    # A pull that carries a closure destroys a status a citizen may be working,
+    # A pull that carries a closure destroys a status an author may be working,
     # and the summary counted it as one more bead pulled — the same +1 a body
     # edit makes. gqlc-kibh went closed that way under an open, unreviewed PR.
     # The post-pull check cannot cover this: it opens by skipping every bead the
@@ -519,14 +525,14 @@ for b in beads:
     # So the transition is named here, where both states are still in hand.
     #
     # Reported, never held — GitHub closing a mirror is how every merge ends,
-    # and every alternative to allowing it has a worse silent-loss direction
-    # (decision 0011 enumerates them with their falsifiers). What makes
-    # report-and-allow sound is now two things OUTSIDE this record. Order is
-    # enforced at the keyboard, so a mirror still closed under an open bead is
-    # GitHub speaking rather than an echo of bd's own push
-    # (.githooks/claude-pre-bash arm 5). And whatever slips past that lands as a
+    # and every alternative to allowing it has a worse silent-loss direction.
+    # What makes report-and-allow sound is OUTSIDE this record, and one of its
+    # two supports has been removed: the reopen order (GitHub first, bd second)
+    # that makes a mirror still closed under an open bead GitHub speaking rather
+    # than an echo of bd's own push used to be enforced at the keyboard, and is
+    # now only a convention. What remains is that whatever slips past lands as a
     # note on the bead itself — the number rides on this record so the caller
-    # below can write it — because a citizen reads their bead and does not read
+    # below can write it — because a person reads their bead and does not read
     # the stderr of whoever's session happened to run the merge. gqlc-e9huy is
     # the incident where reporting reached nobody who could act.
     if status == "open" and gh_state == "closed":
@@ -840,10 +846,9 @@ PYEOF
   # Scope is the only lever this script has (see the header — `bd github sync`
   # offers no field-level exclusion), and it is per bead, so every ALLOWed pull
   # takes all five with it and the summary line above counts it as one more
-  # bead pulled. Measured 2026-08-30
-  # against bd 1.0.4 through this hook: a bead at P0/task/hayk-probe/[class:
-  # warrior,probe-sentinel-label] came back P2/bug/unassigned/[class:warrior,
-  # subject:kingdom/bin/km]. So the five are re-asserted here instead.
+  # bead pulled. Measured 2026-08-30 against bd 1.0.4 through this hook: a bead
+  # filed at P0/task/assigned/[two labels] came back P2/bug/unassigned with a
+  # different label set. So the five are re-asserted here instead.
   #
   # The title is the one of the five with no gate anywhere in bd: read at
   # beads@ce242a879678 (the commit `bd version` reports for the 1.0.4 binary
@@ -854,7 +859,7 @@ PYEOF
   # eligibility rule above, which reads the DESCRIPTION; the title rides along
   # on a gate that never looks at it.
   #
-  # It is re-asserted rather than allowed because the live corpus says citizens
+  # It is re-asserted rather than allowed because the live corpus says people
   # correct bd titles and do not touch GitHub's. Measured 2026-08-30 over 1245
   # mirrored beads: 6 titles disagree with their mirrors, and on 5 of the 6 the
   # GitHub issue has NO `renamed` timeline event at all — the mirror still
@@ -867,13 +872,13 @@ PYEOF
   #
   # The closure transition is where this bites rather than some edge: bd open
   # with the mirror closed is an ALLOW, it is how every merge ends, and it nulls
-  # the assignee of a bead somebody is holding — an unassigned bead in a
-  # non-ready status routes to no dispatch pass at all. bd's assignee is a seat
-  # name and GitHub's is a GitHub login, so GitHub has nothing to put back: of
+  # the assignee of a bead somebody is holding — losing the ledger's only record
+  # of who has it. bd's assignee is a local name and GitHub's is a GitHub login,
+  # so GitHub has nothing to put back: of
   # all 800 issues on the mirror, one carries a GH assignee, and it is open
   # (measured 2026-08-30). Holding the pull instead was the
   # other candidate remedy and would have withheld the closure of very nearly
-  # every bead a citizen was working.
+  # every bead an author was working.
   #
   # These writes move bd's edit time, which the eligibility rule reads. That
   # costs nothing in the steady state — a bead whose body now equals GitHub's
@@ -1284,11 +1289,11 @@ PYEOF
 
   # The closure written where the parties to it actually look. Everything this
   # run says about it otherwise goes to the stderr of whoever's session happened
-  # to run the merge — a citizen with no stake in the bead — and the bead itself
+  # to run the merge — an author with no stake in the bead — and the bead itself
   # ends up carrying a null close_reason, which is the only tell that no human
-  # judged it and nothing reads that either. gqlc-e9huy is the incident: a
-  # judge's withdrawn PASS was reverted here 2.5 minutes after he withdrew it,
-  # and it was found only because the PR comments contradicted the ledger.
+  # decided it and nothing reads that either. gqlc-e9huy is the incident: a
+  # reviewer's withdrawn PASS was reverted here 2.5 minutes after they withdrew
+  # it, and it was found only because the PR comments contradicted the ledger.
   #
   # Rides closed.txt, the intersection, and not the plan's CLOSING records:
   # intent is not outcome, as everywhere else on this path. A bead whose batch
@@ -1305,7 +1310,7 @@ PYEOF
     _now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     while read -r _cid _cn; do
       [ -n "$_cid" ] || continue
-      bd update "$_cid" --append-notes "bd-gh-sync pull ${_now}: closed this bead because GH mirror #${_cn} is closed while the bead was open in bd. No citizen wrote this close — close_reason is null. If this reverted a deliberate reopen: 'gh issue reopen ${_cn}' FIRST, then 'bd reopen ${_cid}', in that order, or the next pull repeats this. Incident: bd gqlc-e9huy; rule: decision 0011." \
+      bd update "$_cid" --append-notes "bd-gh-sync pull ${_now}: closed this bead because GH mirror #${_cn} is closed while the bead was open in bd. Nobody wrote this close — close_reason is null. If this reverted a deliberate reopen: 'gh issue reopen ${_cn}' FIRST, then 'bd reopen ${_cid}', in that order, or the next pull repeats this. Incident: bd gqlc-e9huy." \
         >/dev/null 2>&1 || _notes_failed=$((_notes_failed + 1))
     done <"$_tmp/closed.txt"
   fi
@@ -1350,7 +1355,7 @@ PYEOF
   # `tail -1` keeps this line and drops those. A count that moved by one is what
   # the reader had before, and it does not distinguish an amended body from a
   # status somebody was working. The repair ordering rides along because this is
-  # where a citizen meets the closure — repairing the bead alone looks like a fix
+  # where an author meets the closure — repairing the bead alone looks like a fix
   # and is undone by the next pull, which reads GitHub as authoritative.
   if [ -s "$_tmp/closed.txt" ]; then
     _closed=$(wc -l <"$_tmp/closed.txt")
@@ -1366,7 +1371,8 @@ PYEOF
   # Silent when the pull moved none of the five, which is the steady state. The
   # two failing arms are on the line the caller keeps because both leave a bead
   # carrying GitHub's values for fields GitHub was never authoritative over —
-  # and the nulled assignee among them is invisible to every dispatch pass.
+  # and the nulled assignee among them erases the ledger's only record of who
+  # holds the bead.
   if [ -n "$_restore_blind" ]; then
     _summary="${_summary} Whether the pull also overwrote any bead's title, priority, type, assignee or labels was not established (${_restore_blind})."
   elif [ "$_stuck" -gt 0 ]; then
@@ -1516,7 +1522,7 @@ bd list --status all --limit 0 --json >"$_tmp/beads.json" 9>&- 2>/dev/null \
 # the committed export. The selection below reads the cap and the remedy out of
 # that file rather than writing either a third time: two spellings of one number
 # disagree exactly when somebody raises one of them, and the whole point of
-# refusing at filing time is that the citizen meets the same words here as in
+# refusing at filing time is that the author meets the same words here as in
 # CI. Resolved beside this script first, because all three callers invoke it by
 # path, and off the work tree only as a fallback.
 _hooks_dir=$(cd "$(dirname "$0")" && pwd)
@@ -1585,7 +1591,7 @@ for b in beads:
     # board — and both are moot for work that finished unmirrored, so an issue
     # minted here is a row with no reader that the stale-mirror pass below
     # closes in the same run. Nothing about such a bead ever changes again, so
-    # without this it is re-offered on every push by every citizen forever
+    # without this it is re-offered on every push by every author forever
     # (bd gqlc-bc26w).
     #
     # Above the label screen deliberately, not below it: the bead that provoked
@@ -1602,7 +1608,7 @@ for b in beads:
         continue
     # GitHub rejects the ISSUE, not the label, so a bead offered with one of
     # these comes back 422 and ends up with no mirror at all while the run
-    # reports a push. Held here instead, where the citizen who chose the label
+    # reports a push. Held here instead, where the author who chose the label
     # can still choose another one.
     print("UNMIRRORABLE " + bid)
     for lab in over:
@@ -1646,15 +1652,14 @@ fi
 # a push that GitHub would have refused whole.
 #
 # This verdict was nearly demoted to a non-failing notice on 2026-08-23, on the
-# argument that the condition is permanent and the citizen who sees the alarm is
-# not the one who can clear it. Both halves were falsified the same night.
-# gqlc-njqk, gqlc-a7we and gqlc-to7k did carry the 51-character
-# `subject:kingdom/brain/playbooks/citizen-protocol.md`; they now carry
-# `subject:kingdom/brain/playbooks`, 31 characters — the deepest ancestor
-# directory that fits, which is verbatim the remedy the NOTE line below prints —
-# and all three mirrored normally (GH #1358, #1359, #1360). Measured over the
-# whole board the same day: zero beads carry an over-cap label. So the alarm is
-# clearable, was cleared, and PUSH FAILED stays.
+# argument that the condition is permanent and whoever sees the alarm is not the
+# one who can clear it. Both halves were falsified the same night. gqlc-njqk,
+# gqlc-a7we and gqlc-to7k each carried a 51-character `subject:` label naming a
+# file; they were re-labelled with the 31-character deepest ancestor directory
+# that fits — verbatim the remedy the NOTE line below prints — and all three
+# mirrored normally (GH #1358, #1359, #1360). Measured over the whole board the
+# same day: zero beads carry an over-cap label. So the alarm is clearable, was
+# cleared, and PUSH FAILED stays.
 _unmirrorable=$(_count '^UNMIRRORABLE ' "$_tmp/plan.txt")
 _pushable=$(_count '^NEW ' "$_tmp/plan.txt")
 _new=$((_pushable + _unmirrorable))

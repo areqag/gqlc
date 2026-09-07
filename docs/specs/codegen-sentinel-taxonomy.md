@@ -560,7 +560,7 @@ learns which they got at a call site or not at all — whereas the remedy
 costs one rename under a clear diagnostic. So the reservation is
 package-wide and receiver-blind by decision, not by oversight
 (`docs/specs/codegen-tx-embedded-querier.md` §5, superseding the
-call-site-ambiguity grounds Արթուր ruled on `gqlc-3d0l` for the shipped
+call-site-ambiguity grounds ruled on `gqlc-3d0l` for the shipped
 accessor shape, `docs/specs/codegen-tx-object.md` §9.1).
 `reservedIdentifiers` records this at its declaration. Every
 `scopePackage` row stands on the collision ground instead, the five

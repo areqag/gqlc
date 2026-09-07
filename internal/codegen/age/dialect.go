@@ -422,7 +422,7 @@ var undefinedSpatialFunctions = calledFunctionNames(spatialFunctionProbes)
 // and the namespaces to line up one for one.
 //
 // duration.between(null, null) was run against apache/age@sha256:4241e2d8…
-// (PostgreSQL 18.1, AGE 1.7.0) on 2026-08-29 by Արամազդ, workflow run
+// (PostgreSQL 18.1, AGE 1.7.0) on 2026-08-29, workflow run
 // 33268424367, and re-measured locally against the same image digest the
 // same day (bd gqlc-dy40s). Both runs answered SQLSTATE 3F000 with the
 // message below. The arguments are null because what is being measured

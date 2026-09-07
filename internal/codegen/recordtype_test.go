@@ -338,7 +338,7 @@ func TestRecordFieldLegalityAdmitsAndRefusesOnTheMangle(t *testing.T) {
 		// non-Latin script mangles to a perfectly legal struct field. A
 		// check that swept for [A-Za-z] would refuse this one.
 		{"a name in a non-Latin script", []graph.RecordField{
-			{Name: "քաղաք", Type: graph.TypeString},
+			{Name: "дерево", Type: graph.TypeString},
 		}},
 		{"a name holding a digit after the first rune", []graph.RecordField{
 			{Name: "line2", Type: graph.TypeString},

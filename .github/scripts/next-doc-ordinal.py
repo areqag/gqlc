@@ -11,7 +11,7 @@ then the number is spent, the document is written, and the fix is a rename plus
 every citation aimed at it. The collision was CREATED earlier, at the moment an
 author picked "the next free number" by reading master.
 
-MEASURED 2026-09-01 by Այգ, and the repository was carrying a live instance
+MEASURED 2026-09-01, and the repository was carrying a live instance
 while this was written. master's highest ADR ordinal was 0037, so the naive read
 offered 0038 -- and 0038 already existed on the branch of PR #2126, open at the
 time and merged the next day. The PR number is cited rather than the branch name
