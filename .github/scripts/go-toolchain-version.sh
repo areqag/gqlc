@@ -4,7 +4,7 @@
 # ONE derivation, read by two callers that must not disagree:
 # .github/actions/setup-go exports GOTOOLCHAIN=go<version> into the CI job env,
 # and `just vuln` exports the same locally. When only CI pinned, `just vuln` was
-# red on a clean master for every seat on a box whose default Go is a
+# red on a clean master for every checkout on a box whose default Go is a
 # distribution build — govulncheck cannot place a stdlib version on one, so it
 # looks every stdlib advisory up under an empty version and the gate goes green
 # over the largest attack surface in the binary (bd gqlc-u91z, bd gqlc-irvs).

@@ -986,7 +986,7 @@ func priorDependencies(dumped justDump) (map[string][]string, error) {
 // decoration: both rest partly on the dump's SHAPE, which is an answer just
 // gives rather than a fact about the file. CI pins 1.55.1 and a local run takes
 // whatever is on PATH, so the two can disagree here in the direction nobody
-// watches — red in CI, green on every seat. bd gqlc-rnyit carries that.
+// watches — red in CI, green on every checkout. bd gqlc-rnyit carries that.
 //
 // The first is a further difference: the dump drops each body line's leading
 // indentation, which this reader keeps, and that alone makes every recipe's text

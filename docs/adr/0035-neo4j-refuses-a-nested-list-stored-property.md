@@ -29,8 +29,8 @@ Both are live rows, not recollections:
 `TestNeo4jRefusesANestedListStoredProperty` and
 `TestAGEStoresANestedListProperty` in
 `test/data/codegen/live_nested_list_property_test.go`. The first is the
-premise's tripwire — if an image bump ever serves the write, it reds and the
-town re-opens the question with evidence rather than with this document.
+premise's tripwire — if an image bump ever serves the write, it reds and
+re-opens the question with evidence rather than with this document.
 
 ## The subtlety that shaped the whole design: storage, not values
 

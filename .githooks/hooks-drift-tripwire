@@ -58,7 +58,7 @@ configured="$(git config --get core.hooksPath 2>/dev/null || true)"
 # That is the worst possible first meeting with this message, because
 # `git worktree add` is the operation that CAUSES the drift (bd gqlc-7ijy): the
 # first time anyone sees it, it is on a command that worked, under a heading that
-# says it did not. Crying wolf in an autonomous town is expensive — the block
+# says it did not. Crying wolf in an autonomous session is expensive — the block
 # read as noise is the block that gets ignored when it is the real one.
 #
 # The severity word now agrees with the exit status, and each arm states what
