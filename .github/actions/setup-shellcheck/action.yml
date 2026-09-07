@@ -2,7 +2,7 @@
 # jobs that need it do not each re-download it from a third-party release URL
 # (bd gqlc-bmmf). On 2026-08-29 that URL answered HTTP 504 six times running and
 # reddened `lint` on a PR whose head had not moved and which already carried a
-# judge's PASS. Three required contexts reach shellcheck — `lint` through
+# green review. Three required contexts reach shellcheck — `lint` through
 # lint-hooks and lint-just, `tidy` through `lint-hooks .github/scripts`, and
 # `actionlint`, which grades a `run:` block only by handing it to shellcheck —
 # so one outage in that path can redden all three regardless of the diff.

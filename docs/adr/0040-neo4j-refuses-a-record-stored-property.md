@@ -10,7 +10,7 @@ type fails generation for the neo4j targets:
 So does `RECORD<ANY>`, `RECORD<>`, and a `LIST` of any of them. The same
 declarations generate for Apache AGE.
 
-Written 2026-09-05 by Այգ, executing stage 1 of the design ruled by Արթուր in
+Written 2026-09-05, executing stage 1 of the design in
 `docs/specs/codegen-record-union-carriers.md` (bead `gqlc-x9tg7`, executed on
 `gqlc-jffyz`).
 
@@ -42,8 +42,8 @@ Against the pinned images, 2026-09-05, on the live-smoke runner:
 Both are live rows: `TestNeo4jRefusesAMapValuedStoredProperty` and
 `TestAGEStoresARecordProperty` in
 `test/data/codegen/live_record_property_test.go`. The first is the premise's
-tripwire — if an image bump ever serves the write, it reds and the town
-re-opens the question with evidence rather than with this document.
+tripwire — if an image bump ever serves the write, it reds and the question is
+re-opened with evidence rather than with this document.
 
 ### The neo4j row carries two controls, and they are the point
 

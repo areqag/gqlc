@@ -16,7 +16,7 @@ import (
 // grading below it cannot stand in: it only notices a dead pin on a machine
 // whose default Go is one govulncheck cannot place, and on every other machine
 // — CI included — a scan under the wrong toolchain places a version fine and
-// the recipe runs to the end green. Measured out of tree on the town's box,
+// the recipe runs to the end green. Measured out of tree on a development box
 // where the default Go IS unplaceable: dropping the export alone is caught
 // here, and dropping it with this assertion blinded falls through to the
 // grading instead (bd gqlc-irvs).

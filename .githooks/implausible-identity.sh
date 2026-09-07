@@ -28,7 +28,7 @@
 # read `test@example.invalid|*@example.com|*@example.org|root@localhost`:
 # `fixture <fixture@example.invalid>` was one character class away from every
 # entry, cleared the shape check below (it has an @, and its domain has a dot),
-# and reached two citizens' commits (gqlc-7iea). RFC 2606 and RFC 6761 reserve
+# and reached two people's commits (gqlc-7iea). RFC 2606 and RFC 6761 reserve
 # these names so that nothing under them can ever be delivered to a person, so
 # an address in one is a fixture's or a placeholder's by construction.
 # NOT in this list, though both are special-use names too: `.local` (RFC 6762)

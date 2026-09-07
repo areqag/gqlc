@@ -11,7 +11,7 @@ Struct shapes, method signatures and nullability semantics are unchanged.
 What changed is that a decode which could only ever have produced a wrong
 number now produces an error instead.
 
-Written 2026-09-01 by Ար, executing the design ruled by Արթուր on bead
+Written 2026-09-01, executing the design ruled on bead
 `gqlc-k2p68`, for `gqlc-awtb`.
 
 ## Why it could happen at all

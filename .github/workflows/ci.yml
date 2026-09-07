@@ -175,10 +175,10 @@ jobs:
       # green and this job green, on a tree carrying two ADRs numbered 0036.
       #
       # Unconditional, unlike most steps below: it reads the tree, so it needs no
-      # PR to exist and it also holds on a master push. The enrolled series are
+      # PR to exist and it also holds on a master push. The enrolled series is
       # spelled here, in the `gates` recipe and in ordinal-recheck.yml; see the
-      # checker's docstring for why kingdom/brain/postmortems is deliberately
-      # absent.
+      # checker's docstring for why enrolment is decided at the call site rather
+      # than inferred from the tree.
       #
       # On a pull_request the tree this reads is the merge ref, which GitHub
       # assembled at the author's last push — so it is blind to a collision that
@@ -186,13 +186,7 @@ jobs:
       # still. That half is ordinal-recheck.yml, which re-asks on every master
       # push and posts the answer onto each open PR's head SHA (bd gqlc-4plwf).
       - name: no two documents claim one ordinal
-        run: python3 .github/scripts/check-doc-ordinals.py docs/adr kingdom/brain/decisions
-      # Both series above share every number from 0001 to 0014, so a bare
-      # "ADR NNNN" is ambiguous in exactly that range. Kingdom prose cites its
-      # own law as "decision NNNN"; the bare form is docs/adr's. Unconditional
-      # for the same reason as the ordinal check: it reads the tree.
-      - name: kingdom cites its law as decision NNNN, not ADR NNNN
-        run: python3 .github/scripts/check-adr-citations.py kingdom
+        run: python3 .github/scripts/check-doc-ordinals.py docs/adr
       # The moved-base half's decision cores, driven by their own rows. Here and
       # not only in ordinal-recheck.yml because that workflow fires on master
       # PUSH: a PR breaking a core would pass every required context, merge, and
@@ -284,7 +278,7 @@ jobs:
       # bd gqlc-89vw: a bead label over 50 characters cannot be mirrored to a
       # GitHub issue, and .githooks/bd-gh-sync only WARNS when the API refuses
       # it — the bead is created, the board looks healthy, and the only casualty
-      # is the bd<->GH mirror the town uses for review and closing. Runs on
+      # is the bd<->GH mirror this repository uses for review and closing. Runs on
       # master pushes too: the export is the input, and it is equally wrong
       # there.
       - name: "bead labels fit GitHub's 50-character cap"

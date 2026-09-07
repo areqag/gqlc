@@ -56,20 +56,20 @@ if [ -n "${_push_refs}" ]; then
 fi
 
 # Wrapped so that a suite which damages the repository it runs in gets SAID —
-# on 2026-08-22 the km suite flipped core.bare on the shared config, force-moved
-# a seat's branch, and left a fixture identity in user.email, all found by hand
-# days later (bd gqlc-ed2u, gqlc-lekg). The guard shipped in #1225 and nothing
-# called it until this line (bd gqlc-06y9).
+# on 2026-08-22 a test suite flipped core.bare on the shared config, force-moved
+# another worktree's branch, and left a fixture identity in user.email, all
+# found by hand days later (bd gqlc-ed2u, gqlc-lekg). The guard shipped in #1225
+# and nothing called it until this line (bd gqlc-06y9).
 #
 # ADVISORY OR STRICT IS THE GUARD'S OWN CALL, not this line's. It was pinned
-# advisory here (gqlc-06y9) because seats were linked worktrees of ONE
-# repository: a neighbour committing in their own tree during this window moves
-# refs the guard watches and is indistinguishable from damage by this run —
-# measured, on this hook, against three other seats. Seats become clones under
-# gqlc-w5bh, one at a time, so that premise stops being uniformly false and no
-# single pinned verdict fits the roster while it is mixed. Hence the guard
-# derives it per repository: sharers -> report, sole worktree -> refuse. Pinned
-# here, every converted seat would keep the old town's verdict forever.
+# advisory here (gqlc-06y9) because the sibling worktrees this repository is
+# worked from are linked worktrees of ONE repository: a neighbour committing in
+# their own tree during this window moves refs the guard watches and is
+# indistinguishable from damage by this run — measured, on this hook, against
+# three other worktrees. A standalone clone has no such neighbour, so no single
+# pinned verdict fits both shapes. Hence the guard derives it per repository:
+# sharers -> report, sole worktree -> refuse. Pinned here, a checkout that
+# changed shape would keep the old verdict forever.
 #
 # Only the purity verdict is at stake; `just test`'s own exit code is passed
 # through and still blocks the push. Deliberately not `|| true` here — that could
@@ -100,7 +100,7 @@ _ran_gate test
 # It has a third state (bd gqlc-m9ca): provisioned perfectly — same pinned
 # version, same checksum, ensure-golangci exits 0 — and then failing having
 # graded nothing. The hatch below is unreachable there, because the hatch is
-# guarded by provisioning having FAILED, so a seat that hits it has no move
+# guarded by provisioning having FAILED, so anyone who hits it has no move
 # left that is not `git push --no-verify`.
 #
 # The instance that surfaced it is CLOSED and is not what keeps this arm here.
@@ -133,8 +133,8 @@ if just ensure-golangci >/dev/null 2>&1; then
   # that is not 1.
   #
   # It had to move rather than be copied. A hand-run `just lint` is the FIRST
-  # place a citizen meets the lock — CLAUDE.md and citizen-protocol.md both say
-  # to run the gates before opening a PR — and the hook was the second, so the
+  # place anyone meets the lock — CLAUDE.md's session-completion workflow puts
+  # the quality gates before the push — and the hook was the second, so the
   # only path with the fix was the one you reach after the path without it has
   # already told you your branch is broken.
   #

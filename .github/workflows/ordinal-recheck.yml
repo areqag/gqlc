@@ -58,4 +58,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 .github/scripts/check-open-pr-ordinals.py \
-            docs/adr kingdom/brain/decisions
+            docs/adr

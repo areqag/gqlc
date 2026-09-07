@@ -175,7 +175,7 @@ func TestDelimitedIdentifierEscapes(t *testing.T) {
 		{"an escaped double quote", "`a\\\"b`", `a"b`},
 		{"a four-digit unicode escape", "`a" + "\\" + "u0041b`", "aAb"},
 		{"a six-digit unicode escape", `"a\U01F600b"`, "a\U0001F600b"},
-		{"a non-ASCII body copies through", "`քաղաք`", "քաղաք"},
+		{"a non-ASCII body copies through", "`дерево`", "дерево"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parseSchema(t, "CREATE GRAPH TYPE "+tt.spelling+" { (:A) }")

@@ -61,9 +61,9 @@ against a ledger of 1169 beads:
 | query | rows |
 |---|---|
 | `bd list --all -n 0 --json` | 1169 |
-| `bd list -l class:judge --all -n 0 --json` | 112 |
-| `bd list -l class:warrior --all -n 0 --json` | 526 |
-| `bd list -a tsovinar --all -n 0 --json` | 29 |
+| `bd list -l <label> --all -n 0 --json` | 112 |
+| `bd list -l <other-label> --all -n 0 --json` | 526 |
+| `bd list -a <assignee> --all -n 0 --json` | 29 |
 | `bd list -t task --all -n 0 --json` | 578 |
 | `bd list -p 2 --all -n 0 --json` | 458 |
 
@@ -160,24 +160,19 @@ picture rather than a caveat:
 
 ## Audit of this repository's call sites
 
-Taken 2026-08-23. Eleven scripted `bd list` / `bd ready` invocations exist; ten
-are correct for their purpose. Line numbers are a reading at `c129a0a5` and have
-drifted since. The gate above used to enumerate the live set, so this table had
-something keeping it honest; since PR #1595 removed it, **this table is a dated
-reading and nothing re-derives it**. Re-grep before trusting the count.
+Taken 2026-08-23 over eleven scripted `bd list` / `bd ready` invocations, ten of
+which were correct for their purpose. Six of those sites, including the one wrong
+one, lived in scripts that have since been deleted; what remains is below. Line
+numbers are a reading at `c129a0a5` and have drifted since. The gate above used
+to enumerate the live set, so this table had something keeping it honest; since
+PR #1595 removed it, **this table is a dated reading and nothing re-derives it**.
+Re-grep before trusting the count.
 
 | Site | Query | Verdict |
 | --- | --- | --- |
 | `.githooks/bd-gh-sync` 213, 555, 908, 1114 | `bd list --status all --limit 0 --json` | correct |
 | `internal/tools/ghorphan/main.go` 575 | `bd list --status all --limit 0 --json` | correct |
-| `kingdom/bin/km` 1014, 1150, 1656 | `bd list --status in_progress -n 0 --json` | correct — the status is the point of the query |
-| `kingdom/bin/km` 1196, 1764 | `bd ready -n 0 --json` | correct — `bd ready` is open-only by construction |
-| `kingdom/bin/km` 1865 | `bd list --status open -n 0 --json` | **wrong for its purpose** — bd `gqlc-c7b5` |
 
-(The prose above this table said "nine" and "eight" when it shipped, while the
-table itself enumerated eleven sites. The gate's enumeration row now measures
-the count rather than restating it.)
-
-The one wrong site is the `km doctor` IDENTITY arm, which audits bead owners for
-undeliverable addresses and therefore means "every unfinished bead", not "every
-bead whose status is `open`". Filed as `gqlc-c7b5` rather than fixed here.
+The one wrong site asked for `--status open` when it meant "every unfinished
+bead" — the exact confusion this document opens with, reached by a careful author
+writing a query whose filter reads like the absence of one.

@@ -105,8 +105,8 @@ var nonSpecRootDocs = map[string]string{
 // red until somebody decides which of the two states it is in.
 //
 // Only TRACKED markdown reaches the census below, and that is what makes
-// this list checkable in every clone rather than in some of them. Seats
-// here leave untracked scratch trees at the repository root, so a
+// this list checkable in every clone rather than in some of them. Agents
+// working here leave untracked scratch trees at the repository root, so a
 // candidate set read off the filesystem would redden in the worktree that
 // happens to hold one and nowhere else — a failure only its owner can see,
 // and the reason this census was not written alongside its sibling
@@ -117,9 +117,7 @@ var nonSpecRootDocs = map[string]string{
 // false goes false silently.
 var nonSpecDocTrees = map[string]string{
 	".beads":   "the beads tracker's own README, written by `bd init`; it describes the issue tracker and states nothing about this repository's emitted surface",
-	".claude":  "one Claude Code skill document, instructing an agent how to end a workday; it addresses the agent and not the generator",
 	"internal": "three SOURCE.md provenance notes for the vendored GQL grammar and the two ISO BNF extracts; they record where those artefacts came from, not what codegen emits from them",
-	"kingdom":  "the agent society's charter, playbooks, decisions and seat souls; it governs who takes the work rather than what the generator produces",
 	"test":     "one README stating what the resolver corpus's valid/ claim covers; it is explicit that codegen is outside that claim, and prints no emitted signature or binding",
 }
 

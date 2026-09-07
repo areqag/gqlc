@@ -4,7 +4,7 @@
 #
 # WHY IT IS NOT IN `just test`. bd is a Dolt-backed external binary. `just test`
 # is also the pre-push hook, so anything added there is paid on every local push
-# by every citizen, and this repository treats wall-time as critical.
+# by every author, and this repository treats wall-time as critical.
 # .githooks/tests/bd-gh-sync-test.sh stubbed bd on PATH and drove fixture JSON,
 # so it could never observe the real CLI — and a stub encodes belief, not
 # witness. PR #1595 (f6dc4c7b) deleted it; this workflow is what remains, and it
@@ -25,7 +25,7 @@
 # both moved `updated_at` on a description edit, and both answered
 # `bd show --json` with an ARRAY. This workflow installs the LATEST bd release,
 # not the pinned one, deliberately: the point is to learn that a future bd
-# breaks the assumption BEFORE the town upgrades to it.
+# breaks the assumption BEFORE this repository upgrades to it.
 #
 # WHAT A GREEN RUN DOES NOT WITNESS. It does not run .githooks/bd-gh-sync. It
 # checks the premise the script's dated header records, not the script's use of
@@ -164,9 +164,9 @@ jobs:
           fi
           echo "comparator refuses an unchanged timestamp and an absent one; the pass above is a measurement."
 
-  # The write-side contract that docs/bd-ledger-writes.md rests on, and the
-  # release recipe in kingdom/brain/playbooks/citizen-protocol.md with it (bd
-  # gqlc-o6kp). Measured first-party 2026-08-24 against bd 1.0.4 (ce242a879, the
+  # The write-side contract that docs/bd-ledger-writes.md rests on, including
+  # the two-field release recipe it documents (bd gqlc-o6kp).
+  # Measured first-party 2026-08-24 against bd 1.0.4 (ce242a879, the
   # deployed binary) and bd 1.2.2 (6c124203e, then the latest release): every row
   # below was identical on both.
   #
@@ -292,14 +292,14 @@ jobs:
 
           # --- the documented two-field release still applies BOTH fields -------
           # The rule above is only tolerable because the release recipe every
-          # citizen is told to type is not caught by it.
+          # author is told to type is not caught by it.
           reset
           bd update "$a" --assignee "" --status open >/dev/null 2>&1
           released="$(peek "$a")"
           if [ "$released" = '{"status":"open","assignee":null}' ]; then
               ok 'bd update <id> --assignee "" --status open applies both fields'
           else
-              bad "the two-field release applied something else: $released — kingdom/brain/playbooks/citizen-protocol.md tells every citizen to type exactly this to make a bead routable again"
+              bad "the two-field release applied something else: $released — this is the exact command an author types to make a bead routable again"
           fi
 
           # --- a success line is not a write ------------------------------------
@@ -312,7 +312,7 @@ jobs:
                   *"Updated issue"*)
                       ok "an update that changes nothing still prints a success line — read back, never trust the tick" ;;
                   *)
-                      bad "a no-op update no longer prints a success line (stdout='$out'). That is an IMPROVEMENT — bd now distinguishes accepted from applied — and docs/bd-ledger-writes.md should stop telling citizens the tick means nothing." ;;
+                      bad "a no-op update no longer prints a success line (stdout='$out'). That is an IMPROVEMENT — bd now distinguishes accepted from applied — and docs/bd-ledger-writes.md should stop telling authors the tick means nothing." ;;
               esac
           else
               bad "the no-op probe did not no-op (rc=$rc before=$before after=$after), so the row it was meant to establish proves nothing"
@@ -363,8 +363,8 @@ jobs:
               {
                   echo "### bd's write contract has changed"
                   echo
-                  echo "\`docs/bd-ledger-writes.md\` and the release recipe in"
-                  echo "\`kingdom/brain/playbooks/citizen-protocol.md\` rest on the rows above."
+                  echo "\`docs/bd-ledger-writes.md\`, and the two-field release recipe"
+                  echo "it documents, rest on the rows above."
                   echo "Read the failing row before fixing anything: some of them fail on an"
                   echo "IMPROVEMENT in bd and ask for the documentation to be relaxed."
                   echo

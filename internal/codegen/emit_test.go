@@ -15,7 +15,7 @@ import (
 //
 // Until this test nothing held that behaviourally. A fail-open rewrite
 // keeping a dead branch to satisfy the sentinel census survived the full
-// module — 29 packages, zero failures (bd gqlc-tf8sv, measured on patrol
+// module — 29 packages, zero failures (bd gqlc-tf8sv, measured under
 // gqlc-46s2b). The census that killed the naive rewrite asks whether a
 // branch RETURNING the sentinel exists and goes unexecuted, which cannot
 // distinguish fail-closed from fail-open.
