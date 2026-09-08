@@ -78,6 +78,18 @@ holds anything gqlc cannot prove it generated. Keep your own code out
 of it (see
 [ADR 0012](docs/adr/0012-output-directory-exclusively-owned.md)).
 
+### Nullability in generated types
+
+A nullable position is emitted as a pointer, and that includes the
+element of a list: `scores :: LIST<INT64>` generates `[]*int64`, while
+`scores :: LIST<INT64 NOT NULL>` generates `[]int64`.
+
+If regenerating against an unchanged schema stopped your code compiling
+with something like `cannot use v (variable of type *int64) as int64
+value`, that is this rule, and it changed — see
+[ADR 0041](docs/adr/0041-a-nullable-list-element-is-a-pointer.md) for
+why, and for the two ways to fix a caller.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for dev environment setup and the
