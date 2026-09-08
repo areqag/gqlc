@@ -23,6 +23,7 @@ type (
 )
 
 var (
+	CarriesZone                      = carriesZone
 	DecodeFunc                       = decodeFunc
 	DialectGaps                      = dialectGaps
 	DollarTag                        = dollarTag
