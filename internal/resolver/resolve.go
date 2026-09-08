@@ -442,15 +442,31 @@ func compareBranchColumns(branchCols [][]Column) error {
 	return nil
 }
 
-// describeColumnType renders a resolved column type for a fail-message that
-// has to tell two of them apart: the variant's tag, plus every axis
-// resolvedTypeEqual compares it on.
+// describeColumnType renders a ResolvedType for a fail-message that has to tell
+// two of them apart: the variant's tag, plus every axis resolvedTypeEqual
+// compares it on.
 //
 // The Stringers alone cannot do this. They are wire tags — the "kind"
 // discriminator each MarshalJSON emits — so every ResolvedNode renders "node"
 // whichever type it holds and every ResolvedEdgeUnion renders "edgeUnion"
 // whichever keys it committed, and a message built from them prints the same
 // text on both sides of a mismatch.
+//
+// Its name is narrower than its job: it was written for compareBranchColumns
+// and now also renders the two sides of ErrParameterTypeConflict and of the two
+// ErrUnknownProperty divergence messages, none of which are columns. Kept
+// because the axes it spells cover resolvedTypeEqual's and unify's, and
+// widening it is not the same as widening a Stringer — for ResolvedNode,
+// ResolvedEdge, ResolvedEdgeUnion, ResolvedList and ResolvedUnknown, String()
+// IS the MarshalJSON "kind" discriminator, so a message that needs more than
+// the tag has to be built here rather than there (bd gqlc-y8yzw).
+//
+// It covers those axes rather than matching them exactly, and the excess runs
+// one way: unify's List, Node and Edge arms compare only Element, Labels and
+// EdgeKey, while this renders nullability for all three. So a conflict on one
+// of those can spell a nullability difference that was not the reason unify
+// refused. Nothing renders it today — no corpus cell reaches the parameter
+// site through those three arms — but a reader adding one should expect it.
 //
 // The braces around the union key list are readability, not distinctness: a
 // strict prefix is never equal to its extension, and nullabilityNote already
@@ -611,7 +627,7 @@ func unifyParameterUsesAcrossBranches(params []query.Parameter, tables [][]partS
 				}
 				merged, ok := unify(unified, w)
 				if !ok {
-					return nil, fmt.Errorf("%w: parameter %q: %s vs %s", ErrParameterTypeConflict, p.Name, unified.String(), w.String())
+					return nil, fmt.Errorf("%w: parameter %q: %s vs %s", ErrParameterTypeConflict, p.Name, describeColumnType(unified), describeColumnType(w))
 				}
 				unified = merged
 			}
@@ -1866,7 +1882,7 @@ func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp stri
 			continue
 		}
 		if hit.Type != first.Type || hit.Nullable != first.Nullable {
-			return nil, fmt.Errorf("%w: property %s.%s type differs across union members: %s vs %s", ErrUnknownProperty, refVar, refProp, first.String(), hit.String())
+			return nil, fmt.Errorf("%w: property %s.%s type differs across union members: %s vs %s", ErrUnknownProperty, refVar, refProp, describeColumnType(first), describeColumnType(hit))
 		}
 	}
 	first.Nullable = first.Nullable || bindingNullable
@@ -1889,7 +1905,13 @@ func unionNodeProperty(nts []schema.NodeType, refVar, refProp string, bindingNul
 			continue
 		}
 		if hit.Type != first.Type || hit.Nullable != first.Nullable {
-			return nil, fmt.Errorf("%w: %s.%s type differs across plural-satisfying types: %s vs %s", ErrUnknownProperty, refVar, refProp, first.String(), hit.String())
+			// Unwitnessed, unlike the other two sites rendered this way: no
+			// corpus cell reaches this message, so reverting it to the bare
+			// Stringer pair reddens nothing. Getting here needs two node types
+			// that share a label and disagree about this property, a shape no
+			// corpus schema has, so a fixture costs a new schema rather than a
+			// new query (bd gqlc-xeux).
+			return nil, fmt.Errorf("%w: %s.%s type differs across plural-satisfying types: %s vs %s", ErrUnknownProperty, refVar, refProp, describeColumnType(first), describeColumnType(hit))
 		}
 	}
 	first.Nullable = first.Nullable || bindingNullable
