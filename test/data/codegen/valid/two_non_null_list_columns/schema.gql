@@ -6,8 +6,10 @@
 -- nullable third that makes ListyMixed a mixed row.
 --
 -- None of the three says anything about its ELEMENTS, and all three permit
--- a null one, so all three emit a starred element: tags and spare are
--- []*string and ranks is []*int32. `Ranks []*int32` under a fixture called
+-- a null one, so all three emit a starred element: tags is []*string, ranks
+-- is []*int32, and spare is *[]*string — spare's LEADING star is the
+-- column's own nullability rather than an element's, which is exactly the
+-- distinction the name trips over. `Ranks []*int32` under a fixture called
 -- two_non_null_list_columns reads like a bug and is the rule working. The
 -- opt-out is a qualifier INSIDE the angle brackets — LIST<INT32 NOT NULL>
 -- — and no property here carries one. See

@@ -55,22 +55,50 @@ Go type. One carve-out, and one qualifier that opts out:
   decode still refuses a null element naming its index. A schema that has
   always been honest about its elements sees no signature change at all.
 
-Everything else takes the star uniformly: the scalar widths, `STRING`,
-`BYTES`, the temporal carriers, records, and nested lists.
+Everything else takes the star: the scalar widths, `STRING`, `BYTES`, the
+temporal carriers, records, and nested lists.
+
+One limit on the temporal entry, and it is a pre-existing refusal rather than
+an exception to this rule. On AGE a **zoned** element never arises at all:
+a list has one property name for all its elements and nowhere to put the
+second and later UTC offsets, so AGE refuses the declaration
+([ADR 0036](0036-age-admits-non-zoned-temporal-list-elements-at-every-depth.md)).
+`*time.Time` and `*Time` are therefore element texts the AGE type table
+cannot produce, and its census asserts their absence rather than demanding
+a decoder arm for them. Nothing here changes that. No corpus fixture
+declares a zoned list on any backend, so what neo4j spells for one is
+unwitnessed by a golden and is not stated here.
 
 ### Each level of nesting decides for itself
 
 The qualifier is read at the level it is written, so the two stars a nested
-list can take are independent:
+list can take are independent. Every row below is a committed golden rather
+than a derivation, because the two are easy to get backwards — a `NOT NULL`
+inside the outer angle brackets qualifies the outer list's ELEMENT, which is
+the inner list, and removes the OUTER star:
 
-| declared | emitted |
-|---|---|
-| `LIST<LIST<STRING>>` | `[]*[]*string` |
-| `LIST<LIST<STRING> NOT NULL>` | `[]*[]string` |
-| `LIST<LIST<STRING>> NOT NULL` at the element position | `[][]*string` |
+| declared | emitted | witnessed by |
+|---|---|---|
+| `LIST<LIST<FLOAT32>>` | `[]*[]*float32` | `nested_list_property`, `matrix` |
+| `LIST<LIST<INT16> NOT NULL>` | `[][]*int16` | `nested_list_property`, `grid` |
+| `LIST<LIST<INT16 NOT NULL>>` | `[]*[]int16` | `nested_list_element_projection`, `rankss` |
+| `LIST<LIST<ANY VALUE>>` | `[]*[]any` | `nested_list_property`, `piles` |
 
 There is no rule that a starred outer element implies a starred inner one, or
-the reverse. Depth 3 composes the same way.
+the reverse; rows two and three are each other's mirror and are the pair to
+read together. Depth 3 composes the same way.
+
+Two things the goldens carry that the middle column deliberately does not.
+The whole value's own nullability is a separate, LEADING star, and it is the
+caller's rather than the type table's — all three `nested_list_property`
+properties are themselves nullable, so that file spells them
+`*[]*[]*float32`, `*[][]*int16` and `*[]*[]any`. A `NOT NULL` after the
+closing bracket removes only that leading star and touches neither element
+star. And `rankss` is a projected column on a `:many` query, so its method
+returns `[][]*[]int16`, the outer `[]` being the row wrapper; the nesting
+itself comes from `RETURN [g.ranks, g.ranks]` over a flat
+`ranks :: LIST<INT16 NOT NULL>`, which is the same shape a declared
+`LIST<LIST<INT16 NOT NULL>>` would give.
 
 Worth knowing where those shapes come from on neo4j, because
 [ADR 0035](0035-neo4j-refuses-a-nested-list-stored-property.md) refuses a

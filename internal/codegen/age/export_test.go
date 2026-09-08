@@ -49,6 +49,7 @@ var (
 
 const (
 	GoInstant        = goInstant
+	GoTime           = goTime
 	VertexAnnotation = vertexAnnotation
 )
 
