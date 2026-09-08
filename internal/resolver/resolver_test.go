@@ -874,6 +874,21 @@ var invalidFixtureContains = map[string]string{
 	// label_satisfy_plural_entity — byte-identical query text on a schema that
 	// declares Person itself.
 	"label_satisfy_ambiguous.cypher": `p is satisfied by more than one declared node type: Contractor&Person, Employee&Person`,
+	// The four fixtures whose two sides differ on nullability ALONE. Nothing
+	// else in either message distinguishes them, so before bd gqlc-y8yzw all
+	// four read "property:STRING vs property:STRING" (or :INT) and told the
+	// author nothing about what to change. errors.Is passes on the text either
+	// way, and so does a message that has gone back to the bare Stringer, which
+	// is why the pin has to carry BOTH sides rather than the sentinel.
+	//
+	// The three parameter fixtures and the union one reach two different message
+	// sites — unifyParameterUsesAcrossBranches and unionProperty — that shared
+	// the defect and now share the cure. They are pinned together so a repair
+	// applied to one site and not the other cannot pass.
+	"parameter_type_conflict_nullability.cypher":               `parameter "x": property:STRING (not null) vs property:STRING (nullable)`,
+	"parameter_type_conflict_optional_node_nullability.cypher": `parameter "x": property:STRING (not null) vs property:STRING (nullable)`,
+	"parameter_type_conflict_optional_edge_nullability.cypher": `parameter "x": property:INT (not null) vs property:INT (nullable)`,
+	"unknown_property_union_nullability_differs.cypher":        `r.weight type differs across union members: property:INT (not null) vs property:INT (nullable)`,
 }
 
 // invalidFixtureNoMessagePin names the invalid fixtures whose refusal message
@@ -953,9 +968,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"parameter_across_with_alias_shadow_reversed.cypher":             {},
 	"parameter_conflict_via_multi_type_edge_property.cypher":         {},
 	"parameter_type_conflict_clause_slot_vs_string.cypher":           {},
-	"parameter_type_conflict_nullability.cypher":                     {},
-	"parameter_type_conflict_optional_edge_nullability.cypher":       {},
-	"parameter_type_conflict_optional_node_nullability.cypher":       {},
 	"parameter_type_conflict_property_vs_expr_bool.cypher":           {},
 	"parameter_type_conflict_scalar_kind.cypher":                     {},
 	"parameter_type_conflict_temporal_kind.cypher":                   {},
@@ -1011,7 +1023,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"unknown_label.cypher":                                           {},
 	"unknown_property.cypher":                                        {},
 	"unknown_property_union_missing.cypher":                          {},
-	"unknown_property_union_nullability_differs.cypher":              {},
 	"unknown_property_union_sibling_branch.cypher":                   {},
 	"unknown_property_union_type_differs.cypher":                     {},
 	"unknown_property_via_expr_use.cypher":                           {},

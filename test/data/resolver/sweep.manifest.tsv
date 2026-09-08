@@ -51,7 +51,6 @@ msg	1d5c645cb76b	"unknown property: p.rank missing on plural-satisfying type Con
 msg	1d910b647a82	"unknown property: c.smallOnly missing on plural-satisfying type Company&Large"
 msg	1e369783c1a7	"ambiguous label: p is satisfied by more than one declared node type: Contractor&Person, Employee&Person, Person"
 msg	1eeeffbb6657	"unknown edge: Person-[AUTHORED]->Tag"
-msg	1ef48088a866	"unknown property: property r.weight type differs across union members: property:INT vs property:INT"
 msg	1fe8666b03f0	"unknown property: p.nosuch missing on plural-satisfying type Employee&Person"
 msg	213892c3f04c	"unknown property: p.nosuch missing on plural-satisfying type Engineer&Person&Staff"
 msg	225d6affd495	"unknown label: Company is not declared on any node type"
@@ -61,6 +60,7 @@ msg	2414e8547314	"unknown label: REMOVE n:Nonexistent: label \"Nonexistent\" not
 msg	27c7928ad04d	"ambiguous edge orientation: edge \"r\" matches Employee&Person-[REVIEWED]->Person left-to-right and Person-[REVIEWED]->Employee&Person right-to-left"
 msg	27d7addbbba2	"unknown property: p.age missing on plural-satisfying type Engineer&Person&Staff"
 msg	2a92e72f5464	"unknown edge: Engineer&Person&Staff-[KNOWS]->Engineer&Person&Staff, Engineer&Person&Staff-[KNOWS]->Manager&Person&Staff, Manager&Person&Staff-[KNOWS]->Engineer&Person&Staff, Engineer&Person&Staff-[KNOWS]->Person, Person-[KNOWS]->Engineer&Person&Staff, Manager&Person&Staff-[KNOWS]->Manager&Person&Staff, Manager&Person&Staff-[KNOWS]->Person, Person-[KNOWS]->Manager&Person&Staff, Person-[KNOWS]->Person, Engineer&Person&Staff-[BLOCKED]->Engineer&Person&Staff, Engineer&Person&Staff-[BLOCKED]->Manager&Person&Staff, Manager&Person&Staff-[BLOCKED]->Engineer&Person&Staff, Engineer&Person&Staff-[BLOCKED]->Person, Person-[BLOCKED]->Engineer&Person&Staff, Manager&Person&Staff-[BLOCKED]->Manager&Person&Staff, Manager&Person&Staff-[BLOCKED]->Person, Person-[BLOCKED]->Manager&Person&Staff, Person-[BLOCKED]->Person"
+msg	2ae09c11bf78	"parameter type conflict: parameter \"x\": property:STRING (not null) vs property:INT (not null)"
 msg	2c86186736b5	"call argument assignability: procedure \"test.my.proc\" argument 0: cannot assign int to STRING"
 msg	2da29fcc911f	"ambiguous label: a is satisfied by more than one declared node type: Employee&Person, Person"
 msg	2daa9952f7c1	"part binding type conflict: variable \"r\" carried as edge with labels KNOWS, re-bound with labels LIKES"
@@ -69,11 +69,13 @@ msg	304e3272375e	"union column mismatch: branch 1 column 2 named \"q\"; branch 0
 msg	33664e09e49c	"unknown property: p.name missing on plural-satisfying type Employee&Person"
 msg	361e2b5adcc5	"part binding type conflict: variable \"label\" carried as CALL YIELD scalar, re-bound as plural node"
 msg	365a812a52c6	"unknown property: a.age missing on plural-satisfying type Engineer&Person&Staff"
+msg	395b2a2feadb	"parameter type conflict: parameter \"x\": property:INT (not null) vs property:INT (nullable)"
 msg	39d15e0d200a	"ambiguous binding: cannot uniquely infer type of unlabelled binding \"x\" — candidate types: Employee&Person, Person"
 msg	3dd9ebd833e4	"ambiguous binding: cannot uniquely infer type of unlabelled binding \"a\" — candidate types: Author, Publisher"
 msg	3f90fc3269c7	"unknown edge: Employee&Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Person, Person-[REVIEWED]->Employee&Person"
 msg	40a941ffddb3	"unknown property: r.views"
 msg	40c701648a34	"unknown property: a.notAProp missing on plural-satisfying type Contractor&Person"
+msg	41d8b6d918ac	"parameter type conflict: parameter \"x\": property:STRING (not null) vs scalar(int)"
 msg	4246b27b8fb2	"unknown label: Desk is not declared on any node type"
 msg	43082c348dc5	"unknown label: cannot infer type of unlabelled binding \"p\" — no edge in the pattern reaches a compatible schema node type"
 msg	440e841b4147	"parameter type conflict: parameter \"x\": temporal(date) vs temporal(duration)"
@@ -96,6 +98,7 @@ msg	550d36b077bc	"unknown property: property r.notAProp missing on union member 
 msg	56e5d6eb65b2	"unknown label: SET n:Nonexistent: label \"Nonexistent\" not declared on any node type"
 msg	574eb406c924	"unknown edge: Contractor&Person-[KNOWS]->Contractor&Person, Contractor&Person-[KNOWS]->Employee&Person, Employee&Person-[KNOWS]->Contractor&Person, Employee&Person-[KNOWS]->Employee&Person, Contractor&Person-[BLOCKED]->Contractor&Person, Contractor&Person-[BLOCKED]->Employee&Person, Employee&Person-[BLOCKED]->Contractor&Person, Employee&Person-[BLOCKED]->Employee&Person"
 msg	57fc44a4696d	"unknown edge: Contractor&Person-[KNOWS]->Contractor&Person, Contractor&Person-[KNOWS]->Employee&Person, Contractor&Person-[KNOWS]->Person, Employee&Person-[KNOWS]->Contractor&Person, Employee&Person-[KNOWS]->Employee&Person, Employee&Person-[KNOWS]->Person, Person-[KNOWS]->Contractor&Person, Person-[KNOWS]->Employee&Person, Person-[KNOWS]->Person"
+msg	58106d99ec72	"unknown property: property r.weight type differs across union members: property:INT (not null) vs property:INT (nullable)"
 msg	58f6df02c27f	"unknown edge: Contractor&Person-[KNOWS]->Contractor&Person, Contractor&Person-[KNOWS]->Employee&Person, Employee&Person-[KNOWS]->Contractor&Person, Contractor&Person-[KNOWS]->Person, Person-[KNOWS]->Contractor&Person, Employee&Person-[KNOWS]->Employee&Person, Employee&Person-[KNOWS]->Person, Person-[KNOWS]->Employee&Person, Person-[KNOWS]->Person, Contractor&Person-[BLOCKED]->Contractor&Person, Contractor&Person-[BLOCKED]->Employee&Person, Employee&Person-[BLOCKED]->Contractor&Person, Contractor&Person-[BLOCKED]->Person, Person-[BLOCKED]->Contractor&Person, Employee&Person-[BLOCKED]->Employee&Person, Employee&Person-[BLOCKED]->Person, Person-[BLOCKED]->Employee&Person, Person-[BLOCKED]->Person"
 msg	598c1820ae9d	"unknown label: Hub is not declared on any node type"
 msg	5a4241bcc7d2	"query construct not supported at resolver stage R0: list-of-edges projection"
@@ -110,7 +113,6 @@ msg	62a9201aee7c	"ambiguous binding: cannot uniquely infer type of unlabelled bi
 msg	62bf77167678	"unknown label: Contractor is not declared on any node type"
 msg	630054d40f7f	"unknown edge: Person-[FOUNDED]->Company"
 msg	63360e596d43	"unknown property: c.bOnly missing on plural-satisfying type A&Node"
-msg	6357bb54d036	"unknown property: property r.weight type differs across union members: property:INT vs property:FLOAT"
 msg	661b778d80de	"unknown property: b.age missing on plural-satisfying type Employee&Person"
 msg	66258a778f41	"union column mismatch: column \"x\" projects list (not null) of edge Person-[AUTHORED]->Post (not null) in branch 1 but list (not null) of edge Person-[KNOWS]->Person (not null) in branch 0"
 msg	663a9130ecf6	"unknown label: cannot infer type of unlabelled binding \"c\" — no edge in the pattern reaches a compatible schema node type"
@@ -121,6 +123,7 @@ msg	69c66121a7fe	"unknown property: n.age missing on plural-satisfying type Cont
 msg	6b06b9159eac	"unknown property: n.age missing on plural-satisfying type Employee&Person"
 msg	6b6136df18be	"unknown property: p.nickname missing on plural-satisfying type Contractor&Person"
 msg	6e2a1d04ab95	"unknown property: p.rank missing on plural-satisfying type Employee&Person"
+msg	6e50888dfa54	"parameter type conflict: parameter \"x\": property:STRING (not null) vs property:INT (nullable)"
 msg	6eea6a6d1601	"unknown property: q.nickname missing on plural-satisfying type Contractor&Person"
 msg	6f457e5bb08a	"unknown edge: Employee&Person-[KNOWS]->Employee&Person, Employee&Person-[KNOWS]->Person, Person-[KNOWS]->Employee&Person, Person-[KNOWS]->Person"
 msg	7044d8facbe2	"unknown edge: Employee&Person-[FOUNDED]->Company, Employee&Person-[FOUNDED]->Company&Large, Person-[FOUNDED]->Company, Person-[FOUNDED]->Company&Large"
@@ -133,15 +136,15 @@ msg	781198b8c13a	"ambiguous label: d is satisfied by more than one declared node
 msg	7b2810a056fd	"unknown property: n.notAProp"
 msg	7ed4a730f902	"ambiguous edge orientation: edge \"r\" matches Employee&Person-[REVIEWED]->Company left-to-right and Company-[REVIEWED]->Person right-to-left"
 msg	7fbc388270b1	"unknown label: cannot infer type of unlabelled binding \"b\" — no edge in the pattern reaches a compatible schema node type"
-msg	80a29100e869	"parameter type conflict: parameter \"x\": property:INT vs scalar(bool)"
 msg	80a2bdb9df0c	"query construct not supported at resolver stage R0: untyped edge"
 msg	80f019af8009	"unknown property: p.rank"
+msg	828d1a8e1a67	"parameter type conflict: parameter \"x\": property:STRING (not null) vs property:STRING (nullable)"
 msg	846c96b31a4e	"unknown edge: Contractor&Person-[REVIEWED]->Company, Company-[REVIEWED]->Contractor&Person, Employee&Person-[REVIEWED]->Company, Company-[REVIEWED]->Employee&Person, Person-[REVIEWED]->Company, Company-[REVIEWED]->Person"
 msg	85b55ff1cd8d	"unknown property: p.nosuch"
 msg	85fabd03cb88	"unknown property: a.id missing on plural-satisfying type Contractor&Person"
+msg	88418bced600	"unknown property: property r.weight type differs across union members: property:INT (not null) vs property:FLOAT (not null)"
 msg	8866ed825670	"unknown edge: Company-[REVIEWED]->Employee&Person, Company-[REVIEWED]->Person"
 msg	886f3f92ab3f	"union column mismatch: column \"x\" projects node Post (not null) in branch 1 but node Person (not null) in branch 0"
-msg	89a763968805	"parameter type conflict: parameter \"x\": property:STRING vs scalar(int)"
 msg	8a5730849a0a	"unknown property: q.nickname"
 msg	8b17cef0bd8c	"unknown edge: Contractor&Person-[FOUNDED]->Company, Employee&Person-[FOUNDED]->Company, Person-[FOUNDED]->Company"
 msg	8b3521284c5a	"unknown label: Node is not declared on any node type"
@@ -157,7 +160,6 @@ msg	940ecf5dd42a	"unknown edge: Employee&Person-[WORKS_AT]->Company, Employee&Pe
 msg	951f82dbadaa	"unknown edge: Person-[KNOWS]->Post, Post-[KNOWS]->Person"
 msg	967a2bfaa2bc	"unknown edge: Person-[LIKES]->Post"
 msg	9897f9c085c7	"invalid effect target: SET c.p: \"c\" resolves to a projection alias, not an entity binding"
-msg	9939e894089e	"parameter type conflict: parameter \"x\": property:INT vs property:INT"
 msg	9969af262819	"call argument assignability: procedure \"test.my.proc\" argument 1: cannot assign string to INTEGER"
 msg	9973104ea190	"unknown property: p.age"
 msg	99f21786532e	"unknown property: p.notAProperty"
@@ -191,7 +193,6 @@ msg	b55fd24cd929	"ambiguous label: n is satisfied by more than one declared node
 msg	b5603db7f062	"unknown property: e.views"
 msg	b8654ceef33a	"unknown property: r.likedAt"
 msg	b868d96fda82	"unknown property: r.notAProp"
-msg	b9dc2794de51	"parameter type conflict: parameter \"x\": property:STRING vs property:INT"
 msg	bae55af34462	"unknown property: p2.employeeId missing on plural-satisfying type Contractor&Person"
 msg	bb01d69d59a0	"invalid effect target: REMOVE labels on projection alias \"c\""
 msg	bb283f4c6ded	"unknown property: a.nickname missing on plural-satisfying type Engineer&Person&Staff"
@@ -203,8 +204,8 @@ msg	beef77e5ff05	"unknown edge: Person-[UNKNOWN]->Post"
 msg	c06ea4ec3ccd	"union column mismatch: branch 1 has 1 columns; branch 0 has 0"
 msg	c0916198cf47	"unknown property: property r.notAProp missing on union member Person-[AUTHORED]->Post"
 msg	c2e79c5bc5e4	"unknown property: p.name"
-msg	c3728bc11bd6	"parameter type conflict: parameter \"x\": property:STRING vs property:STRING"
 msg	c504839fd900	"unknown edge: Engineer&Person&Staff-[KNOWS]->Engineer&Person&Staff, Engineer&Person&Staff-[KNOWS]->Manager&Person&Staff, Engineer&Person&Staff-[KNOWS]->Person, Manager&Person&Staff-[KNOWS]->Engineer&Person&Staff, Manager&Person&Staff-[KNOWS]->Manager&Person&Staff, Manager&Person&Staff-[KNOWS]->Person, Person-[KNOWS]->Engineer&Person&Staff, Person-[KNOWS]->Manager&Person&Staff, Person-[KNOWS]->Person"
+msg	c50bcf6179a1	"parameter type conflict: parameter \"x\": property:TIMESTAMP (nullable) vs scalar(int)"
 msg	c68fe8641ec0	"unknown property: p.age missing on plural-satisfying type Contractor&Person"
 msg	c733cd90c82a	"unknown edge: Employee&Person-[REVIEWED]->Company, Company-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Company&Large, Company&Large-[REVIEWED]->Employee&Person, Person-[REVIEWED]->Company, Company-[REVIEWED]->Person, Person-[REVIEWED]->Company&Large, Company&Large-[REVIEWED]->Person"
 msg	c8a3b4fcc56c	"query construct not supported at resolver stage R0: property projection on variable-length edge binding: reach list elements via list-element access (UNWIND in R5 or later)"
@@ -224,7 +225,6 @@ msg	d37513aa9515	"unknown property: a.name missing on plural-satisfying type Con
 msg	d3b97f473a24	"ambiguous binding: c is satisfied by more than one declared node type: Company, Company&Large"
 msg	d400ec7bc217	"unknown property: p.personOnly missing on plural-satisfying type Contractor&Person"
 msg	d46372fb7542	"unknown label: Employee is not declared on any node type"
-msg	d4d9144ed40b	"parameter type conflict: parameter \"x\": property:TIMESTAMP vs scalar(int)"
 msg	d51d6a996c27	"unknown label: Note is not declared on any node type"
 msg	d6812c503330	"unknown property: n.name missing on plural-satisfying type Employee&Person"
 msg	d6bc21a62fc5	"invalid effect target: SET c = ...: \"c\" resolves to a projection alias, not an entity binding"
@@ -271,6 +271,7 @@ msg	f6491c98b5cd	"part binding type conflict: variable \"a\" carried as Person, 
 msg	f67a03092570	"unknown label: cannot infer type of unlabelled binding \"x\" — no edge in the pattern reaches a compatible schema node type"
 msg	f7601f7cf9c0	"ambiguous label: a is satisfied by more than one declared node type: Contractor&Person, Employee&Person, Person"
 msg	f78e7e124b57	"ambiguous binding: cannot uniquely infer type of unlabelled binding \"x\" — candidate types: Note, Post"
+msg	f7f01f1bb59a	"parameter type conflict: parameter \"x\": property:INT (nullable) vs scalar(bool)"
 msg	f81bb33a3ff0	"unknown label: NotDeclared is not declared on any node type"
 msg	f8c4768b84be	"unknown property: p.nickname missing on plural-satisfying type Engineer&Person&Staff"
 msg	f99632a45885	"union column mismatch: branch 1 column 0 named \"y\"; branch 0 named \"x\""
@@ -2142,12 +2143,12 @@ cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/sche
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	b2477b56a9d9
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownProperty	b2477b56a9d9
-cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	d4d9144ed40b
+cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	c50bcf6179a1
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	b2477b56a9d9
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	b2477b56a9d9
-cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	d4d9144ed40b
-cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	d4d9144ed40b
-cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	d4d9144ed40b
+cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	c50bcf6179a1
+cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	c50bcf6179a1
+cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	c50bcf6179a1
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/certificate.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
@@ -2161,55 +2162,55 @@ cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schema
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	b2477b56a9d9
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownProperty	b2477b56a9d9
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownProperty	b2477b56a9d9
-cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	d4d9144ed40b
+cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	c50bcf6179a1
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownProperty	b2477b56a9d9
-cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	d4d9144ed40b
-cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	d4d9144ed40b
-cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	d4d9144ed40b
-cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	d4d9144ed40b
+cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	c50bcf6179a1
+cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	c50bcf6179a1
+cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	c50bcf6179a1
+cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	c50bcf6179a1
 cell	invalid/parameter_conflict_via_multi_type_edge_property.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4da3cbf622c1
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	89a763968805
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	c2e79c5bc5e4
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownProperty	d15afcab6575
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrParameterTypeConflict	89a763968805
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrParameterTypeConflict	89a763968805
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	33664e09e49c
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social.gql	refuse	ErrParameterTypeConflict	89a763968805
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	89a763968805
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrParameterTypeConflict	89a763968805
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrParameterTypeConflict	89a763968805
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
 cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	33664e09e49c
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r1.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	89a763968805
-cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_selfloop.gql	refuse	ErrParameterTypeConflict	89a763968805
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r1.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
+cell	invalid/parameter_type_conflict_clause_slot_vs_string.cypher	valid/schemas/social_selfloop.gql	refuse	ErrParameterTypeConflict	41d8b6d918ac
 cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownProperty	8a5730849a0a
 cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	c2e79c5bc5e4
 cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
@@ -2225,13 +2226,13 @@ cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/satisfy_
 cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social.gql	refuse	ErrUnknownProperty	8a5730849a0a
 cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	8a5730849a0a
-cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	8a5730849a0a
 cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	8a5730849a0a
-cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_nullability.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/certificate.gql	refuse	ErrUnknownProperty	8a5730849a0a
 cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
@@ -2244,16 +2245,16 @@ cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/satisfy_si
 cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social.gql	refuse	ErrUnknownProperty	8a5730849a0a
 cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	8a5730849a0a
 cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownProperty	8a5730849a0a
-cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownProperty	8a5730849a0a
-cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_nullability.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownProperty	8a5730849a0a
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownLabel	4da3cbf622c1
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrParameterTypeConflict	9939e894089e
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
@@ -2266,14 +2267,14 @@ cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/sc
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social.gql	refuse	ErrUnknownProperty	40a941ffddb3
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	9939e894089e
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	9939e894089e
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	9939e894089e
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	40a941ffddb3
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	40a941ffddb3
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	9939e894089e
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	9939e894089e
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	9939e894089e
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/certificate.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
@@ -2284,59 +2285,59 @@ cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/sche
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	4da3cbf622c1
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	4da3cbf622c1
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	9939e894089e
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownProperty	40a941ffddb3
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	9939e894089e
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	9939e894089e
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownProperty	40a941ffddb3
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	9939e894089e
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	9939e894089e
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	9939e894089e
-cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	9939e894089e
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
+cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	395b2a2feadb
 cell	invalid/parameter_type_conflict_optional_edge_nullability.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	4da3cbf622c1
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	c2e79c5bc5e4
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownProperty	d15afcab6575
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	33664e09e49c
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
 cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	33664e09e49c
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r1.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_selfloop.gql	refuse	ErrParameterTypeConflict	c3728bc11bd6
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	80a29100e869
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r1.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_optional_node_nullability.cypher	valid/schemas/social_selfloop.gql	refuse	ErrParameterTypeConflict	828d1a8e1a67
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	c2e79c5bc5e4
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownProperty	d15afcab6575
@@ -2348,17 +2349,17 @@ cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schema
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownProperty	c68fe8641ec0
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownProperty	00e5b117fa25
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	33664e09e49c
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social.gql	refuse	ErrParameterTypeConflict	80a29100e869
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	9973104ea190
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	80a29100e869
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	80a29100e869
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	9973104ea190
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	9973104ea190
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	80a29100e869
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	80a29100e869
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	80a29100e869
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	80a29100e869
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownProperty	00e5b117fa25
@@ -2367,16 +2368,16 @@ cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownProperty	00e5b117fa25
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	33664e09e49c
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social.gql	refuse	ErrParameterTypeConflict	80a29100e869
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	9973104ea190
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r1.gql	refuse	ErrParameterTypeConflict	80a29100e869
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	80a29100e869
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	80a29100e869
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r1.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownProperty	9973104ea190
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	80a29100e869
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	80a29100e869
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	80a29100e869
-cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	80a29100e869
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
+cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	f7f01f1bb59a
 cell	invalid/parameter_type_conflict_property_vs_expr_bool.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownProperty	9973104ea190
 cell	invalid/parameter_type_conflict_scalar_kind.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	dfc5f611ebf1
 cell	invalid/parameter_type_conflict_scalar_kind.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	c2e79c5bc5e4
@@ -2462,7 +2463,7 @@ cell	invalid/parameter_type_conflict_temporal_kind.cypher	valid/schemas/social_r
 cell	invalid/parameter_type_conflict_temporal_kind.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	440e841b4147
 cell	invalid/parameter_type_conflict_temporal_kind.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	440e841b4147
 cell	invalid/parameter_type_conflict_temporal_kind.cypher	valid/schemas/social_selfloop.gql	refuse	ErrParameterTypeConflict	440e841b4147
-cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
 cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	c2e79c5bc5e4
 cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownProperty	d15afcab6575
@@ -2474,17 +2475,17 @@ cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/satis
 cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownProperty	c68fe8641ec0
 cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownProperty	00e5b117fa25
 cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	33664e09e49c
-cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
 cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	9973104ea190
-cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
+cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
 cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	9973104ea190
 cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	9973104ea190
-cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
+cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
+cell	invalid/parameter_type_conflict_two_properties.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
+cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
 cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownProperty	00e5b117fa25
@@ -2493,59 +2494,59 @@ cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/satisfy
 cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownProperty	00e5b117fa25
 cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	33664e09e49c
-cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
 cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	9973104ea190
-cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r1.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r1.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
+cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
+cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
 cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownProperty	9973104ea190
-cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
+cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
+cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
+cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	6e50888dfa54
 cell	invalid/parameter_type_conflict_two_properties.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownProperty	9973104ea190
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownProperty	c2e79c5bc5e4
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownProperty	d15afcab6575
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	33664e09e49c
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	invalid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/certificate.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
 cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownProperty	33664e09e49c
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r1.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
-cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_selfloop.gql	refuse	ErrParameterTypeConflict	b9dc2794de51
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r1.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r2.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r3.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r4.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r5.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r6.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_r7.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
+cell	invalid/parameter_type_conflict_two_properties_same_nullability.cypher	valid/schemas/social_selfloop.gql	refuse	ErrParameterTypeConflict	2ae09c11bf78
 cell	invalid/parameter_use_on_var_length_edge_property.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownEdge	5b7767c8f09c
 cell	invalid/parameter_use_on_var_length_edge_property.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownEdge	5b7767c8f09c
 cell	invalid/parameter_use_on_var_length_edge_property.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
@@ -5545,8 +5546,8 @@ cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/s
 cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownProperty	d0afc163d47a
-cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	1ef48088a866
-cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	6357bb54d036
+cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	58106d99ec72
+cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	88418bced600
 cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	invalid/unknown_property_union_nullability_differs.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownProperty	d0afc163d47a
@@ -5629,8 +5630,8 @@ cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_a
 cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownProperty	d0afc163d47a
-cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	1ef48088a866
-cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	6357bb54d036
+cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	58106d99ec72
+cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	88418bced600
 cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	invalid/unknown_property_union_type_differs.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownProperty	d0afc163d47a
@@ -13651,8 +13652,8 @@ cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/soci
 cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/social_r3.gql	refuse	ErrUnknownProperty	d0afc163d47a
-cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	1ef48088a866
-cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	6357bb54d036
+cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownProperty	58106d99ec72
+cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownProperty	88418bced600
 cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/social_r5.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/social_r6.gql	refuse	ErrUnknownProperty	d0afc163d47a
 cell	valid/union_property_widens_on_nullable_binding.cypher	invalid/schemas/social_r7.gql	refuse	ErrUnknownProperty	d0afc163d47a
