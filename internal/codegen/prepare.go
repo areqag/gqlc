@@ -1355,10 +1355,9 @@ func sweepIdentifiers(entities []Entity, prepared []Query) error {
 		seen[ident] = source
 		return nil
 	}
-	// Source 0: the emitter's own package-scope declarations. Seeded
-	// rather than inserted — the set is a map, so it holds no duplicate
-	// to report, and seeding keeps the fail message's "first" side on the
-	// fixed declaration.
+	// Source 0: the emitter's own package-scope declarations, seeded
+	// before the insert-based sources so a collision reports the fixed
+	// declaration on the fail message's "first" side.
 	for ident, scope := range reservedIdentifiers {
 		if scope != scopePackage {
 			continue

@@ -771,9 +771,8 @@ var ageOnlyTargets = []string{"apache-age-pgx-v5"}
 // reservedIdentifierRows is the reserved set written out longhand, with
 // the scope each name's emitted declaration occupies and the golden
 // targets that declare it. Both columns are read off the committed
-// goldens rather than off the templates by eye:
-// TestReservedScopeMatchesTheEmittedGoldens holds every row to what the
-// corpus declares, and fails a row the corpus declares nowhere.
+// goldens: TestReservedScopeMatchesTheEmittedGoldens holds every row to
+// what the corpus declares, and fails a row the corpus declares nowhere.
 //
 // The declaredBy column is where the set stops being symmetric, and it
 // bounds what the reservation is worth. Four rows are emitted by Apache
@@ -1066,10 +1065,21 @@ func goldenTarget(t *testing.T, path string) string {
 // scopeName renders an identifierScope for a fail message, so that a
 // reader does not have to know which iota is which.
 func scopeName(s codegen.IdentifierScope) string {
-	if s == codegen.ScopeMethod {
+	switch s {
+	case codegen.ScopeMethod:
 		return "scopeMethod"
+	case codegen.ScopePackage:
+		return "scopePackage"
+	default:
+		panic("scopeName: unknown identifierScope " + strconv.Itoa(int(s)))
 	}
-	return "scopePackage"
+}
+
+// TestScopeNameRefusesUnknownScope holds scopeName's default arm to the
+// fail-closed shape the diagnostics need: a scope the switch does not
+// know panics in test instead of rendering as one of the two it does.
+func TestScopeNameRefusesUnknownScope(t *testing.T) {
+	require.Panics(t, func() { scopeName(codegen.IdentifierScope(2)) })
 }
 
 // goldenFixture is the fixture a golden Go file was emitted from, read
@@ -1113,7 +1123,7 @@ func eachDecl(file *ast.File, record func(name string, scope codegen.IdentifierS
 }
 
 // TestReservedScopeMatchesTheEmittedGoldens holds both table columns to
-// the corpus rather than to a claim about the templates. Three checks:
+// the corpus. Three checks:
 //
 //  1. a reserved name is recorded scopePackage exactly when some golden
 //     declares it package-level;
