@@ -50,6 +50,37 @@ discovery_probes := vuln_probe + " " + fence_probe + " " + xtest_probe
 # Where recipes that need a scratch directory allocate one.
 scratch_root := "/tmp"
 
+# Compares the just on PATH against the pin CI installs
+# (.github/actions/setup-just/just-version, read here at run time so the number
+# lives in one file), and refuses on mismatch with the install remedy. just's
+# dump format is not a stability contract across releases, so a version nobody
+# states is a red-in-CI-green-here nobody can reproduce (bd gqlc-rnyit). Not
+# wired into any gate: repinning every host is a rollout, so this answers when
+# asked rather than reddening checkouts whose host is not the pin yet.
+check-just-version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pin_file="{{justfile_directory()}}/.github/actions/setup-just/just-version"
+    if [ ! -f "$pin_file" ]; then
+        echo "error: $pin_file is absent, so there is no pin to check against." >&2
+        exit 1
+    fi
+    want="$(tr -d '[:space:]' < "$pin_file")"
+    if ! printf '%s' "$want" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+        echo "error: $pin_file does not hold a just version (got '$want')." >&2
+        exit 1
+    fi
+    have="$(just --version | sed -n 's/^just //p')"
+    if [ "$have" = "$want" ]; then
+        echo "just $have matches the pin ($pin_file)"
+        exit 0
+    fi
+    echo "error: just $have is on PATH and this tree pins $want ($pin_file)." >&2
+    echo "       Install the pin:" >&2
+    echo "         curl --proto '=https' --tlsv1.2 -sSfL https://just.systems/install.sh \\" >&2
+    echo "           | bash -s -- --tag $want --to \"\$HOME/.local/bin\"" >&2
+    exit 1
+
 # Configures local git settings required after a fresh clone.
 # Idempotent: safe to run multiple times.
 #
