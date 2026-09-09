@@ -300,6 +300,11 @@ MIRROR_MARKER = re.compile(r"(?m)^bd-mirror:[ \t]*([A-Za-z0-9._-]+)\s*$")
 # for; the cap is what stops a body full of numbers from spending an API call
 # on each one.
 MARKER_LOOKUP_CAP = 10
+# What mirror_marker_bead() returns when the lookup itself could not be made:
+# no `gh` on PATH, a timeout, a non-zero exit, or GITHUB_REPOSITORY unset. A
+# singleton rather than None, because None already means "asked GitHub and no
+# single marker was there" and the caller reports the two differently.
+MARKER_LOOKUP_FAILED = object()
 
 
 def refuse(headline, *detail) -> NoReturn:
@@ -368,7 +373,7 @@ def load_bead(jsonl_path, bead_id):
 
 
 def mirror_marker_bead(n):
-    """The bead id issue #n's mirror marker names, or None.
+    """The bead id issue #n's mirror marker names, None, or MARKER_LOOKUP_FAILED.
 
     The export's answer to "which bead does this issue mirror" is the one
     load_bead() reads, and it is the one that goes stale: the export is a
@@ -376,17 +381,19 @@ def mirror_marker_bead(n):
     issue instead, which cannot be stale, because .githooks/bd-gh-sync writes
     the marker in the same run that mints the mirror.
 
-    None on every failure, and the callers treat None as "the export was the
-    only source and it did not have it", which is the behaviour this path had
-    before markers existed. That is not defensiveness for its own sake -- an
-    unmarked mirror is the ordinary state of every issue minted before
-    gqlc-gxcf7 landed, and of any issue whose minting run died between the
-    push and the comment. So there is no configuration in which raising here
-    would be reporting a fault: it would be reporting history.
+    None means asked and found no single marker: no marker comment there, or
+    several distinct ids, which is a claim this cannot adjudicate -- picking
+    either would hold a PR's number against a bead nobody can show it belongs
+    to. MARKER_LOOKUP_FAILED means the issue was never asked: no `gh` on
+    PATH, a timeout, a non-zero exit, or GITHUB_REPOSITORY unset. The callers
+    keep the two apart, so a lookup that never happened is never reported as
+    a marker that is not there (bd gqlc-ch6qn).
 
-    Several distinct ids is also None. Two markers on one issue is a claim
-    this cannot adjudicate, and picking either would hold a PR's number
-    against a bead nobody can show it belongs to.
+    An unmarked mirror is the ordinary state of every issue minted before
+    gqlc-gxcf7 landed, and of any issue whose minting run died between the
+    push and the comment, so None stays fail-open: the callers treat it as
+    "the export was the only source and it did not have it", which is the
+    behaviour this path had before markers existed.
 
     A PR author can post a marker comment by hand and be believed. That is
     accepted rather than overlooked: this is a hygiene gate against a wrong
@@ -396,7 +403,7 @@ def mirror_marker_bead(n):
     """
     repo = os.environ.get("GITHUB_REPOSITORY")
     if not repo:
-        return None
+        return MARKER_LOOKUP_FAILED
     try:
         r = subprocess.run(
             [
@@ -413,9 +420,9 @@ def mirror_marker_bead(n):
         )
     except (OSError, subprocess.SubprocessError):
         # No `gh` on PATH, and a timeout, which is SubprocessError's.
-        return None
+        return MARKER_LOOKUP_FAILED
     if r.returncode != 0:
-        return None
+        return MARKER_LOOKUP_FAILED
     body = r.stdout.decode("utf-8", "replace")
     ids = set(MIRROR_MARKER.findall(body))
     return ids.pop() if len(ids) == 1 else None
@@ -1168,7 +1175,10 @@ def main():
             expected_n = None
             for n in unheld[:MARKER_LOOKUP_CAP]:
                 marker_says[n] = mirror_marker_bead(n)
-                if (marker_says[n] or "").lower() == bead_id.lower():
+                if (
+                    marker_says[n] is not MARKER_LOOKUP_FAILED
+                    and (marker_says[n] or "").lower() == bead_id.lower()
+                ):
                     expected_n = n
                     break
 
@@ -1201,16 +1211,18 @@ def main():
             looked = []
             for n in unheld[:MARKER_LOOKUP_CAP]:
                 other = marker_says.get(n)
-                if other:
+                if other is MARKER_LOOKUP_FAILED:
+                    looked.append(
+                        f"the mirror-marker lookup on #{n} failed, so "
+                        "nothing was established about a marker there"
+                    )
+                elif other:
                     looked.append(
                         f"#{n} carries a mirror marker for {other}, not "
                         f"{bead_id} - likely a wrong number"
                     )
                 else:
-                    looked.append(
-                        f"no mirror marker on #{n} (minted before markers "
-                        "existed, or a wrong number)"
-                    )
+                    looked.append(f"no mirror marker on #{n}")
             if len(unheld) > MARKER_LOOKUP_CAP:
                 looked.append(
                     f"the remaining {len(unheld) - MARKER_LOOKUP_CAP} "
