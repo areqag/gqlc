@@ -1376,19 +1376,14 @@ lint-hooks dir=".githooks": ensure-shellcheck
 # through `{{{{quote(...)}}}}` fixed the recipe and retired the exclusion with it
 # (bd gqlc-4seg).
 #
-# The justfile read is an argument so the recipe can be exercised over a
-# throwaway one, the same way lint-hooks takes its directory. The half about
-# lint-hooks still holds — `lint` calls it twice with two directories.
-# This parameter's own exerciser was internal/tools/ciguard/justbodies_test.go,
-# deleted with the CI scaffolding in PR #1595, and nothing passes an argument
-# here today: `lint` is the only caller and it takes the default. So the
-# parameter is vestigial rather than load-bearing, and whether it goes or gains
-# an exerciser is bd gqlc-gu7ao.
+# The justfile under the gate is justfile() itself: the path parameter this
+# recipe once carried lost its only exerciser with internal/tools/ciguard in
+# PR #1595 (bd gqlc-gu7ao).
 [private]
-lint-just file=justfile(): ensure-shellcheck
+lint-just: ensure-shellcheck
     #!/usr/bin/env bash
     set -euo pipefail
-    file="{{file}}"
+    file="{{justfile()}}"
     if [ ! -f "$file" ]; then
         echo "error: '$file' is not a file, so there are no recipe bodies to lint and this" >&2
         echo "       gate is watching nothing (bd gqlc-wprl)." >&2
