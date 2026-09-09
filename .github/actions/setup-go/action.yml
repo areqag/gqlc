@@ -126,18 +126,17 @@ runs:
         # while every run is cold. Not measured, so not claimed: whether the
         # runner image sets either of those today.
         #
-        # GOPATH is pinned too and is NOT carrying that requirement — it looks
-        # vestigial (bd gqlc-spgv3). $GOPATH/pkg/sumdb is not in the `path:`
-        # list, and nothing here does `go install`; GOMODCACHE is spelled
-        # through it below, but that is spelling, since $GOPATH is $HOME/go.
-        # Its original reason was a HOME-redirecting test harness that PR #1595
-        # deleted. Do not read its presence as evidence that it is required, and
-        # do not read this paragraph as licence to drop the two above it.
-        export GOPATH="$HOME/go"
-        export GOMODCACHE="$GOPATH/pkg/mod"
+        # GOPATH is deliberately NOT pinned (bd gqlc-spgv3). It stabilises no
+        # cached path: $GOPATH/pkg/sumdb is not in the `path:` above, and
+        # nothing here does `go install` or reads $GOPATH/bin. Dropping the
+        # export changes no path the job uses — local witness 2026-09-09,
+        # `go env GOPATH GOMODCACHE GOCACHE` before/after, identical except a
+        # `go env -w` GOPATH entry moves GOPATH alone while GOMODCACHE/GOCACHE
+        # stay pinned (env outranks the config file), and that moves nothing
+        # cached or installed.
+        export GOMODCACHE="$HOME/go/pkg/mod"
         export GOCACHE="$HOME/.cache/go-build"
         {
-            echo "GOPATH=$GOPATH"
             echo "GOMODCACHE=$GOMODCACHE"
             echo "GOCACHE=$GOCACHE"
         } >> "$GITHUB_ENV"
