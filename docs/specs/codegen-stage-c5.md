@@ -438,7 +438,7 @@ C})` renders in the emitted method surface as follows. Single-column
 ```go
 // name: GetAction :one
 // MATCH (:Person)-[r:AUTHORED|LIKES]->(:Post) RETURN r
-func (q *Queries) GetAction(ctx context.Context, arg GetActionParams) (GetActionR, error)
+func (q *Queries) GetAction(ctx context.Context) (GetActionR, error)
 ```
 
 Single-column `:many`:
