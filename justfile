@@ -3654,6 +3654,22 @@ vuln: sweep-discovery-probes vuln-root-residual
 vuln-root-residual:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Run under the toolchain go.mod names, the same pin `just vuln` carries.
+    # just runs each dependency in its own shell before the recipe body, so the
+    # export there cannot reach this recipe, while in CI the whole job env is
+    # pinned via .github/actions/setup-go. A `//go:build go1.N` constraint moves
+    # what `go list` matches, so under two toolchains the two sides derive two
+    # different blind sets — and the ratchet below fails in both directions,
+    # tripping the gate for a reason its message does not describe (bd
+    # gqlc-7qrk1). sweep-discovery-probes needs no pin: it invokes no `go`.
+    GOTOOLCHAIN="go$(./.github/scripts/go-toolchain-version.sh go.mod)"
+    export GOTOOLCHAIN
+    ran_under="$(go env GOVERSION)"
+    if [ "${ran_under}" != "${GOTOOLCHAIN}" ]; then
+        echo "error: this recipe pinned GOTOOLCHAIN=${GOTOOLCHAIN} from go.mod, but the go" >&2
+        echo "       command reports GOVERSION=${ran_under} (bd gqlc-7qrk1)." >&2
+        exit 1
+    fi
     module="$(go list -m)"
     # Emits one line per entry, and nothing at all for an empty set — an empty
     # `echo` would feed `comm` a phantom entry and make the ratchet compare
