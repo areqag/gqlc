@@ -195,7 +195,7 @@ const (
 // floor where it is costs nothing and protects the sites already
 // counted; only a REMOVAL has to be written down here, which is the same
 // price the membership half of this census already charges.
-var specSigDocs = map[string]int{specC1: 5, specC4: 10, specC5: 3}
+var specSigDocs = map[string]int{specC1: 5, specC4: 10, specC5: 2}
 
 // specBindDocs are the documents that print a `map[string]any` driver
 // binding, mapped to how many graded binding values each owes. A floor,
