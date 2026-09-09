@@ -4000,10 +4000,9 @@ func (s *ResolverSuite) endpointLabels(e query.Endpoint, nodes map[string]graph.
 //
 // The goldens cannot carry this: they are machine-written, so a regression
 // that reintroduces a repeat is absorbed by the next -update run and the
-// suite stays green. Everything downstream reads the candidate count as the
-// count of distinct schema edge types — §4.6's verdict table dispatches on
-// it, and codegen emits one dispatch branch per member, which a repeat turns
-// into a duplicate case that does not compile.
+// suite stays green. §4.6's verdict table dispatches on the candidate count
+// as the count of distinct schema edge types, so a repeat reads as a second
+// edge type and mistypes the verdict.
 func (s *ResolverSuite) TestEdgeUnionKeysAreASet() {
 	files, err := filepath.Glob(filepath.Join(fixtureDir, "valid", "*.cypher"))
 	s.Require().NoError(err)

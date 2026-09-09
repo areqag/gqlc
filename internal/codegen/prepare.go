@@ -1027,10 +1027,13 @@ func ResolvedTypeName(t resolver.ResolvedType) (name string) {
 // boundary: the resolver commits at least two candidates (a single one
 // collapses to ResolvedEdge, R3 spec §4.4) and commits only edges the
 // schema declares, so a Validated shape it did not build fails at
-// generation rather than downstream. The third follows from what arrives
-// — the emitted dispatch reads the value's label to pick a candidate,
-// which two candidates carrying one label give it no way to do. First
-// offender in candidate order wins across all three.
+// generation rather than downstream. The third rests on the same section's
+// set postcondition: the emitted dispatch reads the value's label to pick
+// a candidate, which two candidates carrying one label give it no way to
+// do — and because the resolver dedupes on the whole EdgeKey (R3 spec
+// §4.4), two arrivals under one label are two declared types, never one
+// key counted twice. First offender in candidate order wins across all
+// three.
 func admitEdgeUnionCandidates(edgeKeys []schema.EdgeKey, entities []Entity, entityIndex map[entityLookupKey]int, site string) error {
 	if len(edgeKeys) < 2 {
 		return fmt.Errorf("%w: %s resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC6Scope, site, len(edgeKeys))

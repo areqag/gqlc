@@ -677,13 +677,15 @@ func r3EdgeAdmissible(e query.EdgeBinding) error {
 // marker admits. srcs and tgts are slices to support plural node
 // satisfaction (ADR 0022).
 //
-// The result is a set, not a bag. Distinct probes can name one key — for
-// an undirected edge with src == tgt the reversed orientation reproduces
-// the forward one — and both consumers read the result as "the distinct
-// edge types in play": §4.6's verdict table dispatches on the count, and
-// the fail-message enumerates them for a reader who must tell them apart.
-// A repeat makes the first claim a second edge type and the second claim
-// that an edge is ambiguous against itself.
+// The result is a set, not a bag. Distinct probes can name one key two
+// ways — for an undirected edge with src == tgt the reversed orientation
+// reproduces the forward one, and under ADR 0022 plural satisfaction
+// overlapping srcs/tgts yield (A, B) twice with A != B — and both
+// consumers read the result as "the distinct edge types in play": §4.6's
+// verdict table dispatches on the count, and the fail-message enumerates
+// them for a reader who must tell them apart. A repeat makes the first
+// claim a second edge type and the second claim that an edge is ambiguous
+// against itself.
 //
 // Order is first occurrence. The probe order is fixed by the query's label
 // order, the endpoint slices, and the constant orientation pair; the seen
