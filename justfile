@@ -2089,13 +2089,14 @@ fmt-check: ensure-golangci
 #                container images. Runnable here (bd gqlc-tez0 measured the
 #                live battery at ~30s), just not at the price the other arms
 #                are; run it by hand when you touch the live battery.
-#   tidy (part)  three of that job's nine steps read state that does not exist
+#   tidy (part)  three of that job's ten steps read state that does not exist
 #                before the PR: check-pr-closes.py wants the body,
 #                check-pr-authors.sh the commit list, check-cron-freshness.sh
 #                the Actions API. Unrunnable here by construction, not by
-#                choice. The other six DO run — tidy-check and
+#                choice. The other seven DO run — tidy-check and
 #                check-doc-ordinals.py and
 #                check-open-pr-ordinals.py --self-test and
+#                next-doc-ordinal.py --self-test and
 #                bd-export-monotonic-local and check-label-lengths.py as their
 #                own arms, and `just lint-hooks .github/scripts` because `just
 #                lint` already depends on it.
@@ -2172,6 +2173,12 @@ gates:
     # copy fires on master PUSH, which is after the merge it should have
     # stopped.
     run tidy           python3 .github/scripts/check-open-pr-ordinals.py --self-test
+    # The allocator half's rows (bd gqlc-c30cl). Its decision core minus the
+    # fetch: the tool refuses without a network by design, so the rows drive
+    # the merge-and-offer logic with stubbed remotes and never fetch. Same
+    # placement as the moved-base rows above: an arm that reds only here lets
+    # the break merge.
+    run tidy           python3 .github/scripts/next-doc-ordinal.py --self-test
     run govulncheck    just vuln
 
     # Refuse BEFORE the summary, not after: the summary is a coverage claim, and
