@@ -1383,15 +1383,26 @@ C2's §6.6 invariants stand. C3 adds:
   `TemporalDateTime` / TIMESTAMP list-leaf → no `time` import;
   otherwise `time` in the group. Alphabetical placement:
   `fmt` < `time` < the external `neo4j` / `dbtype`.
-- **List loops use `for i, elem := range value`** — the emitted
-  loop variable pair is idiomatic; `errcheck` / `ineffassign` /
-  `stylecheck` pass by construction. The type-assertion fail-
-  message uses the loop index (`element %d`) so a fixture whose
-  input contains a wrong-type element decodes to a diagnostic
-  naming the bad index. Fixtures: element type mismatch is not a
-  golden-testable case (the driver never returns wrong-type
-  elements in a valid `RecordValue`), so it lives as a code-cycle
-  unit test, not a fixture.
+- **List loops use `for <index>, elem<depth> := range <src>`**
+  — the emitted header varies on two axes. The index is `i`
+  when the loop body asserts the element (the type-assertion
+  fail-message names the index via `element %d`) and `_` when
+  the element rides bare with nothing to assert
+  (`carriesElemBare`); the element variable is `elem` at depth
+  0 and `elem<depth>` deeper (`elemLocal`). All four shapes:
+
+  | Depth | Element asserted | Bare element |
+  |---|---|---|
+  | 0 | `for i, elem := range value` | `for _, elem := range value` |
+  | 1 | `for i, elem1 := range inner1` | `for _, elem1 := range inner1` |
+  | 2 | `for i, elem2 := range inner2` | `for _, elem2 := range inner2` |
+
+  The emitted pair is idiomatic either way; `errcheck` /
+  `ineffassign` / `stylecheck` pass by construction (the bare
+  arm ranges with `_`, never an unused `i`). Fixtures: element
+  type mismatch is not a golden-testable case (the driver never
+  returns wrong-type elements in a valid `RecordValue`), so it
+  lives as a code-cycle unit test, not a fixture.
 - **Owner directive (C1 §6.6, C2 §5.5, 2026-07-11) extends
   transitively.** The `errorlint` + `stylecheck` posture holds:
   every new `fmt.Errorf` in §5.5 uses `%w` for wrap, lowercase
