@@ -1302,6 +1302,15 @@ lint-hooks dir=".githooks": ensure-shellcheck
     scripts=()
     unclassified=()
     while IFS= read -r f; do
+        # Skip what git ignores: the sweep asks whether shellcheck should
+        # watch a file, which is meaningless for a path that is not in the
+        # repository. A __pycache__/ written by py_compile used to red the
+        # arm with advice that cannot be followed on a .pyc (bd gqlc-5kuhz).
+        # Outside a git tree check-ignore errors and the file stays swept,
+        # so the refusal below cannot shrink to silence.
+        if git check-ignore -q -- "$f" 2>/dev/null; then
+            continue
+        fi
         head=""
         IFS= read -r head <"$f" || true
         case "$head" in
