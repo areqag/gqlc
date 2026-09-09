@@ -124,6 +124,16 @@ not treat a silent stderr as evidence that nothing was capped.
 The status filter has no such notice at any verbosity. Verified: `bd list --json
 -n 0 2>&1 >/dev/null` prints nothing while omitting 514 rows.
 
+## `bd history` and `bd show` print different clocks
+
+The default `bd history` renderer stamps each entry in host-LOCAL time with no
+timezone marker (`2026-09-09 15:54:40`); `bd show --json` carries
+`created_at`/`updated_at`/`closed_at` in true UTC with a `Z` suffix
+(`2026-09-09T19:54:40Z` for the same event — the 4h EDT offset, measured
+2026-09-09). Neither output warns you. Never compare a `bd history` timestamp
+against a `bd show` timestamp without converting; take any event ordering from
+a single renderer.
+
 ## Rules for a scripted query
 
 1. Pass the row cap explicitly, always: `-n 0` / `--limit 0`.
