@@ -867,6 +867,29 @@ def unverified_tail(refs, bead_id, marker_n):
     return "no 'Closes' line was demanded and none was checked"
 
 
+def swallowed_numbers(pr_body):
+    """Closing numbers the body writes where GitHub does not read them.
+
+    GH_CLOSES over the raw body minus GH_CLOSES over claimable_prose(): what
+    remains sits inside a carrier -- a fence, an HTML comment, a raw
+    <pre>/<code> block -- where GitHub acts on nothing at merge. The export
+    skip reports that same set as a ::warning:: rather than refusing (bd
+    gqlc-2lx3r), because gqlc-2cmhl was filed over a refusal on a quoted
+    keyword, and these two exits report it the same way (bd gqlc-9wil6).
+
+    The subtraction is what keeps the report honest here. The export skip's
+    arm needs none -- it is reached only when the body claims nothing
+    visibly, so every raw number is a swallowed one. These exits are reached
+    with visible keywords in the body too, and a "will NOT close at merge"
+    warning over one of those would be false, so only the difference is
+    reported and a body whose keywords are all visible keeps the old line.
+    """
+    seen = set(GH_CLOSES.findall(claimable_prose(pr_body)))
+    return [
+        n for n in dict.fromkeys(GH_CLOSES.findall(pr_body)) if n not in seen
+    ]
+
+
 def extra_closes(pr_body, expected_n):
     """Numbers GitHub would close at merge that this PR's bead does not mirror.
 
@@ -1344,10 +1367,35 @@ def main():
         # reaches this same exit, so it is not an escape either. What changes
         # is that the pass now says it verified nothing, on both declaration
         # forms rather than on 'Refs:' alone (bd gqlc-63ao).
+        #
+        # What it still does not say on its own is what the author wrote where
+        # GitHub does not read it (bd gqlc-9wil6): a fenced closing line is a
+        # claim nobody's number holds and nothing closes, so it is reported
+        # as a ::warning:: below -- visible, never a refusal -- on the export
+        # skip's terms.
+        swallowed = swallowed_numbers(pr_body)
+        tail_extra = ""
+        if swallowed:
+            numbers = f"#{', #'.join(swallowed)}"
+            one = len(swallowed) == 1
+            print(
+                "::warning title=check-pr-closes unverified::"
+                f"the export's record for {bead_id} carries no external_ref "
+                "value, so this check held nothing against it. The body "
+                f"writes {numbers} inside code, where GitHub does not read a "
+                "closing keyword, so "
+                f"{'that issue' if one else 'those issues'} will NOT close "
+                "at merge - unfence the line, or close by hand after merging."
+            )
+            tail_extra = (
+                f"; {numbers} {'is' if one else 'are'} written inside code "
+                f"and {'closes' if one else 'close'} nothing at merge"
+            )
         print(
             f"[check-pr-closes] the export's record for {bead_id} carries no "
             "external_ref value, so "
             + unverified_tail(refs, bead_id, marker_n)
+            + tail_extra
         )
         sys.exit(0)
 
@@ -1363,11 +1411,32 @@ def main():
         # The twin of the exit above, and silent on the same declaration
         # form for the same reason: a mirror this cannot parse leaves no
         # number to demand, which is a pass, and the pass has to say so
-        # whichever line declared the bead.
+        # whichever line declared the bead. Twin in the swallowed report too
+        # (bd gqlc-9wil6): the same helper, the same warning, this exit's own
+        # subject.
+        swallowed = swallowed_numbers(pr_body)
+        tail_extra = ""
+        if swallowed:
+            numbers = f"#{', #'.join(swallowed)}"
+            one = len(swallowed) == 1
+            print(
+                "::warning title=check-pr-closes unverified::"
+                f"{bead_id} mirrors {ext!r}, which names no issue number, "
+                "so this check held nothing against it. The body writes "
+                f"{numbers} inside code, where GitHub does not read a "
+                "closing keyword, so "
+                f"{'that issue' if one else 'those issues'} will NOT close "
+                "at merge - unfence the line, or close by hand after merging."
+            )
+            tail_extra = (
+                f"; {numbers} {'is' if one else 'are'} written inside code "
+                f"and {'closes' if one else 'close'} nothing at merge"
+            )
         print(
             f"[check-pr-closes] {bead_id} mirrors {ext!r}, which names no "
             "issue number, so "
             + unverified_tail(refs, bead_id, marker_n)
+            + tail_extra
         )
         sys.exit(0)
     expected_n = m.group(1)
