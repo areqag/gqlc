@@ -139,8 +139,9 @@ func (k StatementKind) MarshalJSON() ([]byte, error) {
 // check refusing whatever would reach this one rather than on this set being
 // bounded (codegen-sentinel-taxonomy.md §3).
 // TestResolvedTypeSumIsNotClosed measures both constructions against all
-// eight arms from outside the package. Whether the codegen boundary should
-// normalise them away instead of refusing them is gqlc-edze's question.
+// eight arms from outside the package. The codegen default arms refuse
+// whatever reaches them; their rows stay in §2 permanently
+// (codegen-sentinel-taxonomy.md §5.1 step 5).
 type ResolvedType interface {
 	String() string
 	isResolvedType()
