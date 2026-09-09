@@ -1,16 +1,32 @@
 # Installs the pinned just binary; every job runs its checks through just
 # recipes, so this is the one installer every workflow shares.
+#
+# The pin lives in the `just-version` file beside this action, which `just
+# check-just-version` reads too: one file serves CI and local runs alike
+# (bd gqlc-rnyit). Bump the file and both sides move together.
 name: setup-just
 description: install the pinned just binary and add it to PATH
 runs:
   using: composite
   steps:
+    - name: read pinned just version
+      id: pin
+      shell: bash
+      run: |
+        pin_file="${{ github.action_path }}/just-version"
+        version="$(tr -d '[:space:]' < "$pin_file")"
+        if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "error: $pin_file does not hold a just version (got '$version')." >&2
+          exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
     - name: restore just from cache
       id: cache-just
       uses: actions/cache@v4
       with:
         path: ~/.local/bin/just
-        key: just-1.55.1-${{ runner.os }}
+        key: just-${{ steps.pin.outputs.version }}-${{ runner.os }}
 
     - name: install just
       if: steps.cache-just.outputs.cache-hit != 'true'
@@ -20,7 +36,7 @@ runs:
         curl --proto '=https' --tlsv1.2 -sSfL \
           --retry 5 --retry-all-errors --retry-delay 2 \
           https://just.systems/install.sh \
-          | bash -s -- --tag 1.55.1 --to "$HOME/.local/bin"
+          | bash -s -- --tag ${{ steps.pin.outputs.version }} --to "$HOME/.local/bin"
 
     - name: add just to PATH
       shell: bash
