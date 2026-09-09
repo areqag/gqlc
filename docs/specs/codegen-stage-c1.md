@@ -1118,7 +1118,9 @@ return row, nil
 **Per-query row assembly template — `:many`, two-plus columns:**
 same as `:many` single column, but `out := make([]<Method>Row, 0,
 len(records))` and each iteration decodes every column into a fresh
-`<Method>Row` before appending.
+`<Method>Row` before appending. A `:many` query matching zero records
+returns a non-nil empty slice, never nil, unlike `:one`, which returns
+`ErrNoRows`.
 
 **Nullability check.** For a non-nullable column: `GetRecordValue`
 returns `value, isNil, err`. If `err != nil`, propagate wrapped. If
