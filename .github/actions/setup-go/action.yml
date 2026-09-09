@@ -225,3 +225,30 @@ runs:
             *) infra_fail "go.mod names go${GO_VERSION}, but the provisioned toolchain reports: ${resolved}" ;;
         esac
         echo "provisioned: ${resolved}"
+
+    # The pin above is asserted here rather than trusted. If the two cache
+    # paths drift from the actions/cache `path:`, the job stays green while
+    # every run is cold: the cache restores, the build writes somewhere else,
+    # and nothing saves that somewhere-else (bd gqlc-skwh7). So this step
+    # asks the go command where it will actually write and compares against
+    # the literal `path:` entries, failing the job on divergence.
+    #
+    # Limit, stated plainly: the two paths appear a third time here, so this
+    # catches a drifting pin but not an edit that moves all three together.
+    # A single source both steps read would be stronger, but the cache step
+    # runs before anything in this file could emit the paths, and its `with:`
+    # block cannot be fed from such an output without machinery this file
+    # would then also have to trust — so the assertion is the fix.
+    - name: assert the provisioned Go caches equal the cache paths
+      shell: bash
+      run: |
+        set -euo pipefail
+        fail() {
+            echo "::error title=Go cache paths diverged::$1" >&2
+            exit 1
+        }
+        for want in "$HOME/go/pkg/mod:GOMODCACHE" "$HOME/.cache/go-build:GOCACHE"; do
+            got="$(go env "${want#*:}")"
+            [ "$got" = "${want%%:*}" ] || fail "${want#*:} is $got, but the cache step saves ${want%%:*}"
+        done
+        echo "GOMODCACHE=$(go env GOMODCACHE) GOCACHE=$(go env GOCACHE)"
