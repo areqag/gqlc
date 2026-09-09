@@ -218,6 +218,21 @@ bindings first introduced inside an `OPTIONAL MATCH` clause; the surface
 keyword is `OPTIONAL`, the lowered attribute is **nullable**, mirroring the
 schema side's type-system posture. Codegen emits the corresponding result as
 a pointer or option type.
+
+Nullability is asked at two POSITIONS and they are answered by different
+code. The **whole-value** position — a binding, a property, a parameter —
+is the sense above, and its pointer is written by the caller from a
+`Nullable` flag beside the type. The **element** position is a list's
+`LIST<T>` versus `LIST<T NOT NULL>`, and its pointer is part of the
+carrier TEXT the type table returns: `LIST<STRING>` carries as `[]*string`
+and `LIST<STRING NOT NULL>` as `[]string`, decided per level of nesting,
+so `LIST<LIST<INT64> NOT NULL>` is `[][]*int64` (bd gqlc-dxhwp, design
+gqlc-sokgc). The one carve-out is an element whose mapped type is already
+`any`, which carries null as nil and stays bare.
+
+Both positions exist on one declaration and mean different things: a
+property `xs :: LIST<STRING>` that is itself nullable is a `*[]*string`,
+where the outer star is "no list" and each inner one is "no element".
 _Avoid_: optional (reserve for the Cypher keyword `OPTIONAL MATCH`).
 
 **Endpoint**:

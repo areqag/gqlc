@@ -13,10 +13,10 @@ import (
 
 // Grid corresponds to the Grid node type.
 type Grid struct {
-	Grid   *[][]int16
+	Grid   *[][]*int16
 	Id     int64
-	Matrix *[][]float32
-	Piles  *[][]any
+	Matrix *[]*[]*float32
+	Piles  *[]*[]any
 }
 
 // decodeGrid decodes an agtype vertex into a Grid struct, enforcing
@@ -30,7 +30,7 @@ func decodeGrid(raw []byte) (Grid, error) {
 		return Grid{}, fmt.Errorf("decode Grid: expected label %q, got %q", "Grid", label)
 	}
 	var out Grid
-	value0, err := agtypeNullableProperty(props, "grid", agtypeListOfListOfInt16)
+	value0, err := agtypeNullableProperty(props, "grid", agtypeListOfListOfNullableInt16)
 	if err != nil {
 		return Grid{}, fmt.Errorf("decode Grid.Grid: %w", err)
 	}
@@ -40,12 +40,12 @@ func decodeGrid(raw []byte) (Grid, error) {
 		return Grid{}, fmt.Errorf("decode Grid.Id: %w", err)
 	}
 	out.Id = value1
-	value2, err := agtypeNullableProperty(props, "matrix", agtypeListOfListOfFloat32)
+	value2, err := agtypeNullableProperty(props, "matrix", agtypeListOfNullableListOfNullableFloat32)
 	if err != nil {
 		return Grid{}, fmt.Errorf("decode Grid.Matrix: %w", err)
 	}
 	out.Matrix = value2
-	value3, err := agtypeNullableProperty(props, "piles", agtypeListOfListOfAny)
+	value3, err := agtypeNullableProperty(props, "piles", agtypeListOfNullableListOfAny)
 	if err != nil {
 		return Grid{}, fmt.Errorf("decode Grid.Piles: %w", err)
 	}
@@ -285,34 +285,65 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 	return out, nil
 }
 
+// agtypeNullableElem lifts an element decoder over the null a list whose
+// element type is nullable may hold. Every decoder agtypeList is given
+// refuses the literal null, which is what the NOT NULL element wants;
+// this is the one place that answer changes, and it answers with the nil
+// pointer rather than the Go zero, because a null read as "" or 0 is a
+// value the graph does not hold.
+//
+// The whole-value position has no need of this: a null property is
+// absent from the entity's map entirely, and agtypeNullableProperty
+// reads that absence. Inside a list the null is present as a token, so
+// it has to be recognised here.
+func agtypeNullableElem[T any](decode func([]byte) (T, error)) func([]byte) (*T, error) {
+	return func(raw []byte) (*T, error) {
+		if agtypeIsNull(raw) {
+			return nil, nil
+		}
+		out, err := decode(raw)
+		if err != nil {
+			return nil, err
+		}
+		return &out, nil
+	}
+}
+
+// agtypeIsNull reports whether a raw span is agtype's null. It is a
+// named helper rather than a comparison inside the closure above so that
+// the spelling the wire uses is one thing with one name.
+func agtypeIsNull(raw []byte) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// agtypeListOfNullableFloat32 decodes an agtype list of *float32 elements.
+func agtypeListOfNullableFloat32(raw []byte) ([]*float32, error) {
+	return agtypeList(raw, agtypeNullableElem(agtypeFloat32))
+}
+
+// agtypeListOfNullableInt16 decodes an agtype list of *int16 elements.
+func agtypeListOfNullableInt16(raw []byte) ([]*int16, error) {
+	return agtypeList(raw, agtypeNullableElem(agtypeIntAs[int16]))
+}
+
 // agtypeListOfAny decodes an agtype list of any elements.
 func agtypeListOfAny(raw []byte) ([]any, error) {
 	return agtypeList(raw, agtypeValue)
 }
 
-// agtypeListOfFloat32 decodes an agtype list of float32 elements.
-func agtypeListOfFloat32(raw []byte) ([]float32, error) {
-	return agtypeList(raw, agtypeFloat32)
+// agtypeListOfNullableListOfNullableFloat32 decodes an agtype list of *[]*float32 elements.
+func agtypeListOfNullableListOfNullableFloat32(raw []byte) ([]*[]*float32, error) {
+	return agtypeList(raw, agtypeNullableElem(agtypeListOfNullableFloat32))
 }
 
-// agtypeListOfInt16 decodes an agtype list of int16 elements.
-func agtypeListOfInt16(raw []byte) ([]int16, error) {
-	return agtypeList(raw, agtypeIntAs[int16])
+// agtypeListOfNullableListOfAny decodes an agtype list of *[]any elements.
+func agtypeListOfNullableListOfAny(raw []byte) ([]*[]any, error) {
+	return agtypeList(raw, agtypeNullableElem(agtypeListOfAny))
 }
 
-// agtypeListOfListOfAny decodes an agtype list of []any elements.
-func agtypeListOfListOfAny(raw []byte) ([][]any, error) {
-	return agtypeList(raw, agtypeListOfAny)
-}
-
-// agtypeListOfListOfFloat32 decodes an agtype list of []float32 elements.
-func agtypeListOfListOfFloat32(raw []byte) ([][]float32, error) {
-	return agtypeList(raw, agtypeListOfFloat32)
-}
-
-// agtypeListOfListOfInt16 decodes an agtype list of []int16 elements.
-func agtypeListOfListOfInt16(raw []byte) ([][]int16, error) {
-	return agtypeList(raw, agtypeListOfInt16)
+// agtypeListOfListOfNullableInt16 decodes an agtype list of []*int16 elements.
+func agtypeListOfListOfNullableInt16(raw []byte) ([][]*int16, error) {
+	return agtypeList(raw, agtypeListOfNullableInt16)
 }
 
 // agtypeValue decodes a value of no declared shape through agtype's own

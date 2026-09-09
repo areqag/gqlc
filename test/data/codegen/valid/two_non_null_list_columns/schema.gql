@@ -1,3 +1,22 @@
+-- THE NAME IS ABOUT THE COLUMNS, NOT THEIR ELEMENTS, and since bd
+-- gqlc-dxhwp that distinction is visible in the goldens rather than only
+-- here. `tags` and `ranks` are the two NOT NULL columns the fixture is
+-- named for: the WHOLE list is non-null, so neither is pointer-wrapped at
+-- the column position, which is what these queries pin. `spare` is the
+-- nullable third that makes ListyMixed a mixed row.
+--
+-- None of the three says anything about its ELEMENTS, and all three permit
+-- a null one, so all three emit a starred element: tags is []*string, ranks
+-- is []*int32, and spare is *[]*string — spare's LEADING star is the
+-- column's own nullability rather than an element's, which is exactly the
+-- distinction the name trips over. `Ranks []*int32` under a fixture called
+-- two_non_null_list_columns reads like a bug and is the rule working. The
+-- opt-out is a qualifier INSIDE the angle brackets — LIST<INT32 NOT NULL>
+-- — and no property here carries one. See
+-- docs/adr/0041-a-nullable-list-element-is-a-pointer.md.
+--
+-- Deliberately not renamed: the name is accurate, and the goldens a rename
+-- would churn are the coverage.
 CREATE PROPERTY GRAPH TYPE TwoNonNullListColumns AS {
     (:Listy {
         tags  :: LIST<STRING> NOT NULL,

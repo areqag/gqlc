@@ -49,6 +49,15 @@
 // writer built by hand; whether AGE will STORE a record-typed property
 // as a nested object is a different question that no measurement here
 // answers, and gqlc-jffyz step 5 owes it.
+//
+// Listy and Slot are the two ELEMENT nullabilities, declared as a pair
+// (bd gqlc-dxhwp). A nullable element carries the star and decodes
+// through agtypeNullableElem, which maps the wire's `null` to a nil
+// pointer; a NOT NULL element stays bare and its decoder REFUSES that
+// same `null`. Slot is not redundant coverage of Listy: without it a fix
+// that starred every element would pass every assertion here, because
+// nothing else in this corpus asks what happens to a null the schema
+// forbids.
 CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
     (:Event {
         id         :: INT64     NOT NULL,
@@ -85,6 +94,12 @@ CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
         ranks  :: LIST<INT32> NOT NULL,
         matrix :: LIST<LIST<INT64>> NOT NULL,
         depths :: LIST<FLOAT32>
+    }),
+    (:Slot {
+        tags   :: LIST<STRING NOT NULL> NOT NULL,
+        ranks  :: LIST<INT32 NOT NULL> NOT NULL,
+        matrix :: LIST<LIST<INT64 NOT NULL> NOT NULL> NOT NULL,
+        depths :: LIST<FLOAT32 NOT NULL>
     }),
     (:Anything {
         payload :: ANY VALUE NOT NULL,

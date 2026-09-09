@@ -139,22 +139,22 @@ func TestTypeMapProperty(t *testing.T) {
 	// depth, and the text it produces is the one every other backend
 	// produces for the same declaration — the surface a caller writes
 	// against does not vary by backend, only what fills it does. An
-	// element's NOT NULL qualifier is not part of that text: a Go slice
-	// element is not a pointer either way.
+	// element's NOT NULL qualifier IS part of that text: a nullable
+	// element carries the star, decided per level (bd gqlc-dxhwp).
 	t.Run("a list rides its element's carrier at whatever depth", func(t *testing.T) {
 		cases := map[graph.PropertyType]string{
-			graph.ListOf(graph.TypeString, false):                                       "[]string",
+			graph.ListOf(graph.TypeString, false):                                       "[]*string",
 			graph.ListOf(graph.TypeString, true):                                        "[]string",
-			graph.ListOf(graph.TypeInt32, false):                                        "[]int32",
-			graph.ListOf(graph.TypeFloat32, false):                                      "[]float32",
+			graph.ListOf(graph.TypeInt32, false):                                        "[]*int32",
+			graph.ListOf(graph.TypeFloat32, false):                                      "[]*float32",
 			graph.ListOf(graph.TypeAnyPropertyValue, false):                             "[]any",
-			graph.ListOf(graph.ListOf(graph.TypeInt64, false), false):                   "[][]int64",
-			graph.ListOf(graph.ListOf(graph.ListOf(graph.TypeBool, true), false), true): "[][][]bool",
+			graph.ListOf(graph.ListOf(graph.TypeInt64, false), false):                   "[]*[]*int64",
+			graph.ListOf(graph.ListOf(graph.ListOf(graph.TypeBool, true), false), true): "[][]*[]bool",
 			// These three admitted temporal widths carry no zone, so unlike
 			// the instant and TIME they have nothing that a list's single
 			// name would have to hold once per element.
-			graph.ListOf(graph.TypeDate, false):      "[]Date",
-			graph.ListOf(graph.TypeLocalTime, false): "[]LocalTime",
+			graph.ListOf(graph.TypeDate, false):      "[]*Date",
+			graph.ListOf(graph.TypeLocalTime, false): "[]*LocalTime",
 			graph.ListOf(graph.TypeDuration, true):   "[]Duration",
 		}
 		for pt, want := range cases {
@@ -197,9 +197,15 @@ func TestTypeMapProperty(t *testing.T) {
 				{Name: "zip", Type: graph.TypeInt32, NotNull: true},
 			}): "struct {\n\tCity *string\n\tZip int32\n}",
 			// A field of a container width, and a record inside a record:
-			// the recursion is the same one a list's element takes.
+			// the recursion is the same one a list's element takes. Both
+			// element polarities, because the star a nullable element
+			// carries is the LIST's own and has to survive being reached
+			// through a record field rather than through a column.
 			graph.RecordOf([]graph.RecordField{
 				{Name: "tags", Type: graph.ListOf(graph.TypeString, false), NotNull: true},
+			}): "struct {\n\tTags []*string\n}",
+			graph.RecordOf([]graph.RecordField{
+				{Name: "tags", Type: graph.ListOf(graph.TypeString, true), NotNull: true},
 			}): "struct {\n\tTags []string\n}",
 			graph.RecordOf([]graph.RecordField{
 				{Name: "at", Type: graph.RecordOf([]graph.RecordField{{Name: "lat", Type: graph.TypeFloat64, NotNull: true}}), NotNull: true},

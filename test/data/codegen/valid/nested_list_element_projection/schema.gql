@@ -1,0 +1,26 @@
+-- Every property here is a FLAT list, so every one of them is storable on
+-- both backends. That is the point of the fixture rather than an accident:
+-- the nesting is built by the QUERY, not declared, so ADR 0035's refusal of
+-- a nested list as a stored property never fires and all three targets
+-- enrol. `nested_list_property` is the mirror image — it declares the
+-- nesting, so it is AGE-only.
+--
+-- The three widths differ in exactly one qualifier each, so the two stars a
+-- nested list can take are decided independently and each has a row where
+-- it is absent:
+--
+--   tags   whole nullable, elements nullable  -> [][]*[]*string  both stars
+--   ranks  whole nullable, elements NOT NULL  -> [][]*[]int16    outer only
+--   labels whole NOT NULL, elements nullable  -> [][][]*string   inner only
+--
+-- `labels` is the control that matters. Without it a fix that starred every
+-- nested element unconditionally would pass on the other two rows, and the
+-- outer star would be pinned only in the direction where it is present.
+CREATE PROPERTY GRAPH TYPE NestedListElementProjection AS {
+    (:Grid {
+        id     :: INT64 NOT NULL,
+        tags   :: LIST<STRING>,
+        ranks  :: LIST<INT16 NOT NULL>,
+        labels :: LIST<STRING> NOT NULL
+    })
+}

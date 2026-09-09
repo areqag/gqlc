@@ -10,8 +10,8 @@ import (
 const listyColumnsQueryText = `MATCH (l:Listy) RETURN l.tags AS tags, l.ranks AS ranks`
 
 type ListyColumnsRow struct {
-	Tags  []string
-	Ranks []int32
+	Tags  []*string
+	Ranks []*int32
 }
 
 // ListyColumns executes the ListyColumns query.
@@ -37,14 +37,14 @@ func (q *queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
 		if raw0 == nil {
 			return nil, fmt.Errorf("ListyColumns: column %q is non-nullable but arrived null", "tags")
 		}
-		value0, err := agtypeListOfString(raw0)
+		value0, err := agtypeListOfNullableString(raw0)
 		if err != nil {
 			return nil, fmt.Errorf("ListyColumns: decode column %q: %w", "tags", err)
 		}
 		if raw1 == nil {
 			return nil, fmt.Errorf("ListyColumns: column %q is non-nullable but arrived null", "ranks")
 		}
-		value1, err := agtypeListOfInt32(raw1)
+		value1, err := agtypeListOfNullableInt32(raw1)
 		if err != nil {
 			return nil, fmt.Errorf("ListyColumns: decode column %q: %w", "ranks", err)
 		}
@@ -62,8 +62,8 @@ func (q *queries) ListyColumns(ctx context.Context) ([]ListyColumnsRow, error) {
 const listyRowQueryText = `MATCH (l:Listy) RETURN l.tags AS tags, l.ranks AS ranks`
 
 type ListyRowRow struct {
-	Tags  []string
-	Ranks []int32
+	Tags  []*string
+	Ranks []*int32
 }
 
 // ListyRow executes the ListyRow query.
@@ -99,14 +99,14 @@ func (q *queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
 	if raw0 == nil {
 		return ListyRowRow{}, fmt.Errorf("ListyRow: column %q is non-nullable but arrived null", "tags")
 	}
-	value0, err := agtypeListOfString(raw0)
+	value0, err := agtypeListOfNullableString(raw0)
 	if err != nil {
 		return ListyRowRow{}, fmt.Errorf("ListyRow: decode column %q: %w", "tags", err)
 	}
 	if raw1 == nil {
 		return ListyRowRow{}, fmt.Errorf("ListyRow: column %q is non-nullable but arrived null", "ranks")
 	}
-	value1, err := agtypeListOfInt32(raw1)
+	value1, err := agtypeListOfNullableInt32(raw1)
 	if err != nil {
 		return ListyRowRow{}, fmt.Errorf("ListyRow: decode column %q: %w", "ranks", err)
 	}
@@ -119,9 +119,9 @@ func (q *queries) ListyRow(ctx context.Context) (ListyRowRow, error) {
 const listyMixedQueryText = `MATCH (l:Listy) RETURN l.tags AS tags, l.spare AS spare, l.ranks AS ranks`
 
 type ListyMixedRow struct {
-	Tags  []string
-	Spare *[]string
-	Ranks []int32
+	Tags  []*string
+	Spare *[]*string
+	Ranks []*int32
 }
 
 // ListyMixed executes the ListyMixed query.
@@ -148,13 +148,13 @@ func (q *queries) ListyMixed(ctx context.Context) ([]ListyMixedRow, error) {
 		if raw0 == nil {
 			return nil, fmt.Errorf("ListyMixed: column %q is non-nullable but arrived null", "tags")
 		}
-		value0, err := agtypeListOfString(raw0)
+		value0, err := agtypeListOfNullableString(raw0)
 		if err != nil {
 			return nil, fmt.Errorf("ListyMixed: decode column %q: %w", "tags", err)
 		}
-		var value1 *[]string
+		var value1 *[]*string
 		if raw1 != nil {
-			decoded, err := agtypeListOfString(raw1)
+			decoded, err := agtypeListOfNullableString(raw1)
 			if err != nil {
 				return nil, fmt.Errorf("ListyMixed: decode column %q: %w", "spare", err)
 			}
@@ -163,7 +163,7 @@ func (q *queries) ListyMixed(ctx context.Context) ([]ListyMixedRow, error) {
 		if raw2 == nil {
 			return nil, fmt.Errorf("ListyMixed: column %q is non-nullable but arrived null", "ranks")
 		}
-		value2, err := agtypeListOfInt32(raw2)
+		value2, err := agtypeListOfNullableInt32(raw2)
 		if err != nil {
 			return nil, fmt.Errorf("ListyMixed: decode column %q: %w", "ranks", err)
 		}

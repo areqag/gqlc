@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE NullableTemporalListElement AS {
+    (:Slot {
+        id    :: INT64 NOT NULL,
+        days  :: LIST<DATE> NOT NULL,
+        maybe :: LIST<DATE>,
+        spans :: LIST<DURATION(DAY TO SECOND) NOT NULL> NOT NULL
+    })
+}

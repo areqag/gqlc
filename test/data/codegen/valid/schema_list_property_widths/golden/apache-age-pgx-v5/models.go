@@ -13,11 +13,11 @@ import (
 // Reading corresponds to the Reading node type.
 type Reading struct {
 	Codes []int32
-	Flags *[]bool
+	Flags *[]*bool
 	Id    int64
 	Marks *[]string
-	Ranks *[]int32
-	Tags  *[]string
+	Ranks *[]*int32
+	Tags  *[]*string
 }
 
 // decodeReading decodes an agtype vertex into a Reading struct, enforcing
@@ -36,7 +36,7 @@ func decodeReading(raw []byte) (Reading, error) {
 		return Reading{}, fmt.Errorf("decode Reading.Codes: %w", err)
 	}
 	out.Codes = value0
-	value1, err := agtypeNullableProperty(props, "flags", agtypeListOfBool)
+	value1, err := agtypeNullableProperty(props, "flags", agtypeListOfNullableBool)
 	if err != nil {
 		return Reading{}, fmt.Errorf("decode Reading.Flags: %w", err)
 	}
@@ -51,12 +51,12 @@ func decodeReading(raw []byte) (Reading, error) {
 		return Reading{}, fmt.Errorf("decode Reading.Marks: %w", err)
 	}
 	out.Marks = value3
-	value4, err := agtypeNullableProperty(props, "ranks", agtypeListOfInt32)
+	value4, err := agtypeNullableProperty(props, "ranks", agtypeListOfNullableInt32)
 	if err != nil {
 		return Reading{}, fmt.Errorf("decode Reading.Ranks: %w", err)
 	}
 	out.Ranks = value4
-	value5, err := agtypeNullableProperty(props, "tags", agtypeListOfString)
+	value5, err := agtypeNullableProperty(props, "tags", agtypeListOfNullableString)
 	if err != nil {
 		return Reading{}, fmt.Errorf("decode Reading.Tags: %w", err)
 	}
@@ -288,9 +288,50 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 	return out, nil
 }
 
-// agtypeListOfBool decodes an agtype list of bool elements.
-func agtypeListOfBool(raw []byte) ([]bool, error) {
-	return agtypeList(raw, agtypeBool)
+// agtypeNullableElem lifts an element decoder over the null a list whose
+// element type is nullable may hold. Every decoder agtypeList is given
+// refuses the literal null, which is what the NOT NULL element wants;
+// this is the one place that answer changes, and it answers with the nil
+// pointer rather than the Go zero, because a null read as "" or 0 is a
+// value the graph does not hold.
+//
+// The whole-value position has no need of this: a null property is
+// absent from the entity's map entirely, and agtypeNullableProperty
+// reads that absence. Inside a list the null is present as a token, so
+// it has to be recognised here.
+func agtypeNullableElem[T any](decode func([]byte) (T, error)) func([]byte) (*T, error) {
+	return func(raw []byte) (*T, error) {
+		if agtypeIsNull(raw) {
+			return nil, nil
+		}
+		out, err := decode(raw)
+		if err != nil {
+			return nil, err
+		}
+		return &out, nil
+	}
+}
+
+// agtypeIsNull reports whether a raw span is agtype's null. It is a
+// named helper rather than a comparison inside the closure above so that
+// the spelling the wire uses is one thing with one name.
+func agtypeIsNull(raw []byte) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// agtypeListOfNullableBool decodes an agtype list of *bool elements.
+func agtypeListOfNullableBool(raw []byte) ([]*bool, error) {
+	return agtypeList(raw, agtypeNullableElem(agtypeBool))
+}
+
+// agtypeListOfNullableInt32 decodes an agtype list of *int32 elements.
+func agtypeListOfNullableInt32(raw []byte) ([]*int32, error) {
+	return agtypeList(raw, agtypeNullableElem(agtypeIntAs[int32]))
+}
+
+// agtypeListOfNullableString decodes an agtype list of *string elements.
+func agtypeListOfNullableString(raw []byte) ([]*string, error) {
+	return agtypeList(raw, agtypeNullableElem(agtypeString))
 }
 
 // agtypeListOfInt32 decodes an agtype list of int32 elements.

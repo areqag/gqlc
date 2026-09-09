@@ -69,6 +69,47 @@ func TestTemporalUsesAccumulatesListPtrRegardlessOfParameterOrder(t *testing.T) 
 	}
 }
 
+// TestElementNullabilityPicksADisjointListHelper pins that a list whose
+// ELEMENTS are nullable marks its own pair of bits and does not mark the plain
+// pair, and the reverse.
+//
+// Disjointness is the claim, not merely that the new bits are reachable. The
+// two helpers have incompatible parameter types — []*Date and []Date — so
+// whichever one paramBindExpr names, the other one is not called by anything;
+// and an unexported function nothing calls fails the emitted package's own lint
+// fence, reddening the fixture rather than emitting a dead line. Marking both
+// would therefore break every batch that binds either shape, which is a wider
+// failure than the one this bead is about.
+//
+// The rows are held apart by carrier, not just by row, because conversionUses
+// folds into one map keyed by carrier name: two Date rows in one Prepared would
+// score the union and the assertion could not tell which parameter set which
+// bit.
+func TestElementNullabilityPicksADisjointListHelper(t *testing.T) {
+	prepared := paramsOf(
+		codegen.Param{RawName: "a", Field: "A", GoType: "[]*Date", Nullable: false},
+		codegen.Param{RawName: "b", Field: "B", GoType: "[]*LocalTime", Nullable: true},
+		codegen.Param{RawName: "c", Field: "C", GoType: "[]Duration", Nullable: true},
+	)
+
+	date := neo4j.TemporalUseOf(prepared, "Date")
+	require.True(t, date.ListElem, "a []*Date parameter did not reach the element-nullable helper")
+	require.False(t, date.ListElemPtr, "the whole list is not nullable, so no Ptr wrapper is owed")
+	require.False(t, date.List, "the plain from<X>List takes []Date and nothing here calls it")
+	require.False(t, date.ListPtr, "likewise its wrapper")
+
+	local := neo4j.TemporalUseOf(prepared, "LocalTime")
+	require.True(t, local.ListElem, "a nullable []*LocalTime parameter still owes the element-nullable helper it wraps")
+	require.True(t, local.ListElemPtr, "a nullable list of nullable elements owes the Ptr wrapper too")
+	require.False(t, local.List, "the plain helper is not reached by *[]*LocalTime at either position")
+
+	dur := neo4j.TemporalUseOf(prepared, "Duration")
+	require.True(t, dur.List, "the NOT NULL-element control lost the plain helper")
+	require.True(t, dur.ListPtr, "the NOT NULL-element control is nullable as a whole and owes the Ptr wrapper")
+	require.False(t, dur.ListElem, "a []Duration parameter must not reach the element-nullable helper")
+	require.False(t, dur.ListElemPtr, "likewise its wrapper")
+}
+
 // TestTemporalUsesIgnoresNonCarrierParameters pins the other half of the
 // parameter walk: leafType strips the slice, and a leaf that is not one of
 // codegen.TemporalCarriers reaches no site. []any and []byte are the two that

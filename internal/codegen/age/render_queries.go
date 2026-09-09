@@ -468,15 +468,25 @@ var encodedParamText = map[string]string{
 // null for a nullable field this store spells by absence. Every key on
 // the wire is wrong and nothing fails, which is why it is guarded by an
 // assertion on what the encoder WRITES and not only on what it is named.
+//
+// A nullable ELEMENT's star is stripped by the same walk and for the same
+// reason (bd gqlc-dxhwp): `[]*Date` left `*Date` at the leaf, which
+// matches no arm either, so the same silent fall-through to json.Marshal
+// was one nullable element away from returning. It steps no width — the
+// star is carrier text, not a level — which is why the two prefixes have
+// separate arms here rather than one shared step.
 func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 	leaf, leafWidth := f.GoType, f.Width
-	depth := 0
 	for {
-		elem, ok := strings.CutPrefix(leaf, "[]")
+		if elem, ok := strings.CutPrefix(leaf, "[]"); ok {
+			leaf, leafWidth = elem, elemWidth(leafWidth)
+			continue
+		}
+		elem, ok := strings.CutPrefix(leaf, "*")
 		if !ok {
 			break
 		}
-		depth, leaf, leafWidth = depth+1, elem, elemWidth(leafWidth)
+		leaf = elem
 	}
 	var encoder string
 	switch {
@@ -500,13 +510,14 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 	default:
 		return "", false
 	}
-	switch {
-	case depth > 0 && f.Nullable:
-		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, listEncoder(depth, leaf, leafWidth, encoder)), true
-	case depth > 0:
-		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, listEncoder(depth-1, leaf, leafWidth, encoder)), true
+	// The whole-value nullability is the Param's own flag rather than a
+	// star in its text, so it is composed here; every level below is read
+	// off the type by paramEncoder.
+	switch elem, list := strings.CutPrefix(f.GoType, "[]"); {
 	case f.Nullable:
-		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, encoder), true
+		return fmt.Sprintf("agtypeEncodedNullable(%s, %s)", access, paramEncoder(f.GoType, f.Width, encoder)), true
+	case list:
+		return fmt.Sprintf("agtypeEncodedList(%s, %s)", access, paramEncoder(elem, elemWidth(f.Width), encoder)), true
 	default:
 		return fmt.Sprintf("%s(%s)", encoder, access), true
 	}
@@ -520,7 +531,7 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 // fields, so there is one answer to give and no table to grow.
 //
 // A miss still answers the empty string, as the map alone did. That is
-// not a silent default: the only caller is the closure listEncoder
+// not a silent default: the only caller is the closure paramEncoder
 // spells, which is reached for a leaf fallibleParamEncoder already named
 // an encoder for, so a miss here would be a leaf on that list and absent
 // from this one — and it emits `([], error)`, which does not compile.
@@ -531,9 +542,16 @@ func encodedText(leaf string, width graph.PropertyType) string {
 	return encodedParamText[leaf]
 }
 
-// listEncoder is the encoder FUNCTION VALUE for a value nested levels deep
-// above leaf: the bare leaf encoder at 0, and one closure per level above
-// it, each wrapping agtypeEncodedList around the one below.
+// paramEncoder is the encoder FUNCTION VALUE for one bound Go type: the
+// bare leaf encoder at the leaf, a closure wrapping agtypeEncodedList
+// around the one below per level of nesting, and one wrapping
+// agtypeEncodedNullable per nullable element.
+//
+// It is directed by the TYPE rather than by a level count, because a
+// nullable element's star is decided per level and a count cannot say
+// which levels carry one (bd gqlc-dxhwp). For a star-free type it emits
+// what the level-counting form emitted, byte for byte, which is why no
+// golden of a NOT NULL-element parameter moved with it.
 //
 // The single tab below is not the emitted indentation. generate's only
 // non-error return is codegen.Finalise, which runs format.Source over
@@ -556,17 +574,36 @@ func encodedText(leaf string, width graph.PropertyType) string {
 // the cost of dropping the argument — a whole-expression assertion now
 // spells the flat form.
 //
-// leafWidth reaches encodedText because a record's agtype-side type is its
-// whole struct text rather than a name the table could key on.
-func listEncoder(levels int, leaf string, leafWidth graph.PropertyType, encoder string) string {
-	if levels == 0 {
-		return encoder
+// width descends with the text so the leaf can reach encodedText: a
+// record's agtype-side type is its whole struct text rather than a name
+// the table could key on.
+func paramEncoder(goType string, width graph.PropertyType, encoder string) string {
+	if elem, ok := strings.CutPrefix(goType, "[]"); ok {
+		return fmt.Sprintf("func(in %s) (%s, error) {\n\treturn agtypeEncodedList(in, %s)\n}",
+			goType, encodedParamType(goType, width), paramEncoder(elem, elemWidth(width), encoder))
 	}
-	slices := strings.Repeat("[]", levels-1)
-	return fmt.Sprintf("func(in %s[]%s) (%s[]%s, error) {\n\treturn agtypeEncodedList(in, %s)\n}",
-		slices, leaf,
-		slices, encodedText(leaf, leafWidth),
-		listEncoder(levels-1, leaf, leafWidth, encoder))
+	if elem, ok := strings.CutPrefix(goType, "*"); ok {
+		// agtypeEncodedNullable is the whole-value combinator, reused here
+		// for an element: a nullable element and a nullable parameter are
+		// the same question one level apart, and its (*T, func(T) (E,
+		// error)) -> (*E, error) shape answers both.
+		return fmt.Sprintf("func(in %s) (%s, error) {\n\treturn agtypeEncodedNullable(in, %s)\n}",
+			goType, encodedParamType(goType, width), paramEncoder(elem, width, encoder))
+	}
+	return encoder
+}
+
+// encodedParamType is the agtype-side Go type one bound Go type encodes
+// to. Only the leaf changes: the nesting and the element stars are the
+// same on both sides, since neither combinator alters the shape it walks.
+func encodedParamType(goType string, width graph.PropertyType) string {
+	if elem, ok := strings.CutPrefix(goType, "[]"); ok {
+		return "[]" + encodedParamType(elem, elemWidth(width))
+	}
+	if elem, ok := strings.CutPrefix(goType, "*"); ok {
+		return "*" + encodedParamType(elem, width)
+	}
+	return encodedText(goType, width)
 }
 
 // writeOneBody emits the :one arity check, the single row's decode, and
@@ -772,6 +809,14 @@ func decodeFunc(goType string, width graph.PropertyType) string {
 	}
 	if codegen.IsDeclaredRecord(goType, width) {
 		return "decode" + codegen.RecordHelperSuffix(width)
+	}
+	// A nullable ELEMENT (bd gqlc-dxhwp). Every arm below refuses the
+	// literal null, which is right at the whole-value position — that one
+	// is read by agtypeNullableProperty, and its star never reaches here.
+	// Inside a list there is no such reader, so the combinator wraps the
+	// element's own decoder and maps null to a nil pointer.
+	if elem, ok := strings.CutPrefix(goType, "*"); ok {
+		return "agtypeNullableElem(" + decodeFunc(elem, width) + ")"
 	}
 	switch goType {
 	case "any":

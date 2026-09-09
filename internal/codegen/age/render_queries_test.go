@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/codegen"
@@ -389,6 +390,19 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 		}
 	}
 
+	// The element position, which the walk above cannot see: the star the
+	// KindList arm folds into its element text is applied to a value, so
+	// every starred carrier this backend emits reaches the AST as `"[]" +
+	// elem` and enters the census as nothing. Swept under its own key
+	// because these texts are DERIVED and the ones above are READ, and a
+	// reader who trusts the wrong one of those is owed the difference.
+	starred := starredElementTexts(byMethod["Property"])
+	for _, goType := range starred {
+		t.Run("Property/element/"+goType, func(t *testing.T) {
+			requireCarrierHasAnArm(t, goType)
+		})
+	}
+
 	// 21 until RECORD<ANY> began to carry. It is the twenty-second, and
 	// it is a literal rather than a member of the record FAMILY: a record
 	// whose fields are undeclared has no struct to build, so that arm
@@ -397,6 +411,24 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 	require.Len(t, byMethod["Scalar"], 6, "typeMap.Scalar named %v", byMethod["Scalar"])
 	require.Empty(t, byMethod["Temporal"], "typeMap.Temporal named %v, so this backend now carries a temporal "+
 		"width: read it against decodeFunc before moving this number", byMethod["Temporal"])
+
+	// 22 Property texts less `any` and the two zoned carriers. Pinned
+	// rather than left implicit because starredElementTexts filters, and a
+	// filter that widened to everything would leave this loop ranging over
+	// nothing while every assertion above still passed — the exact shape of
+	// silence this whole test exists against.
+	// assert rather than require on both zoned texts, and on this side of
+	// the Len: a require here aborts, and the one mutation that reaches
+	// them — dropping carriesZone from the filter — admits BOTH, so the
+	// first would be the only one ever witnessed. Each pin then has its own
+	// victim: dropping carriesZone reports the two texts and the count 21,
+	// and a filter widened to exclude everything reports the count 0 while
+	// these two pass vacuously.
+	for _, zoned := range []string{age.GoInstant, age.GoTime} {
+		assert.NotContains(t, starred, "*"+zoned,
+			"typeMap.Property refuses a list whose element carries a zone, so the table produces no such element text")
+	}
+	require.Len(t, starred, 19, "the derived element census is %v", starred)
 }
 
 // requireCarrierHasAnArm requires decodeFunc to name a helper for one Go
@@ -409,17 +441,83 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 // sweep cannot vouch for. No such text reaches here — the record arm,
 // the one arm keyed on a width, contributes no text at all (see
 // returnedGoType).
+//
+// The two prefixes alternate rather than nest one inside the other, so the
+// peel takes them in either order and as many times as they appear:
+// `[]*[]*string` is the carrier this table produces for LIST<LIST<STRING>>,
+// and reaching its `string` means stripping `[]`, `*`, `[]`, `*`. That is
+// the mirror of decodeFunc, which peels a slice down to its element and a
+// pointer down to its pointee; a sweep that peels one and not the other is
+// asking about a different function.
+//
+// MEASURED, because the star half is easy to over-credit and this test's
+// own subject is a guard that vouched for nothing. Two rows, both with
+// decodeFunc's `*` arm deleted: with the star strip reverted but
+// starredElementTexts kept, the package is RED at 19 subtests; with the
+// strip reverted and the census also removed, it is GREEN. So the census is
+// the killer and the strip kills nothing today.
+// Every text the strip reaches is already a bare row of the same census —
+// `*[]any` peels to `[]any` peels to `any`, all three swept — so it is
+// forward-defence for a literal carrier of the form `[]*X` entering the
+// table, written as the honest mirror of decodeFunc rather than claimed as
+// a guard with a victim.
 func requireCarrierHasAnArm(t *testing.T, goType string) {
 	t.Helper()
 	for {
 		decodeFuncOf(t, goType, "",
 			"the type table names Go type %q, which decodeFunc has no arm for the carrier of", goType)
-		elem, ok := strings.CutPrefix(goType, "[]")
-		if !ok {
-			return
+		if elem, ok := strings.CutPrefix(goType, "[]"); ok {
+			goType = elem
+			continue
 		}
-		goType = elem
+		if elem, ok := strings.CutPrefix(goType, "*"); ok {
+			goType = elem
+			continue
+		}
+		return
 	}
+}
+
+// starredElementTexts is every Go type text the type table produces at a
+// list-ELEMENT position, derived from the texts it names as literals.
+//
+// It has to be derived rather than read, and that is the whole reason this
+// function exists. The star is applied at RUN TIME inside the KindList arm
+// — `if !pt.ElemNotNull() && elemTy != "any" { elemTy = "*" + elemTy }` —
+// and the arm still returns the single `"[]" + elem` shape the AST walk
+// accepts, so the walk sees a composition over a VALUE and contributes
+// nothing. Every starred carrier the backend emits is therefore invisible
+// to typeTableGoTypes, by construction and not by an oversight the walk
+// could be widened to fix without resolving types.
+//
+// The two exclusions are the list arm's own. Order is not significant here
+// — both are pure predicates under an `||`, and this function checks `any`
+// first while the arm applies carriesZone first:
+//
+//   - carriesZone refuses a zoned element outright — a list has one property
+//     name for all its elements and so nowhere to put the second and later
+//     UTC offsets. `*time.Time` and `*Time` are texts the table cannot
+//     produce, and demanding an arm for one would be this census vouching
+//     for a carrier rather than reporting it. Both are pinned absent below.
+//   - `any`, the carve-out, already carries null as nil.
+//
+// carriesZone is called through the export rather than copied, so the
+// duplication is the one `any` literal. The alternative is not asking the
+// question: a starred census that over-reached would put a row on this table
+// for a carrier no schema can reach, and this test's contract is what the
+// table PRODUCES. A formulation that asks typeMap.Property for the element
+// text directly and so copies nothing is bd gqlc-uafp — filed, not taken
+// here, because it changes what the guard asks and so needs its own battery.
+func starredElementTexts(property []string) []string {
+	out := make([]string, 0, len(property))
+	for _, text := range property {
+		if text == "any" || age.CarriesZone(text) {
+			continue
+		}
+		out = append(out, "*"+text)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // decodeFuncOf names the helper decodeFunc answers for one Go type, and is

@@ -59,7 +59,7 @@ type DwellingColumnsRow struct {
 		Note    *string
 		ZipCode int32
 	}
-	Moves *[]struct {
+	Moves *[]*struct {
 		Note    *string
 		ZipCode int32
 	}
@@ -109,12 +109,12 @@ func (q *queries) DwellingColumns(ctx context.Context) ([]DwellingColumnsRow, er
 			}
 			value1 = &decoded
 		}
-		var value2 *[]struct {
+		var value2 *[]*struct {
 			Note    *string
 			ZipCode int32
 		}
 		if raw2 != nil {
-			decoded, err := agtypeListOfRecord4329c440(raw2)
+			decoded, err := agtypeListOfNullableRecord4329c440(raw2)
 			if err != nil {
 				return nil, fmt.Errorf("DwellingColumns: decode column %q: %w", "moves", err)
 			}

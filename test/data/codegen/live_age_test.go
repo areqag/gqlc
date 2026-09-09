@@ -21,6 +21,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	certelemage "github.com/areqag/gqlc/test/data/codegen/valid/certified_list_element/golden/apache-age-pgx-v5"
 	entityedgeage "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/apache-age-pgx-v5"
 	entitynodeage "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/apache-age-pgx-v5"
 	listlistage "github.com/areqag/gqlc/test/data/codegen/valid/list_list_int/golden/apache-age-pgx-v5"
@@ -231,6 +232,7 @@ func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 		one:        oneColOneParamOneAGE{q: onecoloneage.New(h.pool, graph)},
 		many:       manyColManyAGE{q: manycolmanyage.New(h.pool, graph)},
 		nested:     nestedListAGE{q: listlistage.New(h.pool, graph)},
+		nullElem:   nullListElemAGE{q: certelemage.New(h.pool, graph)},
 		deepNested: deepNestedListAGE{q: deeplistage.New(h.pool, graph)},
 		entityNode: entityNodeAGE{q: entitynodeage.New(h.pool, graph)},
 		entityEdge: entityEdgeAGE{q: entityedgeage.New(h.pool, graph)},
@@ -262,6 +264,7 @@ type ageScenario struct {
 	one        oneColOneParamOneAGE
 	many       manyColManyAGE
 	nested     nestedListAGE
+	nullElem   nullListElemAGE
 	deepNested deepNestedListAGE
 	entityNode entityNodeAGE
 	entityEdge entityEdgeAGE
@@ -286,6 +289,8 @@ func (s ageScenario) oneColOneParamOne() oneColOneParamOneQuerier { return s.one
 func (s ageScenario) manyColMany() manyColManyQuerier { return s.many }
 
 func (s ageScenario) nestedList() nestedListQuerier { return s.nested }
+
+func (s ageScenario) nullListElem() nullListElemQuerier { return s.nullElem }
 
 func (s ageScenario) deepNestedList() deepNestedListQuerier { return s.deepNested }
 
@@ -631,6 +636,16 @@ type nestedListAGE struct{ q *listlistage.Queries }
 
 func (a nestedListAGE) nestedList(ctx context.Context) ([][]int64, error) {
 	return a.q.NestedList(ctx)
+}
+
+// nullListElemAGE binds the certified_list_element fixture. The null this row
+// is about crosses as the literal token "null" inside one agtype text payload
+// rather than as a nil interface in a Bolt list, so the arm exercises a
+// genuinely different decoder for the same claim.
+type nullListElemAGE struct{ q *certelemage.Queries }
+
+func (a nullListElemAGE) nullablePair(ctx context.Context) ([][]*int64, error) {
+	return a.q.PersonNullablePair(ctx)
 }
 
 // deepNestedListAGE binds the list_list_list_int fixture. On this target the

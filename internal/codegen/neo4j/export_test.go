@@ -66,10 +66,21 @@ func RenderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 // rather than exported fields on the production type: which directions a
 // batch reaches is the emitter's own bookkeeping and has no caller
 // outside this package.
-type CarrierUseFlags struct{ Decode, Encode, EncodePtr, List, ListPtr bool }
+type CarrierUseFlags struct {
+	Decode, Encode, EncodePtr, List, ListPtr bool
+	ListElem, ListElemPtr                    bool
+}
 
 func flagsOf(u carrierUse) CarrierUseFlags {
-	return CarrierUseFlags{u.decode, u.encode, u.encodePtr, u.list, u.listPtr}
+	return CarrierUseFlags{
+		Decode:      u.decode,
+		Encode:      u.encode,
+		EncodePtr:   u.encodePtr,
+		List:        u.list,
+		ListPtr:     u.listPtr,
+		ListElem:    u.listElem,
+		ListElemPtr: u.listElemPtr,
+	}
 }
 
 // TemporalUseOf and RecordUseOf read one carrier out of a conversionUses

@@ -110,6 +110,21 @@ type nestedListQuerier interface {
 	nestedList(ctx context.Context) ([][]int64, error)
 }
 
+// nullListElemQuerier is one arm's certified_list_element handle for the
+// column whose ELEMENTS the schema declares nullable: LIST<INT64> built from a
+// nullable property, which emits [][]*int64.
+//
+// This is the one row where a real server sends a NULL inside a list. Every
+// other list this battery reads is declared NOT NULL at the element position,
+// so before bd gqlc-dxhwp the emitted decoder asserted elem.(int64) on a nil
+// interface — an assertion that is false for every nil, whatever the declared
+// width — and the whole read failed on the first absent element. A signature
+// the store could not fill is what the goldens pinned; this is what says the
+// one it can fill is the one that ships.
+type nullListElemQuerier interface {
+	nullablePair(ctx context.Context) ([][]*int64, error)
+}
+
 // deepNestedListQuerier is one arm's list_list_list_int handle: a
 // LIST<LIST<LIST<INT64>>> column, one level deeper than nestedListQuerier.
 //
@@ -424,6 +439,7 @@ type backend interface {
 	oneColOneParamOne() oneColOneParamOneQuerier
 	manyColMany() manyColManyQuerier
 	nestedList() nestedListQuerier
+	nullListElem() nullListElemQuerier
 	deepNestedList() deepNestedListQuerier
 	entityNodeProjectedOne() entityNodeQuerier
 	entityEdgeProjectedOne() entityEdgeQuerier
@@ -575,6 +591,7 @@ var readScenarios = []struct {
 	{name: "one_col_one_param_one: one + sentinels", run: oneAndSentinels},
 	{name: "many_col_many: many + params", run: manyWithParams},
 	{name: "list_list_int: nested list off the wire", run: nestedListDecode},
+	{name: "certified_list_element: a NULL inside a list", run: nullListElemDecode},
 	{name: "list_list_list_int: thrice-nested list off the wire", run: deepNestedListDecode},
 	{name: "entity_node_projected_one: whole vertex", run: nodeEntityRead},
 	{name: "entity_edge_projected_one: whole edge", run: edgeEntityRead},
@@ -668,7 +685,7 @@ var scenarioTables = []struct {
 	why  string
 }{
 	{
-		name: "readScenarios", got: len(readScenarios), want: 7,
+		name: "readScenarios", got: len(readScenarios), want: 8,
 		why: "the battery every arm runs; a lost row is a read contract no target is checked against",
 	},
 	{
@@ -994,6 +1011,41 @@ func nestedListDecode(ctx context.Context, t *testing.T, b backend) { //nolint:t
 	require.NoError(t, err)
 	require.Equal(t, [][]int64{{1}, {2, 3}}, got,
 		"a nested list off the wire must decode element for element, with each inner list its own length")
+}
+
+// nullListElemDecode is the live witness for bd gqlc-dxhwp: a list arriving
+// off a real server with a NULL inside it decodes to a nil pointer at that
+// index rather than failing the whole read.
+//
+// The seed writes two people and OMITS score on one of them, which is how a
+// property becomes absent on both servers — neither has a way to store a
+// typed null in a property slot, and a SET to null deletes the property. So
+// `[p.score, p.score]` evaluates to a two-element list of nulls for that
+// person and to a list of the stored value for the other.
+//
+// BOTH ROWS ARE THE ASSERTION, not one with the other for company. A decoder
+// that dropped null elements, or that returned an empty slice on meeting one,
+// would still satisfy a null-only row; and a decoder that had not changed at
+// all still satisfies the non-null row, since that is the shape it has always
+// read. Only the pair pins that the same list carries both.
+//
+// Unordered, because the fixture's query has no ORDER BY and MATCH promises
+// no order. The claim is about what the two rows contain, and imposing an
+// order here would be asserting something the query does not offer.
+func nullListElemDecode(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	b.seed(ctx, t, `
+		CREATE (:Person {id: 1, age: 30, score: 7, rank: 1})
+		CREATE (:Person {id: 2, age: 40, rank: 2})
+	`)
+
+	got, err := b.nullListElem().nullablePair(ctx)
+	require.NoError(t, err,
+		"a NULL element must not fail the read; before gqlc-dxhwp the emitted decoder "+
+			"asserted elem.(int64) on a nil interface and returned an error here")
+
+	seven := int64(7)
+	require.ElementsMatch(t, [][]*int64{{&seven, &seven}, {nil, nil}}, got,
+		"an absent element is a nil pointer at its own index, and a present one is unaffected")
 }
 
 // deepNestedListDecode drives the same contract one level deeper, at the depth

@@ -13,9 +13,9 @@ import (
 const readingColumnsQueryText = `MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.marks AS marks`
 
 type ReadingColumnsRow struct {
-	Tags  *[]string
-	Ranks *[]int32
-	Flags *[]bool
+	Tags  *[]*string
+	Ranks *[]*int32
+	Flags *[]*bool
 	Marks *[]string
 }
 
@@ -34,15 +34,19 @@ func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		if err != nil {
 			return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "tags", err)
 		}
-		var value0Ptr *[]string
+		var value0Ptr *[]*string
 		if !isNil {
-			acc0 := make([]string, 0, len(value0))
+			acc0 := make([]*string, 0, len(value0))
 			for i, elem := range value0 {
+				if elem == nil {
+					acc0 = append(acc0, nil)
+					continue
+				}
 				v, ok := elem.(string)
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected string, got %T", "tags", i, elem)
 				}
-				acc0 = append(acc0, v)
+				acc0 = append(acc0, &v)
 			}
 			value0Ptr = &acc0
 		}
@@ -51,10 +55,14 @@ func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		if err != nil {
 			return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "ranks", err)
 		}
-		var value1Ptr *[]int32
+		var value1Ptr *[]*int32
 		if !isNil {
-			acc1 := make([]int32, 0, len(value1))
+			acc1 := make([]*int32, 0, len(value1))
 			for i, elem := range value1 {
+				if elem == nil {
+					acc1 = append(acc1, nil)
+					continue
+				}
 				v, ok := elem.(int64)
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected int64, got %T", "ranks", i, elem)
@@ -63,7 +71,7 @@ func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 				if err != nil {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: %w", "ranks", i, err)
 				}
-				acc1 = append(acc1, vn)
+				acc1 = append(acc1, &vn)
 			}
 			value1Ptr = &acc1
 		}
@@ -72,15 +80,19 @@ func (q *queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		if err != nil {
 			return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "flags", err)
 		}
-		var value2Ptr *[]bool
+		var value2Ptr *[]*bool
 		if !isNil {
-			acc2 := make([]bool, 0, len(value2))
+			acc2 := make([]*bool, 0, len(value2))
 			for i, elem := range value2 {
+				if elem == nil {
+					acc2 = append(acc2, nil)
+					continue
+				}
 				v, ok := elem.(bool)
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected bool, got %T", "flags", i, elem)
 				}
-				acc2 = append(acc2, v)
+				acc2 = append(acc2, &v)
 			}
 			value2Ptr = &acc2
 		}
@@ -142,7 +154,7 @@ const dropTaggedQueryText = `MATCH (r:Reading {tags: $tags}) DELETE r`
 // DropTagged executes the DropTagged query.
 //
 //	MATCH (r:Reading {tags: $tags}) DELETE r
-func (q *queries) DropTagged(ctx context.Context, arg *[]string) error {
+func (q *queries) DropTagged(ctx context.Context, arg *[]*string) error {
 	_, err := q.db.run(ctx, dropTaggedQueryText, map[string]any{"tags": arg}, neo4j.AccessModeWrite)
 	return err
 }

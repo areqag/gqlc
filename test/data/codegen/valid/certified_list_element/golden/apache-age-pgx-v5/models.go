@@ -262,6 +262,42 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 	return out, nil
 }
 
+// agtypeNullableElem lifts an element decoder over the null a list whose
+// element type is nullable may hold. Every decoder agtypeList is given
+// refuses the literal null, which is what the NOT NULL element wants;
+// this is the one place that answer changes, and it answers with the nil
+// pointer rather than the Go zero, because a null read as "" or 0 is a
+// value the graph does not hold.
+//
+// The whole-value position has no need of this: a null property is
+// absent from the entity's map entirely, and agtypeNullableProperty
+// reads that absence. Inside a list the null is present as a token, so
+// it has to be recognised here.
+func agtypeNullableElem[T any](decode func([]byte) (T, error)) func([]byte) (*T, error) {
+	return func(raw []byte) (*T, error) {
+		if agtypeIsNull(raw) {
+			return nil, nil
+		}
+		out, err := decode(raw)
+		if err != nil {
+			return nil, err
+		}
+		return &out, nil
+	}
+}
+
+// agtypeIsNull reports whether a raw span is agtype's null. It is a
+// named helper rather than a comparison inside the closure above so that
+// the spelling the wire uses is one thing with one name.
+func agtypeIsNull(raw []byte) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+// agtypeListOfNullableInt64 decodes an agtype list of *int64 elements.
+func agtypeListOfNullableInt64(raw []byte) ([]*int64, error) {
+	return agtypeList(raw, agtypeNullableElem(agtypeInt64))
+}
+
 // agtypeListOfAny decodes an agtype list of any elements.
 func agtypeListOfAny(raw []byte) ([]any, error) {
 	return agtypeList(raw, agtypeValue)

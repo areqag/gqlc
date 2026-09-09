@@ -298,7 +298,7 @@ var listCarrierParamQuery = codegen.NamedQuery{
 	Name:        "WriteSpans",
 	Cardinality: queryfile.CardinalityExec,
 	SourceFile:  temporalSource,
-	SourceText:  "CREATE (s:Spans {startsOn: $startsOn, opensAt: $opensAt, lasts: $lasts, mayLast: $mayLast})\n",
+	SourceText:  "CREATE (s:Spans {startsOn: $startsOn, opensAt: $opensAt, lasts: $lasts, mayLast: $mayLast, mayMiss: $mayMiss})\n",
 	Validated: resolver.ValidatedQuery{
 		Statement: resolver.StatementWrite,
 		Parameters: []resolver.ResolvedParameter{
@@ -306,6 +306,21 @@ var listCarrierParamQuery = codegen.NamedQuery{
 			{Name: "opensAt", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeLocalTime, true)}},
 			{Name: "lasts", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeDuration, true)}},
 			{Name: "mayLast", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeDuration, true), Nullable: true}},
+			// The nullable ELEMENT, which is the other axis (bd
+			// gqlc-dxhwp). mayLast is a nullable LIST — the whole value may
+			// be absent and every element it has is a Duration — while this
+			// list is always present and any element of it may be null. The
+			// two compose to different encoders and only this one puts an
+			// agtypeEncodedNullable inside an agtypeEncodedList.
+			//
+			// It is a DATE and not a Duration because the fall-through this
+			// witnesses is silent: a leaf the encoder switch does not match
+			// is read as "crosses raw", and json.Marshal over a *Duration
+			// writes {"Months":0,...} while over a *Date it writes an
+			// object too — but the DATE is the width whose correct crossing
+			// is a plain string, so a raw pass-through is visible in the
+			// bound text rather than in a field ordering.
+			{Name: "mayMiss", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeDate, false)}},
 		},
 	},
 }

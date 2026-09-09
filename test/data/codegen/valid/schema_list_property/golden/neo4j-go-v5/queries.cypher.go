@@ -14,7 +14,7 @@ const getEventTagsQueryText = `MATCH (e:Event) RETURN e.tags AS tags`
 // GetEventTags executes the GetEventTags query.
 //
 //	MATCH (e:Event) RETURN e.tags AS tags
-func (q *queries) GetEventTags(ctx context.Context) (*[]string, error) {
+func (q *queries) GetEventTags(ctx context.Context) (*[]*string, error) {
 	records, err := q.db.run(ctx, getEventTagsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
@@ -29,15 +29,19 @@ func (q *queries) GetEventTags(ctx context.Context) (*[]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetEventTags: decode column %q: %w", "tags", err)
 	}
-	var valuePtr *[]string
+	var valuePtr *[]*string
 	if !isNil {
-		acc := make([]string, 0, len(value))
+		acc := make([]*string, 0, len(value))
 		for i, elem := range value {
+			if elem == nil {
+				acc = append(acc, nil)
+				continue
+			}
 			v, ok := elem.(string)
 			if !ok {
 				return nil, fmt.Errorf("GetEventTags: decode column %q element %d: expected string, got %T", "tags", i, elem)
 			}
-			acc = append(acc, v)
+			acc = append(acc, &v)
 		}
 		valuePtr = &acc
 	}

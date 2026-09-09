@@ -12,7 +12,7 @@ import (
 // Event corresponds to the Event node type.
 type Event struct {
 	Id   int64
-	Tags *[]string
+	Tags *[]*string
 }
 
 // decodeEvent decodes a driver dbtype.Node into a Event struct,
@@ -40,13 +40,17 @@ func decodeEvent(node dbtype.Node) (Event, error) {
 		if !ok {
 			return Event{}, fmt.Errorf("decode Event.Tags: property %q: expected []any, got %T", "tags", v)
 		}
-		narrowed := make([]string, 0, len(s))
+		narrowed := make([]*string, 0, len(s))
 		for i0, elem0 := range s {
+			if elem0 == nil {
+				narrowed = append(narrowed, nil)
+				continue
+			}
 			v0, ok := elem0.(string)
 			if !ok {
 				return Event{}, fmt.Errorf("decode Event.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
 			}
-			narrowed = append(narrowed, v0)
+			narrowed = append(narrowed, &v0)
 		}
 		out.Tags = &narrowed
 	}

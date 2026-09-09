@@ -44,6 +44,24 @@ func relationship(props map[string]any) dbtype.Relationship {
 	}
 }
 
+// ptrs builds the want side of an assertion over a list whose elements
+// the schema permits to be NULL, which every list of a declared width
+// here is unless the width says NOT NULL (bd gqlc-dxhwp).
+//
+// It compares by VALUE despite the pointers: reflect.DeepEqual follows a
+// pointer and compares what it points at, so a want built here disagrees
+// with a decode that produced the wrong VALUE and agrees with one that
+// merely allocated elsewhere — which is the claim these tests are making.
+// A want of nil for one element is written into the literal instead, and
+// DeepEqual holds that apart from a pointer to the zero value.
+func ptrs[T any](vs ...T) []*T {
+	out := make([]*T, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, &v)
+	}
+	return out
+}
+
 // typedRelationship is `relationship` under a wire label the caller
 // chooses. Only the edge-union dispatch reads that field: a column the
 // query committed to one edge type decodes whatever arrives under it
@@ -224,32 +242,143 @@ func TestListyNarrowsEachElement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeListy = error %v", err)
 	}
-	if want := []string{"a", "b"}; !reflect.DeepEqual(got.Tags, want) {
+	if want := ptrs("a", "b"); !reflect.DeepEqual(got.Tags, want) {
 		t.Errorf("decodeListy().Tags = %#v, want %#v", got.Tags, want)
 	}
-	if want := []int32{1, -2}; !reflect.DeepEqual(got.Ranks, want) {
+	if want := ptrs[int32](1, -2); !reflect.DeepEqual(got.Ranks, want) {
 		t.Errorf("decodeListy().Ranks = %#v, want %#v", got.Ranks, want)
 	}
-	if want := [][]byte{{1, 2}, {}}; !reflect.DeepEqual(got.Blobs, want) {
+	if want := ptrs([]byte{1, 2}, []byte{}); !reflect.DeepEqual(got.Blobs, want) {
 		t.Errorf("decodeListy().Blobs = %#v, want %#v", got.Blobs, want)
 	}
-	if want := []time.Time{stamp}; !reflect.DeepEqual(got.Stamps, want) {
+	if want := ptrs(stamp); !reflect.DeepEqual(got.Stamps, want) {
 		t.Errorf("decodeListy().Stamps = %#v, want %#v", got.Stamps, want)
 	}
-	if want := ([]Date{{Year: 2026, Month: 8, Day: 29}, {Year: 1969, Month: 12, Day: 31}}); !reflect.DeepEqual(got.Marks, want) {
+	if want := ptrs(Date{Year: 2026, Month: 8, Day: 29}, Date{Year: 1969, Month: 12, Day: 31}); !reflect.DeepEqual(got.Marks, want) {
 		t.Errorf("decodeListy().Marks = %#v, want %#v", got.Marks, want)
 	}
-	if want := ([]Duration{
-		{Months: 14, Days: 3, Seconds: 5025, Nanos: 7},
-		{Months: 1, Days: 200, Seconds: 3, Nanos: 999999999},
-	}); !reflect.DeepEqual(got.Lapses, want) {
+	if want := ptrs(
+		Duration{Months: 14, Days: 3, Seconds: 5025, Nanos: 7},
+		Duration{Months: 1, Days: 200, Seconds: 3, Nanos: 999999999},
+	); !reflect.DeepEqual(got.Lapses, want) {
 		t.Errorf("decodeListy().Lapses = %#v, want %#v", got.Lapses, want)
 	}
 	if got.Depths == nil {
 		t.Fatalf("decodeListy().Depths = nil, want a list")
 	}
-	if want := []float32{0.5, 1.5}; !reflect.DeepEqual(*got.Depths, want) {
+	if want := ptrs[float32](0.5, 1.5); !reflect.DeepEqual(*got.Depths, want) {
 		t.Errorf("decodeListy().Depths = %#v, want %#v", *got.Depths, want)
+	}
+}
+
+// TestListyCarriesNullElements is the bead's own reproduction, run
+// against the emitted decoders rather than against their text
+// (bd gqlc-dxhwp). Every list here declares a WIDTH, so before the fix
+// each element was asserted straight to its bare carrier and the first
+// NULL failed the whole property with `expected string, got <nil>` — a
+// refusal of a value `LIST<STRING>` explicitly permits.
+//
+// TestBinCarriesNullElements makes the same claim for the widths that
+// have no declared element shape, where the null rode through as an
+// untyped nil and always worked. This is the other half, and the halves
+// take different decode arms: Bin's lists are `[]any`, which
+// writeSliceNarrow is never asked to walk at all.
+//
+// One row per ELEMENT ARM of that walk, because the nil check is emitted
+// per arm and an arm shown to admit a null says nothing about the next:
+// tags takes the plain assign, ranks and depths the per-element
+// narrowing call, blobs the arm whose carrier is already the declared
+// width, and marks the temporal arm crossing through toDate. The null
+// sits in a different POSITION in each — first, middle, last, and alone
+// — so a walk that admitted only the null it happened to be handed last
+// disagrees somewhere.
+func TestListyCarriesNullElements(t *testing.T) {
+	got, err := decodeListy(node("Listy", map[string]any{
+		"tags":   []any{nil, "b"},
+		"ranks":  []any{int64(1), nil, int64(-2)},
+		"blobs":  []any{[]byte{1, 2}, nil},
+		"stamps": []any{nil},
+		"marks":  []any{nil, dbtype.Date(time.Date(2026, time.August, 29, 0, 0, 0, 0, time.UTC))},
+		"lapses": []any{dbtype.Duration{Months: 1, Days: 2, Seconds: 3, Nanos: 4}, nil},
+		"depths": []any{nil, 1.5},
+	}))
+	if err != nil {
+		t.Fatalf("decodeListy(nulls) = error %v", err)
+	}
+	b := "b"
+	if want := []*string{nil, &b}; !reflect.DeepEqual(got.Tags, want) {
+		t.Errorf("decodeListy(nulls).Tags = %#v, want %#v", got.Tags, want)
+	}
+	one, minusTwo := int32(1), int32(-2)
+	if want := []*int32{&one, nil, &minusTwo}; !reflect.DeepEqual(got.Ranks, want) {
+		t.Errorf("decodeListy(nulls).Ranks = %#v, want %#v", got.Ranks, want)
+	}
+	blob := []byte{1, 2}
+	if want := []*[]byte{&blob, nil}; !reflect.DeepEqual(got.Blobs, want) {
+		t.Errorf("decodeListy(nulls).Blobs = %#v, want %#v", got.Blobs, want)
+	}
+	if want := []*time.Time{nil}; !reflect.DeepEqual(got.Stamps, want) {
+		t.Errorf("decodeListy(nulls).Stamps = %#v, want %#v", got.Stamps, want)
+	}
+	mark := Date{Year: 2026, Month: 8, Day: 29}
+	if want := []*Date{nil, &mark}; !reflect.DeepEqual(got.Marks, want) {
+		t.Errorf("decodeListy(nulls).Marks = %#v, want %#v", got.Marks, want)
+	}
+	lapse := Duration{Months: 1, Days: 2, Seconds: 3, Nanos: 4}
+	if want := []*Duration{&lapse, nil}; !reflect.DeepEqual(got.Lapses, want) {
+		t.Errorf("decodeListy(nulls).Lapses = %#v, want %#v", got.Lapses, want)
+	}
+	if got.Depths == nil {
+		t.Fatalf("decodeListy(nulls).Depths = nil, want a list")
+	}
+	depth := float32(1.5)
+	if want := []*float32{nil, &depth}; !reflect.DeepEqual(*got.Depths, want) {
+		t.Errorf("decodeListy(nulls).Depths = %#v, want %#v", *got.Depths, want)
+	}
+}
+
+// TestSlotElementsStayBareUnderNotNull is the CONTROL on the two tests
+// above, and the reason the break the star introduces is bounded rather
+// than fleet-wide: `LIST<STRING NOT NULL>` keeps its bare `[]string`,
+// and a NULL element in one is still a violation the decode reports.
+//
+// A schema that forbids nulls in a list gets a decoder that refuses one.
+// Without this row, a fix that starred EVERY element would pass
+// everything above while silently substituting a zero value for a
+// violation this backend exists to name — and no assertion over a
+// nullable list can see that.
+//
+// Slot is otherwise declared for the ENCODE direction alone; this is the
+// only place its widths are decoded, and it is here because it is the
+// only type in this fixture whose list elements carry NOT NULL.
+func TestSlotElementsStayBareUnderNotNull(t *testing.T) {
+	got, err := decodeSlot(node("Slot", map[string]any{
+		"id":   int64(7),
+		"tags": []any{"a", "b"},
+		"days": []any{dbtype.Date(time.Date(2026, time.August, 29, 0, 0, 0, 0, time.UTC))},
+	}))
+	if err != nil {
+		t.Fatalf("decodeSlot = error %v", err)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(got.Tags, want) {
+		t.Errorf("decodeSlot().Tags = %#v, want %#v", got.Tags, want)
+	}
+	if want := []Date{{Year: 2026, Month: 8, Day: 29}}; !reflect.DeepEqual(got.Days, want) {
+		t.Errorf("decodeSlot().Days = %#v, want %#v", got.Days, want)
+	}
+
+	_, err = decodeSlot(node("Slot", map[string]any{
+		"id":   int64(7),
+		"tags": []any{"a", nil},
+		"days": []any{},
+	}))
+	if err == nil {
+		t.Fatalf("decodeSlot(tags: [a, null]) = no error, want a refusal")
+	}
+	for _, want := range []string{"decode Slot.Tags", `"tags"`, "element 1", "expected string", "got <nil>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("decodeSlot(tags: [a, null]) = %v, want it to name %q", err, want)
+		}
 	}
 }
 
@@ -436,13 +565,15 @@ func TestEdgyNarrowsOverARelationship(t *testing.T) {
 	if got.Rank != int32(-3) {
 		t.Errorf("decodeEdgy().Rank = %#v, want -3", got.Rank)
 	}
-	if want := []int32{1, -2}; !reflect.DeepEqual(got.Ranks, want) {
+	if want := ptrs[int32](1, -2); !reflect.DeepEqual(got.Ranks, want) {
 		t.Errorf("decodeEdgy().Ranks = %#v, want %#v", got.Ranks, want)
 	}
 	// The elements the driver hands back already the declared width. The
-	// walk asserts to []byte and appends what it asserted, and an empty
-	// element has to survive that as itself rather than as a nil slice.
-	if want := [][]byte{{1, 2}, {}}; !reflect.DeepEqual(got.Blobs, want) {
+	// walk asserts to []byte and appends the address of what it asserted,
+	// and an empty element has to survive that as an empty slice rather
+	// than as a nil one — which is a different claim from the nil ELEMENT
+	// the star now carries, and the reason both are here.
+	if want := ptrs([]byte{1, 2}, []byte{}); !reflect.DeepEqual(got.Blobs, want) {
 		t.Errorf("decodeEdgy().Blobs = %#v, want %#v", got.Blobs, want)
 	}
 	if want := map[string]any{"k": "v"}; !reflect.DeepEqual(got.Payload, want) {
@@ -457,7 +588,7 @@ func TestEdgyNarrowsOverARelationship(t *testing.T) {
 	if got.Depths == nil {
 		t.Fatalf("decodeEdgy().Depths = nil, want a list")
 	}
-	if want := []float32{0.5, 1.5}; !reflect.DeepEqual(*got.Depths, want) {
+	if want := ptrs[float32](0.5, 1.5); !reflect.DeepEqual(*got.Depths, want) {
 		t.Errorf("decodeEdgy().Depths = %#v, want %#v", *got.Depths, want)
 	}
 	if got.Weight == nil {
@@ -659,16 +790,16 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 		t.Fatalf("ListyColumns returned %d rows, want 1", len(got))
 	}
 	row := got[0]
-	if want := []string{"a", "b"}; !reflect.DeepEqual(row.Tags, want) {
+	if want := ptrs("a", "b"); !reflect.DeepEqual(row.Tags, want) {
 		t.Errorf("ListyColumns()[0].Tags = %#v, want %#v", row.Tags, want)
 	}
-	if want := [][]byte{{1, 2}, {}}; !reflect.DeepEqual(row.Blobs, want) {
+	if want := ptrs([]byte{1, 2}, []byte{}); !reflect.DeepEqual(row.Blobs, want) {
 		t.Errorf("ListyColumns()[0].Blobs = %#v, want %#v", row.Blobs, want)
 	}
 	if row.Depths == nil {
 		t.Fatalf("ListyColumns()[0].Depths = nil, want a list")
 	}
-	if want := []float32{0.5, 1.5}; !reflect.DeepEqual(*row.Depths, want) {
+	if want := ptrs[float32](0.5, 1.5); !reflect.DeepEqual(*row.Depths, want) {
 		t.Errorf("ListyColumns()[0].Depths = %#v, want %#v", *row.Depths, want)
 	}
 
@@ -1053,16 +1184,16 @@ func TestEntityColumnsDecodeWholeEntities(t *testing.T) {
 	if row.E.Rank != int32(-3) {
 		t.Errorf("EntityColumns()[0].E.Rank = %#v, want -3", row.E.Rank)
 	}
-	if want := []int32{1}; !reflect.DeepEqual(row.E.Ranks, want) {
+	if want := ptrs[int32](1); !reflect.DeepEqual(row.E.Ranks, want) {
 		t.Errorf("EntityColumns()[0].E.Ranks = %#v, want %#v", row.E.Ranks, want)
 	}
 	if row.E.Payload != any(int64(1)) {
 		t.Errorf("EntityColumns()[0].E.Payload = %#v, want 1", row.E.Payload)
 	}
-	if want := []string{"a"}; !reflect.DeepEqual(row.L.Tags, want) {
+	if want := ptrs("a"); !reflect.DeepEqual(row.L.Tags, want) {
 		t.Errorf("EntityColumns()[0].L.Tags = %#v, want %#v", row.L.Tags, want)
 	}
-	if want := []int32{1}; !reflect.DeepEqual(row.L.Ranks, want) {
+	if want := ptrs[int32](1); !reflect.DeepEqual(row.L.Ranks, want) {
 		t.Errorf("EntityColumns()[0].L.Ranks = %#v, want %#v", row.L.Ranks, want)
 	}
 
@@ -1474,7 +1605,7 @@ func TestOptionalEntityColumnsCarryTheirNull(t *testing.T) {
 	if got[0].L == nil {
 		t.Fatalf("OptionalEntityColumns()[0].L = nil, want a pointer to a Listy")
 	}
-	if want := []string{"a"}; !reflect.DeepEqual(got[0].L.Tags, want) {
+	if want := ptrs("a"); !reflect.DeepEqual(got[0].L.Tags, want) {
 		t.Errorf("OptionalEntityColumns()[0].L.Tags = %#v, want %#v", got[0].L.Tags, want)
 	}
 

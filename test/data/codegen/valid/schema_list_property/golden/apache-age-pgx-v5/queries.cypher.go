@@ -12,7 +12,7 @@ const getEventTagsQueryText = `MATCH (e:Event) RETURN e.tags AS tags`
 // GetEventTags executes the GetEventTags query.
 //
 //	MATCH (e:Event) RETURN e.tags AS tags
-func (q *queries) GetEventTags(ctx context.Context) (*[]string, error) {
+func (q *queries) GetEventTags(ctx context.Context) (*[]*string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", getEventTagsQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
@@ -38,9 +38,9 @@ func (q *queries) GetEventTags(ctx context.Context) (*[]string, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("GetEventTags: %w", err)
 	}
-	var value0 *[]string
+	var value0 *[]*string
 	if raw0 != nil {
-		decoded, err := agtypeListOfString(raw0)
+		decoded, err := agtypeListOfNullableString(raw0)
 		if err != nil {
 			return nil, fmt.Errorf("GetEventTags: decode column %q: %w", "tags", err)
 		}

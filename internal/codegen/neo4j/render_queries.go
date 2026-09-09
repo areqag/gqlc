@@ -134,15 +134,13 @@ func listElemNeedsImports(e *codegen.ListElem) (needDbtype, needTime bool) {
 }
 
 // goTypeNeedsImports reports whether a Go type text names dbtype or
-// time. Both are single-string prefix checks; list types are walked
-// element-wise by stripping the leading "[]".
+// time. Both are tests on the LEAF, because a package qualifier can only
+// appear there: leafType strips the slice prefixes and the
+// element-nullability stars alike, so `[]*time.Time` answers the same as
+// `time.Time` rather than falling through as a text equal to neither.
 func goTypeNeedsImports(ty string) (bool, bool) {
-	if elem := strings.TrimPrefix(ty, "[]"); elem != ty {
-		return goTypeNeedsImports(elem)
-	}
-	needDbtype := strings.HasPrefix(ty, "dbtype.")
-	needTime := ty == "time.Time"
-	return needDbtype, needTime
+	leaf := leafType(ty)
+	return strings.HasPrefix(leaf, "dbtype."), leaf == "time.Time"
 }
 
 // decodeNeedsImports is goTypeNeedsImports for a decode position, where
@@ -553,7 +551,7 @@ func sliceParamBindExpr(goType string, width graph.PropertyType, nullable bool, 
 	var helper string
 	switch {
 	case isTemporalCarrier(leaf):
-		helper = temporalListHelper(leaf)
+		helper = temporalListHelper(leaf, listElemIsNullable(goType))
 	case codegen.IsDeclaredRecord(leaf, leafWidth):
 		// The second leaf packStruct refuses, and it arrives here for
 		// exactly the reason the paragraph above gives: packV walks the
@@ -948,6 +946,31 @@ func carriesElemBare(e *codegen.ListElem) bool {
 	}
 }
 
+// writeNilElemArm emits the arm that admits a NULL list element: the
+// accumulator takes an untyped nil — which is the nil pointer of the
+// element's starred type — and the iteration ends before anything asks
+// the driver value what it is.
+//
+// `continue` rather than an else block so the arms below stay at one
+// indent level whether or not the element is nullable, which keeps the
+// non-nullable emission byte-identical to what it was.
+func writeNilElemArm(b *strings.Builder, accVar, iterVar, indent string) {
+	fmt.Fprintf(b, "%sif %s == nil {\n", indent, iterVar)
+	fmt.Fprintf(b, "%s\t%s = append(%s, nil)\n", indent, accVar, accVar)
+	fmt.Fprintf(b, "%s\tcontinue\n", indent)
+	fmt.Fprintf(b, "%s}\n", indent)
+}
+
+// addrIf prefixes an addressable local with `&` when the element it
+// fills is nullable. Every caller passes a LOCAL rather than an
+// expression, because Go has no address of a call result.
+func addrIf(nullable bool, local string) string {
+	if nullable {
+		return "&" + local
+	}
+	return local
+}
+
 // walkListElemBody emits the body of one list-element loop iteration
 // (spec §5.5). Every arm is a case on the plan's committed codegen.ColumnKind
 // — the render layer walks committed data only, never a resolver type.
@@ -963,18 +986,37 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, iterVar)
 			return
 		}
-		carrier := driverCarrier(e.GoType)
+		// A nullable element's nil arm comes BEFORE the assertion, or the
+		// assertion is still the thing that runs: the driver hands a NULL
+		// element back as a nil `any`, and `elem.(string)` is false for
+		// one, so the column would fail on a value the schema declared
+		// legal. Everything after it asks the driver about the BASE, the
+		// wire having no pointer to offer.
+		base := elemBase(e.GoType)
+		if e.Nullable {
+			writeNilElemArm(b, accVar, iterVar, indent)
+		}
+		carrier := driverCarrier(base)
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, carrier)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, carrier, f.ColumnName, iterVar, indent)
 		switch {
-		case isTemporalCarrier(e.GoType):
-			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, narrowExpr(e.GoType, "v"))
-		case carrier != e.GoType:
-			fmt.Fprintf(b, "%svn, err := %s\n", indent, narrowCall(e.GoType, e.Width, "v"))
+		case isTemporalCarrier(base):
+			// The conversion is bound to a local first when the element is
+			// nullable, because Go has no address of a call result.
+			if e.Nullable {
+				fmt.Fprintf(b, "%svn := %s\n", indent, narrowExpr(base, "v"))
+				fmt.Fprintf(b, "%s%s = append(%s, &vn)\n", indent, accVar, accVar)
+				return
+			}
+			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, narrowExpr(base, "v"))
+		case carrier != base:
+			fmt.Fprintf(b, "%svn, err := %s\n", indent, narrowCall(base, e.Width, "v"))
 			fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
-			fmt.Fprintf(b, "%s%s = append(%s, vn)\n", indent, accVar, accVar)
+			// The address taken is the NARROWED local's, not the carrier's:
+			// the field holds *int32, and &v would be an *int64.
+			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, addrIf(e.Nullable, "vn"))
 		default:
-			fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
+			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, addrIf(e.Nullable, "v"))
 		}
 	case codegen.ColumnTemporal:
 		// The element arrives as the driver's carrier, which for the
@@ -1039,11 +1081,14 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		// weight.
 		inner := elemLocal("inner", depth+1)
 		innerAcc := elemLocal("innerAcc", depth+1)
+		if e.Nullable {
+			writeNilElemArm(b, accVar, iterVar, indent)
+		}
 		fmt.Fprintf(b, "%s%s, ok := %s.([]any)\n", indent, inner, iterVar)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected []any, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
-		fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, innerAcc, e.GoType, inner)
+		fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, innerAcc, elemBase(e.GoType), inner)
 		walkListElemPlan(b, p, f, e.Nested, innerAcc, inner, zero, indent, depth+1)
-		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, innerAcc)
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, addrIf(e.Nullable, innerAcc))
 	}
 }
 
