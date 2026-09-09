@@ -2832,13 +2832,11 @@ test-codegen-live:
 test-codegen-live-neo4j:
     cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestNeo4jRefusesAMapValuedStoredProperty|TestAGERefusesAUint64ParameterAboveMaxInt64' -skip 'TestLiveSmoke/apache-age' ./...
 
-# the Apache AGE half: the smoke battery's AGE arm, the session-init contract,
-# the dialect fact the AGE backend's edge-union refusal rests on, the offset
-# sidecar's two live branches, the AGE half of the nested-list divergence
-# ADR 0035 rests on, and the AGE half of the record-storage measurement the
-# RECORD carrier design demands before either backend's StorableProperty is
-# written — each on its own apache/age container. Nightly and manual
-# only — these containers are cost this project does not charge to a pull
+# the Apache AGE half of the live battery: the smoke battery's AGE arm, the
+# session-init contract, and the AGE-only probes. The -run alternation below is
+# the source of truth for which probes those are — this sentence describes the
+# shape, not the roster. Each runs on its own apache/age container. Nightly and
+# manual only — these containers are cost this project does not charge to a pull
 # request. -count=1 because this is the AGE arm's only gate and no pull request
 # pays for it, so the run it reports on has to be a real
 # one.
