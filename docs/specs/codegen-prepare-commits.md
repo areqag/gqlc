@@ -4,15 +4,18 @@ Bead: `gqlc-ls8.3` (parent `gqlc-ls8`, "Architecture deepening: five module-dept
 refactors from the 2026-07-12 review").
 
 Deepening target: split between `internal/codegen/prepare.go` +
-`internal/codegen/types.go` and `internal/codegen/render_*.go` today shares
+`internal/codegen/types.go` and `internal/codegen/neo4j/render_*.go` today shares
 authority over the D3 type-mapping table (ADR 0010). Prepare switches on
 `resolver.ResolvedType` on 8 arms; `types.go` carries the mapping tables
 (`goType`, `temporalGoType`, `scalarGoType`, `resolvedListGoType`);
 `render_queries.go` re-switches on the same closed sum at emission time (list-
 element decode: `writeListElementBody` / `writeListElementDecode` /
-`listElemUsesBareAppend`), and both `render_queries.go:294` and
-`render_querier.go:{43,53}` reach into `resolver.StatementRead` /
+`listElemUsesBareAppend`), and both `internal/codegen/neo4j/render_queries.go:398`
+(`accessModeText`) and `internal/codegen/neo4j/render_querier.go:{43,53}` are
+the sites that reached into `resolver.StatementRead` /
 `resolver.StatementWrite` to pick an access mode and interface membership.
+The stage has since landed: both walk committed `IsWrite` instead, and no
+`resolver.*` reference remains on the render side (§4.3).
 
 Failure mode this seam produces: a new `ResolvedType` variant (or a new
 `Statement` value) compiles through `default:` arms in prepare — Phase A rejects
@@ -40,7 +43,7 @@ touched.
 The decisions currently re-derived at render time, and the field or method on
 the prepared model each commits to.
 
-### 1.1 Access mode per method (`render_queries.go:293-298`)
+### 1.1 Access mode per method (`internal/codegen/neo4j/render_queries.go:398-403`)
 
 ```go
 func accessModeText(p preparedQuery) string {
@@ -81,10 +84,13 @@ func accessModeText(m accessMode) string {
 }
 ```
 
-`render_queries.go` calls `accessModeText(p.AccessMode)`; the
-`resolver.StatementWrite` reference at line 294 goes away.
+`render_queries.go` calls `accessModeText(p.IsWrite)`
+(`internal/codegen/neo4j/render_queries.go:391,426`); the
+`resolver.StatementWrite` reference the pre-stage body carried at line 294 is
+gone — `accessModeText` now takes `isWrite bool`
+(`internal/codegen/neo4j/render_queries.go:398`).
 
-### 1.2 Querier interface membership (`render_querier.go:41-60`)
+### 1.2 Querier interface membership (`internal/codegen/neo4j/render_querier.go:41-60`)
 
 ```go
 if p.Validated.Statement != resolver.StatementRead { continue }
@@ -95,14 +101,15 @@ if p.Validated.Statement != resolver.StatementWrite { continue }
 Moves to a `preparedQuery.IsWrite bool` committed in Phase B (linus confirmed:
 real two-value axis, boolean is the honest type). Emission filters
 `ReadQuerier` on `!p.IsWrite`, `WriteQuerier` on `p.IsWrite`. The two
-`resolver.StatementRead` / `resolver.StatementWrite` references at
-`render_querier.go:{43,53}` go away.
+`resolver.StatementRead` / `resolver.StatementWrite` references that sat at
+`internal/codegen/neo4j/render_querier.go:{43,53}` went away with the stage;
+those lines now filter on `p.IsWrite` / `!p.IsWrite`.
 
-`prepare.go:493`'s `resolver.StatementWrite` reference (Phase A shape-mismatch
+`internal/codegen/prepare.go:761`'s `resolver.StatementWrite` reference (Phase A shape-mismatch
 message) stays where it is — Phase A is the mapping-table's home, prepare/types
 are allowed to see resolver types; only render_*.go must not.
 
-### 1.3 List-element decode arms (`render_queries.go:569-672`)
+### 1.3 List-element decode arms (`walkListElemPlan` at `internal/codegen/neo4j/render_queries.go:875`; the pre-stage `writeListElementBody` range retired)
 
 The load-bearing switch. `writeListElementDecode` computes an index-var name by
 peeking at the element type via `listElemUsesBareAppend`; `writeListElementBody`
@@ -143,7 +150,7 @@ const (
 ```
 
 Behavioural note on `columnScalarNull`: at the top level today, Phase B sends
-`ScalarNull` to `columnAny` (`prepare.go:668-670`) because it decodes through
+`ScalarNull` to `columnAny` (`internal/codegen/prepare.go:1195-1197`, now spelled `ColumnAny`) because it decodes through
 `record.Get` (no `GetRecordValue[any]` overload). That decode-shape
 distinction is preserved: the top-level switch treats `columnScalarNull`
 and `columnAny` identically (both dispatch to the record.Get arm at
@@ -183,8 +190,9 @@ Notes:
   triggers `Nested` recursion. Every other `columnKind` at `Nested` is
   disallowed structurally: `Nested` is nil except for `columnList`.
 
-Phase B builds the plan recursively from `t.Element`, mirroring the existing
-`resolvedListGoType` walk (`internal/codegen/types.go:251-303`): same
+Phase B builds the plan recursively from `t.Element`, mirroring the retired
+`resolvedListGoType` walk — now `buildListElemPlan`
+(`internal/codegen/prepare.go:1499`): same
 recursion shape, same entity-index lookups, same edgeUnion-name synthesis —
 but it commits the derived shape into the plan instead of only returning the
 GoType string. `resolvedListGoType` retires: both Phase A (validity probe)
@@ -198,7 +206,7 @@ the same bytes. `render_queries.go` loses its
 `import "github.com/areqag/gqlc/internal/resolver"` line entirely (once §1.1
 and §1.2 also land).
 
-### 1.4 `preparedRow.ListElem resolver.ResolvedType` field (`prepare.go:72`)
+### 1.4 `preparedRow.ListElem resolver.ResolvedType` field (`Row.ListElem *ListElem` at `internal/codegen/prepare.go:153`)
 
 Retires and is **replaced in one atomic commit** (B4). The field's only reader
 is `render_queries.go`'s list decode. `preparedListElem` replaces it.
@@ -213,7 +221,7 @@ through `NamedQuery.Validated`, which is fine — the code contract is that
 lifted, §1.1/§1.2). To make this contract enforceable, a grep test runs in
 the fence (§4.3).
 
-### 1.5 `preparedRow.EdgeKeys` field (`prepare.go:73`)
+### 1.5 `preparedRow.EdgeKeys` field (`Row.EdgeKeys` at `internal/codegen/prepare.go:154`)
 
 Kept as-is at Phase B. It carries `schema.EdgeKey` values (schema-side, not
 resolver-side), so it does not fall under the "no resolver types in render"
@@ -236,7 +244,7 @@ target. Confirmed as intentional in §5.1 below.
   `temporalGoType`, `scalarGoType`) — these ARE the D3 table's home. They
   stay in `types.go` and remain called only by prepare + list-plan
   construction. Their signatures do not change.
-- `internal/codegen/render_models.go`, `render_db.go`, `render_querier.go`,
+- `internal/codegen/neo4j/render_models.go`, `render_db.go`, `render_querier.go`,
   `render_queries.go` — file layout unchanged. `render_models.go` and
   `render_db.go` have no `resolver.*` references today; `render_querier.go`
   and `render_queries.go` do — those references get lifted, but the files
@@ -295,13 +303,17 @@ distinction. Top-level Phase B assignment stays at `columnAny` for
 `[]*preparedEdgeUnion` (linus's preferred option (b)). One-line type change;
 every current reader that ranges values just ranges pointers instead:
 
-- `prepare.go:695-736` (Phase B append sites) — the append target becomes a
-  `*preparedEdgeUnion`, constructed at the call site.
-- `prepare.go:822-828` (`sweepIdentifiers` source 6) — ranges pointers.
-- `render_models.go:48-59` (`unions` local + `markersByEntity` walk) —
+- `internal/codegen/prepare.go:{1222,1255}` (Phase B append sites — top-level
+  edgeUnion and list-of-edgeUnion) — each appends a `*EdgeUnion` constructed
+  at the call site.
+- `internal/codegen/prepare.go:1405-1408` (`sweepIdentifiers` source 6) — ranges pointers.
+- `internal/codegen/neo4j/render_models.go:50-62` (`unions` local + `markersByEntity` walk) —
   ranges pointers.
-- `render_queries.go:759-770` (`edgeKeyToEntityName`) — ranges pointers.
-- `render_queries.go:828-853` (`findEdgeUnionCandidates`) — ranges pointers.
+- `internal/codegen/neo4j/render_queries.go:1187-1198` (`edgeKeyToEntityName`) — ranges pointers.
+- `findEdgeUnionCandidates` (pre-stage `render_queries.go:828-853`) retired with
+  the stage: candidate admission moved to prepare (`admitEdgeUnionCandidates`,
+  `internal/codegen/prepare.go:1034`; leaf search `findEdgeUnionLeaf`, `:1468`);
+  the remaining render-side walk is `edgeKeyToEntityName` above.
 
 `preparedListElem.UnionIdx int` (per §1.3) stores an index into
 `preparedQuery.EdgeUnions`. Index is chosen over a raw `*preparedEdgeUnion`
@@ -309,7 +321,7 @@ pointer inside `preparedListElem` because:
 
 - the plan is built one column at a time, and the top-level column's
   `preparedEdgeUnion` may be appended AFTER the list plan for that same column
-  is constructed (see prepare.go:695 vs 727 — top-level union appended before
+  is constructed (see `internal/codegen/prepare.go:1222 vs 1255` — top-level union appended before
   list-of-edgeUnion; but a future refactor could reorder). An index is
   reorder-safe.
 - `sweepIdentifiers` and `render_models.go` walk `EdgeUnions` by position;
@@ -429,12 +441,15 @@ Widened grep pattern:
 
 ```sh
 ! grep -qE 'resolver\.' \
-    internal/codegen/render_queries.go \
-    internal/codegen/render_querier.go \
-    internal/codegen/render_models.go \
-    internal/codegen/render_db.go \
-    internal/codegen/render.go
+    internal/codegen/neo4j/render_queries.go \
+    internal/codegen/neo4j/render_querier.go \
+    internal/codegen/neo4j/render_models.go \
+    internal/codegen/neo4j/render_db.go
 ```
+
+(The fence has since landed as `TestRenderBoundaryNoResolverRef` in
+`internal/codegen/neo4j/render_boundary_test.go`, which scans `render*.go`
+in-directory instead of the shell form above.)
 
 Any `resolver.` substring — not just `resolver.(Resolved|Statement|Temporal|Scalar)`
 — fails the fence. `resolver.Property`, `resolver.ValidatedQuery`,
@@ -465,7 +480,7 @@ one-character one (workflow rule).
 ### 5.1 Why `preparedRow.EdgeKeys` stays
 
 `render_queries.go`'s edgeUnion column arm reads `f.EdgeKeys[i].Label` at
-`writeEdgeUnionDispatchBody` (line 743) to emit the switch case string. That
+`writeEdgeUnionDispatchBody` (`internal/codegen/neo4j/render_queries.go:1166`) to emit the switch case string. That
 label is a `schema.EdgeKey.Label` (a `graph.LabelSetKey`) — a schema-package
 value, not a resolver-package one. The "no resolver types in render" contract
 is scoped to `resolver.*`; `schema.*` and `graph.*` references at render time
@@ -503,7 +518,7 @@ Grep after this stage:
 internal/codegen/prepare.go   — many resolver.* refs (correct)
 internal/codegen/types.go     — many resolver.* refs (correct)
 internal/codegen/input.go     — 1 (the NamedQuery.Validated field, ADR 0010 D1)
-internal/codegen/render_*.go  — 0
+internal/codegen/neo4j/render_*.go  — 0
 ```
 
 That grep is the litmus: prepare owns the boundary, render never crosses it.
@@ -512,7 +527,7 @@ That grep is the litmus: prepare owns the boundary, render never crosses it.
 this deepening closes)
 
 Today: Phase A rejects an unknown variant via its `default:` arm
-(`prepare.go:565`), but a variant that Phase A were extended to admit could
+(`internal/codegen/prepare.go:864`), but a variant that Phase A were extended to admit could
 silently miscompile through render's `default:`. After this deepening: any
 render_*.go walk only sees `preparedListElem.Kind` and `preparedRow.Kind`
 (the shared closed `columnKind`) and `preparedQuery.AccessMode` (the closed
@@ -573,7 +588,7 @@ window with two writers for the same decision.**
    render changes.
 2. **Green + refactor**: introduce `accessMode` enum + `AccessMode`
    field on `preparedQuery`, populate in `phaseBDerive`. Update
-   `render_queries.go:accessModeText` to switch on the enum. Delete the
+   `internal/codegen/neo4j/render_queries.go:accessModeText` to switch on the enum. Delete the
    `resolver.StatementWrite` reference in that file. One atomic commit —
    old and new paths do not coexist.
 3. Same red / green+refactor pair for `IsWrite` and `render_querier.go`.
