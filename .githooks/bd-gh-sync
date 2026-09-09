@@ -1438,8 +1438,8 @@ _unusable=0
 #
 # The git common directory holds the lock because it is one per clone, which is
 # the granularity of what is being protected: a linked worktree's .beads/
-# redirects to the main checkout's database (.beads/.gitignore names that
-# redirect file), so sibling worktrees push one ledger to one GitHub repository,
+# reaches the main checkout's database, so sibling worktrees push one ledger
+# to one GitHub repository,
 # and that is the pair of sessions the measurement above came from. A lock
 # keyed to the worktree gives each of them one of its own. It also lives under
 # .git, which git neither tracks nor reports, so it is not a file anyone has to
