@@ -96,8 +96,16 @@ def run(argv, check=True):
     """
     result = subprocess.run(argv, capture_output=True, text=True)
     if check and result.returncode != 0:
+        # Name the endpoint, not a fixed slice: for a POST the third token
+        # is the verb flag ("gh api -X"), which says nothing about what was
+        # being posted or where.
+        endpoint = next((a for a in argv if a.startswith("repos/")), None)
+        if endpoint is not None:
+            prefix = f"{' '.join(argv[:2])} {endpoint}"
+        else:
+            prefix = " ".join(argv)
         sys.exit(
-            f"error: {' '.join(argv[:3])} failed (rc={result.returncode}):\n"
+            f"error: {prefix} failed (rc={result.returncode}):\n"
             f"{result.stderr.strip()}"
         )
     return result
@@ -315,7 +323,6 @@ def self_test_claimed_by():
     try:
         claimed_by("headsha", at_cap, ["docs/adr"])
     except SystemExit as refusal:
-        print(f"self-test ok: {name}")
         if str(COMPARE_FILE_CAP) not in str(refusal):
             failed = True
             print(
@@ -323,6 +330,8 @@ def self_test_claimed_by():
                 f"  the refusal does not name the cap: {refusal!s:.120}",
                 file=sys.stderr,
             )
+        else:
+            print(f"self-test ok: {name}")
     else:
         failed = True
         print(
