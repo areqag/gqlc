@@ -1074,8 +1074,8 @@ doctor: check-hooks check-worktree-upstream check-shared-config check-beads-expo
 ensure-golangci:
     #!/usr/bin/env bash
     set -euo pipefail
-    want="{{golangci_version}}"
-    if [ "$({{quote(golangci)}} version --short 2>/dev/null || true)" != "${want#v}" ]; then
+    want="{{ golangci_version }}"
+    if [ "$({{ quote(golangci) }} version --short 2>/dev/null || true)" != "${want#v}" ]; then
         echo "provisioning golangci-lint $want into .bin/" >&2
         attempts="${GQLC_PROVISION_ATTEMPTS:-4}"
         delay="${GQLC_PROVISION_DELAY:-2}"
@@ -1084,7 +1084,7 @@ ensure-golangci:
         while [ "$attempt" -le "$attempts" ]; do
             if curl --proto '=https' --tlsv1.2 -sSfL \
                     "https://raw.githubusercontent.com/golangci/golangci-lint/$want/install.sh" \
-                | sh -s -- -b {{quote(justfile_directory() + "/.bin")}} "$want"; then
+                | sh -s -- -b {{ quote(justfile_directory() + "/.bin") }} "$want"; then
                 installed=1
                 break
             fi
@@ -1112,7 +1112,7 @@ ensure-golangci:
     # install and no `go` on PATH, where the substitution exits 127 and takes
     # the whole recipe with it. A missing tool is the same case as an
     # unrecognised banner — no comparison to make, not an accusation.
-    built="$({{quote(golangci)}} version 2>/dev/null | sed -n 's/.*built with go\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p' | head -n 1 || true)"
+    built="$({{ quote(golangci) }} version 2>/dev/null | sed -n 's/.*built with go\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p' | head -n 1 || true)"
     here="$(go env GOVERSION 2>/dev/null | sed -n 's/^go\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p' || true)"
     if [ -n "$built" ] && [ -n "$here" ]; then
         built_major="${built%% *}"; built_minor="${built##* }"
@@ -1145,13 +1145,13 @@ ensure-golangci:
 ensure-shellcheck:
     #!/usr/bin/env bash
     set -euo pipefail
-    want="{{shellcheck_version}}"
-    have="$({{quote(shellcheck)}} --version 2>/dev/null | sed -n 's/^version: //p' || true)"
+    want="{{ shellcheck_version }}"
+    have="$({{ quote(shellcheck) }} --version 2>/dev/null | sed -n 's/^version: //p' || true)"
     if [ "$have" = "${want#v}" ]; then
         exit 0
     fi
     echo "provisioning shellcheck $want into .bin/" >&2
-    mkdir -p {{quote(justfile_directory() + "/.bin")}}
+    mkdir -p {{ quote(justfile_directory() + "/.bin") }}
     stage="$(mktemp -d)"
     trap 'rm -rf "$stage"' EXIT
     # Upstream releases name the OS with the kernel's own spelling lowercased —
@@ -1170,7 +1170,7 @@ ensure-shellcheck:
     curl --proto '=https' --tlsv1.2 -sSfL --retry 5 --retry-all-errors --retry-delay 2 \
         "https://github.com/koalaman/shellcheck/releases/download/$want/shellcheck-$want.$os.$(uname -m).tar.xz" \
         | tar -xJ -C "$stage"
-    install -m 0755 "$stage/shellcheck-$want/shellcheck" {{quote(shellcheck)}}
+    install -m 0755 "$stage/shellcheck-$want/shellcheck" {{ quote(shellcheck) }}
 
 # provisions the pinned ruff into the gitignored .bin/, exactly as
 # ensure-shellcheck does. Upstream ships a static binary per target triple, so
@@ -1184,19 +1184,19 @@ ensure-shellcheck:
 ensure-ruff:
     #!/usr/bin/env bash
     set -euo pipefail
-    want="{{ruff_version}}"
-    have="$({{quote(ruff)}} --version 2>/dev/null | sed -n 's/^ruff //p' || true)"
+    want="{{ ruff_version }}"
+    have="$({{ quote(ruff) }} --version 2>/dev/null | sed -n 's/^ruff //p' || true)"
     if [ "$have" = "$want" ]; then
         exit 0
     fi
     echo "provisioning ruff $want into .bin/" >&2
-    mkdir -p {{quote(justfile_directory() + "/.bin")}}
+    mkdir -p {{ quote(justfile_directory() + "/.bin") }}
     stage="$(mktemp -d)"
     trap 'rm -rf "$stage"' EXIT
     curl --proto '=https' --tlsv1.2 -sSfL --retry 5 --retry-all-errors --retry-delay 2 \
         "https://github.com/astral-sh/ruff/releases/download/$want/ruff-$(uname -m)-unknown-linux-gnu.tar.gz" \
         | tar -xz -C "$stage"
-    install -m 0755 "$stage/ruff-$(uname -m)-unknown-linux-gnu/ruff" {{quote(ruff)}}
+    install -m 0755 "$stage/ruff-$(uname -m)-unknown-linux-gnu/ruff" {{ quote(ruff) }}
 
 # ruff over the Python in .github/scripts (bd gqlc-tqi4).
 #
@@ -1232,7 +1232,7 @@ ensure-ruff:
 lint-python dir=".github/scripts": ensure-ruff
     #!/usr/bin/env bash
     set -euo pipefail
-    dir="{{dir}}"
+    dir="{{ dir }}"
     if [ ! -d "$dir" ]; then
         echo "error: '$dir' is not a directory, so ruff has nothing to lint" >&2
         exit 1
@@ -1264,10 +1264,10 @@ lint-python dir=".github/scripts": ensure-ruff
         echo "       scripts moved, or this is not the repository root (bd gqlc-tqi4)." >&2
         exit 1
     fi
-    echo "ruff {{ruff_version}} over ${#files[@]} python file(s) under $dir:"
+    echo "ruff {{ ruff_version }} over ${#files[@]} python file(s) under $dir:"
     printf '  %s\n' "${files[@]}"
-    {{ruff}} check --no-cache \
-        --config {{quote(justfile_directory() + "/.github/ruff.toml")}} -- "${files[@]}"
+    {{ ruff }} check --no-cache \
+        --config {{ quote(justfile_directory() + "/.github/ruff.toml") }} -- "${files[@]}"
 
 # shellcheck over the hooks tree (bd gqlc-jhi2). The hooks carry `# shellcheck
 # disable=` directives over deliberate exceptions — the SC2086 disable in
@@ -1292,7 +1292,7 @@ lint-python dir=".github/scripts": ensure-ruff
 lint-hooks dir=".githooks": ensure-shellcheck
     #!/usr/bin/env bash
     set -euo pipefail
-    dir="{{dir}}"
+    dir="{{ dir }}"
     if [ ! -d "$dir" ]; then
         echo "error: '$dir' is not a directory, so shellcheck has nothing to lint" >&2
         echo "       and this gate is watching nothing (bd gqlc-jhi2)." >&2
@@ -1344,9 +1344,9 @@ lint-hooks dir=".githooks": ensure-shellcheck
 
     # Printed, not just counted: the standing evidence in a CI log that the set
     # under the gate is the set anyone reviewing it expects.
-    echo "shellcheck {{shellcheck_version}} over ${#scripts[@]} shell script(s) under $dir:"
+    echo "shellcheck {{ shellcheck_version }} over ${#scripts[@]} shell script(s) under $dir:"
     printf '  %s\n' "${scripts[@]}"
-    {{shellcheck}} -- "${scripts[@]}"
+    {{ shellcheck }} -- "${scripts[@]}"
 
 # shellcheck over the justfile's OWN recipe bodies (bd gqlc-wprl).
 #
@@ -1383,7 +1383,7 @@ lint-hooks dir=".githooks": ensure-shellcheck
 lint-just: ensure-shellcheck
     #!/usr/bin/env bash
     set -euo pipefail
-    file="{{justfile()}}"
+    file="{{ justfile() }}"
     if [ ! -f "$file" ]; then
         echo "error: '$file' is not a file, so there are no recipe bodies to lint and this" >&2
         echo "       gate is watching nothing (bd gqlc-wprl)." >&2
@@ -1421,9 +1421,9 @@ lint-just: ensure-shellcheck
 
     # Printed by recipe name rather than by temp path, because the path is a
     # throwaway and the name is what a reader has to go and open.
-    echo "shellcheck {{shellcheck_version}} over ${#bodies[@]} justfile recipe body/bodies:"
+    echo "shellcheck {{ shellcheck_version }} over ${#bodies[@]} justfile recipe body/bodies:"
     cut -f1 <"$work/index" | sed 's/^/  /'
-    {{shellcheck}} --severity=warning -- "${bodies[@]}"
+    {{ shellcheck }} --severity=warning -- "${bodies[@]}"
 
 # .golangci.yml's run.build-tags list must be the tags this tree actually uses.
 #
@@ -1503,9 +1503,9 @@ lint-just: ensure-shellcheck
 check-golangci-formatters-report: ensure-golangci
     #!/usr/bin/env bash
     set -euo pipefail
-    probe="$(mktemp -d "{{scratch_root}}/gqlc-fmtprobe-XXXXXX")"
+    probe="$(mktemp -d "{{ scratch_root }}/gqlc-fmtprobe-XXXXXX")"
     trap 'rm -rf "${probe}"' EXIT
-    cp {{quote(justfile_directory() + "/.golangci.yml")}} "${probe}/.golangci.yml"
+    cp {{ quote(justfile_directory() + "/.golangci.yml") }} "${probe}/.golangci.yml"
     printf 'module gqlcfmtprobe\n\ngo 1.25\n' >"${probe}/go.mod"
 
     # The pristine file. It carries a package comment and a doc comment on the
@@ -1535,7 +1535,7 @@ check-golangci-formatters-report: ensure-golangci
     # repository's cache, and so the directory is removed with the trap.
     run_probe() {
         ( cd "${probe}" && GOLANGCI_LINT_CACHE="${probe}/cache" \
-            {{quote(lint_lock)}} {{quote(golangci)}} run ./... 2>&1 ) || return $?
+            {{ quote(lint_lock) }} {{ quote(golangci) }} run ./... 2>&1 ) || return $?
     }
 
     if ! control="$(run_probe)"; then
@@ -1735,7 +1735,7 @@ check-golangci-build-tags: sweep-discovery-probes
 sweep-discovery-probes:
     #!/usr/bin/env bash
     set -euo pipefail
-    names=({{discovery_probes}})
+    names=({{ discovery_probes }})
     trap 'rm -rf test/data/*.sweepwitness' EXIT
 
     # Three facts have to agree before the names below mean anything: the
@@ -1756,8 +1756,8 @@ sweep-discovery-probes:
         exit 1
     fi
 
-    evaluated="$('{{just_executable()}}' --justfile '{{justfile()}}' --evaluate)"
-    dumped="$('{{just_executable()}}' --justfile '{{justfile()}}' --dump)"
+    evaluated="$('{{ just_executable() }}' --justfile '{{ justfile() }}' --evaluate)"
+    dumped="$('{{ just_executable() }}' --justfile '{{ justfile() }}' --dump)"
     pairs="$(printf '%s\n' "${evaluated}" \
         | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*_probe\)  *:= "\(.*\)"$/\1\t\2/p')"
     if [ -z "${pairs}" ]; then
@@ -2044,7 +2044,7 @@ sweep-discovery-probes:
 # and gci. Ahead of the lint, so a tree whose formatter enforcement has gone
 # quiet says so before spending eighty seconds.
 lint: ensure-golangci lint-hooks (lint-hooks ".github/scripts") lint-python lint-just check-golangci-formatters-report check-golangci-build-tags
-    {{lint_lock}} {{golangci}} run
+    {{ lint_lock }} {{ golangci }} run
 
 # Guard: the golangci-lint analysis cache must be non-empty after lint.
 # Fails if GOLANGCI_LINT_CACHE in the justfile diverges from the path: in ci.yml (gqlc-b63).
@@ -2054,15 +2054,15 @@ lint-cache-check:
 
 # lints only lines changed since the given rev — the fast pre-push variant
 lint-new rev="origin/master": ensure-golangci
-    {{lint_lock}} {{golangci}} run --new-from-rev {{rev}}
+    {{ lint_lock }} {{ golangci }} run --new-from-rev {{ rev }}
 
 # rewrites formatting in place (gofumpt + gci, both bundled in golangci-lint)
 fmt: ensure-golangci
-    {{golangci}} fmt
+    {{ golangci }} fmt
 
 # formatting check without writing; fails with a diff when unformatted
 fmt-check: ensure-golangci
-    {{golangci}} fmt --diff
+    {{ golangci }} fmt --diff
 
 # THE PRE-PR GATE SET: every required CI context that can run on this machine.
 #
@@ -2234,7 +2234,7 @@ tidy-check:
 # wearing the fix's name. Series default to the two the gate enrols; pass a
 # directory to ask about another.
 adr-next *dirs="docs/adr":
-    python3 .github/scripts/next-doc-ordinal.py {{dirs}}
+    python3 .github/scripts/next-doc-ordinal.py {{ dirs }}
 
 # fails when .beads/issues.jsonl regresses vs base (dropped or reopened issues).
 # Motivated by bd gqlc-v2p: PR #422's blanket `git add -A` shipped a stale bd
@@ -2244,7 +2244,7 @@ adr-next *dirs="docs/adr":
 # Arg is passed through unchanged, so CI can hand it the exact base SHA and
 # avoid a merge-base walk (which needs deep history).
 bd-export-monotonic base:
-    go run ./internal/tools/bdguard -base {{base}}
+    go run ./internal/tools/bdguard -base {{ base }}
 
 # dev-local convenience: compare against the merge-base with origin/master.
 #
@@ -2335,7 +2335,7 @@ gh-orphans:
 #
 # CLOSES the duplicates `just gh-orphans` reports, each pointing at its canonical
 gh-orphans-close *args:
-    go run ./internal/tools/ghorphan -close {{args}}
+    go run ./internal/tools/ghorphan -close {{ args }}
 
 # The quality fence over every module in this tree that the root gates do not
 # already cover: compile (go build), vet, module tidiness (go mod tidy -diff),
@@ -2412,9 +2412,9 @@ test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-externa
     # fencing loop below runs — which is also what the second clause checks.
     # Residue from a run this trap could not clean up is swept by the
     # sweep-discovery-probes dependency, not here.
-    probe="$(mktemp -d test/data/{{fence_probe}}.XXXXXX)"
+    probe="$(mktemp -d test/data/{{ fence_probe }}.XXXXXX)"
     trap 'rm -rf "${probe}"' EXIT
-    printf 'module gqlc.invalid/{{fence_probe}}\n\ngo 1.26.5\n' >"${probe}/go.mod"
+    printf 'module gqlc.invalid/{{ fence_probe }}\n\ngo 1.26.5\n' >"${probe}/go.mod"
     derive_fenced || exit 1
     rm -rf "${probe}"
     trap - EXIT
@@ -2468,7 +2468,7 @@ test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-externa
         echo "fence: ${m}, tags [${taglist:-none}]"
         (cd "${m}" && go build "${tagflag[@]}" ./... && go vet "${tagflag[@]}" ./...)
         (cd "${m}" && go mod tidy -diff)
-        (cd "${m}" && {{lint_lock}} {{golangci}} run)
+        (cd "${m}" && {{ lint_lock }} {{ golangci }} run)
     done
 
 # Holds every nested module to the packaging that keeps it inside govulncheck's
@@ -2523,9 +2523,9 @@ check-codegen-external-tests: sweep-discovery-probes
     # discovered set is that one module, nothing but a changed tree can tell the
     # two apart. Residue this trap could not clean up is swept by the
     # sweep-discovery-probes dependency, not here.
-    probe="$(mktemp -d test/data/{{xtest_probe}}.XXXXXX)"
+    probe="$(mktemp -d test/data/{{ xtest_probe }}.XXXXXX)"
     trap 'rm -rf "${probe}"' EXIT
-    printf 'module gqlc.invalid/{{xtest_probe}}\n\ngo 1.26.5\n' >"${probe}/go.mod"
+    printf 'module gqlc.invalid/{{ xtest_probe }}\n\ngo 1.26.5\n' >"${probe}/go.mod"
     derive_nested || exit 1
     rm -rf "${probe}"
     trap - EXIT
@@ -3058,9 +3058,9 @@ vuln: sweep-discovery-probes vuln-root-residual
     # postcondition below, and stops scanning the day a module is added.
     # Residue this trap could not clean up is swept by the
     # sweep-discovery-probes dependency, not here.
-    probe="$(mktemp -d test/data/{{vuln_probe}}.XXXXXX)"
+    probe="$(mktemp -d test/data/{{ vuln_probe }}.XXXXXX)"
     trap 'rm -rf "${probe}"' EXIT
-    printf 'module gqlc.invalid/{{vuln_probe}}\n\ngo 1.26.5\n' >"${probe}/go.mod"
+    printf 'module gqlc.invalid/{{ vuln_probe }}\n\ngo 1.26.5\n' >"${probe}/go.mod"
     derive_modules || exit 1
     rm -rf "${probe}"
     trap - EXIT
@@ -3816,7 +3816,7 @@ vuln-root-residual:
 actionlint: ensure-shellcheck
     #!/usr/bin/env bash
     set -euo pipefail
-    sc={{quote(shellcheck)}}
+    sc={{ quote(shellcheck) }}
     if [ ! -x "${sc}" ]; then
         echo "error: actionlint's shellcheck is missing or not executable at ${sc}." >&2
         echo "       Refusing rather than running: actionlint would silently skip every" >&2
@@ -3824,7 +3824,7 @@ actionlint: ensure-shellcheck
         echo "       (bd gqlc-68g9). Provision it with:  just ensure-shellcheck" >&2
         exit 1
     fi
-    go run github.com/rhysd/actionlint/cmd/actionlint@{{actionlint_version}} -shellcheck "${sc}"
+    go run github.com/rhysd/actionlint/cmd/actionlint@{{ actionlint_version }} -shellcheck "${sc}"
 
 # pinned openCypher release tag the TCK is vendored from; never "master" so the
 # corpus is reproducible. Bump deliberately, then re-run fetch-tck and commit.
@@ -3836,24 +3836,24 @@ tck_dir := "test/data/query/cypher/tck"
 # (godog reads the .feature files directly). Run for initial population and
 # deliberate version bumps; the result is committed.
 fetch-tck:
-    rm -rf {{tck_dir}}
-    mkdir -p {{tck_dir}}
+    rm -rf {{ tck_dir }}
+    mkdir -p {{ tck_dir }}
     rm -rf .tck-fetch
-    git clone --depth 1 --branch {{tck_tag}} --filter=blob:none --sparse \
+    git clone --depth 1 --branch {{ tck_tag }} --filter=blob:none --sparse \
         https://github.com/opencypher/openCypher.git .tck-fetch
     cd .tck-fetch && git sparse-checkout set tck
-    cp -R .tck-fetch/tck/. {{tck_dir}}/
-    cp .tck-fetch/LICENSE {{tck_dir}}/LICENSE
+    cp -R .tck-fetch/tck/. {{ tck_dir }}/
+    cp .tck-fetch/LICENSE {{ tck_dir }}/LICENSE
     rm -rf .tck-fetch
-    @echo "vendored TCK {{tck_tag}} into {{tck_dir}}"
+    @echo "vendored TCK {{ tck_tag }} into {{ tck_dir }}"
 
 # builds the autogenerated code from the available, relevant ANTLR grammars
 build-grammar:
     sudo docker build -q -t antlr-tool -f Dockerfile.grammar .
     @echo "Generating Go files from GQL.g4..."
-    sudo docker run --rm -v {{invocation_directory()}}:/work -w /work/internal/grammar/gql antlr-tool -package gen -visitor -o gen GQL.g4
+    sudo docker run --rm -v {{ invocation_directory() }}:/work -w /work/internal/grammar/gql antlr-tool -package gen -visitor -o gen GQL.g4
     @echo "Generating Go files from Cypher.g4..."
-    sudo docker run --rm -v {{invocation_directory()}}:/work -w /work/internal/grammar/cypher antlr-tool -package gen -visitor -o gen Cypher.g4
+    sudo docker run --rm -v {{ invocation_directory() }}:/work -w /work/internal/grammar/cypher antlr-tool -package gen -visitor -o gen Cypher.g4
 
 # re-fetches both ISO/IEC 39075 free artefacts and compares their SHA-256
 # against the values pinned in isobnf/productions.go and annexd/SOURCE.md.

@@ -169,6 +169,10 @@ jobs:
       # read inside it.
       - uses: ./.github/actions/setup-shellcheck
       - run: just tidy-check
+      # bd gqlc-nuk0: the justfile drifted unformatted with no gate watching.
+      # The just version is pinned in setup-just, so a formatter upgrade is a
+      # deliberate edit there — --unstable cannot redden an unrelated branch.
+      - run: just --fmt --check --unstable
       # bd gqlc-lsll5: two documents claiming one ordinal differ in FILENAME, so
       # git compares them as unrelated additions and a rebase has nothing to
       # conflict over. Measured on PR #2105: a clean rebase, `just gates` all
