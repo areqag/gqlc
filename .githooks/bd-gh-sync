@@ -1089,7 +1089,7 @@ PYEOF
     || { _post_rc=$?; : >"$_tmp/beads_post.json"; }
   python3 - "$_tmp/beads.json" "$_tmp/beads_post.json" "$_tmp/pulled.txt" \
     "$_tmp/moved.txt" "$_tmp/post_status.txt" >&2 <<'PYEOF' || true
-import json, sys
+import json, re, sys
 
 # status *and* description: "held out of the pull" is a claim about the whole
 # bead, and a --prefer-github pull that reaches a held bead overwrites its body.
@@ -1116,6 +1116,17 @@ def status(text):
 # would accept byte-for-byte alone.
 def one_line(s):
     return str(s).encode("unicode_escape").decode("ascii")
+
+# The pull and push selections refuse an id that is empty, starts with a dash,
+# or carries a byte outside [A-Za-z0-9._-] before passing it as argv. This loop
+# passes nothing anywhere, but a MOVED/GONE record for such an id hands an
+# unvalidated name to every future reader of moved.txt, so the same test runs
+# here first: an id the gate would refuse is reported as unusable and skipped
+# rather than checked.
+def _usable(bid):
+    return (isinstance(bid, str) and len(bid) > 0
+            and not bid.startswith("-")
+            and re.search(r"[^A-Za-z0-9._-]", bid) is None)
 
 before = beads(sys.argv[1])
 after = beads(sys.argv[2])
@@ -1159,6 +1170,11 @@ status("OK")
 moved = []
 for bid, was in sorted(before.items()):
     if bid in pulled:
+        continue
+    if not _usable(bid):
+        print(f"bd-gh-sync: bead id {one_line(bid)} is unusable — it cannot be "
+              f"passed to 'bd github sync', so it was not pulled and is not "
+              f"checked here.", file=sys.stderr)
         continue
     name = one_line(bid)
     if bid not in after:
