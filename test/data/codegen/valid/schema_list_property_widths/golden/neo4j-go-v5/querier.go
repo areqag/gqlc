@@ -10,7 +10,7 @@ type ReadQuerier interface {
 }
 
 type WriteQuerier interface {
-	DropTagged(ctx context.Context, arg *[]string) error
+	DropTagged(ctx context.Context, arg *[]*string) error
 }
 
 type Querier interface {

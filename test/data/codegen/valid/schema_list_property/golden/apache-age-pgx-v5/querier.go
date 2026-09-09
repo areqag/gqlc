@@ -5,7 +5,7 @@ package schemalistproperty
 import "context"
 
 type ReadQuerier interface {
-	GetEventTags(ctx context.Context) (*[]string, error)
+	GetEventTags(ctx context.Context) (*[]*string, error)
 }
 
 type WriteQuerier interface {

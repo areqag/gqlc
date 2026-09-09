@@ -23,6 +23,7 @@ type (
 )
 
 var (
+	CarriesZone                      = carriesZone
 	DecodeFunc                       = decodeFunc
 	DialectGaps                      = dialectGaps
 	DollarTag                        = dollarTag
@@ -48,6 +49,7 @@ var (
 
 const (
 	GoInstant        = goInstant
+	GoTime           = goTime
 	VertexAnnotation = vertexAnnotation
 )
 

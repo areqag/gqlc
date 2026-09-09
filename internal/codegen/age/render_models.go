@@ -118,7 +118,13 @@ type helpers struct {
 	intAs       bool // agtypeIntAs — an integer width narrower than int64 decodes
 	narrowFloat bool // agtypeFloat32 — a FLOAT32 decodes
 
-	list     bool // agtypeList — something decodes an agtype list
+	list bool // agtypeList — something decodes an agtype list
+
+	// agtypeNullableElem — some list has a nullable element, so its
+	// element decoder is wrapped in the combinator that answers a nil
+	// pointer for the literal null every other element decoder refuses.
+	nullableElem bool
+
 	value    bool // agtypeValue / agtypeMap — something decodes a value of no declared shape
 	prop     bool // agtypeProperty — some entity declares a non-nullable property
 	nullProp bool // agtypeNullableProperty — some entity declares a nullable property
@@ -278,14 +284,25 @@ func (h *helpers) forParams(params []codegen.Param) {
 		// for one whose encode cannot fail and neither the leaf encoder
 		// nor agtypeEncodedList was ever marked — an emission calling
 		// helpers it does not define (bd gqlc-vhvz7).
+		// A nullable ELEMENT's star is stripped here too, and marks
+		// agtypeEncodedNullable: paramEncoder wraps the combinator around
+		// the element encoder, so a batch whose only nullable thing is an
+		// element still calls it (bd gqlc-dxhwp). The star steps no width:
+		// element nullability is a fact about the carrier TEXT, and the
+		// declared width one level in is the same either way.
 		leaf, leafWidth := p.GoType, p.Width
-		list := false
+		list, nullElem := false, false
 		for {
 			elem, ok := strings.CutPrefix(leaf, "[]")
+			if ok {
+				leaf, leafWidth, list = elem, elemWidth(leafWidth), true
+				continue
+			}
+			elem, ok = strings.CutPrefix(leaf, "*")
 			if !ok {
 				break
 			}
-			leaf, leafWidth, list = elem, elemWidth(leafWidth), true
+			leaf, nullElem = elem, true
 		}
 		if codegen.IsDeclaredRecord(leaf, leafWidth) {
 			// Marked here and not in the switch below because a record's
@@ -295,7 +312,7 @@ func (h *helpers) forParams(params []codegen.Param) {
 			// same reason the temporals are, so it falls through to the
 			// two combinator marks rather than continuing past them.
 			h.needRecordEncode(leafWidth)
-			if p.Nullable {
+			if p.Nullable || nullElem {
 				h.encNullable = true
 			}
 			if list {
@@ -333,7 +350,7 @@ func (h *helpers) forParams(params []codegen.Param) {
 		if !fallible {
 			continue
 		}
-		if p.Nullable {
+		if p.Nullable || nullElem {
 			h.encNullable = true
 		}
 		if list {
@@ -363,6 +380,14 @@ func (h *helpers) forParams(params []codegen.Param) {
 // what names its helpers; it descends with the text through both the
 // list arm and the record arm. A call site with no width in hand marks
 // exactly what it marked before records existed.
+//
+// A leading star here is always an ELEMENT's, never a whole value's: a
+// nullable property is carried by EntityField.Nullable and the star is
+// written at struct emission, so nothing hands this the starred text.
+// That is what lets the star mean "mark the combinator" with no second
+// condition — and why the mark is not h.nullProp's. It steps no width,
+// for the reason forParams gives: the star is carrier text, and the
+// declared width at this level is the same with or without it.
 func (h *helpers) need(goType string, width graph.PropertyType) {
 	if elem, ok := strings.CutPrefix(goType, "[]"); ok {
 		h.list = true
@@ -374,6 +399,11 @@ func (h *helpers) need(goType string, width graph.PropertyType) {
 	}
 	if codegen.IsDeclaredRecord(goType, width) {
 		h.needRecord(width)
+		return
+	}
+	if elem, ok := strings.CutPrefix(goType, "*"); ok {
+		h.nullableElem = true
+		h.need(elem, width)
 		return
 	}
 	if goType == "any" || goType == "map[string]any" {
@@ -518,7 +548,9 @@ func (h helpers) listHelpers() []listPlan {
 	return out
 }
 
-// listDepth counts a Go slice type's nesting.
+// listDepth counts a Go slice type's nesting. A nullable element carries
+// a leading star (bd gqlc-dxhwp), which is a fact about the element and
+// not a level, so it is stepped over rather than counted.
 func listDepth(goType string) int {
 	depth := 0
 	for {
@@ -526,7 +558,7 @@ func listDepth(goType string) int {
 		if !ok {
 			return depth
 		}
-		depth, goType = depth+1, elem
+		depth, goType = depth+1, strings.TrimPrefix(elem, "*")
 	}
 }
 
@@ -547,6 +579,13 @@ func listDepth(goType string) int {
 // leaf non-record and the name is built from the text as before; that is
 // the pre-record behaviour and it is what a caller with no width in hand
 // still gets.
+//
+// A nullable element's star has to be spelled rather than stripped: it
+// is part of the wrapper's return type, so two slice types that differ
+// only in it need two names. Spelled literally it yields
+// `agtypeListOf*String`, which is not an identifier and gives a package
+// that does not parse — so the star mangles to `Nullable`, once per
+// level, decided by that level's own qualifier.
 func listHelperName(goType string, width graph.PropertyType) string {
 	name := "agtype"
 	for {
@@ -556,6 +595,9 @@ func listHelperName(goType string, width graph.PropertyType) string {
 		}
 		name, goType = name+"ListOf", elem
 		width = elemWidth(width)
+		if bare, nullable := strings.CutPrefix(goType, "*"); nullable {
+			name, goType = name+"Nullable", bare
+		}
 	}
 	if codegen.IsDeclaredRecord(goType, width) {
 		return name + codegen.RecordHelperSuffix(width)
@@ -1446,6 +1488,40 @@ func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) 
 }
 `)
 	}
+	if h.nullableElem {
+		b.WriteString(`
+// agtypeNullableElem lifts an element decoder over the null a list whose
+// element type is nullable may hold. Every decoder agtypeList is given
+// refuses the literal null, which is what the NOT NULL element wants;
+// this is the one place that answer changes, and it answers with the nil
+// pointer rather than the Go zero, because a null read as "" or 0 is a
+// value the graph does not hold.
+//
+// The whole-value position has no need of this: a null property is
+// absent from the entity's map entirely, and agtypeNullableProperty
+// reads that absence. Inside a list the null is present as a token, so
+// it has to be recognised here.
+func agtypeNullableElem[T any](decode func([]byte) (T, error)) func([]byte) (*T, error) {
+	return func(raw []byte) (*T, error) {
+		if agtypeIsNull(raw) {
+			return nil, nil
+		}
+		out, err := decode(raw)
+		if err != nil {
+			return nil, err
+		}
+		return &out, nil
+	}
+}
+
+// agtypeIsNull reports whether a raw span is agtype's null. It is a
+// named helper rather than a comparison inside the closure above so that
+// the spelling the wire uses is one thing with one name.
+func agtypeIsNull(raw []byte) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
+}
+`)
+	}
 	for _, goType := range h.listHelpers() {
 		writeListHelper(&b, goType)
 	}
@@ -1587,9 +1663,18 @@ func writeListHelper(b *strings.Builder, p listPlan) {
 	// The doc line names the element by its carrier alias where it has
 	// one, because a record element's carrier is a multi-line anonymous
 	// struct and pasting it into a // comment breaks the line.
+	//
+	// The star is taken off before the question and put back after: a
+	// NULLABLE record element is `*struct {…}`, which IsDeclaredRecord
+	// answers no for, and the raw text would reach the comment through
+	// that no and split it across lines that are not comments at all
+	// (bd gqlc-dxhwp).
 	shown := elem
-	if codegen.IsDeclaredRecord(elem, elemW) {
+	if bare, nullable := strings.CutPrefix(elem, "*"); codegen.IsDeclaredRecord(bare, elemW) {
 		shown = codegen.RecordAliasName(elemW)
+		if nullable {
+			shown = "*" + shown
+		}
 	}
 	fmt.Fprintf(b, "\n// %s decodes an agtype list of %s elements.\n", name, shown)
 	fmt.Fprintf(b, "func %s(raw []byte) (%s, error) {\n", name, p.goType)

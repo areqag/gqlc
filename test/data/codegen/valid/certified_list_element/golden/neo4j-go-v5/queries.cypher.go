@@ -146,12 +146,12 @@ const personNullablePairQueryText = `MATCH (p:Person) RETURN [p.score, p.score] 
 // PersonNullablePair executes the PersonNullablePair query.
 //
 //	MATCH (p:Person) RETURN [p.score, p.score] AS scores
-func (q *queries) PersonNullablePair(ctx context.Context) ([][]int64, error) {
+func (q *queries) PersonNullablePair(ctx context.Context) ([][]*int64, error) {
 	records, err := q.db.run(ctx, personNullablePairQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
-	out := make([][]int64, 0, len(records))
+	out := make([][]*int64, 0, len(records))
 	for _, record := range records {
 		value, isNil, err := neo4j.GetRecordValue[[]any](record, "scores")
 		if err != nil {
@@ -160,13 +160,17 @@ func (q *queries) PersonNullablePair(ctx context.Context) ([][]int64, error) {
 		if isNil {
 			return nil, fmt.Errorf("PersonNullablePair: column %q is non-nullable but arrived null", "scores")
 		}
-		acc := make([]int64, 0, len(value))
+		acc := make([]*int64, 0, len(value))
 		for i, elem := range value {
+			if elem == nil {
+				acc = append(acc, nil)
+				continue
+			}
 			v, ok := elem.(int64)
 			if !ok {
 				return nil, fmt.Errorf("PersonNullablePair: decode column %q element %d: expected int64, got %T", "scores", i, elem)
 			}
-			acc = append(acc, v)
+			acc = append(acc, &v)
 		}
 		out = append(out, acc)
 	}

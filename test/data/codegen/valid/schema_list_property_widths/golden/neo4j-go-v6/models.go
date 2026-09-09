@@ -12,11 +12,11 @@ import (
 // Reading corresponds to the Reading node type.
 type Reading struct {
 	Codes []int32
-	Flags *[]bool
+	Flags *[]*bool
 	Id    int64
 	Marks *[]string
-	Ranks *[]int32
-	Tags  *[]string
+	Ranks *[]*int32
+	Tags  *[]*string
 }
 
 // decodeReading decodes a driver dbtype.Node into a Reading struct,
@@ -56,13 +56,17 @@ func decodeReading(node dbtype.Node) (Reading, error) {
 		if !ok {
 			return Reading{}, fmt.Errorf("decode Reading.Flags: property %q: expected []any, got %T", "flags", v)
 		}
-		narrowed := make([]bool, 0, len(s))
+		narrowed := make([]*bool, 0, len(s))
 		for i0, elem0 := range s {
+			if elem0 == nil {
+				narrowed = append(narrowed, nil)
+				continue
+			}
 			v0, ok := elem0.(bool)
 			if !ok {
 				return Reading{}, fmt.Errorf("decode Reading.Flags: property %q element %d: expected bool, got %T", "flags", i0, elem0)
 			}
-			narrowed = append(narrowed, v0)
+			narrowed = append(narrowed, &v0)
 		}
 		out.Flags = &narrowed
 	}
@@ -91,8 +95,12 @@ func decodeReading(node dbtype.Node) (Reading, error) {
 		if !ok {
 			return Reading{}, fmt.Errorf("decode Reading.Ranks: property %q: expected []any, got %T", "ranks", v)
 		}
-		narrowed := make([]int32, 0, len(s))
+		narrowed := make([]*int32, 0, len(s))
 		for i0, elem0 := range s {
+			if elem0 == nil {
+				narrowed = append(narrowed, nil)
+				continue
+			}
 			v0, ok := elem0.(int64)
 			if !ok {
 				return Reading{}, fmt.Errorf("decode Reading.Ranks: property %q element %d: expected int64, got %T", "ranks", i0, elem0)
@@ -101,7 +109,7 @@ func decodeReading(node dbtype.Node) (Reading, error) {
 			if err != nil {
 				return Reading{}, fmt.Errorf("decode Reading.Ranks: property %q element %d: %w", "ranks", i0, err)
 			}
-			narrowed = append(narrowed, v0n)
+			narrowed = append(narrowed, &v0n)
 		}
 		out.Ranks = &narrowed
 	}
@@ -110,13 +118,17 @@ func decodeReading(node dbtype.Node) (Reading, error) {
 		if !ok {
 			return Reading{}, fmt.Errorf("decode Reading.Tags: property %q: expected []any, got %T", "tags", v)
 		}
-		narrowed := make([]string, 0, len(s))
+		narrowed := make([]*string, 0, len(s))
 		for i0, elem0 := range s {
+			if elem0 == nil {
+				narrowed = append(narrowed, nil)
+				continue
+			}
 			v0, ok := elem0.(string)
 			if !ok {
 				return Reading{}, fmt.Errorf("decode Reading.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
 			}
-			narrowed = append(narrowed, v0)
+			narrowed = append(narrowed, &v0)
 		}
 		out.Tags = &narrowed
 	}

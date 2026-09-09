@@ -9,7 +9,7 @@ type ReadQuerier interface {
 	PersonPair(ctx context.Context) ([][]int64, error)
 	PersonCollectId(ctx context.Context) ([]int64, error)
 	PersonCollectPair(ctx context.Context) ([][]int64, error)
-	PersonNullablePair(ctx context.Context) ([][]int64, error)
+	PersonNullablePair(ctx context.Context) ([][]*int64, error)
 	PersonNarrowPair(ctx context.Context) ([][]int32, error)
 	PersonFoldPair(ctx context.Context) ([][]any, error)
 }

@@ -138,7 +138,9 @@ func TestTypeMapProperty(t *testing.T) {
 	t.Run("list recurses element-wise", func(t *testing.T) {
 		got, ok := neo4j.TypeMap{}.Property(graph.ListOf(graph.TypeInt32, false))
 		require.True(t, ok)
-		require.Equal(t, "[]int32", got)
+		// Starred because this element is nullable — the recursion's answer
+		// carries the element half of the pointer rule (bd gqlc-dxhwp).
+		require.Equal(t, "[]*int32", got)
 	})
 
 	t.Run("list of unrepresentable element fails", func(t *testing.T) {
@@ -267,7 +269,7 @@ func TestStorablePropertyRefusesANestedList(t *testing.T) {
 		pt   graph.PropertyType
 		want string
 	}{
-		{graph.ListOf(graph.TypeInt16, false), "[]int16"},
+		{graph.ListOf(graph.TypeInt16, false), "[]*int16"},
 		{graph.ListOf(graph.TypeString, true), "[]string"},
 		{graph.ListOf(graph.TypeAnyPropertyValue, false), "[]any"},
 	}
@@ -662,6 +664,39 @@ func TestDriverCarrier(t *testing.T) {
 		// carrier question here.
 		{"[]struct {\n\tF *string\n}", "[]any"},
 		{"[]map[string]any", "[]any"},
+
+		// The same family with a NULLABLE element (bd gqlc-dxhwp). The
+		// star is a fact about the Go field, not about the wire: the
+		// driver hands every non-byte array back as []any whether or not
+		// the schema permits its elements to be NULL, so the carrier is
+		// unmoved and the nil arm the decode grows is the walk's business
+		// rather than this table's. They are rows because isSliceType's
+		// two exclusions are exact-equality tests — "[]*[]byte" is neither
+		// "[]byte" nor "[]any" — so a star reaching the wrong one of them
+		// would be visible here and nowhere else in this file.
+		{"[]*bool", "[]any"},
+		{"[]*string", "[]any"},
+		{"[]*int", "[]any"},
+		{"[]*int8", "[]any"},
+		{"[]*int16", "[]any"},
+		{"[]*int32", "[]any"},
+		{"[]*int64", "[]any"},
+		{"[]*uint", "[]any"},
+		{"[]*uint8", "[]any"},
+		{"[]*uint16", "[]any"},
+		{"[]*uint32", "[]any"},
+		{"[]*uint64", "[]any"},
+		{"[]*float32", "[]any"},
+		{"[]*float64", "[]any"},
+		{"[]*time.Time", "[]any"},
+		{"[]*Date", "[]any"},
+		{"[]*Time", "[]any"},
+		{"[]*LocalTime", "[]any"},
+		{"[]*Duration", "[]any"},
+		{"[]*[]byte", "[]any"},
+		{"[]*[]any", "[]any"},
+		{"[]*struct {\n\tF *string\n}", "[]any"},
+		{"[]*map[string]any", "[]any"},
 	}
 
 	// The obligation is membership over what the TABLE can emit, not a
@@ -732,7 +767,13 @@ func emittedGoTypes(t *testing.T) []string {
 	}
 	for pt := range graphPropertyTypes(t) {
 		add(neo4j.TypeMap{}.Property(pt))
+		// BOTH element polarities, because they are two different emitted
+		// texts: a nullable element carries a star and a NOT NULL one does
+		// not (bd gqlc-dxhwp). Sweeping one polarity would leave the other
+		// family's carrier unmeasured — and it was the bare family that
+		// went unmeasured when this walk asked only for `false`.
 		add(neo4j.TypeMap{}.Property(graph.ListOf(pt, false)))
+		add(neo4j.TypeMap{}.Property(graph.ListOf(pt, true)))
 	}
 	for _, k := range resolver.ScalarValues() {
 		add(neo4j.TypeMap{}.Scalar(k), true)
@@ -745,6 +786,7 @@ func emittedGoTypes(t *testing.T) []string {
 	sweptRecord := graph.RecordOf([]graph.RecordField{{Name: "f", Type: graph.TypeString}})
 	add(neo4j.TypeMap{}.Property(sweptRecord))
 	add(neo4j.TypeMap{}.Property(graph.ListOf(sweptRecord, false)))
+	add(neo4j.TypeMap{}.Property(graph.ListOf(sweptRecord, true)))
 	require.NotEmpty(t, seen,
 		"the derivation read no carrier off the type table, so the obligation it feeds is satisfied by any table at all")
 	out := make([]string, 0, len(seen))

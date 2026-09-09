@@ -484,6 +484,19 @@ const (
 	listyEmpty = `{"id": 844424930131970, "label": "Listy", "properties": {"tags": [], "ranks": [], "depths": [], "matrix": [[]]}}::vertex`
 	listyNulls = `{"id": 844424930131971, "label": "Listy", "properties": {"tags": ["a, b] c\": {d", ""], "ranks": [0], "matrix": []}}::vertex`
 
+	// A null ELEMENT, which unlike a null property IS on the wire: AGE
+	// drops a property whose value is null, but inside a list the null is
+	// a token between two commas and has to be read (bd gqlc-dxhwp). One
+	// per element decoder the walk can bind, with the null in a different
+	// position in each — first, middle, last, alone — because a walk that
+	// mishandles the null also loses its place in the list.
+	listyNullElems = `{"id": 844424930131972, "label": "Listy", "properties": {"tags": [null, "y"], "ranks": [1, null, 3], "depths": [0.5, null], "matrix": [null]}}::vertex`
+
+	// The same shapes against the NOT NULL declarations, where every one
+	// of them is a refusal rather than a nil.
+	slotOK    = `{"id": 1407374883553281, "label": "Slot", "properties": {"tags": ["x", "y"], "ranks": [1, 2], "matrix": [[1], [2, 3]], "depths": [0.5]}}::vertex`
+	slotNulls = `{"id": 1407374883553282, "label": "Slot", "properties": {"tags": ["x", null], "ranks": [1, 2], "matrix": [[1]], "depths": [0.5]}}::vertex`
+
 	anyInt = `{"id": 1125899906842625, "label": "Anything", "properties": {"other": "text", "payload": 42}}::vertex`
 	// anyTag holds the second spelling of the same declared width, ANY
 	// PROPERTY VALUE, beside the first. Both properties are here at once
@@ -659,16 +672,18 @@ func TestDecodeVertexWithListProperties(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeListy(listy) = error %v", err)
 	}
-	if !slicesEqual(got.Tags, []string{"x", "y"}) {
+	if !ptrSlicesEqual(got.Tags, []*string{ptr("x"), ptr("y")}) {
 		t.Errorf("decodeListy(listy).Tags = %#v", got.Tags)
 	}
-	if !slicesEqual(got.Ranks, []int32{1, -2, 2147483647}) {
+	if !ptrSlicesEqual(got.Ranks, []*int32{ptr[int32](1), ptr[int32](-2), ptr[int32](2147483647)}) {
 		t.Errorf("decodeListy(listy).Ranks = %#v", got.Ranks)
 	}
-	if len(got.Matrix) != 2 || !slicesEqual(got.Matrix[0], []int64{1}) || !slicesEqual(got.Matrix[1], []int64{2, 3}) {
+	if len(got.Matrix) != 2 || got.Matrix[0] == nil || got.Matrix[1] == nil ||
+		!ptrSlicesEqual(*got.Matrix[0], []*int64{ptr[int64](1)}) ||
+		!ptrSlicesEqual(*got.Matrix[1], []*int64{ptr[int64](2), ptr[int64](3)}) {
 		t.Errorf("decodeListy(listy).Matrix = %#v", got.Matrix)
 	}
-	if got.Depths == nil || !slicesEqual(*got.Depths, []float32{0.5, 1.5}) {
+	if got.Depths == nil || !ptrSlicesEqual(*got.Depths, []*float32{ptr[float32](0.5), ptr[float32](1.5)}) {
 		t.Errorf("decodeListy(listy).Depths = %#v", got.Depths)
 	}
 
@@ -689,7 +704,10 @@ func TestDecodeVertexWithListProperties(t *testing.T) {
 	if empty.Ranks == nil || len(empty.Ranks) != 0 {
 		t.Errorf("decodeListy(listyEmpty).Ranks = %#v, want an empty slice", empty.Ranks)
 	}
-	if len(empty.Matrix) != 1 || empty.Matrix[0] == nil || len(empty.Matrix[0]) != 0 {
+	// The inner list is a nullable ELEMENT, so this is two indirections:
+	// the element pointer is non-nil, and the slice it addresses is empty
+	// rather than nil.
+	if len(empty.Matrix) != 1 || empty.Matrix[0] == nil || *empty.Matrix[0] == nil || len(*empty.Matrix[0]) != 0 {
 		t.Errorf("decodeListy(listyEmpty).Matrix = %#v, want one empty slice", empty.Matrix)
 	}
 
@@ -703,8 +721,95 @@ func TestDecodeVertexWithListProperties(t *testing.T) {
 	if nulls.Depths != nil {
 		t.Errorf("decodeListy(listyNulls).Depths = %#v, want nil", nulls.Depths)
 	}
-	if !slicesEqual(nulls.Tags, []string{`a, b] c": {d`, ""}) {
+	if !ptrSlicesEqual(nulls.Tags, []*string{ptr(`a, b] c": {d`), ptr("")}) {
 		t.Errorf("decodeListy(listyNulls).Tags = %#v", nulls.Tags)
+	}
+}
+
+// TestListyCarriesNullElements is this bead's reproduction (gqlc-dxhwp).
+// Before the fix every one of these decodes FAILED — the element decoder
+// bound into the walk refused the literal `null`, so a list the schema
+// permits a null element in could not be read at all, and the property's
+// declared nullability had no effect on anything the emission did.
+//
+// One assertion per element decoder the walk can bind, because the
+// combinator wraps each of them separately and a fix that reached only
+// the arm it was tested on would look complete: the plain string decoder,
+// the checked narrowing an INT32 element rides, the FLOAT32 narrowing
+// (a different arm, picked by carrier), and the named wrapper a nested
+// list's element decodes through.
+//
+// The null sits in a different position in each — leading, interior,
+// trailing, and alone — since a walk that mishandles a null also loses
+// its place among the elements around it, and a null only ever at index 0
+// would not show that.
+func TestListyCarriesNullElements(t *testing.T) {
+	got, err := decodeListy([]byte(listyNullElems))
+	if err != nil {
+		t.Fatalf("decodeListy(listyNullElems) = error %v", err)
+	}
+	if !ptrSlicesEqual(got.Tags, []*string{nil, ptr("y")}) {
+		t.Errorf("decodeListy(listyNullElems).Tags = %#v, want [<nil> y]", got.Tags)
+	}
+	if !ptrSlicesEqual(got.Ranks, []*int32{ptr[int32](1), nil, ptr[int32](3)}) {
+		t.Errorf("decodeListy(listyNullElems).Ranks = %#v, want [1 <nil> 3]", got.Ranks)
+	}
+	if got.Depths == nil || !ptrSlicesEqual(*got.Depths, []*float32{ptr[float32](0.5), nil}) {
+		t.Errorf("decodeListy(listyNullElems).Depths = %#v, want [0.5 <nil>]", got.Depths)
+	}
+	// The nested list's own element. A null here is a null LIST, which is
+	// not the empty list listyEmpty holds — both are one element long and
+	// they are different values.
+	if len(got.Matrix) != 1 || got.Matrix[0] != nil {
+		t.Errorf("decodeListy(listyNullElems).Matrix = %#v, want one nil element", got.Matrix)
+	}
+}
+
+// TestSlotElementsStayBareUnderNotNull is the CONTROL for the test above,
+// and it is what makes that one a claim about the DECLARATION rather than
+// about lists. A fix that starred every element passes everything else in
+// this corpus while quietly substituting a nil for a violation of the
+// schema; this is the only thing here that fails it.
+//
+// Both halves are asserted. Slot's properties decode to BARE slices, so
+// the starring is not universal — that half is carried by the types the
+// assertions compile against, since a []*string want would not build
+// against a []string field. And a null element is REFUSED, naming the
+// property and the element index, so the refusal is still located rather
+// than reported of the vertex as a whole.
+func TestSlotElementsStayBareUnderNotNull(t *testing.T) {
+	got, err := decodeSlot([]byte(slotOK))
+	if err != nil {
+		t.Fatalf("decodeSlot(slotOK) = error %v", err)
+	}
+	// These four comparisons are slicesEqual and not ptrSlicesEqual, which
+	// is the bare-element claim: neither call compiles against the other's
+	// field type.
+	if !slicesEqual(got.Tags, []string{"x", "y"}) {
+		t.Errorf("decodeSlot(slotOK).Tags = %#v", got.Tags)
+	}
+	if !slicesEqual(got.Ranks, []int32{1, 2}) {
+		t.Errorf("decodeSlot(slotOK).Ranks = %#v", got.Ranks)
+	}
+	if len(got.Matrix) != 2 || !slicesEqual(got.Matrix[0], []int64{1}) || !slicesEqual(got.Matrix[1], []int64{2, 3}) {
+		t.Errorf("decodeSlot(slotOK).Matrix = %#v", got.Matrix)
+	}
+	if got.Depths == nil || !slicesEqual(*got.Depths, []float32{0.5}) {
+		t.Errorf("decodeSlot(slotOK).Depths = %#v", got.Depths)
+	}
+
+	bad, err := decodeSlot([]byte(slotNulls))
+	if err == nil {
+		t.Fatalf("decodeSlot(slotNulls) = %#v, want a refusal", bad)
+	}
+	for _, want := range []string{
+		"decode Slot.Tags",
+		"element 1",
+		"is not an agtype string",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("decodeSlot(slotNulls) = %q, want it to mention %q", err, want)
+		}
 	}
 }
 
@@ -865,6 +970,32 @@ func TestDecodeVertexWithAnyProperty(t *testing.T) {
 // dependency. A nil slice and an empty one are not equal here: the graph
 // holding an empty list and the graph holding nothing are different
 // answers, and length alone cannot tell them apart.
+// ptr addresses a value, so a want for a nullable element can be written
+// inline beside the nils it sits among.
+func ptr[T any](v T) *T { return &v }
+
+// ptrSlicesEqual compares two slices of pointers BY POINTEE. slicesEqual
+// is `!=` on a comparable, which for a []*T compares ADDRESSES — two
+// independently built slices never share one, so it answers false for
+// every pair and would report a correct decode as a failure.
+func ptrSlicesEqual[T comparable](got, want []*T) bool {
+	if (got == nil) != (want == nil) {
+		return false
+	}
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if (got[i] == nil) != (want[i] == nil) {
+			return false
+		}
+		if got[i] != nil && *got[i] != *want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func slicesEqual[T comparable](got, want []T) bool {
 	if (got == nil) != (want == nil) {
 		return false
@@ -2259,8 +2390,30 @@ func TestEmittedMethodBindsListsOfCarriers(t *testing.T) {
 				OpensAt:  []LocalTime{{Hour: 1}, {Hour: 23, Minute: 59, Second: 59, Nanosecond: 999999000}},
 				Lasts:    []Duration{{Seconds: 90}, {Days: 1, Seconds: 1}},
 				MayLast:  &mayLast,
+				MayMiss:  []*Date{ptr(Date{Year: 2024, Month: 3, Day: 4})},
 			},
-			want: `{"lasts":[90000000,86401000000],"mayLast":[1000000,86400000000],"opensAt":[3600000000,86399999999],"startsOn":["2024-01-02","0001-01-01"]}`,
+			want: `{"lasts":[90000000,86401000000],"mayLast":[1000000,86400000000],"mayMiss":["2024-03-04"],"opensAt":[3600000000,86399999999],"startsOn":["2024-01-02","0001-01-01"]}`,
+		},
+		{
+			// The nullable ELEMENT, which is where this bead's defect was
+			// (gqlc-dxhwp). The encoded element is a string either way, so
+			// a null between two of them is the only thing that says the
+			// combinator ran: a pass-through would have crossed the DATE as
+			// the JSON object its three fields spell, and a fix that
+			// dropped the nil rather than encoding it would leave a
+			// two-element array here.
+			name: "a null element crosses as the agtype null in place",
+			arg: WriteSpansParams{
+				StartsOn: []Date{{Year: 2024, Month: 1, Day: 2}},
+				OpensAt:  []LocalTime{{Hour: 1}},
+				Lasts:    []Duration{{Seconds: 90}},
+				MayMiss: []*Date{
+					ptr(Date{Year: 2024, Month: 3, Day: 4}),
+					nil,
+					ptr(Date{Year: 2024, Month: 3, Day: 6}),
+				},
+			},
+			want: `{"lasts":[90000000],"mayLast":null,"mayMiss":["2024-03-04",null,"2024-03-06"],"opensAt":[3600000000],"startsOn":["2024-01-02"]}`,
 		},
 		{
 			name: "an absent nullable list is the agtype null",
@@ -2269,7 +2422,7 @@ func TestEmittedMethodBindsListsOfCarriers(t *testing.T) {
 				OpensAt:  []LocalTime{{Hour: 1}},
 				Lasts:    []Duration{{Seconds: 90}},
 			},
-			want: `{"lasts":[90000000],"mayLast":null,"opensAt":[3600000000],"startsOn":["2024-01-02"]}`,
+			want: `{"lasts":[90000000],"mayLast":null,"mayMiss":[],"opensAt":[3600000000],"startsOn":["2024-01-02"]}`,
 		},
 		{
 			// A bound list of no elements and an unbound nullable list are
@@ -2278,7 +2431,7 @@ func TestEmittedMethodBindsListsOfCarriers(t *testing.T) {
 			// of the nil would have marshalled as null.
 			name: "an empty list is an empty array and not a null",
 			arg:  WriteSpansParams{},
-			want: `{"lasts":[],"mayLast":null,"opensAt":[],"startsOn":[]}`,
+			want: `{"lasts":[],"mayLast":null,"mayMiss":[],"opensAt":[],"startsOn":[]}`,
 		},
 	}
 	for _, tc := range cases {

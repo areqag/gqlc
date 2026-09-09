@@ -11,9 +11,9 @@ import (
 
 // Listy corresponds to the Listy node type.
 type Listy struct {
-	Ranks []int32
-	Spare *[]string
-	Tags  []string
+	Ranks []*int32
+	Spare *[]*string
+	Tags  []*string
 }
 
 // decodeListy decodes a driver dbtype.Node into a Listy struct,
@@ -35,8 +35,12 @@ func decodeListy(node dbtype.Node) (Listy, error) {
 	if err != nil {
 		return Listy{}, fmt.Errorf("decode Listy.Ranks: %w", err)
 	}
-	value0s := make([]int32, 0, len(value0))
+	value0s := make([]*int32, 0, len(value0))
 	for i0, elem0 := range value0 {
+		if elem0 == nil {
+			value0s = append(value0s, nil)
+			continue
+		}
 		v0, ok := elem0.(int64)
 		if !ok {
 			return Listy{}, fmt.Errorf("decode Listy.Ranks: property %q element %d: expected int64, got %T", "ranks", i0, elem0)
@@ -45,7 +49,7 @@ func decodeListy(node dbtype.Node) (Listy, error) {
 		if err != nil {
 			return Listy{}, fmt.Errorf("decode Listy.Ranks: property %q element %d: %w", "ranks", i0, err)
 		}
-		value0s = append(value0s, v0n)
+		value0s = append(value0s, &v0n)
 	}
 	out.Ranks = value0s
 	if v, ok := node.Props["spare"]; ok {
@@ -53,13 +57,17 @@ func decodeListy(node dbtype.Node) (Listy, error) {
 		if !ok {
 			return Listy{}, fmt.Errorf("decode Listy.Spare: property %q: expected []any, got %T", "spare", v)
 		}
-		narrowed := make([]string, 0, len(s))
+		narrowed := make([]*string, 0, len(s))
 		for i0, elem0 := range s {
+			if elem0 == nil {
+				narrowed = append(narrowed, nil)
+				continue
+			}
 			v0, ok := elem0.(string)
 			if !ok {
 				return Listy{}, fmt.Errorf("decode Listy.Spare: property %q element %d: expected string, got %T", "spare", i0, elem0)
 			}
-			narrowed = append(narrowed, v0)
+			narrowed = append(narrowed, &v0)
 		}
 		out.Spare = &narrowed
 	}
@@ -67,13 +75,17 @@ func decodeListy(node dbtype.Node) (Listy, error) {
 	if err != nil {
 		return Listy{}, fmt.Errorf("decode Listy.Tags: %w", err)
 	}
-	value1s := make([]string, 0, len(value1))
+	value1s := make([]*string, 0, len(value1))
 	for i0, elem0 := range value1 {
+		if elem0 == nil {
+			value1s = append(value1s, nil)
+			continue
+		}
 		v0, ok := elem0.(string)
 		if !ok {
 			return Listy{}, fmt.Errorf("decode Listy.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
 		}
-		value1s = append(value1s, v0)
+		value1s = append(value1s, &v0)
 	}
 	out.Tags = value1s
 	return out, nil

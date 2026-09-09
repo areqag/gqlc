@@ -11,7 +11,7 @@ import (
 
 // Blob corresponds to the Blob node type.
 type Blob struct {
-	Chunks    [][]byte
+	Chunks    []*[]byte
 	Id        int64
 	Payload   []byte
 	Signature *[]byte
@@ -36,13 +36,17 @@ func decodeBlob(node dbtype.Node) (Blob, error) {
 	if err != nil {
 		return Blob{}, fmt.Errorf("decode Blob.Chunks: %w", err)
 	}
-	value0s := make([][]byte, 0, len(value0))
+	value0s := make([]*[]byte, 0, len(value0))
 	for i0, elem0 := range value0 {
+		if elem0 == nil {
+			value0s = append(value0s, nil)
+			continue
+		}
 		v0, ok := elem0.([]byte)
 		if !ok {
 			return Blob{}, fmt.Errorf("decode Blob.Chunks: property %q element %d: expected []byte, got %T", "chunks", i0, elem0)
 		}
-		value0s = append(value0s, v0)
+		value0s = append(value0s, &v0)
 	}
 	out.Chunks = value0s
 	value1, err := neo4j.GetProperty[int64](node, "id")
