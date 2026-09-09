@@ -551,8 +551,7 @@ func TestRecordEncodingsIsTransitiveThroughEveryHidingPosition(t *testing.T) {
 		return graph.RecordOf([]graph.RecordField{{Name: name, Type: graph.ListOf(hidden, false)}})
 	}
 
-	entityLeaf, paramLeaf, colLeaf, listLeaf, nestedLeaf :=
-		leaf("e"), leaf("p"), leaf("c"), leaf("l"), leaf("n")
+	entityLeaf, paramLeaf, colLeaf, listLeaf, nestedLeaf := leaf("e"), leaf("p"), leaf("c"), leaf("l"), leaf("n")
 	entityRec := underField("inner", entityLeaf)
 	paramRec := underList("inner", paramLeaf)
 	colRec := underField("inner", colLeaf)
