@@ -48,9 +48,9 @@ gqlc-7i3g). An 'Also-closes: #<issue>' line avows an extra deliberately and
 subtracts it.
 
 Every exit prints. A pass that says nothing is one no reader can tell from
-this gate not having run (bd gqlc-mk7v, bd gqlc-63ao). The suite holds that
-as a property rather than as a habit: its green helper requires output as
-well as a zero status.
+this gate not having run (bd gqlc-mk7v, bd gqlc-63ao). The suite deleted in
+PR #1595 held that as a property rather than as a habit: its green helper
+required output as well as a zero status. Nothing in this tree checks it now.
 
 This file is approximating another system's markdown parser, so the useful
 question about any disagreement with GitHub is which direction it errs in --
@@ -91,19 +91,18 @@ its bodies, and cannot be re-run from anything in this tree, so no result
 of it is stated here or below: not how many of the 85 disagreed with the
 checker, and not which way any one of them did. It is where the design
 came from, not a bound on this commit. What is measured at this commit is
-the suite's visibility section, where every body was put to the same
-renderer and the row's colour reports what came back.
+stated in the paragraphs below: each body they name was put to the same
+renderer (POST /markdown), and the verdict stated there is what came back.
 
-At this commit every disagreement rowed in that section is the cheap
+At this commit every measured disagreement stated below is the cheap
 direction -- this blanking refusing a marker GitHub renders, which the
 author resolves by moving the line. The three that went the other way are
-the three beads above, and each is now a red row naming what closed it.
-That is a statement about the bodies in the suite and not a census: a shape
-nobody has put to the renderer is rowed nowhere.
-prose_only's docstring enumerates the shapes and each is a row, and the
-suite's visibility section counts them again in its own words. Nothing in
-this repository checks the two against each other -- so changing the set
-means finding every sentence in both whose number depends on it. The
+the three beads above, and each is now closed and named where it stands.
+That is a statement about the bodies measured here and not a census: a shape
+nobody has put to the renderer is covered nowhere.
+prose_only's docstring enumerates the shapes below, and nothing in this
+repository checks that enumeration against anything else -- so changing the
+set means finding every sentence here whose number depends on it. The
 declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
 export has to not already show the bead closed, and the body's claimable
@@ -131,7 +130,7 @@ from typing import NoReturn
 # it is not a declaration at all, so 'Bead: none' still matches nothing.
 # Unanchored, and read over the raw body rather than prose_only's, so prose,
 # code blocks and HTML comments all reach it; '\s*' spans newlines. Three
-# consequences, all rowed below: a sentence that writes an id after the word
+# consequences, all stated below: a sentence that writes an id after the word
 # 'bead:' is read as a declaration; so is one hidden where GitHub renders
 # nothing; and one naming a well-formed id the export does not carry takes
 # the skip and leaves this gate demanding nothing on any branch (bd
@@ -144,7 +143,7 @@ BEAD_IN_BODY = re.compile(r"(?i)Bead:\s*(\S*gqlc-\S*)")
 # makes this gate state on the check run that an issue stays open, so the
 # carriers that were measured to hide the spelling where GitHub renders
 # nothing are blanked before this pattern runs. Blanked, not proved absent --
-# what the suite establishes is that every body measured in it that GitHub
+# what is established here is that every body measured below that GitHub
 # hides the marker in is refused, not that no such shape remains.
 # Leading whitespace is rejected because four spaces is
 # markdown's indented-code-block spelling and this file's own subject matter
@@ -165,20 +164,20 @@ ALSO_CLOSES = re.compile(r"(?im)^Also-closes:[ \t]*([^\n]*)")
 # A code fence: up to three spaces of indentation, then a run of three or
 # more backticks or tildes, then the info string. Four spaces is markdown's
 # indented-code spelling rather than a fence, and a tab indents by four, so
-# neither opens one -- both measured against GitHub's renderer, see the
-# suite's fence section. group(1) is the run, group(2) the info string; which
+# neither opens one -- both measured against GitHub's renderer
+# (POST /markdown). group(1) is the run, group(2) the info string; which
 # of the two a line is depends on the state prose_only() is in.
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\n]*)$")
 # A raw <pre> or <code> block, which GitHub renders as code. <script>,
 # <style> and <textarea> are the other tags markdown groups with <pre>, and
 # are deliberately not blanked: GitHub's sanitiser escapes the tag rather
 # than honouring it, so '&lt;script&gt;' and the text below it both come back
-# as prose a reader sees. Measured through POST /markdown for all three tags;
-# the <script> one is rowed in the suite. group(1) is the tag, so the closer
+# as prose a reader sees. Measured through POST /markdown for all three tags.
+# group(1) is the tag, so the closer
 # has to be that same tag. The '^ {0,3}' is markdown's bound on where an HTML
 # block starts -- at four the line is an indented code block instead -- and
 # the trailing '[\s>]|$' is what keeps '<pretend>' from reading as a <pre>.
-# Both bounds are rows.
+# Both bounds were measured against GitHub's renderer (POST /markdown).
 HTML_OPEN = re.compile(r"^ {0,3}<(pre|code)(?:[\s>]|$)", re.I)
 # The same tag read anywhere on the line, which is where GitHub's sanitiser
 # reads it: markdown starts an HTML *block* only at the line's start, but an
@@ -213,8 +212,8 @@ CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)+?(?<!`)\1(?!`)", re.
 # for, because a closing tag inside a comment does not end the block a reader
 # sees: markdown's line scanner does stop the HTML block on the line that
 # spells '</pre>', but the sanitiser then drops the comment, which leaves the
-# element open, and the marker below it lands inside it. Measured, both
-# spellings rowed: '<pre><!-- </pre> -->' with a marker under it, and '<pre>'
+# element open, and the marker below it lands inside it. Measured against
+# POST /markdown in both spellings: '<pre><!-- </pre> -->' with a marker under it, and '<pre>'
 # followed by '<!-- </pre> -->', each render the marker inside the <pre>.
 # Non-greedy so two comments on a line are two runs. Never applied to text
 # holding an unterminated '<!--' -- both call sites have already truncated
@@ -291,7 +290,7 @@ HASH_N = re.compile(r"#(\d+)")
 # `gh api` as 'bd-mirror: gqlc-x\r\n'. Without the '\s*' the trailing '\r' is
 # a character the id charset does not admit, no line matches, and every marker
 # reads as absent -- a fail-open that would leave this whole path inert while
-# every row of a fixture suite written with Unix endings stayed green.
+# every fixture written with Unix endings stayed green.
 #
 # The id charset is bd-gh-sync's own gate on an id it will pass to the shell,
 # minus the leading-dash case, which cannot arise after 'bd-mirror: '.
@@ -432,7 +431,7 @@ def comments_blanked(text):
     annotates a check run to say an issue stays open. GitHub does the
     opposite -- its HTML-block scanner looks for a literal '</pre>' on the
     line and finds none, so the block runs on and the marker renders inside
-    the <pre>. Measured against POST /markdown, both spellings rowed; it was
+    the <pre>. Measured against POST /markdown in both spellings; it was
     live on this branch between 520b01c3 and this commit.
 
     Spaces cannot make that mistake. The callers look for '</pre' and
@@ -468,7 +467,8 @@ def open_attr_quote(text):
     the lines below the open quote are part of the value (bd gqlc-ncb8).
     '<a href="', the marker, '">z</a>' comes back from GitHub as '<p>z</p>'.
 
-    Two deliberate narrowings, both rowed. A value opens only at a quote whose
+    Two deliberate narrowings, both measured against GitHub's renderer.
+    A value opens only at a quote whose
     preceding non-space character is '=', so an apostrophe in a sentence that
     happens to follow a '<' and a word -- "a <b isn't c" -- opens nothing; and
     a tag left unterminated with no quote open at all returns None, because
@@ -552,7 +552,8 @@ def prose_only(pr_body, strict=False):
     open, and raw <pre> and <code> blocks whose opening tag starts a line,
     indented no more than three spaces -- which is markdown's own bound on
     where an HTML block may start, four spaces being an indented code block
-    instead. Both ends of that bound are rows.
+    instead. Both ends of that bound were measured against GitHub's renderer
+    (POST /markdown).
 
     Blanked only under 'strict', because each costs a lost claim on the
     other question and only a movable refusal on this one: a <pre> or <code>
@@ -562,7 +563,7 @@ def prose_only(pr_body, strict=False):
     opens a comment. Not everything GitHub declines to render as prose --
     what was measured to diverge from it on the marker, in either direction,
     is the paragraphs from 'Not a markdown parser' down, and each shape they
-    name is a row.
+    name is stated there with what the renderer returned.
 
     Fences follow the rule GitHub's renderer follows rather than a toggle on
     every ``` and ~~~ line. A fence closes only on a run of the same
@@ -570,20 +571,20 @@ def prose_only(pr_body, strict=False):
     whitespace after it; a backtick fence whose info string carries a
     backtick opens nothing. Put the toggle back in place of this function --
     4446b7fc's outside_fences and the FENCE it read, both verbatim -- and
-    the suite goes red in three directions: markers the toggle honours and
-    this blanks, markers this honours that the toggle blanks and GitHub
-    renders as prose, and, because main()'s no-bead check reads this
-    function too, a closing keyword inside an HTML comment refused as a
-    claim. The first of those says where the two functions differ and
-    nothing about what a reader sees: some of its rows are markers the
+    three divergences return (unwitnessed since the suite's deletion in
+    PR #1595; nothing in this tree checks them today): markers the toggle
+    honours and this blanks, markers this honours that the toggle blanks
+    and GitHub renders as prose, and, because main()'s no-bead check reads
+    this function too, a closing keyword inside an HTML comment refused as
+    a claim. The first of those says where the two functions differ and
+    nothing about what a reader sees: some of those bodies are markers the
     renderer puts in a code element or drops from the output, and some are
-    divergences the 'Not a markdown parser' paragraph rows, where the
+    divergences the 'Not a markdown parser' paragraphs describe, where the
     renderer shows the marker and the toggle is the one agreeing with it.
-    How many rows that is stays out of this docstring:
-    it moved on this branch, and the row that moved it was added to the
-    no-bead section rather than to the visibility one, so the number tracks
-    the suite's size and not this function's behaviour. Naming the stand-in
-    is what makes it re-countable instead.
+    How many bodies that is stays out of this docstring:
+    the count changed on this branch without this function's behaviour
+    changing, so the number tracks history and not behaviour. Naming the
+    stand-in is what makes it re-countable instead.
     Among the first of the three is the ordinary idiom
     for showing a fence, which is to nest it in a longer one; showing this
     marker is what this file is about, so that is the realistic body rather
@@ -625,13 +626,14 @@ def prose_only(pr_body, strict=False):
     comments_blanked() blanks, and a <code> opened mid-line with no blank
     line above it -- the last three are not a complete tag on a line of
     their own, so GitHub keeps them inline as visible monospace. (A seventh
-    row in that direction, a marker sharing a block's closing line, is the
-    marker pattern's line anchor rather than this function; it is rowed
-    where it says so.) That is the cheap direction on this question: it
+    body in that direction, a marker sharing a block's closing line, is the
+    marker pattern's line anchor rather than this function; it is described
+    where that pattern is defined.) That is the cheap direction on this
+    question: it
     costs a refusal the author resolves by moving the line out from under
     the block, where the other direction is this gate annotating a check run
     to say an issue stays open, over a body in which no reader can see it
-    said. Every one of the seven is red, and each says so where it stands.
+    said. Every one of the seven is named as such where it stands.
 
     At this commit no measured divergence goes the other way on the
     visibility question -- no body in that section renders the marker
@@ -644,19 +646,19 @@ def prose_only(pr_body, strict=False):
     it starts no markdown HTML block; and a block that closes on its own
     opening line and then opens a comment, where the '<!--' is emitted raw
     with nothing to close it and the sanitiser swallows the rest of the
-    body. All three are red rows now, each naming what closed it. That is a
-    statement about the rows in the suite, not a proof that no such shape
-    remains.
+    body. All three are closed, each named above with what closed it. That
+    is a statement about the bodies measured here, not a proof that no such
+    shape remains.
 
     Two shapes reach the pattern over bodies GitHub does render, and are
-    rowed green rather than blanked: an inline code span, which GitHub shows
+    left standing rather than blanked: an inline code span, which GitHub shows
     as visible monospace, and a <details> block, which GitHub collapses
     rather than hides. The code span is where the two questions collide --
     claimable_prose() blanks it and this does not, because a keyword a
     reader can see is not a keyword GitHub acts on; measured on PR #901,
     whose body carries 'Closes #617' only inside spans and whose
     closingIssuesReferences does not list 617. Every shape named in these
-    paragraphs is a row in the suite's visibility section.
+    paragraphs is stated above with what the renderer returned.
     """
     out = []
     # None | ("comment", enclosing) | ("fence", char, run length)
@@ -747,7 +749,7 @@ def prose_only(pr_body, strict=False):
             # and GitHub hides it as well; measured. What resumes is
             # whatever the comment interrupted -- unless the rest of that
             # line carries the enclosing block's own closing tag, which
-            # GitHub does close the block on (measured, rowed).
+            # GitHub does close the block on (measured against POST /markdown).
             end = line.find("-->")
             if end >= 0:
                 enclosing = state[1]
@@ -1108,10 +1110,10 @@ def main():
     # not the callee goes on to use it. So the binding is required rather
     # than defensive. Delete this line and a body declaring its bead with
     # a 'Bead:' line, over a record carrying no external_ref value, raises
-    # UnboundLocalError and exits 1 where it should print and pass; the
-    # suite has rows on both of those exits in that declaration form and
-    # that edit reds them. check_opt_out()'s read of it, further down,
-    # does sit under such a branch.
+    # UnboundLocalError and exits 1 where it should print and pass; nothing
+    # in this tree checks those exits since the suite's deletion in
+    # PR #1595, so verify that edit by hand. check_opt_out()'s read of it,
+    # further down, does sit under such a branch.
     marker_n = None
     if refs is not None:
         in_branch = BEAD_IN_BRANCH.search(branch)
