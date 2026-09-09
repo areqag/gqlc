@@ -2359,9 +2359,10 @@ func TestEmittedMethodBindsTheCarriersAsTheirScalars(t *testing.T) {
 }
 
 // TestEmittedMethodBindsListsOfCarriers runs the emitted method for the
-// one query that binds a LIST of each carrier, which is the only thing in
-// the tree that reaches agtypeEncodedList — and, through a nullable list,
-// the composition of agtypeEncodedNullable around it.
+// one query that binds a LIST of each carrier the three fallible
+// encoders serve, which is the only thing in the tree that reaches
+// agtypeEncodedList — and, through a nullable list, the composition of
+// agtypeEncodedNullable around it.
 //
 // Before this, `agtypeEncodedList` appeared in no emitted artefact
 // anywhere: not in a golden, not in this corpus, not in a fixture. The
