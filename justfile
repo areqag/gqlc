@@ -300,9 +300,8 @@ check-hooks:
 # the same reason check-hooks is: a check nobody invokes is not a check.
 #
 # The directory is an argument so the recipe can be exercised over a throwaway
-# tree; developers and CI take the default. The caller that did so was
-# .githooks/tests/worktree-upstream-test.sh, deleted by PR #1595 (f6dc4c7b), so
-# the parameter is live and currently has no caller but a human.
+# tree; developers and CI take the default. The parameter is live and currently
+# has no caller but a human.
 #
 # Not skipped under CI, unlike check-hooks. actions/checkout leaves a
 # pull_request run on a detached HEAD (no upstream, nothing to say) and a
@@ -376,9 +375,7 @@ check-worktree-upstream dir=".":
 # core.worktree are wrong in CI too, so this recipe runs there.
 #
 # The directory is an argument so the recipe can be exercised over a throwaway
-# tree. The caller that did so was .githooks/tests/shared-config-drift-test.sh,
-# deleted by PR #1595 (f6dc4c7b), so the parameter is live and currently has no
-# caller but a human.
+# tree. The parameter is live and currently has no caller but a human.
 [private]
 check-shared-config dir=".":
     #!/usr/bin/env bash
@@ -1047,9 +1044,7 @@ doctor: check-hooks check-worktree-upstream check-shared-config check-beads-expo
 # read. The failure message names provisioning rather than lint so a reader can
 # tell a setup death from a real finding without opening the log.
 #
-# GQLC_PROVISION_ATTEMPTS / GQLC_PROVISION_DELAY size the budget. The retry
-# tests that set them to keep the failing case fast lived in
-# .githooks/tests/tool-gate-test.sh, deleted by PR #1595 (f6dc4c7b); the two
+# GQLC_PROVISION_ATTEMPTS / GQLC_PROVISION_DELAY size the budget. The two
 # variables are still read here, and nothing exercises them now. An attempts
 # value below 1 runs the loop zero times and falls through to the error, so a
 # malformed budget blocks rather than passes.
@@ -1291,9 +1286,7 @@ lint-python dir=".github/scripts": ensure-ruff
 # recognise. Skipping the latter is how a gate ends up green over a set nobody
 # looked at, which is the defect this recipe exists to close.
 #
-# The caller that exercised this over a throwaway tree was
-# .githooks/tests/lint-hooks-test.sh, deleted by PR #1595 (f6dc4c7b); the
-# parameter is live and currently has no caller but a human.
+# The parameter is live and currently has no caller but a human.
 #
 # shellcheck every hook, selected by shebang; CI and developers take the default.
 lint-hooks dir=".githooks": ensure-shellcheck
