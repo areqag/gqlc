@@ -197,6 +197,12 @@ jobs:
       # guard. Unconditional and network-free: it reads no PR and no remote.
       - name: the moved-base ordinal check's own rows
         run: python3 .github/scripts/check-open-pr-ordinals.py --self-test
+      # The allocator half's own rows (bd gqlc-c30cl). Unconditional and
+      # network-free like the rows above: they drive the merge-and-offer logic
+      # with stubbed remotes and never fetch, because the tool refuses without
+      # a network and a fetching step here would be a flaky red.
+      - name: the allocator's own rows
+        run: python3 .github/scripts/next-doc-ordinal.py --self-test
       # bd gqlc-v2p: fails when a PR's `.beads/issues.jsonl` drops or reopens
       # an issue vs its base. Fetch only the base commit (depth 1) so cost is
       # O(1) in history size, not O(N). Skip on master push — the tip IS the
