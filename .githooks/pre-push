@@ -18,13 +18,34 @@ set -euo pipefail
 # git hands the hook's stdin — the push's ref list — exactly once, and there are
 # now two consumers, so it is captured and replayed to each. Command substitution
 # strips trailing newlines, which the replay restores; on an empty capture, which
-# is the stdin a delete-only push presents, it replays nothing rather than a bare
-# newline. `set -o pipefail` above is what makes each pipeline report the
-# consumer's status rather than the replay's.
+# is git's "nothing to push", it replays nothing rather than a bare newline (a
+# delete-only push still presents one line per deleted ref — bd gqlc-no9x).
+# `set -o pipefail` above is what makes each pipeline report the consumer's
+# status rather than the replay's.
 _push_refs="$(cat)"
 _replay_push_refs() {
   if [ -n "${_push_refs}" ]; then printf '%s\n' "${_push_refs}"; fi
 }
+
+# The ref lines that publish content. A delete spells its local side `(delete)`
+# with an all-zero sha and publishes nothing, so the tree-reading gates below
+# have nothing to grade on those refs — and grading the working tree instead is
+# what made a branch undeletable whenever the local tree was red (bd gqlc-no9x).
+# A line that parses as neither is kept: an unknown shape must run the gates
+# rather than skip them. A mixed push keeps its updates, so this is a per-ref
+# partition, not a whole-push early return.
+_push_updates=""
+if [ -n "${_push_refs}" ]; then
+  while IFS= read -r _pp_line; do
+    [ -n "${_pp_line}" ] || continue
+    _pp_local_ref="" _pp_local_sha=""
+    read -r _pp_local_ref _pp_local_sha _pp_discard <<<"${_pp_line}" || true
+    if [ "${_pp_local_ref}" = "(delete)" ]; then continue; fi
+    case "${_pp_local_sha}" in
+      "" | *[!0]*) _push_updates="${_push_updates:+${_push_updates}$'\n'}${_pp_line}" ;;
+    esac
+  done <<<"${_push_refs}"
+fi
 
 # What the closing notice is entitled to claim. Each gate below appends its name
 # once it has PASSED, and push-transport-notice prints the accumulation.
@@ -74,10 +95,20 @@ fi
 # Only the purity verdict is at stake; `just test`'s own exit code is passed
 # through and still blocks the push. Deliberately not `|| true` here — that could
 # not tell a purity complaint from a failing suite, and would disarm the suite.
-"$(dirname "$0")/repo-purity" just test
-# `set -e` is what makes this line a record of a PASS rather than of an attempt:
-# a failing suite exits above and never reaches it. Same at each _ran_gate below.
-_ran_gate test
+# Skipped on a delete-only push: nothing is published, so there is nothing to
+# grade, and the suite would read the working tree instead (bd gqlc-no9x). The
+# destination guard above still saw the full ref list, so deleting master is
+# refused there; the commit screen and the bead advisory skip delete lines on
+# their own. The lint arm below carries the same skip; the notice is printed
+# once, here.
+if [ -n "${_push_refs}" ] && [ -z "${_push_updates}" ]; then
+  echo "pre-push: delete-only push — nothing published, skipping test/lint gates." >&2
+else
+  "$(dirname "$0")/repo-purity" just test
+  # `set -e` is what makes this line a record of a PASS rather than of an attempt:
+  # a failing suite exits above and never reaches it. Same at each _ran_gate below.
+  _ran_gate test
+fi
 
 # ensure-golangci self-heals the pinned binary in .bin/; a provisioning failure
 # BLOCKS the push. Until bd gqlc-l45j this arm warned and continued, justified
@@ -121,6 +152,11 @@ _ran_gate test
 # non-zero. A misread failure costs a wrong sentence and cannot cost a skipped
 # gate, which is the property that made this shape preferable to routing one
 # class to the hatch.
+# The lint arm carries the same delete-only skip as the suite above: its gates
+# read the working tree, which a delete does not publish (bd gqlc-no9x).
+if [ -n "${_push_refs}" ] && [ -z "${_push_updates}" ]; then
+  :
+else
 if just ensure-golangci >/dev/null 2>&1; then
   lint_log="$(mktemp)"
   trap 'rm -f "${lint_log}"' EXIT
@@ -270,6 +306,7 @@ else
   echo "       Diagnose with: just ensure-golangci" >&2
   echo "       Push anyway (skips the lint): GQLC_ALLOW_MISSING_LINTER=1 git push ..." >&2
   exit 1
+fi
 fi
 
 # LAST, deliberately: an advisory about a branch name is only worth reading on a
