@@ -803,7 +803,7 @@ type nodeTable struct {
 	//     covering inference be learned from without letting an uncovered one
 	//     launder a strict subset into a VarEndpoint the narrowing trusts.
 	//
-	// It is deliberately a positive lane, so anything the resolver did not
+	// A positive lane: anything the resolver did not
 	// itself derive that way defaults to uncovered: an uncovered Phase B
 	// inference (which may be a strict subset of the attainable types), and a
 	// carried entry (whose provenance this Part cannot see).
@@ -857,10 +857,10 @@ func endpointLabels(e query.Endpoint, t nodeTable, s schema.Schema) (endpointKey
 		if sat := satisfyingNodeTypes(ls, s); len(sat) > 0 {
 			return endpointKeys{keys: sat, covers: true}, true
 		}
-		// Unreachable: Phase A1 refuses an inline endpoint no declared type
-		// satisfies, before any edge is closed. Yielding the SPELLED key here is
-		// what used to make that refusal arrive as a missing EDGE naming a source
-		// or target nothing declares (bd gqlc-jqix).
+		// Phase A1 refuses an inline endpoint no declared type satisfies,
+		// before any edge is closed, so this arm yields the empty set.
+		// Yielding the SPELLED key here would report that refusal as a missing
+		// EDGE naming a source or target nothing declares (bd gqlc-jqix).
 		return endpointKeys{}, false
 	default:
 		return endpointKeys{}, false
@@ -1023,19 +1023,17 @@ func orientationDisagreement(cands []schema.EdgeKey, srcs, tgts []graph.LabelSet
 // question is asked only where the arrow leaves it open — endpointContribution
 // takes `directed` for exactly this and skips it on a directed close.
 //
-// It used to ask both of every candidate whatever the arrow said, on the
-// reasoning that the extra end only ever widened the result and so erred in ADR
-// 0006's safe direction. That reasoning does not hold at this call site (bd
-// gqlc-pv0u). Widening is safe for an inferred type, but the set this feeds is
-// the endpoint narrowing, where a second surviving type is not a broader answer
-// but no answer: the caller refuses the whole entity as ambiguous. The extra end
-// therefore bought refusals of queries the schema fully determines, which is the
-// unsafe direction wearing the safe one's name.
+// Both readings are asked only where the arrow leaves the second one open.
+// Widening is safe for an inferred type, but the set this feeds is the
+// endpoint narrowing, where a second surviving type is not a broader answer
+// but no answer: the caller refuses the whole entity as ambiguous. Asking
+// both unconditionally refuses queries the schema fully determines (bd
+// gqlc-pv0u).
 //
-// Package-level rather than closures inside orientationDisagreement because the
-// endpoint narrowing asks the same question of the same candidate set and must
-// get the same answer: whether a candidate's Source or its Target is the type
-// this end of the pattern gets is exactly which reading it is.
+// Package-level so the endpoint narrowing asks the same question of the same
+// candidate set and gets the same answer: whether a candidate's Source or
+// its Target is the type this end of the pattern gets is exactly which
+// reading it is.
 func readsLeftToRight(k schema.EdgeKey, srcs, tgts []graph.LabelSetKey) bool {
 	return slices.Contains(srcs, k.Source) && slices.Contains(tgts, k.Target)
 }
@@ -1075,7 +1073,7 @@ const (
 // same ones. Where srcs and tgts share a key — the ordinary shape of a supertype
 // label admitted at both ends — it answers yes, and answering it would put the
 // candidate's far end into the pattern's near end: a node type the arrow
-// excludes. Asking it anyway was bd gqlc-pv0u.
+// excludes (bd gqlc-pv0u).
 //
 // Every element of the result is drawn from the slice this end contributed to
 // the probe, because a reading is a claim about both of the candidate's ends and
@@ -1125,16 +1123,15 @@ func describeTriedEdges(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey) str
 // and the far end's own narrowing are the same claim about that end, and
 // deriving them twice is how they drift apart.
 //
-// The gates are gqlc-0tft's, unchanged and asked of every edge: it must
-// witnessesItsEndpoints, and BOTH its ends must cover(). Skipping an edge only
-// widens the result, which is the safe direction for both callers — the applier
-// lands on the pre-narrowing candidate list, the Phase B reader on the far
-// end's full satisfying set, which is what each had before this pass existed.
+// The gates are asked of every edge: it must witnessItsEndpoints, and BOTH
+// its ends must cover(). Skipping an edge only widens the result, which is
+// the safe direction for both callers — the applier lands on the
+// pre-narrowing candidate list, the Phase B reader on the far end's full
+// satisfying set.
 //
 // Only plural bindings get an entry. A resolved singular endpoint contributes
 // its one key to every reading it has, so an entry for it could only ever be
-// that same key: including them would change no answer, and the restriction is
-// written here so it is stated once rather than left to each caller.
+// that same key; the restriction lives here so both callers share it.
 func endpointNarrowing(edges []query.EdgeBinding, t nodeTable, s schema.Schema, written map[string]struct{}, demoted map[int]bool) map[string]map[graph.LabelSetKey]struct{} {
 	acc := make(map[string]map[graph.LabelSetKey]struct{}, len(t.cands))
 	for _, e := range edges {
@@ -1258,23 +1255,16 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 			// hop it does not itself touch.
 			//
 			// It is placed AFTER a barren round, not merged into the round
-			// itself, so the widening is legible: reaching here means the round
-			// committed nothing and the refusal below is what shipped before
-			// this lane existed, so nothing the resolver already accepts can
-			// have taken this path. That is an argument about this arrangement,
-			// not about every possible one — moving the narrowing into the first
-			// call reddens no test here and moves no cell of the corpus sweep,
-			// which is what one would expect given that a narrowed candidate set
-			// is a subset of the unnarrowed one. WITHIN a round that leaves
+			// itself: reaching here means the round committed nothing, so the
+			// refusal below is the pre-narrowing one and nothing the resolver
+			// already accepts takes this path. WITHIN a round that leaves
 			// committing EARLIER as the only divergence available: a wide set of
 			// one narrows to that same one type, an empty one stays empty through
 			// the fallback, and only a wide set of two or more lets the narrowed
 			// lane commit where this one defers. It does not on its own order a
 			// round's narrowed commitment against the type a later round reaches
 			// from a richer table — `covered` is what carries that, with
-			// gqlc-3uof's hole in it. The placement buys the reader the argument
-			// rather than making him derive it; it is not load-bearing on any
-			// input measured here.
+			// gqlc-3uof's hole in it.
 			//
 			// Recomputed per round rather than hoisted: a round that commits
 			// changes the binding tables endpointNarrowing reads, so a hoisted
@@ -1287,11 +1277,10 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 			if committed == 0 {
 				n := next[0]
 				// commit() and the raw `inferred` field are the same set at
-				// this line and no test separates them: a binding reaches
-				// `next` only when commit() reported !widened, and that is the
-				// return that leaves `inferred` alone. The call is spelled the
-				// way the round spells it so the message and the decision read
-				// one function.
+				// this line: a binding reaches `next` only when commit()
+				// reported !widened, and that is the return that leaves
+				// `inferred` alone. The call is spelled the way the round
+				// spells it so the message and the decision read one function.
 				cands, _, _ := candidateTypes(n, edges, s, t, written, narrowing, demoted).commit()
 				return fmt.Errorf("%w: cannot uniquely infer type of unlabelled binding %q — candidate types: %s", ErrAmbiguousBinding, n.Variable(), joinCandidates(cands))
 			}
@@ -1353,20 +1342,17 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 			// through endpointLabels gets covers=false and commits uncovered
 			// in turn.
 			//
-			// That transitivity is the absence, not the delete. The else arm
-			// changes no answer on any QUERY: an unlabelled pending
-			// binding is never already in the lane — the lane's other writers
-			// are BindNode, which never sees an unlabelled binding, and the
-			// narrowing's collapse, which cannot run before Phase B; newScope
-			// does not seed the lane from the carry; and a name leaves
+			// That transitivity is the absence, not the delete. The delete keeps
+			// the lane from outliving the entry it qualifies: an unlabelled
+			// pending binding is never already in the lane — the lane's other
+			// writers are BindNode, which never sees an unlabelled binding,
+			// and the narrowing's collapse, which cannot run before Phase B;
+			// newScope does not seed the lane from the carry; and a name leaves
 			// `pending` on the iteration it commits, so there is no second
-			// commit to overwrite. It is written so the absence is asserted
-			// rather than assumed: seeding the lane from the carry is the
-			// change newScope names as its alternative, and it would make this
-			// arm live.
+			// commit to overwrite.
 			// TestPhaseBsUncoveredSingularCommitClearsAResolvedCoversMark pins
 			// it from a seeded table, which is the only place the state is
-			// constructible. Reaching the else at all needs an uncovered
+			// constructible. Reaching the else needs an uncovered
 			// commitment, and the shape that gives one is this transitivity
 			// itself: a far end already in `resolved` and absent from the lane,
 			// on a MANDATORY hop — an OPTIONAL-only one leaves the binding
@@ -1405,13 +1391,10 @@ func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBindin
 			// alone, and this arm writes no `resolved` entry for a mark to
 			// qualify.
 			//
-			// It changes no answer and no QUERY can pin it — every writer of the
-			// lane writes `resolved` in the same breath, and a name already in
-			// `resolved` leaves `pending` before the first round, so no mark can
-			// be here. It is written for the reason the singular arm above and
-			// BindNodeCands both give: the lane must not outlive the entry it
-			// qualifies under any seeding regime, and seeding it from the carry is
-			// the alternative newScope names and declines.
+			// The delete keeps the lane from outliving the entry it qualifies:
+			// every writer of the lane writes `resolved` in the same breath,
+			// and a name already in `resolved` leaves `pending` before the
+			// first round, so no mark can be here.
 			// TestPhaseBsPluralCommitLeavesNoResolvedCoversMark pins it from a
 			// seeded table, which is the only place the state is constructible.
 			delete(t.resolvedCovers, n.Variable())
@@ -1495,10 +1478,8 @@ func (a candidateAcc) result() map[graph.LabelSetKey]struct{} {
 // fewer edges only widens. That argument does not cover the mixed case:
 // candidateAcc.result() picks the narrowed reading over the wide one per
 // accumulator, so one can come back narrowed and the other wide, and then the
-// two sets were not built from comparable contributions. Neither a mixed
-// reading nor a violation appeared anywhere in this package's test run, corpus
-// sweep included — measured with a panic on each, each inverted first to show
-// it fires. The mixed case is unobserved, not impossible.
+// two sets were not built from comparable contributions, so the subset
+// argument above does not extend to it.
 type unlabelledInference struct {
 	inferred   map[graph.LabelSetKey]struct{}
 	attainable map[graph.LabelSetKey]struct{}
@@ -1506,25 +1487,19 @@ type unlabelledInference struct {
 	// innerJoined records that some folded edge drops the rows that lack it, so
 	// the types it points at are types the SURVIVING rows have.
 	//
-	// It is spelled `!e.Nullable() || demoted[e.OptionalGroup()]` and NOT
-	// witnessesItsEndpoints, which answers a stricter question for `attainable`
-	// and also returns false for a variable-length hop. A `*1..2` hop still
-	// filters: measured on social_r1, master accepts
-	// `MATCH (c)-[a:AUTHORED*1..2]->(x:Post) RETURN c.name` as STRING NOT NULL
-	// and `c` is the source of an AUTHORED edge on every row it returns, so that
-	// answer is sound and reusing the stricter predicate here would refuse it.
-	// What a multi-hop's far end licenses is a separate and pre-existing question
-	// (gqlc-3uof), deliberately not widened here.
+	// It is spelled `!e.Nullable() || demoted[e.OptionalGroup()]`:
+	// witnessesItsEndpoints answers a stricter question for `attainable` and
+	// also returns false for a variable-length hop, and a `*1..2` hop still
+	// filters — `MATCH (c)-[a:AUTHORED*1..2]->(x:Post) RETURN c.name` is
+	// STRING NOT NULL, and `c` is the source of an AUTHORED edge on every row
+	// it returns. What a multi-hop's far end licenses is a separate question
+	// (gqlc-3uof) this predicate does not answer.
 	//
-	// The demotedGroups exemption is the one part shared with the family's other
-	// two guards, added by bd gqlc-lixuz to complete it. Until then this was the
-	// blunt `!e.Nullable()`, and the refusal that produced said "every edge
-	// reaching it is an OPTIONAL match, which drops no row" of a group that was
-	// PROVEN — false in its own terms, since a proven group's rows without the
-	// hop are exactly the rows the query does not return. Nothing in the corpus
-	// reached the difference: the widening left the whole package and all 14070
-	// sweep cells unchanged, so TestAProvenOptionalGroupInnerJoinsPhaseB's pair
-	// is the only thing holding it.
+	// The demotedGroups exemption keeps this guard in agreement with the
+	// family's other two guards: a proven group's rows without the hop are
+	// exactly the rows the query does not return, so "every edge reaching it
+	// is an OPTIONAL match, which drops no row" is false of a proven group.
+	// TestAProvenOptionalGroupInnerJoinsPhaseB's pair pins it.
 	//
 	// attested cannot stand in for this either: its far-end conjunct decides
 	// WHICH types the evidence points at, not WHETHER there is any.
@@ -1554,26 +1529,18 @@ type unlabelledInference struct {
 //   - 0: the touching edges agree on nothing, and master refuses with
 //     ErrUnknownLabel. attainable can be non-empty there — the dropped edge is
 //     what emptied the intersection — so substituting really would write a type.
-//     It changes no VERDICT: the edge that emptied the intersection is still in
-//     the pattern and is not declared out of whatever got substituted, so edge
-//     validation refuses a step later and only the SENTINEL moves. Measured, not
-//     argued: substituting on length 0 as well as 1 gives 0 DIFFERENT VERDICT
-//     and 2 DIFFERENT SENTINEL over the corpus sweep, both of them
-//     invalid/unlabelled_optional_hop_empty_intersection.cypher going
+//     The edge that emptied the intersection is still in the pattern and is not
+//     declared out of whatever got substituted, so edge validation refuses a
+//     step later and only the sentinel moves:
+//     invalid/unlabelled_optional_hop_empty_intersection.cypher goes
 //     ErrUnknownLabel -> ErrUnknownEdge "unknown edge:
-//     Company&Large-[HAS_DESK]->Desk". The sweep compares 14070 cells, which is
-//     all of them, and that bounds the claim rather than proving it: no cell
-//     reaches an accept that way, and nothing here says none can. The 0 is a
-//     measurement and not a blind instrument — substituting on length 0 INSTEAD
-//     of length 1 moves 14 verdicts through the same reader.
-//     The gate stays for the message and not for the answer. ErrUnknownLabel is
-//     the true diagnosis; the substituted lane refuses by naming an edge between
-//     a type nothing attested and a far end that was never in doubt. It also
-//     leaves the refusal resting entirely on a downstream check that has no
-//     stated obligation to this one.
+//     Company&Large-[HAS_DESK]->Desk" under the wider substitution. The gate
+//     stays for the message. ErrUnknownLabel is the true diagnosis; the
+//     substituted lane refuses by naming an edge between a type nothing
+//     attested and a far end that was never in doubt, leaving the refusal to
+//     rest on a downstream check with no stated obligation to this one.
 //     Pinned by invalid/unlabelled_optional_hop_empty_intersection.cypher,
-//     whose ErrorIs(ErrUnknownLabel) is what that substitution kills — the
-//     sentinel, which is what this bullet used to call a verdict.
+//     whose ErrorIs(ErrUnknownLabel) the substitution breaks.
 //   - 2 or more: master defers to the next round and eventually refuses with
 //     ErrAmbiguousBinding over the wide set. Committing the wider set instead
 //     would turn every such refusal into a plural binding, which is a change to
@@ -1595,14 +1562,12 @@ type unlabelledInference struct {
 //     lengths never reach a commitment to read the bit: 0 refuses, and 2 or more
 //     defers to the next round.
 //
-// There is no accumulator behind it. candidateTypes used to carry a `covered`
-// field conjoining the same two conjuncts once per edge, and by the second
-// bullet its value at this line was `false` on every input — measured green with
-// the field's read replaced by the literal, over this package's tests and the
-// corpus sweep. It read as the lever a finer coverage rule would pull
-// (gqlc-xzgt) and it was not one: the conjunction that carries that precision is
-// the one over `attested` and `attainable`, since crediting one more edge THERE
-// is what lets the substitution fire, and the substitution is the only route to
+// There is no accumulator behind it: by the second bullet above, conjoining
+// the same two conjuncts once per edge is `false` at this line on every input,
+// so a per-edge `covered` tally beside the two accumulators could only restate
+// `attested`. The conjunction that carries coverage precision is the one over
+// `attested` and `attainable` (gqlc-xzgt): crediting one more edge there is
+// what lets the substitution fire, and the substitution is the only route to
 // a covered commitment.
 //
 // A substituted set of two or more is committed, not deferred, because deferring
@@ -1640,10 +1605,9 @@ func (i unlabelledInference) commit() (keys map[graph.LabelSetKey]struct{}, cove
 // binding holds on the rows it is RETURNED on, so any set commit() could offer
 // is drawn from non-evidence.
 //
-// It deliberately does not test folded: with no touching edge at all nothing
-// folded, so `inferred` is empty and the round reaches case 0 either way —
-// adding the conjunct changed no test in this package, including the corpus
-// sweep. commitUnlabelledRound does test it, because there the count picks
+// It does not test folded: with no touching edge at all nothing folded, so
+// `inferred` is empty and the round reaches case 0 either way.
+// commitUnlabelledRound does test it, because there the count picks
 // between two error messages and only one of them is true of a query with no
 // touching edge.
 func (i unlabelledInference) unconstrained() bool {
@@ -1656,9 +1620,9 @@ func (i unlabelledInference) unconstrained() bool {
 // two are for and commit() for which one a round acts on.
 //
 // It reads each far end's keys whether or not that end covers, and infers from
-// them: refusing an uncovered far end here would turn queries origin/master
-// resolves into ErrUnknownLabel, and the wrong type it infers from one is
-// gqlc-3uof — pre-existing on master and deliberately left alone.
+// them: refusing an uncovered far end here would refuse queries the resolver
+// accepts with ErrUnknownLabel, and the wrong type it infers from one is
+// gqlc-3uof's open question, which this pass does not address.
 //
 // An edge folds into `attainable` under a CONJUNCTION, and each conjunct is a
 // different way the intersection can drop a type the returned rows really have:
@@ -1673,10 +1637,10 @@ func (i unlabelledInference) unconstrained() bool {
 //     come back anyway and this binding is whatever those rows put here.
 //
 // Failing it does not skip the edge for `inferred`, only for `attainable`:
-// `inferred` is left exactly as master computes it, so nothing reads a set
-// master would not have produced. Failing it also leaves no separate mark — the
-// two accumulators and `attested` carry the whole answer, and commit() says why
-// a per-edge coverage tally beside them could only restate `attested`.
+// `inferred` keeps the computation this pass found, so nothing reads a set it
+// would not otherwise have produced. Failing it also leaves no separate mark —
+// the two accumulators and `attested` carry the whole answer, and commit() says
+// why a per-edge coverage tally beside them could only restate `attested`.
 //
 // An edge skipped above (an endpoint endpointLabels cannot read yet) contributes
 // to neither accumulator, which only widens both, so skipping cannot break the
@@ -2021,15 +1985,15 @@ func qualifiedDemoter(e query.EdgeBinding) bool {
 // edge: no quantifier at all, or a quantifier whose range admits exactly one
 // hop and no other count.
 //
-// This is a STRICTER question than qualifiedDemoter's, and deliberately not the
-// same one. qualifiedDemoter asks whether the edge is guaranteed to exist on a
-// surviving row, which a zero lower bound is the only quantifier to break; that
-// answer is all DemoteNullability needs, because nullability is a property of
-// the endpoints' existence and a longer path still ends on real nodes. The
-// narrowing needs more: it reads the closed candidate set as naming the types
-// at the PATTERN's two ends, and under `*2` the closure describes the last hop
-// while the pattern's near end sits two hops back. There, "an edge exists" and
-// "these are its ends" come apart, so a lower-bound test is the wrong test.
+// This answers whether the pattern IS one declared edge; qualifiedDemoter
+// answers whether the edge is guaranteed to exist on a surviving row, which a
+// zero lower bound is the only quantifier to break. Nullability is a property
+// of the endpoints' existence, and a longer path still ends on real nodes, so
+// that answer is all DemoteNullability needs. The narrowing needs the ends:
+// it reads the closed candidate set as naming the types at the PATTERN's two
+// ends, and under `*2` the closure describes the last hop while the pattern's
+// near end sits two hops back. There "an edge exists" and "these are its ends"
+// come apart, so this asks the upper-bound question and not qualifiedDemoter's.
 //
 // `*` is why the upper bound is read rather than the lower. openCypher reads an
 // absent lower bound as one, so `*` passes every lower-bound test there is
@@ -2088,21 +2052,17 @@ func singleHopPattern(e query.EdgeBinding) bool {
 //     observed by it, so it filters no row of the MATCH that fed it. Both
 //     clauses leave every input row in the result, whatever its type.
 //
-// The first arm is §4.4.3's demotion gate, now spelled the same way here and in
+// The first arm is §4.4.3's demotion gate, spelled the same way here and in
 // DemoteNullability down to the demotedGroups exemption, because both ask one
-// question: "is this edge guaranteed on a surviving row". Until bd gqlc-o8oc
-// this arm was the blunter `e.Nullable()`, refusing a proven group's edge that
-// DemoteNullability accepted — a difference whose only recorded reason was
-// gqlc-o8oc's own deferral, never a soundness argument. `demoted` is the
+// question: "is this edge guaranteed on a surviving row". `demoted` is the
 // caller's scope.demotedGroups, which is why Phase D runs above Phases B and C
 // (see the hoist comment in resolvePart): a nil map here reads false for every
-// id, so with the old order this arm would silently answer the pre-refinement
-// answer on every input rather than fail.
+// id, so phase order decides whether this arm answers pre- or post-refinement.
 //
-// The second arm is strictly narrower than §4.4.3's and stays that way — see
-// singleHopPattern for why the extra question is this pass's and not
-// DemoteNullability's. The third is asked only here; DemoteNullability's answer
-// for a written edge is master's and is not this function's to change.
+// The second arm adds singleHopPattern's question to §4.4.3's — see
+// singleHopPattern for why the narrowing needs the ends and not just the
+// existence guarantee. The third is asked only here; DemoteNullability's answer
+// for a written edge stands as it is.
 func witnessesItsEndpoints(e query.EdgeBinding, written map[string]struct{}, demoted map[int]bool) bool {
 	if (e.Nullable() && !demoted[e.OptionalGroup()]) || !singleHopPattern(e) {
 		return false
@@ -2172,15 +2132,13 @@ func unify(a, b ResolvedType) (ResolvedType, bool) {
 // query.Effect — declared at internal/query/query.go's `type Effect interface`,
 // with the eight variants declaring isEffect below it.
 //
-// That sum is NOT closed, and this comment used to say it was while citing a
-// line range where Effect does not live (bd gqlc-vt45, from PR #916). The
-// unexported isEffect marker has value receivers, so it seals DECLARATION of
-// the interface, not INHABITATION: `*query.CreateEffect` and
-// `struct{ query.Effect }` satisfy Effect from any package in the module and
-// match none of the arms below. Control reaches the default arm.
+// That sum is NOT closed: the unexported isEffect marker has value receivers,
+// so it seals DECLARATION of the interface, not INHABITATION.
+// `*query.CreateEffect` and `struct{ query.Effect }` satisfy Effect from any
+// package in the module and match none of the arms below. Control reaches the
+// default arm.
 //
-// The default therefore refuses rather than resting on being unreachable, and
-// it refuses through the error channel — which validateEffect has and
+// The default therefore refuses, through the error channel — which validateEffect has and
 // attributeUse in internal/query/cypher does not — because an Effect the parser
 // built that R6 has no validator for is a coverage gap to report, not a
 // corrupted value to crash on. Pinned by

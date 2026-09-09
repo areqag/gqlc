@@ -125,14 +125,13 @@ func newScope(carry branchState) *scope {
 	// local Phase A1 shadowing (Bind*'s delete cascade) works
 	// uniformly on carried and local names. Nullability seeds too:
 	// Phase D's local-overrides-carry rule (§4.6) overwrites this.
-	// resolvedCovers is deliberately NOT seeded. branchState carries the type,
-	// not how Part K arrived at it, so a carried singular node type is a
-	// commitment this Part cannot see the provenance of — and Part K's Phase B
-	// inference is one of the things it can be. Leaving it uncovered means the
-	// narrowing declines to learn from a carried singular endpoint, which lands
-	// on the pre-narrowing answer. The cost is precision on
-	// `MATCH (a:Only) WITH a MATCH (p:Plural)-[r]->(a)`; the alternative is a
-	// further branchState lane, and no fixture pays the precision.
+	// resolvedCovers is NOT seeded. branchState carries the type, not how Part
+	// K arrived at it, so a carried singular node type is a commitment this
+	// Part cannot see the provenance of — and Part K's Phase B inference is one
+	// of the things it can be. Leaving it uncovered means the narrowing does
+	// not learn from a carried singular endpoint, which lands on the
+	// pre-narrowing answer. The cost is precision on
+	// `MATCH (a:Only) WITH a MATCH (p:Plural)-[r]->(a)`.
 	for name, nt := range carry.exportedNodeTypes {
 		s.nodeTypes[name] = nt
 	}
@@ -251,17 +250,11 @@ func (s *scope) BindNodeCands(nb query.NodeBinding, nts []schema.NodeType) error
 	s.nodeCands[v] = nts
 	// A cands entry is a satisfying set by construction, so it needs no
 	// resolvedCovers mark; the lane qualifies `resolved` only. The delete keeps
-	// the two lanes from ever both claiming v.
-	//
-	// It changes no answer on any QUERY — the singular arm above already
-	// refuses a v in s.nodeTypes, so no query puts v in the lane before this
-	// runs. A test does pin it, by seeding the lane on a scope directly:
-	// TestScopeBindNodeCandsClearsASeededResolvedCoversMark.
-	// It is written for the same reason as BindEdge's copy: the lane must
-	// not outlive the `resolved` entry it qualifies under any seeding regime,
-	// and the moment newScope seeds resolvedCovers from the carry this delete
-	// is what stops a carried mark surviving a plural re-bind and making the
-	// narrowing read the new set as covering.
+	// the two lanes from ever both claiming v: the singular arm above already
+	// refuses a v in s.nodeTypes, so the lane holds no mark for v on entry, and
+	// the delete keeps it that way however the scope was seeded.
+	// TestScopeBindNodeCandsClearsASeededResolvedCoversMark pins it from a
+	// seeded scope.
 	delete(s.resolvedCovers, v)
 	delete(s.edgeTypes, v)
 	delete(s.edgeKeys, v)
@@ -292,23 +285,17 @@ func (s *scope) BindEdge(eb query.EdgeBinding) error {
 		return fmt.Errorf("%w: variable %q carried as edge with labels %s, re-bound with labels %s", ErrPartBindingTypeConflict, v, prev.Labels().Key(), eb.Labels().Key())
 	}
 	s.edgeBindings[v] = eb
-	// Edge shadows any carried node state. The resolvedCovers line changes no
-	// answer on any QUERY: the only node state a shadow can find at v
-	// is the carry's, newScope does not seed the lane from the carry, and a
-	// same-Part BindNode at v never reaches here at all — the PARSER refuses
-	// that query, with `variable bound with conflicting kinds` from
-	// cypher.mergeBinding, so no such scope is ever built. (Nothing above this
-	// cascade looks at s.nodeTypes: the checks there are the callTypes shape
-	// check and the edge-label parity check.)
-	//
-	// It is written because the lane must not outlive the `resolved` entry it
-	// qualifies under ANY seeding regime — the moment newScope seeds it, this
-	// delete is what stops a stale mark from making an edge-shadowed name read
-	// as a covering endpoint. Same argument for BindNodeCands' and BindCall's
-	// copies; those three deletes are the whole set of query-unreachable writes
-	// to this lane on a shadow path, and each is pinned by a test that seeds the
-	// lane on a scope directly — here,
-	// TestScopeBindEdgeClearsASeededResolvedCoversMark.
+	// Edge shadows any carried node state. The resolvedCovers delete keeps the
+	// lane from outliving the `resolved` entry it qualifies: the only node
+	// state a shadow can find at v is the carry's, newScope does not seed the
+	// lane from the carry, and a same-Part BindNode at v never reaches here —
+	// the PARSER refuses that query, with `variable bound with conflicting
+	// kinds` from cypher.mergeBinding, so no such scope is ever built.
+	// (Nothing above this cascade looks at s.nodeTypes: the checks there are
+	// the callTypes shape check and the edge-label parity check.)
+	// TestScopeBindEdgeClearsASeededResolvedCoversMark pins it from a seeded
+	// scope: the delete is what stops a stale mark from making an
+	// edge-shadowed name read as a covering endpoint.
 	delete(s.nodeTypes, v)
 	delete(s.nodeCands, v)
 	delete(s.resolvedCovers, v)
@@ -327,16 +314,13 @@ func (s *scope) BindEdge(eb query.EdgeBinding) error {
 func (s *scope) BindCall(cb query.CallBinding, r procsig.Registry) error {
 	v := cb.Variable()
 	// R7 §4.1: local CallBinding shadows any carried entity state at
-	// the same name (parser-unreachable belt-and-braces since
-	// build.go's imported[v] check rejects the collision at parse).
+	// the same name (belt-and-braces: build.go's imported[v] check rejects the
+	// collision at parse).
 	//
-	// The resolvedCovers line is unreachable from a query twice over — that
-	// parser check, and newScope not seeding the lane from the carry — so it
-	// changes no answer on any query. A test does pin it, by seeding the lane on
-	// a scope directly: TestScopeBindCallClearsASeededResolvedCoversMark.
-	// It is written for BindEdge's reason: the
-	// lane must not outlive the `resolved` entry it qualifies under any seeding
-	// regime, and seeding it from the carry is what would make this delete live.
+	// The resolvedCovers delete keeps the lane from outliving the `resolved`
+	// entry it qualifies, however the scope was seeded.
+	// TestScopeBindCallClearsASeededResolvedCoversMark pins it from a seeded
+	// scope.
 	delete(s.nodeTypes, v)
 	delete(s.nodeCands, v)
 	delete(s.resolvedCovers, v)
@@ -474,22 +458,16 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 // the deferred-close loop in CloseEdges rather than above it, which
 // TestDeferredEdgesCloseBeforeTheNarrowing pins.
 func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
-	// A pure optimization. No test can pin the RETURN, and not for want of a
-	// constructible state: with nodeCands empty the two implementations answer
-	// identically. endpointNarrowing gives an entry only to a plural binding, so
-	// it hands back an empty map, the loop below never runs, and the work the
-	// body does before reaching it only reads. Delete the return and every
-	// package stays green — which the reading above says is what to expect,
-	// rather than a gap in the corpus.
-	//
-	// Its PREMISE is ordinary to assert, and
-	// TestEndpointNarrowingGivesNoEntryWhenNothingIsPlural does, both ways round:
-	// the row where p IS plural is what stops the empty answer being read as an
-	// edge that would never have contributed anything.
-	//
-	// It stays because the work it skips is not free: writtenBindings walks the
+	// A pure optimization: with nodeCands empty endpointNarrowing hands back an
+	// empty map — it gives an entry only to a plural binding — so the loop
+	// below never runs and the work the body does before reaching it only
+	// reads. The return skips work that is not free: writtenBindings walks the
 	// effects and every surviving edge re-runs edgeCandidates over the schema,
 	// on the common scope where nothing is plural.
+	//
+	// TestEndpointNarrowingGivesNoEntryWhenNothingIsPlural pins the premise,
+	// both ways round: the row where p IS plural is what stops the empty answer
+	// being read as an edge that would never have contributed anything.
 	if len(s.nodeCands) == 0 {
 		return
 	}
@@ -507,8 +485,7 @@ func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
 				narrowed = append(narrowed, nt)
 			}
 		}
-		// There is deliberately no "all candidates survived" arm. It happens
-		// often, but it needs no handling: narrowed is built by filtering cands
+		// No "all candidates survived" arm: narrowed is built by filtering cands
 		// in order, so keeping all of them makes it element-wise equal to
 		// cands, and the default arm's write-back is then a no-op. Every v here
 		// came from a plural binding, so len(cands) >= 2 and the all-survived
@@ -529,20 +506,14 @@ func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
 			// ones no matching row can have. The survivor is still a superset of
 			// the attainable types, so the entry stays covered.
 			//
-			// Changes no answer on any QUERY: this pass applies its effects from
-			// a snapshot taken before the loop, CloseEdges returns immediately
-			// after it, and resolvedCovers is not carried, so nothing reads the
-			// lane between this write and the end of the Part. A test does pin
-			// it, by reading the lane back off a scope rather than by asking a
-			// query: TestScopeNarrowingToASingletonMarksTheBindingCovering. Drop
-			// the write and no query test moves, which is the first sentence
-			// again, measured.
-			// It stays because the lane's contract is one-directional —
-			// membership implies covers, and only that direction is load-bearing
-			// — so omitting the write is sound but false, and the moment a reader
-			// appears after this point (carrying the lane is the obvious one, and
-			// the spec now names it) the omission is a precision bug with nothing
-			// to catch it.
+			// The write maintains the lane's invariant — membership implies covers,
+			// and the survivor qualifies per the paragraph above — for whatever
+			// reads the lane after this point. Nothing does within this Part:
+			// this pass applies its effects from a snapshot taken before the
+			// loop, CloseEdges returns immediately after it, and resolvedCovers
+			// is not carried.
+			// TestScopeNarrowingToASingletonMarksTheBindingCovering pins it by
+			// reading the lane back off a scope.
 			s.resolvedCovers[v] = struct{}{}
 			delete(s.nodeCands, v)
 		default:
