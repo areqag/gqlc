@@ -110,18 +110,32 @@ case "${transport}" in
     echo "          push from this repository; it cannot help the one now in flight." >&2
     ;;
   other)
-    # THE LIMIT, STATED. An independent lane measured rc=141 over HTTPS too on
-    # 2026-08-23, and core.sshCommand governs no part of an HTTPS push — git does
-    # not spawn ssh at all, so there is nothing for the keepalive to attach to
-    # and no equivalent config key to set. Every remote in this repository is ssh
-    # today (measured 2026-08-23 over the shared config and all 17 linked
-    # worktrees, with no url.insteadOf rewrite; remotes live in the shared config,
-    # so a per-worktree difference is not reachable), which means this arm belongs
-    # to a clone made over https. Saying nothing to that operator would leave the
-    # gates-passed line reading as a promise the fix does not keep.
+    # THE LIMIT, STATED. core.sshCommand governs no part of an HTTPS push —
+    # git does not spawn ssh at all, so there is nothing for the keepalive to
+    # attach to and no equivalent config key to set. Every remote in this
+    # repository is ssh today (measured 2026-08-23 over the shared config and
+    # all 17 linked worktrees, with no url.insteadOf rewrite; remotes live in
+    # the shared config, so a per-worktree difference is not reachable), which
+    # means this arm belongs to a clone made over https. Saying nothing to that
+    # operator would leave the gates-passed line reading as a promise the fix
+    # does not keep.
+    #
+    # WHAT THE IDLE TIMEOUT REACHES. Over ssh, git spawns `ssh
+    # git-receive-pack` before pre-push runs and holds that session idle for
+    # the whole hook — measured with GIT_TRACE on a dry-run push — and that
+    # held-open session is what the server-side idle timeout closes (rc=141).
+    # Over smart-HTTP there is no held-open session: the info/refs GET
+    # completes before pre-push starts and send-pack's POST (--stateless-rpc)
+    # begins only after it returns, with no HTTP request outstanding across
+    # the hook — measured the same way against git http-backend, over local
+    # http (TLS changes the wire, not the request/response shape). An idle
+    # timeout has nothing to act on mid-hook there, so no HTTPS idle-timeout
+    # failure has been reproduced, and an rc=141 observed over https is not
+    # attributable to this mechanism (bd gqlc-01pw).
     echo "          THIS PUSH IS NOT OVER SSH, and the keepalive fix is ssh-only: core.sshCommand" >&2
-    echo "          governs nothing here. rc=141 has been measured over https too, so the" >&2
-    echo "          push-landed check above is the whole of your cover on this transport." >&2
+    echo "          governs nothing here. Measured (bd gqlc-01pw): the hook holds no HTTPS" >&2
+    echo "          request open, so the idle timeout has nothing to kill mid-hook — but if" >&2
+    echo "          git still exits 141 or 143, the push-landed check above is your cover." >&2
     ;;
 esac
 
