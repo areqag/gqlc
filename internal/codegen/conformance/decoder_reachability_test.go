@@ -2685,7 +2685,49 @@ func (d decoders) decodeBoth(raw []byte) (Post, Author, error) {
 	// sweep classifies compare no string at all — which is why the survival
 	// was invisible to every gate (bd gqlc-lndks, a charged survivor from
 	// the round-1 battery of PR #2619).
-	t.Run("a method naming no entity and carrying a guard of its own is left alone", func(t *testing.T) {
+	//
+	// The comparison this row writes changed with gqlc-i2d2z, and the change
+	// is worth reading before the row is trusted. As landed for gqlc-lndks
+	// the row compared "NoSuchLabelAnywhere" and asserted it accepted, on
+	// the argument that a zero-entity method compares strings for reasons of
+	// its own and refusing one reds a correct emission. That argument holds
+	// for the *class* and not for every member of it: the identical body
+	// written without a receiver was refused by the wireScalarSpellings arm,
+	// so what the row actually pinned was a verdict that turned on spelling.
+	// gqlc-i2d2z closed that, so the string here is now one of the wire's own
+	// — the shape a zero-entity method may still compare — and the arity
+	// mutant this row exists to kill is killed exactly as before, because
+	// widening `>= 2` to `>= 0` reaches this method through the multi-entity
+	// arm, which refuses any guard at all. What no longer passes is
+	// "NoSuchLabelAnywhere"; that is the row directly beneath.
+	t.Run("a method naming no entity comparing a wire spelling is left alone", func(t *testing.T) {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
+func (d decoders) postLabelIsInteresting(raw []byte) (string, error) {
+	label := string(raw)
+	if label != "null" {
+		return "", nil
+	}
+	return label, nil
+}
+`)}}
+
+		require.Empty(t, recordedGrading(files, shapes, alphabet),
+			"a method whose results name no prepared entity was refused for comparing one of the wire's own "+
+				"fixed spellings. No entity here has an alphabet that could grade that comparison, and the "+
+				"method's dispatch belongs to the in-method reader — so this is an ordinary query method and a "+
+				"correct emission. Refusing it is this gate redding the very thing it exists to protect, and "+
+				"without this row the arm below could refuse every zero-entity guard and pass")
+	})
+
+	// The other side of that arm, and the two rows are a pair for the same
+	// reason the arity pair above is: on its own, either one is satisfied by
+	// a reader that answers the same way to everything.
+	//
+	// Synthetic because the corpus cannot reach it. Measured 2026-09-10 over
+	// every fixture and all three targets, 2068 zero-entity methods write no
+	// comparison this reader collects at all, so no emission today lands on
+	// either side of this boundary.
+	t.Run("a method naming no entity comparing a string that is no wire spelling is refused", func(t *testing.T) {
 		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
 func (d decoders) postLabelIsInteresting(raw []byte) (string, error) {
 	label := string(raw)
@@ -2696,11 +2738,62 @@ func (d decoders) postLabelIsInteresting(raw []byte) (string, error) {
 }
 `)}}
 
+		joined := strings.Join(recordedGrading(files, shapes, alphabet), "\n")
+		require.Contains(t, joined, `and "NoSuchLabelAnywhere" appears in a comparison in its body`,
+			"the gate accepted a method naming no prepared entity whose body compares a string no reader here "+
+				"grades. Written without a receiver the identical body is refused by the wireScalarSpellings "+
+				"arm, so accepting it on a receiver makes the spelling of the function decide whether its "+
+				"guard is read at all (bd gqlc-i2d2z)")
+		require.NotContains(t, joined, "prepared entities",
+			"the refusal came from the multi-entity arm rather than the zero-entity one, so this row witnesses "+
+				"an arity boundary instead of the guard it names")
+	})
+
+	// The partition methodOwnGuards draws is the whole of what makes the arm
+	// above safe, and until now nothing held it on a zero-entity method —
+	// every row for it sits on a method that names an entity, where the arm
+	// above never runs. It matters most here: every in-method label switch
+	// any backend emits today is written in a method that names no entity
+	// (measured for PR #2353 and again 2026-09-10, 29 such comparisons
+	// across the neo4j targets), so this arm is the one a real dispatch
+	// meets, and a partition that leaked would red all 29 at once.
+	t.Run("a dispatch's case values are not this arm's", func(t *testing.T) {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
+func (d decoders) labelOf(relType string) (string, error) {
+	switch relType {
+	case "AUTHORED":
+		return "", nil
+	default:
+		return "", nil
+	}
+}
+`)}}
+
 		require.Empty(t, recordedGrading(files, shapes, alphabet),
-			"a method whose results name no prepared entity was refused or graded because its body compares "+
-				"a string. No entity here has an alphabet that could grade that comparison, and the method's "+
-				"dispatch belongs to the in-method reader — so this is an ordinary query method and a correct "+
-				"emission. Refusing it is this gate redding the very thing it exists to protect")
+			"a relationship type in an edge-union dispatch was refused as a zero-entity method's own guard. "+
+				"Those case values belong to the reader that holds them to the candidates the query declares, "+
+				"and \"AUTHORED\" is no wire spelling, so an arm reading them refuses every dispatching query "+
+				"method the corpus emits")
+	})
+
+	t.Run("a comparison beneath a case arm is still this arm's", func(t *testing.T) {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
+func (d decoders) labelOf(relType string, kind string) (string, error) {
+	switch relType {
+	case "AUTHORED":
+		if kind == "NoSuchLabelAnywhere" {
+			return "", nil
+		}
+	}
+	return "", nil
+}
+`)}}
+
+		require.Contains(t, strings.Join(recordedGrading(files, shapes, alphabet), "\n"),
+			`and "NoSuchLabelAnywhere" appears in a comparison in its body`,
+			"stopping at a label switch whole leaves every comparison written under one of its case arms read "+
+				"by neither reader: this one stopped at the switch, and the edge-union reader looks at what "+
+				"the cases hold and at nothing beneath them")
 	})
 
 	t.Run("a satisfiable guard is accepted", func(t *testing.T) {
@@ -3056,8 +3149,30 @@ func emittedMethodDecoders(
 				continue
 			}
 			// Exactly one is graded. Naming none is the ordinary query
-			// method, whose dispatch the in-method reader owns, and it is
-			// left alone.
+			// method, whose dispatch the in-method reader owns; its own
+			// comparisons are held to the wire's fixed spellings and to
+			// nothing else, which is the rule emittedEntityDecoders already
+			// applies to a package-level function naming no entity.
+			//
+			// That arm arrived late (bd gqlc-i2d2z) and it narrows what this
+			// reader accepts, so what it replaced is worth stating. A
+			// zero-entity method's comparisons used to be skipped whole,
+			// which made the spelling of a function the thing that decided
+			// whether its guard was read: the identical body written without
+			// a receiver was refused, and written on one it passed unseen —
+			// the escape-by-spelling class gqlc-37lrd closed for decoders,
+			// reopened one arity down. Measured 2026-09-10 across the whole
+			// corpus, 2068 zero-entity methods write 0 comparisons this
+			// reader collects, so the arm refuses nothing any backend emits
+			// today; the 29 string comparisons their bodies do contain are
+			// dispatch case values, dropped by methodOwnGuards below, and
+			// that non-zero count is what says the partition is doing work
+			// rather than reading nothing.
+			//
+			// It answers no more than the multi-entity arm does. It does not
+			// say the emission is wrong — it says the comparison is read by
+			// nothing, and the day it fires on a real emission is the day
+			// that guard wants an alphabet chosen for it.
 			//
 			// Naming two or more is refused for a package-level function
 			// because an axis has to be picked to grade against and there is
@@ -3080,8 +3195,19 @@ func emittedMethodDecoders(
 			// (bd gqlc-ebkbs, ruled 2026-09-04).
 			entities := resultEntities(fn.Type, shapes)
 			if len(entities) != 1 {
-				if guards := methodOwnGuards(r, fn.Body); len(entities) >= 2 && len(guards) > 0 {
+				guards := methodOwnGuards(r, fn.Body)
+				// The multi-entity arm is tested first so that the arity
+				// bound stays falsifiable. Read the other way round, zero
+				// would be taken by the case below and `>= 2` could read
+				// `>= 0` with nothing to notice — the survivor gqlc-lndks
+				// was filed to close, reopened by the arm beneath it.
+				switch {
+				case len(entities) >= 2 && len(guards) > 0:
 					r.Fail(multiEntityGuardReport(f.Path, fn.Name.Name, entities, guards))
+				case len(entities) == 0:
+					for _, guard := range guards {
+						r.True(wireScalarSpellings[guard], zeroEntityGuardReport(f.Path, fn.Name.Name, guard))
+					}
 				}
 				continue
 			}
@@ -3095,6 +3221,38 @@ func emittedMethodDecoders(
 		}
 	}
 	return out
+}
+
+// zeroEntityGuardReport is the refusal for a method whose results name no
+// prepared entity and whose body compares a string that is not one of the
+// wire's own fixed spellings.
+//
+// It is the method-shaped twin of the arm emittedEntityDecoders applies to a
+// receiver-less function naming no entity, and it is deliberately worded from
+// the same finding: no axis grades this comparison, so nothing in this gate
+// reads it. What it adds over that one is the reason the asymmetry mattered —
+// the two spellings of the same body reached opposite verdicts, so a guard
+// could be moved out of reach of the gate by growing a receiver.
+//
+// It is careful where multiEntityGuardReport is careful, and for the same
+// reason: methodOwnGuards collects an operand of == or != and a case value
+// alike and never reads the other side, so this cannot say the method tests
+// the wire value against this string. What was observed is that the string
+// appears in a comparison in this body, outside any dispatch this gate can
+// read.
+func zeroEntityGuardReport(file, fn, guard string) string {
+	return fmt.Sprintf("the emission writes %s in %s as a method whose results name no prepared entity, and %q "+
+		"appears in a comparison in its body outside any label dispatch. A method naming no entity is an "+
+		"ordinary query method: it has no axis, so there is no alphabet to hold that comparison to, and the "+
+		"in-method dispatch reader looks only at the case values of a label switch and so does not read it "+
+		"either. It is therefore read by nothing — the hazard this gate exists to catch. Such a method may "+
+		"compare only the wire's own fixed spellings %v, which is the same rule and the same closed vocabulary "+
+		"the receiver-less spelling of this body is already held to; until this arm existed the two spellings "+
+		"reached opposite verdicts and a guard escaped the gate by growing a receiver (bd gqlc-i2d2z). This "+
+		"refusal declines to pretend the comparison was read; it does not say the emission is wrong, and it "+
+		"does not say which alphabet should grade it. If this emission is correct, that question now has a "+
+		"specimen and wants deciding",
+		fn, file, guard, slices.Sorted(maps.Keys(wireScalarSpellings)))
 }
 
 // multiEntityGuardReport is the refusal for a method whose results name two
