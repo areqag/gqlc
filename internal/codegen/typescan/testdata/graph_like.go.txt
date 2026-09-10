@@ -1,0 +1,34 @@
+// This fixture is the shape internal/graph/propertytype.go really has, in
+// miniature: an open string type, a second constant family declared in its
+// own block, and the PropertyType table itself.
+//
+// It is the control. Every other fixture here differs from it in one stated
+// way, so an error a row reports is attributable to that difference — and
+// this one must produce no error at all, because the second block below is
+// the reason PropertyTypes tolerates specs it cannot read a value off rather
+// than refusing them everywhere.
+//
+// Nothing here is compiled. testdata is invisible to the go command, and
+// go/parser does not type-check, so the fixtures that follow can hold shapes
+// a compiler would refuse.
+package graph
+
+// PropertyType is the type whose constants the walk collects.
+type PropertyType string
+
+// PropertyTypeKind is a second constant family, and the one that makes the
+// `read != 0` half of the walk's refusal load-bearing: every spec in its
+// block is unreadable to this walk — the first is typed for another type,
+// the rest inherit iota and carry neither a type nor a value — so a refusal
+// that fired on unreadable specs alone would refuse the real source.
+type PropertyTypeKind int
+
+const (
+	KindScalar PropertyTypeKind = iota
+	KindList
+)
+
+const (
+	TypeString PropertyType = "STRING"
+	TypeBool   PropertyType = "BOOL"
+)

@@ -1,0 +1,19 @@
+// This fixture holds a spec go/parser accepts and a type checker would not:
+// two names, one value. It reaches the length half of the walk's readability
+// test, `len(vs.Values) != len(vs.Names)`.
+//
+// A compiler would refuse this file, which is exactly why nothing else can
+// screen that clause: internal/graph cannot hold the shape. The walk parses
+// without type-checking, so it can be handed one — and without the length
+// test it would index the second name into a one-element value list.
+package graph
+
+// PropertyType is the type whose constants the walk collects.
+type PropertyType string
+
+const (
+	TypeString PropertyType = "STRING"
+
+	// Two names, one value.
+	TypePair, TypeSpare PropertyType = "PAIR"
+)
