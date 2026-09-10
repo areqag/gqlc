@@ -46,7 +46,7 @@ func (inv Invocation) String() string {
 	return inv.Recipe + ": " + cmd
 }
 
-// claims reports whether this command line runs the top-level test named name.
+// Claims reports whether this command line runs the top-level test named name.
 //
 // -run is read as an exact list of names split on `|`, where go test reads it
 // as an unanchored regexp. The divergence is the point: `-run TestLiveSmoke`
@@ -64,7 +64,7 @@ func (inv Invocation) String() string {
 // A flag written twice is read as all of its values, where go test honours the
 // last. That direction complains: a name only the last -run carries reads as
 // unclaimed, and a test only the last -skip drops reads as dropped.
-func (inv Invocation) claims(name string) bool {
+func (inv Invocation) Claims(name string) bool {
 	for _, pattern := range FlagValues(inv.Fields, "run") {
 		if !slices.Contains(strings.Split(pattern, "|"), name) {
 			return false
@@ -152,7 +152,7 @@ func (s Split) Complaints() []string {
 	}
 
 	for _, name := range s.Declared {
-		if !slices.ContainsFunc(s.CI, func(inv Invocation) bool { return inv.claims(name) }) {
+		if !slices.ContainsFunc(s.CI, func(inv Invocation) bool { return inv.Claims(name) }) {
 			complaints = append(complaints, fmt.Sprintf(
 				"%s is a live test no CI job runs: add it to a live recipe's -run, or the job that "+
 					"was meant to gate it goes green without it", name))
@@ -161,7 +161,7 @@ func (s Split) Complaints() []string {
 
 	for _, inv := range s.Local {
 		for _, name := range s.Declared {
-			if !inv.claims(name) {
+			if !inv.Claims(name) {
 				complaints = append(complaints, fmt.Sprintf(
 					"%s is a live test `%s` does not run: a live recipe no workflow reaches runs the "+
 						"whole battery, so it selects tests by no name at all", name, inv))
