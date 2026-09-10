@@ -958,7 +958,17 @@ func TestEmittedDecodersNarrowThroughACheck(t *testing.T) {
 				if !isCall || len(call.Args) != 1 {
 					return true
 				}
-				id, isIdent := call.Fun.(*ast.Ident)
+				// Unparen, not a bare assertion on call.Fun: (int32)(v)
+				// is a legal spelling of int32(v) that wraps identically,
+				// and matching only *ast.Ident lets it through.
+				//
+				// Exactly one paren level can arrive, so a single unwrap
+				// would be equivalent here: every emission is walked after
+				// codegen.Finalise ran format.Source over it (emit.go:26),
+				// and gofmt collapses ((int32))(v) to (int32)(v) — measured,
+				// to any depth. Unparen is the stdlib spelling of that
+				// unwrap and does not depend on the collapse holding.
+				id, isIdent := ast.Unparen(call.Fun).(*ast.Ident)
 				if !isIdent || !narrowingWidths[id.Name] {
 					return true
 				}
