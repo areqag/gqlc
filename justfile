@@ -60,7 +60,7 @@ scratch_root := "/tmp"
 check-just-version:
     #!/usr/bin/env bash
     set -euo pipefail
-    pin_file="{{justfile_directory()}}/.github/actions/setup-just/just-version"
+    pin_file="{{ justfile_directory() }}/.github/actions/setup-just/just-version"
     if [ ! -f "$pin_file" ]; then
         echo "error: $pin_file is absent, so there is no pin to check against." >&2
         exit 1
@@ -2249,7 +2249,7 @@ gates:
 # test-binary args, so every run misses), and inter-test coupling in a codegen
 # dev tool is a low-value gate relative to a ~2m40s tax on every push. Revisit
 # if ordering coupling actually bites us.
-test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-bd-gh-sync-selection check-bd-gh-sync-ledger check-push-keepalive
+test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-bd-gh-sync-selection check-bd-gh-sync-ledger check-pr-ready check-push-keepalive
     go build ./...
     go test ./...
 
@@ -3951,3 +3951,91 @@ iso-drift-check:
         echo "ok: both artefacts match their pinned checksums"
     fi
     exit "$fail"
+
+# answers "are this PR's required checks green at its current head" (bd gqlc-xf0v).
+#
+# The reduction is newest-per-context, not newest-run and not any-entry:
+# statusCheckRollup carries an entry per workflow RUN, so a superseded FAILURE
+# never leaves the array, and judging any entry reads a green PR as red
+# (measured on PR #1236: tidy FAILURE beside tidy SUCCESS at the same head).
+# The grouping lives in .github/scripts/pr_ready.py, which this recipe feeds
+# but does not restate — two copies of a reduction drift silently.
+#
+# The required set is enumerated from the PR's BASE branch protection on every
+# run, never from a list in this file, so a protection change cannot make a
+# new required context silently pass. pr-ready-drift below is the backstop for
+# the other direction: the script's canned fixtures spelling a set the live
+# config has moved away from.
+#
+# SKIPPED on a required context is NOT-READY, distinctly from FAILURE, because
+# those have different causes and fixes: a tidy failure skips lint/test/
+# codegen-fence via needs rather than failing them (measured on PR #1015,
+# mergeStateStatus CLEAN with four required contexts newest-and-skipped), so a
+# failure verdict would send the author after a regression that does not exist
+# while a green one repeats the false green. Non-required entries such as
+# live-smoke-age's perpetual SKIPPED are silent in every output.
+#
+# Exits non-zero when not ready: a detector that exits 0 is not a gate.
+pr-ready n:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    n="{{ n }}"
+    if ! printf '%s' "$n" | grep -Eq '^[0-9]+$'; then
+        echo "error: '$n' is not a PR number, so there is no rollup to judge." >&2
+        exit 1
+    fi
+    for tool in gh jq python3; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            echo "error: '$tool' is not installed, so the rollup cannot be read." >&2
+            exit 1
+        fi
+    done
+    scratch="$(mktemp -d)"
+    trap 'rm -rf "$scratch"' EXIT
+    script={{ quote(justfile_directory() + "/.github/scripts/pr_ready.py") }}
+    repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+    base="$(gh pr view "$n" --repo "$repo" --json baseRefName --jq .baseRefName)"
+    head="$(gh pr view "$n" --repo "$repo" --json headRefOid --jq .headRefOid)"
+    gh api "repos/$repo/branches/$base/protection" \
+        --jq '.required_status_checks.contexts' >"$scratch/required.json"
+    gh pr view "$n" --repo "$repo" --json statusCheckRollup \
+        --jq '.statusCheckRollup' >"$scratch/rollup.json"
+    echo "PR #$n at $head against $base:"
+    python3 "$script" "$scratch/rollup.json" "$scratch/required.json"
+
+# fails when branch protection's required contexts move out from under the set
+# pr_ready.py's canned fixtures spell (bd gqlc-xf0v).
+#
+# pr-ready itself cannot drift — it enumerates the required set live on every
+# run — but the fixtures can: a protection change adding an eighth context
+# leaves --self-test green over a seven-context world, and the verdict rows
+# stop proving anything about the new member. This recipe holds the fixture
+# set to the live config so that staleness reddens here instead of passing
+# silently there.
+#
+# Deliberately NOT wired into `just test`: it reaches the network, and test
+# runs offline the way gh-orphans stays out of it for the same reason. Run by
+# hand when protection changes, and whenever the fixture set is edited.
+pr-ready-drift:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "error: 'gh' is not installed, so the live protection config cannot be read." >&2
+        exit 1
+    fi
+    scratch="$(mktemp -d)"
+    trap 'rm -rf "$scratch"' EXIT
+    script={{ quote(justfile_directory() + "/.github/scripts/pr_ready.py") }}
+    repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+    gh api "repos/$repo/branches/master/protection" \
+        --jq '.required_status_checks.contexts' >"$scratch/live.json"
+    python3 "$script" --check-required "$scratch/live.json"
+
+# runs pr_ready.py's canned-rollup matrix offline: the two measured
+# misreadings (a superseded FAILURE the naive query false-reds, required
+# SKIPPED the skipped-as-pass reading false-greens), the missing/pending
+# refusals, and both falsifiers proving the fixtures discriminate. Wired into
+# `test`, which is also what puts it in .githooks/pre-push.
+[private]
+check-pr-ready:
+    python3 .github/scripts/pr_ready.py --self-test
