@@ -945,8 +945,6 @@ func TestEmittedDecodersNarrowThroughACheck(t *testing.T) {
 	for name, src := range emissionsUnderNarrowingGuard(t) {
 		file, err := parser.ParseFile(token.NewFileSet(), name, src, parser.SkipObjectResolution)
 		require.NoError(t, err, "%s does not parse", name)
-		fset := token.NewFileSet()
-		fset.AddFile(name, fset.Base(), len(src))
 
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
