@@ -14,6 +14,7 @@ package age
 // builtin and own-package types for the same reason.
 
 type (
+	CodegenBug   = codegenBug
 	DialectGap   = dialectGap
 	DialectProbe = dialectProbe
 	Finding      = finding
@@ -21,6 +22,11 @@ type (
 	TypeMap      = typeMap
 	WiredEntity  = wiredEntity
 )
+
+// TestRenderFault is the ADDRESS of generate's render-phase fault hook, not
+// its value: a test sets *TestRenderFault and restores it. A plain `var X =
+// x` alias would carry a copy, and setting the copy would arm nothing.
+var TestRenderFault = &testRenderFault
 
 var (
 	CarriesZone                      = carriesZone
