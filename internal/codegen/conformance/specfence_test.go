@@ -51,6 +51,16 @@ import (
 // surviving site (gqlc-0rjn);
 // and a list replacing one of the exhibits specBareListExhibits names,
 // spelled the same way, takes that entry's exemption (gqlc-x2sg).
+//
+// That this file scans bytes rather than parsing markdown is a decision
+// and not an oversight: ADR 0042 rules that no CommonMark parser enters
+// this package, prices the two options against the corpus, and
+// dispositions the three beads that were waiting on the answer
+// (gqlc-r8na3). The limits above are what that ruling accepts. Each was
+// measured unoccupied on the day it was taken and nothing here re-reads
+// those counts, so a limit that becomes occupied does so silently —
+// which is why the ruling prefers an absence check to a parser wherever
+// one of them is worth closing at all.
 
 // docRoots are the trees the fence sweeps, relative to repoRoot. The
 // drift reached C1, C3, C4 and C5, and an ADR or a design note prints
@@ -2187,9 +2197,13 @@ func gradeParams(list string) (name string, exempt, gradable bool) {
 // Neither divergence is closed here: this rule is a byte test rather
 // than a markdown parse, so a better byte test cannot distinguish either
 // spelling from what it already accepts or skips. A parse-based rule
-// would close both; the trade-off (pulling a CommonMark parser into the
-// sweep) is why the byte rule stands, not proof that no parse rule
-// could.
+// would close both, and ADR 0042 declines to buy one: telling prose from
+// code is the service a parser sells, and no graded site in this corpus
+// is in prose — 0 of 79 signature anchors and 0 of 17 binding anchors,
+// measured against cmark-gfm — while all three spellings this rule skips
+// are unoccupied. Where one of these limits is worth closing, that
+// ruling prefers a check that the construct is ABSENT from the swept
+// documents over a scanner that interprets it.
 func scanBareSigs(file, text string) (sigs, unclosed []specSig) {
 	for _, loc := range tickAnchorRe.FindAllStringIndex(text, -1) {
 		open := loc[0]

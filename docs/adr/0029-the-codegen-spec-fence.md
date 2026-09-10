@@ -2,7 +2,13 @@
 
 **Status:** Accepted
 **Date:** 2026-08-17
-**Beads:** gqlc-rz0l, gqlc-lhs3, gqlc-jfwo, gqlc-0rjn, gqlc-vu7z, gqlc-e143, gqlc-173n, gqlc-jnsk, gqlc-offa, gqlc-ipx6, gqlc-x2sg, gqlc-cgat
+**Beads:** gqlc-rz0l, gqlc-lhs3, gqlc-jfwo, gqlc-0rjn, gqlc-vu7z, gqlc-e143, gqlc-173n, gqlc-jnsk, gqlc-offa, gqlc-ipx6, gqlc-x2sg, gqlc-cgat, gqlc-r8na3
+
+> Decision 10 prices a markdown parse as a trade-off and does not settle
+> it. [ADR 0042](0042-the-spec-fence-stays-a-byte-scan.md) settles it —
+> the fence stays a byte scan, no CommonMark parser enters the package —
+> and dispositions the three beads that were waiting on that answer.
+> Read it for what the consequences below are the accepted cost of.
 
 ## Context
 
@@ -313,3 +319,11 @@ own header:
 - The sweeps read raw markdown bytes, so a site inside an HTML comment is graded
   exactly as visible text is — invisible to a reader, present to the census
   (`gqlc-jnsk`).
+
+Every entry above is a limit of a byte scan, and reading them together invites
+the question of whether the scan should become a parse.
+[ADR 0042](0042-the-spec-fence-stays-a-byte-scan.md) answers it: no. It measures
+that no graded site in this corpus sits in rendered prose — which is the
+distinction a parser is bought to draw — and that each construct these limits
+name is currently unoccupied. It also records what that costs, including that
+the counts it rests on are dated and that nothing re-reads them.
