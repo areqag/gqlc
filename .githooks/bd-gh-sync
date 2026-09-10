@@ -48,7 +48,8 @@
 #            offers no field-level exclusion, so scope is the only lever: the
 #            eligible bead ids are passed as --issues and everything else is
 #            left untouched. A bead is eligible only when
-#              * it carries an external_ref present in the bulk GH listing,
+#              * it carries an external_ref naming an issue in THIS repository
+#                and present in the bulk GH listing,
 #              * its status is open or closed — GitHub's issue state is a
 #                two-value domain, so in_progress/blocked/deferred have no
 #                representable counterpart and any pull reverts them,
@@ -95,9 +96,10 @@
 #            the set behind it: a bead list that came back empty withdraws both
 #            arms read off it, a GitHub listing cut off at its --limit withdraws
 #            the orphan one. Emptiness here withdraws a number and never
-#            refuses the pull — an external_ref is matched over any URL and may
-#            name another repository, so mirrored beads over an empty listing
-#            is a legitimate configuration rather than a lost one.
+#            refuses the pull — an external_ref naming another repository is held
+#            as foreign-mirror, and one naming this repository but absent from
+#            the listing is held as not-in-listing; both are holds, neither is
+#            a refusal.
 #   - push:  mirror bd-created beads that have no GH mirror yet and are still
 #            live, AND close GH issues whose bead was closed locally.
 #            Deliberately does NOT run `bd github sync --push-only` (which
@@ -318,6 +320,33 @@ case "$_bound_rc:$_gh_limit_all" in
 esac
 _gh_limit_open=$_gh_limit_all
 
+# A bead's external_ref is matched over any URL, so the trailing /issues/<n> it
+# carries may name another repository's issue (bd gqlc-gs5oh). The number alone
+# cannot tell this repository's #2009 from another repository's, so every
+# selection below compares the ref's owner/repo against this repository's own
+# before treating the number as one of ours.
+_repo=""
+_repo_rc=0
+_repo=$(GITHUB_TOKEN="$_token" gh repo view --json nameWithOwner \
+  --jq .nameWithOwner 2>/dev/null) || _repo_rc=$?
+case "$_repo_rc:$_repo" in
+  0:?*/?*) ;;
+  *) echo "bd-gh-sync: GitHub would not say which repository this is, so no" >&2
+     echo "bd-gh-sync: external_ref below can be told apart from one pointing at" >&2
+     echo "bd-gh-sync: another repository. Refusing rather than matching numbers" >&2
+     echo "bd-gh-sync: blind." >&2
+     case "$_action" in
+       # The push's minting arm needs no identity — it offers beads carrying no
+       # ref at all — so the run continues and the stale-mirror pass reports
+       # itself blind instead of closing by number alone.
+       push) _repo="" ;;
+       drift) echo "bd-gh-sync: DRIFT CHECK FAILED — this repository's identity could not be read." >&2
+              exit 1 ;;
+       *)     echo "bd-gh-sync: SKIPPING pull — this repository's identity could not be read." >&2
+              exit 0 ;;
+     esac ;;
+esac
+
 if [ "$_action" = "pull" ] || [ "$_action" = "drift" ]; then
   # `drift` shares this whole block and stops at the end of it. Everything down
   # to the plan is two listings and a classification over them — no write to bd
@@ -350,7 +379,7 @@ if [ "$_action" = "pull" ] || [ "$_action" = "drift" ]; then
   # refusal below — the one thing this path exists to guarantee — would be
   # replaced by a bare abort.
   _rc=0
-  python3 - "$_tmp/beads.json" "$_tmp/gh.json" "$_gh_limit_all" \
+  python3 - "$_tmp/beads.json" "$_tmp/gh.json" "$_gh_limit_all" "$_repo" \
     >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF' || _rc=$?
 import datetime, json, re, sys
 
@@ -421,6 +450,14 @@ gh = {i["number"]: ((i.get("state") or "").lower(), norm(i.get("body")),
                     edited_at(i.get("updatedAt")))
       for i in issues}
 pat = re.compile(r"/issues/(\d+)$")
+# The number is read off any URL, so the repository has to be read off it too:
+# without this, a bead mirrored to another repository's /issues/<n> is decided
+# from this repository's issue <n> wherever the numbers collide (bd gqlc-gs5oh).
+# Compared case-insensitively: GitHub resolves owner and repo names without
+# regard to case.
+ghpat = re.compile(r"github\.com/([^/\s?#]+)/([^/\s?#]+)/issues/\d+$",
+                   re.IGNORECASE)
+repo = (sys.argv[4] if len(sys.argv) > 4 else "").strip().lower()
 
 # GitHub holds exactly these two. Every other bd status is unrepresentable
 # there, so a pull reads back a value the mirror never carried.
@@ -433,8 +470,20 @@ for b in beads:
     if not m:
         continue
     n = int(m.group(1))
-    mirrored.add(n)
     bid = one_line(b["id"])
+    g = ghpat.search(b.get("external_ref") or "")
+    if g is None or (g.group(1).lower() + "/" + g.group(2).lower()) != repo:
+        # Genuinely foreign rather than merely absent: the bead points at an
+        # issue in another repository (or at a URL from which no repository
+        # can be read at all), so this listing — this repository's — has no
+        # standing to decide it. Held under its own name rather than
+        # not-in-listing, which reads as "GitHub has not shown me this issue".
+        # Kept out of `mirrored` beside it: the number is another repository's,
+        # so it must not suppress the ORPHAN this repository's issue of that
+        # number is owed.
+        out.append(f"HOLD {bid} {n} foreign-mirror")
+        continue
+    mirrored.add(n)
     status = (b.get("status") or "").lower()
 
     if n not in gh:
@@ -1245,11 +1294,11 @@ PYEOF
   # and an empty open listing in the same run contradict each other on their
   # face. The pull-side analogue would be "beads carry external_refs, so the
   # all-state listing cannot be empty" — and that is no contradiction at all: a
-  # ref is matched by /issues/(\d+)$ over any URL, so it legitimately names
-  # another repository, and refusing that shape would fire on every merge
-  # against a repo whose beads were imported from elsewhere. The GitHub listing
-  # is witnessed by its exit status above and its --limit below; only the bead
-  # listing's own cardinality is decided here, where no foreign ref can reach.
+  # ref may name another repository's issue (bd gqlc-gs5oh), and it is held as
+  # foreign-mirror rather than refused, so that shape fires on no merge. The
+  # GitHub listing is witnessed by its exit status above and its --limit below;
+  # only the bead listing's own cardinality is decided here, where no foreign
+  # ref can reach.
   _unwitnessed=""
   _beads_n=$(sed -n 's/^COUNT //p' "$_tmp/plan.txt")
   if [ "${_beads_n:-0}" -eq 0 ]; then
@@ -1916,7 +1965,7 @@ GITHUB_TOKEN="$_token" gh issue list --state open --limit "$_gh_limit_open" \
 # pass did not get far enough to have a verdict.
 GITHUB_TOKEN="$_token" python3 - "$_tmp/beads.json" "$_tmp/beads_after.json" \
   "$_tmp/open_gh.json" "$_tmp/close_status.txt" "$_gh_limit_open" "$_pushed" \
-  9>&- >/dev/null <<'PYEOF' || true
+  "$_repo" 9>&- >/dev/null <<'PYEOF' || true
 import json, re, subprocess, sys
 
 def load(path):
@@ -1982,13 +2031,30 @@ if not beads:
     sys.exit(0)
 
 pat = re.compile(r"/issues/(\d+)$")
+# Same repo gate as the pull selection (bd gqlc-gs5oh): the number is read off
+# any URL, so a closed bead mirrored to another repository's issue must never
+# close this repository's issue of that number. Without an identity to compare
+# against, no number can be told apart from a foreign one, so the pass goes
+# blind rather than closing by number alone.
+ghpat = re.compile(r"github\.com/([^/\s?#]+)/([^/\s?#]+)/issues/\d+$",
+                   re.IGNORECASE)
+repo = (sys.argv[7] if len(sys.argv) > 7 else "").strip().lower()
+if not repo:
+    status("BLIND this repository's identity could not be read, so no "
+           "external_ref can be told apart from one pointing at another "
+           "repository")
+    sys.exit(0)
 stale = []
 for b in beads:
     if b.get("status") != "closed":
         continue
     m = pat.search(b.get("external_ref") or "")
-    if m and int(m.group(1)) in open_nums:
-        stale.append((int(m.group(1)), b))
+    if not m or int(m.group(1)) not in open_nums:
+        continue
+    g = ghpat.search(b.get("external_ref") or "")
+    if g is None or (g.group(1).lower() + "/" + g.group(2).lower()) != repo:
+        continue
+    stale.append((int(m.group(1)), b))
 
 closed = 0
 for n, b in stale:
