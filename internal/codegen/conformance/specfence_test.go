@@ -1569,6 +1569,21 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		text:       "    <MethodName1>(ctx context.Context<param-list-1>) (<return-1>, error)",
 		wantExempt: true,
 	}, {
+		// The tolerance gqlc-dhm3 records: the suffix ranges over every
+		// digit string, not only the -1 and -2 the documents print, so an
+		// interface block showing a third member needs no fence edit.
+		name:       "a higher-numbered whole-list placeholder is the same exemption",
+		text:       "    <MethodName3>(ctx context.Context<param-list-3>) (<return-3>, error)",
+		wantExempt: true,
+	}, {
+		// The other half of that tolerance: the exemption is the fixed
+		// lowercase stem, so a differently-cased near-miss grades as a
+		// declaration. Case-folding the match would turn this row red.
+		name:    "a differently-cased whole-list spelling is graded, not exempted",
+		text:    "func (q *Queries) <MethodName>(ctx context.Context, <Param-list>) (<return>, error) {",
+		wantArg: "",
+		wantAny: true,
+	}, {
 		// A placeholder in the type position is not an exemption for the
 		// name beside it: the name is the one thing this sweep grades.
 		name:    "a placeholder type does not exempt the name beside it",
@@ -2596,6 +2611,13 @@ func paramName(param string) (name string, gradable bool) {
 // here is graded as a declaration, and `<bareParam>` — an angle-bracketed
 // placeholder standing for the query author's parameter name — must stay
 // outside it (ADR 0029 decision 4).
+//
+// The numbered suffix ranges over every digit string, not just the -1
+// and -2 the interface blocks print, so a third member needs no fence
+// edit (gqlc-dhm3). The stem carries the safety: it is the fixed
+// lowercase `<param-list`, so no camelCase placeholder — `<bareParam>`,
+// the drift this fence exists to catch — can match it, whatever the
+// suffix allows.
 //
 // Every spelling it matches is exempted from grading, and every document
 // taking that exemption is reconciled against specListRuleDocs, so the
