@@ -236,3 +236,15 @@ own call sites: [docs/bd-ledger-queries.md](docs/bd-ledger-queries.md).
 Measured 2026-08-24 against bd 1.0.4 and 1.2.2, with the falsifiers and this
 repository's write call-site audit:
 [docs/bd-ledger-writes.md](docs/bd-ledger-writes.md).
+
+## Syncing the bd ledger
+
+- **Do not run `bd dolt pull` / `bd dolt push` on this fleet.** The ledger
+  runs in direct mode over one shared directory with no dolt remote
+  configured, so both fail with `Error 1105: no remote` (bd `gqlc-pixa9`).
+  The `Sync & Collaboration` lines in `bd prime` output are inapplicable
+  boilerplate here, not a broken sync.
+- The read-only probes that show this: `bd config get sync` is unset and
+  `git ls-remote origin 'refs/dolt/*'` returns nothing (both confirmed
+  2026-09-10). If both ever go non-empty, this section is stale — delete it
+  and follow `bd prime` again.
