@@ -527,7 +527,7 @@ That grep is the litmus: prepare owns the boundary, render never crosses it.
 this deepening closes)
 
 Today: Phase A rejects an unknown variant via its `default:` arm
-(`phaseAAdmit`, `internal/codegen/prepare.go`), but a variant that Phase A were extended to admit could
+(`admitColumn`, `internal/codegen/prepare.go`), but a variant that Phase A were extended to admit could
 silently miscompile through render's `default:`. After this deepening: any
 render_*.go walk only sees `preparedListElem.Kind` and `preparedRow.Kind`
 (the shared closed `columnKind`) and `preparedQuery.AccessMode` (the closed
@@ -564,8 +564,9 @@ three parts:
 
   `prepare.go` holds two further type switches over the same sum, and they are
   named here so the quantifier above is not left to context. Neither is in this
-  hazard class: `phaseAAdmit`'s column switch carries a `default:` returning
-  `ErrOutOfC6Scope`, so a variant it does not name is refused loudly rather than
+  hazard class: Phase A's column switch (`admitColumn`, reached from
+  `phaseAAdmit`) carries a `default:` returning `ErrOutOfC6Scope`, so a variant
+  it does not name is refused loudly rather than
   mis-dispatched, and `findEdgeUnionLeaf` is deliberately partial by documented
   contract — it answers "is there an edgeUnion leaf", and every non-match is a
   legitimate `(nil, false)`. The pair above are the only **silent** sites.
