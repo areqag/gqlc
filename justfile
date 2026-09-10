@@ -481,9 +481,11 @@ check-shared-config dir=".":
 #
 # WHAT IT DOES NOT COVER, stated because a partial fix read as a complete one is
 # how this defect keeps costing hours. core.sshCommand governs ssh and nothing
-# else, and rc=141 was measured over HTTPS too on 2026-08-23 by a second lane —
-# git spawns no ssh there, so there is nothing for the keepalive to attach to
-# and no equivalent key to set. It covers every push from this repository as it
+# else — git spawns no ssh over HTTPS, so there is nothing for the keepalive to
+# attach to and no equivalent key to set. (An HTTPS rc=141 was reported on
+# 2026-08-23 by a second lane, but the transport-shape measurement in
+# bd gqlc-01pw shows no outstanding HTTPS request spans the hook window, so that
+# report is unattributed rather than evidence against this fix.) It covers every push from this repository as it
 # is configured: every worktree and the shared checkout resolve origin to
 # git@github.com:areqag/gqlc.git, with no url.insteadOf rewrite, and remotes live
 # in the shared config so a per-worktree difference is not reachable (measured
