@@ -47,11 +47,19 @@ about all of them:
           workflow; that job is PR-blocking and its -run list names
           TestTxMethodSet, so the catch does reach a pull request.
           `just gates` does NOT reach it.
+
+ One battery per worktree at a time (bd gqlc-e6p2): the run holds an
+ flock on <git-dir>/mutation-battery.lock from the dirty-tree gate to
+ the final restore, and a second start refuses with REFUSING and exit 2
+ rather than backing up the first run's mutant. Never background one
+ run and work in the same tree.
 """
 
 import argparse
 import dataclasses
+import fcntl
 import json
+import os
 import subprocess
 import sys
 
@@ -257,6 +265,83 @@ def failing_tests(out):
     })
 
 
+class BatteryLockHeld(Exception):
+    pass
+
+
+def battery_lock_path():
+    # Per-WORKTREE, via --git-dir: linked worktrees each get their own git
+    # dir, and each has its own working tree, so two runs in one worktree
+    # contend here while runs in different worktrees (or separate clones,
+    # which have disjoint trees entirely) do not. The lock lives in the git
+    # dir rather than the tree so taking it never dirties `git status`,
+    # which this harness reads as its start gate below.
+    rc, out = sh("git rev-parse --git-dir")
+    git_dir = out.strip()
+    if rc != 0 or not git_dir:
+        raise BatteryLockHeld(
+            "cannot locate the worktree's git dir "
+            "('git rev-parse --git-dir' failed), so mutual exclusion "
+            "cannot be established; refusing to mutate the live tree "
+            "without it.")
+    if not os.path.isabs(git_dir):
+        top_rc, top_out = sh("git rev-parse --show-toplevel")
+        if top_rc != 0 or not top_out.strip():
+            raise BatteryLockHeld(
+                "git gave a relative --git-dir with no usable "
+                "--show-toplevel, so the lock path is unresolvable; "
+                "refusing to mutate the live tree without it.")
+        git_dir = os.path.join(top_out.strip(), git_dir)
+    return os.path.join(git_dir, "mutation-battery.lock")
+
+
+def acquire_battery_lock():
+    # Non-blocking flock held for the whole run (bd gqlc-e6p2, GH #1176): a
+    # second battery starting while one holds a mutant would back up the
+    # mutant as its baseline and "restore" it afterwards, scoring a clean
+    # sweep against a corrupt tree. A contended lock REFUSES (exit 2, same
+    # shape as the dirty-tree gate) rather than waiting: rows take minutes,
+    # so a wait would either expire mid-run or outlive any bound worth
+    # setting. flock releases on process death, so there is no stale lock
+    # to clean up; the PID inside is diagnostic only, never a liveness
+    # check. Never fall back to running unlocked.
+    path = battery_lock_path()
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as e:
+        raise BatteryLockHeld(
+            f"could not open the battery lock at {path}: {e}; refusing "
+            "to mutate the live tree without mutual exclusion.")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        holder = "unknown"
+        try:
+            with open(path) as f:
+                holder = f.read().strip() or "unknown"
+        except OSError:
+            pass
+        os.close(fd)
+        raise BatteryLockHeld(
+            f"another mutation battery holds this worktree's lock ({path}, "
+            f"holder says: {holder}); it is mid-mutate with the live tree "
+            "dirty by design. Wait for it to finish and run again; "
+            "overlapping runs corrupt each other's baseline and restore.")
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, f"pid={os.getpid()}\n".encode())
+    except OSError:
+        pass
+    return fd
+
+
+def release_battery_lock(fd):
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def restore():
     sh("git checkout -- " + " ".join(RESTORE))
 
@@ -391,6 +476,14 @@ def main():
               "restores by checkout. Commit or clean first:\n" + out)
         return 2
 
+    try:
+        lock_fd = acquire_battery_lock()
+    except BatteryLockHeld as e:
+        print(f"REFUSING: {e}")
+        return 2
+    print(f"battery lock held for this worktree; "
+          f"a second battery will refuse until this run exits.", flush=True)
+
     wanted = [m for m in MUTANTS if not args.only or m.id in args.only.split(",")]
     rows = []
     try:
@@ -403,6 +496,7 @@ def main():
             restore()
     finally:
         restore()
+        release_battery_lock(lock_fd)
 
     if args.out:
         with open(args.out, "w") as f:
