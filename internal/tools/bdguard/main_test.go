@@ -1047,7 +1047,7 @@ type gitBoundary struct {
 // process so no caller can re-poison it between calls.
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{"-C", dir}, args...)...)
 	var env []string
 	for _, kv := range os.Environ() {
 		if k, _, _ := strings.Cut(kv, "="); !strings.HasPrefix(k, "GIT_") {
@@ -1058,7 +1058,8 @@ func git(t *testing.T, dir string, args ...string) string {
 	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
 			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, exit.Stderr)
 		}
 		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
