@@ -2089,6 +2089,48 @@ lint-cache-check:
 lint-new rev="origin/master": ensure-golangci
     {{ lint_lock }} {{ golangci }} run --new-from-rev {{ rev }}
 
+# The function-complexity gate (gocyclo + gocognit) on its own, over the given
+# packages — `just complexity ./internal/codegen/...`, or the whole tree when
+# asked for nothing.
+#
+# CI does NOT call this: both linters are in `.golangci.yml`'s enable list, so
+# the merge-blocking `lint` job already runs them and this recipe would be a
+# second copy of that gate to keep in step. What calls it is .githooks/pre-commit,
+# which needs the complexity findings WITHOUT the other twenty-odd linters —
+# measured 2026-09-10, the full `golangci-lint run` is ~76 s warm over this tree
+# and the hook's budget is sub-second, while these two alone over the packages a
+# commit touches are a fraction of that.
+#
+# The thresholds are NOT written here. `--enable-only` selects which linters run
+# and changes nothing else: `linters.settings` and `linters.exclusions` are both
+# still read, so the numbers and the _test.go exemption still come from
+# `.golangci.yml` and the hook cannot drift from CI. Both halves were measured
+# on 2026-09-10 against a probe package — gocyclo fired at 28 (the configured
+# 25, not gocyclo's own default of 30), and a copy of the same over-complex
+# functions in a `_test.go` went unreported.
+#
+# `--enable-only`, NOT `--default none --enable gocyclo,gocognit`. That pairing
+# reads like a restriction and is not one: `--enable` ADDS to the config's
+# enable list, so all 28 configured linters still run. It looks correct on a
+# clean tree — the extra linters find nothing, so the report contains only
+# complexity rows — and the tell only appears once some other linter has
+# something to say. Measured the same day: the probe drew two `revive` findings
+# through that spelling, which is also ~76 s of hook nobody asked for.
+#
+# Restricting to the changed packages is exact rather than a sampling
+# compromise: gocyclo and gocognit score one function from its own AST, so no
+# edit can change the score of a function in a package it did not touch.
+#
+# The two --max flags UNCAP the report. golangci-lint defaults to 50 issues per
+# linter and 3 sharing one message, and applies both silently — measured
+# 2026-09-10, a capped run dropped build.go's gocyclo row from output that
+# otherwise looked complete. It cannot turn a red run green, one surviving issue
+# being enough to exit non-zero, so this is about what the person who has to fix
+# it gets to see: a capped list sends them round the loop once per hidden
+# function.
+complexity *paths: ensure-golangci
+    {{ lint_lock }} {{ golangci }} run --enable-only gocyclo,gocognit --max-issues-per-linter 0 --max-same-issues 0 {{ if paths == "" { "./..." } else { paths } }}
+
 # rewrites formatting in place (gofumpt + gci, both bundled in golangci-lint)
 fmt: ensure-golangci
     {{ golangci }} fmt

@@ -41,6 +41,9 @@ linters:
     - musttag
     - forbidigo
     - ireturn
+    # function complexity — both, deliberately; see the settings below
+    - gocyclo
+    - gocognit
     # tests
     - testifylint
     - thelper
@@ -87,6 +90,36 @@ linters:
           msg: route output through cmd.OutOrStdout()/cmd.ErrOrStderr(); direct printing bypasses the command writers
         - pattern: ^log\.(Print|Fatal|Panic)
           msg: route output through cmd.OutOrStdout()/cmd.ErrOrStderr(), not the legacy log package
+    # Two counters, because on this tree they disagree by 3x and each is blind
+    # where the other sees. gocyclo increments once per `case`, so a flat
+    # constant->text dispatch table scores as if it were deeply nested;
+    # gocognit charges a `switch` once regardless of arm count and charges for
+    # nesting depth instead. Measured 2026-09-10 over 734 non-test functions:
+    #
+    #   function                                          cyclo  cognit
+    #   internal/codegen/neo4j/types.go  (typeMap).Property   31      10
+    #   internal/codegen/age/types.go    (typeMap).Property   33      15
+    #   internal/resolver/resolve.go     resolveType          21       6
+    #   internal/resolver/scope.go       DemoteNullability    43      90
+    #
+    # The first three are flat tables. gocyclo ranked neo4j's the 6th-worst
+    # function in the repository when it is one `switch` with no nesting at
+    # all, and the only way to satisfy a gocyclo-only gate there is to shatter
+    # a readable table — which `exhaustive` then stops holding to the full
+    # constant set. The fourth is the genuinely hard function, and gocyclo
+    # ranked it only 1.4x above a lookup table. Either counter alone points
+    # refactoring effort at the wrong functions; together they do not.
+    #
+    # A linter fires STRICTLY ABOVE its min-complexity, so these admit 25 and
+    # 35 and refuse 26 and 36. Both numbers are the measured ceiling of the
+    # tree after gqlc-oudt paid down the 13 functions that stood above them —
+    # they are a ratchet position, not a comfort margin, and gqlc-5sfv tracks
+    # lowering them. Raising either to land a change is the wrong direction:
+    # extract a helper instead.
+    gocyclo:
+      min-complexity: 25
+    gocognit:
+      min-complexity: 35
     ireturn:
       # return structs, not interfaces — with two deliberate exceptions: the
       # marker-sealed sums of the query model (Binding, Endpoint, Projection,
@@ -173,6 +206,22 @@ linters:
         text: "method (Enter|Exit)OC_"
         linters:
           - revive
+      # Complexity is gated on production code only. What the counters find in
+      # _test.go here is table-driven assertion harnesses, where the branching
+      # is per-case data rather than control flow a reader has to hold: of the
+      # 1905 functions measured on 2026-09-10, the worst test offender was
+      # assertReferentialIntegrity at cyclo 42 — one `case` per invariant it
+      # checks. Splitting those to satisfy a counter makes the failure harder
+      # to localise, which is the opposite of what a test is for.
+      #
+      # This is the loosest part of the gate and the part most likely to be
+      # wrong. It is an exemption for TEST HARNESSES, not a licence for
+      # unreadable tests; if a test grows genuinely nested logic, that logic
+      # wants to be a helper under test in its own right.
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - gocognit
 
 formatters:
   enable:

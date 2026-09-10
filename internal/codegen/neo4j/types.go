@@ -38,6 +38,34 @@ type typeMap struct{}
 // models an instant without residue. DURATION collapses its
 // (YEAR TO MONTH) vs (DAY TO SECOND) qualifier onto a single Duration
 // carrying Months / Days / Seconds / Nanos (see ADR 0002 Consequences).
+//
+// EXEMPT FROM gocyclo, NOT FROM gocognit. gocyclo counts this 31 because it
+// increments once per `case` and the table has one per property width;
+// gocognit counts it 10, charging the `switch` once and the nesting nothing.
+// A 3x disagreement, and gocognit is the one describing what a reader faces:
+// gocyclo alone ranked this the 6th-most-complex function in the repository
+// when it is one flat table behind two container guards.
+//
+// Splitting it to satisfy the count is not available, and that is a fact
+// about this method rather than a preference. ONE guard reads it by
+// STRUCTURE: typescan.PropertyArms skips any decl whose `fn.Recv == nil` and
+// takes the method name as an argument, so a table moved to a plain function
+// is invisible to it — the walk is propertyArmNames in decoder_test.go, and
+// it feeds TWO obligations: types_test.go:123 and decoder_test.go:206. That
+// does not pass vacuously at either. types_test.go asserts
+// `require.NotEmpty(t, arms, ...)` before ranging over them, precisely so a
+// walk that read nothing cannot hold the table to nothing, and
+// decoder_test.go's `require.Contains(t, arms, ...)` reds on an empty map
+// too. It reds LOUDLY, and was measured doing so on 2026-09-10 when exactly
+// that split was attempted.
+//
+// The age copy of this table is held by a SECOND structural guard that this
+// package has no equivalent of: age's render_queries_test.go reads its
+// typeMap's RETURN statements and refuses a return whose shape it cannot
+// read. Nothing here walks returns, so the neo4j table rests on the arms
+// walk alone — do not read the age comment as also describing this one.
+//
+//nolint:gocyclo // flat per-width dispatch table; gocognit scores it 10 and still gates it
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
 		elemTy, ok := t.Property(pt.Elem())

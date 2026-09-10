@@ -208,61 +208,8 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 	sc := newScope(carry)
 	sc.Ingest(part)
 
-	// Phase A1: local labelled-node / edge / call admission. The
-	// unlabelled-node arm defers to Phase B (InferUnlabelled reads
-	// s.bindings and picks them up). Bind* runs the cross-lane shadow
-	// cascade and the R5/R7 conflict checks.
-	for _, b := range sc.bindings {
-		switch bb := b.(type) {
-		case query.NodeBinding:
-			if len(bb.Labels()) == 0 {
-				continue
-			}
-			nts, err := resolveNodeLabels(bb.Labels(), s)
-			if err != nil {
-				return nil, branchState{}, nil, orientationEvidence{}, err
-			}
-			if len(nts) == 1 {
-				if err := sc.BindNode(bb, nts[0]); err != nil {
-					return nil, branchState{}, nil, orientationEvidence{}, err
-				}
-			} else {
-				if err := sc.BindNodeCands(bb, nts); err != nil {
-					return nil, branchState{}, nil, orientationEvidence{}, err
-				}
-			}
-		case query.EdgeBinding:
-			if err := sc.BindEdge(bb); err != nil {
-				return nil, branchState{}, nil, orientationEvidence{}, err
-			}
-			// An inline endpoint carries a label expression but no variable, so
-			// it is not in sc.bindings and the arm above never reaches it. Ask it
-			// the same question here that a var spelling gets, at the same phase:
-			// the two are the same pattern and must refuse the same way.
-			//
-			// Satisfiability is a property of the expression and the schema
-			// alone, so an unsatisfiable set means no row can ever stand there and
-			// there was never an edge to look for. Left to edge closure it fell
-			// through to the SPELLED key, which no declared type carries, and
-			// refused as a missing EDGE — inviting the author to go declare
-			// `Person-[WORKS_AT]->Company&Desk`, a thing no node could be an
-			// endpoint of (bd gqlc-jqix).
-			for _, ep := range []query.Endpoint{bb.Source(), bb.Target()} {
-				ie, inline := ep.(query.InlineEndpoint)
-				if !inline || len(ie.Labels()) == 0 {
-					continue
-				}
-				if _, err := resolveNodeLabels(ie.Labels(), s); err != nil {
-					return nil, branchState{}, nil, orientationEvidence{}, err
-				}
-			}
-		case query.CallBinding:
-			if err := sc.BindCall(bb, r); err != nil {
-				return nil, branchState{}, nil, orientationEvidence{}, err
-			}
-		default:
-			return nil, branchState{}, nil, orientationEvidence{}, fmt.Errorf("%w: %s binding", ErrOutOfR0Scope, b.Kind())
-		}
+	if err := admitLocalBindings(sc, s, r); err != nil {
+		return nil, branchState{}, nil, orientationEvidence{}, err
 	}
 
 	// Phase D (§4.6) runs ABOVE Phases A2/B/C. The invariant, which replaces R4's
@@ -337,6 +284,77 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 	// exportedOptionalGroup, so downstream Parts can close cross-Part
 	// group demotion via the ay9 fixed point.
 	return sc.columns, sc.Export(), []parameterUseSite{site}, sc.orientation, nil
+}
+
+// admitLocalBindings runs Phase A1: local labelled-node / edge / call
+// admission. The unlabelled-node arm defers to Phase B (InferUnlabelled reads
+// s.bindings and picks them up). Bind* runs the cross-lane shadow cascade and
+// the R5/R7 conflict checks.
+func admitLocalBindings(sc *scope, s schema.Schema, r procsig.Registry) error {
+	for _, b := range sc.bindings {
+		switch bb := b.(type) {
+		case query.NodeBinding:
+			if err := admitLabelledNode(sc, bb, s); err != nil {
+				return err
+			}
+		case query.EdgeBinding:
+			if err := admitEdge(sc, bb, s); err != nil {
+				return err
+			}
+		case query.CallBinding:
+			if err := sc.BindCall(bb, r); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("%w: %s binding", ErrOutOfR0Scope, b.Kind())
+		}
+	}
+	return nil
+}
+
+// admitLabelledNode is Phase A1's NodeBinding arm. An unlabelled binding is
+// not admitted here at all — Phase B picks it up.
+func admitLabelledNode(sc *scope, b query.NodeBinding, s schema.Schema) error {
+	if len(b.Labels()) == 0 {
+		return nil
+	}
+	nts, err := resolveNodeLabels(b.Labels(), s)
+	if err != nil {
+		return err
+	}
+	if len(nts) == 1 {
+		return sc.BindNode(b, nts[0])
+	}
+	return sc.BindNodeCands(b, nts)
+}
+
+// admitEdge is Phase A1's EdgeBinding arm.
+func admitEdge(sc *scope, b query.EdgeBinding, s schema.Schema) error {
+	if err := sc.BindEdge(b); err != nil {
+		return err
+	}
+	// An inline endpoint carries a label expression but no variable, so
+	// it is not in sc.bindings and admitLabelledNode never reaches it. Ask it
+	// the same question here that a var spelling gets, at the same phase:
+	// the two are the same pattern and must refuse the same way.
+	//
+	// Satisfiability is a property of the expression and the schema
+	// alone, so an unsatisfiable set means no row can ever stand there and
+	// there was never an edge to look for. Left to edge closure it fell
+	// through to the SPELLED key, which no declared type carries, and
+	// refused as a missing EDGE — inviting the author to go declare
+	// `Person-[WORKS_AT]->Company&Desk`, a thing no node could be an
+	// endpoint of (bd gqlc-jqix).
+	for _, ep := range []query.Endpoint{b.Source(), b.Target()} {
+		ie, inline := ep.(query.InlineEndpoint)
+		if !inline || len(ie.Labels()) == 0 {
+			continue
+		}
+		if _, err := resolveNodeLabels(ie.Labels(), s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // fillGroupingKeys populates Column.GroupingKey for branch 0's final Part per
@@ -2392,64 +2410,75 @@ func validateRemoveLabelsEffect(sc *scope, e query.RemoveLabelsEffect, s schema.
 // referential integrity already covers them). See §4.4.
 func validateDeleteEffect(sc *scope, e query.DeleteEffect, s schema.Schema) error {
 	for _, t := range e.Targets() {
-		v := t.Variable
-		p := t.Property
-		if p == "" {
-			if _, ok := sc.nodeTypes[v]; ok {
-				continue
-			}
-			if _, ok := sc.nodeCands[v]; ok {
-				continue
-			}
-			if _, ok := sc.edgeTypes[v]; ok {
-				continue
-			}
-			if _, ok := sc.edgeCands[v]; ok {
-				continue
-			}
-			if _, ok := sc.carriedResolvedTypes[v]; ok {
-				return fmt.Errorf("%w: DELETE %s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, v)
-			}
-			return fmt.Errorf("%w: DELETE %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
+		if err := validateDeleteTarget(sc, t, s); err != nil {
+			return err
 		}
-		if nt, ok := sc.nodeTypes[v]; ok {
-			if _, ok := nt.Properties[p]; !ok {
-				return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
-			}
-			continue
-		}
-		if nts, ok := sc.nodeCands[v]; ok {
-			if _, err := unionNodeProperty(nts, v, p, false); err != nil {
-				return err
-			}
-			continue
-		}
-		if et, ok := sc.edgeTypes[v]; ok {
-			if sc.edgeBindings[v].Hops() != nil {
-				return fmt.Errorf("%w: DELETE on variable-length edge %q", ErrInvalidEffectTarget, v)
-			}
-			if _, ok := et.Properties[p]; !ok {
-				return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
-			}
-			continue
-		}
-		if cands, ok := sc.edgeCands[v]; ok {
-			if sc.edgeBindings[v].Hops() != nil {
-				return fmt.Errorf("%w: DELETE on variable-length edge %q", ErrInvalidEffectTarget, v)
-			}
-			if _, err := unionProperty(cands, s, v, p, false); err != nil {
-				return err
-			}
-			continue
-		}
-		if _, ok := sc.carriedResolvedTypes[v]; ok {
-			return fmt.Errorf("%w: DELETE %s.%s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, p, v)
-		}
-		return fmt.Errorf("%w: DELETE %s.%s: %q not in any Part scope", ErrInvalidEffectTarget, v, p, v)
 	}
 	// Refs walk: parser's referential-integrity sweep covers these; skip per
 	// §4.4 step 2 ("R6 runs no additional check on e.Refs()").
 	return nil
+}
+
+// validateDeleteTarget checks one DELETE target. An empty Property is the
+// entity shape; anything else is the bare-property shape.
+func validateDeleteTarget(sc *scope, t query.Ref, s schema.Schema) error {
+	v := t.Variable
+	p := t.Property
+	if p == "" {
+		return validateDeleteEntityTarget(sc, v)
+	}
+	if nt, ok := sc.nodeTypes[v]; ok {
+		if _, ok := nt.Properties[p]; !ok {
+			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+		}
+		return nil
+	}
+	if nts, ok := sc.nodeCands[v]; ok {
+		_, err := unionNodeProperty(nts, v, p, false)
+		return err
+	}
+	if et, ok := sc.edgeTypes[v]; ok {
+		if sc.edgeBindings[v].Hops() != nil {
+			return fmt.Errorf("%w: DELETE on variable-length edge %q", ErrInvalidEffectTarget, v)
+		}
+		if _, ok := et.Properties[p]; !ok {
+			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+		}
+		return nil
+	}
+	if cands, ok := sc.edgeCands[v]; ok {
+		if sc.edgeBindings[v].Hops() != nil {
+			return fmt.Errorf("%w: DELETE on variable-length edge %q", ErrInvalidEffectTarget, v)
+		}
+		_, err := unionProperty(cands, s, v, p, false)
+		return err
+	}
+	if _, ok := sc.carriedResolvedTypes[v]; ok {
+		return fmt.Errorf("%w: DELETE %s.%s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, p, v)
+	}
+	return fmt.Errorf("%w: DELETE %s.%s: %q not in any Part scope", ErrInvalidEffectTarget, v, p, v)
+}
+
+// validateDeleteEntityTarget checks a whole-entity DELETE target. Every
+// entity lane admits it unconditionally; only a projection alias and an
+// unbound name are refused.
+func validateDeleteEntityTarget(sc *scope, v string) error {
+	if _, ok := sc.nodeTypes[v]; ok {
+		return nil
+	}
+	if _, ok := sc.nodeCands[v]; ok {
+		return nil
+	}
+	if _, ok := sc.edgeTypes[v]; ok {
+		return nil
+	}
+	if _, ok := sc.edgeCands[v]; ok {
+		return nil
+	}
+	if _, ok := sc.carriedResolvedTypes[v]; ok {
+		return fmt.Errorf("%w: DELETE %s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, v)
+	}
+	return fmt.Errorf("%w: DELETE %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
 }
 
 // resolveNodeLabels resolves a query node binding's label set to the set of

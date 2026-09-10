@@ -74,6 +74,45 @@ func (l *listener) buildBranch(rb *rawBranch) (query.Branch, error) {
 // the part's own bindings (an imported name carries no kind to check, and an edge
 // endpoint always names a node in the same MATCH).
 func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part, map[string]bool, error) {
+	scope, err := partScope(rp, imported)
+	if err != nil {
+		return query.Part{}, nil, err
+	}
+	if err := validateRefs(rp, scope); err != nil {
+		return query.Part{}, nil, err
+	}
+	bindings, err := assembleBindings(rp)
+	if err != nil {
+		return query.Part{}, nil, err
+	}
+	applyStandaloneCallReturns(rp)
+
+	var (
+		partBindings []query.Binding
+		partEffects  []query.Effect
+	)
+	if len(bindings) > 0 {
+		partBindings = bindings
+	}
+	if len(rp.effects) > 0 {
+		partEffects = rp.effects
+	}
+	// Route through NewPart so the model's "at least one of bindings /
+	// projection / effects" invariant is enforced at the type-interface
+	// boundary (Stage 12 §3.2 amend). The grammar rules out the all-empty
+	// shape, so ErrEmptyPart is unreachable via parse — but the belt-and-
+	// braces guard keeps illegal states unrepresentable if a future grammar
+	// widening slips.
+	part, err := query.NewPart(partBindings, rp.returns, rp.returnsAll, rp.distinct, partEffects)
+	if err != nil {
+		return query.Part{}, nil, err
+	}
+	return part, exportedNames(rp, scope), nil
+}
+
+// partScope computes the part's resolution scope: the imported names plus every
+// variable the part binds itself, rejecting cross-kind name collisions as it goes.
+func partScope(rp *rawPart, imported map[string]bool) (map[string]bool, error) {
 	scope := map[string]bool{}
 	for k := range imported {
 		scope[k] = true
@@ -92,87 +131,118 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 	// Stage 0..7 two-way check (§1.6).
 	for _, pb := range rp.pathBindings {
 		if _, ok := rp.byVar[pb.Variable()]; ok {
-			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, pb.Variable())
+			return nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, pb.Variable())
 		}
 		scope[pb.Variable()] = true
 	}
-	// Stage 9: UNWIND-introduced variables enter the scope alongside entity
-	// and path variables. A RETURN x on `UNWIND … AS x` resolves against
-	// the unwind binding, and its type is the recorded element type
-	// (via refType). A same-name entity, path, or earlier unwind binding
-	// preceding it in the same part is a kind conflict — collectUnwind
-	// catches the byVar and unwind-vs-unwind and path-vs-unwind cases at
-	// listener time; the three sweeps here are the belt-and-braces
-	// symmetric backstop (spec §4.3 amend).
 	pathByVar := make(map[string]bool, len(rp.pathBindings))
 	for _, pb := range rp.pathBindings {
 		pathByVar[pb.Variable()] = true
 	}
+	unwindByVar, err := addUnwindScope(rp, scope, pathByVar)
+	if err != nil {
+		return nil, err
+	}
+	if err := addCallScope(rp, scope, imported, pathByVar, unwindByVar); err != nil {
+		return nil, err
+	}
+	return scope, nil
+}
+
+// addUnwindScope admits this part's UNWIND variables into scope and returns the
+// index of them.
+//
+// Stage 9: UNWIND-introduced variables enter the scope alongside entity
+// and path variables. A RETURN x on `UNWIND … AS x` resolves against
+// the unwind binding, and its type is the recorded element type
+// (via refType). A same-name entity, path, or earlier unwind binding
+// preceding it in the same part is a kind conflict — collectUnwind
+// catches the byVar and unwind-vs-unwind and path-vs-unwind cases at
+// listener time; the three sweeps here are the belt-and-braces
+// symmetric backstop (spec §4.3 amend).
+func addUnwindScope(rp *rawPart, scope, pathByVar map[string]bool) (map[string]bool, error) {
 	unwindByVar := make(map[string]bool, len(rp.unwindBindings))
 	for _, ub := range rp.unwindBindings {
-		if _, ok := rp.byVar[ub.Variable()]; ok {
-			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ub.Variable())
+		v := ub.Variable()
+		if _, ok := rp.byVar[v]; ok {
+			return nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
 		}
-		if pathByVar[ub.Variable()] {
-			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ub.Variable())
+		if pathByVar[v] {
+			return nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
 		}
-		if unwindByVar[ub.Variable()] {
-			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ub.Variable())
+		if unwindByVar[v] {
+			return nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
 		}
-		unwindByVar[ub.Variable()] = true
-		scope[ub.Variable()] = true
+		unwindByVar[v] = true
+		scope[v] = true
 	}
-	// Stage 14: CALL YIELD bindings enter the scope alongside entity,
-	// path, and unwind bindings. Five-way collision sweep (entity /
-	// path / unwind / prior call / imported) — imported catches
-	// Call1[15]'s `WITH 'Hi' AS label CALL test.labels() YIELD label`
-	// pattern, where the CallBinding's variable collides with a name
-	// exported by the preceding WITH. The `if callByVar[v]` arm is
-	// the sole authority for intra-YIELD name collision — the two
-	// `CALL YIELD intra rename collision` reject cases in
-	// parser_test.go discriminate it.
+	return unwindByVar, nil
+}
+
+// addCallScope admits this part's CALL YIELD variables into scope.
+//
+// Stage 14: CALL YIELD bindings enter the scope alongside entity,
+// path, and unwind bindings. Five-way collision sweep (entity /
+// path / unwind / prior call / imported) — imported catches
+// Call1[15]'s `WITH 'Hi' AS label CALL test.labels() YIELD label`
+// pattern, where the CallBinding's variable collides with a name
+// exported by the preceding WITH. The `if callByVar[v]` arm is
+// the sole authority for intra-YIELD name collision — the two
+// `CALL YIELD intra rename collision` reject cases in
+// parser_test.go discriminate it.
+func addCallScope(rp *rawPart, scope, imported, pathByVar, unwindByVar map[string]bool) error {
 	callByVar := make(map[string]bool, len(rp.callBindings))
 	for _, cb := range rp.callBindings {
 		v := cb.Variable()
 		if _, ok := rp.byVar[v]; ok {
-			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
+			return fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
 		}
 		if pathByVar[v] {
-			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
+			return fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
 		}
 		if unwindByVar[v] {
-			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
+			return fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
 		}
 		if callByVar[v] {
-			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
+			return fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
 		}
 		if imported[v] {
-			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
+			return fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
 		}
 		callByVar[v] = true
 		scope[v] = true
 	}
+	return nil
+}
 
+// validateRefs resolves every recorded variable use against the part's scope.
+func validateRefs(rp *rawPart, scope map[string]bool) error {
 	for _, ref := range rp.refs {
 		if !scope[ref.name] {
-			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrUnboundVariable, ref.name)
+			return fmt.Errorf("%w: %s", ErrUnboundVariable, ref.name)
 		}
 		// An endpoint must reference a node binding; it always names a node in the
 		// same MATCH, so its kind is checked against this part's own bindings. A
 		// return-item ref accepts either kind (and may resolve to an imported name).
-		if ref.endpointRef {
-			idx, ok := rp.byVar[ref.name]
-			if ok && rp.bindings[idx].kind != graph.Node {
-				return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ref.name)
-			}
+		if !ref.endpointRef {
+			continue
+		}
+		idx, ok := rp.byVar[ref.name]
+		if ok && rp.bindings[idx].kind != graph.Node {
+			return fmt.Errorf("%w: %s", ErrVariableKindConflict, ref.name)
 		}
 	}
+	return nil
+}
 
+// assembleBindings flattens the part's four binding families into the model's
+// single ordered slice.
+func assembleBindings(rp *rawPart) ([]query.Binding, error) {
 	bindings := make([]query.Binding, 0, len(rp.bindings)+len(rp.pathBindings)+len(rp.unwindBindings)+len(rp.callBindings))
 	for _, rb := range rp.bindings {
 		b, err := rb.toBinding()
 		if err != nil {
-			return query.Part{}, nil, err
+			return nil, err
 		}
 		bindings = append(bindings, b)
 	}
@@ -197,62 +267,49 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 	for _, cb := range rp.callBindings {
 		bindings = append(bindings, cb)
 	}
+	return bindings, nil
+}
 
-	// Stage 14: standalone CALL without a downstream RETURN populates
-	// Part.Returns from the CallBindings (spec §4.3). The listener
-	// sets callStandalone when the standalone path fires and no
-	// explicit RETURN populated rp.returns; this branch mints one
-	// RefProjection per CallBinding in walk order (signature-
-	// declaration order) and sets returnsAll to mirror the
-	// grammar's `YIELD *` / no-YIELD implicit-all posture.
-	if rp.callStandalone && len(rp.returns) == 0 && !rp.returnsAll {
-		for _, cb := range rp.callBindings {
-			rp.returns = append(rp.returns, query.ReturnItem{
-				Name: cb.Variable(),
-				Value: query.NewRefProjection(
-					query.Ref{Variable: cb.Variable()},
-					cb.ResultType(),
-				),
-			})
-		}
-		rp.returnsAll = true
+// applyStandaloneCallReturns mutates rp in place.
+//
+// Stage 14: standalone CALL without a downstream RETURN populates
+// Part.Returns from the CallBindings (spec §4.3). The listener
+// sets callStandalone when the standalone path fires and no
+// explicit RETURN populated rp.returns; this branch mints one
+// RefProjection per CallBinding in walk order (signature-
+// declaration order) and sets returnsAll to mirror the
+// grammar's `YIELD *` / no-YIELD implicit-all posture.
+func applyStandaloneCallReturns(rp *rawPart) {
+	if !rp.callStandalone || len(rp.returns) > 0 || rp.returnsAll {
+		return
 	}
+	for _, cb := range rp.callBindings {
+		rp.returns = append(rp.returns, query.ReturnItem{
+			Name: cb.Variable(),
+			Value: query.NewRefProjection(
+				query.Ref{Variable: cb.Variable()},
+				cb.ResultType(),
+			),
+		})
+	}
+	rp.returnsAll = true
+}
 
-	var (
-		partBindings []query.Binding
-		partEffects  []query.Effect
-	)
-	if len(bindings) > 0 {
-		partBindings = bindings
-	}
-	if len(rp.effects) > 0 {
-		partEffects = rp.effects
-	}
-	// Route through NewPart so the model's "at least one of bindings /
-	// projection / effects" invariant is enforced at the type-interface
-	// boundary (Stage 12 §3.2 amend). The grammar rules out the all-empty
-	// shape, so ErrEmptyPart is unreachable via parse — but the belt-and-
-	// braces guard keeps illegal states unrepresentable if a future grammar
-	// widening slips.
-	part, err := query.NewPart(partBindings, rp.returns, rp.returnsAll, rp.distinct, partEffects)
-	if err != nil {
-		return query.Part{}, nil, err
-	}
-
-	// The names this part exports into the next: under WITH * the whole in-scope
-	// set carries forward (transitive — spec §4); otherwise each return item's
-	// Name (the AS alias, or the bare variable for WITH a).
+// exportedNames returns the names this part exports into the next: under WITH *
+// the whole in-scope set carries forward (transitive — spec §4); otherwise each
+// return item's Name (the AS alias, or the bare variable for WITH a).
+func exportedNames(rp *rawPart, scope map[string]bool) map[string]bool {
 	exported := map[string]bool{}
 	if rp.returnsAll {
 		for k := range scope {
 			exported[k] = true
 		}
-	} else {
-		for _, r := range rp.returns {
-			exported[r.Name] = true
-		}
+		return exported
 	}
-	return part, exported, nil
+	for _, r := range rp.returns {
+		exported[r.Name] = true
+	}
+	return exported
 }
 
 // toBinding builds the model binding from a raw binding via the smart

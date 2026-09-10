@@ -39,61 +39,8 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 `)
 	}
 
-	// Collect edgeUnion interfaces across every query, preserving
-	// Input.Queries slice order sub-ordered by column position.
-	// markersByEntity maps entity-struct name -> ordered interface
-	// names it satisfies, deduplicated so an entity that appears twice
-	// in an EdgeKeys slice (impossible — resolver commits distinct
-	// candidates) or across two per-query columns projecting the same
-	// interface (impossible — per-query-column naming) still emits one
-	// marker per interface participation.
-	var unions []*codegen.EdgeUnion
-	markersByEntity := make(map[string][]string)
-	seenMarker := make(map[string]struct{})
-	for _, p := range prepared {
-		for _, u := range p.EdgeUnions {
-			unions = append(unions, u)
-			for _, cand := range u.Candidates {
-				key := cand + "\x00" + u.InterfaceName
-				if _, dup := seenMarker[key]; dup {
-					continue
-				}
-				seenMarker[key] = struct{}{}
-				markersByEntity[cand] = append(markersByEntity[cand], u.InterfaceName)
-			}
-		}
-	}
-
-	// fmt is unconditional once an entity exists: every decode helper
-	// opens with the wire-label guard, whose mismatch arm is a
-	// fmt.Errorf. It used to gate on a property whose read can fail,
-	// which left a zero-property entity's helper importing nothing —
-	// that helper now reports a wrong-labelled value like every other.
-	anyProp := true
-	anyNonNull := false
-	anyTime := false
-	for _, e := range entities {
-		for _, f := range e.Fields {
-			// neo4j is emitted for GetProperty, which a property of no
-			// declared shape never reaches (ridesADriverCarrier) and a
-			// nullable one reads round through the Props map. An import
-			// nothing names does not compile.
-			if !f.Nullable && ridesADriverCarrier(f.GoType) {
-				anyNonNull = true
-			}
-			// A list property names its leaf type, not its slice
-			// type, so an exact "time.Time" match misses
-			// LIST<TIMESTAMP> ([]time.Time) and its nestings and
-			// emits a struct field plus a decode assertion against
-			// an unimported package. goTypeNeedsImports strips the
-			// "[]" prefixes to the leaf; the dbtype half of its
-			// answer is discarded because this file's dbtype import
-			// is unconditional.
-			if _, needTime := goTypeNeedsImports(f.GoType); needTime {
-				anyTime = true
-			}
-		}
-	}
+	unions, markersByEntity := collectEdgeUnions(prepared)
+	anyNonNull, anyTime := modelImportNeeds(entities)
 
 	var b strings.Builder
 	b.WriteString(codegen.Header())
@@ -106,42 +53,13 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 	// gates the math import with it.
 	narrowsInts, narrowsFloats := narrowsANumericWidth(entities, prepared)
 
-	// Imports: dbtype is unconditional (every helper's argument type);
-	// fmt gates on anyProp; math gates on narrowsFloats; time gates on
-	// anyTime (TIMESTAMP property); neo4j gates on anyNonNull.
-	// Alphabetical: fmt, math, time, then external neo4j / dbtype.
-	b.WriteString("import (\n")
-	if anyProp {
-		b.WriteString("\t\"fmt\"\n")
-	}
-	if narrowsFloats {
-		b.WriteString("\t\"math\"\n")
-	}
-	if anyTime {
-		b.WriteString("\t\"time\"\n")
-	}
-	if anyProp || narrowsFloats || anyTime {
-		b.WriteString("\n")
-	}
-	if anyNonNull {
-		b.WriteString("\t\"" + target.neo4jImport + "\"\n")
-	}
-	b.WriteString("\t\"" + target.dbtypeImport + "\"\n")
-	b.WriteString(")\n\n")
+	writeModelImports(&b, target, narrowsFloats, anyTime, anyNonNull)
 
 	for i, e := range entities {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		writeEntityStruct(&b, e)
-		if markers := markersByEntity[e.Name]; len(markers) > 0 {
-			b.WriteString("\n")
-			for _, iface := range markers {
-				fmt.Fprintf(&b, "func (%s) is%s() {}\n", e.Name, iface)
-			}
-		}
-		b.WriteString("\n")
-		writeEntityDecodeHelper(&b, e)
+		writeEntityBlock(&b, e, markersByEntity[e.Name])
 	}
 
 	// The site-named record aliases (spec §2.1), after the entity blocks
@@ -166,6 +84,109 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 		fmt.Fprintf(&b, "type %s interface{ is%s() }\n", u.InterfaceName, u.InterfaceName)
 	}
 	return []byte(b.String())
+}
+
+// collectEdgeUnions collects the edgeUnion interfaces across every query,
+// preserving Input.Queries slice order sub-ordered by column position.
+// The second result maps entity-struct name -> ordered interface
+// names it satisfies, deduplicated so an entity that appears twice
+// in an EdgeKeys slice (impossible — resolver commits distinct
+// candidates) or across two per-query columns projecting the same
+// interface (impossible — per-query-column naming) still emits one
+// marker per interface participation.
+func collectEdgeUnions(prepared []codegen.Query) ([]*codegen.EdgeUnion, map[string][]string) {
+	var unions []*codegen.EdgeUnion
+	markersByEntity := make(map[string][]string)
+	seenMarker := make(map[string]struct{})
+	for _, p := range prepared {
+		for _, u := range p.EdgeUnions {
+			unions = append(unions, u)
+			for _, cand := range u.Candidates {
+				key := cand + "\x00" + u.InterfaceName
+				if _, dup := seenMarker[key]; dup {
+					continue
+				}
+				seenMarker[key] = struct{}{}
+				markersByEntity[cand] = append(markersByEntity[cand], u.InterfaceName)
+			}
+		}
+	}
+	return unions, markersByEntity
+}
+
+// modelImportNeeds reports whether the emitted file reaches the driver
+// package (neo4j.GetProperty) and whether it names time.
+func modelImportNeeds(entities []codegen.Entity) (anyNonNull, anyTime bool) {
+	for _, e := range entities {
+		for _, f := range e.Fields {
+			// neo4j is emitted for GetProperty, which a property of no
+			// declared shape never reaches (ridesADriverCarrier) and a
+			// nullable one reads round through the Props map. An import
+			// nothing names does not compile.
+			if !f.Nullable && ridesADriverCarrier(f.GoType) {
+				anyNonNull = true
+			}
+			// A list property names its leaf type, not its slice
+			// type, so an exact "time.Time" match misses
+			// LIST<TIMESTAMP> ([]time.Time) and its nestings and
+			// emits a struct field plus a decode assertion against
+			// an unimported package. goTypeNeedsImports strips the
+			// "[]" prefixes to the leaf; the dbtype half of its
+			// answer is discarded because this file's dbtype import
+			// is unconditional.
+			if _, needTime := goTypeNeedsImports(f.GoType); needTime {
+				anyTime = true
+			}
+		}
+	}
+	return anyNonNull, anyTime
+}
+
+// writeModelImports emits the import block. dbtype is unconditional (every
+// helper's argument type); fmt gates on anyProp; math gates on
+// narrowsFloats; time gates on anyTime (TIMESTAMP property); neo4j gates
+// on anyNonNull. Alphabetical: fmt, math, time, then external neo4j /
+// dbtype.
+func writeModelImports(b *strings.Builder, target driverTarget, narrowsFloats, anyTime, anyNonNull bool) {
+	// fmt is unconditional once an entity exists: every decode helper
+	// opens with the wire-label guard, whose mismatch arm is a
+	// fmt.Errorf. It used to gate on a property whose read can fail,
+	// which left a zero-property entity's helper importing nothing —
+	// that helper now reports a wrong-labelled value like every other.
+	anyProp := true
+
+	b.WriteString("import (\n")
+	if anyProp {
+		b.WriteString("\t\"fmt\"\n")
+	}
+	if narrowsFloats {
+		b.WriteString("\t\"math\"\n")
+	}
+	if anyTime {
+		b.WriteString("\t\"time\"\n")
+	}
+	if anyProp || narrowsFloats || anyTime {
+		b.WriteString("\n")
+	}
+	if anyNonNull {
+		b.WriteString("\t\"" + target.neo4jImport + "\"\n")
+	}
+	b.WriteString("\t\"" + target.dbtypeImport + "\"\n")
+	b.WriteString(")\n\n")
+}
+
+// writeEntityBlock emits one entity's struct declaration, its edgeUnion
+// marker methods and its decode helper.
+func writeEntityBlock(b *strings.Builder, e codegen.Entity, markers []string) {
+	writeEntityStruct(b, e)
+	if len(markers) > 0 {
+		b.WriteString("\n")
+		for _, iface := range markers {
+			fmt.Fprintf(b, "func (%s) is%s() {}\n", e.Name, iface)
+		}
+	}
+	b.WriteString("\n")
+	writeEntityDecodeHelper(b, e)
 }
 
 // writeEntityStruct emits the exported struct declaration for one entity.

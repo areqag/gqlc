@@ -646,6 +646,48 @@ func agtypeCarrier(goType string) string {
 // counterpart here: this one refuses the column that would name them.
 func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	var b strings.Builder
+	writeModelsPreamble(&b, pkg, h)
+
+	writeEntities(&b, entities)
+
+	// The carriers sit with the entity structs because they are part of
+	// the type surface; their helpers sit below with the other decoders.
+	records := recordPlans(h)
+	writeRecordCarriers(&b, records)
+
+	plain := make([]codegen.Entity, 0, len(entities))
+	for _, e := range entities {
+		plain = append(plain, e.Entity)
+	}
+	writeRecordSiteAliases(&b, codegen.RecordSiteAliases(plain))
+
+	writeScalarDecoders(&b, h)
+	writeTemporalDecoders(&b, h)
+	writeTemporalEncoders(&b, h)
+	writeWireDecoders(&b, h)
+	for _, goType := range h.listHelpers() {
+		writeListHelper(&b, goType)
+	}
+	// The field helper is gated on a record having a field to read, not on
+	// a record existing: a record of no fields declares no call site, and
+	// an emitted helper nothing calls is a compile error in the generated
+	// package.
+	if h.recordField {
+		writeRecordFieldHelper(&b)
+	}
+	writeRecordDecoders(&b, records)
+	writeRecordEncoders(&b, records)
+	writePropertyDecoders(&b, h)
+	return []byte(b.String())
+}
+
+// The writers below are one contiguous run of the emitted file each, and
+// renderModels calls them in the order the file is laid out: a block moved
+// between two of them moves in the bytes the goldens are held to.
+
+// writeModelsPreamble emits the header, the package clause and the import
+// block.
+func writeModelsPreamble(b *strings.Builder, pkg string, h helpers) {
 	b.WriteString(codegen.Header())
 	b.WriteString("package " + pkg + "\n")
 
@@ -665,20 +707,11 @@ func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 		b.WriteString("\t\"time\"\n")
 	}
 	b.WriteString(")\n")
+}
 
-	writeEntities(&b, entities)
-
-	// The carriers sit with the entity structs because they are part of
-	// the type surface; their helpers sit below with the other decoders.
-	records := recordPlans(h)
-	writeRecordCarriers(&b, records)
-
-	plain := make([]codegen.Entity, 0, len(entities))
-	for _, e := range entities {
-		plain = append(plain, e.Entity)
-	}
-	writeRecordSiteAliases(&b, codegen.RecordSiteAliases(plain))
-
+// writeScalarDecoders emits the argument encoder and the scalar decoders,
+// agtypeArgs through agtypeFloat32.
+func writeScalarDecoders(b *strings.Builder, h helpers) {
 	if h.args {
 		b.WriteString(`
 // agtypeArgs renders a query's bound parameters as the single agtype
@@ -819,6 +852,11 @@ func agtypeFloat32(raw []byte) (float32, error) {
 }
 `)
 	}
+}
+
+// writeTemporalDecoders emits the temporal decoders, agtypeInstant through
+// agtypeZone.
+func writeTemporalDecoders(b *strings.Builder, h helpers) {
 	if h.instant {
 		b.WriteString(`
 // agtypeInstant decodes an encoded instant: agtype has no temporal
@@ -1137,6 +1175,11 @@ func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, e
 }
 `)
 	}
+}
+
+// writeTemporalEncoders emits the bind-side encoders, agtypeMicros through
+// agtypeEncodedList.
+func writeTemporalEncoders(b *strings.Builder, h helpers) {
 	if h.micros {
 		b.WriteString(`
 // agtypeMicros encodes an instant into the integer a query binds it as,
@@ -1343,6 +1386,11 @@ func agtypeEncodedList[T, E any](in []T, encode func(T) (E, error)) ([]E, error)
 }
 `)
 	}
+}
+
+// writeWireDecoders emits the agtype wire readers the typed decoders are
+// built on, agtypeSpan through agtypeIsNull.
+func writeWireDecoders(b *strings.Builder, h helpers) {
 	b.WriteString(`
 // agtypeSpan reports where the value at the front of b ends: the offset
 // of the first stop byte outside any nested structure, or len(b) when
@@ -1522,18 +1570,10 @@ func agtypeIsNull(raw []byte) bool {
 }
 `)
 	}
-	for _, goType := range h.listHelpers() {
-		writeListHelper(&b, goType)
-	}
-	// The field helper is gated on a record having a field to read, not on
-	// a record existing: a record of no fields declares no call site, and
-	// an emitted helper nothing calls is a compile error in the generated
-	// package.
-	if h.recordField {
-		writeRecordFieldHelper(&b)
-	}
-	writeRecordDecoders(&b, records)
-	writeRecordEncoders(&b, records)
+}
+
+// writePropertyDecoders emits agtypeValue and the property lookups.
+func writePropertyDecoders(b *strings.Builder, h helpers) {
 	if h.value {
 		b.WriteString(`
 // agtypeValue decodes a value of no declared shape through agtype's own
@@ -1647,7 +1687,6 @@ func agtypeNullableProperty[T any](props map[string][]byte, key string, decode f
 }
 `)
 	}
-	return []byte(b.String())
 }
 
 // writeListHelper emits the named wrapper for one Go slice type: the

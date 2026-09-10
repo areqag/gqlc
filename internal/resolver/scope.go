@@ -628,107 +628,142 @@ func (s *scope) SeedLocalNullability() {
 // Reads s.bindings and s.carriedGroups; writes s.nullableBinding.
 // Parameter-free per §2.2 D1.
 func (s *scope) DemoteNullability() {
-	// 5xg pre-pass: bare-ref demotion. A binding whose parser-time
-	// flag is true was re-referenced in a required bare pattern; the
-	// row-drop witness demotes it. Anonymous bindings (v == "") skip
-	// — they carry no table entry.
+	s.demoteBareReferences()
+	groups := s.optionalGroupMembership()
+	s.demotedGroups = map[int]bool{}
+	s.demoteProvenGroups(groups)
+	s.demoteAcrossEdges(groups)
+}
+
+// demoteIfPresent writes false into v's nullable-lane entry only when the
+// table already holds one; a name with no entry stays absent.
+func (s *scope) demoteIfPresent(v string) {
+	if _, present := s.nullableBinding[v]; present {
+		s.nullableBinding[v] = false
+	}
+}
+
+// demoteBareReferences is the 5xg pre-pass: bare-ref demotion. A binding
+// whose parser-time flag is true was re-referenced in a required bare
+// pattern; the row-drop witness demotes it. Anonymous bindings (v == "")
+// skip — they carry no table entry.
+func (s *scope) demoteBareReferences() {
 	for _, b := range s.bindings {
 		switch bb := b.(type) {
 		case query.NodeBinding:
 			if bb.ReferencedInRequiredBarePattern() && bb.Variable() != "" {
-				if _, present := s.nullableBinding[bb.Variable()]; present {
-					s.nullableBinding[bb.Variable()] = false
-				}
+				s.demoteIfPresent(bb.Variable())
 			}
 		case query.EdgeBinding:
 			// ReferencedInRequiredBarePattern: unreachable in practice — an edge is
 			// never bare (the parser passes bare=false at every collectEdge call site).
 			// The arm is kept for symmetry with NodeBinding.
 			if bb.ReferencedInRequiredBarePattern() && bb.Variable() != "" {
-				if _, present := s.nullableBinding[bb.Variable()]; present {
-					s.nullableBinding[bb.Variable()] = false
-				}
+				s.demoteIfPresent(bb.Variable())
 			}
 			// 0kq: an OPTIONAL-introduced edge variable that is re-referenced in a
 			// required chain witnesses its own non-nullness; demote it here, before
 			// the group-closure fixed point runs, so the group closure can also
 			// propagate to co-introduced siblings if any.
 			if bb.ReferencedInRequiredChain() && bb.Variable() != "" {
-				if _, present := s.nullableBinding[bb.Variable()]; present {
-					s.nullableBinding[bb.Variable()] = false
-				}
+				s.demoteIfPresent(bb.Variable())
 			}
 		}
 	}
-	// ay9 pre-pass: OPTIONAL-group membership scan. A name may belong to
-	// multiple groups simultaneously — a carried group id from Part K, plus a
-	// fresh local group id if Part K+1 re-declares the name under a new
-	// OPTIONAL MATCH. Any one group being proven demotes the name (and every
-	// other member of that group). Seed from carry first, then union in the
-	// local declarations.
-	members := map[int][]string{}  // group id → named members
-	groupsOf := map[string][]int{} // named member → group ids (may span carry + local)
-	addMember := func(v string, g int) {
-		if v == "" || g <= 0 {
+}
+
+// optionalGroups is the ay9 pre-pass's membership index, held in both
+// directions so a proof about one name reaches every co-introduced sibling.
+type optionalGroups struct {
+	members  map[int][]string // group id → named members
+	groupsOf map[string][]int // named member → group ids (may span carry + local)
+}
+
+// add records v as a member of group g, ignoring anonymous names and the
+// non-group id 0, and keeping groupsOf[v] duplicate-free.
+func (g optionalGroups) add(v string, id int) {
+	if v == "" || id <= 0 {
+		return
+	}
+	for _, existing := range g.groupsOf[v] {
+		if existing == id {
 			return
 		}
-		for _, existing := range groupsOf[v] {
-			if existing == g {
-				return
-			}
-		}
-		groupsOf[v] = append(groupsOf[v], g)
-		members[g] = append(members[g], v)
+	}
+	g.groupsOf[v] = append(g.groupsOf[v], id)
+	g.members[id] = append(g.members[id], v)
+}
+
+// optionalGroupMembership is the ay9 pre-pass: OPTIONAL-group membership
+// scan. A name may belong to multiple groups simultaneously — a carried
+// group id from Part K, plus a fresh local group id if Part K+1 re-declares
+// the name under a new OPTIONAL MATCH. Any one group being proven demotes
+// the name (and every other member of that group). Seed from carry first,
+// then union in the local declarations.
+func (s *scope) optionalGroupMembership() optionalGroups {
+	groups := optionalGroups{
+		members:  map[int][]string{},
+		groupsOf: map[string][]int{},
 	}
 	for name, g := range s.carriedGroups {
-		addMember(name, g)
+		groups.add(name, g)
 	}
 	for _, b := range s.bindings {
 		switch bb := b.(type) {
 		case query.NodeBinding:
-			addMember(bb.Variable(), bb.OptionalGroup())
+			groups.add(bb.Variable(), bb.OptionalGroup())
 		case query.EdgeBinding:
-			addMember(bb.Variable(), bb.OptionalGroup())
+			groups.add(bb.Variable(), bb.OptionalGroup())
 		}
 	}
-	demotedGroups := map[int]bool{}
-	s.demotedGroups = demotedGroups
-	demoteGroup := func(g int) bool {
-		if g == 0 || demotedGroups[g] {
-			return false
-		}
-		demotedGroups[g] = true
-		for _, m := range members[g] {
-			if _, present := s.nullableBinding[m]; present {
-				s.nullableBinding[m] = false
-			}
-		}
-		return true
+	return groups
+}
+
+// demoteGroup demotes every member of group g, reporting whether this call
+// was the one that proved it. Requires s.demotedGroups to be non-nil.
+func (s *scope) demoteGroup(groups optionalGroups, g int) bool {
+	if g == 0 || s.demotedGroups[g] {
+		return false
 	}
-	// A carried binding whose local Nullable() entry in the table is
-	// already false (either from SeedLocalNullability's re-MATCH
-	// override or from the 5xg pre-pass) is a proven witness for its
-	// carried group. Fire that closure before the edge-driven fixed
-	// point so a carried group without a local edge witness still
-	// demotes. Map iteration order is unobservable here: demoteGroup
-	// writes false idempotently to each member's table entry, so any
-	// visit order converges to the same fixed point.
-	for name, gs := range groupsOf {
+	s.demotedGroups[g] = true
+	for _, m := range groups.members[g] {
+		s.demoteIfPresent(m)
+	}
+	return true
+}
+
+// demoteGroupsOf demotes every group v belongs to, reporting whether any of
+// them was newly proven.
+func (s *scope) demoteGroupsOf(groups optionalGroups, v string) bool {
+	changed := false
+	for _, g := range groups.groupsOf[v] {
+		if s.demoteGroup(groups, g) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// demoteProvenGroups fires the carried-group closure. A carried binding
+// whose local Nullable() entry in the table is already false (either from
+// SeedLocalNullability's re-MATCH override or from the 5xg pre-pass) is a
+// proven witness for its carried group. Fire that closure before the
+// edge-driven fixed point so a carried group without a local edge witness
+// still demotes. Map iteration order is unobservable here: demoteGroup
+// writes false idempotently to each member's table entry, so any visit
+// order converges to the same fixed point.
+func (s *scope) demoteProvenGroups(groups optionalGroups) {
+	for name, gs := range groups.groupsOf {
 		if nb, present := s.nullableBinding[name]; present && !nb {
 			for _, g := range gs {
-				demoteGroup(g)
+				s.demoteGroup(groups, g)
 			}
 		}
 	}
-	demoteGroupsOf := func(v string) bool {
-		changed := false
-		for _, g := range groupsOf[v] {
-			if demoteGroup(g) {
-				changed = true
-			}
-		}
-		return changed
-	}
+}
+
+// demoteAcrossEdges runs the edge-driven fixed point (§4.4) to convergence.
+func (s *scope) demoteAcrossEdges(groups optionalGroups) {
 	for changed := true; changed; {
 		changed = false
 		for _, b := range s.bindings {
@@ -739,28 +774,38 @@ func (s *scope) DemoteNullability() {
 			// ay9: an OPTIONAL edge whose group is proven is an
 			// effective witness (its existence on surviving rows is
 			// established); the §4.4.3 hop gate applies unchanged.
-			if (e.Nullable() && !demotedGroups[e.OptionalGroup()]) || !qualifiedDemoter(e) {
+			if (e.Nullable() && !s.demotedGroups[e.OptionalGroup()]) || !qualifiedDemoter(e) {
 				continue
 			}
-			for _, side := range [2]query.Endpoint{e.Source(), e.Target()} {
-				ve, ok := side.(query.VarEndpoint)
-				if !ok {
-					continue
-				}
-				v := ve.Variable()
-				if v == "" {
-					continue
-				}
-				if nb, present := s.nullableBinding[v]; present && nb {
-					s.nullableBinding[v] = false
-					changed = true
-				}
-				if demoteGroupsOf(v) {
-					changed = true
-				}
+			if s.demoteEndpoints(groups, e) {
+				changed = true
 			}
 		}
 	}
+}
+
+// demoteEndpoints demotes both named endpoints of a qualified demoter edge
+// and their groups, reporting whether anything moved.
+func (s *scope) demoteEndpoints(groups optionalGroups, e query.EdgeBinding) bool {
+	changed := false
+	for _, side := range [2]query.Endpoint{e.Source(), e.Target()} {
+		ve, ok := side.(query.VarEndpoint)
+		if !ok {
+			continue
+		}
+		v := ve.Variable()
+		if v == "" {
+			continue
+		}
+		if nb, present := s.nullableBinding[v]; present && nb {
+			s.nullableBinding[v] = false
+			changed = true
+		}
+		if s.demoteGroupsOf(groups, v) {
+			changed = true
+		}
+	}
+	return changed
 }
 
 // ResolveProjections runs the full §4.4 projection walk end-to-end:
@@ -1175,31 +1220,7 @@ func (s *scope) Export() branchState {
 		exportedResolvedTypes:     make(map[string]ResolvedType),
 		exportedCallTypes:         make(map[string]callBindingSlot),
 	}
-	// Build the local group-id lookup up front: a name gets its local
-	// binding's OptionalGroup if declared this Part, otherwise its carried
-	// group id from the incoming carry. Local shadows carry — a local
-	// re-declaration with a distinct (possibly zero) group replaces the
-	// carried id. Only names surviving into exportedNames get promoted to
-	// the outgoing carry below.
-	localGroup := map[string]int{}
-	for _, b := range s.bindings {
-		var v string
-		var g int
-		switch bb := b.(type) {
-		case query.NodeBinding:
-			v = bb.Variable()
-			g = bb.OptionalGroup()
-		case query.EdgeBinding:
-			v = bb.Variable()
-			g = bb.OptionalGroup()
-		default:
-			continue
-		}
-		if v == "" {
-			continue
-		}
-		localGroup[v] = g
-	}
+	localGroup := s.localGroupIDs()
 
 	// Names that leave via WITH — for WITH * that's every scopeOrder name;
 	// for an explicit WITH item that's item.Name (which for a bare `WITH v`
@@ -1222,74 +1243,108 @@ func (s *scope) Export() branchState {
 	}
 	out.exportedOrder = exportedNames
 
-	// Populate the binding maps for exports whose Name corresponds to an
-	// in-scope binding-name (bare RefProjection{Ref{v, ""}}). An aliased
-	// export like `WITH e.p AS x` puts `x` only in exportedResolvedTypes, not
-	// in any binding map — downstream refs to `x` bypass via §4.5.4.
 	iter := s.returns
 	if s.returnsAll {
 		iter = s.items
 	}
 	for _, item := range iter {
-		alias := item.Name
-		rp, ok := item.Value.(query.RefProjection)
-		if !ok {
-			continue
-		}
-		ref := rp.Ref()
-		// Only export a binding entry when the alias matches the bare
-		// binding-name reference (Ref{Variable: v, Property: ""} named by
-		// its own variable). Anything else — property projection, renamed
-		// alias — lives only in exportedResolvedTypes.
-		if ref.Property != "" || alias != ref.Variable {
-			continue
-		}
-		v := ref.Variable
-		if nt, ok := s.nodeTypes[v]; ok {
-			out.exportedNodeTypes[v] = nt
-		}
-		if cands, ok := s.nodeCands[v]; ok {
-			out.exportedNodeCands[v] = cands
-			// Only alongside a nodeCands entry: the lane is meaningless for a
-			// name with no candidate set, and seeding it for one would put a
-			// true into a downstream scope that nothing ever clears.
-			if s.pluralByInference[v] {
-				out.exportedPluralByInference[v] = true
-			}
-		}
-		if et, ok := s.edgeTypes[v]; ok {
-			out.exportedEdgeTypes[v] = et
-			if k, ok := s.edgeKeys[v]; ok {
-				out.exportedEdgeKeys[v] = k
-			}
-		}
-		if cands, ok := s.edgeCands[v]; ok {
-			out.exportedEdgeCands[v] = cands
-		}
-		if b, ok := s.edgeBindings[v]; ok {
-			out.exportedEdgeBindings[v] = b
-		}
-		if nb, ok := s.nullableBinding[v]; ok {
-			out.exportedNullableBinding[v] = nb
-		}
-		if slot, ok := s.callTypes[v]; ok {
-			out.exportedCallTypes[v] = slot
-		}
-		// Group id: local wins over carry. A local binding with
-		// OptionalGroup == 0 (e.g. a re-MATCH of a carried OPTIONAL name
-		// in a required MATCH) drops the carried group id — the name is
-		// no longer OPTIONAL-scoped in this Part. Only propagate a
-		// positive id, so downstream Parts do not have to distinguish
-		// "declared, group 0" from "not declared" (§3.3 semantics).
-		if g, ok := localGroup[v]; ok {
-			if g > 0 {
-				out.exportedOptionalGroup[v] = g
-			}
-		} else if g, ok := s.carriedGroups[v]; ok && g > 0 {
-			out.exportedOptionalGroup[v] = g
-		}
+		s.exportBindingLanes(&out, item, localGroup)
 	}
 	return out
+}
+
+// localGroupIDs is the local group-id lookup Export builds up front: a name
+// gets its local binding's OptionalGroup if declared this Part, otherwise its
+// carried group id from the incoming carry. Local shadows carry — a local
+// re-declaration with a distinct (possibly zero) group replaces the carried
+// id. Only names surviving into exportedNames get promoted to the outgoing
+// carry.
+func (s *scope) localGroupIDs() map[string]int {
+	localGroup := map[string]int{}
+	for _, b := range s.bindings {
+		var v string
+		var g int
+		switch bb := b.(type) {
+		case query.NodeBinding:
+			v = bb.Variable()
+			g = bb.OptionalGroup()
+		case query.EdgeBinding:
+			v = bb.Variable()
+			g = bb.OptionalGroup()
+		default:
+			continue
+		}
+		if v == "" {
+			continue
+		}
+		localGroup[v] = g
+	}
+	return localGroup
+}
+
+// exportBindingLanes populates the binding maps for an export whose Name
+// corresponds to an in-scope binding-name (bare RefProjection{Ref{v, ""}}).
+// An aliased export like `WITH e.p AS x` puts `x` only in
+// exportedResolvedTypes, not in any binding map — downstream refs to `x`
+// bypass via §4.5.4.
+func (s *scope) exportBindingLanes(out *branchState, item query.ReturnItem, localGroup map[string]int) {
+	alias := item.Name
+	rp, ok := item.Value.(query.RefProjection)
+	if !ok {
+		return
+	}
+	ref := rp.Ref()
+	// Only export a binding entry when the alias matches the bare
+	// binding-name reference (Ref{Variable: v, Property: ""} named by
+	// its own variable). Anything else — property projection, renamed
+	// alias — lives only in exportedResolvedTypes.
+	if ref.Property != "" || alias != ref.Variable {
+		return
+	}
+	v := ref.Variable
+	if nt, ok := s.nodeTypes[v]; ok {
+		out.exportedNodeTypes[v] = nt
+	}
+	if cands, ok := s.nodeCands[v]; ok {
+		out.exportedNodeCands[v] = cands
+		// Only alongside a nodeCands entry: the lane is meaningless for a
+		// name with no candidate set, and seeding it for one would put a
+		// true into a downstream scope that nothing ever clears.
+		if s.pluralByInference[v] {
+			out.exportedPluralByInference[v] = true
+		}
+	}
+	if et, ok := s.edgeTypes[v]; ok {
+		out.exportedEdgeTypes[v] = et
+		if k, ok := s.edgeKeys[v]; ok {
+			out.exportedEdgeKeys[v] = k
+		}
+	}
+	if cands, ok := s.edgeCands[v]; ok {
+		out.exportedEdgeCands[v] = cands
+	}
+	if b, ok := s.edgeBindings[v]; ok {
+		out.exportedEdgeBindings[v] = b
+	}
+	if nb, ok := s.nullableBinding[v]; ok {
+		out.exportedNullableBinding[v] = nb
+	}
+	if slot, ok := s.callTypes[v]; ok {
+		out.exportedCallTypes[v] = slot
+	}
+	// Group id: local wins over carry. A local binding with
+	// OptionalGroup == 0 (e.g. a re-MATCH of a carried OPTIONAL name
+	// in a required MATCH) drops the carried group id — the name is
+	// no longer OPTIONAL-scoped in this Part. Only propagate a
+	// positive id, so downstream Parts do not have to distinguish
+	// "declared, group 0" from "not declared" (§3.3 semantics).
+	if g, ok := localGroup[v]; ok {
+		if g > 0 {
+			out.exportedOptionalGroup[v] = g
+		}
+	} else if g, ok := s.carriedGroups[v]; ok && g > 0 {
+		out.exportedOptionalGroup[v] = g
+	}
 }
 
 // ValidateEffects is R6 Phase E: walk s.effects in slice order,
