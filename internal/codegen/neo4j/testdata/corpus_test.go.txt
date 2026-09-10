@@ -733,10 +733,10 @@ func TestEdgyKeepsAbsentApartFromEmptyOverARelationship(t *testing.T) {
 }
 
 // A query column carrying a list of no declared element shape is the
-// same claim as TestBinCarriesNullElements, one emission over: a column
-// is decoded through neo4j.GetRecordValue and a property through the
-// Props map, so the two paths narrow independently and a null that
-// survives one can still fail the other.
+// same claim as TestBinCarriesNullElements, one emission over: a list
+// column is decoded through neo4j.GetRecordValue[[]any] and a property
+// through the Props map, so the two paths narrow independently and a
+// null that survives one can still fail the other.
 func TestBinColumnsCarryNullElements(t *testing.T) {
 	q := queriesOver([]string{"loose", "bag"}, []any{
 		[]any{true, nil, 3.5},
@@ -938,8 +938,9 @@ func TestNestColumnsAccumulateAtEveryDepth(t *testing.T) {
 // the property one emission over. `any` is a member of neither
 // neo4j.PropertyValue nor neo4j.RecordValue, so the column has no
 // constrained driver entry point to go through at all — and the null it
-// exists to carry is the one value such an entry point could not have
-// been written to carry.
+// exists to carry is the one value those entry points refuse rather
+// than return: a held null arrives as an untyped nil, which asserts to
+// no member of either set.
 //
 // Null is not in this table because payload is NOT NULL, and what a
 // non-nullable column does with a null is refuse it — see

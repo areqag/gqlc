@@ -252,9 +252,11 @@ exported name duplicated anywhere (`gqlc-igs4`).
 
 ### 2.3 The edgeUnion emission — the C5 body
 
-C4's per-source emission dispatched five column arms (`columnProperty`,
+C4's per-source emission dispatched seven column arms (`columnProperty`,
 `columnNode`, `columnEdge`, `columnTemporal`, `columnScalar`,
-`columnList`, `columnAny` — seven; see `generate.go:99-128`). C5 adds
+`columnList`, `columnAny`; see the `ColumnKind` declaration in
+`prepare.go` and its per-source emission in `render_queries.go`,
+§5.5). C5 adds
 an eighth: `columnEdgeUnion`. The arm decodes the column via
 `record.Get(key)` (returning `(any, bool)`) — the same honest-any
 carrier `columnAny` uses — and dispatches into a type switch on the
