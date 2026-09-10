@@ -498,39 +498,9 @@ func union(a, b []string) []string {
 // each file under the child module's import path, which is assembled per
 // run, and a corpus module is one flat package by construction.
 func Entered(dir, profile string) (map[string]bool, error) {
-	type block struct{ start, end int }
-	covered := map[string][]block{}
-	for line := range strings.Lines(profile) {
-		line = strings.TrimSpace(line)
-		name, span, ok := strings.Cut(line, ":")
-		if !ok || line == "" || strings.HasPrefix(line, "mode:") {
-			continue
-		}
-		fields := strings.Fields(span)
-		if len(fields) != 3 {
-			return nil, fmt.Errorf("corpusrun: coverage line %q has %d fields, want 3", line, len(fields))
-		}
-		count, err := strconv.Atoi(fields[2])
-		if err != nil {
-			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable count: %w", line, err)
-		}
-		if count == 0 {
-			continue
-		}
-		from, to, ok := strings.Cut(fields[0], ",")
-		if !ok {
-			return nil, fmt.Errorf("corpusrun: coverage line %q has no block range", line)
-		}
-		start, err := lineOf(from)
-		if err != nil {
-			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable start line: %w", line, err)
-		}
-		end, err := lineOf(to)
-		if err != nil {
-			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable end line: %w", line, err)
-		}
-		base := filepath.Base(name)
-		covered[base] = append(covered[base], block{start, end})
+	covered, err := coveredBlocks(profile)
+	if err != nil {
+		return nil, err
 	}
 
 	sources, err := filepath.Glob(filepath.Join(dir, "*.go"))
@@ -564,6 +534,50 @@ func Entered(dir, profile string) (map[string]bool, error) {
 		}
 	}
 	return out, nil
+}
+
+type block struct{ start, end int }
+
+// coveredBlocks reads a coverage profile into the line spans that ran,
+// keyed by the basename of the file each span sits in.
+//
+// A block whose count is zero is dropped rather than recorded, so a
+// span's presence here is a witness that it executed.
+func coveredBlocks(profile string) (map[string][]block, error) {
+	covered := map[string][]block{}
+	for line := range strings.Lines(profile) {
+		line = strings.TrimSpace(line)
+		name, span, ok := strings.Cut(line, ":")
+		if !ok || line == "" || strings.HasPrefix(line, "mode:") {
+			continue
+		}
+		fields := strings.Fields(span)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("corpusrun: coverage line %q has %d fields, want 3", line, len(fields))
+		}
+		count, err := strconv.Atoi(fields[2])
+		if err != nil {
+			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable count: %w", line, err)
+		}
+		if count == 0 {
+			continue
+		}
+		from, to, ok := strings.Cut(fields[0], ",")
+		if !ok {
+			return nil, fmt.Errorf("corpusrun: coverage line %q has no block range", line)
+		}
+		start, err := lineOf(from)
+		if err != nil {
+			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable start line: %w", line, err)
+		}
+		end, err := lineOf(to)
+		if err != nil {
+			return nil, fmt.Errorf("corpusrun: coverage line %q has an unreadable end line: %w", line, err)
+		}
+		base := filepath.Base(name)
+		covered[base] = append(covered[base], block{start, end})
+	}
+	return covered, nil
 }
 
 // lineOf reads the line out of a profile's line.column position. A

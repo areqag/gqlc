@@ -115,6 +115,32 @@ type typeMap struct{}
 // nested text under each — reads one answer rather than four
 // re-derivations of it. A nullable column of LIST<INT64> is therefore
 // `*[]*int64`: one star from each owner.
+//
+// EXEMPT FROM gocyclo, NOT FROM gocognit. gocyclo counts this 33 because it
+// increments once per `case` and the table has one per property width;
+// gocognit counts it 15, charging the `switch` once and the nesting nothing,
+// and gocognit is the one describing what a reader faces here — a flat table
+// with two container guards in front of it.
+//
+// Splitting it to satisfy the count is not available, and that is a fact
+// about this method rather than a preference. Two guards read it by
+// STRUCTURE, and both red LOUDLY rather than quietly:
+//
+//   - typescan.PropertyArms skips any decl whose `fn.Recv == nil` and takes
+//     the method name as an argument, so a table moved to a plain function is
+//     invisible to it. What that does not do is pass vacuously —
+//     types_test.go asserts `require.NotEmpty(t, arms, ...)` before ranging
+//     over them, precisely so a walk that read nothing cannot hold the table
+//     to nothing.
+//   - render_queries_test.go's typeTableGoTypes reads this method's RETURN
+//     statements out of the package directory, and returnedGoType REFUSES a
+//     return whose shape it cannot read rather than skipping it — so a return
+//     of the form `t.someHelper(pt)` reds it too.
+//
+// Both were measured failing on 2026-09-10 when exactly that split was
+// attempted.
+//
+//nolint:gocyclo // flat per-width dispatch table; gocognit scores it 15 and still gates it
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
 		elemTy, ok := t.Property(pt.Elem())
