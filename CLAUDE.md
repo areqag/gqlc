@@ -69,6 +69,18 @@ the unfilter and is not one.
   evidence that nothing was capped. The status filter is not disclosed at all.
 - `bd show <id> --json` returns an **array**; use `.[0]`. It does resolve closed
   beads, so it is a safe way to test whether an id exists.
+- **`bd list --long --json` and `bd show --json` name the same dependency
+  edge with different keys.** Measured 2026-09-10: a list edge is
+  `{issue_id, depends_on_id, type, ...}` — the blocker is `.depends_on_id`,
+  the kind `.type` — while a show edge is the blocker's full issue inlined,
+  with `.id` and `.dependency_type`. Neither side's names exist on the other,
+  so a filter written for one matches nothing against the other and returns a
+  confident false zero (`select(.dependency_type=="blocks")` over list edges
+  reads 0 against 232 real `blocks` edges). For "is anything blocked behind
+  this bead", prefer `dependent_count > 0`, which needs no edge-walking.
+  Otherwise build the positive control first: take one pair independently
+  confirmed with `bd show` and assert your query finds it before trusting its
+  zeros.
 
 Full measurements, the deployed-bd contract, and an audit of this repository's
 own call sites: [docs/bd-ledger-queries.md](docs/bd-ledger-queries.md).
