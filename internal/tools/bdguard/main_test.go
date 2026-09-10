@@ -1,23 +1,28 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
 // Tests target check() directly — no git shellout, no chdir, no git repo
-// staged on disk. The six `t.TempDir()` calls are all in the readAllowed*
-// tests, which write and read a plain file; none runs `git init`. The git
-// boundary in run() is exercised only by a manual incident replay against a
-// scratch repo outside the worktree; gitRefContaining sits behind the same
-// boundary and is injected here as a func value (bd gqlc-drvx). Motivation:
-// earlier iterations tried to stage a real git repo per test, and the tempdir
-// git calls occasionally landed in the outer worktree despite
-// GIT_CEILING_DIRECTORIES — pointless blast radius for testing a comparator.
+// staged on disk — except the git-boundary rows at the bottom of this file,
+// which stage a scratch repo per test. The six `t.TempDir()` calls outside
+// those rows are all in the readAllowed* tests, which write and read a plain
+// file; none runs `git init`. gitRefContaining is injected into check() as a
+// func value, so its CALLERS are covered by fakes; the boundary rows cover
+// the function itself (bd gqlc-drvx). The scratch repo is entered by chdir
+// AND by explicit GIT_DIR/GIT_WORK_TREE, never by cwd alone: an earlier
+// iteration relied on cwd plus GIT_CEILING_DIRECTORIES and occasionally ran
+// its git calls in the outer worktree, so the double entry is the fix for a
+// witnessed leak, not caution for its own sake.
 
 const (
 	issueOpenA    = `{"_type":"issue","id":"a","status":"open"}`
@@ -1013,4 +1018,242 @@ func TestRefuseDeclaredFact_UnparseableTimestampsAreRefused(t *testing.T) {
 			t.Errorf("expected the base-timestamp refusal, got: %q", got)
 		}
 	})
+}
+
+// --- the git boundary: run, showAtRef, gitRefContaining ----------------------
+
+// gitBoundary is a scratch repo: commits A then B on main (probe.txt reads
+// "v1" at A, "v2" at B; the export committed at A and untouched since), plus
+// one orphaned commit C branched off A and deleted, so its object is present
+// but no ref reaches it.
+type gitBoundary struct {
+	dir    string
+	branch string
+	shaA   string
+	shaB   string
+	orphan string
+}
+
+// git runs git -C dir, so fixture construction never depends on the process
+// cwd. It returns trimmed stdout and fails the test on any git failure.
+//
+// Every GIT_* variable is scrubbed and both directory variables pinned to the
+// scratch repo on each invocation: a suite run from a git hook inherits
+// GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE, and those beat both the cwd and
+// -C, so without the scrub the fixture's commits land in the calling
+// repository. Witnessed when .githooks/pre-push ran this suite (bd gqlc-7iea
+// for the original incident); the scrub is .githooks/git-env-sandbox.sh's
+// `unset "${!GIT_@}"` plus the explicit pin, per command rather than per
+// process so no caller can re-poison it between calls.
+func git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	var env []string
+	for _, kv := range os.Environ() {
+		if k, _, _ := strings.Cut(kv, "="); !strings.HasPrefix(k, "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, "GIT_DIR="+filepath.Join(dir, ".git"), "GIT_WORK_TREE="+dir)
+	cmd.Env = env
+	out, err := cmd.Output()
+	if err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, exit.Stderr)
+		}
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// gitCommit commits the staged tree. Identity and signing are pinned per
+// command: both are fixture concerns, not properties under test, and a bare
+// commit would stop for a name on a fresh machine or for a key under a
+// signing global config.
+func gitCommit(t *testing.T, dir, msg string) string {
+	t.Helper()
+	git(t, dir, "-c", "user.name=bdguard-test", "-c", "user.email=bdguard-test@example.invalid",
+		"-c", "commit.gpgsign=false", "commit", "-qm", msg)
+	return git(t, dir, "rev-parse", "HEAD")
+}
+
+func writeBoundaryFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+func stageGitBoundary(t *testing.T) gitBoundary {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".beads"), 0o755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	writeBoundaryFile(t, dir, "probe.txt", "v1\n")
+	writeBoundaryFile(t, dir, filepath.Join(".beads", "issues.jsonl"), issueOpenA+"\n"+issueOpenB+"\n")
+	git(t, dir, "init", "-q", "-b", "main")
+	git(t, dir, "add", "probe.txt", filepath.Join(".beads", "issues.jsonl"))
+	shaA := gitCommit(t, dir, "A")
+	writeBoundaryFile(t, dir, "probe.txt", "v2\n")
+	git(t, dir, "add", "probe.txt")
+	shaB := gitCommit(t, dir, "B")
+	git(t, dir, "checkout", "-qb", "side", shaA)
+	writeBoundaryFile(t, dir, "side.txt", "side\n")
+	git(t, dir, "add", "side.txt")
+	orphan := gitCommit(t, dir, "C")
+	git(t, dir, "checkout", "-q", "main")
+	git(t, dir, "branch", "-q", "-D", "side")
+	return gitBoundary{dir: dir, branch: "main", shaA: shaA, shaB: shaB, orphan: orphan}
+}
+
+// enter points the git shellouts under test at the scratch repo twice: by
+// cwd, which run() needs for the worktree files it reads by relative path,
+// and by environment, which the git children honour wherever the cwd points.
+// Either alone would pass; the pair is what keeps a regression in one from
+// landing the shellouts in the outer worktree.
+func (b gitBoundary) enter(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_DIR", filepath.Join(b.dir, ".git"))
+	t.Setenv("GIT_WORK_TREE", b.dir)
+	t.Chdir(b.dir)
+}
+
+func TestShowAtRef_ContentAtRef(t *testing.T) {
+	// Two refs, two contents: answering HEAD's bytes at either ref, or A's
+	// bytes at both, both fail here.
+	b := stageGitBoundary(t)
+	b.enter(t)
+	for _, tt := range []struct {
+		ref  string
+		want string
+	}{
+		{b.shaA, "v1\n"},
+		{b.shaB, "v2\n"},
+	} {
+		got, err := showAtRef(context.Background(), tt.ref, "probe.txt")
+		if err != nil {
+			t.Fatalf("showAtRef(%s): %v", tt.ref[:8], err)
+		}
+		if string(got) != tt.want {
+			t.Errorf("showAtRef(%s) = %q, want %q", tt.ref[:8], got, tt.want)
+		}
+	}
+}
+
+func TestShowAtRef_AbsentPath(t *testing.T) {
+	// run() treats this sentinel as "repo before bd landed" and passes with
+	// an empty base; any other error fails the run. The classification is
+	// what this row pins.
+	b := stageGitBoundary(t)
+	b.enter(t)
+	_, err := showAtRef(context.Background(), b.shaA, "does-not-exist.txt")
+	if !errors.Is(err, errPathAbsentAtRef) {
+		t.Errorf("showAtRef(absent path) = %v, want %v", err, errPathAbsentAtRef)
+	}
+}
+
+func TestShowAtRef_UnresolvableRef(t *testing.T) {
+	// The other side of the split above: a ref git cannot resolve must bubble
+	// up, not collapse into "absent at ref" and grant a vacuous pass.
+	b := stageGitBoundary(t)
+	b.enter(t)
+	_, err := showAtRef(context.Background(), "nosuchbranch", "probe.txt")
+	if err == nil {
+		t.Fatal("showAtRef(unresolvable ref) = nil, want an error")
+	}
+	if errors.Is(err, errPathAbsentAtRef) {
+		t.Errorf("showAtRef(unresolvable ref) = %v, which misreads a bad ref as an absent path", err)
+	}
+}
+
+func TestGitRefContaining_OnARef(t *testing.T) {
+	// shaA sits on main without being its tip, so a positive answer here
+	// comes from the history walk, not from HEAD equality.
+	b := stageGitBoundary(t)
+	b.enter(t)
+	got := gitRefContaining(context.Background(), b.shaA)
+	if got == "" {
+		t.Fatalf("gitRefContaining(%s) = \"\", want the ref holding it", b.shaA[:8])
+	}
+	if got != "refs/heads/"+b.branch && got != "HEAD" {
+		t.Errorf("gitRefContaining(%s) = %q, want refs/heads/%s or HEAD", b.shaA[:8], got, b.branch)
+	}
+}
+
+func TestGitRefContaining_OrphanedSHA(t *testing.T) {
+	// The veto's silent case: the object IS present (cat-file says so) and NO
+	// ref reaches it (log --all never names it), so "" comes from the
+	// membership legs rather than the existence gate. Both halves are asserted
+	// so the row cannot pass vacuously on a fixture that lost the object.
+	b := stageGitBoundary(t)
+	if all := git(t, b.dir, "log", "--all", "--format=%H"); strings.Contains(all, b.orphan) {
+		t.Fatalf("fixture: orphan %s is reachable from a ref", b.orphan[:8])
+	}
+	git(t, b.dir, "cat-file", "-e", b.orphan+"^{commit}")
+	b.enter(t)
+	if got := gitRefContaining(context.Background(), b.orphan); got != "" {
+		t.Errorf("gitRefContaining(orphan %s) = %q, want \"\"", b.orphan[:8], got)
+	}
+}
+
+func TestGitRefContaining_UnknownSHA(t *testing.T) {
+	// A sha the repo never had: the existence gate collapses it to "" rather
+	// than erroring out of the run.
+	b := stageGitBoundary(t)
+	b.enter(t)
+	if got := gitRefContaining(context.Background(), "1234567890abcdef1234567890abcdef12345678"); got != "" {
+		t.Errorf("gitRefContaining(unknown sha) = %q, want \"\"", got)
+	}
+}
+
+func TestGitRefContaining_DetachedHeadFallsBackToHEAD(t *testing.T) {
+	// No ref reaches the orphan, but HEAD IS it, so the merge-base leg still
+	// speaks. Deleting that leg would keep every other row green while this
+	// one goes red, which is why it is its own row.
+	b := stageGitBoundary(t)
+	git(t, b.dir, "checkout", "-q", b.orphan)
+	b.enter(t)
+	if got := gitRefContaining(context.Background(), b.orphan); got != "HEAD" {
+		t.Errorf("gitRefContaining(orphan at detached HEAD) = %q, want \"HEAD\"", got)
+	}
+}
+
+func TestRun_CleanPasses(t *testing.T) {
+	// The worktree export is byte-identical to the base ref's, so the success
+	// arm of check() must propagate out of run() as nil.
+	b := stageGitBoundary(t)
+	b.enter(t)
+	if err := run(context.Background(), b.shaA); err != nil {
+		t.Fatalf("run(clean) = %v, want nil", err)
+	}
+}
+
+func TestRun_DroppedIssueFails(t *testing.T) {
+	// The head worktree drops b against base shaA; check()'s finding must
+	// propagate out of run() naming the id, not collapse into a pass.
+	b := stageGitBoundary(t)
+	b.enter(t)
+	writeBoundaryFile(t, b.dir, exportPath, issueOpenA+"\n")
+	err := run(context.Background(), b.shaA)
+	if err == nil {
+		t.Fatal("run(drop) = nil, want the dropped finding")
+	}
+	if !strings.Contains(err.Error(), "dropped") || !strings.Contains(err.Error(), "\n    - b\n") {
+		t.Errorf("run(drop) = %v, want the dropped id 'b'", err)
+	}
+}
+
+func TestRun_UnresolvableBaseIsAnError(t *testing.T) {
+	// A base git cannot resolve is a broken invocation, not an empty base;
+	// run() must fail rather than pass vacuously.
+	b := stageGitBoundary(t)
+	b.enter(t)
+	err := run(context.Background(), "nosuchbranch")
+	if err == nil {
+		t.Fatal("run(unresolvable base) = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "read base") {
+		t.Errorf("run(unresolvable base) = %v, want the base-read failure", err)
+	}
 }
