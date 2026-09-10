@@ -638,6 +638,12 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 	// reaches the same line and embeds no variant. These two are what the rows
 	// above measure, so these two are what this row requires the comment to
 	// keep.
+	//
+	// The match is on substrings, and the limit that follows is accepted
+	// scope, not coverage: a comment disclaiming a mechanism ("nothing to
+	// do with the pointer form") still passes, as does an incidental use
+	// such as "pointerless". The row witnesses that both names survive,
+	// not what the sentence around them asserts (gqlc-2ccn).
 	t.Run("the fall-through comment names the pointer form and the embedding", func(t *testing.T) {
 		comment := fallThroughComment(t)
 		require.Containsf(t, comment, "pointer",
