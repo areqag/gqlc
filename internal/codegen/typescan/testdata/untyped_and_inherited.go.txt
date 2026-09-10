@@ -1,0 +1,25 @@
+// This fixture is graph_like.go.txt's const block plus the two spec shapes
+// PropertyTypes' doc comment names as the reason it refuses rather than
+// drops: one that inherits its predecessor's value and one that is untyped.
+//
+// Both are usable everywhere a PropertyType is wanted — TypeAlias IS a
+// PropertyType, and TypeUntyped converts to one implicitly — so dropping
+// either would narrow the obligation a backend's table is held to without
+// saying so, which is the harm the refusal exists to prevent.
+package graph
+
+// PropertyType is the type whose constants the walk collects.
+type PropertyType string
+
+const (
+	TypeString PropertyType = "STRING"
+
+	// TypeAlias inherits the spec above, so it carries neither a type nor a
+	// value of its own and this walk sees no PropertyType on it — while the
+	// compiler gives it type PropertyType and value "STRING".
+	TypeAlias
+
+	// TypeUntyped is an untyped string constant. Nothing marks it as a
+	// PropertyType and it is assignable to one regardless.
+	TypeUntyped = "UNTYPED"
+)
