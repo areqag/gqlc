@@ -1492,8 +1492,18 @@ PYEOF
     # bead id is not guaranteed to be a single word here, and flattening the
     # three onto a line to separate them on every space renders one bead as two
     # names `bd show` does not answer to.
-    _names=$(awk 'NR<=3 { sub(/^[^ ]* /, ""); printf "%s%s", sep, $0; sep=", " }' \
-      "$_tmp/moved.txt")
+    # GONE records enumerate before MOVED ones (bd gqlc-gdlv). moved.txt arrives
+    # in id sort, which has no relation to interestingness, so the truncation
+    # below used to drop whichever id sorted last — including a deletion, the
+    # one transition no re-assert undoes and the one whose WARNING line names no
+    # recovery command. A deletion is the id the reader of this one surviving
+    # line most needs, so it is never the one elided into "+N more".
+    # `sed -n /p` twice rather than grep, for the reason the hold section
+    # states: zero matches is the healthy answer here on one side or the other,
+    # and grep reports it as exit 1.
+    _names=$( { sed -n '/^GONE /p' "$_tmp/moved.txt"
+                sed -n '/^GONE /!p' "$_tmp/moved.txt"; } |
+      awk 'NR<=3 { sub(/^[^ ]* /, ""); printf "%s%s", sep, $0; sep=", " }')
     [ "$_moved" -gt 3 ] && _names="${_names}, +$((_moved - 3)) more"
     _what="changed anyway"
     [ "$_gone" -gt 0 ] && _what="${_what}, ${_gone} of them deleted outright"
