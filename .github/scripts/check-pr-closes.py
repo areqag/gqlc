@@ -36,7 +36,10 @@ the export can still be held against its own number by asking GitHub for the
 comments on the number the body claims (bd gqlc-gxcf7). Where that recovers
 the mapping the run continues into the ordinary extras check and can refuse;
 where it does not, the skip above is what happens, and it says which of the
-two it looked at. The recovery is fail-open in every direction -- no marker,
+two it looked at. A recovery on a spelling wider than the demanded
+'Closes #N' line warns rather than passing as checked (bd gqlc-qyf06): the
+demand's keyword set is what both paths hold, and only it. The recovery is
+fail-open in every direction -- no marker,
 several markers, no network, no `gh` -- because its absence is the state the
 whole of that neighbour was written for.
 
@@ -1221,6 +1224,30 @@ def main():
                 extra = extra_closes(pr_body, expected_n)
                 if extra:
                     refuse_extras(pr_body, bead_id, expected_n, extra)
+                # The "(ok)" below answers the demand's question, not the
+                # scan's: expected_n came out of the wide GH_CLOSES scan, and
+                # a body reaching here on a wider spelling alone would pass
+                # over a line the demand path refuses as missing (bd
+                # gqlc-qyf06). The narrow CLOSES hit is therefore required
+                # for it; without one the run still passes -- this path is
+                # fail-open -- but as the skip below, naming the demanded
+                # line.
+                if expected_n not in CLOSES.findall(claimable_prose(pr_body)):
+                    print(
+                        "::warning title=check-pr-closes marker-spelling::"
+                        f"{bead_id} is not in the export at this commit, but "
+                        f"issue #{expected_n} carries a mirror marker naming "
+                        "it. The body closes that issue in a spelling this "
+                        "gate does not demand, so nothing was held: add "
+                        f"'Closes #{expected_n}' to the PR body so the "
+                        "demand is met when the export catches up."
+                    )
+                    print(
+                        f"[check-pr-closes] {bead_id} -> #{expected_n} via "
+                        "mirror marker, but the body's spelling is not the "
+                        f"demanded 'Closes #{expected_n}' - skipping"
+                    )
+                    sys.exit(0)
                 print(f"[check-pr-closes] {bead_id} -> Closes #{expected_n} (ok)")
                 sys.exit(0)
 
@@ -1261,7 +1288,10 @@ def main():
                 f"{bead_id} is not in the export at this commit and no "
                 f"mirror marker names it, so this check held nothing against "
                 f"it: {'; '.join(looked)}. {numbers} {verb} at merge "
-                "unexamined - confirm by hand before merging."
+                "unexamined - confirm by hand before merging. When the "
+                "export catches up, the line this gate demands for the "
+                "bead's own number is 'Closes #N': a wider spelling closes "
+                "the issue without meeting that demand (bd gqlc-qyf06)."
             )
             print(
                 f"[check-pr-closes] bead {bead_id!r} not in export and no "
