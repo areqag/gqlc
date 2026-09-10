@@ -829,6 +829,34 @@ PYEOF
   : >"$_tmp/pulled.txt" ||
     echo "bd-gh-sync: could not create ${_tmp}/pulled.txt, so which beads this run pulled cannot be recorded and the held-bead check will report itself as not run." >&2
 
+  # Circuit breaker on the ALLOW count (bd gqlc-fc1v). Nothing caps how many
+  # beads one run hands to --prefer-github: the in-sync drop exists only
+  # because a scoped dry-run proposed 129 updates where the unscoped one
+  # proposed 4, and that near-miss was caught by eye rather than by this
+  # script. The steady state is 0 eligible, so a run naming dozens is either a
+  # merge wave closing mirrors or the failure shape again, and the two are told
+  # apart by scale rather than by kind. The bound is 5% of the corpus the
+  # selection walked, with a floor of 10 for a repository small enough that a
+  # percentage stops meaning anything: at ~1200 beads that is 60, an order of
+  # magnitude above any legitimate pull measured and half the 129 near-miss.
+  # Past it the run pulls nothing — a trimmed pull is the unbounded pull with a
+  # smaller number on it — and the refusal rides the summary line the `tail -1`
+  # caller keeps, because a run that pulled 129 beads prints the same success
+  # bytes as one that pulled 2.
+  _allow_max=10
+  _beads_seen=$(sed -n 's/^COUNT //p' "$_tmp/plan.txt")
+  case "$_beads_seen" in ''|*[!0-9]*) _beads_seen=0 ;; esac
+  [ "$((_beads_seen / 20))" -gt "$_allow_max" ] && _allow_max=$((_beads_seen / 20))
+  _breaker=""
+  if [ "$_eligible" -gt "$_allow_max" ]; then
+    _breaker="the ${_eligible} eligible bead(s) exceed the circuit-breaker bound of ${_allow_max}"
+    echo "bd-gh-sync: ${_breaker}, so no pull is issued. Either GitHub moved at a" >&2
+    echo "bd-gh-sync: scale this repository has never measured, or the selection let" >&2
+    echo "bd-gh-sync: through what the in-sync drop was added to stop. The refused ids" >&2
+    echo "bd-gh-sync: (first 12): $(sed -n 's/^ALLOW //p' "$_tmp/plan.txt" | awk 'NR<=12 { printf "%s ", $0 }')" >&2
+    echo "bd-gh-sync: Nothing was pulled; narrow the scope by hand." >&2
+  fi
+
   # Batched here rather than by `xargs -n`, because xargs parses quotes: a
   # single bead id containing an apostrophe aborted the whole construction with
   # "unmatched single quote", so zero batches ran, the error printed above the
@@ -856,33 +884,38 @@ PYEOF
 
   _ids=""
   _n=0
-  while IFS= read -r _bid; do
-    # The id becomes a shell argument. bd mints ids like `gqlc-4np` and
-    # `gqlc-35yu.8`, so this refuses corruption only — and corruption is worth
-    # a line of its own rather than a silent drop, because a bead that cannot
-    # be named cannot be pulled, ever. A leading dash is refused separately
-    # from the charset: `--issues` is a legal-looking id that would arrive as
-    # `--issues --issues`, which is the empty-scope pull this file exists to
-    # make unreachable.
-    case "$_bid" in
-      "" | -* | *[!A-Za-z0-9._-]*)
-        _unusable=$((_unusable + 1))
-        echo "bd-gh-sync: bead id '${_bid}' is unusable — it cannot be passed to 'bd github sync', so it was not pulled." >&2
-        continue
-        ;;
-    esac
-    if [ -n "$_ids" ]; then _ids="${_ids},${_bid}"; else _ids="$_bid"; fi
-    _n=$((_n + 1))
-    if [ "$_n" -ge "$_batch" ]; then
+  # The breaker refuses the whole pull rather than running the loop: the loop
+  # is the only path to a batch, so skipping it lands the summary below on its
+  # PULL FAILED arm with "no batch ran at all" beside the reason above.
+  if [ -z "$_breaker" ]; then
+    while IFS= read -r _bid; do
+      # The id becomes a shell argument. bd mints ids like `gqlc-4np` and
+      # `gqlc-35yu.8`, so this refuses corruption only — and corruption is worth
+      # a line of its own rather than a silent drop, because a bead that cannot
+      # be named cannot be pulled, ever. A leading dash is refused separately
+      # from the charset: `--issues` is a legal-looking id that would arrive as
+      # `--issues --issues`, which is the empty-scope pull this file exists to
+      # make unreachable.
+      case "$_bid" in
+        "" | -* | *[!A-Za-z0-9._-]*)
+          _unusable=$((_unusable + 1))
+          echo "bd-gh-sync: bead id '${_bid}' is unusable — it cannot be passed to 'bd github sync', so it was not pulled." >&2
+          continue
+          ;;
+      esac
+      if [ -n "$_ids" ]; then _ids="${_ids},${_bid}"; else _ids="$_bid"; fi
+      _n=$((_n + 1))
+      if [ "$_n" -ge "$_batch" ]; then
+        _run_batch "$_ids" "$_n"
+        _ids=""
+        _n=0
+      fi
+    done <"$_tmp/allow.txt"
+    # An empty --issues would widen the pull back to everything, so a batch is
+    # only ever issued from a non-empty accumulator.
+    if [ -n "$_ids" ]; then
       _run_batch "$_ids" "$_n"
-      _ids=""
-      _n=0
     fi
-  done <"$_tmp/allow.txt"
-  # An empty --issues would widen the pull back to everything, so a batch is
-  # only ever issued from a non-empty accumulator.
-  if [ -n "$_ids" ]; then
-    _run_batch "$_ids" "$_n"
   fi
 
   if [ "$_eligible" -eq 0 ]; then
@@ -1394,9 +1427,11 @@ PYEOF
     _summary="bd-gh-sync: PULL FAILED — ${_pulled} of ${_eligible} eligible bead(s) pulled"
     [ "$_failed" -gt 0 ] &&
       _summary="${_summary}; ${_failed} of ${_batches} 'bd github sync' batch(es) exited non-zero"
+    [ -n "$_breaker" ] &&
+      _summary="${_summary}; ${_breaker}, so no batch ran (circuit breaker tripped — nothing was pulled)"
     [ "$_unusable" -gt 0 ] &&
       _summary="${_summary}; ${_unusable} bead id(s) unusable"
-    [ "$_batches" -eq 0 ] &&
+    [ "$_batches" -eq 0 ] && [ -z "$_breaker" ] &&
       _summary="${_summary}; no batch ran at all"
   else
     _summary="bd-gh-sync: pulled ${_pulled} bead(s)"
