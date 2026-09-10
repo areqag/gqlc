@@ -445,6 +445,28 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 	// axis separately, so it is recorded that way.
 	shapes := slices.Sorted(maps.Keys(entityShapeWords))
 	accepted := make(map[string]int, len(targets))
+	// methodDecoders is what witnesses that this sweep consults the method
+	// census at all. Its decoders contribute guards to `graded` and are
+	// deliberately neither reconciled nor counted anywhere else, so until
+	// this counter existed the call site below could be deleted whole and
+	// every assertion in the package still passed — measured 2026-09-03 and
+	// again 2026-09-10 (bd gqlc-z6vex). The synthetic rows reach
+	// emittedMethodDecoders through recordedGrading, their own composition
+	// of the helpers, so they witness the helper and never the sweep's use
+	// of it.
+	//
+	// Per target, not summed. An aggregate floor is held up by whichever
+	// target emits the most and says nothing about a target that went
+	// silent, which is the same argument the per-axis decoder census below
+	// makes for itself.
+	//
+	// Not refined per axis, though the corpus would carry it today:
+	// measured 2026-09-10 the method decoders split 20 node / 1 edge for
+	// apache-age-pgx-v5 and 17 / 2 for both neo4j targets. A per-axis floor
+	// would therefore rest on a cell holding exactly one decoder, where an
+	// ordinary fixture edit reds a gate that is not about fixtures. The
+	// per-target floor is what the emission has to keep true.
+	methodDecoders := make(map[string]int, len(targets))
 	decoders := make(map[string]map[codegen.EntityKind]int, len(targets))
 	guarded := make(map[string]map[codegen.EntityKind]int, len(targets))
 	for _, target := range targets {
@@ -490,10 +512,12 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 					}
 					graded += gradeDecoderGuards(s.Require(), target, fixture, d, alphabet)
 				}
-				// A decoder written as a method is graded and neither
-				// reconciled nor counted; emittedMethodDecoders states which
-				// of the three each measurement admits and why.
+				// A decoder written as a method is graded and counted but not
+				// reconciled; emittedMethodDecoders states which of the three
+				// each measurement admits and why. The count is this loop's
+				// only trace in an asserted number — see methodDecoders above.
 				for _, d := range emittedMethodDecoders(s.Require(), files, decoderShapes) {
+					methodDecoders[target]++
 					graded += gradeDecoderGuards(s.Require(), target, fixture, d, alphabet)
 				}
 				// The conjunction verdict, which needs neither the axis
@@ -515,6 +539,15 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 		// against codegen.Prepare rather than sampled.
 		s.Require().NotZero(accepted[target],
 			"%s generated for no fixture in the corpus, so this sweep read none of its emissions", target)
+		s.Require().NotZero(methodDecoders[target],
+			"%s emitted no decoder written as a method over the whole corpus, so this sweep classified none of "+
+				"them and the guards of any it does emit are graded by nothing. Either the emission stopped "+
+				"writing entity-filling methods, or the classification stopped recognising them, or the call "+
+				"to emittedMethodDecoders was dropped from this sweep — the third is the one no other assertion "+
+				"here can see, because a method decoder is graded and counted and never reconciled, so a sweep "+
+				"that stopped consulting the census reddens nowhere else (bd gqlc-z6vex). Measured 2026-09-10 "+
+				"at 21 for apache-age-pgx-v5 and 19 for each neo4j target, 59 in all, against 57 on 2026-09-02",
+			target)
 		for _, shape := range shapes {
 			words := entityShapeWords[shape]
 			s.Require().NotZero(decoders[target][shape],
