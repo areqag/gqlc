@@ -160,7 +160,14 @@ jobs:
       # every PR for a reason that is not a dead cron.
       actions: read
     steps:
+      # bd gqlc-g3g6: full history so bdguard's reachability veto can decide.
+      # Under the default depth-1 checkout a declared closing sha is outside
+      # the fetched pack, gitRefContaining answers "", and the veto never
+      # fires. Scoped to this job's checkout alone: no other job reads
+      # history, so no other checkout is deepened.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-just
       # Not for tidy-check, which needs no shellcheck: for the `just lint-hooks
