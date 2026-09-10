@@ -343,6 +343,47 @@ def self_test_claimed_by():
     return failed
 
 
+def self_test_gh_failure():
+    """A failed `gh` is a broken instrument, not an empty answer (bd gqlc-pju6h).
+
+    Measured shape: `gh` prints its error body (`{"message": "Not Found"}`)
+    to STDOUT and exits non-zero. That body parses as a successful lookup
+    with no files, so a call site reading it with check=False reports "adds
+    no enrolled document" -- a silent green in a gate whose whole job is to
+    go red. This row puts a fake `gh` first on PATH and asserts the compare
+    read fails loudly instead.
+    """
+    name = "a gh failure whose error body goes to stdout fails loudly, not green"
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = Path(tmp) / "gh"
+        fake.write_text('#!/bin/sh\nprintf \'{"message": "Not Found"}\'\nexit 1\n')
+        fake.chmod(0o755)
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{tmp}{os.pathsep}{old_path}"
+        try:
+            try:
+                added_under("owner/repo", "base", "head", ["docs/adr"])
+            except SystemExit as failure:
+                if failure.code == 0:
+                    print(
+                        f"self-test FAILED: {name}\n"
+                        "  the failing gh exited the script with code 0",
+                        file=sys.stderr,
+                    )
+                    return True
+                print(f"self-test ok: {name}")
+                return False
+        finally:
+            os.environ["PATH"] = old_path
+    print(
+        f"self-test FAILED: {name}\n"
+        "  a failing gh was read as an empty compare, which the caller "
+        'reports as "adds no enrolled document"',
+        file=sys.stderr,
+    )
+    return True
+
+
 def self_test():
     """Drive the decision cores over the window this gate was built from.
 
@@ -383,6 +424,8 @@ def self_test():
     ]
 
     failed = self_test_claimed_by()
+    if self_test_gh_failure():
+        failed = True
     for name, master_names, added_names, want_ok in rows:
         got_ok, description = verdict("docs/adr", master_names, added_names)
         if got_ok != want_ok:
