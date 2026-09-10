@@ -394,30 +394,33 @@ The change adds guards, so the PR records rows per ADR 0005, at minimum:
 
 Behavioural rows live in the live battery (`test/data/codegen/live_test.go`
 scenario list), which runs every scenario against every arm: the neo4j
-arms are PR-blocking (`codegen-live.yml` live-smoke), the AGE arm is
-nightly/manual.
+arms are PR-blocking (`codegen-live.yml` live-smoke) and so is the AGE arm
+(`live-smoke-age`).
 
-**That asymmetry costs more than this spec first claimed.** The original
-justification — "acceptable because pgx itself carries most of the AGE
-behaviour (F6) and the PR-blocking fence still compiles the AGE emission" —
-survives only in part. The battery above measured two guards that are killed
-on the AGE arm **alone**: the Rollback done-guard (neo4j's driver `Close` is
-already idempotent, so it survives there) and the AGE Begin refusal's
-condition as distinct from its message. `live-smoke-age` carries
-`if: github.event_name != 'pull_request'`, and `codegen-live.yml` records at
-that line that GitHub counts a *skipped* check as satisfying a required
-context — which is why the id is deliberately kept off master's required
-list. So a change breaking either guard merges green and is caught by the
-nightly, which files an issue rather than blocking. Not silent; not
-PR-blocking either. Stated here so the check table is not read as promising
-more than it does.
+**The asymmetry this paragraph used to record is closed, and it had cost
+more than this spec first claimed.** Until bd `gqlc-ezwae` the AGE arm was
+nightly-and-manual, and the original justification for that — "acceptable
+because pgx itself carries most of the AGE behaviour (F6) and the
+PR-blocking fence still compiles the AGE emission" — survived only in part:
+the battery above measured two guards that are killed on the AGE arm
+**alone**, the Rollback done-guard (neo4j's driver `Close` is already
+idempotent, so it survives there) and the AGE Begin refusal's condition as
+distinct from its message. Both merged green under the old trade and were
+caught by the nightly, which files an issue rather than blocking. Both are
+PR-blocking now: `live-smoke-age` enumerates `pull_request` among its
+events, so it runs rather than skipping on a PR, which is what makes the id
+safe to require at all — `codegen-live.yml` records at that line that GitHub
+counts a *skipped* check as satisfying a required context. It still skips on
+`merge_group`, so that caveat is live for a merge queue and dead for a pull
+request. Stated here so the check table is not read as promising either more
+or less than it does.
 
 Driver-stub unit tests are NOT available for the neo4j rows:
 `ExplicitTransaction` carries the unexported `legacy()` method in v5, so
 it cannot be faked outside the driver package — that is why the rows sit
 in the live battery and not beside the renderer.
 
-New live scenarios (each runs on v5, v6 and — nightly — AGE):
+New live scenarios (each runs on v5, v6 and AGE, all three PR-blocking):
 
 1. begin → write → commit → row visible to a fresh handle.
 2. begin → write → rollback → row absent.

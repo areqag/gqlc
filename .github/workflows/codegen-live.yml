@@ -10,9 +10,23 @@
 # Go's test cache is the primary skip mechanism; adding path filters would
 # risk false skips on new codegen-adjacent packages.
 #
-# live-smoke-age is nightly and manual only (bd gqlc-35yu.8): its containers
-# are additional wall-time that a pull request is deliberately not charged for,
-# so the AGE arm's regressions are caught on master rather than at review time.
+# live-smoke-age is PR-blocking too, since bd gqlc-ezwae. It was nightly and
+# manual only (bd gqlc-35yu.8) on the ground that its containers are wall-time a
+# pull request should not be charged — an argument locked 2026-07-31, BEFORE the
+# arm existed to be measured. Measured since (bd gqlc-zase): the AGE arm takes
+# 55-58s where the neo4j arm every PR already runs takes 73-116s on the SAME
+# runs, and the two jobs share a startedAt, so they are parallel runners and the
+# PR critical path does not move at all. Flake against it: 30 of 30 scheduled
+# nightlies green, 2026-08-06..2026-09-04. Those numbers are a claim about
+# today's tree and expire if this battery ever outgrows the neo4j arm's
+# duration; whoever grows it past ~73s re-weighs the trade with them in hand.
+#
+# No paths: filter here either, and for a second reason on top of live-smoke's.
+# A workflow-level one would filter live-smoke as well, and a required context
+# that never reports leaves every non-matching PR pending forever; a job-level
+# one needs a hand-kept list of what affects AGE emission, whose first stale
+# entry recreates the unwitnessed merge this arm was put on PRs to close, one
+# layer down and silently (bd gqlc-zase, rejected alternative 1).
 #
 # Nightly cron on master is retained for both as a safety net in case a
 # merge-time race sneaks a codegen change past the PR gate; workflow_dispatch
@@ -49,15 +63,32 @@ jobs:
       - uses: ./.github/actions/setup-just
       - run: just test-codegen-live-neo4j
 
-  # Runs only on the nightly cron and manual dispatch; skipped on pull requests
-  # and on merge groups. GitHub counts a skipped check as satisfying a required
-  # context, so this id must stay off master's required-check list.
+  # This id is a required context of master's protection, like live-smoke above,
+  # so renaming the job detaches that gate silently.
   #
-  # Enumerated positively rather than as `!= 'pull_request'`: that negative went
-  # TRUE on a merge group, charging every queued merge the AGE container
-  # wall-time a PR is deliberately not charged (decision 0010).
+  # It runs on pull requests, the nightly cron and manual dispatch, and is
+  # skipped on merge groups alone. Requiring it is only safe because it never
+  # skips on a pull request: GitHub counts a skipped check as SATISFYING a
+  # required context, so an id that skipped there would be a green gate that
+  # graded nothing — which is what this id was, and why it was kept off the
+  # required list until bd gqlc-ezwae put it on every PR.
+  #
+  # That caveat survives for merge_group, where this job still skips. A required
+  # context absent from the merge group blocks a queue, so before any merge
+  # queue is enabled here this job has to join merge_group first. No queue is
+  # possible today (user-owned repo, bd gqlc-9vzmw); whoever changes that
+  # re-opens decision 0010 rather than discovering this comment afterwards.
+  #
+  # Enumerated positively rather than as `!= 'merge_group'`: that negative shape
+  # went TRUE on a merge group when it was written `!= 'pull_request'`, charging
+  # every queued merge the AGE container wall-time (decision 0010). The
+  # enumeration is also what internal/liverecipes reads: the events below are
+  # declared in liverecipes.ArmTriggers and checked against this line, because a
+  # job that stops running reports a skipped check and a skipped check is green.
   live-smoke-age:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,18 +98,21 @@ jobs:
       - uses: ./.github/actions/setup-just
       - run: just test-codegen-live-age
 
-  # bd gqlc-0oau. The AGE arm runs nowhere but here, so a red nightly is the
-  # only signal that master has an AGE regression — and by default a red
-  # scheduled run notifies GitHub's own default recipient (the last committer to
-  # the cron file) and nobody else. An email nobody owns is not a gate. This
-  # turns the failure into a durable artefact instead: one tracking issue,
-  # reopened and commented on every failing night, closed by hand when the
-  # regression is.
+  # bd gqlc-0oau. A red nightly is the only signal that the MERGED tree has a
+  # live regression — pull requests now smoke both arms, but each one smokes its
+  # own merge ref rather than what master became, and a merge race landing a
+  # break past two green PR gates has three instances on record. By default a
+  # red scheduled run notifies GitHub's own default recipient (the last
+  # committer to the cron file) and nobody else. An email nobody owns is not a
+  # gate. This turns the failure into a durable artefact instead: one tracking
+  # issue, reopened and commented on every failing night, closed by hand when
+  # the regression is.
   #
   # Scheduled runs only. On workflow_dispatch a person is already watching the
-  # run they started, and on a pull request live-smoke's red check is the
-  # signal; neither needs an issue, and filing one on a developer's manual
-  # dispatch would train people to ignore the issue that matters.
+  # run they started, and on a pull request both arms' red checks are the signal
+  # and they block the merge; neither needs an issue, and filing one on a
+  # developer's manual dispatch would train people to ignore the issue that
+  # matters.
   #
   # `always()` is what lets this job run at all after a needed job failed;
   # without it the job is skipped exactly when it is wanted. `cancelled` is in
@@ -126,9 +160,10 @@ jobs:
               "- live-smoke-age: \`${AGE_RESULT}\`" \
               "- run: ${RUN_URL}" \
               "" \
-              "The AGE arm runs on this schedule only — no pull request exercises it —" \
-              "so an AGE regression sits on master until this is read. Close this issue" \
-              "when the nightly is green again; the next failing night reopens it.")"
+              "Pull requests exercise both arms pre-merge, so what this schedule is the" \
+              "only witness of is the MERGED tree: a regression two green PR gates raced" \
+              "past sits on master until this is read. Close this issue when the nightly" \
+              "is green again; the next failing night reopens it.")"
 
           # --state all: a closed tracking issue is reopened rather than
           # duplicated, so the history of every red night stays on one thread.
