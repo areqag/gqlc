@@ -242,11 +242,11 @@ var reGrammarAltLabel = regexp.MustCompile(`#([A-Za-z_][A-Za-z0-9_]*)`)
 // and tokens from the generated tables, plus fragments and alternative labels
 // scanned from the .g4.
 //
-// It is deliberately not the normalized map grammarRuleNames builds. That map
+// It is deliberately not the normalised map grammarRuleNames builds. That map
 // exists to match ISO's `node type pattern` against ANTLR's `nodeTypePattern`,
 // where collapsing case and punctuation is the point. A spelledBy names one
 // symbol and is written by the same hand that reads the grammar, so it is held to
-// the exact spelling — normalizing would let `dynamicuniontype` satisfy a claim
+// the exact spelling — normalising would let `dynamicuniontype` satisfy a claim
 // about `DYNAMIC_UNION_TYPE`, and an entry that names a symbol only up to case is
 // not evidence its author found the symbol.
 func grammarSpellings(t *testing.T) map[string]bool {
