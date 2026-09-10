@@ -292,12 +292,20 @@ func isAlnum(c byte) bool {
 // regressed vs the base. Its only I/O is exemptions.refContaining, injected so
 // its branches are reachable with no `git` shellout. Measured with
 // `go test ./internal/tools/bdguard -coverprofile=c.out && go tool cover
-// -func=c.out`: check and parse are at 100.0% of statements.
+// -func=c.out`: check, parse, showAtRef and gitRefContaining are at 100.0% of
+// statements, run at 68.8% — its covered arms are success, a dropped finding,
+// and an unresolvable base; the uncovered remainder is head/allowlist read
+// failures and the absent-at-base leg, all failures of os.ReadFile rather
+// than of the boundary. main() alone is at 0.0%: the flag entrypoint.
 //
-// The uncovered remainder in that same profile is main(), run(), showAtRef and
-// gitRefContaining, all at 0.0% — the flag entrypoint and the git boundary. No
-// automated test reaches them (bd gqlc-drvx); they were exercised only by a
-// manual incident replay against a scratch repo outside the worktree.
+// The git-boundary rows (TestRun_CleanPasses, TestRun_DroppedIssueFails,
+// TestRun_UnresolvableBaseIsAnError, TestShowAtRef_ContentAtRef,
+// TestShowAtRef_AbsentPath, TestShowAtRef_UnresolvableRef,
+// TestGitRefContaining_OnARef, TestGitRefContaining_OrphanedSHA,
+// TestGitRefContaining_UnknownSHA,
+// TestGitRefContaining_DetachedHeadFallsBackToHEAD)
+// stage a scratch repo per test with GIT_DIR/GIT_WORK_TREE set explicitly
+// (bd gqlc-drvx).
 //
 // exemptions.drops exempts ids from the dropped arm only: a bead still present
 // but no longer closed is a status regression, not the deletion the list
