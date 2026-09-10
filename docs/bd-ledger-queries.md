@@ -134,6 +134,30 @@ timezone marker (`2026-09-09 15:54:40`); `bd show --json` carries
 against a `bd show` timestamp without converting; take any event ordering from
 a single renderer.
 
+## `bd dep list` shows one direction: what the bead depends on, never what it blocks
+
+`bd dep list <id>` defaults to `--direction=down` — what `<id>` depends on.
+A bead that blocks something but depends on nothing prints "`<id>` has no
+dependencies", which reads as a denial of the relationship you just created.
+It is not: the edge is on the other end.
+
+Measured 2026-09-10 against bd 1.0.4: `gqlc-3ds4q` was created with nothing
+but `--deps blocks:gqlc-2399s`. Its own list is empty (`gqlc-3ds4q has no
+dependencies`); the target's list carries the edge (`gqlc-3ds4q ... via
+blocks`); and `bd dep list gqlc-3ds4q --direction=up` shows `gqlc-2399s ...
+via blocks` (bd `gqlc-2399s`).
+
+To see the reverse — what depends on, i.e. is blocked by, a bead — pass
+`--direction=up`:
+
+    bd dep list <new-id>                 # what <new-id> depends on (down, the default)
+    bd dep list <new-id> --direction=up  # what <new-id> blocks
+    bd dep list <target-id>              # the edge, if <new-id> blocks <target-id>
+
+So after `bd create ... --deps blocks:<target>`, verify on the target's
+list, not the new bead's. Never run a duplicate `bd dep add` to "repair"
+the empty read-back: the edge is already there.
+
 ## Rules for a scripted query
 
 1. Pass the row cap explicitly, always: `-n 0` / `--limit 0`.
