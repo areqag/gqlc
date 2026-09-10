@@ -1760,9 +1760,9 @@ func justfileDisagreements(
 		return out
 	}
 
-	byReader := make(map[string]justRecipe, len(read))
+	byReader := make(map[string][]justRecipe, len(read))
 	for _, r := range read {
-		byReader[r.name] = r
+		byReader[r.name] = append(byReader[r.name], r)
 	}
 
 	names := make([]string, 0, len(declared))
@@ -1771,7 +1771,7 @@ func justfileDisagreements(
 	}
 	slices.Sort(names)
 	for _, name := range names {
-		got, found := byReader[name]
+		defs, found := byReader[name]
 		if !found {
 			out = append(out, fmt.Sprintf(
 				"just declares recipe %s and this reader does not find it, so the body of %s "+
@@ -1779,6 +1779,7 @@ func justfileDisagreements(
 					"which is asked only of recipes it read (bd gqlc-6n9y)", name, name))
 			continue
 		}
+		got := defs[len(defs)-1]
 		if !slices.Equal(got.deps, declared[name]) {
 			out = append(out, fmt.Sprintf(
 				"just runs %v before recipe %s's body and this reader reads %v, so the closure "+
@@ -1825,6 +1826,32 @@ func justfileDisagreements(
 			out = append(out, fmt.Sprintf(
 				"this reader reads a recipe %s that just does not declare, so it can be "+
 					"reported as an unswept caller that does not exist", name))
+		}
+	}
+
+	// A name read more than once carries a body per definition, and the sweep
+	// decision reads each of those bodies for a caller while the clauses above
+	// read only the last. When the definitions answer differently about naming
+	// modscopePkg, whether the recipe is a caller rests on the definition —
+	// and just refuses a justfile that defines a recipe twice (measured:
+	// `just --dump` answers rc=1, "redefined", on 1.58.0), so there is no
+	// second body on just's side to set either against. That split is reported
+	// here rather than left to the last-wins reading above (bd gqlc-qneu).
+	for _, name := range names {
+		defs := byReader[name]
+		if len(defs) < 2 {
+			continue
+		}
+		first := runsModscope(defs[0].body)
+		for _, other := range defs[1:] {
+			if runsModscope(other.body) != first {
+				out = append(out, fmt.Sprintf(
+					"this reader reads recipe %s more than once and the bodies answer "+
+						"differently about naming %s, so whether %s is a caller the sweep "+
+						"decision counts rests on which definition is read (bd gqlc-qneu)",
+					name, modscopePkg, name))
+				break
+			}
 		}
 	}
 	return out
@@ -1914,6 +1941,28 @@ func TestJustfileDisagreementsFindsEachWayTheTwoReadingsPart(t *testing.T) {
 			want: []string{
 				"this reader reads a body for recipe vuln that names " + modscopePkg +
 					" and just reads one that does not",
+			},
+		},
+		{
+			// One name read twice, where the shadowed body names the path and
+			// the last one does not. The comparison keys by name and keeps the
+			// last body, so the mention clause above agrees with just here —
+			// and the sweep decision reads each body for a caller, so the
+			// shadowed one still selects vuln. just refuses a justfile that
+			// defines a recipe twice (measured: `just --dump` answers rc=1,
+			// "redefined", on 1.58.0), so there is no second body on just's
+			// side to set either against; the row sets the two read bodies
+			// against each other (bd gqlc-qneu).
+			name:     "a shadowed body naming the path the last body does not name",
+			declared: map[string][]string{probeSweep: {}, "vuln": {probeSweep}},
+			bodies:   map[string]string{probeSweep: "", "vuln": "echo nothing here"},
+			read: []justRecipe{
+				sweep,
+				{name: "vuln", deps: []string{probeSweep}, body: readCallerBody},
+				{name: "vuln", deps: []string{probeSweep}},
+			},
+			want: []string{
+				"reads recipe vuln more than once and the bodies answer differently",
 			},
 		},
 		{
