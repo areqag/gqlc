@@ -1,0 +1,13 @@
+// This fixture declares a PropertyType constant whose value is a conversion
+// rather than a literal, so the walk finds a spec it is meant to read and an
+// expression it cannot take a string off.
+//
+// The block holds nothing else: were the refusal to drop the spec instead,
+// this file would read as an empty table, which is the silent outcome the
+// row about it asserts against.
+package graph
+
+// PropertyType is the type whose constants the walk collects.
+type PropertyType string
+
+const TypeDerived PropertyType = PropertyType("DERIVED")

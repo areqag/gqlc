@@ -1,0 +1,15 @@
+// This fixture declares a PropertyType constant whose value is a literal the
+// walk cannot unquote: an integer. go/parser reports it as a BasicLit like
+// any string, so the literal test above it passes and only strconv.Unquote
+// separates the two.
+//
+// It is the shape an author reaches for when adding a constant to a table
+// that has grown a numeric neighbour, and a compiler would refuse it — so,
+// like names_without_values.go.txt, internal/graph cannot hold it and nothing
+// but a fixture can drive it.
+package graph
+
+// PropertyType is the type whose constants the walk collects.
+type PropertyType string
+
+const TypeNumeric PropertyType = 42
