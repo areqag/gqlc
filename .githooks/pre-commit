@@ -78,4 +78,53 @@ else
   exit 1
 fi
 
+# Function-complexity gate (gocyclo + gocognit), scoped to the packages this
+# commit touches.
+#
+# ONE SOURCE WITH CI, and the sharing is the thresholds rather than the
+# invocation: both linters sit in `.golangci.yml`'s enable list, so the
+# merge-blocking `lint` job already runs them, and `just complexity` selects
+# those two with `--default none --enable` while still reading their
+# min-complexity from that same file. There is no number written here, and none
+# in ci.yml, so the hook cannot go soft while CI stays strict. What that buys is
+# the round trip: a function over the line is refused at `git commit` instead of
+# eight minutes into CI.
+#
+# WHY SCOPED, when the format check above is deliberately repo-wide: the full
+# `golangci-lint run` is ~76 s warm over this tree (measured 2026-09-10), which
+# a pre-commit hook cannot spend. Restricting to changed packages is exact
+# rather than a sampling compromise — gocyclo and gocognit score a function from
+# its own AST alone, so no edit can change the score of a function in a package
+# it did not touch. A whole-tree run would re-measure ~1900 functions to find
+# the same answer.
+#
+# It reads the WORKTREE, not the staged content, exactly as the format check
+# above does. A partially staged file is therefore judged by what is on disk. The
+# gate that cannot be sidestepped that way is CI's; this one is here to catch the
+# ordinary case early, and `git commit --no-verify` is a shorter path anyway for
+# anyone actually trying to get around it.
+if [ "${GQLC_ALLOW_MISSING_LINTER:-}" != "1" ]; then
+  complexity_dirs=()
+  while IFS= read -r -d '' staged_go; do
+    staged_dir="$(dirname "$staged_go")"
+    # A file staged as added and then removed from the worktree leaves a
+    # directory golangci-lint would refuse to load; skip rather than fail.
+    [ -d "$staged_dir" ] || continue
+    complexity_dirs+=("./$staged_dir")
+  done < <(git diff --cached --name-only --diff-filter=ACM -z -- '*.go')
+
+  if [ ${#complexity_dirs[@]} -gt 0 ]; then
+    # One package may own several staged files; lint it once.
+    readarray -t complexity_dirs < <(printf '%s\n' "${complexity_dirs[@]}" | sort -u)
+    if ! complexity_out="$(just complexity "${complexity_dirs[@]}" 2>&1)"; then
+      echo "ERROR: function complexity over the gate in a package this commit touches." >&2
+      echo "$complexity_out" >&2
+      echo >&2
+      echo "       Thresholds live in .golangci.yml (gocyclo, gocognit); CI enforces the same two." >&2
+      echo "       Extract a helper — do not raise the threshold to land a change (see bd gqlc-5sfv)." >&2
+      exit 1
+    fi
+  fi
+fi
+
 exit 0

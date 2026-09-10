@@ -743,143 +743,172 @@ func cardinalityAnnotation(c queryfile.Cardinality) string {
 // carries — which is to say a Validated shape the resolver did not build.
 func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entityLookupKey]int, tm TypeMap) error {
 	for i, q := range queries {
-		if _, reserved := reservedIdentifiers[q.Name]; reserved {
-			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
-		}
-		if q.Cardinality != queryfile.CardinalityOne && q.Cardinality != queryfile.CardinalityMany && q.Cardinality != queryfile.CardinalityExec {
-			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
-		}
-		// Cardinality × shape gate (spec §4.9). Runs before the column-type
-		// sweep so a fixture combining :exec-on-projection with an
-		// unrepresentable-width column fires ErrExecOnProjection first —
-		// the caller fixes the cardinality axis before revisiting widths.
-		if q.Cardinality == queryfile.CardinalityExec && len(q.Validated.Columns) > 0 {
-			return fmt.Errorf("%w: query %q at position %d has cardinality :exec but projects %d column(s) (first column %q) — drop :exec or drop RETURN", ErrExecOnProjection, q.Name, i, len(q.Validated.Columns), q.Validated.Columns[0].Name)
-		}
-		if (q.Cardinality == queryfile.CardinalityOne || q.Cardinality == queryfile.CardinalityMany) && len(q.Validated.Columns) == 0 {
-			shape := "zero-column read"
-			if q.Validated.Statement == resolver.StatementWrite {
-				shape = "zero-column write"
-			}
-			return fmt.Errorf("%w: query %q at position %d has cardinality %s but the query is a %s — annotate :exec or add a RETURN clause", ErrCardinalityShapeMismatch, q.Name, i, cardinalityAnnotation(q.Cardinality), shape)
-		}
-		// Both backends emit SourceText through a Go RAW string literal, so the
-		// bytes such a literal cannot carry are refused here rather than
-		// emitted. A backtick cannot appear in one at all; a carriage return
-		// can, and is DISCARDED from the literal's value (Go spec, "String
-		// literals"). The CR is the worst of the set because the loss is
-		// silent: generate exits 0 having written a constant whose value is not
-		// the text that was parsed and resolved. For AGE that forges the
-		// dollar-quote delimiter, dollarTag having scanned the bytes before
-		// emission and the SQL parser the bytes after; for neo4j the discarded
-		// byte glues the tokens it separated (bd gqlc-7f9a).
-		//
-		// Every CR reaching here is content, never a line ending, so this
-		// refuses no authoring convention: queryfile reads with
-		// bufio.ScanLines, which takes a CRLF's CR before SourceText exists,
-		// and a lone-CR file is one line the annotation grammar already
-		// rejects.
-		//
-		// The last two are not carried differently but make the emitted file
-		// unparseable: Go source must be valid UTF-8 and, by a documented
-		// implementation restriction, may not hold a NUL. So nothing ships
-		// wrong and these are a diagnostic remedy rather than a correctness
-		// one — without them the user is handed a go/format failure citing a
-		// line of a GENERATED file, naming neither the query nor the byte
-		// (bd gqlc-32n53).
-		//
-		// They are refused HERE, and not further upstream where a refusal
-		// could name the file and line, because neither byte is a defect in
-		// the query — only in its emission. Measured 2026-09-03 over
-		// cmd/gqlc: the openCypher lexer already refuses both where they
-		// stand in a token slot, and what survives to this point is the
-		// positions it has no reason to scan — inside a line comment, and
-		// inside a string literal, where a NUL is a value the server itself
-		// accepts. Refusing them in the grammar would refuse a query neo4j
-		// runs.
-		if strings.ContainsRune(q.SourceText, '`') {
-			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC6Scope, q.Name, i)
-		}
-		if strings.ContainsRune(q.SourceText, '\r') {
-			return fmt.Errorf("%w: query %q at position %d has a carriage return in its source text", ErrOutOfC6Scope, q.Name, i)
-		}
-		if strings.ContainsRune(q.SourceText, '\x00') {
-			return fmt.Errorf("%w: query %q at position %d has a NUL in its source text", ErrOutOfC6Scope, q.Name, i)
-		}
-		if !utf8.ValidString(q.SourceText) {
-			return fmt.Errorf("%w: query %q at position %d is not valid UTF-8", ErrOutOfC6Scope, q.Name, i)
+		if err := admitQueryAxes(q, i); err != nil {
+			return err
 		}
 		for ci, col := range q.Validated.Columns {
-			// Shape check first (spec §4.3, §6.4): count(*), arithmetic
-			// expressions, and other non-clean shapes route to
-			// ErrAliasRequired regardless of their resolved type — the fix
-			// is an AS alias, not a scope change. Only after the column's
-			// text is a known shape do we check its resolved type.
-			if _, ok := rowFieldName(col.Name); !ok {
-				return fmt.Errorf("%w: query %q column %d %q is neither a bare identifier nor a property access — add an explicit AS alias", ErrAliasRequired, q.Name, ci, col.Name)
-			}
-			switch t := col.Type.(type) {
-			case resolver.ResolvedProperty:
-				if kind, field, unbuilt := unimplementedTypeKind(t.Type); unbuilt {
-					return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnimplementedTypeKind, q.Name, ci, col.Name, unimplementedKindDetail(t.Type, kind, field))
-				}
-				if record, reason, illegal := recordFieldLegality(t.Type); illegal {
-					return fmt.Errorf("%w: query %q column %d %q has %s", ErrRecordFieldCollision, q.Name, ci, col.Name, recordFieldDetail(t.Type, record, reason))
-				}
-				if _, ok := tm.Property(t.Type); !ok {
-					return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnrepresentableWidth, q.Name, ci, col.Name, t.Type)
-				}
-			case resolver.ResolvedNode:
-				if _, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: t.Labels}]; !ok {
-					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.Labels))
-				}
-			case resolver.ResolvedEdge:
-				if _, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: t.EdgeKey}]; !ok {
-					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.KeyLabels), string(t.EdgeKey.Target))
-				}
-			case resolver.ResolvedEdgeUnion:
-				if err := admitEdgeUnionCandidates(t.EdgeKeys, entities, entityIndex, columnSite(q.Name, ci, col.Name)); err != nil {
-					return err
-				}
-			case resolver.ResolvedTemporal:
-				// Every temporal kind is representable; the closed enum
-				// maps into the TypeMap's temporal table (§5.1) without a
-				// fallible dispatch.
-			case resolver.ResolvedScalar:
-				// Every scalar kind is representable at C3 — bool /
-				// int64 / float64 / string / any / map[string]any.
-			case resolver.ResolvedUnknown:
-				// Honest-any leaf (§3.3). Fully in-scope; the emission
-				// walks the record.Get path.
-			case resolver.ResolvedList:
-				// Recurse the list-element chain to find unrepresentable
-				// leaves (§4.7). Phase B repeats the walk to commit the
-				// plan; here the call is a validity probe — we discard
-				// the returned plan. Threading unionIdx = -1 and an
-				// empty interface name is inert: Phase A never emits,
-				// so neither is read.
-				if _, err := buildListElemPlan(t.Element, entities, entityIndex, tm, -1, ""); err != nil {
-					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
-				}
-			default:
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, ResolvedTypeName(col.Type))
+			if err := admitColumn(q, ci, col, entities, entityIndex, tm); err != nil {
+				return err
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
-			prop, ok := p.Type.(resolver.ResolvedProperty)
-			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, ResolvedTypeName(p.Type))
-			}
-			if kind, field, unbuilt := unimplementedTypeKind(prop.Type); unbuilt {
-				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnimplementedTypeKind, q.Name, pi, p.Name, unimplementedKindDetail(prop.Type, kind, field))
-			}
-			if record, reason, illegal := recordFieldLegality(prop.Type); illegal {
-				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrRecordFieldCollision, q.Name, pi, p.Name, recordFieldDetail(prop.Type, record, reason))
-			}
-			if _, ok := tm.Property(prop.Type); !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
+			if err := admitParameter(q, pi, p, tm); err != nil {
+				return err
 			}
 		}
+	}
+	return nil
+}
+
+// admitQueryAxes gates the axes that read a query whole rather than
+// per-column or per-parameter: reserved name, cardinality, cardinality ×
+// shape, and the source-text bytes. i is the query's slice position,
+// which every refusal names.
+func admitQueryAxes(q NamedQuery, i int) error {
+	if _, reserved := reservedIdentifiers[q.Name]; reserved {
+		return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
+	}
+	if q.Cardinality != queryfile.CardinalityOne && q.Cardinality != queryfile.CardinalityMany && q.Cardinality != queryfile.CardinalityExec {
+		return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
+	}
+	// Cardinality × shape gate (spec §4.9). Runs before the column-type
+	// sweep so a fixture combining :exec-on-projection with an
+	// unrepresentable-width column fires ErrExecOnProjection first —
+	// the caller fixes the cardinality axis before revisiting widths.
+	if q.Cardinality == queryfile.CardinalityExec && len(q.Validated.Columns) > 0 {
+		return fmt.Errorf("%w: query %q at position %d has cardinality :exec but projects %d column(s) (first column %q) — drop :exec or drop RETURN", ErrExecOnProjection, q.Name, i, len(q.Validated.Columns), q.Validated.Columns[0].Name)
+	}
+	if (q.Cardinality == queryfile.CardinalityOne || q.Cardinality == queryfile.CardinalityMany) && len(q.Validated.Columns) == 0 {
+		shape := "zero-column read"
+		if q.Validated.Statement == resolver.StatementWrite {
+			shape = "zero-column write"
+		}
+		return fmt.Errorf("%w: query %q at position %d has cardinality %s but the query is a %s — annotate :exec or add a RETURN clause", ErrCardinalityShapeMismatch, q.Name, i, cardinalityAnnotation(q.Cardinality), shape)
+	}
+	// Both backends emit SourceText through a Go RAW string literal, so the
+	// bytes such a literal cannot carry are refused here rather than
+	// emitted. A backtick cannot appear in one at all; a carriage return
+	// can, and is DISCARDED from the literal's value (Go spec, "String
+	// literals"). The CR is the worst of the set because the loss is
+	// silent: generate exits 0 having written a constant whose value is not
+	// the text that was parsed and resolved. For AGE that forges the
+	// dollar-quote delimiter, dollarTag having scanned the bytes before
+	// emission and the SQL parser the bytes after; for neo4j the discarded
+	// byte glues the tokens it separated (bd gqlc-7f9a).
+	//
+	// Every CR reaching here is content, never a line ending, so this
+	// refuses no authoring convention: queryfile reads with
+	// bufio.ScanLines, which takes a CRLF's CR before SourceText exists,
+	// and a lone-CR file is one line the annotation grammar already
+	// rejects.
+	//
+	// The last two are not carried differently but make the emitted file
+	// unparseable: Go source must be valid UTF-8 and, by a documented
+	// implementation restriction, may not hold a NUL. So nothing ships
+	// wrong and these are a diagnostic remedy rather than a correctness
+	// one — without them the user is handed a go/format failure citing a
+	// line of a GENERATED file, naming neither the query nor the byte
+	// (bd gqlc-32n53).
+	//
+	// They are refused HERE, and not further upstream where a refusal
+	// could name the file and line, because neither byte is a defect in
+	// the query — only in its emission. Measured 2026-09-03 over
+	// cmd/gqlc: the openCypher lexer already refuses both where they
+	// stand in a token slot, and what survives to this point is the
+	// positions it has no reason to scan — inside a line comment, and
+	// inside a string literal, where a NUL is a value the server itself
+	// accepts. Refusing them in the grammar would refuse a query neo4j
+	// runs.
+	if strings.ContainsRune(q.SourceText, '`') {
+		return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC6Scope, q.Name, i)
+	}
+	if strings.ContainsRune(q.SourceText, '\r') {
+		return fmt.Errorf("%w: query %q at position %d has a carriage return in its source text", ErrOutOfC6Scope, q.Name, i)
+	}
+	if strings.ContainsRune(q.SourceText, '\x00') {
+		return fmt.Errorf("%w: query %q at position %d has a NUL in its source text", ErrOutOfC6Scope, q.Name, i)
+	}
+	if !utf8.ValidString(q.SourceText) {
+		return fmt.Errorf("%w: query %q at position %d is not valid UTF-8", ErrOutOfC6Scope, q.Name, i)
+	}
+	return nil
+}
+
+// admitColumn gates one projected column of q against the resolved-type
+// sum. ci is the column's position within the query.
+func admitColumn(q NamedQuery, ci int, col resolver.Column, entities []Entity, entityIndex map[entityLookupKey]int, tm TypeMap) error {
+	// Shape check first (spec §4.3, §6.4): count(*), arithmetic
+	// expressions, and other non-clean shapes route to
+	// ErrAliasRequired regardless of their resolved type — the fix
+	// is an AS alias, not a scope change. Only after the column's
+	// text is a known shape do we check its resolved type.
+	if _, ok := rowFieldName(col.Name); !ok {
+		return fmt.Errorf("%w: query %q column %d %q is neither a bare identifier nor a property access — add an explicit AS alias", ErrAliasRequired, q.Name, ci, col.Name)
+	}
+	switch t := col.Type.(type) {
+	case resolver.ResolvedProperty:
+		if kind, field, unbuilt := unimplementedTypeKind(t.Type); unbuilt {
+			return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnimplementedTypeKind, q.Name, ci, col.Name, unimplementedKindDetail(t.Type, kind, field))
+		}
+		if record, reason, illegal := recordFieldLegality(t.Type); illegal {
+			return fmt.Errorf("%w: query %q column %d %q has %s", ErrRecordFieldCollision, q.Name, ci, col.Name, recordFieldDetail(t.Type, record, reason))
+		}
+		if _, ok := tm.Property(t.Type); !ok {
+			return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnrepresentableWidth, q.Name, ci, col.Name, t.Type)
+		}
+	case resolver.ResolvedNode:
+		if _, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: t.Labels}]; !ok {
+			return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.Labels))
+		}
+	case resolver.ResolvedEdge:
+		if _, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: t.EdgeKey}]; !ok {
+			return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.KeyLabels), string(t.EdgeKey.Target))
+		}
+	case resolver.ResolvedEdgeUnion:
+		if err := admitEdgeUnionCandidates(t.EdgeKeys, entities, entityIndex, columnSite(q.Name, ci, col.Name)); err != nil {
+			return err
+		}
+	case resolver.ResolvedTemporal:
+		// Every temporal kind is representable; the closed enum
+		// maps into the TypeMap's temporal table (§5.1) without a
+		// fallible dispatch.
+	case resolver.ResolvedScalar:
+		// Every scalar kind is representable at C3 — bool /
+		// int64 / float64 / string / any / map[string]any.
+	case resolver.ResolvedUnknown:
+		// Honest-any leaf (§3.3). Fully in-scope; the emission
+		// walks the record.Get path.
+	case resolver.ResolvedList:
+		// Recurse the list-element chain to find unrepresentable
+		// leaves (§4.7). Phase B repeats the walk to commit the
+		// plan; here the call is a validity probe — we discard
+		// the returned plan. Threading unionIdx = -1 and an
+		// empty interface name is inert: Phase A never emits,
+		// so neither is read.
+		if _, err := buildListElemPlan(t.Element, entities, entityIndex, tm, -1, ""); err != nil {
+			return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
+		}
+	default:
+		return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, ResolvedTypeName(col.Type))
+	}
+	return nil
+}
+
+// admitParameter gates one bound parameter of q. pi is the parameter's
+// position within the query.
+func admitParameter(q NamedQuery, pi int, p resolver.ResolvedParameter, tm TypeMap) error {
+	prop, ok := p.Type.(resolver.ResolvedProperty)
+	if !ok {
+		return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, ResolvedTypeName(p.Type))
+	}
+	if kind, field, unbuilt := unimplementedTypeKind(prop.Type); unbuilt {
+		return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnimplementedTypeKind, q.Name, pi, p.Name, unimplementedKindDetail(prop.Type, kind, field))
+	}
+	if record, reason, illegal := recordFieldLegality(prop.Type); illegal {
+		return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrRecordFieldCollision, q.Name, pi, p.Name, recordFieldDetail(prop.Type, record, reason))
+	}
+	if _, ok := tm.Property(prop.Type); !ok {
+		return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
 	}
 	return nil
 }
@@ -1067,225 +1096,254 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 		if q.Validated.Statement == resolver.StatementWrite {
 			p.IsWrite = true
 		}
-
-		// Params field derivation.
-		seenParam := make(map[string]int, len(q.Validated.Parameters))
-		for pi, param := range q.Validated.Parameters {
-			field := paramFieldName(param.Name)
-			// A name of nothing but underscores mangles to the empty
-			// string, which is not a Go field name. Refused only where
-			// the emission spells one: the one-parameter and no-parameter
-			// forms take the bare typed argument and derive no identifier
-			// from the parameter name at all, so $_ is served there and
-			// has to stay served (TestBlankParameterReachesOnlyThe-
-			// SingleParameterForm pins both halves).
-			//
-			// Before this, the two-or-more form emitted a struct field
-			// with no name and a bind expression reading `arg.,`, which
-			// left go/format to refuse the emission as ErrFormatFailure —
-			// a sentinel naming a template bug, handed to an author whose
-			// query is the thing at fault. Deferred rather than
-			// permanent: a future stage that spells Params fields
-			// positionally admits this, which is what puts it under
-			// ErrOutOfC6Scope rather than an unrepresentability.
-			if field == "" && len(q.Validated.Parameters) > 1 {
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s mangles to no Go field name, and a query binding %d parameters spells one per parameter; rename it",
-					ErrOutOfC6Scope, q.Name, pi, param.Name, len(q.Validated.Parameters))
-			}
-			if first, dup := seenParam[field]; dup {
-				return nil, fmt.Errorf("%w: query %q parameters $%s (position %d) and $%s (position %d) both mangle to %q", ErrParamNameCollision, q.Name, q.Validated.Parameters[first].Name, first, param.Name, pi, field)
-			}
-			seenParam[field] = pi
-
-			// Phase A guaranteed ResolvedProperty + representable width.
-			prop, ok := param.Type.(resolver.ResolvedProperty)
-			if !ok {
-				//gqlc:unreachable param-type-invariant
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, ResolvedTypeName(param.Type))
-			}
-			ty, _ := tm.Property(prop.Type)
-			p.ParamFields = append(p.ParamFields, Param{
-				RawName:  param.Name,
-				Field:    field,
-				GoType:   ty,
-				Nullable: prop.Nullable,
-				Width:    prop.Type,
-			})
+		params, err := deriveParamFields(q, tm)
+		if err != nil {
+			return nil, err
 		}
-
-		// Row field derivation.
-		seenRow := make(map[string]int, len(q.Validated.Columns))
-		for ci, col := range q.Validated.Columns {
-			field, ok := rowFieldName(col.Name)
-			if !ok {
-				//gqlc:unreachable row-field-alias
-				return nil, fmt.Errorf("%w: query %q column %d %q is neither a bare identifier nor a property access — add an explicit AS alias", ErrAliasRequired, q.Name, ci, col.Name)
-			}
-			if first, dup := seenRow[field]; dup {
-				return nil, fmt.Errorf("%w: query %q columns %d (%q) and %d (%q) both derive to %q — add an explicit AS alias to disambiguate", ErrRowFieldCollision, q.Name, first, q.Validated.Columns[first].Name, ci, col.Name, field)
-			}
-			seenRow[field] = ci
-
-			switch t := col.Type.(type) {
-			case resolver.ResolvedProperty:
-				if t.Type.Kind() == graph.KindList {
-					// Schema list property: build a ColumnList plan so the
-					// render layer uses the element-by-element decode path
-					// rather than a whole-slice carrier (§4.7).
-					elemResolved := resolver.ResolvedProperty{
-						Type:     t.Type.Elem(),
-						Nullable: !t.Type.ElemNotNull(),
-					}
-					plan, err := buildListElemPlan(elemResolved, entities, entityIndex, tm, -1, "")
-					if err != nil {
-						return nil, fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
-					}
-					p.RowFields = append(p.RowFields, Row{
-						ColumnName: col.Name,
-						Field:      field,
-						GoType:     "[]" + plan.GoType,
-						Nullable:   t.Nullable,
-						Kind:       ColumnList,
-						ListElem:   plan,
-						Width:      t.Type,
-					})
-					break
-				}
-				ty, _ := tm.Property(t.Type)
-				p.RowFields = append(p.RowFields, Row{
-					ColumnName: col.Name,
-					Field:      field,
-					GoType:     ty,
-					Nullable:   t.Nullable,
-					Kind:       ColumnProperty,
-					Width:      t.Type,
-				})
-			case resolver.ResolvedNode:
-				idx := entityIndex[entityLookupKey{Kind: EntityNode, Labels: t.Labels}]
-				p.RowFields = append(p.RowFields, Row{
-					ColumnName: col.Name,
-					Field:      field,
-					GoType:     entities[idx].Name,
-					Nullable:   t.Nullable,
-					Kind:       ColumnNode,
-				})
-			case resolver.ResolvedEdge:
-				idx := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: t.EdgeKey}]
-				p.RowFields = append(p.RowFields, Row{
-					ColumnName: col.Name,
-					Field:      field,
-					GoType:     entities[idx].Name,
-					Nullable:   t.Nullable,
-					Kind:       ColumnEdge,
-				})
-			case resolver.ResolvedTemporal:
-				ty, ok := tm.Temporal(t.Kind)
-				if !ok {
-					return nil, fmt.Errorf("%w: query %q column %d %q projects %s", ErrUnrepresentableTemporal, q.Name, ci, col.Name, t)
-				}
-				p.RowFields = append(p.RowFields, Row{
-					ColumnName: col.Name,
-					Field:      field,
-					GoType:     ty,
-					Kind:       ColumnTemporal,
-				})
-			case resolver.ResolvedScalar:
-				ty := tm.Scalar(t.Kind)
-				kind := ColumnScalar
-				// A null scalar has no narrowed carrier to assert against,
-				// so it shares ColumnAny's untyped lane at the top level
-				// (§5.5); a map scalar has a legitimate typed one.
-				if t.Kind == resolver.ScalarNull {
-					kind = ColumnAny
-				}
-				p.RowFields = append(p.RowFields, Row{
-					ColumnName: col.Name,
-					Field:      field,
-					GoType:     ty,
-					Kind:       kind,
-				})
-			case resolver.ResolvedUnknown:
-				p.RowFields = append(p.RowFields, Row{
-					ColumnName: col.Name,
-					Field:      field,
-					GoType:     "any",
-					Kind:       ColumnAny,
-				})
-			case resolver.ResolvedEdgeUnion:
-				// C5 edgeUnion synthesis (§4.10): interface name is
-				// <QueryName><RowFieldName>; candidates are the schema's
-				// entity struct names in resolver-canonical EdgeKeys order.
-				// Every candidate has a Phase A guarantee of a schema-cache
-				// entry (§2.1), so the lookup is infallible here.
-				interfaceName := q.Name + field
-				candidates := make([]string, len(t.EdgeKeys))
-				for i, ek := range t.EdgeKeys {
-					candidates[i] = entities[entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: ek}]].Name
-				}
-				p.EdgeUnions = append(p.EdgeUnions, &EdgeUnion{
-					QueryName:     q.Name,
-					ColumnPos:     ci,
-					ColumnName:    col.Name,
-					FieldName:     field,
-					InterfaceName: interfaceName,
-					EdgeKeys:      t.EdgeKeys,
-					Candidates:    candidates,
-				})
-				p.RowFields = append(p.RowFields, Row{
-					ColumnName: col.Name,
-					Field:      field,
-					GoType:     interfaceName,
-					Nullable:   t.Nullable,
-					Kind:       ColumnEdgeUnion,
-					EdgeKeys:   t.EdgeKeys,
-				})
-			case resolver.ResolvedList:
-				// list-of-edgeUnion at a leaf synthesises an EdgeUnion so
-				// models.go emits the interface + marker methods (§5.2).
-				// The leaf's synthesised interface name matches the top-level
-				// column's field name — every element of the list satisfies
-				// the same sealed sum. Append first so the plan builder
-				// can carry the resolved UnionIdx and interface name
-				// (§5.2 index-not-pointer).
-				unionIdx := -1
-				interfaceName := q.Name + field
-				if leafEK, isEdgeUnion := findEdgeUnionLeaf(t.Element); isEdgeUnion {
-					candidates := make([]string, len(leafEK))
-					for i, ek := range leafEK {
-						candidates[i] = entities[entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: ek}]].Name
-					}
-					unionIdx = len(p.EdgeUnions)
-					p.EdgeUnions = append(p.EdgeUnions, &EdgeUnion{
-						QueryName:     q.Name,
-						ColumnPos:     ci,
-						ColumnName:    col.Name,
-						FieldName:     field,
-						InterfaceName: interfaceName,
-						EdgeKeys:      leafEK,
-						Candidates:    candidates,
-					})
-				}
-				plan, err := buildListElemPlan(t.Element, entities, entityIndex, tm, unionIdx, interfaceName)
-				if err != nil {
-					return nil, fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
-				}
-				p.RowFields = append(p.RowFields, Row{
-					ColumnName: col.Name,
-					Field:      field,
-					GoType:     "[]" + plan.GoType,
-					Nullable:   t.Nullable,
-					Kind:       ColumnList,
-					ListElem:   plan,
-				})
-			default:
-				//gqlc:unreachable column-type-invariant
-				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, ResolvedTypeName(col.Type))
-			}
+		p.ParamFields = params
+		if err := deriveRowFields(&p, entities, entityIndex, tm); err != nil {
+			return nil, err
 		}
-
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// deriveParamFields is Phase B's Params field derivation: one Param per
+// bound parameter in Validated.Parameters order, with the per-query
+// mangled-name collision check.
+func deriveParamFields(q NamedQuery, tm TypeMap) ([]Param, error) {
+	var fields []Param
+	seenParam := make(map[string]int, len(q.Validated.Parameters))
+	for pi, param := range q.Validated.Parameters {
+		field := paramFieldName(param.Name)
+		// A name of nothing but underscores mangles to the empty
+		// string, which is not a Go field name. Refused only where
+		// the emission spells one: the one-parameter and no-parameter
+		// forms take the bare typed argument and derive no identifier
+		// from the parameter name at all, so $_ is served there and
+		// has to stay served (TestBlankParameterReachesOnlyThe-
+		// SingleParameterForm pins both halves).
+		//
+		// Before this, the two-or-more form emitted a struct field
+		// with no name and a bind expression reading `arg.,`, which
+		// left go/format to refuse the emission as ErrFormatFailure —
+		// a sentinel naming a template bug, handed to an author whose
+		// query is the thing at fault. Deferred rather than
+		// permanent: a future stage that spells Params fields
+		// positionally admits this, which is what puts it under
+		// ErrOutOfC6Scope rather than an unrepresentability.
+		if field == "" && len(q.Validated.Parameters) > 1 {
+			return nil, fmt.Errorf("%w: query %q parameter %d $%s mangles to no Go field name, and a query binding %d parameters spells one per parameter; rename it",
+				ErrOutOfC6Scope, q.Name, pi, param.Name, len(q.Validated.Parameters))
+		}
+		if first, dup := seenParam[field]; dup {
+			return nil, fmt.Errorf("%w: query %q parameters $%s (position %d) and $%s (position %d) both mangle to %q", ErrParamNameCollision, q.Name, q.Validated.Parameters[first].Name, first, param.Name, pi, field)
+		}
+		seenParam[field] = pi
+
+		// Phase A guaranteed ResolvedProperty + representable width.
+		prop, ok := param.Type.(resolver.ResolvedProperty)
+		if !ok {
+			//gqlc:unreachable param-type-invariant
+			return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, ResolvedTypeName(param.Type))
+		}
+		ty, _ := tm.Property(prop.Type)
+		fields = append(fields, Param{
+			RawName:  param.Name,
+			Field:    field,
+			GoType:   ty,
+			Nullable: prop.Nullable,
+			Width:    prop.Type,
+		})
+	}
+	return fields, nil
+}
+
+// deriveRowFields is Phase B's Row field derivation: one Row per column
+// in Validated.Columns order, with the per-query derived-name collision
+// check.
+func deriveRowFields(p *Query, entities []Entity, entityIndex map[entityLookupKey]int, tm TypeMap) error {
+	q := p.NamedQuery
+	seenRow := make(map[string]int, len(q.Validated.Columns))
+	for ci, col := range q.Validated.Columns {
+		field, ok := rowFieldName(col.Name)
+		if !ok {
+			//gqlc:unreachable row-field-alias
+			return fmt.Errorf("%w: query %q column %d %q is neither a bare identifier nor a property access — add an explicit AS alias", ErrAliasRequired, q.Name, ci, col.Name)
+		}
+		if first, dup := seenRow[field]; dup {
+			return fmt.Errorf("%w: query %q columns %d (%q) and %d (%q) both derive to %q — add an explicit AS alias to disambiguate", ErrRowFieldCollision, q.Name, first, q.Validated.Columns[first].Name, ci, col.Name, field)
+		}
+		seenRow[field] = ci
+		if err := appendRowField(p, ci, col, field, entities, entityIndex, tm); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// appendRowField commits one column's Row field, and the EdgeUnion the
+// C5 / §4.7 arms synthesise alongside it, onto p. field is the derived
+// Row field name deriveRowFields has already collision-checked.
+func appendRowField(p *Query, ci int, col resolver.Column, field string, entities []Entity, entityIndex map[entityLookupKey]int, tm TypeMap) error {
+	q := p.NamedQuery
+	switch t := col.Type.(type) {
+	case resolver.ResolvedProperty:
+		if t.Type.Kind() == graph.KindList {
+			// Schema list property: build a ColumnList plan so the
+			// render layer uses the element-by-element decode path
+			// rather than a whole-slice carrier (§4.7).
+			elemResolved := resolver.ResolvedProperty{
+				Type:     t.Type.Elem(),
+				Nullable: !t.Type.ElemNotNull(),
+			}
+			plan, err := buildListElemPlan(elemResolved, entities, entityIndex, tm, -1, "")
+			if err != nil {
+				return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
+			}
+			p.RowFields = append(p.RowFields, Row{
+				ColumnName: col.Name,
+				Field:      field,
+				GoType:     "[]" + plan.GoType,
+				Nullable:   t.Nullable,
+				Kind:       ColumnList,
+				ListElem:   plan,
+				Width:      t.Type,
+			})
+			break
+		}
+		ty, _ := tm.Property(t.Type)
+		p.RowFields = append(p.RowFields, Row{
+			ColumnName: col.Name,
+			Field:      field,
+			GoType:     ty,
+			Nullable:   t.Nullable,
+			Kind:       ColumnProperty,
+			Width:      t.Type,
+		})
+	case resolver.ResolvedNode:
+		idx := entityIndex[entityLookupKey{Kind: EntityNode, Labels: t.Labels}]
+		p.RowFields = append(p.RowFields, Row{
+			ColumnName: col.Name,
+			Field:      field,
+			GoType:     entities[idx].Name,
+			Nullable:   t.Nullable,
+			Kind:       ColumnNode,
+		})
+	case resolver.ResolvedEdge:
+		idx := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: t.EdgeKey}]
+		p.RowFields = append(p.RowFields, Row{
+			ColumnName: col.Name,
+			Field:      field,
+			GoType:     entities[idx].Name,
+			Nullable:   t.Nullable,
+			Kind:       ColumnEdge,
+		})
+	case resolver.ResolvedTemporal:
+		ty, ok := tm.Temporal(t.Kind)
+		if !ok {
+			return fmt.Errorf("%w: query %q column %d %q projects %s", ErrUnrepresentableTemporal, q.Name, ci, col.Name, t)
+		}
+		p.RowFields = append(p.RowFields, Row{
+			ColumnName: col.Name,
+			Field:      field,
+			GoType:     ty,
+			Kind:       ColumnTemporal,
+		})
+	case resolver.ResolvedScalar:
+		ty := tm.Scalar(t.Kind)
+		kind := ColumnScalar
+		// A null scalar has no narrowed carrier to assert against,
+		// so it shares ColumnAny's untyped lane at the top level
+		// (§5.5); a map scalar has a legitimate typed one.
+		if t.Kind == resolver.ScalarNull {
+			kind = ColumnAny
+		}
+		p.RowFields = append(p.RowFields, Row{
+			ColumnName: col.Name,
+			Field:      field,
+			GoType:     ty,
+			Kind:       kind,
+		})
+	case resolver.ResolvedUnknown:
+		p.RowFields = append(p.RowFields, Row{
+			ColumnName: col.Name,
+			Field:      field,
+			GoType:     "any",
+			Kind:       ColumnAny,
+		})
+	case resolver.ResolvedEdgeUnion:
+		// C5 edgeUnion synthesis (§4.10): interface name is
+		// <QueryName><RowFieldName>; candidates are the schema's
+		// entity struct names in resolver-canonical EdgeKeys order.
+		// Every candidate has a Phase A guarantee of a schema-cache
+		// entry (§2.1), so the lookup is infallible here.
+		interfaceName := q.Name + field
+		candidates := make([]string, len(t.EdgeKeys))
+		for i, ek := range t.EdgeKeys {
+			candidates[i] = entities[entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: ek}]].Name
+		}
+		p.EdgeUnions = append(p.EdgeUnions, &EdgeUnion{
+			QueryName:     q.Name,
+			ColumnPos:     ci,
+			ColumnName:    col.Name,
+			FieldName:     field,
+			InterfaceName: interfaceName,
+			EdgeKeys:      t.EdgeKeys,
+			Candidates:    candidates,
+		})
+		p.RowFields = append(p.RowFields, Row{
+			ColumnName: col.Name,
+			Field:      field,
+			GoType:     interfaceName,
+			Nullable:   t.Nullable,
+			Kind:       ColumnEdgeUnion,
+			EdgeKeys:   t.EdgeKeys,
+		})
+	case resolver.ResolvedList:
+		// list-of-edgeUnion at a leaf synthesises an EdgeUnion so
+		// models.go emits the interface + marker methods (§5.2).
+		// The leaf's synthesised interface name matches the top-level
+		// column's field name — every element of the list satisfies
+		// the same sealed sum. Append first so the plan builder
+		// can carry the resolved UnionIdx and interface name
+		// (§5.2 index-not-pointer).
+		unionIdx := -1
+		interfaceName := q.Name + field
+		if leafEK, isEdgeUnion := findEdgeUnionLeaf(t.Element); isEdgeUnion {
+			candidates := make([]string, len(leafEK))
+			for i, ek := range leafEK {
+				candidates[i] = entities[entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: ek}]].Name
+			}
+			unionIdx = len(p.EdgeUnions)
+			p.EdgeUnions = append(p.EdgeUnions, &EdgeUnion{
+				QueryName:     q.Name,
+				ColumnPos:     ci,
+				ColumnName:    col.Name,
+				FieldName:     field,
+				InterfaceName: interfaceName,
+				EdgeKeys:      leafEK,
+				Candidates:    candidates,
+			})
+		}
+		plan, err := buildListElemPlan(t.Element, entities, entityIndex, tm, unionIdx, interfaceName)
+		if err != nil {
+			return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
+		}
+		p.RowFields = append(p.RowFields, Row{
+			ColumnName: col.Name,
+			Field:      field,
+			GoType:     "[]" + plan.GoType,
+			Nullable:   t.Nullable,
+			Kind:       ColumnList,
+			ListElem:   plan,
+		})
+	default:
+		//gqlc:unreachable column-type-invariant
+		return fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, ResolvedTypeName(col.Type))
+	}
+	return nil
 }
 
 // sweepIdentifiers runs spec §4.6's exported-identifier collision sweep
@@ -1367,6 +1425,23 @@ func sweepIdentifiers(entities []Entity, prepared []Query) error {
 		}
 		seen[ident] = fmt.Sprintf("the generated package's fixed declaration %q", ident)
 	}
+	if err := sweepEntityNames(entities, insert); err != nil {
+		return err
+	}
+	if err := sweepQueryNames(prepared, insert); err != nil {
+		return err
+	}
+	return sweepRecordNames(entities, prepared, insert)
+}
+
+// insertIdent enrols one emitted identifier under the text naming where
+// it came from, refusing one already enrolled. The per-source sweeps take
+// it rather than the map so they share one enrolment order and one
+// refusal.
+type insertIdent func(ident, source string) error
+
+// sweepEntityNames enrols sources 1 and 2.
+func sweepEntityNames(entities []Entity, insert insertIdent) error {
 	// Source 1: entity struct names.
 	for _, e := range entities {
 		var srcAxis string
@@ -1388,6 +1463,11 @@ func sweepIdentifiers(entities []Entity, prepared []Query) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// sweepQueryNames enrols sources 3 through 7.
+func sweepQueryNames(prepared []Query, insert insertIdent) error {
 	// Sources 3-5: method / Params / Row.
 	for _, p := range prepared {
 		if err := insert(p.MethodName, fmt.Sprintf("query %q method", p.Name)); err != nil {
@@ -1422,6 +1502,11 @@ func sweepIdentifiers(entities []Entity, prepared []Query) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// sweepRecordNames enrols sources 8 and 9.
+func sweepRecordNames(entities []Entity, prepared []Query, insert insertIdent) error {
 	// Source 8: record carrier aliases and conversion helpers, in
 	// RecordEncodings' canonical-encoding order so the side a collision
 	// reports as "first" does not move between runs.

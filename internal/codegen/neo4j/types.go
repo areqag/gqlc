@@ -38,6 +38,25 @@ type typeMap struct{}
 // models an instant without residue. DURATION collapses its
 // (YEAR TO MONTH) vs (DAY TO SECOND) qualifier onto a single Duration
 // carrying Months / Days / Seconds / Nanos (see ADR 0002 Consequences).
+//
+// EXEMPT FROM gocyclo, NOT FROM gocognit. gocyclo counts this 31 because it
+// increments once per `case` and the table has one per property width;
+// gocognit counts it 10, charging the `switch` once and the nesting nothing.
+// A 3x disagreement, and gocognit is the one describing what a reader faces:
+// gocyclo alone ranked this the 6th-most-complex function in the repository
+// when it is one flat table behind two container guards.
+//
+// Splitting it to satisfy the count is not available, and that is a fact
+// about this method rather than a preference. Two guards read it by
+// STRUCTURE: typescan.PropertyArms skips any decl whose `fn.Recv == nil` and
+// takes the method name as an argument, so a table moved to a plain function
+// is invisible to the walk in decoder_test.go that holds every arm to a row —
+// and the walk then reads zero arms and passes vacuously. render_queries_test.go's
+// carrier walk reads this method's RETURN statements and refuses any it
+// cannot read, so a return of the form `t.someHelper(pt)` reddens it. Both
+// were measured failing on 2026-09-10 when exactly that split was attempted.
+//
+//nolint:gocyclo // flat per-width dispatch table; gocognit scores it 10 and still gates it
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
 		elemTy, ok := t.Property(pt.Elem())
