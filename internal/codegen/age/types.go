@@ -124,13 +124,21 @@ type typeMap struct{}
 //
 // Splitting it to satisfy the count is not available, and that is a fact
 // about this method rather than a preference. Two guards read it by
-// STRUCTURE: typescan.PropertyArms skips any decl whose `fn.Recv == nil` and
-// takes the method name as an argument, so a table moved to a plain function
-// is invisible to the walk in types_test.go that holds every arm to a row —
-// and the walk then reads zero arms and passes vacuously. render_queries_test.go's
-// carrier walk reads this method's RETURN statements and refuses any it
-// cannot read, so a return of the form `t.someHelper(pt)` reddens it. Both
-// were measured failing on 2026-09-10 when exactly that split was attempted.
+// STRUCTURE, and both red LOUDLY rather than quietly:
+//
+//   - typescan.PropertyArms skips any decl whose `fn.Recv == nil` and takes
+//     the method name as an argument, so a table moved to a plain function is
+//     invisible to it. What that does not do is pass vacuously —
+//     types_test.go asserts `require.NotEmpty(t, arms, ...)` before ranging
+//     over them, precisely so a walk that read nothing cannot hold the table
+//     to nothing.
+//   - render_queries_test.go's typeTableGoTypes reads this method's RETURN
+//     statements out of the package directory, and returnedGoType REFUSES a
+//     return whose shape it cannot read rather than skipping it — so a return
+//     of the form `t.someHelper(pt)` reds it too.
+//
+// Both were measured failing on 2026-09-10 when exactly that split was
+// attempted.
 //
 //nolint:gocyclo // flat per-width dispatch table; gocognit scores it 15 and still gates it
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {

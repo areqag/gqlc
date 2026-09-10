@@ -47,14 +47,21 @@ type typeMap struct{}
 // when it is one flat table behind two container guards.
 //
 // Splitting it to satisfy the count is not available, and that is a fact
-// about this method rather than a preference. Two guards read it by
+// about this method rather than a preference. ONE guard reads it by
 // STRUCTURE: typescan.PropertyArms skips any decl whose `fn.Recv == nil` and
 // takes the method name as an argument, so a table moved to a plain function
-// is invisible to the walk in decoder_test.go that holds every arm to a row —
-// and the walk then reads zero arms and passes vacuously. render_queries_test.go's
-// carrier walk reads this method's RETURN statements and refuses any it
-// cannot read, so a return of the form `t.someHelper(pt)` reddens it. Both
-// were measured failing on 2026-09-10 when exactly that split was attempted.
+// is invisible to it — the walk is propertyArmNames in decoder_test.go and
+// the obligation it feeds is in types_test.go. That does not pass vacuously:
+// types_test.go asserts `require.NotEmpty(t, arms, ...)` before ranging over
+// them, precisely so a walk that read nothing cannot hold the table to
+// nothing. It reds LOUDLY, and was measured doing so on 2026-09-10 when
+// exactly that split was attempted.
+//
+// The age copy of this table is held by a SECOND structural guard that this
+// package has no equivalent of: age's render_queries_test.go reads its
+// typeMap's RETURN statements and refuses a return whose shape it cannot
+// read. Nothing here walks returns, so the neo4j table rests on the arms
+// walk alone — do not read the age comment as also describing this one.
 //
 //nolint:gocyclo // flat per-width dispatch table; gocognit scores it 10 and still gates it
 func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
