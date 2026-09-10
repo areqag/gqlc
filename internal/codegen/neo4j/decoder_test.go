@@ -945,8 +945,6 @@ func TestEmittedDecodersNarrowThroughACheck(t *testing.T) {
 	for name, src := range emissionsUnderNarrowingGuard(t) {
 		file, err := parser.ParseFile(token.NewFileSet(), name, src, parser.SkipObjectResolution)
 		require.NoError(t, err, "%s does not parse", name)
-		fset := token.NewFileSet()
-		fset.AddFile(name, fset.Base(), len(src))
 
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -958,7 +956,17 @@ func TestEmittedDecodersNarrowThroughACheck(t *testing.T) {
 				if !isCall || len(call.Args) != 1 {
 					return true
 				}
-				id, isIdent := call.Fun.(*ast.Ident)
+				// Unparen, not a bare assertion on call.Fun: (int32)(v)
+				// is a legal spelling of int32(v) that wraps identically,
+				// and matching only *ast.Ident lets it through.
+				//
+				// Exactly one paren level can arrive, so a single unwrap
+				// would be equivalent here: every emission is walked after
+				// codegen.Finalise ran format.Source over it (emit.go:26),
+				// and gofmt collapses ((int32))(v) to (int32)(v) — measured,
+				// to any depth. Unparen is the stdlib spelling of that
+				// unwrap and does not depend on the collapse holding.
+				id, isIdent := ast.Unparen(call.Fun).(*ast.Ident)
 				if !isIdent || !narrowingWidths[id.Name] {
 					return true
 				}
@@ -991,15 +999,30 @@ var narrowingGuardSkips = map[string]bool{"temporal_neo4j.go": true}
 // The bytes come from Generate rather than from the golden tree, for the
 // reason the corpus states: a golden regenerated alongside a defect
 // agrees with itself.
+//
+// Emptiness is asserted PER FIXTURE, inside keep, and that placement is
+// the whole point of the assertion. An assertion on the merged map holds
+// as long as ONE fixture still emits, so a fixture that goes silent —
+// Generate returning an empty list with a nil error, or every file it
+// emits landing in narrowingGuardSkips — leaves the guard walking half
+// its beat and reporting the same green. Measured on this guard before
+// the split: blinding probe alone and blinding corpus alone were each
+// green; only blinding both was red. keep counts what it KEPT rather
+// than what it was handed, so the all-skipped case is caught too.
 func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	keep := func(prefix string, files []codegen.File) {
+		kept := 0
 		for _, f := range files {
 			if !narrowingGuardSkips[f.Path] {
 				out[prefix+f.Path] = string(f.Contents)
+				kept++
 			}
 		}
+		require.NotZero(t, kept,
+			"the %s fixture contributed no walked file, so the guard's green covers only the other fixture",
+			prefix)
 	}
 
 	probe, err := gql.New().Parse(strings.NewReader(decoderProbeSchema(unclaimedProperty)))
@@ -1017,7 +1040,6 @@ func emissionsUnderNarrowingGuard(t *testing.T) map[string]string {
 	require.NoError(t, err)
 	keep("corpus/", corpusFiles)
 
-	require.NotEmpty(t, out, "the guard walked no emitted files at all")
 	return out
 }
 
