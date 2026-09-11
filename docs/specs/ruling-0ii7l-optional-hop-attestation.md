@@ -624,8 +624,9 @@ one** — but it takes a `WITH`, and the reason it does is itself a result.
 implies `qualifiedDemoter(e)`: `singleHopPattern` demands an upper bound of
 exactly one hop, which forces a lower bound of one, and both return true on a
 nil quantifier and a nil lower bound. `witnessesItsEndpoints` and
-`demoteAcrossEdges` then share an identical nullability precondition —
-`e.Nullable() && !demoted[e.OptionalGroup()]` disqualifies an edge from each.
+`demoteAcrossEdges` then share an identical nullability precondition: both call
+`presentOnEveryRow`, and an edge that fails it —
+`e.Nullable() && !demoted[e.OptionalGroup()]` — is disqualified from each.
 So every edge `endpointNarrowing` folds also demotes both of its named endpoints
 and their groups, and Phase D runs *above* Phases B and C, so that demotion is
 already in hand when either reader runs. Conjunct (b) puts the attesting hop in

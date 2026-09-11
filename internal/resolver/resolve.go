@@ -2116,8 +2116,17 @@ func witnessesItsEndpoints(e query.EdgeBinding, written map[string]struct{}, dem
 // (singleHopPattern and qualifiedDemoter respectively). While both re-spelled
 // it, the two could drift apart and no test could see it: a guard that
 // re-spells a condition rather than calling it is not pinned by any assertion
-// about the condition. One symbol makes that drift unspellable instead of
-// merely untested (bd gqlc-nmga).
+// about the condition.
+//
+// What the symbol removes is the second COPY, not the drift. Re-spelling this
+// condition inline at one call site is still spellable, and a test asserting
+// the implication between the two guards cannot see it: rewriting
+// demoteAcrossEdges' gate to `e.Nullable() || !qualifiedDemoter(e)` leaves
+// TestEveryEdgeTheNarrowingLearnsFromAlsoDemotesItsEndpoints green — measured
+// on PR #2868's head and re-measured 2026-09-11 at bda2933d. What reds is the
+// corpus fixture valid/demote_group_cascade.cypher, three of whose six columns
+// type nullable once ay9's exemption is gone. That test's own comment
+// enumerates the guard holding each caller's side (bd gqlc-nmga, gqlc-3biy).
 func presentOnEveryRow(e query.EdgeBinding, demoted map[int]bool) bool {
 	return !e.Nullable() || demoted[e.OptionalGroup()]
 }
