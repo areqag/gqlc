@@ -34,16 +34,17 @@
 # The step sets errexit and nounset itself, on the first line of the run block,
 # so that argument is checkable from this file alone.
 #
-# NOT GUARDED BY A TEST. The sibling setup-golangci/action.yml used to say a
-# tool at internal/tools/ciguard asserts this shape; that tool was deleted with
-# the rest of the CI scaffolding in PR #1595, and the sibling now says so too
-# (bd gqlc-chep). So nothing IN THIS TREE holds the path below in agreement
-# with the justfile's `shellcheck`
-# variable, catches the errexit-spelling regression described above, or refuses
-# an `if:`/`continue-on-error:` on either step. The first two were measured once,
-# out of tree, on the branch that added this file; the third was not measured at
-# all. A measurement is not a guard either way, and gqlc-chep is where the
-# decision about a real one lives.
+# WHAT GUARDS THAT SPELLING NOW. The sibling setup-golangci/action.yml used to
+# say a tool at internal/tools/ciguard asserts this shape; that tool was deleted
+# with the rest of the CI scaffolding in PR #1595 (bd gqlc-chep). bd gqlc-pz5jw
+# ruled that it does not come back, and the assert step below is what was taken
+# instead — the sibling carries the argument for its shape and for the three
+# things it does not cover, and this file deliberately does not restate it.
+#
+# What is asserted here is the same pair: the emitted pin is the justfile's
+# `shellcheck_version`, and the justfile's `shellcheck` variable is the path the
+# cache saves. An `if:`/`continue-on-error:` on the restore step remains
+# unguarded, as it does there.
 name: setup-shellcheck
 description: restore the pinned shellcheck binary into .bin/ from cache
 runs:
@@ -56,6 +57,29 @@ runs:
         set -euo pipefail
         version="$(just --evaluate shellcheck_version)"
         echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: assert the pin reached the cache key
+      shell: bash
+      env:
+        PIN: ${{ steps.pin.outputs.version }}
+      run: |
+        set -euo pipefail
+        want_version="$(just --evaluate shellcheck_version)"
+        want_path="${GITHUB_WORKSPACE}/.bin/shellcheck"
+        if [ -z "${PIN}" ]; then
+            echo "::error title=shellcheck pin is empty::the version step emitted no version, so the cache below would key on 'shellcheck-bin-<os>-' and every job would re-download from the third-party release URL this action exists to stop reaching (bd gqlc-pz5jw)." >&2
+            exit 1
+        fi
+        if [ "${PIN}" != "${want_version}" ]; then
+            echo "::error title=shellcheck pin drifted::the version step emitted '${PIN}', but the justfile's shellcheck_version is '${want_version}'. ensure-shellcheck would reject what this key caches." >&2
+            exit 1
+        fi
+        got_path="$(just --evaluate shellcheck)"
+        if [ "${got_path}" != "${want_path}" ]; then
+            echo "::error title=shellcheck install path drifted::the justfile installs to '${got_path}', but the cache below saves '.bin/shellcheck'. The restore would be green over the wrong path and every job would re-download." >&2
+            exit 1
+        fi
+        echo "pin ${PIN} -> ${want_path}"
 
     - name: restore shellcheck binary from cache
       uses: actions/cache@v4
