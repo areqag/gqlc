@@ -9,22 +9,33 @@ import (
 	"time"
 )
 
-// The text on the right of every case below was captured from apache/age
-// 1.7.0 and cross-checked byte-for-byte against what pgx v5 scans
-// (gqlc-35yu.5, corpus sections C1-C11). These bytes are what the
+// The PACKAGE-LEVEL string consts in this file were captured from
+// apache/age 1.7.0 and cross-checked byte-for-byte against what pgx v5
+// scans (gqlc-35yu.5, corpus sections C1-C11). These bytes are what the
 // helpers under test will actually be handed.
 //
-// That claim now has a guard behind it rather than a provenance note.
-// Every package-level string const in this file is named in exactly one
-// of two tables in test/data/codegen/live_age_agtype_capture_test.go:
-// the live one, whose rows are re-read off a running apache/age 1.7.0
-// and compared byte-for-byte, or the synthetic one, whose rows carry the
-// reason they are written rather than captured. A Docker-free census
-// beside it fails on a const in neither table, so a new capture cannot
-// enter this file unwitnessed. Until that landed the claim was prose,
-// and five of the captures had drifted from the server in property key
-// order — alice, bob, anyTag, slotOK, slotNulls, all corrected here
-// (bd gqlc-6308, 2026-09-10).
+// That claim has a guard behind it rather than a provenance note. Every
+// package-level string const in this file is named in exactly one of two
+// tables in test/data/codegen/agtype_capture_census_test.go: the live
+// one, whose rows are re-read off a running apache/age 1.7.0 and
+// compared byte-for-byte by TestAGEAgtypeCaptureMatchesTheServer, or the
+// synthetic one, whose rows carry the reason they are written rather
+// than captured. A Docker-free census beside them fails on a const in
+// neither table, so a new capture cannot enter this file unwitnessed.
+// Until that landed the claim was prose, and five of the captures had
+// drifted from the server in property key order — alice, bob, anyTag,
+// slotOK, slotNulls, all corrected here (bd gqlc-6308, 2026-09-10).
+//
+// THE GUARD REACHES PACKAGE-LEVEL CONSTS AND NOTHING ELSE, and the
+// sentence above is scoped to them on purpose. A string literal written
+// inside a test body is an input that test composed for itself, read
+// beside the assertion that uses it; it is not a capture and nothing
+// replays it. Several are deliberately malformed, because refusing a
+// mis-shaped carrier is what their assertion is about, and one is a
+// hand-edited copy of alice's bytes carrying alice's real graphid. Do
+// not read an in-body literal as something a server emitted, and do not
+// add a capture as one — a capture belongs in the const block above,
+// where the census can see it (bd gqlc-28kw).
 //
 // This file is compiled in a throwaway module whose go.mod requires
 // nothing, run with GOPROXY=off so that a corpus run cannot reach the
@@ -312,6 +323,18 @@ func TestDecodeVertexReadsNullableProperties(t *testing.T) {
 // fail for another reason: a value out of the carrier's own range, or a
 // property missing from the vertex, fails inside agtypeInt64 and would
 // satisfy a bare `err != nil`.
+//
+// EVERY raw BELOW IS WRITTEN, NOT CAPTURED. Each is alice with one
+// property widened past the declared width, so none was ever emitted by
+// a server and none is replayed by TestAGEAgtypeCaptureMatchesTheServer.
+// Two things say so on their face: they all carry graphid
+// 844424930131972, and one graph cannot hand the same id to eleven
+// distinct writes; and their property keys are in the order an author
+// types rather than the order jsonb stores, which is by key length then
+// bytewise. It is in fact the order alice itself carried until the live
+// witness corrected it. The shared id is deliberate and nothing reads
+// it — whether a declared width holds a value is a property of the TEXT
+// handed to the decoder, not of which vertex produced it (bd gqlc-28kw).
 func TestDecodeVertexRefusesAValueTheDeclaredWidthCannotHold(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -366,6 +389,10 @@ func TestDecodeVertexRefusesAValueTheDeclaredWidthCannotHold(t *testing.T) {
 // reaches the caller unchanged. Without these rows a decoder that refused
 // every narrow value would satisfy the refusals above, and the boundary
 // rows are where a check written one comparison too tight shows up.
+//
+// Every raw below is written rather than captured, on the same terms as
+// the table above: alice with one property moved to a boundary, sharing
+// the one meaningless graphid, keyed in author order rather than jsonb's.
 func TestDecodeVertexAcceptsWhatTheDeclaredWidthHolds(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
