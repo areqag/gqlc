@@ -14,6 +14,11 @@
       "name": "DeletePerson",
       "cardinality": "exec",
       "text": "MATCH (p:Person) WHERE p.id = $id DELETE p"
+    },
+    {
+      "name": "StreamPeople",
+      "cardinality": "iter",
+      "text": "MATCH (p:Person) RETURN p.name AS name"
     }
   ]
 }

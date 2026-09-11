@@ -645,6 +645,8 @@ func cardinalityAnnotation(c queryfile.Cardinality) string {
 		return ":many"
 	case queryfile.CardinalityExec:
 		return ":exec"
+	case queryfile.CardinalityIter:
+		return ":iter"
 	}
 	return "<invalid>"
 }
@@ -688,7 +690,7 @@ func admitQueryAxes(q NamedQuery, i int) error {
 	if _, reserved := reservedIdentifiers[q.Name]; reserved {
 		return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
 	}
-	if q.Cardinality != queryfile.CardinalityOne && q.Cardinality != queryfile.CardinalityMany && q.Cardinality != queryfile.CardinalityExec {
+	if q.Cardinality != queryfile.CardinalityOne && q.Cardinality != queryfile.CardinalityMany && q.Cardinality != queryfile.CardinalityExec && q.Cardinality != queryfile.CardinalityIter {
 		return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 	}
 	// Cardinality × shape gate (spec §4.9). Runs before the column-type
@@ -698,7 +700,14 @@ func admitQueryAxes(q NamedQuery, i int) error {
 	if q.Cardinality == queryfile.CardinalityExec && len(q.Validated.Columns) > 0 {
 		return fmt.Errorf("%w: query %q at position %d has cardinality :exec but projects %d column(s) (first column %q) — drop :exec or drop RETURN", ErrExecOnProjection, q.Name, i, len(q.Validated.Columns), q.Validated.Columns[0].Name)
 	}
-	if (q.Cardinality == queryfile.CardinalityOne || q.Cardinality == queryfile.CardinalityMany) && len(q.Validated.Columns) == 0 {
+	// :iter is read-only (ADR 0010 D8). Ordered BEFORE the zero-column gate
+	// below so a zero-column :iter write — which satisfies both — reports the
+	// axis the caller has to fix first: adding a RETURN to a streamed write
+	// still leaves it refused, where re-annotating fixes it outright.
+	if q.Cardinality == queryfile.CardinalityIter && q.Validated.Statement == resolver.StatementWrite {
+		return fmt.Errorf("%w: query %q at position %d has cardinality :iter but the query writes — a streamed write yields rows the transaction may still roll back; annotate :many", ErrIterOnWrite, q.Name, i)
+	}
+	if (q.Cardinality == queryfile.CardinalityOne || q.Cardinality == queryfile.CardinalityMany || q.Cardinality == queryfile.CardinalityIter) && len(q.Validated.Columns) == 0 {
 		shape := "zero-column read"
 		if q.Validated.Statement == resolver.StatementWrite {
 			shape = "zero-column write"

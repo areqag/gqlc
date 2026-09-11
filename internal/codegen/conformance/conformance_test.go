@@ -203,6 +203,8 @@ func sentinelIdent(err error) string {
 		return "ErrExecOnProjection"
 	case codegen.ErrCardinalityShapeMismatch:
 		return "ErrCardinalityShapeMismatch"
+	case codegen.ErrIterOnWrite:
+		return "ErrIterOnWrite"
 	case codegen.ErrUnrepresentableWidth:
 		return "ErrUnrepresentableWidth"
 	case codegen.ErrUnstorableProperty:

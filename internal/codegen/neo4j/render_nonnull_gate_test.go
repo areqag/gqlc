@@ -37,7 +37,30 @@ import (
 // exist. The behaviour that does matter — that the two refusals stay
 // distinguishable and each names its column — is pinned in the corpus by
 // requireDistinctRefusals (bd gqlc-h803), which names neither phrase.
-const gateLine = `return zeroValue, fmt.Errorf("SweepQuery: column %q is non-nullable but arrived null", "col")`
+const gateRefusal = `fmt.Errorf("SweepQuery: column %q is non-nullable but arrived null", "col")`
+
+// gateExits is the sweep's second axis, added with :iter (bd gqlc-1a5).
+//
+// Every lane below now takes its failure form as a parameter instead of
+// hard-coding `return <zero>, err`, because a :iter decode runs inside a
+// callback returning bool where that does not compile. A parameter is a
+// thing a lane can forget to use: a lane that kept a literal `return
+// zeroValue, ...` would emit identical bytes under the pair exit — so the
+// single-exit sweep this replaced would stay green — and emit source that
+// does not compile under the yield exit. Running the whole table under both
+// exits is what makes the parameter's use, rather than its presence,
+// the thing that is checked.
+//
+// gateLine is what the lane must emit under each; want is the exit's own
+// name, for the failure message.
+var gateExits = []struct {
+	want     string
+	exit     neo4j.Exit
+	gateLine string
+}{
+	{want: "pair", exit: neo4j.PairExit("zeroValue"), gateLine: "return zeroValue, " + gateRefusal},
+	{want: "yield", exit: neo4j.YieldExit("zeroValue"), gateLine: "yield(zeroValue, " + gateRefusal + ")\nreturn false"},
+}
 
 // nonNullGateCase is one lane of the row-assembly dispatch, reached by a
 // codegen.Row that routes there.
@@ -148,11 +171,11 @@ func sweepQuery(f codegen.Row) codegen.Query {
 	}
 }
 
-// renderColumn runs the row-assembly dispatch for one column and returns
-// the emitted Go source.
-func renderColumn(f codegen.Row) string {
+// renderColumn runs the row-assembly dispatch for one column under a chosen
+// exit and returns the emitted Go source.
+func renderColumn(f codegen.Row, exit neo4j.Exit) string {
 	var b strings.Builder
-	neo4j.WriteSingleColumnDecodeIndent(&b, sweepQuery(f), f, "rec", "zeroValue", "\tout.Col = ", "\n", "\t")
+	neo4j.WriteSingleColumnDecodeIndent(&b, sweepQuery(f), f, "rec", exit, "\tout.Col = ", "\n", "\t")
 	return b.String()
 }
 
@@ -165,24 +188,29 @@ func renderColumn(f codegen.Row) string {
 // next lane from skipping the gate the way writeAnyColumnDecodeIndent
 // did: `any` was the width where the omission was observable, but the
 // omission itself was a lane's, not a width's.
+//
+// The exit axis is the second dimension; see gateExits for why one alone
+// cannot see a lane that ignores the parameter.
 func TestEveryColumnKindGatesArrivedNull(t *testing.T) {
-	for _, c := range nonNullGateCases() {
-		t.Run(c.kindName+"/"+c.desc, func(t *testing.T) {
-			f := c.row
-			f.Nullable = false
-			nonNullable := renderColumn(f)
-			require.Contains(t, nonNullable, c.lane,
-				"row did not reach the lane this case names; the case is testing some other arm's gate")
-			require.Contains(t, nonNullable, gateLine,
-				"a non-nullable column's lane must refuse a value that arrived null")
+	for _, x := range gateExits {
+		for _, c := range nonNullGateCases() {
+			t.Run(x.want+"/"+c.kindName+"/"+c.desc, func(t *testing.T) {
+				f := c.row
+				f.Nullable = false
+				nonNullable := renderColumn(f, x.exit)
+				require.Contains(t, nonNullable, c.lane,
+					"row did not reach the lane this case names; the case is testing some other arm's gate")
+				require.Contains(t, nonNullable, x.gateLine,
+					"a non-nullable column's lane must refuse a value that arrived null, through the exit it was handed")
 
-			f.Nullable = true
-			nullable := renderColumn(f)
-			require.Contains(t, nullable, c.lane,
-				"nullable row did not reach the lane this case names")
-			require.NotContains(t, nullable, gateLine,
-				"a nullable column carries the graph's null in its pointer; refusing it would make the declared nullability unreachable")
-		})
+				f.Nullable = true
+				nullable := renderColumn(f, x.exit)
+				require.Contains(t, nullable, c.lane,
+					"nullable row did not reach the lane this case names")
+				require.NotContains(t, nullable, x.gateLine,
+					"a nullable column carries the graph's null in its pointer; refusing it would make the declared nullability unreachable")
+			})
+		}
 	}
 }
 

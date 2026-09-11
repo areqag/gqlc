@@ -9,6 +9,7 @@ package fixtures_test
 import (
 	"context"
 	"fmt"
+	"iter"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	certelemage "github.com/areqag/gqlc/test/data/codegen/valid/certified_list_element/golden/apache-age-pgx-v5"
 	entityedgeage "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/apache-age-pgx-v5"
 	entitynodeage "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/apache-age-pgx-v5"
+	iterage "github.com/areqag/gqlc/test/data/codegen/valid/iter_read_multicolumn/golden/apache-age-pgx-v5"
 	listlistage "github.com/areqag/gqlc/test/data/codegen/valid/list_list_int/golden/apache-age-pgx-v5"
 	deeplistage "github.com/areqag/gqlc/test/data/codegen/valid/list_list_list_int/golden/apache-age-pgx-v5"
 	manycolmanyage "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/apache-age-pgx-v5"
@@ -218,6 +220,11 @@ func (h *ageArm) savepointScenario(ctx context.Context, t *testing.T) savepointB
 	return h.newScenario(ctx, t)
 }
 
+func (h *ageArm) iterScenario(ctx context.Context, t *testing.T) iterBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
 func (h *ageArm) temporalScenario(ctx context.Context, t *testing.T) temporalBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
@@ -233,6 +240,7 @@ func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 		graph:      graph,
 		one:        oneColOneParamOneAGE{q: onecoloneage.New(h.pool, graph)},
 		many:       manyColManyAGE{q: manycolmanyage.New(h.pool, graph)},
+		iters:      iterReadMulticolumnAGE{q: iterage.New(h.pool, graph)},
 		nested:     nestedListAGE{q: listlistage.New(h.pool, graph)},
 		nullElem:   nullListElemAGE{q: certelemage.New(h.pool, graph)},
 		nullOuter:  nullOuterElemAGE{q: nullouterage.New(h.pool, graph)},
@@ -267,6 +275,7 @@ type ageScenario struct {
 	graph      string
 	one        oneColOneParamOneAGE
 	many       manyColManyAGE
+	iters      iterReadMulticolumnAGE
 	nested     nestedListAGE
 	nullElem   nullListElemAGE
 	nullOuter  nullOuterElemAGE
@@ -293,6 +302,15 @@ func (s ageScenario) seed(ctx context.Context, t *testing.T, cypher string) {
 func (s ageScenario) oneColOneParamOne() oneColOneParamOneQuerier { return s.one }
 
 func (s ageScenario) manyColMany() manyColManyQuerier { return s.many }
+
+func (s ageScenario) iterReadMulticolumn() iterQuerier { return s.iters }
+
+// No: the three-row result this battery seeds is wholly in the pgx
+// connection's receive buffer before the first row is handed out, so
+// rows.Next() walks memory and the dead context is never consulted. The
+// declaration is about the size of the result as much as about the driver —
+// see iterBackend, where the measurement is recorded.
+func (s ageScenario) cancelReachesAStartedStream() bool { return false }
 
 func (s ageScenario) nestedList() nestedListQuerier { return s.nested }
 
@@ -731,4 +749,32 @@ func (a manyColManyAGE) peopleByAgeAndLocale(ctx context.Context, minAge int64, 
 		out = append(out, person{Name: row.Name, Age: row.Age})
 	}
 	return out, nil
+}
+
+// iterReadMulticolumnAGE relays this target's sequence under the same rules
+// the neo4j adapters follow, and on this arm the rules have a second reason.
+// The emitted body holds a connection out of the shared pgxpool from Query
+// until its deferred Close, so a relay that drained into a slice would return
+// the connection before the scenario ever broke out of its range — and
+// iterAbandonedRange, which walks away from 24 sequences and then asks the
+// pool for one more, would pass against a body that never released anything.
+type iterReadMulticolumnAGE struct{ q *iterage.Queries }
+
+func (a iterReadMulticolumnAGE) streamPeopleByAge(ctx context.Context, minAge int64, locale string) iter.Seq2[person, error] {
+	return func(yield func(person, error) bool) {
+		for row, err := range a.q.StreamPeopleByAge(ctx, iterage.StreamPeopleByAgeParams{
+			MinAge: minAge,
+			Locale: locale,
+		}) {
+			if err != nil {
+				if !yield(person{}, err) {
+					return
+				}
+				continue
+			}
+			if !yield(person{Name: row.Name, Age: row.Age}, nil) {
+				return
+			}
+		}
+	}
 }

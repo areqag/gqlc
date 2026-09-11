@@ -165,7 +165,7 @@ func isBlankOrComment(line string) bool {
 }
 
 // parseCardinality lowers the annotation's raw token into the enum, or
-// reports the token was not one of the three C0-accepted values.
+// reports the token was not one of the accepted values.
 func parseCardinality(tok string) (Cardinality, bool) {
 	switch tok {
 	case "one":
@@ -174,6 +174,8 @@ func parseCardinality(tok string) (Cardinality, bool) {
 		return CardinalityMany, true
 	case "exec":
 		return CardinalityExec, true
+	case "iter":
+		return CardinalityIter, true
 	default:
 		return 0, false
 	}
