@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-17
-**Beads:** gqlc-rz0l, gqlc-lhs3, gqlc-jfwo, gqlc-0rjn, gqlc-vu7z, gqlc-e143, gqlc-173n, gqlc-jnsk, gqlc-offa, gqlc-ipx6, gqlc-x2sg, gqlc-cgat, gqlc-r8na3
+**Beads:** gqlc-rz0l, gqlc-lhs3, gqlc-jfwo, gqlc-0rjn, gqlc-vu7z, gqlc-e143, gqlc-173n, gqlc-jnsk, gqlc-offa, gqlc-ipx6, gqlc-x2sg, gqlc-cgat, gqlc-r8na3, gqlc-yn2l
 
 > Decision 10 prices a markdown parse as a trade-off and does not settle
 > it. [ADR 0042](0042-the-spec-fence-stays-a-byte-scan.md) settles it —
@@ -367,6 +367,80 @@ The line rule is what makes this work, and a paragraph rule would not: the
 replacement `gqlc-x2sg` measured happens INSIDE one paragraph, so a marker
 scoped to the paragraph would survive the edit it has to catch.
 
+## Decision 13 — the emitted parameter list is a closed shape, so anything longer is drift
+
+The signature sweep once read a parameter list only when it split into exactly
+two, and passed over anything longer. `gqlc-vu7z` is what that cost: the naive
+sqlc-shaped signature a reader would plausibly write — `PeopleOverAge` taking
+the context parameter and then `minAge int64` and `locale string` as two
+separate arguments — carries the query author's parameter names into the
+emitted signature, which is the capture vector `gqlc-lhs3` removed from the
+emitter written in a second spelling, and it sat green. It was measured green
+as a live mutation before this decision.
+
+That shape is described here rather than printed, and the reason is a limit
+worth stating: Decision 12's exhibit mechanism is defined over the
+parenthesis-less census alone, so there has never been a way for a document to
+print a PARENTHESISED drifted signature as an exhibit. It did not matter while
+an overlong list was skipped. It does now — this paragraph is the first place
+in the corpus that wanted one, and the fence caught the attempt.
+
+The rule that closes it is not a new discriminator but the emitter's own shape.
+The emitted list is CLOSED at every arity: `ctx context.Context` alone with no
+query parameter, `ctx context.Context, arg <T>` with one, and
+`ctx context.Context, arg <MethodName>Params` with two or more — the emitter
+renders no form taking them separately. So any list longer than that is drift by
+construction, and the fence says so rather than declining to look.
+
+What the old arity rule was really doing was keeping a second population out:
+functions the documents print that open the same anchor and are not emitted
+query methods. Measured 2026-09-11 over the swept corpus, that population is 13
+sites and 4 distinct lists — the `driverOrTx.run` seam in its two spellings (9
+and 2 sites), neo4j's own `ExecuteWrite`, and one godog step handler.
+
+Telling those from a drifted claim cannot be done from the bytes. An emitted
+query method's name is the query author's, so there is no receiver, no keyword
+and no shape a four-parameter drifted claim could not also wear. That is
+Decision 12's finding one construct over, and the answer is the same shape:
+`specNonMethodLists` writes the intent down, per document, keyed by the verbatim
+parameter list, reconciled in both directions.
+
+The bead asked for a real discriminator rather than a list, and named two
+candidates. Both were measured and both were declined:
+
+- Anchoring on the receiver `func (q *Queries)` plus the `Querier` /
+  `WriteQuerier` interface blocks: of the 17 graded arity-2 sites, 13 carry the
+  receiver and 3 are interface members, but **two are prose quotes carrying
+  neither**. Adopting it drops those two, taking C1 and C4 below the floors
+  `specSigDocs` declares — so it narrows what is graded in order to widen it,
+  and pays for the fix by lowering two numbers.
+- Grading only signatures inside sections the spec marks normative: that is
+  section structure, which is a markdown parse, which
+  [ADR 0042](0042-the-spec-fence-stays-a-byte-scan.md) declines.
+
+The census is reconciled with an EXACT count, not a floor, and that is the
+opposite asymmetry from Decision 3's for the opposite reason. A floor is right
+for a census of what a document OWES, where growing is honest. This census
+bounds an EXEMPTION, where growing is the failure: a floor would wave through an
+unrecorded fourteenth site spelled like a declared one. So a document that
+starts printing the run seam once more is red until the number beside it moves,
+and one that stops printing it is red too.
+
+Decision 12's marker does NOT transfer, and the reason is measured rather than
+assumed: 11 of the 13 sites sit inside fenced Go code blocks, where
+`**exhibit**` is not emphasis but literal text corrupting the example. Only C4's
+`ExecuteWrite` span and the godog handler are in prose. So the residual gap is
+`gqlc-x2sg`'s exactly — a quote replaced in place by a claim spelled
+identically keeps the count satisfied — and it is filed rather than closed
+(`gqlc-yn2l`), bounded by what such a claim would have to say: that an emitted
+query method takes a `cypher string` and a driver `params map[string]any`.
+
+The census key is canonicalised — the list's depth-zero entries, whitespace
+collapsed, rejoined on `, ` — so gofmt's line breaks and trailing comma are not
+a different entry. Without that, reformatting a quoted signature reads as one
+exempted site disappearing and an unrecorded one arriving. Only this census is
+canonicalised; Decision 10's exhibit census keeps the text a document prints.
+
 ## Consequences
 
 The fence is a graded-site check, not a document check. What it does **not**
@@ -382,8 +456,12 @@ own header:
   it.
 - A site swapped for another inside one document is invisible: the per-document
   floor is a count, not a membership (`gqlc-0rjn`, Decision 3).
-- A signature carrying the author's names as separate arguments is past the
-  arity the signature sweep reads (`gqlc-vu7z`).
+- A parameter list one of the documents quotes for a function that is not an
+  emitted query method — the `run` seam, `ExecuteWrite`, a godog handler — is
+  exempted by `specNonMethodLists` by its text and its count, so replacing one
+  of those quotes in place with a claim spelled identically keeps the exemption
+  (`gqlc-yn2l`, Decision 13). It is Decision 12's gap where Decision 12's remedy
+  does not reach, because 11 of the 13 sites are inside fenced code blocks.
 - The prose around an intact graded span may say the opposite of it
   (`gqlc-e143`). The editorial answer, and why the fence is not the answer, is
   Decision 11.
