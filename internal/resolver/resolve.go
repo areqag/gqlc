@@ -2321,8 +2321,11 @@ func (c effectClause) prefix() string {
 // setClause names the clause a SetPropertyEffect is carried by, which is the
 // one thing the effect value itself does not know: SET at the top level,
 // ON CREATE SET / ON MATCH SET inside a MERGE. Every other variant names
-// itself, because only Set-family effects nest inside MERGE (query.go:1651-1660)
-// so no other variant is ever reached under a clause but its own.
+// itself, because only Set-family effects nest inside MERGE:
+// query.MergeEffect's OnMatch and OnCreate return []SetEffect, not []Effect,
+// so the five non-Set variants are excluded by the compiler at the ON action
+// slot rather than by a check here. Cited by type because a line range into
+// query.go drifts.
 func validateEffect(sc *scope, e query.Effect, s schema.Schema, setClause effectClause) error {
 	switch ee := e.(type) {
 	case query.CreateEffect:
@@ -2371,8 +2374,8 @@ func validateCreateEffect(sc *scope, e query.CreateEffect) error {
 
 // validateMergeEffect runs the CREATE variable-presence check and routes each
 // SetEffect in OnMatch / OnCreate through the SET-family validators. Sub-sum
-// type-safety is guaranteed by query.go:1651-1660 (only Set-family effects can
-// appear inside).
+// type-safety comes from the []SetEffect return on query.MergeEffect's OnMatch
+// and OnCreate, which excludes the five non-Set variants at compile time.
 func validateMergeEffect(sc *scope, e query.MergeEffect, s schema.Schema) error {
 	for _, v := range e.Variables() {
 		if v == "" {
