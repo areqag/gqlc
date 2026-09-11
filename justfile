@@ -2303,7 +2303,10 @@ lint-new rev="origin/master": ensure-golangci
 # otherwise looked complete. It cannot turn a red run green, one surviving issue
 # being enough to exit non-zero, so this is about what the person who has to fix
 # it gets to see: a capped list sends them round the loop once per hidden
-# function.
+# function. The third suppressor in that family is `issues.uniq-by-line`, whose
+# default keeps one issue per source line; it is turned off in `.golangci.yml`
+# and not here, because these two linters both report at a function's
+# DECLARATION line and CI's report is degraded by it identically (bd gqlc-5sfv).
 #
 # THE PATHS ARE GROUPED BY OWNING MODULE and the linter runs once per module,
 # from inside that module. golangci-lint is module-scoped: a root-module run
