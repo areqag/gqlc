@@ -110,3 +110,44 @@ func (q *queries) BlobColumns(ctx context.Context) ([]BlobColumnsRow, error) {
 	}
 	return out, nil
 }
+
+const blobLooseQueryText = `MATCH (b:Blob) RETURN b.loose AS loose`
+
+// BlobLoose executes the BlobLoose query.
+//
+//	MATCH (b:Blob) RETURN b.loose AS loose
+func (q *queries) BlobLoose(ctx context.Context) (map[string]any, error) {
+	stmt, err := q.cypherStmt("$gqlc$", blobLooseQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return nil, fmt.Errorf("BlobLoose: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("BlobLoose: %w", err)
+		}
+		return nil, ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return nil, fmt.Errorf("BlobLoose: scan row: %w", err)
+	}
+	if rows.Next() {
+		return nil, ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("BlobLoose: %w", err)
+	}
+	if raw0 == nil {
+		return nil, fmt.Errorf("BlobLoose: column %q is non-nullable but arrived null", "loose")
+	}
+	value0, err := agtypeMap(raw0)
+	if err != nil {
+		return nil, fmt.Errorf("BlobLoose: decode column %q: %w", "loose", err)
+	}
+	return value0, nil
+}
