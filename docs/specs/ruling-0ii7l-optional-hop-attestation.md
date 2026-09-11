@@ -175,6 +175,8 @@ implying mechanism pinned by a test — never to leave an unreachable branch
 standing unexamined. §6 makes the measurement an execution obligation with a
 declared outcome either way.
 
+> **Settled by §9.4 — REACHABLE, so the conjunct stays a guard.**
+
 ## 4. What the condition still cannot attest
 
 The bead asks for this list explicitly, and it is the half of the ruling that
@@ -263,6 +265,11 @@ pattern. Whether the parser accepts that shape was not established here; if it
 does, it is the third fixture, and if it does not, the bead should record that
 the direction is unreachable rather than quietly drop it.
 
+> **Corrected by §9.4 on all three counts.** The named gain fixture does not
+> move and is not the one shipped; the foreign-group fixture moves a VERDICT
+> rather than a width (§9.2); and the third direction is unreachable because the
+> resolver refuses it before the gate, not because the parser rejects it.
+
 ## 6. Mutation rows the execution owes
 
 Declare the expected victim before each run, per decision 0005. One row per
@@ -282,6 +289,10 @@ finding to report, not a row to quietly drop. Screen every row with
 `go test -c -o /dev/null ./internal/resolver/` before trusting a RED: a mutation
 the compiler rejects is not a mutation the tests killed.
 
+> **Results in §9.5.** Neither row came back vacuous: row 3 has a fixture and
+> row 5 settled §3.2. The screen this paragraph asks for earned its keep on a
+> distractor, not on a row.
+
 ## 7. What the execution PR owes beyond the code
 
 - **A corpus delta, in ADR 0038's table form**, before the widening is described
@@ -296,6 +307,11 @@ the compiler rejects is not a mutation the tests killed.
   is for — written then, with the measurement in it, on the next free ordinal
   re-derived at push time. If the delta is empty except for the new fixtures,
   this document plus the bead prose is the whole record and no ADR is owed.
+
+> **Answered in §9.1–9.3. No ADR is owed**, on this section's own test: the
+> delta is exactly the new fixtures, and no pre-existing cell moves. Read §9.2
+> before accepting that as the end of it — one new fixture's cell moves
+> accept → refuse, on a query shape master accepted.
 
 ## 8. Rejected alternatives
 
@@ -317,3 +333,200 @@ the compiler rejects is not a mutation the tests killed.
   is read by `DemoteNullability` to flip `Nullable` bits. Reusing it for a
   per-binding, non-null-conditional claim would make ADR 0006's nullability
   answer wrong in order to make Phase B's type answer sharper.
+
+---
+
+## 9. Execution record (bd gqlc-1qijx)
+
+Written after implementation, against measurements rather than the predictions
+above. Where a prediction was falsified this section says so and says what
+replaced it; the prediction is left standing in its own section so the
+correction is legible as a correction.
+
+### 9.1 The corpus delta §7 asks for
+
+Measured two ways, because the two answer different questions and only the
+second is attributable to the widening.
+
+**Master's manifest against this branch's sweep** — did any query that existed
+before this PR change answer?
+
+| | cells |
+|---|---|
+| same verdict, same sentinel, same detail | 14491 |
+| same verdict, same sentinel, DIFFERENT DETAIL | **0** |
+| same verdict, DIFFERENT SENTINEL | **0** |
+| DIFFERENT VERDICT | **0** |
+| in manifest, absent from sweep | **0** |
+| in sweep, absent from manifest | 172 |
+
+The 172 are the four new fixtures against all 43 schemas. No pre-existing cell
+moves, in any column.
+
+**This branch against this branch with the widening removed** — of the cells
+that exist now, which does the widening itself move? The mutant is the gate
+reduced to `otherCovers && witnessesItsEndpoints(e, written, demoted)`, which is
+master's. Note this is **not** mutation row 1: row 1's `&&` is *stricter* than
+master, so it is no baseline for a delta — used as one it reports about 30 moved
+cells, most of them attestations master had and row 1 removes.
+
+Of 14663 cells, **10 move**, all belonging to the two new fixtures:
+
+| cells | fixture | movement |
+|---|---|---|
+| 8 | `valid/unlabelled_optional_introduced_hop_attests.cypher` | accept → accept, detail changes: the ADR 0038 wrong-orientation warning appears |
+| 2 | `invalid/unlabelled_optional_introduced_hop_foreign_group_withheld.cypher` | **accept → refuse** |
+
+So by §7's literal test — "if the delta is empty except for the new fixtures,
+this document plus the bead prose is the whole record" — **no ADR is owed**. The
+delta is exactly the new fixtures. But the second row of that table is a
+behaviour change on a query *shape* master accepted, and §9.2 is that finding
+rather than a footnote to it.
+
+### 9.2 The one verdict that moves, and why it is a fix
+
+```
+MATCH (p:Person)
+OPTIONAL MATCH (p)-[q:WORKS_AT]->(c)
+OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk)
+RETURN c.smallOnly
+```
+
+Against `satisfy_plural_edges_inline_subtype.gql`, master **accepts** this and
+types `c.smallOnly` as nullable `STRING`. This branch refuses it with
+`ErrUnknownProperty`, `c.smallOnly missing on plural-satisfying type
+Company&Large`.
+
+Master's acceptance is the defect that schema was written to expose, and the
+schema says so in its own header: `HAS_DESK` is declared from the bare `Company`
+only, so reached through an `OPTIONAL MATCH` that hop "is an outer join and
+filters no row" — the `Employee&Person-[WORKS_AT]->Company&Large` row still
+comes back with `h` and `d` null, and `smallOnly` is not a property it has.
+Master narrowed `c` to `Company` on that hop regardless, and generated a decoder
+for a column those rows do not carry.
+
+The widening removes the narrowing as a side effect of its own commitment: `q`
+is in `c`'s own group, so it attests `c`, and `c` commits covered to `q`'s
+contribution `{Company, Company&Large}` **before** the foreign-group `h` can
+narrow it. That is §5's "the committed set must be `q`'s contribution — not
+`q ∩ h`", arriving in the polarity §5 did not anticipate: the wider committed set
+turns an unsound acceptance into a refusal, rather than only widening a golden.
+
+What makes it legible as a fix rather than a regression is the twin one keyword
+away. `invalid/unlabelled_optional_hop_type_only_property.cypher` is the same
+query with the FIRST hop mandatory, and master already refused it. Master
+therefore refused the MORE constrained twin and accepted the less constrained
+one. After this PR the two agree.
+
+The refusal is the fixture; the pair is pinned by `invalidFixtureContains`, whose
+`plural-satisfying type` phrase is what says `c` was left wide rather than pinned
+to the wrong single member.
+
+### 9.3 §4's three coverage consumers, checked
+
+§4's last bullet requires these checked rather than argued, and singles out the
+third as the one its own benign-ness argument does not reach.
+
+- **`endpointNarrowing`'s two `covering()` gates** and **`NarrowPluralEndpoints`**
+  — no cell attributable to them moves. The delta in §9.1 is 10 cells and all 10
+  are accounted for by the two mechanisms described above. This is a bound, not a
+  demonstration that a widened binding reaches those gates and is handled well
+  there; the corpus contains no query that puts a widened binding into a plural
+  endpoint position, so the honest statement is that the widening does not
+  disturb them over the corpus as it stands.
+- **ADR 0038's wrong-orientation clause 3** — reached, and directly. It is the
+  entire observable of `valid/unlabelled_optional_introduced_hop_attests.cypher`,
+  which is accepted both before and after and differs only in that the detector
+  now speaks. §4 was right that this is the consumer the argument did not cover,
+  and the measurement is favourable: in that fixture `q` is null exactly when the
+  first OPTIONAL clause missed, and on those rows the second clause's `r` is null
+  too, so "conditional on `q` being non-null" and "on the rows where `r` exists"
+  are the same rows. The detector's new warning is sound for that reason, and the
+  reason is a property of the shape rather than of the fixture.
+
+### 9.4 Corrections to the predictions above
+
+- **§3.2 is settled: clause (e) is REACHABLE**, so it stays a guard and is not
+  demoted to a derivation. The measurement is mutation row 5 — dropping `carried`
+  makes `valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher`
+  gain the wrong-orientation warning, so the `WITH count(p) AS c` alias
+  re-declared as `(c)` under a later part's `OPTIONAL MATCH` does reach the gate
+  with conjuncts (a)–(d) all true. `TestACarriedAliasRedeclaredUnderAnOptionalClauseDoesNotAttest`
+  is the pin, and carries the uncarried twin as its control.
+
+  §3.2 also assumed such a query "is refused *somewhere else*". It is not
+  refused anywhere. Master accepts it and types the `count(p)` alias as a
+  **Post node** — a scalar returned to the caller as a node, with a node decoder
+  generated for it. That is bd **gqlc-60jb**, pre-existing and not fixed here;
+  the test's `NoError` pins the hole rather than endorsing it. If gqlc-60jb's
+  fix refuses the shape before Phase B, conjunct (e) becomes unreachable and
+  ADR 0038's precedent applies to it after all.
+- **§5's named gain fixture does not move, and is not in the PR.**
+  `MATCH (p:Person) OPTIONAL MATCH (p)-[a:AUTHORED]->(c) RETURN c.title` returns
+  byte-identical output with and without the widening. §5's "if it does not move,
+  nothing was widened" is false of it: the widening changes the commitment's
+  COVERAGE, and a projected property type is blind to the coverage bit. The gain
+  direction needs an observable that reads coverage, which is why the fixture
+  shipped is `unlabelled_optional_introduced_hop_attests.cypher` and its
+  observable is the ADR 0038 warning.
+- **§5's third direction is unreachable, and not for the reason §5 guessed.** §5
+  left open "whether the parser accepts" a bare `(n)` in the introducing clause's
+  comma pattern. It does — `MATCH (p:Person) OPTIONAL MATCH (n), (p)-[a:AUTHORED]->(x:Post) RETURN n`
+  parses cleanly. The direction is unreachable because the *resolver* refuses it
+  first, with `ErrUnknownLabel`, `cannot infer type of unlabelled binding "n" —
+  no edge in the pattern reaches a compatible schema node type`: a binding no
+  edge touches has no inference to commit, covered or otherwise, so the gate is
+  never consulted. There is no fixture to write.
+- **§6's row 3 is not vacuous.** §6 allowed that the `singleHopPattern` conjunct
+  might have no fixture. It has one —
+  `valid/unlabelled_optional_introduced_var_length_hop_withheld.cypher`, the
+  attests fixture with `*2` on the first hop.
+
+### 9.5 Mutation rows
+
+Per decision 0005: victim declared before each run, every mutant screened with
+`go test -c -o /dev/null ./internal/resolver/`, every `-run` anchored
+`^TestResolverSuite$/^Test...$`, every restore by `cp` from a pristine copy and
+proved by `sha256sum` rather than by `git status`. Baseline asserted first: each
+anchor below runs a non-zero number of subtests and passes on the unmutated tree.
+
+| # | mutation | declared victim | result |
+|---|---|---|---|
+| 1 | `\|\|` → `&&` in the widened gate | attests fixture loses its warning | KILLED, golden diff is `-` the warning |
+| 2 | drop (b) group equality | foreign-group fixture starts accepting | KILLED, "An error is expected but got nil" |
+| 3 | drop (c) `singleHopPattern` | var-length fixture gains a warning | KILLED, golden diff is `+` the warning |
+| 4 | drop (a) the floor `g < 1` | `TestTheGroupFloorRefusesLegacyNullableBindings` | KILLED |
+| 5 | drop (e) `carried` | carried-name fixture gains a warning, and `TestACarriedAlias...` | KILLED at both |
+
+Each row was killed by the symptom declared for it, not merely by some failure.
+
+**Distractors.** The gate is `otherCovers && (witnessesItsEndpoints(...) ||
+introducedByThisHop(...))` — three clauses, so a SURVIVED needs to be readable as
+"another clause absorbed it" rather than "the guard is untested".
+
+| mutation | at the attests fixture's anchor | at a wider anchor |
+|---|---|---|
+| `witnessesItsEndpoints(...)` → `false` | SURVIVED | KILLED over `TestValid` (201 subtests) by `attainable_commitment_covers_*` |
+| `otherCovers` → forced true | SURVIVED | SURVIVED over all of `TestValid`; KILLED over the package, by `TestInvalid` and `TestPhaseBsUncoveredSingularCommitClearsAResolvedCoversMark` |
+
+The first is the one that matters: the new fixture is carried by the new
+disjunct **alone**, so its warning is not an artefact of the pre-existing arm.
+
+The `otherCovers` distractor also had to be respelled. Spelled `if true &&` it
+left `otherCovers` declared-and-not-used and the *compiler* rejected it — a fake
+RED that the screen caught and that a run without the screen would have recorded
+as a kill. Respelled `if (otherCovers || true) &&` it compiles, and its result is
+the one tabled.
+
+**Negative control, declared to SURVIVE.** The `written` conjunct of
+`introducedByThisHop` is documented in its own comment as inert — "no OPTIONAL
+MATCH can CREATE or MERGE" — and is carried only for symmetry with
+`witnessesItsEndpoints`. Replacing it with `return true` SURVIVED all 602 tests
+in the package, which is both the non-degeneracy check the battery needs and a
+measurement of the comment's own claim.
+
+That control's first spelling was refused by the harness rather than by the
+compiler: the two lines it targets are byte-identical to the last two lines of
+`witnessesItsEndpoints`, so the anchor matched twice and the apparatus aborted
+instead of mutating the wrong function. Re-anchored through the `carried` block
+above them, it is unambiguous.
