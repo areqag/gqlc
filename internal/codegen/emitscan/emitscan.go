@@ -368,31 +368,40 @@ func PackageDecls(file *ast.File) []string {
 // bound throughout it, so a read outside the block that binds it is not
 // free.
 //
-// The bound set is the function's own receiver, parameters and results,
-// plus what DeclaredIdents recognises: short variable declarations,
-// var/const declarations, range clauses, type-switch and select
-// bindings (those two through the assignment each holds), and function
-// literals. Over exactly those constructs the flat reading errs towards
-// calling a name bound, which is the direction that makes an emission
-// capturing one fail rather than slip through.
+// The bound set is the function's own receiver, parameters, results and
+// type parameters — including a generic receiver's, which are written
+// into the receiver's type rather than into a field list — plus what
+// DeclaredIdents recognises: short variable declarations, var/const
+// declarations, range clauses, type-switch and select bindings (those
+// two through the assignment each holds), local type declarations, and
+// function literals. Over those constructs the flat reading errs
+// towards calling a name bound, which is the direction that makes an
+// emission capturing one fail rather than slip through.
 //
-// That is not the whole of what Go binds, and on the remainder this
-// errs the OTHER way — so read the list above as the limit it is, not
-// as a property of the analysis. Measured 2026-09-10, one row per
-// construct, each binding a name inside a function and reading it back:
-// a local type declaration and that type's field names, a statement
-// label, a parameter name written into a func TYPE in a signature, and
-// a type parameter — on the function or on a generic receiver — are all
-// reported free. The last is live rather than hypothetical, since the
-// age emitter emits func agtypeList[T any](...).
+// Three more constructs write an identifier inside a function without
+// binding it anywhere the body can read: a local type's field names, a
+// statement label, and a parameter name in a func TYPE. Those are not
+// in the bound set either; ReferencedIdents drops them per occurrence,
+// which is exact where calling them bound would swallow a genuine read
+// of the same name elsewhere in the function. Its doc comment carries
+// that reasoning.
 //
-// What bounds the damage is the one caller that acts on the free set:
-// Scope intersects it with the package's own declarations, and none of
-// those names is a package-level declaration, so each is dropped before
-// a sweep sees it. Widening the bound set is gqlc-db0e.
+// Read the two lists above as the enumeration they are, not as a
+// property of the analysis: a construct absent from both is unmeasured,
+// and TestFreeIdentsBoundSetLimits holds one row per construct named
+// here. The enumeration was measured under gqlc-9hrh, which found five
+// constructs erring the OTHER way — one of them live, since the age
+// emitter emits func agtypeList[T any](...) — and closed under
+// gqlc-db0e, which is where the per-occurrence verdicts were decided.
+//
+// What bounded the damage in the meantime, and still bounds any
+// construct nobody has thought of, is the one caller that acts on the
+// free set: Scope intersects it with the package's own declarations, so
+// a name that is not a package-level declaration is dropped before a
+// sweep sees it.
 func FreeIdents(fn *ast.FuncDecl) map[string]bool {
 	bound := make(map[string]bool)
-	for _, l := range []*ast.FieldList{fn.Recv, fn.Type.Params, fn.Type.Results} {
+	for _, l := range []*ast.FieldList{fn.Recv, fn.Type.TypeParams, fn.Type.Params, fn.Type.Results} {
 		if l == nil {
 			continue
 		}
@@ -401,6 +410,9 @@ func FreeIdents(fn *ast.FuncDecl) map[string]bool {
 				bound[n.Name] = true
 			}
 		}
+	}
+	for _, id := range receiverTypeParams(fn.Recv) {
+		bound[id.Name] = true
 	}
 	ast.Inspect(fn, func(n ast.Node) bool {
 		for _, id := range DeclaredIdents(n) {
@@ -418,19 +430,82 @@ func FreeIdents(fn *ast.FuncDecl) map[string]bool {
 	return free
 }
 
-// ReferencedIdents names every identifier a node mentions in a position
-// where scope resolution applies. Selector suffixes and struct-literal
-// keys are excluded: those resolve against a type, not against the
-// scope the parameter is bound in, so no argument name can capture
-// them.
+// receiverTypeParams names the type parameters a generic receiver binds.
+// They are written into the receiver's TYPE rather than into a field
+// list — `func (q *Q[T]) f()` binds T at the index of Q — so the sweep
+// over fn.Recv's names above cannot see them, and without this they read
+// as free while the body genuinely resolves them against the receiver.
 //
-// The two exclusions recurse rather than sweeping their operand flat,
-// because either can hold the other: arg.MinAge inside a map literal is
+// The index alone is taken, never the operand: Q itself is resolved
+// outside the function and must stay free, or the resolved set loses
+// every type an emitted method hangs off.
+func receiverTypeParams(recv *ast.FieldList) []*ast.Ident {
+	if recv == nil {
+		return nil
+	}
+	var out []*ast.Ident
+	for _, f := range recv.List {
+		typ := f.Type
+		if star, ok := typ.(*ast.StarExpr); ok {
+			typ = star.X
+		}
+		switch t := typ.(type) {
+		case *ast.IndexExpr:
+			out = appendIdent(out, t.Index)
+		case *ast.IndexListExpr:
+			for _, index := range t.Indices {
+				out = appendIdent(out, index)
+			}
+		}
+	}
+	return out
+}
+
+// appendIdent appends expr only when it is a bare identifier. A receiver
+// type parameter always is; anything else at that position is not a
+// binding and must not be recorded as one.
+func appendIdent(out []*ast.Ident, expr ast.Expr) []*ast.Ident {
+	if id, ok := expr.(*ast.Ident); ok {
+		return append(out, id)
+	}
+	return out
+}
+
+// ReferencedIdents names every identifier a node mentions in a position
+// where scope resolution applies. Five kinds of occurrence are excluded,
+// because each resolves somewhere other than the scope a parameter is
+// bound in, so no argument name can capture one: a selector suffix, a
+// struct-literal key, a field or method name at its declaration site, a
+// parameter name written into a func TYPE, and a statement label.
+//
+// The exclusions recurse rather than sweeping their operand flat,
+// because they can hold one another: arg.MinAge inside a map literal is
 // a selector under a key-value, and reading that operand flat would
 // call the field name MinAge a scope reference. Doing so is not merely
 // noise — a package-level declaration is held to being resolvable from
 // some function, so a name that only ever appears as a field suffix
 // would satisfy that check while nothing resolved it.
+//
+// The last three arrived with gqlc-db0e, and each is an exclusion rather
+// than an addition to FreeIdents' bound set on purpose. The bound set is
+// keyed by NAME and so applies to the whole function, while an exclusion
+// is per OCCURRENCE: `type row struct{ col int }` beside a genuine read
+// of a package-level `col` must leave that read free, and calling `col`
+// bound would swallow it. A label is the clearest case — Go resolves
+// labels in a namespace of their own, so `Loop:` cannot shadow a
+// package-level `Loop` and `break Loop` cannot resolve one. What would
+// have to change for that verdict to change: a caller wanting the label
+// namespace, which would need a set of its own rather than this one.
+//
+// A function's or literal's OWN binding names stay in, which is why
+// signatureIdents reads them explicitly instead of letting the FuncType
+// arm drop them. That is deliberate over-inclusion — a binding is not a
+// reference — and it is load-bearing: internal/codegen/age/capture_test.go's
+// methodScopes reads this set to assert that renaming a query's
+// parameters moves nothing an emitted method resolves, and a signature
+// that named its argument after the query is exactly the defect it is
+// written to catch. Dropping signature names would blind it wherever
+// such a parameter went unread in the body.
 func ReferencedIdents(n ast.Node) []string {
 	var out []string
 	ast.Inspect(n, func(n ast.Node) bool {
@@ -441,6 +516,34 @@ func ReferencedIdents(n ast.Node) []string {
 		case *ast.KeyValueExpr:
 			out = append(out, ReferencedIdents(e.Value)...)
 			return false
+		case *ast.FuncDecl:
+			out = append(out, signatureIdents(e.Recv, e.Type)...)
+			if e.Body != nil {
+				out = append(out, ReferencedIdents(e.Body)...)
+			}
+			return false
+		case *ast.FuncLit:
+			out = append(out, signatureIdents(nil, e.Type)...)
+			out = append(out, ReferencedIdents(e.Body)...)
+			return false
+		case *ast.FuncType:
+			// Reached only as a TYPE, since the two arms above consume
+			// the signature of a declaration and of a literal first. A
+			// name here binds nothing any body can read.
+			out = append(out, fieldTypeIdents(e.TypeParams, e.Params, e.Results)...)
+			return false
+		case *ast.StructType:
+			out = append(out, fieldTypeIdents(e.Fields)...)
+			return false
+		case *ast.InterfaceType:
+			out = append(out, fieldTypeIdents(e.Methods)...)
+			return false
+		case *ast.LabeledStmt:
+			out = append(out, ReferencedIdents(e.Stmt)...)
+			return false
+		case *ast.BranchStmt:
+			// break/continue/goto name a label and nothing else.
+			return false
 		case *ast.Ident:
 			out = append(out, e.Name)
 		}
@@ -449,11 +552,47 @@ func ReferencedIdents(n ast.Node) []string {
 	return out
 }
 
+// signatureIdents reads the binding lists of a function declaration or
+// literal: the names they introduce AND the types written beside them.
+// Both halves are references for this analysis' purposes — see
+// ReferencedIdents' doc comment for why the names are kept.
+func signatureIdents(recv *ast.FieldList, typ *ast.FuncType) []string {
+	var out []string
+	for _, l := range []*ast.FieldList{recv, typ.TypeParams, typ.Params, typ.Results} {
+		if l == nil {
+			continue
+		}
+		for _, f := range l.List {
+			for _, name := range f.Names {
+				out = append(out, name.Name)
+			}
+			out = append(out, ReferencedIdents(f.Type)...)
+		}
+	}
+	return out
+}
+
+// fieldTypeIdents reads the types in field lists whose names are never
+// scope bindings: a struct's fields, an interface's methods, and the
+// parameters, results and type parameters of a func type.
+func fieldTypeIdents(lists ...*ast.FieldList) []string {
+	var out []string
+	for _, l := range lists {
+		if l == nil {
+			continue
+		}
+		for _, f := range l.List {
+			out = append(out, ReferencedIdents(f.Type)...)
+		}
+	}
+	return out
+}
+
 // DeclaredIdents returns the identifiers a node binds. Short variable
-// declarations, var/const declarations, range clauses and function
-// literals are what an emitted body uses to introduce a name; for what
-// it does NOT cover, see FreeIdents' doc comment, which states the
-// limits of the bound set this feeds. Binding is only half of what a
+// declarations, var/const and local type declarations, range clauses
+// and function literals are what an emitted body uses to introduce a
+// name; for what it does NOT cover, see FreeIdents' doc comment, which
+// enumerates the bound set this feeds. Binding is only half of what a
 // parameter can capture, though — see ReferencedIdents for the other
 // half.
 //
@@ -467,6 +606,12 @@ func ReferencedIdents(n ast.Node) []string {
 func DeclaredIdents(n ast.Node) []*ast.Ident {
 	var out []*ast.Ident
 	switch stmt := n.(type) {
+	case *ast.TypeSpec:
+		// A type declared inside a body binds its name in the function's
+		// scope like any local, so a read of it is not free. Its FIELD
+		// names are not bound here: they are not in the function's scope
+		// at all, and ReferencedIdents excludes them per occurrence.
+		out = append(out, stmt.Name)
 	case *ast.FuncLit:
 		for _, l := range []*ast.FieldList{stmt.Type.Params, stmt.Type.Results} {
 			if l == nil {
