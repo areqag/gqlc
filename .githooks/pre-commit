@@ -107,9 +107,18 @@ complexity_gate() {
   # printed directly above "0 issues." — an author sent looking for a function
   # to split by a run that had measured none (bd gqlc-f0x1, gqlc-i8j9). That
   # module boundary is fixed in `just complexity` itself, but the class is not
-  # closed by fixing one member of it: a package that does not compile, a
-  # neighbour's lint lock and a missing linter all still arrive here as
-  # not-1, and each of them would tell the same lie.
+  # closed by fixing one member of it. Two other members were measured arriving
+  # here as not-1 on 2026-09-11: a staged directory holding no Go file (exit 5,
+  # reachable by staging an added file and then deleting it) and a neighbouring
+  # worktree's lint lock (exit 3). Each would have told the same lie.
+  #
+  # A package that does not TYPE-CHECK is NOT one of them, which is worth
+  # writing down because it is the first member a reader reaches for: measured
+  # the same day, `var _ int = "not an int"` staged into internal/resolver
+  # passed this gate at exit 0. `--enable-only gocyclo,gocognit` selects two
+  # AST-only linters, so golangci-lint never asks for type information and
+  # never notices. One that does not PARSE is caught earlier still, by the
+  # repo-wide `just fmt-check` below, and never reaches this function.
   if [ "$complexity_rc" -eq 1 ]; then
     echo "ERROR: function complexity over the gate in a package this commit touches." >&2
     echo "$complexity_out" >&2
