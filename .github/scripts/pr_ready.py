@@ -39,9 +39,12 @@ empty-required short-circuit either: --check-required and the required-unanimity
 row below both refuse an empty set, because zero required contexts would make
 every PR READY.
 
-Non-required entries (live-smoke-age's perpetual SKIPPED, nightly-alert) are
+Non-required entries (nightly-alert's perpetual SKIPPED on a pull request) are
 not named in any output. A reader who has to discount noise they were never
-told about is the defect's starting shape.
+told about is the defect's starting shape. That exemplar was live-smoke-age
+until bd gqlc-ezwae put the AGE arm on pull requests: it runs there now instead
+of skipping, and joins the required set, so the fixture below moved to a job
+that really does skip on every PR.
 """
 
 import json
@@ -151,8 +154,10 @@ def fixture_superseded_failure():
         {"name": "govulncheck", "conclusion": "SUCCESS", "startedAt": "2026-08-22T05:40:03Z"},
         {"name": "live-smoke", "conclusion": "SUCCESS", "startedAt": "2026-08-22T05:40:04Z"},
         # Non-required noise: silent in every output, present so the row
-        # proves it.
-        {"name": "live-smoke-age", "conclusion": "SKIPPED", "startedAt": "2026-08-22T05:40:05Z"},
+        # proves it. nightly-alert skips on every pull request by its own
+        # `if:` (schedule only), which is what keeps this entry faithful to a
+        # real PR rollup rather than to a job that has since started running.
+        {"name": "nightly-alert", "conclusion": "SKIPPED", "startedAt": "2026-08-22T05:40:05Z"},
     ]
     return required, rollup
 
@@ -238,12 +243,12 @@ def self_test():
         f"rows: {rows_p}",
     )
 
-    noise_names = [entry_name(e) for e in rollup_a if entry_name(e) == "live-smoke-age"]
+    noise_names = [entry_name(e) for e in rollup_a if entry_name(e) == "nightly-alert"]
     out_a = []
     report(ready_a, rows_a, out_a)
     check(
         "non-required-contexts-stay-silent",
-        len(noise_names) == 1 and not any("live-smoke-age" in line for line in out_a),
+        len(noise_names) == 1 and not any("nightly-alert" in line for line in out_a),
         f"report: {out_a}",
     )
 

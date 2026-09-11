@@ -90,20 +90,24 @@ type Split struct {
 // Complaints is every way the two artefacts disagree.
 //
 // The arm split is a partition and not one equality, because the halves are
-// deliberately unequal: the PR-blocking half runs the neo4j battery alone, and
-// charging a pull request for AGE containers is the cost that split exists to
-// refuse (.github/workflows/codegen-live.yml). So what has to hold is that
-// every declared test is claimed by SOME half, and that every name a half
-// claims is declared — both directions, because a test declared and claimed by
-// nothing is a battery that is green from never running, and a name claimed and
-// declared by nothing is the same rot pointing the other way.
+// deliberately unequal: they boot different containers, so each runs the tests
+// written against its own backend and the two -run lists overlap in
+// TestLiveSmoke alone (.github/workflows/codegen-live.yml). So what has to hold
+// is that every declared test is claimed by SOME half, and that every name a
+// half claims is declared — both directions, because a test declared and
+// claimed by nothing is a battery that is green from never running, and a name
+// claimed and declared by nothing is the same rot pointing the other way.
 //
-// What this does NOT say is WHICH half a test belongs in. Which containers a
-// live test needs is a property of its body, declared nowhere this reads, so a
-// half that stops running a test another half still runs passes here (bd
-// gqlc-vh74). A disagreement complaint names the test or the name at fault, and
-// a vacuity complaint names the collection that is empty; neither reports a
-// count, because a count pins the size of a guard and not its membership.
+// What this does NOT say is WHICH half a test belongs in, nor WHEN a half runs.
+// Which containers a live test needs is a property of its body, declared
+// nowhere this reads, so a half that stops running a test another half still
+// runs passes here (bd gqlc-vh74, answered by arms.go); and a half CI stops
+// reaching on some event passes here too, because a `just` line in a workflow
+// is read the same whether the job around it is conditional (bd gqlc-ezwae,
+// answered by triggers.go). A disagreement complaint names the test or the
+// name at fault, and a vacuity complaint names the collection that is empty;
+// neither reports a count, because a count pins the size of a guard and not
+// its membership.
 func (s Split) Complaints() []string {
 	var complaints []string
 	// The vacuity guards. Each guarded collection is ranged over by some of the

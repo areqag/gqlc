@@ -547,6 +547,17 @@ a dispatched run rather than by the pull request that adds it.
 witnessed off the nightly clock at all. The lag is one cycle, against an image
 pinned by digest that no pull request can alter except by editing that digest.
 
+**Correction, 2026-09-10 (bd `gqlc-ezwae`).** The paragraph above is kept as
+the record of what was true when this ADR was accepted, and its first sentence
+is no longer true. `live-smoke-age` now enumerates `pull_request` among its
+events and is a required context, so a refusal added here is witnessed by the
+pull request that adds it and there is no lag to absorb. The wall-time argument
+that had excluded the arm was amended on measurement rather than relitigated:
+the AGE arm runs 55-58s against the neo4j arm's 73-116s on the same runs, in
+parallel, so the PR critical path did not move (bd `gqlc-zase`). The arm is
+still skipped on `merge_group`, and `workflow_dispatch` is still accepted, so
+the sentence about witnessing off the nightly clock survives the correction.
+
 An earlier draft of this section said Docker was unavailable locally, which made
 iteration a matter of dispatching a run and waiting. That is not true on every
 host — item 4's probes, its served call, and the short-circuit trap below were

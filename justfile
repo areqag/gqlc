@@ -2150,6 +2150,11 @@ fmt-check: ensure-golangci
 # construction (bd gqlc-jq50, gqlc-s9bx). Naming ONE recipe moves that drift
 # here, next to the recipes it is about and in front of everyone who edits them.
 #
+# That seven is the count as PR #1643 measured it and the count has since moved:
+# live-smoke-age joins master's required list as an eighth (bd gqlc-ezwae), and
+# it is reachable here no more than live-smoke's container half is — the
+# NOT-covered summary below names it for that reason.
+#
 # EVERY ARM RUNS EVEN AFTER ONE FAILS, and the failures are reported together at
 # the end. Stopping at the first is precisely what a pre-PR check must not do:
 # the cost this recipe exists to remove is the round trip, and three failures
@@ -2164,6 +2169,12 @@ fmt-check: ensure-golangci
 #                container images. Runnable here (bd gqlc-tez0 measured the
 #                live battery at ~30s), just not at the price the other arms
 #                are; run it by hand when you touch the live battery.
+#   live-smoke-age
+#                `just test-codegen-live-age` — the same trade on the AGE
+#                side, and PR-blocking since bd gqlc-ezwae, so it is a
+#                required context this recipe does not cover rather than a
+#                nightly whose red arrives later. It carries -count=1, so it
+#                is the slower of the two to re-run.
 #   tidy (part)  three of that job's ten steps read state that does not exist
 #                before the PR: check-pr-closes.py wants the body,
 #                check-pr-authors.sh the commit list, check-cron-freshness.sh
@@ -2271,6 +2282,9 @@ gates:
     echo "       live-smoke        its CONTAINER half only. The Docker-free half"
     echo "                         of that job ran above as live-smoke[docker-free];"
     echo "                         what is left needs Docker: just test-codegen-live-neo4j"
+    echo "       live-smoke-age    entirely. It is PR-blocking too (bd gqlc-ezwae) and"
+    echo "                         has no Docker-free half here; all of it needs"
+    echo "                         Docker: just test-codegen-live-age"
     echo "       tidy (3 steps)    check-pr-closes.py, check-pr-authors.sh and"
     echo "                         check-cron-freshness.sh read a PR body, a PR's"
     echo "                         commit list and the Actions API. None exist here."
@@ -2821,8 +2835,10 @@ test-codegen-live:
 # It would equally cover the AGE half, whose image is pinned the same way in
 # live_age_test.go, so that half's -count=1 does not follow from
 # TestAGERefusesRelationshipTypeAlternation being a measurement. It rests on the
-# reason given at that recipe instead: nightly and manual are its only runs. The
-# asymmetry errs safe and is left standing.
+# reason given at that recipe instead, which bd gqlc-ezwae restated when the arm
+# joined pull requests: a cached PASS is a weaker witness than a real run, and
+# the AGE arm was measured able to afford a real one per PR. The asymmetry errs
+# safe and is left standing.
 #
 # -v is not part of that asymmetry and does not disturb it: it joins the cache
 # key, so the first run after this line misses and every later one replays the
@@ -2879,11 +2895,18 @@ test-codegen-live-neo4j:
 # the Apache AGE half of the live battery: the smoke battery's AGE arm, the
 # session-init contract, and the AGE-only probes. The -run alternation below is
 # the source of truth for which probes those are — this sentence describes the
-# shape, not the roster. Each runs on its own apache/age container. Nightly and
-# manual only — these containers are cost this project does not charge to a pull
-# request. -count=1 because this is the AGE arm's only gate and no pull request
-# pays for it, so the run it reports on has to be a real
-# one.
+# shape, not the roster. Each runs on its own apache/age container. It runs on
+# pull requests as well as on the nightly and on dispatch since bd gqlc-ezwae:
+# the arm was measured at 55-58s against the neo4j arm's 73-116s on the SAME
+# runs, in parallel, so charging a pull request for these containers costs no
+# critical-path minute (bd gqlc-zase).
+#
+# -count=1 stays, and its reason is no longer "this is the AGE arm's only gate".
+# A cached PASS is a weaker witness than a real run, and the measurement above
+# is what says this arm can afford a real one on every pull request; dropping it
+# would buy back seconds already shown not to be on the critical path, at the
+# price of the nightly's freshness. Weighed and declined in gqlc-zase, rejected
+# alternative 4.
 #
 # The alternation is a NAME LIST, not a pattern: go test's -run is unanchored, so
 # a prefix here would silently claim every test that extends it, and
@@ -4015,7 +4038,9 @@ iso-drift-check:
 # mergeStateStatus CLEAN with four required contexts newest-and-skipped), so a
 # failure verdict would send the author after a regression that does not exist
 # while a green one repeats the false green. Non-required entries such as
-# live-smoke-age's perpetual SKIPPED are silent in every output.
+# nightly-alert's perpetual SKIPPED on a pull request are silent in every
+# output. (That exemplar was live-smoke-age until bd gqlc-ezwae put the AGE arm
+# on pull requests, where it now runs rather than skipping and is required.)
 #
 # Exits non-zero when not ready: a detector that exits 0 is not a gate.
 pr-ready n:

@@ -39,12 +39,16 @@
 // filed by topic and this is not their topic. Both halves are one claim, so
 // they are one file rather than a row filed under each backend.
 //
-// COST. The AGE half is nightly and manual only, like every AGE row. The
-// neo4j half rides live-smoke, which pull requests do block on, and it starts
-// its own container: three concurrent neo4j containers rather than two, which
-// TestLiveSmoke's own header already measures as ~4GB peak and within a
-// standard runner. The recipe carries no -count=1, so a pull request that
-// does not invalidate the test binary pays nothing at all.
+// COST. Both halves block a pull request. The AGE half was nightly and manual
+// only when this was written, like every AGE row; bd gqlc-ezwae put
+// live-smoke-age on pull requests too, on the measurement that the AGE arm is
+// the shorter of the two and runs beside the neo4j one rather than after it.
+// The neo4j half rides live-smoke and starts its own container: three
+// concurrent neo4j containers rather than two, which TestLiveSmoke's own header
+// already measures as ~4GB peak and within a standard runner. That recipe
+// carries no -count=1, so a pull request that does not invalidate the test
+// binary pays nothing at all for it; the AGE recipe does carry -count=1 and
+// pays the container boot every time, which is the cost gqlc-zase measured.
 //
 // Both names are spelled into the recipes in the justfile. go test's -run is
 // unanchored and the recipes' alternations are name lists for that reason; a
