@@ -19,9 +19,39 @@ set -uo pipefail
 
 guard="${1:?usage: bd-prime-guarded.rows <path-to-guard>}"
 [ -x "${guard}" ] || { echo "error: ${guard} is not executable" >&2; exit 1; }
+# Absolute from here on. Rows below run the guard from a directory of their own
+# choosing, and a relative path — which is what `just test-bd-prime-guard`
+# passes — would resolve against that directory instead and vanish.
+guard="$(cd "$(dirname "${guard}")" && pwd)/$(basename "${guard}")"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "${scratch}"' EXIT
+
+# EVERY ROW RUNS FROM HERE, not from the directory the battery was invoked in
+# (bd gqlc-kip5). Most rows point the guard at a BEADS_DIR bd then declines to
+# use, and bd's answer to a useless BEADS_DIR is to fall back to DISCOVERY — it
+# walks up from the current directory and adopts whatever workspace it finds.
+# Invoked from a repository checkout, that workspace is the checkout's own.
+#
+# Measured 2026-09-11 in a fresh clone carrying `.beads/` but no ledger
+# database, which is the shape of every CI checkout because the database is
+# gitignored and the tracked export is not one (clone depth is irrelevant —
+# ci.yml's tidy job fetches full history and is affected just the same): one run
+# of this battery left `.beads/embeddeddolt` and `.beads/backup` created and
+# `.beads/issues.jsonl` DELETED — `git status` reporting ` D` on the committed
+# export that three later steps of ci.yml's tidy job read. A sibling worktree
+# hides this completely: bd resolves a linked worktree to the main checkout,
+# which has a database, so the run is a no-op there and the battery looks
+# harmless on every developer machine in this fleet.
+#
+# A scratch directory has no `.beads` above it, so discovery finds nothing to
+# adopt and anything bd creates dies with the trap above.
+neutral_cwd="${scratch}/neutral"
+mkdir -p "${neutral_cwd}"
+
+# For the last row, which asserts the paragraph above rather than trusting it.
+invoked_from="${PWD}"
+beads_before="$(find "${invoked_from}/.beads" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | sort)"
 
 # The first line of the guard's refusal. Allow rows assert its ABSENCE rather
 # than a successful `bd prime`, because several of them point bd at a fabricated
@@ -43,15 +73,16 @@ row() {
 }
 
 # Runs the guard once with BEADS_DIR set to $1 (or unset when $1 is the literal
-# string UNSET), leaving rc/out/err in the globals below.
+# string UNSET), from directory $2 or else the neutral one above, leaving
+# rc/out/err in the globals below.
 rc=0; out=""; err=""
 run_guard() {
-    local dir="$1" o e
+    local dir="$1" cwd="${2:-${neutral_cwd}}" o e
     o="${scratch}/out.$$.${RANDOM}"; e="${scratch}/err.$$.${RANDOM}"
     if [ "${dir}" = UNSET ]; then
-        timeout 120 env -u BEADS_DIR "${guard}" >"${o}" 2>"${e}"
+        (cd "${cwd}" && timeout 120 env -u BEADS_DIR "${guard}") >"${o}" 2>"${e}"
     else
-        BEADS_DIR="${dir}" timeout 120 "${guard}" >"${o}" 2>"${e}"
+        (cd "${cwd}" && BEADS_DIR="${dir}" timeout 120 "${guard}") >"${o}" 2>"${e}"
     fi
     rc=$?
     out="$(cat "${o}")"; err="$(cat "${e}")"
@@ -81,12 +112,38 @@ else
     row bootstrap-then-prime FAIL "bd init did not produce ${ws}/.beads/embeddeddolt"
 fi
 
-# A2: the ordinary session — BEADS_DIR unset, bd discovers this repository.
-run_guard UNSET
-if ! refused && [ "${rc}" -eq 0 ] && [ "${#out}" -gt 10000 ]; then
-    row unset-beads-dir PASS "guard allowed, rc=0, ${#out} bytes of prime from the discovered ledger"
+# A2: the ordinary session — BEADS_DIR unset, so bd discovers a workspace by
+# walking up from the current directory instead of being pointed at one.
+#
+# The workspace is one this row initialises, NOT this repository (bd gqlc-kip5).
+# The ledger database is gitignored, so a checkout that has never been primed —
+# every CI run of this battery, and every fresh clone — carries a .beads holding
+# config.yaml and metadata.json and no database at all. Measured 2026-09-11 in a
+# depth-1 clone: `bd prime` there creates the database and prints 4976 bytes
+# about an empty fleet, where the same command against this fleet's live ledger
+# printed 750425. A byte threshold sized for one of those is unmeetable in the
+# other — the 10000 this row used to demand fails in a fresh checkout — so
+# this row supplies its own ledger and the threshold means the same thing
+# everywhere. It also stops the battery writing a database into the checkout as
+# a side effect of being run.
+#
+# What that gives up, said rather than hidden: this row no longer witnesses that
+# THIS repository's ledger is discoverable. Nothing it asserted about the guard
+# is lost — the guard reads BEADS_DIR and never the workspace — and `bd prime`
+# discovering this tree is exercised by every session's SessionStart hook.
+ws2="$(probe_dir)/ws"; mkdir -p "${ws2}"
+if (cd "${ws2}" && env -u BEADS_DIR bd init --prefix probe) >"${scratch}/init2.log" 2>&1; then
+    run_guard UNSET "${ws2}"
+    # A floor, not a fit: a freshly initialised ledger primes to ~5 KiB, while
+    # the failures this row is watching for — a refusal, a crash, a guard that
+    # swallowed stdout — produce nothing or a few hundred bytes.
+    if ! refused && [ "${rc}" -eq 0 ] && [ "${#out}" -gt 1000 ]; then
+        row unset-beads-dir PASS "guard allowed, rc=0, ${#out} bytes of prime from the workspace discovered at the cwd"
+    else
+        row unset-beads-dir FAIL "rc=${rc} refused=$(refused && echo yes || echo no) stdout=${#out}B"
+    fi
 else
-    row unset-beads-dir FAIL "rc=${rc} refused=$(refused && echo yes || echo no) stdout=${#out}B"
+    row unset-beads-dir FAIL "bd init did not make a ledger at ${ws2}, so discovery had nothing to find"
 fi
 
 # A3: an existing but empty BEADS_DIR. Measured: bd creates nothing there and
@@ -190,6 +247,26 @@ if case "${err}" in *"bd init"*) true ;; *) false ;; esac; then
     row refusal-names-remedy PASS "stderr names 'bd init'"
 else
     row refusal-names-remedy FAIL "stderr does not name 'bd init'"
+fi
+
+# --- the battery's own hygiene --------------------------------------------
+# Last, because it grades everything above it. Driving the real bd means driving
+# the thing that ADOPTS a workspace it discovers, so a row that forgets where it
+# is running writes into the tree under test; see the neutral_cwd note at the top
+# for what that cost measured. Comparing the listing rather than the bytes
+# because what goes wrong is creation and deletion, both of which it sees, and
+# `.beads/issues.jsonl` is 6 MB.
+#
+# It CANNOT fail in a sibling worktree of a primed repository, where bd resolves
+# to the main checkout and there is nothing to damage — which is every machine in
+# this fleet, and exactly why the damage went unseen. It can fail in CI, which is
+# the checkout shape that has the defect.
+beads_after="$(find "${invoked_from}/.beads" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | sort)"
+if [ "${beads_before}" = "${beads_after}" ]; then
+    row battery-leaves-cwd-alone PASS "${invoked_from}/.beads unchanged across the battery"
+else
+    row battery-leaves-cwd-alone FAIL "$(diff <(printf '%s\n' "${beads_before}") \
+        <(printf '%s\n' "${beads_after}") | tr '\n' ' ')"
 fi
 
 echo "bd-prime-guarded: ${pass} passed, ${fail} failed, ${skip} skipped"
