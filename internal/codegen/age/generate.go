@@ -42,9 +42,15 @@ var testRenderFault func()
 // error, the CLI refuses the run and emits no package, and the panic's own
 // sentence is the error's text, byte for byte. What changes is that a test
 // binary survives it — before this seam, one untaught carrier reaching any
-// of the 66 Generate call sites in this package's tests killed the whole
+// of the 69 Generate call sites in this package's tests killed the whole
 // binary, so the pin whose job is to NAME the lost carrier never ran and a
 // second, unrelated regression stayed invisible behind the first.
+//
+// This seam is NOT the whole fence, and the design that proposed it said it
+// was. Twelve tests call the render layer directly through the export_test
+// bridge, below generate, and a codegen bug reaching one of those still
+// took the binary with this recover in place — measured, not argued. The
+// other half is in render_fence_test.go.
 //
 // The recover is same-goroutine, which is sound only because the render
 // phase is synchronous: no non-test file in this package spells `go func`,
