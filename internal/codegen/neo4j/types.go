@@ -7,8 +7,17 @@ import (
 )
 
 // typeMap is the driver's Go-type table (spec §5.1) the shared phases
-// read. Stateless: every entry is a pure function of the resolved type.
-type typeMap struct{}
+// read. Every entry is a pure function of the resolved type and of the
+// one field below, so two tables built for the same major answer alike.
+//
+// uuidCarrier is the Go type text this major spells a UUID property as,
+// or empty for a major with no carrier for it. It is the only width the
+// two majors disagree about, and it is UNEXPORTED and zero-valued at the
+// v5 answer on purpose: every caller that builds a bare typeMap{} keeps
+// the answer the table gave before dbtype.UUID existed. A major that
+// carries a width has to say so; a table that says nothing refuses,
+// which is the direction that cannot emit code the driver will not pack.
+type typeMap struct{ uuidCarrier string }
 
 // Property maps a resolved property type to its native Go emission (spec
 // §5.1). Returns (typeText, ok): ok=false for the eight unrepresentable
@@ -167,26 +176,38 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// work — the arrangement graph.TypeList already has.
 		return "map[string]any", true
 	case graph.TypeUUID:
-		// Refused on BOTH majors here, and unlike the eight below that
-		// is a statement about this table today rather than a permanent
-		// one. dbtype.UUID exists — it landed in neo4j-go-driver v6.2.0
-		// and v5.28.4 has no counterpart, the two versions
-		// test/data/codegen/go.mod pins — so the v6 answer is owed and
-		// is not given here.
+		// The one width the two majors answer differently, and the
+		// reason this table has a field at all. dbtype.UUID landed in
+		// neo4j-go-driver v6.2.0; v5.28.4 has no counterpart — the two
+		// versions test/data/codegen/go.mod pins — so v6 returns the
+		// carrier the target names and v5 returns nothing.
 		//
-		// Giving it is stage 2 of bd gqlc-eg4b and needs more than this
-		// arm: a carrier that exists on one major and not the other is
-		// the first of its kind in this table, so the table has to
-		// learn which major it is answering for, and the v5 refusal
-		// then needs a sentinel saying the width is representable but
-		// not on this driver rather than ErrUnrepresentableWidth, which
-		// says something false about it. Until that lands, both majors
-		// refuse and the message names the width, which is true on v5
-		// and merely incomplete on v6.
+		// What v6 returns is codegen.UUIDCarrier, the gqlc-owned neutral
+		// name, and not dbtype.UUID: this is the emitted PUBLIC surface,
+		// where ADR 0033 admits no driver type. driverCarrier below is
+		// where the neutral name becomes the driver's, on the decode and
+		// encode sites where the driver belongs.
 		//
-		// test/data/codegen/invalid/uuid_width_unrepresentable is the
-		// fixture that holds this, on all three enrolled targets.
-		return "", false
+		// The empty string is spelled as a refusal here rather than
+		// left to fall through to the eight below, because the two
+		// refusals are not the same refusal and generate() has to tell
+		// them apart: a width no major carries stays
+		// ErrUnrepresentableWidth, and this one becomes
+		// ErrUnrepresentableOnDriverVersion, which says the thing that
+		// is actually true of it — the backend carries it, this driver
+		// does not. That discrimination is made in generate() off
+		// codegen.RefusedWidth rather than here, because this method's
+		// signature has no channel to carry a reason.
+		//
+		// dbtype.UUID also needs Bolt 6.1 on the wire: the v6 hydrator
+		// and packUUID both refuse an older protocol, and the server
+		// image this repository pins speaks Bolt 5.x. So the emitted
+		// code compiles and is asserted against a golden, and no live
+		// round trip is claimed for it (bd gqlc-eg4b).
+		if t.uuidCarrier == "" {
+			return "", false
+		}
+		return t.uuidCarrier, true
 	case graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
@@ -418,13 +439,24 @@ func driverCarrier(goType string) string {
 		return "int64"
 	case "float32", "float64":
 		return "float64"
-	case "Date", "Time", "LocalTime", "LocalDateTime", "Duration":
-		// The neutral temporal carriers (ADR 0033). The driver still
-		// speaks dbtype on both wires, so the carrier is the dbtype
-		// counterpart — but unlike every other arm here the two are not
-		// conversion-compatible, and narrowExpr / widenExpr route them
-		// through the emitted to<X> / from<X> helpers instead of a Go
-		// conversion.
+	case "Date", "Time", "LocalTime", "LocalDateTime", "Duration", codegen.UUIDCarrier:
+		// The neutral carriers (ADR 0033). The driver still speaks dbtype
+		// on both wires, so the carrier is the dbtype counterpart — and
+		// unlike every other arm here the two are reached through the
+		// emitted to<X> / from<X> pair rather than by a Go conversion,
+		// which is what narrowExpr and widenExpr route them to.
+		//
+		// The dbtype spelling is the gqlc name verbatim for all six,
+		// which is what lets one arm answer them: dbtype.Date beside
+		// Date, dbtype.UUID beside UUID. It is a fact about the driver's
+		// naming and not a rule — a seventh carrier whose counterpart is
+		// spelled differently needs its own arm.
+		//
+		// UUID is reached on the v6 target alone: v5 has no carrier for
+		// the width, so Prepare refuses the batch and nothing carrying it
+		// reaches emission. isNeutralCarrier records why it is bridged
+		// through a helper pair at all, given that UUID and dbtype.UUID
+		// are the same underlying [16]byte.
 		return "dbtype." + goType
 	default:
 		return goType

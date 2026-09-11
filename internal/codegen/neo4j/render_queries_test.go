@@ -313,7 +313,7 @@ func TestNarrowsANumericWidthIgnoresRecords(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ints, floats := neo4j.NarrowsANumericWidth(tt.entities, nil)
+			ints, floats := neo4j.NarrowsANumericWidth(tt.entities, nil, neo4j.TypeMap{})
 			require.Equal(t, tt.ints, ints, "narrowInt")
 			require.Equal(t, tt.floats, floats, "narrowFloat32")
 		})
