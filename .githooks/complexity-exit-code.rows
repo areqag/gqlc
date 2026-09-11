@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+# Rows for `just complexity`'s EXIT CODE, run by `just test-complexity-exit-code`.
+#
+# What is under test is not the thresholds — .golangci.yml owns those and CI's
+# lint job enforces them — but the one property .githooks/pre-commit reads off
+# this recipe and cannot verify for itself: 1 means "the packages loaded, the
+# two linters graded them, and something is over the gate", and every other
+# non-zero code means it never got that far. The hook prints two different
+# messages off that distinction, and the wrong one sends an author looking for
+# a function to split over a package nothing measured (bd gqlc-f0x1, gqlc-i8j9,
+# gqlc-9nj3).
+#
+# $1 is the justfile under test, defaulting to this repository's. It is a
+# parameter so that a mutation run can point these rows at a COPY of the real
+# justfile with one line cut by sed — `just --justfile` resolves
+# justfile_directory() to the copy's own directory, so the copy has to sit at
+# the repo root, not in /tmp.
+#
+# EVERY PROBE DIRECTORY IS `_`-PREFIXED, and that is load-bearing rather than a
+# naming habit. The go tool skips a path element beginning with `_` or `.` when
+# it expands `./...`, so a probe these rows leak — a trap does not run under
+# SIGKILL, and quota walls and watchdogs kill sessions here — is invisible to
+# every sweep in the repository while remaining reachable by the explicit path
+# these rows hand it. Measured: `go list ./...` from the root does not name a
+# probe under test/_complexityprobe.*, and `go list ./test/_complexityprobe.X`
+# loads it. A probe with a deliberately broken package clause under an ordinary
+# name would stop `go list ./...`, `just lint` and `just vuln` dead for whoever
+# came next, which is the failure mode `sweep-discovery-probes` already exists
+# to clean up after.
+set -uo pipefail
+
+justfile="${1:-justfile}"
+[ -f "${justfile}" ] || { echo "error: ${justfile} is not a file" >&2; exit 1; }
+
+# The probes must live inside a Go module, so they cannot go in /tmp. They are
+# still allocated rather than spelled — several sessions share this checkout's
+# siblings and a fixed name is a collision — and .gitignore carries the glob so
+# a leaked one cannot be swept into someone's `git add`.
+root_probe_parent="test"
+nested_probe_parent="test/data/codegen"
+
+sweep_probes() {
+    rm -rf "${root_probe_parent:?}"/_complexityprobe.* \
+        "${nested_probe_parent:?}"/_complexityprobe.*
+}
+
+# Swept on the way IN as well as out, off the glob rather than off a list this
+# run built. A trap does not run under SIGKILL and sessions here are killed by
+# quota walls and stall watchdogs, so the entry sweep is what clears a previous
+# run's residue; a list would only ever know about probes this run made.
+sweep_probes
+trap sweep_probes EXIT
+
+# probe writes the new directory into `probe`, a global, rather than printing it
+# for a caller to capture. `d="$(probe_dir ...)"` reads better and is broken: the
+# command substitution runs the function in a SUBSHELL, so the append to the
+# cleanup list happened in a child and the parent swept nothing. Measured here —
+# 24 probe directories survived three runs of these rows, found only because
+# `just fmt-check` warns about the unparseable one. Hence the glob sweep above,
+# which cannot be defeated that way, and this shape, which has no subshell.
+probe=""
+probe_dir() {
+    probe="$(mktemp -d "${1}/_complexityprobe.XXXXXXXX")"
+}
+
+pass=0
+fail=0
+row() {
+    local name="$1" verdict="$2" detail="$3"
+    if [ "${verdict}" = PASS ]; then
+        pass=$((pass + 1))
+        printf '  PASS  %-30s %s\n' "${name}" "${detail}"
+    else
+        fail=$((fail + 1))
+        printf '  FAIL  %-30s %s\n' "${name}" "${detail}" >&2
+    fi
+}
+
+# Leaves the recipe's exit status in rc and its combined output in out.
+rc=0; out=""
+run_complexity() {
+    out="$(just --justfile "${justfile}" complexity "$@" 2>&1)"
+    rc=$?
+}
+
+# A function gocyclo refuses. The gate is `min-complexity: 24` and a linter
+# fires STRICTLY above its setting, so 30 sequential branches clears it with
+# room the threshold can move into without silently emptying these rows.
+over_complex_go() {
+    local dest="$1" pkg="$2" i
+    {
+        printf 'package %s\n\nfunc Branchy(n int) int {\n\ttotal := 0\n' "${pkg}"
+        for i in $(seq 1 30); do
+            printf '\tif n == %d {\n\t\ttotal++\n\t}\n' "${i}"
+        done
+        printf '\treturn total\n}\n'
+    } >"${dest}"
+}
+
+# --- the graded rows ------------------------------------------------------
+# Written first on purpose. A pre-flight that refuses too much reports "graded
+# nothing" over packages that grade fine, which is the same lie in the other
+# direction and is invisible from the broken-tree rows alone.
+
+# G1: a package over the threshold is still reported as a complexity finding.
+probe_dir "${root_probe_parent}"; d="${probe}"
+over_complex_go "${d}/a.go" probe
+run_complexity "./${d}"
+if [ "${rc}" -eq 1 ] && [ "${out}" != "${out#*gocyclo}" ]; then
+    row over-complex-is-graded PASS "rc=1 and the report names gocyclo"
+else
+    row over-complex-is-graded FAIL "rc=${rc}, expected 1 with a gocyclo row; output: ${out}"
+fi
+
+# G2: a package under the threshold passes.
+probe_dir "${root_probe_parent}"; d="${probe}"
+printf 'package %s\n\nfunc Simple() int { return 1 }\n' probe >"${d}/a.go"
+run_complexity "./${d}"
+if [ "${rc}" -eq 0 ]; then
+    row under-threshold-passes PASS "rc=0"
+else
+    row under-threshold-passes FAIL "rc=${rc}, expected 0; output: ${out}"
+fi
+
+# G3: a TYPE error does not stop the grading, and must not start reporting one.
+# gocyclo and gocognit are AST-only, so golangci-lint never asks for type
+# information and this package grades exactly like G1. The pre-flight must agree
+# — `go list` loads a package it cannot type-check — because mid-edit source is
+# the normal state of a tree at commit time, and a gate that refused it would
+# cost more than the bug it closes.
+probe_dir "${root_probe_parent}"; d="${probe}"
+over_complex_go "${d}/a.go" probe
+printf '\nvar _ int = "not an int"\n\nfunc _undefined() { noSuchSymbol() }\n' >>"${d}/a.go"
+run_complexity "./${d}"
+if [ "${rc}" -eq 1 ] && [ "${out}" != "${out#*gocyclo}" ]; then
+    row type-error-still-graded PASS "rc=1 and the report names gocyclo"
+else
+    row type-error-still-graded FAIL "rc=${rc}, expected 1 with a gocyclo row; output: ${out}"
+fi
+
+# G4: a path in the NESTED module still grades. The pre-flight runs from the
+# module root, after the grouping, and this is the row that says so: spelled per
+# staged directory instead it would run `go list ./test/data/codegen/...` from
+# the root module, which fails with "main module does not contain package" and
+# would call every commit touching the live battery a load failure — gqlc-f0x1
+# re-opened from the other side.
+probe_dir "${nested_probe_parent}"; d="${probe}"
+over_complex_go "${d}/a.go" probe
+run_complexity "./${d}"
+if [ "${rc}" -eq 1 ] && [ "${out}" != "${out#*gocyclo}" ]; then
+    row nested-module-still-graded PASS "rc=1 and the report names gocyclo"
+else
+    row nested-module-still-graded FAIL "rc=${rc}, expected 1 with a gocyclo row; output: ${out}"
+fi
+
+# --- the load-failure rows ------------------------------------------------
+
+# L1: THE BEAD'S CASE (gqlc-9nj3). Two package clauses in one directory is a
+# package-LOADING failure, but golangci-lint reports it through `typecheck` —
+# its always-on pseudo-linter, which --enable-only does not suppress — as an
+# ISSUE, so it takes --issues-exit-code and arrives as 1. Before the pre-flight
+# this row read rc=1 and the hook printed "function complexity over the gate"
+# over a directory in which nothing was graded.
+probe_dir "${root_probe_parent}"; d="${probe}"
+printf 'package %s\n' probe >"${d}/a.go"
+printf 'package someoneelse\n' >"${d}/b.go"
+run_complexity "./${d}"
+if [ "${rc}" -ne 0 ] && [ "${rc}" -ne 1 ]; then
+    row package-clause-clash PASS "rc=${rc}, structural rather than 1"
+else
+    row package-clause-clash FAIL "rc=${rc}, expected a non-1 structural code; output: ${out}"
+fi
+
+# L2: the same clash inside the NESTED module, which is where it was first
+# measured (bd gqlc-9nj3 staged `package codegen` beside `package fixtures` in
+# test/data/codegen). Kept separate from L1 because the grouping decides which
+# directory `go list` runs from, and one row cannot fail for the other's reason.
+probe_dir "${nested_probe_parent}"; d="${probe}"
+printf 'package %s\n' probe >"${d}/a.go"
+printf 'package someoneelse\n' >"${d}/b.go"
+run_complexity "./${d}"
+if [ "${rc}" -ne 0 ] && [ "${rc}" -ne 1 ]; then
+    row package-clause-clash-nested PASS "rc=${rc}, structural rather than 1"
+else
+    row package-clause-clash-nested FAIL "rc=${rc}, expected a non-1 structural code; output: ${out}"
+fi
+
+# L3: a directory holding no Go file. Already not-1 before the pre-flight
+# (golangci-lint exits 5), and it stays not-1 through it — the row is here so
+# that a pre-flight which started swallowing its own failures could not turn
+# this one green by accident.
+probe_dir "${root_probe_parent}"; d="${probe}"
+run_complexity "./${d}"
+if [ "${rc}" -ne 0 ] && [ "${rc}" -ne 1 ]; then
+    row no-go-file PASS "rc=${rc}, structural rather than 1"
+else
+    row no-go-file FAIL "rc=${rc}, expected a non-1 structural code; output: ${out}"
+fi
+
+# --- the row that pins a KNOWN GAP ----------------------------------------
+
+# X1: a file whose body does not PARSE reaches this recipe and still comes back
+# as 1, so the hook still prints the complexity sentence over a package nothing
+# graded. It is NOT covered by the pre-flight and is not meant to be: go/build
+# reads only as far as the imports, so `go list` loads this package at rc=0
+# (measured), and the comment in .githooks/pre-commit which claimed `just
+# fmt-check` catches it first is false — golangci-lint's formatters report an
+# unparseable file as a level=warning and the run exits 0 (measured 2026-09-11,
+# bd gqlc-3rgo).
+#
+# The row asserts the CURRENT behaviour rather than the desired one, so that
+# whoever closes that bead is failed here and sent to this comment instead of
+# discovering the pin by accident.
+probe_dir "${root_probe_parent}"; d="${probe}"
+printf 'package %s\n\nfunc Broken( {{{\n' probe >"${d}/a.go"
+run_complexity "./${d}"
+if [ "${rc}" -eq 1 ]; then
+    row parse-error-KNOWN-GAP PASS "rc=1 — still misreported as a finding, bd gqlc-3rgo"
+else
+    row parse-error-KNOWN-GAP FAIL "rc=${rc}: the gap may be closed; update this row and bd gqlc-3rgo"
+fi
+
+printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
+[ "${fail}" -eq 0 ]
