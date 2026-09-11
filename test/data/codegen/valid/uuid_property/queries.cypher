@@ -42,6 +42,19 @@
 //   refusal rather than an emission. STRING is the member chosen for exactly
 //   that reason — it is the family a UUID would collapse into if it were text.
 //
+// span is not a UUID and is the only property here that is not. It is a
+// DURATION, and DURATION SPECIFICALLY, because this fixture is the only place
+// in the corpus where a temporal bridge and the UUID bridge are emitted side
+// by side — and Duration is the one temporal carrier whose two conversion
+// bodies name no time package, so temporal_neo4j.go here imports dbtype alone.
+// That is the pairing needsTimePackage answers about. Driven off the uses
+// map's own keys it would see the UUID entry, whose bodies live in the OTHER
+// file, and put an unused time import in this one; driven off
+// codegen.TemporalCarriers it does not. An emitted package with an unused
+// import does not compile, so the claim is carried by TestGoldenBuild over
+// this fixture rather than by an assertion naming the function. Any other
+// temporal width here would answer true on both readings and witness nothing.
+//
 // The union's own file is where the import walk is tested: UUID reaches
 // union_neo4j.go's dbtype import through the same DECODE-ONLY rule the five
 // neutral temporal carriers reach it through — the decode arm dispatches on
@@ -81,7 +94,7 @@
 MATCH (a:Account) RETURN a
 
 // name: AccountColumns :many
-MATCH (a:Account) RETURN a.ref AS ref, a.prior AS prior, a.trail AS trail, a.chain AS chain, a.either AS either
+MATCH (a:Account) RETURN a.ref AS ref, a.prior AS prior, a.trail AS trail, a.chain AS chain, a.either AS either, a.span AS span
 
 // name: AccountByRef :many
 MATCH (a:Account) WHERE a.ref = $ref RETURN a.id AS id

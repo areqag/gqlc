@@ -40,7 +40,7 @@ func (q *queries) AccountWhole(ctx context.Context) (Account, error) {
 	return value, nil
 }
 
-const accountColumnsQueryText = `MATCH (a:Account) RETURN a.ref AS ref, a.prior AS prior, a.trail AS trail, a.chain AS chain, a.either AS either`
+const accountColumnsQueryText = `MATCH (a:Account) RETURN a.ref AS ref, a.prior AS prior, a.trail AS trail, a.chain AS chain, a.either AS either, a.span AS span`
 
 type AccountColumnsRow struct {
 	Ref    UUID
@@ -48,11 +48,12 @@ type AccountColumnsRow struct {
 	Trail  *[]*UUID
 	Chain  *[]UUID
 	Either *any
+	Span   Duration
 }
 
 // AccountColumns executes the AccountColumns query.
 //
-//	MATCH (a:Account) RETURN a.ref AS ref, a.prior AS prior, a.trail AS trail, a.chain AS chain, a.either AS either
+//	MATCH (a:Account) RETURN a.ref AS ref, a.prior AS prior, a.trail AS trail, a.chain AS chain, a.either AS either, a.span AS span
 func (q *queries) AccountColumns(ctx context.Context) ([]AccountColumnsRow, error) {
 	records, err := q.db.run(ctx, accountColumnsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
@@ -131,6 +132,14 @@ func (q *queries) AccountColumns(ctx context.Context) ([]AccountColumnsRow, erro
 			value4Ptr = &v
 		}
 		row.Either = value4Ptr
+		value5, isNil, err := neo4j.GetRecordValue[dbtype.Duration](record, "span")
+		if err != nil {
+			return nil, fmt.Errorf("AccountColumns: decode column %q: %w", "span", err)
+		}
+		if isNil {
+			return nil, fmt.Errorf("AccountColumns: column %q is non-nullable but arrived null", "span")
+		}
+		row.Span = toDuration(value5)
 		out = append(out, row)
 	}
 	return out, nil

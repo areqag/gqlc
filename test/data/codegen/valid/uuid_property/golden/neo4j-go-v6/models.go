@@ -16,6 +16,7 @@ type Account struct {
 	Id     int64
 	Prior  *UUID
 	Ref    UUID
+	Span   Duration
 	Trail  *[]*UUID
 }
 
@@ -74,6 +75,11 @@ func decodeAccount(node dbtype.Node) (Account, error) {
 		return Account{}, fmt.Errorf("decode Account.Ref: %w", err)
 	}
 	out.Ref = toUUID(value1)
+	value2, err := neo4j.GetProperty[dbtype.Duration](node, "span")
+	if err != nil {
+		return Account{}, fmt.Errorf("decode Account.Span: %w", err)
+	}
+	out.Span = toDuration(value2)
 	if v, ok := node.Props["trail"]; ok {
 		s, ok := v.([]any)
 		if !ok {
