@@ -1,0 +1,34 @@
+gqlc-9hrh — emitscan: DeclaredIdents has no *ast.FuncLit arm
+
+worktree: /home/antranig/Developer/gqlc/gqlc-9hrh-emitscan
+branch:   fix/gqlc-9hrh-emitscan-funclit-arm (no upstream yet)
+base:     319a3f75 (origin/master)
+GH mirror: https://github.com/areqag/gqlc/issues/2833  -> Closes #2833
+
+[x] bd update --claim; bd ready no longer lists it (status in_progress, assignee areqag)
+[x] verified bead claims against HEAD:
+    - DeclaredIdents (emitscan.go:426-458) arms: AssignStmt/ValueSpec/RangeStmt only. No FuncLit.
+    - FreeIdents (:365-394) binds fn.Recv/Params/Results, then ast.Inspect + DeclaredIdents.
+    - BodyLocals (:461-478) ast.Inspect(fn.Body) + DeclaredIdents -> same miss, fixed by the same arm.
+    - BodyLocals' only caller: internal/codegen/age/capture_test.go:649, asserting body-local names
+      are invariant under a column rename. A missed closure param = vacuous pass there.
+[ ] falsifier test, RED on master
+[ ] probe: what else violates FreeIdents' "errs towards calling a name bound"
+[ ] fix + comment
+[ ] mutation rows
+[ ] just gates
+[ ] PR
+[x] falsifier RED on master (base 319a3f75, no fix applied):
+    TestAClosureParameterIsNotFree      FAIL: free set contains "yield"
+    TestAClosureParameterIsABodyLocal   FAIL: BodyLocals = ["row"], missing "yield"
+    -> BodyLocals DOES need the arm; it gets it from the same DeclaredIdents change.
+[x] fix applied: *ast.FuncLit arm in DeclaredIdents (params AND results). Both falsifiers GREEN.
+[x] probe (scratch module, emitscan.go copied by cp, sha256 matched) measured the doc comment's
+    universal. 10 constructs bound (ok); 5 still FREE: local type decl, its field names, statement
+    label, func-type param name in a signature, type parameter (fn + generic receiver).
+    Type parameter is LIVE today: age/render_models.go:1515 emits func agtypeList[T any](...).
+    Bounded by Scope intersecting free idents with package decls -> all dropped before a sweep.
+[x] doc comment narrowed: enumerates both halves, cites gqlc-db0e for the remainder.
+[x] follow-up bead filed: gqlc-db0e (open, unassigned) with the 14-row probe as its falsifier.
+[x] TestFreeIdentsBoundSetLimits added, 16 rows, pins both halves of the comment.
+[ ] mutation rows
