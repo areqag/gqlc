@@ -122,6 +122,30 @@ func oneWriteBranch(part query.Part, params ...query.Parameter) query.Query {
 	return q
 }
 
+// withAggregateTrailingWhere is the two-part model BOTH halves of the gqlc-dvd1
+// pair pin expect — `MATCH (a:Post) WITH count(a) AS c WHERE c <cmp> RETURN c`.
+// It is a function rather than a var because each caller mutates its own copy's
+// Parameters, and the whole point of the pair is that nothing ELSE differs
+// between the literal and parameterised forms. Two hand-written literals could
+// drift apart and the pin would still pass; one constructor cannot.
+func withAggregateTrailingWhere() query.Query {
+	return query.Query{Branches: []query.Branch{{Parts: []query.Part{
+		{
+			Bindings: []query.Binding{must(query.NewNodeBinding("a", graph.LabelSet{"Post"}))},
+			Returns: []query.ReturnItem{
+				{Name: "c", Value: query.NewAggregateProjection(
+					query.AggCount, []query.Ref{{Variable: "a"}}, false, query.TypeInt{},
+				)},
+			},
+		},
+		{
+			Returns: []query.ReturnItem{
+				{Name: "c", Value: query.NewRefProjection(query.Ref{Variable: "c"}, query.TypeInt{})},
+			},
+		},
+	}}}}
+}
+
 var mustParse = map[string]struct {
 	src  string
 	want query.Query
@@ -1664,6 +1688,51 @@ var mustParse = map[string]struct {
 			query.NewExprUseAt(query.TypeBool{}, query.ExprInPredicate, 1, 0),
 		}}}},
 	},
+	// AUTHORED (gqlc-dvd1 / ruling-4w5 §6) — the LITERAL half of the pair. A
+	// post-aggregation filter is the ordinary shape of a WITH-trailing WHERE and
+	// it has always parsed, because a literal comparison reaches no pairAddSub
+	// and so leaks no varRef onto any part's refs.
+	//
+	// This is the arm gqlc-cmp's PR #147 pin covers (the refs snapshot/restore
+	// in mineWhere). It is restated here so its parameterised twin below sits
+	// BESIDE it: the two models must differ in the Parameters table alone, and
+	// that is not checkable against a pin kept elsewhere in the file.
+	"with-aggregate trailing where, literal": {
+		src:  "MATCH (a:Post)\nWITH count(a) AS c WHERE c > 1\nRETURN c",
+		want: withAggregateTrailingWhere(),
+	},
+	// AUTHORED (gqlc-dvd1 / ruling-4w5 §1.2, §6) — the PARAMETER half, and the
+	// headline repair. Master REFUSED this legal query with `unbound variable:
+	// c` while its literal twin above parsed, which is why the defect read as a
+	// parameter bug: pairAddSub fires only on a `var[.prop]` vs `$param` pair,
+	// and pre-swap its appendRef put `c` into the refs of the part the WITH
+	// CLOSED — where an alias the WITH INTRODUCES is not bound, so buildPart's
+	// referential-integrity sweep rejected it.
+	//
+	// gqlc-cmp's pin could not see this arm: mineComparisons runs BEFORE
+	// mineWhere takes savedRefs, so the leaked ref is captured into the snapshot
+	// and survives the restore. The guard and the defect were one line apart.
+	//
+	// Two assertions, and the second is what the literal twin buys: $p's
+	// PropertyUse is stamped at Part 1 — the part the WITH OPENS, which is the
+	// scope openCypher evaluates a trailing WHERE against — and the branch
+	// structure is otherwise identical to the literal form's. A regression that
+	// re-refuses shows up as a parse error; a regression that merely re-stamps
+	// Part 0 shows up in the Uses list alone.
+	"with-aggregate trailing where, parameter": {
+		src: "MATCH (a:Post)\nWITH count(a) AS c WHERE c = $p\nRETURN c",
+		want: func() query.Query {
+			q := withAggregateTrailingWhere()
+			q.Parameters = []query.Parameter{{Name: "p", Uses: []query.Use{
+				// A BARE variable, not a property lookup:
+				// refFromNonArithmetic's case 0 returns ok for `c` with no
+				// `.prop`, which is why the leak covered `c = $p` as well as
+				// `b.title = $p`.
+				query.NewPropertyUseAt(query.Ref{Variable: "c"}, 1, 0),
+			}}}
+			return q
+		}(),
+	},
 	// Stage 11 §1.1 — a $param inside a quantifier's filter WHERE body, paired
 	// with the ITERATION variable x. typeQuantifier's savedOuter restore rolls
 	// back curPart.refs after the rich typer walks the filter body — but a
@@ -2828,6 +2897,40 @@ var mustReject = map[string]struct {
 				{Name: "b", Token: procsig.TokenInteger, Nullable: true},
 			},
 		}},
+	},
+	// AUTHORED (gqlc-dvd1 / ruling-4w5 §1.3 row I1, §6): a WITH-trailing WHERE
+	// reading a name the WITH DROPPED. The projection exports `t` only, so `a`
+	// is not in the scope openCypher evaluates this WHERE against, and Neo4j
+	// reports `a` not defined. Master ADMITTED it and committed $p ::
+	// property:INT off the stale pre-projection binding of `a`.
+	//
+	// The fail-site is pairAddSub's appendRef at the `ref <cmp> $param` arm
+	// (expr.go, the a→b orientation). Post-swap that appendRef is no longer a
+	// leak: it writes `a` into the refs of the part the WITH OPENED, and
+	// buildPart's referential-integrity sweep finds nothing binding it.
+	//
+	// This is the ACCEPTANCE NARROWING the change carries, and ADR 0045 is the
+	// record of it. No resolver fixture can hold this shape: ErrUnboundVariable
+	// is a parser sentinel, and both resolver harnesses require their fixtures
+	// to parse (resolver_test.go loadQuery; sweep_test.go "must parse").
+	"with-trailing where reads a dropped name": {
+		query: "MATCH (a:Post)\nWITH a.title AS t WHERE a.id = $p\nRETURN t",
+		want:  cypher.ErrUnboundVariable,
+	},
+	// AUTHORED (gqlc-dvd1 / ruling-4w5 §6 mutation row 3): the OPERAND-REVERSED
+	// twin of the pin above. pairAddSub has two symmetric arms — one for
+	// `ref <cmp> $param` and one for `$param <cmp> ref` — each with its own
+	// appendRef call, and the corpus writes every comparison the first way
+	// round. Without this pin, deleting the second arm's appendRef is a
+	// mutation nothing kills, and the two arms ship on one witness.
+	//
+	// It is a separate fail-site, not a duplicate: the operands reach
+	// refFromNonArithmetic in the other order and the two calls are distinct
+	// statements. Verified as a mutation row rather than assumed — the row is in
+	// the PR body.
+	"with-trailing where reads a dropped name, operands reversed": {
+		query: "MATCH (a:Post)\nWITH a.title AS t WHERE $p = a.id\nRETURN t",
+		want:  cypher.ErrUnboundVariable,
 	},
 	// Stage 14 (Call1 [12]): in-query CALL with no YIELD followed by
 	// RETURN referencing a would-be result column. In-query CALL

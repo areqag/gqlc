@@ -459,20 +459,40 @@ func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
 }
 
 // EnterOC_With collects its projection into the current part (a WITH item is a
-// RETURN item — they share oC_ProjectionBody), mines its optional WHERE for
-// parameters, then CLOSES the current part and OPENS a fresh empty part in the
-// current branch. The closed part's returns are the names it exports into the
-// next part's scope (spec §4); Stage 6 also carries their result types so the
-// next part's classifier can type a bare-alias RefProjection.
+// RETURN item — they share oC_ProjectionBody), CLOSES the current part and
+// OPENS a fresh empty part in the current branch, and only THEN mines its
+// optional WHERE for parameters. The closed part's returns are the names it
+// exports into the next part's scope (spec §4); Stage 6 also carries their
+// result types so the next part's classifier can type a bare-alias
+// RefProjection.
+//
+// The order of those three statements is load-bearing in both directions, and
+// each is pinned by a mutation row in docs/specs/
+// ruling-4w5-semantic-scope-attribution.md §6:
+//
+//   - The projection stays BEFORE the swap. openCypher evaluates a WITH's
+//     projection in the PRE-projection scope, so the part it closes is the
+//     correct one for the projection's own refs. Moving it past the swap
+//     loses the bindings it projects from.
+//   - The WHERE goes AFTER the swap. openCypher evaluates a WITH's trailing
+//     WHERE against the projection's OUTPUT scope, which is exactly the part
+//     the swap opens. Mined before the swap, every Use in that WHERE is
+//     stamped with the part the WITH CLOSED, and pairAddSub's appendRef
+//     (expr.go) puts the WHERE's variables into the closed part's
+//     referential-integrity set — which refuses legal Cypher such as
+//     `WITH count(a) AS c WHERE c = $p` with ErrUnboundVariable, and admits
+//     out-of-scope reads such as `WITH a.title AS t WHERE a.x = $p` against
+//     the stale binding. Post-swap, that same appendRef becomes the scope
+//     check rather than the leak (ADR 0045, gqlc-dvd1).
 func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
 	l.collectProjection(c.OC_ProjectionBody())
-	if w := c.OC_Where(); w != nil {
-		l.mineWhere(w)
-	}
 	if l.err != nil {
 		return
 	}
 	l.closePartOpenNext(exportedTypes(l.curPart))
+	if w := c.OC_Where(); w != nil {
+		l.mineWhere(w)
+	}
 }
 
 // exportedTypes computes the name → Stage-6 result type map the closed part

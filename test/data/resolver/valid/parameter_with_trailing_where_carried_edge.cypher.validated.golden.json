@@ -1,0 +1,25 @@
+{
+  "columns": [
+    {
+      "name": "p",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [
+    {
+      "name": "p",
+      "type": {
+        "kind": "property",
+        "type": "TIMESTAMP",
+        "nullable": true
+      }
+    }
+  ],
+  "statement": "read",
+  "distinct": false
+}

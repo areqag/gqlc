@@ -1,0 +1,23 @@
+{
+  "columns": [
+    {
+      "name": "b",
+      "type": {
+        "kind": "node",
+        "labels": "Post",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [
+    {
+      "name": "p",
+      "type": {
+        "kind": "unknown"
+      }
+    }
+  ],
+  "statement": "read",
+  "distinct": false
+}
