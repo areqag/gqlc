@@ -7,6 +7,7 @@ import "context"
 type ReadQuerier interface {
 	BlobWhole(ctx context.Context) (Blob, error)
 	BlobColumns(ctx context.Context) ([]BlobColumnsRow, error)
+	BlobLoose(ctx context.Context) (map[string]any, error)
 }
 
 type WriteQuerier interface {

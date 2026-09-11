@@ -3,6 +3,7 @@ CREATE PROPERTY GRAPH TYPE RecordAnyAndEmpty AS {
         id      :: INT64 NOT NULL,
         loose   :: RECORD NOT NULL,
         maybe   :: RECORD,
-        blank   :: RECORD { } NOT NULL
+        blank   :: RECORD { } NOT NULL,
+        either  :: ANY<RECORD | INT32>
     })
 }
