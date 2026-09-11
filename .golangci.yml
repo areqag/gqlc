@@ -94,30 +94,47 @@ linters:
     # where the other sees. gocyclo increments once per `case`, so a flat
     # constant->text dispatch table scores as if it were deeply nested;
     # gocognit charges a `switch` once regardless of arm count and charges for
-    # nesting depth instead. Measured 2026-09-10 over 734 non-test functions:
+    # nesting depth instead. The pair that shows it are the two
+    # `(typeMap).Property` tables, which gocyclo scores 31 and 33 against
+    # gocognit's 10 and 15 — one `switch` with no nesting at all, ranked by
+    # gocyclo alone among the worst functions in the repository. Satisfying a
+    # gocyclo-only gate there means shattering a readable table, which
+    # `exhaustive` then stops holding to the full constant set; both carry a
+    # `//nolint:gocyclo` naming gocognit as the counter still gating them.
+    # Either counter alone points refactoring effort at the wrong functions;
+    # together they do not.
     #
-    #   function                                          cyclo  cognit
-    #   internal/codegen/neo4j/types.go  (typeMap).Property   31      10
-    #   internal/codegen/age/types.go    (typeMap).Property   33      15
-    #   internal/resolver/resolve.go     resolveType          21       6
-    #   internal/resolver/scope.go       DemoteNullability    43      90
-    #
-    # The first three are flat tables. gocyclo ranked neo4j's the 6th-worst
-    # function in the repository when it is one `switch` with no nesting at
-    # all, and the only way to satisfy a gocyclo-only gate there is to shatter
-    # a readable table — which `exhaustive` then stops holding to the full
-    # constant set. The fourth is the genuinely hard function, and gocyclo
-    # ranked it only 1.4x above a lookup table. Either counter alone points
-    # refactoring effort at the wrong functions; together they do not.
-    #
-    # A linter fires STRICTLY ABOVE its min-complexity, so these admit 25 and
-    # 35 and refuse 26 and 36. Both numbers are the measured ceiling of the
-    # tree after gqlc-oudt paid down the 13 functions that stood above them —
-    # they are a ratchet position, not a comfort margin, and gqlc-5sfv tracks
-    # lowering them. Raising either to land a change is the wrong direction:
+    # A linter fires STRICTLY ABOVE its min-complexity, so these admit 24 and
+    # 35 and refuse 25 and 36. Both are the measured ceiling of the tree rather
+    # than a comfort margin — nothing sits between either number and the worst
+    # function under it. Raising one to land a change is the wrong direction:
     # extract a helper instead.
+    #
+    # Measured 2026-09-11 for bd gqlc-5sfv, over BOTH modules at
+    # `min-complexity: 1`, counting the functions each gate would refuse:
+    #
+    #   above  cyclo  cognit
+    #     10      78     140
+    #     15      23      61
+    #     20       8      31
+    #     24       0      17
+    #     30       0      10
+    #     35       0       0
+    #
+    # So gocyclo moved 25 -> 24 for free, and gocognit did not move at all:
+    # `internal/tools/ghorphan/main.go plan` scores exactly 35, so no gocognit
+    # rung is left that does not come with refactors. The next rung worth
+    # taking is 20/30, priced above at 8 + 10 functions.
+    #
+    # THAT TABLE NEEDS `uniq-by-line: false` BELOW, which is why it is set
+    # repo-wide. Both linters report at the function's DECLARATION line, so by
+    # construction they collide on every function they both fire on, and the
+    # default keeps one of each pair: the same run read 219 gocyclo findings
+    # with the default on against 774 with it off, and put gocyclo's maximum at
+    # 9 rather than 24. A distribution measured through that default is short
+    # by two thirds and describes a tree three rungs tighter than this one.
     gocyclo:
-      min-complexity: 25
+      min-complexity: 24
     gocognit:
       min-complexity: 35
     ireturn:
@@ -222,6 +239,28 @@ linters:
         linters:
           - gocyclo
           - gocognit
+
+issues:
+  # golangci-lint keeps ONE issue per source line by default and says nothing
+  # about the ones it drops. That is the third silent suppressor in this gate's
+  # report, after the two `--max` caps the `complexity` recipe already uncaps,
+  # and it is the one that bites hardest here because gocyclo and gocognit both
+  # report at a function's DECLARATION line — so they do not merely happen to
+  # collide, they collide on every function they both fire on.
+  #
+  # Measured 2026-09-11 (bd gqlc-5sfv), one tree, both modules, both linters at
+  # min-complexity 1: 219 gocyclo findings with the default, 774 without it,
+  # and not one shared line between the surviving gocyclo and gocognit sets.
+  # Read through the default, gocyclo's worst function on this tree scores 9;
+  # it scores 24. The threshold table above was measured against the second
+  # number and would have been wrong by three rungs against the first.
+  #
+  # It cannot turn a red run green — one surviving issue is enough to exit
+  # non-zero — so this is about what the person who has to fix it gets to see.
+  # Behaviourally, on a function over both gates: with the default, only
+  # gocognit is named, so an author who extracts until gocognit is satisfied is
+  # refused a second time by a gocyclo finding they were never shown.
+  uniq-by-line: false
 
 formatters:
   enable:
