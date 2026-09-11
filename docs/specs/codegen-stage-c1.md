@@ -892,7 +892,7 @@ parameter name instead was measured green. The backtick anchor
 closes that spelling, and the delimiter is the whole run of
 backticks rather than one of them — closed by a run of the same
 length — so the same bullet written inside two backticks is read the
-way one written inside a single backtick is. Four neighbouring ones
+way one written inside a single backtick is. Three neighbouring ones
 stay open: a parenthesis-less parameter list with no code span around
 it is not read at all, in running prose or on its own line inside a
 fenced or indented code block — the paren anchor needs no span and
@@ -902,15 +902,19 @@ same block rule declines to open, read from the other side — the rule
 tests where a run of backticks sits rather than parsing the document,
 so it skips a line-opening run of three that the line goes on to
 close, and reads a single backtick on a tab-indented line, where a
-renderer does the opposite of both (`gqlc-cgat`); the binding sweep
-has no second anchor, so `"minAge": minAge` stated with no `map[string]any`
-literal around it is unswept (`gqlc-offa`); and a claim put in the
-place of one of the parenthesis-less lists that test names as
-exhibits, spelled the way that exhibit was, takes its exemption
-(`gqlc-x2sg`). The binding case was measured rather than assumed —
-these documents carry over 500 bare `"key": value` spans across more
-than 30 files, nearly all of them JSON model shapes, so a sweep
-reading them would redden on prose across the corpus.
+renderer does the opposite of both (`gqlc-cgat`); and the binding
+sweep has no second anchor, so the **exhibit** `"minAge": minAge`
+stated with no `map[string]any` literal around it is unswept
+(`gqlc-offa`). A fourth is now closed: a claim put in the place of one
+of the parenthesis-less lists that test names as exhibits, spelled the
+way that exhibit was, used to take its exemption, because the
+exemption went to whichever matching site came first. It is claimed by
+a marker on the site's own line instead, so an unmarked claim is
+graded and an entry left covering nothing is reported (`gqlc-x2sg`).
+The binding case was measured rather than assumed — these documents
+carry over 500 bare spans shaped like the **exhibit** `"key": value`,
+across more than 30 files, nearly all of them JSON model shapes, so a
+sweep reading them would redden on prose across the corpus.
 
 The fifth and sixth are narrower, and both were measured rather than
 reasoned about. The sweeps read raw markdown bytes, so a site inside
