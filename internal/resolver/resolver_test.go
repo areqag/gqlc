@@ -394,6 +394,14 @@ var invalidFixtures = map[string]error{
 	// and whole-entity reference is refused.
 	"label_satisfy_plural_property.cypher": ErrUnknownProperty,
 	"label_satisfy_plural_entity.cypher":   ErrAmbiguousLabel,
+	// gqlc-z8lw. The same intersection rule reached from the three MUTATING
+	// clauses rather than from a projection. Their point is not the sentinel,
+	// which is the read path's, but that each names the clause at fault: see
+	// their pins in invalidFixtureContains and their group in
+	// unknownPropertyClauseGroups.
+	"set_property_unknown_on_plural_satisfying_node.cypher":    ErrUnknownProperty,
+	"remove_property_unknown_on_plural_satisfying_node.cypher": ErrUnknownProperty,
+	"delete_property_unknown_on_plural_satisfying_node.cypher": ErrUnknownProperty,
 	// 0tft. Phase C narrows a plural endpoint to the node types its committed
 	// candidates put on that end of the pattern, intersected across every
 	// touching edge — so the refusal that survives the widening is the one
@@ -1225,6 +1233,27 @@ var invalidFixtureContains = map[string]string{
 	"set_property_unknown_on_multi_type_edge.cypher":    "SET property r.notAProp missing on union member Person-[AUTHORED]->Post",
 	"remove_property_unknown_on_multi_type_edge.cypher": "REMOVE property r.notAProp missing on union member Person-[AUTHORED]->Post",
 	"delete_property_unknown_on_multi_type_edge.cypher": "DELETE property r.notAProp missing on union member Person-[AUTHORED]->Post",
+
+	// The plural-satisfying NODE lane of the same three validators, which is
+	// unionNodeProperty's missing arm and takes its clause as an argument for
+	// the same reason unionProperty's does. Before these three fixtures no
+	// invalid fixture reached that arm under a mutating clause AT ALL under its
+	// own paired schema: the twelve `plural-satisfying type` pins above are all
+	// read-path, so the only thing asserting the clause word here was
+	// TestCorpusSweepManifest, and a digest regenerates. Measured at bda2933d
+	// (bd gqlc-z8lw): dropping clause.prefix() from that arm reddened the
+	// manifest alone — 227 cells, 0 sentinel, 0 verdict — and went fully green
+	// after -update, as did swapping clauseRemove for clauseDelete at the
+	// REMOVE call site (26 cells).
+	//
+	// Each pin carries the clause word, so a DROPPED prefix and a MISATTRIBUTED
+	// one both red here. What they do not hold is that the three are separated
+	// from each other at all — collapsing all three call sites onto one clause
+	// constant leaves each message matching only its own twin's pin — and that
+	// is unknownPropertyClauseGroups' half.
+	"set_property_unknown_on_plural_satisfying_node.cypher":    "SET p.employeeId missing on plural-satisfying type Person",
+	"remove_property_unknown_on_plural_satisfying_node.cypher": "REMOVE p.employeeId missing on plural-satisfying type Person",
+	"delete_property_unknown_on_plural_satisfying_node.cypher": "DELETE p.employeeId missing on plural-satisfying type Person",
 	// Both begin at the sentinel; see label_satisfy_plural_property above.
 	"unknown_property_union_missing.cypher":      "unknown property: property r.views missing on union member Person-[LIKES]->Post",
 	"unknown_property_union_type_differs.cypher": "unknown property: property r.weight type differs across union members: property:INT (not null) vs property:FLOAT (not null)",
@@ -1605,6 +1634,13 @@ var unknownPropertyClauseGroups = map[string][]string{
 	"MERGE sub-clause, a.notAProp": {
 		"merge_on_create_unknown_property.cypher",
 		"merge_on_match_unknown_property.cypher",
+	},
+	// The plural-satisfying node lane, whose three call sites all land in
+	// unionNodeProperty's missing arm (bd gqlc-z8lw).
+	"plural-satisfying node binding, p.employeeId": {
+		"set_property_unknown_on_plural_satisfying_node.cypher",
+		"remove_property_unknown_on_plural_satisfying_node.cypher",
+		"delete_property_unknown_on_plural_satisfying_node.cypher",
 	},
 }
 
