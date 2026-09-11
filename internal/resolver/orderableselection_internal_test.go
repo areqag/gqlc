@@ -92,6 +92,18 @@ func TestOrderableSelectionNamesEveryPropertyType(t *testing.T) {
 		// row is where the decision gets recorded.
 		graph.TypeDecimal: false,
 
+		// UUID takes DECIMAL's answer for DECIMAL's reason: the ruling does not
+		// enumerate it, so refusing degrades min(p.u) to any and admitting it
+		// would be a decision nobody has made. A second reason holds here and
+		// not there — no target can carry a UUID property at all today, so
+		// there is no column for a preserved width to reach: all three refuse
+		// it with codegen.ErrUnrepresentableWidth
+		// (test/data/codegen/invalid/uuid_width_unrepresentable). That second
+		// reason expires when gqlc-eg4b's stage 2 lands a v6 dbtype.UUID
+		// carrier; the first one does not, so this row still needs a ruling
+		// rather than a re-read of the codegen table.
+		graph.TypeUUID: false,
+
 		// The open/composite families. Ordering an ANY is engine-dependent at
 		// best — it holds whatever the writer wrote — and "can min/max over a
 		// list be typed" is a question the ruling explicitly does not open
