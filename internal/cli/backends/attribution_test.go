@@ -51,121 +51,220 @@ var selfName = map[string]string{
 // sentinels: today it holds ErrUnrepresentableWidth on AGE's BYTES and
 // ErrUnstorableProperty on neo4j's nested list with the same line.
 //
-// Since bd gqlc-oxgyt it asserts the converse too, on the rows where the
-// converse is well posed: a width every target refuses FOR THE SAME
-// REASON carries no name anywhere. That is the half the rule needs to be
-// a rule rather than a one-way obligation — without it, a backend that
-// suffixed its name to every refusal it ever raised would pass.
+// Since bd gqlc-oxgyt it asserts the converse too: a refusal no other
+// enrolled target answers differently carries no name. That is the half
+// the rule needs to be a rule rather than a one-way obligation — without
+// it, a backend that suffixed its name to every refusal it ever raised
+// would pass.
 //
-// "For the same reason" is the sentinel each refusal cites, and it is a
-// real restriction rather than a hedge. Nine of this sweep's widths are
-// refused by every target under two DIFFERENT sentinels —
-// LIST<LIST<BYTES>> and its record-shaped siblings, where AGE has no
-// carrier for BYTES and neo4j will not store a nested value. Each of
-// those two refusals is itself contingent: neo4j carries BYTES, and AGE
-// stores nested lists. So both names are owed, and it is only their
-// CONJUNCTION over one width that is unanimous — a shape the converse as
-// stated would wrongly call a shared refusal. Those rows are logged and
-// left unasserted; asserting them needs a per-refusal notion of
-// contingency this layer cannot compute (bd gqlc-r0yy).
+// CONTINGENCY IS A PROPERTY OF A REFUSAL, NOT OF A WIDTH (bd gqlc-r0yy).
+// The converse was first stated over widths — a width every target
+// refuses CITING ONE SENTINEL carries no name — and that scoping left
+// nine of this sweep's widths asserted by neither half. LIST<LIST<BYTES>>
+// and its record-shaped siblings are refused by every target under two
+// different sentinels: AGE has no carrier for BYTES, neo4j will not store
+// a nested value. Each of those two refusals is itself contingent, so
+// each name is owed — neo4j carries BYTES, and AGE stores nested lists —
+// and it is only their CONJUNCTION over one width that is unanimous. A
+// width-scoped converse can only call that a shared refusal or say
+// nothing, and it said nothing.
+//
+// So the question is asked once per refusal instead: did any other
+// enrolled target answer THIS declaration with something other than THIS
+// refusal's sentinel set? That covers every unanimously-refused width
+// uniformly and subsumes the sentinel-agreement scoping, which is its
+// contraction — where every target refuses under one sentinel no target
+// dissents, and the converse fires exactly as before.
+//
+// It needs nothing new from codegen. The claim a refusal makes is the
+// sentinel it cites, which errors.Is already exposes; codegen.RefusedWidth
+// answers a different question (which WIDTH), for a different caller
+// (a backend deciding at emit time whether to name itself).
 func TestAContingentRefusalNamesItsBackend(t *testing.T) {
 	reg, err := backends.Registry()
 	require.NoError(t, err)
 
 	keys := reg.Keys()
-	require.NotEmpty(t, keys, "an empty roster makes every width unanimous, so the sweep below asserts nothing")
+	require.NotEmpty(t, keys, "an empty roster leaves every refusal without a dissenter, so the sweep below asserts nothing")
 	for _, key := range keys {
 		require.Contains(t, selfName, key,
 			"registry key %q declares no phrase to call itself by, so a refusal of its own could not be told from a shared one", key)
 	}
 
-	var contested, shared, divergent []graph.PropertyType
+	var contested, divergent, shared []graph.PropertyType
 	for _, pt := range declaredWidths() {
-		accepted, refused := partitionByVerdict(t, reg, keys, pt)
+		answers := answersByTarget(t, reg, keys, pt)
+		accepted, sentinels := tallyAnswers(answers)
 		switch {
-		case len(refused) == 0:
+		case len(sentinels) == 0:
 			// Every target emitted it. There is no refusal to attribute.
+			continue
 		case len(accepted) > 0:
 			contested = append(contested, pt)
-			for key, err := range refused {
-				require.ErrorContains(t, err, selfName[key],
-					"%s is refused by %s and accepted by %v, so the message has to say which target refused; it reads %q",
-					pt, key, accepted, err.Error())
-			}
-		case len(citedSentinels(t, pt, refused)) == 1:
-			shared = append(shared, pt)
-			for key, err := range refused {
-				require.NotContains(t, err.Error(), selfName[key],
-					"%s is refused by every enrolled target under one sentinel, so the declaration is the obstacle "+
-						"and naming %s tells the author another target may differ when none does; it reads %q",
-					pt, key, err.Error())
-			}
-		default:
+		case len(sentinels) > 1:
 			divergent = append(divergent, pt)
+		default:
+			shared = append(shared, pt)
 		}
+		requireAttribution(t, pt, answers)
 	}
 
+	// The three buckets are bookkeeping, not three rules — every row above
+	// went through the one requireAttribution call. They are guarded
+	// separately because they are the three distinct ways the rule can
+	// reach a verdict, and a bucket that empties takes its evidence path
+	// out of the sweep without failing anything.
 	require.NotEmpty(t, contested,
-		"no declared width divides the roster, so every row above was unanimous and the naming obligation certified nothing")
+		"no declared width divides the roster, so no refusal above owed its name because another target ACCEPTED the declaration")
+	require.NotEmpty(t, divergent,
+		"no declared width is refused by every enrolled target under two sentinels, so no refusal above owed its name "+
+			"because another target REFUSED the declaration for a different reason — the evidence path bd gqlc-r0yy "+
+			"was filed for, and the one a width-scoped converse could not see. If a type table legitimately closed "+
+			"that gap, delete this guard; it is here so the gap cannot close silently")
 	require.NotEmpty(t, shared,
-		"no declared width is refused by every target under one sentinel, so the converse above certified nothing")
+		"no declared width is refused by every enrolled target with no dissenter, so the converse — that such a refusal "+
+			"carries NO name — certified nothing")
 	t.Logf("widths dividing the roster: %v", contested)
-	t.Logf("widths every target refuses for the same reason: %v", shared)
-	t.Logf("widths every target refuses for DIFFERENT reasons, unasserted per bd gqlc-r0yy: %v", divergent)
+	t.Logf("widths every target refuses, under two or more sentinels: %v", divergent)
+	t.Logf("widths every target refuses under one sentinel: %v", shared)
 }
 
-// citedSentinels reports the distinct sentinel sets the refusals cite, so
-// the caller can tell one shared reason from several coincident ones. The
-// set rather than a single sentinel because errors.Is is not exclusive,
-// and sorted so two keys citing the same pair in either order agree.
+// answer is what one enrolled target said about one declaration: either
+// it emitted, or it refused with an error citing a sentinel set.
 //
-// A refusal citing NO sentinel fails here rather than being folded in
-// with the others. It would otherwise compare equal to every other
-// sentinel-less refusal and let a coincidence read as a shared reason —
-// and the sweep declares no queries, so every refusal it can raise comes
-// from a schema phase, all of which the taxonomy (docs/specs/
-// codegen-sentinel-taxonomy.md) requires to carry one.
-func citedSentinels(t *testing.T, pt graph.PropertyType, refused map[string]error) []string {
-	t.Helper()
-
-	seen := make(map[string]struct{})
-	for key, err := range refused {
-		var cited []string
-		for _, sentinel := range codegen.AllSentinels() {
-			if errors.Is(err, sentinel) {
-				cited = append(cited, sentinel.Error())
-			}
-		}
-		require.NotEmpty(t, cited,
-			"%s is refused by %s citing none of the codegen sentinels, so its reason cannot be compared with the "+
-				"other targets'; it reads %q", pt, key, err.Error())
-		slices.Sort(cited)
-		seen[strings.Join(cited, "+")] = struct{}{}
-	}
-	return slices.Sorted(maps.Keys(seen))
+// The sentinel set rather than a single sentinel because errors.Is is not
+// exclusive, and joined from a sorted slice so two refusals citing the
+// same pair in either order compare equal.
+type answer struct {
+	accepted  bool
+	err       error
+	sentinels string
 }
 
-// partitionByVerdict generates a one-property schema carrying pt for
-// every enrolled target, returning the keys that emitted it and the
-// errors of those that refused.
-func partitionByVerdict(t *testing.T, reg codegen.Registry, keys []string, pt graph.PropertyType) ([]string, map[string]error) {
+// differsFrom reports whether a answers the declaration with something
+// other than what b said. This is the whole of ADR 0035's contingency
+// test, asked between two targets.
+func (a answer) differsFrom(b answer) bool {
+	if a.accepted != b.accepted {
+		return true
+	}
+	return a.sentinels != b.sentinels
+}
+
+// describe renders an answer for a failure message, which is the only
+// caller: a row that fails wants to print the dissent it turned on.
+func (a answer) describe() string {
+	if a.accepted {
+		return "emitted it"
+	}
+	return "refused it citing " + a.sentinels
+}
+
+// requireAttribution holds ADR 0035's rule over every refusal of one
+// declaration: a refusal names its backend exactly when some other
+// enrolled target answered that declaration with something other than
+// this refusal's sentinel set.
+func requireAttribution(t *testing.T, pt graph.PropertyType, answers map[string]answer) {
 	t.Helper()
 
-	var accepted []string
-	refused := make(map[string]error)
+	for _, key := range slices.Sorted(maps.Keys(answers)) {
+		mine := answers[key]
+		if mine.accepted {
+			continue
+		}
+		other, dissents := dissenter(answers, key)
+		if dissents {
+			require.ErrorContains(t, mine.err, selfName[key],
+				"%s is refused by %s citing %s, and %s %s, so another target does differ and the message has to say "+
+					"which one refused; it reads %q",
+				pt, key, mine.sentinels, other, answers[other].describe(), mine.err.Error())
+			continue
+		}
+		require.NotContains(t, mine.err.Error(), selfName[key],
+			"%s is refused by every enrolled target citing %s, so the declaration is the obstacle and naming %s tells "+
+				"the author another target may differ when none does; it reads %q",
+			pt, mine.sentinels, selfName[key], mine.err.Error())
+	}
+}
+
+// dissenter returns an enrolled target that answered this declaration
+// with something other than key's refusal, and whether there is one.
+//
+// Its identity is returned rather than a bool alone because it is the
+// whole of the evidence the rule turns on, and a failing row that says
+// which target dissented is the difference between a diagnosis and a
+// re-measurement. Iterated in sorted key order so the witness a given
+// roster names does not move between runs.
+func dissenter(answers map[string]answer, key string) (string, bool) {
+	mine := answers[key]
+	for _, other := range slices.Sorted(maps.Keys(answers)) {
+		if other != key && answers[other].differsFrom(mine) {
+			return other, true
+		}
+	}
+	return "", false
+}
+
+// tallyAnswers reports the keys that emitted, and the distinct sentinel
+// sets cited among those that refused. Both are for bucketing and for the
+// reach guards; the rule itself is asked per refusal by requireAttribution.
+func tallyAnswers(answers map[string]answer) (accepted, sentinels []string) {
+	seen := make(map[string]struct{})
+	for key, a := range answers {
+		if a.accepted {
+			accepted = append(accepted, key)
+			continue
+		}
+		seen[a.sentinels] = struct{}{}
+	}
+	slices.Sort(accepted)
+	return accepted, slices.Sorted(maps.Keys(seen))
+}
+
+// answersByTarget generates a one-property schema carrying pt for every
+// enrolled target and records what each one answered.
+func answersByTarget(t *testing.T, reg codegen.Registry, keys []string, pt graph.PropertyType) map[string]answer {
+	t.Helper()
+
+	answers := make(map[string]answer, len(keys))
 	for _, key := range keys {
 		newGen, ok := reg.Lookup(key)
 		require.True(t, ok, "registry key %q reported by Keys does not resolve through Lookup", key)
 
 		files, err := newGen("widths").Generate(codegen.Input{Schema: schemaWithPayload(pt)})
 		if err != nil {
-			refused[key] = err
+			answers[key] = answer{err: err, sentinels: citedSentinels(t, pt, key, err)}
 			continue
 		}
 		require.NotEmpty(t, files, "%s emitted no files at %s and returned no error, so neither verdict is recorded", pt, key)
-		accepted = append(accepted, key)
+		answers[key] = answer{accepted: true}
 	}
-	return accepted, refused
+	return answers
+}
+
+// citedSentinels renders the sentinel set one refusal cites, as the
+// joined key two refusals are compared by.
+//
+// A refusal citing NO sentinel fails here rather than yielding an empty
+// key. It would otherwise compare equal to every other sentinel-less
+// refusal and let a coincidence read as agreement — and the sweep
+// declares no queries, so every refusal it can raise comes from a schema
+// phase, all of which the taxonomy (docs/specs/
+// codegen-sentinel-taxonomy.md) requires to carry one.
+func citedSentinels(t *testing.T, pt graph.PropertyType, key string, err error) string {
+	t.Helper()
+
+	var cited []string
+	for _, sentinel := range codegen.AllSentinels() {
+		if errors.Is(err, sentinel) {
+			cited = append(cited, sentinel.Error())
+		}
+	}
+	require.NotEmpty(t, cited,
+		"%s is refused by %s citing none of the codegen sentinels, so its reason cannot be compared with the "+
+			"other targets'; it reads %q", pt, key, err.Error())
+	slices.Sort(cited)
+	return strings.Join(cited, "+")
 }
 
 // declaredWidths is graph's property-type vocabulary, each width also in
