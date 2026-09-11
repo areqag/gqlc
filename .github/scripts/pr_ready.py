@@ -131,6 +131,7 @@ def fixture_superseded_failure():
         "actionlint",
         "govulncheck",
         "live-smoke",
+        "live-smoke-age",
         "codegen-fence",
     ]
     rollup = [
@@ -153,6 +154,11 @@ def fixture_superseded_failure():
         {"name": "actionlint", "conclusion": "SUCCESS", "startedAt": "2026-08-22T05:40:02Z"},
         {"name": "govulncheck", "conclusion": "SUCCESS", "startedAt": "2026-08-22T05:40:03Z"},
         {"name": "live-smoke", "conclusion": "SUCCESS", "startedAt": "2026-08-22T05:40:04Z"},
+        {
+            "name": "live-smoke-age",
+            "conclusion": "SUCCESS",
+            "startedAt": "2026-08-22T05:40:04Z",
+        },
         # Non-required noise: silent in every output, present so the row
         # proves it. nightly-alert skips on every pull request by its own
         # `if:` (schedule only), which is what keeps this entry faithful to a
@@ -171,6 +177,7 @@ def fixture_required_skipped():
         "actionlint",
         "govulncheck",
         "live-smoke",
+        "live-smoke-age",
         "codegen-fence",
     ]
     rollup = [
@@ -181,6 +188,11 @@ def fixture_required_skipped():
         {"name": "actionlint", "conclusion": "SUCCESS", "startedAt": "2026-08-22T06:09:00Z"},
         {"name": "govulncheck", "conclusion": "SUCCESS", "startedAt": "2026-08-22T06:09:00Z"},
         {"name": "live-smoke", "conclusion": "SUCCESS", "startedAt": "2026-08-22T06:09:00Z"},
+        {
+            "name": "live-smoke-age",
+            "conclusion": "SUCCESS",
+            "startedAt": "2026-08-22T06:09:00Z",
+        },
     ]
     return required, rollup
 
@@ -281,8 +293,8 @@ def self_test():
 
     check(
         "fixtures-agree-on-required-set",
-        set(required_a) == set(required_b) and len(required_a) == 7,
-        f"{required_a} vs {required_b}",
+        set(required_a) == set(required_b) and len(required_a) == 8,
+        f"{len(required_a)} {required_a} vs {len(required_b)} {required_b}",
     )
 
     if failures:
