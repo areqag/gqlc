@@ -128,6 +128,15 @@ dispositioned differently.
   structure blinds the scan from there to the next `-->`; that is 0 occurrences
   today and is what its witness has to pin. The absence check is the alternative
   remedy, and the one this ruling prefers.
+
+  Taken as the absence check, in
+  [ADR 0029](0029-the-codegen-spec-fence.md) decision 15. The hazard above was
+  real and this document was its victim: the three code-span quotes at lines 62,
+  101 and 126 here mean a reader that cannot tell a span from prose opens a
+  comment at the first and runs to the second. The check skips openers inside an
+  inline code span for that reason, and an unterminated opener runs to end of
+  file rather than being discarded. `scanBareBinds` is left out — it has no
+  anchor to refuse — so the row above is closed for four of the five sweeps.
 - **`gqlc-cgat` is a documented limit rather than a bug.** It is the only one of
   the three whose repair genuinely wants the block structure a parse supplies,
   and its hiding place is unoccupied. Its ALLOW pins in

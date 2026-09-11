@@ -45,15 +45,30 @@ import (
 // as is one inside a code span whose backtick run the block rule takes
 // for a fence, since that rule tests bytes rather than parsing markdown
 // — while the paren anchor reaches a block like any other text
-// (gqlc-cgat); a listed document keeps its census entry on one
-// surviving site (gqlc-0rjn); and a quote of one of the parameter
-// lists specNonMethodLists exempts, replaced in place by a claim
-// spelled identically, keeps the exemption (gqlc-yn2l).
+// (gqlc-cgat); and a listed document keeps its census entry on one
+// surviving site (gqlc-0rjn).
 //
 // A list replacing one of the exhibits specBareListExhibits names,
 // spelled the same way, no longer takes that entry's exemption: an
 // exemption is claimed by exhibitMarker on the site's line rather than
-// by the site coming first (gqlc-x2sg).
+// by the site coming first (gqlc-x2sg). Neither does a claim replacing
+// one of the non-method quotes specNonMethodSites exempts: that census
+// is keyed by the NAME the document prints before the parameter list as
+// well as by the list, so a replacement has to keep both (gqlc-yn2l).
+//
+// A site hidden inside an HTML comment no longer pays a census either.
+// Four of the five anchors are refused there outright rather than read
+// there, which is an absence check and not a scanner (gqlc-jnsk, ADR
+// 0029 decision 15). The fifth, scanBareBinds, has no anchor to refuse,
+// so a commented brace-less binding span is still read and still counts.
+//
+// A documented binding is graded on its SHAPE as well as its name: no
+// arm of the emitter can produce a `*` or an `&`, so either operator is
+// drift at every nullability, and the deref hiding inside a carrier is
+// no longer peeled away before the comparison. What remains unreached
+// there is the sweep's breadth — every map[string]any literal under
+// docRoots is graded whatever it is for — which fails closed and is
+// declined on measurement (gqlc-173n, ADR 0029 decision 16).
 //
 // A signature carrying the author's parameter names as separate
 // arguments is no longer past the arity read here: the emitted list is a
@@ -242,7 +257,7 @@ var specListRuleDocs = []string{specC1, specC4}
 // driver/transaction `run` seam in both its spellings, the neo4j
 // driver's own ExecuteWrite, and the godog step handler the golden-test
 // migration note quotes. Each is spelled here once and counted per
-// document in specNonMethodLists, so a document that respells one is red
+// document in specNonMethodSites, so a document that respells one is red
 // on its text rather than silently exempted under the old spelling.
 const (
 	runSeamList      = "ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode"
@@ -252,8 +267,34 @@ const (
 	godogStepList = "ctx context.Context, sigText string, _ *godog.Table"
 )
 
-// specNonMethodLists are the parameter lists longer than any the emitter
-// renders, mapped per document to how many times each is printed there.
+// nonMethodSite spells one exempted site the way specNonMethodSites keys
+// it: the name the document prints immediately before the parameter
+// list, then the list itself back inside its parentheses.
+//
+// The name is half the key, and it is the half gqlc-yn2l is about. Keyed
+// by the list alone, a document could replace one of these quotes IN
+// PLACE with a claim about the emitted surface spelled identically — the
+// count stayed satisfied and the claim went ungraded. It cannot now: an
+// emitted query method's name is the query author's, so a claim carries
+// that name where the quote carried `run`, `ExecuteWrite` or `func`, and
+// the replacement is red twice over — once as an overlong list no entry
+// covers, once as an entry whose count fell (ADR 0029 decision 14).
+func nonMethodSite(name, list string) string { return name + "(" + list + ")" }
+
+// The four sites above under the name each document prints them with.
+// `func` is not an omission: the godog handler is quoted as an anonymous
+// function literal, so `func` is what stands in the name position, and
+// keying on it holds a replacement to still being one.
+var (
+	runSeamSite      = nonMethodSite("run", runSeamList)
+	runSeamTxSite    = nonMethodSite("run", runSeamTxList)
+	executeWriteSite = nonMethodSite("ExecuteWrite", executeWriteList)
+	godogStepSite    = nonMethodSite("func", godogStepList)
+)
+
+// specNonMethodSites are the sites whose parameter list is longer than
+// any the emitter renders, mapped per document to how many times each is
+// printed there.
 //
 // The emitted query method's parameter list is a closed shape at every
 // arity — `(ctx context.Context)` or `(ctx context.Context, arg <T>)`,
@@ -270,6 +311,15 @@ const (
 // restated one construct over, and the answer is the same — a census
 // written down, reconciled in BOTH directions.
 //
+// What the name in the key buys is the OTHER half of gqlc-x2sg, which a
+// general discriminator was never going to answer. No name tells an
+// emitted query method from something else in the abstract; but these
+// four sites are not in the abstract, and the names they are printed
+// under — `run`, `ExecuteWrite`, `func` — are recorded here beside the
+// lists. So an in-place replacement has to keep the name as well as the
+// list, and a claim about the emitted surface does not (gqlc-yn2l, ADR
+// 0029 decision 14).
+//
 // The count is exact rather than a floor, and that asymmetry is the
 // opposite of specSigDocs' for the opposite reason. specSigDocs bounds a
 // REQUIREMENT, where growing is honest; this bounds an EXEMPTION, where
@@ -283,25 +333,28 @@ const (
 // mechanism, and the reason is measured rather than assumed: 11 of these
 // 13 sites sit inside fenced Go code blocks, where `**exhibit**` is not
 // emphasis but literal text corrupting the example (measured 2026-09-11;
-// the two in prose are C4's ExecuteWrite span and the godog handler). So
-// the residual gap is x2sg's exactly: a document REPLACING one of these
-// quotes with a claim spelled identically keeps the count satisfied. It
-// is bounded by what such a claim would have to say — that an emitted
-// query method takes a `cypher string` and a `params map[string]any` —
-// and it is filed rather than closed (gqlc-yn2l).
-var specNonMethodLists = map[string]map[string]int{
-	specC0:        {runSeamList: 2, runSeamTxList: 1},
-	specC1:        {runSeamList: 6, runSeamTxList: 1},
-	specC4:        {runSeamList: 1, executeWriteList: 1},
-	specGodogDocs: {godogStepList: 1},
+// the two in prose are C4's ExecuteWrite span and the godog handler).
+// The name in the key is what stands in for it, and it costs no byte in
+// any document because every one of these sites already prints one.
+//
+// The residual after that is narrower than x2sg's and is stated rather
+// than assumed: a replacement keeping BOTH halves is still exempted, so
+// what it has to claim is that an emitted query method is named `run`,
+// or `ExecuteWrite`, or is an anonymous `func` literal, AND takes a
+// `cypher string` beside a driver `params map[string]any`.
+var specNonMethodSites = map[string]map[string]int{
+	specC0:        {runSeamSite: 2, runSeamTxSite: 1},
+	specC1:        {runSeamSite: 6, runSeamTxSite: 1},
+	specC4:        {runSeamSite: 1, executeWriteSite: 1},
+	specGodogDocs: {godogStepSite: 1},
 }
 
-// nonMethodCensus flattens specNonMethodLists into the one-entry-per
+// nonMethodCensus flattens specNonMethodSites into the one-entry-per
 // (document, list) form the census helpers reconcile, on exhibitEntry's
 // terms.
 func nonMethodCensus() map[string]int {
 	out := map[string]int{}
-	for doc, lists := range specNonMethodLists {
+	for doc, lists := range specNonMethodSites {
 		for list, n := range lists {
 			out[exhibitEntry(doc, list)] = n
 		}
@@ -529,7 +582,7 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 		files,
 		func(file string) string { return readDoc(t, file) },
 		specBareListExhibits,
-		specNonMethodLists,
+		specNonMethodSites,
 	)
 
 	var bad []specSig
@@ -558,15 +611,20 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 			"so a list naming the query author's parameters as separate arguments is the capture vector\n"+
 			"gqlc-lhs3 removed, written in a second spelling (gqlc-vu7z).\n\n"+
 			"If the function above is not an emitted query method — the driver/transaction `run` seam, the\n"+
-			"driver's own API, a test harness handler — write its parameter list into specNonMethodLists\n"+
-			"beside its document, with the number of times that document prints it")
+			"driver's own API, a test harness handler — write its NAME and parameter list into\n"+
+			"specNonMethodSites beside its document, with the number of times that document prints it.\n"+
+			"The name is part of the key, so a site that kept the list and changed the name is reported\n"+
+			"here rather than exempted: that is the in-place replacement gqlc-yn2l is about")
 
-	requireCensusExact(t, nonMethodCensus(), sweep.nonMethod, "specNonMethodLists", "exempted signature",
-		"each entry above is one parameter list a document prints that opens the emitted query method's\n"+
-			"anchor and belongs to something else, and the number beside it is how many times that document\n"+
-			"prints it. The count is exact, not a floor: this census bounds an EXEMPTION, so a site it has\n"+
-			"not been told about is the failure it exists to prevent, and a site that went away means the\n"+
-			"exemption is holding nothing (gqlc-vu7z)")
+	requireCensusExact(t, nonMethodCensus(), sweep.nonMethod, "specNonMethodSites", "exempted signature",
+		"each entry above is one site a document prints that opens the emitted query method's anchor and\n"+
+			"belongs to something else — spelled as the name before the parameter list, then the list — and\n"+
+			"the number beside it is how many times that document prints it. The count is exact, not a\n"+
+			"floor: this census bounds an EXEMPTION, so a site it has not been told about is the failure it\n"+
+			"exists to prevent, and a site that went away means the exemption is holding nothing\n"+
+			"(gqlc-vu7z). An entry reported missing here with no matching arrival may instead be a quote\n"+
+			"whose NAME was rewritten in place; the list is then unchanged and the new name is graded as\n"+
+			"drift by the failure above (gqlc-yn2l)")
 
 	requireCensusFloors(t, specSigDocs, sweep.sigDocs, "specSigDocs", "graded signature",
 		"each document on this list prints emitted query methods whose arguments this fence reads, and the\n"+
@@ -637,6 +695,17 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 			"one identifier, and only the map key carries the author's parameter name (gqlc-lhs3, gqlc-rz0l)",
 			codegen.ParamArg))
 
+	requireClean(t, sweep.deref, "documented parameter binding derefs or takes an address",
+		"these documented map[string]any entries carry a `*` or an `&`, and no arm of the emitter can\n"+
+			"produce one: every binding it writes is the access expression bare or one helper call wrapped\n"+
+			"around it, and the access expression is codegen.ParamArg or a field selected off it. The\n"+
+			"operators are therefore wrong at every nullability, which is why this is graded without\n"+
+			"knowing the parameter's type.\n\n"+
+			"The shape this exists for is `float64(*arg)`, whose IDENTIFIER is right — so the name rule\n"+
+			"above passes it — and which is a nil panic at runtime. A nullable parameter binds bare:\n"+
+			"paramBindExpr returns the access expression before driverCarrier is reached, so a carrier\n"+
+			"around a deref documents the one composition the emitter refuses to write (gqlc-173n)")
+
 	// A document quoting a signature owes a binding only while it is
 	// listed here (ADR 0029 decision 9).
 	requireCensusFloors(t, specBindDocs, sweep.bindDocs, "specBindDocs", "graded binding",
@@ -657,6 +726,51 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 			"claims about the emitted surface, and each covers exactly one site — a second span spelled the same\n"+
 			"way in the same document is graded. An entry is claimed by "+exhibitMarker+" on the site's own\n"+
 			"line, not by the site coming first (gqlc-x2sg)")
+}
+
+// TestSpecDocumentsCarryNoGradedAnchorInsideAnHTMLComment refuses the one
+// construct that lets a document's rendered text and its swept bytes
+// disagree.
+//
+// Both sweeps above read bytes, so an HTML comment is invisible to the
+// reader and fully present to them. That cuts two ways and only one of
+// them is a nuisance. A commented site whose text has DRIFTED reddens the
+// fence over a line no reader can see: annoying, loud, self-correcting. A
+// commented site that is CORRECT quietly pays a census — specSigDocs and
+// specBindDocs are per-document floors, so a document can meet its whole
+// obligation on signatures nobody reads, and the floor that exists to
+// prove the surface is still documented proves nothing (bd gqlc-jnsk).
+// The second is the direction that matters, and it cannot be caught by
+// reading the site harder, because there is nothing wrong with the site.
+//
+// So this is an absence check, not a scanner: the anchors may not appear
+// inside a comment at all, in either condition. ADR 0042 prefers refusing
+// a construct over interpreting it, and that preference is what makes
+// this affordable — deciding whether a comment's contents would have
+// rendered is a markdown parse, while deciding whether a byte run sits
+// between `<!--` and `-->` is not (ADR 0029 decision 15).
+//
+// The corpus passes today: the one real HTML comment in it is in
+// docs/bd-ledger-writes.md and carries no anchor.
+func TestSpecDocumentsCarryNoGradedAnchorInsideAnHTMLComment(t *testing.T) {
+	files := docFiles(t)
+	require.NotEmpty(t, files, "the fence swept no documents; docRoots is stale")
+
+	var hidden []specSig
+	for _, file := range files {
+		hidden = append(hidden, commentedAnchors(file, readDoc(t, file))...)
+	}
+
+	requireClean(t, hidden, "documented anchor is buried in an HTML comment",
+		"each line above names an anchor one of this fence's sweeps reads, sitting inside an HTML comment.\n"+
+			"A renderer hides that text from every reader; a byte scan does not, so the two disagree about\n"+
+			"what the document says. The harm runs in the quiet direction: specSigDocs and specBindDocs are\n"+
+			"per-document floors, and a commented site satisfies its document's floor while showing the\n"+
+			"reader nothing — the census then vouches for a surface the documentation has stopped\n"+
+			"describing (gqlc-jnsk).\n\n"+
+			"The remedy is in the text: delete the commented block, or uncomment it so the claim it makes\n"+
+			"is one a reader can check. There is no exemption list here on purpose — an exemption would be\n"+
+			"a second invisible place for a signature to live")
 }
 
 // TestEveryRootDocIsSweptOrDeclaredOutOfScope reconciles the repository
@@ -801,7 +915,7 @@ type sigSweep struct {
 	unclosed []specSig
 
 	// overlong are the sites whose parameter list is longer than any the
-	// emitter renders and which specNonMethodLists does not account for,
+	// emitter renders and which specNonMethodSites does not account for,
 	// so they are drift rather than another function (gqlc-vu7z).
 	overlong []specSig
 
@@ -821,6 +935,12 @@ type bindSweep struct {
 	graded   []specSig
 	unclosed []specSig
 	bindDocs map[string]int
+
+	// deref are the graded bindings whose expression carries a pointer
+	// operator. Kept apart from `graded` because it is a different
+	// question about the same site — the shape rather than the name — and
+	// a site can be in both (gqlc-173n).
+	deref []specSig
 
 	// bareExhibits are the brace-less binding spans a document prints as
 	// exhibits of the limit rather than as claims, routed out of the
@@ -919,8 +1039,9 @@ func sweepBinds(files []string, read func(string) string, exhibits map[string][]
 	for _, file := range files {
 		text := read(file)
 
-		binds, broken := scanSpecBinds(file, text)
+		binds, deref, broken := scanSpecBinds(file, text)
 		out.unclosed = append(out.unclosed, broken...)
+		out.deref = append(out.deref, deref...)
 		for _, bind := range binds {
 			out.bindDocs[file]++
 			out.graded = append(out.graded, bind)
@@ -1209,7 +1330,7 @@ func TestSpecSweepRoutesBareBindsByExhibit(t *testing.T) {
 
 // TestSpecSweepRoutesOverlongSitesByCensus is the witness for the other
 // routing in sweepSigs: a parameter list longer than any the emitter
-// renders is reported as drift unless specNonMethodLists accounts for it
+// renders is reported as drift unless specNonMethodSites accounts for it
 // in the document printing it (gqlc-vu7z).
 //
 // The corpus cannot stand in for these rows. Every overlong site it
@@ -1227,58 +1348,96 @@ func TestSpecSweepRoutesOverlongSitesByCensus(t *testing.T) {
 		seam    = "ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode"
 		drifted = "ctx context.Context, minAge int64, locale string"
 	)
+	var (
+		seamSite  = nonMethodSite("run", seam)
+		bareSite  = nonMethodSite("", seam)
+		claimSite = nonMethodSite("PeopleOverAge", seam)
+	)
 	docs := map[string]string{
 		"seam.md":    "the seam is `func (d driverDB) run(" + seam + ") error`\n",
 		"twice.md":   "`run(" + seam + ") error`\nand again `run(" + seam + ") error`\n",
 		"drift.md":   "`func (q *Queries) PeopleOverAge(" + drifted + ") ([]string, error)`\n",
 		"bare.md":    "the seam takes `" + seam + "`\n",
 		"wrapped.md": "```go\nfunc (d driverDB) run(\n\tctx context.Context,\n\tcypher string,\n\tparams map[string]any,\n\taccess neo4j.AccessMode,\n) error\n```\n",
+		"claim.md":   "the emitted method is `func (q *Queries) PeopleOverAge(" + seam + ") error`\n",
+		"generic.md": "`func ExecuteWrite[T any](" + executeWriteList + ") (T, error)`\n",
 	}
 	read := func(file string) string { return docs[file] }
-	census := func(file string, n int) map[string]map[string]int {
-		return map[string]map[string]int{file: {seam: n}}
+	census := func(file, site string, n int) map[string]map[string]int {
+		return map[string]map[string]int{file: {site: n}}
 	}
 
-	t.Run("a declared list is counted rather than reported", func(t *testing.T) {
-		sweep := sweepSigs([]string{"seam.md"}, read, nil, census("seam.md", 1))
+	t.Run("a declared site is counted rather than reported", func(t *testing.T) {
+		sweep := sweepSigs([]string{"seam.md"}, read, nil, census("seam.md", seamSite, 1))
 		require.Empty(t, sweep.overlong)
 		require.Empty(t, sweep.graded)
-		require.Equal(t, map[string]int{"seam.md: " + seam: 1}, sweep.nonMethod)
+		require.Equal(t, map[string]int{"seam.md: " + seamSite: 1}, sweep.nonMethod)
 	})
 
 	t.Run("each occurrence adds to the count", func(t *testing.T) {
-		sweep := sweepSigs([]string{"twice.md"}, read, nil, census("twice.md", 2))
+		sweep := sweepSigs([]string{"twice.md"}, read, nil, census("twice.md", seamSite, 2))
 		require.Empty(t, sweep.overlong)
-		require.Equal(t, map[string]int{"twice.md: " + seam: 2}, sweep.nonMethod,
+		require.Equal(t, map[string]int{"twice.md: " + seamSite: 2}, sweep.nonMethod,
 			"an exact census needs the second occurrence counted, not absorbed by the first")
 	})
 
 	t.Run("an undeclared overlong list is reported", func(t *testing.T) {
-		sweep := sweepSigs([]string{"drift.md"}, read, nil, census("drift.md", 1))
+		sweep := sweepSigs([]string{"drift.md"}, read, nil, census("drift.md", seamSite, 1))
 		require.Empty(t, sweep.nonMethod)
 		require.Len(t, sweep.overlong, 1,
 			"the author's parameter names as separate arguments are drift, and were unswept (gqlc-vu7z)")
-		require.Equal(t, drifted, sweep.overlong[0].list)
+		require.Equal(t, nonMethodSite("PeopleOverAge", drifted), sweep.overlong[0].list)
+	})
+
+	// The gqlc-yn2l row. The document prints the declared list, verbatim,
+	// the declared number of times — everything the census used to key on
+	// — and has replaced the quote it stood for with a claim about the
+	// emitted surface. Both arms have to move: the claim is reported as
+	// drift, and the entry it displaced counts nothing, so the exact
+	// census is red in the `lost` direction as well.
+	t.Run("a claim replacing the quote in place keeps neither the exemption nor the count", func(t *testing.T) {
+		sweep := sweepSigs([]string{"claim.md"}, read, nil, census("claim.md", seamSite, 1))
+		require.Len(t, sweep.overlong, 1,
+			"the name is half the census key, so a claim wearing the declared list is still graded (gqlc-yn2l)")
+		require.Equal(t, claimSite, sweep.overlong[0].list)
+		require.Empty(t, sweep.nonMethod,
+			"the declared entry now covers nothing, and an exact census reports that as a loss")
 	})
 
 	t.Run("the exemption is scoped to the document that declared it", func(t *testing.T) {
-		sweep := sweepSigs([]string{"seam.md"}, read, nil, census("elsewhere.md", 1))
+		sweep := sweepSigs([]string{"seam.md"}, read, nil, census("elsewhere.md", seamSite, 1))
 		require.Len(t, sweep.overlong, 1,
-			"one document's entry does not exempt another document printing the same list")
+			"one document's entry does not exempt another document printing the same site")
 		require.Empty(t, sweep.nonMethod)
 	})
 
-	t.Run("a bare span reaches the same census", func(t *testing.T) {
-		sweep := sweepSigs([]string{"bare.md"}, read, nil, census("bare.md", 1))
+	t.Run("a bare span reaches the same census, under the empty name", func(t *testing.T) {
+		sweep := sweepSigs([]string{"bare.md"}, read, nil, census("bare.md", bareSite, 1))
 		require.Empty(t, sweep.overlong, "the code-span scanner's overlong sites route here too")
-		require.Equal(t, map[string]int{"bare.md: " + seam: 1}, sweep.nonMethod)
+		require.Equal(t, map[string]int{"bare.md: " + bareSite: 1}, sweep.nonMethod)
+	})
+
+	t.Run("a bare span is not exempted by the named entry for the same list", func(t *testing.T) {
+		sweep := sweepSigs([]string{"bare.md"}, read, nil, census("bare.md", seamSite, 1))
+		require.Len(t, sweep.overlong, 1,
+			"the parentheses are off, so the document printed no name and the site cannot claim a named entry")
+		require.Empty(t, sweep.nonMethod)
 	})
 
 	t.Run("a wrapped list is the same census entry as an inline one", func(t *testing.T) {
-		sweep := sweepSigs([]string{"wrapped.md"}, read, nil, census("wrapped.md", 1))
+		sweep := sweepSigs([]string{"wrapped.md"}, read, nil, census("wrapped.md", seamSite, 1))
 		require.Empty(t, sweep.overlong,
 			"gofmt's line breaks and trailing comma are formatting, not a different parameter list")
-		require.Equal(t, map[string]int{"wrapped.md: " + seam: 1}, sweep.nonMethod)
+		require.Equal(t, map[string]int{"wrapped.md: " + seamSite: 1}, sweep.nonMethod)
+	})
+
+	// C4 quotes neo4j's ExecuteWrite with its type-parameter list, which
+	// is the one site in the corpus where the byte before the paren is
+	// not part of the name.
+	t.Run("a type-parameter list is stepped over to reach the name", func(t *testing.T) {
+		sweep := sweepSigs([]string{"generic.md"}, read, nil, census("generic.md", executeWriteSite, 1))
+		require.Empty(t, sweep.overlong)
+		require.Equal(t, map[string]int{"generic.md: " + executeWriteSite: 1}, sweep.nonMethod)
 	})
 }
 
@@ -1358,7 +1517,7 @@ func requireCensusFloors(t fenceT, written map[string]int, observed map[string]i
 // floor, because growing is honest and an equality reddens on every
 // addition (specSigDocs). A census of what is EXEMPTED is not: growing
 // is the failure mode, since an unrecorded site that matches a declared
-// entry is exactly the site nobody wrote down. So specNonMethodLists is
+// entry is exactly the site nobody wrote down. So specNonMethodSites is
 // held to ==, and a document printing one more of the run seam is red
 // until the number beside it moves.
 //
@@ -1987,13 +2146,13 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 	}, {
 		// The seam is past every arity the emitter renders, so it is
 		// REPORTED here rather than skipped, and sweepSigs is what
-		// decides — against specNonMethodLists — that this particular
+		// decides — against specNonMethodSites — that this particular
 		// list belongs to something that is not a query method. Before
 		// gqlc-vu7z the scanner dropped it silently, and dropped a
 		// drifted `(ctx, minAge int64, locale string)` with it.
 		name:         "the driverOrTx.run seam is reported as overlong, not dropped",
 		text:         "func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error) {",
-		wantOverlong: runSeamList,
+		wantOverlong: runSeamSite,
 	}, {
 		// gqlc-vu7z's own reproduction: the naive sqlc-shaped signature
 		// a reader would plausibly write, carrying the query author's
@@ -2003,7 +2162,7 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		// widened.
 		name:         "the author's names as separate arguments are drift",
 		text:         "func (q *Queries) PeopleOverAge(ctx context.Context, minAge int64, locale string) ([]string, error)",
-		wantOverlong: "ctx context.Context, minAge int64, locale string",
+		wantOverlong: nonMethodSite("PeopleOverAge", "ctx context.Context, minAge int64, locale string"),
 	}, {
 		// The same list wrapped across lines is the same entry: the
 		// paren walk reads through the breaks and the list is collapsed
@@ -2011,7 +2170,7 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		// out of its census entry by reformatting it.
 		name:         "a wrapped overlong list collapses to the same entry",
 		text:         "func (d driverDB) run(\n    ctx context.Context,\n    cypher string,\n    params map[string]any,\n    access neo4j.AccessMode,\n) ([]*neo4j.Record, error) {",
-		wantOverlong: runSeamList,
+		wantOverlong: runSeamSite,
 	}, {
 		name:    "a signature wrapped after ctx is still one signature",
 		text:    "func (q *Queries) PersonById(ctx context.Context,\n    id int64) (PersonRow, error)",
@@ -2117,7 +2276,7 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 			} else {
 				require.Len(t, overlong, 1, "overlong")
 				require.Equal(t, tc.wantOverlong, overlong[0].list,
-					"the verbatim list specNonMethodLists reconciles by identity")
+					"the verbatim list specNonMethodSites reconciles by identity")
 			}
 			if !tc.wantAny {
 				require.Empty(t, got)
@@ -2188,7 +2347,7 @@ func TestSpecBareSigScannerDetectsDrift(t *testing.T) {
 		// green on the corpus (gqlc-vu7z).
 		name:         "an overlong list is reported here too, not dropped",
 		text:         "the seam takes `ctx context.Context, cypher string, params map[string]any`",
-		wantOverlong: "ctx context.Context, cypher string, params map[string]any",
+		wantOverlong: nonMethodSite("", "ctx context.Context, cypher string, params map[string]any"),
 	}, {
 		// A span the paren walk already grades, reached from inside. Read
 		// twice it would be graded twice and reported twice, so the anchor
@@ -2364,11 +2523,17 @@ func TestSpecParamListRuleScannerDetectsDrift(t *testing.T) {
 // same terms: each row is a `map[string]any` literal that was in the
 // specs before gqlc-rz0l corrected it, or the correction, or a form the
 // sweep must leave alone.
+//
+// `want` is the identifier each entry binds and `wantDeref` the entries
+// graded on their shape instead, verbatim. The two are separate columns
+// because they are separate questions about one site, and the row that
+// motivates the second — `float64(*x)` — answers the first correctly.
 func TestSpecBindScannerDetectsDrift(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		text string
-		want []string
+		name      string
+		text      string
+		want      []string
+		wantDeref []string
 	}{{
 		name: "c1 §5.3 template, before",
 		text: `map[string]any{"<rawName>": <bareParam>}`,
@@ -2390,9 +2555,42 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 		text: `map[string]any{"x": float64(arg)}`,
 		want: []string{"arg"},
 	}, {
-		name: "c3 §5.7 nullable FLOAT32, before — a deref the emitter never writes",
-		text: `map[string]any{"x": float64(*x)}`,
-		want: []string{"x"},
+		// The shape gqlc-173n is about. gqlc-rz0l took C3 §5.7 out of
+		// scope precisely because a mechanical rename there produces this,
+		// and the name column shows why the name rule cannot catch it: the
+		// identifier is `x` before the correction and would be `arg`
+		// after, either way the right answer to the wrong question.
+		name:      "c3 §5.7 nullable FLOAT32, before — a deref the emitter never writes",
+		text:      `map[string]any{"x": float64(*x)}`,
+		want:      []string{"x"},
+		wantDeref: []string{"float64(*x)"},
+	}, {
+		name:      "the same deref with the corrected identifier is still graded",
+		text:      `map[string]any{"x": float64(*arg)}`,
+		want:      []string{"arg"},
+		wantDeref: []string{"float64(*arg)"},
+	}, {
+		name:      "a bare deref carries no carrier to hide behind and is graded too",
+		text:      `map[string]any{"x": *arg}`,
+		want:      []string{"arg"},
+		wantDeref: []string{"*arg"},
+	}, {
+		name:      "an address-of is the mirror image and is graded on the same terms",
+		text:      `map[string]any{"x": &arg}`,
+		want:      []string{"arg"},
+		wantDeref: []string{"&arg"},
+	}, {
+		name:      "a deref on a selector in the multi-parameter form",
+		text:      `map[string]any{"pid": arg.Pid, "x": float64(*arg.X)}`,
+		want:      []string{"arg.Pid", "arg.X"},
+		wantDeref: []string{"float64(*arg.X)"},
+	}, {
+		// The negative control the four rows above need: the operator is
+		// what is graded, not the carrier, not the selector, not the
+		// nullable helper's name.
+		name: "the emitter's own nullable form carries no operator and is left alone",
+		text: `map[string]any{"maybe": fromNullableDateListPtr(arg.Maybe)}`,
+		want: []string{"arg.Maybe"},
 	}, {
 		name: "the multi-parameter form binds selectors off the same identifier",
 		text: `map[string]any{"pid": arg.Pid, "oid": arg.Oid}`,
@@ -2405,6 +2603,17 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 		name: "the AGE instant encoder is peeled to the identifier it reads",
 		text: `map[string]any{"seenAt": agtypeNullableMicros(arg.SeenAt)}`,
 		want: []string{"arg.SeenAt"},
+	}, {
+		// gqlc-173n's second half, pinned as deliberate rather than
+		// closed. mapAnchor is the bare literal type, and docRoots is all
+		// of docs/, so a future note showing an unrelated option map is
+		// told its binding is not generator-owned. That fails CLOSED —
+		// the risk is that whoever meets it narrows docRoots, whose
+		// breadth is load-bearing — and the remedy the bead proposes is
+		// refuted by the corpus: see ADR 0029 decision 16.
+		name: "an unrelated map literal anywhere under docRoots is graded, and fails closed",
+		text: `opts := map[string]any{"debug": true}`,
+		want: []string{"true"},
 	}, {
 		name: "an elided literal is prose, not a binding",
 		text: `map[string]any{...}`,
@@ -2419,13 +2628,17 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 		want: []string{"arg.Pid", "arg.Oid"},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, unclosed := scanSpecBinds("witness.md", tc.text)
+			got, deref, unclosed := scanSpecBinds("witness.md", tc.text)
 			require.Empty(t, unclosed)
-			var values []string
+			var values, shapes []string
 			for _, bind := range got {
 				values = append(values, bind.arg)
 			}
-			require.Equal(t, tc.want, values)
+			for _, bind := range deref {
+				shapes = append(shapes, bind.arg)
+			}
+			require.Equal(t, tc.want, values, "bound identifiers")
+			require.Equal(t, tc.wantDeref, shapes, "expressions graded on their shape")
 		})
 	}
 }
@@ -2437,8 +2650,9 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 // fix.
 func TestSpecScannersReportUnreadableSites(t *testing.T) {
 	t.Run("an unterminated map literal is reported, not dropped", func(t *testing.T) {
-		binds, unclosed := scanSpecBinds("witness.md", "prose\nmap[string]any{\"id\": arg\nmore prose\n")
+		binds, deref, unclosed := scanSpecBinds("witness.md", "prose\nmap[string]any{\"id\": *arg\nmore prose\n")
 		require.Empty(t, binds)
+		require.Empty(t, deref, "an unreadable literal yields no shape grading either")
 		require.Len(t, unclosed, 1)
 		require.Equal(t, 2, unclosed[0].line)
 	})
@@ -2627,12 +2841,175 @@ func scanSpecSigs(file, text string) (sigs, exempt, overlong, unclosed []specSig
 			site.arg = name
 			sigs = append(sigs, site)
 		case paramOverlong:
-			site.list = canonicalList(list)
+			site.list = nonMethodSite(declName(text, open), canonicalList(list))
 			overlong = append(overlong, site)
 		case paramUnread:
 		}
 	}
 	return sigs, exempt, overlong, unclosed
+}
+
+// TestSpecDeclNameReadsTheNamePosition pins the name half of the
+// specNonMethodSites key on synthetic input, because the corpus can only
+// exercise the shapes it happens to print: every one of its 13 exempted
+// sites is a plain identifier or `ExecuteWrite`'s type-parameter form,
+// so the empty-name and unbalanced-bracket arms are unreachable live.
+//
+// Each row's text ends at the parenthesis the parameter list opens on,
+// which is the offset scanSpecSigs reaches this with.
+func TestSpecDeclNameReadsTheNamePosition(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want string
+	}{
+		{"an interface member", "    run(", "run"},
+		{"a method with a receiver", "func (d driverDB) run(", "run"},
+		{"a generic function's type parameters are stepped over", "func ExecuteWrite[T any](", "ExecuteWrite"},
+		{"two type parameters are one list", "func Pick[K comparable, V any](", "Pick"},
+		{"an anonymous function literal names the keyword", "a godog step handler (`func(", "func"},
+		{"a claim about the emitted surface names the method", "func (q *Queries) PeopleOverAge(", "PeopleOverAge"},
+		{"nothing in the name position reads as no name", "the list is (", ""},
+		{"a bracket run that never opens fails closed", "T any](", ""},
+		{"a parenthesis at the very start of a document", "(", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, declName(tc.text, len(tc.text)-1))
+		})
+	}
+}
+
+// TestSpecCommentedAnchorsReadOnlyWhatARendererHides witnesses the
+// absence check gqlc-jnsk asks for on synthetic input, because the
+// corpus cannot exercise it: its one real HTML comment carries no
+// anchor, so on a clean tree every arm of this reader is unreached and
+// TestSpecDocumentsCarryNoGradedAnchorInsideAnHTMLComment passes over an
+// empty set whatever the reader does.
+//
+// Each row states the sites expected as `line:anchor`, so a row that
+// reports the right count on the wrong offset is a failure rather than a
+// pass.
+func TestSpecCommentedAnchorsReadOnlyWhatARendererHides(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want []string
+	}{{
+		name: "a signature inside a comment is hidden from the reader and reported",
+		text: "intro\n<!--\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n-->\n",
+		want: []string{"3:" + ctxAnchor},
+	}, {
+		name: "the same signature outside a comment is the sweeps' business, not this check's",
+		text: "intro\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n",
+		want: nil,
+	}, {
+		// The anchor sits BETWEEN the two quoted delimiters, which is
+		// what makes this row load-bearing: with the opener read as an
+		// opener, the span runs from the first quote past the signature
+		// to the second and the signature is reported. That is ADR 0042's
+		// own shape — it quotes the opener three times with text between
+		// — and a row whose anchor sits outside the naive span witnesses
+		// nothing, because both readings then report nothing.
+		name: "a comment opener inside a code span opens nothing",
+		text: "an HTML comment opens on `" + commentOpen + "`.\n" +
+			"func (q *Queries) A" + ctxAnchor + ", arg int64) error\n" +
+			"and closes on `" + commentClose + "`.\n",
+		want: nil,
+	}, {
+		name: "an unclosed comment hides every anchor after it",
+		text: "intro\n<!--\nnotes\n\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n",
+		want: []string{"5:" + ctxAnchor},
+	}, {
+		name: "the binding anchor is hidden on the same terms as the signature",
+		text: "<!-- params := " + mapAnchor + "\"minAge\": minAge} -->\n",
+		want: []string{"1:" + mapAnchor},
+	}, {
+		name: "a parenthesis-less list inside a comment is reported on its backtick anchor",
+		text: "<!-- the list is `" + ctxParam + ", arg int64` -->\n",
+		want: []string{"1:" + tickAnchor},
+	}, {
+		name: "the rule bullet is an anchor too, so a commented bullet cannot pay its census",
+		text: "<!--\n- " + paramListTerm + " — `, " + codegen.ParamArg + " <T>` if one parameter.\n-->\n",
+		want: []string{"2:" + paramListTerm},
+	}, {
+		// A fenced block's delimiter is a run of backticks, so
+		// inlineCodeSpans pairs it like a very long span and the opener
+		// inside falls in one. The conflation is gqlc-cgat's, and here it
+		// runs in the correct direction — a renderer prints a fenced
+		// block verbatim, comment delimiters and all, so nothing is
+		// hidden and there is nothing to refuse. Pinned because it is
+		// measured rather than designed: the first mutation row written
+		// for this check commented out a signature inside C1's fenced
+		// example and SURVIVED, and that was the apparatus being wrong,
+		// not the guard.
+		name: "a comment opener inside a fenced code block opens nothing",
+		text: "```go\n<!--\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n-->\n```\n",
+		want: nil,
+	}, {
+		name: "a comment carrying no anchor is left alone",
+		text: "<!-- TODO: rewrite this section once the seam lands. -->\n",
+		want: nil,
+	}, {
+		name: "one comment naming two anchors reports both",
+		text: "<!--\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\nparams := " + mapAnchor + "\"minAge\": minAge}\n-->\n",
+		want: []string{"2:" + ctxAnchor, "3:" + mapAnchor},
+	}, {
+		name: "a closed comment releases the text after it",
+		text: "<!-- notes -->\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n<!--\nparams := " + mapAnchor + "\"minAge\": minAge}\n-->\n",
+		want: []string{"4:" + mapAnchor},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			for _, sig := range commentedAnchors("doc.md", tc.text) {
+				got = append(got, fmt.Sprintf("%d:%s", sig.line, sig.arg))
+			}
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// declName is the identifier a document prints immediately before a
+// parameter list's opening parenthesis, empty when the list opens after
+// something that is not one. It is the name half of the key
+// specNonMethodSites exempts a site under (gqlc-yn2l).
+//
+// A type-parameter list between the name and the paren is stepped over,
+// because the corpus prints one: C4 quotes neo4j's
+// `func ExecuteWrite[T any](…)`, and reading `]` as the end of the name
+// would key that site under the empty name instead of under
+// `ExecuteWrite`. A bracket run that never opens leaves the name empty
+// rather than guessing, which fails closed — the site is then keyed
+// under a name no census entry carries and is reported as drift.
+//
+// Only the name position is read. A receiver, a `func` keyword and the
+// rest of the line are deliberately left out: they are what ADR 0029
+// decision 13 measured and declined as a general DISCRIMINATOR, and
+// nothing here is discriminating. This narrows a census key.
+func declName(text string, open int) string {
+	end := open
+	if end > 0 && text[end-1] == ']' {
+		depth := 0
+		for end > 0 {
+			end--
+			switch text[end] {
+			case ']':
+				depth++
+			case '[':
+				depth--
+			}
+			if depth == 0 {
+				break
+			}
+		}
+		if depth != 0 {
+			return ""
+		}
+	}
+	start := end
+	for start > 0 && isIdentByte(text[start-1]) {
+		start--
+	}
+	return text[start:end]
 }
 
 // paramVerdict is what gradeParams made of one parameter list.
@@ -2650,7 +3027,7 @@ const (
 	// is the shape the emitter renders and the name is graded.
 	paramNamed
 	// paramOverlong: more parameters than the emitter renders at any
-	// arity. Drift unless specNonMethodLists says the list belongs to
+	// arity. Drift unless specNonMethodSites says the list belongs to
 	// something that is not an emitted query method (gqlc-vu7z).
 	paramOverlong
 )
@@ -2666,7 +3043,7 @@ const (
 // and says so, rather than being passed over for being past the arity
 // this once read (gqlc-vu7z). The lists in the corpus that are longer
 // and are not drift belong to functions that are not emitted query
-// methods, and sweepSigs routes them out against specNonMethodLists.
+// methods, and sweepSigs routes them out against specNonMethodSites.
 func gradeParams(list string) (string, paramVerdict) {
 	params := splitTopLevel(list)
 	if len(params) > 2 {
@@ -2768,7 +3145,13 @@ func scanBareSigs(file, text string) (sigs, overlong, unclosed []specSig) {
 			site.list = list
 			sigs = append(sigs, site)
 		case paramOverlong:
-			site.list = canonicalList(list)
+			// The parentheses are off here, so there is no name position
+			// to read and the key carries the empty one. That is the
+			// honest reading — the document printed no name — and it
+			// means such a site can only ever be exempted by a census
+			// entry written with no name. None is today: all 13 sites the
+			// corpus holds are parenthesised.
+			site.list = nonMethodSite("", canonicalList(list))
 			overlong = append(overlong, site)
 		case paramUnread, paramPlaceholder:
 		}
@@ -2854,9 +3237,14 @@ func scanParamListRules(file, text string) []specSig {
 // Entries with no `:` — the `...` and `map[string]any{...}` elisions —
 // are prose, not bindings, and are not graded.
 //
+// `deref` is the second grading, on the SHAPE rather than the name: an
+// expression carrying a pointer operator. It is returned beside the
+// binding rather than instead of it, because the two questions are
+// independent — a documented `float64(*someoneElse)` is wrong twice.
+//
 // A literal whose brace never closes is returned separately, so that the
 // sweep reports a site it could not read.
-func scanSpecBinds(file, text string) (binds, unclosed []specSig) {
+func scanSpecBinds(file, text string) (binds, deref, unclosed []specSig) {
 	for _, loc := range mapAnchorRe.FindAllStringIndex(text, -1) {
 		anchor := loc[0]
 		open := loc[1] - 1
@@ -2878,13 +3266,38 @@ func scanSpecBinds(file, text string) (binds, unclosed []specSig) {
 			}
 			// `arg.<Field1>` is the template form of a real selector; its
 			// prefix is what this fence grades, so it is kept.
+			expr := strings.TrimSpace(entry[colon+1:])
 			bind := site
-			bind.arg = unwrapConversions(strings.TrimSpace(entry[colon+1:]))
+			bind.arg = unwrapConversions(expr)
 			binds = append(binds, bind)
+			if pointerOperatorRe.MatchString(expr) {
+				shape := site
+				shape.arg = expr
+				deref = append(deref, shape)
+			}
 		}
 	}
-	return binds, unclosed
+	return binds, deref, unclosed
 }
+
+// pointerOperatorRe matches the two operators no emitted driver binding
+// can carry.
+//
+// Every binding the emitter writes is `access`, or one helper call
+// wrapped around it — paramBindExpr's arms return the access expression
+// bare, `from<T>[Ptr](access)`, `encode<Suffix>[Ptr](access)` or
+// `<carrier>(access)`, and sliceParamBindExpr's are the same shape —
+// while `access` itself is codegen.ParamArg or a field selected off it.
+// No arm introduces a `*` or an `&`, so the operators are wrong at every
+// nullability rather than only at one, which is what lets this be a byte
+// test with no knowledge of the parameter's type (gqlc-173n).
+//
+// It reads the whole expression rather than the head, because the deref
+// that motivates this sits INSIDE a carrier: a nullable parameter binds
+// bare — paramBindExpr returns before driverCarrier is reached — so the
+// shape a mechanical rename produces is `float64(*arg)`, which is a nil
+// panic at runtime and whose identifier is nonetheless correct.
+var pointerOperatorRe = regexp.MustCompile(`[*&]`)
 
 // jsonScalars are the value words a JSON model shape writes where a
 // driver binding writes an expression. They are excluded by name, and
@@ -3098,6 +3511,115 @@ func span(text string, open int, opener, closer byte) (string, bool) {
 	return "", false
 }
 
+// commentOpen and commentClose delimit an HTML comment. It is the one
+// construct in this corpus that a markdown renderer hides from the
+// reader while leaving its bytes in the file for a byte scanner to read,
+// so it is the one place a document's rendered text and the text this
+// fence sweeps can disagree (bd gqlc-jnsk).
+const (
+	commentOpen  = "<!--"
+	commentClose = "-->"
+)
+
+// htmlCommentSpans returns the half-open byte ranges of text's HTML
+// comments.
+//
+// A `<!--` inside an inline code span opens nothing: a renderer prints
+// that run verbatim as content. Skipping those is not a refinement, it
+// is what keeps this reader off `docs/adr/0042-the-spec-fence-stays-a-
+// byte-scan.md`, which discusses the construct by quoting it three
+// times in code spans; read naively, the first quote would open a
+// "comment" running hundreds of lines to the second.
+//
+// An unclosed `<!--` runs to the end of the document. That is the
+// renderer's own reading — it hides everything after — and it is also
+// the fail-closed one here: the alternative, treating an unterminated
+// opener as no comment at all, would mean a document could hide an
+// arbitrary amount of graded text from both the reader and this check
+// by omitting the terminator.
+func htmlCommentSpans(text string) [][2]int {
+	code := inlineCodeSpans(text, 0, len(text))
+	var out [][2]int
+	for i := 0; i < len(text); {
+		j := strings.Index(text[i:], commentOpen)
+		if j < 0 {
+			return out
+		}
+		open := i + j
+		if end, ok := spanCovering(code, open); ok {
+			i = end
+			continue
+		}
+		k := strings.Index(text[open:], commentClose)
+		if k < 0 {
+			return append(out, [2]int{open, len(text)})
+		}
+		i = open + k + len(commentClose)
+		out = append(out, [2]int{open, i})
+	}
+	return out
+}
+
+// spanCovering reports the end of the inline code span containing the
+// byte at `at`, if one does.
+func spanCovering(spans []codeSpan, at int) (int, bool) {
+	for _, s := range spans {
+		if s.at <= at && at < s.end {
+			return s.end, true
+		}
+	}
+	return 0, false
+}
+
+// gradedAnchors are the byte runs that carry a site into one of this
+// fence's sweeps: the signature anchor, the bare-list anchor, the
+// driver-binding anchor, and the bullet term the rule scanner reads.
+// They are the same constants the scanners match on, not copies, so an
+// anchor that changes spelling changes here too.
+//
+// scanBareBinds has no entry because it has no anchor — it offers every
+// inline code span in the document to bareBindValues — so a commented
+// bare binding is the residual this list does not cover (ADR 0029
+// decision 15).
+var gradedAnchors = []struct {
+	name string
+	re   *regexp.Regexp
+}{
+	{ctxAnchor, ctxAnchorRe},
+	{tickAnchor, tickAnchorRe},
+	{mapAnchor, mapAnchorRe},
+	{paramListTerm, anchorPattern(paramListTerm)},
+}
+
+// commentedAnchors reports every graded anchor a document buries inside
+// an HTML comment, at most one site per anchor per comment: the comment
+// is the unit a writer fixes, so naming each of its anchors once is the
+// whole of what a failure has to say.
+//
+// `arg` carries the anchor's spelling rather than an argument name,
+// because the finding is that a site exists where no reader can see it —
+// nothing has been read out of it, and nothing should be.
+func commentedAnchors(file, text string) []specSig {
+	var out []specSig
+	for _, comment := range htmlCommentSpans(text) {
+		body := text[comment[0]:comment[1]]
+		for _, anchor := range gradedAnchors {
+			loc := anchor.re.FindStringIndex(body)
+			if loc == nil {
+				continue
+			}
+			at := comment[0] + loc[0]
+			out = append(out, specSig{
+				file: file,
+				line: 1 + strings.Count(text[:at], "\n"),
+				arg:  anchor.name,
+				text: strings.TrimSpace(collapse(lineAt(text, at))),
+			})
+		}
+	}
+	return out
+}
+
 // readDoc reads one swept document, named relative to repoRoot.
 func readDoc(t *testing.T, file string) string {
 	t.Helper()
@@ -3106,7 +3628,7 @@ func readDoc(t *testing.T, file string) string {
 	return string(body)
 }
 
-// canonicalList is the spelling specNonMethodLists keys an overlong
+// canonicalList is the spelling specNonMethodSites keys an overlong
 // parameter list by: its depth-zero entries, each with its own
 // whitespace collapsed, rejoined on `, `.
 //
@@ -3226,10 +3748,18 @@ func anchorPattern(anchor string) *regexp.Regexp {
 }
 
 // codeSpan is one inline `code` run, carrying the offset it opened at so
-// a failure can name the line it sits on.
+// a failure can name the line it sits on, and the offset just past its
+// closing delimiter so a caller can ask whether some other byte run
+// falls inside it.
+//
+// `end` is past the closing backticks rather than at them, so [at, end)
+// covers the delimiters as well as the body: what htmlCommentSpans needs
+// to know is whether a run of bytes is inside a span a renderer prints
+// verbatim, and the delimiters are part of what it prints.
 type codeSpan struct {
 	text string
 	at   int
+	end  int
 }
 
 // inlineCodeSpans returns the code runs in text[from:to] up to the first
@@ -3258,8 +3788,8 @@ func inlineCodeSpans(text string, from, to int) []codeSpan {
 		if closing < 0 {
 			return out
 		}
-		out = append(out, codeSpan{text: collapse(bounded[body:closing]), at: open})
 		i = closing + (body - open)
+		out = append(out, codeSpan{text: collapse(bounded[body:closing]), at: open, end: i})
 	}
 	return out
 }
