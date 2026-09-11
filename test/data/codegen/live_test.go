@@ -32,6 +32,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"iter"
 	"os"
 	"strings"
 	"testing"
@@ -94,6 +95,22 @@ type oneColOneParamOneQuerier interface {
 // and Row types are package-local to each target, so they stop here.
 type manyColManyQuerier interface {
 	peopleByAgeAndLocale(ctx context.Context, minAge int64, locale string) ([]person, error)
+}
+
+// iterQuerier is one arm's iter_read_multicolumn handle: the same shape
+// manyColManyQuerier reads, annotated `:iter` instead of `:many`, so the two
+// batteries differ in the cardinality and in nothing else.
+//
+// The adapter behind this MUST NOT materialise the sequence. Every claim the
+// iter scenarios make is about what the emitted sequence does WHILE it is
+// being consumed — where an error lands relative to the rows, and what the
+// server-side resource does when the consumer stops early — and all of it is
+// erased by an adapter that drains into a slice and hands back a sequence
+// over that. Flattening the target's own Row into person is the only thing
+// the adapter is allowed to do, one row at a time, and it must relay a false
+// from yield by returning.
+type iterQuerier interface {
+	streamPeopleByAge(ctx context.Context, minAge int64, locale string) iter.Seq2[person, error]
 }
 
 // nestedListQuerier is one arm's list_list_int handle: a LIST<LIST<INT64>>
@@ -428,6 +445,19 @@ type edgeUnionHarness interface {
 	edgeUnionScenario(ctx context.Context, t *testing.T) edgeUnionBackend
 }
 
+// iterHarness is an arm whose target emits a `:iter` method. Every arm does
+// — `:iter` is a cardinality rather than a capability, so no backend can
+// refuse it the way AGE refuses a temporal constructor or an alternation —
+// and the capability column exists anyway, so that an arm LOSING the
+// emission is a red in the arms table rather than a battery quietly not
+// running. The all-true column is the point: every other capability here
+// splits the arms, and one that does not still has to be asserted or its
+// scenarios can vanish for a target without anyone noticing.
+type iterHarness interface {
+	harness
+	iterScenario(ctx context.Context, t *testing.T) iterBackend
+}
+
 // temporalHarness is an arm whose target admits the zoneless temporal
 // widths, and zonedTimeHarness one that admits TIME WITH TIME ZONE.
 // Two columns and not one because the two go their own way: Apache AGE
@@ -528,6 +558,33 @@ type writeBackend interface {
 type edgeUnionBackend interface {
 	backend
 	edgeUnionUndeclared() edgeUnionQuerier
+}
+
+// iterBackend is a scenario's view of an iterHarness.
+type iterBackend interface {
+	backend
+	iterReadMulticolumn() iterQuerier
+
+	// cancelReachesAStartedStream is the arm's declaration of whether
+	// cancelling the consumer's context AFTER a row has been delivered is
+	// observed by the emitted body at all. It is the arm speaking about its
+	// own driver, the way temporalBackend's storedLocalTime is, and it reads
+	// nothing from the generated code, so it cannot agree with a defect in
+	// it.
+	//
+	// neo4j says yes: the driver pulls each record off the wire as the
+	// sequence is ranged, so a dead context fails the next read and the
+	// failure reaches the consumer as the sequence's last item.
+	//
+	// Apache AGE says no, and the reason belongs to the pgx pipeline rather
+	// than to anything gqlc emits. The whole of a small result is already in
+	// the connection's receive buffer by the time the first row is handed
+	// out, so rows.Next() walks memory and never consults the context.
+	// Measured 2026-09-11 against the three-row seed below: AGE answered
+	// rows=3, errs=0 where neo4j answered rows=1, errs=1. A result large
+	// enough to cross the buffer would change that answer, which is why this
+	// is an arm's declaration and not a constant of the backend.
+	cancelReachesAStartedStream() bool
 }
 
 // temporalBackend is a scenario's view of a temporalHarness and
@@ -632,10 +689,11 @@ var arms = []struct {
 	savepoints          bool
 	constructedTemporal bool
 	mapColumns          bool
+	iters               bool
 }{
-	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true, edgeUnions: true, temporals: true, zonedTime: true, constructedTemporal: true, mapColumns: true},
-	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true, edgeUnions: true, temporals: true, zonedTime: true, constructedTemporal: true, mapColumns: true},
-	{name: "apache-age-pgx-v5", start: startAGE, writes: true, temporals: true, savepoints: true},
+	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true, edgeUnions: true, temporals: true, zonedTime: true, constructedTemporal: true, mapColumns: true, iters: true},
+	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true, edgeUnions: true, temporals: true, zonedTime: true, constructedTemporal: true, mapColumns: true, iters: true},
+	{name: "apache-age-pgx-v5", start: startAGE, writes: true, temporals: true, savepoints: true, iters: true},
 }
 
 // readScenarios are the battery every arm runs. Each body is written once
@@ -724,6 +782,22 @@ var edgeUnionScenarios = []struct {
 	{name: "edge_union_undeclared_relationship_type: label dispatch", run: edgeUnionDispatch},
 }
 
+// iterScenarios are the battery an arm runs for the `:iter` cardinality.
+//
+// All three rows are about what happens DURING consumption, which is the
+// whole of what `:iter` adds and the whole of what nothing else here covers.
+// A golden pins the emitted text and the corpus pins that it compiles;
+// neither can see where an error lands relative to the rows, or what the
+// server-side resource does when a consumer walks away mid-sequence.
+var iterScenarios = []struct {
+	name string
+	run  func(ctx context.Context, t *testing.T, b iterBackend)
+}{
+	{name: "iter_read_multicolumn: an error mid-stream is the sequence's last item", run: iterMidStreamError},
+	{name: "iter_read_multicolumn: an abandoned range releases its resource", run: iterAbandonedRange},
+	{name: "iter_read_multicolumn: a transaction failure after a delivered row", run: iterFailureAfterDelivery},
+}
+
 // scenarioTables declares how large each battery is. The sizes are written
 // down here rather than measured off the tables, because a number taken from
 // the table cannot notice the table shrinking — it shrinks with it.
@@ -775,6 +849,10 @@ var scenarioTables = []struct {
 	{
 		name: "edgeUnionScenarios", got: len(edgeUnionScenarios), want: 1,
 		why: "the only live witness for the emitted edge-union label dispatch",
+	},
+	{
+		name: "iterScenarios", got: len(iterScenarios), want: 3,
+		why: "the only live witness for anything that happens DURING a :iter consumption — where a mid-stream error lands, and whether an abandoned range releases its server-side resource. Both are invisible to a golden and to the compiler, and the second is the AGE pooled-connection hold, which is the cost the emitted doc comment discloses",
 	},
 }
 
@@ -899,6 +977,20 @@ func TestLiveSmoke(t *testing.T) {
 							t.Parallel()
 						}
 						sc.run(ctx, t, eh.edgeUnionScenario(ctx, t))
+					})
+				}
+			}
+
+			ih, servesIters := h.(iterHarness)
+			require.Equal(t, arm.iters, servesIters,
+				"the arm's :iter capability must match the arms table; a target that gained or lost the streaming emission updates both")
+			if servesIters {
+				for _, sc := range iterScenarios {
+					t.Run(sc.name, func(t *testing.T) {
+						if parallelScenarios {
+							t.Parallel()
+						}
+						sc.run(ctx, t, ih.iterScenario(ctx, t))
 					})
 				}
 			}
@@ -1527,6 +1619,202 @@ func edgeUnionDispatch(ctx context.Context, t *testing.T, b edgeUnionBackend) { 
 		"the row arrived and could not be decoded; that is not an absent row")
 	require.ErrorContains(t, err, `unexpected relationship type "FLAGGED"`,
 		"the failure must name the label that arrived")
+}
+
+// iterSeedThreeWithAGapAtTwo seeds three people ordered 1, 2, 3 by age, of
+// whom the middle one carries NO name. The schema declares name NOT NULL, so
+// the emitted decoder refuses that row — which is how this battery produces a
+// mid-stream failure without a fault injector, on every arm, through a seed
+// that stays inside the dialect intersection.
+//
+// The query orders by age, so which row fails is a fact and not a race: one
+// row is delivered, the second fails, and the third is never reached. Both
+// halves are load-bearing. Without a row before the failure, the scenario
+// could not tell a mid-stream error from an error the first Records call
+// returned; without a row after it, it could not tell a stream that STOPPED
+// from one that skipped the bad row and ran on.
+const iterSeedThreeWithAGapAtTwo = `
+	CREATE (:Person {name: 'Alice', age: 1, locale: 'en'})
+	CREATE (:Person {age: 2, locale: 'en'})
+	CREATE (:Person {name: 'Carol', age: 3, locale: 'en'})
+`
+
+// iterDrain consumes a sequence to its end and returns the rows and the
+// errors in arrival order. Errors are collected rather than asserted so a
+// scenario can say WHERE one landed, which is the claim a `:iter` method owes
+// and a `(T, error)` method cannot make.
+func iterDrain(seq iter.Seq2[person, error]) (rows []person, errs []error, errFirstAt int) {
+	errFirstAt = -1
+	for row, err := range seq {
+		if err != nil {
+			if errFirstAt < 0 {
+				errFirstAt = len(rows)
+			}
+			errs = append(errs, err)
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows, errs, errFirstAt
+}
+
+// iterMidStreamError pins where a failure lands in a sequence that has
+// already delivered rows.
+//
+// The contract, and each clause is separately falsifiable: the consumer sees
+// every row that decoded before the failure; it sees the failure exactly
+// once; and the sequence ends there rather than continuing past it. The last
+// is the one with teeth — a decoder that logged the bad row and carried on
+// would hand a consumer a short result set that looks complete, which is the
+// silent wrong answer `:many` cannot produce because it returns an error
+// instead of a slice.
+func iterMidStreamError(ctx context.Context, t *testing.T, b iterBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.iterReadMulticolumn()
+	b.seed(ctx, t, iterSeedThreeWithAGapAtTwo)
+
+	rows, errs, errFirstAt := iterDrain(q.streamPeopleByAge(ctx, 0, "en"))
+
+	require.Len(t, errs, 1, "the failure must reach the consumer exactly once")
+	require.Equal(t, []person{{Name: "Alice", Age: 1}}, rows,
+		"every row that decoded before the failure must reach the consumer, and no row after it")
+	require.Equal(t, 1, errFirstAt,
+		"the error must arrive after the first row and before the third; landing at 0 means the stream failed before delivering anything, and at 2 that it skipped the bad row instead of stopping")
+	require.ErrorContains(t, errs[0], "non-nullable",
+		"the failure must be the arrived-null refusal for the seeded gap, not some other error standing in for it")
+}
+
+// iterAbandonedPasses is how many times iterAbandonedRange walks away from a
+// sequence before testing that the arm still works.
+//
+// It is larger than any pool this battery opens, and that is the whole design
+// of the row. One abandoned range proves nothing: a leaked connection is
+// still one of several the pool holds, so the next query is served and the
+// scenario passes while the leak is real. Exhausting the pool several times
+// over is what turns a leak into a failure — under a `:iter` body that did
+// not release on early exit, the run stops here rather than at some unrelated
+// scenario minutes later.
+const iterAbandonedPasses = 24
+
+// iterAbandonedRange pins that a consumer may stop early.
+//
+// `range` over a function calls yield until it returns false, and a `break`
+// is how that false is produced. What the emitted body owes at that point is
+// the release of whatever it is holding — a pooled connection on Apache AGE,
+// a session and its transaction on neo4j — and nothing in a golden or in a
+// compile can see whether it does.
+func iterAbandonedRange(ctx context.Context, t *testing.T, b iterBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.iterReadMulticolumn()
+	b.seed(ctx, t, `
+		CREATE (:Person {name: 'Alice', age: 1, locale: 'en'})
+		CREATE (:Person {name: 'Bob', age: 2, locale: 'en'})
+		CREATE (:Person {name: 'Carol', age: 3, locale: 'en'})
+	`)
+
+	for pass := range iterAbandonedPasses {
+		got := 0
+		for row, err := range q.streamPeopleByAge(ctx, 0, "en") {
+			require.NoError(t, err, "pass %d yielded an error before the break", pass)
+			require.Equal(t, person{Name: "Alice", Age: 1}, row,
+				"pass %d must stop at the first row; a second row means the break did not reach the emitted body", pass)
+			got++
+			break
+		}
+		require.Equal(t, 1, got, "pass %d delivered no row, so it abandoned nothing", pass)
+	}
+
+	// The witness. If any of the passes above held its resource, this is
+	// where the arm runs out: the call blocks until the context deadline and
+	// fails here rather than reporting a leak nobody measured.
+	rows, errs, _ := iterDrain(q.streamPeopleByAge(ctx, 0, "en"))
+	require.Empty(t, errs,
+		"after %d abandoned ranges the arm must still serve a query; an error here is the resource those ranges did not release", iterAbandonedPasses)
+	require.Equal(t, []person{{Name: "Alice", Age: 1}, {Name: "Bob", Age: 2}, {Name: "Carol", Age: 3}}, rows,
+		"the sequence that is drained to its end must carry every row")
+}
+
+// iterFailureAfterDelivery is gqlc-nx54's owed row, and what it can and
+// cannot witness is worth stating because the two are easy to confuse.
+//
+// The hazard is a managed-retry RE-ENTRY: neo4j's ExecuteRead calls the unit
+// of work again when the transaction fails retriably, including on a commit
+// failure, and a second pass would call yield on a range the consumer has
+// already left — which the Go runtime answers with a panic ("range function
+// continued iteration after function for loop body returned false"). The
+// emitted body's answer is the exit rule: once a row is delivered, every exit
+// returns errIterStreamStarted, so the envelope ends instead of retrying.
+//
+// WHAT THIS ROW DOES NOT DO is produce a retriable commit failure. That needs
+// a cluster — a leader switch mid-transaction — and this battery runs one
+// single-instance container per arm, where a commit failure is not a shape
+// the server offers. Cancelling the context is what is available: it fails
+// the transaction AFTER a row has been delivered, which drives the delivered
+// branch and the fence at the bottom of the seam, and it establishes that the
+// whole path terminates and reports rather than panicking.
+//
+// So this is a witness for the delivered-then-failed path and for the absence
+// of a panic on it, and NOT for the retry itself. The mutation row that
+// deletes the re-entry guard is expected to survive this, and that survival
+// is a finding about the coverage rather than about the guard.
+//
+// The consumer here BREAKS on the first error rather than draining, and that
+// is the whole shape of the row rather than a stylistic choice. Breaking is
+// what a caller who sees an error actually writes, and it is what makes a
+// second delivery fatal: `range` over a function panics on a yield that
+// follows a false. Draining instead hides that — it answers true to every
+// yield, so a body with two delivery points reports twice and passes. Written
+// with a drain, this scenario passed on neo4j against a seam that yielded the
+// error once from the record loop and once more from below the managed
+// envelope (rows=1, errs=2, measured 2026-09-11); with the break it is a
+// panic and a dead test binary.
+func iterFailureAfterDelivery(ctx context.Context, t *testing.T, b iterBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.iterReadMulticolumn()
+	b.seed(ctx, t, `
+		CREATE (:Person {name: 'Alice', age: 1, locale: 'en'})
+		CREATE (:Person {name: 'Bob', age: 2, locale: 'en'})
+		CREATE (:Person {name: 'Carol', age: 3, locale: 'en'})
+	`)
+
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var rows []person
+	var errs []error
+	// No require inside the range: a failed assertion calls runtime.Goexit,
+	// which unwinds THROUGH the emitted sequence without letting it observe a
+	// false from yield. That would leave the arm holding the very resource
+	// the scenario beside this one is about, and the failure would surface
+	// there instead of here.
+	for row, err := range q.streamPeopleByAge(streamCtx, 0, "en") {
+		if err != nil {
+			errs = append(errs, err)
+			break
+		}
+		rows = append(rows, row)
+		// Cancel once the first row is in the consumer's hands. Everything
+		// downstream of this is the delivered branch.
+		cancel()
+	}
+
+	require.NotEmpty(t, rows, "the scenario must deliver a row before cancelling, or it is testing the undelivered path")
+	if b.cancelReachesAStartedStream() {
+		require.Len(t, errs, 1,
+			"a stream this arm's driver notices the cancellation of must report it to the consumer exactly once; zero reads to a caller as a complete result, and more than one is a second yield the consumer's break has already forbidden")
+		require.Len(t, rows, 1,
+			"the cancellation was issued on the first row, so it must be the only one; a further row means the emitted body went on reading after the context died")
+	} else {
+		require.Empty(t, errs,
+			"this arm declares the cancellation unobservable, so an error here means it became observable and the declaration on iterBackend is now stale rather than that the emission is wrong")
+		require.Len(t, rows, 3,
+			"a cancellation this arm cannot see must change nothing: the sequence runs to its natural end")
+	}
+
+	// The sequence terminated — reaching this line at all is that claim — and
+	// it did so without a panic, which is the whole of what the exit rule
+	// buys. A panic is not caught here: it would take the test binary, which
+	// is the loudest possible report and the right one.
+	rows, errs, _ = iterDrain(q.streamPeopleByAge(ctx, 0, "en"))
+	require.Empty(t, errs, "the failed stream must leave the arm usable under a live context")
+	require.Len(t, rows, 3, "the re-read must see the whole graph")
 }
 
 // execWrite drives the :exec contract — the write reaches the graph, and the

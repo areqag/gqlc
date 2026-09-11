@@ -8,7 +8,7 @@ import (
 	"iter"
 )
 
-const streamPeopleByAgeQueryText = `MATCH (p:Person) WHERE p.age > $minAge AND p.locale = $locale RETURN p.name, p.age`
+const streamPeopleByAgeQueryText = `MATCH (p:Person) WHERE p.age > $minAge AND p.locale = $locale RETURN p.name, p.age ORDER BY p.age`
 
 type StreamPeopleByAgeParams struct {
 	MinAge int64
@@ -22,7 +22,7 @@ type StreamPeopleByAgeRow struct {
 
 // StreamPeopleByAge executes the StreamPeopleByAge query.
 //
-//	MATCH (p:Person) WHERE p.age > $minAge AND p.locale = $locale RETURN p.name, p.age
+//	MATCH (p:Person) WHERE p.age > $minAge AND p.locale = $locale RETURN p.name, p.age ORDER BY p.age
 //
 // The returned sequence holds a database connection for as long as the
 // consumer keeps ranging, and releases it when the range ends — by

@@ -68,10 +68,22 @@ var errIterStreamStarted = errors.New("gqlc: iter stream already delivered a row
 // whole unit of work; an error arriving after one has been delivered is
 // yielded, because the consumer has already seen rows the retry would
 // re-produce. Either way the consumer sees the error exactly once.
+//
+// stopped is what makes "exactly once" true, and it is not the same claim
+// as delivered. It is set the moment the consumer can take no further
+// item — because yield returned false, or because the error that is the
+// sequence's last item has just gone out — and it fences the yield below
+// the envelope. Without it the two delivery points are independent: the
+// envelope reports the context error in its own words as well, so a
+// cancelled stream yields twice, and a consumer that broke out of its
+// range on the first error gets the second one thrown at a range loop
+// that has already returned false, which is the runtime panic the exit
+// rule exists to prevent (measured live 2026-09-11: rows=1, errs=2).
 func (d driverDB) stream(ctx context.Context, cypher string, params map[string]any, yield func(*neo4j.Record, error) bool) {
 	session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
 	delivered := false
+	stopped := false
 	_, err := neo4j.ExecuteRead(ctx, session, func(tx neo4j.ManagedTransaction) (any, error) {
 		// Re-entry guard. Reached only when managed retry calls this unit
 		// of work again after a row has already gone to the consumer;
@@ -88,11 +100,16 @@ func (d driverDB) stream(ctx context.Context, cypher string, params map[string]a
 				if !delivered {
 					return nil, recordErr
 				}
+				// Set before the yield, not after: this error is the
+				// sequence's last item whatever the consumer answers,
+				// so a true from yield must not re-open the fence.
+				stopped = true
 				yield(nil, recordErr)
 				return nil, errIterStreamStarted
 			}
 			delivered = true
 			if !yield(record, nil) {
+				stopped = true
 				return nil, errIterStreamStarted
 			}
 		}
@@ -101,7 +118,7 @@ func (d driverDB) stream(ctx context.Context, cypher string, params map[string]a
 		}
 		return nil, nil
 	})
-	if err != nil && !errors.Is(err, errIterStreamStarted) {
+	if err != nil && !errors.Is(err, errIterStreamStarted) && !stopped {
 		yield(nil, err)
 	}
 }

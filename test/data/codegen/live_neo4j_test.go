@@ -8,6 +8,7 @@ package fixtures_test
 import (
 	"context"
 	"fmt"
+	"iter"
 	"testing"
 	"time"
 
@@ -25,6 +26,8 @@ import (
 	entityedgev6 "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/neo4j-go-v6"
 	entitynodev5 "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/neo4j-go-v5"
 	entitynodev6 "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/neo4j-go-v6"
+	iterv5 "github.com/areqag/gqlc/test/data/codegen/valid/iter_read_multicolumn/golden/neo4j-go-v5"
+	iterv6 "github.com/areqag/gqlc/test/data/codegen/valid/iter_read_multicolumn/golden/neo4j-go-v6"
 	listlistv5 "github.com/areqag/gqlc/test/data/codegen/valid/list_list_int/golden/neo4j-go-v5"
 	listlistv6 "github.com/areqag/gqlc/test/data/codegen/valid/list_list_int/golden/neo4j-go-v6"
 	deeplistv5 "github.com/areqag/gqlc/test/data/codegen/valid/list_list_list_int/golden/neo4j-go-v5"
@@ -95,6 +98,7 @@ type neo4jV5 struct {
 	one        oneColOneParamOneV5
 	mixed      mixedReadWriteBatchV5
 	many       manyColManyV5
+	iters      iterReadMulticolumnV5
 	nestedList nestedListV5
 	nullElem   nullListElemV5
 	nullOuter  nullOuterElemV5
@@ -150,6 +154,7 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 		one:        oneColOneParamOneV5{q: onecolonev5.New(driver)},
 		mixed:      mixedReadWriteBatchV5{q: mixedv5.New(driver)},
 		many:       manyColManyV5{q: manycolmanyv5.New(driver)},
+		iters:      iterReadMulticolumnV5{q: iterv5.New(driver)},
 		nestedList: nestedListV5{q: listlistv5.New(driver)},
 		nullElem:   nullListElemV5{q: certelemv5.New(driver)},
 		nullOuter:  nullOuterElemV5{q: nullouterv5.New(driver)},
@@ -180,6 +185,11 @@ func (h *neo4jV5) writeScenario(ctx context.Context, t *testing.T) writeBackend 
 }
 
 func (h *neo4jV5) edgeUnionScenario(ctx context.Context, t *testing.T) edgeUnionBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV5) iterScenario(ctx context.Context, t *testing.T) iterBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
 }
@@ -453,6 +463,13 @@ func batteryTimeV5(v zonedv5.Time) timeValue {
 
 func (s neo4jV5Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 
+func (s neo4jV5Scenario) iterReadMulticolumn() iterQuerier { return s.arm.iters }
+
+// Both neo4j arms answer yes: Records(ctx) pulls each record off the wire as
+// the consumer ranges, so a context that dies mid-stream fails the next read
+// and the failure travels to the consumer as the sequence's last item.
+func (s neo4jV5Scenario) cancelReachesAStartedStream() bool { return true }
+
 func (s neo4jV5Scenario) nestedList() nestedListQuerier { return s.arm.nestedList }
 
 func (s neo4jV5Scenario) nullListElem() nullListElemQuerier { return s.arm.nullElem }
@@ -676,6 +693,44 @@ func (a manyColManyV5) peopleByAgeAndLocale(ctx context.Context, minAge int64, l
 	return out, nil
 }
 
+type iterReadMulticolumnV5 struct{ q *iterv5.Queries }
+
+// streamPeopleByAge relays the generated sequence one row at a time.
+//
+// The shape is the contract iterQuerier states, and every clause of it is
+// load-bearing rather than stylistic. It ranges over the generated sequence
+// instead of collecting it, so the generated body is still suspended inside
+// the consumer's loop and still holding whatever it holds. It returns when
+// yield says false, which is what carries the scenario's `break` down into
+// the generated body — swallowing that false would leave the emitted seam
+// ranging on with nobody listening, and the release this battery measures
+// would happen for the wrong reason. And it forwards an error item as an
+// item rather than as a second return value, because where the error lands
+// relative to the rows is the claim `:iter` makes and a `(T, error)`
+// signature cannot.
+//
+// Flattening StreamPeopleByAgeRow into person is the only translation: the
+// generated Row type is package-local to this target, so a battery shared by
+// three of them cannot name it.
+func (a iterReadMulticolumnV5) streamPeopleByAge(ctx context.Context, minAge int64, locale string) iter.Seq2[person, error] {
+	return func(yield func(person, error) bool) {
+		for row, err := range a.q.StreamPeopleByAge(ctx, iterv5.StreamPeopleByAgeParams{
+			MinAge: minAge,
+			Locale: locale,
+		}) {
+			if err != nil {
+				if !yield(person{}, err) {
+					return
+				}
+				continue
+			}
+			if !yield(person{Name: row.Name, Age: row.Age}, nil) {
+				return
+			}
+		}
+	}
+}
+
 // neo4jV6 is the neo4j-go-v6 arm on the same image, isolated the same way as
 // neo4jV5.
 type neo4jV6 struct {
@@ -683,6 +738,7 @@ type neo4jV6 struct {
 	one        oneColOneParamOneV6
 	mixed      mixedReadWriteBatchV6
 	many       manyColManyV6
+	iters      iterReadMulticolumnV6
 	nestedList nestedListV6
 	nullElem   nullListElemV6
 	nullOuter  nullOuterElemV6
@@ -717,6 +773,7 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 		one:        oneColOneParamOneV6{q: onecolonev6.New(driver)},
 		mixed:      mixedReadWriteBatchV6{q: mixedv6.New(driver)},
 		many:       manyColManyV6{q: manycolmanyv6.New(driver)},
+		iters:      iterReadMulticolumnV6{q: iterv6.New(driver)},
 		nestedList: nestedListV6{q: listlistv6.New(driver)},
 		nullElem:   nullListElemV6{q: certelemv6.New(driver)},
 		nullOuter:  nullOuterElemV6{q: nullouterv6.New(driver)},
@@ -747,6 +804,11 @@ func (h *neo4jV6) writeScenario(ctx context.Context, t *testing.T) writeBackend 
 }
 
 func (h *neo4jV6) edgeUnionScenario(ctx context.Context, t *testing.T) edgeUnionBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV6) iterScenario(ctx context.Context, t *testing.T) iterBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
 }
@@ -1001,6 +1063,10 @@ func batteryTimeV6(v zonedv6.Time) timeValue {
 
 func (s neo4jV6Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 
+func (s neo4jV6Scenario) iterReadMulticolumn() iterQuerier { return s.arm.iters }
+
+func (s neo4jV6Scenario) cancelReachesAStartedStream() bool { return true }
+
 func (s neo4jV6Scenario) nestedList() nestedListQuerier { return s.arm.nestedList }
 
 func (s neo4jV6Scenario) nullListElem() nullListElemQuerier { return s.arm.nullElem }
@@ -1203,4 +1269,30 @@ func (a manyColManyV6) peopleByAgeAndLocale(ctx context.Context, minAge int64, l
 		out = append(out, person{Name: row.Name, Age: row.Age})
 	}
 	return out, nil
+}
+
+// iterReadMulticolumnV6 relays the v6 target's sequence. It is the v5 adapter
+// with the package alias changed and nothing else, which is
+// TestBackendInvariantSurface's claim carried down into the battery: had the
+// two majors needed different relay code here, the caller-visible surface
+// would have varied by driver major and that fence would be wrong.
+type iterReadMulticolumnV6 struct{ q *iterv6.Queries }
+
+func (a iterReadMulticolumnV6) streamPeopleByAge(ctx context.Context, minAge int64, locale string) iter.Seq2[person, error] {
+	return func(yield func(person, error) bool) {
+		for row, err := range a.q.StreamPeopleByAge(ctx, iterv6.StreamPeopleByAgeParams{
+			MinAge: minAge,
+			Locale: locale,
+		}) {
+			if err != nil {
+				if !yield(person{}, err) {
+					return
+				}
+				continue
+			}
+			if !yield(person{Name: row.Name, Age: row.Age}, nil) {
+				return
+			}
+		}
+	}
 }
