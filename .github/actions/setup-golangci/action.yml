@@ -81,6 +81,12 @@ runs:
         set -euo pipefail
         want_version="$(just --evaluate golangci_version)"
         want_path="${GITHUB_WORKSPACE}/.bin/golangci-lint"
+        # The empty case is DETECTED by the inequality below — "" is not
+        # v2.13.1 — so this branch is here for the diagnosis and not for the
+        # catch. Measured: with it removed, an empty pin still refuses, under
+        # the "pin drifted" wording, which names neither the emptied key nor the
+        # regression that produced one. Removing it costs the reader, not the
+        # gate.
         if [ -z "${PIN}" ]; then
             echo "::error title=golangci pin is empty::the version step emitted no version, so the cache below would key on 'golangci-bin-<os>-' and every job would re-download behind a green step. That is the August 2026 regression, not a hypothetical (bd gqlc-pz5jw)." >&2
             exit 1
