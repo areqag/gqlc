@@ -5,6 +5,12 @@ and none of this can be fixed by patching it. What follows is the contract as
 measured against the deployed binary, and the rules that make a query in this
 repository truthful.
 
+Every rule here assumes the queries below are reaching the ledger you think they
+are. That assumption has its own failure mode, and it is silent: see
+[bd-prime-creates-a-ledger.md](bd-prime-creates-a-ledger.md) for how a wrong
+`BEADS_DIR` plus `bd prime` turns every query on this page into a confident
+answer about an empty database.
+
 Every figure below was taken first-party against the live ledger, and each
 section carries the date it was measured on: the sections up to and including
 "`--status open` means the literal status" are 2026-08-23 against 775 beads, and

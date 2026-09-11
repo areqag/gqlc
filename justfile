@@ -1058,6 +1058,170 @@ check-bd-gh-sync-ledger:
     ANCHORS
     [ "$missing" -eq 0 ] || exit 1
 
+# This check is the acceptance of bd gqlc-o22k.
+#
+# What it holds: the pull's append-only rule cannot tell a block APPENDED on
+# GitHub from the same block CUT in bd — the two leave identical bodies — so an
+# edit-time ordering is the only thing separating them. It used to read GitHub's
+# `updatedAt`, which is not an edit time: it moves on a comment and on a close,
+# and bd-gh-sync's own push path writes both when it auto-closes a mirror. So a
+# bead whose description was cut locally and then closed was pulled back with
+# the cut block restored, silently, by this file acting on its own echo. The fix
+# reads `lastEditedAt` (coalesced to `createdAt`, null for a body never edited).
+#
+# It runs the REAL selection, cut out of .githooks/bd-gh-sync, rather than a
+# restatement of the rule — a restatement keeps passing after the hook stops
+# agreeing with it. Every way the cut can come back wrong (anchor missing or
+# duplicated, heredoc unterminated, block empty) is fatal, because an empty
+# selection emits an empty plan and an empty plan is the shape of a healthy run.
+#
+# ~100ms: one python3 start, no network, no git, no bd and no gh.
+[private]
+check-bd-gh-sync-pull-tiebreak:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    hook={{ quote(justfile_directory() + "/.githooks/bd-gh-sync") }}
+    if [ ! -f "$hook" ]; then
+        echo "error: $hook is missing, so bd-gh-sync's pull selection cannot be run and" >&2
+        echo "       this check would report a pass over nothing (bd gqlc-o22k)." >&2
+        exit 1
+    fi
+    scratch="$(mktemp -d)" || exit 1
+    trap 'rm -rf "$scratch"' EXIT
+
+    # Names the PULL selection. The file carries six PYEOF heredocs; the push
+    # one begins `python3 - "$_tmp/beads.json" "$_label_gate"` and this is the
+    # only other that opens on beads.json. Matched anywhere in the line rather
+    # than at column 1 because this invocation is nested in an `if` block, and
+    # carries no trailing backslash: awk processes escapes in a -v assignment
+    # and the awks disagree about a lone trailing one, so ENVIRON is used.
+    anchor='python3 - "$_tmp/beads.json" "$_tmp/gh.json"'
+    erc=0
+    ANCHOR="$anchor" awk '
+        index($0, ENVIRON["ANCHOR"]) > 0 && !armed && !seen { anchors++; armed = 1; next }
+        armed && index($0, "<<") && index($0, "PYEOF") { armed = 0; inblock = 1; opened++; next }
+        inblock && $0 == "PYEOF" { inblock = 0; closed++; seen = 1; next }
+        inblock { print }
+        END {
+            if (anchors != 1) { printf "the anchor line matched %d time(s), want exactly 1\n", anchors + 0 >"/dev/stderr"; exit 3 }
+            if (opened != 1) { printf "the heredoc after the anchor opened %d time(s), want 1\n", opened + 0 >"/dev/stderr"; exit 3 }
+            if (closed != 1) { printf "that heredoc closed %d time(s), want 1\n", closed + 0 >"/dev/stderr"; exit 3 }
+        }
+    ' "$hook" >"$scratch/selection.py" 2>"$scratch/extract.err" || erc=$?
+    if [ "$erc" -ne 0 ] || [ ! -s "$scratch/selection.py" ]; then
+        echo "error: could not cut bd-gh-sync's pull selection out of $hook (bd gqlc-o22k)." >&2
+        sed 's/^/       /' "$scratch/extract.err" >&2
+        echo "       Refusing rather than judging a block nobody read. If the invocation was" >&2
+        echo "       deliberately reshaped, update the anchor in this recipe to match it." >&2
+        exit 1
+    fi
+
+    # Four beads, each with the SAME local description and the same
+    # `updated_at`, so the edit time is the only input that separates them.
+    cat >"$scratch/beads.json" <<'BEADS'
+    [
+     {"id":"probe-cut-then-autoclose","status":"open",
+      "external_ref":"https://github.com/areqag/gqlc/issues/1",
+      "description":"line1\nline2","updated_at":"2026-09-10T12:00:00Z"},
+     {"id":"probe-genuine-gh-append","status":"open",
+      "external_ref":"https://github.com/areqag/gqlc/issues/2",
+      "description":"line1\nline2","updated_at":"2026-09-10T12:00:00Z"},
+     {"id":"probe-edit-time-missing","status":"open",
+      "external_ref":"https://github.com/areqag/gqlc/issues/3",
+      "description":"line1\nline2","updated_at":"2026-09-10T12:00:00Z"},
+     {"id":"probe-never-edited","status":"open",
+      "external_ref":"https://github.com/areqag/gqlc/issues/4",
+      "description":"line1\nline2","updated_at":"2026-09-10T12:00:00Z"}
+    ]
+    BEADS
+
+    # Every body properly extends its bead description, so all four clear the
+    # prefix test and reach the tiebreak. That is the point: the prefix test
+    # cannot separate #1 from #2.
+    cat >"$scratch/gh.json" <<'GH'
+    [
+     {"number":1,"state":"open","body":"line1\nline2\nBLOCK CUT IN BD"},
+     {"number":2,"state":"open","body":"line1\nline2\nAPPENDED ON GITHUB"},
+     {"number":3,"state":"open","body":"line1\nline2\nNO EDIT TIME KNOWN"},
+     {"number":4,"state":"open","body":"line1\nline2\nAPPENDED AT CREATION"}
+    ]
+    GH
+
+    # TWO concatenated documents with no enclosing array — the shape
+    # `gh api graphql --paginate` actually writes. json.load reads the first and
+    # raises on the second, so #4 being decided at all is what witnesses the
+    # stream decoder. #1 was last body-edited BEFORE the bead's cut; #2 after
+    # it; #3 is absent from the map entirely; #4 has never been edited, so its
+    # createdAt is the coalesce.
+    cat >"$scratch/ghedit.json" <<'EDIT'
+    {"data":{"repository":
+      {"issues":{"pageInfo":{"hasNextPage":true,"endCursor":"c1"},
+       "nodes":[
+        {"number":1,"lastEditedAt":"2026-09-10T11:00:00Z","createdAt":"2026-09-10T10:00:00Z"},
+        {"number":2,"lastEditedAt":"2026-09-10T14:00:00Z","createdAt":"2026-09-10T10:00:00Z"}]}}}}
+    {"data":{"repository":
+      {"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},
+       "nodes":[
+        {"number":4,"lastEditedAt":null,"createdAt":"2026-09-10T14:00:00Z"}]}}}}
+    EDIT
+
+    cat >"$scratch/expected.txt" <<'PLAN'
+    HOLD probe-cut-then-autoclose 1 gh-not-newer-than-bd
+    ALLOW probe-genuine-gh-append
+    HOLD probe-edit-time-missing 3 gh-body-edit-time-unavailable
+    ALLOW probe-never-edited
+    COUNT 4
+    DONE
+    PLAN
+
+    run() {
+        python3 "$scratch/selection.py" "$scratch/beads.json" "$scratch/gh.json" \
+            999 areqag/gqlc "$1" 2>"$scratch/plan.err"
+    }
+
+    prc=0
+    run "$scratch/ghedit.json" >"$scratch/plan.txt" || prc=$?
+    if [ "$prc" -ne 0 ]; then
+        echo "error: bd-gh-sync's pull selection exited $prc on a four-bead fixture, so" >&2
+        echo "       what it decides cannot be read at all (bd gqlc-o22k). It said:" >&2
+        sed 's/^/       /' "$scratch/plan.err" >&2
+        exit 1
+    fi
+    if ! diff -u "$scratch/expected.txt" "$scratch/plan.txt" >"$scratch/verdict.diff" 2>&1; then
+        echo "error: bd-gh-sync's pull tiebreak no longer decides what gqlc-o22k fixed." >&2
+        echo "       Expected on the left, what the live hook produced on the right:" >&2
+        sed 's/^/       /' "$scratch/verdict.diff" >&2
+        echo "       probe-cut-then-autoclose turning to ALLOW is the silent one: it writes" >&2
+        echo "       a locally-deleted block back over the bead, triggered by this hook's" >&2
+        echo "       own auto-close comment." >&2
+        exit 1
+    fi
+
+    # The falsifier, in band. Same selection, same beads, same bodies — the ONE
+    # difference is that #1 carries the time GitHub's `updatedAt` would have
+    # reported, the auto-close comment at 13:00 rather than the body edit at
+    # 11:00. That is the pre-fix input, and it must flip #1 to ALLOW. If it does
+    # not, the tiebreak is no longer reading the edit time at all and the row
+    # above passed without being able to fail.
+    cat >"$scratch/ghedit.pre.json" <<'PRE'
+    {"data":{"repository":
+      {"issues":{"pageInfo":{"hasNextPage":false,"endCursor":null},
+       "nodes":[
+        {"number":1,"lastEditedAt":"2026-09-10T13:00:00Z","createdAt":"2026-09-10T10:00:00Z"},
+        {"number":2,"lastEditedAt":"2026-09-10T14:00:00Z","createdAt":"2026-09-10T10:00:00Z"},
+        {"number":4,"lastEditedAt":null,"createdAt":"2026-09-10T14:00:00Z"}]}}}}
+    PRE
+    frc=0
+    run "$scratch/ghedit.pre.json" >"$scratch/pre.txt" || frc=$?
+    if [ "$frc" -ne 0 ] || ! command grep -qx "ALLOW probe-cut-then-autoclose" "$scratch/pre.txt"; then
+        echo "error: feeding the pull selection the timestamp \`updatedAt\` would have" >&2
+        echo "       reported did NOT flip probe-cut-then-autoclose to ALLOW (exit $frc), so" >&2
+        echo "       the comparison above is not reading the body-edit time and cannot fail" >&2
+        echo "       (bd gqlc-o22k). It produced:" >&2
+        sed 's/^/       /' "$scratch/pre.txt" >&2
+        exit 1
+    fi
+
 # health check for local dev environment; extend as new drift modes emerge
 doctor: check-hooks check-worktree-upstream check-shared-config check-beads-export check-push-keepalive
     @echo "ok"
@@ -2291,7 +2455,7 @@ gates:
 # test-binary args, so every run misses), and inter-test coupling in a codegen
 # dev tool is a low-value gate relative to a ~2m40s tax on every push. Revisit
 # if ordering coupling actually bites us.
-test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-bd-gh-sync-selection check-bd-gh-sync-ledger check-pr-ready check-push-keepalive
+test: check-hooks check-worktree-upstream check-shared-config check-beads-export check-bd-gh-sync-selection check-bd-gh-sync-ledger check-bd-gh-sync-pull-tiebreak check-pr-ready check-push-keepalive
     go build ./...
     go test ./...
 
