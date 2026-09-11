@@ -1243,6 +1243,22 @@ check-bd-gh-sync-pull-tiebreak:
 test-bd-prime-guard:
     @.githooks/bd-prime-guarded.rows .githooks/bd-prime-guarded
 
+# The rows for `just complexity`'s EXIT CODE, which is the only thing
+# .githooks/pre-commit has to tell "a function is over the gate" from "nothing
+# was graded" (bd gqlc-f0x1, gqlc-i8j9, gqlc-9nj3). ~4s: each row is a real
+# invocation of the real recipe over a probe package it writes, because the
+# property under test is what golangci-lint does with a broken tree and a stub
+# would only encode the belief about it.
+#
+# ENROLLED IN `just gates` AND IN ci.yml's lint job, unlike test-bd-prime-guard
+# above, which is what the second paragraph of that comment is asking for. It
+# rides `lint` rather than taking a context of its own: the job already provides
+# Go, just, the pinned golangci-lint and shellcheck, and a required context
+# added here is one a repository admin has to enable by hand before it blocks
+# anything.
+test-complexity-exit-code: sweep-discovery-probes ensure-golangci
+    @.githooks/complexity-exit-code.rows justfile
+
 # health check for local dev environment; extend as new drift modes emerge
 doctor: check-hooks check-worktree-upstream check-shared-config check-beads-export check-push-keepalive
     @echo "ok"
@@ -2351,6 +2367,13 @@ lint-new rev="origin/master": ensure-golangci
 # means "code was graded and found wanting". A structural code from any module
 # therefore wins over a 1 from another — the commit author must not be told a
 # function is over the threshold when a module failed to load.
+#
+# That contract is not golangci-lint's alone to keep, and this recipe holds the
+# other half of it: a package-LOADING failure comes back from golangci-lint as a
+# `typecheck` ISSUE and therefore as 1, so the per-module `go list` pre-flight
+# below is what keeps 1 meaning graded (bd gqlc-9nj3). The rows in
+# .githooks/complexity-exit-code.rows hold it, `just test-complexity-exit-code` runs
+# them.
 complexity *paths: sweep-discovery-probes ensure-golangci
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2415,9 +2438,53 @@ complexity *paths: sweep-discovery-probes ensure-golangci
         read -r -a patterns <<<"${grouped[${module}]}"
         echo "complexity: ${module} (${patterns[*]})"
         module_rc=0
-        ( cd "${module}" && {{ lint_lock }} {{ golangci }} run \
-            --enable-only gocyclo,gocognit \
-            --max-issues-per-linter 0 --max-same-issues 0 "${patterns[@]}" ) || module_rc=$?
+        # PRE-FLIGHT THE LOAD, because golangci-lint cannot report one as a
+        # structural failure. A directory whose files disagree about their
+        # package clause is a package-LOADING failure, but golangci-lint
+        # surfaces it through `typecheck` — its always-on pseudo-linter, which
+        # --enable-only does not suppress — as an ISSUE, so it takes
+        # --issues-exit-code and arrives as 1. Measured 2026-09-11 on
+        # test/data/codegen: `package codegen` staged beside `package fixtures`
+        # exits 1 with "found packages fixtures ... and codegen ... (typecheck)"
+        # and "1 issues: * typecheck: 1", having graded no function. The hook
+        # reads 1 as "graded and found something" and printed the complexity
+        # sentence over it (bd gqlc-9nj3) — the same lie gqlc-f0x1 and gqlc-i8j9
+        # were about, reached past the exit-code test that closed them.
+        #
+        # `go list` discriminates exactly where this gate needs it to, which is
+        # why it is the pre-flight rather than a parse of the report. Measured
+        # the same day, all four against this tree: a package-clause clash exits
+        # 1 and names both clauses; a directory holding no Go file exits 1; a
+        # TYPE error (`var _ int = "not an int"`, a reference to an undefined
+        # symbol) exits 0; and so does a file whose body does not PARSE, go/build
+        # reading only as far as the imports. The last two are the ones that must
+        # not turn red here — gocyclo and gocognit are AST-only and grade both of
+        # those packages fine, so refusing mid-edit source would be worse than
+        # the bug this closes.
+        #
+        # IT RUNS FROM THE MODULE ROOT, after the grouping above, and that is
+        # load-bearing rather than incidental. `go list ./test/data/codegen`
+        # from the root module fails with "main module does not contain package"
+        # (measured) — so this same pre-flight spelled per staged DIRECTORY,
+        # which is the obvious place for it, would call every commit touching
+        # the live battery a load failure and re-open gqlc-f0x1 from the other
+        # side.
+        #
+        # Cost, since this is on the path of every commit: 11-17 ms per module
+        # warm, 93 ms for the root module's whole-tree `./...`, against ~300 ms
+        # for the cheapest real invocation of this recipe (one package, warm).
+        #
+        # 7 is not invented here: it is the code golangci-lint itself exits with
+        # when it cannot load the packages it was handed, and it is not 1, which
+        # is the whole of what the hook's reading needs.
+        if ! ( cd "${module}" && go list "${patterns[@]}" >/dev/null ); then
+            echo "complexity: ${module} could not be LOADED, so no function in it was graded" >&2
+            module_rc=7
+        else
+            ( cd "${module}" && {{ lint_lock }} {{ golangci }} run \
+                --enable-only gocyclo,gocognit \
+                --max-issues-per-linter 0 --max-same-issues 0 "${patterns[@]}" ) || module_rc=$?
+        fi
         if [ "${module_rc}" -ne 0 ] && { [ "${rc}" -eq 0 ] || [ "${module_rc}" -ne 1 ]; }; then
             rc="${module_rc}"
         fi
@@ -2525,6 +2592,7 @@ gates:
     run lint           just lint
     run lint           just lint-cache-check
     run lint           just vuln-root-residual
+    run lint           just test-complexity-exit-code
     run test           just test
     # Deliberately NOT the bare context "live-smoke". These tests run in CI only
     # inside that job, but this arm is its Docker-free slice and cannot boot a
