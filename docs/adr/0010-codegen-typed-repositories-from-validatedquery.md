@@ -606,30 +606,137 @@ func (q *Queries) HeaviestPeople(ctx context.Context) iter.Seq2[PersonRow, error
   triggers the driver's managed retry — the connection-setup /
   leader-election flake class is covered. Once the first row is yielded
   to the caller, transient errors from `result.Err()` or per-row decode
-  are yielded as `(zeroRow, err)` and the callback returns nil to
-  prevent retry (retry would double-yield already-delivered rows):
+  are yielded as `(zeroRow, err)` and the unit of work must become
+  non-re-enterable, because a retry would double-yield already-delivered
+  rows. The sketch this bullet originally carried tried to buy that with
+  a `nil` return and did not; what the rule costs, and the sketch that
+  pays it, are the next bullet.
+- Corrected (bug `gqlc-nx54`, 2026-09-10): **a `nil` return from the
+  unit of work does not disarm managed retry.** It falls through to
+  `conn.TxCommit`, and a commit failure calls `state.OnFailure(ctx, err,
+  conn, true)` and returns `(false, nil)` — "not done" — so
+  `for state.Continue(ctx)` calls the unit of work *again* (v5.28.4
+  `neo4j/session_with_context.go:468-469, 530-545`; v6.2.0
+  `neo4j/session.go:469-470, 531-545` is the same code). `Continue`
+  re-enters when `IsRetryable` holds of the last error, which for a
+  live connection is any `TransientError` classification, plus
+  `NotALeader` / `ForbiddenOnReadOnlyDatabase` /
+  `AuthorizationExpired` (`neo4j/internal/retry/state.go:69-96,
+  134-149`, `neo4j/db/errors.go:149-167`; both majors carry those two
+  files, differing only in that v6 refuses a `PoolTimeout` where v5
+  retries it, which does not reach this path). The trigger is therefore
+  a commit failure of exactly the class managed retry exists to absorb.
+
+  On re-entry the old sketch called `yield` on a range-over-func loop
+  the consumer had already broken out of. That is a panic, not an error
+  return, and it lands in the consumer's stack: measured on go1.27.0,
+  `panic: runtime error: range function continued iteration after
+  function for loop body returned false`, reported at the consumer's
+  `for ... range` line. The old sketch's trailing
+  `if err != nil { yield(zeroRow, err) }` is the same hazard outside the
+  callback — after a consumer break, that line panics too.
+
+  The rule the sketch below makes mechanical: **once a row has reached
+  the consumer, every exit from the unit of work returns the sentinel**,
+  so the driver never reaches `TxCommit` and the re-entry window does
+  not exist. The sentinel is built with `errors.New` and wraps nothing:
+  `errorutil.WrapError` passes an unknown type through unchanged
+  (`neo4j/internal/errorutil/errors.go:54-91`), but `IsRetryable` uses
+  `errors.As`, so a sentinel carrying a driver error *inside* it is
+  still classified retryable and re-enters. `ExecuteRead` then returns
+  that same sentinel value (`State.ProduceError` → `WrapError` →
+  unchanged), which is what the outer `errors.Is` test reads.
 
   ```go
+  // Wraps nothing: the driver's retry classifier calls errors.As, so a
+  // sentinel carrying a driver error inside it is still retryable.
+  var errIterStreamStarted = errors.New("gqlc: :iter stream already started")
+
   func (q *Queries) HeaviestPeople(ctx context.Context) iter.Seq2[Row, error] {
       return func(yield func(Row, error) bool) {
-          err := q.session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+          var started, stopped bool
+          emit := func(row Row, err error) bool {
+              if stopped { return false }                // yield after false panics
+              started = true
+              if !yield(row, err) { stopped = true }
+              return !stopped
+          }
+          _, err := q.session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+              if started {
+                  return nil, errIterStreamStarted       // re-entered: never yield twice
+              }
               result, err := tx.Run(ctx, cypher, params)
-              if err != nil { return nil, err }         // retry covers this
+              if err != nil { return nil, err }          // pre-first-yield: retry covers this
               for result.Next(ctx) {
-                  if !yield(decode(result.Record())) {
-                      return nil, nil                    // consumer break
+                  if !emit(decode(result.Record())) {
+                      return nil, errIterStreamStarted   // consumer break
                   }
               }
               if err := result.Err(); err != nil {
-                  yield(zeroRow, err)                    // mid-stream err
-                  return nil, nil                        // nil = no retry
+                  if !started { return nil, err }        // still inside the envelope
+                  emit(zeroRow, err)                     // mid-stream err
+                  return nil, errIterStreamStarted
               }
-              return nil, nil
+              if started {
+                  return nil, errIterStreamStarted       // drained: do not let it commit
+              }
+              return nil, nil                            // empty result: commit is safe
           })
-          if err != nil { yield(zeroRow, err) }          // retries exhausted
+          if err != nil && !errors.Is(err, errIterStreamStarted) {
+              emit(zeroRow, err)                         // retries exhausted
+          }
       }
   }
   ```
+
+  Two properties of that sketch are not decoration. The entry check is
+  redundant against the exit rule — no post-yield path returns `nil`, so
+  nothing re-enters — and is kept because it is the one place a later
+  exit path that forgets the rule is caught rather than reaching a
+  consumer's stack. And `emit` exists because *every* `yield` site needs
+  the `stopped` test, the post-`ExecuteRead` one included.
+
+  What the rule costs: a `:iter` transaction that delivered at least one
+  row is **never committed** — it is rolled back when the pool resets
+  the connection. For a read that is a lost commit of nothing, and the
+  bookmark advancement it skips (`s.retrieveBookmarks`, v5 `:547-550`,
+  reached only after a successful commit) is advancement the emitted
+  code does not use: `driverDB.run` opens a fresh session per call with
+  a bare `SessionConfig{AccessMode: access}` and no `BookmarkManager`
+  (`internal/codegen/neo4j/render_db.go:66-68`), so no generated call
+  reads another's bookmarks today. A rollback is cheap here because the
+  transaction is a read; on a write it would be data loss, which is a
+  second reason for the read-only rule above.
+
+  Why `:many` is unaffected: its callback calls `result.Collect(ctx)`
+  and returns, so re-entry re-runs the query and discards the first
+  pass. No consumer code runs inside the retry envelope, which is the
+  whole of the defect.
+
+  Not yet run, and named so nobody reads this bullet as more than it is:
+  `gqlc-nx54`'s falsifier — a live test that forces a `TxCommit` failure
+  after a row has been streamed and observes the panic — has not been
+  executed. The panic is measured on a standalone range-over-func probe
+  and the re-entry is read out of the two pinned driver sources; nothing
+  here observed the two composed against a server.
+
+  Reconciliation with the Tx-object ruling
+  ([codegen-tx-object.md](../specs/codegen-tx-object.md) §1): `:iter`'s
+  caller-facing shape is `iter.Seq2`, which the consumer spends as `for
+  row, err := range q.X(ctx)` — the compiler synthesises `yield`, and no
+  callback is handed to the caller, so the shape stands. What the ruling
+  *does* remove from the option set is the obvious alternative remedy, a
+  `pgx.ForEachRow`-style `func(ctx, yield func(Row) error) error`
+  (shipped in `pgx/v5@v5.10.0 rows.go:401-421`): that one does hand the
+  caller a callback. §3 F4 of the same spec settled the principle this
+  bug is an instance of — "an object with `Commit` cannot retry, because
+  retrying means re-running user code that already observed results" —
+  and yielding a row inside `ExecuteRead` is that exact situation.
+  `gqlc-1a5` therefore has a further option to weigh when it picks up:
+  build `:iter` on `BeginTransaction` (F1, F3) instead of `ExecuteRead`,
+  which deletes the retry envelope and the re-entry hazard with it and
+  pays for that with the pre-first-yield retry this bullet keeps. No
+  decision is taken here.
 
 - Resolved (grill, 2026-07-11): `SKIP` / `LIMIT` are **orthogonal** to
   cardinality — they flow through as `$skip` / `$limit` Params like any
@@ -644,12 +751,18 @@ func (q *Queries) HeaviestPeople(ctx context.Context) iter.Seq2[PersonRow, error
   testcontainer harness (once merged) is extended with `:iter` cases:
   seed rows → range via `:iter` → assert values; verify early `break`
   cleanup; verify pre-first-yield retry. Nested golden module `go.mod`
-  for `:iter` fixtures specifies `go 1.23` minimum.
+  for `:iter` fixtures specifies `go 1.23` minimum. Added by
+  `gqlc-nx54`: one row forcing a `TxCommit` failure after at least one
+  row has been streamed, asserting an error return and no panic — the
+  case the corrected sketch above exists for, and the one no test
+  anywhere currently covers.
 - Implementation trigger: gqlc-1a5 remains open at P3. Picking up the
-  build is gated on real user demand (someone files an issue for
+  build was gated on real user demand (someone files an issue for
   streaming) or benchmarked need (`[]Row` materialisation shown to
-  bottleneck a workload). The grill markers above are the paved runway
-  when the trigger fires.
+  bottleneck a workload). The demand half fired 2026-09-08; the
+  feasibility and blast-radius measurements it produced live in
+  gqlc-1a5's notes, and no option has been chosen. The grill markers
+  above are the paved runway.
 
 ## Consequences
 
