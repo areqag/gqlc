@@ -88,12 +88,12 @@ func flagsOf(u carrierUse) CarrierUseFlags {
 // but cannot spell its element; these are how it asks. Absent reads as
 // the zero flags, which is what an unused carrier means.
 func TemporalUseOf(prepared codegen.Prepared, name string) CarrierUseFlags {
-	temporal, _ := conversionUses(prepared)
+	temporal, _, _ := conversionUses(prepared)
 	return flagsOf(temporal[name])
 }
 
 func RecordUseOf(prepared codegen.Prepared, encoding graph.PropertyType) CarrierUseFlags {
-	_, records := conversionUses(prepared)
+	_, records, _ := conversionUses(prepared)
 	return flagsOf(records[encoding])
 }
 
@@ -101,7 +101,7 @@ func RecordUseOf(prepared codegen.Prepared, encoding graph.PropertyType) Carrier
 // order, so a test can compare it against codegen.RecordEncodings without
 // spelling the map's element type.
 func RecordUseEncodings(prepared codegen.Prepared) []graph.PropertyType {
-	_, records := conversionUses(prepared)
+	_, records, _ := conversionUses(prepared)
 	out := make([]graph.PropertyType, 0, len(records))
 	for pt := range records {
 		out = append(out, pt)
@@ -113,7 +113,7 @@ func RecordUseEncodings(prepared codegen.Prepared) []graph.PropertyType {
 // TemporalUseNames is the key set of the temporal half, sorted, so a test
 // can assert that a batch reaching no temporal carrier marks none.
 func TemporalUseNames(prepared codegen.Prepared) []string {
-	temporal, _ := conversionUses(prepared)
+	temporal, _, _ := conversionUses(prepared)
 	out := make([]string, 0, len(temporal))
 	for name := range temporal {
 		out = append(out, name)

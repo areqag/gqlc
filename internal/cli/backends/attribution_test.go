@@ -313,6 +313,28 @@ func declaredWidths() []graph.PropertyType {
 	// whatever a backend says about records AS SUCH — which is where
 	// neo4j's storage answer lands.
 	widths = append(widths, graph.RecordOf(nil), graph.TypeAnyRecord)
+
+	// Two closed unions, and they are here for opposite reasons.
+	//
+	// UNION<DATE|STRING> is the width spec §8 names as the third
+	// falsifier: neo4j admits it because the driver hands back a
+	// dbtype.Date that no string can be mistaken for, and AGE refuses it
+	// because agtype has no date scalar and a DATE is ISO text
+	// indistinguishable on the wire from a STRING. So it divides the
+	// roster, and AGE's refusal of it is contingent — the rule above
+	// obliges that message to name AGE, which is the ADR 0035 half the
+	// tripwire in union_test.go stood in for while nothing generated a
+	// union at all.
+	//
+	// UNION<BOOL|INT64> is the control that makes the first row's dissent
+	// mean something: its members land in distinct wire families on BOTH
+	// backends, so both emit it and there is no refusal to attribute.
+	// Without it a reader could not tell whether AGE refuses this union's
+	// members or refuses closed unions as such.
+	widths = append(widths,
+		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeDate}, {Type: graph.TypeString}}),
+		graph.UnionOf([]graph.UnionMember{{Type: graph.TypeBool}, {Type: graph.TypeInt64}}),
+	)
 	return widths
 }
 

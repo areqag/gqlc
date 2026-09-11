@@ -207,8 +207,6 @@ func sentinelIdent(err error) string {
 		return "ErrUnrepresentableWidth"
 	case codegen.ErrUnstorableProperty:
 		return "ErrUnstorableProperty"
-	case codegen.ErrUnimplementedTypeKind:
-		return "ErrUnimplementedTypeKind"
 	case codegen.ErrUnrepresentableEdgeUnion:
 		return "ErrUnrepresentableEdgeUnion"
 	case codegen.ErrUnrepresentableTemporal:

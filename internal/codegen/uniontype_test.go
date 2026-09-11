@@ -401,6 +401,12 @@ func TestUnionHelperSuffixIsASpellableIdentifierFragment(t *testing.T) {
 // is the only reader, and it runs before any file is rendered, so nothing
 // else would notice if the two drifted.
 //
+// The ListPtr wrapper is one of the five and not an oversight in the
+// other direction: a nullable LIST<UNION<…>> parameter binds nil as the
+// Cypher null its declaration asked for, which an `encode…List` taking a
+// value slice has no nil to distinguish. The record group carries the same
+// wrapper for the same reason.
+//
 // The absence of a carrier alias is asserted rather than left implicit. A
 // union carries as `any`, a predeclared name every emission already spells,
 // so an alias would be a second spelling of a type the backends must not
@@ -415,6 +421,7 @@ func TestUnionHelperNamesAreTheNamesEmitted(t *testing.T) {
 		"encode" + suffix,
 		"encode" + suffix + "Ptr",
 		"encode" + suffix + "List",
+		"encode" + suffix + "ListPtr",
 		"decode" + suffix,
 	}, names)
 

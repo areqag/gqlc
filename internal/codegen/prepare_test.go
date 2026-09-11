@@ -1668,7 +1668,18 @@ var fixedDeclarationFiles = map[string]bool{
 // follow from the batch instead: entity structs and their decode
 // helpers in models.go, and the query surface in each queryFileSuffix
 // file. Those are sources 1-6 of the sweep, not source 0.
-var inputDerivedFiles = map[string]bool{"models.go": true}
+//
+// union_neo4j.go joins them rather than the fixed side because its whole
+// contents follow from the batch: one validation and one dispatch helper
+// per closed-union ENCODING the batch reaches, named from that encoding's
+// own hash. It exports nothing today — every name in it is a
+// decodeUnion/encodeUnion suffix — and classifying it here rather than
+// as emitter-fixed is what would force a reserved row if it ever did.
+// Its record sibling record_neo4j.go has the same shape and is absent
+// deliberately: the loop below refuses a name no golden emits, and the
+// corpus's record fixtures are AGE-only because neo4j will not store a
+// map in a property, so nothing emits it to classify.
+var inputDerivedFiles = map[string]bool{"models.go": true, "union_neo4j.go": true}
 
 // queryFileSuffix ends every emitted per-source query file. The stem
 // before it is the query source's own basename, so that side of the
@@ -2303,35 +2314,36 @@ func (m unknownWidthTypeMap) Property(pt graph.PropertyType) (string, bool) {
 	return m.stubTypeMap.Property(pt)
 }
 
-// TestUnimplementedKindRefusedBeforeTheCarrierQuestion pins the refusal
-// gqlc-h9n.33 owes the rest of the pipeline. The schema front end now
-// resolves RECORD and closed dynamic unions to a PropertyType carrying
-// its parts, and no backend emits either kind, so every position that
-// asks a TypeMap for a carrier has to refuse the kind first.
+// TestEveryDeclaredKindReachesTheCarrierQuestion is what
+// TestUnimplementedKindRefusedBeforeTheCarrierQuestion became when
+// gqlc-x2uy deleted ErrUnimplementedTypeKind, and the inversion is the
+// point: the rows that used to assert a union was refused BEFORE the
+// table now assert it reaches the table, at all four positions that ask
+// one for a carrier.
 //
-// Two different things go wrong without that, and they need separate
-// typeMaps to tell apart.
+// The table is still the two tables, because the claim still has two
+// halves and one typeMap cannot make both.
 //
-// Under a dialect table the kind reaches a switch with no case for it
-// and leaves as ok=false, so the caller is told ErrUnrepresentableWidth
-// — that the backend has no Go type WIDE enough, which sends them to
-// change the declared width. There is no width to change: the answer is
-// that gqlc has built no emission for the kind at all. Every row's
-// NotErrorIs is what witnesses that, and it is the reason the refusal
-// cannot simply be left to the tables.
+// Under a permissive table every kind is ADMITTED. That is the deletion's
+// deliverable: a width the walk used to stop now travels the whole way to
+// the carrier question, and a walk left in the tree at any of the four
+// sites reds every row of this half.
 //
-// Under a permissive table the kind is not refused at all — stubTypeMap
-// answers "property:RECORD<a INT32>", and generation would emit that
-// string as a Go type. So the refusal must not depend on a table
-// refusing, which is a claim only a table that admits everything can
-// make.
+// Under a table with no case for the width the answer is
+// ErrUnrepresentableWidth — the carrier channel, which is the ONLY thing
+// a kind can be refused through now. That half is not redundant with the
+// first: a residual walk that refused unions unconditionally would red
+// the permissive half alone, while one that refused them only where the
+// table also did would red this half alone, by answering a sentinel this
+// package no longer declares.
 //
-// The list rows are the shallow-walk falsifier: a check that asks
-// Kind() at the top and stops admits LIST<RECORD<…>>, whose record then
-// dies inside the table as a width error — the exact confusion this
-// test exists to forbid, one level down and invisible to every other
-// row.
-func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
+// The list and record rows are the shallow-walk falsifier read in the new
+// direction: an admission that asks Kind() at the top and stops would
+// still admit LIST<UNION<…>> here, so the nesting rows are what hold the
+// claim that the DESCENT reaches the table too — a carrier built for the
+// outer width and not for the member inside it emits a field no decoder
+// can fill.
+func TestEveryDeclaredKindReachesTheCarrierQuestion(t *testing.T) {
 	entities, index := listPlanTestFixture(t)
 	person := graph.LabelSetKey("Person")
 
@@ -2403,68 +2415,21 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 		},
 	}}
 
-	// Stage 1 of gqlc-x9tg7 emits records, so the record rows that used
-	// to sit here have moved to `admitted` below. What remains refused
-	// is the union — and, the arm stage 1 adds, a union REACHED THROUGH
-	// a record, which is only refusable because the walk now descends
-	// Fields. Without that descent every row below carrying `union`
-	// inside a record passes the walk, reaches the table with a record
-	// it cannot spell a struct text for, and comes back a width error.
-	refused := []struct {
-		name string
-		pt   graph.PropertyType
-	}{
-		{"a union", union},
-		{"a union under a list", graph.ListOf(union, true)},
-		{"a union inside a record", graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})},
-		{"a union under a list inside a record", graph.RecordOf([]graph.RecordField{{Name: "u", Type: graph.ListOf(union, true)}})},
-		{"a union inside a record inside a record", graph.RecordOf([]graph.RecordField{
-			{Name: "at", Type: graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})},
-		})},
-		{"a union inside a record under a list", graph.ListOf(graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}}), true)},
-	}
-
-	tables := []struct {
-		name string
-		of   func(pt graph.PropertyType) codegen.TypeMap
-	}{{
-		// The dialect's answer. Asserts ORDER: the kind is refused
-		// before the table is asked, so moving the walk below
-		// tm.Property reds every row here.
-		name: "a table with no case for the width",
-		of:   func(pt graph.PropertyType) codegen.TypeMap { return unknownWidthTypeMap{refuse: pt} },
-	}, {
-		// Asserts INDEPENDENCE: the refusal is gqlc's own and does
-		// not borrow the table's. Deleting the walk entirely leaves
-		// these rows generating a Go type spelled
-		// "property:RECORD<a INT32>".
-		name: "a table that admits every width",
-		of:   func(graph.PropertyType) codegen.TypeMap { return stubTypeMap{} },
-	}}
-
-	for _, pos := range positions {
-		for _, tbl := range tables {
-			for _, r := range refused {
-				t.Run(pos.name+"/"+tbl.name+"/"+r.name, func(t *testing.T) {
-					err := pos.run(r.pt, tbl.of(r.pt))
-					require.ErrorIs(t, err, codegen.ErrUnimplementedTypeKind)
-					require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth,
-						"the caller has no width to change; reporting the carrier gap sends them to an edit that cannot help")
-				})
-			}
-		}
-	}
-
-	// The over-refusal fence. A walk that answered "not a scalar" rather
-	// than "a union, or a record with one under it" refuses these too,
-	// and every row above stays green while lists and records stop
-	// generating.
+	// Every kind the schema front end resolves, at every position that
+	// asks a TypeMap for a carrier. The union rows were the `refused`
+	// table until gqlc-x2uy deleted the walk, and they are here now for
+	// the same reason the record rows arrived at stage 1: the kind has an
+	// emission, so the position's job is to reach the carrier question
+	// rather than to stop short of it.
 	//
-	// The record rows are stage 1's deliverable and they are here rather
-	// than in a test of their own on purpose: this is the table that
-	// knows all four positions, and spec §6 binds the carrier question
-	// at every one of them. A record admitted at three of four would
-	// otherwise be a hole nothing looks at.
+	// The nesting rows are what hold the DESCENT. A union inside a record
+	// is admitted only if the record's carrier was built by asking the
+	// member's; an admission that answered on the outer Kind() alone
+	// passes every bare row here and emits a struct field nothing fills.
+	//
+	// All four positions rather than a test of its own, because spec §6
+	// binds the carrier question at every one of them and a kind admitted
+	// at three of four is a hole nothing looks at.
 	admitted := []struct {
 		name string
 		pt   graph.PropertyType
@@ -2479,6 +2444,14 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 		{"a record under two lists", graph.ListOf(graph.ListOf(record, true), true)},
 		{"a record inside a record", graph.RecordOf([]graph.RecordField{{Name: "at", Type: record}})},
 		{"a list inside a record", graph.RecordOf([]graph.RecordField{{Name: "xs", Type: graph.ListOf(graph.TypeInt32, true)}})},
+		{"a union", union},
+		{"a union under a list", graph.ListOf(union, true)},
+		{"a union inside a record", graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})},
+		{"a union under a list inside a record", graph.RecordOf([]graph.RecordField{{Name: "u", Type: graph.ListOf(union, true)}})},
+		{"a union inside a record inside a record", graph.RecordOf([]graph.RecordField{
+			{Name: "at", Type: graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})},
+		})},
+		{"a union inside a record under a list", graph.ListOf(graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}}), true)},
 	}
 	for _, pos := range positions {
 		for _, a := range admitted {
@@ -2487,91 +2460,44 @@ func TestUnimplementedKindRefusedBeforeTheCarrierQuestion(t *testing.T) {
 			})
 		}
 	}
-}
 
-// TestUnimplementedTypeKindNamesTheKindAndTheSite holds the message to
-// the two things a reader needs from it: WHICH kind stopped generation,
-// and where it was declared.
-//
-// The nested row is the one that costs anything. There the declared
-// width and the unbuilt kind are different strings, and a message naming
-// only one leaves the reader guessing which level to edit — the list
-// they can see in the schema, or the record inside it they cannot. The
-// bare row is the other branch of the same rendering, and it is here
-// because a message that appended `whose RECORD<a INT32> has no
-// emission` to a property already declared as exactly that would be
-// noise no reader gains from.
-func TestUnimplementedTypeKindNamesTheKindAndTheSite(t *testing.T) {
-	person := graph.LabelSetKey("Person")
-	union := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})
-
-	inRecord := graph.RecordOf([]graph.RecordField{{Name: "u", Type: union}})
-	nested := graph.RecordOf([]graph.RecordField{{Name: "at", Type: inRecord}})
-
-	tests := []struct {
-		name    string
-		pt      graph.PropertyType
-		wantErr string
-	}{{
-		name:    "the property is the unbuilt kind",
-		pt:      union,
-		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` + string(union),
-	}, {
-		name: "the unbuilt kind is inside the declared width",
-		pt:   graph.ListOf(union, true),
-		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` +
-			string(graph.ListOf(union, true)) + `, whose ` + string(union) + ` has no emission`,
-	}, {
-		// Stage 1's arm. A record can declare the same unbuilt width at
-		// several fields, so naming the sub-type alone does not say
-		// which declaration to open — the field name is the part that
-		// locates the edit, and it is what the list rendering above has
-		// no equivalent of.
-		name: "the unbuilt kind is a record field",
-		pt:   inRecord,
-		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` +
-			string(inRecord) + `, whose field "u" has ` + string(union) + `, which has no emission`,
-	}, {
-		// The path accumulates outward rather than reporting the leaf,
-		// because "u" appears at both levels of this declaration and a
-		// message naming only the leaf would send the reader to either.
-		name: "the unbuilt kind is under two records",
-		pt:   nested,
-		wantErr: `property type kind not implemented yet: entity "Person" property "p" has ` +
-			string(nested) + `, whose field "at.u" has ` + string(union) + `, which has no emission`,
-	}}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := codegen.PhaseZAdmit(schema.Schema{
-				Name: "Test",
-				Nodes: map[graph.LabelSetKey]schema.NodeType{
-					person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{
-						"p": {Name: "p", Type: tt.pt},
-					}},
-				},
-			}, stubTypeMap{})
-			require.ErrorIs(t, err, codegen.ErrUnimplementedTypeKind)
-			require.EqualError(t, err, tt.wantErr)
-		})
+	// The other half: with the table refusing the width, the answer is
+	// the carrier channel and nothing else. ErrUnrepresentableWidth is
+	// the only sentinel a kind can be refused through now, and asserting
+	// it here is what catches a residual kind walk that fires only where
+	// the table also refuses — which the permissive half above cannot
+	// see, both halves answering an error either way.
+	for _, pos := range positions {
+		for _, a := range admitted {
+			t.Run(pos.name+"/refused by the table/"+a.name, func(t *testing.T) {
+				err := pos.run(a.pt, unknownWidthTypeMap{refuse: a.pt})
+				require.ErrorIs(t, err, codegen.ErrUnrepresentableWidth)
+			})
+		}
 	}
 }
 
-// TestUnimplementedKindOutranksRecordFieldLegality fixes the order of
-// the two refusals a record can draw at once, which the taxonomy's §2
-// row for ErrRecordFieldCollision states and nothing else measures.
+// TestRecordFieldLegalityAnswersARecordCarryingAUnion is what
+// TestUnimplementedKindOutranksRecordFieldLegality became when gqlc-x2uy
+// deleted the kind walk that used to outrank it.
 //
-// A record with BOTH an unbuilt kind under it and a pair of fields that
-// mangle together is refused for the KIND. That is the edit that can
-// help: a record carrying a union has no emission at any spelling, so
-// renaming its fields moves nothing, while the reverse reading sends
-// the author to rename a field and meet the second refusal after.
-func TestUnimplementedKindOutranksRecordFieldLegality(t *testing.T) {
+// The order it fixed has no second refusal to order against any more, so
+// what is left to hold is that the mangle refusal still fires on a record
+// whose fields include a union — a record that used to be answered one
+// check earlier and could have been made unreachable by the deletion
+// without anything else going red.
+//
+// The union is not decoration in the first row. recordFieldLegality
+// descends through MEMBERS since gqlc-n1tzz, so a record carrying one is
+// a strictly longer walk to the same collision, and a descent that
+// stopped at a union member would return "legal" here and emit a struct
+// declaring MinAge twice.
+func TestRecordFieldLegalityAnswersARecordCarryingAUnion(t *testing.T) {
 	person := graph.LabelSetKey("Person")
 	union := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})
 
-	// Illegal on both axes at once: "minAge"/"min_age" mangle together,
-	// and "u" carries a kind no backend emits.
+	// "minAge"/"min_age" mangle together, beside a field carrying a kind
+	// that is now emitted rather than refused.
 	both := graph.RecordOf([]graph.RecordField{
 		{Name: "min_age", Type: graph.TypeInt32},
 		{Name: "minAge", Type: graph.TypeInt32},
@@ -2591,12 +2517,15 @@ func TestUnimplementedKindOutranksRecordFieldLegality(t *testing.T) {
 	}
 
 	err := admit(both)
-	require.ErrorIs(t, err, codegen.ErrUnimplementedTypeKind)
-	require.NotErrorIs(t, err, codegen.ErrRecordFieldCollision)
+	require.ErrorIs(t, err, codegen.ErrRecordFieldCollision)
+	require.EqualError(t, err,
+		`record field collision: entity "Person" property "p" has `+string(both)+
+			`, whose fields "minAge" and "min_age" both mangle to "MinAge"`)
 
-	// The control, and it is what stops this passing on a build where
-	// the legality check was never wired in at all: the same record with
-	// the union field taken away is refused, and refused for the fields.
+	// The control, and it is what stops the row above passing on a build
+	// where the union field was what made the record illegal rather than
+	// the mangle: the same record with the union taken away is refused
+	// for the fields, with the same message but its own width named.
 	legalKinds := graph.RecordOf([]graph.RecordField{
 		{Name: "min_age", Type: graph.TypeInt32},
 		{Name: "minAge", Type: graph.TypeInt32},

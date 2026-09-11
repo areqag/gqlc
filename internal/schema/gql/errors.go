@@ -166,10 +166,12 @@ var (
 // deferred and there is nothing left for a "yet" to promise.
 //
 // So the three below are the permanent kind, and their absence of a "yet" is
-// the claim. A family declined because gqlc has not built it belongs in
-// internal/codegen, at the layer that has not built it: ErrUnimplementedTypeKind
-// is where record and union EMISSION is deferred, and it carries the "yet"
-// these three must not.
+// the claim. It used to be made by contrast with a sentinel one layer down —
+// internal/codegen's ErrUnimplementedTypeKind, which carried the "yet" for the
+// record and union EMISSION — and gqlc-x2uy deleted it, both kinds now emitting
+// on both backends. The contrast is gone and the claim is stronger without it:
+// no refusal on gqlc's type path carries a "yet" today, so the three below are
+// permanent in a taxonomy with no other kind left to be.
 var (
 	ErrPathValueType       = fmt.Errorf("%w: PATH is a traversal a query produces, not a value an element stores", ErrUnsupportedType)
 	ErrReferenceValueType  = fmt.Errorf("%w: a graph, node, edge or binding table reference is a handle into a graph rather than a value, and a property holding one would be a relationship no traversal can follow", ErrUnsupportedType)

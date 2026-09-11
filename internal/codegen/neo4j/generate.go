@@ -66,7 +66,7 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	// One walk answers both conversion kinds, so models.go's record
 	// helpers and temporal_neo4j.go's carrier bridges are gated off the
 	// same reading of the batch (see conversionUses).
-	temporalUse, recordUse := conversionUses(prepared)
+	temporalUse, recordUse, unionUse := conversionUses(prepared)
 
 	files := []codegen.File{
 		{Path: "db.go", Contents: renderDB(pkg, hasOne, target)},
@@ -83,6 +83,18 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 		files = append(files, codegen.File{
 			Path:     "record_neo4j.go",
 			Contents: renderRecordHelpers(pkg, encodings, recordUse, target),
+		})
+	}
+
+	// The closed unions' validation and dispatch helpers, in their own
+	// file for the reason the records have one: they are emitted only
+	// when the batch reaches a union, and a batch can reach one through a
+	// query parameter alone — which models.go, whose whole body is gated
+	// on the schema declaring an entity, would emit nothing for.
+	if encodings := codegen.UnionEncodings(prepared.Entities, prepared.Queries); len(encodings) > 0 {
+		files = append(files, codegen.File{
+			Path:     "union_neo4j.go",
+			Contents: renderUnionHelpers(pkg, encodings, unionUse, target),
 		})
 	}
 

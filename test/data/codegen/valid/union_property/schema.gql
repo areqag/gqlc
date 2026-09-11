@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE UnionProperty AS {
+    (:Row {
+        id     :: INT64 NOT NULL,
+        pick   :: ANY<INT32 | STRING>,
+        also   :: ANY<INT32 | STRING>,
+        flag   :: ANY<BOOL | FLOAT64>
+    })
+}

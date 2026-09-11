@@ -13,11 +13,16 @@ import (
 // recordFieldLegality reports the outermost record under pt whose
 // declared fields have no legal Go spelling, with the reason. It is
 // asked at every position that asks a TypeMap for a property carrier,
-// AFTER unimplementedTypeKind and BEFORE the table, because it is the
-// precondition RecordStructText assumes and the table has no channel to
-// report it through — Property answers (string, bool), and "this record
-// cannot be spelled" is not the same claim as "this width has no
-// carrier".
+// and BEFORE the table, because it is the precondition RecordStructText
+// assumes and the table has no channel to report it through — Property
+// answers (string, bool), and "this record cannot be spelled" is not the
+// same claim as "this width has no carrier".
+//
+// It is the FIRST question at each of those four sites since gqlc-x2uy
+// deleted the unimplemented-kind walk that used to stand ahead of it.
+// Nothing moved between the two: the walk refused a kind gqlc emitted
+// nothing for, and once both kinds had an emission it had no input left
+// to refuse.
 //
 // Three illegalities, all the mangle's doing rather than the author's
 // spelling (spec §2). Two fields whose paramFieldName mangles collide
@@ -97,9 +102,8 @@ func recordFieldLegality(pt graph.PropertyType) (graph.PropertyType, string, boo
 
 // recordFieldDetail renders the tail every ErrRecordFieldCollision
 // message shares, so the four fail-sites differ only in how they name
-// themselves — the arrangement unimplementedKindDetail already has. When
-// the declared type IS the offending record the two arguments are the
-// same string and naming it twice would say nothing.
+// themselves. When the declared type IS the offending record the two
+// arguments are the same string and naming it twice would say nothing.
 func recordFieldDetail(declared, record graph.PropertyType, reason string) string {
 	if declared == record {
 		return string(declared) + ", whose " + reason

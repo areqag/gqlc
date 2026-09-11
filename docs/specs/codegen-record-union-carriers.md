@@ -387,6 +387,20 @@ it, and nothing in it is built here.
 
 ## 7. Ruling: staging, and the refusal that remains
 
+**Both stages have landed.** The ruling below is kept in its original
+voice — it is the decision, not a status board — but a reader should
+know two things about the tree before reading it. `unimplementedTypeKind`
+and the line numbers cited for it no longer exist: `gqlc-x2uy` deleted
+the sentinel, the walk, its registry row and its taxonomy entries, so
+the four sites now ask `recordFieldLegality` first and the type map
+second. And stage 2's scope moved in both directions — `LIST<UNION<…>>`
+storage on neo4j is deferred to `gqlc-npus`, unmeasured against the
+server, so neo4j's `StorableProperty` presently admits a union-valued
+list by saying nothing about it; while stage 2 grew a half this section
+did not anticipate, the AGE union emission, since §4's admission rule
+left AGE admitting wire-distinct unions that nothing on that backend
+rendered, and the walk could not be deleted while that was true.
+
 **Stage 1 — records** (`gqlc-jffyz`, retitled to records only):
 `KindRecord` + `TypeAnyRecord` + `RECORD<>` carriers on both
 backends, all four positions, aliases layer, helpers, and the walk

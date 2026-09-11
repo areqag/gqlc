@@ -388,7 +388,16 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 // error. No Row-struct decoding, and no writeRunCall — an :exec method has
 // no rows to bind, so it calls run inline and keeps the error alone.
 func writeExecBody(b *strings.Builder, p codegen.Query) {
-	fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %s, %s, %s)\n", codegen.QueryTextConst(p), paramsMapText(p), accessModeText(p.IsWrite))
+	hoisted := writeParamPrelude(b, p, "return err")
+	// `=` rather than `:=` once a prelude ran: the prelude declared err,
+	// and `_, err :=` beside it declares no new variable, which does not
+	// compile. The row bodies below need no such care — `records` is new
+	// on every path.
+	assign := ":="
+	if len(hoisted) > 0 {
+		assign = "="
+	}
+	fmt.Fprintf(b, "\t_, err %s q.db.run(ctx, %s, %s, %s)\n", assign, codegen.QueryTextConst(p), paramsMapText(p, hoisted), accessModeText(p.IsWrite))
 	b.WriteString("\treturn err\n")
 }
 
@@ -423,7 +432,8 @@ func writeDocComment(b *strings.Builder, p codegen.Query) {
 // C4 threads the access mode dispatch per Validated.Statement (§5.5);
 // the C1 hardcoded neo4j.AccessModeRead retires.
 func writeRunCall(b *strings.Builder, p codegen.Query) {
-	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %s, %s, %s)\n", codegen.QueryTextConst(p), paramsMapText(p), accessModeText(p.IsWrite))
+	hoisted := writeParamPrelude(b, p, fmt.Sprintf("return %s, err", zeroValueText(p)))
+	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %s, %s, %s)\n", codegen.QueryTextConst(p), paramsMapText(p, hoisted), accessModeText(p.IsWrite))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroValueText(p))
 }
 
@@ -434,7 +444,11 @@ func writeRunCall(b *strings.Builder, p codegen.Query) {
 // the widen pattern (int64(v)) — the driver accepts the wider carrier.
 // Nullable parameters go through binParamExpr, which handles the
 // nil-pointer case by binding a bare nil literal.
-func paramsMapText(p codegen.Query) string {
+// hoisted names the local a fallible binding was evaluated into by
+// writeParamPrelude, keyed by the parameter's wire name; it is nil when
+// the query has no fallible parameter, which is every query that declares
+// no closed union.
+func paramsMapText(p codegen.Query, hoisted map[string]string) string {
 	if len(p.ParamFields) == 0 {
 		return "nil"
 	}
@@ -448,7 +462,11 @@ func paramsMapText(p codegen.Query) string {
 		if len(p.ParamFields) > 1 {
 			access = codegen.ParamArg + "." + f.Field
 		}
-		fmt.Fprintf(&b, "%q: %s", f.RawName, paramBindExpr(f, access))
+		bind := paramBindExpr(f, access)
+		if local, ok := hoisted[f.RawName]; ok {
+			bind = local
+		}
+		fmt.Fprintf(&b, "%q: %s", f.RawName, bind)
 	}
 	b.WriteString("}")
 	return b.String()
@@ -475,6 +493,9 @@ func paramsMapText(p codegen.Query) string {
 // `[]any(arg)` — not a Go conversion at all, so any query with a list
 // parameter emitted a package that did not compile (bd gqlc-hrls).
 func paramBindExpr(f codegen.Param, access string) string {
+	if expr, ok := unionBindExpr(f, access); ok {
+		return expr
+	}
 	if isSliceType(f.GoType) {
 		return sliceParamBindExpr(f.GoType, f.Width, f.Nullable, access)
 	}
@@ -504,6 +525,91 @@ func paramBindExpr(f codegen.Param, access string) string {
 		return widenExpr(f.GoType, f.Width, access)
 	}
 	return access
+}
+
+// unionBindExpr renders the binding for a parameter whose declared width
+// IS a closed union, or is a list of one, and reports that it did.
+//
+// Asked BEFORE the slice test below it, because a LIST<UNION<…>> carries
+// as `[]any` — a text isSliceType deliberately excludes, since an ANY
+// element is already the value the driver packs. A union element is not:
+// it is validated against a declared member set before it reaches the
+// wire, which is what declaring the members buys (spec §4).
+//
+// Every expression this renders is FALLIBLE — it answers (value, error),
+// not a value — so a caller placing it inside the parameter map literal
+// would emit a file that does not compile. paramBindIsFallible is the
+// question, and writeParamPrelude is the answer: the binding is hoisted
+// into a statement above the run call and the map names the local.
+func unionBindExpr(f codegen.Param, access string) (string, bool) {
+	switch {
+	case codegen.IsDeclaredUnion(f.GoType, f.Width):
+		suffix := codegen.UnionHelperSuffix(f.Width)
+		if f.Nullable {
+			return fmt.Sprintf("encode%sPtr(%s)", suffix, access), true
+		}
+		return fmt.Sprintf("encode%s(%s)", suffix, access), true
+	case isUnionList(f.GoType, f.Width):
+		suffix := codegen.UnionHelperSuffix(f.Width.Elem())
+		if f.Nullable {
+			return fmt.Sprintf("encode%sListPtr(%s)", suffix, access), true
+		}
+		return fmt.Sprintf("encode%sList(%s)", suffix, access), true
+	}
+	return "", false
+}
+
+// paramBindIsFallible reports whether the expression paramBindExpr
+// rendered for this parameter answers (value, error) rather than a value.
+//
+// Exactly the bindings that route through a union's validation, directly
+// or through a record field: a closed union refuses a value outside its
+// declared member set at BIND time (spec §4), and every encode helper
+// standing above one inherits that refusal. Every other binding on this
+// backend is total — a widen is a Go conversion and a temporal or record
+// encode is a field copy — so a hoisted local and an ignored error would
+// be plumbing nothing can raise.
+//
+// codegen.ReachesUnion is asked of the WIDTH rather than the carrier text
+// for IsDeclaredUnion's reason: `any` is also ANY VALUE's carrier and
+// `[]any` also LIST<ANY>'s, and neither has a member set to validate
+// against.
+func paramBindIsFallible(f codegen.Param) bool {
+	return codegen.ReachesUnion(f.Width)
+}
+
+// writeParamPrelude emits the statements a fallible parameter binding
+// owes before the run call, and answers the expression each parameter
+// binds through: a hoisted local for the fallible ones, the ordinary
+// inline expression for the rest.
+//
+// Hoisted rather than inlined because the parameter map is a composite
+// LITERAL, which has no room for an error check — and the error is the
+// whole of what a closed union's bind-time validation buys. failReturn is
+// the site's own `return …` line, because an :exec method returns one
+// value where the row methods return two.
+//
+// The locals are positional, and so the generator's own: no identifier a
+// schema or a query text chose reaches a body's scope through one.
+func writeParamPrelude(b *strings.Builder, p codegen.Query, failReturn string) map[string]string {
+	var hoisted map[string]string
+	for i, f := range p.ParamFields {
+		if !paramBindIsFallible(f) {
+			continue
+		}
+		access := codegen.ParamArg
+		if len(p.ParamFields) > 1 {
+			access = codegen.ParamArg + "." + f.Field
+		}
+		local := fmt.Sprintf("param%d", i)
+		fmt.Fprintf(b, "\t%s, err := %s\n", local, paramBindExpr(f, access))
+		fmt.Fprintf(b, "\tif err != nil {\n\t\t%s\n\t}\n", failReturn)
+		if hoisted == nil {
+			hoisted = make(map[string]string, len(p.ParamFields))
+		}
+		hoisted[f.RawName] = local
+	}
+	return hoisted
 }
 
 // outrangesTheSignedCarrier reports whether a Go integer width holds
@@ -685,6 +791,10 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 		// neo4j.RecordValue, and GetRecordValue[any] does not compile.
 		// The same rule the entity path states as ridesADriverCarrier
 		// and the element path as carriesElemBare, one axis up.
+		if codegen.IsDeclaredUnion(f.GoType, f.Width) {
+			writeUnionColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+			return
+		}
 		if !ridesADriverCarrier(f.GoType) {
 			writeAnyColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 			return
@@ -792,6 +902,50 @@ func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.R
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(varName)
+	b.WriteString(assignSuffix)
+}
+
+// writeUnionColumnDecodeIndent emits the record.Get lane for a column
+// whose declared width is a DECLARED union. It takes the untyped `any`
+// the way writeAnyColumnDecodeIndent does — a union has no carrier to
+// force a neo4j.GetRecordValue[T] through — and then hands it to the
+// decode helper the member set earned, so what reaches the caller is the
+// member's declared width rather than the driver's.
+//
+// The not-found gate and the null gate are the two writeAnyColumnDecodeIndent
+// states in the same words, and they stay separate here for the same
+// reason: Get reports the key a projected column always has, whatever
+// lies under it. The null gate additionally keeps nil away from the
+// helper, which carries no member for it and would otherwise report a
+// declared NOT NULL as an unmatched member.
+func writeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+	suffix := codegen.UnionHelperSuffix(f.Width)
+	fmt.Fprintf(b, "%s%s, ok := %s.Get(%q)\n", indent, varName, recordExpr, f.ColumnName)
+	fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: key not found\", %q)\n%s}\n",
+		indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	if f.Nullable {
+		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, codegen.UnionCarrierText)
+		fmt.Fprintf(b, "%sif %s != nil {\n", indent, varName)
+		fmt.Fprintf(b, "%s\tv, err := decode%s(%s)\n", indent, suffix, varName)
+		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s\t}\n",
+			indent, indent, zero, p.MethodName, f.ColumnName, indent)
+		fmt.Fprintf(b, "%s\t%sPtr = &v\n%s}\n", indent, varName, indent)
+		b.WriteString(indent)
+		b.WriteString(assignPrefix[len(indent):])
+		b.WriteString(varName)
+		b.WriteString("Ptr")
+		b.WriteString(assignSuffix)
+		return
+	}
+	fmt.Fprintf(b, "%sif %s == nil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n",
+		indent, varName, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%s%sU, err := decode%s(%s)\n", indent, varName, suffix, varName)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n",
+		indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	b.WriteString(indent)
+	b.WriteString(assignPrefix[len(indent):])
+	b.WriteString(varName)
+	b.WriteString("U")
 	b.WriteString(assignSuffix)
 }
 
@@ -940,7 +1094,13 @@ func carriesElemBare(e *codegen.ListElem) bool {
 	case codegen.ColumnAny, codegen.ColumnScalarNull:
 		return true
 	case codegen.ColumnProperty:
-		return !ridesADriverCarrier(e.GoType)
+		// A DECLARED union rides no driver carrier either — its carrier
+		// text is the same `any` — and yet it is not bare: the member set
+		// is what makes the element answerable, so the body dispatches it
+		// through decode<Suffix> and names the index in that call's
+		// failure. Testing the carrier text alone would answer for both
+		// and leave the loop head declaring an index the union arm reads.
+		return !ridesADriverCarrier(e.GoType) && !codegen.IsDeclaredUnion(elemBase(e.GoType), e.Width)
 	default:
 		return false
 	}
@@ -959,6 +1119,29 @@ func writeNilElemArm(b *strings.Builder, accVar, iterVar, indent string) {
 	fmt.Fprintf(b, "%s\t%s = append(%s, nil)\n", indent, accVar, accVar)
 	fmt.Fprintf(b, "%s\tcontinue\n", indent)
 	fmt.Fprintf(b, "%s}\n", indent)
+}
+
+// writeUnionElemArm emits the element arm for a list whose elements are
+// a DECLARED union: the driver value goes through the decode helper the
+// member set earned, and what lands in the accumulator is the narrowed
+// member rather than the raw `any` the bare arm would append.
+//
+// No type assertion precedes the call, which is what separates this arm
+// from every other non-bare one: the helper's own type switch IS the
+// assertion, and it refuses a shape no member carries by name. Asserting
+// first would need a carrier to assert to, and a union has none beyond
+// `any`.
+func writeUnionElemArm(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, iterVar, zero, indent string) {
+	// The nil arm comes first for the reason the property arm's does: a
+	// NULL element arrives as a nil `any`, which no member carries, so
+	// the helper would refuse a value the schema declared legal.
+	if e.Nullable {
+		writeNilElemArm(b, accVar, iterVar, indent)
+	}
+	fmt.Fprintf(b, "%sv, err := decode%s(%s)\n", indent, codegen.UnionHelperSuffix(e.Width), iterVar)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n",
+		indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, addrIf(e.Nullable, "v"))
 }
 
 // addrIf prefixes an addressable local with `&` when the element it
@@ -984,6 +1167,10 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 	case codegen.ColumnProperty:
 		if carriesElemBare(e) {
 			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, iterVar)
+			return
+		}
+		if codegen.IsDeclaredUnion(elemBase(e.GoType), e.Width) {
+			writeUnionElemArm(b, p, f, e, accVar, iterVar, zero, indent)
 			return
 		}
 		// A nullable element's nil arm comes BEFORE the assertion, or the
