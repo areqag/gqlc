@@ -2314,9 +2314,10 @@ fmt-check: ensure-golangci
 # construction (bd gqlc-jq50, gqlc-s9bx). Naming ONE recipe moves that drift
 # here, next to the recipes it is about and in front of everyone who edits them.
 #
-# That seven is the count as PR #1643 measured it and the count has since moved:
-# live-smoke-age joins master's required list as an eighth (bd gqlc-ezwae), and
-# it is reachable here no more than live-smoke's container half is — the
+# That seven is the count as PR #1643 measured it, and the count has since
+# moved: live-smoke-age is master's eighth required context as of 2026-09-10
+# (bd gqlc-ezwae put the arm on pull requests, bd gqlc-f98s made it required),
+# and it is reachable here no more than live-smoke's container half is — the
 # NOT-covered summary below names it for that reason.
 #
 # EVERY ARM RUNS EVEN AFTER ONE FAILS, and the failures are reported together at
@@ -4238,11 +4239,13 @@ pr-ready n:
 # pr_ready.py's canned fixtures spell (bd gqlc-xf0v).
 #
 # pr-ready itself cannot drift — it enumerates the required set live on every
-# run — but the fixtures can: a protection change adding an eighth context
-# leaves --self-test green over a seven-context world, and the verdict rows
-# stop proving anything about the new member. This recipe holds the fixture
-# set to the live config so that staleness reddens here instead of passing
-# silently there.
+# run — but the fixtures can, and that is measured rather than argued: on
+# 2026-09-10 bd gqlc-f98s made live-smoke-age master's eighth required
+# context, and --self-test over the then-unedited seven-context fixtures
+# passed EVERY row. Nothing else in the tree was red, so the verdict rows had
+# quietly stopped proving anything about the new member and only this recipe
+# said so. It holds the fixture set to the live config precisely so that
+# staleness reddens here instead of passing silently there.
 #
 # Deliberately NOT wired into `just test`: it reaches the network, and test
 # runs offline the way gh-orphans stays out of it for the same reason. Run by
