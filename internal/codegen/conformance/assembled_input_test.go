@@ -618,6 +618,38 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 			msg: `invalid cardinality: query "Fetch" at position 0 has unrecognised cardinality 7`,
 		},
 		{
+			name: "cardinality-iter-zero-column-read",
+			why: "A :iter READ projecting no columns. The zero-column gate's other two disjuncts have fixtures — " +
+				"invalid/cardinality_shape_zero_column_write_one and _write_many — and the :iter disjunct is the one " +
+				"whose fixture was attempted and not found. A read query reaches the resolver's column list through " +
+				"RETURN, which projects at least one column; the one other zero-column read shape, a CALL with no " +
+				"YIELD, dies at ErrUnknownProcedure in this harness, which builds procsig.NewRegistry(nil). Four " +
+				"spellings were measured against the harness on 2026-09-11 — `RETURN *` bare, after a WITH and under " +
+				"a WHERE, and `CALL db.ping()` — and none of the four reached this branch. That is a measurement over " +
+				"four candidates on today's harness, not a claim that no text reaches it: a procedure registry " +
+				"arriving in the corpus is the change that would make a fixture the better witness. " +
+				"The case sits here rather than beside admitQueryAxes because the fence measures the corpus from " +
+				"outside internal/codegen: corpusPackages folds `internal/codegen_test` back onto `internal/codegen` " +
+				"and drops it, so a witness in that package contributes nothing to the profile " +
+				"TestReachableBranchesAreReached reads. It read green anyway, because the two write fixtures cover the " +
+				"same return, which is what kept the gap invisible (bd gqlc-e3ra).",
+			in: codegen.Input{
+				Schema: probeSchema(),
+				Queries: []codegen.NamedQuery{{
+					Name:        "Stream",
+					Cardinality: queryfile.CardinalityIter,
+					SourceFile:  "probe.cypher",
+					SourceText:  "CALL some.proc()",
+					// Spelled out although StatementRead is the zero value:
+					// a write here is answered by ErrIterOnWrite one gate
+					// earlier, so this field is what the row is about.
+					Validated: resolver.ValidatedQuery{Statement: resolver.StatementRead},
+				}},
+			},
+			is:  codegen.ErrCardinalityShapeMismatch,
+			msg: `cardinality-shape mismatch: query "Stream" at position 0 has cardinality :iter but the query is a zero-column read — annotate :exec or add a RETURN clause`,
+		},
+		{
 			name: "format-failure-query-name",
 			why: "A NamedQuery.Name that is not a Go identifier, which reaches gofmt as a method name with a space in it. " +
 				"input.go documents Name as \"must already be a valid exported Go identifier ... Enforced by the queryfile " +
