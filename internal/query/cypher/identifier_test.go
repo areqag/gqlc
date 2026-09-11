@@ -455,3 +455,235 @@ func TestARichProjectionKeepsItsSourceText(t *testing.T) {
 	require.Contains(t, got, `"variable":"n","property":"age"`,
 		"the ref beside it is decoded")
 }
+
+// --- delimited function names (bd gqlc-e3k0) ---
+//
+// gqlc-y25yo decoded 24 identifier read sites and deliberately left two:
+// shape.go's functionName and fullFunctionName. Both match against a catalogue
+// of BUILT-IN openCypher names rather than against anything the schema declares,
+// so the defect that bead fixed — two spellings of one name failing to unify
+// across the schema/query boundary — cannot arise here. The open question was
+// narrower and was a semantics question: does the delimited spelling of a
+// built-in DENOTE that built-in?
+//
+// openCypher's answer is yes, and it is stated rather than inferred. The
+// Cypher 9 reference (Procedures) carries a worked example headed "Call a
+// procedure using a quoted namespace and name", whose prose reads "This calls a
+// procedure db.labels" over the query CALL `db`.`labels` — neither segment is a
+// reserved word, so the escaping there is gratuitous and the example exists only
+// to say that the gratuitously-escaped spelling resolves to the built-in. Its
+// reserved-word appendix says the same thing from the other side: it names
+// Variables, FUNCTION NAMES and Parameters as the three contexts a reserved word
+// may not be used in, and that "by escaping any of the reserved words
+// (encapsulating in backticks `), they would be valid as identifiers in the
+// above contexts" — so a function name is an identifier position and the
+// backticks are the identifier's spelling, not a different name.
+//
+// Two servers were asked the same question directly and agree (both against the
+// image digests this repository already pins for its live batteries, 2026-09-11):
+//
+//   - neo4j 5.26.28 answers `toString`(1) with "1", `count`(n) with the
+//     aggregate, and `nosuchfunc`(1) with Unknown function 'nosuchfunc' —
+//     quoting the name back DECODED, which is the server saying the delimiters
+//     were gone before it consulted its catalogue.
+//   - apache/age 1.7.0 answers `date`() with `function date does not exist`,
+//     byte-identical to what it answers date() — same decode, different server,
+//     different catalogue.
+//
+// The limits, because the evidence does not reach as far as the claim: the
+// spec's worked example is for a PROCEDURE, and openCypher 9 contains no worked
+// example of a delimited FUNCTION name. The transfer rests on the two names
+// being one production — Cypher.g4 §oC_FunctionName and §oC_ProcedureName are
+// both `oC_Namespace oC_SymbolicName` — plus the appendix sentence above, plus
+// the two server measurements. The openCypher TCK settles nothing either way:
+// across its whole corpus in this tree exactly ONE delimited identifier appears
+// inside a query block (Call1.feature, `RETURN n.name AS ` + "`name`" + `), and it is
+// an alias. The falsifier for the whole section is a server that resolves the
+// delimited spelling to a DIFFERENT function than the undelimited one; neither
+// server tested does, and no third was tried.
+//
+// This is also the reading the tree already committed to for the sibling
+// production: call.go's procedureNameOf has decoded each segment of a procedure
+// name since gqlc-y25yo, which is exactly the spec example's case. Leaving the
+// function readers undecoded left the two halves of one grammar rule disagreeing.
+
+// TestADelimitedBuiltinNameDenotesTheBuiltin is this bead's falsifier.
+//
+// Each row asserts the CLASSIFICATION the delimited spelling earns, not merely
+// that it parsed: before this bead every one of them parsed, and every one
+// lowered to the undifferentiated FuncProjection/TypeUnknown fall-through, which
+// is a clean parse of the wrong query. Asserting the model JSON is what
+// separates "the name reached the catalogue" from "the name reached the parser".
+func TestADelimitedBuiltinNameDenotesTheBuiltin(t *testing.T) {
+	for name, tt := range map[string]struct {
+		src  string
+		want string
+	}{
+		// functionName → aggregateFunc. The aggregate kind is the whole
+		// answer: a FuncProjection here would drop the grouping semantics
+		// the resolver builds its GROUP BY from.
+		"an aggregate at RETURN position": {
+			"MATCH (n) RETURN `count`(n) AS c",
+			`"kind":"aggregate"`,
+		},
+		// The case-folding and the decode compose, in that order: the row
+		// would pass on a decode that forgot to lowercase only if the
+		// catalogue held the author's case, which it does not.
+		"an aggregate spelled in mixed case": {
+			"MATCH (n) RETURN `cOuNt`(n) AS c",
+			`"kind":"aggregate"`,
+		},
+		// fullFunctionName → temporalConstructorType, bare arm.
+		"a bare temporal constructor": {
+			"MATCH (n) RETURN `date`() AS d",
+			`"type":"date"`,
+		},
+		// fullFunctionName → temporalConstructorType, NAMESPACED arm. This
+		// row is the one that reaches the namespace loop rather than the
+		// trailing symbolic name, so a decode applied only to the bare name
+		// leaves it failing.
+		"a namespaced temporal constructor": {
+			"MATCH (n) RETURN `duration`.`between`(n.a, n.b) AS d",
+			`"type":"duration"`,
+		},
+		// Half-delimited, because an author who backticks one segment has
+		// no reason to backtick the other and the two segments are decoded
+		// by different lines of fullFunctionName.
+		"a namespaced constructor with only its namespace delimited": {
+			"MATCH (n) RETURN `duration`.between(n.a, n.b) AS d",
+			`"type":"duration"`,
+		},
+		"a namespaced constructor with only its bare name delimited": {
+			"MATCH (n) RETURN duration.`between`(n.a, n.b) AS d",
+			`"type":"duration"`,
+		},
+		// functionName → builtinScalarFuncType, the third catalogue these
+		// two readers feed. Its arg-shape guard is satisfied by the node
+		// binding, so a miss here is the NAME missing and nothing else.
+		"a builtin scalar function": {
+			"MATCH (n) RETURN `elementId`(n) AS e",
+			`"type":"string"`,
+		},
+		// typing.go's rich-expression walk, which reads both readers through
+		// its own call sites. Without this row the RETURN-position rows
+		// above could be satisfied by a change to classifyFunction alone,
+		// leaving the two positions disagreeing about one call — the drift
+		// those call sites' own comments say is impossible.
+		"an aggregate inside a rich expression": {
+			"MATCH (n) RETURN `count`(n) + 1 AS c",
+			`"containsAggregate":true`,
+		},
+		// The temporal half of that same walk. Parenthesised rather than
+		// bare so the call is typed by typeExpression's atom arm instead of
+		// by classifyFunction, which the bare rows above already cover: an
+		// ExprProjection carrying "date" is typing.go's answer, and a
+		// FuncProjection carrying it would be expr.go's.
+		"a temporal constructor inside a rich expression": {
+			"MATCH (n) RETURN (`date`()) AS d",
+			`"kind":"expr","refs":null,"type":"date"`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			q, err := parseQuery(t, tt.src)
+			require.NoError(t, err)
+			require.Contains(t, modelJSON(t, q), tt.want)
+		})
+	}
+}
+
+// TestADelimitedNameThatIsNotTheBuiltinIsNotTheBuiltin is the negative control
+// for the rows above: a delimited name that is NOT a built-in must keep the
+// fall-through every unrecognised function gets.
+//
+// The second call is not decoration. Without it this row is satisfied by a
+// change that makes EVERY delimited name miss the catalogue — which is precisely
+// the behaviour before this bead — so it would read as a guard while guarding
+// nothing. The pair is the claim: one delimited name that lands in the
+// catalogue and one that does not.
+//
+// What this pair does NOT distinguish is decoding from trimming, and the limit
+// is worth stating because the name below is the shape that looks like it would.
+// A decode resolves a doubled delimiter to one, so the token whose text is
+// co-backtick-backtick-unt denotes co`unt; a reader that merely dropped the
+// outer delimiters would call it co“unt. Both miss, and they miss for the same
+// reason: NO built-in name contains a backtick, so at these two readers — whose
+// only consumers are three closed catalogues of built-in names — trim and decode
+// are observationally equivalent and no test written here can separate them.
+// Measured, not assumed: replacing decodeEscaped's body with the bare slice
+// leaves both tests in this section green and kills gqlc-y25yo's
+// TestADelimitedIdentifierDecodesItsEscape (bd gqlc-e3k0, mutation row M5).
+//
+// So the reason these readers call symbolicName rather than trimming is not that
+// a test here demands it. It is that a name has ONE spelling rule in this
+// package and symbolicName is where it lives; the row that holds that rule
+// honest is the one over graph.LabelSet.Key, where a mis-decode becomes a wrong
+// identity rather than a wrong lookup.
+func TestADelimitedNameThatIsNotTheBuiltinIsNotTheBuiltin(t *testing.T) {
+	q, err := parseQuery(t, "MATCH (n) RETURN `co``unt`(n) AS c")
+	require.NoError(t, err)
+	require.NotContains(t, modelJSON(t, q), `"kind":"aggregate"`,
+		"a name whose decode is not in the catalogue must not match it")
+
+	// The positive control: a delimited name that DOES decode into the
+	// catalogue, so the row above cannot pass by every delimited name missing.
+	q2, err := parseQuery(t, "MATCH (n) RETURN `count`(n) AS c")
+	require.NoError(t, err)
+	require.Contains(t, modelJSON(t, q2), `"kind":"aggregate"`,
+		"positive control: a delimited name that decodes into the catalogue matches")
+}
+
+// TestADelimitedCountIsNotTheStarAggregate pins the ONE place openCypher says
+// the delimited spelling does not reach the built-in, and says why that is not
+// an exception to the section above.
+//
+// count(*) is not a function invocation at all. Cypher.g4 §oC_Atom carries it as
+// its own alternative, `( COUNT SP? '(' SP? '*' SP? ')' )`, binding the COUNT
+// KEYWORD token — and a delimited spelling lexes as EscapedSymbolicName, which
+// is a different token that alternative cannot match. So the query below is not
+// a count that fails to be recognised; it is an oC_FunctionInvocation whose
+// argument list holds '*', and '*' is not an oC_Expression. It does not parse.
+//
+// That is exactly what the reserved-word appendix predicts — escaping a reserved
+// word makes it an identifier, and COUNT's star form needs the keyword — and it
+// is what neo4j 5.26.28 answers, measured 2026-09-11: `count`(*) is refused with
+// "Invalid input '(': expected an expression", while count(*) beside it returns
+// a row.
+//
+// The row asserts a REFUSAL rather than a classification, because a decode
+// written one production too wide — at the token level rather than at
+// oC_SymbolicName — would make this parse and silently invent a count(*) the
+// grammar has no spelling for.
+func TestADelimitedCountIsNotTheStarAggregate(t *testing.T) {
+	_, err := parseQuery(t, "MATCH (n) RETURN `count`(*) AS c")
+	require.ErrorContains(t, err, "syntax error",
+		"`count`(*) is a syntax error, as it is on the server — not a call that "+
+			"reaches the catalogue and misses")
+
+	// The positive control beside it, so the row cannot be passing because
+	// the harness refuses everything.
+	q, err := parseQuery(t, "MATCH (n) RETURN count(*) AS c")
+	require.NoError(t, err)
+	require.Contains(t, modelJSON(t, q), `"kind":"aggregate"`)
+}
+
+// TestTheFunctionScansStillQuoteTheAuthorsText is the guard the bead asked for
+// by name, and it is stated here — beside the change — rather than left to the
+// consumer's own package.
+//
+// internal/codegen/age/dialect.go builds its four dialect gaps on
+// UnqualifiedFunctionCalls and QualifiedFunctionCalls, and what it does with
+// Call.Text is quote it back at the author, so that field must stay the bytes
+// that are in the file. Those two scans are an INDEPENDENT reading — functions.go
+// carries its own listeners and reaches oC_SymbolicName directly, never through
+// shape.go — so decoding the shape.go readers cannot reach them. This row is what
+// turns that from a claim about the call graph into a fact about the output, and
+// it is what would fail if a later change "tidied" the two readings into one.
+func TestTheFunctionScansStillQuoteTheAuthorsText(t *testing.T) {
+	calls := cypher.UnqualifiedFunctionCalls("RETURN `date`(), `co``unt`(n)")
+	require.Equal(t, []string{"`date`", "`co``unt`"}, callTexts(calls),
+		"the fence quotes the author back; a decoded name here would print bytes nobody typed")
+
+	qcalls := cypher.QualifiedFunctionCalls("RETURN `duration`.`between`(a, b)")
+	require.Len(t, qcalls, 1)
+	require.Equal(t, "`duration`.`between`", qcalls[0].Text)
+}
