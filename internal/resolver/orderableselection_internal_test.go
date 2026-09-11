@@ -92,6 +92,24 @@ func TestOrderableSelectionNamesEveryPropertyType(t *testing.T) {
 		// row is where the decision gets recorded.
 		graph.TypeDecimal: false,
 
+		// UUID is refused on DECIMAL's rationale exactly, and arrives here the
+		// same way nothing else in this table did: ruling-p9qgu predates the
+		// constant. gqlc-eg4b added graph.TypeUUID (#2842) after this file's
+		// own PR (#2838) had built its merge ref, so the census shipped without
+		// a verdict for it and master failed this test on the merge of two
+		// separately-green branches (bd gqlc-598a).
+		//
+		// false is also the answer on the merits rather than only on precedent.
+		// A UUID has a byte order, so orderableSelection COULD return true
+		// without lying about representability — but min/max over one selects
+		// by that byte order, and for a v4 UUID that is a random draw and for a
+		// v6/v7 one it is a timestamp the caller did not ask to sort by. Typing
+		// the column would be committing to whichever the schema happens to
+		// hold. Refusing degrades min(p.u) to any, which costs the column its
+		// type and cannot be wrong; this row is where a later bead that wants
+		// it records the decision.
+		graph.TypeUUID: false,
+
 		// The open/composite families. Ordering an ANY is engine-dependent at
 		// best — it holds whatever the writer wrote — and "can min/max over a
 		// list be typed" is a question the ruling explicitly does not open
