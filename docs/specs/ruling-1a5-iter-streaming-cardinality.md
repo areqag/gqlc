@@ -375,6 +375,25 @@ In this order, because each step's guard is the next step's screen.
    `iter_read_entity`, `iter_read_multicolumn`, `iter_with_skip_limit`;
    `invalid/iter_on_write`, `invalid/iter_zero_column_read`. The nested golden
    module is already `go 1.26.6`, above `iter`'s 1.23 floor.
+   [2026-09-11 (gqlc-c7uf): five of those six landed with gqlc-1a5 (PR #2874).
+   `invalid/iter_zero_column_read` did not, and no fixture of that name exists.
+   Four spellings were measured against that day's conformance harness and none
+   reached the zero-column branch: a read reaches the column list through
+   `RETURN`, which projects at least one column, and the one other zero-column
+   read shape — a `CALL` with no `YIELD` — dies at `ErrUnknownProcedure`,
+   because the harness builds `procsig.NewRegistry(nil)`. Four candidates on one
+   dated harness is not a demonstration that no text reaches the branch; read it
+   as no fixture found yet. The witness is assembled instead, and lives at
+   `TestAssembledInput/cardinality-iter-zero-column-read` in
+   `internal/codegen/conformance/assembled_input_test.go` — moved there from the
+   `codegen_test` package by gqlc-e3ra (PR #2890), because a witness in that
+   package is one the coverage reachability fence cannot read.
+   `codegen-sentinel-taxonomy.md` §2's `ErrCardinalityShapeMismatch` row carries
+   the live account — the four spellings by name, and the corpus change that
+   would make a fixture the better witness — and this line is not maintained
+   against it. The name stays here rather than being deleted because a plan that
+   records what it could not build is worth more than one that reads as though
+   it never tried.]
 7. **Live arms** (`test/data/codegen/live_test.go`), the two behaviours with
    zero coverage today: a mid-stream error on row *k*, and abandoning the range
    without draining. Plus gqlc-nx54's owed row — a forced `TxCommit` failure
@@ -395,7 +414,7 @@ one string in `returnTypeText` and it deletes the §5 import arm.
 | # | mutation | expected victim |
 |---|---|---|
 | 1 | drop the `:iter` + Write arm | `invalid/iter_on_write` stops refusing |
-| 2 | drop the `:iter` + zero-column arm | `invalid/iter_zero_column_read` |
+| 2 | drop the `:iter` + zero-column arm | `invalid/iter_zero_column_read` [2026-09-11 (gqlc-c7uf): no fixture of that name was built — step 6's note has the measurement. This row as written names a victim that cannot have run, so read it as not yet run rather than as run and KILLED. The victim available today is `TestAssembledInput/cardinality-iter-zero-column-read`.] |
 | 3 | drop the `iter` arm from `querierImports` | the new import guard test, **and** `codegen-fence` — if only the fence reds, the guard is not a guard |
 | 4 | delete the `stopped` test inside `emit` | the live re-entry row of §4; if it is not runnable, the row is vacuous and must be reported as such rather than dropped |
 | 5 | flip one `== CardinalityMany` to `!= CardinalityExec` | an `:iter` golden takes the `:many` body |
