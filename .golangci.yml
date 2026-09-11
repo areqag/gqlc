@@ -105,7 +105,7 @@ linters:
     # together they do not.
     #
     # A linter fires STRICTLY ABOVE its min-complexity, so these admit 24 and
-    # 35 and refuse 25 and 36. Both are the measured ceiling of the tree rather
+    # 34 and refuse 25 and 35. Both are the measured ceiling of the tree rather
     # than a comfort margin — nothing sits between either number and the worst
     # function under it. Raising one to land a change is the wrong direction:
     # extract a helper instead.
@@ -121,10 +121,22 @@ linters:
     #     30       0      10
     #     35       0       0
     #
-    # So gocyclo moved 25 -> 24 for free, and gocognit did not move at all:
-    # `internal/tools/ghorphan/main.go plan` scores exactly 35, so no gocognit
-    # rung is left that does not come with refactors. The next rung worth
-    # taking is 20/30, priced above at 8 + 10 functions.
+    # So gocyclo moved 25 -> 24 for free. gocognit's 35 was held by exactly one
+    # function — `internal/tools/ghorphan/main.go plan`, on the nose — so the
+    # rung below it cost one refactor rather than none: plan now delegates the
+    # per-orphan decision to planOrphan and the corpus index to
+    # indexCreationTimes, and scores 15, which let gocognit take 35 -> 34.
+    #
+    # WHAT BINDS EACH NUMBER NOW, which is the next author's headroom:
+    #
+    #   gocyclo 24  internal/tools/bdguard/main.go check
+    #               internal/resolver/resolve.go resolvedTypeEqual
+    #   gocognit 34 internal/tools/modscope/main.go run
+    #
+    # So neither number has another free notch: gocyclo needs two functions
+    # refactored to reach 23, gocognit one to reach 33. The next rung worth
+    # taking as a lane of its own is 20/30, priced in the table above at 8 + 10
+    # functions.
     #
     # THAT TABLE NEEDS `uniq-by-line: false` BELOW, which is why it is set
     # repo-wide. Both linters report at the function's DECLARATION line, so by
@@ -136,7 +148,7 @@ linters:
     gocyclo:
       min-complexity: 24
     gocognit:
-      min-complexity: 35
+      min-complexity: 34
     ireturn:
       # return structs, not interfaces — with two deliberate exceptions: the
       # marker-sealed sums of the query model (Binding, Endpoint, Projection,
