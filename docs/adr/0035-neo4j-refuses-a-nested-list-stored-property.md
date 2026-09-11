@@ -182,20 +182,40 @@ defect rather than guarding a decision. bd `gqlc-oxgyt` closed that: AGE's
 `nameBackend` now withholds its suffix on a width no backend carries, at any
 container depth, and the same sweep asserts the converse.
 
-It is asserted on the rows where it is well posed: a width every target refuses
-**citing one sentinel**. That restriction is not a hedge. Nine widths —
-`LIST<LIST<BYTES>>`, `RECORD<f BYTES>`, `LIST<RECORD<f BYTES>>` and the `TIME`
-and `TIMESTAMP` forms of each — are refused by every target under *two*
-sentinels, AGE's `ErrUnrepresentableWidth` and neo4j's `ErrUnstorableProperty`.
-Each of those two refusals is itself contingent, so each name is owed: neo4j
-carries `BYTES`, and AGE stores nested lists. Only their conjunction over one
-width is unanimous, which the converse as stated would misread. Those nine are
-logged and unasserted; closing the gap needs a per-refusal notion of
-contingency the composition root cannot compute from a width alone, which is bd
-`gqlc-r0yy`.
+It was first asserted only on the rows where a **width**-scoped converse is well
+posed: a width every target refuses *citing one sentinel*. That restriction was
+not a hedge, and it was also not enough. Nine widths — `LIST<LIST<BYTES>>`,
+`RECORD<f BYTES>`, `LIST<RECORD<f BYTES>>` and the `TIME` and `TIMESTAMP` forms
+of each — are refused by every target under *two* sentinels, AGE's
+`ErrUnrepresentableWidth` and neo4j's `ErrUnstorableProperty`. Each of those two
+refusals is itself contingent, so each name is owed: neo4j carries `BYTES`, and
+AGE stores nested lists. Only their conjunction over one width is unanimous, and
+a width-scoped converse can only call that a shared refusal or say nothing. It
+said nothing, so those nine were asserted by neither half.
 
-Measured 2026-09-10 over the three-key roster: 67 widths divide it, 40 are
-refused unanimously under one sentinel, and 9 unanimously under two.
+bd `gqlc-r0yy` closed that by moving the question off the width and onto the
+refusal, which is where this decision always put it: a refusal names its backend
+exactly when some other enrolled target answered *that declaration* with
+something other than *that refusal's* sentinel set. Sentinel agreement is the
+contraction of that rule rather than a companion to it — where every target
+refuses under one sentinel no target dissents, and the converse fires as before
+— so one assertion now covers every unanimously-refused width, the nine
+included.
+
+It needed nothing new from `codegen`. The claim a refusal makes is the sentinel
+it cites and `errors.Is` already exposes it; `codegen.RefusedWidth` answers a
+different question (which *width*) for a different caller (a backend deciding at
+emit time whether to name itself), and it is untouched.
+
+What replaces the width enumeration as a staleness guard is a reach guard. The
+sweep requires each of the rule's three evidence paths to be non-empty — a
+dissenter that accepted, a dissenter that refused for a different reason, and no
+dissenter at all — so a type table that empties one of them reddens rather than
+quietly narrowing what the rule certifies.
+
+Measured 2026-09-10 over the three-key roster and unchanged by the rework: 67
+widths divide it, 40 are refused unanimously under one sentinel, and 9
+unanimously under two.
 
 ## The emitter asymmetry, and one arm that is now unreachable
 
