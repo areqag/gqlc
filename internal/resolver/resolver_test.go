@@ -1515,6 +1515,80 @@ func (s *ResolverSuite) TestInvalid() {
 	}
 }
 
+// unknownPropertyClauseGroups names sets of invalid fixtures whose queries
+// reference the SAME unknown property on the SAME binding and differ only in
+// the mutating clause that references it. Each group's members must therefore
+// refuse with DIFFERENT text, and that is the one claim no entry in
+// invalidFixtureContains can make: a pin asserts what one fixture's message
+// says, and two fixtures rendering byte-identical text both satisfy their own
+// pins. Before bd gqlc-vplu every group below rendered one string across all
+// of its members — `unknown property: r.notAProp` for the first two, for
+// instance — so a refusal raised by DELETE and reported as a SET one was green
+// under the whole suite.
+//
+// This test and the per-fixture pins hold opposite halves. The pins say WHICH
+// clause each fixture names, so swapping two sites' clause constants reddens
+// them; this says the clauses are SEPARATED AT ALL, so collapsing two sites
+// onto one clause word — which leaves every message a valid substring match
+// for nothing but its own twin — reddens here. Neither catches the other's
+// mutation.
+var unknownPropertyClauseGroups = map[string][]string{
+	"single-type edge binding, r.notAProp": {
+		"set_property_unknown_on_single_type_edge.cypher",
+		"remove_property_unknown_on_single_type_edge.cypher",
+		"delete_edge_property_unknown.cypher",
+	},
+	"multi-type edge binding, r.notAProp": {
+		"set_property_unknown_on_multi_type_edge.cypher",
+		"remove_property_unknown_on_multi_type_edge.cypher",
+		"delete_property_unknown_on_multi_type_edge.cypher",
+	},
+	"node binding, n.notAProp": {
+		"set_property_unknown_property.cypher",
+		"remove_property_unknown.cypher",
+		"delete_bare_property_unknown.cypher",
+	},
+	"MERGE sub-clause, a.notAProp": {
+		"merge_on_create_unknown_property.cypher",
+		"merge_on_match_unknown_property.cypher",
+	},
+}
+
+// TestUnknownPropertyNamesTheClauseAtFault resolves each group above and holds
+// that its members' refusals are pairwise distinct. It reads the fixtures off
+// disk rather than embedding the queries, so a fixture edited out from under
+// the group is a failure here rather than a claim about text nobody ships.
+func (s *ResolverSuite) TestUnknownPropertyNamesTheClauseAtFault() {
+	mapping := s.loadMapping("invalid")
+
+	for group, names := range unknownPropertyClauseGroups {
+		s.Run(group, func() {
+			s.Require().Greater(len(names), 1, "a group of one separates nothing")
+			seen := make(map[string]string, len(names))
+			for _, name := range names {
+				schemaName, ok := mapping[name]
+				s.Require().True(ok, "unmapped invalid fixture %q", name)
+				sch := s.loadSchema("invalid", schemaName)
+				q := s.loadQuery(filepath.Join(fixtureDir, "invalid", name))
+
+				_, err := New(sch, WithRegistry(regR7)).Resolve(q)
+				s.Require().Error(err)
+				s.Require().ErrorIs(err, ErrUnknownProperty, name)
+
+				msg := err.Error()
+				if twin, dup := seen[msg]; dup {
+					s.Failf("two clauses, one refusal",
+						"%s and %s differ only in the clause referencing the unknown property, "+
+							"and both refuse with %q: which clause was at fault is absent from the message",
+						twin, name, msg)
+					continue
+				}
+				seen[msg] = name
+			}
+		})
+	}
+}
+
 // TestEveryInvalidFixtureDeclaresItsMessagePin holds that every invalid
 // fixture says whether its refusal message is pinned, in exactly one of the
 // two maps. TestInvalid's message check is conditional on the pin being
