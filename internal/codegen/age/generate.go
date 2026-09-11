@@ -20,7 +20,7 @@ import (
 // as that test's own panic, naming the site.
 type codegenBug string
 
-// testRenderFault, when non-nil, panics in place of the render phase. It
+// renderFaultHook, when non-nil, panics in place of the render phase. It
 // is nil in production and set only by this package's own tests.
 //
 // It exists because the fault it stands in for is not reachable from any
@@ -30,7 +30,7 @@ type codegenBug string
 // would have no standing witness, so deleting it would redden nothing —
 // the inert-guard failure this seam exists to end (bd gqlc-h0vqx). The
 // hook is what keeps the guard falsifiable in both directions.
-var testRenderFault func()
+var renderFaultHook func()
 
 // generate is the pure emission kernel. Determinism per §2.3: the output
 // slice is sorted by Path before return. First-error short-circuit:
@@ -150,8 +150,8 @@ func generate(in codegen.Input, packageName string) (files []codegen.File, err e
 	// exists for. A hook sited before the slice was built would find
 	// files already nil and could not tell that assignment from a missing
 	// one.
-	if testRenderFault != nil {
-		testRenderFault()
+	if renderFaultHook != nil {
+		renderFaultHook()
 	}
 	// The neutral temporal carriers, emitted byte-identically on every
 	// backend and only when the prepared surface references one (ADR

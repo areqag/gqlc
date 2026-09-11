@@ -23,10 +23,16 @@ type (
 	WiredEntity  = wiredEntity
 )
 
-// TestRenderFault is the ADDRESS of generate's render-phase fault hook, not
-// its value: a test sets *TestRenderFault and restores it. A plain `var X =
+// RenderFaultHook is the ADDRESS of generate's render-phase fault hook, not
+// its value: a test sets *RenderFaultHook and restores it. A plain `var X =
 // x` alias would carry a copy, and setting the copy would arm nothing.
-var TestRenderFault = &testRenderFault
+//
+// Neither this nor the variable behind it is spelled with a Test prefix,
+// though the hook exists only for tests. internal/tools/testcite reads a
+// capitalised Test-prefixed word in a comment as a citation of a test
+// function and fails when no such function is declared, so the natural
+// name for this bridge reddens a gate three packages away.
+var RenderFaultHook = &renderFaultHook
 
 var (
 	CarriesZone                      = carriesZone

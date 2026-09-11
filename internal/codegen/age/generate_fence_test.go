@@ -53,9 +53,9 @@ func faultProbeInput() codegen.Input {
 // restores it, on the panicking path too.
 func withRenderFault(t *testing.T, fault func()) {
 	t.Helper()
-	prev := *age.TestRenderFault
-	*age.TestRenderFault = fault
-	t.Cleanup(func() { *age.TestRenderFault = prev })
+	prev := *age.RenderFaultHook
+	*age.RenderFaultHook = fault
+	t.Cleanup(func() { *age.RenderFaultHook = prev })
 }
 
 // TestGenerateConvertsACodegenBugPanicIntoItsOwnRefusal is the standing
@@ -305,7 +305,7 @@ func TestAFencedFaultIsNamedOnStderr(t *testing.T) {
 // two rows above: it asserts the hook is inert when unarmed, so a pass there
 // is the recover doing the work and not the probe input failing on its own.
 func TestGenerateWithNoRenderFaultIsUnaffected(t *testing.T) {
-	require.Nil(t, *age.TestRenderFault, "the fault hook must be nil unless a row arms it")
+	require.Nil(t, *age.RenderFaultHook, "the fault hook must be nil unless a row arms it")
 
 	files, err := age.New().Generate(faultProbeInput())
 
