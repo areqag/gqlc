@@ -315,6 +315,14 @@ func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
 // backend and must not. TestAContingentRefusalNamesItsBackend
 // (internal/cli/backends) holds that half, over the enrolled roster, and
 // reddens both ways.
+//
+// It follows, and is stated because it was measured rather than reasoned
+// to: the rows below range over the very list they are about, so a width
+// LEAVING the list takes its own row with it and this test stays green.
+// Deleting graph.TypeDecimal from oversizedNumerics SURVIVED here and was
+// KILLED at the composition root, as was adding graph.TypeBytes to it.
+// That is the intended division — membership is a claim about the roster
+// — and it is why this test is the cheap half and not the guard.
 func TestAUniversallyUncarriedWidthIsRefusedWithoutTheBackendName(t *testing.T) {
 	require.NotEmpty(t, age.OversizedNumerics,
 		"the universal width list is empty, so every row below ranges over nothing")

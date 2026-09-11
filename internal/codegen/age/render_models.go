@@ -1573,6 +1573,26 @@ func agtypeIsNull(raw []byte) bool {
 }
 
 // writePropertyDecoders emits agtypeValue and the property lookups.
+//
+// Both lookups below key on ABSENCE and neither recognises an explicit
+// null, unlike agtypeRecordField, which reads one as absence. Since bd
+// gqlc-3ohpo that is measured rather than assumed: against the
+// digest-pinned apache/age image (AGE 1.7.0, PostgreSQL 18.1),
+// TestAGEDropsANullPropertyAndKeepsANullRecordField in test/data/codegen
+// found no route by which a vertex property can hold an explicit null.
+// CREATE with a null member, SET n.x = null, a null-valued bound scalar
+// parameter and a null-producing expression all drop the key, and the
+// two routes that would hand AGE a caller-built map for a property slot
+// are refused by the server — CREATE (z:L $props) and SET n += $props.
+//
+// So the emitted claim below, that an absent key is how a null arrives,
+// is the whole of the wire rather than a narrow reading of it, and
+// widening these to accept a null token would add an arm no input can
+// reach. The asymmetry with agtypeRecordField is reachability, not two
+// readings: a record is stored as one map value, and a map arriving as a
+// PARAMETER keeps its explicit nulls, because what drops a null member
+// is Cypher's map literal constructor rather than the storage format.
+// See writeRecordFieldHelper for that side.
 func writePropertyDecoders(b *strings.Builder, h helpers) {
 	if h.value {
 		b.WriteString(`
