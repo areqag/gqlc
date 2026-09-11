@@ -68,13 +68,14 @@ func symbolicName(sn gen.IOC_SymbolicNameContext) string {
 // them can have odd length. There is no third case for a left-to-right
 // replacement to mis-split.
 //
-// The guard is for a token no lexer produces — the production's smallest match
-// is the two-character empty name, so a shorter text cannot arrive — and it
-// returns the bytes rather than slicing out of range.
+// The slice is unguarded because its precondition is the caller's, not a fact
+// about the argument: both callers reach here only for a context whose
+// EscapedSymbolicName is non-nil, and that production's smallest match is the
+// two-character empty name. A length guard was written here first and removed
+// after a mutation row deleting it survived the whole suite — nothing can reach
+// it, so it was mechanism that read as a check while checking nothing (bd
+// gqlc-y25yo).
 func decodeEscaped(text string) string {
-	if len(text) < 2 {
-		return text
-	}
 	return strings.ReplaceAll(text[1:len(text)-1], "``", "`")
 }
 
