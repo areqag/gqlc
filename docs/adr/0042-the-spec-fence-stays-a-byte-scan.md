@@ -43,9 +43,9 @@ to a space:
 | in rendered prose text | **0** | **0** |
 
 The two occurrences past the raw count are code spans reflowed across a source
-line break — one in ADR 0029 §223, one in C1 §872 — which are an anchor only
-after the normalisation ADR 0029 decision 8 compiles into `anchorPattern`. That
-decision turns out to be load-bearing over two live sites rather than
+line break — one in ADR 0029's decision 10, one in C1 §5.3 — which are an anchor
+only after the normalisation ADR 0029 decision 8 compiles into `anchorPattern`.
+That decision turns out to be load-bearing over two live sites rather than
 defensive.
 
 **Where the gaps are occupied.** Each bead names a construct the byte scan reads
