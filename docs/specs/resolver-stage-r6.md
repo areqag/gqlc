@@ -291,9 +291,10 @@ rules follow:
   cypher` (§6.4 invalid).
 
 The parser does not attribute Effects to any Part-index axis — every
-Effect lives directly on `Part.Effects` (`internal/query/query.go:
-116-122`). R6 has no Use→Part attribution problem for Effects because
-the parser did not create one.
+Effect lives directly on `Part.Effects` (the `Effects []Effect` field
+of `type Part struct` in `internal/query/query.go`, whose doc comment
+records the walk-order contract). R6 has no Use→Part attribution
+problem for Effects because the parser did not create one.
 
 ### 2.5 What R6 does NOT admit
 
@@ -639,9 +640,10 @@ Algorithm:
 1. For each variable name `v` in `e.Variables()`:
    - If `v == ""` (anonymous edge — Stage 12 §1.3; the empty
      string enters `CreateEffect.Variables` from an anonymous
-     edge binding at `internal/query/cypher/listener.go:349-350`
-     ("A named binding contributes its variable; an anonymous edge
-     contributes an empty string"). An anonymous node contributes
+     edge binding in `func (l *listener) EnterOC_Create` in
+     `internal/query/cypher/listener.go`, whose doc comment reads "A
+     named binding contributes its variable; an anonymous edge
+     contributes an empty string". An anonymous node contributes
      no binding at all, so does not fire this arm.): skip.
      Anonymous bindings are legitimately anonymous; nothing to
      verify by name.
@@ -736,8 +738,10 @@ of `validateMergeEffect` via `validateSetPropertyEffect` — fixture
 
 ### 4.3 SET-family and REMOVE-family validation
 
-Four private validators cover the five SET/REMOVE variants. Each
-resolves the target variable against `nodeTypes` / `edgeTypes` /
+Five private validators cover the five SET/REMOVE variants — one
+each, §4.3.1 through §4.3.5, matching the five `func validate…Effect`
+declarations for those variants in `internal/resolver/resolve.go`.
+Each resolves the target variable against `nodeTypes` / `edgeTypes` /
 `edgeCands` / `edgeBindings`, and — for property targets — looks up
 the property on the resolved schema entity.
 
@@ -750,10 +754,12 @@ map[string]query.EdgeBinding, carriedResolvedTypes map[string]
 ResolvedType, s schema.Schema) error`.
 
 Algorithm — resolve `e.Target()` (a `Ref{Variable, Property}` — both
-non-empty; the constructor `query.go:1815-1818` enforces non-empty
-`Variable`, and non-empty `Property` is grammar-guaranteed by the
-parser's `propertyExpressionRef` at `internal/query/cypher/shape.go:
-456-469` (empty lookup rejected at build time). §8 pins both.):
+non-empty; `func NewSetPropertyEffect` in `internal/query/query.go`
+enforces non-empty `Variable`, and non-empty `Property` is
+grammar-guaranteed by the parser's `func propertyExpressionRef` in
+`internal/query/cypher/shape.go` (empty lookup rejected at build
+time). §8 pins both, and records that the two halves rest on
+different guards.):
 
 1. Let `v := e.Target().Variable`, `p := e.Target().Property`.
 2. If `v` is in `nodeTypes`:
@@ -864,8 +870,9 @@ EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings
 map[string]query.EdgeBinding, carriedResolvedTypes map[string]
 ResolvedType, s schema.Schema) error`.
 
-Algorithm — resolve `e.TargetVariable()` (a non-empty string per
-parser smart constructor `query.go:1872-1875`):
+Algorithm — resolve `e.TargetVariable()` (a non-empty string per the
+smart constructor `func NewSetEntityEffect` in
+`internal/query/query.go`):
 
 1. Let `v := e.TargetVariable()`.
 2. If `v` is in `nodeTypes` OR `edgeTypes` OR `edgeCands`, the
@@ -953,8 +960,10 @@ Failure edge:
 
 Signature identical to `validateSetPropertyEffect`. Algorithm
 identical: `e.Target()` (a `Ref{Variable, Property}` — both non-
-empty per parser smart constructor `query.go:1963-1969`) must
-resolve; the property must exist on the target's schema type.
+empty per the smart constructor `func NewRemovePropertyEffect` in
+`internal/query/query.go`, which unlike `NewSetPropertyEffect`
+rejects an empty `Property` itself rather than leaning on the parser)
+must resolve; the property must exist on the target's schema type.
 
 **No value-side check** — `RemovePropertyEffect` carries no value.
 The variant is the removal analogue of `SetPropertyEffect`; the
@@ -1111,7 +1120,8 @@ R6 replaces both arms:
 - **`ExprInDeleteTarget`**: the Use records `ExprUse{TypeUnknown,
   ExprInDeleteTarget}` (Stage 12 §1.4 — the parser always uses
   `TypeUnknown` for the enclosing type of a DELETE-target ExprUse;
-  see `internal/query/cypher/listener.go:499`). Route through
+  see the sole `query.ExprInDeleteTarget` call site in
+  `internal/query/cypher/listener.go`). Route through
   `resolveType(uu.EnclosingType())` → `ResolvedUnknown{}`. Same
   code path as ExprInSetValue with `TypeUnknown` enclosing.
 
@@ -2031,41 +2041,97 @@ unchanged, as the R5 spec §7.1 recorded.
 ## 8. Ground-truth cross-check
 
 Every factual claim in this spec is verifiable against source; the
-citations below name the file:line the claim rests on.
+citations below name the construct or the file:line the claim rests
+on.
+
+**Citation convention, and its limit.** The query-model rows below
+(everything citing `internal/query/query.go`, and the parser-emission
+rows that populate the model) name the Go construct — `type
+CreateEffect`, `func (e MergeEffect) OnMatch` — rather than a line
+range, because a line range into a 2700-line file drifts on any
+insertion above it and drifts silently: the reader lands on unrelated
+code and has no way to tell a moved target from a deleted one. That is
+not a general property of this section. The resolver, schema, spec and
+ADR rows further down still carry line ranges and were NOT re-derived
+by the 2026-09-11 pass (gqlc-ily6); treat their line numbers as
+first-commit values and grep for the named symbol instead. Where that
+pass found a named subject that no longer exists in the tree, the row
+carries a dated bracketed note saying so rather than being deleted.
 
 - **`Query.Branches`, `Query.Combinators`, `Query.Parameters`,
-  `Query.StatementKind`** — `internal/query/query.go:26-52` (Query
-  struct). §2.4 iterates `Branches`.
-- **`Branch.Parts`** — `internal/query/query.go:59-63`.
+  `Query.StatementKind`** — `type Query struct` in
+  `internal/query/query.go`. §2.4 iterates `Branches`.
+- **`Branch.Parts`** — `type Branch struct` in
+  `internal/query/query.go`.
 - **`Part.Bindings`, `Part.Returns`, `Part.ReturnsAll`,
-  `Part.Distinct`, `Part.Effects`** —
-  `internal/query/query.go:81-123`. §4.1 reads `Effects`
-  (line 116-122 pins the field).
-- **`NewPart` invariant** — `internal/query/query.go:150-159`;
-  admits `effects` as one of the three ways a Part can be
-  non-empty.
-- **`Effect` sealed sum + variants** —
-  `internal/query/query.go:1631-1660` (Effect interface with
-  `isEffect()` marker), plus:
-  - `CreateEffect` — `internal/query/query.go:1663-1704`.
-  - `DeleteEffect` — `internal/query/query.go:1706-1765`.
-  - `SetOp` — `internal/query/query.go:1767-1795`.
-  - `SetPropertyEffect` — `internal/query/query.go:1797-1856`.
-  - `SetEntityEffect` — `internal/query/query.go:1858-1912`.
-  - `SetLabelsEffect` — `internal/query/query.go:1914-1952`.
-  - `RemovePropertyEffect` —
-    `internal/query/query.go:1954-1986`.
-  - `RemoveLabelsEffect` — `internal/query/query.go:1988-2022`.
-  - `MergeEffect` — `internal/query/query.go:2024-2116`.
-- **`SetEffect` sealed sub-sum** — `internal/query/query.go:
-  1651-1660` (interface with `isEffect()` + `isSetEffect()` markers).
-  `SetPropertyEffect.isSetEffect()` at `:1842`;
-  `SetEntityEffect.isSetEffect()` at `:1900`;
-  `SetLabelsEffect.isSetEffect()` at `:1942`.
+  `Part.Distinct`, `Part.Effects`** — `type Part struct` in
+  `internal/query/query.go`. §4.1 reads `Effects` (the
+  `Effects []Effect` field pins it).
+- **`NewPart` invariant** — `func NewPart` in
+  `internal/query/query.go`; admits `effects` as one of the three
+  ways a Part can be non-empty.
+- **`Effect` sealed sum + variants** — `type Effect interface` in
+  `internal/query/query.go`, whose sole member is the unexported
+  `isEffect()` marker. Eight types declare it, and they are the whole
+  admitted set (§4.1.1 dispatches over the same eight):
+  - `type CreateEffect struct` — `func (CreateEffect) isEffect()`.
+  - `type DeleteEffect struct` — `func (DeleteEffect) isEffect()`.
+  - `type SetPropertyEffect struct` —
+    `func (SetPropertyEffect) isEffect()`.
+  - `type SetEntityEffect struct` —
+    `func (SetEntityEffect) isEffect()`.
+  - `type SetLabelsEffect struct` —
+    `func (SetLabelsEffect) isEffect()`.
+  - `type RemovePropertyEffect struct` —
+    `func (RemovePropertyEffect) isEffect()`.
+  - `type RemoveLabelsEffect struct` —
+    `func (RemoveLabelsEffect) isEffect()`.
+  - `type MergeEffect struct` — `func (MergeEffect) isEffect()`.
+
+  `grep -c 'isEffect()' internal/query/query.go` reads 9: the
+  interface's own declaration plus those eight. The marker is
+  unexported, so only a type declared in package `query` can satisfy
+  `Effect` by declaring it — but "satisfy" is wider than "declare", so
+  this is not a closed sum: an out-of-package `*SetPropertyEffect` or
+  an embedding wrapper satisfies `Effect` and matches no
+  `case SetPropertyEffect:` arm. `TestQuerySumsAreNotClosed` in
+  `internal/query/sealedsum_test.go` measures that, and it is why
+  the per-Effect dispatcher keeps a default arm returning
+  `ErrOutOfR0Scope: unknown Effect variant`. That dispatcher is
+  `func validateEffect` (singular, one Effect per call) in
+  `internal/resolver/resolve.go`; §2.2 / §4.1 design it as
+  `validateEffects` taking the whole slice, and no symbol of that
+  plural spelling exists in the tree.
+- **`SetOp`** — `type SetOp int` in `internal/query/query.go`. Listed
+  here because §4.3.2 reads it, NOT because it is an Effect variant:
+  it is the `=` / `+=` discriminator carried by
+  `SetEntityEffect.Op()`, declares no `isEffect()`, and is absent
+  from the eight above. [2026-09-11 (gqlc-ily6): before this pass it
+  sat inside the variant list above, between `DeleteEffect` and
+  `SetPropertyEffect`, which made the list read nine long.]
+- **`SetEffect` sealed sub-sum** — `type SetEffect interface` in
+  `internal/query/query.go` (embeds `Effect`, adds the unexported
+  `isSetEffect()` marker). Three types declare it:
+  `func (SetPropertyEffect) isSetEffect()`,
+  `func (SetEntityEffect) isSetEffect()`,
+  `func (SetLabelsEffect) isSetEffect()`. Eight `isEffect()`
+  declarers minus those three is the five the sub-sum excludes —
+  `CreateEffect`, `DeleteEffect`, `RemovePropertyEffect`,
+  `RemoveLabelsEffect`, `MergeEffect`. The same "satisfy is wider
+  than declare" limit applies: `TestQuerySumsAreNotClosed/SetEffect`
+  measures it.
 - **`MergeEffect.OnMatch()` / `MergeEffect.OnCreate()` return
-  `[]SetEffect`** — `internal/query/query.go:2093-2099` (the
-  accessors return `[]SetEffect`, not `[]Effect`). Type-level
-  guarantee only Set-family effects can appear inside.
+  `[]SetEffect`** — `func (e MergeEffect) OnMatch` and
+  `func (e MergeEffect) OnCreate` in `internal/query/query.go`; both
+  return `[]SetEffect`, not `[]Effect`. What enforces "only
+  Set-family effects nest inside an ON action slot" is therefore the
+  compiler, on those two return types: the five non-`SetEffect`
+  variants named above do not declare `isSetEffect()`, so no value of
+  those five concrete types can be placed in either slot. The limit is
+  the one above — a wrapper type that embeds a Set-family variant
+  satisfies `SetEffect` too, so this excludes the five named types,
+  not everything outside the three. The doc comment on
+  `type SetEffect interface` states the same bound.
 - **The R5 kernel's effect-admission gate** —
   `internal/resolver/resolve.go:153-155`:
   ```
@@ -2073,7 +2139,12 @@ citations below name the file:line the claim rests on.
       return nil, branchState{}, nil, fmt.Errorf("%w: write clause", ErrOutOfR0Scope)
   }
   ```
-  §4.1 DROPS this gate at R6.
+  §4.1 DROPS this gate at R6. [2026-09-11 (gqlc-ily6): confirmed
+  dropped — no `ErrOutOfR0Scope: write clause` fail site remains in
+  `internal/resolver/`. This row and the next quote pre-R6 code on
+  purpose; grepping for them in the current tree correctly finds
+  nothing, and that is the R6 change having landed, not a broken
+  citation.]
 - **The R5 `ExprInSetValue` / `ExprInDeleteTarget` reject arms** —
   `internal/resolver/resolve.go:709-712`:
   ```
@@ -2084,30 +2155,47 @@ citations below name the file:line the claim rests on.
   ```
   §4.5 REPLACES these with a `resolveType(uu.EnclosingType())`
   pass-through.
-- **`ExprPosition` enum** —
-  `internal/query/query.go:1345-1391`. Values `ExprInProjection`
-  (`iota`), `ExprInPredicate`, `ExprInSetValue`,
-  `ExprInDeleteTarget`.
+- **`ExprPosition` enum** — `type ExprPosition int` in
+  `internal/query/query.go`. Values `ExprInProjection` (`iota`),
+  `ExprInPredicate`, `ExprInSetValue`, `ExprInDeleteTarget`.
 - **`ExprUse` struct with `EnclosingType()` accessor** —
-  `internal/query/query.go:1394-1421`. §4.5 reads.
+  `type ExprUse struct` and `func (u ExprUse) EnclosingType` in
+  `internal/query/query.go`. §4.5 reads.
 - **Parser emits `ExprUse{TypeUnknown, ExprInDeleteTarget}` for
-  DELETE-target params** — `internal/query/cypher/listener.go:
-  499` (`l.addParameterUse(name, p, query.NewExprUse(query.
-  TypeUnknown{}, query.ExprInDeleteTarget))`).
+  DELETE-target params** — `internal/query/cypher/listener.go`, the
+  sole `query.ExprInDeleteTarget` call site outside comments:
+  `l.addParameterUse(name, p, query.NewExprUse(query.TypeUnknown{},
+  query.ExprInDeleteTarget))`.
 - **Parser emits `ExprUse{valueType, ExprInSetValue}` for SET-
-  value params** — `internal/query/cypher/expr.go:677` and `:707`.
+  value params** — `internal/query/cypher/expr.go`, in
+  `func (l *listener) collectSetItem`: two
+  `query.NewExprUse(valueType, query.ExprInSetValue)` call sites, one
+  in the arm that builds a `SetPropertyEffect` and one in the arm
+  that builds a `SetEntityEffect`. The `SetLabelsEffect` arm has no
+  value expression and so mines no parameters.
 - **Parser test pin: `MATCH (n) DELETE nodes($p)` emits
   `DeleteEffect(nil, nil, false)` with `$p → ExprUse{TypeUnknown,
-  ExprInDeleteTarget}`** —
-  `internal/query/cypher/parser_test.go:1926-1936`.
+  ExprInDeleteTarget}`** — the `"delete rich expression with param"`
+  entry of the `mustParse` table in
+  `internal/query/cypher/parser_test.go`.
 - **Parser test pin: `SET n.age = $newAge` emits
   `SetPropertyEffect(Ref{n, age}, TypeUnknown, nil)` with `$newAge
-  → ExprUse{TypeUnknown, ExprInSetValue}`** —
-  `internal/query/cypher/parser_test.go:1897-1910`.
-- **Parser test pin: `MERGE (a:Person) ON CREATE SET b.created =
-  1 …` emits `MergeEffect{Variables, nil OnMatch, [{SetProperty
-  Effect}] OnCreate}`** —
-  `internal/query/cypher/parser_test.go:2018-2023`.
+  → ExprUse{TypeUnknown, ExprInSetValue}`** — the
+  `"set property with bare param"` entry of the `mustParse` table in
+  `internal/query/cypher/parser_test.go`.
+- **Parser test pin: a `MERGE … ON CREATE SET` emits
+  `MergeEffect{Variables, nil OnMatch, [{SetPropertyEffect}]
+  OnCreate}`** — the `"authored merge branch-leak kill probe"` entry
+  of the `mustParse` table in
+  `internal/query/cypher/parser_test.go` (`MERGE (n) ON CREATE SET
+  n.a = 1 / SET n.b = 2`). [2026-09-11 (gqlc-ily6): this row
+  originally named the source `MERGE (a:Person) ON CREATE SET
+  b.created = 1 …`; that table entry no longer exists — PR #308
+  (gqlc-ls8.5) migrated the authored shape pins into the golden
+  corpus, where the MERGE shapes are now `testdata/golden/Merge*`.
+  The entry named above is a different, still-present pin that
+  asserts the same `nil OnMatch` / one-`SetPropertyEffect` OnCreate
+  shape the row was cited for.]
 - **CREATE reuses `collectPattern` — CREATE bindings enter
   `Part.Bindings`** — `internal/query/cypher/listener.go` (search
   for `EnterOC_Create`); Stage 12 §1.3.
@@ -2120,30 +2208,49 @@ citations below name the file:line the claim rests on.
   `InvalidClauseComposition` at runtime; parser accepts** —
   Stage 12 §1.1 lines 65-68.
 - **`SetPropertyEffect.Target()` returns a `Ref{Variable, Property}`
-  with both non-empty** — `internal/query/query.go:1815-1818`
-  (constructor rejects empty target variable) plus Stage 12 §1.5
-  (parser only emits with non-empty property; multi-level LHS
-  rejects at parse with `ErrNestedPropertyTarget`).
+  with both non-empty** — two different guards, not one:
+  `func NewSetPropertyEffect` in `internal/query/query.go` rejects an
+  empty `target.Variable` and nothing else, so `Property` is NOT
+  enforced there; non-empty `Property` rests on Stage 12 §1.5 (the
+  parser only emits with a non-empty property, and a multi-level LHS
+  rejects at parse with `ErrNestedPropertyTarget`). A
+  `SetPropertyEffect` built directly through the constructor with an
+  empty `Property` is representable.
 - **`SetEntityEffect.TargetVariable()` non-empty** —
-  `internal/query/query.go:1872-1875`.
+  `func NewSetEntityEffect` in `internal/query/query.go` rejects an
+  empty `targetVar`.
 - **`SetLabelsEffect.Labels()` non-empty** —
-  `internal/query/query.go:1925-1932`.
+  `func NewSetLabelsEffect` in `internal/query/query.go` rejects both
+  an empty `targetVar` and a zero-length `labels`.
 - **`DeleteEffect.Targets()` are bare-shape Refs;
   `DeleteEffect.Refs()` are rich-shape refs** — Stage 12 §1.4
   field contract lines 213-224.
 - **`DeleteEffect.Detach()` is a runtime-only distinction** —
   Stage 12 §1.4 lines 226-231.
 - **`RemovePropertyEffect.Target()` returns a `Ref{Variable,
-  Property}` with both non-empty** —
-  `internal/query/query.go:1963-1969` (constructor rejects empty).
+  Property}` with both non-empty** — `func NewRemovePropertyEffect`
+  in `internal/query/query.go`, which rejects an empty `Variable` AND
+  an empty `Property`. This is the stronger of the two property-target
+  constructors: unlike `NewSetPropertyEffect` above, it does not lean
+  on the parser for the `Property` half.
 - **`RemoveLabelsEffect.Labels()` non-empty** —
-  `internal/query/query.go:1996-2003`.
+  `func NewRemoveLabelsEffect` in `internal/query/query.go`, which
+  rejects both an empty `targetVar` and a zero-length `labels`.
 - **`schema.Schema` fields: `Nodes map[graph.LabelSetKey]NodeType`,
   `Edges map[EdgeKey]EdgeType`** —
   `internal/schema/schema.go:12-16`.
 - **`schema.NodeType` fields: `Labels graph.LabelSetKey`, `Name`,
   `Properties map[string]Property`** —
-  `internal/schema/schema.go:20-24`.
+  `internal/schema/schema.go:20-24`. [2026-09-11 (gqlc-ily6): the
+  `Labels` field no longer exists under that name. `type NodeType
+  struct` now carries `KeyLabels` (identity; also the `Nodes` map
+  key) and `CompleteLabels` (key labels plus any implied) as two
+  separate fields, per the GG21/GG22 key-versus-complete split
+  recorded on `type Schema`'s doc comment and ADR 0015. `Name` and
+  `Properties` are unchanged. R6 reads `Properties`, so the split
+  does not disturb any claim this spec rests on the row for; the row
+  is kept rather than deleted because §4.3 cites it. `type EdgeType
+  struct` gained `CompleteLabels` the same way.]
 - **`schema.EdgeType` fields: `EdgeKey` (embedded), `Name`,
   `Properties map[string]Property`** —
   `internal/schema/schema.go:28-32`.
@@ -2151,13 +2258,29 @@ citations below name the file:line the claim rests on.
   `Nullable bool`** — `internal/schema/schema.go:43-47`.
 - **`R5 witnessAcrossScopes` structure** —
   `internal/resolver/resolve.go:673-719`. §4.5 revises lines
-  709-712.
+  709-712. [2026-09-11 (gqlc-ily6): no `func witnessAcrossScopes`
+  exists in the tree any more — the name survives only in doc
+  comments on `internal/query/query.go` and
+  `internal/resolver/resolve.go`, the latter recording that its
+  Part-index range check moved out to `func selectPartScope`. The
+  `ExprUse` dispatch §4.5 planned to revise now lives in
+  `internal/resolver/scope.go`, in the `case query.ExprUse:` arm that
+  routes `ExprInProjection`, `ExprInPredicate`, `ExprInSetValue` and
+  `ExprInDeleteTarget` through `resolveType(uu.EnclosingType())` — so
+  the revision this spec designed did land, under a different
+  function. The other `witnessAcrossScopes` mentions — §1, §2.2 and
+  §4.5 — are stale in the same way; they were left as the R6 design
+  record rather than rewritten.]
 - **`R5 resolveType` for a `TypeUnknown` returns
   `ResolvedUnknown{}`** — `internal/resolver/resolve.go:1147-1148`.
 - **`R5 unify` widens `ResolvedUnknown{}` on either side** —
   `internal/resolver/resolve.go:1256-1262`.
 - **`R5 unifyParameterUsesAcrossScopes` unifies witnesses via the
   R2 lattice** — `internal/resolver/resolve.go:611-653`.
+  [2026-09-11 (gqlc-ily6): the walker is now
+  `func unifyParameterUsesAcrossBranches` in the same file; no symbol
+  spelled `unifyParameterUsesAcrossScopes` exists. §2.2, §2.3 and
+  §4.5 use the old spelling too.]
 - **`R5 materialiseReturns` returns `part.Returns` unchanged when
   `!part.ReturnsAll`** —
   `internal/resolver/resolve.go:324-341`.
