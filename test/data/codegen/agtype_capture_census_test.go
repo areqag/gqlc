@@ -292,7 +292,7 @@ func TestEveryAgtypeCaptureIsWitnessedOrDeclaredSynthetic(t *testing.T) {
 	// fact rather than two facts about a copy.
 	for _, g := range agtypeLiveCaptures {
 		for _, c := range g.captures {
-			require.Equal(t, fixture[c.constName], c.want,
+			require.Equal(t, c.want, fixture[c.constName],
 				"agtypeLiveCaptures[%s].want must be the fixture's own literal; it is what "+
 					"TestAGEAgtypeCaptureMatchesTheServer holds the server to, so a want that "+
 					"has drifted from the fixture witnesses bytes the corpus does not use",
