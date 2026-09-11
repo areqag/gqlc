@@ -4160,6 +4160,221 @@ func (s *ResolverSuite) TestACarriedAliasRedeclaredUnderAnOptionalClauseIsRefuse
 	s.Equal("wrong-orientation-drop", vqUncarried.Warnings[0].Producer)
 }
 
+// TestAWidenedPluralCommitmentIsNarrowedOneWithLater is the cell the
+// optional-hop-attestation ruling recorded as missing (§9.3, bd gqlc-nmga): a
+// commitment made covered THROUGH introducedByThisHop, standing as a plural
+// endpoint that NarrowPluralEndpoints then narrows.
+//
+// §4 of that ruling names three readers of the coverage bit that had to be
+// checked against the widening, because a commitment made covered that way
+// covers only CONDITIONAL on the binding being non-null while every
+// pre-existing covered commitment covers unconditionally. gqlc-1qijx checked
+// the third directly and left the first two — endpointNarrowing's two
+// covering() gates and NarrowPluralEndpoints — on a corpus bound: the widening
+// moved 10 of 14663 cells and all 10 were other mechanisms, so it did not
+// disturb those readers over the corpus AS IT STOOD. No query put a widened
+// binding where they could read it. valid/...plural_endpoint_narrows.cypher is
+// that query, and this test is what says which mechanism its golden observes.
+//
+// WHY IT TAKES A `WITH`. Within one Part the two shapes exclude each other, and
+// TestEveryEdgeTheNarrowingLearnsFromAlsoDemotesItsEndpoints is the mechanism:
+// any edge endpointNarrowing folds and that touches `c` demotes `c`'s
+// OPTIONAL group, which demotes the same-group hop that was attesting, so
+// witnessesItsEndpoints answers true and the coverage stops being the
+// widening's. Phase D runs above Phases B and C, so that demotion is already in
+// hand when either reader runs. A `WITH` cuts the demotion off from the
+// commitment: Part 1 commits from ITS OWN demotion state, and Part 2's
+// mandatory hop cannot reach back.
+//
+// The widened set crosses the boundary because carriesPluralBinding defers the
+// whole-entity refusal in a non-final Part, which is the route etj6 opened and
+// which newScope's resolvedCovers cut does NOT close — a plural carry is read
+// through endpointLabels' `cands` arm, whose covers is an unconditional true.
+// That is the conditional-coverage read §4 was worried about, reached.
+//
+// AND IT IS SOUND, for a reason that is a property of the readers rather than
+// of this schema. Both learn only from an edge that passes
+// witnessesItsEndpoints — required, or in a proven group — so the edge is on
+// every returned row, so both of its ends are non-null on every returned row.
+// The condition "covering conditional on `c` being non-null" is discharged by
+// the very gate the reader applies before reading. The `optional part-2 hop`
+// arm below is that argument as a measurement: one keyword takes the guarantee
+// away and the narrowing declines to fire.
+func (s *ResolverSuite) TestAWidenedPluralCommitmentIsNarrowedOneWithLater() {
+	sch := s.loadSchema("valid", "satisfy_plural_edges_inline_subtype.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	// Read from disk so the arms below cannot drift from the fixture whose
+	// golden is the artefact this test explains.
+	src, err := os.ReadFile(filepath.Join(fixtureDir, "valid",
+		"unlabelled_optional_introduced_hop_plural_endpoint_narrows.cypher"))
+	s.Require().NoError(err)
+
+	cols, err := resolve(string(src))
+	s.Require().NoError(err)
+	s.Require().Equal([]Column{{Name: "c.largeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}}, cols,
+		"largeId is declared on Company&Large alone, so a `c` left plural is refused and a `c` pinned to the bare Company never closes Part 2's edge; typing the column at all is NarrowPluralEndpoints' collapse")
+
+	// The arm that says the collapse is Part 2's and not Part 1's. Same query
+	// with Part 2's hop deleted: `c` crosses the WITH still holding BOTH company
+	// types, so the projection is refused on the one that lacks largeId.
+	s.Run("without part 2's hop the carry is still plural", func() {
+		_, err := resolve("MATCH (p:Person)\n" +
+			"OPTIONAL MATCH (p)-[q:WORKS_AT]->(c)\n" +
+			"OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk)\n" +
+			"WITH c\n" +
+			"RETURN c.largeId")
+		s.Require().ErrorIs(err, ErrUnknownProperty)
+		s.Require().ErrorContains(err, "c.largeId missing on plural-satisfying type Company",
+			"the widened set crosses the WITH intact, so the fixture's acceptance is the narrowing and not a Part 1 commitment that was singular all along")
+	})
+
+	// The arm that says the gate is witnessesItsEndpoints. One keyword: an
+	// OPTIONAL part-2 hop is an outer join, so it is no evidence about the rows
+	// that lack it, endpointNarrowing skips it, and the set stays wide. It is
+	// also why the unconditional covers on the carried plural set is safe —
+	// the only hop that gets to read it is one that forces `c` non-null.
+	s.Run("an optional part 2 hop narrows nothing", func() {
+		_, err := resolve("MATCH (p:Person)\n" +
+			"OPTIONAL MATCH (p)-[q:WORKS_AT]->(c)\n" +
+			"OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk)\n" +
+			"WITH c\n" +
+			"OPTIONAL MATCH (e:Employee)-[w:WORKS_AT]->(c)\n" +
+			"RETURN c.largeId")
+		s.Require().ErrorIs(err, ErrUnknownProperty)
+		s.Require().ErrorContains(err, "c.largeId missing on plural-satisfying type Company",
+			"an outer join returns the rows it missed, so it witnesses neither of its ends and the narrowing declines it")
+	})
+
+	// The arm that says the same Part does not reach the cell. Delete the WITH
+	// and the mandatory hop joins Phase B's own intersection, which the
+	// foreign-group HAS_DESK has already cut to the bare Company — the two
+	// disagree and the round reaches case 0. That is one schema's way of
+	// failing; the general one is the demotion in the test below.
+	s.Run("the same part reaches no commitment at all", func() {
+		_, err := resolve("MATCH (p:Person)\n" +
+			"OPTIONAL MATCH (p)-[q:WORKS_AT]->(c)\n" +
+			"OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk)\n" +
+			"MATCH (e:Employee)-[w:WORKS_AT]->(c)\n" +
+			"RETURN c.largeId")
+		s.Require().ErrorIs(err, ErrUnknownLabel,
+			"one Part folds part 2's hop into Phase B's own intersection, so there is no committed plural set for the narrowing to be handed")
+	})
+
+	// The arm that says the WIDENING is what commits the plural set, not the
+	// bare fact of two candidates. Drop the foreign-group hop and `inferred` is
+	// the same two types as `attainable`, so commit() never substitutes and
+	// Phase B defers to its terminal refusal.
+	s.Run("without the foreign group hop the substitution never fires", func() {
+		_, err := resolve("MATCH (p:Person)\n" +
+			"OPTIONAL MATCH (p)-[q:WORKS_AT]->(c)\n" +
+			"WITH c\n" +
+			"MATCH (e:Employee)-[w:WORKS_AT]->(c)\n" +
+			"RETURN c.largeId")
+		s.Require().ErrorIs(err, ErrAmbiguousBinding,
+			"commit() substitutes only on a singleton `inferred`, so the foreign-group hop is what makes the fixture a WIDENED commitment rather than a native plural one")
+	})
+}
+
+// TestEveryEdgeTheNarrowingLearnsFromAlsoDemotesItsEndpoints is the mechanism
+// behind the `WITH` in the fixture above, stated over the two predicates rather
+// than over one schema's intersection (bd gqlc-nmga).
+//
+// The claim: an edge witnessesItsEndpoints only if it is also a qualified
+// demoter under the same nullability precondition. So any edge endpointNarrowing
+// folds is an edge demoteAcrossEdges has already run on, which demoted both of
+// its named endpoints AND every OPTIONAL group they belong to. For a binding
+// whose coverage came from introducedByThisHop that group is the binding's own,
+// and the attesting hop shares it — so the hop is demoted too and
+// witnessesItsEndpoints was already true of it. Within one Part the widening can
+// therefore never be what makes a commitment readable by either narrowing
+// reader; that is why the cell needs a scope boundary.
+//
+// Both halves of the precondition are swept, not just the hop range, because the
+// implication would also break if one guard treated a proven group differently
+// from the other — which is exactly the drift bd gqlc-o8oc found once already.
+//
+// The counts at the end are what stop this passing vacuously. Without the
+// witness count a guard that refused everything would satisfy the implication,
+// and without the strictness count the two predicates could have become the same
+// function and nothing here would say so.
+func (s *ResolverSuite) TestEveryEdgeTheNarrowingLearnsFromAlsoDemotesItsEndpoints() {
+	hops := func(minHops, maxHops *int) *query.EdgeHops {
+		h, err := query.NewEdgeHops(minHops, maxHops)
+		s.Require().NoError(err)
+		return &h
+	}
+	n := func(i int) *int { return &i }
+
+	spellings := []struct {
+		name string
+		hops *query.EdgeHops
+	}{
+		{"no quantifier", nil},
+		{"*1", hops(n(1), n(1))},
+		{"*..1", hops(nil, n(1))},
+		{"*0..1", hops(n(0), n(1))},
+		{"*2", hops(n(2), n(2))},
+		{"*2..1", hops(n(2), n(1))},
+		{"*", hops(nil, nil)},
+		{"*2..5", hops(n(2), n(5))},
+	}
+
+	src, err := query.NewVarEndpoint("c")
+	s.Require().NoError(err)
+	tgt := query.NewInlineEndpoint(graph.LabelSet{"Desk"})
+
+	witnesses, strict := 0, 0
+	for _, sp := range spellings {
+		for _, nullable := range []bool{false, true} {
+			for _, proven := range []bool{false, true} {
+				name := fmt.Sprintf("%s/nullable=%v/proven=%v", sp.name, nullable, proven)
+				s.Run(name, func() {
+					var e query.EdgeBinding
+					var err error
+					switch {
+					case sp.hops == nil && nullable:
+						e, err = query.NewNullableEdgeBindingInGroup("h", graph.LabelSet{"HAS_DESK"}, src, tgt, true, 1)
+					case sp.hops == nil:
+						e, err = query.NewEdgeBinding("h", graph.LabelSet{"HAS_DESK"}, src, tgt, true)
+					case nullable:
+						e, err = query.NewNullableVarLengthEdgeBindingInGroup("h", graph.LabelSet{"HAS_DESK"}, src, tgt, true, *sp.hops, 1)
+					default:
+						e, err = query.NewVarLengthEdgeBinding("h", graph.LabelSet{"HAS_DESK"}, src, tgt, true, *sp.hops)
+					}
+					s.Require().NoError(err)
+
+					demoted := map[int]bool{}
+					if proven {
+						demoted[1] = true
+					}
+					witnessed := witnessesItsEndpoints(e, map[string]struct{}{}, demoted)
+					// The nullability precondition, spelled here the way
+					// demoteAcrossEdges spells it, so a change to either guard's
+					// half of it shows up as a failed implication.
+					demotes := (!e.Nullable() || demoted[e.OptionalGroup()]) && qualifiedDemoter(e)
+					if witnessed {
+						witnesses++
+						s.True(demotes,
+							"an edge the narrowing learns from that does not demote its endpoints would let a widened commitment be read inside its own Part")
+					}
+					if demotes && !witnessed {
+						strict++
+					}
+				})
+			}
+		}
+	}
+
+	s.Positive(witnesses, "no input witnessed its endpoints, so the implication above was never asked")
+	s.Positive(strict, "every demoter also witnessed, so the two predicates have collapsed into one and the implication is an identity")
+}
+
 // TestAProvenOptionalGroupInnerJoinsPhaseB is the same distinction one guard
 // over: `innerJoined`, the conjunct Phase B's unconstrained() gate reads. It is
 // the third and last member of the endpoint-witness family (bd gqlc-lixuz);
