@@ -38,20 +38,29 @@ justfile="${1:-justfile}"
 # a leaked one cannot be swept into someone's `git add`.
 root_probe_parent="test"
 nested_probe_parent="test/data/codegen"
-probes=()
+
 sweep_probes() {
-    local p
-    for p in ${probes[@]+"${probes[@]}"}; do
-        rm -rf "${p}"
-    done
+    rm -rf "${root_probe_parent:?}"/_complexityprobe.* \
+        "${nested_probe_parent:?}"/_complexityprobe.*
 }
+
+# Swept on the way IN as well as out, off the glob rather than off a list this
+# run built. A trap does not run under SIGKILL and sessions here are killed by
+# quota walls and stall watchdogs, so the entry sweep is what clears a previous
+# run's residue; a list would only ever know about probes this run made.
+sweep_probes
 trap sweep_probes EXIT
 
+# probe writes the new directory into `probe`, a global, rather than printing it
+# for a caller to capture. `d="$(probe_dir ...)"` reads better and is broken: the
+# command substitution runs the function in a SUBSHELL, so the append to the
+# cleanup list happened in a child and the parent swept nothing. Measured here —
+# 24 probe directories survived three runs of these rows, found only because
+# `just fmt-check` warns about the unparseable one. Hence the glob sweep above,
+# which cannot be defeated that way, and this shape, which has no subshell.
+probe=""
 probe_dir() {
-    local parent="$1" d
-    d="$(mktemp -d "${parent}/_complexityprobe.XXXXXXXX")"
-    probes+=("${d}")
-    printf '%s\n' "${d}"
+    probe="$(mktemp -d "${1}/_complexityprobe.XXXXXXXX")"
 }
 
 pass=0
@@ -94,7 +103,7 @@ over_complex_go() {
 # direction and is invisible from the broken-tree rows alone.
 
 # G1: a package over the threshold is still reported as a complexity finding.
-d="$(probe_dir "${root_probe_parent}")"
+probe_dir "${root_probe_parent}"; d="${probe}"
 over_complex_go "${d}/a.go" probe
 run_complexity "./${d}"
 if [ "${rc}" -eq 1 ] && [ "${out}" != "${out#*gocyclo}" ]; then
@@ -104,7 +113,7 @@ else
 fi
 
 # G2: a package under the threshold passes.
-d="$(probe_dir "${root_probe_parent}")"
+probe_dir "${root_probe_parent}"; d="${probe}"
 printf 'package %s\n\nfunc Simple() int { return 1 }\n' probe >"${d}/a.go"
 run_complexity "./${d}"
 if [ "${rc}" -eq 0 ]; then
@@ -119,7 +128,7 @@ fi
 # — `go list` loads a package it cannot type-check — because mid-edit source is
 # the normal state of a tree at commit time, and a gate that refused it would
 # cost more than the bug it closes.
-d="$(probe_dir "${root_probe_parent}")"
+probe_dir "${root_probe_parent}"; d="${probe}"
 over_complex_go "${d}/a.go" probe
 printf '\nvar _ int = "not an int"\n\nfunc _undefined() { noSuchSymbol() }\n' >>"${d}/a.go"
 run_complexity "./${d}"
@@ -135,7 +144,7 @@ fi
 # the root module, which fails with "main module does not contain package" and
 # would call every commit touching the live battery a load failure — gqlc-f0x1
 # re-opened from the other side.
-d="$(probe_dir "${nested_probe_parent}")"
+probe_dir "${nested_probe_parent}"; d="${probe}"
 over_complex_go "${d}/a.go" probe
 run_complexity "./${d}"
 if [ "${rc}" -eq 1 ] && [ "${out}" != "${out#*gocyclo}" ]; then
@@ -152,7 +161,7 @@ fi
 # ISSUE, so it takes --issues-exit-code and arrives as 1. Before the pre-flight
 # this row read rc=1 and the hook printed "function complexity over the gate"
 # over a directory in which nothing was graded.
-d="$(probe_dir "${root_probe_parent}")"
+probe_dir "${root_probe_parent}"; d="${probe}"
 printf 'package %s\n' probe >"${d}/a.go"
 printf 'package someoneelse\n' >"${d}/b.go"
 run_complexity "./${d}"
@@ -166,7 +175,7 @@ fi
 # measured (bd gqlc-9nj3 staged `package codegen` beside `package fixtures` in
 # test/data/codegen). Kept separate from L1 because the grouping decides which
 # directory `go list` runs from, and one row cannot fail for the other's reason.
-d="$(probe_dir "${nested_probe_parent}")"
+probe_dir "${nested_probe_parent}"; d="${probe}"
 printf 'package %s\n' probe >"${d}/a.go"
 printf 'package someoneelse\n' >"${d}/b.go"
 run_complexity "./${d}"
@@ -180,7 +189,7 @@ fi
 # (golangci-lint exits 5), and it stays not-1 through it — the row is here so
 # that a pre-flight which started swallowing its own failures could not turn
 # this one green by accident.
-d="$(probe_dir "${root_probe_parent}")"
+probe_dir "${root_probe_parent}"; d="${probe}"
 run_complexity "./${d}"
 if [ "${rc}" -ne 0 ] && [ "${rc}" -ne 1 ]; then
     row no-go-file PASS "rc=${rc}, structural rather than 1"
@@ -202,7 +211,7 @@ fi
 # The row asserts the CURRENT behaviour rather than the desired one, so that
 # whoever closes that bead is failed here and sent to this comment instead of
 # discovering the pin by accident.
-d="$(probe_dir "${root_probe_parent}")"
+probe_dir "${root_probe_parent}"; d="${probe}"
 printf 'package %s\n\nfunc Broken( {{{\n' probe >"${d}/a.go"
 run_complexity "./${d}"
 if [ "${rc}" -eq 1 ]; then
