@@ -495,24 +495,159 @@ func TestAClosureParameterIsABodyLocal(t *testing.T) {
 		"an ordinary body local is missing, so this test is not reading the set it claims to")
 }
 
-// TestFreeIdentsBoundSetLimits holds both halves of the enumeration in
-// FreeIdents' doc comment: the constructs over which the analysis errs
-// towards calling a name bound, and the constructs on which it errs the
-// other way.
+// genericHelperEmission is the one construct gqlc-db0e closed that is
+// LIVE rather than scheduled: the signature the age emitter writes at
+// internal/codegen/age/render_models.go:1515, inside the raw string
+// opened at :1504. agtypeNullableElem, agtypeProperty,
+// agtypeNullableProperty and render_record.go's agtypeRecordField are
+// the same shape. Copied rather than generated here so the unit stays a
+// unit; if the emitter drops the form entirely this exhibit outlives it,
+// which costs a row rather than hiding one.
+const genericHelperEmission = `package p
+
+func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) {
+	out := make([]T, 0)
+	value, err := decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, value), nil
+}
+`
+
+// TestALiveGenericHelperBindsItsTypeParameter is the live half of
+// gqlc-db0e. Every other construct that bead closed is reachable only
+// from an emission nobody writes yet; this one ships today, so `T` was
+// in a real emitted function's free set until the bound set grew
+// fn.Type.TypeParams.
+func TestALiveGenericHelperBindsItsTypeParameter(t *testing.T) {
+	file, err := emitscan.Parse(queryPath, genericHelperEmission)
+	require.NoError(t, err)
+
+	free := emitscan.FreeIdents(onlyFuncDecl(t, file))
+
+	require.NotContains(t, free, "T",
+		"a type parameter of a shipping emitted helper is reported free, so the analysis errs towards calling a name UNbound on a construct that is in the tree now")
+	require.Contains(t, free, "make",
+		"a universe name the body resolves is missing, so this test is not reading the set it claims to")
+}
+
+// TestAGenericReceiverBindsItsTypeParameterButNotItsType holds the half
+// of the receiver rule that is easy to overshoot. A generic receiver
+// writes both names at the same position — `func (q *Q[T])` — but only
+// one of them is bound there. Q is resolved in package scope and must
+// stay free, or the resolved set loses every type an emitted method
+// hangs off; T is bound by the receiver and must not be free.
+func TestAGenericReceiverBindsItsTypeParameterButNotItsType(t *testing.T) {
+	file, err := emitscan.Parse(queryPath, "package p\n\nfunc (q *Q[T]) f(x T) { _ = x }\n")
+	require.NoError(t, err)
+
+	free := emitscan.FreeIdents(onlyFuncDecl(t, file))
+
+	require.NotContains(t, free, "T", "a receiver's type parameter is reported free")
+	require.Contains(t, free, "Q",
+		"the receiver's own type was taken as a binding along with its type parameter, so a package-level type an emitted method hangs off is no longer resolved by anything")
+}
+
+// TestASignatureNameStaysInTheReferencedSet pins the over-inclusion
+// gqlc-db0e chose to keep when it started dropping func-TYPE parameter
+// names.
 //
-// The second half is the reason this is a table rather than a list of
-// positive cases. A comment that admits a limit rots in two directions
-// — the limit gets quietly fixed and the comment keeps warning about
-// it, or the "bound" list grows a construct nobody rechecked. Each row
-// binds a name inside a function and reads it back, so a row that flips
-// is a comment that has gone stale. The wantFree rows are gqlc-db0e's
-// falsifier: fixing that bead flips them, and the flip is the point.
+// A binding occurrence is not a reference, so a strict reading would
+// drop a function's own parameter names too. It does not, because
+// internal/codegen/age/capture_test.go's methodScopes reads this set to
+// assert that renaming a query's parameters moves nothing an emitted
+// method resolves — and a signature that named its argument after the
+// query is the defect that assertion exists to catch. The parameter
+// here is deliberately unread in the body: a parameter the body reads
+// would stay in the set through the body alone, so only an unread one
+// can tell whether the signature half is still being read.
+func TestASignatureNameStaysInTheReferencedSet(t *testing.T) {
+	file, err := emitscan.Parse(queryPath, "package p\n\nfunc (q *Queries) GetPerson(ctx context.Context, arg GetPersonParams) error { return nil }\n")
+	require.NoError(t, err)
+
+	names := emitscan.ReferencedIdents(onlyFuncDecl(t, file))
+
+	for _, name := range []string{"q", "ctx", "arg"} {
+		require.Contains(t, names, name,
+			"a name the signature binds is missing from the referenced set, so age's methodScopes no longer perturbs when an emitted signature names its argument after the query")
+	}
+	require.Contains(t, names, "GetPersonParams",
+		"the type beside a parameter is missing, so this test is not reading the set it claims to")
+}
+
+// TestNonScopeOccurrencesAreExcludedPerOccurrence is what distinguishes
+// gqlc-db0e's verdict from the alternative it declined.
+//
+// Three of the six constructs that bead closed write a name that binds
+// nothing the body can read: a field name at its declaration site, a
+// statement label, and a parameter name in a func TYPE. Either remedy
+// empties the free set of that name, so TestFreeIdentsBoundSetLimits
+// cannot tell them apart — but they differ on the source below, where
+// the SAME name is also a genuine read of a package-level declaration.
+// An exclusion is per occurrence and leaves the read free; adding the
+// name to FreeIdents' bound set is keyed by name, applies to the whole
+// function, and would swallow it. Swallowing it is the direction a
+// capture slips through the sweep.
+//
+// So these rows do not fail before the fix — they failed under the
+// remedy that was not taken, and that is what they are here to hold.
+// What would have to change for the verdict to change: a caller that
+// wanted the label or field namespace, which would need a set of its
+// own rather than this one.
+func TestNonScopeOccurrencesAreExcludedPerOccurrence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		read string
+		src  string
+	}{
+		{
+			name: "a field name declared locally does not bind the same name elsewhere",
+			read: "col",
+			src:  "func f() { type row struct{ col int }; var r row; _ = r.col; _ = col }",
+		},
+		{
+			name: "a label does not bind the same name elsewhere",
+			read: "Loop",
+			src:  "func f() { Loop: for { break Loop }; _ = Loop }",
+		},
+		{
+			name: "a func-type parameter name does not bind the same name elsewhere",
+			read: "yield",
+			src:  "func f(g func(yield int)) { _ = g; _ = yield }",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := emitscan.Parse(queryPath, "package p\n\n"+tc.src+"\n")
+			require.NoError(t, err)
+
+			require.Contains(t, emitscan.FreeIdents(onlyFuncDecl(t, file)), tc.read,
+				"a genuine read of a package-level name is not reported free, because an occurrence that binds nothing was recorded as binding it for the whole function; the resolved set now loses a name the body really does resolve")
+		})
+	}
+}
+
+// TestFreeIdentsBoundSetLimits holds the enumeration in FreeIdents' doc
+// comment: every construct that introduces a name inside a function, and
+// the claim that none of them is reported free.
+//
+// It arrived under gqlc-9hrh in two halves — ten rows asserting a name
+// was bound and six asserting it was NOT, the second half being the
+// measured record of where the analysis erred the direction the doc
+// comment forbids. gqlc-db0e closed those six, so the table is now one
+// half, and a row that flips is a regression rather than a comment that
+// has gone stale.
+//
+// Why a table rather than a list of positive cases: the six rows that
+// once read the other way were found by enumerating constructs, not by
+// noticing a bug, and the enumeration is the only thing that makes the
+// doc comment's claim checkable. A construct added to the claim without
+// a row here is a claim nobody measured.
 func TestFreeIdentsBoundSetLimits(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		bound    string
-		src      string
-		wantFree bool
+		name  string
+		bound string
+		src   string
 	}{
 		{name: "closure parameter", bound: "yield", src: "func f() any { return func(yield int) { _ = yield } }"},
 		{name: "closure named result", bound: "cnt", src: "func f() any { return func() (cnt int) { _ = cnt; return } }"},
@@ -525,12 +660,46 @@ func TestFreeIdentsBoundSetLimits(t *testing.T) {
 		{name: "own parameter", bound: "p", src: "func f(p int) { _ = p }"},
 		{name: "own named result", bound: "r", src: "func f() (r int) { _ = r; return }"},
 
-		{name: "local type declaration", bound: "row", src: "func f() { type row struct{}; var r row; _ = r }", wantFree: true},
-		{name: "local type field name", bound: "col", src: "func f() { type row struct{ col int }; var r row; _ = r.col }", wantFree: true},
-		{name: "statement label", bound: "Loop", src: "func f() { Loop: for { break Loop } }", wantFree: true},
-		{name: "func-type parameter name in a signature", bound: "yield", src: "func f(g func(yield int)) { _ = g }", wantFree: true},
-		{name: "type parameter", bound: "T", src: "func f[T any](x T) { var y T; _ = y; _ = x }", wantFree: true},
-		{name: "generic receiver type parameter", bound: "T", src: "func (q *Q[T]) f(x T) { _ = x }", wantFree: true},
+		// The six gqlc-db0e closed. Each was measured reporting its name
+		// FREE before that bead; the four below that are not a plain
+		// bound-set widening carry their verdict at the row.
+		{name: "local type declaration", bound: "row", src: "func f() { type row struct{}; var r row; _ = r }"},
+
+		// Not one of the five gqlc-db0e enumerated, and here because
+		// they cost one row each: an interface's method names sit in the
+		// same field-list position as a struct's field names and resolve
+		// the same way, so a fence that covered one and not the other
+		// would be an unmeasured half.
+		{name: "local interface method name", bound: "m", src: "func f() { type r interface{ m() }; var v r; v.m() }"},
+
+		// A FIELD name is not in the function's scope at all, so it is
+		// excluded from ReferencedIdents rather than added to the bound
+		// set — the same verdict, and for the same reason, as the
+		// selector suffix in `r.col`, which that function has always
+		// excluded. Binding it instead would also empty this row, which
+		// is why the row cannot distinguish the two; the row that can is
+		// in TestNonScopeOccurrencesAreExcludedPerOccurrence.
+		{name: "local type field name", bound: "col", src: "func f() { type row struct{ col int }; var r row; _ = r.col }"},
+
+		// A label lives in its own namespace in Go: `Loop:` cannot shadow
+		// a package-level `Loop`, and `break Loop` does not resolve one.
+		// So a label is not a reference, and it is excluded rather than
+		// bound. This would have to change if FreeIdents ever grew a
+		// caller that wanted the label namespace — nothing would then be
+		// reading it, and it would need its own set rather than this one.
+		{name: "statement label", bound: "Loop", src: "func f() { Loop: for { break Loop } }"},
+
+		// A parameter name written into a func TYPE binds nothing: it is
+		// documentation on the type, and the body cannot read it. Not a
+		// reference either, so excluded rather than bound — the bead
+		// (gqlc-db0e) reached the same verdict from the same premise.
+		{name: "func-type parameter name in a signature", bound: "yield", src: "func f(g func(yield int)) { _ = g }"},
+
+		// A type parameter IS in the function's scope and the body's `T`
+		// genuinely resolves it, so these two are the bound-set widening
+		// the bead names, not an exclusion.
+		{name: "type parameter", bound: "T", src: "func f[T any](x T) { var y T; _ = y; _ = x }"},
+		{name: "generic receiver type parameter", bound: "T", src: "func (q *Q[T]) f(x T) { _ = x }"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file, err := emitscan.Parse(queryPath, "package p\n\n"+tc.src+"\n")
@@ -538,13 +707,8 @@ func TestFreeIdentsBoundSetLimits(t *testing.T) {
 
 			free := emitscan.FreeIdents(onlyFuncDecl(t, file))
 
-			if tc.wantFree {
-				require.Contains(t, free, tc.bound,
-					"the doc comment names this as a construct the bound set misses; it no longer does, so the comment now warns about a limit that is gone")
-				return
-			}
 			require.NotContains(t, free, tc.bound,
-				"the doc comment names this as a construct over which the analysis errs towards calling a name bound; it is reported free, which is the direction a capture slips through the sweep")
+				"the doc comment claims this construct's name is not reported free; it is, which is the direction a capture slips through the sweep rather than failing it")
 		})
 	}
 }
