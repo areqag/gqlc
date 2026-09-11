@@ -652,6 +652,15 @@ var invalidFixtures = map[string]error{
 	// as the only difference between resolving and refusing.
 	"certified_list_unknown_property.cypher":    ErrUnknownProperty,
 	"certified_collect_unknown_property.cypher": ErrUnknownProperty,
+
+	// unionNodeProperty's DIVERGENCE arm, which no other fixture reaches: every
+	// other plural-satisfying fixture either agrees on the projected property,
+	// so the ADR 0022 intersection succeeds, or omits it from a candidate, so
+	// the missing-on arm answers at i == 0. Reaching this one needs two node
+	// types that share a label and disagree about a property they both declare,
+	// which is a shape no corpus schema had — hence a new schema rather than a
+	// new query against an existing one (bd gqlc-xeux).
+	"plural_satisfying_property_nullability_differs.cypher": ErrUnknownProperty,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -874,21 +883,31 @@ var invalidFixtureContains = map[string]string{
 	// label_satisfy_plural_entity — byte-identical query text on a schema that
 	// declares Person itself.
 	"label_satisfy_ambiguous.cypher": `p is satisfied by more than one declared node type: Contractor&Person, Employee&Person`,
-	// The four fixtures whose two sides differ on nullability ALONE. Nothing
-	// else in either message distinguishes them, so before bd gqlc-y8yzw all
-	// four read "property:STRING vs property:STRING" (or :INT) and told the
-	// author nothing about what to change. errors.Is passes on the text either
-	// way, and so does a message that has gone back to the bare Stringer, which
-	// is why the pin has to carry BOTH sides rather than the sentinel.
+	// The fixtures whose two sides differ on nullability ALONE. Nothing else in
+	// either message distinguishes them, so before bd gqlc-y8yzw they read
+	// "property:STRING vs property:STRING" (or :INT) and told the author
+	// nothing about what to change. errors.Is passes on the text either way,
+	// and so does a message that has gone back to the bare Stringer, which is
+	// why each pin has to carry BOTH sides rather than the sentinel.
 	//
-	// The three parameter fixtures and the union one reach two different message
-	// sites — unifyParameterUsesAcrossBranches and unionProperty — that shared
-	// the defect and now share the cure. They are pinned together so a repair
-	// applied to one site and not the other cannot pass.
+	// They reach three message sites — unifyParameterUsesAcrossBranches,
+	// unionProperty and unionNodeProperty — that shared the defect and now
+	// share the cure. They are pinned together so a repair applied to some of
+	// the sites and not the rest cannot pass.
+	//
+	// unionNodeProperty is the site gqlc-y8yzw's PR (#2694) could fix but not
+	// witness: no corpus schema declared two label-sharing node types that
+	// disagree about a property they both have, so the arm was reachable by no
+	// cell of the sweep and the bare-Stringer revert reddened nothing. That is
+	// bd gqlc-xeux, and the last pin below is what closes it — against a
+	// divergence on nullability alone, because a divergence on TYPE renders
+	// differently under the bare Stringer too and so would leave the revert
+	// alive.
 	"parameter_type_conflict_nullability.cypher":               `parameter "x": property:STRING (not null) vs property:STRING (nullable)`,
 	"parameter_type_conflict_optional_node_nullability.cypher": `parameter "x": property:STRING (not null) vs property:STRING (nullable)`,
 	"parameter_type_conflict_optional_edge_nullability.cypher": `parameter "x": property:INT (not null) vs property:INT (nullable)`,
 	"unknown_property_union_nullability_differs.cypher":        `r.weight type differs across union members: property:INT (not null) vs property:INT (nullable)`,
+	"plural_satisfying_property_nullability_differs.cypher":    `p.tenure type differs across plural-satisfying types: property:INT (not null) vs property:INT (nullable)`,
 }
 
 // invalidFixtureNoMessagePin names the invalid fixtures whose refusal message

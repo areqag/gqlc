@@ -2,7 +2,7 @@
 # the cross product is resolved under regR7Alt instead of regR7. Generated
 # file: edit internal/resolver/sweep_test.go, not this.
 #
-# 944 cells differ, over 23 queries. Both counts are taken off the rows
+# 967 cells differ, over 23 queries. Both counts are taken off the rows
 # they head rather than written as prose, so they restate themselves on the
 # next regeneration.
 #
@@ -42,6 +42,7 @@ cell	invalid/call_arg_int_at_string.cypher	invalid/schemas/satisfy_plural_edges_
 cell	invalid/call_arg_int_at_string.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	615fd703aa70
 cell	invalid/call_arg_int_at_string.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	615fd703aa70
 cell	invalid/call_arg_int_at_string.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	615fd703aa70
+cell	invalid/call_arg_int_at_string.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	615fd703aa70
 cell	invalid/call_arg_int_at_string.cypher	invalid/schemas/satisfy_singular.gql	accept	-	615fd703aa70
 cell	invalid/call_arg_int_at_string.cypher	invalid/schemas/social.gql	accept	-	615fd703aa70
 cell	invalid/call_arg_int_at_string.cypher	invalid/schemas/social_ambiguous.gql	accept	-	615fd703aa70
@@ -84,6 +85,7 @@ cell	invalid/call_arg_type_mismatch.cypher	invalid/schemas/satisfy_plural_edges_
 cell	invalid/call_arg_type_mismatch.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	invalid/call_arg_type_mismatch.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	invalid/call_arg_type_mismatch.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrCallArgAssignability	43b3862aa71d
+cell	invalid/call_arg_type_mismatch.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	invalid/call_arg_type_mismatch.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	invalid/call_arg_type_mismatch.cypher	invalid/schemas/social.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	invalid/call_arg_type_mismatch.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrCallArgAssignability	43b3862aa71d
@@ -126,6 +128,7 @@ cell	invalid/call_yield_property_lookup.cypher	invalid/schemas/satisfy_plural_ed
 cell	invalid/call_yield_property_lookup.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	invalid/call_yield_property_lookup.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	invalid/call_yield_property_lookup.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrCallArgAssignability	43b3862aa71d
+cell	invalid/call_yield_property_lookup.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	invalid/call_yield_property_lookup.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	invalid/call_yield_property_lookup.cypher	invalid/schemas/social.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	invalid/call_yield_property_lookup.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrCallArgAssignability	43b3862aa71d
@@ -168,6 +171,7 @@ cell	valid/call_arg_float_at_float.cypher	invalid/schemas/satisfy_plural_edges_r
 cell	valid/call_arg_float_at_float.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrCallArgAssignability	d3e803ef5267
 cell	valid/call_arg_float_at_float.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrCallArgAssignability	d3e803ef5267
 cell	valid/call_arg_float_at_float.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrCallArgAssignability	d3e803ef5267
+cell	valid/call_arg_float_at_float.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrCallArgAssignability	d3e803ef5267
 cell	valid/call_arg_float_at_float.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrCallArgAssignability	d3e803ef5267
 cell	valid/call_arg_float_at_float.cypher	invalid/schemas/social.gql	refuse	ErrCallArgAssignability	d3e803ef5267
 cell	valid/call_arg_float_at_float.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrCallArgAssignability	d3e803ef5267
@@ -210,6 +214,7 @@ cell	valid/call_arg_float_at_number.cypher	invalid/schemas/satisfy_plural_edges_
 cell	valid/call_arg_float_at_number.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrCallArgAssignability	04365e28ad10
 cell	valid/call_arg_float_at_number.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrCallArgAssignability	04365e28ad10
 cell	valid/call_arg_float_at_number.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrCallArgAssignability	04365e28ad10
+cell	valid/call_arg_float_at_number.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrCallArgAssignability	04365e28ad10
 cell	valid/call_arg_float_at_number.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrCallArgAssignability	04365e28ad10
 cell	valid/call_arg_float_at_number.cypher	invalid/schemas/social.gql	refuse	ErrCallArgAssignability	04365e28ad10
 cell	valid/call_arg_float_at_number.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrCallArgAssignability	04365e28ad10
@@ -252,6 +257,7 @@ cell	valid/call_arg_int_at_float.cypher	invalid/schemas/satisfy_plural_edges_rev
 cell	valid/call_arg_int_at_float.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrCallArgAssignability	6064854dad6f
 cell	valid/call_arg_int_at_float.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrCallArgAssignability	6064854dad6f
 cell	valid/call_arg_int_at_float.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrCallArgAssignability	6064854dad6f
+cell	valid/call_arg_int_at_float.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrCallArgAssignability	6064854dad6f
 cell	valid/call_arg_int_at_float.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrCallArgAssignability	6064854dad6f
 cell	valid/call_arg_int_at_float.cypher	invalid/schemas/social.gql	refuse	ErrCallArgAssignability	6064854dad6f
 cell	valid/call_arg_int_at_float.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrCallArgAssignability	6064854dad6f
@@ -294,6 +300,7 @@ cell	valid/call_arg_int_at_number.cypher	invalid/schemas/satisfy_plural_edges_re
 cell	valid/call_arg_int_at_number.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	23b80a383303
 cell	valid/call_arg_int_at_number.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	23b80a383303
 cell	valid/call_arg_int_at_number.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	23b80a383303
+cell	valid/call_arg_int_at_number.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	23b80a383303
 cell	valid/call_arg_int_at_number.cypher	invalid/schemas/satisfy_singular.gql	accept	-	23b80a383303
 cell	valid/call_arg_int_at_number.cypher	invalid/schemas/social.gql	accept	-	23b80a383303
 cell	valid/call_arg_int_at_number.cypher	invalid/schemas/social_ambiguous.gql	accept	-	23b80a383303
@@ -336,6 +343,7 @@ cell	valid/call_arg_null_at_typed.cypher	invalid/schemas/satisfy_plural_edges_re
 cell	valid/call_arg_null_at_typed.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_arg_null_at_typed.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_arg_null_at_typed.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrCallArgAssignability	43b3862aa71d
+cell	valid/call_arg_null_at_typed.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_arg_null_at_typed.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_arg_null_at_typed.cypher	invalid/schemas/social.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_arg_null_at_typed.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrCallArgAssignability	43b3862aa71d
@@ -378,6 +386,7 @@ cell	valid/call_arg_unknown_param.cypher	invalid/schemas/satisfy_plural_edges_re
 cell	valid/call_arg_unknown_param.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	8b5064941838
 cell	valid/call_arg_unknown_param.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	8b5064941838
 cell	valid/call_arg_unknown_param.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	8b5064941838
+cell	valid/call_arg_unknown_param.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	8b5064941838
 cell	valid/call_arg_unknown_param.cypher	invalid/schemas/satisfy_singular.gql	accept	-	8b5064941838
 cell	valid/call_arg_unknown_param.cypher	invalid/schemas/social.gql	accept	-	8b5064941838
 cell	valid/call_arg_unknown_param.cypher	invalid/schemas/social_ambiguous.gql	accept	-	8b5064941838
@@ -420,6 +429,7 @@ cell	valid/call_in_query_yield_as.cypher	invalid/schemas/satisfy_plural_edges_re
 cell	valid/call_in_query_yield_as.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	f3bcce92496d
 cell	valid/call_in_query_yield_as.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	f3bcce92496d
 cell	valid/call_in_query_yield_as.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	f3bcce92496d
+cell	valid/call_in_query_yield_as.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	f3bcce92496d
 cell	valid/call_in_query_yield_as.cypher	invalid/schemas/satisfy_singular.gql	accept	-	f3bcce92496d
 cell	valid/call_in_query_yield_as.cypher	invalid/schemas/social.gql	accept	-	f3bcce92496d
 cell	valid/call_in_query_yield_as.cypher	invalid/schemas/social_ambiguous.gql	accept	-	f3bcce92496d
@@ -462,6 +472,7 @@ cell	valid/call_in_query_yield_return.cypher	invalid/schemas/satisfy_plural_edge
 cell	valid/call_in_query_yield_return.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_in_query_yield_return.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_in_query_yield_return.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	ad7cd0ff41e8
+cell	valid/call_in_query_yield_return.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_in_query_yield_return.cypher	invalid/schemas/satisfy_singular.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_in_query_yield_return.cypher	invalid/schemas/social.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_in_query_yield_return.cypher	invalid/schemas/social_ambiguous.gql	accept	-	ad7cd0ff41e8
@@ -504,6 +515,7 @@ cell	valid/call_standalone_yield_items.cypher	invalid/schemas/satisfy_plural_edg
 cell	valid/call_standalone_yield_items.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_standalone_yield_items.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_standalone_yield_items.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrCallArgAssignability	43b3862aa71d
+cell	valid/call_standalone_yield_items.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_standalone_yield_items.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_standalone_yield_items.cypher	invalid/schemas/social.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_standalone_yield_items.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrCallArgAssignability	43b3862aa71d
@@ -546,6 +558,7 @@ cell	valid/call_standalone_yield_items_reordered.cypher	invalid/schemas/satisfy_
 cell	valid/call_standalone_yield_items_reordered.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_standalone_yield_items_reordered.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_standalone_yield_items_reordered.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrCallArgAssignability	43b3862aa71d
+cell	valid/call_standalone_yield_items_reordered.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_standalone_yield_items_reordered.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_standalone_yield_items_reordered.cypher	invalid/schemas/social.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_standalone_yield_items_reordered.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrCallArgAssignability	43b3862aa71d
@@ -588,6 +601,7 @@ cell	valid/call_standalone_yield_star_float.cypher	invalid/schemas/satisfy_plura
 cell	valid/call_standalone_yield_star_float.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	d494063493a2
 cell	valid/call_standalone_yield_star_float.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	d494063493a2
 cell	valid/call_standalone_yield_star_float.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	d494063493a2
+cell	valid/call_standalone_yield_star_float.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	d494063493a2
 cell	valid/call_standalone_yield_star_float.cypher	invalid/schemas/satisfy_singular.gql	accept	-	d494063493a2
 cell	valid/call_standalone_yield_star_float.cypher	invalid/schemas/social.gql	accept	-	d494063493a2
 cell	valid/call_standalone_yield_star_float.cypher	invalid/schemas/social_ambiguous.gql	accept	-	d494063493a2
@@ -630,6 +644,7 @@ cell	valid/call_standalone_yield_star_integer.cypher	invalid/schemas/satisfy_plu
 cell	valid/call_standalone_yield_star_integer.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	55c05f3a2f36
 cell	valid/call_standalone_yield_star_integer.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	55c05f3a2f36
 cell	valid/call_standalone_yield_star_integer.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	55c05f3a2f36
+cell	valid/call_standalone_yield_star_integer.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	55c05f3a2f36
 cell	valid/call_standalone_yield_star_integer.cypher	invalid/schemas/satisfy_singular.gql	accept	-	55c05f3a2f36
 cell	valid/call_standalone_yield_star_integer.cypher	invalid/schemas/social.gql	accept	-	55c05f3a2f36
 cell	valid/call_standalone_yield_star_integer.cypher	invalid/schemas/social_ambiguous.gql	accept	-	55c05f3a2f36
@@ -672,6 +687,7 @@ cell	valid/call_standalone_yield_star_non_nullable.cypher	invalid/schemas/satisf
 cell	valid/call_standalone_yield_star_non_nullable.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	ffdec5b2b23e
 cell	valid/call_standalone_yield_star_non_nullable.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	ffdec5b2b23e
 cell	valid/call_standalone_yield_star_non_nullable.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	ffdec5b2b23e
+cell	valid/call_standalone_yield_star_non_nullable.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	ffdec5b2b23e
 cell	valid/call_standalone_yield_star_non_nullable.cypher	invalid/schemas/satisfy_singular.gql	accept	-	ffdec5b2b23e
 cell	valid/call_standalone_yield_star_non_nullable.cypher	invalid/schemas/social.gql	accept	-	ffdec5b2b23e
 cell	valid/call_standalone_yield_star_non_nullable.cypher	invalid/schemas/social_ambiguous.gql	accept	-	ffdec5b2b23e
@@ -714,6 +730,7 @@ cell	valid/call_standalone_yield_star_number.cypher	invalid/schemas/satisfy_plur
 cell	valid/call_standalone_yield_star_number.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	aa64181cee63
 cell	valid/call_standalone_yield_star_number.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	aa64181cee63
 cell	valid/call_standalone_yield_star_number.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	aa64181cee63
+cell	valid/call_standalone_yield_star_number.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	aa64181cee63
 cell	valid/call_standalone_yield_star_number.cypher	invalid/schemas/satisfy_singular.gql	accept	-	aa64181cee63
 cell	valid/call_standalone_yield_star_number.cypher	invalid/schemas/social.gql	accept	-	aa64181cee63
 cell	valid/call_standalone_yield_star_number.cypher	invalid/schemas/social_ambiguous.gql	accept	-	aa64181cee63
@@ -756,6 +773,7 @@ cell	valid/call_standalone_yield_star_string_nullable.cypher	invalid/schemas/sat
 cell	valid/call_standalone_yield_star_string_nullable.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_standalone_yield_star_string_nullable.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_standalone_yield_star_string_nullable.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	ad7cd0ff41e8
+cell	valid/call_standalone_yield_star_string_nullable.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_standalone_yield_star_string_nullable.cypher	invalid/schemas/satisfy_singular.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_standalone_yield_star_string_nullable.cypher	invalid/schemas/social.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_standalone_yield_star_string_nullable.cypher	invalid/schemas/social_ambiguous.gql	accept	-	ad7cd0ff41e8
@@ -793,6 +811,7 @@ cell	valid/call_yield_before_match.cypher	invalid/schemas/satisfy_plural_edges_o
 cell	valid/call_yield_before_match.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	accept	-	6d3e5aed442d
 cell	valid/call_yield_before_match.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	6d3e5aed442d
 cell	valid/call_yield_before_match.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	6d3e5aed442d
+cell	valid/call_yield_before_match.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	6d3e5aed442d
 cell	valid/call_yield_before_match.cypher	invalid/schemas/social.gql	accept	-	6d3e5aed442d
 cell	valid/call_yield_before_match.cypher	invalid/schemas/social_edgeunion.gql	accept	-	6d3e5aed442d
 cell	valid/call_yield_before_match.cypher	invalid/schemas/social_r2.gql	accept	-	6d3e5aed442d
@@ -829,6 +848,7 @@ cell	valid/call_yield_carry_forward.cypher	invalid/schemas/satisfy_plural_edges_
 cell	valid/call_yield_carry_forward.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_yield_carry_forward.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_yield_carry_forward.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	ad7cd0ff41e8
+cell	valid/call_yield_carry_forward.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_yield_carry_forward.cypher	invalid/schemas/satisfy_singular.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_yield_carry_forward.cypher	invalid/schemas/social.gql	accept	-	ad7cd0ff41e8
 cell	valid/call_yield_carry_forward.cypher	invalid/schemas/social_ambiguous.gql	accept	-	ad7cd0ff41e8
@@ -871,6 +891,7 @@ cell	valid/call_yield_carry_with_alias.cypher	invalid/schemas/satisfy_plural_edg
 cell	valid/call_yield_carry_with_alias.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	accept	-	f3bcce92496d
 cell	valid/call_yield_carry_with_alias.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	f3bcce92496d
 cell	valid/call_yield_carry_with_alias.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	f3bcce92496d
+cell	valid/call_yield_carry_with_alias.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	f3bcce92496d
 cell	valid/call_yield_carry_with_alias.cypher	invalid/schemas/satisfy_singular.gql	accept	-	f3bcce92496d
 cell	valid/call_yield_carry_with_alias.cypher	invalid/schemas/social.gql	accept	-	f3bcce92496d
 cell	valid/call_yield_carry_with_alias.cypher	invalid/schemas/social_ambiguous.gql	accept	-	f3bcce92496d
@@ -908,6 +929,7 @@ cell	valid/call_yield_mixed_return.cypher	invalid/schemas/satisfy_plural_edges_o
 cell	valid/call_yield_mixed_return.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	accept	-	2a0054efd24d
 cell	valid/call_yield_mixed_return.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	accept	-	2a0054efd24d
 cell	valid/call_yield_mixed_return.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	accept	-	2a0054efd24d
+cell	valid/call_yield_mixed_return.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	accept	-	2a0054efd24d
 cell	valid/call_yield_mixed_return.cypher	invalid/schemas/social.gql	accept	-	2a0054efd24d
 cell	valid/call_yield_mixed_return.cypher	invalid/schemas/social_edgeunion.gql	accept	-	2a0054efd24d
 cell	valid/call_yield_mixed_return.cypher	invalid/schemas/social_r2.gql	accept	-	2a0054efd24d
@@ -944,6 +966,7 @@ cell	valid/call_yield_two_columns.cypher	invalid/schemas/satisfy_plural_edges_re
 cell	valid/call_yield_two_columns.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_yield_two_columns.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_yield_two_columns.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrCallArgAssignability	43b3862aa71d
+cell	valid/call_yield_two_columns.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_yield_two_columns.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_yield_two_columns.cypher	invalid/schemas/social.gql	refuse	ErrCallArgAssignability	43b3862aa71d
 cell	valid/call_yield_two_columns.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrCallArgAssignability	43b3862aa71d
