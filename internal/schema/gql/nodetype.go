@@ -1,9 +1,6 @@
 package gql
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
@@ -63,18 +60,12 @@ func labelSet(p gen.ILabelSetPhraseContext) (graph.LabelSet, error) {
 	return labels, nil
 }
 
-// labelName reads one label as the name it denotes, refusing a decoded name that
-// carries the separator graph.LabelSet.Key joins on. See ErrAmpersandInLabel for
-// why the refusal is here — the label is the last place the two label sets are
-// still distinguishable — and bd gqlc-yd4ba for making such a label
-// representable instead.
+// labelName reads one label as the name it denotes. Every byte a delimited
+// identifier can hold is admitted, including the "&" that graph.LabelSet.Key
+// joins on: the key quotes such a label rather than colliding on it, so there is
+// nothing left here to refuse (bd gqlc-649co). Refusing it was this function's
+// job only while the key was unquoted, and a refusal would have had to be copied
+// into every front end that reads a label.
 func labelName(n gen.ILabelNameContext) (string, error) {
-	label, err := identifierName(n.Identifier())
-	if err != nil {
-		return "", err
-	}
-	if strings.Contains(label, "&") {
-		return "", fmt.Errorf("%w: %q", ErrAmpersandInLabel, label)
-	}
-	return label, nil
+	return identifierName(n.Identifier())
 }

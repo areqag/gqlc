@@ -1,0 +1,15 @@
+-- A label carrying the separator graph.LabelSet.Key joins on. This file lived in
+-- invalid/ until gqlc-649co, because the key joined labels with an unquoted "&"
+-- and this one-label set therefore keyed identically to the two-label set
+-- (:Person&Employee) — the node type's identity, forged.
+--
+-- The key quotes such a label now, so the declaration is admitted and this
+-- golden is the one place the quoting is visible in serialised form: key_labels
+-- reads "`Person&Employee`", carrying delimiters the ENCODING added rather than
+-- the ones the author wrote. That spelling is the whole point of the file. A
+-- change that dropped the parser's refusal without quoting the key would parse
+-- this fixture happily and spell the key "Person&Employee", which is exactly the
+-- forgery, and only the golden would say so.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:`Person&Employee` { id :: INT })
+}

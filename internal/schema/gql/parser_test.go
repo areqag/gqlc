@@ -363,6 +363,14 @@ func (s *ParserSuite) TestEndpointFillerMixedRejectionsReportTheSource() {
 // The two arms are the `=>` split: a filler written with `=>` is named by the key
 // label set before it, a `=>`-less one by its implied content. One row per
 // spelling is what reaches both.
+//
+// The vehicle is ErrNoEscapeIdentifier, an identifier-level refusal raised by
+// identifierName underneath labelSet. It was ErrAmpersandInLabel until
+// gqlc-649co, which deleted that sentinel; the substitution is free because what
+// this test pins is the FORWARDING, and any refusal labelSet can return exercises
+// it identically. What it does need is a refusal raised BELOW fillerLabels rather
+// than by fillerLabels itself, which is what the paragraph above says the two
+// tests before it already cover.
 func (s *ParserSuite) TestEndpointFillerForwardsALabelRefusal() {
 	cases := []struct {
 		name string
@@ -370,17 +378,17 @@ func (s *ParserSuite) TestEndpointFillerForwardsALabelRefusal() {
 	}{
 		{
 			name: "`=>`-less filler, the implied-content arm",
-			src:  "(:Person), (:`A&B`) -[:AUTHORED]-> (:Person)",
+			src:  `(:Person), (:@"A") -[:AUTHORED]-> (:Person)`,
 		},
 		{
 			name: "key-label-set filler, the `=>` arm",
-			src:  "(:Person), (:`A&B` =>) -[:AUTHORED]-> (:Person)",
+			src:  `(:Person), (:@"A" =>) -[:AUTHORED]-> (:Person)`,
 		},
 	}
 	for _, tt := range cases {
 		s.Run(tt.name, func() {
 			got, err := gql.New().Parse(strings.NewReader(graphType(tt.src)))
-			s.Require().ErrorIs(err, gql.ErrAmpersandInLabel)
+			s.Require().ErrorIs(err, gql.ErrNoEscapeIdentifier)
 			s.Require().NotErrorIs(err, gql.ErrUnknownEndpoint,
 				"a swallowed arm degrades to this: nil labels key as the empty label set, which matches no declaration")
 			s.Equal(schema.Schema{}, got, "model must be the zero value on error")
@@ -1159,17 +1167,20 @@ var invalidFixtures = map[string]error{
 	"endpoint_filler_properties.gql": gql.ErrEndpointFillerHasProperties,
 	"multi_label_edge.gql":           gql.ErrMultiLabelEdgeType,
 
-	// The four identifier declines, in invalid/ rather than the corpus for the
+	// The three identifier declines, in invalid/ rather than the corpus for the
 	// reason argued above: each is a judgment about a SPELLING — an @ prefix, an
-	// empty decode, an escape denoting no character, a label carrying the key
-	// separator — and none of them is a construct that becomes supported later
-	// and takes its fixture with it. gqlc-yd4ba could make the ampersand one
-	// representable, and its fixture would then move to a valid one in the same
-	// commit; that is a rewrite of this row, not an orphan left behind.
+	// empty decode, an escape denoting no character — and none of them is a
+	// construct that becomes supported later and takes its fixture with it.
+	//
+	// A fourth stood here until gqlc-649co: ampersand_in_label.gql, pinning
+	// ErrAmpersandInLabel. It is the exception the paragraph above anticipated —
+	// graph.LabelSetKey quotes such a label now instead of colliding on it, so
+	// the sentinel is gone and the fixture moved to valid/ in that same commit,
+	// where its golden pins the quoted key spelling. That is a rewrite of this
+	// row, not an orphan left behind.
 	"no_escape_identifier.gql": gql.ErrNoEscapeIdentifier,
 	"empty_identifier.gql":     gql.ErrEmptyIdentifier,
 	"identifier_escape.gql":    gql.ErrIdentifierEscape,
-	"ampersand_in_label.gql":   gql.ErrAmpersandInLabel,
 }
 
 // allSentinels is the canonical list of every Parse sentinel — the single source
@@ -1216,7 +1227,6 @@ var allSentinels = map[string]error{
 	"ErrNoEscapeIdentifier":          gql.ErrNoEscapeIdentifier,
 	"ErrEmptyIdentifier":             gql.ErrEmptyIdentifier,
 	"ErrIdentifierEscape":            gql.ErrIdentifierEscape,
-	"ErrAmpersandInLabel":            gql.ErrAmpersandInLabel,
 }
 
 // sentinelsWithoutAFile are the package's error values allSentinels deliberately
