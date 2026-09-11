@@ -1335,16 +1335,24 @@ func anyValueColumnsAgreeOnNull(ctx context.Context, t *testing.T, b backend) { 
 //     it away from the decoder. Without this row a decoder wired to run
 //     unconditionally would look identical on every row above.
 //
-// Both callers of the helper are driven. rowColumns is the projected-column
-// lane and rowWhole the vertex-property lane in models.go; they hand the same
-// helper different bytes, and a guard present in one is not a guard in the
-// other.
+// Both callers of the helper are driven, in BOTH directions. rowColumns is the
+// projected-column lane and rowWhole the vertex-property lane in models.go;
+// they hand the same helper different bytes, and a guard present in one is not
+// a guard in the other. Until bd gqlc-6jyp only the arrival direction went
+// through the vertex lane and both refusals went through the column lane alone,
+// which is this scenario's own premise applied one level short: an emitter that
+// dropped the vertex lane's error check — the `if err != nil` beside each
+// `decode Row.<F>: property %q` wrap — would have hidden every refusal behind a
+// zero value and left the whole battery green.
 //
 // The wordings asserted are the INTERSECTION of what the two backends spell,
 // which is why they are substrings rather than whole messages: neo4j reports a
 // Go carrier it dispatched on and AGE the agtype text it parsed. The shared
 // spine — the union's own name, the column's name, and the narrowing
-// sentence — is identical on both, and that is what is held here.
+// sentence — is identical on both, and that is what is held here. The vertex
+// lane narrows that intersection further: neo4j names the property a second
+// time (`decode Row.Pick: property "pick":`) where AGE wraps as `decode
+// Row.Pick:` alone, so `decode Row.Pick` is the whole of what both spell.
 func unionColumnDecode(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
 	q := b.unionColumns()
 
@@ -1364,8 +1372,6 @@ func unionColumnDecode(ctx context.Context, t *testing.T, b backend) { //nolint:
 	// The other caller of the same helpers: the vertex-property lane.
 	whole, err := q.rowWhole(ctx)
 	require.NoError(t, err, "the same widths must decode off the vertex-property lane")
-	require.NotErrorIs(t, err, q.errNoRows(),
-		"the vertex was seeded, so a no-rows error means this half stopped testing what it names")
 	requireUnionMember(t, whole.Pick, int32(7), "Row.Pick")
 	requireUnionMember(t, whole.Also, "seven", "Row.Also")
 	requireUnionMember(t, whole.Flag, true, "Row.Flag")
@@ -1402,6 +1408,28 @@ func unionColumnDecode(ctx context.Context, t *testing.T, b backend) { //nolint:
 	require.ErrorContains(t, err, "does not fit the declared int32 width",
 		"and it must be the NARROWING sentence: this value is a member of the set, so a membership refusal here would mean the decoder never reached the narrow")
 
+	// The same refusal through the OTHER lane, on the same stored value. The
+	// vertex lane reaches the helper through a different emitted line — a
+	// per-property call site in models.go rather than a per-column one in
+	// queries.cypher.go — and its error check is emitted separately, so the row
+	// above says nothing about whether this one propagates at all.
+	_, err = q.rowWhole(ctx)
+	require.Error(t, err,
+		"a value outside the declared width must fail the row off the vertex-property lane too; "+
+			"the property call site swallowing the helper's error would hand back a nil Pick beside a nil error, "+
+			"which is the shape a legitimately absent property has")
+	// This is where the no-rows distinction can actually fire: rowWhole is a
+	// :one, so an arm whose seed never landed answers ErrNoRows, and a bare
+	// require.Error above would be satisfied by it while nothing under test ran.
+	require.NotErrorIs(t, err, q.errNoRows(),
+		"the vertex was seeded, so a no-rows error means this half stopped testing what it names")
+	require.ErrorContains(t, err, "decode Row.Pick",
+		"the refusal must name the FIELD it came from; also and flag hold decodable values here, so a refusal naming either is the wrong property having failed")
+	require.ErrorContains(t, err, "UNION<INT32|STRING>",
+		"and the union whose member set it was held against")
+	require.ErrorContains(t, err, "does not fit the declared int32 width",
+		"and the narrowing sentence, for the reason the column lane's row above gives")
+
 	// The membership refusal, which is a different defect and is asserted
 	// apart from the one above. 2.5 is in no member's family at all.
 	b.seed(ctx, t, "MATCH (r:Row {id: 1}) SET r.pick = 2.5")
@@ -1414,6 +1442,19 @@ func unionColumnDecode(ctx context.Context, t *testing.T, b backend) { //nolint:
 	require.NotContains(t, err.Error(), "does not fit the declared",
 		"a value in no member's family must not be reported as a narrowing failure: the two refusals answer different questions, "+
 			"and a test that cannot tell them apart witnesses neither")
+
+	// And the membership refusal through the vertex lane. Both refusals are
+	// driven through both lanes rather than one each: the two are separate
+	// emitted paths through the helper on each lane, and a lane that collapsed
+	// them into one another is the defect the column lane's pair already
+	// refuses to accept.
+	_, err = q.rowWhole(ctx)
+	require.Error(t, err,
+		"a value in no member's family must fail the row off the vertex-property lane too")
+	require.ErrorContains(t, err, "decode Row.Pick")
+	require.ErrorContains(t, err, "UNION<INT32|STRING>")
+	require.NotContains(t, err.Error(), "does not fit the declared",
+		"and it must still be the MEMBERSHIP refusal on this lane: a lane that reported it as a narrowing failure would be answering the other question")
 
 	// The negative control. No member of a closed union carries nil, so the
 	// decoder refuses nil by construction and a nil here is the emitted
