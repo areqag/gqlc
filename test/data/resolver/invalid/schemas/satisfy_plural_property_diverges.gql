@@ -1,0 +1,33 @@
+-- Two node types satisfy `(:Person)` and BOTH declare `tenure`, so a property
+-- projection through the plural binding walks past unionNodeProperty's
+-- missing-on-a-candidate arm and reaches its divergence arm — the shape no
+-- other corpus schema has (bd gqlc-xeux). Every other plural schema either
+-- declares the projected property identically on every satisfying type, so the
+-- ADR 0022 intersection succeeds, or omits it from one, so the miss answers
+-- first.
+--
+-- The divergence is on NULLABILITY ALONE and not on type, which is what makes
+-- the fixture load-bearing rather than merely reaching. ResolvedProperty's
+-- Stringer is the JSON wire tag and drops Nullable, so under the bare Stringer
+-- the two sides of the refusal render the same text and the message says
+-- nothing about what to change; only describeColumnType's nullability note
+-- separates them. A type divergence would be visible either way.
+--
+-- No bare (:Person) is declared: with one, `(p:Person)` would exact-match it
+-- and the plural lane would never run.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralPropertyDiverges AS {
+
+    (:Person&Contractor {
+        id     :: INT NOT NULL,
+        name   :: STRING NOT NULL,
+        tenure :: INT NOT NULL
+    }),
+
+    (:Person&Employee {
+        id     :: INT NOT NULL,
+        name   :: STRING NOT NULL,
+        tenure :: INT
+    })
+
+}

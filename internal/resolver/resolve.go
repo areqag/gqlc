@@ -1889,12 +1889,15 @@ func unionNodeProperty(nts []schema.NodeType, refVar, refProp string, bindingNul
 			continue
 		}
 		if hit.Type != first.Type || hit.Nullable != first.Nullable {
-			// Unwitnessed, unlike the other two sites rendered this way: no
-			// corpus cell reaches this message, so reverting it to the bare
-			// Stringer pair reddens nothing. Getting here needs two node types
-			// that share a label and disagree about this property, a shape no
-			// corpus schema has, so a fixture costs a new schema rather than a
-			// new query (bd gqlc-xeux).
+			// Reaching this needs two node types that share a label and
+			// disagree about a property they BOTH declare, which no corpus
+			// schema had when PR #2694 rendered the pair this way — so the
+			// bare-Stringer revert reddened nothing here while it reddened the
+			// two sibling sites. satisfy_plural_property_diverges.gql is the
+			// schema that was missing, and the arm is now held by
+			// plural_satisfying_property_nullability_differs.cypher's pin in
+			// invalidFixtureContains, which disagrees on nullability alone and
+			// so is satisfied by no bare Stringer (bd gqlc-xeux).
 			return nil, fmt.Errorf("%w: %s.%s type differs across plural-satisfying types: %s vs %s", ErrUnknownProperty, refVar, refProp, describeColumnType(first), describeColumnType(hit))
 		}
 	}
