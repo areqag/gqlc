@@ -384,6 +384,28 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 // Absence is the schema's null on the nullable arm and a decode failure
 // on the non-nullable one, worded the way neo4j.GetProperty words its
 // own miss so that a caller cannot tell which arm reported it.
+//
+// THE NON-NULLABLE ARM GATES ON PRESENCE AND NOTHING ELSE, and that is
+// deliberate rather than an omission (bd gqlc-wc5j). `any` is the one
+// emitted width inhabited by nil, so a key PRESENT with a nil value
+// would deliver nil out of a property the schema declares NOT NULL,
+// beside a nil error — the shape bd gqlc-tez0 closed one axis down, in
+// the COLUMN path, where a null genuinely does arrive.
+//
+// It does not arrive here because a neo4j property has no null state:
+// every route by which a caller could try to store one either REMOVES
+// the key or is refused, so `!ok` is already the whole of the refusal
+// and a nil check would have no input to check. Dead code in a decoder
+// is worse than none — it reads as evidence that the state occurs.
+//
+// That claim is the SERVER's, not this project's, so nothing in this
+// repository can hold it and no image bump would announce its breaking.
+// TestNeo4jNeverHandsBackANullValuedProperty, in test/data/codegen's
+// live_null_valued_property_test.go, enumerates those routes against a
+// real server and goes red naming the one that stored a null, which is
+// the same breath in which this paragraph stops being true. The AGE
+// emission rests on the identical claim about its own server, stated at
+// agtypeProperty, and is witnessed by the AGE arm beside it.
 func writeShapelessFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, arg string) {
 	if f.Nullable {
 		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)

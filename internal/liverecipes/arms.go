@@ -63,4 +63,6 @@ var LiveArms = map[string]Arm{
 	"TestAGEStoresANestedListProperty":              ArmAGE,
 	"TestAGEStoresARecordProperty":                  ArmAGE,
 	"TestAGEMatchesATemporalListParameter":          ArmAGE,
+	"TestNeo4jNeverHandsBackANullValuedProperty":    ArmNeo4j,
+	"TestAGENeverHandsBackANullValuedProperty":      ArmAGE,
 }
