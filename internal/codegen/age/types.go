@@ -263,10 +263,12 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// declared type, which is the silent widening §5.1 exists to
 		// refuse.
 		//
-		// The refusal carries NO backend name today, because no
-		// enrolled target carries UUID either — see
-		// uncarriedEverywhere, which is where that claim is made and
-		// where the note on when it stops being true lives.
+		// The refusal NAMES this backend, which it did not until
+		// stage 2 of bd gqlc-eg4b: neo4j-go-v6 carries UUID as
+		// dbtype.UUID, so this is AGE's answer rather than the
+		// declaration's obstacle and an author reading it has somewhere
+		// to go. The name follows from UUID's absence from
+		// uncarriedEverywhere rather than from anything written here.
 		return "", false
 	case graph.TypeBytes,
 		graph.TypeInt128, graph.TypeInt256,

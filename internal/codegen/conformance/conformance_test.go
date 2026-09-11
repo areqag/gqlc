@@ -655,10 +655,10 @@ func TestSentinelReachability(t *testing.T) {
 // at least one invalid fixture.
 //
 // The rule it enforces is that publication is opt-in and a witness is
-// not. A backend may publish nothing — the two neo4j entries do — but a
-// name it does publish is a claim that the corpus records that refusal,
-// and an unwitnessed one is dead machinery that reads from the outside
-// exactly like coverage. One witnessing fixture anywhere suffices: this
+// not. A backend may publish nothing — nothing enrolled does today, but
+// the registry admits it — and a name it does publish is a claim that
+// the corpus records that refusal, and an unwitnessed one is dead
+// machinery that reads from the outside exactly like coverage. One witnessing fixture anywhere suffices: this
 // asks whether the name is reachable, not whether every target reaches
 // it, and TestInvalid's per-target ErrorIs is what holds the fixture to
 // the behaviour.
@@ -1404,6 +1404,14 @@ var driverSliceCarriers = map[string]bool{
 // before. dbtype.Duration flipped that way: temporal_list_param declares
 // LIST<DURATION> for its nullable list parameter, and the property side
 // of that declaration walks the list and asserts the element.
+//
+// dbtype.UUID is the first entry only ONE of the two majors can produce —
+// the type landed in v6.2.0 and v5.28.4 has no counterpart — and the ledger
+// has no target axis to say so on. It does not need one: the sweep is over
+// every neo4j golden at once, so a carrier is witnessed if any target's
+// emission names it, and uuid_property is a v6-only fixture for the same
+// reason. What would redden here is v6 ceasing to assert it, which is the
+// question the flag is for.
 var driverScalarCarriers = map[string]bool{
 	"bool":                true,
 	"int64":               true,
@@ -1413,6 +1421,7 @@ var driverScalarCarriers = map[string]bool{
 	"dbtype.Date":         true,
 	"dbtype.Duration":     true,
 	"dbtype.Relationship": true,
+	"dbtype.UUID":         true,
 
 	"map[string]any":       false,
 	"dbtype.Point2D":       false,

@@ -128,7 +128,7 @@ func TestRecordUseAnswersForExactlyTheSharedEncodingSet(t *testing.T) {
 	require.ElementsMatch(t, want, shared,
 		"the premise: the fixture really does reach all five records, so neither walk can be right by reaching none")
 
-	require.Equal(t, shared, neo4j.RecordUseEncodings(prepared),
+	require.Equal(t, shared, neo4j.RecordUseEncodings(prepared, neo4j.TypeMap{}),
 		"conversionUses must answer for exactly the encodings RecordEncodings names — both are sorted, so this compares order too")
 }
 
@@ -206,7 +206,7 @@ func TestRecordHelpersAreEmittedOnlyWhereCalled(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out := string(neo4j.RenderRecordHelpers("db", all,
-				map[graph.PropertyType]neo4j.CarrierUseFlags{pt: tc.use}))
+				map[graph.PropertyType]neo4j.CarrierUseFlags{pt: tc.use}, neo4j.TargetV5))
 
 			require.Contains(t, out, "type record",
 				"the alias is owed whichever direction is reached — every signature names it")
@@ -265,7 +265,7 @@ func TestRecordHelperErrorsBalanceTheirVerbs(t *testing.T) {
 	)
 	use := neo4j.CarrierUseFlags{Decode: true, Encode: true}
 	out := neo4j.RenderRecordHelpers("db", []graph.PropertyType{pt, inner},
-		map[graph.PropertyType]neo4j.CarrierUseFlags{pt: use, inner: use})
+		map[graph.PropertyType]neo4j.CarrierUseFlags{pt: use, inner: use}, neo4j.TargetV5)
 
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "record_neo4j.go", out, 0)
@@ -358,7 +358,7 @@ func TestARecordPropertyGetsASiteNamedAlias(t *testing.T) {
 		},
 	}
 
-	src := string(neo4j.RenderModels("models", []codegen.Entity{e}, nil))
+	src := string(neo4j.RenderModels("models", []codegen.Entity{e}, nil, neo4j.TargetV5))
 
 	// assert and not require, for the reason the age twin records: under
 	// require the Contains failure aborts the NotContains arm, so a
