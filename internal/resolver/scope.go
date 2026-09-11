@@ -3,6 +3,7 @@ package resolver
 import (
 	"fmt"
 
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/schema"
@@ -1019,6 +1020,16 @@ func (s *scope) projectionType(p query.Projection, sch schema.Schema) (ResolvedT
 	case query.ExprProjection:
 		return s.certifiedProjectionType(pp.Type(), pp.Refs(), pp.LeavesAreRefs(), sch)
 	case query.AggregateProjection:
+		// The bare unknown is overloaded as a TYPE and not as a PROJECTION:
+		// Func() is in the shared model and separates "the operand's type was
+		// not committed at parse time" from "the fold is engine-dependent"
+		// without the resolver ever consulting the parser's fold table (spec
+		// ruling-p9qgu §1). min/max SELECT and so take the selection sibling;
+		// collect folds into a list spine and keeps certifiedProjectionType
+		// verbatim; everything else keeps today's answer.
+		if fn := pp.Func(); fn == query.AggMin || fn == query.AggMax {
+			return s.selectionProjectionType(pp.Type(), pp.Refs(), pp.LeavesAreRefs(), sch)
+		}
 		return s.certifiedProjectionType(pp.Type(), pp.Refs(), pp.LeavesAreRefs(), sch)
 	default:
 		return nil, fmt.Errorf("%w: unknown projection variant (%T)", ErrOutOfR0Scope, p)
@@ -1050,6 +1061,120 @@ func (s *scope) certifiedProjectionType(t query.Type, refs []query.Ref, certifie
 		return base, nil
 	}
 	return fillLeaf(base, leaf, false), nil
+}
+
+// selectionProjectionType resolves min/max's column type (spec
+// ruling-p9qgu-fold-result-upgrade.md §3.1, §4). min and max do not FOLD, they
+// SELECT: the result is one of the operand's own values, unchanged, so it is
+// exactly as representable as the property is and the machinery that already
+// round-trips `RETURN p.age` through a driver's 64-bit integer into a declared
+// INT32 — ADR 0002's width preservation with ADR 0037's out-of-width read
+// refusal — covers the aggregate result with nothing added. There is no fold
+// table here and there must not be one.
+//
+// It is a SIBLING of certifiedProjectionType rather than a flag on it, and
+// fillLeaf is deliberately not on this path. fillLeaf's underList parameter is
+// the never-fill-a-bare-unknown belt, and min/max fill a bare unknown; reaching
+// it by passing underList=true or deleting the condition would authorise avg's
+// fill as a side effect, silently, which is the one thing that belt exists to
+// stop (ruling §4).
+//
+// Three ways this is NOT the operand's type verbatim:
+//
+//   - Nullable is forced TRUE. min/max over an EMPTY GROUP are NULL, so the
+//     column is nullable even where the property is declared NOT NULL and the
+//     binding is non-nullable. Reusing refProjectionType's nullability verbatim
+//     would emit a non-pointer field that receives NULL — the ADR 0041 defect
+//     in the other direction.
+//   - Only an ORDERABLE family fills. BYTES is not orderable and must not be
+//     admitted; see orderableSelection.
+//   - Only a ResolvedProperty fills. min(n) over a node binding degrades to
+//     base, which is today's any.
+//
+// The single ref is resolved through s.refProjectionType REUSED VERBATIM, which
+// is f45qn §5's consistency invariant: a certified projection's leaf type is
+// byte-identical to what the same ref projected BARE would resolve to, because
+// it goes through the one reader rather than a second reading of the schema.
+// The named acceptance change rides on that reuse — min(p.nosuch) now refuses
+// ErrUnknownProperty where it was silently any, exactly as collect already does.
+//
+// len(refs) != 1 degrades rather than refusing, and rides the same guard as the
+// uncertified case because it is the same answer for the same reason: there is
+// nothing to upgrade base FROM. The depth-0 mint condition makes a certified
+// min/max operand a single bare var/var.prop, so it is a belt against a future
+// mint site rather than a reachable arm today. It shares that guard's return
+// spelling deliberately — TestNilColumnTypeIsNotConstructible requires every
+// arm returning a value it did not build to be distinguishable BY ITS RETURN
+// TEXT, so two arms with one recorded argument must be one arm.
+func (s *scope) selectionProjectionType(t query.Type, refs []query.Ref, certified bool, sch schema.Schema) (ResolvedType, error) {
+	base, err := resolveType(t)
+	if err != nil || !certified || len(refs) != 1 {
+		return base, err
+	}
+	rt, err := s.refProjectionType(refs[0], sch)
+	if err != nil {
+		return nil, err
+	}
+	prop, ok := rt.(ResolvedProperty)
+	if !ok || !orderableSelection(prop.Type) {
+		return base, nil
+	}
+	prop.Nullable = true
+	return prop, nil
+}
+
+// orderableSelection reports whether a min/max over a property of this declared
+// type yields a value of that same type — i.e. whether the family carries a
+// total order the selection preserves (spec ruling-p9qgu §3.1).
+//
+// It is NOT aggregateResultType and is NOT derived from it, and it must not be
+// described as a copy of it. That table is query.Type -> query.Type over the
+// parser's WIDTH-FREE types; this one is a predicate over graph.PropertyType,
+// which carries the width ADR 0002 exists to preserve. Calling the parser's
+// table from here would mean demoting ResolvedProperty{INT32} to
+// query.TypeInt{} and then inventing a width for the answer, which is
+// discarding the fidelity ADR 0002 commits to and re-guessing it one line later
+// (ruling §2). The two range over different domains and answer different
+// questions.
+//
+// It is an ALLOW-list, so anything unenumerated degrades to any — the safe
+// direction, since a wrong concrete type is strictly worse than an honest
+// unknown. What that excludes, and why:
+//
+//   - BYTES. The ruling's named negative: not ordered by the aggregate.
+//   - DECIMAL. Not among the families the ruling enumerates. Excluding it
+//     degrades to any, which costs a column its type and cannot be wrong;
+//     admitting it would be a decision no one has made.
+//   - ANY, LIST<ANY>, RECORD<ANY> and every composite spelling (LIST<INT32>,
+//     RECORD<...>). Ordering these is engine-dependent at best, and "can
+//     min/max over a list be typed" is explicitly not opened by the ruling.
+//
+// PropertyType is a string type with an open composite grammar rather than a
+// closed enum, so this cannot be written as an exhaustive switch over declared
+// constants; TestOrderableSelectionNamesEveryPropertyType holds the verdict for
+// every constant internal/graph declares, which is where the arms this corpus
+// does not reach are witnessed.
+func orderableSelection(t graph.PropertyType) bool {
+	switch t {
+	case graph.TypeString, graph.TypeBool,
+		graph.TypeDate, graph.TypeTime, graph.TypeLocalTime,
+		graph.TypeTimestamp, graph.TypeDuration,
+		graph.TypeInt, graph.TypeInt8, graph.TypeInt16, graph.TypeInt32,
+		graph.TypeInt64, graph.TypeInt128, graph.TypeInt256,
+		graph.TypeUint, graph.TypeUint8, graph.TypeUint16, graph.TypeUint32,
+		graph.TypeUint64, graph.TypeUint128, graph.TypeUint256,
+		graph.TypeFloat, graph.TypeFloat16, graph.TypeFloat32,
+		graph.TypeFloat64, graph.TypeFloat128, graph.TypeFloat256:
+		return true
+	default:
+		// The allow-list's point, and also what keeps `exhaustive` off this
+		// switch: it runs default-signifies-exhaustive, so a default arm is
+		// the declaration that the unenumerated constants are handled
+		// deliberately. That linter could not hold the full set anyway — the
+		// composite spellings are not constants — which is why the verdict
+		// table lives in a test instead.
+		return false
+	}
 }
 
 // unifiedRefPropertyType resolves every ref of a certified projection and

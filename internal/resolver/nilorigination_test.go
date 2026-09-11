@@ -65,6 +65,7 @@ var auditedSurface = []string{
 	"projectionType",
 	"refProjectionType",
 	"resolveType",
+	"selectionProjectionType",
 	"unionNodeProperty",
 	"unionProperty",
 }
@@ -116,6 +117,22 @@ var nonConstructingReturns = map[string]string{
 	// VALUE, which is never a nil interface. It cannot introduce a nil into a
 	// tree that had none, and base had none by the row above.
 	"certifiedProjectionType: return fillLeaf(base, leaf, false), nil": "fillLeaf returns base's own nodes, a ResolvedList literal, or the ResolvedProperty value it was given",
+
+	// min/max's sibling (bd gqlc-b8m8f). Both base arms inherit
+	// certifiedProjectionType's argument verbatim, because they ARE the same
+	// arms over the same resolveType call. The `err` arm carries one extra
+	// condition this function's twin does not have — the arity degrade — which
+	// is folded onto it rather than given its own return precisely because the
+	// row below would then license two arms by spelling alone.
+	"selectionProjectionType: return base, nil": "base is resolveType's non-nil return, reached only on its nil-error path",
+	"selectionProjectionType: return base, err": "either err is non-nil, or resolveType succeeded and base is its non-nil return; neither is a nil type on a nil error",
+
+	// The filling arm. prop is the ResolvedProperty that refProjectionType
+	// returned, type-asserted out of the interface and so a struct VALUE by the
+	// time this reads it; forcing Nullable rewrites a bool field and cannot
+	// make it nil. A struct in an interface is never a nil interface, which is
+	// the same argument the two union rows above rest on.
+	"selectionProjectionType: return prop, nil": "prop is a ResolvedProperty value obtained by type assertion; a struct in an interface is never a nil interface",
 }
 
 // carryWriters is every assignment into the two maps that move a resolved

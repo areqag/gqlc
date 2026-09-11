@@ -33,7 +33,8 @@
                   }
                 ],
                 "distinct": false,
-                "type": "unknown"
+                "type": "unknown",
+                "leavesAreRefs": true
               }
             }
           ],

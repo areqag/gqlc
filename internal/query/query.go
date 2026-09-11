@@ -1433,9 +1433,9 @@ func NewAggregateProjection(fn AggregateFunc, refs []Ref, distinct bool, t Type)
 
 // NewAggregateProjectionWithAxes builds an AggregateProjection carrying every
 // axis, including the ref-valued-leaf certificate. leavesAreRefs is minted by
-// classifyAggregateCall for collect alone, and only when its single argument
-// is a uniform-depth tree of bare refs; see LeavesAreRefs for what the bit
-// asserts. The certificate is appended after the pre-existing parameters
+// classifyAggregateCall for collect, min and max, and each under its own depth
+// condition; see LeavesAreRefs for what the bit asserts and what splits them.
+// The certificate is appended after the pre-existing parameters
 // rather than placed beside distinct, so no call site can transpose two
 // adjacent bools.
 func NewAggregateProjectionWithAxes(fn AggregateFunc, refs []Ref, distinct bool, t Type, leavesAreRefs bool) AggregateProjection {
@@ -1463,10 +1463,22 @@ func (p AggregateProjection) Type() Type { return p.resultType }
 
 // LeavesAreRefs is the ref-valued-leaf certificate — the same axis
 // ExprProjection.LeavesAreRefs documents, which states what the bit asserts.
-// Only collect mints it, because collect(T) = list<T> puts the operand's
-// values at the result type's unknown leaf verbatim. sum/min/max/avg never
-// mint: their unknown is the result of a fold, or engine-dependent, and no
-// schema lookup may overwrite it (spec model-change-f45qn §1 answer 3).
+//
+// collect, min and max mint it, at different depths and for different reasons.
+// collect(T) = list<T> puts the operand's values at the result type's unknown
+// leaf verbatim, so ANY depth qualifies. min/max SELECT rather than fold — the
+// result is one of the operand's own values, unchanged — so depth 0 EXACTLY
+// qualifies; at any greater depth the operand is a list and the aggregate
+// orders lists, which spec ruling-p9qgu deliberately does not open.
+//
+// sum and avg/stDev/percentile* never mint: sum's unknown is the result of a
+// FOLD whose value may not fit the operand's declared width, and the rest are
+// engine-dependent by function identity. No schema lookup may overwrite either
+// (spec model-change-f45qn §1 answer 3, ruling-p9qgu §3.2).
+//
+// The bit is a claim about the operand's SHAPE and not about what the resolver
+// can do with it: min(n) over a node binding mints and is then degraded to any
+// there, because a node is not a schema-declared property type.
 func (p AggregateProjection) LeavesAreRefs() bool { return p.leavesAreRefs }
 
 func (AggregateProjection) isProjection() {}

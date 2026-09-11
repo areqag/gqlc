@@ -3345,7 +3345,7 @@ test-codegen-live:
 # the presence-only gate at writeShapelessFieldDecode -- and a pull request is
 # where that had better still be true.
 test-codegen-live-neo4j:
-    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestNeo4jRefusesAMapValuedStoredProperty|TestNeo4jRefusesAUint64ParameterAboveMaxInt64|TestNeo4jNeverHandsBackANullValuedProperty|TestAGERefusesAUint64ParameterAboveMaxInt64|TestEveryAgtypeCaptureIsWitnessedOrDeclaredSynthetic' -skip 'TestLiveSmoke/apache-age' ./...
+    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestNeo4jRefusesAMapValuedStoredProperty|TestNeo4jRefusesAUint64ParameterAboveMaxInt64|TestNeo4jNeverHandsBackANullValuedProperty|TestAGERefusesAUint64ParameterAboveMaxInt64|TestEveryAgtypeCaptureIsWitnessedOrDeclaredSynthetic|TestNeo4jMinOverAnEmptyGroupIsNull' -skip 'TestLiveSmoke/apache-age' ./...
 
 # the Apache AGE half of the live battery: the smoke battery's AGE arm, the
 # session-init contract, and the AGE-only probes. The -run alternation below is
@@ -3379,7 +3379,7 @@ test-codegen-live-neo4j:
 # runs nowhere else actually executed. It goes on the whole recipe rather than a
 # second `go test` invocation, which would start a second AGE container.
 test-codegen-live-age:
-    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGERefusesTheSpatialConstructor|TestAGERefusesTheNamespaceItHasNoSchemaFor|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEStoresANestedListProperty|TestAGEStoresARecordProperty|TestAGEMatchesATemporalListParameter|TestAGENeverHandsBackANullValuedProperty|TestAGEKeepsAnExplicitNullAtARecordFieldButNotAtAProperty|TestAGEAgtypeCaptureMatchesTheServer|TestAGEAgtypeNullReachesPgxAsSQLNULL' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGERefusesTheSpatialConstructor|TestAGERefusesTheNamespaceItHasNoSchemaFor|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEStoresANestedListProperty|TestAGEStoresARecordProperty|TestAGEMatchesATemporalListParameter|TestAGENeverHandsBackANullValuedProperty|TestAGEKeepsAnExplicitNullAtARecordFieldButNotAtAProperty|TestAGEAgtypeCaptureMatchesTheServer|TestAGEAgtypeNullReachesPgxAsSQLNULL|TestAGEMinOverAnEmptyGroupIsNull' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than

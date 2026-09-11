@@ -653,6 +653,13 @@ var invalidFixtures = map[string]error{
 	"certified_list_unknown_property.cypher":    ErrUnknownProperty,
 	"certified_collect_unknown_property.cypher": ErrUnknownProperty,
 
+	// min/max's half of the same acceptance change (spec ruling-p9qgu §4.4,
+	// bd gqlc-b8m8f). Before it, min(p.nosuch) was ACCEPTED as any — the
+	// projection's Refs were never resolved — so the typo reached the
+	// generated code as an untyped column. Its valid twin is
+	// certified_min_property, one property renamed.
+	"certified_min_unknown_property.cypher": ErrUnknownProperty,
+
 	// unionNodeProperty's DIVERGENCE arm, which no other fixture reaches: every
 	// other plural-satisfying fixture either agrees on the projected property,
 	// so the ADR 0022 intersection succeeds, or omits it from a candidate, so
@@ -1170,12 +1177,38 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	// covered and this entry would add nothing.
 	"label_satisfy_none.cypher": {},
 
-	"ambiguous_edge_orientation_after_inference.cypher":            {},
-	"call_arg_int_at_string.cypher":                                {},
-	"call_arg_type_mismatch.cypher":                                {},
-	"call_yield_property_lookup.cypher":                            {},
-	"certified_collect_unknown_property.cypher":                    {},
-	"certified_list_unknown_property.cypher":                       {},
+	"ambiguous_edge_orientation_after_inference.cypher": {},
+	"call_arg_int_at_string.cypher":                     {},
+	"call_arg_type_mismatch.cypher":                     {},
+	"call_yield_property_lookup.cypher":                 {},
+	"certified_collect_unknown_property.cypher":         {},
+	"certified_list_unknown_property.cypher":            {},
+	// NOT inherited — this entry is new (bd gqlc-b8m8f), and its reason is
+	// stated from a measurement rather than from the two entries above.
+	//
+	// It refuses from refProjectionType's single-node-type arm (scope.go, the
+	// `nt.Properties[ref.Property]` miss), reached through
+	// selectionProjectionType instead of unifiedRefPropertyType. What this
+	// fixture adds over the other fixtures reaching that arm is a VERDICT —
+	// that min's operand is resolved against the schema at all, where before
+	// the ruling it was silently any — and TestInvalid's errors.Is makes that
+	// claim without reading any text.
+	//
+	// WHAT HOLDS THE ARM'S TEXT, measured 2026-09-11 by rewriting that one
+	// fmt.Errorf and grading per fixture: NOT a message pin. TestInvalid stays
+	// entirely GREEN under that mutation — unknown_property.cypher, the bare
+	// `p.nosuch` twin, is waived in THIS MAP too (see its entry below), so
+	// there is no invalidFixtureContains entry on the arm to red. The guard
+	// that does red is TestCorpusSweepManifest, whose detail digest moved on
+	// 321 cells. That is a real guard and it is why this entry is not a hole,
+	// but it is not the message pin an earlier draft of this comment claimed.
+	//
+	// Whether the arm should ALSO carry a message pin is bd gqlc-9vpga's
+	// question, not this bead's: per PR #2829, two sites rendering identical
+	// text are usually still separable by test, so "the twin renders the same
+	// bytes" is not on its own a reason to waive. This entry is deliberately
+	// left waived pending that lane's verdict rather than pinned here.
+	"certified_min_unknown_property.cypher":                        {},
 	"create_unknown_edge.cypher":                                   {},
 	"delete_bare_property_unknown.cypher":                          {},
 	"delete_edge_property_unknown.cypher":                          {},
