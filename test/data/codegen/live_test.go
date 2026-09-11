@@ -185,6 +185,40 @@ type anyValueColumnQuerier interface {
 	errNoRows() error
 }
 
+// unionColumns is one Row of the union_property fixture as the battery reads
+// it: the three declared-union properties, each a nullable `any`.
+//
+// The struct is the battery's own rather than either target's, because the
+// two targets name it differently (RowColumnsRow off the column lane, Row off
+// the vertex lane) and the claim is the same claim in both places.
+type unionColumns struct {
+	Pick *any
+	Also *any
+	Flag *any
+}
+
+// unionColumnQuerier is one arm's union_property handle: a closed union
+// arriving off the wire, which nothing in this repository had ever EXECUTED
+// (bd gqlc-2c0c).
+//
+// Every emitted decoder is unexported — `decodeUnion<suffix>` — and is called
+// only after the driver has answered, so no compiled test in the tree can
+// reach one. The direction was pinned by golden text alone, and PR #2851
+// measured what that is worth: its mutation row M4 deleted the emitted
+// decoders' empty-value guard and SURVIVED, because a golden that regenerates
+// alongside the emitter agrees with whatever the emitter now says.
+//
+// BOTH lanes are here because the emitted code has two callers for one helper
+// and they hand it different bytes. rowColumns comes off the projected-column
+// lane (record.Get on neo4j, rows.Scan on Apache AGE), rowWhole off the
+// vertex-property lane in models.go. A guard written into one and not the
+// other is invisible to a probe that only drives one of them.
+type unionColumnQuerier interface {
+	rowColumns(ctx context.Context) ([]unionColumns, error)
+	rowWhole(ctx context.Context) (unionColumns, error)
+	errNoRows() error
+}
+
 // mixedReadWriteBatchQuerier is one arm's mixed_read_write_batch handle.
 type mixedReadWriteBatchQuerier interface {
 	getPersonName(ctx context.Context, id int64) (string, error)
@@ -467,6 +501,7 @@ type backend interface {
 	entityNodeProjectedOne() entityNodeQuerier
 	entityEdgeProjectedOne() entityEdgeQuerier
 	anyValueColumns() anyValueColumnQuerier
+	unionColumns() unionColumnQuerier
 }
 
 // writeBackend is a scenario's view of a writeHarness.
@@ -620,6 +655,7 @@ var readScenarios = []struct {
 	{name: "entity_node_projected_one: whole vertex", run: nodeEntityRead},
 	{name: "entity_edge_projected_one: whole edge", run: edgeEntityRead},
 	{name: "schema_any_property: ANY VALUE columns agree on null", run: anyValueColumnsAgreeOnNull},
+	{name: "union_property: a closed union dispatches on the wire family it arrived as", run: unionColumnDecode},
 }
 
 // writeScenarios are the battery an arm runs once its target emits :exec
@@ -709,7 +745,7 @@ var scenarioTables = []struct {
 	why  string
 }{
 	{
-		name: "readScenarios", got: len(readScenarios), want: 9,
+		name: "readScenarios", got: len(readScenarios), want: 10,
 		why: "the battery every arm runs; a lost row is a read contract no target is checked against",
 	},
 	{
@@ -1264,6 +1300,158 @@ func anyValueColumnsAgreeOnNull(ctx context.Context, t *testing.T, b backend) { 
 	require.NoError(t, err)
 	require.NotNil(t, payload)
 	require.Equal(t, "also here", *payload)
+}
+
+// unionColumnDecode drives the closed-union DECODE direction, which until
+// this scenario nothing in the repository executed (bd gqlc-2c0c).
+//
+// The gap was not a missing assertion, it was a missing CALLER. `decodeUnion…`
+// is unexported in every emitted package and runs only once a driver has
+// answered, so the conformance corpus could only ever compare its text to a
+// golden — and the golden is regenerated from the same emitter, so the two
+// agree by construction. PR #2851 put a number on that: its mutation row M4
+// deleted the emitted decoders' empty-value guard and the whole tree stayed
+// green.
+//
+// WHAT EACH STEP IS FOR, since a union decoder can be wrong in four
+// independent ways and one arrival witnesses none of the others:
+//
+//   - the narrowing. An INT32 member arrives on both backends inside a
+//     64-bit carrier — neo4j hands the caller an int64, AGE a decimal text —
+//     so int32 is a width nothing but the generated decoder can produce.
+//     `require.IsType` on that is the load-bearing line in this scenario: a
+//     decoder that never ran leaves the driver's own int64 in the `any`.
+//   - the DISPATCH, which is the thing a single arrival cannot show. The same
+//     emitted helper is handed a second wire family and must answer with the
+//     other member. One helper, two arrivals, two widths.
+//   - the two refusals, which are different defects and are asserted apart.
+//     A value inside a member's family but outside its declared width is a
+//     NARROWING failure; a value in no member's family at all is a
+//     MEMBERSHIP failure. An assertion that merely demanded "an error"
+//     could not tell an emitter that had collapsed one into the other.
+//   - the null, which is the negative control. No member of a closed union
+//     carries nil, so the decoder REFUSES nil by construction; a nullable
+//     union column arriving null therefore proves the emitted nil-guard kept
+//     it away from the decoder. Without this row a decoder wired to run
+//     unconditionally would look identical on every row above.
+//
+// Both callers of the helper are driven. rowColumns is the projected-column
+// lane and rowWhole the vertex-property lane in models.go; they hand the same
+// helper different bytes, and a guard present in one is not a guard in the
+// other.
+//
+// The wordings asserted are the INTERSECTION of what the two backends spell,
+// which is why they are substrings rather than whole messages: neo4j reports a
+// Go carrier it dispatched on and AGE the agtype text it parsed. The shared
+// spine — the union's own name, the column's name, and the narrowing
+// sentence — is identical on both, and that is what is held here.
+func unionColumnDecode(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.unionColumns()
+
+	// One Row carrying one member of each declared union: an INT32 for pick,
+	// a STRING for also, a BOOL for flag.
+	b.seed(ctx, t, "CREATE (:Row {id: 1, pick: 7, also: 'seven', flag: true})")
+
+	rows, err := q.rowColumns(ctx)
+	require.NoError(t, err, "a union column carrying a declared member must decode, not refuse")
+	require.Len(t, rows, 1,
+		"the scenario seeded exactly one Row; a different count means it is reading a graph another scenario wrote")
+
+	requireUnionMember(t, rows[0].Pick, int32(7), "pick")
+	requireUnionMember(t, rows[0].Also, "seven", "also")
+	requireUnionMember(t, rows[0].Flag, true, "flag")
+
+	// The other caller of the same helpers: the vertex-property lane.
+	whole, err := q.rowWhole(ctx)
+	require.NoError(t, err, "the same widths must decode off the vertex-property lane")
+	require.NotErrorIs(t, err, q.errNoRows(),
+		"the vertex was seeded, so a no-rows error means this half stopped testing what it names")
+	requireUnionMember(t, whole.Pick, int32(7), "Row.Pick")
+	requireUnionMember(t, whole.Also, "seven", "Row.Also")
+	requireUnionMember(t, whole.Flag, true, "Row.Flag")
+
+	// The dispatch. pick and flag arrive as the OTHER member of their own
+	// union, through the helper that just answered with the first.
+	b.seed(ctx, t, "MATCH (r:Row {id: 1}) SET r.pick = 'now a string', r.flag = 1.5")
+
+	rows, err = q.rowColumns(ctx)
+	require.NoError(t, err, "the second member of a union must decode through the same emitted helper as the first")
+	require.Len(t, rows, 1)
+	requireUnionMember(t, rows[0].Pick, "now a string", "pick")
+	requireUnionMember(t, rows[0].Flag, 1.5, "flag")
+	requireUnionMember(t, rows[0].Also, "seven", "also")
+
+	whole, err = q.rowWhole(ctx)
+	require.NoError(t, err)
+	requireUnionMember(t, whole.Pick, "now a string", "Row.Pick")
+	requireUnionMember(t, whole.Flag, 1.5, "Row.Flag")
+
+	// The narrowing refusal: 2^32 is an integer the wire carries happily and
+	// the declared INT32 member cannot hold. A decoder that skipped the
+	// narrow would hand back a silently truncated 0 with no error at all.
+	b.seed(ctx, t, "MATCH (r:Row {id: 1}) SET r.pick = 4294967296")
+
+	_, err = q.rowColumns(ctx)
+	require.Error(t, err,
+		"a value inside a member's wire family but outside its declared width must fail the row; "+
+			"the alternative is a silent truncation, which is the defect narrowing exists to prevent")
+	require.ErrorContains(t, err, `decode column "pick"`,
+		"the refusal must name the column it came from, or a caller cannot tell which of three union columns refused")
+	require.ErrorContains(t, err, "UNION<INT32|STRING>",
+		"and the union whose member set it was held against")
+	require.ErrorContains(t, err, "does not fit the declared int32 width",
+		"and it must be the NARROWING sentence: this value is a member of the set, so a membership refusal here would mean the decoder never reached the narrow")
+
+	// The membership refusal, which is a different defect and is asserted
+	// apart from the one above. 2.5 is in no member's family at all.
+	b.seed(ctx, t, "MATCH (r:Row {id: 1}) SET r.pick = 2.5")
+
+	_, err = q.rowColumns(ctx)
+	require.Error(t, err,
+		"a value outside the declared member set must fail the row; a closed union that accepted it would be ADR 0020's open union wearing a member list")
+	require.ErrorContains(t, err, `decode column "pick"`)
+	require.ErrorContains(t, err, "UNION<INT32|STRING>")
+	require.NotContains(t, err.Error(), "does not fit the declared",
+		"a value in no member's family must not be reported as a narrowing failure: the two refusals answer different questions, "+
+			"and a test that cannot tell them apart witnesses neither")
+
+	// The negative control. No member of a closed union carries nil, so the
+	// decoder refuses nil by construction and a nil here is the emitted
+	// nil-guard having kept the column away from it. Without this row a
+	// decoder called unconditionally would look identical above.
+	b.seed(ctx, t, "MATCH (r:Row {id: 1}) SET r.pick = null, r.also = null, r.flag = null")
+
+	rows, err = q.rowColumns(ctx)
+	require.NoError(t, err,
+		"a nullable union column arriving null is the schema's own case; reaching the decoder with it would refuse the row, since no member carries nil")
+	require.Len(t, rows, 1)
+	require.Nil(t, rows[0].Pick, "a null union column must be a nil pointer, not a pointer to a decoded nil")
+	require.Nil(t, rows[0].Also)
+	require.Nil(t, rows[0].Flag)
+
+	whole, err = q.rowWhole(ctx)
+	require.NoError(t, err, "and the same on the vertex-property lane, where the guard is a different line of emitted code")
+	require.Nil(t, whole.Pick)
+	require.Nil(t, whole.Also)
+	require.Nil(t, whole.Flag)
+}
+
+// requireUnionMember holds one decoded union column to the member the graph
+// holds, at that member's DECLARED width.
+//
+// The width is the assertion. Both backends carry an INT32 member inside
+// something wider — an int64 on neo4j's wire, decimal text on AGE's — so
+// int32 is a shape only the generated decoder can produce, and a decoder that
+// never ran leaves the carrier behind instead. require.Equal would catch that
+// too, since int32(7) and int64(7) are not equal to testify; IsType is here
+// so the failure says which of the two happened.
+func requireUnionMember(t *testing.T, got *any, want any, column string) {
+	t.Helper()
+	require.NotNil(t, got,
+		"column %q holds a value, so the emitted nil-guard must not have skipped its decode", column)
+	require.IsType(t, want, *got,
+		"column %q must arrive as its member's DECLARED width; the driver's own carrier reaching the caller unchanged is the decoder not having run", column)
+	require.Equal(t, want, *got, "column %q", column)
 }
 
 // edgeEntityRead drives the edge-entity contract — a whole edge arrives as

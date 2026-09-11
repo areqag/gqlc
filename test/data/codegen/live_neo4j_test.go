@@ -47,6 +47,8 @@ import (
 	temporalv6 "github.com/areqag/gqlc/test/data/codegen/valid/temporal_property_roundtrip/golden/neo4j-go-v6"
 	tsv5 "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/neo4j-go-v5"
 	tsv6 "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/neo4j-go-v6"
+	unionpropv5 "github.com/areqag/gqlc/test/data/codegen/valid/union_property/golden/neo4j-go-v5"
+	unionpropv6 "github.com/areqag/gqlc/test/data/codegen/valid/union_property/golden/neo4j-go-v6"
 	zonedv5 "github.com/areqag/gqlc/test/data/codegen/valid/zoned_time_roundtrip/golden/neo4j-go-v5"
 	zonedv6 "github.com/areqag/gqlc/test/data/codegen/valid/zoned_time_roundtrip/golden/neo4j-go-v6"
 )
@@ -100,6 +102,7 @@ type neo4jV5 struct {
 	entityNode entityNodeV5
 	entityEdge entityEdgeV5
 	anyValue   anyValueColumnsV5
+	unions     unionColumnsV5
 	edgeUnion  edgeUnionV5
 	timestamps timestampRoundtripV5
 	temporals  temporalRoundtripV5
@@ -154,6 +157,7 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 		entityNode: entityNodeV5{q: entitynodev5.New(driver)},
 		entityEdge: entityEdgeV5{q: entityedgev5.New(driver)},
 		anyValue:   anyValueColumnsV5{q: anypropv5.New(driver)},
+		unions:     unionColumnsV5{q: unionpropv5.New(driver)},
 		edgeUnion:  edgeUnionV5{q: edgeunionv5.New(driver)},
 		timestamps: timestampRoundtripV5{q: tsv5.New(driver)},
 		temporals:  temporalRoundtripV5{q: temporalv5.New(driver)},
@@ -477,6 +481,36 @@ func (a anyValueColumnsV5) eventPayload(ctx context.Context) (*any, error) {
 
 func (a anyValueColumnsV5) errNoRows() error { return anypropv5.ErrNoRows }
 
+func (s neo4jV5Scenario) unionColumns() unionColumnQuerier { return s.arm.unions }
+
+// unionColumnsV5 binds the closed-union fixture. Both lanes are passed
+// through untouched — the columns arrive as `any` already, and narrowing them
+// here would be this adapter deciding what the emitted decoder was supposed
+// to produce, which is the one thing the scenario is asking.
+type unionColumnsV5 struct{ q *unionpropv5.Queries }
+
+func (a unionColumnsV5) rowColumns(ctx context.Context) ([]unionColumns, error) {
+	got, err := a.q.RowColumns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]unionColumns, 0, len(got))
+	for _, r := range got {
+		out = append(out, unionColumns{Pick: r.Pick, Also: r.Also, Flag: r.Flag})
+	}
+	return out, nil
+}
+
+func (a unionColumnsV5) rowWhole(ctx context.Context) (unionColumns, error) {
+	r, err := a.q.RowWhole(ctx)
+	if err != nil {
+		return unionColumns{}, err
+	}
+	return unionColumns{Pick: r.Pick, Also: r.Also, Flag: r.Flag}, nil
+}
+
+func (a unionColumnsV5) errNoRows() error { return unionpropv5.ErrNoRows }
+
 func (s neo4jV5Scenario) edgeUnionUndeclared() edgeUnionQuerier { return s.arm.edgeUnion }
 
 type edgeUnionV5 struct{ q *edgeunionv5.Queries }
@@ -656,6 +690,7 @@ type neo4jV6 struct {
 	entityNode entityNodeV6
 	entityEdge entityEdgeV6
 	anyValue   anyValueColumnsV6
+	unions     unionColumnsV6
 	edgeUnion  edgeUnionV6
 	timestamps timestampRoundtripV6
 	temporals  temporalRoundtripV6
@@ -689,6 +724,7 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 		entityNode: entityNodeV6{q: entitynodev6.New(driver)},
 		entityEdge: entityEdgeV6{q: entityedgev6.New(driver)},
 		anyValue:   anyValueColumnsV6{q: anypropv6.New(driver)},
+		unions:     unionColumnsV6{q: unionpropv6.New(driver)},
 		edgeUnion:  edgeUnionV6{q: edgeunionv6.New(driver)},
 		timestamps: timestampRoundtripV6{q: tsv6.New(driver)},
 		temporals:  temporalRoundtripV6{q: temporalv6.New(driver)},
@@ -992,6 +1028,34 @@ func (a anyValueColumnsV6) eventPayload(ctx context.Context) (*any, error) {
 }
 
 func (a anyValueColumnsV6) errNoRows() error { return anypropv6.ErrNoRows }
+
+func (s neo4jV6Scenario) unionColumns() unionColumnQuerier { return s.arm.unions }
+
+// unionColumnsV6 binds the closed-union fixture, passing both lanes through
+// untouched for the reason its v5 twin gives.
+type unionColumnsV6 struct{ q *unionpropv6.Queries }
+
+func (a unionColumnsV6) rowColumns(ctx context.Context) ([]unionColumns, error) {
+	got, err := a.q.RowColumns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]unionColumns, 0, len(got))
+	for _, r := range got {
+		out = append(out, unionColumns{Pick: r.Pick, Also: r.Also, Flag: r.Flag})
+	}
+	return out, nil
+}
+
+func (a unionColumnsV6) rowWhole(ctx context.Context) (unionColumns, error) {
+	r, err := a.q.RowWhole(ctx)
+	if err != nil {
+		return unionColumns{}, err
+	}
+	return unionColumns{Pick: r.Pick, Also: r.Also, Flag: r.Flag}, nil
+}
+
+func (a unionColumnsV6) errNoRows() error { return unionpropv6.ErrNoRows }
 
 func (s neo4jV6Scenario) edgeUnionUndeclared() edgeUnionQuerier { return s.arm.edgeUnion }
 

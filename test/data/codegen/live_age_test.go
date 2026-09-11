@@ -33,6 +33,7 @@ import (
 	anypropage "github.com/areqag/gqlc/test/data/codegen/valid/schema_any_property/golden/apache-age-pgx-v5"
 	temporalage "github.com/areqag/gqlc/test/data/codegen/valid/temporal_property_roundtrip/golden/apache-age-pgx-v5"
 	tsage "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/apache-age-pgx-v5"
+	unionpropage "github.com/areqag/gqlc/test/data/codegen/valid/union_property/golden/apache-age-pgx-v5"
 )
 
 const (
@@ -239,6 +240,7 @@ func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 		entityNode: entityNodeAGE{q: entitynodeage.New(h.pool, graph)},
 		entityEdge: entityEdgeAGE{q: entityedgeage.New(h.pool, graph)},
 		anyValue:   anyValueColumnsAGE{q: anypropage.New(h.pool, graph)},
+		unions:     unionColumnsAGE{q: unionpropage.New(h.pool, graph)},
 		mixed:      mixedReadWriteBatchAGE{q: mixedage.New(h.pool, graph)},
 		timestamps: timestampRoundtripAGE{q: tsage.New(h.pool, graph)},
 		temporals:  temporalRoundtripAGE{q: temporalage.New(h.pool, graph)},
@@ -272,6 +274,7 @@ type ageScenario struct {
 	entityNode entityNodeAGE
 	entityEdge entityEdgeAGE
 	anyValue   anyValueColumnsAGE
+	unions     unionColumnsAGE
 	mixed      mixedReadWriteBatchAGE
 	timestamps timestampRoundtripAGE
 	temporals  temporalRoundtripAGE
@@ -304,6 +307,8 @@ func (s ageScenario) entityNodeProjectedOne() entityNodeQuerier { return s.entit
 func (s ageScenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.entityEdge }
 
 func (s ageScenario) anyValueColumns() anyValueColumnQuerier { return s.anyValue }
+
+func (s ageScenario) unionColumns() unionColumnQuerier { return s.unions }
 
 func (s ageScenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.mixed }
 
@@ -577,6 +582,32 @@ func (a anyValueColumnsAGE) eventPayload(ctx context.Context) (*any, error) {
 }
 
 func (a anyValueColumnsAGE) errNoRows() error { return anypropage.ErrNoRows }
+
+// unionColumnsAGE binds the closed-union fixture, passing both lanes through
+// untouched for the reason its neo4j twin gives.
+type unionColumnsAGE struct{ q *unionpropage.Queries }
+
+func (a unionColumnsAGE) rowColumns(ctx context.Context) ([]unionColumns, error) {
+	got, err := a.q.RowColumns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]unionColumns, 0, len(got))
+	for _, r := range got {
+		out = append(out, unionColumns{Pick: r.Pick, Also: r.Also, Flag: r.Flag})
+	}
+	return out, nil
+}
+
+func (a unionColumnsAGE) rowWhole(ctx context.Context) (unionColumns, error) {
+	r, err := a.q.RowWhole(ctx)
+	if err != nil {
+		return unionColumns{}, err
+	}
+	return unionColumns{Pick: r.Pick, Also: r.Also, Flag: r.Flag}, nil
+}
+
+func (a unionColumnsAGE) errNoRows() error { return unionpropage.ErrNoRows }
 
 type entityEdgeAGE struct{ q *entityedgeage.Queries }
 
