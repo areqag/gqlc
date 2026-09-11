@@ -943,16 +943,24 @@ halves, which has to assert that an emitted query method is named
 takes a `cypher string` beside a driver parameters map.
 
 The fifth and sixth are narrower, and both were measured rather than
-reasoned about. The sweeps read raw markdown bytes, so a site inside
-an HTML comment is graded exactly as visible text is: a document whose
-only surviving `ctx context.Context` sits in `<!-- ... -->` keeps its
-census entry while showing a reader nothing, and a commented site
-disagreeing with `codegen.ParamArg` is red on text no rendered page
-displays (`gqlc-jnsk`). The binding sweep, meanwhile, peels pointer
-operators off a value along with carrier conversions before comparing
-it, so `*arg` and `&arg` in a `map[string]any` entry both unwrap to
-`arg` and stay green (`gqlc-173n`) — what is held is the identifier
-underneath, not the expression around it.
+reasoned about. The sweeps read raw markdown bytes, so an HTML comment
+is present to them and absent from the rendered page — and the half of
+that which matters is not the noisy half. A commented site that has
+drifted reddens the fence over a line no reader can see, which is loud
+and self-correcting; a commented site that is *correct* pays its
+document's floor while showing a reader nothing, so the census vouches
+for a surface the documentation has stopped describing. Four of the
+five anchors are therefore refused inside a comment outright, rather
+than read there: an absence check, not a scanner, because deciding
+whether a comment's contents would have rendered is a parse and
+deciding whether bytes sit between the delimiters is not
+(`gqlc-jnsk`). The fifth is the brace-less binding scanner, which has
+no anchor to refuse and so still reads such a span inside a comment.
+The binding sweep, meanwhile, peels pointer operators off a
+value along with carrier conversions before comparing it, so `*arg`
+and `&arg` in a `map[string]any` entry both unwrap to `arg` and stay
+green (`gqlc-173n`) — what is held is the identifier underneath, not
+the expression around it.
 
 One further gap is recorded in the fence's own header rather than
 here, because it bounds what the sweeps reach at all: the prose around

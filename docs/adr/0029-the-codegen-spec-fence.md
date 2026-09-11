@@ -492,6 +492,51 @@ an emitted query method is named `run`, or `ExecuteWrite`, or is an anonymous
 `params map[string]any`. That is narrower than the residual Decision 12 accepts
 for the exhibit censuses, where the shape alone is the key.
 
+## Decision 15 — a graded anchor may not sit inside an HTML comment
+
+The sweeps read bytes, so an HTML comment is fully present to them and fully
+absent from the rendered page. That is the only construct in this corpus where
+the two disagree, and it cuts two ways which are not equally serious.
+
+A commented site whose text has **drifted** reddens the fence over a line no
+reader can see. That is a maintenance annoyance, and it is loud, so it corrects
+itself. A commented site whose text is **correct** pays a census: `specSigDocs`
+and `specBindDocs` are per-document floors, so a document can meet its whole
+obligation on signatures nobody reads, and a floor that exists to prove the
+surface is still described proves nothing. `gqlc-jnsk` names the second as the
+direction that matters, and it is the one that cannot be fixed by reading the
+site harder — there is nothing wrong with the site.
+
+So the answer is an **absence check**: the anchors may not appear inside a
+comment at all, in either condition. That is
+[ADR 0042](0042-the-spec-fence-stays-a-byte-scan.md)'s stated preference —
+refuse the construct rather than interpret it — and here the preference is what
+makes the decision affordable. Deciding whether a comment's contents *would have
+rendered* as a graded site is a markdown parse. Deciding whether a byte run sits
+between the two comment delimiters is not.
+
+There is no exemption list, on purpose. An exemption would be a second invisible
+place for a signature to live, which is the thing being removed.
+
+Two properties, each of which cost a row:
+
+- A comment opener inside an inline code span opens nothing, because a renderer
+  prints that run verbatim as content. This is not a refinement: ADR 0042
+  discusses the construct by quoting the opener in code spans three times, and
+  read naively the first quote opens a "comment" running hundreds of lines to
+  the second. The check would have booby-trapped the document that motivates it.
+- An unterminated opener runs to the end of the document. That is the renderer's
+  own reading, and it is the fail-closed one — treating it as no comment at all
+  would let a document hide any amount of graded text from both the reader and
+  this check by omitting the terminator.
+
+What remains unreached is `scanBareBinds`, which has no anchor: it offers every
+inline code span in a document to `bareBindValues` and grades whatever parses as
+a binding. A commented bare binding is therefore still read and still graded, so
+`gqlc-offa`'s sweep keeps the limit this decision closes for the other four.
+Giving it one would mean anchoring a scanner that exists precisely because the
+binding it catches carries no anchor.
+
 ## Consequences
 
 The fence is a graded-site check, not a document check. What it does **not**
@@ -525,9 +570,11 @@ own header:
   (`gqlc-offa`, `gqlc-cgat`, Decision 10).
 - `docFiles`'s guard that every `docRoots` entry exists on disk is neither
   witnessed nor in Decision 7's enumeration (`gqlc-ipx6`).
-- The sweeps read raw markdown bytes, so a site inside an HTML comment is graded
-  exactly as visible text is — invisible to a reader, present to the census
-  (`gqlc-jnsk`).
+- The sweeps read raw markdown bytes, so a site inside an HTML comment would be
+  graded exactly as visible text is. Four of the five anchors are now refused
+  outright inside a comment rather than read there (`gqlc-jnsk`, Decision 15).
+  The fifth, `scanBareBinds`, has no anchor to refuse, so a brace-less binding
+  span inside a comment is still read and still pays `specBindDocs`.
 
 Every entry above is a limit of a byte scan, and reading them together invites
 the question of whether the scan should become a parse.

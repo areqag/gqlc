@@ -56,6 +56,12 @@ import (
 // is keyed by the NAME the document prints before the parameter list as
 // well as by the list, so a replacement has to keep both (gqlc-yn2l).
 //
+// A site hidden inside an HTML comment no longer pays a census either.
+// Four of the five anchors are refused there outright rather than read
+// there, which is an absence check and not a scanner (gqlc-jnsk, ADR
+// 0029 decision 15). The fifth, scanBareBinds, has no anchor to refuse,
+// so a commented brace-less binding span is still read and still counts.
+//
 // A signature carrying the author's parameter names as separate
 // arguments is no longer past the arity read here: the emitted list is a
 // closed shape at every arity, so anything longer is graded as drift,
@@ -701,6 +707,51 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 			"claims about the emitted surface, and each covers exactly one site — a second span spelled the same\n"+
 			"way in the same document is graded. An entry is claimed by "+exhibitMarker+" on the site's own\n"+
 			"line, not by the site coming first (gqlc-x2sg)")
+}
+
+// TestSpecDocumentsCarryNoGradedAnchorInsideAnHTMLComment refuses the one
+// construct that lets a document's rendered text and its swept bytes
+// disagree.
+//
+// Both sweeps above read bytes, so an HTML comment is invisible to the
+// reader and fully present to them. That cuts two ways and only one of
+// them is a nuisance. A commented site whose text has DRIFTED reddens the
+// fence over a line no reader can see: annoying, loud, self-correcting. A
+// commented site that is CORRECT quietly pays a census — specSigDocs and
+// specBindDocs are per-document floors, so a document can meet its whole
+// obligation on signatures nobody reads, and the floor that exists to
+// prove the surface is still documented proves nothing (bd gqlc-jnsk).
+// The second is the direction that matters, and it cannot be caught by
+// reading the site harder, because there is nothing wrong with the site.
+//
+// So this is an absence check, not a scanner: the anchors may not appear
+// inside a comment at all, in either condition. ADR 0042 prefers refusing
+// a construct over interpreting it, and that preference is what makes
+// this affordable — deciding whether a comment's contents would have
+// rendered is a markdown parse, while deciding whether a byte run sits
+// between `<!--` and `-->` is not (ADR 0029 decision 15).
+//
+// The corpus passes today: the one real HTML comment in it is in
+// docs/bd-ledger-writes.md and carries no anchor.
+func TestSpecDocumentsCarryNoGradedAnchorInsideAnHTMLComment(t *testing.T) {
+	files := docFiles(t)
+	require.NotEmpty(t, files, "the fence swept no documents; docRoots is stale")
+
+	var hidden []specSig
+	for _, file := range files {
+		hidden = append(hidden, commentedAnchors(file, readDoc(t, file))...)
+	}
+
+	requireClean(t, hidden, "documented anchor is buried in an HTML comment",
+		"each line above names an anchor one of this fence's sweeps reads, sitting inside an HTML comment.\n"+
+			"A renderer hides that text from every reader; a byte scan does not, so the two disagree about\n"+
+			"what the document says. The harm runs in the quiet direction: specSigDocs and specBindDocs are\n"+
+			"per-document floors, and a commented site satisfies its document's floor while showing the\n"+
+			"reader nothing — the census then vouches for a surface the documentation has stopped\n"+
+			"describing (gqlc-jnsk).\n\n"+
+			"The remedy is in the text: delete the commented block, or uncomment it so the claim it makes\n"+
+			"is one a reader can check. There is no exemption list here on purpose — an exemption would be\n"+
+			"a second invisible place for a signature to live")
 }
 
 // TestEveryRootDocIsSweptOrDeclaredOutOfScope reconciles the repository
@@ -2747,6 +2798,73 @@ func TestSpecDeclNameReadsTheNamePosition(t *testing.T) {
 	}
 }
 
+// TestSpecCommentedAnchorsReadOnlyWhatARendererHides witnesses the
+// absence check gqlc-jnsk asks for on synthetic input, because the
+// corpus cannot exercise it: its one real HTML comment carries no
+// anchor, so on a clean tree every arm of this reader is unreached and
+// TestSpecDocumentsCarryNoGradedAnchorInsideAnHTMLComment passes over an
+// empty set whatever the reader does.
+//
+// Each row states the sites expected as `line:anchor`, so a row that
+// reports the right count on the wrong offset is a failure rather than a
+// pass.
+func TestSpecCommentedAnchorsReadOnlyWhatARendererHides(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want []string
+	}{{
+		name: "a signature inside a comment is hidden from the reader and reported",
+		text: "intro\n<!--\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n-->\n",
+		want: []string{"3:" + ctxAnchor},
+	}, {
+		name: "the same signature outside a comment is the sweeps' business, not this check's",
+		text: "intro\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n",
+		want: nil,
+	}, {
+		name: "a comment opener inside a code span opens nothing",
+		text: "an HTML comment opens on `" + commentOpen + "` and closes on `" + commentClose + "`.\n" +
+			"func (q *Queries) A" + ctxAnchor + ", arg int64) error\n",
+		want: nil,
+	}, {
+		name: "an unclosed comment hides every anchor after it",
+		text: "intro\n<!--\nnotes\n\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n",
+		want: []string{"5:" + ctxAnchor},
+	}, {
+		name: "the binding anchor is hidden on the same terms as the signature",
+		text: "<!-- params := " + mapAnchor + "\"minAge\": minAge} -->\n",
+		want: []string{"1:" + mapAnchor},
+	}, {
+		name: "a parenthesis-less list inside a comment is reported on its backtick anchor",
+		text: "<!-- the list is `" + ctxParam + ", arg int64` -->\n",
+		want: []string{"1:" + tickAnchor},
+	}, {
+		name: "the rule bullet is an anchor too, so a commented bullet cannot pay its census",
+		text: "<!--\n- " + paramListTerm + " — `, " + codegen.ParamArg + " <T>` if one parameter.\n-->\n",
+		want: []string{"2:" + paramListTerm},
+	}, {
+		name: "a comment carrying no anchor is left alone",
+		text: "<!-- TODO: rewrite this section once the seam lands. -->\n",
+		want: nil,
+	}, {
+		name: "one comment naming two anchors reports both",
+		text: "<!--\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\nparams := " + mapAnchor + "\"minAge\": minAge}\n-->\n",
+		want: []string{"2:" + ctxAnchor, "3:" + mapAnchor},
+	}, {
+		name: "a closed comment releases the text after it",
+		text: "<!-- notes -->\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n<!--\nparams := " + mapAnchor + "\"minAge\": minAge}\n-->\n",
+		want: []string{"4:" + mapAnchor},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			for _, sig := range commentedAnchors("doc.md", tc.text) {
+				got = append(got, fmt.Sprintf("%d:%s", sig.line, sig.arg))
+			}
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // declName is the identifier a document prints immediately before a
 // parameter list's opening parenthesis, empty when the list opens after
 // something that is not one. It is the name half of the key
@@ -3260,6 +3378,115 @@ func span(text string, open int, opener, closer byte) (string, bool) {
 	return "", false
 }
 
+// commentOpen and commentClose delimit an HTML comment. It is the one
+// construct in this corpus that a markdown renderer hides from the
+// reader while leaving its bytes in the file for a byte scanner to read,
+// so it is the one place a document's rendered text and the text this
+// fence sweeps can disagree (bd gqlc-jnsk).
+const (
+	commentOpen  = "<!--"
+	commentClose = "-->"
+)
+
+// htmlCommentSpans returns the half-open byte ranges of text's HTML
+// comments.
+//
+// A `<!--` inside an inline code span opens nothing: a renderer prints
+// that run verbatim as content. Skipping those is not a refinement, it
+// is what keeps this reader off `docs/adr/0042-the-spec-fence-stays-a-
+// byte-scan.md`, which discusses the construct by quoting it three
+// times in code spans; read naively, the first quote would open a
+// "comment" running hundreds of lines to the second.
+//
+// An unclosed `<!--` runs to the end of the document. That is the
+// renderer's own reading — it hides everything after — and it is also
+// the fail-closed one here: the alternative, treating an unterminated
+// opener as no comment at all, would mean a document could hide an
+// arbitrary amount of graded text from both the reader and this check
+// by omitting the terminator.
+func htmlCommentSpans(text string) [][2]int {
+	code := inlineCodeSpans(text, 0, len(text))
+	var out [][2]int
+	for i := 0; i < len(text); {
+		j := strings.Index(text[i:], commentOpen)
+		if j < 0 {
+			return out
+		}
+		open := i + j
+		if end, ok := spanCovering(code, open); ok {
+			i = end
+			continue
+		}
+		k := strings.Index(text[open:], commentClose)
+		if k < 0 {
+			return append(out, [2]int{open, len(text)})
+		}
+		i = open + k + len(commentClose)
+		out = append(out, [2]int{open, i})
+	}
+	return out
+}
+
+// spanCovering reports the end of the inline code span containing the
+// byte at `at`, if one does.
+func spanCovering(spans []codeSpan, at int) (int, bool) {
+	for _, s := range spans {
+		if s.at <= at && at < s.end {
+			return s.end, true
+		}
+	}
+	return 0, false
+}
+
+// gradedAnchors are the byte runs that carry a site into one of this
+// fence's sweeps: the signature anchor, the bare-list anchor, the
+// driver-binding anchor, and the bullet term the rule scanner reads.
+// They are the same constants the scanners match on, not copies, so an
+// anchor that changes spelling changes here too.
+//
+// scanBareBinds has no entry because it has no anchor — it offers every
+// inline code span in the document to bareBindValues — so a commented
+// bare binding is the residual this list does not cover (ADR 0029
+// decision 15).
+var gradedAnchors = []struct {
+	name string
+	re   *regexp.Regexp
+}{
+	{ctxAnchor, ctxAnchorRe},
+	{tickAnchor, tickAnchorRe},
+	{mapAnchor, mapAnchorRe},
+	{paramListTerm, anchorPattern(paramListTerm)},
+}
+
+// commentedAnchors reports every graded anchor a document buries inside
+// an HTML comment, at most one site per anchor per comment: the comment
+// is the unit a writer fixes, so naming each of its anchors once is the
+// whole of what a failure has to say.
+//
+// `arg` carries the anchor's spelling rather than an argument name,
+// because the finding is that a site exists where no reader can see it —
+// nothing has been read out of it, and nothing should be.
+func commentedAnchors(file, text string) []specSig {
+	var out []specSig
+	for _, comment := range htmlCommentSpans(text) {
+		body := text[comment[0]:comment[1]]
+		for _, anchor := range gradedAnchors {
+			loc := anchor.re.FindStringIndex(body)
+			if loc == nil {
+				continue
+			}
+			at := comment[0] + loc[0]
+			out = append(out, specSig{
+				file: file,
+				line: 1 + strings.Count(text[:at], "\n"),
+				arg:  anchor.name,
+				text: strings.TrimSpace(collapse(lineAt(text, at))),
+			})
+		}
+	}
+	return out
+}
+
 // readDoc reads one swept document, named relative to repoRoot.
 func readDoc(t *testing.T, file string) string {
 	t.Helper()
@@ -3388,10 +3615,18 @@ func anchorPattern(anchor string) *regexp.Regexp {
 }
 
 // codeSpan is one inline `code` run, carrying the offset it opened at so
-// a failure can name the line it sits on.
+// a failure can name the line it sits on, and the offset just past its
+// closing delimiter so a caller can ask whether some other byte run
+// falls inside it.
+//
+// `end` is past the closing backticks rather than at them, so [at, end)
+// covers the delimiters as well as the body: what htmlCommentSpans needs
+// to know is whether a run of bytes is inside a span a renderer prints
+// verbatim, and the delimiters are part of what it prints.
 type codeSpan struct {
 	text string
 	at   int
+	end  int
 }
 
 // inlineCodeSpans returns the code runs in text[from:to] up to the first
@@ -3420,8 +3655,8 @@ func inlineCodeSpans(text string, from, to int) []codeSpan {
 		if closing < 0 {
 			return out
 		}
-		out = append(out, codeSpan{text: collapse(bounded[body:closing]), at: open})
 		i = closing + (body - open)
+		out = append(out, codeSpan{text: collapse(bounded[body:closing]), at: open, end: i})
 	}
 	return out
 }
