@@ -157,6 +157,9 @@ var pinned = map[string]map[string]string{
 		"live_x_test.go":           "ILLUSTRATIVE. Quoted from a fixture TABLE in internal/liverecipes/split_test.go, in the sentence saying table data is not prose. It is quoted precisely because this reader never sees it as a citation.",
 		"live_age_ungated_test.go": "HISTORICAL. The deleted file the filing instance rested on. Repaired in PR #2401, so the only thing left writing the name is this file's account of why the filename half exists — which is the sentence a repair would delete.",
 	},
+	"test/data/codegen/live_age_temporal_list_param_test.go": {
+		"live_age_ungated_test.go": "HISTORICAL. gqlc-pcqit's PLACEMENT paragraph ruled this file out as a home for the row it owed, and the file had already been folded into live_age_dialect_test.go by PR #1903. The sentence records that the bead's own reasoning rested on a file that was gone, so the next reader of that paragraph does not re-derive it; repointing the name at a file that exists would delete exactly what it says.",
+	},
 	"internal/cli/init_test.go": {
 		"TestInitRefusesMultiTargetEdit": "HISTORICAL. TestInitRefusalNamesAddFlag replaced it; the sentence records that the two were not kept side by side because they differ only in the expected message.",
 	},

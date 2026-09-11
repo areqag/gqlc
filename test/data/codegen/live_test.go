@@ -125,6 +125,28 @@ type nullListElemQuerier interface {
 	nullablePair(ctx context.Context) ([][]*int64, error)
 }
 
+// nullOuterElemQuerier is one arm's nested_list_element_projection handle:
+// three nested-list columns that differ in exactly one nullability qualifier
+// each, so the two stars a nested list can take are read independently.
+//
+// The OUTER star is what nothing else here witnesses. list_list_int is nested
+// with elements NOT NULL and certified_list_element is nullable but flat, so
+// before this row no live server had ever been asked to answer [null, null]
+// into a []*[]*string — the shape that reaches the nil arm and the address-of
+// in neo4j's walkListElemBody ColumnList case, and prepare.go's
+// `Nullable: elemNullable` on the same arm (bd gqlc-mxvp).
+//
+// labelss is the control on the other side: its outer element is NOT NULL, so
+// an emitter that starred every nested element unconditionally would satisfy
+// the two rows above and fail to compile here. That half is held by the
+// checked-in goldens rather than by this interface; what the method adds is
+// that the unstarred outer element still decodes a real server's answer.
+type nullOuterElemQuerier interface {
+	tagsPair(ctx context.Context) ([][]*[]*string, error)
+	ranksPair(ctx context.Context) ([][]*[]int16, error)
+	labelsPair(ctx context.Context) ([][][]*string, error)
+}
+
 // deepNestedListQuerier is one arm's list_list_list_int handle: a
 // LIST<LIST<LIST<INT64>>> column, one level deeper than nestedListQuerier.
 //
@@ -440,6 +462,7 @@ type backend interface {
 	manyColMany() manyColManyQuerier
 	nestedList() nestedListQuerier
 	nullListElem() nullListElemQuerier
+	nullOuterElem() nullOuterElemQuerier
 	deepNestedList() deepNestedListQuerier
 	entityNodeProjectedOne() entityNodeQuerier
 	entityEdgeProjectedOne() entityEdgeQuerier
@@ -592,6 +615,7 @@ var readScenarios = []struct {
 	{name: "many_col_many: many + params", run: manyWithParams},
 	{name: "list_list_int: nested list off the wire", run: nestedListDecode},
 	{name: "certified_list_element: a NULL inside a list", run: nullListElemDecode},
+	{name: "nested_list_element_projection: a NULL as a nested list's OUTER element", run: nullOuterElemDecode},
 	{name: "list_list_list_int: thrice-nested list off the wire", run: deepNestedListDecode},
 	{name: "entity_node_projected_one: whole vertex", run: nodeEntityRead},
 	{name: "entity_edge_projected_one: whole edge", run: edgeEntityRead},
@@ -685,7 +709,7 @@ var scenarioTables = []struct {
 	why  string
 }{
 	{
-		name: "readScenarios", got: len(readScenarios), want: 8,
+		name: "readScenarios", got: len(readScenarios), want: 9,
 		why: "the battery every arm runs; a lost row is a read contract no target is checked against",
 	},
 	{
@@ -1046,6 +1070,80 @@ func nullListElemDecode(ctx context.Context, t *testing.T, b backend) { //nolint
 	seven := int64(7)
 	require.ElementsMatch(t, [][]*int64{{&seven, &seven}, {nil, nil}}, got,
 		"an absent element is a nil pointer at its own index, and a present one is unaffected")
+}
+
+// nullOuterElemDecode is the live witness for bd gqlc-mxvp: a nested list
+// whose OUTER element arrives NULL decodes to a nil pointer at that index,
+// rather than being type-asserted to []any and failing the whole read.
+//
+// WHY THE OUTER ELEMENT AND NOT THE INNER ONE. The two neighbouring rows above
+// each hold one half of this shape and neither holds both — list_list_int is
+// nested with its elements NOT NULL, certified_list_element is nullable but
+// flat — so the combination reached no live server until this row. It is the
+// combination that matters: `e.Nullable` on neo4j's walkListElemBody
+// ColumnList arm is what emits the nil arm and the address-of, and every other
+// nested-list golden in the corpus has it false, so all three sites could be
+// deleted with the whole battery green (measured on bd gqlc-dxhwp). Two of the
+// three are held by the goldens' ability to COMPILE, since an unstarred
+// innerAcc cannot be appended to a []*[]*string. The nil arm is the one a
+// compiler cannot see: deleting it emits code that builds and then meets a
+// nil at run time, which is what this row is here to be red for.
+//
+// THE SEED IS THE ASSERTION'S OTHER HALF. grid 2 OMITS tags and ranks, which
+// is how a property becomes absent on both servers, so `[g.tags, g.tags]`
+// evaluates to a two-element list of nulls for it and to the stored list for
+// grid 1. A fixture whose tags were all present would pass this row with the
+// nil arm deleted, which is exactly the vacuous pass the bead names.
+//
+// labelss is declared NOT NULL at the outer position, so it is seeded on both
+// grids and both its rows are pointer-free. It is the control that says the
+// two starred columns are starred because of their qualifier and not because
+// the emitter stars every nested element: without it, an emitter that did
+// would satisfy tagss and rankss and be witnessed nowhere.
+//
+// Unordered, for the reason nullListElemDecode gives: MATCH promises no order
+// and the query has no ORDER BY, so what is asserted is what the two rows
+// contain.
+func nullOuterElemDecode(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	b.seed(ctx, t, `
+		CREATE (:Grid {id: 1, tags: ['a', 'b'], ranks: [1, 2], labels: ['x', 'y']})
+		CREATE (:Grid {id: 2, labels: ['z']})
+	`)
+
+	q := b.nullOuterElem()
+
+	t.Run("a nullable outer element arrives nil", func(t *testing.T) {
+		got, err := q.tagsPair(ctx)
+		require.NoError(t, err,
+			"a NULL at the OUTER position of a nested list must not fail the read; without "+
+				"walkListElemBody's nil arm the emitted decoder runs elem.([]any) on a nil any")
+
+		a, bb := "a", "b"
+		present := []*string{&a, &bb}
+		require.ElementsMatch(t, [][]*[]*string{{&present, &present}, {nil, nil}}, got,
+			"an absent outer element is a nil *[]*string at its own index, and a present one "+
+				"still carries every inner element")
+	})
+
+	t.Run("a nullable outer element over a NOT NULL inner width arrives nil", func(t *testing.T) {
+		got, err := q.ranksPair(ctx)
+		require.NoError(t, err, "the outer star is decided by the outer qualifier alone")
+
+		present := []int16{1, 2}
+		require.ElementsMatch(t, [][]*[]int16{{&present, &present}, {nil, nil}}, got,
+			"rankss differs from tagss in the INNER qualifier only, so a decoder that "+
+				"reached its nil arm by way of the inner one would part company here")
+	})
+
+	t.Run("a NOT NULL outer element carries no pointer", func(t *testing.T) {
+		got, err := q.labelsPair(ctx)
+		require.NoError(t, err, "the control column is seeded on both grids and has no null to meet")
+
+		x, y, z := "x", "y", "z"
+		require.ElementsMatch(t, [][][]*string{{{&x, &y}, {&x, &y}}, {{&z}, {&z}}}, got,
+			"labelss is NOT NULL at the outer position, so the emitter must NOT star it; "+
+				"one that starred every nested element unconditionally would pass the two rows above")
+	})
 }
 
 // deepNestedListDecode drives the same contract one level deeper, at the depth

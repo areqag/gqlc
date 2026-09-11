@@ -28,6 +28,7 @@ import (
 	deeplistage "github.com/areqag/gqlc/test/data/codegen/valid/list_list_list_int/golden/apache-age-pgx-v5"
 	manycolmanyage "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/apache-age-pgx-v5"
 	mixedage "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/apache-age-pgx-v5"
+	nullouterage "github.com/areqag/gqlc/test/data/codegen/valid/nested_list_element_projection/golden/apache-age-pgx-v5"
 	onecoloneage "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/apache-age-pgx-v5"
 	anypropage "github.com/areqag/gqlc/test/data/codegen/valid/schema_any_property/golden/apache-age-pgx-v5"
 	temporalage "github.com/areqag/gqlc/test/data/codegen/valid/temporal_property_roundtrip/golden/apache-age-pgx-v5"
@@ -233,6 +234,7 @@ func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 		many:       manyColManyAGE{q: manycolmanyage.New(h.pool, graph)},
 		nested:     nestedListAGE{q: listlistage.New(h.pool, graph)},
 		nullElem:   nullListElemAGE{q: certelemage.New(h.pool, graph)},
+		nullOuter:  nullOuterElemAGE{q: nullouterage.New(h.pool, graph)},
 		deepNested: deepNestedListAGE{q: deeplistage.New(h.pool, graph)},
 		entityNode: entityNodeAGE{q: entitynodeage.New(h.pool, graph)},
 		entityEdge: entityEdgeAGE{q: entityedgeage.New(h.pool, graph)},
@@ -265,6 +267,7 @@ type ageScenario struct {
 	many       manyColManyAGE
 	nested     nestedListAGE
 	nullElem   nullListElemAGE
+	nullOuter  nullOuterElemAGE
 	deepNested deepNestedListAGE
 	entityNode entityNodeAGE
 	entityEdge entityEdgeAGE
@@ -291,6 +294,8 @@ func (s ageScenario) manyColMany() manyColManyQuerier { return s.many }
 func (s ageScenario) nestedList() nestedListQuerier { return s.nested }
 
 func (s ageScenario) nullListElem() nullListElemQuerier { return s.nullElem }
+
+func (s ageScenario) nullOuterElem() nullOuterElemQuerier { return s.nullOuter }
 
 func (s ageScenario) deepNestedList() deepNestedListQuerier { return s.deepNested }
 
@@ -646,6 +651,25 @@ type nullListElemAGE struct{ q *certelemage.Queries }
 
 func (a nullListElemAGE) nullablePair(ctx context.Context) ([][]*int64, error) {
 	return a.q.PersonNullablePair(ctx)
+}
+
+// nullOuterElemAGE binds the nested_list_element_projection fixture. The nulls
+// this row is about arrive inside one agtype text payload — `[null, null]`
+// parsed by an emitted decoder — rather than as nil `any` elements in a Bolt
+// list, so the outer star is read here by a different mechanism than on the
+// neo4j arms and the row is worth its container on both.
+type nullOuterElemAGE struct{ q *nullouterage.Queries }
+
+func (a nullOuterElemAGE) tagsPair(ctx context.Context) ([][]*[]*string, error) {
+	return a.q.TagsPair(ctx)
+}
+
+func (a nullOuterElemAGE) ranksPair(ctx context.Context) ([][]*[]int16, error) {
+	return a.q.RanksPair(ctx)
+}
+
+func (a nullOuterElemAGE) labelsPair(ctx context.Context) ([][][]*string, error) {
+	return a.q.LabelsPair(ctx)
 }
 
 // deepNestedListAGE binds the list_list_list_int fixture. On this target the
