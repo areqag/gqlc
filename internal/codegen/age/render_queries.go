@@ -231,7 +231,7 @@ func zeroLiteral(goType string) string {
 		return `""`
 	case "bool":
 		return "false"
-	case "any", "map[string]any":
+	case "any", goAnyRecord:
 		return "nil"
 	case goInstant, goDate, goLocalTime, goTime, goDuration:
 		// The instant and the neutral carriers are all structs, so their
@@ -861,7 +861,7 @@ func decodeFunc(goType string, width graph.PropertyType) string {
 	switch goType {
 	case "any":
 		return "agtypeValue"
-	case "map[string]any":
+	case goAnyRecord:
 		return "agtypeMap"
 	}
 	carrier := agtypeCarrier(goType)

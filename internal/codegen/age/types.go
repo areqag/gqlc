@@ -332,7 +332,7 @@ func wireFamily(goType string) string {
 		return codegen.WireFamilyIndistinct
 	case strings.HasPrefix(goType, "["):
 		return "list"
-	case goType == "map[string]any", codegen.IsRecordStruct(goType):
+	case goType == goAnyRecord, codegen.IsRecordStruct(goType):
 		return "map"
 	}
 	switch agtypeCarrier(goType) {

@@ -44,10 +44,14 @@ var (
 	FindUndefinedNamespaces          = findUndefinedNamespaces
 	FindUndefinedSpatialFunctions    = findUndefinedSpatialFunctions
 	Generate                         = generate
-	NamespaceProbes                  = namespaceProbes
-	OversizedNumerics                = oversizedNumerics
-	UncarriedEverywhere              = uncarriedEverywhere
-	RejectOffsetSidecarCollisions    = rejectOffsetSidecarCollisions
+	// Bare, like DecodeFunc above: it names a helper rather than
+	// rendering one, so no codegenBug crosses it and there is nothing for
+	// the render fence to catch.
+	ListHelperName                = listHelperName
+	NamespaceProbes               = namespaceProbes
+	OversizedNumerics             = oversizedNumerics
+	UncarriedEverywhere           = uncarriedEverywhere
+	RejectOffsetSidecarCollisions = rejectOffsetSidecarCollisions
 	// The three render-layer bridges are FENCED, and the wrapper is the
 	// binding rather than a helper the call sites opt into: a bare
 	// renderer is unexported, so this is the only route from age_test
