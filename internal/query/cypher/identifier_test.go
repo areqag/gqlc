@@ -591,17 +591,33 @@ func TestADelimitedBuiltinNameDenotesTheBuiltin(t *testing.T) {
 	}
 }
 
-// TestADelimitedNameThatIsNotTheBuiltinIsNotTheBuiltin is the negative control,
-// and it is what makes the rows above about DECODING rather than about stripping.
-//
-// A decode resolves a doubled delimiter to one, so the delimited spelling whose
-// text is co-backtick-backtick-unt denotes co`unt, and no catalogue holds that.
+// TestADelimitedNameThatIsNotTheBuiltinIsNotTheBuiltin is the negative control
+// for the rows above: a delimited name that is NOT a built-in must keep the
+// fall-through every unrecognised function gets.
 //
 // The second call is not decoration. Without it this row is satisfied by a
 // change that makes EVERY delimited name miss the catalogue — which is precisely
 // the behaviour before this bead — so it would read as a guard while guarding
 // nothing. The pair is the claim: one delimited name that lands in the
-// catalogue (asserted by the test above) and one that does not.
+// catalogue and one that does not.
+//
+// What this pair does NOT distinguish is decoding from trimming, and the limit
+// is worth stating because the name below is the shape that looks like it would.
+// A decode resolves a doubled delimiter to one, so the token whose text is
+// co-backtick-backtick-unt denotes co`unt; a reader that merely dropped the
+// outer delimiters would call it co“unt. Both miss, and they miss for the same
+// reason: NO built-in name contains a backtick, so at these two readers — whose
+// only consumers are three closed catalogues of built-in names — trim and decode
+// are observationally equivalent and no test written here can separate them.
+// Measured, not assumed: replacing decodeEscaped's body with the bare slice
+// leaves both tests in this section green and kills gqlc-y25yo's
+// TestADelimitedIdentifierDecodesItsEscape (bd gqlc-e3k0, mutation row M5).
+//
+// So the reason these readers call symbolicName rather than trimming is not that
+// a test here demands it. It is that a name has ONE spelling rule in this
+// package and symbolicName is where it lives; the row that holds that rule
+// honest is the one over graph.LabelSet.Key, where a mis-decode becomes a wrong
+// identity rather than a wrong lookup.
 func TestADelimitedNameThatIsNotTheBuiltinIsNotTheBuiltin(t *testing.T) {
 	q, err := parseQuery(t, "MATCH (n) RETURN `co``unt`(n) AS c")
 	require.NoError(t, err)
