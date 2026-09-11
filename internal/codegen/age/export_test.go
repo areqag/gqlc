@@ -14,6 +14,7 @@ package age
 // builtin and own-package types for the same reason.
 
 type (
+	CodegenBug   = codegenBug
 	DialectGap   = dialectGap
 	DialectProbe = dialectProbe
 	Finding      = finding
@@ -21,6 +22,17 @@ type (
 	TypeMap      = typeMap
 	WiredEntity  = wiredEntity
 )
+
+// RenderFaultHook is the ADDRESS of generate's render-phase fault hook, not
+// its value: a test sets *RenderFaultHook and restores it. A plain `var X =
+// x` alias would carry a copy, and setting the copy would arm nothing.
+//
+// Neither this nor the variable behind it is spelled with a Test prefix,
+// though the hook exists only for tests. internal/tools/testcite reads a
+// capitalised Test-prefixed word in a comment as a citation of a test
+// function and fails when no such function is declared, so the natural
+// name for this bridge reddens a gate three packages away.
+var RenderFaultHook = &renderFaultHook
 
 var (
 	CarriesZone                      = carriesZone
@@ -35,16 +47,23 @@ var (
 	Generate                         = generate
 	NamespaceProbes                  = namespaceProbes
 	RejectOffsetSidecarCollisions    = rejectOffsetSidecarCollisions
-	RenderCypherFile                 = renderCypherFile
-	RenderModels                     = renderModels
-	SpatialFunctionProbes            = spatialFunctionProbes
-	UndefinedFunctionProbes          = undefinedFunctionProbes
-	UndefinedFunctions               = undefinedFunctions
-	UndefinedNamespaces              = undefinedNamespaces
-	UndefinedSpatialFunctions        = undefinedSpatialFunctions
-	UnservedColumn                   = unservedColumn
-	UnservedReason                   = unservedReason
-	WriteEntityFieldDecode           = writeEntityFieldDecode
+	// The three render-layer bridges are FENCED, and the wrapper is the
+	// binding rather than a helper the call sites opt into: a bare
+	// renderer is unexported, so this is the only route from age_test
+	// into the render layer and a test written later is covered without
+	// anyone remembering. See render_fence_test.go. DecodeFunc and
+	// Generate above are deliberately bare — the first is pinned through
+	// PanicsWithValue, the second converts the panic itself.
+	RenderCypherFile          = fencedBytes2(renderCypherFile)
+	RenderModels              = fencedBytes3(renderModels)
+	SpatialFunctionProbes     = spatialFunctionProbes
+	UndefinedFunctionProbes   = undefinedFunctionProbes
+	UndefinedFunctions        = undefinedFunctions
+	UndefinedNamespaces       = undefinedNamespaces
+	UndefinedSpatialFunctions = undefinedSpatialFunctions
+	UnservedColumn            = unservedColumn
+	UnservedReason            = unservedReason
+	WriteEntityFieldDecode    = fencedVoid4(writeEntityFieldDecode)
 )
 
 const (

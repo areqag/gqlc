@@ -797,6 +797,19 @@ func columnDecoder(f codegen.Row) string {
 // shape emits a package that compiles, because the field was typed from
 // the same table, and reads the value as the wrong Go type at run time.
 //
+// The panic is still taken rather than returned, because the callers that
+// render this helper's answer write into a *strings.Builder and have no
+// error to return. What it is not is the end of the process: the value is
+// a codegenBug, and generate recovers exactly that type at its own
+// boundary (generate.go), so a codegen bug reached through Generate is
+// (nil, error) carrying the sentence below. A caller OUTSIDE generate
+// still takes the panic, which is why this package's own bare callers ask
+// through decodeFuncOf, whose require.NotPanics contains it; the VALUE is
+// pinned separately by TestDecodeFuncRefusesACarrierItWasNotTaught, which
+// calls decodeFunc bare through require.PanicsWithValue. Tests that enter
+// the RENDER layer directly are covered by a second fence on the
+// export_test bridges (render_fence_test.go).
+//
 // TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces is what goes
 // red when the table gains a carrier this switch was not taught: it walks
 // the typeMap methods of every .go file in the package, so a new row that
@@ -857,5 +870,5 @@ func decodeFunc(goType string, width graph.PropertyType) string {
 	case goDuration:
 		return "agtypeDuration"
 	}
-	panic(fmt.Sprintf("age codegen bug: Go type %q carries as %q, which decodeFunc has no arm for", goType, carrier))
+	panic(codegenBug(fmt.Sprintf("age codegen bug: Go type %q carries as %q, which decodeFunc has no arm for", goType, carrier)))
 }
