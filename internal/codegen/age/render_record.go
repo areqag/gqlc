@@ -276,10 +276,36 @@ func fieldEncoder(f codegen.RecordFieldPlan, access string) (string, bool) {
 // It is close kin to agtypeProperty and is deliberately NOT that helper.
 // The two answer the same question about different things — a member of
 // a record's own map, versus a property of a vertex — and only this one
-// reads an explicit null as absence. Whether a stored property can
-// arrive as an explicit null is a question about AGE's wire that this
-// branch has not measured, and widening agtypeProperty to match would be
-// answering it by assumption.
+// reads an explicit null as absence. That divergence is deliberate, and
+// since bd gqlc-3ohpo it is measured rather than assumed, against the
+// digest-pinned apache/age image (AGE 1.7.0, PostgreSQL 18.1) by
+// TestAGEKeepsAnExplicitNullAtARecordFieldButNotAtAProperty in
+// test/data/codegen.
+//
+// What the measurement found is a REACHABILITY asymmetry, not two
+// readings of one wire. At a vertex property an explicit null is
+// unreachable. Every route that writes one drops the key, which
+// TestAGENeverHandsBackANullValuedProperty enumerates (bd gqlc-wc5j),
+// and the two routes that would hand AGE a caller-built map for a
+// property slot are refused outright — CREATE (z:L $props) answers
+// "properties in a CREATE clause as a parameter is not supported" and
+// SET n += $props answers "SET clause expects a map". So agtypeProperty
+// keying on absence alone is not a narrow reading; it is the only case
+// there is.
+//
+// At a record field the null IS reachable, because a record is stored as
+// one map value. A map arriving as a bound PARAMETER keeps its explicit
+// nulls — {"a": null, "b": 2} reads back with the null intact after a
+// store and a re-read — since what drops a null member is Cypher's map
+// literal CONSTRUCTOR (a projected {a:1, b:null} loses b at any depth),
+// which a parameter bypasses. Hence this helper's null arm is
+// load-bearing where agtypeProperty's absence of one is correct.
+//
+// Widening agtypeProperty to match would therefore answer a question
+// that cannot be asked. Lists are the third case and are neither: an
+// element written null is kept positionally ([1, null, 2] reads back
+// whole), there being no key to drop, which is agtypeNullableElem's
+// premise.
 func writeRecordFieldHelper(b *strings.Builder) {
 	b.WriteString(`
 // agtypeRecordField reads one member of a record's map. An absent key and

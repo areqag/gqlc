@@ -2,7 +2,10 @@ package codegen
 
 import (
 	"errors"
+	"fmt"
 	"slices"
+
+	"github.com/areqag/gqlc/internal/graph"
 )
 
 // Sentinels returned by Generate. Package-level values so callers branch
@@ -303,3 +306,50 @@ var allSentinels = []error{
 // to values. Callers must not rely on ordering — the slice is
 // copy-returned so a mutation cannot leak into the canonical set.
 func AllSentinels() []error { return slices.Clone(allSentinels) }
+
+// widthRefusal is an ErrUnrepresentableWidth carrying the width it is
+// about. The four fail-sites that raise that sentinel already name the
+// width in their text; this carries the VALUE alongside it, because the
+// one decision downstream of the sentinel — whether the backend that
+// refused should put its own name on the message — is a decision about
+// which width was refused, and a backend reading its own sentence back
+// apart to find out would be parsing a message it has no contract with.
+//
+// Unexported, with a value receiver, so the only way to make one is the
+// constructor below and the only way to read one is RefusedWidth. The
+// wrapped error carries the sentinel and the whole of the text, so
+// errors.Is and Error() are unaffected by the carriage.
+type widthRefusal struct {
+	err   error
+	width graph.PropertyType
+}
+
+func (e widthRefusal) Error() string { return e.err.Error() }
+func (e widthRefusal) Unwrap() error { return e.err }
+
+// unrepresentableWidth builds an ErrUnrepresentableWidth fail-message
+// that remembers the width it refused. The caller passes the sentinel in
+// the format arguments as it always did, so the branch still reads as a
+// `%w` wrap of ErrUnrepresentableWidth to a reader and to the sentinel
+// fence's AST walk, which keys on the identifier inside the return.
+func unrepresentableWidth(width graph.PropertyType, format string, args ...any) error {
+	return widthRefusal{err: fmt.Errorf(format, args...), width: width}
+}
+
+// RefusedWidth reports the declared width an ErrUnrepresentableWidth
+// refusal is about, and whether the error carries one at all.
+//
+// ok=false is the honest answer for an error this package did not raise
+// through the constructor above — including a future fail-site that
+// forgets to — so a caller must treat it as "not known" rather than as
+// "no width". The one caller today is a backend deciding whether to
+// attribute its refusal to itself, and it keeps the attribution on
+// ok=false: the conservative direction is the message the backend
+// already emitted.
+func RefusedWidth(err error) (graph.PropertyType, bool) {
+	var refusal widthRefusal
+	if !errors.As(err, &refusal) {
+		return "", false
+	}
+	return refusal.width, true
+}

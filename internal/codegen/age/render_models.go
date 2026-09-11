@@ -1573,6 +1573,29 @@ func agtypeIsNull(raw []byte) bool {
 }
 
 // writePropertyDecoders emits agtypeValue and the property lookups.
+//
+// Both lookups below key on ABSENCE and neither recognises an explicit
+// null, unlike agtypeRecordField, which reads one as absence. Since bd
+// gqlc-3ohpo that divergence is measured rather than assumed, and the
+// measurement is in two halves.
+//
+// TestAGENeverHandsBackANullValuedProperty (bd gqlc-wc5j) enumerates the
+// routes a null can take onto a property and finds each of them dropping
+// the key.
+// TestAGEKeepsAnExplicitNullAtARecordFieldButNotAtAProperty closes the
+// two routes that enumeration cannot walk, because the server refuses
+// them: CREATE (z:L $props) and SET n += $props are the only spellings
+// that would put a whole caller-built map at a property slot, and both
+// are declined.
+//
+// So the emitted claim below, that an absent key is how a null arrives,
+// is the whole of the wire rather than a narrow reading of it, and
+// widening these to accept a null token would add an arm no input can
+// reach. The asymmetry with agtypeRecordField is reachability, not two
+// readings: a record is stored as one map value, and a map arriving as a
+// PARAMETER keeps its explicit nulls, because what drops a null member
+// is Cypher's map literal constructor rather than the storage format.
+// See writeRecordFieldHelper for that side.
 func writePropertyDecoders(b *strings.Builder, h helpers) {
 	if h.value {
 		b.WriteString(`
