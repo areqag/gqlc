@@ -104,6 +104,14 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// that width would.
 		return codegen.RecordStructText(pt.Fields(), t.Property)
 	}
+	if pt.Kind() == graph.KindUnion {
+		// The carrier is `any` and the admission rule is the whole of the
+		// decision (spec §4): the members have to be pairwise distinct on
+		// THIS driver's wire, because the emitted decode has the wire shape
+		// and nothing else to narrow by. UNION<INT32|INT64> is refused
+		// here, both widths arriving as int64.
+		return codegen.UnionCarrier(pt, t.Property, wireFamily)
+	}
 	switch pt {
 	case graph.TypeString:
 		return "string", true
@@ -167,6 +175,44 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		return "", false
 	}
 	return "", false
+}
+
+// wireFamily folds one carrier text onto the equivalence class of declared
+// widths this driver delivers as one indistinguishable shape (CONTEXT.md,
+// "wire family"). It is asked of a closed union's members alone, because
+// that is the one place two declared widths have to be told apart by their
+// arrival rather than by the declaration that asked for them.
+//
+// It is driverCarrier's answer and not a second table, which is the point.
+// driverCarrier already says which neo4j.GetRecordValue[T] a carrier is
+// fetched through, and two widths fetched through one T are exactly two
+// widths that arrive as one shape: every integer width comes back int64,
+// every float float64, every list []any, and a record and a Cypher map
+// both map[string]any. A separate table would be a second statement of the
+// same fact with its own opportunity to disagree with the decode this
+// package actually emits. The temporal widths separate here for free —
+// driverCarrier answers each a distinct dbtype, and TIMESTAMP time.Time —
+// which is why a zoned member rides a union on this backend while AGE
+// refuses one.
+//
+// ANY is the one carrier driverCarrier's answer has to be overridden for.
+// It arrives as whatever the writer wrote, so it owns no shape of its own
+// and leaves none for a member beside it — WireFamilyIndistinct is the tag
+// that says so. A nested UNION carries as `any` too and lands here for the
+// same reason.
+//
+// A PLAIN FUNCTION and not a typeMap method, deliberately. age's census
+// walk tells a carrier method from the rest by its declared result shape,
+// and a (string, bool) method of this receiver would be swept as one and
+// hold its family tags to decodeFunc arms. The tags are not Go types. The
+// same reading would be wrong here, where decoder_test.go's arms walk
+// takes a method name and would be widened by a second carrier-shaped
+// method appearing beside Property.
+func wireFamily(goType string) string {
+	if goType == codegen.UnionCarrierText {
+		return codegen.WireFamilyIndistinct
+	}
+	return driverCarrier(goType)
 }
 
 // StorableProperty refuses a record, a list of records, and a list whose
