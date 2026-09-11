@@ -36,24 +36,31 @@ import (
 // normative rule, and prose is where the drift gqlc-rz0l corrected sat.
 //
 // What is graded is a site, not a document, and the documents can still
-// disagree with codegen.ParamArg and stay green in at least six
+// disagree with codegen.ParamArg and stay green in at least five
 // places. The count is a floor rather than a census: it records what
-// has been measured. A signature carrying the author's names as
-// separate arguments is past the arity read here (gqlc-vu7z); prose
-// beside an intact graded span can say the opposite of it (gqlc-e143);
-// a binding stated with no map literal around it is unread
-// (gqlc-offa); a parenthesis-less parameter list on its own line
-// inside a code block, fenced or indented, is unread too — as is one
-// inside a code span whose backtick run the block rule takes for a
-// fence, since that rule tests bytes rather than parsing markdown —
-// while the paren anchor reaches a block like any other text
-// (gqlc-cgat); and a listed document keeps its census entry on one
-// surviving site (gqlc-0rjn).
+// has been measured. Prose beside an intact graded span can say the
+// opposite of it (gqlc-e143); a binding stated with no map literal
+// around it is unread (gqlc-offa); a parenthesis-less parameter list on
+// its own line inside a code block, fenced or indented, is unread too —
+// as is one inside a code span whose backtick run the block rule takes
+// for a fence, since that rule tests bytes rather than parsing markdown
+// — while the paren anchor reaches a block like any other text
+// (gqlc-cgat); a listed document keeps its census entry on one
+// surviving site (gqlc-0rjn); and a quote of one of the parameter
+// lists specNonMethodLists exempts, replaced in place by a claim
+// spelled identically, keeps the exemption (gqlc-yn2l).
 //
 // A list replacing one of the exhibits specBareListExhibits names,
 // spelled the same way, no longer takes that entry's exemption: an
 // exemption is claimed by exhibitMarker on the site's line rather than
 // by the site coming first (gqlc-x2sg).
+//
+// A signature carrying the author's parameter names as separate
+// arguments is no longer past the arity read here: the emitted list is a
+// closed shape at every arity, so anything longer is graded as drift,
+// and the functions in the corpus that open the same anchor without
+// being query methods are exempted per document by an exact census
+// (gqlc-vu7z).
 //
 // That this file scans bytes rather than parsing markdown is a decision
 // and not an oversight: ADR 0042 rules that no CommonMark parser enters
@@ -189,11 +196,13 @@ const repoRoot = "../../../"
 // the floors that edit takes C4's signature count below what specSigDocs
 // declares, and is reported by document name with both numbers.
 const (
-	specC1   = "docs/specs/codegen-stage-c1.md"
-	specC3   = "docs/specs/codegen-stage-c3.md"
-	specC4   = "docs/specs/codegen-stage-c4.md"
-	specC5   = "docs/specs/codegen-stage-c5.md"
-	adrFence = "docs/adr/0029-the-codegen-spec-fence.md"
+	specC0        = "docs/specs/codegen-stage-c0.md"
+	specC1        = "docs/specs/codegen-stage-c1.md"
+	specC3        = "docs/specs/codegen-stage-c3.md"
+	specC4        = "docs/specs/codegen-stage-c4.md"
+	specC5        = "docs/specs/codegen-stage-c5.md"
+	specGodogDocs = "docs/specs/cypher-golden-test-migration.md"
+	adrFence      = "docs/adr/0029-the-codegen-spec-fence.md"
 )
 
 // specSigDocs are the documents that print an emitted query method
@@ -227,6 +236,78 @@ var specBindDocs = map[string]int{specC1: 3, specC3: 3, specC4: 3, specC5: 1}
 // placeholder; a document not here may not have a whole-list placeholder
 // waved through (ADR 0029 decision 4).
 var specListRuleDocs = []string{specC1, specC4}
+
+// The four parameter lists the documentation prints that open the
+// emitted query method's anchor and belong to something else: the
+// driver/transaction `run` seam in both its spellings, the neo4j
+// driver's own ExecuteWrite, and the godog step handler the golden-test
+// migration note quotes. Each is spelled here once and counted per
+// document in specNonMethodLists, so a document that respells one is red
+// on its text rather than silently exempted under the old spelling.
+const (
+	runSeamList      = "ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode"
+	runSeamTxList    = "ctx context.Context, cypher string, params map[string]any, _ neo4j.AccessMode"
+	executeWriteList = "ctx context.Context, session SessionWithContext, " +
+		"work ManagedTransactionWorkT[T], configurers ...func(*TransactionConfig)"
+	godogStepList = "ctx context.Context, sigText string, _ *godog.Table"
+)
+
+// specNonMethodLists are the parameter lists longer than any the emitter
+// renders, mapped per document to how many times each is printed there.
+//
+// The emitted query method's parameter list is a closed shape at every
+// arity — `(ctx context.Context)` or `(ctx context.Context, arg <T>)`,
+// never more — so ANY longer list opening that anchor is drift, and is
+// graded as drift (gqlc-vu7z). What this census holds is the other
+// population the same anchor reaches: functions the documentation prints
+// that are not emitted query methods at all. Thirteen sites, four
+// distinct lists, measured 2026-09-11 over the swept corpus.
+//
+// Telling those apart from a drifted claim cannot be done from the
+// bytes: an emitted query method's name is the query author's, so there
+// is no receiver, no keyword and no shape that a drifted four-parameter
+// claim could not also wear. That is ADR 0042's finding for gqlc-x2sg
+// restated one construct over, and the answer is the same — a census
+// written down, reconciled in BOTH directions.
+//
+// The count is exact rather than a floor, and that asymmetry is the
+// opposite of specSigDocs' for the opposite reason. specSigDocs bounds a
+// REQUIREMENT, where growing is honest; this bounds an EXEMPTION, where
+// growing is the failure — an unrecorded fourteenth site spelled like
+// one of these four would be waved through by a floor. So a document
+// that starts printing the run seam once more is red until the number
+// beside it moves, and a document that stops printing one is red too,
+// because the exemption is then holding nothing.
+//
+// What it does NOT carry is the exhibitMarker half of gqlc-x2sg's
+// mechanism, and the reason is measured rather than assumed: 11 of these
+// 13 sites sit inside fenced Go code blocks, where `**exhibit**` is not
+// emphasis but literal text corrupting the example (measured 2026-09-11;
+// the two in prose are C4's ExecuteWrite span and the godog handler). So
+// the residual gap is x2sg's exactly: a document REPLACING one of these
+// quotes with a claim spelled identically keeps the count satisfied. It
+// is bounded by what such a claim would have to say — that an emitted
+// query method takes a `cypher string` and a `params map[string]any` —
+// and it is filed rather than closed (gqlc-yn2l).
+var specNonMethodLists = map[string]map[string]int{
+	specC0:        {runSeamList: 2, runSeamTxList: 1},
+	specC1:        {runSeamList: 6, runSeamTxList: 1},
+	specC4:        {runSeamList: 1, executeWriteList: 1},
+	specGodogDocs: {godogStepList: 1},
+}
+
+// nonMethodCensus flattens specNonMethodLists into the one-entry-per
+// (document, list) form the census helpers reconcile, on exhibitEntry's
+// terms.
+func nonMethodCensus() map[string]int {
+	out := map[string]int{}
+	for doc, lists := range specNonMethodLists {
+		for list, n := range lists {
+			out[exhibitEntry(doc, list)] = n
+		}
+	}
+	return out
+}
 
 // exhibitMarker is what a document writes on the line carrying a site
 // this census exempts, and it is the whole of what tells an exhibit from
@@ -444,7 +525,12 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 	files := docFiles(t)
 	require.NotEmpty(t, files, "the fence swept no documents; docRoots is stale")
 
-	sweep := sweepSigs(files, func(file string) string { return readDoc(t, file) }, specBareListExhibits)
+	sweep := sweepSigs(
+		files,
+		func(file string) string { return readDoc(t, file) },
+		specBareListExhibits,
+		specNonMethodLists,
+	)
 
 	var bad []specSig
 	for _, sig := range sweep.graded {
@@ -464,6 +550,23 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 			"instead of after the generator; the emitter binds codegen.ParamArg (%q) at every arity, precisely so\n"+
 			"that no author-chosen identifier reaches the scope the method body resolves in (gqlc-lhs3, gqlc-rz0l)",
 			codegen.ParamArg))
+
+	requireClean(t, sweep.overlong, "documented method takes more parameters than the emitter renders",
+		"these documented signatures open `(ctx context.Context` and then carry more than the one argument\n"+
+			"the emitter binds. The emitted parameter list is a closed shape at every arity — one query\n"+
+			"parameter renders as `arg <T>`, two or more render as a single `arg <MethodName>Params` struct —\n"+
+			"so a list naming the query author's parameters as separate arguments is the capture vector\n"+
+			"gqlc-lhs3 removed, written in a second spelling (gqlc-vu7z).\n\n"+
+			"If the function above is not an emitted query method — the driver/transaction `run` seam, the\n"+
+			"driver's own API, a test harness handler — write its parameter list into specNonMethodLists\n"+
+			"beside its document, with the number of times that document prints it")
+
+	requireCensusExact(t, nonMethodCensus(), sweep.nonMethod, "specNonMethodLists", "exempted signature",
+		"each entry above is one parameter list a document prints that opens the emitted query method's\n"+
+			"anchor and belongs to something else, and the number beside it is how many times that document\n"+
+			"prints it. The count is exact, not a floor: this census bounds an EXEMPTION, so a site it has\n"+
+			"not been told about is the failure it exists to prevent, and a site that went away means the\n"+
+			"exemption is holding nothing (gqlc-vu7z)")
 
 	requireCensusFloors(t, specSigDocs, sweep.sigDocs, "specSigDocs", "graded signature",
 		"each document on this list prints emitted query methods whose arguments this fence reads, and the\n"+
@@ -694,8 +797,19 @@ func trackedFiles(t *testing.T) []string {
 // TestSpecSweepsCarryUnreadableSites and
 // TestSpecSweepRoutesBareSitesByExhibit are the witnesses.
 type sigSweep struct {
-	graded       []specSig
-	unclosed     []specSig
+	graded   []specSig
+	unclosed []specSig
+
+	// overlong are the sites whose parameter list is longer than any the
+	// emitter renders and which specNonMethodLists does not account for,
+	// so they are drift rather than another function (gqlc-vu7z).
+	overlong []specSig
+
+	// nonMethod counts the overlong sites that census does account for,
+	// per (document, list) entry, so the exemption is reconciled against
+	// the corpus in both directions AND by count.
+	nonMethod map[string]int
+
 	sigDocs      map[string]int
 	exemptDocs   map[string]bool
 	ruleDocs     map[string]bool
@@ -719,8 +833,20 @@ type bindSweep struct {
 // parameter lists that exhibits names for a document as
 // read-but-not-graded. Each name covers one site; every other bare list
 // in the same document is read on the same terms as any other's.
-func sweepSigs(files []string, read func(string) string, exhibits map[string][]string) sigSweep {
+//
+// A list longer than any the emitter renders is drift, and is routed the
+// other way round from an exhibit: the census is consulted by (document,
+// list) and an accounted site is COUNTED rather than deleted from a
+// pending set, because one entry there covers a stated number of sites
+// rather than exactly one (gqlc-vu7z).
+func sweepSigs(
+	files []string,
+	read func(string) string,
+	exhibits map[string][]string,
+	nonMethod map[string]map[string]int,
+) sigSweep {
 	out := sigSweep{
+		nonMethod:    map[string]int{},
 		sigDocs:      map[string]int{},
 		exemptDocs:   map[string]bool{},
 		ruleDocs:     map[string]bool{},
@@ -730,14 +856,24 @@ func sweepSigs(files []string, read func(string) string, exhibits map[string][]s
 	for _, file := range files {
 		text := read(file)
 
-		sigs, exempt, broken := scanSpecSigs(file, text)
+		sigs, exempt, long, broken := scanSpecSigs(file, text)
 		out.unclosed = append(out.unclosed, broken...)
 		if len(exempt) > 0 {
 			out.exemptDocs[file] = true
 		}
 
-		bare, bareBroken := scanBareSigs(file, text)
+		bare, bareLong, bareBroken := scanBareSigs(file, text)
 		out.unclosed = append(out.unclosed, bareBroken...)
+
+		for _, sites := range [][]specSig{long, bareLong} {
+			for _, site := range sites {
+				if _, declared := nonMethod[file][site.list]; !declared {
+					out.overlong = append(out.overlong, site)
+					continue
+				}
+				out.nonMethod[exhibitEntry(file, site.list)]++
+			}
+		}
 		unclaimed := map[string]bool{}
 		for _, list := range exhibits[file] {
 			unclaimed[list] = true
@@ -925,7 +1061,7 @@ func TestSpecSweepsCarryUnreadableSites(t *testing.T) {
 	read := func(file string) string { return docs[file] }
 
 	t.Run("the signature sweep carries an unreadable parameter list out of the scanner", func(t *testing.T) {
-		sweep := sweepSigs(files, read, nil)
+		sweep := sweepSigs(files, read, nil, nil)
 		require.Len(t, sweep.unclosed, 1)
 		require.Equal(t, "unreadable.md", sweep.unclosed[0].file)
 		require.Equal(t, 2, sweep.unclosed[0].line)
@@ -991,39 +1127,39 @@ func TestSpecSweepRoutesBareSitesByExhibit(t *testing.T) {
 	}
 
 	t.Run("an unlisted document's bare list is graded", func(t *testing.T) {
-		sweep := sweepSigs([]string{"graded.md"}, read, nil)
+		sweep := sweepSigs([]string{"graded.md"}, read, nil, nil)
 		require.Len(t, sweep.graded, 1)
 		require.Equal(t, "minAge", sweep.graded[0].arg)
 		require.Empty(t, sweep.bareExhibits)
 	})
 
 	t.Run("a listed and marked bare list is censused instead of graded", func(t *testing.T) {
-		sweep := sweepSigs([]string{"exhibit.md"}, read, listing("exhibit.md"))
+		sweep := sweepSigs([]string{"exhibit.md"}, read, listing("exhibit.md"), nil)
 		require.Empty(t, sweep.graded)
 		require.Equal(t, map[string]bool{"exhibit.md: " + drifted: true}, sweep.bareExhibits)
 	})
 
 	t.Run("a listed bare list the document stopped printing is not censused", func(t *testing.T) {
-		sweep := sweepSigs([]string{"silent.md"}, read, listing("silent.md"))
+		sweep := sweepSigs([]string{"silent.md"}, read, listing("silent.md"), nil)
 		require.Empty(t, sweep.bareExhibits, "the lost direction is what reports this")
 	})
 
 	t.Run("a listed document's unlisted bare list is graded", func(t *testing.T) {
-		sweep := sweepSigs([]string{"mixed.md"}, read, listing("mixed.md"))
+		sweep := sweepSigs([]string{"mixed.md"}, read, listing("mixed.md"), nil)
 		require.Len(t, sweep.graded, 1)
 		require.Equal(t, codegen.ParamArg, sweep.graded[0].arg)
 		require.Equal(t, map[string]bool{"mixed.md: " + drifted: true}, sweep.bareExhibits)
 	})
 
 	t.Run("a second copy of a listed bare list is graded", func(t *testing.T) {
-		sweep := sweepSigs([]string{"twice.md"}, read, listing("twice.md"))
+		sweep := sweepSigs([]string{"twice.md"}, read, listing("twice.md"), nil)
 		require.Len(t, sweep.graded, 1)
 		require.Equal(t, "minAge", sweep.graded[0].arg)
 		require.Equal(t, map[string]bool{"twice.md: " + drifted: true}, sweep.bareExhibits)
 	})
 
 	t.Run("a listed bare list with no marker on its line is graded", func(t *testing.T) {
-		sweep := sweepSigs([]string{"unmarked.md"}, read, listing("unmarked.md"))
+		sweep := sweepSigs([]string{"unmarked.md"}, read, listing("unmarked.md"), nil)
 		require.Len(t, sweep.graded, 1,
 			"a claim spelled the way an exhibit is takes no exemption from the census naming that "+
 				"spelling; only "+exhibitMarker+" on the site's line does (gqlc-x2sg)")
@@ -1033,7 +1169,7 @@ func TestSpecSweepRoutesBareSitesByExhibit(t *testing.T) {
 	})
 
 	t.Run("the exemption follows the marker rather than the position", func(t *testing.T) {
-		sweep := sweepSigs([]string{"claimfirst.md"}, read, listing("claimfirst.md"))
+		sweep := sweepSigs([]string{"claimfirst.md"}, read, listing("claimfirst.md"), nil)
 		require.Len(t, sweep.graded, 1, "the unmarked occurrence is graded even though it comes first")
 		require.Equal(t, 1, sweep.graded[0].line, "and it is the one on line 1 that is graded")
 		require.Equal(t, map[string]bool{"claimfirst.md: " + drifted: true}, sweep.bareExhibits)
@@ -1068,6 +1204,81 @@ func TestSpecSweepRoutesBareBindsByExhibit(t *testing.T) {
 			"a binding claim spelled the way an exhibit is takes no exemption from the census (gqlc-x2sg)")
 		require.Equal(t, "minAge", sweep.graded[0].arg)
 		require.Empty(t, sweep.bareExhibits)
+	})
+}
+
+// TestSpecSweepRoutesOverlongSitesByCensus is the witness for the other
+// routing in sweepSigs: a parameter list longer than any the emitter
+// renders is reported as drift unless specNonMethodLists accounts for it
+// in the document printing it (gqlc-vu7z).
+//
+// The corpus cannot stand in for these rows. Every overlong site it
+// holds today is accounted for, so the live run exercises the counting
+// arm and never the reporting one; a sweep that routed EVERYTHING to the
+// census would be green on the whole repository. The drifted row below
+// is the bead's own reproduction, and it is the row that was measured
+// green before this change.
+//
+// The counting arm is the half the exact census needs: one entry stands
+// for a stated number of sites, so an occurrence has to add to a count
+// rather than claim an entry the way an exhibit does.
+func TestSpecSweepRoutesOverlongSitesByCensus(t *testing.T) {
+	const (
+		seam    = "ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode"
+		drifted = "ctx context.Context, minAge int64, locale string"
+	)
+	docs := map[string]string{
+		"seam.md":    "the seam is `func (d driverDB) run(" + seam + ") error`\n",
+		"twice.md":   "`run(" + seam + ") error`\nand again `run(" + seam + ") error`\n",
+		"drift.md":   "`func (q *Queries) PeopleOverAge(" + drifted + ") ([]string, error)`\n",
+		"bare.md":    "the seam takes `" + seam + "`\n",
+		"wrapped.md": "```go\nfunc (d driverDB) run(\n\tctx context.Context,\n\tcypher string,\n\tparams map[string]any,\n\taccess neo4j.AccessMode,\n) error\n```\n",
+	}
+	read := func(file string) string { return docs[file] }
+	census := func(file string, n int) map[string]map[string]int {
+		return map[string]map[string]int{file: {seam: n}}
+	}
+
+	t.Run("a declared list is counted rather than reported", func(t *testing.T) {
+		sweep := sweepSigs([]string{"seam.md"}, read, nil, census("seam.md", 1))
+		require.Empty(t, sweep.overlong)
+		require.Empty(t, sweep.graded)
+		require.Equal(t, map[string]int{"seam.md: " + seam: 1}, sweep.nonMethod)
+	})
+
+	t.Run("each occurrence adds to the count", func(t *testing.T) {
+		sweep := sweepSigs([]string{"twice.md"}, read, nil, census("twice.md", 2))
+		require.Empty(t, sweep.overlong)
+		require.Equal(t, map[string]int{"twice.md: " + seam: 2}, sweep.nonMethod,
+			"an exact census needs the second occurrence counted, not absorbed by the first")
+	})
+
+	t.Run("an undeclared overlong list is reported", func(t *testing.T) {
+		sweep := sweepSigs([]string{"drift.md"}, read, nil, census("drift.md", 1))
+		require.Empty(t, sweep.nonMethod)
+		require.Len(t, sweep.overlong, 1,
+			"the author's parameter names as separate arguments are drift, and were unswept (gqlc-vu7z)")
+		require.Equal(t, drifted, sweep.overlong[0].list)
+	})
+
+	t.Run("the exemption is scoped to the document that declared it", func(t *testing.T) {
+		sweep := sweepSigs([]string{"seam.md"}, read, nil, census("elsewhere.md", 1))
+		require.Len(t, sweep.overlong, 1,
+			"one document's entry does not exempt another document printing the same list")
+		require.Empty(t, sweep.nonMethod)
+	})
+
+	t.Run("a bare span reaches the same census", func(t *testing.T) {
+		sweep := sweepSigs([]string{"bare.md"}, read, nil, census("bare.md", 1))
+		require.Empty(t, sweep.overlong, "the code-span scanner's overlong sites route here too")
+		require.Equal(t, map[string]int{"bare.md: " + seam: 1}, sweep.nonMethod)
+	})
+
+	t.Run("a wrapped list is the same census entry as an inline one", func(t *testing.T) {
+		sweep := sweepSigs([]string{"wrapped.md"}, read, nil, census("wrapped.md", 1))
+		require.Empty(t, sweep.overlong,
+			"gofmt's line breaks and trailing comma are formatting, not a different parameter list")
+		require.Equal(t, map[string]int{"wrapped.md: " + seam: 1}, sweep.nonMethod)
 	})
 }
 
@@ -1135,6 +1346,71 @@ func requireCensusFloors(t fenceT, written map[string]int, observed map[string]i
 				strings.Join(under, "\n")+"\n\n"+
 				"Restore the site, or — if the document genuinely no longer states it — lower the number here in\n"+
 				"the same commit, so that the removal is written down where the child text cannot edit it.\n\n"+why)
+	}
+}
+
+// requireCensusExact is requireCensusFloors with the inequality closed:
+// membership reconciled in both directions, then each declared entry
+// held to its number in BOTH directions rather than only from below.
+//
+// The two helpers differ because the two kinds of census differ, and
+// picking the wrong one is silent. A census of what a document OWES is a
+// floor, because growing is honest and an equality reddens on every
+// addition (specSigDocs). A census of what is EXEMPTED is not: growing
+// is the failure mode, since an unrecorded site that matches a declared
+// entry is exactly the site nobody wrote down. So specNonMethodLists is
+// held to ==, and a document printing one more of the run seam is red
+// until the number beside it moves.
+//
+// A count of zero or less is refused for the same reason a floor of zero
+// is: it leaves a line that reads like a census entry while exempting
+// nothing, and the membership half above would pass it.
+func requireCensusExact(t fenceT, written map[string]int, observed map[string]int, census, unit, why string) {
+	t.Helper()
+
+	declared := make([]string, 0, len(written))
+	for entry := range written {
+		declared = append(declared, entry)
+	}
+	sort.Strings(declared)
+
+	seen := make(map[string]bool, len(observed))
+	for entry, n := range observed {
+		if n > 0 {
+			seen[entry] = true
+		}
+	}
+	requireCensus(t, declared, seen, census, why)
+
+	var zeroed, off []string
+	for _, entry := range declared {
+		want := written[entry]
+		if want <= 0 {
+			zeroed = append(zeroed, fmt.Sprintf("  %s: %d", entry, want))
+			continue
+		}
+		if got := observed[entry]; got != want {
+			off = append(off, fmt.Sprintf("  %s — %s declares %d %s(s), the sweep found %d",
+				entry, census, want, unit, got))
+		}
+	}
+
+	if len(zeroed) > 0 {
+		require.Fail(t, census+" declares a count of zero",
+			"an entry exempting no site is an entry guarding nothing, and its line here reads like a guard.\n"+
+				"Remove the line, or write down the number of sites it actually covers:\n"+
+				strings.Join(zeroed, "\n"))
+	}
+	if len(off) > 0 {
+		require.Fail(t, census+" does not agree with the sweep on how many sites it covers",
+			"each entry below is still observed, so the membership reconciliation above is satisfied; it is\n"+
+				"the count that moved. Reading HIGH means a site this census covers stopped being printed and\n"+
+				"the exemption now holds less than it claims; reading LOW means the document grew a site that\n"+
+				"matched a declared entry and was exempted without anyone writing it down — which is the whole\n"+
+				"failure this census is exact rather than a floor to catch:\n"+
+				strings.Join(off, "\n")+"\n\n"+
+				"Move the number here in the same commit as the document change, so that the exemption's size\n"+
+				"is written down where the child text cannot edit it.\n\n"+why)
 	}
 }
 
@@ -1455,6 +1731,67 @@ func TestSpecFailuresAreWired(t *testing.T) {
 		wantFail: true,
 		wantMsg:  []string{"census declares an entry the sweep did not produce", "a"},
 	}, {
+		name: "requireCensusExact passes an entry at its count",
+		call: func(ft fenceT) {
+			requireCensusExact(ft, map[string]int{"a": 2}, map[string]int{"a": 2}, "census", "site", "why")
+		},
+	}, {
+		// The row that separates requireCensusExact from
+		// requireCensusFloors, and the reason both exist: over this
+		// input the floor helper PASSES. An exemption that has grown
+		// covers a site nobody wrote down.
+		name: "requireCensusExact fails an entry the sweep found more of",
+		call: func(ft fenceT) {
+			requireCensusExact(ft, map[string]int{"a": 2}, map[string]int{"a": 3}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg: []string{
+			"census does not agree with the sweep on how many sites it covers",
+			"census declares 2 site(s), the sweep found 3", "why",
+		},
+	}, {
+		name: "requireCensusExact fails an entry the sweep found fewer of",
+		call: func(ft fenceT) {
+			requireCensusExact(ft, map[string]int{"a": 2}, map[string]int{"a": 1}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares 2 site(s), the sweep found 1"},
+	}, {
+		name: "requireCensusExact reports the entry that moved, not one that held",
+		call: func(ft fenceT) {
+			requireCensusExact(ft, map[string]int{"a": 2, "b": 2}, map[string]int{"a": 2, "b": 3}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"b — census declares 2 site(s), the sweep found 3"},
+	}, {
+		name: "requireCensusExact fails a count of zero",
+		call: func(ft fenceT) {
+			requireCensusExact(ft, map[string]int{"a": 0}, map[string]int{"a": 1}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares a count of zero", "a: 0"},
+	}, {
+		name: "requireCensusExact still fails a declared entry the sweep did not produce",
+		call: func(ft fenceT) {
+			requireCensusExact(ft, map[string]int{"a": 1, "b": 1}, map[string]int{"a": 1}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares an entry the sweep did not produce", "b"},
+	}, {
+		name: "requireCensusExact still fails an entry nobody declared",
+		call: func(ft fenceT) {
+			requireCensusExact(ft, map[string]int{"a": 1}, map[string]int{"a": 1, "b": 1}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"the sweep produced an entry census does not declare", "b"},
+	}, {
+		name: "requireCensusExact fails a census that declares nothing",
+		call: func(ft fenceT) {
+			requireCensusExact(ft, nil, map[string]int{}, "census", "site", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares no entry"},
+	}, {
 		name: "requireSwept passes over a run that read something",
 		call: func(ft fenceT) { requireSwept(ft, 1, "the sweep", "why") },
 	}, {
@@ -1590,11 +1927,12 @@ func TestSpecCensusReconcilesBothDirections(t *testing.T) {
 // 4).
 func TestSpecSigScannerDetectsDrift(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		text       string
-		wantArg    string
-		wantAny    bool
-		wantExempt bool
+		name         string
+		text         string
+		wantArg      string
+		wantAny      bool
+		wantExempt   bool
+		wantOverlong string
 	}{{
 		name:    "c1 §3.1, before",
 		text:    "func (q *Queries) PersonById(ctx context.Context, id int64) (PersonRow, error)",
@@ -1647,8 +1985,33 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		name: "zero-parameter methods have no argument to grade",
 		text: "func (q *Queries) AllPeopleNames(ctx context.Context) ([]string, error)",
 	}, {
-		name: "the driverOrTx.run seam is not a query method",
-		text: "func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error) {",
+		// The seam is past every arity the emitter renders, so it is
+		// REPORTED here rather than skipped, and sweepSigs is what
+		// decides — against specNonMethodLists — that this particular
+		// list belongs to something that is not a query method. Before
+		// gqlc-vu7z the scanner dropped it silently, and dropped a
+		// drifted `(ctx, minAge int64, locale string)` with it.
+		name:         "the driverOrTx.run seam is reported as overlong, not dropped",
+		text:         "func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error) {",
+		wantOverlong: runSeamList,
+	}, {
+		// gqlc-vu7z's own reproduction: the naive sqlc-shaped signature
+		// a reader would plausibly write, carrying the query author's
+		// parameter names as separate arguments. The emitter renders two
+		// query parameters as one `arg <Method>Params` struct, so this
+		// is drift, and it was green at every gate until the arity rule
+		// widened.
+		name:         "the author's names as separate arguments are drift",
+		text:         "func (q *Queries) PeopleOverAge(ctx context.Context, minAge int64, locale string) ([]string, error)",
+		wantOverlong: "ctx context.Context, minAge int64, locale string",
+	}, {
+		// The same list wrapped across lines is the same entry: the
+		// paren walk reads through the breaks and the list is collapsed
+		// before the census sees it, so a document cannot move a site
+		// out of its census entry by reformatting it.
+		name:         "a wrapped overlong list collapses to the same entry",
+		text:         "func (d driverDB) run(\n    ctx context.Context,\n    cypher string,\n    params map[string]any,\n    access neo4j.AccessMode,\n) ([]*neo4j.Record, error) {",
+		wantOverlong: runSeamList,
 	}, {
 		name:    "a signature wrapped after ctx is still one signature",
 		text:    "func (q *Queries) PersonById(ctx context.Context,\n    id int64) (PersonRow, error)",
@@ -1746,9 +2109,16 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		wantAny: true,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, exempt, unclosed := scanSpecSigs("witness.md", tc.text)
+			got, exempt, overlong, unclosed := scanSpecSigs("witness.md", tc.text)
 			require.Empty(t, unclosed)
 			require.Equal(t, tc.wantExempt, len(exempt) > 0, "exempt")
+			if tc.wantOverlong == "" {
+				require.Empty(t, overlong, "overlong")
+			} else {
+				require.Len(t, overlong, 1, "overlong")
+				require.Equal(t, tc.wantOverlong, overlong[0].list,
+					"the verbatim list specNonMethodLists reconciles by identity")
+			}
 			if !tc.wantAny {
 				require.Empty(t, got)
 				return
@@ -1769,10 +2139,11 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 // opening on anything but the context parameter has to fall out first.
 func TestSpecBareSigScannerDetectsDrift(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		text    string
-		wantArg string
-		wantAny bool
+		name         string
+		text         string
+		wantArg      string
+		wantAny      bool
+		wantOverlong string
 	}{{
 		name:    "the capture vector with the parens left off",
 		text:    "- The parameter list is `ctx context.Context, minAge int64`.",
@@ -1809,8 +2180,15 @@ func TestSpecBareSigScannerDetectsDrift(t *testing.T) {
 		name: "a whole-list placeholder names nothing here either",
 		text: "either `ctx context.Context, <param-list>` or `ctx context.Context<param-list>`",
 	}, {
-		name: "the run seam is past the arity this scanner reads",
-		text: "the seam takes `ctx context.Context, cypher string, params map[string]any`",
+		// The span scanner reports an overlong list the way the paren
+		// walk does, so the two anchors reach the same population. No
+		// bare site in the corpus is overlong today — all five are at
+		// arity 1 or 2, measured 2026-09-11 — so this row is the whole
+		// witness for that arm, and dropping it from scanBareSigs is
+		// green on the corpus (gqlc-vu7z).
+		name:         "an overlong list is reported here too, not dropped",
+		text:         "the seam takes `ctx context.Context, cypher string, params map[string]any`",
+		wantOverlong: "ctx context.Context, cypher string, params map[string]any",
 	}, {
 		// A span the paren walk already grades, reached from inside. Read
 		// twice it would be graded twice and reported twice, so the anchor
@@ -1871,8 +2249,14 @@ func TestSpecBareSigScannerDetectsDrift(t *testing.T) {
 		wantAny: true,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, unclosed := scanBareSigs("witness.md", tc.text)
+			got, overlong, unclosed := scanBareSigs("witness.md", tc.text)
 			require.Empty(t, unclosed)
+			if tc.wantOverlong == "" {
+				require.Empty(t, overlong, "overlong")
+			} else {
+				require.Len(t, overlong, 1, "overlong")
+				require.Equal(t, tc.wantOverlong, overlong[0].list)
+			}
 			if !tc.wantAny {
 				require.Empty(t, got)
 				return
@@ -2059,21 +2443,24 @@ func TestSpecScannersReportUnreadableSites(t *testing.T) {
 		require.Equal(t, 2, unclosed[0].line)
 	})
 	t.Run("an unterminated parameter list is reported, not dropped", func(t *testing.T) {
-		sigs, exempt, unclosed := scanSpecSigs("witness.md", "prose\nRemovePerson(ctx context.Context, arg int64\nmore prose\n")
+		sigs, exempt, overlong, unclosed := scanSpecSigs("witness.md", "prose\nRemovePerson(ctx context.Context, arg int64\nmore prose\n")
 		require.Empty(t, sigs)
 		require.Empty(t, exempt)
+		require.Empty(t, overlong)
 		require.Len(t, unclosed, 1)
 		require.Equal(t, 2, unclosed[0].line)
 	})
 	t.Run("an unterminated code span is reported, not dropped", func(t *testing.T) {
-		sigs, unclosed := scanBareSigs("witness.md", "prose\nthe list is `ctx context.Context, minAge int64\nmore prose\n")
+		sigs, overlong, unclosed := scanBareSigs("witness.md", "prose\nthe list is `ctx context.Context, minAge int64\nmore prose\n")
 		require.Empty(t, sigs)
+		require.Empty(t, overlong)
 		require.Len(t, unclosed, 1)
 		require.Equal(t, 2, unclosed[0].line)
 	})
 	t.Run("a span whose closing run is the wrong length is reported too", func(t *testing.T) {
-		sigs, unclosed := scanBareSigs("witness.md", "prose\nthe list is ``ctx context.Context, minAge int64`\nmore prose\n")
+		sigs, overlong, unclosed := scanBareSigs("witness.md", "prose\nthe list is ``ctx context.Context, minAge int64`\nmore prose\n")
 		require.Empty(t, sigs)
+		require.Empty(t, overlong)
 		require.Len(t, unclosed, 1)
 		require.Equal(t, 2, unclosed[0].line)
 	})
@@ -2082,8 +2469,9 @@ func TestSpecScannersReportUnreadableSites(t *testing.T) {
 	// cmark-gfm leaves the backticks below as literal text, printing no
 	// code element at all.
 	t.Run("a longer closing run does not close a shorter opener", func(t *testing.T) {
-		sigs, unclosed := scanBareSigs("witness.md", "prose\nthe list is `ctx context.Context, minAge int64``\nmore prose\n")
+		sigs, overlong, unclosed := scanBareSigs("witness.md", "prose\nthe list is `ctx context.Context, minAge int64``\nmore prose\n")
 		require.Empty(t, sigs)
+		require.Empty(t, overlong)
 		require.Len(t, unclosed, 1)
 		require.Equal(t, 2, unclosed[0].line)
 	})
@@ -2217,7 +2605,7 @@ func collectDocs(base string, roots []string) ([]string, error) {
 // parameter, or `(ctx context.Context, <param-list>)` past a comma — and
 // either way there is no name in the declaration to read. Both positions
 // are read on identical terms (ADR 0029 decision 4).
-func scanSpecSigs(file, text string) (sigs, exempt, unclosed []specSig) {
+func scanSpecSigs(file, text string) (sigs, exempt, overlong, unclosed []specSig) {
 	for _, loc := range ctxAnchorRe.FindAllStringIndex(text, -1) {
 		open := loc[0]
 		site := specSig{
@@ -2231,31 +2619,58 @@ func scanSpecSigs(file, text string) (sigs, exempt, unclosed []specSig) {
 			unclosed = append(unclosed, site)
 			continue
 		}
-		name, isExempt, gradable := gradeParams(list)
-		switch {
-		case isExempt:
+		name, verdict := gradeParams(list)
+		switch verdict {
+		case paramPlaceholder:
 			exempt = append(exempt, site)
-		case gradable:
+		case paramNamed:
 			site.arg = name
 			sigs = append(sigs, site)
+		case paramOverlong:
+			site.list = canonicalList(list)
+			overlong = append(overlong, site)
+		case paramUnread:
 		}
 	}
-	return sigs, exempt, unclosed
+	return sigs, exempt, overlong, unclosed
 }
 
+// paramVerdict is what gradeParams made of one parameter list.
+type paramVerdict int
+
+const (
+	// paramUnread: nothing here to grade — a zero-parameter method, or a
+	// span whose second field is not a parameter declaration at all.
+	paramUnread paramVerdict = iota
+	// paramPlaceholder: a whole-list placeholder stood in for the
+	// parameters, so the declaration names no argument and the document
+	// owes the `<param-list>` bullet instead.
+	paramPlaceholder
+	// paramNamed: one named argument after the context parameter, which
+	// is the shape the emitter renders and the name is graded.
+	paramNamed
+	// paramOverlong: more parameters than the emitter renders at any
+	// arity. Drift unless specNonMethodLists says the list belongs to
+	// something that is not an emitted query method (gqlc-vu7z).
+	paramOverlong
+)
+
 // gradeParams reads the argument name out of a parameter list's
-// contents, reporting separately whether a whole-list placeholder stood
-// in for the parameters. It is the one grading step both signature
-// anchors share (ADR 0029 decision 10).
+// contents, reporting what it made of the list. It is the one grading
+// step both signature anchors share (ADR 0029 decision 10).
 //
 // The emitted query method takes two parameters at most, at every arity:
 // `arg <T>` for one query parameter, `arg <Method>Params` for two or
-// more. A longer list — the `driverOrTx.run` seam, ExecuteWrite — is not
-// a query method and is not graded.
-func gradeParams(list string) (name string, exempt, gradable bool) {
+// more. That is a CLOSED shape — the emitter has no form taking the
+// author's parameters as separate arguments — so a longer list is drift
+// and says so, rather than being passed over for being past the arity
+// this once read (gqlc-vu7z). The lists in the corpus that are longer
+// and are not drift belong to functions that are not emitted query
+// methods, and sweepSigs routes them out against specNonMethodLists.
+func gradeParams(list string) (string, paramVerdict) {
 	params := splitTopLevel(list)
 	if len(params) > 2 {
-		return "", false, false
+		return "", paramOverlong
 	}
 
 	// The parameter the placeholder would be in: whatever trails the
@@ -2265,14 +2680,17 @@ func gradeParams(list string) (name string, exempt, gradable bool) {
 	if len(params) == 1 {
 		tail = ctxParamTail(tail)
 		if tail == "" {
-			return "", false, false // a zero-parameter method has no name to read.
+			return "", paramUnread // a zero-parameter method has no name to read.
 		}
 	}
 	if listPlaceholderRe.MatchString(tail) {
-		return "", true, false
+		return "", paramPlaceholder
 	}
-	name, gradable = paramName(tail)
-	return name, false, gradable
+	name, gradable := paramName(tail)
+	if !gradable {
+		return "", paramUnread
+	}
+	return name, paramNamed
 }
 
 // scanBareSigs extracts every parameter list a document prints inside an
@@ -2320,7 +2738,7 @@ func gradeParams(list string) (name string, exempt, gradable bool) {
 // are unoccupied. Where one of these limits is worth closing, that
 // ruling prefers a check that the construct is ABSENT from the swept
 // documents over a scanner that interprets it.
-func scanBareSigs(file, text string) (sigs, unclosed []specSig) {
+func scanBareSigs(file, text string) (sigs, overlong, unclosed []specSig) {
 	for _, loc := range tickAnchorRe.FindAllStringIndex(text, -1) {
 		open := loc[0]
 		start := open
@@ -2343,15 +2761,19 @@ func scanBareSigs(file, text string) (sigs, unclosed []specSig) {
 			continue
 		}
 		list := collapse(text[open+1 : closing])
-		name, _, gradable := gradeParams(list)
-		if !gradable {
-			continue
+		name, verdict := gradeParams(list)
+		switch verdict {
+		case paramNamed:
+			site.arg = name
+			site.list = list
+			sigs = append(sigs, site)
+		case paramOverlong:
+			site.list = canonicalList(list)
+			overlong = append(overlong, site)
+		case paramUnread, paramPlaceholder:
 		}
-		site.arg = name
-		site.list = list
-		sigs = append(sigs, site)
 	}
-	return sigs, unclosed
+	return sigs, overlong, unclosed
 }
 
 // ctxParamTail splits the context parameter off the head of a parameter
@@ -2682,6 +3104,23 @@ func readDoc(t *testing.T, file string) string {
 	body, err := os.ReadFile(filepath.Join(repoRoot, file))
 	require.NoError(t, err)
 	return string(body)
+}
+
+// canonicalList is the spelling specNonMethodLists keys an overlong
+// parameter list by: its depth-zero entries, each with its own
+// whitespace collapsed, rejoined on `, `.
+//
+// The normalisation is what makes the census entry a claim about the
+// PARAMETERS rather than about the formatting around them. gofmt wraps a
+// long signature across lines and leaves a trailing comma, and the same
+// seam is printed both ways in these documents; keyed on the raw bytes
+// those are two entries, so a document reformatting a quote would read
+// as one exempted site disappearing and an unrecorded one arriving. It
+// is only the exemption census that is canonicalised — a bare list's own
+// `list` field stays verbatim, because specBareListExhibits reconciles
+// the text a document prints (ADR 0029 decision 10).
+func canonicalList(list string) string {
+	return strings.Join(splitTopLevel(collapse(list)), ", ")
 }
 
 // splitTopLevel splits a parameter list or composite literal at its

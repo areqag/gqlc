@@ -820,10 +820,19 @@ section states which is which. The one token it declines to grade
 list — `<param-list>` and the numbered `<param-list-1>` the interface
 block below uses — and a document taking that exemption owes the
 bullet, because the exemption and the requirement are the same list.
-It also reads nothing out of a list holding three or more parameters,
-which is how the `driverOrTx.run` seam stays out of a sweep for query
-methods, and which is why a signature carrying the author's names as
-separate arguments is past what it reads (`gqlc-vu7z`).
+A list holding three or more parameters is read and reported as drift,
+because the emitted list is a closed shape at every arity — no query
+parameters, `arg <T>` for one, `arg <MethodName>Params` for two or
+more — so a signature carrying the author's names as separate
+arguments is caught rather than passed over for being past an arity
+(`gqlc-vu7z`). The functions these documents print that open the same
+context-parameter anchor without being query methods — the
+`driverOrTx.run` seam, the driver's own `ExecuteWrite`, a godog step
+handler — are exempted by `specNonMethodLists`, which names each
+parameter list verbatim beside the document printing it and says how
+many times that document prints it. The count is exact: a document
+that grows one of those quotes is red until the number moves, and a
+document that drops one is red too.
 
 Which documents owe graded sites is written down in that test, by
 name, and reconciled against what the sweep actually read — in both
@@ -915,6 +924,17 @@ The binding case was measured rather than assumed — these documents
 carry over 500 bare spans shaped like the **exhibit** `"key": value`,
 across more than 30 files, nearly all of them JSON model shapes, so a
 sweep reading them would redden on prose across the corpus.
+
+That marker does not reach everywhere the same shape now occurs. The
+exemption for a parameter list belonging to something other than a
+query method is held by `specNonMethodLists` on its text and its
+count, with no marker beside it, because 11 of the 13 sites it covers
+sit inside fenced Go code blocks where a bolded word is literal text
+corrupting the example. So one of those quotes replaced in place by a
+claim spelled identically keeps the exemption — the same defect one
+construct over, filed rather than closed (`gqlc-yn2l`), and bounded by
+what such a claim would have to assert: that an emitted query method
+takes a `cypher string` and a driver parameters map as arguments.
 
 The fifth and sixth are narrower, and both were measured rather than
 reasoned about. The sweeps read raw markdown bytes, so a site inside
