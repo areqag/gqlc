@@ -121,11 +121,12 @@ complexity_gate() {
   # 1. Measured 2026-09-11: `package codegen` staged into test/data/codegen
   # beside `package fixtures` printed the complexity sentence over a directory
   # in which no function was graded. What holds the contract now is the
-  # per-module `go list` pre-flight in `just complexity`, which turns that into
-  # 7 — so this branch is correct only for as long as that pre-flight is there,
-  # and .githooks/complexity-exit-code.rows is what says so. That pre-flight is
-  # also why the no-Go-file member above now arrives as 7 rather than
-  # golangci-lint's own 5; either way it is not 1, which is all this test asks.
+  # per-module pre-flight in `just complexity` — `go list`, and then `gofmt -l`
+  # over the file list `go list` named — which turns that into 7, so this branch
+  # is correct only for as long as that pre-flight is there, and
+  # .githooks/complexity-exit-code.rows is what says so. That pre-flight is also
+  # why the no-Go-file member above now arrives as 7 rather than golangci-lint's
+  # own 5; either way it is not 1, which is all this test asks.
   #
   # A package that does not TYPE-CHECK is NOT one of them, which is worth
   # writing down because it is the first member a reader reaches for: measured
@@ -134,20 +135,33 @@ complexity_gate() {
   # AST-only linters, so golangci-lint never asks for type information and
   # never notices.
   #
-  # A PACKAGE THAT DOES NOT PARSE IS STILL MISREPORTED HERE — stated plainly
-  # because the sentence this replaces claimed the opposite, and a claim of
-  # coverage that is wider than the coverage is the failure this gate exists to
-  # prevent. It read "one that does not PARSE is caught earlier still, by the
-  # repo-wide `just fmt-check` below, and never reaches this function", and both
-  # halves are false: measured 2026-09-11, `func ( {{{` in internal/resolver
+  # A PACKAGE THAT DOES NOT PARSE REACHES THIS FUNCTION, and is handled by the
+  # arm BELOW rather than by this one (bd gqlc-3rgo). Two earlier sentences here
+  # were wrong about it and both are worth the space, because each was a claim of
+  # coverage wider than the coverage, which is the failure this gate exists to
+  # prevent.
+  #
+  # The first said it was "caught earlier still, by the repo-wide `just
+  # fmt-check` below, and never reaches this function". Both halves are false:
+  # measured 2026-09-11, a half-typed function signature in internal/resolver
   # made golangci-lint's formatters emit `level=warning msg="(gofumpt)
-  # formatting file ...: expected ')', found '{'"` and exit 0, so fmt-check
-  # passes it through, and `just complexity` then returns 1 through typecheck
-  # exactly as the package-clause clash used to. The `go list` pre-flight does
-  # not see it either, go/build reading only as far as the imports. bd gqlc-3rgo
-  # holds it, with the two candidate fixes; the row named parse-error-KNOWN-GAP
-  # in .githooks/complexity-exit-code.rows pins the current behaviour so that
-  # closing it fails there rather than silently.
+  # formatting file ...: expected ')', found '{'"` and exit 0 — a formatter that
+  # cannot parse a file declines to format it and WARNS — and this hook calls
+  # fmt-check with >/dev/null 2>&1, so the warning is not even seen.
+  #
+  # The second said it was still misreported here. It was, until the `gofmt -l`
+  # half of `just complexity`'s pre-flight; `go list` alone cannot see it,
+  # go/build reading only as far as the imports. Rows `parse-error` and
+  # `parse-error-in-test` in .githooks/complexity-exit-code.rows hold it.
+  #
+  # Nothing was changed in `just fmt-check` for this. Making IT refuse an
+  # unparseable file was the other candidate on the bead, and it was declined:
+  # fmt-check is repo-wide, so one unparseable file anywhere — including a probe
+  # directory leaked by .githooks/complexity-exit-code.rows, which golangci-lint's
+  # formatters walk and `go list ./...` does not — would block every commit in
+  # the tree rather than the one commit that touches it. Today a leaked probe
+  # warns on a stream this hook discards; under that candidate it would refuse
+  # every commit until someone re-ran the rows that sweep it.
   if [ "$complexity_rc" -eq 1 ]; then
     echo "ERROR: function complexity over the gate in a package this commit touches." >&2
     echo "$complexity_out" >&2

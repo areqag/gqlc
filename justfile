@@ -2389,6 +2389,32 @@ complexity *paths: sweep-discovery-probes ensure-golangci
         nested+=("${module}")
     done <<<"${modules_raw}"
 
+    # gofmt is the PARSE half of the pre-flight below. Resolved out of GOROOT
+    # rather than off PATH so it is the one belonging to the toolchain that just
+    # ran `go list`, with PATH as the fallback for a distribution that ships the
+    # binary only as a symlink. Every Go distribution carries it, so this arm is
+    # about saying which failure it is rather than about a case anyone expects:
+    # an unresolvable gofmt exits 127 through the pre-flight, which this recipe
+    # would otherwise report as "this file does not parse" — the same wrong-cause
+    # message the pre-flight exists to stop printing (bd gqlc-3rgo).
+    gofmt_bin="$(go env GOROOT)/bin/gofmt"
+    if [ ! -x "${gofmt_bin}" ]; then
+        gofmt_bin="$(command -v gofmt || true)"
+    fi
+    if [ -z "${gofmt_bin}" ]; then
+        echo "complexity: no gofmt in \$(go env GOROOT)/bin or on PATH, so the PARSE" >&2
+        echo "            pre-flight cannot run. This is a missing tool, NOT a finding" >&2
+        echo "            about your code and NOT a complexity result." >&2
+        exit 7
+    fi
+
+    # The Go files of a package, absolute, one per line. Test files are in the
+    # list because golangci-lint lints them too (run.tests defaults to true), and
+    # measured 2026-09-11 a `_test.go` that does not parse arrives from this
+    # recipe as 1 exactly as a non-test file does. CgoFiles are separate from
+    # GoFiles in `go list`'s output and would otherwise go unparsed.
+    list_fmt='{{{{$d := .Dir}}{{{{range .GoFiles}}{{{{$d}}/{{{{.}}{{{{"\n"}}{{{{end}}{{{{range .CgoFiles}}{{{{$d}}/{{{{.}}{{{{"\n"}}{{{{end}}{{{{range .TestGoFiles}}{{{{$d}}/{{{{.}}{{{{"\n"}}{{{{end}}{{{{range .XTestGoFiles}}{{{{$d}}/{{{{.}}{{{{"\n"}}{{{{end}}'
+
     set -- {{ paths }}
     if [ "$#" -eq 0 ]; then
         set -- ./...
@@ -2457,10 +2483,38 @@ complexity *paths: sweep-discovery-probes ensure-golangci
         # 1 and names both clauses; a directory holding no Go file exits 1; a
         # TYPE error (`var _ int = "not an int"`, a reference to an undefined
         # symbol) exits 0; and so does a file whose body does not PARSE, go/build
-        # reading only as far as the imports. The last two are the ones that must
-        # not turn red here — gocyclo and gocognit are AST-only and grade both of
-        # those packages fine, so refusing mid-edit source would be worse than
-        # the bug this closes.
+        # reading only as far as the imports. The type error is the one that must
+        # not turn red here — gocyclo and gocognit are AST-only and grade that
+        # package fine, so refusing mid-edit source would be worse than the bug
+        # this closes.
+        #
+        # AND THEN PARSE, because `go list`'s blindness to a body is the gap it
+        # left behind (bd gqlc-3rgo). go/build reads only as far as the imports,
+        # so a file whose body is cut off mid-signature loads at rc=0 here and is
+        # reported by golangci-lint through the same always-on `typecheck` — as
+        # an ISSUE, so as 1, over a package in which nothing was graded. That is
+        # the common member of the class rather than an exotic one: a half-typed
+        # function is the normal state of a file at the moment someone reaches
+        # for `git commit`, where a clause clash needs a deliberately broken
+        # tree.
+        #
+        # gofmt is the parser, handed the EXACT file list `go list` just named
+        # rather than a directory. gofmt walks a directory recursively — measured
+        # 2026-09-11, `gofmt -l .` from the root descends into `_`-prefixed
+        # directories that `go list ./...` skips — so a directory argument would
+        # refuse a package over a parse error in some unrelated package below it,
+        # which is the "refuses too much" lie in the other direction that the
+        # graded rows exist to catch. `gofmt -l` exits 0 for a file that merely
+        # needs formatting and 0 for one that does not type-check, and non-zero
+        # only when it could not parse (all three measured), so its exit status
+        # is the question this pre-flight is asking and nothing else.
+        #
+        # NOT the sentence the hook used to carry, which said an unparseable file
+        # was "caught earlier still, by the repo-wide `just fmt-check`". It is
+        # not: golangci-lint's formatters decline to format a file they cannot
+        # parse, emit `level=warning msg="(gofumpt) formatting file ...: expected
+        # ')', found '{'"` and exit 0 (measured 2026-09-11), and the hook calls
+        # fmt-check with >/dev/null 2>&1 so the warning is not even seen.
         #
         # IT RUNS FROM THE MODULE ROOT, after the grouping above, and that is
         # load-bearing rather than incidental. `go list ./test/data/codegen`
@@ -2470,17 +2524,41 @@ complexity *paths: sweep-discovery-probes ensure-golangci
         # the live battery a load failure and re-open gqlc-f0x1 from the other
         # side.
         #
-        # Cost, since this is on the path of every commit: 11-17 ms per module
-        # warm, 93 ms for the root module's whole-tree `./...`, against ~300 ms
-        # for the cheapest real invocation of this recipe (one package, warm).
+        # Cost, since this is on the path of every commit: the `-f` template
+        # costs `go list` nothing measurable (9-15 ms per module warm either
+        # way, 81-102 ms for the root module's whole-tree `./...`), and gofmt
+        # adds 14-28 ms over one package's 16 files and 161-187 ms over the root
+        # module's 267 — against ~300 ms for the cheapest real invocation of this
+        # recipe. A commit stages one or two packages, so the added cost there is
+        # the 14-28 ms figure, not the whole-tree one (measured 2026-09-11).
         #
         # 7 is not invented here: it is the code golangci-lint itself exits with
         # when it cannot load the packages it was handed, and it is not 1, which
-        # is the whole of what the hook's reading needs.
-        if ! ( cd "${module}" && go list "${patterns[@]}" >/dev/null ); then
+        # is the whole of what the hook's reading needs. The parse arm shares it
+        # for the same reason: the hook prints one message for every code that is
+        # not 1, and both arms mean the same thing to it.
+        module_go_files=()
+        if ! module_go_list="$( cd "${module}" && go list -f "${list_fmt}" "${patterns[@]}" )"; then
             echo "complexity: ${module} could not be LOADED, so no function in it was graded" >&2
             module_rc=7
         else
+            # `|| continue` and not `&& append`: a herestring over an EMPTY
+            # variable still yields one empty line, so the `&&` form would leave
+            # the loop — and with it the whole `if`, which is the last command in
+            # this branch — at status 1, and errexit would kill the recipe with
+            # exactly the code the hook reads as "graded, and found something".
+            while IFS= read -r module_go_file; do
+                [ -n "${module_go_file}" ] || continue
+                module_go_files+=("${module_go_file}")
+            done <<<"${module_go_list}"
+        fi
+        if [ "${module_rc}" -eq 0 ] && [ "${#module_go_files[@]}" -gt 0 ] \
+            && ! module_parse_err="$("${gofmt_bin}" -l "${module_go_files[@]}" 2>&1 >/dev/null)"; then
+            echo "complexity: ${module} holds a file that does not PARSE, so no function in it was graded" >&2
+            printf '%s\n' "${module_parse_err}" >&2
+            module_rc=7
+        fi
+        if [ "${module_rc}" -eq 0 ]; then
             ( cd "${module}" && {{ lint_lock }} {{ golangci }} run \
                 --enable-only gocyclo,gocognit \
                 --max-issues-per-linter 0 --max-same-issues 0 "${patterns[@]}" ) || module_rc=$?
