@@ -1544,6 +1544,24 @@ func (s *ResolverSuite) TestInvalid() {
 			s.Require().Error(err)
 			s.Equal(ValidatedQuery{}, vq, "model must be the zero value on error")
 			s.Require().ErrorIs(err, wantErr)
+			// ErrorContains is a substring test, so a pin here cannot see a
+			// message that gained a LEADING prefix — and that is deliberate,
+			// because several pins are fragments chosen to discriminate one
+			// arm from a sibling arm rather than whole messages. What holds
+			// the prefix is TestCorpusSweepManifest, which digests
+			// err.Error() WHOLE for every refusing cell of the corpus cross
+			// product, so a prefixed message moves its cells into DIFFERENT
+			// DETAIL and the report prints the was/now pair with the prefix
+			// visible in it.
+			//
+			// Measured 2026-09-11 (bd gqlc-d15h), prefixing one construction
+			// site at a time in resolve.go: the `%s binding` arm of
+			// ErrOutOfR0Scope moved 72 cells and the SET-on-projection-alias
+			// arm of ErrInvalidEffectTarget moved 36, while in both runs the
+			// affected fixture's own subtest here PASSED. So the pin's
+			// blindness to a prefix is not a gap in the corpus's coverage of
+			// one; do not widen this map's value to carry an anchoring intent
+			// on the prefix's account.
 			if substr, ok := invalidFixtureContains[name]; ok {
 				s.Require().ErrorContains(err, substr)
 			}
