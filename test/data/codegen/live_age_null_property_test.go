@@ -134,7 +134,7 @@ func TestAGEDropsANullPropertyAndKeepsANullRecordField(t *testing.T) {
 			t.Run(route.name, func(t *testing.T) {
 				cypherExecParams(ctx, t, pool, route.write, route.params)
 				got := cypherOne(ctx, t, pool, `MATCH (n:`+route.label+`) RETURN properties(n)`)
-				require.Equal(t, `{"keep": 1}`, got,
+				require.JSONEq(t, `{"keep": 1}`, got,
 					"the control member must survive and the null member must not reach storage as a key")
 			})
 		}
@@ -168,11 +168,11 @@ func TestAGEDropsANullPropertyAndKeepsANullRecordField(t *testing.T) {
 		// doubt: neo4j projects maps it will not store, so "storage drops it"
 		// would not have settled the question on its own.
 		got := cypherOne(ctx, t, pool, `RETURN {a: 1, b: null}`)
-		require.Equal(t, `{"a": 1}`, got,
+		require.JSONEq(t, `{"a": 1}`, got,
 			"the map literal constructor drops a null member on the way out as well as in")
 
 		nested := cypherOne(ctx, t, pool, `RETURN {outer: {a: null, b: 2}}`)
-		require.Equal(t, `{"outer": {"b": 2}}`, nested,
+		require.JSONEq(t, `{"outer": {"b": 2}}`, nested,
 			"and at depth, so a record-shaped literal loses it too")
 	})
 
@@ -181,12 +181,12 @@ func TestAGEDropsANullPropertyAndKeepsANullRecordField(t *testing.T) {
 		// one that says what the rows above are really about: the dropping is
 		// the MAP LITERAL CONSTRUCTOR's, not the storage format's.
 		projected := cypherOneParams(ctx, t, pool, `RETURN $m`, `{"m": {"a": null, "b": 2}}`)
-		require.Equal(t, `{"a": null, "b": 2}`, projected,
+		require.JSONEq(t, `{"a": null, "b": 2}`, projected,
 			"a map that never passes through the literal constructor keeps its null member")
 
 		cypherExecParams(ctx, t, pool, `CREATE (:R8 {addr: $m})`, `{"m": {"a": null, "b": 2}}`)
 		stored := cypherOne(ctx, t, pool, `MATCH (n:R8) RETURN n.addr`)
-		require.Equal(t, `{"a": null, "b": 2}`, stored,
+		require.JSONEq(t, `{"a": null, "b": 2}`, stored,
 			"and keeps it through storage, which is the exact shape agtypeRecordField reads: "+
 				"an explicit null at a record member, in a map the decoder receives whole")
 	})
@@ -198,7 +198,7 @@ func TestAGEDropsANullPropertyAndKeepsANullRecordField(t *testing.T) {
 		// a stored list dropped its nulls the way a stored map does.
 		cypherExec(ctx, t, pool, `CREATE (:R9 {xs: [1, null, 2]})`)
 		got := cypherOne(ctx, t, pool, `MATCH (n:R9) RETURN n.xs`)
-		require.Equal(t, `[1, null, 2]`, got,
+		require.JSONEq(t, `[1, null, 2]`, got,
 			"a list keeps its null elements, positionally — a list has no key to drop")
 	})
 }
@@ -239,6 +239,14 @@ func cypherOne(ctx context.Context, t *testing.T, pool *pgxpool.Pool, text strin
 // cypherOneParams runs a read expected to answer exactly one row of one
 // column and returns its raw agtype bytes as text. The whole point of this
 // file is what the server put on the wire, so nothing is decoded on the way.
+//
+// The callers compare that text with require.JSONEq rather than Equal.
+// Every claim here is about which MEMBERS a value has — a dropped key, or
+// a null one that survived — and JSONEq states that without also pinning
+// agtype's spacing, which is the server's rendering choice and not a
+// thing this file means to freeze. It still separates the two shapes that
+// matter: an absent key and a key holding null unmarshal differently, so
+// a drop cannot pass as a survival.
 func cypherOneParams(ctx context.Context, t *testing.T, pool *pgxpool.Pool, text, params string) string {
 	t.Helper()
 	require.NotContains(t, text, "$nullprobe$", "a probe must not close the delimiter it travels in")
