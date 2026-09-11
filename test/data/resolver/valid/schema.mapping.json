@@ -206,6 +206,7 @@
     "certified_avg_stays_any.cypher": "certificate.gql",
     "unlabelled_optional_introduced_hop_attests.cypher": "social_r5.gql",
     "unlabelled_optional_introduced_var_length_hop_withheld.cypher": "social_r5.gql",
+    "unlabelled_optional_introduced_hop_plural_endpoint_narrows.cypher": "satisfy_plural_edges_inline_subtype.gql",
     "parameter_with_trailing_where_carried_node.cypher": "social_r1.gql",
     "parameter_with_trailing_where_aggregate_alias.cypher": "social_r1.gql",
     "parameter_with_trailing_where_renamed_carry.cypher": "social_r1.gql",

@@ -2087,23 +2087,39 @@ func singleHopPattern(e query.EdgeBinding) bool {
 //     observed by it, so it filters no row of the MATCH that fed it. Both
 //     clauses leave every input row in the result, whatever its type.
 //
-// The first arm is §4.4.3's demotion gate, spelled the same way here and in
-// DemoteNullability down to the demotedGroups exemption, because both ask one
-// question: "is this edge guaranteed on a surviving row". `demoted` is the
-// caller's scope.demotedGroups, which is why Phase D runs above Phases B and C
-// (see the hoist comment in resolvePart): a nil map here reads false for every
-// id, so phase order decides whether this arm answers pre- or post-refinement.
+// The first arm is presentOnEveryRow, §4.4.3's demotion gate, which
+// demoteAcrossEdges CALLS rather than re-spells — see that function for why
+// the shared spelling is a shared symbol. `demoted` is the caller's
+// scope.demotedGroups, which is why Phase D runs above Phases B and C (see the
+// hoist comment in resolvePart): a nil map there reads false for every id, so
+// phase order decides whether this arm answers pre- or post-refinement.
 //
 // The second arm adds singleHopPattern's question to §4.4.3's — see
 // singleHopPattern for why the narrowing needs the ends and not just the
 // existence guarantee. The third is asked only here; DemoteNullability's answer
 // for a written edge stands as it is.
 func witnessesItsEndpoints(e query.EdgeBinding, written map[string]struct{}, demoted map[int]bool) bool {
-	if (e.Nullable() && !demoted[e.OptionalGroup()]) || !singleHopPattern(e) {
+	if !presentOnEveryRow(e, demoted) || !singleHopPattern(e) {
 		return false
 	}
 	_, isWritten := written[e.Variable()]
 	return !isWritten
+}
+
+// presentOnEveryRow answers §4.4.3's question from nullability alone: is `e` on
+// every surviving row? A required edge is. So is an OPTIONAL edge whose group is
+// already proven — that is ay9's exemption, and dropping it is the exact drift
+// bd gqlc-o8oc found.
+//
+// It exists as a symbol because witnessesItsEndpoints and demoteAcrossEdges
+// share this half VERBATIM and differ only in the hop gate they put beside it
+// (singleHopPattern and qualifiedDemoter respectively). While both re-spelled
+// it, the two could drift apart and no test could see it: a guard that
+// re-spells a condition rather than calling it is not pinned by any assertion
+// about the condition. One symbol makes that drift unspellable instead of
+// merely untested (bd gqlc-nmga).
+func presentOnEveryRow(e query.EdgeBinding, demoted map[int]bool) bool {
+	return !e.Nullable() || demoted[e.OptionalGroup()]
 }
 
 // introducedByThisHop is the second route to attestation (gqlc-1qijx, ruling

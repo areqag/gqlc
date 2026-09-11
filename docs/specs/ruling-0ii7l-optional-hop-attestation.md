@@ -437,6 +437,7 @@ third as the one its own benign-ness argument does not reach.
   there; the corpus contains no query that puts a widened binding into a plural
   endpoint position, so the honest statement is that the widening does not
   disturb them over the corpus as it stands.
+  **Superseded by §9.7, which reaches both readers directly.**
 - **ADR 0038's wrong-orientation clause 3** — reached, and directly. It is the
   entire observable of `valid/unlabelled_optional_introduced_hop_attests.cypher`,
   which is accepted both before and after and differs only in that the detector
@@ -610,3 +611,175 @@ that *cannot fail*, and this one can.
 at a fixture *and* a test; the corpus arm is gone and the unit arm is now the
 whole of it. Anyone deleting that unit test deletes the only thing standing
 between clause (e) and an unexamined branch.
+
+### 9.7 Readers 1 and 2, reached directly (bd gqlc-nmga)
+
+§9.3 left `endpointNarrowing`'s `covering()` gates and `NarrowPluralEndpoints`
+carrying a bound rather than a measurement: no corpus query put an
+OPTIONAL-introduced, widening-attested binding into a plural-endpoint position.
+gqlc-nmga was opened to build one. **The outcome is a real cell, not a vacuous
+one** — but it takes a `WITH`, and the reason it does is itself a result.
+
+**Within one Part the two shapes are mutually exclusive.** `singleHopPattern(e)`
+implies `qualifiedDemoter(e)`: `singleHopPattern` demands an upper bound of
+exactly one hop, which forces a lower bound of one, and both return true on a
+nil quantifier and a nil lower bound. `witnessesItsEndpoints` and
+`demoteAcrossEdges` then share an identical nullability precondition —
+`e.Nullable() && !demoted[e.OptionalGroup()]` disqualifies an edge from each.
+So every edge `endpointNarrowing` folds also demotes both of its named endpoints
+and their groups, and Phase D runs *above* Phases B and C, so that demotion is
+already in hand when either reader runs. Conjunct (b) puts the attesting hop in
+the endpoint's own introducing group, which is the group just demoted, so
+`witnessesItsEndpoints` is true of the attesting hop too and the coverage stops
+being *attributable* to the widening. That derivation is pinned by
+`TestEveryEdgeTheNarrowingLearnsFromAlsoDemotesItsEndpoints`, which asserts the
+implication over eight hop spellings crossed with nullable and proven, and
+carries two non-vacuity counters: one that the witnessed arm is ever taken, one
+that `qualifiedDemoter` is ever strictly weaker than `singleHopPattern`. Without
+the second the implication could hold because the two predicates had silently
+collapsed into one.
+
+**Across a `WITH` the cell exists.** A widened set of two or more leaves the Part
+as a plural commitment: `ResolveProjections`' non-final arm defers the
+whole-entity refusal when `carriesPluralBinding` (bd gqlc-etj6), and `newScope`
+seeds `nodeCands` from `exportedNodeCands` while deliberately not seeding
+`resolvedCovers`. In the next Part `endpointLabels`' `cands` arm reports
+`covers: true` **unconditionally**, which is exactly the conditional-coverage
+read §4 was worried about, reached. The fixture is
+`valid/unlabelled_optional_introduced_hop_plural_endpoint_narrows.cypher`:
+
+```
+MATCH (p:Person)
+OPTIONAL MATCH (p)-[q:WORKS_AT]->(c)
+OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk)
+WITH c
+MATCH (e:Employee)-[w:WORKS_AT]->(c)
+RETURN c.largeId
+```
+
+On `satisfy_plural_edges_inline_subtype.gql`, `largeId` is declared on
+`Company&Large` alone, so the column types only if `NarrowPluralEndpoints`
+collapsed `c` from `{Company, Company&Large}` to `Company&Large`. Typing it at
+all is the two readers' answer, and it is `property:INT`, non-null.
+
+**It is sound, for a reason that is a property of the readers rather than of the
+fixture.** Both learn only from an edge that passes `witnessesItsEndpoints` —
+required, or in a group already proven — so that edge is on every returned row,
+so both of its ends are non-null on every returned row. The condition the
+widening attaches ("covering, conditional on the binding being non-null") is
+discharged by the very gate the reader applies before reading the bit. Making
+Part 2's hop OPTIONAL measures this: the narrowing declines and `c` stays plural.
+
+**Controls, measured with the widening live**, each an `s.Run` arm of
+`TestAWidenedPluralCommitmentIsNarrowedOneWithLater`:
+
+| control | query change | result |
+|---|---|---|
+| the carry is still plural without Part 2's hop | drop `MATCH (e:Employee)…` | refuse, `c.largeId missing on plural-satisfying type Company` |
+| an OPTIONAL Part-2 hop narrows nothing | `OPTIONAL MATCH (e:Employee)…` | refuse, same |
+| the same Part reaches no commitment | drop `WITH c` | refuse `ErrUnknownLabel` |
+| the substitution needs the foreign-group hop | drop the `HAS_DESK` clause | refuse `ErrAmbiguousBinding`, `candidate types: Company, Company&Large` |
+
+The third is the same-Part exclusion derived above, observed on a query. The
+fourth separates this from a *native* plural binding: without the second OPTIONAL
+clause the commitment is never widened and `c` is merely ambiguous.
+
+**Mutation rows.** Declared before running; restored by `cp` from a pristine copy
+with `sha256sum -c` per row, never `git checkout --`.
+
+| # | mutation | declared victim | result |
+|---|---|---|---|
+| 1 | gate → `otherCovers && witnessesItsEndpoints(e, written, demoted)` | fixture refuses `unknown edge: Employee&Person-[WORKS_AT]->Company` | **KILLED**, text exactly as declared |
+| 2 | `NarrowPluralEndpoints`' `case len(narrowed) == 1` → `== -1` | fixture refuses `ErrUnknownProperty` | **SURVIVED** — see below |
+| 2b | that pass's `keep` filter → `ok \|\| true` | fixture refuses `c.largeId missing on plural-satisfying type Company` | **KILLED**, text exactly as declared |
+| 3 | `endpointLabels`' `cands` arm `covers: true` → `false` | fixture refuses `ErrUnknownProperty` | **KILLED**, but at `unknown edge: Employee&Person-[WORKS_AT]->Company` — not surgical, see below |
+| 3b | `endpointNarrowing`'s gate alone: `srcCovers, tgtCovers = false, false` | fixture refuses `c.largeId missing on plural-satisfying type Company` | **KILLED**, text exactly as declared |
+| 3c | `candidateTypes`' `covering()` read alone: `otherCovers = false` | fixture refuses `unknown edge: Employee&Person-[WORKS_AT]->Company` | **KILLED**, text exactly as declared |
+| 4 | `qualifiedDemoter`'s `*lower >= 1` → `>= 2` | `TestEveryEdge…AlsoDemotesItsEndpoints` | **KILLED**, on the `*1` rows |
+| 5 | `presentOnEveryRow` → `!e.Nullable()` (drop ay9's exemption) | `TestAProvenOptionalGroupWitnessesItsEndpoints` and `valid/demote_group_cascade.cypher` | **KILLED**, both, one per caller |
+| — | `NarrowPluralEndpoints`' `if len(s.nodeCands) == 0` → `< 0` (negative control) | nothing; the early return is documented as a pure optimization | **SURVIVED** as declared |
+
+Row 2 is the disclosure. It was designed to blind reader 2 and does not: the
+`switch` has a `default` arm writing `s.nodeCands[v] = narrowed`, so suppressing
+the singleton arm reroutes a one-element `narrowed` back through the plural lane
+instead of removing the narrowing. A one-element plural candidate set still types
+`c.largeId`, because every candidate in it declares the property. So the row
+blinds the *lane exit*, which this fixture is insensitive to — its observable is a
+property projection, not a whole-entity one. Row 2b is the corrected mutation and
+blinds the filter that computes `narrowed` at all. Row 2 is kept in the table
+rather than replaced: a mutation that reroutes instead of blinding is the failure
+mode a SURVIVED row exists to expose, and deleting it would hide that the
+singleton arm's *narrowing* and its *lane exit* are two separable effects.
+
+**Row 2's SURVIVED is fixture-local, and the singleton arm is not unguarded.**
+The whole `internal/resolver` package reds under it: nine suite tests, among them
+`TestEdgeClosureNarrowsThePluralEndpointsItPins`, all six arms of
+`TestNarrowingLearnsOnlyFromEdgesEveryRowHas`, and the two `TestValid` fixtures
+`plural_endpoint_anonymous_edge_closes_singular.cypher` and
+`plural_endpoint_whole_entity_after_edge_closure.cypher` — the second being the
+whole-entity observable this fixture lacks. The sweep moves **19 cells of
+15480**: 13 different verdict, 5 different detail, 1 different sentinel. So the
+row says only that *this* fixture cannot see the lane exit, which is why the
+follow-up (bd gqlc-4m6g) adds a whole-entity variant beside it rather than a
+guard where none exists.
+
+**Row 3's victim is correct, its predicted message is not, and the first
+explanation offered for that gap was WRONG.** It is recorded here because the
+wrong explanation is the more instructive half.
+
+The claim made was that the `cands` arm's `covers` bit licenses closing Part 2's
+edge, so the refusal lands a phase earlier. That is false, and the code it
+describes says so in a comment: `CloseEdges` (scope.go) calls `closeEdge` with
+`src.declared()`, **not** `covering()`, over *"declared(), not covering(): the
+close only needs each probed key to be declared, and refusing an uncovered
+endpoint here would turn queries master resolves into ErrUnknownEdge."* Edge
+closure never reads the bit. Its only three readers are `endpointNarrowing`'s
+gate, `candidateTypes`' fold, and `wrongorientation.go`.
+
+What is true is that **row 3's mutation is not surgical.** `endpointLabels` is
+shared, so `covers: false` there also blinds Part 1's `otherCovers` on the plural
+far end — which suppresses `attested`, so `commit()` returns the singular
+`inferred` `{Company}` and Part 2's edge is then genuinely undeclared. Rows 3b
+and 3c separate the two readers and settle it: blinding `endpointNarrowing`'s
+gate alone yields row 3's **declared** message with the edge closing fine, and
+blinding `candidateTypes`' read alone yields row 3's **observed** message,
+byte-identical to row 1's. So row 3 duplicates row 1 rather than discovering
+anything, and **row 3b is the surgical row for reader 1** that row 3 was meant
+to be.
+
+The methodological point, since a later bead will read this table: a
+declared-vs-observed gap licenses a *question*, not a conclusion. This one was
+answered by inventing a mechanism that the target file's own comment refutes.
+The correct move was two isolating mutations, which cost one run each.
+
+**One production change came out of this, and it is a deletion of duplication
+rather than a behaviour change.** `witnessesItsEndpoints` and `demoteAcrossEdges`
+each spelled §4.4.3's nullability precondition out in full, identically. The
+derivation above depends on the two spellings staying identical, and the first
+draft of `TestEveryEdge…AlsoDemotesItsEndpoints` claimed to hold them so — it
+re-spelled the condition a third time and asserted the implication. That claim is
+false, and was measured false: rewriting `demoteAcrossEdges`' gate to
+`e.Nullable() || !qualifiedDemoter(e)`, dropping ay9's proven-group exemption —
+precisely the drift bd gqlc-o8oc found once already — left that test **green**.
+An implication between two predicates cannot see a change that moves both, nor
+one that moves the guard away from the copy the test re-spelled.
+
+The shared half is now one symbol, `presentOnEveryRow`, which both guards call.
+Row 5 is its pin, and it kills once per caller —
+`TestAProvenOptionalGroupWitnessesItsEndpoints` on one side and
+`valid/demote_group_cascade.cypher` on the other.
+
+The honest limit, re-measured after the extraction: the drift mutation above
+**still** leaves `TestEveryEdge…AlsoDemotesItsEndpoints` green, because
+re-spelling the condition inline at one call site bypasses the shared symbol
+just as before. What the extraction removes is the second *copy*; what catches an
+inline re-spelling is `valid/demote_group_cascade.cypher`, which reds. That test
+holds the hop half of the derivation and not the nullability half, and its
+comment now says so and names the two guards that do hold it. A guard whose
+comment overstates its reach is worse than no guard, because it stops the next
+person looking.
+
+**Corpus delta:** the fixture adds 43 cells (360 queries × 43 schemas, up from
+359), 2 accept and 41 refuse. No pre-existing cell moves — `sweep.manifest.tsv`'s
+diff is the header line plus 43 insertions, and `TestSweepRegistryDelta` reports
+0 in every moved category.

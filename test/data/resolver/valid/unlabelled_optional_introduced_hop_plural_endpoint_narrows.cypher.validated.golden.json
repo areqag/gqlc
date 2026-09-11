@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "name": "c.largeId",
+      "type": {
+        "kind": "property",
+        "type": "INT",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
