@@ -327,9 +327,10 @@ func TestDecodeVertexReadsNullableProperties(t *testing.T) {
 // EVERY raw BELOW IS WRITTEN, NOT CAPTURED. Each is alice with one
 // property widened past the declared width, so none was ever emitted by
 // a server and none is replayed by TestAGEAgtypeCaptureMatchesTheServer.
-// Two things say so on their face: they all carry graphid
-// 844424930131972, and one graph cannot hand the same id to eleven
-// distinct writes; and their property keys are in the order an author
+// Two things say so on their face. They all carry graphid
+// 844424930131972 — as does every row of the sibling table below, eleven
+// in total across the two, and one graph cannot hand one id to eleven
+// distinct writes. And their property keys are in the order an author
 // types rather than the order jsonb stores, which is by key length then
 // bytewise. It is in fact the order alice itself carried until the live
 // witness corrected it. The shared id is deliberate and nothing reads
