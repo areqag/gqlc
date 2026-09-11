@@ -404,9 +404,9 @@ func plan(issues []issue, beads []bead, window time.Duration, repo string) ([]fi
 	// mirror inside the default window, which is certainly a duplicate. What
 	// narrowing decided was which canonical the closing comment names, not
 	// whether a duplicate is being closed. The narrow direction is no longer
-	// left reachable either: see the ambiguity guard in the verdict switch
-	// below, which refuses when narrowing collapses a match set of two or more
-	// to one (bd gqlc-fzb2).
+	// left reachable either: see the ambiguity guard in planOrphan's verdict
+	// switch below, which refuses when narrowing collapses a match set of two
+	// or more to one (bd gqlc-fzb2).
 	if window > defaultWindow {
 		return nil, fmt.Errorf("ghorphan: -window is %s, above the %s ceiling; a wider window loosens the adjacency clause and can turn a refusal into a close, which is an irreversible write. Every candidate's Δt is already in the report, so read that instead", window, defaultWindow)
 	}
@@ -417,18 +417,9 @@ func plan(issues []issue, beads []bead, window time.Duration, repo string) ([]fi
 		return nil, errors.New("ghorphan: the bead ledger came back empty; refusing, because with no bead pointing anywhere every issue reads as unbound and nothing is protected")
 	}
 
-	createdAt := make(map[int]time.Time, len(issues))
-	seen := make(map[int]bool, len(issues))
-	for _, i := range issues {
-		if seen[i.Number] {
-			return nil, fmt.Errorf("ghorphan: the issue listing holds #%d twice; refusing to reconcile a corpus this tool cannot key by number", i.Number)
-		}
-		seen[i.Number] = true
-		t, err := time.Parse(time.RFC3339, i.CreatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("ghorphan: issue #%d has createdAt %q, which is not RFC3339: %w — creation-time adjacency is a third of the predicate, so an unreadable timestamp is refused rather than treated as far apart", i.Number, i.CreatedAt, err)
-		}
-		createdAt[i.Number] = t
+	createdAt, err := indexCreationTimes(issues)
+	if err != nil {
+		return nil, err
 	}
 
 	bound := boundIssues(beads, repo)
@@ -470,61 +461,95 @@ func plan(issues []issue, beads []bead, window time.Duration, repo string) ([]fi
 			continue
 		}
 
-		// o is unbound and every candidate is bound, so o is not among them and
-		// there is no self-pairing to exclude here. The check that o is not its
-		// own canonical lives in apply(), at the write boundary, where it holds
-		// however the plan was arrived at — a copy of it here would be a branch
-		// no input can reach, and so a branch no test can hold.
-		// matchedWide is the same predicate evaluated at defaultWindow rather
-		// than at the window in force. It is what the ambiguity guard below
-		// reads, and when window == defaultWindow it is matched, so the guard
-		// costs nothing on the default invocation and cannot fire on it.
-		var matched, matchedWide []issue
-		evidence := make([]string, 0, len(cands))
-		for _, c := range cands {
-			bodyOK := o.Body == c.Body
-			gap := createdAt[o.Number].Sub(createdAt[c.Number])
-			adjacent := gap.Abs() <= window
-			if bodyOK && adjacent {
-				matched = append(matched, c)
-			}
-			if bodyOK && gap.Abs() <= defaultWindow {
-				matchedWide = append(matchedWide, c)
-			}
-			evidence = append(evidence, candidateEvidence(o, c, bodyOK, adjacent, gap))
-		}
-
-		f := finding{Orphan: o.Number, Evidence: evidence}
-		switch len(matched) {
-		case 1:
-			// The ambiguity guard (bd gqlc-fzb2). Narrowing -window may make
-			// the tool less decisive; it may not make it more. A match set of
-			// two or more at the default window is the tool saying nothing here
-			// distinguishes the mirrors, and a narrower window does not add
-			// information — it removes some. Refusing here is what makes the
-			// ceiling's own justification true in both directions: the operator
-			// would otherwise read the pick in the report of the run that had
-			// already made it.
-			if len(matchedWide) > 1 {
-				f.Verdict = verdictRefuse
-				f.Reason = fmt.Sprintf("%d bound issues match on title, body and creation time at the %s default window, and the -window %s in force leaves only #%d; narrowing the window is not information about which mirror is canonical, so the ambiguity stands",
-					len(matchedWide), defaultWindow, window, matched[0].Number)
-			} else {
-				f.Verdict = verdictClose
-				f.Canonical = matched[0].Number
-				f.Beads = bound.local[matched[0].Number]
-			}
-		case 0:
-			f.Verdict = verdictRefuse
-			f.Reason = fmt.Sprintf("shares a title with %d bound issue(s), none of which matches on both body and creation time", len(cands))
-		default:
-			f.Verdict = verdictRefuse
-			f.Reason = fmt.Sprintf("%d bound issues match on title, body and creation time; nothing here says which mirror is canonical", len(matched))
-		}
-		findings = append(findings, f)
+		findings = append(findings, planOrphan(o, cands, createdAt, window, bound))
 	}
 	slices.SortFunc(findings, func(a, b finding) int { return a.Orphan - b.Orphan })
 	return findings, nil
+}
+
+// indexCreationTimes keys the listing by issue number, which is the key every
+// later lookup uses and the reason both refusals here are fatal rather than
+// skips. A number appearing twice would make createdAt[n] whichever row was
+// read last, silently; and creation-time adjacency is a third of the predicate,
+// so a timestamp that does not parse would otherwise read as "far apart" — the
+// answer that keeps an issue open, but reached by not knowing rather than by
+// measuring.
+func indexCreationTimes(issues []issue) (map[int]time.Time, error) {
+	createdAt := make(map[int]time.Time, len(issues))
+	seen := make(map[int]bool, len(issues))
+	for _, i := range issues {
+		if seen[i.Number] {
+			return nil, fmt.Errorf("ghorphan: the issue listing holds #%d twice; refusing to reconcile a corpus this tool cannot key by number", i.Number)
+		}
+		seen[i.Number] = true
+		t, err := time.Parse(time.RFC3339, i.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("ghorphan: issue #%d has createdAt %q, which is not RFC3339: %w — creation-time adjacency is a third of the predicate, so an unreadable timestamp is refused rather than treated as far apart", i.Number, i.CreatedAt, err)
+		}
+		createdAt[i.Number] = t
+	}
+	return createdAt, nil
+}
+
+// planOrphan decides one unbound open issue against cands, the bound issues
+// sharing its title. Every verdict is reached here, so this is the whole of the
+// decision; plan() around it selects which issues reach it and in what order the
+// findings come back.
+//
+// o is unbound and every candidate is bound, so o is not among them and
+// there is no self-pairing to exclude here. The check that o is not its
+// own canonical lives in apply(), at the write boundary, where it holds
+// however the plan was arrived at — a copy of it here would be a branch
+// no input can reach, and so a branch no test can hold.
+//
+// matchedWide is the same predicate evaluated at defaultWindow rather
+// than at the window in force. It is what the ambiguity guard below
+// reads, and when window == defaultWindow it is matched, so the guard
+// costs nothing on the default invocation and cannot fire on it.
+func planOrphan(o issue, cands []issue, createdAt map[int]time.Time, window time.Duration, bound bindings) finding {
+	var matched, matchedWide []issue
+	evidence := make([]string, 0, len(cands))
+	for _, c := range cands {
+		bodyOK := o.Body == c.Body
+		gap := createdAt[o.Number].Sub(createdAt[c.Number])
+		adjacent := gap.Abs() <= window
+		if bodyOK && adjacent {
+			matched = append(matched, c)
+		}
+		if bodyOK && gap.Abs() <= defaultWindow {
+			matchedWide = append(matchedWide, c)
+		}
+		evidence = append(evidence, candidateEvidence(o, c, bodyOK, adjacent, gap))
+	}
+
+	f := finding{Orphan: o.Number, Evidence: evidence}
+	switch len(matched) {
+	case 1:
+		// The ambiguity guard (bd gqlc-fzb2). Narrowing -window may make
+		// the tool less decisive; it may not make it more. A match set of
+		// two or more at the default window is the tool saying nothing here
+		// distinguishes the mirrors, and a narrower window does not add
+		// information — it removes some. Refusing here is what makes the
+		// ceiling's own justification true in both directions: the operator
+		// would otherwise read the pick in the report of the run that had
+		// already made it.
+		if len(matchedWide) > 1 {
+			f.Verdict = verdictRefuse
+			f.Reason = fmt.Sprintf("%d bound issues match on title, body and creation time at the %s default window, and the -window %s in force leaves only #%d; narrowing the window is not information about which mirror is canonical, so the ambiguity stands",
+				len(matchedWide), defaultWindow, window, matched[0].Number)
+		} else {
+			f.Verdict = verdictClose
+			f.Canonical = matched[0].Number
+			f.Beads = bound.local[matched[0].Number]
+		}
+	case 0:
+		f.Verdict = verdictRefuse
+		f.Reason = fmt.Sprintf("shares a title with %d bound issue(s), none of which matches on both body and creation time", len(cands))
+	default:
+		f.Verdict = verdictRefuse
+		f.Reason = fmt.Sprintf("%d bound issues match on title, body and creation time; nothing here says which mirror is canonical", len(matched))
+	}
+	return f
 }
 
 // candidateEvidence states, for one (orphan, candidate) pair, what each half of
