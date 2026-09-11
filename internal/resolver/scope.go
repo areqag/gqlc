@@ -901,10 +901,14 @@ func (s *scope) demoteAcrossEdges(groups optionalGroups) {
 			if !ok {
 				continue
 			}
-			// ay9: an OPTIONAL edge whose group is proven is an
-			// effective witness (its existence on surviving rows is
-			// established); the §4.4.3 hop gate applies unchanged.
-			if (e.Nullable() && !s.demotedGroups[e.OptionalGroup()]) || !qualifiedDemoter(e) {
+			// ay9's exemption — an OPTIONAL edge whose group is proven
+			// is an effective witness, its existence on surviving rows
+			// established — lives in presentOnEveryRow, which
+			// witnessesItsEndpoints calls too. Calling it rather than
+			// re-spelling it is what stops the two drifting. The §4.4.3
+			// hop gate beside it differs between the two callers and
+			// stays here.
+			if !presentOnEveryRow(e, s.demotedGroups) || !qualifiedDemoter(e) {
 				continue
 			}
 			if s.demoteEndpoints(groups, e) {

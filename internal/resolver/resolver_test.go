@@ -4295,14 +4295,39 @@ func (s *ResolverSuite) TestAWidenedPluralCommitmentIsNarrowedOneWithLater() {
 // therefore never be what makes a commitment readable by either narrowing
 // reader; that is why the cell needs a scope boundary.
 //
-// Both halves of the precondition are swept, not just the hop range, because the
-// implication would also break if one guard treated a proven group differently
-// from the other — which is exactly the drift bd gqlc-o8oc found once already.
+// WHAT THIS TEST DOES NOT PIN, stated because an earlier draft of this comment
+// claimed the opposite. It does NOT catch the two guards treating a proven
+// OPTIONAL group differently from each other — the drift bd gqlc-o8oc found
+// once already. It cannot: a test asserting an implication between two
+// predicates goes green whenever BOTH move together, and green whenever the
+// half it re-spells stops matching the guard it is re-spelling. Measured on
+// this test's previous form: rewriting demoteAcrossEdges' gate to
+// `e.Nullable() || !qualifiedDemoter(e)`, dropping ay9's exemption outright,
+// left it passing.
 //
-// The counts at the end are what stop this passing vacuously. Without the
+// So that half is not held here at all, and the extraction of presentOnEveryRow
+// does not change that — re-measured after it, the same drift still leaves this
+// test green. What the extraction buys is that there is no longer a second COPY
+// of the condition to drift; what holds it against being re-spelled inline
+// anyway is other guards, and naming them is the point of this paragraph:
+//
+//   - on demoteAcrossEdges' side, valid/demote_group_cascade.cypher. It is the
+//     corpus fixture that reds under the inline re-spelling above.
+//   - on witnessesItsEndpoints' side, TestAProvenOptionalGroupWitnessesItsEndpoints,
+//     whose "the group is proven" arm reds when presentOnEveryRow itself loses
+//     the exemption.
+//
+// The `proven` axis is still swept here because it decides which rows reach the
+// witnessed arm, not because sweeping it would detect a divergence.
+//
+// What is pinned here is the other half — that singleHopPattern's question is
+// strictly stronger than qualifiedDemoter's across every hop spelling the
+// grammar admits.
+//
+// The counts at the end are what stop that passing vacuously. Without the
 // witness count a guard that refused everything would satisfy the implication,
-// and without the strictness count the two predicates could have become the same
-// function and nothing here would say so.
+// and without the strictness count the two hop predicates could have become the
+// same function and nothing here would say so.
 func (s *ResolverSuite) TestEveryEdgeTheNarrowingLearnsFromAlsoDemotesItsEndpoints() {
 	hops := func(minHops, maxHops *int) *query.EdgeHops {
 		h, err := query.NewEdgeHops(minHops, maxHops)
@@ -4354,10 +4379,11 @@ func (s *ResolverSuite) TestEveryEdgeTheNarrowingLearnsFromAlsoDemotesItsEndpoin
 						demoted[1] = true
 					}
 					witnessed := witnessesItsEndpoints(e, map[string]struct{}{}, demoted)
-					// The nullability precondition, spelled here the way
-					// demoteAcrossEdges spells it, so a change to either guard's
-					// half of it shows up as a failed implication.
-					demotes := (!e.Nullable() || demoted[e.OptionalGroup()]) && qualifiedDemoter(e)
+					// demoteAcrossEdges' gate, reassembled from the same two
+					// symbols it calls. presentOnEveryRow is called, not
+					// re-spelled: re-spelling it is what made the previous form
+					// of this test blind to ay9 drift (see the header).
+					demotes := presentOnEveryRow(e, demoted) && qualifiedDemoter(e)
 					if witnessed {
 						witnesses++
 						s.True(demotes,

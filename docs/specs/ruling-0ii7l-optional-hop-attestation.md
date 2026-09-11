@@ -692,8 +692,11 @@ with `sha256sum -c` per row, never `git checkout --`.
 | 1 | gate → `otherCovers && witnessesItsEndpoints(e, written, demoted)` | fixture refuses `unknown edge: Employee&Person-[WORKS_AT]->Company` | **KILLED**, text exactly as declared |
 | 2 | `NarrowPluralEndpoints`' `case len(narrowed) == 1` → `== -1` | fixture refuses `ErrUnknownProperty` | **SURVIVED** — see below |
 | 2b | that pass's `keep` filter → `ok \|\| true` | fixture refuses `c.largeId missing on plural-satisfying type Company` | **KILLED**, text exactly as declared |
-| 3 | `endpointLabels`' `cands` arm `covers: true` → `false` | fixture refuses `ErrUnknownProperty` | **KILLED**, but at `unknown edge: Employee&Person-[WORKS_AT]->Company` |
+| 3 | `endpointLabels`' `cands` arm `covers: true` → `false` | fixture refuses `ErrUnknownProperty` | **KILLED**, but at `unknown edge: Employee&Person-[WORKS_AT]->Company` — not surgical, see below |
+| 3b | `endpointNarrowing`'s gate alone: `srcCovers, tgtCovers = false, false` | fixture refuses `c.largeId missing on plural-satisfying type Company` | **KILLED**, text exactly as declared |
+| 3c | `candidateTypes`' `covering()` read alone: `otherCovers = false` | fixture refuses `unknown edge: Employee&Person-[WORKS_AT]->Company` | **KILLED**, text exactly as declared |
 | 4 | `qualifiedDemoter`'s `*lower >= 1` → `>= 2` | `TestEveryEdge…AlsoDemotesItsEndpoints` | **KILLED**, on the `*1` rows |
+| 5 | `presentOnEveryRow` → `!e.Nullable()` (drop ay9's exemption) | `TestAProvenOptionalGroupWitnessesItsEndpoints` and `valid/demote_group_cascade.cypher` | **KILLED**, both, one per caller |
 | — | `NarrowPluralEndpoints`' `if len(s.nodeCands) == 0` → `< 0` (negative control) | nothing; the early return is documented as a pure optimization | **SURVIVED** as declared |
 
 Row 2 is the disclosure. It was designed to blind reader 2 and does not: the
@@ -708,13 +711,73 @@ rather than replaced: a mutation that reroutes instead of blinding is the failur
 mode a SURVIVED row exists to expose, and deleting it would hide that the
 singleton arm's *narrowing* and its *lane exit* are two separable effects.
 
-Row 3's victim is correct and its predicted message is not. `covers: false` on
-the `cands` arm does not merely stop the narrowing — coverage is what licenses
-closing Part 2's edge against a candidate set at all, so the refusal lands one
-phase earlier, on the edge rather than on the property. Disclosed because the
-declared-vs-observed gap is the informative part: it says the `cands` arm's
-`covers` bit is load-bearing for edge closure as well as for the narrowing, which
-neither §4 nor §9.3 says.
+**Row 2's SURVIVED is fixture-local, and the singleton arm is not unguarded.**
+The whole `internal/resolver` package reds under it: nine suite tests, among them
+`TestEdgeClosureNarrowsThePluralEndpointsItPins`, all six arms of
+`TestNarrowingLearnsOnlyFromEdgesEveryRowHas`, and the two `TestValid` fixtures
+`plural_endpoint_anonymous_edge_closes_singular.cypher` and
+`plural_endpoint_whole_entity_after_edge_closure.cypher` — the second being the
+whole-entity observable this fixture lacks. The sweep moves **19 cells of
+15480**: 13 different verdict, 5 different detail, 1 different sentinel. So the
+row says only that *this* fixture cannot see the lane exit, which is why the
+follow-up (bd gqlc-4m6g) adds a whole-entity variant beside it rather than a
+guard where none exists.
+
+**Row 3's victim is correct, its predicted message is not, and the first
+explanation offered for that gap was WRONG.** It is recorded here because the
+wrong explanation is the more instructive half.
+
+The claim made was that the `cands` arm's `covers` bit licenses closing Part 2's
+edge, so the refusal lands a phase earlier. That is false, and the code it
+describes says so in a comment: `CloseEdges` (scope.go) calls `closeEdge` with
+`src.declared()`, **not** `covering()`, over *"declared(), not covering(): the
+close only needs each probed key to be declared, and refusing an uncovered
+endpoint here would turn queries master resolves into ErrUnknownEdge."* Edge
+closure never reads the bit. Its only three readers are `endpointNarrowing`'s
+gate, `candidateTypes`' fold, and `wrongorientation.go`.
+
+What is true is that **row 3's mutation is not surgical.** `endpointLabels` is
+shared, so `covers: false` there also blinds Part 1's `otherCovers` on the plural
+far end — which suppresses `attested`, so `commit()` returns the singular
+`inferred` `{Company}` and Part 2's edge is then genuinely undeclared. Rows 3b
+and 3c separate the two readers and settle it: blinding `endpointNarrowing`'s
+gate alone yields row 3's **declared** message with the edge closing fine, and
+blinding `candidateTypes`' read alone yields row 3's **observed** message,
+byte-identical to row 1's. So row 3 duplicates row 1 rather than discovering
+anything, and **row 3b is the surgical row for reader 1** that row 3 was meant
+to be.
+
+The methodological point, since a later bead will read this table: a
+declared-vs-observed gap licenses a *question*, not a conclusion. This one was
+answered by inventing a mechanism that the target file's own comment refutes.
+The correct move was two isolating mutations, which cost one run each.
+
+**One production change came out of this, and it is a deletion of duplication
+rather than a behaviour change.** `witnessesItsEndpoints` and `demoteAcrossEdges`
+each spelled §4.4.3's nullability precondition out in full, identically. The
+derivation above depends on the two spellings staying identical, and the first
+draft of `TestEveryEdge…AlsoDemotesItsEndpoints` claimed to hold them so — it
+re-spelled the condition a third time and asserted the implication. That claim is
+false, and was measured false: rewriting `demoteAcrossEdges`' gate to
+`e.Nullable() || !qualifiedDemoter(e)`, dropping ay9's proven-group exemption —
+precisely the drift bd gqlc-o8oc found once already — left that test **green**.
+An implication between two predicates cannot see a change that moves both, nor
+one that moves the guard away from the copy the test re-spelled.
+
+The shared half is now one symbol, `presentOnEveryRow`, which both guards call.
+Row 5 is its pin, and it kills once per caller —
+`TestAProvenOptionalGroupWitnessesItsEndpoints` on one side and
+`valid/demote_group_cascade.cypher` on the other.
+
+The honest limit, re-measured after the extraction: the drift mutation above
+**still** leaves `TestEveryEdge…AlsoDemotesItsEndpoints` green, because
+re-spelling the condition inline at one call site bypasses the shared symbol
+just as before. What the extraction removes is the second *copy*; what catches an
+inline re-spelling is `valid/demote_group_cascade.cypher`, which reds. That test
+holds the hop half of the derivation and not the nullability half, and its
+comment now says so and names the two guards that do hold it. A guard whose
+comment overstates its reach is worse than no guard, because it stops the next
+person looking.
 
 **Corpus delta:** the fixture adds 43 cells (360 queries × 43 schemas, up from
 359), 2 accept and 41 refuse. No pre-existing cell moves — `sweep.manifest.tsv`'s
