@@ -17,7 +17,7 @@ var corpusAreaB = []corpusEntry{
 		sentinel: gql.ErrUnnamedNodeType,
 		feature:  "mandatory",
 		bead:     "gqlc-0ri",
-		reason:   "property types with no label set — the schema model keys node types by label set (resolve.go:35-37), and an empty key is not a blank name but the same key for every unlabelled type, so a second one would collide rather than differ. Decided in ADR 0018: declined on gqlc's model, not on a reading of the standard. nodeTypeImpliedContent alternative 2 has no other route",
+		reason:   "property types with no label set — the schema model keys node types by label set (the `Nodes: make(map[graph.LabelSetKey]schema.NodeType)` construction in func (rawSchema) resolve, resolve.go), and an empty key is not a blank name but the same key for every unlabelled type, so a second one would collide rather than differ. Decided in ADR 0018: declined on gqlc's model, not on a reading of the standard. nodeTypeImpliedContent alternative 2 has no other route",
 	},
 	{
 		file:    "18.2-node-type/pattern_label_implication.gql",

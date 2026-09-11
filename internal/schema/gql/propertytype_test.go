@@ -520,8 +520,10 @@ func TestRecordPropertyResolves(t *testing.T) {
 // TestRecordFieldOrderCanonicalisedThroughParser is the guard the whole
 // canonicalisation exists for, asserted where a user can reach it. Two schemas
 // declaring the same fields in different orders describe one type, and the
-// resolver unifies a query's property reference across labels with `==`
-// (resolver/scope.go:1023) — so an implementation that encoded declaration order
+// resolver unifies a query's property reference across labels by comparing
+// whole types (the `prop.Type != unified.Type` refusal in
+// func (s *scope) unifiedRefPropertyType, internal/resolver/scope.go) — so an
+// implementation that encoded declaration order
 // would refuse a valid query, and nothing else in the suite would notice.
 func TestRecordFieldOrderCanonicalisedThroughParser(t *testing.T) {
 	ab, err := parseFirstProperty(t, "RECORD { a :: INT, b :: STRING }")
@@ -535,8 +537,10 @@ func TestRecordFieldOrderCanonicalisedThroughParser(t *testing.T) {
 // from its fields'. They are different syntax positions (recordType's own
 // notNull? at GQL.g4:1979 versus the field's, inside its valueType) and reading
 // the record's from a subtree scan would report a field's qualifier as the
-// property's — the defect the list alternatives were written around
-// (propertytype.go:33-39), reachable here through one more shape.
+// property's — the defect the list alternatives were written around: the
+// `lt.NotNull() != nil` direct-child reads in func resolveValueType's
+// ListValueTypeAlt* arms, stated in its doc comment's first bullet
+// (propertytype.go). Reachable here through one more shape.
 func TestRecordNotNullBindsWhereItIsSpelled(t *testing.T) {
 	t.Run("on the record", func(t *testing.T) {
 		got, err := parseFirstProperty(t, "RECORD { a :: INT } NOT NULL")
@@ -645,7 +649,8 @@ func TestClosedUnionTrailingNotNullBindsToTheRightMember(t *testing.T) {
 
 // TestDeclinedFamilyInsideRecordOrUnionSurfacesItsOwnSentinel is the behaviour
 // change the recursion brings, stated positively. declineValueType deliberately
-// did not descend (propertytype.go:77-81) because the outer context was the only
+// did not descend (func declineValueType, propertytype.go: its switch inspects the
+// handed valueType's own alternative and never recurses) because the outer context was the only
 // thing it could answer for; now that records and unions resolve their parts,
 // the part that cannot resolve reports its own family. A reader who sees
 // ErrUnsupportedType bare for `PATH | STRING` is reading a regression.

@@ -974,8 +974,8 @@ func walkForAggregate(node antlr.Tree) bool {
 		}
 	case gen.IOC_QuantifierContext:
 		// Row 10 partial: descend into the source list, skip the WHERE
-		// filter body (which mirrors typeQuantifier's savedOuter/restore
-		// at typing.go:449-452).
+		// filter body (which mirrors the savedOuter save/restore around
+		// the OC_Where walk in func (l *listener) typeQuantifier).
 		filter := n.OC_FilterExpression()
 		if filter == nil {
 			return false

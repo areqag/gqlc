@@ -1068,7 +1068,11 @@ type CallArg struct {
 }
 
 // NewCallArg builds a CallArg, normalising a nil Type to TypeUnknown{}
-// (mirroring NewCallBinding at :867-869). The parser never mints a bare
+// (mirroring the `if resultType == nil` normalisation in func
+// NewCallBindingWithArgs, which is what NewCallBinding delegates to
+// [2026-09-11 (gqlc-kvil): this row cited NewCallBinding by line range;
+// NewCallBinding is now a two-line delegation and the guard itself lives
+// in NewCallBindingWithArgs. Same guard]). The parser never mints a bare
 // nil, but the constructor is the model-invariant guard.
 func NewCallArg(t Type) CallArg {
 	if t == nil {

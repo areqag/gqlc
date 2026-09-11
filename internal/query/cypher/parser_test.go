@@ -1533,11 +1533,13 @@ var mustParse = map[string]struct {
 	},
 	// aggregate-kind-rich-exprs spec §4.5 pin #10 — bare-arg
 	// regression / bit-identity guard (Blocker 3(b)). Today's bare
-	// path via functionArgRefs → refFromNonArithmetic (shape.go:29-48)
+	// path via functionArgRefs → func refFromNonArithmetic (shape.go)
 	// yields Ref{n, age}; post-widening the rich path via
-	// typeExpressionMining → typeAtom (typing.go:322-326) +
-	// typeNonArithmetic's single-lookup property upgrade
-	// (typing.go:292-300) yields the same Ref{n, age}. This pin is
+	// typeExpressionMining → func (l *listener) typeAtom's
+	// `case a.OC_Variable() != nil` arm (typing.go) + func (l *listener)
+	// typeNonArithmetic's single-lookup property upgrade (its
+	// `len(lookups) == 1` branch, typing.go) yields the same Ref{n, age}.
+	// This pin is
 	// GREEN both pre- and post-widening: any drift in refs mining
 	// between the two paths surfaces as a structural break here.
 	// The two agreeing sites are named above; keep them synchronised.
@@ -1682,7 +1684,10 @@ var mustParse = map[string]struct {
 			},
 		}}}, Parameters: []query.Parameter{{Name: "threshold", Uses: []query.Use{
 			// EnterOC_ExistentialSubquery fires after EnterOC_With's Part swap
-			// (listener.go:293), so emission-time curPart is Part 1 (fvo, ADR
+			// (func (l *listener) closePartOpenNext in listener.go, the
+			// Category-B sink EnterOC_With calls; the swap was inlined in
+			// EnterOC_With when this pin was written), so emission-time
+			// curPart is Part 1 (fvo, ADR
 			// 0008 amendment 2026-07-06). Part 1's scope carries n via
 			// exportedTypes — resolver-adequate for the EXISTS body's $threshold.
 			query.NewExprUseAt(query.TypeBool{}, query.ExprInPredicate, 1, 0),
@@ -1873,9 +1878,11 @@ var mustParse = map[string]struct {
 	// collection-sink Phase C pin — Unwind entry-point twin. UNWIND [m] AS k
 	// inside an EXISTS body reaches TWO Category A/B writes in collectUnwind
 	// via post-guard-drop EnterOC_Unwind: (1) the source-expression refs sweep
-	// mines varRef{m} from the [m] list literal (Category A, expr.go:124), and
+	// mines varRef{m} from the [m] list literal (Category A, collectUnwind's
+	// `for _, ref := range refs { l.appendRef(...) }` loop in expr.go), and
 	// (2) the UnwindBinding{k} construction appends to the part's unwind
-	// bindings (Category B, expr.go:139). Both writes now route through the
+	// bindings (Category B, the closing l.appendUnwindBinding(ub) in the same
+	// function). Both writes now route through the
 	// appendRef / appendUnwindBinding sinks; without either routing, this pin
 	// would fail — an un-sunk refs write leaks varRef{m} onto the outer part
 	// (which only binds n), and build()'s referential-integrity sweep would
@@ -1897,10 +1904,12 @@ var mustParse = map[string]struct {
 	},
 	// collection-sink Phase C pin — Set entry-point twin. A single SET clause
 	// with three items (m.p = 1, m:L, m += {x: 2}) inside an EXISTS body
-	// exercises ALL THREE arms of collectSetItem in one construction:
-	// propertyExpression (:750 refs + :764 effects), variable+labels (:768
-	// refs + :775 effects), and variable+expression (:779 refs + :794
-	// effects). Post-guard-drop, each arm's refs write is routed through
+	// exercises ALL THREE arms of func (l *listener) collectSetItem (expr.go)
+	// in one construction — each arm is one `case` of its switch, and each
+	// does one l.appendRef then one l.appendEffect: the propertyExpression
+	// arm (SetPropertyEffect), the variable+labels arm (SetLabelsEffect),
+	// and the variable+expression arm (SetEntityEffect).
+	// Post-guard-drop, each arm's refs write is routed through
 	// appendRef and each arm's effects write through appendEffect; the
 	// terminating writeSeen flag flip in EnterOC_Set is routed through
 	// markWriteSeen. Under EXISTS suppression, all seven routings no-op,
@@ -1929,11 +1938,13 @@ var mustParse = map[string]struct {
 	// collection-sink Phase C pin — Delete entry-point twin. A single DELETE
 	// clause with two bare-variable targets (m, o) inside an EXISTS body
 	// exercises all three sink classes reachable from EnterOC_Delete in one
-	// construction: the per-target refs write at listener.go:655 fires twice
-	// (once per bare-variable target that hits the nonArithmeticAtom +
-	// refFromNonArithmetic path), the terminating effects write at :669
-	// fires once (one DeleteEffect{targets=[m,o], detach=true}), and the
-	// terminating writeSeen flip at :670 fires once. DETACH is included to
+	// construction (all three live in func (l *listener) EnterOC_Delete,
+	// listener.go): the per-target `l.appendRef(varRef{name: ref.Variable})`
+	// inside the AllOC_Expression loop fires twice (once per bare-variable
+	// target that hits the nonArithmeticAtom + refFromNonArithmetic path), the
+	// terminating `l.appendEffect(query.NewDeleteEffect(...))` fires once (one
+	// DeleteEffect{targets=[m,o], detach=true}), and the terminating
+	// `l.markWriteSeen()` fires once. DETACH is included to
 	// exercise the detach flag naturally alongside — it toggles a bool on
 	// the effect payload, not a sink surface, but its presence keeps the
 	// pin realistic (DELETE without DETACH on referenced nodes is an
@@ -1964,10 +1975,13 @@ var mustParse = map[string]struct {
 	// collection-sink Phase C pin — Remove entry-point twin. A single REMOVE
 	// clause with two items (m:L for the variable+labels arm, m.p for the
 	// propertyExpression arm) inside an EXISTS body exercises BOTH arms of
-	// collectRemoveItem plus the terminal writeSeen in EnterOC_Remove:
-	// variable+labels arm (expr.go:806 refs + :813 effects), propertyExpression
-	// arm (expr.go:822 refs + :828 effects), terminating markWriteSeen at
-	// listener.go:711. Under EXISTS suppression, all five per-item sink calls
+	// func (l *listener) collectRemoveItem (expr.go) plus the terminal
+	// writeSeen in func (l *listener) EnterOC_Remove (listener.go): the
+	// variable+labels arm (one l.appendRef then one l.appendEffect of a
+	// RemoveLabelsEffect), the propertyExpression arm (one l.appendRef then
+	// one l.appendEffect of a RemovePropertyEffect), and EnterOC_Remove's
+	// closing l.markWriteSeen().
+	// Under EXISTS suppression, all five per-item sink calls
 	// (2×refs + 2×effects) plus the terminal writeSeen no-op: no RemoveEffect
 	// leaks into outer Effects, no varRef{m} leaks onto outer refs, and
 	// StatementKind stays StatementRead. Without ANY of the three sink
@@ -1994,9 +2008,10 @@ var mustParse = map[string]struct {
 	},
 	// collection-sink Phase C pin — Create entry-point twin. A single CREATE
 	// clause with one fresh node binding (m) inside an EXISTS body exercises
-	// both un-migrated sink classes reachable from EnterOC_Create: the
-	// terminating effects write at listener.go:533 (Cat B, one CreateEffect)
-	// and the terminating writeSeen flip at :534 (Cat C). The pattern-collection
+	// both un-migrated sink classes reachable from func (l *listener)
+	// EnterOC_Create (listener.go): its terminating
+	// `l.appendEffect(query.NewCreateEffect(vars))` (Cat B, one CreateEffect)
+	// and the `l.markWriteSeen()` on the line after it (Cat C). The pattern-collection
 	// subtree (collectPattern → collectPatternPart → collectPatternElement →
 	// recordEndpointRefs, plus mergeBinding / appendBinding / appendPathBinding
 	// / setPathMemberSink / appendPathMember / appendUnwindBinding) is already
@@ -2004,7 +2019,10 @@ var mustParse = map[string]struct {
 	// from the pattern no-op under suppression regardless of the guard drop.
 	// Under EXISTS suppression with the subqueryDepth guard removed,
 	// collectPattern still runs its full walk but every sink call (endpoint
-	// refs at pattern.go:381, binding appends at listener.go:222-256) short-
+	// refs via func (l *listener) recordEndpointRefs in pattern.go, which
+	// calls l.appendRef; binding appends via the "Category A — per-part
+	// writes" sink block in listener.go — appendBinding, appendPathBinding,
+	// appendPathMember, appendUnwindBinding) short-
 	// circuits at the sink method boundary. `before` and `len(bindings)` are
 	// equal at the delta computation, so `vars` is empty and the resulting
 	// CreateEffect is degenerate (NewCreateEffect(nil)) — but the appendEffect
@@ -2029,9 +2047,10 @@ var mustParse = map[string]struct {
 	// collection-sink Phase C pin — Merge entry-point twin. A single MERGE
 	// clause with one fresh node binding (m), an ON MATCH SET arm, and an
 	// ON CREATE SET arm inside an EXISTS body exercises both un-migrated
-	// sink classes reachable from EnterOC_Merge: the terminating effects
-	// write at listener.go:573 (Cat B, one MergeEffect) and the terminating
-	// writeSeen flip at :574 (Cat C). The pattern-collection subtree that
+	// sink classes reachable from func (l *listener) EnterOC_Merge
+	// (listener.go): its terminating l.appendEffect of the MergeEffect
+	// (Cat B) and the l.markWriteSeen() on the line after it (Cat C).
+	// The pattern-collection subtree that
 	// collectPatternPart reaches is already sink-gated on l.suppressed()
 	// from Phase B — same "safe by construction" class as EnterOC_Create.
 	// The ON MATCH / ON CREATE arms are walked via collectMergeAction,
@@ -2045,8 +2064,8 @@ var mustParse = map[string]struct {
 	// onMatch and onCreate payloads on the resulting MergeEffect are nil.
 	// The outer NewMergeEffect(nil, nil, nil) constructor succeeds cleanly
 	// (variables/onMatch/onCreate all skip their len(...) > 0 branches, no
-	// error). The migrated l.appendEffect at :573 no-ops under suppression
-	// before the leak lands; the migrated l.markWriteSeen at :574 no-ops
+	// error). Both migrated calls named above no-op under suppression:
+	// l.appendEffect before the leak lands, l.markWriteSeen
 	// before the outer StatementKind flip lands. Outer Effects stays nil,
 	// StatementKind stays StatementRead. Without the two migrations, this
 	// pin fails: an un-sunk effects write leaks one MergeEffect{vars=nil,
@@ -2070,22 +2089,25 @@ var mustParse = map[string]struct {
 	// collection-sink Phase C pin — InQueryCall entry-point twin. A single
 	// in-query CALL with YIELD inside an EXISTS body exercises the un-migrated
 	// callBindings sink class reachable from EnterOC_InQueryCall via the
-	// shared collectCall path (call.go:149, the YIELD-items branch that
-	// appends one CallBinding per resolved YIELD item). The other writes
+	// shared collectCall path (the l.appendCallBinding(cb) inside
+	// func (l *listener) collectYieldItems in call.go, which appends one
+	// CallBinding per resolved YIELD item). The other writes
 	// reachable from collectCall are already suppression-safe: addParameterUse
 	// is l.suppressed()-gated at method entry (commit b5e206d, "gate
 	// addParameterUse under EXISTS suppression"); typeExpressionMining returns
-	// its refs to the caller (collectCall discards them via `_` at call.go:57),
+	// its refs to the caller (collectCall discards them via the `_` in its
+	// argument-mining `t, _, params := l.typeExpressionMining(e)`),
 	// so no ref-write reaches curPart.refs; l.fail sets listener error state
 	// (l.err), not curPart content, and is intentionally NOT suppression-gated
 	// — parse-time validation errors surface regardless of EXISTS suppression
 	// per the Rev 3 spec collection/validation split. Standalone-only writes
-	// (l.curPart.callStandalone at call.go:95) never fire from enterInQueryCall
-	// (standalone=false hardcoded at call.go:285). Under EXISTS suppression
+	// (collectCall's `if standalone && l.err == nil { l.setCallStandalone() }`
+	// tail) never fire from func (l *listener) enterInQueryCall, which passes
+	// a hardcoded `false, // in-query`. Under EXISTS suppression
 	// with the subqueryDepth guard removed, collectCall runs its full walk,
 	// looks up the procedure, mines args (no-op via addParameterUse's sink
 	// gate), expands YIELD items into CallBinding shapes — and the migrated
-	// l.appendCallBinding call at call.go:149 no-ops at the sink boundary
+	// l.appendCallBinding call in collectYieldItems no-ops at the sink boundary
 	// before the leak lands. Outer callBindings stays empty. Without the
 	// migration, this pin fails: an un-sunk callBindings append leaks one
 	// CallBinding{variable="label", procName="test.labels", ...} into outer
@@ -2124,10 +2146,12 @@ var mustParse = map[string]struct {
 	// fires, and the guard-drop is dead-code removal rather than a
 	// runtime leak fix. This pin instead asserts the STRUCTURAL wire:
 	// commit-13 replaced the direct `l.curPart.callStandalone = true`
-	// write at call.go:95 with `l.setCallStandalone()` (activating the
-	// previously `//nolint:unused` sink method at listener.go:274) and
-	// replaced the inlined curPart-priming block at listener.go:748-754
-	// with `l.openBranch()`. Both changes preserve behaviour at top
+	// write in func (l *listener) collectCall (call.go) with
+	// `l.setCallStandalone()` (activating the then-`//nolint:unused` sink
+	// method func (l *listener) setCallStandalone in listener.go) and replaced
+	// the inlined curPart-priming block in func (l *listener)
+	// EnterOC_StandaloneCall (listener.go) with a call to its Category-B sink
+	// func (l *listener) openBranch. Both changes preserve behaviour at top
 	// level and are the last two migrations in the Phase-C sink-routing
 	// pattern. The pin exercises: standalone CALL with implicit YIELD
 	// on a two-result signature produces two CallBindings (proves
@@ -2485,13 +2509,18 @@ var mustParse = map[string]struct {
 	// if l.fail were NOT sink-gated; with the Phase D gate in place,
 	// the outer parse succeeds cleanly (matching master's pre-Phase-C
 	// guarded-early-return behaviour). Each entry documents its target
-	// fail-site by file:line and the sentinel it would trip. Assertion
+	// fail-site by the construct that holds it — function, and where a
+	// function holds several, the arm — and the sentinel it would trip.
+	// (A file:line target, which is what these entries carried until
+	// gqlc-kvil, points at unrelated code after any insertion above it and
+	// gives no way to tell a moved fail-site from a deleted one.) Assertion
 	// shape mirrors "authored CALL inside EXISTS suppression": bare
 	// outer MATCH ... RETURN n. Future refactors that ungate any of
 	// these fail-sites — or that break Phase D's fail-gate — will
 	// regress the corresponding entry.
 	"exists fail parity — hop range integer overflow": {
-		// Target: pattern.go:292 edgeHopsFromRangeLiteral. Grammar accepts
+		// Target: the l.fail on the error from func edgeHopsFromRangeLiteral,
+		// in collectEdge's OC_RangeLiteral branch (pattern.go). Grammar accepts
 		// any IntegerLiteral; strconv.Atoi rejects one that overflows int64,
 		// returning the wrapped "invalid integer in hop range" error via
 		// l.fail. (The spec example `[r*-1]` is a grammar-level SyntaxError
@@ -2506,7 +2535,9 @@ var mustParse = map[string]struct {
 		}),
 	},
 	"exists fail parity — pattern predicate projection": {
-		// Target: expr.go:196 ErrPatternInProjection (pattern-shape
+		// Target: the isPatternPredicateAtom guard at the head of
+		// func (l *listener) collectReturnItem (expr.go), which fails with
+		// ErrPatternInProjection (pattern-shape
 		// expression appears as a RETURN projection column, which the
 		// model does not admit).
 		src: "MATCH (n) WHERE exists { MATCH (m) RETURN (m)-->() }\nRETURN n",
@@ -2518,7 +2549,9 @@ var mustParse = map[string]struct {
 		}),
 	},
 	"exists fail parity — nested property target SET": {
-		// Target: expr.go:747 ErrNestedPropertyTarget (SET target is a
+		// Target: ErrNestedPropertyTarget from the propertyExpression arm of
+		// func (l *listener) collectSetItem (expr.go) — the `%w: SET %s`
+		// fail, not collectRemoveItem's `%w: REMOVE %s` twin. (SET target is a
 		// two-hop property expression `n.a.b`; the model's Ref carries a
 		// single property segment).
 		src: "MATCH (n) WHERE exists { MATCH (m) SET m.a.b = 1 RETURN m }\nRETURN n",
@@ -2530,11 +2563,15 @@ var mustParse = map[string]struct {
 		}),
 	},
 	"exists fail parity — unwind byVar kind conflict against outer entity": {
-		// Target: expr.go:107 ErrVariableKindConflict. Inner UNWIND [1] AS x
+		// Target: ErrVariableKindConflict from the `if _, clash :=
+		// l.curPart.byVar[variable]; clash` sweep in func (l *listener)
+		// collectUnwind (expr.go) — the first of that function's three
+		// kind-conflict fails, ahead of the pathBindings and unwindBindings
+		// sweeps. Inner UNWIND [1] AS x
 		// under EXISTS runs collectUnwind (no suppression gate on the
-		// handler); its byVar clash sweep reads the OUTER part's byVar,
+		// handler); that sweep reads the OUTER part's byVar,
 		// finds outer `x` (bound as a node by the outer MATCH), and would
-		// fire l.fail at expr.go:107 if not sink-gated. mergeBinding-path
+		// fire l.fail there if not sink-gated. mergeBinding-path
 		// version of this test would hit mergeBinding's own suppression
 		// gate first, so this UNWIND-path trigger is the one that
 		// genuinely exercises the Phase D fail-gate.
@@ -2550,12 +2587,15 @@ var mustParse = map[string]struct {
 		// The `MATCH p = ()-->()` inside EXISTS binds `p` as a path
 		// variable. Three fail-sites are reachable from the inner
 		// walker on this input, in the order the walker hits them:
-		// (1) pattern.go:88 NewPathBinding — "path binding requires
-		// at least one member" fires first for empty-member cases;
-		// this is what actually surfaces on this specific source
+		// (1) func (l *listener) collectPatternPart's `l.fail(err)` on the
+		// error from func NewPathBinding (internal/query/query.go) — "path
+		// binding requires at least one member" fires first for empty-member
+		// cases; this is what actually surfaces on this specific source
 		// (verified first-party by linus-2 in the RED reproduction
-		// on 7af1e6a). (2) expr.go:107 collectUnwind pathBindings
-		// sweep. (3) pattern.go:84 collectPatternPart path-vs-unwind
+		// on 7af1e6a). (2) the pathBindings sweep in func (l *listener)
+		// collectUnwind (expr.go), the second of its three
+		// ErrVariableKindConflict fails. (3) the unwindBindings loop at the
+		// head of collectPatternPart (pattern.go), its path-vs-unwind
 		// collision (ErrVariableKindConflict). Any of the three
 		// firing without the Phase D gate would leak an outer
 		// l.err; the pin is protective against all three regardless
@@ -2573,7 +2613,9 @@ var mustParse = map[string]struct {
 		}),
 	},
 	"exists fail parity — CALL unknown procedure": {
-		// Target: call.go:43 ErrUnknownProcedure. Unregistered procedure
+		// Target: ErrUnknownProcedure from the `sig, ok := l.registry.Lookup`
+		// miss in func (l *listener) collectCall (call.go) — its first
+		// fail-site. Unregistered procedure
 		// under EXISTS; registry lookup fails, sink-gated fail no-ops.
 		src: "MATCH (n) WHERE exists { CALL nope.proc() YIELD x RETURN x }\nRETURN n",
 		want: oneBranch(query.Part{
@@ -2589,7 +2631,8 @@ var mustParse = map[string]struct {
 		}},
 	},
 	"exists fail parity — CALL arity mismatch": {
-		// Target: call.go:72 ErrProcedureArity. Registered proc expects
+		// Target: ErrProcedureArity from collectCall's explicit-invocation
+		// arity check (call.go). Registered proc expects
 		// 1 arg, call passes 0. Sink-gated fail no-ops.
 		src: "MATCH (n) WHERE exists { CALL test.echo() YIELD out RETURN out }\nRETURN n",
 		want: oneBranch(query.Part{
@@ -2605,7 +2648,8 @@ var mustParse = map[string]struct {
 		}},
 	},
 	"exists fail parity — CALL unknown YIELD field": {
-		// Target: call.go:136 ErrUnknownProcedure on unknown YIELD field
+		// Target: ErrUnknownProcedure from the findResultByName miss in
+		// func (l *listener) collectYieldItems (call.go), on unknown YIELD field
 		// (one sentinel covers both name and field miss per Q1 ruling).
 		// Registered proc has `out`, YIELD requests `bogus`. Sink-gated
 		// fail no-ops.

@@ -116,11 +116,12 @@ func TestElementTypesAreKeyedByTheirKeyLabelSet(t *testing.T) {
 // TestLabelSetsDoesNotWriteThroughItsInput pins labelSets' purity with respect to
 // the key label set it is handed. Building the complete set appends the implied
 // labels to the key ones, and appending to a slice with spare capacity writes into
-// the caller's backing array — so the clone at resolve.go:149 is load-bearing for
-// any caller whose LabelSet has room to spare.
+// the caller's backing array — so the `slices.Clone(key)` inside the
+// `append(slices.Clone(key), implied...)` of func labelSets (resolve.go) is
+// load-bearing for any caller whose LabelSet has room to spare.
 //
-// Today no caller does: every LabelSet reaching labelSets comes from labelSet()
-// (nodetype.go:36-53), which returns either a one-element literal or a make() sized
+// Today no caller does: every LabelSet reaching labelSets comes from func labelSet
+// (nodetype.go), which returns either a one-element literal or a make() sized
 // exactly to the label count, both len == cap. That invariant lives in a different
 // file from the clone that depends on it, is not stated anywhere, and would be
 // undone by any future collector that accumulates labels with append. Dropping the
