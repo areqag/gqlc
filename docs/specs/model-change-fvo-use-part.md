@@ -2491,6 +2491,29 @@ shadow above is a distinct shape whose Part-attribution and
 semantic-attribution diverge, and fvo's axis cannot bridge that
 divergence.
 
+**Superseded 2026-09-10 — the follow-up ruled against the axis.**
+gqlc-4w5 was opened on this residual and answered in
+[`ruling-4w5-semantic-scope-attribution.md`](ruling-4w5-semantic-scope-attribution.md).
+The ruling **declines** the semantic-scope axis this section
+anticipates: for a WITH's trailing WHERE the semantic scope IS a
+Part — the one the WITH opens — so the lexical axis can already
+name it, and the defect is WHEN it is stamped rather than which
+axes exist. The paragraph above ("Closing it requires a DIFFERENT
+axis") is therefore the part of this section that did not hold;
+the mined behaviour and the shape itself reproduced exactly.
+
+Two corrections to the assessment here, both from running the
+shipped parser rather than reading it:
+
+- **"No regression" understates the defect.** The same pre-swap
+  mining makes the parser REFUSE five legal Cypher queries when a
+  `$param` is present, including the ordinary post-aggregation
+  filter `WITH count(a) AS c WHERE c = $p`. Those refusals
+  pre-date fvo and were never assessed here.
+- **The remedy costs one golden**, not a model change:
+  moving `mineWhere` below `closePartOpenNext` in `EnterOC_With`.
+  Execution is tracked on **gqlc-dvd1**.
+
 ### 7.7 Follow-up beads flagged for close-out
 
 - **UNION-with-Uses branch attribution** — §7.2.1 records the
