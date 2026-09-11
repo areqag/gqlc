@@ -45,6 +45,15 @@ var (
 	WriteSingleColumnDecodeIndent = writeSingleColumnDecodeIndent
 )
 
+// RenderQuerier emits querier.go for a batch. The v5 target, because the
+// only thing the target decides in this file is the dbtype import path, and
+// which import paths appear is the whole subject here rather than a
+// difference between the majors — the corpus already holds the two equal
+// modulo that path.
+func RenderQuerier(pkg string, prepared []codegen.Query) []byte {
+	return renderQuerier(pkg, prepared, driverV5)
+}
+
 // RenderRecordHelpers emits record_neo4j.go for a chosen encoding set and
 // use record. The use map's element type is unexported, so a test states
 // the directions as CarrierUseFlags and this converts.
