@@ -76,23 +76,17 @@ var (
 	ErrIdentifierEscape   = errors.New("delimited identifier carries an escape denoting no character: a \\u or \\U value that is an unpaired surrogate or above the Unicode maximum has no encoding, and writing it as U+FFFD would give it a name it shares with every other unreadable escape")
 )
 
-// ErrAmpersandInLabel refuses a label whose decoded name contains an ampersand.
-// graph.LabelSet.Key joins labels with "&" and does not quote them
-// (graph/labelset.go:25), so the one-label set {A&B} and the two-label set {A, B}
-// produce the same key — and the key IS the type's identity, so the forgery
-// reaches every map keyed by it. It is the same hazard quoteFieldName already
-// prevents inside a record encoding, here in the key that identifies the element
-// type itself.
+// There is deliberately no fourth identifier sentinel here for a label carrying
+// an ampersand. ErrAmpersandInLabel stood in this position between gqlc-tzu9r
+// and gqlc-649co, refusing the label because graph.LabelSet.Key joined on an
+// unquoted "&" and the one-label set {A&B} therefore keyed identically to the
+// two-label set {A, B} — the type's own identity, forged.
 //
-// A delimited label is the only way to write one: an ampersand cannot appear in
-// a regular identifier. Before gqlc-tzu9r the delimiters travelled with the name
-// and kept the two keys apart by accident, so nothing was forgeable and nothing
-// guarded it.
-//
-// Refusing is the fail-closed half of a choice with a second half not taken:
-// quoting LabelSetKey would make such labels representable, but the key reaches
-// schema JSON, EdgeKey and codegen, which is a design of its own — bd gqlc-yd4ba.
-var ErrAmpersandInLabel = errors.New("label contains an ampersand, which is the separator LabelSet.Key joins on: such a label would key identically to the multi-label set spelling it")
+// It was the fail-closed half of a choice whose other half has since been taken:
+// LabelSetKey quotes such a label now, so the collision cannot be spelled and
+// there is nothing left to decline. Restoring the refusal would reject an
+// ISO-legal schema, and it would have to be copied into every other front end
+// that reads a label into that same key rather than living at the key itself.
 
 // ErrUnsupportedSource is the class of rejected <graph type source> alternatives
 // rather than a leaf sentinel: the two reachable rejections below wrap it, so a

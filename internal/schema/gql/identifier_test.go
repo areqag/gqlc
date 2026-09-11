@@ -258,16 +258,11 @@ func TestDelimitedIdentifierRefusals(t *testing.T) {
 			`CREATE GRAPH TYPE "\U110000" { (:A) }`,
 			gql.ErrIdentifierEscape,
 		},
-		{
-			"a label carrying the key separator",
-			"CREATE GRAPH TYPE G { (:`A&B`) }",
-			gql.ErrAmpersandInLabel,
-		},
-		{
-			"an edge label carrying the key separator",
-			"CREATE GRAPH TYPE G { (:A), (:B), (:A)-[:`E&F`]->(:B) }",
-			gql.ErrAmpersandInLabel,
-		},
+		// Two rows stood here until gqlc-649co, both refusing a label carrying the
+		// key separator with ErrAmpersandInLabel. They are not deleted coverage:
+		// they became TestAnAmpersandBearingLabelKeysAsOneLabel below, which is
+		// the same two sources asserted as acceptances.
+		//
 		// The four rows below are the node-type and edge-type NAME positions, one
 		// per listener site: EnterNodeTypePattern, EnterNodeTypePhrase,
 		// EnterEdgeTypePattern, EnterEdgeTypePhrase. Each was converted to
@@ -320,21 +315,46 @@ func TestDelimitedIdentifierRefusals(t *testing.T) {
 	}
 }
 
-// TestAnAmpersandRefusalIsAboutTheAmpersand is ErrAmpersandInLabel's negative
-// control, and it is the row that says the refusal is narrow. A guard spelled
-// "refuse every delimited label" would pass every row of the table above and be
-// wrong about the whole feature this bead exists to add.
+// TestAnAmpersandBearingLabelKeysAsOneLabel is the acceptance that replaced
+// ErrAmpersandInLabel (bd gqlc-649co), taken through the public Parse at both
+// label positions — a node's and an edge's, which reach labelSet through separate
+// callers (nodetype.go:44 and :57).
 //
-// The two names differ by exactly the one byte the guard is about, and the
-// admitted one keys as the single label AB — not as the two-label set the refused
-// spelling would have forged, which is the collision itself stated as a value.
-func TestAnAmpersandRefusalIsAboutTheAmpersand(t *testing.T) {
-	got, err := parseSchema(t, "CREATE GRAPH TYPE G { (:`AB`) }")
-	require.NoError(t, err)
-	require.Contains(t, got.Nodes, graph.LabelSetKey("AB"))
+// What it asserts is the KEY SPELLING, not merely that the parse succeeded, and
+// that distinction is the whole test. Deleting the parser's refusal without
+// quoting the key also makes both sources parse — and yields the key
+// "A&B", which is byte-identical to the two-label set (:A&B) and is precisely the
+// type-identity forgery the refusal existed to prevent. Only the spelling can
+// tell those two changes apart, so a bare require.NoError here would vouch for
+// the defect.
+//
+// The last stanza is that forgery stated as a value: the one-label and two-label
+// sets must key differently, and each must decode back to what its author wrote.
+func TestAnAmpersandBearingLabelKeysAsOneLabel(t *testing.T) {
+	t.Run("a node label", func(t *testing.T) {
+		got, err := parseSchema(t, "CREATE GRAPH TYPE G { (:`A&B`) }")
+		require.NoError(t, err)
+		require.Contains(t, got.Nodes, graph.LabelSetKey("`A&B`"),
+			"the key quotes the label; spelled A&B it would be the two-label set")
+		require.Equal(t, graph.LabelSet{"A&B"}, graph.LabelSetKey("`A&B`").Split())
+	})
 
-	require.Equal(t, graph.LabelSet{"A", "B"}.Key(), graph.LabelSet{"A&B"}.Key(),
-		"the forgery the refusal prevents: if these ever differ, bd gqlc-yd4ba has landed and the refusal can be narrowed or dropped")
+	t.Run("an edge label", func(t *testing.T) {
+		got, err := parseSchema(t, "CREATE GRAPH TYPE G { (:A), (:B), (:A)-[:`E&F`]->(:B) }")
+		require.NoError(t, err)
+		require.Len(t, got.Edges, 1)
+		for key := range got.Edges {
+			require.Equal(t, graph.LabelSetKey("`E&F`"), key.KeyLabels)
+			require.Equal(t, graph.LabelSet{"E&F"}, key.KeyLabels.Split())
+		}
+	})
+
+	t.Run("the two sets it must not forge", func(t *testing.T) {
+		require.NotEqual(t, graph.LabelSet{"A", "B"}.Key(), graph.LabelSet{"A&B"}.Key(),
+			"the forgery: one label spelling itself as two")
+		require.Equal(t, graph.LabelSet{"A&B"}, graph.LabelSet{"A&B"}.Key().Split())
+		require.Equal(t, graph.LabelSet{"A", "B"}, graph.LabelSet{"A", "B"}.Key().Split())
+	})
 }
 
 // TestTheNoEscapeRefusalIsAboutTheLEADINGMarker is ErrNoEscapeIdentifier's
