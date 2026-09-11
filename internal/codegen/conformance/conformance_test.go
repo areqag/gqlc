@@ -1349,9 +1349,10 @@ func importQualifier(imp *ast.ImportSpec, path string) string {
 //	Date | LocalTime | LocalDateTime | Time | Duration | time.Time |
 //	[]byte | []any
 //
-// (neo4j/graph.go:25 under v5, the same plus the Vector and UUID named
-// types under v6) and neo4j.RecordValue (neo4j/record.go:25) is that
-// set plus map[string]any, Node, Relationship and Path. A value the
+// (the PropertyValue constraint in the driver's neo4j/graph.go under v5,
+// the same plus the Vector and UUID named types under v6) and
+// neo4j.RecordValue (the RecordValue constraint in neo4j/record.go) is
+// that set plus map[string]any, Node, Relationship and Path. A value the
 // driver hands to generated code came off one of those two constraints,
 // so a type assertion on it can only be true for a member of them —
 // every other name is an assertion that is false for every value the

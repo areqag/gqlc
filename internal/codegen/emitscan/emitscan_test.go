@@ -496,13 +496,21 @@ func TestAClosureParameterIsABodyLocal(t *testing.T) {
 }
 
 // genericHelperEmission is the one construct gqlc-db0e closed that is
-// LIVE rather than scheduled: the signature the age emitter writes at
-// internal/codegen/age/render_models.go:1515, inside the raw string
-// opened at :1504. agtypeNullableElem, agtypeProperty,
-// agtypeNullableProperty and render_record.go's agtypeRecordField are
-// the same shape. Copied rather than generated here so the unit stays a
-// unit; if the emitter drops the form entirely this exhibit outlives it,
-// which costs a row rather than hiding one.
+// LIVE rather than scheduled: agtypeList, which the age emitter writes
+// from writeWireDecoders' `h.list` arm in
+// internal/codegen/age/render_models.go. agtypeNullableElem,
+// agtypeProperty, agtypeNullableProperty and render_record.go's
+// agtypeRecordField are the same shape. Copied rather than generated
+// here so the unit stays a unit; if the emitter drops the form entirely
+// this exhibit outlives it, which costs a row rather than hiding one.
+//
+// [2026-09-11 (gqlc-g23w): this cited render_models.go:1515 "inside the
+// raw string opened at :1504". Those lines held agtypeEncodedNullable's
+// emission on the day the cite was written, not agtypeList's — and
+// agtypeEncodedNullable is `[T, E any]` over an encode func, a different
+// shape from the four siblings named above and from the exhibit below.
+// The cite was wrong at birth rather than drifted. Named by construct
+// now so it cannot be either.]
 const genericHelperEmission = `package p
 
 func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) {
