@@ -109,6 +109,7 @@ var corpusTests = []string{
 	"TestSlotElementsStayBareUnderNotNull",
 	"TestAgtypeValue",
 	"TestDecodeVertexWithAnyProperty",
+	"TestUnionDecodersRefuseABodyWithNoAgtypeValueInIt",
 	"TestDecodeEdge",
 	"TestEntityDecodersRefuseTheOtherAnnotation",
 	"TestDecodeVertexRefusesMisshapenText",
@@ -244,6 +245,7 @@ var corpusTables = map[string]corpusrun.Table{
 	"TestEmittedMethodBindsListsOfCarriers":                   {Rows: 8},
 	"TestEmittedMethodBindsNestedListsOfCarriers":             {Rows: 5},
 	"TestEmittedMethodBindsTheCarriersAsTheirScalars":         {Rows: 6},
+	"TestUnionDecodersRefuseABodyWithNoAgtypeValueInIt":       {Rows: 10},
 }
 
 // TestEmittedHelpersDecodeTheAgtypeCorpus runs the emitted agtype

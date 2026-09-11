@@ -58,6 +58,21 @@
 // that starred every element would pass every assertion here, because
 // nothing else in this corpus asks what happens to a null the schema
 // forbids.
+//
+// Anything.choice and Anything.toggle are the CLOSED unions, and they
+// ride the same label as payload/maybe/tag on purpose: both spellings
+// carry as `any`, so the open one and the closed one differ only in the
+// decoder the property read is handed, and putting them on one label is
+// what makes that the only difference. Two of them rather than one
+// because the emitted dispatch has two shapes and an empty body reaches
+// a different line in each — a member set claiming a self-delimiting
+// family opens with `switch body[0]`, which indexes, and one claiming
+// only boolean and float opens with a whole-token comparison, which does
+// not. The empty-value guard above both is what this corpus is here to
+// reach: a live AGE server can deliver neither an SQL-NULL-free null nor
+// a zero-length property value, so the guard is unreachable from the
+// live batteries and only a harness that feeds the decoder directly can
+// present one (bd gqlc-6omn).
 CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
     (:Event {
         id         :: INT64     NOT NULL,
@@ -104,7 +119,9 @@ CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
     (:Anything {
         payload :: ANY VALUE NOT NULL,
         maybe   :: ANY VALUE,
-        tag     :: ANY PROPERTY VALUE
+        tag     :: ANY PROPERTY VALUE,
+        choice  :: ANY<INT32 | STRING>,
+        toggle  :: ANY<BOOL | FLOAT64>
     }),
     (:Dwelling {
         id    :: INT64 NOT NULL,
