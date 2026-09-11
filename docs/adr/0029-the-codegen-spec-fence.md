@@ -518,13 +518,21 @@ between the two comment delimiters is not.
 There is no exemption list, on purpose. An exemption would be a second invisible
 place for a signature to live, which is the thing being removed.
 
-Two properties, each of which cost a row:
+Three properties, each of which cost a row:
 
 - A comment opener inside an inline code span opens nothing, because a renderer
   prints that run verbatim as content. This is not a refinement: ADR 0042
   discusses the construct by quoting the opener in code spans three times, and
   read naively the first quote opens a "comment" running hundreds of lines to
   the second. The check would have booby-trapped the document that motivates it.
+- A comment opener inside a FENCED code block opens nothing either, for the same
+  reason — a fence is printed verbatim too, so nothing there is hidden. That
+  falls out of `gqlc-cgat`'s conflation rather than being designed: a fence is a
+  run of backticks, so the span reader pairs it like a very long code span. The
+  direction happens to be the right one, and it is pinned because it is measured
+  rather than intended. It cost the first mutation row written for this check,
+  which commented out a signature inside a fenced example and SURVIVED — the
+  apparatus being wrong, not the guard.
 - An unterminated opener runs to the end of the document. That is the renderer's
   own reading, and it is the fail-closed one — treating it as no comment at all
   would let a document hide any amount of graded text from both the reader and

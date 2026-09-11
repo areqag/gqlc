@@ -2822,9 +2822,17 @@ func TestSpecCommentedAnchorsReadOnlyWhatARendererHides(t *testing.T) {
 		text: "intro\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n",
 		want: nil,
 	}, {
+		// The anchor sits BETWEEN the two quoted delimiters, which is
+		// what makes this row load-bearing: with the opener read as an
+		// opener, the span runs from the first quote past the signature
+		// to the second and the signature is reported. That is ADR 0042's
+		// own shape — it quotes the opener three times with text between
+		// — and a row whose anchor sits outside the naive span witnesses
+		// nothing, because both readings then report nothing.
 		name: "a comment opener inside a code span opens nothing",
-		text: "an HTML comment opens on `" + commentOpen + "` and closes on `" + commentClose + "`.\n" +
-			"func (q *Queries) A" + ctxAnchor + ", arg int64) error\n",
+		text: "an HTML comment opens on `" + commentOpen + "`.\n" +
+			"func (q *Queries) A" + ctxAnchor + ", arg int64) error\n" +
+			"and closes on `" + commentClose + "`.\n",
 		want: nil,
 	}, {
 		name: "an unclosed comment hides every anchor after it",
@@ -2842,6 +2850,20 @@ func TestSpecCommentedAnchorsReadOnlyWhatARendererHides(t *testing.T) {
 		name: "the rule bullet is an anchor too, so a commented bullet cannot pay its census",
 		text: "<!--\n- " + paramListTerm + " — `, " + codegen.ParamArg + " <T>` if one parameter.\n-->\n",
 		want: []string{"2:" + paramListTerm},
+	}, {
+		// A fenced block's delimiter is a run of backticks, so
+		// inlineCodeSpans pairs it like a very long span and the opener
+		// inside falls in one. The conflation is gqlc-cgat's, and here it
+		// runs in the correct direction — a renderer prints a fenced
+		// block verbatim, comment delimiters and all, so nothing is
+		// hidden and there is nothing to refuse. Pinned because it is
+		// measured rather than designed: the first mutation row written
+		// for this check commented out a signature inside C1's fenced
+		// example and SURVIVED, and that was the apparatus being wrong,
+		// not the guard.
+		name: "a comment opener inside a fenced code block opens nothing",
+		text: "```go\n<!--\nfunc (q *Queries) A" + ctxAnchor + ", arg int64) error\n-->\n```\n",
+		want: nil,
 	}, {
 		name: "a comment carrying no anchor is left alone",
 		text: "<!-- TODO: rewrite this section once the seam lands. -->\n",
