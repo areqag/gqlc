@@ -141,5 +141,9 @@
     "certified_collect_unknown_property.cypher": "certificate.gql",
     "certified_min_unknown_property.cypher": "certificate.gql",
     "plural_satisfying_property_nullability_differs.cypher": "satisfy_plural_property_diverges.gql",
-    "unlabelled_optional_introduced_hop_foreign_group_withheld.cypher": "satisfy_plural_edges_inline_subtype.gql"
+    "unlabelled_optional_introduced_hop_foreign_group_withheld.cypher": "satisfy_plural_edges_inline_subtype.gql",
+    "carried_alias_redeclared_as_node.cypher": "social_r5.gql",
+    "carried_alias_redeclared_as_labelled_node.cypher": "social_r5.gql",
+    "carried_alias_redeclared_as_edge.cypher": "social_r5.gql",
+    "carried_edge_redeclared_as_node.cypher": "social_r5.gql"
 }

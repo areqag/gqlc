@@ -291,6 +291,13 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 // s.bindings and picks them up). Bind* runs the cross-lane shadow cascade and
 // the R5/R7 conflict checks.
 func admitLocalBindings(sc *scope, s schema.Schema, r procsig.Registry) error {
+	// The cross-lane kind check runs before the admission loop, so it reads the
+	// carry seed alone — no local Bind* has overwritten a lane yet. It has to
+	// precede BindNode as well as Phase B: the labelled and edge spellings of
+	// the fault never reach inference. See scope.ValidateCarriedKinds.
+	if err := sc.ValidateCarriedKinds(); err != nil {
+		return err
+	}
 	for _, b := range sc.bindings {
 		switch bb := b.(type) {
 		case query.NodeBinding:
@@ -2151,11 +2158,26 @@ func witnessesItsEndpoints(e query.EdgeBinding, written map[string]struct{}, dem
 //
 //     inferUnlabelled's CARRY WINS filter drops every name carried as a NODE
 //     before Phase B sees it, so this conjunct can only fire for a name carried
-//     as something else. The ruling left its reachability open (§3.2); the
-//     measurement that settles it as REACHABLE is
-//     TestACarriedAliasRedeclaredUnderAnOptionalClauseDoesNotAttest, where a
-//     `WITH count(p) AS c` alias re-declared as `(c)` under a later Part's
-//     OPTIONAL MATCH reaches this gate with every other conjunct true.
+//     as something else. The ruling left its reachability open (§3.2) and
+//     gqlc-1qijx settled it REACHABLE, its witness a `WITH count(p) AS c` alias
+//     re-declared as `(c)` under a later Part's OPTIONAL MATCH.
+//
+//     gqlc-60jb narrowed that, and the standing this conjunct now has is worth
+//     reading before touching it. scope.ValidateCarriedKinds refuses a carried
+//     non-node re-declared as a node at Phase A1, so that witness is gone: every
+//     route the guard can see is refused before Phase B runs. What is left is
+//     the one route the guard deliberately skips — a name carried as a CALL
+//     YIELD scalar. Measured on the rebased tree by replacing the body below
+//     with a panic: ZERO reaches across the whole module's tests with the guard
+//     live, five with it blinded, and a hand-written
+//     `CALL test.labels() YIELD label WITH label … OPTIONAL MATCH (label)-[a:AUTHORED]->(y)`
+//     panics with the guard LIVE. So it is still reached, and it is now reached
+//     WITHOUT AN OBSERVABLE: commitUnlabelledRound refuses every such query a
+//     few lines later, with a byte-identical message whether this conjunct
+//     returns here or not. That is the standing the `written` conjunct above
+//     already has, and it is why the pin is the direct call in
+//     TestTheCarriedConjunctWithholdsAttestationFromACarriedName rather than a
+//     corpus fixture: dropping this conjunct reddens nothing in the package.
 func introducedByThisHop(n query.NodeBinding, e query.EdgeBinding, written, carried map[string]struct{}) bool {
 	g := n.OptionalGroup()
 	if g < 1 || g != e.OptionalGroup() || !singleHopPattern(e) {

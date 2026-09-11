@@ -258,6 +258,19 @@ var invalidFixtures = map[string]error{
 	"union_edge_union_arity_prefix_reversed.cypher": ErrUnionColumnMismatch,
 	"part_binding_type_conflict.cypher":             ErrPartBindingTypeConflict,
 	"part_binding_type_conflict_edge.cypher":        ErrPartBindingTypeConflict,
+	// gqlc-60jb. The two fixtures above conflict an ENTITY carry against an
+	// entity re-declaration, which is the only half R5 §4.2.3 ruled on. These
+	// four are the cross-lane half: the carry and the local declaration
+	// disagree about KIND, so neither the §6.4 LabelSetKey check nor Phase B's
+	// CARRY WINS filter ever compares them. All four resolved on master —
+	// _as_node anchored an AUTHORED hop as though a count() were a Post. The
+	// OPTIONAL in two of them is incidental: _as_labelled_node and _as_edge
+	// carry no OPTIONAL and never reach Phase B at all, which is what places
+	// the refusal at Phase A1 rather than at the inference site.
+	"carried_alias_redeclared_as_node.cypher":          ErrPartBindingTypeConflict,
+	"carried_alias_redeclared_as_labelled_node.cypher": ErrPartBindingTypeConflict,
+	"carried_alias_redeclared_as_edge.cypher":          ErrPartBindingTypeConflict,
+	"carried_edge_redeclared_as_node.cypher":           ErrPartBindingTypeConflict,
 	// oou additions. unify checks property type and nullability side by side
 	// and both raise ErrParameterTypeConflict, so
 	// parameter_type_conflict_two_properties.cypher — STRING NOT NULL against
@@ -1056,6 +1069,44 @@ var invalidFixtureContains = map[string]string{
 	// resolver arm whose only assertion lives two packages away is one no
 	// reader of this file could find.
 	"unknown_label.cypher": `NotDeclared is not declared on any node type`,
+	// ValidateCarriedKinds, the cross-lane arm of ErrPartBindingTypeConflict
+	// (bd gqlc-60jb). Pinned rather than waived because that sentinel is raised
+	// from MANY sites — BindNode, BindNodeCands, BindEdge, and the two R7 shape
+	// checks in commitUnlabelledRound — so errors.Is settles nothing about
+	// WHICH of them refused, and this is the only one reporting a disagreement
+	// between the carry's kind and the local pattern's.
+	//
+	// The pins hold the sentence's two variable halves: the carried kind the
+	// guard read out of carriedResolvedTypes, and the pattern kind
+	// declaredEntityKind named. Note what they do NOT discriminate —
+	// _as_node and _as_labelled_node produce a BYTE-IDENTICAL sentence, since
+	// one format string serves both and the labelled/unlabelled distinction is
+	// invisible to it. Those two are separated by the route they take to the
+	// site rather than by the message, and each earns its place: only the
+	// unlabelled one would otherwise reach Phase B at all.
+	// The three CALL YIELD fixtures move out of the waiver map in the same
+	// change, because ValidateCarriedKinds is what made them load-bearing. It
+	// skips names in callTypes so these five R7 sites keep reporting the more
+	// precise fault, and before this the skip was held by nothing that names it:
+	// dropping it was measured KILLED only by TestSweepRegistryDelta, which
+	// fails for an aggregate reason (no cell accepts under both registries with
+	// a different model) rather than because any message moved. Regenerating the
+	// manifest did not rescue it, so it was a real guard — but an aggregate one
+	// two files away, and a reader of ValidateCarriedKinds could not find it.
+	//
+	// Each pin is the substring the skip buys and the mutation takes: drop the
+	// skip and the same query refuses with the cross-lane sentence above
+	// instead. They span the three distinct sites reached — BindNode for the
+	// labelled node, BindEdge for the edge, commitUnlabelledRound for the
+	// unlabelled one — and each carries its own re-bound rendering, so a site
+	// that started naming the wrong schema type is caught too.
+	"part_binding_type_conflict_call_vs_node.cypher":       `variable "label" carried as CALL YIELD scalar, re-bound as Person`,
+	"part_binding_type_conflict_call_vs_edge.cypher":       `variable "label" carried as CALL YIELD scalar, re-bound as edge with labels KNOWS`,
+	"part_binding_type_conflict_call_vs_unlabelled.cypher": `variable "label" carried as CALL YIELD scalar, re-bound as Person`,
+	"carried_alias_redeclared_as_node.cypher":              `variable "c" carried as scalar(int), re-declared as a node pattern`,
+	"carried_alias_redeclared_as_labelled_node.cypher":     `variable "c" carried as scalar(int), re-declared as a node pattern`,
+	"carried_alias_redeclared_as_edge.cypher":              `variable "c" carried as scalar(int), re-declared as an edge pattern`,
+	"carried_edge_redeclared_as_node.cypher":               `variable "r" carried as edge, re-declared as a node pattern`,
 }
 
 // invalidFixtureNoMessagePin names the invalid fixtures whose refusal message
@@ -1226,9 +1277,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"parameter_use_on_var_length_edge_property.cypher":             {},
 	"parameter_use_unknown_edge_property.cypher":                   {},
 	"part_binding_type_conflict.cypher":                            {},
-	"part_binding_type_conflict_call_vs_edge.cypher":               {},
-	"part_binding_type_conflict_call_vs_node.cypher":               {},
-	"part_binding_type_conflict_call_vs_unlabelled.cypher":         {},
 	"part_binding_type_conflict_edge.cypher":                       {},
 	"plural_endpoint_contradictory_edges_stay_plural.cypher":       {},
 	"plural_endpoint_created_edge_stays_plural.cypher":             {},
@@ -3820,25 +3868,71 @@ func (s *ResolverSuite) TestTheGroupFloorRefusesLegacyNullableBindings() {
 		"group 0 is `no OPTIONAL clause introduced this`, not a group two bindings can share: without the floor these two read 0 == 0 and attest each other (bd gqlc-1qijx)")
 }
 
-// TestACarriedAliasRedeclaredUnderAnOptionalClauseDoesNotAttest settles the
-// reachability the ruling left open (§3.2) for conjunct (e), `carried`.
+// TestTheCarriedConjunctWithholdsAttestationFromACarriedName is the row for
+// conjunct (e) of introducedByThisHop, and it is a direct call rather than a
+// corpus fixture for a reason gqlc-60jb created.
 //
-// The open question was whether anything can reach that conjunct with the other
-// four true. inferUnlabelled's CARRY WINS filter drops every name carried as a
-// NODE before Phase B is asked, so a carried node cannot be the witness; the
-// conjunct can only fire for a name carried as something else. This query is
-// that shape: `WITH count(p) AS c` exports `c` as a scalar, and the next Part
-// re-declares it as `(c)` under an OPTIONAL MATCH, where mergeBinding's
-// per-Part dedup makes it a FRESH binding carrying that clause's group.
+// gqlc-1qijx pinned (e) through a query: `WITH count(p) AS c` re-declared as
+// `(c)` under a later Part's OPTIONAL MATCH reached the gate with every other
+// conjunct true, and dropping (e) made that fixture gain a warning.
+// scope.ValidateCarriedKinds now refuses that query at Phase A1, so the fixture
+// is gone from valid/ and (e) has no corpus witness left: dropping it was
+// measured SURVIVING the whole package.
 //
-// It is measured rather than argued in both directions. The first assertion is
-// the reachability: `c` survives CARRY WINS and arrives at the gate with (a)-(d)
-// all true, so `carried` is the only thing refusing. The second is what the
-// refusal buys — the same query with the carry removed is the corpus fixture
-// unlabelled_optional_introduced_hop_attests, which DOES warn. Same two hops,
-// same schema, one `WITH`: the warning's absence here is `carried` and nothing
-// else.
-func (s *ResolverSuite) TestACarriedAliasRedeclaredUnderAnOptionalClauseDoesNotAttest() {
+// It is NOT dead code, which is the reason the answer is a unit pin and not a
+// deletion. Replacing the conjunct's body with a panic and running the module
+// reached it zero times with the guard live and five with it blinded — but a
+// hand-written `CALL test.labels() YIELD label WITH label … OPTIONAL MATCH
+// (label)-[a:AUTHORED]->(y)` panics with the guard LIVE, because
+// ValidateCarriedKinds skips names carried as CALL YIELD scalars on purpose.
+// That route reaches (e) and then is refused by commitUnlabelledRound a few
+// lines later with a message that is byte-identical either way, which is why
+// no query can pin it: it is reached without an observable.
+//
+// So this is the conjunct's whole assertion, and it is built the way conjunct
+// (a)'s is, with the positive control first. Without that control the False
+// below is satisfied by any of (a)-(d) refusing instead, which is the same
+// observable for the wrong reason.
+func (s *ResolverSuite) TestTheCarriedConjunctWithholdsAttestationFromACarriedName() {
+	n, err := query.NewNullableNodeBindingInGroup("c", graph.LabelSet{}, 1)
+	s.Require().NoError(err)
+	cEnd, err := query.NewVarEndpoint("c")
+	s.Require().NoError(err)
+	e, err := query.NewNullableEdgeBindingInGroup("h", graph.LabelSet{"HAS_DESK"},
+		cEnd, query.NewInlineEndpoint(graph.LabelSet{"Desk"}), true, 1)
+	s.Require().NoError(err)
+
+	// The positive control: conjuncts (a)-(d) all hold for this pair, so the
+	// gate attests when nothing says the name was carried.
+	s.Require().True(introducedByThisHop(n, e, map[string]struct{}{}, map[string]struct{}{}),
+		"the pair must reach conjunct (e) with (a)-(d) true, or the False below is some other conjunct's refusal")
+
+	s.False(introducedByThisHop(n, e, map[string]struct{}{}, map[string]struct{}{"c": {}}),
+		"a name the previous Part exported is bound from there and is non-null on the rows this OPTIONAL clause missed, so the clause's hop attests nothing about it however cleanly it re-declares (bd gqlc-1qijx, gqlc-60jb)")
+}
+
+// TestACarriedAliasRedeclaredUnderAnOptionalClauseIsRefused is the flipped half
+// of what gqlc-1qijx left pinned, and the assertion the ruling (§9.4) said would
+// have to flip when gqlc-60jb was fixed.
+//
+// The query is the same one that test ran, and it used to be ACCEPTED — `c` is
+// an INTEGER `count(p)` re-declared as the node pattern `(c)`, and master typed
+// the column as a Post node. The predecessor asserted NoError on it, and said in
+// so many words that the NoError pinned a hole. ValidateCarriedKinds closes the
+// hole, so this now asserts the refusal.
+//
+// What the flip costs is recorded here rather than only in the ruling: the
+// refusal happens at Phase A1, BEFORE Phase B, so this query no longer reaches
+// introducedByThisHop at all and can no longer be the reachability witness for
+// its `carried` conjunct. That conjunct's own standing is settled separately, by
+// TestTheCarriedConjunctWithholdsAttestationFromACarriedName.
+//
+// The uncarried twin is kept as the control, and it does more work now than it
+// did: without it an ErrorIs here could mean the resolver has started refusing
+// this whole SHAPE — two OPTIONAL hops off one unlabelled binding — rather than
+// the carry disagreement. One `WITH` apart, the twin still resolves and still
+// warns, so what the assertion above isolates is the re-declaration.
+func (s *ResolverSuite) TestACarriedAliasRedeclaredUnderAnOptionalClauseIsRefused() {
 	sch := s.loadSchema("valid", "social_r5.gql")
 	resolve := func(src string) (ValidatedQuery, error) {
 		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
@@ -3856,25 +3950,18 @@ func (s *ResolverSuite) TestACarriedAliasRedeclaredUnderAnOptionalClauseDoesNotA
 		"OPTIONAL MATCH (q)-[r:AUTHORED|LIKES]->(y2:Person)\n" +
 		"RETURN r"
 
-	// This NoError PINS A HOLE rather than endorsing one. The query is nonsense
-	// — `c` is an INTEGER count re-declared as a node pattern — and the ruling
-	// (§3.2) assumed it was refused somewhere upstream. It is not refused
-	// anywhere: master accepts it too, and types the column as a Post NODE. That
-	// is bd gqlc-60jb, filed from this measurement and not fixed here. When it
-	// is fixed this assertion flips to a refusal, and conjunct (e) must be
-	// re-examined at the same time — a refusal before Phase B would make it
-	// unreachable.
-	vqCarried, err := resolve(carried)
-	s.Require().NoError(err, "master accepts this too (bd gqlc-60jb); what `carried` withholds is the attestation, not the query")
-	s.Empty(vqCarried.Warnings,
-		"the re-declared `c` is bound from its earlier Part and is non-null on the rows this OPTIONAL clause missed, so the hop attests nothing about it and LIKES stays in the committed set (bd gqlc-1qijx)")
+	_, err := resolve(carried)
+	s.Require().ErrorIs(err, ErrPartBindingTypeConflict,
+		"`c` is carried as an INTEGER and re-declared as a node pattern; accepting it returned a count to the caller behind a node decoder (bd gqlc-60jb)")
+	s.Contains(err.Error(), `variable "c" carried as scalar(int), re-declared as a node pattern`,
+		"the sentinel is raised from five other sites, so errors.Is alone does not say the cross-lane guard is what refused")
 
-	// The control. Without it an empty Warnings could mean the widening never
-	// ran at all, which is the same observable for the wrong reason.
+	// The control. Without it the ErrorIs above is satisfied by any refusal of
+	// the two-OPTIONAL shape, which is the same observable for the wrong reason.
 	vqUncarried, err := resolve(uncarried)
 	s.Require().NoError(err)
 	s.Require().Len(vqUncarried.Warnings, 1,
-		"one `WITH` apart, the widening fires and drops the wrong-orientation LIKES — so the pair isolates `carried` as what refuses above")
+		"one `WITH` apart the query resolves and the widening fires, so what the refusal above isolates is the carried re-declaration and not the shape")
 	s.Equal("wrong-orientation-drop", vqUncarried.Warnings[0].Producer)
 }
 
