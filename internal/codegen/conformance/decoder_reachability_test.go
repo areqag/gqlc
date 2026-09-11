@@ -2754,9 +2754,10 @@ func (d decoders) postLabelIsInteresting(raw []byte) (string, error) {
 	// every row for it sits on a method that names an entity, where the arm
 	// above never runs. It matters most here: every in-method label switch
 	// any backend emits today is written in a method that names no entity
-	// (measured for PR #2353 and again 2026-09-10, 29 such comparisons
-	// across the neo4j targets), so this arm is the one a real dispatch
-	// meets, and a partition that leaked would red all 29 at once.
+	// (measured for PR #2353 and again 2026-09-10: 29 such comparisons on
+	// each neo4j target, 58 in all), so this arm is the one a real dispatch
+	// meets, and a partition that leaked reds the corpus itself rather than
+	// this row alone — which is what it did when the leak was mutated in.
 	t.Run("a dispatch's case values are not this arm's", func(t *testing.T) {
 		files := []codegen.File{{Path: "models.go", Contents: []byte(prologue + `
 func (d decoders) labelOf(relType string) (string, error) {
@@ -3164,10 +3165,12 @@ func emittedMethodDecoders(
 			// reopened one arity down. Measured 2026-09-10 across the whole
 			// corpus, 2068 zero-entity methods write 0 comparisons this
 			// reader collects, so the arm refuses nothing any backend emits
-			// today; the 29 string comparisons their bodies do contain are
-			// dispatch case values, dropped by methodOwnGuards below, and
-			// that non-zero count is what says the partition is doing work
-			// rather than reading nothing.
+			// today; the string comparisons their bodies do contain — 29 on
+			// each neo4j target, none on apache-age-pgx-v5 — are dispatch
+			// case values, dropped by methodOwnGuards below, and that
+			// non-zero count is what says the partition is doing work
+			// rather than reading nothing. A reader collecting nothing at
+			// all would have reported the same 0.
 			//
 			// It answers no more than the multi-entity arm does. It does not
 			// say the emission is wrong — it says the comparison is read by
