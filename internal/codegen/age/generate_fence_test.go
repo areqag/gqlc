@@ -111,30 +111,27 @@ func TestGenerateRepanicsAFaultThatIsNotItsOwn(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// bareRenderOutcome is how a call through a fenced render bridge ended.
-// The call runs on its own goroutine because the fence ends it with
-// runtime.Goexit, which terminates whichever goroutine makes the call — on
-// the test's own goroutine that is the failure it is meant to be, and there
-// would be nothing left to assert from.
-type bareRenderOutcome struct {
-	returned bool // the renderer ran to completion
-	panicked any  // a fault crossed the bridge unhandled
-}
+// The three rows below pin the OTHER fence — the one over the export_test
+// render bridges, in render_fence_test.go. They are what generate's recover
+// alone did not give: twelve tests call the render layer directly, below
+// generate's seam, and a codegen bug reaching one of them used to take the
+// whole binary.
+//
+// They read the fence's record rather than a return value because a fenced
+// renderer returns its zero value, which is indistinguishable from a
+// renderer that simply emitted nothing. The record is the only place the
+// fault is NAMED, so it is the only thing worth asserting on.
+//
+// Like the rows above, none of these calls t.Parallel: the record is
+// package-level state and resetRecord drops all of it.
 
-// callBareRender runs fn on its own goroutine and reports how it ended.
-func callBareRender(fn func()) bareRenderOutcome {
-	var out bareRenderOutcome
-	done := make(chan struct{})
-	go func() {
-		// Runs on the Goexit path too, which is what makes the
-		// abandoned case observable rather than a hang.
-		defer close(done)
-		defer func() { out.panicked = recover() }()
-		fn()
-		out.returned = true
-	}()
-	<-done
-	return out
+// resetRecord clears the fence's record before a row and again after it, so
+// a row that provokes a fault on purpose neither inherits one nor leaves one
+// behind for a later reader of stderr.
+func resetRecord(t *testing.T) {
+	t.Helper()
+	age.ResetRecordedRenderFaults()
+	t.Cleanup(age.ResetRecordedRenderFaults)
 }
 
 // untaughtField is an entity field whose Go type no arm of decodeFunc
@@ -146,25 +143,30 @@ func untaughtField() codegen.EntityField {
 }
 
 // TestABareRenderCallFailsOnlyItsOwnTest is the standing witness for the
-// export_test render bridges being fenced, and it is the row that would
-// have caught what generate's recover alone did not: twelve tests call the
-// render layer directly, below generate's seam, and a codegen bug reaching
-// one of them used to take the whole binary.
+// export_test render bridges being fenced.
 //
 // Two ways to break the fence, one assertion each. Rebind the bridge to the
-// bare renderer and the fault arrives here as panicked. Change the fence to
-// swallow and return a zero value and it arrives as returned — which would
-// be worse than the panic, since a site asserting the ABSENCE of something
-// would then pass on empty output.
+// bare renderer and the fault arrives here as a panic, which is the binary
+// dying — and with it every pin after this one. Keep the recover but drop
+// the record and the row still passes its first assertion and fails its
+// second, which is the case worth separating: a fence that swallows in
+// silence is worse than no fence, because the carrier that lost its arm is
+// then named nowhere at all and the caller just sees empty output.
 func TestABareRenderCallFailsOnlyItsOwnTest(t *testing.T) {
+	resetRecord(t)
 	f := untaughtField()
 	e := codegen.Entity{Name: "E", Kind: codegen.EntityNode, Fields: []codegen.EntityField{f}}
 
 	var b strings.Builder
-	out := callBareRender(func() { age.WriteEntityFieldDecode(&b, e, 0, f) })
+	require.NotPanics(t, func() { age.WriteEntityFieldDecode(&b, e, 0, f) },
+		"a codegen bug must not cross the bridge as a panic — it takes the binary, and with it every pin after it")
 
-	require.Nil(t, out.panicked, "a codegen bug must not cross the bridge as a panic — it takes the binary, and with it every pin after it")
-	require.False(t, out.returned, "the fence must abandon the call, not return a zero value a caller could assert against")
+	faults := age.RecordedRenderFaults()
+	require.Len(t, faults, 1, "the fence must RECORD the fault, not swallow it: an unrecorded bug names the lost carrier nowhere")
+	// The carrier by name. This is the sentence a reader whose test failed
+	// on empty output has to find on stderr, so a fence that recorded some
+	// other string would be no use to them.
+	require.Contains(t, faults[0], `"complex128"`)
 }
 
 // TestAFaultThatIsNotACodegenBugStillCrossesTheRenderBridge is the other
@@ -173,6 +175,7 @@ func TestABareRenderCallFailsOnlyItsOwnTest(t *testing.T) {
 // unserved_nil_type_test.go depends on that, and a fence that caught
 // everything would swallow it.
 func TestAFaultThatIsNotACodegenBugStillCrossesTheRenderBridge(t *testing.T) {
+	resetRecord(t)
 	// A SERVED carrier with a nil builder. The carrier has to be served:
 	// an empty EntityField carries the Go type "", which decodeFunc
 	// refuses as a codegen bug before the builder is ever written to, so
@@ -181,10 +184,9 @@ func TestAFaultThatIsNotACodegenBugStillCrossesTheRenderBridge(t *testing.T) {
 	f := codegen.EntityField{PropName: "p", Field: "P", GoType: "string", Width: graph.TypeString}
 	e := codegen.Entity{Name: "E", Kind: codegen.EntityNode, Fields: []codegen.EntityField{f}}
 
-	out := callBareRender(func() { age.WriteEntityFieldDecode(nil, e, 0, f) })
-
-	require.NotNil(t, out.panicked, "a fault that is not a codegen bug must reach the caller unchanged")
-	require.False(t, out.returned)
+	require.Panics(t, func() { age.WriteEntityFieldDecode(nil, e, 0, f) },
+		"a fault that is not a codegen bug must reach the caller unchanged")
+	require.Empty(t, age.RecordedRenderFaults(), "a re-panicked fault is not this fence's, so it must not be recorded as one")
 }
 
 // TestAFencedBridgeIsTransparentWhenNothingFaults is the negative control
@@ -192,15 +194,15 @@ func TestAFaultThatIsNotACodegenBugStillCrossesTheRenderBridge(t *testing.T) {
 // bridge and returns normally, so their verdicts are the fence acting and
 // not the bridge being broken for every input.
 func TestAFencedBridgeIsTransparentWhenNothingFaults(t *testing.T) {
+	resetRecord(t)
 	f := codegen.EntityField{PropName: "p", Field: "P", GoType: "string", Width: graph.TypeString}
 	e := codegen.Entity{Name: "E", Kind: codegen.EntityNode, Fields: []codegen.EntityField{f}}
 
 	var b strings.Builder
-	out := callBareRender(func() { age.WriteEntityFieldDecode(&b, e, 0, f) })
+	require.NotPanics(t, func() { age.WriteEntityFieldDecode(&b, e, 0, f) })
 
-	require.Nil(t, out.panicked)
-	require.True(t, out.returned, "a served carrier must render through the bridge untouched")
-	require.NotEmpty(t, b.String(), "the control must actually emit, or it screens nothing")
+	require.NotEmpty(t, b.String(), "a served carrier must render through the bridge untouched, or the control screens nothing")
+	require.Empty(t, age.RecordedRenderFaults(), "a clean render must record nothing")
 }
 
 // TestGenerateWithNoRenderFaultIsUnaffected is the negative control for the

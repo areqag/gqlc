@@ -9,27 +9,39 @@ package age
 // twelve sites call age.RenderModels, age.RenderCypherFile or
 // age.WriteEntityFieldDecode through the export_test bridge, below
 // generate's seam, and each of those still took the whole binary. That is
-// what the acceptance row for bd gqlc-h0vqx measured — delete decodeFunc's
-// `any` arm and the run died in TestImportsTimeAgreesWithTheEmittedFile at
-// a bare age.RenderModels, with 544 of 9834 tests reached and the pin whose
-// job is to NAME the lost carrier never running.
+// what the acceptance row for bd gqlc-h0vqx measured — with generate's
+// recover alone, deleting decodeFunc's `any` arm still died in
+// TestImportsTimeAgreesWithTheEmittedFile at a bare age.RenderModels, 544
+// of 9834 RUN lines reached and the pin whose job is to NAME the lost
+// carrier never running.
 //
 // WHY THE BRIDGE AND NOT THE TWELVE SITES. Wrapping the sites is the sweep
-// this bead rejected: it is correct on the day it is written and grows a
-// blind spot with the next test that calls a renderer. The bridge is the
-// only route from package age_test into the render layer — the renderers
+// this bead rejected: correct the day it is written, and one blind spot
+// wider with the next test that calls a renderer. The bridge is the only
+// route from package age_test into the render layer — the renderers
 // themselves are unexported — so fencing it covers the twelve sites that
 // exist and every one written later, by construction rather than by anyone
 // remembering. No call site changes, now or ever.
 //
-// WHY Goexit AND NOT AN ERROR RETURN. These renderers write into a
-// *strings.Builder and return bytes; there is no error in their contract to
-// widen, and widening it would be the ~20-function plumbing change the
-// design (bd gqlc-qi4st) rejected on cost. runtime.Goexit fails exactly the
-// test that made the call, runs its defers, and leaves the binary alive for
-// every test after it — which is the whole property this bead is about. It
-// fails the test rather than returning a zero value, so a site that asserts
-// the ABSENCE of something cannot pass on empty output.
+// WHY NOT runtime.Goexit, which is what a helper would use to fail one
+// test. Goexit is what testing itself calls under t.FailNow, but only
+// after bookkeeping this code cannot do without a *testing.T: a bare
+// Goexit out of a test goroutine makes tRunner panic with "test executed
+// panic(nil) or runtime.Goexit", which is unrecovered and takes the binary
+// — the very failure being fenced, wearing a different message. Measured
+// both ways while building this: called from inside the deferred recover
+// it re-raised the panic it had just caught ("panic: ... [recovered]"),
+// and called cleanly after it, it died in tRunner instead. Failing exactly
+// one test needs that test's own t, which a bridge binding does not have.
+//
+// SO THE FENCE RECORDS AND RETURNS THE ZERO VALUE, and the caller fails on
+// its own assertions. THE LIMIT OF THAT, stated rather than left to be
+// discovered: a site whose assertion is a NEGATIVE one — NotContains,
+// NotRegexp — passes on empty output, so it is not a witness. Every
+// positive assertion fails, the fault is named on stderr against the
+// running test, and the pin that exists to name the carrier
+// (TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces) reaches its
+// own subtests and fails there, which is the property the bead asked for.
 //
 // NOT FENCED, deliberately: age.DecodeFunc and age.Generate stay bound to
 // the bare functions. DecodeFunc's panic is pinned by
@@ -40,26 +52,75 @@ package age
 import (
 	"fmt"
 	"os"
-	"runtime"
+	"sync"
 )
 
-// renderFault handles a panic that crossed a fenced render bridge. A fault
-// that is not a codegenBug is re-panicked unchanged: this fence is as
-// selective as generate's, so a nil-map dereference in a renderer still
-// reaches the test's own stack and names its site.
-func renderFault(v any) {
-	bug, ok := v.(codegenBug)
-	if !ok {
-		panic(v)
+// renderFaults is the fence's record of every codegen bug that reached a
+// bare render call. Guarded because this package runs 21 parallel tests and
+// any of them may render.
+var renderFaults struct {
+	sync.Mutex
+	seen []string
+}
+
+// RecordedRenderFaults is the external test package's view of that record.
+// It spells only builtin types, so binding it costs export_test.go's
+// zero-import rule nothing.
+func RecordedRenderFaults() []string {
+	renderFaults.Lock()
+	defer renderFaults.Unlock()
+	return append([]string(nil), renderFaults.seen...)
+}
+
+// ResetRecordedRenderFaults drops the record, so a test that provokes a
+// fault on purpose does not leave one behind for a later reader.
+func ResetRecordedRenderFaults() {
+	renderFaults.Lock()
+	defer renderFaults.Unlock()
+	renderFaults.seen = nil
+}
+
+// fenced runs call and converts a codegenBug it raises into a recorded,
+// reported fault, leaving the binary alive for every test after this one.
+//
+// THE TWO STAGES ARE NOT A STYLE CHOICE. The recover completes and the
+// inner function RETURNS before anything else happens, because acting on
+// the fault from inside the deferred function that caught it is what
+// re-raises it.
+//
+// A fault that is not a codegenBug is re-panicked from inside the defer,
+// which is the ordinary re-raise and is safe. That keeps this fence as
+// selective as generate's, so a nil dereference in a renderer still reaches
+// the test's own stack and names its site — unserved_nil_type_test.go
+// depends on exactly that.
+func fenced(call func()) {
+	var bug codegenBug
+	caught := func() (caught bool) {
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+			cb, ok := v.(codegenBug)
+			if !ok {
+				panic(v)
+			}
+			bug, caught = cb, true
+		}()
+		call()
+		return false
+	}()
+	if !caught {
+		return
 	}
-	// Stderr rather than a returned error because there is no t here and
-	// no error in the signature. go test attributes this to the running
-	// test, and it is the only place the lost carrier is NAMED — the
-	// failure testing itself reports for a Goexit does not carry a
-	// reason.
+	renderFaults.Lock()
+	renderFaults.seen = append(renderFaults.seen, string(bug))
+	renderFaults.Unlock()
+	// Stderr rather than a returned error: there is no t here and no
+	// error in these signatures. go test attributes this to the running
+	// test, and it is where the lost carrier is NAMED for a reader whose
+	// test failed on an empty render.
 	fmt.Fprintf(os.Stderr, "\ncodegen bug reached a bare render call: %s\n", string(bug))
-	// Fails this test and only this test. Deferred calls still run.
-	runtime.Goexit()
 }
 
 // fencedBytes2 and fencedBytes3 wrap a renderer returning []byte;
@@ -73,33 +134,22 @@ func renderFault(v any) {
 // first path segment) does not match.
 func fencedBytes2[A, B any](f func(A, B) []byte) func(A, B) []byte {
 	return func(a A, b B) []byte {
-		defer func() {
-			if v := recover(); v != nil {
-				renderFault(v)
-			}
-		}()
-		return f(a, b)
+		var out []byte
+		fenced(func() { out = f(a, b) })
+		return out
 	}
 }
 
 func fencedBytes3[A, B, C any](f func(A, B, C) []byte) func(A, B, C) []byte {
 	return func(a A, b B, c C) []byte {
-		defer func() {
-			if v := recover(); v != nil {
-				renderFault(v)
-			}
-		}()
-		return f(a, b, c)
+		var out []byte
+		fenced(func() { out = f(a, b, c) })
+		return out
 	}
 }
 
 func fencedVoid4[A, B, C, D any](f func(A, B, C, D)) func(A, B, C, D) {
 	return func(a A, b B, c C, d D) {
-		defer func() {
-			if v := recover(); v != nil {
-				renderFault(v)
-			}
-		}()
-		f(a, b, c, d)
+		fenced(func() { f(a, b, c, d) })
 	}
 }
