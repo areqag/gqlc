@@ -438,3 +438,113 @@ func (q *Queries) GetPerson(ctx context.Context, arg GetPersonParams) error {
 	require.Contains(t, free, "Queries",
 		"the receiver's type is resolved outside the function and must stay free, or the resolved set loses every type an emitted method hangs off")
 }
+
+// iterEmission is the shape ruling-1a5-iter-streaming-cardinality §5
+// schedules for :iter: a method returning iter.Seq2, whose body returns
+// a closure binding `yield`. `yield` is written here ONLY by the
+// literal's parameter list — the signature names it nowhere — so a test
+// over this source reads DeclaredIdents' FuncLit arm and nothing else.
+const iterEmission = `package p
+
+func (q *Queries) GetPersonIter(ctx context.Context, arg GetPersonParams) iter.Seq2[GetPersonRow, error] {
+	return func(yield func(GetPersonRow, error) bool) {
+		var row GetPersonRow
+		if !yield(row, nil) {
+			return
+		}
+	}
+}
+`
+
+// TestAClosureParameterIsNotFree holds the direction of error that
+// FreeIdents' doc comment declares, at the one construct that broke it:
+// a name a function literal binds is bound, not free.
+//
+// Which way it errs is the whole safety argument for the capture
+// sweeps. A name reported free is a name the sweep checks for capture;
+// a name wrongly reported free is only noise, but a bound name wrongly
+// omitted is a capture that slips through. Before the FuncLit arm,
+// `yield` was omitted from every bound set, so an emission that let a
+// query author's chosen name reach a closure parameter was unpoliced.
+func TestAClosureParameterIsNotFree(t *testing.T) {
+	file, err := emitscan.Parse(queryPath, iterEmission)
+	require.NoError(t, err)
+
+	fn := onlyFuncDecl(t, file)
+	free := emitscan.FreeIdents(fn)
+
+	require.NotContains(t, free, "yield",
+		"a closure parameter is reported free, so FreeIdents errs towards calling a name UNbound — the opposite of the direction its doc comment declares, and the direction in which a capture slips through the sweep instead of failing it")
+	require.Contains(t, free, "GetPersonRow",
+		"a type the closure names is resolved outside the function and must stay free, or the resolved set loses the row type an :iter emission hangs off")
+}
+
+// TestAClosureParameterIsABodyLocal holds the same arm through
+// BodyLocals, which is a separate question from FreeIdents': its only
+// caller asserts that the set of names an emitted body binds is
+// invariant under renaming the query's columns. A closure parameter
+// missing from that set makes the assertion pass over a name it never
+// saw, so the omission is a vacuous pass rather than noise.
+func TestAClosureParameterIsABodyLocal(t *testing.T) {
+	file, err := emitscan.Parse(queryPath, iterEmission)
+	require.NoError(t, err)
+
+	require.Contains(t, emitscan.BodyLocals(file), "yield",
+		"a name bound by a closure parameter is not reported as a body local, so a rename sweep over body locals never sees it")
+	require.Contains(t, emitscan.BodyLocals(file), "row",
+		"an ordinary body local is missing, so this test is not reading the set it claims to")
+}
+
+// TestFreeIdentsBoundSetLimits holds both halves of the enumeration in
+// FreeIdents' doc comment: the constructs over which the analysis errs
+// towards calling a name bound, and the constructs on which it errs the
+// other way.
+//
+// The second half is the reason this is a table rather than a list of
+// positive cases. A comment that admits a limit rots in two directions
+// — the limit gets quietly fixed and the comment keeps warning about
+// it, or the "bound" list grows a construct nobody rechecked. Each row
+// binds a name inside a function and reads it back, so a row that flips
+// is a comment that has gone stale. The wantFree rows are gqlc-db0e's
+// falsifier: fixing that bead flips them, and the flip is the point.
+func TestFreeIdentsBoundSetLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		bound    string
+		src      string
+		wantFree bool
+	}{
+		{name: "closure parameter", bound: "yield", src: "func f() any { return func(yield int) { _ = yield } }"},
+		{name: "closure named result", bound: "cnt", src: "func f() any { return func() (cnt int) { _ = cnt; return } }"},
+		{name: "short variable declaration", bound: "v", src: "func f() { v := 1; _ = v }"},
+		{name: "var declaration", bound: "v", src: "func f() { var v int; _ = v }"},
+		{name: "const declaration", bound: "v", src: "func f() { const v = 1; _ = v }"},
+		{name: "range clause", bound: "v", src: "func f(xs []int) { for _, v := range xs { _ = v } }"},
+		{name: "type switch binding", bound: "v", src: "func f(x any) { switch v := x.(type) { default: _ = v } }"},
+		{name: "select comm clause", bound: "v", src: "func f(c chan int) { select { case v := <-c: _ = v } }"},
+		{name: "own parameter", bound: "p", src: "func f(p int) { _ = p }"},
+		{name: "own named result", bound: "r", src: "func f() (r int) { _ = r; return }"},
+
+		{name: "local type declaration", bound: "row", src: "func f() { type row struct{}; var r row; _ = r }", wantFree: true},
+		{name: "local type field name", bound: "col", src: "func f() { type row struct{ col int }; var r row; _ = r.col }", wantFree: true},
+		{name: "statement label", bound: "Loop", src: "func f() { Loop: for { break Loop } }", wantFree: true},
+		{name: "func-type parameter name in a signature", bound: "yield", src: "func f(g func(yield int)) { _ = g }", wantFree: true},
+		{name: "type parameter", bound: "T", src: "func f[T any](x T) { var y T; _ = y; _ = x }", wantFree: true},
+		{name: "generic receiver type parameter", bound: "T", src: "func (q *Q[T]) f(x T) { _ = x }", wantFree: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := emitscan.Parse(queryPath, "package p\n\n"+tc.src+"\n")
+			require.NoError(t, err)
+
+			free := emitscan.FreeIdents(onlyFuncDecl(t, file))
+
+			if tc.wantFree {
+				require.Contains(t, free, tc.bound,
+					"the doc comment names this as a construct the bound set misses; it no longer does, so the comment now warns about a limit that is gone")
+				return
+			}
+			require.NotContains(t, free, tc.bound,
+				"the doc comment names this as a construct over which the analysis errs towards calling a name bound; it is reported free, which is the direction a capture slips through the sweep")
+		})
+	}
+}
