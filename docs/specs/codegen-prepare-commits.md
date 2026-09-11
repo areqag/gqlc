@@ -527,7 +527,7 @@ That grep is the litmus: prepare owns the boundary, render never crosses it.
 this deepening closes)
 
 Today: Phase A rejects an unknown variant via its `default:` arm
-(`internal/codegen/prepare.go:864`), but a variant that Phase A were extended to admit could
+(`admitColumn`, `internal/codegen/prepare.go`), but a variant that Phase A were extended to admit could
 silently miscompile through render's `default:`. After this deepening: any
 render_*.go walk only sees `preparedListElem.Kind` and `preparedRow.Kind`
 (the shared closed `columnKind`) and `preparedQuery.AccessMode` (the closed
@@ -555,12 +555,38 @@ three parts:
   codegen.ColumnKind`.
 - `exhaustive` **cannot read a type switch at all** — its `check` setting takes
   only `switch` and `map`, and rejects `typeswitch` as an `invalid program
-  element` (golangci-lint 2.13.1). So the two **type** switches over
-  `resolver.ResolvedType` — `buildListElemPlan` and the Phase B assignment
-  switch, both in `prepare.go` — are guarded by **neither compiler nor
-  linter**: deleting an arm from either leaves `go build ./...` at exit 0 *and*
-  the full lint config at `0 issues`. That hole is open as bd `gqlc-69cox`;
-  this paragraph records it as it stands and does not promise its outcome.
+  element` (golangci-lint 2.13.1). That leaves this decision's **two dispatch
+  switches** over `resolver.ResolvedType` guarded by **neither compiler nor
+  linter**: Phase B's column-assignment switch in `appendRowField` and the
+  list-element switch in `buildListElemPlan`, the two that PRODUCE a row plan.
+  Deleting an arm from either leaves `go build ./...` at exit 0 *and* the full
+  lint config at `0 issues`.
+
+  `prepare.go` holds two further type switches over the same sum, and they are
+  named here so the quantifier above is not left to context. Neither is in this
+  hazard class: Phase A's column switch (`admitColumn`, reached from
+  `phaseAAdmit`) carries a `default:` returning `ErrOutOfC6Scope`, so a variant
+  it does not name is refused loudly rather than
+  mis-dispatched, and `findEdgeUnionLeaf` is deliberately partial by documented
+  contract — it answers "is there an edgeUnion leaf", and every non-match is a
+  legitimate `(nil, false)`. The pair above are the only **silent** sites.
+
+  What enforces them is the **test layer**, per-arm and pinned at both sites:
+  `TestPhaseBCommitsListElemPlan` (§4.1) for the list-element switch, and
+  `TestPhaseBDeriveCommitsRowKinds` for the top-level one. Each carries a row
+  per arm asserting the `columnKind` that arm commits, and each holds its row
+  set to the arm set, so a deleted arm reddens a named row rather than
+  depending on a corpus fixture that happens to cover it. Decided on bd
+  `gqlc-69cox` and witnessed by arm-deletion rows: an arm removed from either
+  switch routes its executions into the loud fallthrough and reddens the
+  mapping-table test for that arm.
+
+  The bound is honest and worth stating: this is **test-time** enforcement.
+  Nothing compile-time was added, and nothing here stops a deleted arm from
+  compiling and linting clean — a contributor who deletes an arm *and* its
+  mapping-table row still gets a green tree. What the pair buys is that the
+  loss is one deliberate two-place edit rather than an invisible side effect of
+  a fixture cleanup.
 - Even the value-switch half holds **only while the switch carries no bare
   `default`**: `.golangci.yml` sets `default-signifies-exhaustive: true` under
   `linters.settings.exhaustive`, so a `default` retires the check silently.

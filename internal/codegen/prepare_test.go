@@ -1,6 +1,7 @@
 package codegen_test
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -357,6 +358,222 @@ func TestPreparedListElemMapsToColumnKind(t *testing.T) {
 		seen[plan.Kind] = struct{}{}
 	}
 	require.Len(t, seen, 9, "every ColumnKind value should be reachable via buildListElemPlan; missing arms indicate a plan-builder gap")
+}
+
+// TestPhaseBDeriveCommitsRowKinds is the top-level half of the
+// mapping-table pair, and the guard the gqlc-69cox ruling asked for.
+//
+// prepare.go dispatches over the sealed resolver.ResolvedType sum at two
+// sites that produce row plans: buildListElemPlan, pinned per-arm by
+// TestPhaseBCommitsListElemPlan above, and Phase B's column-assignment
+// switch in appendRowField, which until this test had no equivalent.
+// Neither site is guarded at build time — Go does not require a switch to
+// be exhaustive and golangci-lint's `exhaustive` cannot read a type
+// switch at all (its `check` setting rejects `typeswitch`), so a deleted
+// arm builds clean and lints green. What caught one was the corpus: every
+// arm happens to be executed by some fixture today, and a deleted arm
+// routes its executions into the //gqlc:unreachable default, which
+// reddens whatever was covering it.
+//
+// "Happens to" is the whole reason this test exists. Nothing pinned that
+// coverage per arm, so a fixture cleanup could orphan one arm with every
+// gate still green — the test-time guard for that arm would evaporate
+// silently. One row per arm here is what makes the loss loud instead.
+//
+// This asserts the dispatch fact (Row.Kind) and the carrier text only
+// where the text is the arm's point: the entity struct name for the two
+// entity arms, the synthesised interface name for edgeUnion, and the two
+// arms that both answer ColumnAny, where GoType is the only thing that
+// says which of them ran. Pinning an exact GoType on every arm would red
+// on refactors that changed nothing this test is about.
+//
+// Width is asserted on every row rather than the property ones alone,
+// because its rule is a cross-arm one (§6): an arm that resolved no
+// property type must leave it zero rather than fill it with a plausible
+// spelling. Same for EdgeUnions, held at zero on nine rows so that the
+// synthesis is pinned to the arm that owns it.
+//
+// No synthetic foreign-variant negative row is added here, deliberately.
+// The Phase B default is tagged //gqlc:unreachable column-type-invariant
+// and errors_test.go's reachability fence holds tagged branches
+// unexecuted, so driving it would red that fence. Phase A's arm-complete
+// admission switch is what refuses a foreign variant reaching prepare,
+// and TestPhaseBCommitsListElemPlan's synthetic-variant row already
+// covers the one reachable fallthrough of the pair.
+func TestPhaseBDeriveCommitsRowKinds(t *testing.T) {
+	entities, index := listPlanTestFixture(t)
+	knowsKey := schema.EdgeKey{
+		Source:    graph.LabelSetKey("Person"),
+		KeyLabels: graph.LabelSetKey("KNOWS"),
+		Target:    graph.LabelSetKey("Person"),
+	}
+	likesKey := schema.EdgeKey{
+		Source:    graph.LabelSetKey("Person"),
+		KeyLabels: graph.LabelSetKey("LIKES"),
+		Target:    graph.LabelSetKey("Person"),
+	}
+	personName := entities[index[listPlanPersonKey()]].Name
+	knowsName := entities[index[listPlanKnowsKey()]].Name
+	tm := stubTypeMap{}
+
+	listWidth := graph.ListOf(graph.TypeInt32, true)
+
+	type armRow struct {
+		name       string
+		variant    string // held to the row's own input by %T below
+		in         resolver.ResolvedType
+		kind       codegen.ColumnKind
+		goType     string // asserted only where non-empty
+		width      graph.PropertyType
+		listElem   bool
+		edgeUnions int
+	}
+
+	rows := []armRow{{
+		name:    "property_scalar_width",
+		variant: "resolver.ResolvedProperty",
+		in:      resolver.ResolvedProperty{Type: graph.TypeInt32},
+		kind:    codegen.ColumnProperty,
+		width:   graph.TypeInt32,
+	}, {
+		// The §4.7 split inside the Property arm: a schema list
+		// property commits a ColumnList with an element plan, not a
+		// whole-slice ColumnProperty carrier.
+		name:     "property_list_width",
+		variant:  "resolver.ResolvedProperty",
+		in:       resolver.ResolvedProperty{Type: listWidth},
+		kind:     codegen.ColumnList,
+		width:    listWidth,
+		listElem: true,
+	}, {
+		name:    "node",
+		variant: "resolver.ResolvedNode",
+		in:      resolver.ResolvedNode{Labels: graph.LabelSetKey("Person")},
+		kind:    codegen.ColumnNode,
+		goType:  personName,
+	}, {
+		name:    "edge",
+		variant: "resolver.ResolvedEdge",
+		in:      resolver.ResolvedEdge{EdgeKey: knowsKey},
+		kind:    codegen.ColumnEdge,
+		goType:  knowsName,
+	}, {
+		name:    "temporal",
+		variant: "resolver.ResolvedTemporal",
+		in:      resolver.ResolvedTemporal{Kind: resolver.TemporalDate},
+		kind:    codegen.ColumnTemporal,
+	}, {
+		name:    "scalar",
+		variant: "resolver.ResolvedScalar",
+		in:      resolver.ResolvedScalar{Kind: resolver.ScalarInt},
+		kind:    codegen.ColumnScalar,
+	}, {
+		// §5.5: at the TOP level a null scalar shares ColumnAny's
+		// untyped lane. Deliberately not ColumnScalarNull — that
+		// split is list-element-only (§1.3). The GoType is asserted
+		// because it is the only thing distinguishing this arm from
+		// the unknown row below, which answers the same Kind.
+		name:    "scalar_null",
+		variant: "resolver.ResolvedScalar",
+		in:      resolver.ResolvedScalar{Kind: resolver.ScalarNull},
+		kind:    codegen.ColumnAny,
+		goType:  "scalar:null",
+	}, {
+		name:    "unknown",
+		variant: "resolver.ResolvedUnknown",
+		in:      resolver.ResolvedUnknown{},
+		kind:    codegen.ColumnAny,
+		goType:  "any",
+	}, {
+		name:       "edgeUnion",
+		variant:    "resolver.ResolvedEdgeUnion",
+		in:         resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{knowsKey, likesKey}},
+		kind:       codegen.ColumnEdgeUnion,
+		edgeUnions: 1,
+	}, {
+		name:     "list",
+		variant:  "resolver.ResolvedList",
+		in:       resolver.ResolvedList{Element: resolver.ResolvedScalar{Kind: resolver.ScalarInt}},
+		kind:     codegen.ColumnList,
+		listElem: true,
+	}}
+
+	// The arm set the table claims to cover. This is what makes a
+	// deleted row loud: rows outnumber arms — ResolvedProperty and
+	// ResolvedScalar each split into two — so a count of rows cannot
+	// tell a dropped arm from a dropped split, and the set can.
+	//
+	// Each row declares its own variant and is held to it by %T, so
+	// relabelling a row to fill a gap it does not exercise reddens
+	// rather than passing.
+	//
+	// This is not a second copy of the sum's size. Whether
+	// internal/resolver still declares exactly these eight is owned by
+	// TestResolvedTypeSumIsNotClosed/declared_variants, which walks that
+	// package's isResolvedType declarations; a ninth variant reddens
+	// there, and nothing in this package demands a row for it here.
+	wantArms := []string{
+		"resolver.ResolvedEdge",
+		"resolver.ResolvedEdgeUnion",
+		"resolver.ResolvedList",
+		"resolver.ResolvedNode",
+		"resolver.ResolvedProperty",
+		"resolver.ResolvedScalar",
+		"resolver.ResolvedTemporal",
+		"resolver.ResolvedUnknown",
+	}
+	covered := make(map[string]struct{}, len(wantArms))
+	for _, tt := range rows {
+		require.Equal(t, tt.variant, fmt.Sprintf("%T", tt.in),
+			"row %q declares an arm it does not exercise", tt.name)
+		covered[tt.variant] = struct{}{}
+	}
+	require.Equal(t, wantArms, slices.Sorted(maps.Keys(covered)),
+		"every arm of Phase B's column-assignment switch needs a row here; an arm with none is guarded by corpus coverage alone (gqlc-69cox)")
+
+	for _, tt := range rows {
+		t.Run(tt.name, func(t *testing.T) {
+			q := codegen.NamedQuery{
+				Name:        "Fetch",
+				Cardinality: queryfile.CardinalityMany,
+				SourceText:  "MATCH (n) RETURN x AS c",
+				Validated: resolver.ValidatedQuery{
+					Statement: resolver.StatementRead,
+					Columns:   []resolver.Column{{Name: "c", Type: tt.in}},
+				},
+			}
+
+			out, err := codegen.PhaseBDerive([]codegen.NamedQuery{q}, entities, index, tm)
+			require.NoError(t, err)
+			require.Len(t, out, 1)
+			require.Len(t, out[0].RowFields, 1)
+			got := out[0].RowFields[0]
+
+			require.Equal(t, tt.kind, got.Kind, "committed decode arm")
+			if tt.goType != "" {
+				require.Equal(t, tt.goType, got.GoType, "carrier text")
+			}
+			require.NotEmpty(t, got.GoType, "every arm commits a carrier text")
+			require.Equal(t, tt.width, got.Width,
+				"Width is set by the property arms alone; an arm that resolved no property type leaves it zero (§6)")
+
+			if tt.listElem {
+				require.NotNil(t, got.ListElem, "a ColumnList row carries its element decode plan (§1.3)")
+			} else {
+				require.Nil(t, got.ListElem, "ListElem is non-nil only for ColumnList")
+			}
+
+			require.Len(t, out[0].EdgeUnions, tt.edgeUnions, "synthesised edgeUnion entries")
+			if tt.edgeUnions > 0 {
+				require.Equal(t, got.GoType, out[0].EdgeUnions[0].InterfaceName,
+					"the edgeUnion row's carrier IS the synthesised interface name")
+				require.Equal(t, q.Name+got.Field, out[0].EdgeUnions[0].InterfaceName,
+					"§4.10 spells the interface <QueryName><RowFieldName>")
+				require.Equal(t, []schema.EdgeKey{knowsKey, likesKey}, got.EdgeKeys,
+					"the candidate keys reach the row in resolver-canonical order")
+			}
+		})
+	}
 }
 
 // TestPhaseBCommitsIsWrite asserts that phaseBDerive commits the
