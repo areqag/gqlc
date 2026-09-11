@@ -105,6 +105,8 @@
     "set_property_unknown_on_plural_satisfying_node.cypher": "satisfy_singular.gql",
     "remove_property_unknown_on_plural_satisfying_node.cypher": "satisfy_singular.gql",
     "delete_property_unknown_on_plural_satisfying_node.cypher": "satisfy_singular.gql",
+    "merge_on_create_property_unknown_on_plural_satisfying_node.cypher": "satisfy_singular.gql",
+    "merge_on_match_property_unknown_on_plural_satisfying_node.cypher": "satisfy_singular.gql",
     "plural_endpoint_contradictory_edges_stay_plural.cypher": "satisfy_plural_edges_reversed.gql",
     "plural_endpoint_inline_endpoint_stays_plural.cypher": "satisfy_plural_edges_inline_subtype.gql",
     "plural_endpoint_inline_endpoint_property_stays_plural.cypher": "satisfy_plural_edges_inline_subtype.gql",
