@@ -55,11 +55,17 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	}
 
 	pkg := prepared.Package
-	hasOne := false
+	// hasOne gates renderDB's :one sentinels; hasIter gates its streaming
+	// seam. Both are "does the batch hold at least one", and neither can
+	// break early now that two answers come out of the walk.
+	hasOne, hasIter := false, false
 	for _, p := range prepared.Queries {
-		if p.Cardinality == queryfile.CardinalityOne {
+		switch p.Cardinality {
+		case queryfile.CardinalityOne:
 			hasOne = true
-			break
+		case queryfile.CardinalityIter:
+			hasIter = true
+		case queryfile.CardinalityMany, queryfile.CardinalityExec:
 		}
 	}
 
@@ -69,7 +75,7 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	temporalUse, recordUse, unionUse := conversionUses(prepared)
 
 	files := []codegen.File{
-		{Path: "db.go", Contents: renderDB(pkg, hasOne, target)},
+		{Path: "db.go", Contents: renderDB(pkg, hasOne, hasIter, target)},
 		{Path: "querier.go", Contents: renderQuerier(pkg, prepared.Queries, target)},
 		{Path: "models.go", Contents: renderModels(pkg, prepared.Entities, prepared.Queries, target)},
 	}
@@ -114,10 +120,10 @@ func generate(in codegen.Input, target driverTarget, packageName string) ([]code
 	// SourceFile basename in first-appearance order (§5.5). Basename
 	// stripped of extension.
 	for _, group := range groupBySource(prepared.Queries) {
-		needDbtype, needTime, needFmt := groupImports(group.queries)
+		needDbtype, needTime, needFmt, needIter := groupImports(group.queries)
 		files = append(files, codegen.File{
 			Path:     group.filename,
-			Contents: renderCypherFile(pkg, group.queries, needDbtype, needTime, needFmt, target),
+			Contents: renderCypherFile(pkg, group.queries, needDbtype, needTime, needFmt, needIter, target),
 		})
 	}
 

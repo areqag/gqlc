@@ -21,6 +21,19 @@ func namesInstant(p codegen.Query) bool {
 		slices.ContainsFunc(p.RowFields, func(f codegen.Row) bool { return f.GoType == goInstant })
 }
 
+// namesIter reports whether one query's emitted surface spells iter.Seq2,
+// which is the whole of what decides whether the file it lands in imports
+// "iter".
+//
+// It reads the CARDINALITY where namesInstant reads a field's GoType, and
+// the asymmetry is forced rather than stylistic: the sequence type is
+// composed by returnTypeText out of the element type, so it appears in no
+// ParamField's and no RowField's own type text. A scan shaped like
+// namesInstant's could not find it however the needle were spelled.
+func namesIter(p codegen.Query) bool {
+	return p.Cardinality == queryfile.CardinalityIter
+}
+
 // sourceGroup carries one <name>.cypher.go file's worth of prepared
 // queries in emission order. Grouping is by SourceFile basename minus
 // extension, in first-appearance order.
@@ -104,6 +117,9 @@ func renderCypherFile(pkg string, queries []codegen.Query) []byte {
 	b.WriteString(codegen.Header())
 	b.WriteString("package " + pkg + "\n\n")
 	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n")
+	if slices.ContainsFunc(queries, namesIter) {
+		b.WriteString("\t\"iter\"\n")
+	}
 	if slices.ContainsFunc(queries, namesInstant) {
 		b.WriteString("\t\"time\"\n")
 	}
@@ -158,20 +174,39 @@ func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 	default:
 		fmt.Fprintf(b, ", %s %sParams", codegen.ParamArg, p.MethodName)
 	}
-	if p.Cardinality == queryfile.CardinalityExec {
+	// A switch rather than a chain of ==, so `exhaustive` reds this site
+	// when a cardinality is added: the return shape is per-member, and an
+	// unnamed member silently taking the :one shape is the failure mode
+	// this switch exists to make impossible.
+	switch p.Cardinality {
+	case queryfile.CardinalityExec:
 		b.WriteString(") error")
 		return
+	case queryfile.CardinalityIter:
+		// One return value, not two: iter.Seq2 carries the error in its
+		// second type parameter, and the consumer's range loop binds it.
+		b.WriteString(") " + returnTypeText(p))
+		return
+	case queryfile.CardinalityOne, queryfile.CardinalityMany:
 	}
 	b.WriteString(") (" + returnTypeText(p) + ", error)")
 }
 
 // returnTypeText composes the return-type text for a prepared query.
-// :one → T or MethodRow; :many → []T or []MethodRow.
+// :one → T or MethodRow; :many → []T or []MethodRow; :iter →
+// iter.Seq2[T, error].
 func returnTypeText(p codegen.Query) string {
 	elem := rowElemText(p)
-	if p.Cardinality == queryfile.CardinalityMany {
+	switch p.Cardinality {
+	case queryfile.CardinalityMany:
 		return "[]" + elem
+	case queryfile.CardinalityIter:
+		return "iter.Seq2[" + elem + ", error]"
+	case queryfile.CardinalityOne, queryfile.CardinalityExec:
+		return elem
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks it for a missing arm (bd gqlc-51l6m's pattern).
 	return elem
 }
 
@@ -200,6 +235,13 @@ func pointerWrapped(f codegen.Row) bool {
 // zeroValueText composes the zero-value expression for a prepared
 // query's return type, matching the emitted method signature (§5.3).
 func zeroValueText(p codegen.Query) string {
+	// :iter deliberately does NOT take the :many arm below, and the
+	// fall-through is correct rather than incidental. What a :iter body
+	// zeroes is the ROW it yields beside an error, never the sequence —
+	// a sequence is returned once, before any row is read, and is never
+	// zeroed at all. So :iter wants the same per-element answer :one
+	// gets, and a sweep converting this site to name :iter alongside
+	// :many would emit `yield(nil, err)` for a non-nilable row type.
 	if p.Cardinality == queryfile.CardinalityMany {
 		return "nil"
 	}
@@ -282,8 +324,70 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	case queryfile.CardinalityMany:
 		writeQueryCall(b, p)
 		writeManyBody(b, p)
+	case queryfile.CardinalityIter:
+		writeIterBody(b, p)
 	}
 	b.WriteString("}\n")
+}
+
+// writeIterBody emits the :iter body: a closure returning the sequence,
+// whose body is the :many cursor walk with the append replaced by a
+// yield and the early returns replaced by yield-then-stop.
+//
+// Unlike the neo4j side there is no streaming seam to add: this backend's
+// :many body ALREADY loops rows.Next() with a deferred rows.Close(), so
+// :iter is that same loop consumed lazily. pgx has no managed retry, so
+// there is no envelope to re-enter and no exit sentinel — the neo4j
+// side's errIterStreamStarted has deliberately no counterpart here.
+//
+// The func literal's parameter is named `yield`; the `func(Row, error)
+// bool` inside the emitted iter.Seq2 TYPE keeps its parameters UNNAMED,
+// because emitscan's FreeIdents reports a parameter name in a func *type*
+// as free (bd gqlc-db0e) and a model-typed name there would red the
+// capture sweep as a false positive.
+func writeIterBody(b *strings.Builder, p codegen.Query) {
+	elem := rowElemText(p)
+	zero := zeroValueText(p)
+	fmt.Fprintf(b, "\treturn func(yield func(%s, error) bool) {\n", elem)
+
+	// The statement composition and the query call move INSIDE the
+	// closure: opening a cursor when the method is CALLED rather than
+	// when it is ranged would hold a pooled connection for a sequence the
+	// caller may never spend. Nothing is acquired until the range starts.
+	argsExpr := writeStatement(b, p)
+	fmt.Fprintf(b, "\t\trows, err := q.db.Query(ctx, stmt, %s)\n", argsExpr)
+	fmt.Fprintf(b, "\t\tif err != nil {\n\t\t\tyield(%s, fmt.Errorf(%q, err))\n\t\t\treturn\n\t\t}\n",
+		zero, p.MethodName+": %w")
+	b.WriteString("\t\tdefer rows.Close()\n")
+
+	b.WriteString("\t\tfor rows.Next() {\n")
+	// The scan and decode run inside an immediately-invoked func
+	// returning (row, error), for the reason the neo4j side wraps its
+	// own: writeScan and the whole writeColumnDecode family write their
+	// failure as `return <zero>, fmt.Errorf(...)`, which does not compile
+	// in a closure whose result is the sequence's. Wrapping reuses every
+	// decoder unchanged instead of forking the family per cardinality.
+	fmt.Fprintf(b, "\t\t\trow, err := func() (%s, error) {\n", elem)
+	writeScan(b, p, "\t\t\t\t", zero)
+	for i, f := range p.RowFields {
+		writeColumnDecode(b, p, i, f, "\t\t\t\t", zero)
+	}
+	if len(p.RowFields) == 1 {
+		fmt.Fprintf(b, "\t\t\t\treturn %s, nil\n", valueName(0))
+	} else {
+		fmt.Fprintf(b, "\t\t\t\treturn %sRow{\n", p.MethodName)
+		for i, f := range p.RowFields {
+			fmt.Fprintf(b, "\t\t\t\t\t%s: %s,\n", f.Field, valueName(i))
+		}
+		b.WriteString("\t\t\t\t}, nil\n")
+	}
+	b.WriteString("\t\t\t}()\n")
+	fmt.Fprintf(b, "\t\t\tif err != nil {\n\t\t\t\tyield(%s, err)\n\t\t\t\treturn\n\t\t\t}\n", zero)
+	b.WriteString("\t\t\tif !yield(row, nil) {\n\t\t\t\treturn\n\t\t\t}\n")
+	b.WriteString("\t\t}\n")
+	fmt.Fprintf(b, "\t\tif err := rows.Err(); err != nil {\n\t\t\tyield(%s, fmt.Errorf(%q, err))\n\t\t}\n",
+		zero, p.MethodName+": %w")
+	b.WriteString("\t}\n")
 }
 
 // writeDocComment emits the per-method doc comment: the method name and

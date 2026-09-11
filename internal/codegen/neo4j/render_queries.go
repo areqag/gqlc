@@ -58,11 +58,16 @@ func groupBySource(prepared []codegen.Query) []sourceGroup {
 // (`fmt.Errorf`) — every :one / :many method does, and every write-
 // with-projection method does; the C4 :exec three-line body does not
 // (spec §5.5).
-func groupImports(queries []codegen.Query) (needDbtype, needTime, needFmt bool) {
+func groupImports(queries []codegen.Query) (needDbtype, needTime, needFmt, needIter bool) {
 	for _, p := range queries {
 		if p.Cardinality != queryfile.CardinalityExec {
 			// Row-assembly bodies emit fmt.Errorf decode wrappers.
 			needFmt = true
+		}
+		// iter fires on the :iter return type alone — iter.Seq2 is named
+		// in the signature, which is the only place this file spells it.
+		if p.Cardinality == queryfile.CardinalityIter {
+			needIter = true
 		}
 		for _, f := range p.RowFields {
 			nd, nt := columnNeedsImports(f)
@@ -83,7 +88,7 @@ func groupImports(queries []codegen.Query) (needDbtype, needTime, needFmt bool) 
 			}
 		}
 	}
-	return needDbtype, needTime, needFmt
+	return needDbtype, needTime, needFmt, needIter
 }
 
 // columnNeedsImports reports whether one prepared row needs dbtype /
@@ -166,18 +171,21 @@ func decodeNeedsImports(ty string) (bool, bool) {
 // (C4: a write-only file whose queries are all :exec emits no
 // fmt.Errorf wrapper, so fmt is elided). The row-assembly template
 // inlines the per-kind decode arm.
-func renderCypherFile(pkg string, queries []codegen.Query, withDbtype, withTime, withFmt bool, target driverTarget) []byte {
+func renderCypherFile(pkg string, queries []codegen.Query, withDbtype, withTime, withFmt, withIter bool, target driverTarget) []byte {
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package ")
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
-	// Import order per goimports: stdlib first (context, fmt, time),
+	// Import order per goimports: stdlib first (context, fmt, iter, time),
 	// then third-party (neo4j, dbtype). A single grouped import ()
 	// block keeps gofmt output stable.
 	b.WriteString("import (\n\t\"context\"\n")
 	if withFmt {
 		b.WriteString("\t\"fmt\"\n")
+	}
+	if withIter {
+		b.WriteString("\t\"iter\"\n")
 	}
 	if withTime {
 		b.WriteString("\t\"time\"\n")
@@ -248,37 +256,61 @@ func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 	default:
 		fmt.Fprintf(b, ", %s %sParams", codegen.ParamArg, p.MethodName)
 	}
-	if p.Cardinality == queryfile.CardinalityExec {
+	// A switch rather than a chain of ==, so `exhaustive` reds this site
+	// when a cardinality is added: the return shape is per-member, and an
+	// unnamed member silently taking the :one shape is the failure mode
+	// this switch exists to make impossible.
+	switch p.Cardinality {
+	case queryfile.CardinalityExec:
 		b.WriteString(") error")
 		return
+	case queryfile.CardinalityIter:
+		// One return value, not two: iter.Seq2 carries the error in its
+		// second type parameter, and the consumer's range loop binds it.
+		b.WriteString(") ")
+		b.WriteString(returnTypeText(p))
+		return
+	case queryfile.CardinalityOne, queryfile.CardinalityMany:
 	}
 	b.WriteString(") (")
 	b.WriteString(returnTypeText(p))
 	b.WriteString(", error)")
 }
 
+// rowElemText is the Go type of one decoded row: the column's own type
+// for a single-column projection, the derived Row struct otherwise.
+func rowElemText(p codegen.Query) string {
+	if len(p.RowFields) != 1 {
+		return p.MethodName + "Row"
+	}
+	elem := ""
+	// Nullable columns wrap the emitted Go type in a pointer, EXCEPT
+	// edgeUnion columns whose emitted type is a sealed interface —
+	// nil is the natural absence value for an interface, and
+	// pointer-to-interface is the Go anti-pattern ADR 0010 D3
+	// Resolved (lines 343–345) forbids (§3.3).
+	if p.RowFields[0].Nullable && p.RowFields[0].Kind != codegen.ColumnEdgeUnion {
+		elem = "*"
+	}
+	return elem + p.RowFields[0].GoType
+}
+
 // returnTypeText composes the return-type text for a prepared query.
-// :one → T or MethodRow; :many → []T or []MethodRow. Bare-value shape
-// used for single-column projections; struct shape otherwise.
+// :one → T or MethodRow; :many → []T or []MethodRow; :iter →
+// iter.Seq2[T, error]. Bare-value shape used for single-column
+// projections; struct shape otherwise.
 func returnTypeText(p codegen.Query) string {
-	var elem string
-	if len(p.RowFields) == 1 {
-		elem = ""
-		// Nullable columns wrap the emitted Go type in a pointer, EXCEPT
-		// edgeUnion columns whose emitted type is a sealed interface —
-		// nil is the natural absence value for an interface, and
-		// pointer-to-interface is the Go anti-pattern ADR 0010 D3
-		// Resolved (lines 343–345) forbids (§3.3).
-		if p.RowFields[0].Nullable && p.RowFields[0].Kind != codegen.ColumnEdgeUnion {
-			elem = "*"
-		}
-		elem += p.RowFields[0].GoType
-	} else {
-		elem = p.MethodName + "Row"
-	}
-	if p.Cardinality == queryfile.CardinalityMany {
+	elem := rowElemText(p)
+	switch p.Cardinality {
+	case queryfile.CardinalityMany:
 		return "[]" + elem
+	case queryfile.CardinalityIter:
+		return "iter.Seq2[" + elem + ", error]"
+	case queryfile.CardinalityOne, queryfile.CardinalityExec:
+		return elem
 	}
+	// Below the switch rather than in a `default`, so `exhaustive` still
+	// checks it for a missing arm (bd gqlc-51l6m's pattern).
 	return elem
 }
 
@@ -291,6 +323,13 @@ func returnTypeText(p codegen.Query) string {
 // (dbtype.Kind{} / time.Time{}), lists (nil), scalars (bool/int64/
 // float64/string), map (nil), and any (nil).
 func zeroValueText(p codegen.Query) string {
+	// :iter deliberately does NOT take the :many arm below, and the
+	// fall-through is correct rather than incidental. What a :iter body
+	// zeroes is the ROW it yields beside an error, never the sequence —
+	// a sequence is returned once, before any row is read, and is never
+	// zeroed at all. So :iter wants the same per-element answer :one
+	// gets, and a sweep converting this site to name :iter alongside
+	// :many would emit `yield(nil, err)` for a non-nilable row type.
 	if p.Cardinality == queryfile.CardinalityMany {
 		return "nil"
 	}
@@ -380,8 +419,67 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	case queryfile.CardinalityMany:
 		writeRunCall(b, p)
 		writeManyBody(b, p)
+	case queryfile.CardinalityIter:
+		writeIterBody(b, p)
 	}
 	b.WriteString("}\n")
+}
+
+// writeIterBody emits the :iter body: a closure returning the sequence,
+// whose own body drives the streaming seam and decodes one record per
+// yield. No writeRunCall — :iter does not materialise, so there are no
+// `records` to bind, and the parameter prelude moves INSIDE the returned
+// closure because a binding failure has nowhere to go until the consumer
+// ranges (the method itself returns no error).
+//
+// The func literal's parameter is named `yield`; the `func(Row, error)
+// bool` inside the emitted iter.Seq2 TYPE keeps its parameters UNNAMED.
+// That is deliberate: emitscan's FreeIdents reports a parameter name in
+// a func *type* as free (bd gqlc-db0e), so naming them would put a model
+// type's name into the free set and red the capture sweep as a false
+// positive. It costs nothing to leave them unnamed.
+func writeIterBody(b *strings.Builder, p codegen.Query) {
+	elem := rowElemText(p)
+	zero := zeroValueText(p)
+	fmt.Fprintf(b, "\treturn func(yield func(%s, error) bool) {\n", elem)
+
+	// A fallible parameter binding is reported through the sequence, so
+	// its failure yields once and stops rather than returning.
+	hoisted := writeParamPrelude(b, p, fmt.Sprintf("yield(%s, err)\n\t\treturn", zero))
+
+	fmt.Fprintf(b, "\t\tq.db.stream(ctx, %s, %s, func(record *neo4j.Record, err error) bool {\n",
+		codegen.QueryTextConst(p), paramsMapText(p, hoisted))
+	// Every error the seam delivers ends the sequence: one yield, then
+	// false. Continuing past an error would let a consumer append a row
+	// decoded from a record the server never sent.
+	fmt.Fprintf(b, "\t\t\tif err != nil {\n\t\t\t\tyield(%s, err)\n\t\t\t\treturn false\n\t\t\t}\n", zero)
+
+	// The decode runs inside an immediately-invoked func returning
+	// (row, error) rather than inline. The whole decoder family — entity,
+	// any, list, edgeUnion, union, carrier-narrow — writes its failure as
+	// `return <zero>, fmt.Errorf(...)`, which does not compile inside a
+	// callback returning bool. Wrapping reuses all of them unchanged.
+	//
+	// A func literal rather than a named package-level helper: a helper
+	// would add a generated identifier per query to the package scope,
+	// where it could collide with a schema- or query-derived name, and
+	// ErrIdentifierCollision has a fixture family for exactly that.
+	fmt.Fprintf(b, "\t\t\trow, err := func() (%s, error) {\n", elem)
+	if len(p.RowFields) == 1 {
+		writeSingleColumnDecodeIndent(b, p, p.RowFields[0], "record", zero, "\t\t\t\treturn ", ", nil\n", "\t\t\t\t")
+	} else {
+		fmt.Fprintf(b, "\t\t\t\tvar out %sRow\n", p.MethodName)
+		for _, f := range p.RowFields {
+			writeSingleColumnDecodeIndent(b, p, f, "record", zero, "\t\t\t\tout."+f.Field+" = ", "\n", "\t\t\t\t")
+		}
+		b.WriteString("\t\t\t\treturn out, nil\n")
+	}
+	b.WriteString("\t\t\t}()\n")
+	fmt.Fprintf(b, "\t\t\tif err != nil {\n\t\t\t\tyield(%s, err)\n\t\t\t\treturn false\n\t\t\t}\n", zero)
+	b.WriteString("\t\t\treturn yield(row, nil)\n")
+
+	b.WriteString("\t\t})\n")
+	b.WriteString("\t}\n")
 }
 
 // writeExecBody writes the :exec body: run, discard the rows, return the

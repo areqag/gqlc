@@ -10,7 +10,13 @@ import (
 // self-contained snapshots that survive transaction close (§5.6).
 // emitOneSentinels controls whether ErrNoRows / ErrMultipleResults are
 // declared: true iff the batch contains at least one :one query.
-func renderDB(pkg string, emitOneSentinels bool, target driverTarget) []byte {
+// emitStream controls whether the streaming seam is declared: true iff
+// the batch contains at least one :iter query. It is gated rather than
+// unconditional so a batch with no :iter query emits the db.go it always
+// did — the seam is a second method on driverOrTx, and adding it to every
+// generated package would churn every golden to carry an interface method
+// nothing in the package calls.
+func renderDB(pkg string, emitOneSentinels, emitStream bool, target driverTarget) []byte {
 	var sentinelBlock string
 	if emitOneSentinels {
 		sentinelBlock = `
@@ -23,6 +29,104 @@ var ErrNoRows = errors.New("gqlc: no rows in result set")
 var ErrMultipleResults = errors.New("gqlc: multiple rows in :one result set")
 `
 	}
+	// The three streaming fragments are emitted together or not at all:
+	// the interface method, the two implementations, and the exit
+	// sentinel the managed-retry implementation returns.
+	var streamSentinel, streamSeam, streamImpls string
+	if emitStream {
+		streamSentinel = `
+// errIterStreamStarted aborts the unit of work of a :iter method that has
+// already handed a row to the consumer. It never reaches the caller.
+//
+// Returning an error rather than nil is what keeps the driver's managed
+// retry away from a stream in progress. ExecuteRead re-enters the unit of
+// work when the transaction it wraps fails retriably — including on a
+// commit failure, where the retry state reports "not done" and calls the
+// work function a second time. A second pass would call yield on a range
+// loop the consumer may already have broken out of, and the Go runtime
+// panics on that ("range function continued iteration after function for
+// loop body returned false").
+//
+// So once a row is delivered, every exit returns this: the driver never
+// reaches TxCommit, and the re-entry window does not exist. The cost is
+// that a :iter transaction which delivered a row is never committed,
+// which is sound because :iter is refused on writes (ErrIterOnWrite).
+// This sentinel is not retriable — it is not a driver error type — so
+// returning it ends the managed envelope rather than restarting it.
+var errIterStreamStarted = errors.New("gqlc: iter stream already delivered a row")
+`
+		streamSeam = `
+	stream(ctx context.Context, cypher string, params map[string]any, yield func(*neo4j.Record, error) bool)`
+		streamImpls = `
+// stream runs cypher in a managed read transaction and hands each record
+// to yield in order, stopping when yield returns false. Every error
+// reaches the consumer through yield, so the caller has one delivery
+// channel and never a second return value.
+//
+// Retry is pre-first-yield only. An error arriving before any record has
+// been delivered is returned to the managed envelope, which may retry the
+// whole unit of work; an error arriving after one has been delivered is
+// yielded, because the consumer has already seen rows the retry would
+// re-produce. Either way the consumer sees the error exactly once.
+func (d driverDB) stream(ctx context.Context, cypher string, params map[string]any, yield func(*neo4j.Record, error) bool) {
+	session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+	delivered := false
+	_, err := neo4j.ExecuteRead(ctx, session, func(tx neo4j.ManagedTransaction) (any, error) {
+		// Re-entry guard. Reached only when managed retry calls this unit
+		// of work again after a row has already gone to the consumer;
+		// yielding a second time would panic. See errIterStreamStarted.
+		if delivered {
+			return nil, errIterStreamStarted
+		}
+		result, err := tx.Run(ctx, cypher, params)
+		if err != nil {
+			return nil, err
+		}
+		for record, recordErr := range result.Records(ctx) {
+			if recordErr != nil {
+				if !delivered {
+					return nil, recordErr
+				}
+				yield(nil, recordErr)
+				return nil, errIterStreamStarted
+			}
+			delivered = true
+			if !yield(record, nil) {
+				return nil, errIterStreamStarted
+			}
+		}
+		if delivered {
+			return nil, errIterStreamStarted
+		}
+		return nil, nil
+	})
+	if err != nil && !errors.Is(err, errIterStreamStarted) {
+		yield(nil, err)
+	}
+}
+
+// stream runs cypher inside the caller's transaction. There is no managed
+// envelope here and so no retry to re-enter: the exit sentinel the
+// driverDB path needs has no counterpart on this one.
+func (t txDB) stream(ctx context.Context, cypher string, params map[string]any, yield func(*neo4j.Record, error) bool) {
+	result, err := t.tx.Run(ctx, cypher, params)
+	if err != nil {
+		yield(nil, err)
+		return
+	}
+	for record, recordErr := range result.Records(ctx) {
+		if recordErr != nil {
+			yield(nil, recordErr)
+			return
+		}
+		if !yield(record, nil) {
+			return
+		}
+	}
+}
+`
+	}
 	// errors is unconditional: the Tx block below is emitted whatever the
 	// batch holds, and ErrTxDone needs it even when no :one query does.
 	importsBlock := "import (\n\t\"context\"\n\t\"errors\"\n\t\"fmt\"\n"
@@ -30,7 +134,7 @@ var ErrMultipleResults = errors.New("gqlc: multiple rows in :one result set")
 
 	return []byte(codegen.Header() + `package ` + pkg + `
 
-` + importsBlock + sentinelBlock + `
+` + importsBlock + sentinelBlock + streamSentinel + `
 // queries is the core every generated query method hangs off. Queries
 // and Tx both embed it, which is what lets one emission of each method
 // serve both handles; it is unexported so a Tx cannot hand it out.
@@ -56,7 +160,7 @@ func (q *Queries) WithTx(tx neo4j.ManagedTransaction) *Queries {
 // C1 returns []*neo4j.Record — driver-documented self-contained value
 // snapshots safe to consume after the transaction closes (§5.6).
 type driverOrTx interface {
-	run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error)
+	run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error)` + streamSeam + `
 }
 
 type driverDB struct {
@@ -99,7 +203,7 @@ func (t txDB) run(ctx context.Context, cypher string, params map[string]any, _ n
 	}
 	return result.Collect(ctx)
 }
-
+` + streamImpls + `
 // ErrTxDone is returned by Commit when the transaction has already
 // been committed or rolled back. Rollback on a finished transaction
 // returns nil instead, so a deferred tx.Rollback(ctx) is always safe.
