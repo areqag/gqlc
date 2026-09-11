@@ -1,6 +1,8 @@
 package age_test
 
 import (
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -203,6 +205,42 @@ func TestAFencedBridgeIsTransparentWhenNothingFaults(t *testing.T) {
 
 	require.NotEmpty(t, b.String(), "a served carrier must render through the bridge untouched, or the control screens nothing")
 	require.Empty(t, age.RecordedRenderFaults(), "a clean render must record nothing")
+}
+
+// TestAFencedFaultIsNamedOnStderr pins the one half of the fence a reader
+// actually meets. The record above is read by nothing but these rows; what
+// an author sees when their test fails on empty output is the line go test
+// attributes to the running test, and without it the lost carrier is named
+// nowhere a human looks.
+//
+// Swapping os.Stderr is safe here for the same reason these rows do not call
+// t.Parallel: Go resumes a paused parallel test only after the sequential
+// phase it was declared in has finished, so no other test in this package is
+// running while this one holds the swap.
+func TestAFencedFaultIsNamedOnStderr(t *testing.T) {
+	resetRecord(t)
+	f := untaughtField()
+	e := codegen.Entity{Name: "E", Kind: codegen.EntityNode, Fields: []codegen.EntityField{f}}
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	prev := os.Stderr
+	os.Stderr = w
+
+	require.NotPanics(t, func() { age.WriteEntityFieldDecode(&strings.Builder{}, e, 0, f) })
+
+	// Restore before reading: the message is far under the pipe buffer, so
+	// this cannot deadlock, and a failed assertion below must not leave the
+	// rest of the binary writing into a pipe nobody drains.
+	os.Stderr = prev
+	require.NoError(t, w.Close())
+	got, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+
+	require.Contains(t, string(got), "codegen bug reached a bare render call",
+		"the fence must SAY so: the record is read by no other test, so this line is the only naming a reader gets")
+	require.Contains(t, string(got), `"complex128"`, "and it must name the carrier that lost its arm")
 }
 
 // TestGenerateWithNoRenderFaultIsUnaffected is the negative control for the
