@@ -618,6 +618,27 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 			msg: `invalid cardinality: query "Fetch" at position 0 has unrecognised cardinality 7`,
 		},
 		{
+			name: "format-failure-query-name",
+			why: "A NamedQuery.Name that is not a Go identifier, which reaches gofmt as a method name with a space in it. " +
+				"input.go documents Name as \"must already be a valid exported Go identifier ... Enforced by the queryfile " +
+				"front end; Generate does not re-validate\" — the pipeline-vs-contract argument this suite exists because " +
+				"§5.1 rejects. Name is an exported field of an exported struct, so what the front end enforces does not " +
+				"bound what a caller hands over, and no gate between here and emission looks at it again. " +
+				"This is the only case in the suite whose fail-site is the FORMATTER rather than a check: every other row " +
+				"is refused by something that inspected it, while this one is emitted, and go/format is what notices. " +
+				"That is also why the row exists at all — ErrFormatFailure sat in taxonomy §4 as \"declared and " +
+				"deliberately unreachable\" through two falsifications (gqlc-2m2v, gqlc-9xiz), both of them template bugs " +
+				"a user's schema reached. The claim survived those because both were repaired at the template. It does not " +
+				"survive this: nothing is broken here, and the row is the sentinel's sole witness.",
+			in: func() codegen.Input {
+				q := probeQuery(resolver.Column{Name: "n", Type: resolver.ResolvedNode{Labels: "Person"}})
+				q.Name = "Fetch Me"
+				return codegen.Input{Schema: probeSchema(), Queries: []codegen.NamedQuery{q}}
+			}(),
+			is:  codegen.ErrFormatFailure,
+			msg: "format failure: querier.go: 8:8: expected ';', found Me (and 1 more errors)",
+		},
+		{
 			name: "column-width",
 			why:  "A column carrying a width no schema property declares. Phase Z walks the schema, so a column backed by a declared property loses there first.",
 			in: codegen.Input{

@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE RecordAnyList AS {
+    (:Payload {
+        id    :: INT64 NOT NULL,
+        rows  :: LIST<RECORD> NOT NULL,
+        grid  :: LIST<LIST<RECORD>> NOT NULL
+    })
+}

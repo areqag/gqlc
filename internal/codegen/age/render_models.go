@@ -34,6 +34,28 @@ const (
 	goDuration  = "Duration"
 )
 
+// goAnyRecord is the carrier RECORD<ANY> is emitted as — Go's
+// unconstrained string-keyed product, which is what a record whose fields
+// are undeclared maps to (types.go, spec §3).
+//
+// Named rather than spelled at each site that tells it apart, because of
+// the one property that distinguishes it from every other carrier this
+// backend produces: it is NOT A GO IDENTIFIER. Every other text the type
+// table answers with is an identifier, a qualified name, or a `[]`/`*`
+// composition of one, and listHelperName — the one site that derives an
+// identifier from a carrier — rested on that until bd gqlc-9xiz. The
+// fence that holds the property rather than asserting it is
+// TestEveryAdmittedListCarrierDerivesAGoIdentifier (render_models_test.go).
+//
+// THE TYPE TABLE ITSELF STILL SPELLS THE LITERAL, in both of the arms
+// that answer it, and that is deliberate. typeMap's returns are read by
+// an AST walk (typeTableGoTypes, render_queries_test.go) which reads a
+// string literal and two named shapes and REFUSES anything else, so a
+// carrier returned as a const identifier is not a carrier the census can
+// see. The const is for the sites that tell the text apart after the
+// table has produced it, which the walk does not read.
+const goAnyRecord = "map[string]any"
+
 // offsetSidecar names the property one field's UTC offset in seconds
 // rides in, with ok=false for a field whose stored value carries no
 // zone. It is the one answer to both halves of the question — whether a
@@ -461,7 +483,7 @@ func (h *helpers) need(goType string, width graph.PropertyType) {
 		h.needUnion(width)
 		return
 	}
-	if goType == "any" || goType == "map[string]any" {
+	if goType == "any" || goType == goAnyRecord {
 		h.needValue()
 		return
 	}
@@ -711,11 +733,30 @@ func listDepth(goType string) int {
 //
 // The element is named by exporting its Go type text, which every leaf
 // the property table produces admits because those leaves are Go
-// identifiers — except one. A declared record's leaf carrier is an
-// anonymous struct, and exporting its first letter would spell
-// `agtypeListOfStruct {`, which is not an identifier at all. That leaf
-// is named from its width's digest instead, the same name its own
-// helpers carry, so a list of records reads agtypeListOfRecord<digest>.
+// identifiers — except TWO, and both are named here rather than exported.
+//
+// A declared record's leaf carrier is an anonymous struct, and exporting
+// its first letter would spell `agtypeListOfStruct {`, which is not an
+// identifier at all. That leaf is named from its width's digest instead,
+// the same name its own helpers carry, so a list of records reads
+// agtypeListOfRecord<digest>.
+//
+// RECORD<ANY>'s carrier is goAnyRecord, and it is the second (bd
+// gqlc-9xiz). Exporting its first letter spells `Map[string]any`, which
+// is an identifier followed by an index expression, so the emitted call
+// `agtypeProperty(props, "payload", agtypeListOfNullableMap[string]any)`
+// parsed as an index inside an argument list and go/format refused the
+// whole file — reported to the author as ErrFormatFailure naming a
+// template bug, for a LIST<RECORD> property they were entitled to
+// declare. It is named AnyRecord, which is what the width is called and
+// what tells it apart from the digest-named records above.
+//
+// KEYED ON THE TEXT rather than on the width, unlike the record arm
+// beside it. The text is what gets emitted into the wrapper's signature,
+// so it is what has to be an identifier, and the width is optional here
+// by contract — see the paragraph below. A caller holding the carrier and
+// no width would otherwise reach the export again and re-emit the
+// unparseable name.
 //
 // width descends in step with the text, one Elem per `[]` stripped, and
 // is consulted only at the leaf. A width that runs out before the text
@@ -745,6 +786,9 @@ func listHelperName(goType string, width graph.PropertyType) string {
 	}
 	if codegen.IsDeclaredRecord(goType, width) {
 		return name + codegen.RecordHelperSuffix(width)
+	}
+	if goType == goAnyRecord {
+		return name + "AnyRecord"
 	}
 	return name + strings.ToUpper(goType[:1]) + goType[1:]
 }

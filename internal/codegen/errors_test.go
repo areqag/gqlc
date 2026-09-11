@@ -1181,6 +1181,23 @@ func (s *SentinelTaxonomySuite) sentinelOfRow(row []string, heading string) stri
 // up to three spaces of indent before a table row, so keying off the raw
 // first byte let an indented row through unparsed — the same fail-open
 // the tables themselves exist to close.
+//
+// Every table but §4's must carry at least one row, because an empty one
+// is a table the fence reads nothing out of and then reconciles clean.
+// §4 is the exception, and only §4: it has been empty since bd gqlc-9xiz
+// promoted ErrFormatFailure, its only row ever, into allSentinels.
+//
+// Empty is that table's SAFEST state rather than a gap, which is why the
+// exception is sound. §4 grants an exemption — the branches under it owe
+// zero coverage — so rows are what buy silence here and their absence
+// buys none. Nor can a row go missing unnoticed: TestDeclaredSentinelsAre-
+// Accounted requires every sentinel declared in errors.go to be in
+// allSentinels OR to have a §4 row, so deleting a row without promoting
+// the sentinel reds there instead, naming the sentinel. What this
+// exception drops is a check that was already made twice over.
+//
+// It is scoped by heading rather than by a flag at the call site so that
+// §1, §2, §3 and §6 cannot acquire it by accident.
 func (s *SentinelTaxonomySuite) tableRows(doc []string, heading string) [][]string {
 	var out [][]string
 	found := false
@@ -1206,6 +1223,8 @@ func (s *SentinelTaxonomySuite) tableRows(doc []string, heading string) [][]stri
 		out = append(out, cells)
 	}
 	s.Require().True(found, "%s has no %q heading; the fence keys its tables off the heading text", taxonomyDoc, heading)
-	s.Require().NotEmpty(out, "%s: the table under %q has no rows", taxonomyDoc, heading)
+	if heading != excludedHeading {
+		s.Require().NotEmpty(out, "%s: the table under %q has no rows", taxonomyDoc, heading)
+	}
 	return out
 }

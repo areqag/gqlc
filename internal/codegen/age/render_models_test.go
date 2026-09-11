@@ -366,3 +366,120 @@ func isEmittedHelper(name string) bool {
 	}
 	return false
 }
+
+// TestEveryAdmittedListCarrierDerivesAGoIdentifier holds the property
+// listHelperName rests on and nothing measured until bd gqlc-9xiz: the
+// wrapper name derived for a list carrier the table ADMITS is a Go
+// identifier.
+//
+// It is a property of the pair (type table, name derivation) rather than
+// of either one, which is why neither side's own tests could see it. The
+// table is entitled to answer any Go type text for a width — `map[string]
+// any` is as legitimate a carrier as `string` — and listHelperName
+// exports a leaf's first letter, which is an identifier only for a leaf
+// that was one already. LIST<RECORD<ANY>> is where those two met:
+// `agtypeListOfNullableMap[string]any` reached the emission, parsed as an
+// index expression inside an argument list, and go/format refused a file
+// the author never wrote. The author's only fault was declaring a
+// LIST<RECORD> property.
+//
+// WHY A SWEEP AND NOT TWO ROWS for the two widths that failed. The two
+// were found by a sweep one package up (internal/cli/backends), not by
+// anyone predicting them, and what made them findable was that they were
+// the first container forms of the first non-identifier carrier this
+// table ever produced. A pair of pinned rows would hold the instance;
+// this holds the class, so the next carrier with a bracket, a dot or a
+// space in it fails HERE — naming the width and the name it derived —
+// rather than in go/format against emitted bytes.
+//
+// The domain is built from internal/graph's own width vocabulary, so a
+// width added upstream joins this sweep with no edit here, and a form the
+// table declines drops out because the table said so rather than because
+// this file listed it.
+func TestEveryAdmittedListCarrierDerivesAGoIdentifier(t *testing.T) {
+	forms := admittedListForms(t)
+	require.NotEmpty(t, forms,
+		"typeMap.Property admitted no list width at all, so this sweep ranged over nothing; the list arm "+
+			"is refusing everything and every row below would pass vacuously")
+
+	// The two widths bd gqlc-9xiz was filed for, asserted to be IN the
+	// domain rather than only to pass it. A sweep whose domain quietly
+	// stopped covering them would go green having dropped the rows it
+	// exists for, which is how the hand-written list one package up went
+	// stale (bd gqlc-tn96).
+	anyRecord := graph.ListOf(graph.TypeAnyRecord, false)
+	for _, want := range []graph.PropertyType{anyRecord, graph.ListOf(anyRecord, false)} {
+		require.Containsf(t, formWidths(forms), want,
+			"%s is the width whose carrier this sweep was written for, and the domain no longer reaches it", want)
+	}
+
+	for _, f := range forms {
+		t.Run(string(f.width), func(t *testing.T) {
+			name := age.ListHelperName(f.goType, f.width)
+			require.Truef(t, token.IsIdentifier(name),
+				"typeMap.Property admits %s as %q, and listHelperName derives the wrapper name %q from it, "+
+					"which is not a Go identifier. The emission declares that wrapper and names it at every "+
+					"call site, so the generated file does not parse and the author is handed a go/format "+
+					"error against bytes they did not write. Either the derivation needs an arm for this "+
+					"carrier (listHelperName), or the table must stop admitting the width",
+				f.width, f.goType, name)
+		})
+	}
+}
+
+// admittedListForms is every list width this backend admits, over a
+// domain built from graph's declared vocabulary, paired with the carrier
+// the table answers for it.
+//
+// The forms are the ones an author can declare a property at: a list of
+// each declared width, a list of a list of it, and a list of a record
+// carrying it — plus the field-less RECORD, which has no field to inherit
+// a refusal from. RECORD<ANY>, the other field-less form, is NOT appended
+// here: it is a declared width, so it arrives with the vocabulary above,
+// and appending it as well put it in the domain twice. Its presence is
+// pinned fail-closed by the containment assertion in the caller, so a
+// vocabulary that stopped carrying it reds there rather than shrinking
+// this sweep in silence. Both element nullabilities, because the star is
+// folded into the element text and so changes the leaf listHelperName
+// reads.
+//
+// A form the table declines is skipped rather than recorded as passing:
+// ok=false means no carrier was produced, so there is no name to derive
+// and nothing to assert.
+func admittedListForms(t *testing.T) []propertyRow {
+	t.Helper()
+
+	var elems []graph.PropertyType
+	for _, width := range declaredPropertyTypes(t) {
+		elems = append(elems,
+			width,
+			graph.ListOf(width, false),
+			graph.ListOf(width, true),
+			graph.RecordOf([]graph.RecordField{{Name: "f", Type: width, NotNull: true}}),
+		)
+	}
+	elems = append(elems, graph.RecordOf(nil))
+
+	var out []propertyRow
+	for _, elem := range elems {
+		for _, notNull := range []bool{false, true} {
+			list := graph.ListOf(elem, notNull)
+			text, ok := age.TypeMap{}.Property(list)
+			if !ok {
+				continue
+			}
+			out = append(out, propertyRow{goType: text, width: list})
+		}
+	}
+	return out
+}
+
+// formWidths is the widths of a row set, for the containment assertions
+// above.
+func formWidths(rows []propertyRow) []graph.PropertyType {
+	out := make([]graph.PropertyType, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.width)
+	}
+	return out
+}
