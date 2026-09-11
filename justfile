@@ -2292,8 +2292,81 @@ lint-new rev="origin/master": ensure-golangci
 # being enough to exit non-zero, so this is about what the person who has to fix
 # it gets to see: a capped list sends them round the loop once per hidden
 # function.
+#
+# GROUPED BY OWNING MODULE, because golangci-lint is module-scoped and this
+# tree is not one module. A path under test/data/codegen is not a package of
+# the main module, so a root-rooted run dies before it measures anything:
+# "main module (github.com/areqag/gqlc) does not contain package
+# github.com/areqag/gqlc/test/data/codegen", exit 7, over the words `0 issues`.
+# The caller is .githooks/pre-commit, which turns any non-zero exit into
+# "function complexity over the gate in a package this commit touches" — so the
+# hook accused an author of an over-complex function the linter had not
+# measured, and sent them to .golangci.yml thresholds that had nothing to do
+# with it. That refused EVERY commit editing a live test, an adapter or a golden
+# under the one nested module in the tree, which is where the whole live battery
+# and all ~97 fixtures live (bd gqlc-f0x1).
+#
+# Fixed here rather than in the hook so every caller gets it, and the hook keeps
+# passing repo-relative directories and knowing nothing about modules. The
+# per-module invocation is the same shape `just test-codegen-fence` already uses
+# for build, vet, tidy and lint: `(cd "${m}" && golangci-lint run ...)`, which is
+# sound because {{ golangci }} and {{ lint_lock }} are absolute.
+#
+# A path whose module cannot be found is NOT skipped. Skipping is how this gate
+# would exit 0 over unmeasured code and report it as measured, which is the
+# failure it exists to prevent; an unplaceable path is a hard error instead.
 complexity *paths: ensure-golangci
-    {{ lint_lock }} {{ golangci }} run --enable-only gocyclo,gocognit --max-issues-per-linter 0 --max-same-issues 0 {{ if paths == "" { "./..." } else { paths } }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    requested=({{ if paths == "" { "./..." } else { paths } }})
+
+    # The nearest ancestor of a path that holds a go.mod, as a repo-relative
+    # directory; "." for the root module. `./...` is a package PATTERN, not a
+    # directory, so its wildcard tail is trimmed before the walk.
+    module_root() {
+        local dir="${1#./}"
+        dir="${dir%/...}"
+        dir="${dir%/}"
+        [ -n "${dir}" ] && [ "${dir}" != "..." ] || dir="."
+        while [ "${dir}" != "." ]; do
+            [ -f "${dir}/go.mod" ] && { printf '%s\n' "${dir}"; return 0; }
+            dir="$(dirname "${dir}")"
+        done
+        [ -f go.mod ] || return 1
+        printf '.\n'
+    }
+
+    declare -A grouped=()
+    for p in "${requested[@]}"; do
+        if ! root="$(module_root "${p}")"; then
+            echo "error: ${p} is under no module in this tree, so nothing measured it." >&2
+            echo "       Complexity is scored per module; a path with no go.mod above it" >&2
+            echo "       cannot be linted and must not be reported as clean (bd gqlc-f0x1)." >&2
+            exit 1
+        fi
+        # Re-root the path onto the module that owns it. golangci-lint is run
+        # from there, so a repo-relative path would miss by the prefix — and
+        # miss QUIETLY in the direction that matters, since a path resolving to
+        # nothing is a package nothing measured.
+        stripped="${p#./}"
+        if [ "${root}" = "." ]; then
+            rel="${p}"
+        elif [ "${stripped}" = "${root}" ]; then
+            # The module root directory itself: its own package, not its tree.
+            rel="."
+        else
+            rel="./${stripped#"${root}/"}"
+        fi
+        grouped["${root}"]="${grouped["${root}"]:-} ${rel}"
+    done
+
+    # Sorted so the report is in the same order on every run; a set printed in
+    # hash order reads like it changed when it did not.
+    for root in $(printf '%s\n' "${!grouped[@]}" | sort); do
+        read -ra targets <<<"${grouped["${root}"]}"
+        (cd "${root}" && {{ lint_lock }} {{ golangci }} run --enable-only gocyclo,gocognit --max-issues-per-linter 0 --max-same-issues 0 "${targets[@]}")
+    done
 
 # rewrites formatting in place (gofumpt + gci, both bundled in golangci-lint)
 fmt: ensure-golangci
@@ -3089,7 +3162,7 @@ test-codegen-live-neo4j:
 # runs nowhere else actually executed. It goes on the whole recipe rather than a
 # second `go test` invocation, which would start a second AGE container.
 test-codegen-live-age:
-    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGERefusesTheSpatialConstructor|TestAGERefusesTheNamespaceItHasNoSchemaFor|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEStoresANestedListProperty|TestAGEStoresARecordProperty' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -v -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine|TestAGERefusesTheSpatialConstructor|TestAGERefusesTheNamespaceItHasNoSchemaFor|TestAGEOffsetSidecar|TestAGEZonedTime|TestAGEStoresANestedListProperty|TestAGEStoresARecordProperty|TestAGEMatchesATemporalListParameter' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than

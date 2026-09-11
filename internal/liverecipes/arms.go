@@ -61,4 +61,5 @@ var LiveArms = map[string]Arm{
 	"TestAGEZonedTime":                            ArmAGE,
 	"TestAGEStoresANestedListProperty":            ArmAGE,
 	"TestAGEStoresARecordProperty":                ArmAGE,
+	"TestAGEMatchesATemporalListParameter":        ArmAGE,
 }
