@@ -948,21 +948,28 @@ for i, record := range records {
     switch rel.Type {
     case <label0>:
         entity, err := decode<Name0>(rel)
-        if err != nil { return nil, fmt.Errorf("<Method>: record %d: decode column %q: %w", i, <columnName>, err) }
+        if err != nil { return nil, fmt.Errorf("<Method>: decode column %q: %w", <columnName>, err) }
         out = append(out, entity)
     // ... one case per EdgeKey ...
     default:
-        return nil, fmt.Errorf("<Method>: record %d: column %q: unexpected relationship type %q", i, <columnName>, rel.Type)
+        return nil, fmt.Errorf("<Method>: column %q: unexpected relationship type %q", <columnName>, rel.Type)
     }
 }
 return out, nil
 ```
 
-- **Per-record error naming.** The record index is threaded into
-  each error message, following the C2 `:many` entity arm's
-  precedent. A driver-arrival with a foreign relationship type in
-  record 42 of a 1000-record `:many` reads as
-  `... record 42: column "action": unexpected relationship type "FOLLOWED"`.
+- **No per-record error naming.** This section proposed threading the
+  record index into each message, following what it took to be the C2
+  `:many` entity arm's precedent. The implementation did not take it up:
+  the `:many` arm reuses the `:one` message set byte-for-byte, so a
+  foreign relationship type in record 42 of a 1000-record `:many` reads
+  as `ListActions: column "r": unexpected relationship type "FLAGGED"`
+  with no index at all. The templates above were corrected to the
+  shipped form on 2026-09-10 (bd `gqlc-tsuu5`); the witness is
+  `ListActions` in
+  `test/data/codegen/valid/edge_union_two_queries_same_column_shape/golden/neo4j-go-v5/queries.cypher.go`.
+  What the C2 arm indexes is list ELEMENTS, not records, which is the
+  misreading this bullet rested on.
 
 **Per-column decode template — `columnEdgeUnion` (multi-column, Row
 struct field):**
@@ -998,11 +1005,10 @@ list, ok := raw.([]any)
 if !ok { return <zero>, fmt.Errorf(...) }
 inner := make([]<Interface>, 0, len(list))
 for j, elem := range list {
-    if elem == nil {
-        return <zero>, fmt.Errorf("<Method>: column %q element %d: unexpected null (list-of-non-null)", <columnName>, j)
-    }
     rel, ok := elem.(dbtype.Relationship)
-    if !ok { return <zero>, fmt.Errorf(...) }
+    if !ok {
+        return <zero>, fmt.Errorf("<Method>: decode column %q element %d: expected dbtype.Relationship, got %T", <columnName>, j, elem)
+    }
     switch rel.Type {
     case <label0>:
         entity, err := decode<Name0>(rel)
@@ -1010,7 +1016,7 @@ for j, elem := range list {
         inner = append(inner, entity)
     // ...
     default:
-        return <zero>, fmt.Errorf("<Method>: column %q element %d: unexpected relationship type %q", <columnName>, j, rel.Type)
+        return <zero>, fmt.Errorf("<Method>: decode column %q element %d: unexpected relationship type %q", <columnName>, j, rel.Type)
     }
 }
 ```
@@ -1020,6 +1026,17 @@ for j, elem := range list {
   of-edgeUnion is a decode error. The consumer who wants nullable
   elements uses a top-level nullable list (nullable at the list
   level, not the element level).
+
+  It is not a decode error with a message of its own, which is what
+  this section proposed. The implementation emits no
+  `unexpected null (list-of-non-null)`; the string appears nowhere in
+  the tree. A nil element reaches the `dbtype.Relationship` type
+  assertion, fails it, and is reported as
+  `decode column %q element %d: expected dbtype.Relationship, got %T`
+  with `<nil>` in the `%T`. The template above was corrected to the
+  shipped form on 2026-09-10 (bd `gqlc-tsuu5`); the witness is
+  `PathActions` in
+  `test/data/codegen/valid/edge_union_list/golden/neo4j-go-v5/queries.cypher.go`.
 
 **Example — single-column `:one` edgeUnion projection:**
 
