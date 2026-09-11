@@ -3049,6 +3049,23 @@ var mustReject = map[string]struct {
 		query: "MATCH (:Person)-[r:AUTHORED]->(:Post), (:Person)-[r:LIKES]->(:Post) RETURN r",
 		want:  cypher.ErrUnsatisfiableRelationshipType,
 	},
+	// AUTHORED (gqlc-y25yo): a delimited identifier whose decoded text is
+	// empty. The grammar admits it — oC_EscapedSymbolicName's body is a
+	// star over "any char but backtick", so it matches zero characters —
+	// and no TCK scenario writes one, so there is nothing verbatim to
+	// take. Fail-site: refuseEmptyIdentifiers, the pre-walk sweep in
+	// listener.walk. It is a refusal because "" is the model's own
+	// ABSENCE sentinel in two positions a decoded identifier reaches
+	// (rawBinding.variable for an anonymous pattern element, Ref.Property
+	// for a bare variable reference), so the empty name has no spelling
+	// that does not collide with a name that was never written. The label
+	// position below is arbitrary among the positions the sweep covers:
+	// the sweep is one chokepoint over every oC_SymbolicName in the tree,
+	// not a per-position check.
+	"empty delimited identifier": {
+		query: "MATCH (n:``) RETURN n",
+		want:  cypher.ErrEmptyIdentifier,
+	},
 }
 
 func TestMustReject(t *testing.T) {

@@ -394,7 +394,16 @@ func (l *listener) SyntaxError(_ antlr.Recognizer, offendingSymbol any, line, co
 // listener recorded — turning ANTLR's void, side-effecting walk into an ordinary
 // error-returning call. A syntax error recorded during lexing/parsing means the
 // tree is unreliable, so we surface it and never walk.
+//
+// refuseEmptyIdentifiers runs first and its own failure short-circuits the
+// collection walk, so ErrEmptyIdentifier names the cause rather than being
+// shadowed by the ErrUnboundVariable an empty variable name would collect into.
+// See its doc for why the sweep is not a walker handler.
 func (l *listener) walk(tree antlr.Tree) error {
+	if l.err != nil {
+		return l.err
+	}
+	l.refuseEmptyIdentifiers(tree)
 	if l.err != nil {
 		return l.err
 	}

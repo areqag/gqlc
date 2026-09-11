@@ -90,7 +90,7 @@ func (l *listener) collectUnwind(c gen.IOC_UnwindContext) {
 	}
 	variable := ""
 	if v := c.OC_Variable(); v != nil {
-		variable = v.GetText()
+		variable = variableName(v)
 	}
 	// Grammatical guarantee: an UNWIND without `AS name` never lexes, so
 	// variable is always non-empty here. Guard defensively.
@@ -183,7 +183,21 @@ func (l *listener) mineSortItemParameters(e gen.IOC_ExpressionContext) {
 // CASE, list indexing/slicing, chained comparisons, parenthesised composites)
 // falls through to the Stage-6 rich-expression classifier, which types the
 // sub-tree and mines its refs. The column name is the explicit AS alias if
-// present, else the verbatim source text of the expression (E1). Stage 11
+// present, else the verbatim source text of the expression (E1) — except for an
+// un-aliased bare variable, where the name is the variable's DECODED name.
+//
+// That exception is not cosmetic: ReturnItem.Name is read twice, as the output
+// column name and (via exportedNames / exportedTypes) as the name a WITH exports
+// into the next part's scope. Those two roles agree for every undecoded
+// spelling and come apart for a delimited one, so leaving the verbatim text here
+// would have a WITH export the delimited spelling while every reference to it
+// decodes — and a query that delimits one variable in all three of MATCH, WITH
+// and RETURN, which parses today, would fail as an unbound variable. The scope
+// name has to be the name, so the column name follows it. The unwrapping is
+// deliberately not recursive: RETURN (n) keeps the column name "(n)" because its
+// atom is a parenthesised expression and not a variable (bd gqlc-y25yo).
+//
+// Stage 11
 // (§1.4, gqlc-3r0 fold): a pattern predicate at projection position is a
 // bucket-1 parse-shape rejection — Pattern1 [22]/[23] cite
 // SyntaxError:UnexpectedSyntax, which the parser owns. The
@@ -202,8 +216,11 @@ func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 	}
 
 	name := originalText(l.ts, e)
+	if v, isVar := bareProjectedVariable(e); isVar {
+		name = v
+	}
 	if alias := item.OC_Variable(); alias != nil {
-		name = alias.GetText()
+		name = variableName(alias)
 	}
 
 	l.appendReturnItem(query.ReturnItem{Name: name, Value: value})
@@ -639,7 +656,7 @@ func (l *listener) mineInlineMap(variable string, p gen.IOC_PropertiesContext) {
 				l.fail(fmt.Errorf("%w: %s in an anonymous pattern element", ErrUnsupportedParameter, param))
 				return
 			}
-			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: variable, Property: keys[i].GetText()}))
+			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: variable, Property: propertyKeyName(keys[i])}))
 			continue
 		}
 		// Widening (§4.3): route the value expression through the rich typer so
@@ -655,7 +672,7 @@ func (l *listener) mineInlineMap(variable string, p gen.IOC_PropertiesContext) {
 				l.fail(fmt.Errorf("%w: %s in an anonymous pattern element", ErrUnsupportedParameter, name))
 				return
 			}
-			l.addParameterUse(name, node, query.NewPropertyUse(query.Ref{Variable: variable, Property: keys[i].GetText()}))
+			l.addParameterUse(name, node, query.NewPropertyUse(query.Ref{Variable: variable, Property: propertyKeyName(keys[i])}))
 		}
 	}
 	// Any parameter under this map that was not a direct key value (e.g. nested in
@@ -793,7 +810,7 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 		l.appendEffect(eff)
 
 	case item.OC_Variable() != nil && item.OC_NodeLabels() != nil:
-		variable := item.OC_Variable().GetText()
+		variable := variableName(item.OC_Variable())
 		l.appendRef(varRef{name: variable})
 		labels := nodeLabels(item.OC_NodeLabels())
 		eff, err := query.NewSetLabelsEffect(variable, labels)
@@ -804,7 +821,7 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 		l.appendEffect(eff)
 
 	case item.OC_Variable() != nil && item.OC_Expression() != nil:
-		variable := item.OC_Variable().GetText()
+		variable := variableName(item.OC_Variable())
 		l.appendRef(varRef{name: variable})
 		op := setItemOp(item)
 		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
@@ -831,7 +848,7 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 // (spec §1.6 amend).
 func (l *listener) collectRemoveItem(item gen.IOC_RemoveItemContext) {
 	if item.OC_Variable() != nil && item.OC_NodeLabels() != nil {
-		variable := item.OC_Variable().GetText()
+		variable := variableName(item.OC_Variable())
 		l.appendRef(varRef{name: variable})
 		labels := nodeLabels(item.OC_NodeLabels())
 		eff, err := query.NewRemoveLabelsEffect(variable, labels)

@@ -113,6 +113,26 @@ var (
 	// durable: the constraint is a fact about the language, not a gap in this
 	// model.
 	ErrUnsatisfiableRelationshipType = errors.New("unsatisfiable relationship type")
+
+	// ErrEmptyIdentifier rejects a delimited identifier that denotes the empty
+	// name — a pair of backticks with nothing between them, in any of the
+	// positions oC_SymbolicName reaches. The refusal mirrors the schema front
+	// end's gql.ErrEmptyIdentifier, so a name no schema can declare is a name no
+	// query can name.
+	//
+	// It is a refusal and not a quoting because the model has no spelling for
+	// the empty name: "" is the model's own sentinel for ABSENCE at two
+	// positions a decoded identifier reaches — an anonymous pattern element's
+	// rawBinding.variable, and a bare variable reference's query.Ref.Property —
+	// so accepting one would report a different query rather than a name the
+	// model cannot hold. That is the opposite of the ruling gqlc-649co executes
+	// for an ampersand-bearing label, which IS representable once
+	// graph.LabelSetKey quotes it.
+	//
+	// The sentinel is durable, and its fail-site is the pre-walk sweep
+	// refuseEmptyIdentifiers rather than any one read site: the check is total
+	// over the parse tree, so a read site added later cannot forget it.
+	ErrEmptyIdentifier = errors.New("empty delimited identifier")
 )
 
 // allSentinels is the canonical closed set of sentinels Parse may return
@@ -130,6 +150,7 @@ var allSentinels = []error{
 	ErrUnknownProcedure,
 	ErrProcedureArity,
 	ErrUnsatisfiableRelationshipType,
+	ErrEmptyIdentifier,
 }
 
 // AllSentinels returns a copy of the cypher package's user-input-reachable

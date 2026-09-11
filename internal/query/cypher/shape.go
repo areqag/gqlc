@@ -34,17 +34,37 @@ func refFromNonArithmetic(nae gen.IOC_NonArithmeticOperatorExpressionContext) (q
 	if atom == nil || atom.OC_Variable() == nil {
 		return query.Ref{}, false
 	}
-	variable := atom.OC_Variable().GetText()
+	variable := variableName(atom.OC_Variable())
 
 	lookups := nae.AllOC_PropertyLookup()
 	switch len(lookups) {
 	case 0:
 		return query.Ref{Variable: variable}, true
 	case 1:
-		return query.Ref{Variable: variable, Property: lookups[0].OC_PropertyKeyName().GetText()}, true
+		return query.Ref{Variable: variable, Property: propertyKeyName(lookups[0].OC_PropertyKeyName())}, true
 	default:
 		return query.Ref{}, false
 	}
+}
+
+// bareProjectedVariable returns the decoded name of the variable a projection
+// item's expression IS, when the expression is exactly one variable reference
+// with no lookup, label or list operator attached.
+//
+// It deliberately does not unwrap parentheses the way bareVariableFromAtom
+// does. Its caller uses the answer as a projection's exported NAME, and the
+// name of a parenthesised projection is its source text; only the delimiters of
+// a bare variable are syntax that a name has to shed.
+func bareProjectedVariable(e gen.IOC_ExpressionContext) (string, bool) {
+	nae := nonArithmeticAtom(e)
+	if nae == nil || len(nae.AllOC_PropertyLookup()) > 0 {
+		return "", false
+	}
+	atom := nae.OC_Atom()
+	if atom == nil || atom.OC_Variable() == nil {
+		return "", false
+	}
+	return variableName(atom.OC_Variable()), true
 }
 
 // nonArithmeticAtom collapses an expression's precedence tower and returns the
@@ -498,7 +518,7 @@ func parameterName(p antlr.Tree) string {
 		return ""
 	}
 	if sn := pc.OC_SymbolicName(); sn != nil {
-		return sn.GetText()
+		return symbolicName(sn)
 	}
 	if di := pc.DecimalInteger(); di != nil {
 		return di.GetText()
@@ -600,7 +620,7 @@ func propertyExpressionRef(pe gen.IOC_PropertyExpressionContext) (query.Ref, boo
 	if !ok {
 		return query.Ref{}, false
 	}
-	return query.Ref{Variable: variable, Property: lookups[0].OC_PropertyKeyName().GetText()}, true
+	return query.Ref{Variable: variable, Property: propertyKeyName(lookups[0].OC_PropertyKeyName())}, true
 }
 
 // bareVariableFromAtom unwraps an atom to its underlying variable name, if the
@@ -615,7 +635,7 @@ func bareVariableFromAtom(a gen.IOC_AtomContext) (string, bool) {
 		return "", false
 	}
 	if v := a.OC_Variable(); v != nil {
-		return v.GetText(), true
+		return variableName(v), true
 	}
 	pe := a.OC_ParenthesizedExpression()
 	if pe == nil {

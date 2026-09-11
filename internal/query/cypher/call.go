@@ -105,17 +105,16 @@ func (l *listener) collectCall(
 // `test.my.proc`. Namespace fragments follow the same dot-separated
 // convention the grammar's oC_Namespace production admits (each
 // oC_SymbolicName followed by '.').
+//
+// Each segment reaches the registry as the name it DENOTES, so a delimited
+// segment and its undelimited spelling resolve to one signature (bd
+// gqlc-y25yo). That is why the name is rebuilt from the segments rather than
+// read off procName.GetText(): the dots belong to oC_Namespace and not to any
+// segment, so the context's own text interleaves them with the delimiters that
+// have to come off, and there is no way to strip one without re-finding the
+// boundaries the parse has already found.
 func extractProcedureName(procName gen.IOC_ProcedureNameContext) string {
-	if procName == nil {
-		return ""
-	}
-	// The whole procedure name is the text of the procName context
-	// itself, with all whitespace stripped. The grammar defines
-	// procedureName as oC_Namespace oC_SymbolicName and namespace as
-	// (oC_SymbolicName '.')*, so the concatenated text is exactly
-	// the dotted fully-qualified name (no whitespace admits between
-	// symbolic names and dots per the grammar).
-	return procName.GetText()
+	return procedureNameOf(procName)
 }
 
 // collectYieldItems iterates the YIELD list, resolving each item
@@ -202,11 +201,11 @@ func extractYieldItem(item gen.IOC_YieldItemContext) (variable, sourceField stri
 		return "", ""
 	}
 	if v := item.OC_Variable(); v != nil {
-		variable = v.GetText()
+		variable = variableName(v)
 	}
 	if item.AS() != nil {
 		if f := item.OC_ProcedureResultField(); f != nil {
-			sourceField = f.GetText()
+			sourceField = procedureResultFieldName(f)
 		}
 	} else {
 		sourceField = variable
