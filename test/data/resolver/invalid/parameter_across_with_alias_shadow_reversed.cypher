@@ -1,1 +1,1 @@
-MATCH (a:Post) WITH a.title AS a MATCH (a:Person) WHERE a.title = $p RETURN a
+MATCH (a:Post) WITH a.title AS t MATCH (a:Person) WHERE a.title = $p RETURN a
