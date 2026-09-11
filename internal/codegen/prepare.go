@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -585,82 +584,6 @@ func entityAxisText(kind EntityKind, labels graph.LabelSetKey, edgeKey schema.Ed
 	return fmt.Sprintf("edge type (%s -[:%s]-> %s)", string(edgeKey.Source), string(edgeKey.KeyLabels), string(edgeKey.Target))
 }
 
-// unimplementedTypeKind reports the outermost sub-type of pt whose KIND
-// gqlc has built no emission for, and whether pt carries one at all. It
-// is asked at every position that asks a TypeMap for a property carrier,
-// and asked FIRST — see ErrUnimplementedTypeKind for why the table's own
-// ok=false is the wrong answer here.
-//
-// It also reports the dotted path of RECORD FIELD names the unbuilt
-// kind sits under, empty when it sits under none.
-//
-// The recursion is through list elements and record fields. ADR 0039
-// walked list elements alone and said so: a record was refused at its
-// own node, so nothing below one was reachable and a Fields descent
-// would have been an arm no input could enter — not a guard, and nothing
-// to test it with. Stage 1 of gqlc-x9tg7 emits records, which makes
-// their fields reachable and makes the descent owed; ADR 0039 named this
-// as the expected reversal. A union is still refused at its own node,
-// so Members stays undescended for exactly the reason Fields used to be.
-//
-// Descending is the only way to tell RECORD<a INT32> from RECORD<u
-// UNION<…>>: without it the second reaches the table, which has no case
-// for the union nested inside the struct text it is asked to build, and
-// comes back a width error — the same confusion the list descent exists
-// to forbid, one kind over.
-func unimplementedTypeKind(pt graph.PropertyType) (graph.PropertyType, string, bool) {
-	switch pt.Kind() {
-	case graph.KindUnion:
-		return pt, "", true
-	case graph.KindRecord:
-		for _, f := range pt.Fields() {
-			kind, path, unbuilt := unimplementedTypeKind(f.Type)
-			if !unbuilt {
-				continue
-			}
-			// The field names accumulate outward, so a record nested
-			// in a record reports "at.zone" rather than the innermost
-			// name alone — the author has to be told which declaration
-			// to open, and the leaf name alone can appear at several.
-			if path != "" {
-				return kind, f.Name + "." + path, true
-			}
-			return kind, f.Name, true
-		}
-		return "", "", false
-	case graph.KindList:
-		return unimplementedTypeKind(pt.Elem())
-	case graph.KindScalar:
-		// Every scalar has an emission on some backend, so the walk stops
-		// and the carrier question below decides. Named rather than left
-		// to the default so a fourth kind cannot be added silently.
-	}
-	return "", "", false
-}
-
-// unimplementedKindDetail renders the tail every ErrUnimplementedTypeKind
-// message shares, so the four fail-sites differ only in how they name
-// themselves. For a bare union the two type arguments are the same
-// string and it renders as the plain `has %s` the width refusals use;
-// under a list or inside a record they differ, and both are named
-// because neither alone tells the reader what to edit — the declared
-// width does not say which level is unbuilt, and the sub-type alone
-// cannot be found in the schema.
-//
-// field is the dotted record-field path the unbuilt kind sits under, and
-// is named when there is one for the same reason: inside a record the
-// sub-type is not enough to locate, because one width can be declared at
-// several fields and the reader has to be told which declaration to open.
-func unimplementedKindDetail(declared, kind graph.PropertyType, field string) string {
-	if declared == kind {
-		return string(declared)
-	}
-	if field != "" {
-		return string(declared) + ", whose field " + strconv.Quote(field) + " has " + string(kind) + ", which has no emission"
-	}
-	return string(declared) + ", whose " + string(kind) + " has no emission"
-}
-
 // prepareEntityFields derives an entity's per-property field list in
 // map-key-sorted order (spec §5.2), reporting a same-entity field-name
 // collision as ErrPropertyFieldCollision. The C3 eager width sweep (§4.8)
@@ -689,9 +612,6 @@ func prepareEntityFields(entityName string, props map[string]schema.Property, tm
 			return nil, fmt.Errorf("%w: entity %q properties %q and %q both mangle to %q", ErrPropertyFieldCollision, entityName, first, p.Name, field)
 		}
 		seen[field] = p.Name
-		if kind, field, unbuilt := unimplementedTypeKind(p.Type); unbuilt {
-			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrUnimplementedTypeKind, entityName, p.Name, unimplementedKindDetail(p.Type, kind, field))
-		}
 		if record, reason, illegal := recordFieldLegality(p.Type); illegal {
 			return nil, fmt.Errorf("%w: entity %q property %q has %s", ErrRecordFieldCollision, entityName, p.Name, recordFieldDetail(p.Type, record, reason))
 		}
@@ -847,9 +767,6 @@ func admitColumn(q NamedQuery, ci int, col resolver.Column, entities []Entity, e
 	}
 	switch t := col.Type.(type) {
 	case resolver.ResolvedProperty:
-		if kind, field, unbuilt := unimplementedTypeKind(t.Type); unbuilt {
-			return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnimplementedTypeKind, q.Name, ci, col.Name, unimplementedKindDetail(t.Type, kind, field))
-		}
 		if record, reason, illegal := recordFieldLegality(t.Type); illegal {
 			return fmt.Errorf("%w: query %q column %d %q has %s", ErrRecordFieldCollision, q.Name, ci, col.Name, recordFieldDetail(t.Type, record, reason))
 		}
@@ -900,9 +817,6 @@ func admitParameter(q NamedQuery, pi int, p resolver.ResolvedParameter, tm TypeM
 	prop, ok := p.Type.(resolver.ResolvedProperty)
 	if !ok {
 		return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, ResolvedTypeName(p.Type))
-	}
-	if kind, field, unbuilt := unimplementedTypeKind(prop.Type); unbuilt {
-		return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnimplementedTypeKind, q.Name, pi, p.Name, unimplementedKindDetail(prop.Type, kind, field))
 	}
 	if record, reason, illegal := recordFieldLegality(prop.Type); illegal {
 		return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrRecordFieldCollision, q.Name, pi, p.Name, recordFieldDetail(prop.Type, record, reason))
@@ -1629,9 +1543,6 @@ func findEdgeUnionLeaf(t resolver.ResolvedType) ([]schema.EdgeKey, bool) {
 func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex map[entityLookupKey]int, tm TypeMap, unionIdx int, unionInterfaceName string) (*ListElem, error) {
 	switch tt := t.(type) {
 	case resolver.ResolvedProperty:
-		if kind, field, unbuilt := unimplementedTypeKind(tt.Type); unbuilt {
-			return nil, fmt.Errorf("%w: list element has %s", ErrUnimplementedTypeKind, unimplementedKindDetail(tt.Type, kind, field))
-		}
 		if record, reason, illegal := recordFieldLegality(tt.Type); illegal {
 			return nil, fmt.Errorf("%w: list element has %s", ErrRecordFieldCollision, recordFieldDetail(tt.Type, record, reason))
 		}

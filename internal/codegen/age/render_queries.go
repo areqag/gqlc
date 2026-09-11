@@ -492,6 +492,15 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 	switch {
 	case codegen.IsDeclaredRecord(leaf, leafWidth):
 		encoder = "encode" + codegen.RecordHelperSuffix(leafWidth)
+	case codegen.IsDeclaredUnion(leaf, leafWidth):
+		// A closed union is on the fallible list for a reason unlike
+		// every other entry: not a shape change and not a range one, but
+		// that the declared member set is enforced HERE and nowhere else.
+		// Left alone the `any` crosses through json.Marshal as whatever
+		// the caller happened to put in it, and a value of no declared
+		// member reaches the store — which is the one thing declaring the
+		// members was for (spec §4).
+		encoder = "encode" + codegen.UnionHelperSuffix(leafWidth)
 	case leaf == goDate:
 		encoder = "agtypeDateText"
 	case leaf == goLocalTime:
@@ -538,6 +547,15 @@ func fallibleParamEncoder(f codegen.Param, access string) (string, bool) {
 func encodedText(leaf string, width graph.PropertyType) string {
 	if codegen.IsDeclaredRecord(leaf, width) {
 		return "map[string]any"
+	}
+	if codegen.IsDeclaredUnion(leaf, width) {
+		// The union's encoder answers the carrier it was handed, because
+		// which member matched decides what the value widens to and that
+		// is a run-time answer: a DATE member crosses as a string and an
+		// INT32 member as itself. `any` is the one static type that holds
+		// both, and it is the same text the carrier has, so the two sides
+		// of the encode agree by construction rather than by a table row.
+		return codegen.UnionCarrierText
 	}
 	return encodedParamText[leaf]
 }
@@ -830,6 +848,15 @@ func decodeFunc(goType string, width graph.PropertyType) string {
 	// element's own decoder and maps null to a nil pointer.
 	if elem, ok := strings.CutPrefix(goType, "*"); ok {
 		return "agtypeNullableElem(" + decodeFunc(elem, width) + ")"
+	}
+	// Asked before the `any` arm below, which would otherwise take every
+	// closed union for a value of no declared shape: the two carrier texts
+	// are the same string and only the width beside it tells them apart.
+	// The difference is the whole of what declaring a member set buys — an
+	// INT32 member comes back int32 through this dispatch and would come
+	// back the store's int64 through agtypeValue.
+	if codegen.IsDeclaredUnion(goType, width) {
+		return "decode" + codegen.UnionHelperSuffix(width)
 	}
 	switch goType {
 	case "any":
