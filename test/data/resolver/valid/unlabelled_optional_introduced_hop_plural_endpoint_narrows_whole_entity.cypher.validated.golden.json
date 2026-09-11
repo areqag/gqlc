@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "name": "c",
+      "type": {
+        "kind": "node",
+        "labels": "Company\u0026Large",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}

@@ -4238,6 +4238,31 @@ func (s *ResolverSuite) TestAWidenedPluralCommitmentIsNarrowedOneWithLater() {
 	s.Require().Equal([]Column{{Name: "c.largeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}}, cols,
 		"largeId is declared on Company&Large alone, so a `c` left plural is refused and a `c` pinned to the bare Company never closes Part 2's edge; typing the column at all is NarrowPluralEndpoints' collapse")
 
+	// The arm that separates the singleton case's two effects. That case both
+	// NARROWS (it computes the survivor) and LEAVES THE PLURAL LANE (nodeTypes
+	// write, resolvedCovers mark, delete from nodeCands), and the property
+	// projection above cannot tell them apart: suppressing only the lane exit
+	// reroutes a one-element `narrowed` through the switch's default arm, and a
+	// one-element plural candidate set still types `c.largeId`, because the one
+	// candidate in it declares largeId. A WHOLE-ENTITY projection can tell them
+	// apart — refProjectionType's nodeCands arm refuses a bare `c` on presence
+	// in the lane, not on the candidate count — so `RETURN c` is sensitive to
+	// the exit and `RETURN c.largeId` is not.
+	//
+	// valid/plural_endpoint_whole_entity_after_edge_closure.cypher already
+	// reaches the exit for a NATIVELY plural binding. This reaches it for one
+	// whose plurality came from the gqlc-1qijx widening, which is the cell
+	// §9.7's mutation row 2 found missing (bd gqlc-4m6g).
+	s.Run("a whole entity projection sees the lane exit", func() {
+		wholeSrc, err := os.ReadFile(filepath.Join(fixtureDir, "valid",
+			"unlabelled_optional_introduced_hop_plural_endpoint_narrows_whole_entity.cypher"))
+		s.Require().NoError(err)
+		wholeCols, err := resolve(string(wholeSrc))
+		s.Require().NoError(err)
+		s.Require().Equal([]Column{{Name: "c", Type: ResolvedNode{Labels: "Company&Large"}}}, wholeCols,
+			"a `c` still in nodeCands is refused whole-entity however few candidates it holds, so naming a node type at all is the singleton arm's nodeTypes write and not its filter")
+	})
+
 	// The arm that says the collapse is Part 2's and not Part 1's. Same query
 	// with Part 2's hop deleted: `c` crosses the WITH still holding BOTH company
 	// types, so the projection is refused on the one that lacks largeId.
