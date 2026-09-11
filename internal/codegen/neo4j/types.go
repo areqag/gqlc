@@ -282,6 +282,42 @@ func wireFamily(goType string) string {
 // KindRecord covers RECORD<ANY> and the fieldless RECORD<> too: Kind()
 // tests the "RECORD<" prefix, which all three spellings share. A depth-3
 // list of records is already refused one level out by the nested-list arm.
+//
+// THE UNION ARM IS THE LIST ARM ONLY, and it rests on its own measurement
+// rather than on the record one next door. A BARE union property is a
+// single primitive value and is STORED — the pinned image kept
+// `{u: true}` — so the refusal cannot be hung on KindUnion at the top.
+// What the server refuses is the ARRAY: a stored property array must be
+// homogeneous in its storage type, and every union gqlc admits is
+// heterogeneous by construction, because codegen.UnionMemberCollision
+// already refuses at declaration any union whose members share a wire
+// family. So a LIST<UNION<…>> that reaches here spans two or more
+// families and is exactly the shape measured by
+// TestNeo4jRefusesAHeterogeneousArrayStoredProperty, against Neo4j Kernel
+// 5.26.28 community, which answered:
+//
+//	Neo4j only supports a subset of Cypher types for storage as
+//	singleton or array properties.
+//
+// with three controls green in the same run — a homogeneous BOOL array
+// and a homogeneous INT array were both stored on that session, and the
+// identical heterogeneous list came back as a projected column. So the
+// refusal is the property slot's, not the server's view of mixed lists.
+//
+// IT REFUSES THE WHOLE WIDTH THOUGH ONE PAIR IS ACCEPTED, and that is the
+// deliberate part. The same run measured `{ns: [1, 1.5]}` STORED, and read
+// it back as `[1.0, 1.5]` with both elements typed FLOAT: the server
+// widens a long into a double rather than refusing the array. An
+// INT64|FLOAT64 union is wire-distinct and would reach here, so a guard
+// keyed on "the pairs the server rejects out loud" would admit the one
+// width whose failure is SILENT — the emitted decode dispatch would
+// resolve that element to the FLOAT64 member, the INT64 the writer stored
+// having been destroyed in the store. A loud refusal at generation, where
+// the property can be named, beats a lossy round-trip at runtime.
+//
+// LIST<ANY VALUE> stays admitted for the reason it is admitted above: it
+// can carry a heterogeneous list at runtime, which no static check can
+// see, and that write fails at the server as it does today.
 func (typeMap) StorableProperty(pt graph.PropertyType) bool {
 	if pt.Kind() == graph.KindRecord {
 		return false
@@ -290,7 +326,7 @@ func (typeMap) StorableProperty(pt graph.PropertyType) bool {
 		return true
 	}
 	elem := pt.Elem().Kind()
-	return elem != graph.KindList && elem != graph.KindRecord
+	return elem != graph.KindList && elem != graph.KindRecord && elem != graph.KindUnion
 }
 
 // Temporal maps a resolver Temporal kind to the Go type text C3 emits
