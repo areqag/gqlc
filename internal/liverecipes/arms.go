@@ -13,7 +13,10 @@ type Arm string
 const (
 	// ArmNeo4j is the PR-blocking half, against one neo4j:5-community image.
 	ArmNeo4j Arm = "neo4j"
-	// ArmAGE is the nightly-and-manual half, each test on its own AGE container.
+	// ArmAGE is the other PR-blocking half, each test on its own AGE
+	// container. PR-blocking since bd gqlc-ezwae; it was nightly-and-manual
+	// before that, and the halves still differ on merge_group. Which events
+	// each half runs on is declared in ArmTriggers rather than here.
 	ArmAGE Arm = "age"
 	// ArmAll is a test that runs in both halves, with a -skip carving out the
 	// other half's subtests. TestLiveSmoke is one by design: the smoke battery
@@ -26,9 +29,9 @@ const (
 // attributes to CI, so a rename here has to follow the justfile and the
 // workflow together.
 const (
-	// Neo4jRecipe is the PR-blocking half CI runs.
+	// Neo4jRecipe is the neo4j half CI runs.
 	Neo4jRecipe = "test-codegen-live-neo4j"
-	// AgeRecipe is the nightly-and-manual half CI runs.
+	// AgeRecipe is the AGE half CI runs.
 	AgeRecipe = "test-codegen-live-age"
 )
 
