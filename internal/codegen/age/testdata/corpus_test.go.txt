@@ -14,6 +14,18 @@ import (
 // (gqlc-35yu.5, corpus sections C1-C11). These bytes are what the
 // helpers under test will actually be handed.
 //
+// That claim now has a guard behind it rather than a provenance note.
+// Every package-level string const in this file is named in exactly one
+// of two tables in test/data/codegen/live_age_agtype_capture_test.go:
+// the live one, whose rows are re-read off a running apache/age 1.7.0
+// and compared byte-for-byte, or the synthetic one, whose rows carry the
+// reason they are written rather than captured. A Docker-free census
+// beside it fails on a const in neither table, so a new capture cannot
+// enter this file unwitnessed. Until that landed the claim was prose,
+// and five of the captures had drifted from the server in property key
+// order — alice, bob, anyTag, slotOK, slotNulls, all corrected here
+// (bd gqlc-6308, 2026-09-10).
+//
 // This file is compiled in a throwaway module whose go.mod requires
 // nothing, run with GOPROXY=off so that a corpus run cannot reach the
 // network (see corpus_test.go). testify is therefore unavailable, and
@@ -237,8 +249,8 @@ func TestAgtypeFloat64(t *testing.T) {
 // not the schema's or the author's, and a null property arrives as no key
 // at all rather than as a key holding null.
 const (
-	alice  = `{"id": 844424930131969, "label": "Person", "properties": {"id": 1, "rank": 3, "tally": 7, "name": "Alice", "score": 9.5, "active": true}}::vertex`
-	bob    = `{"id": 844424930131970, "label": "Person", "properties": {"id": 2, "rank": 4, "tally": 8, "name": "Bob", "score": 1.0, "weight": 0.5, "active": false, "middleName": "Q"}}::vertex`
+	alice  = `{"id": 844424930131969, "label": "Person", "properties": {"id": 1, "name": "Alice", "rank": 3, "score": 9.5, "tally": 7, "active": true}}::vertex`
+	bob    = `{"id": 844424930131970, "label": "Person", "properties": {"id": 2, "name": "Bob", "rank": 4, "score": 1.0, "tally": 8, "active": false, "weight": 0.5, "middleName": "Q"}}::vertex`
 	marker = `{"id": 1407374883553281, "label": "Marker", "properties": {}}::vertex`
 	actedIn = `{"id": 1125899906842625, "label": "ACTED_IN", "end_id": 844424930131970, "start_id": 844424930131969, "properties": {"since": 2019}}::edge`
 
@@ -494,14 +506,14 @@ const (
 
 	// The same shapes against the NOT NULL declarations, where every one
 	// of them is a refusal rather than a nil.
-	slotOK    = `{"id": 1407374883553281, "label": "Slot", "properties": {"tags": ["x", "y"], "ranks": [1, 2], "matrix": [[1], [2, 3]], "depths": [0.5]}}::vertex`
-	slotNulls = `{"id": 1407374883553282, "label": "Slot", "properties": {"tags": ["x", null], "ranks": [1, 2], "matrix": [[1]], "depths": [0.5]}}::vertex`
+	slotOK    = `{"id": 1407374883553281, "label": "Slot", "properties": {"tags": ["x", "y"], "ranks": [1, 2], "depths": [0.5], "matrix": [[1], [2, 3]]}}::vertex`
+	slotNulls = `{"id": 1407374883553282, "label": "Slot", "properties": {"tags": ["x", null], "ranks": [1, 2], "depths": [0.5], "matrix": [[1]]}}::vertex`
 
 	anyInt = `{"id": 1125899906842625, "label": "Anything", "properties": {"other": "text", "payload": 42}}::vertex`
 	// anyTag holds the second spelling of the same declared width, ANY
 	// PROPERTY VALUE, beside the first. Both properties are here at once
 	// so what the assertion compares is the two spellings on one vertex.
-	anyTag = `{"id": 1125899906842628, "label": "Anything", "properties": {"payload": 42, "tag": {"a": 1}}}::vertex`
+	anyTag = `{"id": 1125899906842628, "label": "Anything", "properties": {"tag": {"a": 1}, "payload": 42}}::vertex`
 	anyMap = `{"id": 1125899906842626, "label": "Anything", "properties": {"payload": {"a": 1, "b": [true, null, "z"], "c": {"d": 1.5}}}}::vertex`
 	anyList = `{"id": 1125899906842627, "label": "Anything", "properties": {"payload": [1, "two", 3.5, true, null, [1, 2], {"k": "v"}]}}::vertex`
 )

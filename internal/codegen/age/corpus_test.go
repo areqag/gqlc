@@ -182,15 +182,24 @@ var corpusSubtests = map[string]int{
 // This is the third census because the first two cannot see the fixture's
 // commonest shape. corpusTests names top-level tests and a top-level test
 // passes whether or not anything ran inside it; corpusSubtests counts
-// subtest passes and this fixture has three t.Run call sites among 51
-// top-level tests, so for the other 48 a test whose table goes empty has
-// no key on either side, which is equality. Measured: emptying the
+// subtest passes, and corpusSubtests' key set IS the set of tests that
+// call t.Run — a handful of this fixture's tests, a guarded fact rather
+// than a figure in prose, since Declared.Check compares that map against
+// the run. For every test not among those keys a table that goes empty
+// has no key on either side, which is equality. Measured: emptying the
 // five-entry table in TestAgtypeListRefusesAnElementOfTheWrongScalar
 // reddens this census and nothing else in the run moved (bd gqlc-eum1,
 // the half gqlc-mlf4 left open; re-taken 2026-09-02 under gqlc-wuyu,
 // where "nothing else moved" is witnessed by Check's order — Tables is
 // compared last, so reaching it means Tests and Subtests both agreed).
-// The count of t.Run sites was one in 46 tests when this was written.
+//
+// This paragraph used to carry the two counts as figures — "N t.Run call
+// sites among M top-level tests". No guard read either, and both drifted
+// every time the fixture grew: 46 to 51 to 56 over three hand-repairs,
+// the last of them days old when it was found stale again. They are gone
+// rather than re-fixed, because the fact they were there to support is
+// the one the sentence above now states, and that one is guarded
+// (bd gqlc-zobe7).
 //
 // Every test here that ranges over anything has an entry, and a test that
 // ranges over nothing has none — see corpusrun.Table for what Rows and
