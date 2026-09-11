@@ -178,9 +178,9 @@ if just ensure-golangci >/dev/null 2>&1; then
   # already told you your branch is broken.
   #
   # It also had to move rather than be duplicated HERE AND THERE: a wait in
-  # both places would nest, and the default budget of twelve attempts ten
-  # seconds apart would become twelve of twelve, i.e. twenty-four minutes of a
-  # hook that looks hung.
+  # both places would nest, and the default budget would be squared. At the
+  # thirty retries lint-lock.sh derives today that is thirty of thirty, which is
+  # hours of a hook that looks hung (bd gqlc-6ypo).
   #
   # What remains is the plain run. Sets ${lint_rc}; the run's merged output is
   # in ${lint_log}. It returns 0 on every path, lock exhaustion included: the
