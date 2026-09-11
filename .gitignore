@@ -33,3 +33,9 @@ __pycache__/
 # that schedules one. settings.json and skills/ under the same directory are
 # TRACKED, so this is the one path rather than the whole directory.
 /.claude/scheduled_tasks.lock
+
+# Probe packages written by .githooks/complexity-exit-code.rows: each row needs
+# a package inside a Go module, so they cannot go in /tmp. The `_` prefix keeps
+# a leaked one out of every `./...` sweep; this keeps it out of `git add -A`.
+/test/_complexityprobe.*/
+/test/data/codegen/_complexityprobe.*/

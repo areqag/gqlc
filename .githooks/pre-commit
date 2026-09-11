@@ -108,17 +108,46 @@ complexity_gate() {
   # to split by a run that had measured none (bd gqlc-f0x1, gqlc-i8j9). That
   # module boundary is fixed in `just complexity` itself, but the class is not
   # closed by fixing one member of it. Two other members were measured arriving
-  # here as not-1 on 2026-09-11: a staged directory holding no Go file (exit 5,
-  # reachable by staging an added file and then deleting it) and a neighbouring
-  # worktree's lint lock (exit 3). Each would have told the same lie.
+  # here as not-1 on 2026-09-11: a staged directory holding no Go file and a
+  # neighbouring worktree's lint lock (exit 3). Each would have told the same
+  # lie.
+  #
+  # THE 1-MEANS-GRADED CONTRACT IS NOT golangci-lint's ALONE TO KEEP, which is
+  # the correction bd gqlc-9nj3 paid for and the reason the paragraph above is
+  # not the whole story. A directory whose files disagree about their package
+  # clause is a package-LOADING failure, but golangci-lint reports it through
+  # `typecheck` — its always-on pseudo-linter, which --enable-only does not
+  # suppress — as an ISSUE, so it takes --issues-exit-code and arrives here as
+  # 1. Measured 2026-09-11: `package codegen` staged into test/data/codegen
+  # beside `package fixtures` printed the complexity sentence over a directory
+  # in which no function was graded. What holds the contract now is the
+  # per-module `go list` pre-flight in `just complexity`, which turns that into
+  # 7 — so this branch is correct only for as long as that pre-flight is there,
+  # and .githooks/complexity-exit-code.rows is what says so. That pre-flight is
+  # also why the no-Go-file member above now arrives as 7 rather than
+  # golangci-lint's own 5; either way it is not 1, which is all this test asks.
   #
   # A package that does not TYPE-CHECK is NOT one of them, which is worth
   # writing down because it is the first member a reader reaches for: measured
   # the same day, `var _ int = "not an int"` staged into internal/resolver
   # passed this gate at exit 0. `--enable-only gocyclo,gocognit` selects two
   # AST-only linters, so golangci-lint never asks for type information and
-  # never notices. One that does not PARSE is caught earlier still, by the
-  # repo-wide `just fmt-check` below, and never reaches this function.
+  # never notices.
+  #
+  # A PACKAGE THAT DOES NOT PARSE IS STILL MISREPORTED HERE — stated plainly
+  # because the sentence this replaces claimed the opposite, and a claim of
+  # coverage that is wider than the coverage is the failure this gate exists to
+  # prevent. It read "one that does not PARSE is caught earlier still, by the
+  # repo-wide `just fmt-check` below, and never reaches this function", and both
+  # halves are false: measured 2026-09-11, `func ( {{{` in internal/resolver
+  # made golangci-lint's formatters emit `level=warning msg="(gofumpt)
+  # formatting file ...: expected ')', found '{'"` and exit 0, so fmt-check
+  # passes it through, and `just complexity` then returns 1 through typecheck
+  # exactly as the package-clause clash used to. The `go list` pre-flight does
+  # not see it either, go/build reading only as far as the imports. bd gqlc-3rgo
+  # holds it, with the two candidate fixes; the row named parse-error-KNOWN-GAP
+  # in .githooks/complexity-exit-code.rows pins the current behaviour so that
+  # closing it fails there rather than silently.
   if [ "$complexity_rc" -eq 1 ]; then
     echo "ERROR: function complexity over the gate in a package this commit touches." >&2
     echo "$complexity_out" >&2

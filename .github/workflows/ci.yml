@@ -126,6 +126,15 @@ jobs:
       # behaviour across a version bump; bd gqlc-sh4j is that gap.
       - run: just lint
       - run: just lint-cache-check
+      # The exit code .githooks/pre-commit reads off `just complexity` to tell a
+      # real complexity finding from a package that never loaded (bd gqlc-9nj3,
+      # and gqlc-f0x1/gqlc-i8j9 before it). It rides this job rather than taking
+      # a required context of its own: a new context has to be enabled by hand
+      # on the branch protection before it blocks anything, and the four tools
+      # these rows need — Go, just, the pinned golangci-lint, shellcheck — are
+      # already set up above. Last of the lint steps because nothing after it
+      # depends on it.
+      - run: just test-complexity-exit-code
 
   test:
     runs-on: ubuntu-latest
