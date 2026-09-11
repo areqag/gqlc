@@ -69,4 +69,6 @@ var LiveArms = map[string]Arm{
 	"TestEveryAgtypeCaptureIsWitnessedOrDeclaredSynthetic":      ArmNeo4j,
 	"TestAGEAgtypeCaptureMatchesTheServer":                      ArmAGE,
 	"TestAGEAgtypeNullReachesPgxAsSQLNULL":                      ArmAGE,
+	"TestNeo4jMinOverAnEmptyGroupIsNull":                        ArmNeo4j,
+	"TestAGEMinOverAnEmptyGroupIsNull":                          ArmAGE,
 }

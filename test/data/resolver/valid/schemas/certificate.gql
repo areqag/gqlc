@@ -2,11 +2,34 @@
 -- against `id`'s INT so the width row has two integers the resolver must
 -- refuse to unify: ADR 0002 preserves widths, and numeric widening is
 -- deliberately not inferred.
+--
+-- `meta` is the min/max selection rows' NEGATIVE operand (gqlc-b8m8f, spec
+-- ruling-p9qgu §3.1): ANY is outside orderableSelection's allow-list, so
+-- min(p.meta) stays `any` where min(p.rank) commits INT32. Every other
+-- property here is orderable, so without it that arm has no corpus witness.
+--
+-- TWO list fixtures, because two guards hold a list operand out of the fill and
+-- one hides the other. min([p.id, p.age]) is stopped by the resolver's
+-- len(refs) == 1 arm BEFORE the parser's depth-0 mint condition matters, so it
+-- stays `any` even with that condition deleted — measured under mutation, not
+-- reasoned. min([p.rank]) has ONE ref at depth 1, so the mint condition is the
+-- only thing between it and a scalar INT32 committed for a value that is a
+-- LIST. That is certified_min_single_ref_list_stays_any, and it is the row the
+-- depth mutation moves.
+--
+-- It is ANY and not the ruling's named BYTES because this schema has to stay
+-- codegen-admissible on BOTH backends — TestResolverValidCorpusStageBoundary
+-- reads the README's single partition, and AGE refuses a BYTES property at
+-- SCHEMA admission ("BYTES has no agtype scalar at all", age/types.go) while
+-- neo4j carries it as []byte. A BYTES row here would be refused before any
+-- query was looked at, so it would witness nothing about min. BYTES itself is
+-- held by TestOrderableSelectionNamesEveryPropertyType, which needs no schema.
 CREATE PROPERTY GRAPH TYPE Certificate AS {
     (:Person {
         id   :: INT NOT NULL,
         age  :: INT,
         name :: STRING NOT NULL,
-        rank :: INT32 NOT NULL
+        rank :: INT32 NOT NULL,
+        meta :: ANY VALUE
     })
 }

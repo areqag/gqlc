@@ -1277,12 +1277,18 @@ var mustParse = map[string]struct {
 	// Stage 10 — min over a Stage-6 string-typed operand commits to the
 	// operand type (min/max are order-preserving; if the operand is a
 	// scalar comparable, the aggregate's result IS the operand type).
+	//
+	// leavesAreRefs is TRUE here since spec ruling-p9qgu §3.1 admitted
+	// min/max to the mint site at depth 0, and a bare ref IS depth 0. It
+	// is the mint site's answer about SHAPE and says nothing about whether
+	// the resolver can use it — this operand is an UNWIND binding, which
+	// is out of R0 scope there.
 	"min over unwind string": {
 		src: "UNWIND ['a', 'b'] AS x\nRETURN min(x)",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{must(query.NewUnwindBinding("x", query.TypeString{}))},
 			Returns: []query.ReturnItem{
-				{Name: "min(x)", Value: query.NewAggregateProjection(query.AggMin, []query.Ref{{Variable: "x"}}, false, query.TypeString{})},
+				{Name: "min(x)", Value: query.NewAggregateProjectionWithAxes(query.AggMin, []query.Ref{{Variable: "x"}}, false, query.TypeString{}, true)},
 			},
 		}),
 	},

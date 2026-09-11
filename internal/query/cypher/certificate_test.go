@@ -158,22 +158,78 @@ func TestCertificateMintPredicate(t *testing.T) {
 			want: false,
 		},
 		{
-			// sum/min/max commit the result of a FOLD: the leaf holds a
-			// value no ref ever held, so clause 1 is false however
-			// ref-shaped the operand is. Each is pinned against the
-			// collect row above, which differs only in the function name.
+			// sum commits the result of a FOLD: the leaf holds a value no
+			// ref ever held, so clause 1 is false however ref-shaped the
+			// operand is. Pinned against the collect row above, which
+			// differs only in the function name.
+			//
+			// This is the one third of sum/min/max that stayed false when
+			// spec ruling-p9qgu split the trio, and the decline is
+			// PERMANENT rather than deferred (§3.2): committing the
+			// operand's width fails ADR 0037 reads on data the schema
+			// permits, and committing a wider width is a claim about the
+			// driver's accumulator the schema cannot make.
 			name: "sum over a ref does not mint",
 			src:  "MATCH (p:Person) RETURN sum(p.id) AS s",
 			want: false,
 		},
+
+		// --- AggregateProjection: min/max, at depth 0 exactly ---
 		{
-			name: "min over a ref does not mint",
+			// min/max SELECT rather than fold — the result is one of the
+			// operand's own values, unchanged — so a depth-0 operand does
+			// put a ref's own value at the leaf and clause 1 holds
+			// (ruling-p9qgu §3.1). Pinned against the sum row above, which
+			// differs only in the function name, so the pair isolates
+			// function identity as the thing that splits the trio.
+			name: "min over a ref mints",
 			src:  "MATCH (p:Person) RETURN min(p.id) AS s",
+			want: true,
+		},
+		{
+			name: "max over a ref mints",
+			src:  "MATCH (p:Person) RETURN max(p.id) AS s",
+			want: true,
+		},
+		{
+			// A bare binding is depth 0 too, so it mints HERE and the
+			// resolver degrades it there — min(n) is not a
+			// ResolvedProperty and falls to any in selectionProjectionType,
+			// not at this predicate. The certificate is a claim about
+			// SHAPE; this row records that the two questions are answered
+			// in different places.
+			name: "min over a bare binding mints",
+			src:  "MATCH (p:Person) RETURN min(p) AS s",
+			want: true,
+		},
+		{
+			// The depth-0 clause, and the row it exists for. collect over
+			// this same operand mints (see above), because any depth puts
+			// refs at a list spine's leaf; min does not, because min over a
+			// list orders LISTS, and whether a list ordering is
+			// well-defined enough to type its result is a question the
+			// ruling does not open. Dropping `d == 0` flips this row and
+			// leaves every other row in this table alone.
+			name: "min over a certified list literal does not mint",
+			src:  "MATCH (p:Person) RETURN min([p.id, p.age]) AS s",
 			want: false,
 		},
 		{
-			name: "max over a ref does not mint",
-			src:  "MATCH (p:Person) RETURN max(p.id) AS s",
+			name: "max over a certified list literal does not mint",
+			src:  "MATCH (p:Person) RETURN max([p.id, p.age]) AS s",
+			want: false,
+		},
+		{
+			name: "min over a rich operand does not mint",
+			src:  "MATCH (p:Person) RETURN min(size(p.tags)) AS s",
+			want: false,
+		},
+		{
+			// min's half of the arity clause. Its refs are p.id and p.age
+			// at one depth, and min(x, y) has no defined leaf for a fill to
+			// land on any more than collect(x, y) does.
+			name: "min over two arguments does not mint",
+			src:  "MATCH (p:Person) RETURN min(p.id, p.age) AS s",
 			want: false,
 		},
 		{

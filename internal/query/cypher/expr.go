@@ -453,17 +453,39 @@ func (l *listener) classifyAggregateCall(fi gen.IOC_FunctionInvocationContext, f
 		l.addParameterUse(name, p, query.NewExprUse(resultType, query.ExprInProjection))
 	}
 	distinct := fi.DISTINCT() != nil
-	// collect alone mints the ref-valued-leaf certificate: collect(T) =
-	// list<T> puts the operand's values at the result type's unknown leaf
-	// verbatim, which is what the certificate asserts. sum/min/max commit the
-	// result of a FOLD and avg/stDev/percentile* are engine-dependent — for
-	// both, an unknown may mean something no schema lookup is entitled to
-	// overwrite (spec model-change-f45qn §1 answer 3). Any depth qualifies,
-	// since collect(p.id) and collect([p.id, p.age]) both put refs at the
-	// leaf; DISTINCT is orthogonal and does not block minting.
+	// collect, min and max mint the ref-valued-leaf certificate, and they mint
+	// it under different depth conditions because they put refs at the leaf for
+	// different reasons (spec ruling-p9qgu §3.1).
+	//
+	// collect(T) = list<T> puts the operand's values at the result type's
+	// unknown leaf verbatim, which is what the certificate asserts. ANY depth
+	// qualifies: collect(p.id) and collect([p.id, p.age]) both put refs at the
+	// leaf.
+	//
+	// min/max SELECT rather than fold — the result is one of the operand's own
+	// values, unchanged — so a bare `var`/`var.prop` operand makes the result
+	// exactly as representable as the property is. Depth 0 EXACTLY, and that is
+	// deliberate: min([p.id, p.age]) orders LISTS, and whether a list ordering
+	// is well-defined enough to type its result is a question the ruling does
+	// not open. Depth 0 is what keeps it closed by construction.
+	//
+	// sum folds outside the operand's declared width and is declined
+	// PERMANENTLY, not deferred (ruling §3.2): committing the operand's width
+	// fails ADR 0037 reads on data the schema permits, and committing a wider
+	// one is a claim about the driver's accumulator that the schema cannot
+	// make. avg/stDev/percentile* are engine-dependent by function identity,
+	// before any operand is looked at. For all of them an unknown means
+	// something no schema lookup is entitled to overwrite (spec
+	// model-change-f45qn §1 answer 3).
+	//
+	// DISTINCT is orthogonal and does not block minting.
 	leavesAreRefs := false
-	if fn == query.AggCollect && len(args) == 1 {
+	switch {
+	case fn == query.AggCollect && len(args) == 1:
 		_, leavesAreRefs = refValuedShape(args[0])
+	case (fn == query.AggMin || fn == query.AggMax) && len(args) == 1:
+		d, ok := refValuedShape(args[0])
+		leavesAreRefs = ok && d == 0
 	}
 	return query.NewAggregateProjectionWithAxes(fn, refs, distinct, resultType, leavesAreRefs)
 }
