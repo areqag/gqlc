@@ -281,6 +281,24 @@ Beads IDs alone don't auto-close linked GitHub issues on merge — GitHub only r
 
 See `bd memories pr-body-closes-gh-issue` for the full note and the incidents that motivated it.
 
+## Writing a claim into a durable document
+
+A **growing-range universal** is a claim of the form "every commit since `<sha>` is comment-only", "no package in the tree has that shape", "all 6 test files do X". It is true when written and it rots on the next commit in its range, with nobody touching the sentence. Nothing goes red; the document just starts lying.
+
+**Do not put one into a carrier that outlives the range** — a spec, an ADR, a code comment, a bead, a memory. In those, either date the endpoint (*"measured 2026-09-10 at `e5d7cdfa`"*) or state the claim over a range that is already closed.
+
+A PR body is the one carrier where it is acceptable left open, because the range closes at merge and dating it would defeat the point. That exemption is about the carrier, not about the sentence: the same words copied out of a merged PR body into an ADR need the date added on the way.
+
+Three habits that keep a durable claim honest:
+
+- **State the negative.** "This does not reach X" survives a growing corpus; "this reaches everything" does not.
+- **Enumerate the limits, and say whether the list is a floor.** A count of known gaps is a record of what has been measured, not a census — write which one it is, so a later reader knows whether finding a seventh falsifies the paragraph or extends it.
+- **Name what would falsify it.** A claim with no stated falsifier cannot be checked by the next reader, only believed.
+
+The related rule for mutation rows — publish the diff, and an `md5 after` column pins movement rather than identity — is stated once in [docs/mutation/README.md](docs/mutation/README.md) rather than repeated here.
+
+No gate holds any of this. A gate for it would have to grade English, and this repo's recurring defect is a guard green over nothing; a keyword matcher over prose is that shape by construction. The check is a reviewer reading the sentence and asking what would have to change for it to become false.
+
 ## AI attribution
 
 Do not add AI-authorship attribution to commits or PR bodies:

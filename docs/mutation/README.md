@@ -84,3 +84,38 @@ Worth recording so nobody re-audits them from scratch:
 So the screen's blindness costs a matrix nothing on the SURVIVED side and
 everything on the KILLED side, where a row can read KILLED because the
 artifact stopped parsing.
+
+## Publishing a row so a later reader can re-run it
+
+A published row is evidence only to the extent someone else can reproduce
+it. Two things decide that, and both are about how the row is *written*.
+
+**Publish the mutation as a diff, not as a description.** A row that says
+"replace the early-out with a panic" leaves the next reader guessing at the
+bytes. A row that carries the hunk leaves nothing to guess. Where a diff is
+too long to sit in the table, put it beside the table and have the row point
+at it.
+
+**An `md5 after` column pins movement, not identity.** That column is
+author-self-certified by construction — it is a digest of bytes only the
+author saw — so the reproducible claim it makes is `changed` versus `no-op`,
+which is the question it was brought in to answer. The digits are not
+reproducible from the row's own prose.
+
+Measured (PR #963, round 3): a reviewer re-ran two inherited rows. MR-2,
+deleting a named early-out, reproduced to the digit at `b97b97d7`, because
+deleting a named block leaves no wording choice. MR-2ctl, replacing the same
+site with a panic, reproduced the *behaviour* exactly — 268 panics, 275 FAIL,
+the same as the original run — and hashed differently, `027faa18` against
+`276fafeb`, purely because the two authors wrote different panic text.
+
+So a reader comparing digits across two honest runs of the same row can read
+a mismatch as a contradiction when it is only a difference in wording. Either
+publish the literal diff, or say on the table that the hash pins movement
+rather than identity. The second costs one sentence and is what the column
+means either way.
+
+This is a writing convention and no gate holds it: a gate for it would have
+to grade prose. What falsifies a matrix written this way is a reader who
+cannot reconstruct the mutated bytes from the row — if that happens, the row
+needed its diff.

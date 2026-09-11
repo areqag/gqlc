@@ -947,6 +947,17 @@ rule above went four stages unchecked because there was neither a
 fence nor a note saying there was none; the next drift will at least
 be a known unknown.
 
+Because that bullet is the normative statement, it is also the only
+one. Every other mention of the argument name in these documents
+**cites this section rather than restating the rule** — C4 §5.3's own
+bullet does, and a document that argues the rule again is a second
+place for it to drift, in prose no sweep reads. That is an editorial
+discipline and nothing enforces it: the fence grades identifiers, so
+the sentences around the tails above can contradict them and stay
+green (`gqlc-e143`). What the discipline buys is that there is one
+paragraph to read for that, rather than one per document. ADR 0029
+decision 11 records why a prose-grading gate was refused instead.
+
 The 3-line doc-comment quote of the query text is a readability
 affordance for `godoc` browsers — the query is the source of truth,
 and having the top of it inline saves a jump to the `<methodName>QueryText`
