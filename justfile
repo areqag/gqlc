@@ -2310,6 +2310,13 @@ lint-new rev="origin/master": ensure-golangci
 # module has to be remembered, and the two that already exist were generalised
 # precisely because it was not.
 #
+# Reading modscope is what makes sweep-discovery-probes a dependency, and it is
+# not optional: a probe module a killed run left under test/data stops the walk
+# on goDirs' empty-walk refusal, so the gate would die over litter. The
+# dependency is held by TestEveryRecipeRunningModscopeSweepsProbesFirst (bd
+# gqlc-c7o7), which caught this recipe the first time it ran without it. It
+# costs 0.1s measured, which is the reason it is affordable inside a hook.
+#
 # With no paths the default is every module's `./...`, not the root's. A
 # root-only `./...` is what the comment above used to call "the whole tree"
 # while the nested module went unmeasured, and a coverage claim wider than the
@@ -2320,7 +2327,7 @@ lint-new rev="origin/master": ensure-golangci
 # means "code was graded and found wanting". A structural code from any module
 # therefore wins over a 1 from another — the commit author must not be told a
 # function is over the threshold when a module failed to load.
-complexity *paths: ensure-golangci
+complexity *paths: sweep-discovery-probes ensure-golangci
     #!/usr/bin/env bash
     set -euo pipefail
 
