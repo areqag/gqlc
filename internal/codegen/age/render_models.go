@@ -1576,14 +1576,17 @@ func agtypeIsNull(raw []byte) bool {
 //
 // Both lookups below key on ABSENCE and neither recognises an explicit
 // null, unlike agtypeRecordField, which reads one as absence. Since bd
-// gqlc-3ohpo that is measured rather than assumed: against the
-// digest-pinned apache/age image (AGE 1.7.0, PostgreSQL 18.1),
-// TestAGEDropsANullPropertyAndKeepsANullRecordField in test/data/codegen
-// found no route by which a vertex property can hold an explicit null.
-// CREATE with a null member, SET n.x = null, a null-valued bound scalar
-// parameter and a null-producing expression all drop the key, and the
-// two routes that would hand AGE a caller-built map for a property slot
-// are refused by the server — CREATE (z:L $props) and SET n += $props.
+// gqlc-3ohpo that divergence is measured rather than assumed, and the
+// measurement is in two halves.
+//
+// TestAGENeverHandsBackANullValuedProperty (bd gqlc-wc5j) enumerates the
+// routes a null can take onto a property and finds each of them dropping
+// the key.
+// TestAGEKeepsAnExplicitNullAtARecordFieldButNotAtAProperty closes the
+// two routes that enumeration cannot walk, because the server refuses
+// them: CREATE (z:L $props) and SET n += $props are the only spellings
+// that would put a whole caller-built map at a property slot, and both
+// are declined.
 //
 // So the emitted claim below, that an absent key is how a null arrives,
 // is the whole of the wire rather than a narrow reading of it, and

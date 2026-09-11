@@ -279,19 +279,19 @@ func fieldEncoder(f codegen.RecordFieldPlan, access string) (string, bool) {
 // reads an explicit null as absence. That divergence is deliberate, and
 // since bd gqlc-3ohpo it is measured rather than assumed, against the
 // digest-pinned apache/age image (AGE 1.7.0, PostgreSQL 18.1) by
-// TestAGEDropsANullPropertyAndKeepsANullRecordField in
+// TestAGEKeepsAnExplicitNullAtARecordFieldButNotAtAProperty in
 // test/data/codegen.
 //
 // What the measurement found is a REACHABILITY asymmetry, not two
 // readings of one wire. At a vertex property an explicit null is
-// unreachable: CREATE with a null member, SET n.x = null, a null-valued
-// bound scalar parameter, and a null-producing expression (head([]),
-// toInteger('abc')) all drop the key, and the two routes that would hand
-// AGE a caller-built map for a property slot are refused outright —
-// CREATE (z:L $props) answers "properties in a CREATE clause as a
-// parameter is not supported" and SET n += $props answers "SET clause
-// expects a map". So agtypeProperty keying on absence alone is not a
-// narrow reading; it is the only case there is.
+// unreachable. Every route that writes one drops the key, which
+// TestAGENeverHandsBackANullValuedProperty enumerates (bd gqlc-wc5j),
+// and the two routes that would hand AGE a caller-built map for a
+// property slot are refused outright — CREATE (z:L $props) answers
+// "properties in a CREATE clause as a parameter is not supported" and
+// SET n += $props answers "SET clause expects a map". So agtypeProperty
+// keying on absence alone is not a narrow reading; it is the only case
+// there is.
 //
 // At a record field the null IS reachable, because a record is stored as
 // one map value. A map arriving as a bound PARAMETER keeps its explicit
