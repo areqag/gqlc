@@ -1227,10 +1227,19 @@ check-bd-gh-sync-pull-tiebreak:
 # (bd gqlc-q2jb). ~2s, and it drives the REAL bd: the allow half's claim is that
 # a fresh checkout still bootstraps, and a stub would only encode the belief.
 #
-# NOT enrolled in `just gates`, deliberately. An arm there names the required CI
-# context it stands for, and this has none — adding one means editing ci.yml,
-# which was out of scope for the change that added the guard. So until bd
-# gqlc-kip5 lands, this is developer-run and a break in the guard lands green.
+# ENROLLED UNDER `tidy`, in ci.yml and in the `gates` recipe (bd gqlc-kip5). That
+# job already carries the checks needing neither Docker nor a Go build, and it is
+# already required on master, so this claimed a context that exists rather than a
+# ninth one somebody would have to decide to require. What it costs tidy is a
+# PINNED bd: ci.yml downloads the 1.0.4 release tarball, the version this fleet
+# deploys, and asserts the version it got before running these rows against it.
+# Deliberately not the latest release — bd-behaviour.yml takes the latest on
+# purpose, because its job is to learn that a future bd breaks an assumption, and
+# that is the right shape for an alarm and the wrong one for a merge gate.
+#
+# The rows needed one change to be runnable outside a primed workspace: a CI
+# checkout carries .beads config with no database, the database being gitignored.
+# The measurement is at A2 in the rows.
 test-bd-prime-guard:
     @.githooks/bd-prime-guarded.rows .githooks/bd-prime-guarded
 
@@ -2550,6 +2559,12 @@ gates:
     # placement as the moved-base rows above: an arm that reds only here lets
     # the break merge.
     run tidy           python3 .github/scripts/next-doc-ordinal.py --self-test
+    # The rows for .githooks/bd-prime-guarded (bd gqlc-kip5). ci.yml's tidy job
+    # runs the same command against a PINNED bd; here it runs against whatever bd
+    # this machine deploys, which is the binary the guard actually protects the
+    # session hooks from. Those are different questions and both are wanted: a
+    # local red says this host's bd has moved, a CI red says the guard has.
+    run tidy           just test-bd-prime-guard
     run govulncheck    just vuln
 
     # Refuse BEFORE the summary, not after: the summary is a coverage claim, and

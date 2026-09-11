@@ -214,6 +214,50 @@ jobs:
       # a network and a fetching step here would be a flaky red.
       - name: the allocator's own rows
         run: python3 .github/scripts/next-doc-ordinal.py --self-test
+      # bd gqlc-kip5: the rows for .githooks/bd-prime-guarded, the wrapper the
+      # SessionStart and PreCompact hooks in .claude/settings.json run instead of
+      # a bare `bd prime`. Until now nothing ran them unattended, so an edit to
+      # that guard landed green.
+      #
+      # HERE rather than in a job of its own, because a new job is a new status
+      # context and a context nobody adds to master's required list blocks
+      # nothing. tidy already holds the checks that need neither Docker nor a Go
+      # build, and it is already required. UNCONDITIONAL, for the same reason: a
+      # step behind an `if:` is skipped rather than failed, and a skipped check
+      # satisfies a required context.
+      #
+      # PINNED to the bd this fleet deploys, and unlike bd-behaviour.yml — which
+      # takes the LATEST release deliberately, being an alarm about future bd
+      # versions rather than a gate — a merge gate must not change its mind
+      # because somebody else cut a release. The version is asserted after the
+      # download, so a tarball that is not what the pin names is a loud failure
+      # here rather than eleven confusing rows below.
+      - name: install the pinned bd
+        env:
+          BD_VERSION: 1.0.4
+        run: |
+          url="https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_amd64.tar.gz"
+          mkdir -p "$HOME/.local/bin"
+          # Retried: a GitHub release download is exactly the thing this
+          # repository has watched answer 429 (bd gqlc-l45j, gqlc-flko), and this
+          # one is now inside a required context.
+          curl --proto '=https' --tlsv1.2 -sSfL \
+            --retry 5 --retry-all-errors --retry-delay 3 \
+            -o "${RUNNER_TEMP}/beads.tar.gz" "$url"
+          tar -C "${RUNNER_TEMP}" -xzf "${RUNNER_TEMP}/beads.tar.gz" bd
+          install -m 0755 "${RUNNER_TEMP}/bd" "$HOME/.local/bin/bd"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          got="$("${RUNNER_TEMP}/bd" version)"
+          echo "$got"
+          case "$got" in
+            *"$BD_VERSION"*) ;;
+            *)
+              echo "::error title=bd pin not honoured::asked for ${BD_VERSION}, got '${got}'"
+              exit 1
+              ;;
+          esac
+      - name: the bd-prime guard's own rows
+        run: just test-bd-prime-guard
       # bd gqlc-v2p: fails when a PR's `.beads/issues.jsonl` drops or reopens
       # an issue vs its base. Fetch only the base commit (depth 1) so cost is
       # O(1) in history size, not O(N). Skip on master push — the tip IS the
