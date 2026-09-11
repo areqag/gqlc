@@ -92,6 +92,23 @@ func TestOrderableSelectionNamesEveryPropertyType(t *testing.T) {
 		// row is where the decision gets recorded.
 		graph.TypeDecimal: false,
 
+		// UUID is refused for DECIMAL's reason and not for BYTES': it carries
+		// a total byte order, so this row says "the ruling does not enumerate
+		// it", not "it is not ordered". ruling-p9qgu predates the constant —
+		// gqlc-eg4b added it in PR #2842, after the ruling was written — so
+		// there was no enumeration for it to be left out of, and the
+		// least/greatest of a set of opaque identifiers is not a question
+		// anyone has asked. Refusing degrades min(p.u) to any, which costs a
+		// column its type and cannot be WRONG. If a later bead wants it
+		// orderable, this row is where the decision gets recorded.
+		//
+		// This row exists because master went red without either PR being
+		// wrong: #2842 added the constant and #2838 added this census, and
+		// neither merge ref contained the other. That is a semantic conflict
+		// no text-level merge can surface, and this table is the thing that
+		// caught it — which is the case for keeping it exhaustive.
+		graph.TypeUUID: false,
+
 		// The open/composite families. Ordering an ANY is engine-dependent at
 		// best — it holds whatever the writer wrote — and "can min/max over a
 		// list be typed" is a question the ruling explicitly does not open
