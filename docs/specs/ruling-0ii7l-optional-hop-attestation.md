@@ -691,6 +691,7 @@ with `sha256sum -c` per row, never `git checkout --`.
 |---|---|---|---|
 | 1 | gate → `otherCovers && witnessesItsEndpoints(e, written, demoted)` | fixture refuses `unknown edge: Employee&Person-[WORKS_AT]->Company` | **KILLED**, text exactly as declared |
 | 2 | `NarrowPluralEndpoints`' `case len(narrowed) == 1` → `== -1` | fixture refuses `ErrUnknownProperty` | **SURVIVED** — see below |
+| 2c | row 2 unchanged, re-run against the whole-entity variant (bd gqlc-4m6g) | that fixture refuses `ErrAmbiguousBinding` | **KILLED**, text exactly as declared — see §9.7.1 |
 | 2b | that pass's `keep` filter → `ok \|\| true` | fixture refuses `c.largeId missing on plural-satisfying type Company` | **KILLED**, text exactly as declared |
 | 3 | `endpointLabels`' `cands` arm `covers: true` → `false` | fixture refuses `ErrUnknownProperty` | **KILLED**, but at `unknown edge: Employee&Person-[WORKS_AT]->Company` — not surgical, see below |
 | 3b | `endpointNarrowing`'s gate alone: `srcCovers, tgtCovers = false, false` | fixture refuses `c.largeId missing on plural-satisfying type Company` | **KILLED**, text exactly as declared |
@@ -722,6 +723,57 @@ whole-entity observable this fixture lacks. The sweep moves **19 cells of
 row says only that *this* fixture cannot see the lane exit, which is why the
 follow-up (bd gqlc-4m6g) adds a whole-entity variant beside it rather than a
 guard where none exists.
+
+#### 9.7.1 The lane exit, observed on a widened binding (bd gqlc-4m6g)
+
+Row 2 blinds the *lane exit* and not the narrowing, and §9.7 closed by naming
+`plural_endpoint_whole_entity_after_edge_closure.cypher` as the observable this
+fixture lacks. That fixture reaches the exit for a **natively** plural binding —
+one plural because its written label set is satisfied by two declared types. The
+cell §9.7 was built to reach is a binding plural because of the gqlc-1qijx
+widening, and no query put one of those where the exit could be seen.
+
+The fixture that does is the property fixture with one token changed:
+
+```
+MATCH (p:Person)
+OPTIONAL MATCH (p)-[q:WORKS_AT]->(c)
+OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk)
+WITH c
+MATCH (e:Employee)-[w:WORKS_AT]->(c)
+RETURN c
+```
+
+as `valid/unlabelled_optional_introduced_hop_plural_endpoint_narrows_whole_entity.cypher`,
+on the same schema, with `s.Run("a whole entity projection sees the lane exit")`
+saying which mechanism its golden observes. Accepted, `c` is
+`node:Company&Large`, non-null.
+
+**Why one token separates the two effects.** `refProjectionType`'s `nodeCands`
+arm refuses a bare ref on **presence** in the lane, not on the candidate count,
+and so does `carriesPluralBinding` at the Part boundary. A property lookup asks
+`unionNodeProperty` instead, which a one-element candidate set satisfies exactly
+as a resolved type would. So rerouting a one-element `narrowed` through the
+`default` arm is invisible to `RETURN c.largeId` and fatal to `RETURN c`.
+
+**Row 2 re-run, unchanged, with that fixture in the corpus: KILLED.** Declared
+before the run — `TestValid` on the new fixture and the new `s.Run` arm both
+fail on `ambiguous binding: c is satisfied by more than one declared node type:
+Company&Large`, and the sweep moves the query's two accepting cells to
+`refuse ErrAmbiguousBinding`. All three observed, the error text byte-identical
+to the declaration. The `Company&Large` in that message is the disclosure the
+row was after: the set has been narrowed to one element and the binding is still
+in the plural lane.
+
+Under the mutant the sweep now moves **21 cells of 15523** — 15 different
+verdict, 5 different detail, 1 different sentinel — against 19 of 15480 before,
+the two added being this query's own. Adding the fixture itself moves the
+manifest by **43 new cells and no changed one**: 0 different verdict, 0
+different detail, 0 different sentinel, one row per schema.
+
+**Row 2 stays recorded as SURVIVED.** It was a true measurement of the corpus as
+it stood, and the reroute it exposed is a property of the `switch` rather than of
+the fixture. Row 2c is the same mutation against a corpus that can see it.
 
 **Row 3's victim is correct, its predicted message is not, and the first
 explanation offered for that gap was WRONG.** It is recorded here because the
