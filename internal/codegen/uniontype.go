@@ -239,16 +239,21 @@ func UnionHelperSuffix(pt graph.PropertyType) string {
 // a second spelling of a type the backends must not drift on
 // (UnionCarrierText exists so they cannot).
 //
-// All four helpers, not the subset a given batch reaches, for the reason
+// All five helpers, not the subset a given batch reaches, for the reason
 // RecordHelperNames reserves all five: which directions are emitted is a
 // per-backend reading of the batch and the identifier sweep runs before
-// any backend has made one.
+// any backend has made one. The five are the record group's five, minus
+// the alias and plus nothing — a nullable LIST<UNION<…>> parameter owes
+// its own wrapper here exactly as a nullable LIST<RECORD<…>> does there,
+// because both bind through a per-element helper that a bare pointer
+// cannot be handed to.
 func UnionHelperNames(pt graph.PropertyType) []string {
 	suffix := UnionHelperSuffix(pt)
 	return []string{
 		"encode" + suffix,
 		"encode" + suffix + "Ptr",
 		"encode" + suffix + "List",
+		"encode" + suffix + "ListPtr",
 		"decode" + suffix,
 	}
 }
@@ -270,4 +275,46 @@ func UnionHelperNames(pt graph.PropertyType) []string {
 // across runs.
 func UnionEncodings(entities []Entity, prepared []Query) []graph.PropertyType {
 	return reachableEncodings(entities, prepared, graph.KindUnion)
+}
+
+// ReachesUnion reports whether a width IS a closed union or reaches one
+// through list elements, record fields or union members.
+//
+// It exists for one question, which is why it answers a bool rather than
+// a set: whether a value in the PARAMETER position can fail to bind. A
+// union's encode validates against a declared member set and refuses a
+// value outside it, so every helper standing above one inherits a
+// fallible signature — a record whose field is a union builds its map
+// through that refusal, and a list of such records builds its elements
+// through it again. Every other encode on both backends is total, and a
+// helper declared (map[string]any, error) that can only answer nil would
+// be an error the caller is made to check and nothing can raise.
+//
+// Transitive through all three containers rather than through the two
+// reachable today, for reachableEncodings' reason: the closure rule is
+// not the kind's, and a shallow test would hand a total signature to a
+// helper whose body calls a fallible one.
+//
+// No `seen` set: a graph.PropertyType is a finite canonical encoding of
+// its own contents, so the descent is over a tree and terminates on the
+// text. The first union found short-circuits the rest.
+func ReachesUnion(pt graph.PropertyType) bool {
+	switch pt.Kind() {
+	case graph.KindUnion:
+		return true
+	case graph.KindRecord:
+		for _, f := range pt.Fields() {
+			if ReachesUnion(f.Type) {
+				return true
+			}
+		}
+		return false
+	case graph.KindList:
+		return ReachesUnion(pt.Elem())
+	case graph.KindScalar:
+		// A scalar has no contents, so nothing hides inside one. Named
+		// rather than defaulted so a fifth kind cannot be added silently.
+		return false
+	}
+	return false
 }

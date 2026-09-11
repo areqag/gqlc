@@ -213,6 +213,24 @@ type helpers struct {
 	// does with a nil is fail naming itself and the record it is in,
 	// which is an error message the caller has and the helper does not.
 	recordField bool
+
+	// unions holds every closed union encoding the batch reaches, in
+	// first-marked order and deduplicated by canonical encoding, with
+	// unionDecoders and unionEncoders the two direction subsets.
+	//
+	// The same three fields the records have, for the same reasons and
+	// with one difference: there is no carrier ALIAS to emit, a union
+	// carrying as `any` (spec §4). So `unions` exists only to keep the two
+	// direction maps in a deterministic order — the order the batch
+	// reached them — which is what makes the emitted file byte-stable.
+	//
+	// Two direction sets rather than one bool for the record half's reason
+	// exactly: a union READ but never bound would emit an encoder naming
+	// its members' encode-side helpers — agtypeDateText for a DATE member
+	// — which nothing in a read-only batch marks.
+	unions        []graph.PropertyType
+	unionDecoders map[graph.PropertyType]bool
+	unionEncoders map[graph.PropertyType]bool
 }
 
 // listPlan is one named list wrapper: the Go slice type it decodes into
@@ -279,84 +297,109 @@ func (h *helpers) forEntities(entities []wiredEntity) {
 // agtypeDateText.
 func (h *helpers) forParams(params []codegen.Param) {
 	for _, p := range params {
-		// Counted, not stripped once. A depth-2 list left "[]civil.Date"
-		// here, which matches no carrier arm, so the parameter was taken
-		// for one whose encode cannot fail and neither the leaf encoder
-		// nor agtypeEncodedList was ever marked — an emission calling
-		// helpers it does not define (bd gqlc-vhvz7).
-		// A nullable ELEMENT's star is stripped here too, and marks
-		// agtypeEncodedNullable: paramEncoder wraps the combinator around
-		// the element encoder, so a batch whose only nullable thing is an
-		// element still calls it (bd gqlc-dxhwp). The star steps no width:
-		// element nullability is a fact about the carrier TEXT, and the
-		// declared width one level in is the same either way.
-		leaf, leafWidth := p.GoType, p.Width
-		list, nullElem := false, false
-		for {
-			elem, ok := strings.CutPrefix(leaf, "[]")
-			if ok {
-				leaf, leafWidth, list = elem, elemWidth(leafWidth), true
-				continue
-			}
-			elem, ok = strings.CutPrefix(leaf, "*")
-			if !ok {
-				break
-			}
-			leaf, nullElem = elem, true
+		h.forParam(p)
+	}
+}
+
+// forParam marks the helpers ONE bound parameter encodes through.
+//
+// Split out of the loop above rather than inlined in it because the
+// per-parameter answer is four cases deep and the loop is one line: the
+// complexity gate reads them together, and what it was reading was a
+// function whose shape was "walk to the leaf, then decide", where only
+// the second half has any branching.
+//
+// The two declared-encoding arms are marked HERE and not in the leaf
+// switch because neither encoder is one of the fixed helper names: both
+// are emitted per encoding, and marking one is what puts that encoding on
+// the list renderModels emits from. Both are fallible — a record because
+// a field's own encoding can fail, a closed union because enforcing the
+// declared member set is the whole point of it — so both fall through to
+// the combinator marks rather than returning past them.
+func (h *helpers) forParam(p codegen.Param) {
+	leaf, leafWidth, list, nullElem := paramLeaf(p)
+	switch {
+	case codegen.IsDeclaredRecord(leaf, leafWidth):
+		h.needRecordEncode(leafWidth)
+	case codegen.IsDeclaredUnion(leaf, leafWidth):
+		h.needUnionEncode(leafWidth)
+	case leaf == goInstant:
+		// The instant predates the combinators and keeps its own pair:
+		// its encode cannot fail, so it stays an expression inside the
+		// args map and needs no local bound to it.
+		if p.Nullable {
+			h.nullMicros = true
+		} else {
+			h.micros = true
 		}
-		if codegen.IsDeclaredRecord(leaf, leafWidth) {
-			// Marked here and not in the switch below because a record's
-			// encoder is not one of the fixed helper names: it is emitted
-			// per encoding, and marking it is what puts that encoding on
-			// the list renderModels emits from. It is fallible for the
-			// same reason the temporals are, so it falls through to the
-			// two combinator marks rather than continuing past them.
-			h.needRecordEncode(leafWidth)
-			if p.Nullable || nullElem {
-				h.encNullable = true
-			}
-			if list {
-				h.encList = true
-			}
-			continue
-		}
-		if leaf == goInstant {
-			// The instant predates the combinators and keeps its own
-			// pair: its encode cannot fail, so it stays an expression
-			// inside the args map and needs no local bound to it.
-			if p.Nullable {
-				h.nullMicros = true
-			} else {
-				h.micros = true
-			}
-			continue
-		}
-		fallible := true
-		switch leaf {
-		case goDate:
-			h.dateText = true
-		case goLocalTime:
-			h.localTimeMicros = true
-		case goTime:
-			h.timeMicros = true
-			h.wrapDay = true
-		case goDuration:
-			h.durationMicros = true
-		case "uint64", "uint":
-			h.unsigned = true
-		default:
-			fallible = false
-		}
-		if !fallible {
-			continue
-		}
-		if p.Nullable || nullElem {
-			h.encNullable = true
-		}
-		if list {
-			h.encList = true
+		return
+	default:
+		if !h.markLeafEncoder(leaf) {
+			return
 		}
 	}
+	if p.Nullable || nullElem {
+		h.encNullable = true
+	}
+	if list {
+		h.encList = true
+	}
+}
+
+// markLeafEncoder marks the one fixed encoder a leaf carrier crosses
+// through, reporting whether the leaf has one at all. A false is a
+// carrier the JSON encoder already writes as the agtype scalar it rides,
+// so nothing is marked and the two combinators are not owed either.
+func (h *helpers) markLeafEncoder(leaf string) bool {
+	switch leaf {
+	case goDate:
+		h.dateText = true
+	case goLocalTime:
+		h.localTimeMicros = true
+	case goTime:
+		h.timeMicros = true
+		h.wrapDay = true
+	case goDuration:
+		h.durationMicros = true
+	case "uint64", "uint":
+		h.unsigned = true
+	default:
+		return false
+	}
+	return true
+}
+
+// paramLeaf walks one bound parameter's carrier text down to its leaf,
+// reporting the leaf's text and width and whether a list level or a
+// nullable element was crossed on the way.
+//
+// Counted, not stripped once. A depth-2 list left "[]civil.Date" at the
+// leaf, which matches no carrier arm, so the parameter was taken for one
+// whose encode cannot fail and neither the leaf encoder nor
+// agtypeEncodedList was ever marked — an emission calling helpers it does
+// not define (bd gqlc-vhvz7).
+//
+// A nullable ELEMENT's star is stripped here too, and its flag marks
+// agtypeEncodedNullable: paramEncoder wraps the combinator around the
+// element encoder, so a batch whose only nullable thing is an element
+// still calls it (bd gqlc-dxhwp). The star steps no width — element
+// nullability is a fact about the carrier TEXT, and the declared width
+// one level in is the same either way.
+func paramLeaf(p codegen.Param) (leaf string, leafWidth graph.PropertyType, list, nullElem bool) {
+	leaf, leafWidth = p.GoType, p.Width
+	for {
+		elem, ok := strings.CutPrefix(leaf, "[]")
+		if ok {
+			leaf, leafWidth, list = elem, elemWidth(leafWidth), true
+			continue
+		}
+		elem, ok = strings.CutPrefix(leaf, "*")
+		if !ok {
+			break
+		}
+		leaf, nullElem = elem, true
+	}
+	return leaf, leafWidth, list, nullElem
 }
 
 // need marks the helper one emitted Go type decodes through. Narrow
@@ -404,6 +447,18 @@ func (h *helpers) need(goType string, width graph.PropertyType) {
 	if elem, ok := strings.CutPrefix(goType, "*"); ok {
 		h.nullableElem = true
 		h.need(elem, width)
+		return
+	}
+	// Asked BEFORE the `any` arm below and not folded into it. A union's
+	// carrier text IS `any`, so the arm below would take every closed
+	// union for a value of no declared shape and mark agtypeValue — which
+	// compiles, decodes, and hands the caller the driver's widened int64
+	// where an INT32 member was declared. The pair is what tells them
+	// apart (codegen.IsDeclaredUnion), and it is asked after the star
+	// strip because a nullable ELEMENT reaches here as `*any` with the
+	// union width still beside it.
+	if codegen.IsDeclaredUnion(goType, width) {
+		h.needUnion(width)
 		return
 	}
 	if goType == "any" || goType == "map[string]any" {
@@ -515,6 +570,95 @@ func (h *helpers) needRecordEncode(width graph.PropertyType) {
 			continue
 		}
 		h.forParams([]codegen.Param{{GoType: fieldTy, Width: f.Type}})
+	}
+}
+
+// needUnion marks one closed union's DECODER, then the helpers its
+// members decode through — including the probes the dispatch itself asks,
+// which no member need mark on its own.
+//
+// Marked before the recursion, for needRecord's reason: a union that
+// contained itself would terminate here rather than run away. graph
+// cannot build one today, and the mark is free.
+//
+// The members are asked through unionMemberCarrier, the SAME wrapped
+// Property the admission rule was answered with, so a member this backend
+// declines cannot reach here — the whole union would have been declined at
+// Property and never admitted.
+//
+// agtypeInt64 and agtypeFloat64 are marked by the FAMILY rather than by
+// the member. The numeric arms of the dispatch probe with them before
+// narrowing, so a union whose only numeric member is a LOCAL TIME still
+// calls agtypeInt64 directly — which h.need would have marked anyway
+// through the integer carrier the LOCAL TIME rides — while one whose only
+// numeric member is a FLOAT32 calls agtypeFloat64 and would NOT have:
+// h.need marks agtypeFloat32 and the float scalar beneath it, and the
+// distinction is real enough that the probe is marked here in its own
+// right rather than inherited.
+func (h *helpers) needUnion(width graph.PropertyType) {
+	if h.unionDecoders[width] {
+		return
+	}
+	h.markUnion(width)
+	h.unionDecoders[width] = true
+	for _, m := range width.Members() {
+		memberTy, ok := unionMemberCarrier(m.Type)
+		if !ok {
+			continue
+		}
+		switch wireFamily(memberTy) {
+		case "integer":
+			h.integer = true
+		case "float":
+			h.float = true
+		}
+		h.need(memberTy, m.Type)
+	}
+}
+
+// needUnionEncode marks one closed union's ENCODER, then the helpers its
+// members encode through.
+//
+// The members are marked by asking forParams, one synthesised parameter
+// per member, because that is literally the question the emission asks:
+// a union member crosses the way a bound parameter of the same width
+// crosses, through the same leaf encoder and the same two combinators.
+// Asking it in the same words is what keeps the mark from drifting from
+// writeUnionEncoders, which composes each arm through the same
+// fallibleParamEncoder.
+//
+// No nullability is carried onto the synthesised parameter, matching the
+// arm the encoder emits: the whole value's nullability is the position's
+// and is spent before this helper is called, and a member's own NOT NULL
+// has no codegen effect (spec §4).
+func (h *helpers) needUnionEncode(width graph.PropertyType) {
+	if h.unionEncoders[width] {
+		return
+	}
+	h.markUnion(width)
+	h.unionEncoders[width] = true
+	for _, m := range width.Members() {
+		memberTy, ok := unionMemberCarrier(m.Type)
+		if !ok {
+			continue
+		}
+		h.forParams([]codegen.Param{{GoType: memberTy, Width: m.Type}})
+	}
+}
+
+// markUnion registers one encoding and readies the two direction sets.
+//
+// No alias is emitted from this list, unlike markRecord's: a union's
+// carrier is `any`. What the list is for is order — the emitted helpers
+// follow the order the batch reached their encodings, which is a function
+// of the schema and so byte-stable across runs.
+func (h *helpers) markUnion(width graph.PropertyType) {
+	if !slices.Contains(h.unions, width) {
+		h.unions = append(h.unions, width)
+	}
+	if h.unionDecoders == nil {
+		h.unionDecoders = map[graph.PropertyType]bool{}
+		h.unionEncoders = map[graph.PropertyType]bool{}
 	}
 }
 
@@ -677,6 +821,14 @@ func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	}
 	writeRecordDecoders(&b, records)
 	writeRecordEncoders(&b, records)
+	// The unions follow the records, and their decoders follow the record
+	// decoders for a reason beyond layout: a union member may BE a
+	// declared record, so this block names helpers the block above
+	// declares, and reading them in call order is what a reader of the
+	// emitted file gets from the arrangement.
+	unions := unionPlans(h)
+	writeUnionDecoders(&b, unions)
+	writeUnionEncoders(&b, unions)
 	writePropertyDecoders(&b, h)
 	return []byte(b.String())
 }

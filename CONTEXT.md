@@ -470,21 +470,23 @@ neo4j driver's package, a private carrier behind the conversion boundary);
 "runtime type" (there is no gqlc runtime module — the carriers are emitted,
 not imported).
 
-**Emission question / carrier question / storage question**:
-The three independent things asked about a **property type**, and the
-reason three sentinels answer where one used to. Only the last two are
-asked of a backend.
+**Carrier question / storage question**:
+The two independent things a **backend** is asked about a **property
+type**, and the reason two sentinels answer where one used to.
 
-The emission question is "has gqlc built an emission for this KIND at
-all?" and a `no` routes to `ErrUnimplementedTypeKind`. It is asked first,
-of gqlc rather than of a target, and the answer is the same on every
-target at once — today `no` for `RECORD` and the closed dynamic unions,
-which the schema front end resolves and nothing renders (`gqlc-h9n.33`).
-Asking it first is what stops a kind reaching a type table that has no
-case for it and coming back as a missing carrier, which would name an
-edit — change the declared width — that cannot help, because no width of
-that kind is emitted anywhere. It is the one refusal of the three that a
-future stage retires.
+There were three until `gqlc-x2uy`. The third was the emission question —
+"has gqlc built an emission for this KIND at all?" — asked of gqlc rather
+than of a target, answered the same on every target at once, and routed
+to `ErrUnimplementedTypeKind`. It was asked first so that a kind nothing
+rendered could not reach a type table with no case for it and come back
+as a missing carrier, naming an edit (change the declared width) that
+could not help. It was the one refusal of the three carrying a "yet", and
+both stages it promised have landed: `gqlc-x9tg7` gave `RECORD` an
+emission on both backends and `gqlc-x2uy` gave the closed dynamic unions
+one, after which it had no `no` left to answer and the sentinel was
+deleted. Every kind reaches the carrier question now, and a kind a
+backend cannot carry is refused there — the right site, because a union
+AGE declines and neo4j emits is a target's answer rather than gqlc's.
 
 The carrier question is "is there a faithful Go type for this width?" and
 a `no` routes to `ErrUnrepresentableWidth`. The storage question is "will

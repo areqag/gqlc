@@ -3345,7 +3345,7 @@ test-codegen-live:
 # the presence-only gate at writeShapelessFieldDecode -- and a pull request is
 # where that had better still be true.
 test-codegen-live-neo4j:
-    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestNeo4jRefusesAMapValuedStoredProperty|TestNeo4jRefusesAUint64ParameterAboveMaxInt64|TestNeo4jNeverHandsBackANullValuedProperty|TestAGERefusesAUint64ParameterAboveMaxInt64|TestEveryAgtypeCaptureIsWitnessedOrDeclaredSynthetic|TestNeo4jMinOverAnEmptyGroupIsNull' -skip 'TestLiveSmoke/apache-age' ./...
+    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestNeo4jRefusesAMapValuedStoredProperty|TestNeo4jRefusesAUint64ParameterAboveMaxInt64|TestNeo4jNeverHandsBackANullValuedProperty|TestAGERefusesAUint64ParameterAboveMaxInt64|TestAGERefusesAUnionParameterOutsideTheDeclaredMemberSet|TestEveryAgtypeCaptureIsWitnessedOrDeclaredSynthetic|TestNeo4jMinOverAnEmptyGroupIsNull' -skip 'TestLiveSmoke/apache-age' ./...
 
 # the Apache AGE half of the live battery: the smoke battery's AGE arm, the
 # session-init contract, and the AGE-only probes. The -run alternation below is

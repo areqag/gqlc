@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
@@ -322,6 +323,16 @@ func writeLabelGuard(b *strings.Builder, e codegen.Entity, arg string) {
 // argument itself would emit a redeclaration, and generation would still
 // exit 0 because the format gate only parses.
 func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, arg string) {
+	if codegen.IsDeclaredUnion(f.GoType, f.Width) || isUnionList(f.GoType, f.Width) {
+		// Asked before BOTH tests below it, because a closed union takes
+		// the wrong one of them at each arity: on its own it carries as
+		// `any` and would go to the shapeless lane, which hands the
+		// driver value over undispatched; as a list it carries as `[]any`
+		// and would ride the default arm, which assigns the driver's own
+		// slice bare. Both lose the narrowing the member list buys.
+		writeUnionFieldDecode(b, e, f, arg)
+		return
+	}
 	if !ridesADriverCarrier(f.GoType) {
 		writeShapelessFieldDecode(b, e, i, f, arg)
 		return
@@ -419,6 +430,60 @@ func writeShapelessFieldDecode(b *strings.Builder, e codegen.Entity, i int, f co
 	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: could not find any property named %%s\", %q)\n", e.Name, e.Name, f.Field, f.PropName)
 	b.WriteString("\t}\n")
 	fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
+}
+
+// writeUnionFieldDecode emits the read of a property whose declared width
+// IS a closed union, or is a list of one.
+//
+// It goes through the Props map directly, for writeShapelessFieldDecode's
+// reason: the carrier is `any`, which is a member of neither
+// neo4j.PropertyValue nor neo4j.RecordValue, so neo4j.GetProperty[any]
+// does not compile. What the driver leaves in that map is the wire value,
+// which is exactly what the emitted dispatch narrows.
+//
+// Absence is the schema's null on the nullable arm and a decode failure on
+// the non-nullable one, worded the way neo4j.GetProperty words its own
+// miss so a caller cannot tell which arm reported it.
+//
+// The nullable arm gates on presence AND on a nil value, which is one test
+// more than writeShapelessFieldDecode's. The extra test is not a claim
+// that a neo4j property can hold a null — the paragraph there records why
+// it cannot — it is what stops a nil reaching decode<Suffix>, which
+// dispatches on the wire shape and belongs no member to. A broken premise
+// there would be a refusal naming the union rather than a nil delivered as
+// a value.
+func writeUnionFieldDecode(b *strings.Builder, e codegen.Entity, f codegen.EntityField, arg string) {
+	site := decodeSite{
+		zero: e.Name + "{}",
+		fail: func(depth int, tail string) (format, args string) {
+			// e.Name and f.Field are mangled Go identifiers, so they are
+			// safe pasted into the format; the PROPERTY name is author
+			// text and is an argument, for recordFail's reason.
+			subject := "property %q" + strings.Repeat(" element", depth)
+			return strconv.Quote("decode " + e.Name + "." + f.Field + ": " + subject + ": " + tail),
+				strconv.Quote(f.PropName)
+		},
+	}
+	// The locals are positional and carry a `u` stem no other lane in this
+	// file emits, so a property whose name collides with one of them
+	// cannot emit a redeclaration.
+	n := 0
+	next := func() string { n++; return fmt.Sprintf("u%d", n) }
+
+	if f.Nullable {
+		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok && v != nil {\n", arg, f.PropName)
+		got := writeValueDecode(b, site, 0, f.GoType, f.Width, "v", "\t\t", next)
+		fmt.Fprintf(b, "\t\tout.%s = &%s\n", f.Field, got)
+		b.WriteString("\t}\n")
+		return
+	}
+	raw := next()
+	fmt.Fprintf(b, "\t%s, ok := %s.Props[%q]\n", raw, arg, f.PropName)
+	b.WriteString("\tif !ok {\n")
+	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: could not find any property named %%s\", %q)\n", e.Name, e.Name, f.Field, f.PropName)
+	b.WriteString("\t}\n")
+	got := writeValueDecode(b, site, 0, f.GoType, f.Width, raw, "\t", next)
+	fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, got)
 }
 
 // isSliceType reports whether an emitted Go type is a slice this package

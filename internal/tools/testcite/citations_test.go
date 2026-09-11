@@ -178,6 +178,10 @@ var pinned = map[string]map[string]string{
 	"internal/tools/ghorphan/main_test.go": {
 		"TestANarrowerWindowTurnsAnAmbiguousRefusalIntoAClose": "HISTORICAL. The name this test carried before the ambiguity guard in plan(), when it pinned the flip as REACHABLE. NOTE the coarseness the doc comment above warns about: this file wrote the same name at a second site as genuine rot (a stale citation of the renamed test, repaired with this pin), so a real citation of it written here later would be excused silently.",
 	},
+	"internal/codegen/prepare_test.go": {
+		"TestUnimplementedKindRefusedBeforeTheCarrierQuestion": "HISTORICAL. The name TestEveryDeclaredKindReachesTheCarrierQuestion replaced when gqlc-x2uy deleted ErrUnimplementedTypeKind. The rename records an INVERSION rather than a tidy-up — the rows that asserted a union was refused BEFORE the type table now assert it reaches the table — and naming the old test is what stops the next reader taking the new rows for the old ones weakened. Resolving it would mean the sentinel was never deleted.",
+		"TestUnimplementedKindOutranksRecordFieldLegality":     "HISTORICAL. The name TestRecordFieldLegalityAnswersARecordCarryingAUnion replaced in the same change. The ordering it pinned had two refusals to order and one of them is gone, so it could not be repaired into the new world and was rewritten around what survives. The old name is the record of which claim was retired rather than relaxed.",
+	},
 	"internal/tools/modscope/justfile_test.go": {
 		"hooktests_test.go": "HISTORICAL. The sentence is the record of this citation being DROPPED rather than repointed: the file went with the CI scaffolding in PR #1595 and the argument never needed it (bd gqlc-chep). Repairing it the way rot is repaired would delete the fact it exists to carry.",
 	},

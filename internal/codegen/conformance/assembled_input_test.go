@@ -525,7 +525,7 @@ func ghostEdge() schema.EdgeKey {
 
 // collidingRecord is a record whose two field names are distinct in GQL
 // and one name in Go: paramFieldName spells both "MinAge". Every kind in
-// it has an emission, so it is past the unimplemented-kind walk and the
+// it has an emission, so every carrier question it raises answers and the
 // legality check is the only thing that refuses it.
 func collidingRecord() graph.PropertyType {
 	return graph.RecordOf([]graph.RecordField{
@@ -628,44 +628,8 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 			msg: `unrepresentable property width: query "Fetch" column 0 "x" has INT128`,
 		},
 		{
-			name: "column-unimplemented-kind",
-			why:  "A column carrying a union, on column-width's argument one step further along: Phase Z walks the schema and refuses a declared union property there, so a column reaching the kind check is one no declared property backs. The resolver types a column from a schema property or from callProjectionType, and neither yields a kind Phase Z has not already refused. It carried a record until stage 1 of gqlc-x9tg7 gave records an emission; the union is now the only kind refused at its own node.",
-			in: codegen.Input{
-				Schema:  probeSchema(),
-				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{Name: "u", Type: resolver.ResolvedProperty{Type: graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})}})},
-			},
-			is:  codegen.ErrUnimplementedTypeKind,
-			msg: `property type kind not implemented yet: query "Fetch" column 0 "u" has UNION<INT32|STRING>`,
-		},
-		{
-			name: "param-unimplemented-kind",
-			why:  "A parameter carrying a union, on param-width's argument.",
-			in: codegen.Input{
-				Schema: probeSchema(),
-				Queries: []codegen.NamedQuery{probeParamQuery(resolver.ResolvedParameter{
-					Name: "p",
-					Type: resolver.ResolvedProperty{Type: graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})},
-				})},
-			},
-			is:  codegen.ErrUnimplementedTypeKind,
-			msg: `property type kind not implemented yet: query "Fetch" parameter 0 $p has UNION<INT32|STRING>`,
-		},
-		{
-			name: "list-elem-unimplemented-kind",
-			why:  "A ResolvedList over a ResolvedProperty carrying a union, on list-elem-width's argument. The element is spelled as a bare union rather than a LIST<UNION<…>> property because that is the shape this SITE takes: Phase B splits a list property into its element before reaching here, so the nesting the walk exists to see through is exercised at the unit level and the reach measured here is the site's own.",
-			in: codegen.Input{
-				Schema: probeSchema(),
-				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{
-					Name: "us",
-					Type: resolver.ResolvedList{Element: resolver.ResolvedProperty{Type: graph.UnionOf([]graph.UnionMember{{Type: graph.TypeInt32}, {Type: graph.TypeString}})}},
-				})},
-			},
-			is:  codegen.ErrUnimplementedTypeKind,
-			msg: `query "Fetch" column 0 "us": property type kind not implemented yet: list element has UNION<INT32|STRING>`,
-		},
-		{
 			name: "column-record-field-collision",
-			why:  "A column carrying a record whose two field names mangle to one Go field, on column-unimplemented-kind's argument: Phase Z walks the schema and refuses a declared record with colliding fields there, so a column reaching this check is one no declared property backs. The record is legal as a KIND and illegal only as a Go SPELLING, which is what puts it past the walk and at this site.",
+			why:  "A column carrying a record whose two field names mangle to one Go field, on column-width's argument: Phase Z walks the schema and refuses a declared record with colliding fields there, so a column reaching this check is one no declared property backs. The record is legal as a KIND and illegal only as a Go SPELLING, which is why the carrier question answers and the collision is the only thing left to refuse it.",
 			in: codegen.Input{
 				Schema:  probeSchema(),
 				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{Name: "r", Type: resolver.ResolvedProperty{Type: collidingRecord()}})},
@@ -675,7 +639,7 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 		},
 		{
 			name: "param-record-field-collision",
-			why:  "A parameter carrying the same record, on param-unimplemented-kind's argument. Spelled at the parameter site as well as the column site because the two are separate returns in separate passes, and a check wired into one of them would leave the other emitting a struct that declares one Go field twice.",
+			why:  "A parameter carrying the same record, on param-width's argument. Spelled at the parameter site as well as the column site because the two are separate returns in separate passes, and a check wired into one of them would leave the other emitting a struct that declares one Go field twice.",
 			in: codegen.Input{
 				Schema: probeSchema(),
 				Queries: []codegen.NamedQuery{probeParamQuery(resolver.ResolvedParameter{
@@ -688,7 +652,7 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 		},
 		{
 			name: "list-elem-record-field-collision",
-			why:  "A ResolvedList whose element carries the same record, on list-elem-unimplemented-kind's argument and spelled the same way, as a bare element rather than a list-valued property.",
+			why:  "A ResolvedList whose element carries the same record, on list-elem-width's argument and spelled the same way, as a bare element rather than a list-valued property.",
 			in: codegen.Input{
 				Schema: probeSchema(),
 				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{
