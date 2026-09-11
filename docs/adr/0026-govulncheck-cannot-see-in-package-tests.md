@@ -327,6 +327,66 @@ set. Exporting the fields instead measures at ~285 production references. It
 stays blind on purpose. The goal is to shrink the residual and know its size,
 not to reach zero by exporting things that should stay private.
 
+**The attempt was made, and this is what it measured** (gqlc-mwohz), recorded
+here so the next reader inherits it rather than re-deriving it. Every
+in-package `_test.go` under `internal/resolver` was flipped to `package
+resolver_test` and the identifiers the compiler then rejected were qualified,
+one build at a time. Eighteen were left. Most of them an `export_test.go`
+bridge carries the way `internal/codegen/age`'s does — by type inference
+(`var X = x`, `type X = x`) and method expressions, neither of which spells a
+type name. Three are not:
+
+| type | declared | what the tests do with it |
+|---|---|---|
+| `branchState` | `resolve.go` | composite literal, unexported fields |
+| `callBindingSlot` | `resolve.go` | composite literal, unexported fields |
+| `nodeTable` | `resolve.go` | composite literal, unexported fields |
+
+A constructor must spell its parameter types, and these three carry fields
+typed by `schema.NodeType`, `schema.EdgeType`, `schema.EdgeKey` and
+`query.EdgeBinding`. So the bridge has to import `internal/schema`, whose
+closure reaches antlr — and a single third-party import in `export_test.go`
+puts the package back in the blind set, because the residual is measured from
+a package's `.TestImports`. Bridge written, package still blind. That is the
+wall, and it is the same test `internal/codegen/age` passed: what decides a
+case is what the fields are TYPED by, not that the tests reach them.
+
+Which test files need what, so a future attempt does not re-derive the map:
+
+| file | unexported identifiers needed |
+|---|---|
+| `keylabelset_test.go` | `edgeCandidates` `endpointLabels` `labelDeclared` `nodeTable` `resolveNodeLabels` `undeclaredLabels` |
+| `resolver_test.go` | `allSentinels` `endpointContribution` `formatEdgeKey` `orientationDisagreement` `patternLeft` `patternRight` `unionColumnTypeArm` |
+| `scope_test.go` | `branchState` `callBindingSlot` `newScope` |
+| `sumdefaults_internal_test.go` | `branchState` `newScope` `resolveType` `validateEffect` |
+| `sweep_test.go` | `allSentinels` |
+| `undeclaredreltype_test.go` | none |
+
+That map was taken over the six in-package files the package held on
+2026-08-29 and it is **not a census of the package** — a seventh,
+`wrongorientation_test.go`, arrived with #2126 and is not in it, and any file
+added since is not either. Read it as a lower bound on the work and re-derive
+the rest with the same compiler loop. What does not move with the file count is
+the all-or-nothing property: the gate is per-package, and every in-package file
+here imports testify, so one file left behind keeps `internal/resolver` blind
+and a partial conversion buys nothing.
+
+**The other route was measured and declined.** Exporting the fields instead of
+bridging them was sized at roughly 285 production references across 16 field
+names; a word count over the package's non-test files on 2026-09-10 at
+`e5d7cdfa` put the three largest at 48 (`resolved`), 58 (`cands`) and 25
+(`resolvedCovers`). The two numbers were taken by different methods and neither
+is the reference count a rename tool would report — what they agree on is the
+order, a few hundred sites in the resolver's hot path renaming private state to
+satisfy a scanner. The decision does not turn on the digit, so nothing here
+should be quoted as one; anyone who wants the exact figure should re-take it.
+
+**What would actually unblock this**, if someone wants it: constructors or
+builders for those three types in PRODUCTION, used by production, whose
+signatures a bridge can then carry by inference. That is a design question
+about the resolver's internal API and has to be justified on its own merits —
+not by this ADR, and not by the scanner. Route it through a designer.
+
 `internal/codegen/age` looked like the same wall and was not, which is the
 distinction worth carrying to the next package: its tests also build types from
 composite literals naming unexported fields — `dialectGap`, `dialectProbe`,

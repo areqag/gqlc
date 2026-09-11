@@ -281,6 +281,52 @@ was not chosen:
   binding. A sweep that reddens on those is worse than a named limit, so the
   limit is named (`gqlc-offa`) and the brace stays part of the binding anchor.
 
+## Decision 11 — the argument-name rule has one normative statement, and every other mention cites it
+
+The fence grades identifiers. It reads no prose, so a sentence sitting under an
+intact graded span can specify the opposite of it and every assertion still
+passes — leave a `<param-list>` tail alone and rewrite the sentence beneath it,
+and the document goes back to specifying the capture vector `gqlc-rz0l` removed,
+in the section that is this repository's statement of the rule. Measured green
+against the fence at `163d1873` (`gqlc-e143`).
+
+**Closing that inside the fence is refused.** It means grading natural language
+against an emitter, which is not something a Go test does honestly. Every cheap
+approximation — a keyword blacklist, "no sentence near a graded span may contain
+*derive*" — passes over the rewording nobody predicted and reddens on innocent
+prose, which is worse than the gap named. This repository's recurring defect is
+a guard green over nothing, and a keyword matcher over English is that shape by
+construction. Do not close `gqlc-e143` by adding one.
+
+**What is tractable is editorial.** The rule has one normative statement — the
+`<param-list>` bullet in `docs/specs/codegen-stage-c1.md` §5.3 — and every other
+mention in these documents cites it rather than restating it. That does not
+narrow what any one sentence can say; it narrows how many sentences a reviewer
+has to read to know whether the documented rule still matches the emitter, from
+one paragraph per document to one paragraph.
+
+The bullet is not an arbitrary choice of home. It is the one text the fence
+holds verbatim by identity (Decision 5), so an edit to the rule *as stated in
+the tails* is red there, and both arities are in that one place rather than one
+fenced and one in prose — which is how the single-parameter arity came to sit in
+prose with the capture vector in it.
+
+What this does **not** buy, stated plainly because the gap is the bead's whole
+subject: the sentences around those tails are still unfenced. `gqlc-e143`'s
+mutation stays green after this decision. The change is that there is one such
+neighbourhood instead of one per document and it is named, so the reviewing is
+possible rather than diffuse.
+
+Measured 2026-09-10 at `e5d7cdfa`: `ParamArg`, "generator-owned" and "argument
+name" together name three documents under `docRoots` — C1, C4, and this one.
+C4's two mentions both cite C1 §5.3 and neither carries the rationale. So the
+discipline held before it was written down; this decision is what keeps it
+holding. Those three terms are a screen and not a census — a mention spelling
+none of them is invisible to it, so read the number as a floor. What falsifies
+this decision is a second normative statement appearing anywhere under
+`docRoots`, or a new document that states the rule instead of citing it. Nothing
+gates either; re-running that screen is what finds them.
+
 ## Consequences
 
 The fence is a graded-site check, not a document check. What it does **not**
@@ -301,7 +347,8 @@ own header:
 - A signature carrying the author's names as separate arguments is past the
   arity the signature sweep reads (`gqlc-vu7z`).
 - The prose around an intact graded span may say the opposite of it
-  (`gqlc-e143`).
+  (`gqlc-e143`). The editorial answer, and why the fence is not the answer, is
+  Decision 11.
 - The binding sweep peels pointer operators along with carrier conversions, so
   `*arg` and `&arg` unwrap to `arg` and stay green (`gqlc-173n`).
 - A driver binding stated with no `map[string]any` literal around it is unswept,
