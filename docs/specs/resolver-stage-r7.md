@@ -1159,7 +1159,15 @@ itself is what fails).
 
 Failure edge — fixture `call_yield_property_lookup.cypher` (§6.4):
 `CALL test.my.proc('Stefan', 1) YIELD city\nRETURN city.length`.
-Golden pins `ErrUnknownProperty: city.length`.
+The golden pins the SENTINEL `ErrUnknownProperty` and nothing else —
+`internal/resolver/resolver_test.go` maps the fixture to the sentinel,
+and no fixture, golden or assertion anywhere holds the message text.
+The message emitted is `unknown property: city.length (CALL YIELD
+variable "city" is a scalar)`, quoted whole in §6.5 below. This
+paragraph read `Golden pins ErrUnknownProperty: city.length` until
+2026-09-10 (bd `gqlc-tsuu5`), which overstated the golden in two
+directions at once: it attributed the message to the golden, and it
+gave a prefix of the message rather than the message.
 
 **Judgment call — no separate ErrCallScalarPropertyAccess
 sentinel.** Adding a sentinel per failure family is anti-pattern

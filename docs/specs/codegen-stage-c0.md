@@ -396,8 +396,8 @@ carrying a set through the walk for no code-size or clarity benefit.
 ### 4.5 Sentinel set
 
 Package-level sentinels in `internal/queryfile/errors.go`, wrapped at
-the fail-site with detail (`fmt.Errorf("%w: line %d: %s",
-ErrUnknownCardinality, lineno, tok)`) — the schema/gql / resolver
+the fail-site with detail (`fmt.Errorf("%w: line %d: %q",
+ErrUnknownCardinality, lineno, cardTok)`) — the schema/gql / resolver
 convention.
 
 ```go

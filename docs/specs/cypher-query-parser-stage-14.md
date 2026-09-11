@@ -888,9 +888,12 @@ Steps (in walk order):
      the source field via the optional field child; a bare variable
      means the source field name equals the variable).
    - For each item, resolve the source field against `sig.Results`.
-     If no result declares the source field: `l.fail(fmt.Errorf("%w:
-     %s on %s", ErrUnknownProcedure, sourceField, name))` and
-     return.
+     If no result declares the source field: `l.fail(fmt.Errorf("%w
+     result field: %s on %s", ErrUnknownProcedure, sourceField,
+     procName))` and return. The ` result field` infix is load-bearing:
+     `ErrUnknownProcedure` covers both the name miss and the YIELD-field
+     miss, and the message text is the only thing that separates them
+     (`internal/query/cypher/errors.go` on `ErrUnknownProcedure`).
    - **Intra-YIELD collision check.** Before recording the
      CallBinding, check the variable against the set of names this
      CALL's YIELD list has already recorded. If duplicate:
