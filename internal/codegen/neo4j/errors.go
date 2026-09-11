@@ -89,7 +89,14 @@ func nameBackend(err error) error {
 
 // driverVersionRefusal re-raises a width refusal that another enrolled
 // driver major would have carried, under this package's own sentinel.
-// (nil, false) leaves the error to nameBackend above.
+// nil leaves the error to nameBackend above.
+//
+// One error return rather than the (error, bool) pair this had first:
+// the bool carried nothing the error did not, since every return was
+// either (nil, false) or (non-nil, true). revive's error-return rule is
+// what surfaced it — the pair also had the error in the wrong position —
+// and collapsing it was the fix that removed a state rather than
+// reordering one.
 //
 // It reads the refusal rather than re-walking the batch, which is why it
 // covers all four of the front end's raise sites — the entity sweep, the
@@ -102,6 +109,7 @@ func nameBackend(err error) error {
 // ok=false from RefusedWidth keeps the front end's error, which is the
 // conservative direction: the coarse sentinel is true of every width no
 // major carries, and merely incomplete about one a newer major does.
+// That is the nil return.
 //
 // The message inherits the front end's position text with the sentinel
 // prefix removed, so the author still reads which entity, column or
@@ -109,10 +117,10 @@ func nameBackend(err error) error {
 // package did not predict passes through unchanged and reads redundantly
 // rather than wrongly — which is why this is not a parse of a text this
 // package has no contract with.
-func driverVersionRefusal(err error, target driverTarget) (error, bool) {
+func driverVersionRefusal(err error, target driverTarget) error {
 	width, ok := codegen.RefusedWidth(err)
 	if !ok {
-		return nil, false
+		return nil
 	}
 	for _, other := range driverTargets {
 		if other.key == target.key {
@@ -123,15 +131,15 @@ func driverVersionRefusal(err error, target driverTarget) (error, bool) {
 		}
 		site := strings.TrimPrefix(err.Error(), codegen.ErrUnrepresentableWidth.Error()+": ")
 		return fmt.Errorf("%w: %s, which the neo4j backend carries only on the %s target",
-			ErrUnrepresentableOnDriverVersion, site, other.key), true
+			ErrUnrepresentableOnDriverVersion, site, other.key)
 	}
-	return nil, false
+	return nil
 }
 
 // refuse is the one place a refusal leaves this backend, so the two
 // rules above are asked in one order rather than at each call site.
 func refuse(err error, target driverTarget) error {
-	if refusal, ok := driverVersionRefusal(err, target); ok {
+	if refusal := driverVersionRefusal(err, target); refusal != nil {
 		return refusal
 	}
 	return nameBackend(err)
