@@ -394,12 +394,41 @@ and the line numbers cited for it no longer exist: `gqlc-x2uy` deleted
 the sentinel, the walk, its registry row and its taxonomy entries, so
 the four sites now ask `recordFieldLegality` first and the type map
 second. And stage 2's scope moved in both directions — `LIST<UNION<…>>`
-storage on neo4j is deferred to `gqlc-npus`, unmeasured against the
-server, so neo4j's `StorableProperty` presently admits a union-valued
-list by saying nothing about it; while stage 2 grew a half this section
-did not anticipate, the AGE union emission, since §4's admission rule
-left AGE admitting wire-distinct unions that nothing on that backend
-rendered, and the walk could not be deleted while that was true.
+storage on neo4j was deferred to `gqlc-npus` rather than guessed, so for
+a while neo4j's `StorableProperty` admitted a union-valued list by
+saying nothing about it; while stage 2 grew a half this section did not
+anticipate, the AGE union emission, since §4's admission rule left AGE
+admitting wire-distinct unions that nothing on that backend rendered,
+and the walk could not be deleted while that was true.
+
+**`gqlc-npus` has since measured it, and the fork below took its
+refuses branch.** Against Neo4j Kernel 5.26.28 community the server
+refused `{xs: [true, 1]}` with *"Neo4j only supports a subset of Cypher
+types for storage as singleton or array properties"*, with a
+homogeneous `BOOL` array, a homogeneous `INT` array, a bare union value
+and a projection of the identical mixed list all green in the same run.
+So neo4j's `StorableProperty` now refuses a list whose element is a
+union, beside the nested-list and record arms, and
+`TestNeo4jRefusesAHeterogeneousArrayStoredProperty` is the tripwire
+under it. Two details of that measurement are load-bearing and are
+recorded here because neither was predictable from the rule's wording:
+
+- the refusal is a **different message** from the map-valued one this
+  section's §5 fork rests on (*"Property values can only be of
+  primitive types or arrays thereof"*), so the two probes cannot share
+  a wording constant;
+- the **numeric pairing is accepted, and lossy**. `{ns: [1, 1.5]}`
+  stores, and reads back as `[1.0, 1.5]` with both elements typed
+  `FLOAT` — the server widens the long rather than refusing the array.
+  An `INT64|FLOAT64` union is wire-distinct and therefore admitted by
+  §4, so a storage arm keyed on *the pairs the server rejects out loud*
+  would have admitted the one width whose failure is **silent**. The
+  arm refuses the whole width for that reason, and is over-broad by
+  exactly one member pairing on purpose.
+
+The arm is the **list branch only**: a bare `UNION<…>` property is a
+single primitive value and is stored, so `KindUnion` is not refused at
+the top of `StorableProperty` the way `KindRecord` is.
 
 **Stage 1 — records** (`gqlc-jffyz`, retitled to records only):
 `KindRecord` + `TypeAnyRecord` + `RECORD<>` carriers on both

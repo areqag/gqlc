@@ -52,7 +52,11 @@ var LiveArms = map[string]Arm{
 	"TestNeo4jRefusesANestedListStoredProperty":     ArmNeo4j,
 	"TestNeo4jRefusesAMapValuedStoredProperty":      ArmNeo4j,
 	"TestNeo4jRefusesAUint64ParameterAboveMaxInt64": ArmNeo4j,
-	"TestAGERefusesAUint64ParameterAboveMaxInt64":   ArmNeo4j,
+	// The LIST<UNION<…>> storage measurement (bd gqlc-npus), beside the
+	// nested-list and map-valued rows it is modelled on. Its own neo4j
+	// container, no AGE half.
+	"TestNeo4jRefusesAHeterogeneousArrayStoredProperty": ArmNeo4j,
+	"TestAGERefusesAUint64ParameterAboveMaxInt64":       ArmNeo4j,
 	// Needs no container either — it binds over a nil DBTX and the panic
 	// IS the assertion — so it goes in the cheap half beside the uint64
 	// row above rather than paying for an AGE image it never talks to.

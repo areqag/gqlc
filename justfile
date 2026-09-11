@@ -3340,12 +3340,13 @@ test-codegen-live:
 # They earn the PR-blocking half rather than the nightly one for one reason.
 # Each is the tripwire under a claim that exists SOLELY because of what this
 # server does -- nested lists for ADR 0035, map-valued properties for the record
-# carriers' storage ruling, the driver's own overflow refusal for the uint64
+# carriers' storage ruling, heterogeneous arrays for the LIST<UNION<..>> arm bd
+# gqlc-npus measured, the driver's own overflow refusal for the uint64
 # widen bd gqlc-tzjqu removed, and the absence of any null-valued property for
 # the presence-only gate at writeShapelessFieldDecode -- and a pull request is
 # where that had better still be true.
 test-codegen-live-neo4j:
-    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestNeo4jRefusesAMapValuedStoredProperty|TestNeo4jRefusesAUint64ParameterAboveMaxInt64|TestNeo4jNeverHandsBackANullValuedProperty|TestAGERefusesAUint64ParameterAboveMaxInt64|TestAGERefusesAUnionParameterOutsideTheDeclaredMemberSet|TestEveryAgtypeCaptureIsWitnessedOrDeclaredSynthetic|TestNeo4jMinOverAnEmptyGroupIsNull' -skip 'TestLiveSmoke/apache-age' ./...
+    cd test/data/codegen && go test -v -tags codegen_live -run 'TestLiveSmoke|TestEveryBatteryIsTheDeclaredSize|TestEveryBatteryIsNamedInScenarioTables|TestTxMethodSet|TestNeo4jRefusesANestedListStoredProperty|TestNeo4jRefusesAMapValuedStoredProperty|TestNeo4jRefusesAHeterogeneousArrayStoredProperty|TestNeo4jRefusesAUint64ParameterAboveMaxInt64|TestNeo4jNeverHandsBackANullValuedProperty|TestAGERefusesAUint64ParameterAboveMaxInt64|TestAGERefusesAUnionParameterOutsideTheDeclaredMemberSet|TestEveryAgtypeCaptureIsWitnessedOrDeclaredSynthetic|TestNeo4jMinOverAnEmptyGroupIsNull' -skip 'TestLiveSmoke/apache-age' ./...
 
 # the Apache AGE half of the live battery: the smoke battery's AGE arm, the
 # session-init contract, and the AGE-only probes. The -run alternation below is

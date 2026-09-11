@@ -356,6 +356,132 @@ func TestStorablePropertyRefusesARecord(t *testing.T) {
 	}
 }
 
+// TestStorablePropertyRefusesAUnionValuedList is the record test's sibling
+// one kind over, and like it rests on its own measurement rather than on the
+// symmetry. TestNeo4jRefusesAHeterogeneousArrayStoredProperty measured the
+// pinned image — Neo4j Kernel 5.26.28 community — which answered a
+// heterogeneous array property write with
+//
+//	Neo4j only supports a subset of Cypher types for storage as singleton
+//	or array properties.
+//
+// and did so with three controls green in the same run: homogeneous BOOL and
+// INT arrays were both stored on that session, and the identical mixed list
+// came back as a projected column. So the refusal is the property slot's.
+//
+// EVERY ROW ASSERTS BOTH AXES, for the reason the record test states. A
+// LIST<UNION<…>> arriving as a query VALUE decodes fine on this backend —
+// render_queries.go emits the dispatch for exactly that — so a row asserting
+// only StorableProperty==false would stay green if someone moved the refusal
+// onto Property and took the query-value positions with it.
+//
+// THE ADMITTED ROWS ARE NOT DECORATION. They are what stops the arm from
+// being written one level too high. The bare union is STORED by the server
+// (the live probe has a row for it), so an arm keyed on KindUnion at the top
+// of StorableProperty would refuse a width the server demonstrably keeps, and
+// no refused row above could tell. LIST<INT32> is the flat-list control ADR
+// 0035 turns on, here to say the union arm did not widen into "no lists".
+func TestStorablePropertyRefusesAUnionValuedList(t *testing.T) {
+	union := graph.UnionOf([]graph.UnionMember{
+		{Type: graph.TypeBool},
+		{Type: graph.TypeInt64},
+	})
+	// A second family crossing, measured beside the first on the server:
+	// the arm is scoped to the WIDTH, not to one member pairing.
+	stringy := graph.UnionOf([]graph.UnionMember{
+		{Type: graph.TypeInt32},
+		{Type: graph.TypeString},
+	})
+	// The numeric pairing, and the row this arm is most easily got wrong at.
+	// The server ACCEPTS [1, 1.5] — it is the one heterogeneous array it does
+	// not refuse — but stores it by widening the long to a double, measured
+	// as ["FLOAT NOT NULL", "FLOAT NOT NULL"] on read-back. So this width
+	// fails SILENTLY rather than loudly, and it must be refused with the
+	// rest. An arm keyed on "the pairs the server rejects out loud" would
+	// admit exactly this one and leave the other two rows green.
+	numeric := graph.UnionOf([]graph.UnionMember{
+		{Type: graph.TypeInt64},
+		{Type: graph.TypeFloat64},
+	})
+	refused := []graph.PropertyType{
+		graph.ListOf(union, false),
+		graph.ListOf(stringy, false),
+		graph.ListOf(numeric, false),
+		// The qualifier sits on the list's element, which Elem() strips —
+		// the same shape the nested-list and record tests carry a row for.
+		graph.ListOf(union, true),
+	}
+	for _, pt := range refused {
+		t.Run("refused/"+string(pt), func(t *testing.T) {
+			require.Falsef(t, neo4j.TypeMap{}.StorableProperty(pt),
+				"the neo4j server answers a heterogeneous array property write with \"only supports a "+
+					"subset of Cypher types for storage\", and every union gqlc admits is heterogeneous "+
+					"by construction, so the table must refuse %s rather than emit a struct field no "+
+					"write could faithfully fill", pt)
+
+			got, ok := neo4j.TypeMap{}.Property(pt)
+			require.Truef(t, ok,
+				"%s must stay CARRIED: a union-valued list arriving as a query VALUE decodes on this "+
+					"backend, and putting the refusal on the carrier axis would take that decode with it", pt)
+			require.NotEmpty(t, got)
+		})
+	}
+
+	admitted := []graph.PropertyType{
+		// The bare union. The server stores one, so the arm belongs in the
+		// list branch and not at the top of StorableProperty.
+		union,
+		numeric,
+		// The flat-list control, so "refuses a union-valued list" cannot
+		// quietly become "refuses lists".
+		graph.ListOf(graph.TypeInt32, false),
+	}
+	for _, pt := range admitted {
+		t.Run("admitted/"+string(pt), func(t *testing.T) {
+			require.Truef(t, neo4j.TypeMap{}.StorableProperty(pt),
+				"%s is stored by the server — the live probe writes a bare union value and a flat "+
+					"array on the same session — so refusing it here would refuse a width neo4j keeps", pt)
+		})
+	}
+}
+
+// TestUnionListPropertyRejectionReachesTheCaller is the record and
+// nested-list obligation for this width: a table returning false is only
+// useful if the failure travels out of generation naming the entity, the
+// property, the declared type and the backend that refused.
+//
+// It is not either of those tests with a type substituted in. All three
+// refusals ride ErrUnstorableProperty, so what this adds is that the union
+// width reaches that sentinel AT ALL — a union travels a different route,
+// through UnionCarrier's wire-family admission rule, and a mistake that
+// routed it to the carrier channel instead would leave both siblings green.
+//
+// The NotErrorIs carries that. ErrUnrepresentableWidth is the channel a
+// union with a colliding member pair takes, which is a real refusal of a
+// real union and would be the wrong one here: BOOL and INT64 are
+// wire-distinct on this backend, so this union is admitted by that rule and
+// refused only by the storage one.
+func TestUnionListPropertyRejectionReachesTheCaller(t *testing.T) {
+	union := graph.UnionOf([]graph.UnionMember{
+		{Type: graph.TypeBool},
+		{Type: graph.TypeInt64},
+	})
+	listed := graph.ListOf(union, false)
+	files, err := neo4j.New().Generate(codegen.Input{Schema: schemaWithPayload(listed)})
+
+	require.ErrorIs(t, err, codegen.ErrUnstorableProperty,
+		"the heterogeneous-array refusal is a STORAGE refusal and rides the sentinel the nested "+
+			"list and the record ride; prepare.go's entity sweep routes it and names the property")
+	require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth,
+		"BOOL and INT64 are distinct wire families on this backend, so UnionCarrier ADMITS this "+
+			"union; claiming the carrier channel would report the wrong mechanism and would stay "+
+			"green if the admission rule started refusing wire-distinct pairs")
+	require.ErrorContains(t, err,
+		`entity "Blob" property "payload" has `+string(listed)+
+			`, which the neo4j backend cannot store as a property`)
+	require.Nil(t, files)
+}
+
 // TestNestedListPropertyRejectionReachesTheCaller pins what an author
 // actually sees, which is the half of the refusal that has to be right:
 // a table returning ok=false is only useful if the failure travels out
