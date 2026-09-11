@@ -11,3 +11,6 @@ ORDER BY p.name
 
 // name: DeletePerson :exec
 MATCH (p:Person) WHERE p.id = $id DELETE p
+
+// name: StreamPeople :iter
+MATCH (p:Person) RETURN p.name AS name

@@ -52,7 +52,7 @@ var (
 	OversizedNumerics             = oversizedNumerics
 	UncarriedEverywhere           = uncarriedEverywhere
 	RejectOffsetSidecarCollisions = rejectOffsetSidecarCollisions
-	// The three render-layer bridges are FENCED, and the wrapper is the
+	// The four render-layer bridges are FENCED, and the wrapper is the
 	// binding rather than a helper the call sites opt into: a bare
 	// renderer is unexported, so this is the only route from age_test
 	// into the render layer and a test written later is covered without
@@ -61,6 +61,7 @@ var (
 	// PanicsWithValue, the second converts the panic itself.
 	RenderCypherFile          = fencedBytes2(renderCypherFile)
 	RenderModels              = fencedBytes3(renderModels)
+	RenderQuerier             = fencedBytes2(renderQuerier)
 	SpatialFunctionProbes     = spatialFunctionProbes
 	UndefinedFunctionProbes   = undefinedFunctionProbes
 	UndefinedFunctions        = undefinedFunctions

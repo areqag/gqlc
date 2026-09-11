@@ -13,10 +13,11 @@ type AnnotatedQuery struct {
 
 // Cardinality is the author-declared consumer-side row axis of a
 // [AnnotatedQuery] (CONTEXT.md Generation-language: one row, a list of rows,
-// or no rows). Open enum: :iter is reserved for post-v1 (ADR 0010 D8,
-// gqlc-1a5) so a future constant can be added without churning the wire.
-// Zero value means "not set" and is a bug the front end never produces;
-// codegen catches it as ErrInvalidCardinality.
+// a stream of rows, or no rows). Open enum: the members start at iota+1 and
+// a new one appends, which is what let :iter land as a fourth member without
+// churning the wire (ADR 0010 D8, gqlc-1a5). Zero value means "not set" and
+// is a bug the front end never produces; codegen catches it as
+// ErrInvalidCardinality.
 type Cardinality int
 
 const (
@@ -29,11 +30,17 @@ const (
 	// CardinalityExec is the ":exec" annotation: the generated method
 	// returns no rows — a projection-less write.
 	CardinalityExec
+	// CardinalityIter is the ":iter" annotation: the generated method
+	// returns iter.Seq2[Row, error], streaming rows to the consumer's
+	// range loop rather than materialising a slice. Read-only — codegen
+	// refuses it on a write with ErrIterOnWrite (ADR 0010 D8).
+	CardinalityIter
 )
 
-// String returns the wire tag ("one" / "many" / "exec"), matching sqlc's
-// tokens minus the leading colon. Used by both packages for error messages
-// and by tests for golden encoding. Zero-value falls through to "invalid".
+// String returns the wire tag ("one" / "many" / "exec" / "iter"), matching
+// sqlc's tokens minus the leading colon. Used by both packages for error
+// messages and by tests for golden encoding. Zero-value falls through to
+// "invalid".
 func (c Cardinality) String() string {
 	switch c {
 	case CardinalityOne:
@@ -42,6 +49,8 @@ func (c Cardinality) String() string {
 		return "many"
 	case CardinalityExec:
 		return "exec"
+	case CardinalityIter:
+		return "iter"
 	}
 	// Below the switch rather than in a `default`, so `exhaustive` still
 	// checks this stringer for a missing arm — the members start at iota+1

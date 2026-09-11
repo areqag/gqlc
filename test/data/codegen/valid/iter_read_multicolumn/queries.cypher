@@ -1,0 +1,2 @@
+// name: StreamPeopleByAge :iter
+MATCH (p:Person) WHERE p.age > $minAge AND p.locale = $locale RETURN p.name, p.age ORDER BY p.age

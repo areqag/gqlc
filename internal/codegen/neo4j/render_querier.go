@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/queryfile"
 )
 
 // renderQuerier emits querier.go (spec §5.4). ReadQuerier lists every
@@ -23,10 +24,13 @@ func renderQuerier(pkg string, prepared []codegen.Query, target driverTarget) []
 	// Import set: context always (for method signatures); dbtype iff a
 	// method signature names a dbtype.<Kind>; time iff a signature names
 	// time.Time. The signature-search runs over Params and Row types.
-	needDbtype, needTime := querierImports(prepared)
+	needDbtype, needTime, needIter := querierImports(prepared)
 	if len(prepared) > 0 {
-		if needDbtype || needTime {
+		if needDbtype || needTime || needIter {
 			b.WriteString("import (\n\t\"context\"\n")
+			if needIter {
+				b.WriteString("\t\"iter\"\n")
+			}
 			if needTime {
 				b.WriteString("\t\"time\"\n")
 			}
@@ -74,7 +78,7 @@ func renderQuerier(pkg string, prepared []codegen.Query, target driverTarget) []
 // single-param queries surface the Go type directly. The querier
 // interface file needs an import when — and only when — its method
 // signature strings contain the carrier.
-func querierImports(prepared []codegen.Query) (needDbtype, needTime bool) {
+func querierImports(prepared []codegen.Query) (needDbtype, needTime, needIter bool) {
 	scan := func(ty string) {
 		if strings.Contains(ty, "dbtype.") {
 			needDbtype = true
@@ -84,6 +88,14 @@ func querierImports(prepared []codegen.Query) (needDbtype, needTime bool) {
 		}
 	}
 	for _, p := range prepared {
+		// iter is read off the CARDINALITY and not off a GoType. The other
+		// two carriers reach the signature as a column's or a parameter's
+		// own type text, which is what scan sees; iter.Seq2 is composed by
+		// returnTypeText and appears in no GoType at all, so extending
+		// scan could never find it however the needle were spelled.
+		if p.Cardinality == queryfile.CardinalityIter {
+			needIter = true
+		}
 		// Only 1-param methods surface the Go type directly in the signature;
 		// multi-param methods use arg MethodNameParams, so field types are
 		// not imported in querier.go.
@@ -96,5 +108,5 @@ func querierImports(prepared []codegen.Query) (needDbtype, needTime bool) {
 			scan(p.RowFields[0].GoType)
 		}
 	}
-	return needDbtype, needTime
+	return needDbtype, needTime, needIter
 }

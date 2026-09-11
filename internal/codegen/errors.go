@@ -166,6 +166,18 @@ var (
 	// edits (annotation vs clause). Introduced at C4.
 	ErrCardinalityShapeMismatch = errors.New("cardinality-shape mismatch")
 
+	// ErrIterOnWrite is returned when a query annotated :iter writes
+	// (Validated.Statement == resolver.StatementWrite). :iter is read-only
+	// by ruling (ADR 0010 D8): a streamed write yields rows to the caller
+	// while the transaction is still open, so a mid-stream rollback leaves
+	// the caller holding rows that no longer exist, and a pre-first-yield
+	// retry re-runs the write so a stashed elementId no longer matches.
+	// :many holds "if you see it, it's committed"; a streamed write cannot.
+	// The caller annotates :many (materialise, keeping the managed-retry
+	// envelope) or drops the write. The fail-message names the query and
+	// its position.
+	ErrIterOnWrite = errors.New("iter cardinality on write query")
+
 	// ErrParamNameCollision is returned when two Parameters mangle to
 	// the same Params-struct field name (§4.2). The fail-message names
 	// both parameter positions. Introduced at C1.
@@ -298,6 +310,7 @@ var allSentinels = []error{
 	ErrExecOnProjection,
 	ErrCardinalityShapeMismatch,
 	ErrFormatFailure,
+	ErrIterOnWrite,
 }
 
 // AllSentinels returns a copy of the codegen package's user-input-
