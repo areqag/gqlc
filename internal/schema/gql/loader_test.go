@@ -128,7 +128,8 @@ func TestLoaderResolvesChains(t *testing.T) {
 			want:  "Copied",
 		},
 		{
-			// The name-drift check at loader.go:70 compares the referenced file's
+			// The name-drift check — the `next.name != ref.name()` guard raising
+			// ErrReferenceNameMismatch in func (*Loader).Load, loader.go — compares the referenced file's
 			// DECLARED name against the reference's last segment, and the two sides
 			// are read by different helpers: segment() refuses a delimited path
 			// element outright, so a reference is always regular, while the target's
