@@ -904,10 +904,23 @@ func (s *scope) demoteAcrossEdges(groups optionalGroups) {
 			// ay9's exemption — an OPTIONAL edge whose group is proven
 			// is an effective witness, its existence on surviving rows
 			// established — lives in presentOnEveryRow, which
-			// witnessesItsEndpoints calls too. Calling it rather than
-			// re-spelling it is what stops the two drifting. The §4.4.3
-			// hop gate beside it differs between the two callers and
-			// stays here.
+			// witnessesItsEndpoints calls too.
+			//
+			// Calling it removes the second COPY of the condition. It
+			// does not stop the condition being re-spelled inline right
+			// here: rewriting the gate below to
+			// `e.Nullable() || !qualifiedDemoter(e)` drops the exemption
+			// and leaves
+			// TestEveryEdgeTheNarrowingLearnsFromAlsoDemotesItsEndpoints
+			// green. Lint stays quiet with it — witnessesItsEndpoints is
+			// still a caller, so `unused` never sees the symbol lose one.
+			// What reds is valid/demote_group_cascade.cypher, carrying
+			// TestCorpusSweepManifest with it: 11 cells of 15523 differ
+			// in detail, 0 in verdict, 0 in sentinel. Measured 2026-09-11
+			// at 8ab1e6da; the row is at presentOnEveryRow (gqlc-3biy).
+			//
+			// The §4.4.3 hop gate beside it differs between the two
+			// callers and stays here.
 			if !presentOnEveryRow(e, s.demotedGroups) || !qualifiedDemoter(e) {
 				continue
 			}
