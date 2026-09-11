@@ -27,5 +27,6 @@ var (
 	PhaseZAdmit          = phaseZAdmit
 	RecordFieldLegality  = recordFieldLegality
 	ReservedIdentifiers  = reservedIdentifiers
+	SweepIdentifiers     = sweepIdentifiers
 	TypeTextNamesCarrier = typeTextNamesCarrier
 )

@@ -1347,7 +1347,7 @@ func appendRowField(p *Query, ci int, col resolver.Column, field string, entitie
 }
 
 // sweepIdentifiers runs spec §4.6's exported-identifier collision sweep
-// across every emitted top-level identifier. Nine sources, in insertion
+// across every emitted top-level identifier. Eleven sources, in insertion
 // order (§2.2 / §5.7):
 //
 //  0. the emitter's own scopePackage declarations
@@ -1360,6 +1360,9 @@ func appendRowField(p *Query, ci int, col resolver.Column, field string, entitie
 //  7. `<bareMethod>QueryText` consts, one per query (C6)
 //  8. record carrier aliases and their five conversion helpers, one
 //     group per declared-record encoding the batch reaches
+//  9. site-named record aliases, one per record-typed entity property
+//  10. a closed union's four validation/dispatch helpers, one group per
+//     union encoding the batch reaches
 //
 // First insertion-order duplicate wins, so a batch-derived name that
 // lands on a fixed declaration reports the fixed declaration. Source 0
@@ -1505,7 +1508,8 @@ func sweepQueryNames(prepared []Query, insert insertIdent) error {
 	return nil
 }
 
-// sweepRecordNames enrols sources 8 and 9.
+// sweepRecordNames enrols sources 8, 9 and — through sweepUnionNames —
+// 10, which is last in the enrolment order.
 func sweepRecordNames(entities []Entity, prepared []Query, insert insertIdent) error {
 	// Source 8: record carrier aliases and conversion helpers, in
 	// RecordEncodings' canonical-encoding order so the side a collision
@@ -1540,6 +1544,45 @@ func sweepRecordNames(entities []Entity, prepared []Query, insert insertIdent) e
 	for _, a := range RecordSiteAliases(entities) {
 		if err := insert(a.Name, fmt.Sprintf("record site alias %q for entity %q property %q", a.Name, a.Entity, a.Property)); err != nil {
 			return err
+		}
+	}
+	return sweepUnionNames(entities, prepared, insert)
+}
+
+// sweepUnionNames enrols source 10: the validation/dispatch helpers a
+// closed union's emission declares.
+//
+// The same shape as source 8 one namespace over, and it is enrolled for
+// the same reason: the helpers are "encode"/"decode" + "Union" + eight hex
+// digits of the canonical encoding, and source 2's are "decode" + an
+// entity struct name that comes from a schema label — so a label spelled
+// Union<that digest> declares decodeUnion<digest> twice. Neither side is
+// author-chosen, so no capture guard reaches the pair.
+//
+// Per ENCODING rather than per emission site, for source 8's reason:
+// UnionEncodings has already made the set distinct, so a duplicate
+// arriving here is a collision with another SOURCE and never a union with
+// itself.
+//
+// No carrier alias in the group, which is the one entry source 8 has that
+// this one does not. A union carries as `any`, a predeclared name the
+// emission spells inline, so there is nothing to alias and nothing to
+// reserve — see codegen.UnionHelperNames.
+//
+// LAST, after source 9, so every source that was here before it keeps
+// reporting the same side of a collision as "first": the message names an
+// author-facing declaration rather than whichever generator-owned name
+// the enrolment order happened to reach earlier.
+func sweepUnionNames(entities []Entity, prepared []Query, insert insertIdent) error {
+	for _, pt := range UnionEncodings(entities, prepared) {
+		for _, ident := range UnionHelperNames(pt) {
+			what := "decode helper"
+			if strings.HasPrefix(ident, "encode") {
+				what = "encode helper"
+			}
+			if err := insert(ident, fmt.Sprintf("union %s %s %q", string(pt), what, ident)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
