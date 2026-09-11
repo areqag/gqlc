@@ -2118,6 +2118,17 @@ lexical-Part witness they all still admit (§7.5 verifies each).
 MATCH (a:Post) WITH a.title AS a MATCH (a:Person) WHERE a.title = $p RETURN a
 ```
 
+> **Amended by gqlc-60jb.** The alias is now `AS t`, not `AS a`:
+> `MATCH (a:Post) WITH a.title AS t MATCH (a:Person) WHERE a.title = $p RETURN a`.
+> `WITH a.title AS a` carries `a` as a scalar and then re-declares it as a node
+> pattern, which `scope.ValidateCarriedKinds` refuses with
+> `ErrPartBindingTypeConflict` — a *different* sentinel from the
+> `ErrUnknownProperty` this section is about, so the shadow would have stopped
+> discriminating anything. Renaming the alias keeps the fixture's subject, which
+> is the lexical-Part witness, and not the self-shadow. Verified by regenerating
+> `test/data/resolver/sweep.manifest.tsv` across the edit: 0 cells changed
+> verdict and 0 changed detail.
+
 **Schema mapping entry** in
 `test/data/resolver/invalid/schema.mapping.json`:
 
@@ -2210,6 +2221,8 @@ claim on `ValidatedQuery.Parameters`.
 
 - **`parameter_across_with_alias_shadow.cypher`** —
   `MATCH (a:Person) WITH a.name AS a MATCH (a:Post) WHERE a.title = $p RETURN a`.
+  (**Amended by gqlc-60jb: the alias is now `AS nm`.** See §7.4's amendment note
+  for why; the Part attribution this bullet analyses is unaffected.)
   The `$p` sits in Part 1's MATCH's WHERE (Cursor-through §4.2.2:
   `mineWhere` from `EnterOC_Match` uses the current `curPart`,
   which is Part 1). Lexical Part = 1.

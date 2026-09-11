@@ -176,6 +176,9 @@ standing unexamined. §6 makes the measurement an execution obligation with a
 declared outcome either way.
 
 > **Settled by §9.4 — REACHABLE, so the conjunct stays a guard.**
+> **Re-settled by §9.6 (gqlc-60jb).** Still a guard, but no longer reachable
+> from the corpus, and where it is reachable it is reached *without an
+> observable*. Its pin is now a direct unit call, not a fixture.
 
 ## 4. What the condition still cannot attest
 
@@ -461,6 +464,12 @@ third as the one its own benign-ness argument does not reach.
   the test's `NoError` pins the hole rather than endorsing it. If gqlc-60jb's
   fix refuses the shape before Phase B, conjunct (e) becomes unreachable and
   ADR 0038's precedent applies to it after all.
+
+  > **Overtaken by §9.6.** gqlc-60jb's fix has landed and the conditional in
+  > the last sentence fired only halfway: the shape is refused before Phase B,
+  > the fixture named above is deleted and the test renamed, but (e) did **not**
+  > become unreachable, so ADR 0038's precedent does *not* apply. Read §9.6
+  > before citing either paragraph.
 - **§5's named gain fixture does not move, and is not in the PR.**
   `MATCH (p:Person) OPTIONAL MATCH (p)-[a:AUTHORED]->(c) RETURN c.title` returns
   byte-identical output with and without the widening. §5's "if it does not move,
@@ -500,6 +509,11 @@ anchor below runs a non-zero number of subtests and passes on the unmutated tree
 
 Each row was killed by the symptom declared for it, not merely by some failure.
 
+> **Row 5 is stale as of §9.6.** Both of its victims are gone — the fixture is
+> deleted and the test it names was renamed when its `NoError` flipped to an
+> `ErrorIs`. The row was re-run against the gqlc-60jb tree and still KILLS, but
+> now at one victim, a unit test, and for a different reason. §9.6 tables it.
+
 **Distractors.** The gate is `otherCovers && (witnessesItsEndpoints(...) ||
 introducedByThisHop(...))` — three clauses, so a SURVIVED needs to be readable as
 "another clause absorbed it" rather than "the guard is untested".
@@ -530,3 +544,69 @@ compiler: the two lines it targets are byte-identical to the last two lines of
 `witnessesItsEndpoints`, so the anchor matched twice and the apparatus aborted
 instead of mutating the wrong function. Re-anchored through the `carried` block
 above them, it is unambiguous.
+
+### 9.6 Amendment: clause (e) after gqlc-60jb
+
+gqlc-60jb added `scope.ValidateCarriedKinds`, which refuses a name carried as a
+scalar or an edge and re-declared as a node or edge pattern, from
+`admitLocalBindings` — before Phase B runs. §9.4 predicted that this would make
+clause (e) unreachable and hand it to ADR 0038's demote-to-derivation precedent.
+It was measured instead of assumed, and the prediction is half right. The
+conjunct **stays**, and this section is the record of why, because "it stays"
+without the measurement behind it is exactly the unexamined branch §3.2 forbids.
+
+**What changed under it.** The three artefacts §9.4 cites no longer exist in
+the form it cites them:
+
+- `valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher` is
+  **deleted**. Its query is now refused, so it cannot be a `valid/` fixture, and
+  it is not moved to `invalid/` — `invalid/carried_alias_redeclared_as_node.cypher`
+  is the same shape with a message pin, so keeping both would be one mechanism
+  under two names.
+- `TestACarriedAliasRedeclaredUnderAnOptionalClauseDoesNotAttest` is renamed
+  `...IsRefused`; its `NoError` (which §9.4 describes as "pins the hole rather
+  than endorsing it") is now `ErrorIs(ErrPartBindingTypeConflict)`. The hole it
+  pinned is closed, so the pin inverts. Its uncarried twin survives unchanged as
+  the control and still asserts exactly one `wrong-orientation-drop` warning.
+- Row 5's corpus victim is therefore gone.
+
+**Reachability, in three measurements.** Each is a distinct apparatus, not three
+readings of one.
+
+| probe | apparatus | result |
+|---|---|---|
+| does anything in the module reach (e)? | (e)'s body → `panic("CLAUSE-E-REACHED")`, `go test ./...` | **0 reaches** |
+| is that probe capable of firing? | same panic, `ValidateCarriedKinds` blinded (positive control) | **5 reaches**, at `c` and `r` |
+| is (e) reachable *in principle*? | same panic, guard live, hand-written CALL YIELD alias re-declared as `(c)` under a later `OPTIONAL MATCH` | **PANICS** |
+
+The third row is the one that overturns §9.4's prediction. `ValidateCarriedKinds`
+skips names in `callTypes` — a CALL YIELD scalar is refused by R7 §4.1.2's own
+shape checks, and re-refusing it here would take that refusal's message away —
+so a CALL-YIELD-carried name still arrives at Phase B and still reaches the gate.
+Clause (e) is reached; it is only the *corpus* that no longer reaches it.
+
+**But it is reached without an observable.** Running three CALL YIELD shapes
+across two schemas with clause (e) present and with it dropped produces
+**byte-identical** refusals: `commitUnlabelledRound` refuses the same way either
+way, so the conjunct changes no output any caller can see. That is why row 5's
+corpus victim could be deleted without a replacement fixture appearing — there
+is no fixture to write, in either directory.
+
+**Disposition: keep, and pin by unit call.** A conjunct that is reached, and
+whose removal a corpus cannot detect, is precisely the shape that rots silently.
+The pin is `TestTheCarriedConjunctWithholdsAttestationFromACarriedName`, which
+calls `introducedByThisHop` directly with a `carried` map that does and does not
+hold the name — the same apparatus row 4 already uses for the group floor, and
+for the same reason. ADR 0038's precedent does not apply: it governs branches
+that *cannot fail*, and this one can.
+
+**Row 5, re-measured against the gqlc-60jb tree.**
+
+| # | mutation | declared victim | result |
+|---|---|---|---|
+| 5′ | drop (e) `carried` | `TestTheCarriedConjunctWithholdsAttestationFromACarriedName` | KILLED, that test alone |
+
+"That test alone" is the finding, not an aside. Before gqlc-60jb the row killed
+at a fixture *and* a test; the corpus arm is gone and the unit arm is now the
+whole of it. Anyone deleting that unit test deletes the only thing standing
+between clause (e) and an unexamined branch.
