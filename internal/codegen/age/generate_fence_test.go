@@ -11,6 +11,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/queryfile"
 	"github.com/areqag/gqlc/internal/schema"
 )
 
@@ -168,6 +169,63 @@ func TestABareRenderCallFailsOnlyItsOwnTest(t *testing.T) {
 	// The carrier by name. This is the sentence a reader whose test failed
 	// on empty output has to find on stderr, so a fence that recorded some
 	// other string would be no use to them.
+	require.Contains(t, faults[0], `"complex128"`)
+}
+
+// TestABareRenderModelsCallFailsOnlyItsOwnTest and
+// TestABareRenderCypherFileCallFailsOnlyItsOwnTest are the same witness for
+// the other two bridges, and they exist because the first battery over this
+// fence measured them UNWITNESSED.
+//
+// Unbinding RenderModels was caught, but only by a compound row — delete
+// decodeFunc's `any` arm as well and the binary dies again. Unbinding
+// RenderCypherFile was caught by nothing at all: the row read identically to
+// leaving it bound, because no test in the tree drives a lost carrier
+// through that bridge. A binding whose removal reddens nothing is the exact
+// disease this bead is about, so each bridge now has a row that reaches
+// decodeFunc through it directly and needs no second mutation to report.
+//
+// Both carriers are complex128 for the reason untaughtField gives: it stands
+// in for an arm that was deleted, without the test editing the type table.
+func TestABareRenderModelsCallFailsOnlyItsOwnTest(t *testing.T) {
+	resetRecord(t)
+	entities := []age.WiredEntity{age.WiredEntity{
+		Entity: codegen.Entity{Name: "E", Kind: codegen.EntityNode, Fields: []codegen.EntityField{untaughtField()}},
+	}.WithLabels("E", age.VertexAnnotation)}
+	var h age.Helpers
+	h.ForEntities(entities)
+
+	require.NotPanics(t, func() { age.RenderModels("m", entities, h) },
+		"a codegen bug must not cross the RenderModels bridge as a panic")
+
+	faults := age.RecordedRenderFaults()
+	require.Len(t, faults, 1, "the RenderModels binding must be fenced, not merely correct-looking")
+	require.Contains(t, faults[0], `"complex128"`)
+}
+
+func TestABareRenderCypherFileCallFailsOnlyItsOwnTest(t *testing.T) {
+	resetRecord(t)
+	// Cardinality One with one row field is the shortest path from
+	// renderCypherFile to decodeFunc: writeMethod -> writeOneBody ->
+	// writeColumnDecode -> columnDecoder. The column kind must not be
+	// ColumnNode or ColumnEdge, since columnDecoder answers those by name
+	// and never reaches the switch.
+	q := codegen.Query{
+		NamedQuery: codegen.NamedQuery{
+			Name:        "Q",
+			SourceText:  "MATCH (p:Person) RETURN p.x",
+			Cardinality: queryfile.CardinalityOne,
+		},
+		MethodName: "Q",
+		Bare:       "q",
+		RowFields:  []codegen.Row{{ColumnName: "x", Field: "X", GoType: "complex128"}},
+	}
+
+	require.NotPanics(t, func() { age.RenderCypherFile("p", []codegen.Query{q}) },
+		"a codegen bug must not cross the RenderCypherFile bridge as a panic")
+
+	faults := age.RecordedRenderFaults()
+	require.Len(t, faults, 1, "the RenderCypherFile binding must be fenced: the first battery found this one witnessed by nothing")
 	require.Contains(t, faults[0], `"complex128"`)
 }
 

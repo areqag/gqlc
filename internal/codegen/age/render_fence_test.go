@@ -4,7 +4,7 @@ package age
 // not sit above.
 //
 // generate recovers a codegenBug at its own boundary, which covers every
-// production run and every one of this package's 66 .Generate( test call
+// production run and every one of this package's 69 .Generate( test call
 // sites. It does not cover a test that enters the RENDER LAYER directly:
 // twelve sites call age.RenderModels, age.RenderCypherFile or
 // age.WriteEntityFieldDecode through the export_test bridge, below
@@ -36,10 +36,21 @@ package age
 //
 // SO THE FENCE RECORDS AND RETURNS THE ZERO VALUE, and the caller fails on
 // its own assertions. THE LIMIT OF THAT, stated rather than left to be
-// discovered: a site whose assertion is a NEGATIVE one — NotContains,
-// NotRegexp — passes on empty output, so it is not a witness. Every
-// positive assertion fails, the fault is named on stderr against the
-// running test, and the pin that exists to name the carrier
+// discovered: a site whose assertion is SATISFIED BY EMPTY OUTPUT is not a
+// witness. That is wider than the obvious NotContains/NotRegexp — it also
+// takes an equality whose expected side is itself computed from the
+// rendered bytes. Measured on the acceptance row rather than reasoned:
+// with decodeFunc's `any` arm deleted,
+// TestImportsTimeAgreesWithTheEmittedFile PASSES, because it compares
+// importsTime() against whether the rendered source spells a time
+// qualifier, and an empty render spells none while that carrier wants
+// none either. That site is the one that used to take the whole binary,
+// so this is still the better trade — but it is not a witness and must
+// not be read as one.
+//
+// What does report: every assertion that needs bytes fails, the fault is
+// named on stderr against the running test, and the pin whose job is to
+// name the carrier
 // (TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces) reaches its
 // own subtests and fails there, which is the property the bead asked for.
 //

@@ -803,8 +803,12 @@ func columnDecoder(f codegen.Row) string {
 // a codegenBug, and generate recovers exactly that type at its own
 // boundary (generate.go), so a codegen bug reached through Generate is
 // (nil, error) carrying the sentence below. A caller OUTSIDE generate
-// still takes the panic — the bare test callers go through decodeFuncOf,
-// which is what pins the value.
+// still takes the panic, which is why this package's own bare callers ask
+// through decodeFuncOf, whose require.NotPanics contains it; the VALUE is
+// pinned separately by TestDecodeFuncRefusesACarrierItWasNotTaught, which
+// calls decodeFunc bare through require.PanicsWithValue. Tests that enter
+// the RENDER layer directly are covered by a second fence on the
+// export_test bridges (render_fence_test.go).
 //
 // TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces is what goes
 // red when the table gains a carrier this switch was not taught: it walks
