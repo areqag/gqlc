@@ -86,11 +86,21 @@ func TestTypeMapProperty(t *testing.T) {
 	// this driver — the numeric ones the driver has no type for. Until
 	// stage 1 of gqlc-x9tg7 TypeAnyRecord sat here too, fail-closed under
 	// an unreachable arm; it now has a carrier and has moved above.
+	//
+	// graph.TypeUUID is the one row here that is not permanent, and the
+	// one row here this driver HAS a type for: dbtype.UUID exists at
+	// v6.2.0 and not at v5.28.4, the two versions
+	// test/data/codegen/go.mod pins. This table is asked of a typeMap
+	// that does not yet know which major it is answering for, so the row
+	// records what both majors answer today. It moves when stage 2 of bd
+	// gqlc-eg4b teaches the table the difference — this row going red is
+	// how that change announces itself rather than landing silently.
 	unrepresentable := []graph.PropertyType{
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
 		graph.TypeDecimal,
+		graph.TypeUUID,
 	}
 	for _, pt := range unrepresentable {
 		t.Run("unrepresentable/"+string(pt), func(t *testing.T) {

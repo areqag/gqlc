@@ -353,6 +353,20 @@ const (
 
 	TypeDecimal PropertyType = "DECIMAL"
 
+	// TypeUUID is an RFC 9562 universally unique identifier: 128 bits with
+	// no parameters at all — no length, no precision, no element type — so
+	// the flat enum holds it as it holds STRING, and nothing about it waits
+	// on the PropertyType-shape decision gqlc-do1 stage 2 is parked behind.
+	//
+	// It is not an ISO 39075 value type. The GQL grammar's <predefined type>
+	// has no UUID alternative and neither does Cypher 25; the bare keyword is
+	// gqlc's own (GQL.g4 uuidType). Its target support is likewise partial
+	// rather than universal: neo4j-go-driver grew dbtype.UUID at v6.2.0 and
+	// v5 has none, so a v5 emission refuses it — see neo4j.ErrRequiresDriverV6,
+	// whose whole reason for existing is that this refusal is about the
+	// driver rather than about the width.
+	TypeUUID PropertyType = "UUID"
+
 	// TypeAnyPropertyValue is the open dynamic union of storable property value
 	// types — ISO GQL's ANY VALUE and ANY? PROPERTY VALUE. Both spellings are the
 	// same type: a property whose value the author did not or could not constrain

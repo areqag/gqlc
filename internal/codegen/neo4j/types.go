@@ -166,6 +166,27 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		// "map[string]any" keeps it agreeing with the arm that does the
 		// work — the arrangement graph.TypeList already has.
 		return "map[string]any", true
+	case graph.TypeUUID:
+		// Refused on BOTH majors here, and unlike the eight below that
+		// is a statement about this table today rather than a permanent
+		// one. dbtype.UUID exists — it landed in neo4j-go-driver v6.2.0
+		// and v5.28.4 has no counterpart, the two versions
+		// test/data/codegen/go.mod pins — so the v6 answer is owed and
+		// is not given here.
+		//
+		// Giving it is stage 2 of bd gqlc-eg4b and needs more than this
+		// arm: a carrier that exists on one major and not the other is
+		// the first of its kind in this table, so the table has to
+		// learn which major it is answering for, and the v5 refusal
+		// then needs a sentinel saying the width is representable but
+		// not on this driver rather than ErrUnrepresentableWidth, which
+		// says something false about it. Until that lands, both majors
+		// refuse and the message names the width, which is true on v5
+		// and merely incomplete on v6.
+		//
+		// test/data/codegen/invalid/uuid_width_unrepresentable is the
+		// fixture that holds this, on all three enrolled targets.
+		return "", false
 	case graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,

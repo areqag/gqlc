@@ -375,6 +375,13 @@ var typeSpellings = map[string]graph.PropertyType{
 	"DECIMAL": graph.TypeDecimal,
 	"DEC":     graph.TypeDecimal,
 
+	// The one gqlc-owned spelling in this table. ISO 39075 names no UUID
+	// value type, so there is no standard spelling to alias and no
+	// parenthesised or verbose form to fold — the grammar admits the bare
+	// keyword and nothing else (GQL.g4 uuidType), so this row is the whole
+	// of it and a second row here would be a spelling the parser refuses.
+	"UUID": graph.TypeUUID,
+
 	// Open dynamic union types: ANY VALUE, bare ANY (VALUE elided), and the two
 	// spellings of the narrower ANY? PROPERTY VALUE. All map to TypeAnyPropertyValue
 	// and emit Go's any. (ADR 0020)

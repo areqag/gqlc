@@ -193,6 +193,17 @@ var corpusAreaD1 = []corpusEntry{
 		feature: "mandatory",
 	},
 	{
+		// The corpus' only "extension" entry, and the only file here whose
+		// construct ISO does not have: bd gqlc-eg4b added the UUID keyword to
+		// GQL.g4 itself. Resolving, not unsupported — the point of the
+		// addition is that it reaches graph.TypeUUID — so no sentinel and no
+		// bead. Whether a backend can then EMIT it is a separate question
+		// answered per driver in internal/codegen, not here.
+		file:    "18.9-value-type/scalar_uuid.gql",
+		outcome: resolves,
+		feature: "extension",
+	},
+	{
 		file:    "18.9-value-type/scalar_zoned_time.gql",
 		outcome: resolves,
 		feature: "mandatory",

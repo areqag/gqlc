@@ -83,6 +83,12 @@ func TestTypeMapProperty(t *testing.T) {
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
 		graph.TypeDecimal,
+		// agtype's value vocabulary is boolean / integer / float /
+		// string / list / map, so a 128-bit identifier has no shape to
+		// come back as itself in. Permanent for as long as that is
+		// true of agtype, and so unlike the neo4j table's UUID row,
+		// which is waiting on a carrier the driver already ships.
+		graph.TypeUUID,
 	}
 	for _, pt := range unrepresentable {
 		t.Run("unrepresentable/"+string(pt), func(t *testing.T) {
@@ -324,10 +330,10 @@ func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
 // That is the intended division — membership is a claim about the roster
 // — and it is why this test is the cheap half and not the guard.
 func TestAUniversallyUncarriedWidthIsRefusedWithoutTheBackendName(t *testing.T) {
-	require.NotEmpty(t, age.OversizedNumerics,
+	require.NotEmpty(t, age.UncarriedEverywhere,
 		"the universal width list is empty, so every row below ranges over nothing")
 
-	for _, width := range age.OversizedNumerics {
+	for _, width := range age.UncarriedEverywhere {
 		for _, pt := range []graph.PropertyType{
 			width,
 			graph.ListOf(width, false),
