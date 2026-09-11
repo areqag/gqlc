@@ -932,7 +932,14 @@ var invalidFixtureContains = map[string]string{
 	// mutated to `return true` makes them RESOLVE, which TestInvalid's
 	// Require().Error already refuses. The mode that needs the phrase is the
 	// wrong-member one, which stays a refusal.
-	"label_satisfy_plural_property.cypher":                         `p.name missing on plural-satisfying type Employee&Person`,
+	// This pin and the three others marked the same way start at the SENTINEL,
+	// not at the variable. Their arm is shared with the effect validators and
+	// takes an effectClause argument since gqlc-vplu, and the read path's is the
+	// empty one; a pin that began at `p.name` could not see a clause prefix
+	// leaking onto a read-path refusal, because whatever prefix appeared would
+	// sit BEFORE the substring and still contain it. Beginning at the sentinel
+	// is what makes the read branch of effectClause.prefix held by something.
+	"label_satisfy_plural_property.cypher":                         `unknown property: p.name missing on plural-satisfying type Employee&Person`,
 	"plural_endpoint_inline_endpoint_property_stays_plural.cypher": `p.personOnly missing on plural-satisfying type Employee&Person`,
 	"plural_endpoint_multi_hop_far_end_stays_plural.cypher":        `c.bOnly missing on plural-satisfying type A&Node`,
 	"plural_endpoint_multi_hop_range_stays_plural.cypher":          `p.bOnly missing on plural-satisfying type A&Node`,
@@ -994,7 +1001,8 @@ var invalidFixtureContains = map[string]string{
 	"parameter_type_conflict_optional_node_nullability.cypher": `parameter "x": property:STRING (not null) vs property:STRING (nullable)`,
 	"parameter_type_conflict_optional_edge_nullability.cypher": `parameter "x": property:INT (not null) vs property:INT (nullable)`,
 	"unknown_property_union_nullability_differs.cypher":        `r.weight type differs across union members: property:INT (not null) vs property:INT (nullable)`,
-	"plural_satisfying_property_nullability_differs.cypher":    `p.tenure type differs across plural-satisfying types: property:INT (not null) vs property:INT (nullable)`,
+	// Begins at the sentinel; see label_satisfy_plural_property above.
+	"plural_satisfying_property_nullability_differs.cypher": `unknown property: p.tenure type differs across plural-satisfying types: property:INT (not null) vs property:INT (nullable)`,
 	// ErrParameterTypeConflict's rendering of a NON-property witness, screened
 	// as the fourth axis of bd gqlc-9vpga. The sentinel has one construction
 	// site and one format string, so errors.Is settles which arm fired and the
@@ -1217,8 +1225,9 @@ var invalidFixtureContains = map[string]string{
 	"set_property_unknown_on_multi_type_edge.cypher":    "SET property r.notAProp missing on union member Person-[AUTHORED]->Post",
 	"remove_property_unknown_on_multi_type_edge.cypher": "REMOVE property r.notAProp missing on union member Person-[AUTHORED]->Post",
 	"delete_property_unknown_on_multi_type_edge.cypher": "DELETE property r.notAProp missing on union member Person-[AUTHORED]->Post",
-	"unknown_property_union_missing.cypher":             "property r.views missing on union member Person-[LIKES]->Post",
-	"unknown_property_union_type_differs.cypher":        "property r.weight type differs across union members: property:INT (not null) vs property:FLOAT (not null)",
+	// Both begin at the sentinel; see label_satisfy_plural_property above.
+	"unknown_property_union_missing.cypher":      "unknown property: property r.views missing on union member Person-[LIKES]->Post",
+	"unknown_property_union_type_differs.cypher": "unknown property: property r.weight type differs across union members: property:INT (not null) vs property:FLOAT (not null)",
 }
 
 // invalidFixtureNoMessagePin names the invalid fixtures whose refusal message
