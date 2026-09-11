@@ -6,10 +6,13 @@ package neo4j
 // back to Driver) and the session interface name.
 //
 // The session name is asymmetric, and only one direction is load-bearing.
-// v6 keeps SessionWithContext as an alias for Session (v6 session.go:81),
+// v6 keeps SessionWithContext as an alias for Session (the
+// `type SessionWithContext = Session` declaration in v6's neo4j/session.go),
 // so either spelling compiles there; v5's Session is the deprecated
-// non-context session, a different interface entirely (v5 session.go:31),
-// so v5 must be spelled SessionWithContext. A single inline spelling would
+// non-context session, a different interface entirely (the `type Session
+// interface` declaration in v5's neo4j/session.go, with v5's context
+// session declared separately in neo4j/session_with_context.go), so v5
+// must be spelled SessionWithContext. A single inline spelling would
 // therefore have to be the v5 one, and this field exists so the emission
 // says what it means on each major rather than relying on that alias.
 //

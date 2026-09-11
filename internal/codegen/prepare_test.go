@@ -2297,11 +2297,11 @@ func rawLiteralValue(text string) (string, bool) {
 // unknownWidthTypeMap refuses one width outright and admits the rest,
 // which is what a real dialect table does with a width it has no case
 // for: neo4j's Property falls off the end of its switch and returns
-// ok=false (internal/codegen/neo4j/types.go:30). stubTypeMap admits
-// every width but DECIMAL, so without this wrapper the rows below could
-// only measure the permissive answer, and the ordering claim — that the
-// kind question is asked BEFORE the carrier question — would have
-// nothing to bite on.
+// ok=false (typeMap.Property in internal/codegen/neo4j/types.go).
+// stubTypeMap admits every width but DECIMAL, so without this wrapper
+// the rows below could only measure the permissive answer, and the
+// ordering claim — that the kind question is asked BEFORE the carrier
+// question — would have nothing to bite on.
 type unknownWidthTypeMap struct {
 	stubTypeMap
 	refuse graph.PropertyType
