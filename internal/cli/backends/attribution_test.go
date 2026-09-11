@@ -11,6 +11,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/cli/backends"
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/typescan"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -92,7 +93,7 @@ func TestAContingentRefusalNamesItsBackend(t *testing.T) {
 	}
 
 	var contested, divergent, shared []graph.PropertyType
-	for _, pt := range declaredWidths() {
+	for _, pt := range declaredWidths(t) {
 		answers := answersByTarget(t, reg, keys, pt)
 		accepted, sentinels := tallyAnswers(answers)
 		switch {
@@ -267,35 +268,69 @@ func citedSentinels(t *testing.T, pt graph.PropertyType, key string, err error) 
 	return strings.Join(cited, "+")
 }
 
+// graphPropertyTypeSource is where internal/graph declares the property
+// types this sweep ranges over. The vocabulary is read off that
+// declaration rather than restated here, which is the same gate
+// internal/codegen/age, internal/codegen/neo4j and internal/resolver
+// hold their own tables with.
+const graphPropertyTypeSource = "../../graph/propertytype.go"
+
 // declaredWidths is graph's property-type vocabulary, each width also in
 // its flat-list and nested-list forms. The nesting is not decoration:
 // LIST<LIST<T>> is where neo4j's storage refusal lives, and it is what
 // puts a second sentinel under the one rule above.
 //
-// Hand-enumerated because graph exports no vocabulary; the backend type
-// tables' own tests enumerate it the same way. A width added to graph
-// without a row here is swept by nothing, which is a gap this sweep
-// shares with them rather than one it introduces.
+// The vocabulary is READ rather than listed, because graph exports none
+// at run time — PropertyType is an open string type, so nothing
+// enumerates its constants but a walk over the source that declares
+// them. It was listed by hand until bd gqlc-tn96, and that list went
+// stale the day PR #2842 added graph.TypeUUID: the sweep ran 32 of 33
+// declared widths for a fortnight and nothing said so, because a
+// hand-written list cannot notice what it omits. Now a width added
+// upstream joins the sweep with no edit here, or the read fails and
+// takes the test with it.
 //
 // TypeList is spelled LIST<ANY>, so it and ListOf(TypeAnyPropertyValue)
 // are the same width reached two ways and a couple of rows repeat. The
 // duplication is the constant block's, not a miscount here.
-func declaredWidths() []graph.PropertyType {
-	scalars := []graph.PropertyType{
-		graph.TypeString, graph.TypeBytes, graph.TypeBool,
-		graph.TypeDate, graph.TypeTime, graph.TypeLocalTime,
-		graph.TypeTimestamp, graph.TypeDuration,
-		graph.TypeInt, graph.TypeInt8, graph.TypeInt16, graph.TypeInt32,
-		graph.TypeInt64, graph.TypeInt128, graph.TypeInt256,
-		graph.TypeUint, graph.TypeUint8, graph.TypeUint16, graph.TypeUint32,
-		graph.TypeUint64, graph.TypeUint128, graph.TypeUint256,
-		graph.TypeFloat, graph.TypeFloat16, graph.TypeFloat32,
-		graph.TypeFloat64, graph.TypeFloat128, graph.TypeFloat256,
-		graph.TypeDecimal, graph.TypeAnyPropertyValue, graph.TypeList,
-	}
+func declaredWidths(t *testing.T) []graph.PropertyType {
+	t.Helper()
 
-	widths := make([]graph.PropertyType, 0, 5*len(scalars)+2)
-	for _, pt := range scalars {
+	vocabulary, err := typescan.PropertyTypes(graphPropertyTypeSource)
+	require.NoError(t, err,
+		"%s is the artefact this sweep reads its vocabulary from; without it there is nothing to sweep", graphPropertyTypeSource)
+	require.NotEmptyf(t, vocabulary,
+		"read no PropertyType constants out of %s, so this sweep would range over the four hand-built widths below "+
+			"and assert nothing about any declared one", graphPropertyTypeSource)
+
+	// Sorted so the widths a failing run names, and the three bucket
+	// logs below, do not reorder between runs over one vocabulary.
+	declared := slices.Sorted(maps.Keys(vocabulary))
+
+	widths := make([]graph.PropertyType, 0, 5*len(declared)+4)
+	for _, pt := range declared {
+		// RECORD<ANY> is swept as a bare width below and nowhere else,
+		// because two of its container forms cannot be asked about at
+		// all: LIST<RECORD<ANY>> and LIST<LIST<RECORD<ANY>>> make AGE
+		// emit Go that does not parse (bd gqlc-9xiz), which fails with
+		// ErrFormatFailure — deliberately not a taxonomy sentinel, so
+		// citedSentinels has nothing to compare and the rule above
+		// cannot reach a verdict. That is a live defect rather than a
+		// width every target refuses, and it is gqlc-9xiz's to fix, not
+		// this sweep's to encode.
+		//
+		// There is no tripwire holding this hold-out to its reason,
+		// because nothing in this repository may reach that branch while
+		// it stands: codegen's own §4 fence
+		// (TestExcludedBranchesAreUnreached) profiles every package that
+		// depends on codegen and fails if any test binary executes a
+		// sentinel documented as deliberately unreachable, so a test
+		// asserting the defect is still there reds the fence instead. So
+		// the expiry lives in bd gqlc-9xiz, which names this hold-out as
+		// part of its own repair.
+		if pt == graph.TypeAnyRecord {
+			continue
+		}
 		flat := graph.ListOf(pt, false)
 		widths = append(widths, pt, flat, graph.ListOf(flat, false))
 		// Each scalar also as the single field of a record, and that
@@ -311,7 +346,9 @@ func declaredWidths() []graph.PropertyType {
 	// The two records with no declared fields. Neither has a field to
 	// inherit a refusal from, so what divides the roster over them is
 	// whatever a backend says about records AS SUCH — which is where
-	// neo4j's storage answer lands.
+	// neo4j's storage answer lands. RECORD<> is built rather than
+	// declared, so the read above cannot reach it either way;
+	// TypeAnyRecord is named here because the loop skipped it.
 	widths = append(widths, graph.RecordOf(nil), graph.TypeAnyRecord)
 
 	// Two closed unions, and they are here for opposite reasons.
