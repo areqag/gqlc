@@ -63,7 +63,7 @@ func TestResolveTypeMapsADeclaredVariant(t *testing.T) {
 // sc is nil because the default arm returns before reading it; a variant that
 // started dereferencing sc first would fail this row rather than pass it.
 func TestValidateEffectDefaultRefusesAForeignEffect(t *testing.T) {
-	err := validateEffect(nil, foreignEffect{}, schema.Schema{})
+	err := validateEffect(nil, foreignEffect{}, schema.Schema{}, clauseSet)
 	require.ErrorIs(t, err, ErrOutOfR0Scope)
 	require.Contains(t, err.Error(), "unknown Effect variant")
 }
@@ -73,7 +73,7 @@ func TestValidateEffectDefaultRefusesAForeignEffect(t *testing.T) {
 // reach it.
 func TestValidateEffectDispatchesADeclaredVariant(t *testing.T) {
 	sc := newScope(branchState{})
-	err := validateEffect(sc, query.NewCreateEffect(nil), schema.Schema{})
+	err := validateEffect(sc, query.NewCreateEffect(nil), schema.Schema{}, clauseSet)
 	require.NotErrorIs(t, err, ErrOutOfR0Scope,
 		"a declared Effect variant must be dispatched, not fall through to the tripwire")
 }

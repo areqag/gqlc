@@ -1859,13 +1859,18 @@ func callProjectionType(slot callBindingSlot, ref query.Ref, nullableBinding map
 	}
 }
 
-func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp string, bindingNullable bool) (ResolvedType, error) {
+// clause is the mutating clause that referenced the property, or clauseRead on
+// the read path. SET, REMOVE and DELETE of one unknown property on one
+// multi-type edge binding all funnel through the missing-member arm below, so
+// unlike the single-type lanes this is ONE site for three clauses and the
+// clause has to arrive from the caller (bd gqlc-vplu).
+func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp string, bindingNullable bool, clause effectClause) (ResolvedType, error) {
 	var first ResolvedProperty
 	for i, k := range cands {
 		et := s.Edges[k]
 		prop, ok := et.Properties[refProp]
 		if !ok {
-			return nil, fmt.Errorf("%w: property %s.%s missing on union member %s", ErrUnknownProperty, refVar, refProp, formatEdgeKey(k))
+			return nil, fmt.Errorf("%w: %sproperty %s.%s missing on union member %s", ErrUnknownProperty, clause.prefix(), refVar, refProp, formatEdgeKey(k))
 		}
 		hit := ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}
 		if i == 0 {
@@ -1873,7 +1878,7 @@ func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp stri
 			continue
 		}
 		if hit.Type != first.Type || hit.Nullable != first.Nullable {
-			return nil, fmt.Errorf("%w: property %s.%s type differs across union members: %s vs %s", ErrUnknownProperty, refVar, refProp, describeColumnType(first), describeColumnType(hit))
+			return nil, fmt.Errorf("%w: %sproperty %s.%s type differs across union members: %s vs %s", ErrUnknownProperty, clause.prefix(), refVar, refProp, describeColumnType(first), describeColumnType(hit))
 		}
 	}
 	first.Nullable = first.Nullable || bindingNullable
@@ -1883,12 +1888,12 @@ func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp stri
 // unionNodeProperty resolves a property reference against a plural node
 // candidate set. The property must exist on every candidate with identical type
 // and nullability — the intersection rule for plural label satisfaction (ADR 0022).
-func unionNodeProperty(nts []schema.NodeType, refVar, refProp string, bindingNullable bool) (ResolvedType, error) {
+func unionNodeProperty(nts []schema.NodeType, refVar, refProp string, bindingNullable bool, clause effectClause) (ResolvedType, error) {
 	var first ResolvedProperty
 	for i, nt := range nts {
 		prop, ok := nt.Properties[refProp]
 		if !ok {
-			return nil, fmt.Errorf("%w: %s.%s missing on plural-satisfying type %s", ErrUnknownProperty, refVar, refProp, nt.KeyLabels)
+			return nil, fmt.Errorf("%w: %s%s.%s missing on plural-satisfying type %s", ErrUnknownProperty, clause.prefix(), refVar, refProp, nt.KeyLabels)
 		}
 		hit := ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}
 		if i == 0 {
@@ -1905,7 +1910,7 @@ func unionNodeProperty(nts []schema.NodeType, refVar, refProp string, bindingNul
 			// plural_satisfying_property_nullability_differs.cypher's pin in
 			// invalidFixtureContains, which disagrees on nullability alone and
 			// so is satisfied by no bare Stringer (bd gqlc-xeux).
-			return nil, fmt.Errorf("%w: %s.%s type differs across plural-satisfying types: %s vs %s", ErrUnknownProperty, refVar, refProp, describeColumnType(first), describeColumnType(hit))
+			return nil, fmt.Errorf("%w: %s%s.%s type differs across plural-satisfying types: %s vs %s", ErrUnknownProperty, clause.prefix(), refVar, refProp, describeColumnType(first), describeColumnType(hit))
 		}
 	}
 	first.Nullable = first.Nullable || bindingNullable
@@ -2246,6 +2251,40 @@ func unify(a, b ResolvedType) (ResolvedType, bool) {
 	}
 }
 
+// effectClause names the mutating clause an ErrUnknownProperty refusal was
+// raised under. It exists because the variable and the property in that
+// sentence both come from the QUERY, so every construction site that renders
+// them bare renders the same bytes: `SET r.notAProp`, `REMOVE r.notAProp` and
+// `DELETE r.notAProp` on one binding all refused with `unknown property:
+// r.notAProp`, and errors.Is reports only the sentinel, so a refusal
+// attributed to the wrong clause was invisible to every test that could be
+// written — rewriting one site's format as another's was a literal no-op on
+// the bytes (bd gqlc-vplu, measured on PR #2843).
+//
+// The zero value is the read path, which is under no mutating clause and whose
+// text is unchanged; only the effect validators pass a named clause.
+type effectClause string
+
+const (
+	clauseRead          effectClause = ""
+	clauseSet           effectClause = "SET"
+	clauseMergeOnCreate effectClause = "ON CREATE SET"
+	clauseMergeOnMatch  effectClause = "ON MATCH SET"
+	clauseRemove        effectClause = "REMOVE"
+	clauseDelete        effectClause = "DELETE"
+)
+
+// prefix renders the clause as a leading qualifier for a refusal detail, or
+// the empty string on the read path. Kept as a prefix rather than a whole
+// message so each arm keeps its own format string and stays separately
+// mutable.
+func (c effectClause) prefix() string {
+	if c == clauseRead {
+		return ""
+	}
+	return string(c) + " "
+}
+
 // validateEffect dispatches one Effect through its per-variant validator against
 // the scope's committed binding tables. The dispatch is a type switch on
 // query.Effect — declared at internal/query/query.go's `type Effect interface`,
@@ -2262,14 +2301,20 @@ func unify(a, b ResolvedType) (ResolvedType, bool) {
 // built that R6 has no validator for is a coverage gap to report, not a
 // corrupted value to crash on. Pinned by
 // TestValidateEffectDefaultRefusesAForeignEffect.
-func validateEffect(sc *scope, e query.Effect, s schema.Schema) error {
+//
+// setClause names the clause a SetPropertyEffect is carried by, which is the
+// one thing the effect value itself does not know: SET at the top level,
+// ON CREATE SET / ON MATCH SET inside a MERGE. Every other variant names
+// itself, because only Set-family effects nest inside MERGE (query.go:1651-1660)
+// so no other variant is ever reached under a clause but its own.
+func validateEffect(sc *scope, e query.Effect, s schema.Schema, setClause effectClause) error {
 	switch ee := e.(type) {
 	case query.CreateEffect:
 		return validateCreateEffect(sc, ee)
 	case query.MergeEffect:
 		return validateMergeEffect(sc, ee, s)
 	case query.SetPropertyEffect:
-		return validateSetPropertyEffect(sc, ee, s)
+		return validateSetPropertyEffect(sc, ee, s, setClause)
 	case query.SetEntityEffect:
 		return validateSetEntityEffect(sc, ee)
 	case query.SetLabelsEffect:
@@ -2329,12 +2374,12 @@ func validateMergeEffect(sc *scope, e query.MergeEffect, s schema.Schema) error 
 		return fmt.Errorf("%w: MERGE variable %q not bound after phase C", ErrInvalidEffectTarget, v)
 	}
 	for _, se := range e.OnMatch() {
-		if err := validateEffect(sc, se, s); err != nil {
+		if err := validateEffect(sc, se, s, clauseMergeOnMatch); err != nil {
 			return err
 		}
 	}
 	for _, se := range e.OnCreate() {
-		if err := validateEffect(sc, se, s); err != nil {
+		if err := validateEffect(sc, se, s, clauseMergeOnCreate); err != nil {
 			return err
 		}
 	}
@@ -2346,17 +2391,17 @@ func validateMergeEffect(sc *scope, e query.MergeEffect, s schema.Schema) error 
 // edge targets (a var-length binding is a list of edges, not one edge).
 // Rejects projection-alias targets and out-of-scope names (defensive tripwire)
 // with ErrInvalidEffectTarget.
-func validateSetPropertyEffect(sc *scope, e query.SetPropertyEffect, s schema.Schema) error {
+func validateSetPropertyEffect(sc *scope, e query.SetPropertyEffect, s schema.Schema, clause effectClause) error {
 	v := e.Target().Variable
 	p := e.Target().Property
 	if nt, ok := sc.nodeTypes[v]; ok {
 		if _, ok := nt.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clause.prefix(), v, p)
 		}
 		return nil
 	}
 	if nts, ok := sc.nodeCands[v]; ok {
-		if _, err := unionNodeProperty(nts, v, p, false); err != nil {
+		if _, err := unionNodeProperty(nts, v, p, false, clause); err != nil {
 			return err
 		}
 		return nil
@@ -2366,7 +2411,7 @@ func validateSetPropertyEffect(sc *scope, e query.SetPropertyEffect, s schema.Sc
 			return fmt.Errorf("%w: SET on variable-length edge %q", ErrInvalidEffectTarget, v)
 		}
 		if _, ok := et.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clause.prefix(), v, p)
 		}
 		return nil
 	}
@@ -2374,7 +2419,7 @@ func validateSetPropertyEffect(sc *scope, e query.SetPropertyEffect, s schema.Sc
 		if sc.edgeBindings[v].Hops() != nil {
 			return fmt.Errorf("%w: SET on variable-length edge %q", ErrInvalidEffectTarget, v)
 		}
-		if _, err := unionProperty(cands, s, v, p, false); err != nil {
+		if _, err := unionProperty(cands, s, v, p, false, clause); err != nil {
 			return err
 		}
 		return nil
@@ -2447,12 +2492,12 @@ func validateRemovePropertyEffect(sc *scope, e query.RemovePropertyEffect, s sch
 	p := e.Target().Property
 	if nt, ok := sc.nodeTypes[v]; ok {
 		if _, ok := nt.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clauseRemove.prefix(), v, p)
 		}
 		return nil
 	}
 	if nts, ok := sc.nodeCands[v]; ok {
-		if _, err := unionNodeProperty(nts, v, p, false); err != nil {
+		if _, err := unionNodeProperty(nts, v, p, false, clauseRemove); err != nil {
 			return err
 		}
 		return nil
@@ -2462,7 +2507,7 @@ func validateRemovePropertyEffect(sc *scope, e query.RemovePropertyEffect, s sch
 			return fmt.Errorf("%w: REMOVE on variable-length edge %q", ErrInvalidEffectTarget, v)
 		}
 		if _, ok := et.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clauseRemove.prefix(), v, p)
 		}
 		return nil
 	}
@@ -2470,7 +2515,7 @@ func validateRemovePropertyEffect(sc *scope, e query.RemovePropertyEffect, s sch
 		if sc.edgeBindings[v].Hops() != nil {
 			return fmt.Errorf("%w: REMOVE on variable-length edge %q", ErrInvalidEffectTarget, v)
 		}
-		if _, err := unionProperty(cands, s, v, p, false); err != nil {
+		if _, err := unionProperty(cands, s, v, p, false, clauseRemove); err != nil {
 			return err
 		}
 		return nil
@@ -2528,12 +2573,12 @@ func validateDeleteTarget(sc *scope, t query.Ref, s schema.Schema) error {
 	}
 	if nt, ok := sc.nodeTypes[v]; ok {
 		if _, ok := nt.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clauseDelete.prefix(), v, p)
 		}
 		return nil
 	}
 	if nts, ok := sc.nodeCands[v]; ok {
-		_, err := unionNodeProperty(nts, v, p, false)
+		_, err := unionNodeProperty(nts, v, p, false, clauseDelete)
 		return err
 	}
 	if et, ok := sc.edgeTypes[v]; ok {
@@ -2541,7 +2586,7 @@ func validateDeleteTarget(sc *scope, t query.Ref, s schema.Schema) error {
 			return fmt.Errorf("%w: DELETE on variable-length edge %q", ErrInvalidEffectTarget, v)
 		}
 		if _, ok := et.Properties[p]; !ok {
-			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+			return fmt.Errorf("%w: %s%s.%s", ErrUnknownProperty, clauseDelete.prefix(), v, p)
 		}
 		return nil
 	}
@@ -2549,7 +2594,7 @@ func validateDeleteTarget(sc *scope, t query.Ref, s schema.Schema) error {
 		if sc.edgeBindings[v].Hops() != nil {
 			return fmt.Errorf("%w: DELETE on variable-length edge %q", ErrInvalidEffectTarget, v)
 		}
-		_, err := unionProperty(cands, s, v, p, false)
+		_, err := unionProperty(cands, s, v, p, false, clauseDelete)
 		return err
 	}
 	if _, ok := sc.carriedResolvedTypes[v]; ok {
