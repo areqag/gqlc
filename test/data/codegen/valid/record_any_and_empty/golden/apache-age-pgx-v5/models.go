@@ -12,10 +12,11 @@ import (
 
 // Blob corresponds to the Blob node type.
 type Blob struct {
-	Blank struct{}
-	Id    int64
-	Loose map[string]any
-	Maybe *map[string]any
+	Blank  struct{}
+	Either *any
+	Id     int64
+	Loose  map[string]any
+	Maybe  *map[string]any
 }
 
 // decodeBlob decodes an agtype vertex into a Blob struct, enforcing
@@ -34,21 +35,26 @@ func decodeBlob(raw []byte) (Blob, error) {
 		return Blob{}, fmt.Errorf("decode Blob.Blank: %w", err)
 	}
 	out.Blank = value0
-	value1, err := agtypeProperty(props, "id", agtypeInt64)
+	value1, err := agtypeNullableProperty(props, "either", decodeUnion5ff7d656)
+	if err != nil {
+		return Blob{}, fmt.Errorf("decode Blob.Either: %w", err)
+	}
+	out.Either = value1
+	value2, err := agtypeProperty(props, "id", agtypeInt64)
 	if err != nil {
 		return Blob{}, fmt.Errorf("decode Blob.Id: %w", err)
 	}
-	out.Id = value1
-	value2, err := agtypeProperty(props, "loose", agtypeMap)
+	out.Id = value2
+	value3, err := agtypeProperty(props, "loose", agtypeMap)
 	if err != nil {
 		return Blob{}, fmt.Errorf("decode Blob.Loose: %w", err)
 	}
-	out.Loose = value2
-	value3, err := agtypeNullableProperty(props, "maybe", agtypeMap)
+	out.Loose = value3
+	value4, err := agtypeNullableProperty(props, "maybe", agtypeMap)
 	if err != nil {
 		return Blob{}, fmt.Errorf("decode Blob.Maybe: %w", err)
 	}
-	out.Maybe = value3
+	out.Maybe = value4
 	return out, nil
 }
 
@@ -87,6 +93,30 @@ func agtypeInt64(raw []byte) (int64, error) {
 	out, err := strconv.ParseInt(strings.TrimSuffix(string(raw), "::numeric"), 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("gqlc: %q is not an agtype integer: %w", raw, err)
+	}
+	return out, nil
+}
+
+// agtypeIntAs decodes an agtype integer into a width narrower than the
+// int64 scalar it rides in, refusing a stored value that width cannot
+// hold rather than wrapping it.
+//
+// Two clauses, and both are load-bearing. The round-trip catches every
+// width whose range is a strict subset of int64's. It cannot catch
+// uint64, where the conversion is a bijection and int64(uint64(-1)) is
+// -1 again; there the sign comparison is the whole of the check. A
+// UINT64 property's readable set is therefore [0, MaxInt64], since
+// agtype's integer scalar is signed 64-bit and a larger value is
+// unstorable rather than unreadable.
+func agtypeIntAs[T ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64](raw []byte) (T, error) {
+	v, err := agtypeInt64(raw)
+	if err != nil {
+		return 0, err
+	}
+	out := T(v)
+	if int64(out) != v || (out < T(0)) != (v < 0) {
+		return 0, fmt.Errorf("gqlc: value %d does not fit the declared %T width", v, out)
 	}
 	return out, nil
 }
@@ -268,6 +298,32 @@ func decodeRecordd25fb0e0(raw []byte) (recordd25fb0e0, error) {
 		return out, fmt.Errorf("decode RECORD<>: %w", err)
 	}
 	return out, nil
+}
+
+// decodeUnion5ff7d656 dispatches an agtype value onto the member of
+// UNION<INT32|RECORD<ANY>> whose wire family it arrived as, and narrows it
+// to that member's declared width.
+func decodeUnion5ff7d656(raw []byte) (any, error) {
+	body := bytes.TrimSpace(raw)
+	if len(body) == 0 {
+		return nil, fmt.Errorf("decode UNION<INT32|RECORD<ANY>>: %q is not an agtype value", raw)
+	}
+	switch body[0] {
+	case '{':
+		out, err := agtypeMap(body)
+		if err != nil {
+			return nil, fmt.Errorf("decode UNION<INT32|RECORD<ANY>>: %w", err)
+		}
+		return out, nil
+	}
+	if _, err := agtypeInt64(body); err == nil {
+		out, err := agtypeIntAs[int32](body)
+		if err != nil {
+			return nil, fmt.Errorf("decode UNION<INT32|RECORD<ANY>>: %w", err)
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("decode UNION<INT32|RECORD<ANY>>: %q is no member's wire shape", raw)
 }
 
 // agtypeValue decodes a value of no declared shape through agtype's own
