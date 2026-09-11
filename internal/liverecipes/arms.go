@@ -45,14 +45,18 @@ const (
 // AGE-prefixed and backend-neutral tests sit in the neo4j half by design, and
 // a naming rule would misfile them.
 var LiveArms = map[string]Arm{
-	"TestLiveSmoke":                                             ArmAll,
-	"TestEveryBatteryIsTheDeclaredSize":                         ArmNeo4j,
-	"TestEveryBatteryIsNamedInScenarioTables":                   ArmNeo4j,
-	"TestTxMethodSet":                                           ArmNeo4j,
-	"TestNeo4jRefusesANestedListStoredProperty":                 ArmNeo4j,
-	"TestNeo4jRefusesAMapValuedStoredProperty":                  ArmNeo4j,
-	"TestNeo4jRefusesAUint64ParameterAboveMaxInt64":             ArmNeo4j,
-	"TestAGERefusesAUint64ParameterAboveMaxInt64":               ArmNeo4j,
+	"TestLiveSmoke":                                 ArmAll,
+	"TestEveryBatteryIsTheDeclaredSize":             ArmNeo4j,
+	"TestEveryBatteryIsNamedInScenarioTables":       ArmNeo4j,
+	"TestTxMethodSet":                               ArmNeo4j,
+	"TestNeo4jRefusesANestedListStoredProperty":     ArmNeo4j,
+	"TestNeo4jRefusesAMapValuedStoredProperty":      ArmNeo4j,
+	"TestNeo4jRefusesAUint64ParameterAboveMaxInt64": ArmNeo4j,
+	"TestAGERefusesAUint64ParameterAboveMaxInt64":   ArmNeo4j,
+	// Needs no container either — it binds over a nil DBTX and the panic
+	// IS the assertion — so it goes in the cheap half beside the uint64
+	// row above rather than paying for an AGE image it never talks to.
+	"TestAGERefusesAUnionParameterOutsideTheDeclaredMemberSet": ArmNeo4j,
 	"TestAGESessionInit":                                        ArmAGE,
 	"TestAGERefusesRelationshipTypeAlternation":                 ArmAGE,
 	"TestAGERefusesTheFunctionsItDoesNotDefine":                 ArmAGE,
