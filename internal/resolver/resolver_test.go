@@ -931,15 +931,19 @@ var invalidFixtureContains = map[string]string{
 	"parameter_type_conflict_property_vs_expr_bool.cypher":   `parameter "x": property:INT (nullable) vs scalar(bool)`,
 	"parameter_type_conflict_clause_slot_vs_string.cypher":   `parameter "x": property:STRING (not null) vs scalar(int)`,
 	"parameter_conflict_via_multi_type_edge_property.cypher": `parameter "x": property:TIMESTAMP (nullable) vs scalar(int)`,
-	// ErrUnknownLabel, screened as the fifth axis of bd gqlc-9vpga. It is the
-	// largest unscreened sentinel built at SEVERAL sites — seven, each with its
-	// own format string — so errors.Is genuinely cannot say which of seven
-	// different diagnoses an author is holding. Three of the seven were held
-	// before this: CloseEdges' deferred-endpoint pair through
-	// anonymous_edge_uninferable_endpoint above, Phase B's case 0 through
-	// unlabelled_optional_hop_empty_intersection, the satisfying-set arm
-	// through TestInlineEndpointCommitsOnTheTypesSatisfyingIt. The arms below
-	// held nothing at all inside this package.
+	// ErrUnknownLabel, screened as the fifth axis of bd gqlc-9vpga. Every site
+	// that raises it carries its OWN format string — no two of them render the
+	// same sentence — so what errors.Is cannot say here is which of that many
+	// unrelated diagnoses an author is holding. That is why it was taken ahead
+	// of the sentinels carrying more waived entries: ErrUnknownProperty is
+	// raised from more sites, but most of them share one bare `%s.%s`, where a
+	// pin separates no site from any other.
+	//
+	// Some arms were already held, from three different places: CloseEdges'
+	// deferred-endpoint pair through anonymous_edge_uninferable_endpoint above,
+	// Phase B's case 0 through unlabelled_optional_hop_empty_intersection, the
+	// satisfying-set arm through TestInlineEndpointCommitsOnTheTypesSatisfyingIt.
+	// The arms below held nothing at all inside this package.
 	//
 	// CloseEdges' SOURCE and TARGET arms (scope.go) are each other's mirror:
 	// one word apart, one sentinel, and reached only through fixtures that were
@@ -1022,13 +1026,13 @@ var invalidFixtureContains = map[string]string{
 //     the scalar kind, drop the temporal kind — because the three pins this arm
 //     already had conflict ResolvedProperty against ResolvedProperty and so say
 //     nothing about any other variant. The two that stay are named below.
-//   - gqlc-9vpga, fifth pass: all thirteen refusing with ErrUnknownLabel. It is
-//     built at SEVEN sites with seven different format strings, which is why it
-//     was taken ahead of the larger ErrUnknownProperty: where a sentinel has one
-//     site errors.Is already settles the arm and a pin only discriminates within
-//     it, but seven sites mean seven diagnoses one errors.Is cannot separate.
-//     Four arms held nothing inside this package and six entries moved. The five
-//     that stay are named below, each against the guard that holds it.
+//   - gqlc-9vpga, fifth pass: every fixture refusing with ErrUnknownLabel. It is
+//     raised from SEVERAL sites and no two of them share a format string, which
+//     is what made it the axis: where a sentinel has one site errors.Is already
+//     settles the arm and a pin can only discriminate within it, but several
+//     sites with several sentences are several diagnoses errors.Is cannot
+//     separate. Four of its arms were asserted nowhere in this package. The
+//     entries that stay are named below, each against the guard that holds it.
 //
 // THE SCREEN THAT AXIS NEEDED, because it applies to every axis left and
 // nothing above it says so. TestCorpusSweepManifest digests err.Error() for
@@ -1072,8 +1076,8 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	// reddens that pin, so a second copy of the same string discriminates
 	// nothing further. What separates these three from it is the clause each
 	// reaches it through — CREATE, a MERGE endpoint, a UNION branch — and that
-	// is a claim about reachability, held by their own presence in the corpus
-	// and by TestSweepReachesEverySentinel, not by a message.
+	// is a claim about which clauses reach the check at all, which their own
+	// TestInvalid subtests make with errors.Is and no message can add to.
 	"create_unknown_label.cypher":         {},
 	"merge_endpoint_unknown_label.cypher": {},
 	"union_unknown_label_branch.cypher":   {},
