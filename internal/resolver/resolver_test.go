@@ -1023,8 +1023,10 @@ var invalidFixtureContains = map[string]string{
 	// same sentence — so what errors.Is cannot say here is which of that many
 	// unrelated diagnoses an author is holding. That is why it was taken ahead
 	// of the sentinels carrying more waived entries: ErrUnknownProperty is
-	// raised from more sites, but most of them share one bare `%s.%s`, where a
-	// pin separates no site from any other.
+	// raised from more sites, but most of them then shared one bare `%s.%s`,
+	// where a pin separates no site from any other. (Six of those carry their
+	// clause word since gqlc-vplu; the reading was true when this was written
+	// and is the reason for the ordering, not a claim about the tree today.)
 	//
 	// Some arms were already held, from three different places: CloseEdges'
 	// deferred-endpoint pair through anonymous_edge_uninferable_endpoint above,
@@ -1111,7 +1113,7 @@ var invalidFixtureContains = map[string]string{
 	// ErrUnknownProperty, the seventh axis of bd gqlc-9vpga and the sentinel
 	// with the most waived entries left. Fifteen sites raise it. Five say
 	// something of their own — the CALL YIELD scalar arm, the two union-member
-	// arms, the two plural-satisfying arms — and the other TEN emit a bare
+	// arms, the two plural-satisfying arms — and the other TEN emitted a bare
 	// `%s.%s` and nothing else. That last fact is why this sentinel was passed
 	// over by the fifth axis, on the reading that ten identical formats leave a
 	// pin separating no site from any other. Measured rather than read off the
@@ -1122,17 +1124,29 @@ var invalidFixtureContains = map[string]string{
 	// which variable gqlc could not find — was asserted nowhere in this
 	// package for any of them.
 	//
-	// The pins below are per site, and within a site per distinct sentence.
-	// Where one site renders the same sentence for two fixtures the second is
-	// waived, with its twin named, because the mutation that kills one kills
-	// both; see invalidFixtureNoMessagePin.
+	// bd gqlc-vplu then answered the limit that axis recorded. Six of the ten
+	// bare sites are effect validators, and a refusal raised at one of them now
+	// LEADS with the clause at fault — SET, ON CREATE SET, ON MATCH SET, REMOVE
+	// or DELETE — as ErrInvalidEffectTarget's arms already did. The four bare
+	// sites on the read path are under no mutating clause and are unchanged.
+	// So the pins below hold something they could not hold before: rewriting
+	// one effect site's format as another's is no longer a no-op on the bytes.
+	//
+	// The pins are per site, and within a site per distinct sentence. Where one
+	// site renders the same sentence for two fixtures the second is waived,
+	// with its twin named, because the mutation that kills one kills both; see
+	// invalidFixtureNoMessagePin. That is now the ONLY reason anything is
+	// waived here — the three fixtures waived for the missing clause word are
+	// pinned above.
 	//
 	// What these DO hold, measured one site at a time: baring any of the ten
-	// `%s.%s` sites to its variable alone leaves the package green through a
-	// full regeneration today, and reddens exactly that site's own fixtures
-	// after this change. What they do NOT hold is which site fired, and the
-	// waiver block says why that is beyond a pin's reach here rather than
-	// merely unattempted.
+	// sites to its variable alone leaves the package green through a full
+	// regeneration on the pre-#2843 tree, and reddens exactly that site's own
+	// fixtures now; and swapping one effect site's clause constant for another
+	// site's reddens exactly the fixtures under the clause it stole. What no
+	// pin holds, because two fixtures rendering identical text each satisfy
+	// their own, is that two clauses are separated AT ALL — that is
+	// TestUnknownPropertyNamesTheClauseAtFault's claim, not a pin's.
 
 	// scope.go, the two projection lanes: a property read in RETURN, on a node
 	// binding and on a single-type edge binding.
@@ -1158,33 +1172,53 @@ var invalidFixtureContains = map[string]string{
 	"parameter_use_unknown_edge_property.cypher":         "r.notAProp",
 
 	// resolve.go's effect validators, node lane: SET, REMOVE and DELETE each
-	// check the property themselves, at three separate sites that say the same
-	// thing. Two of these pins are about POSITION rather than about the site —
-	// set_second_effect writes a.name before a.nope and delete_second_target
-	// deletes n.name before n.notAProp, so the pin holds that the refusal names
-	// the failing one and not the first one it walked past.
-	"effect_order_first_failure_wins.cypher":               "n.notAProp",
-	"merge_on_create_unknown_property.cypher":              "a.notAProp",
-	"merge_on_match_second_effect_unknown_property.cypher": "b.notAProp",
-	"set_second_effect_unknown_property.cypher":            "a.nope",
-	"remove_property_unknown.cypher":                       "n.notAProp",
-	"delete_second_target_unknown_property.cypher":         "n.notAProp",
+	// check the property themselves, at three separate sites. Each pin below
+	// LEADS with the clause word, which is what bd gqlc-vplu added and what
+	// makes these pins hold their own site: until then all three sites rendered
+	// a bare `%s.%s` and the whole discriminating content of these pins came
+	// from the query, so rewriting one site's format as another's changed no
+	// byte anywhere and no pin could notice. Two of them are also about
+	// POSITION rather than about the site — set_second_effect writes a.name
+	// before a.nope and delete_second_target deletes n.name before n.notAProp,
+	// so the pin holds that the refusal names the failing one and not the first
+	// one it walked past.
+	//
+	// The MERGE pair is the one place the clause is finer than the validator:
+	// ON CREATE SET and ON MATCH SET are one site (validateSetPropertyEffect,
+	// reached through validateMergeEffect) and separate here only because the
+	// clause is threaded from the MERGE walk rather than read off the effect.
+	"effect_order_first_failure_wins.cypher":               "SET n.notAProp",
+	"merge_on_create_unknown_property.cypher":              "ON CREATE SET a.notAProp",
+	"merge_on_match_unknown_property.cypher":               "ON MATCH SET a.notAProp",
+	"merge_on_match_second_effect_unknown_property.cypher": "ON MATCH SET b.notAProp",
+	"set_second_effect_unknown_property.cypher":            "SET a.nope",
+	"remove_property_unknown.cypher":                       "REMOVE n.notAProp",
+	"delete_second_target_unknown_property.cypher":         "DELETE n.notAProp",
 
-	// The same three validators' single-type EDGE lane, three more sites.
-	"set_property_unknown_on_single_type_edge.cypher":    "r.notAProp",
-	"remove_property_unknown_on_single_type_edge.cypher": "r.notAProp",
-	"delete_edge_property_unknown.cypher":                "r.notAProp",
+	// The same three validators' single-type EDGE lane, three more sites. All
+	// three fixtures name r.notAProp, so before the clause word these three
+	// pins were the same string and separated nothing.
+	"set_property_unknown_on_single_type_edge.cypher":    "SET r.notAProp",
+	"remove_property_unknown_on_single_type_edge.cypher": "REMOVE r.notAProp",
+	"delete_edge_property_unknown.cypher":                "DELETE r.notAProp",
 
 	// The five sites that say something of their own. The CALL YIELD arm is
 	// the only place in the corpus that reports a property lookup on a scalar
 	// as an unknown property rather than as a type error, and its parenthetical
-	// is the whole of that disclosure. The two union-member arms below are one
-	// site each: the multi-type edge lane of SET, REMOVE, DELETE and of a plain
-	// projection all reach the missing-member arm, so its pin is one.
-	"call_yield_property_lookup.cypher":              `city.length (CALL YIELD variable "city" is a scalar)`,
-	"set_property_unknown_on_multi_type_edge.cypher": "property r.notAProp missing on union member Person-[AUTHORED]->Post",
-	"unknown_property_union_missing.cypher":          "property r.views missing on union member Person-[LIKES]->Post",
-	"unknown_property_union_type_differs.cypher":     "property r.weight type differs across union members: property:INT (not null) vs property:FLOAT (not null)",
+	// is the whole of that disclosure.
+	//
+	// The multi-type edge lane of SET, REMOVE and DELETE and of a plain
+	// projection all reach ONE site — unionProperty's missing-member arm — so
+	// unlike the lanes above there is no per-site format to carry the clause
+	// and it arrives as an argument from the caller. That is why the three
+	// effect pins differ from each other and from the read-path pin, which is
+	// under no clause and keeps its unprefixed text.
+	"call_yield_property_lookup.cypher":                 `city.length (CALL YIELD variable "city" is a scalar)`,
+	"set_property_unknown_on_multi_type_edge.cypher":    "SET property r.notAProp missing on union member Person-[AUTHORED]->Post",
+	"remove_property_unknown_on_multi_type_edge.cypher": "REMOVE property r.notAProp missing on union member Person-[AUTHORED]->Post",
+	"delete_property_unknown_on_multi_type_edge.cypher": "DELETE property r.notAProp missing on union member Person-[AUTHORED]->Post",
+	"unknown_property_union_missing.cypher":             "property r.views missing on union member Person-[LIKES]->Post",
+	"unknown_property_union_type_differs.cypher":        "property r.weight type differs across union members: property:INT (not null) vs property:FLOAT (not null)",
 }
 
 // invalidFixtureNoMessagePin names the invalid fixtures whose refusal message
@@ -1249,7 +1283,13 @@ var invalidFixtureContains = map[string]string{
 //     twice, on the reading that a pin could then separate no site from any
 //     other. Measuring the site-to-fixture assignment instead of the strings
 //     shows the sites are reached by DISJOINT fixtures, so a pin does hold its
-//     own site; twenty moved and seven stay, named below.
+//     own site; twenty moved and seven stayed, named below.
+//   - gqlc-vplu, the follow-up that axis filed against itself: the seven it left
+//     were not one kind. Four are twins of a pin at the same site under the same
+//     clause, which no message can separate; the other three were inseparable
+//     only because the CLAUSE at fault was absent from the sentence, which is a
+//     defect in the message rather than a limit on pinning. Giving the six
+//     effect sites their clause word moved those three and left four here.
 //
 // THE SCREEN THAT AXIS NEEDED, because it applies to every axis left and
 // nothing above it says so. TestCorpusSweepManifest digests err.Error() for
@@ -1313,42 +1353,29 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	// covered and this entry would add nothing.
 	"label_satisfy_none.cypher": {},
 
-	// ErrUnknownProperty's seven survivors, waived on a measurement — the seventh
-	// axis of bd gqlc-9vpga, which pinned the other twenty. Fifteen sites raise
-	// this sentinel and TEN of them emit the same bare `%s.%s`: nothing but the
-	// variable and the property name, both of which come from the query rather
-	// than from the site. The site-to-fixture assignment was measured with
-	// per-site markers and is DISJOINT — every site is reached, and no fixture
-	// reaches two — so a pin does hold its own site, which is why twenty moved.
+	// ErrUnknownProperty's survivors, waived on a measurement — the seventh axis
+	// of bd gqlc-9vpga (PR #2843) pinned twenty and left seven here; gqlc-vplu
+	// moved three more, leaving these four. Fifteen sites raise this sentinel
+	// and TEN of them emitted a bare `%s.%s`: nothing but the variable and the
+	// property name, both of which come from the query rather than from the
+	// site. The site-to-fixture assignment was measured with per-site markers
+	// and is DISJOINT — every site is reached, and no fixture reaches two.
 	//
-	// What it does NOT do here, and this is the limit worth recording: because
-	// no site contributes a single byte of its own to that sentence, two sites
-	// reached by two fixtures whose queries happen to name the same variable
-	// and property render byte-identical text. Rewriting one such site's format
-	// as the other's is a LITERAL NO-OP on the bytes, so no pin anywhere can
-	// separate them, and none below claims to. `SET r.notAProp`, `REMOVE
-	// r.notAProp` and `DELETE r.notAProp` on a single-type edge all refuse with
-	// `unknown property: r.notAProp` — which clause was at fault is absent from
-	// the message, not merely unpinned. That is the opposite of what the same
-	// three verbs do for the variable-length-edge refusal pinned above, where
-	// the verb IS in the sentence; gqlc-9vpga's notes carry it as a follow-up.
-	//
-	// Each entry below is byte-identical to a pin ABOVE raised at the SAME
-	// site, so a second copy of that string discriminates nothing further —
-	// the mutation that kills the pin kills this fixture's subtest with it.
+	// Six of those ten now lead with the clause at fault (SET / ON CREATE SET /
+	// ON MATCH SET / REMOVE / DELETE), so the fixtures that gqlc-9vpga recorded
+	// as inseparable BECAUSE the verb was absent are separable and are pinned
+	// above. The three that remain here are not that case: each is byte-
+	// identical to a pin above raised at the same site AND under the same
+	// clause, so a second copy of that string discriminates nothing further and
+	// the mutation that kills the pin kills this fixture's subtest with it. No
+	// clause word can separate two fixtures whose queries use the SAME clause.
 	// The twin is named on each.
-	"certified_collect_unknown_property.cypher": {}, // == certified_list_unknown_property, scope.go refProjectionType node arm
-	"set_property_unknown_property.cypher":      {}, // == effect_order_first_failure_wins, validateSetPropertyEffect node arm
-	"merge_on_match_unknown_property.cypher":    {}, // == merge_on_create_unknown_property, same arm; ON MATCH vs ON CREATE is not in the message
-	"delete_bare_property_unknown.cypher":       {}, // == delete_second_target_unknown_property, validateDeleteTarget node arm
-	// The multi-type-edge lane of all three verbs funnels through ONE site
-	// (unionProperty's missing-member arm), so unlike the single-type lane
-	// these are not even separate sites: one pin, on the SET entry above,
-	// covers the sentence all three render.
-	"remove_property_unknown_on_multi_type_edge.cypher": {},
-	"delete_property_unknown_on_multi_type_edge.cypher": {},
-	// The seventh arrived from the other side (bd gqlc-b8m8f, PR #2838) while
-	// this axis was being measured, and it is the same shape as the first: it
+	"certified_collect_unknown_property.cypher": {}, // == certified_list_unknown_property, scope.go refProjectionType node arm; a read-path site, under no mutating clause
+	"set_property_unknown_property.cypher":      {}, // == effect_order_first_failure_wins, validateSetPropertyEffect node arm; both are `SET n.notAProp`
+	"delete_bare_property_unknown.cypher":       {}, // == delete_second_target_unknown_property, validateDeleteTarget node arm; both are `DELETE n.notAProp`
+	// The fourth arrived from the other side (bd gqlc-b8m8f, PR #2838) while
+	// gqlc-9vpga's axis was being measured, and it is the same shape as the
+	// first: it
 	// reaches S1 too, so it is a twin of certified_list's pin above and a pin
 	// here would discriminate nothing further. Its own reason for existing is
 	// a VERDICT rather than a message — that min's operand is resolved against
