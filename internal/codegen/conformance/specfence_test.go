@@ -62,6 +62,14 @@ import (
 // 0029 decision 15). The fifth, scanBareBinds, has no anchor to refuse,
 // so a commented brace-less binding span is still read and still counts.
 //
+// A documented binding is graded on its SHAPE as well as its name: no
+// arm of the emitter can produce a `*` or an `&`, so either operator is
+// drift at every nullability, and the deref hiding inside a carrier is
+// no longer peeled away before the comparison. What remains unreached
+// there is the sweep's breadth — every map[string]any literal under
+// docRoots is graded whatever it is for — which fails closed and is
+// declined on measurement (gqlc-173n, ADR 0029 decision 16).
+//
 // A signature carrying the author's parameter names as separate
 // arguments is no longer past the arity read here: the emitted list is a
 // closed shape at every arity, so anything longer is graded as drift,
@@ -687,6 +695,17 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 			"one identifier, and only the map key carries the author's parameter name (gqlc-lhs3, gqlc-rz0l)",
 			codegen.ParamArg))
 
+	requireClean(t, sweep.deref, "documented parameter binding derefs or takes an address",
+		"these documented map[string]any entries carry a `*` or an `&`, and no arm of the emitter can\n"+
+			"produce one: every binding it writes is the access expression bare or one helper call wrapped\n"+
+			"around it, and the access expression is codegen.ParamArg or a field selected off it. The\n"+
+			"operators are therefore wrong at every nullability, which is why this is graded without\n"+
+			"knowing the parameter's type.\n\n"+
+			"The shape this exists for is `float64(*arg)`, whose IDENTIFIER is right — so the name rule\n"+
+			"above passes it — and which is a nil panic at runtime. A nullable parameter binds bare:\n"+
+			"paramBindExpr returns the access expression before driverCarrier is reached, so a carrier\n"+
+			"around a deref documents the one composition the emitter refuses to write (gqlc-173n)")
+
 	// A document quoting a signature owes a binding only while it is
 	// listed here (ADR 0029 decision 9).
 	requireCensusFloors(t, specBindDocs, sweep.bindDocs, "specBindDocs", "graded binding",
@@ -917,6 +936,12 @@ type bindSweep struct {
 	unclosed []specSig
 	bindDocs map[string]int
 
+	// deref are the graded bindings whose expression carries a pointer
+	// operator. Kept apart from `graded` because it is a different
+	// question about the same site — the shape rather than the name — and
+	// a site can be in both (gqlc-173n).
+	deref []specSig
+
 	// bareExhibits are the brace-less binding spans a document prints as
 	// exhibits of the limit rather than as claims, routed out of the
 	// graded set and reconciled against specBareBindExhibits (gqlc-offa).
@@ -1014,8 +1039,9 @@ func sweepBinds(files []string, read func(string) string, exhibits map[string][]
 	for _, file := range files {
 		text := read(file)
 
-		binds, broken := scanSpecBinds(file, text)
+		binds, deref, broken := scanSpecBinds(file, text)
 		out.unclosed = append(out.unclosed, broken...)
+		out.deref = append(out.deref, deref...)
 		for _, bind := range binds {
 			out.bindDocs[file]++
 			out.graded = append(out.graded, bind)
@@ -2497,11 +2523,17 @@ func TestSpecParamListRuleScannerDetectsDrift(t *testing.T) {
 // same terms: each row is a `map[string]any` literal that was in the
 // specs before gqlc-rz0l corrected it, or the correction, or a form the
 // sweep must leave alone.
+//
+// `want` is the identifier each entry binds and `wantDeref` the entries
+// graded on their shape instead, verbatim. The two are separate columns
+// because they are separate questions about one site, and the row that
+// motivates the second — `float64(*x)` — answers the first correctly.
 func TestSpecBindScannerDetectsDrift(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		text string
-		want []string
+		name      string
+		text      string
+		want      []string
+		wantDeref []string
 	}{{
 		name: "c1 §5.3 template, before",
 		text: `map[string]any{"<rawName>": <bareParam>}`,
@@ -2523,9 +2555,42 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 		text: `map[string]any{"x": float64(arg)}`,
 		want: []string{"arg"},
 	}, {
-		name: "c3 §5.7 nullable FLOAT32, before — a deref the emitter never writes",
-		text: `map[string]any{"x": float64(*x)}`,
-		want: []string{"x"},
+		// The shape gqlc-173n is about. gqlc-rz0l took C3 §5.7 out of
+		// scope precisely because a mechanical rename there produces this,
+		// and the name column shows why the name rule cannot catch it: the
+		// identifier is `x` before the correction and would be `arg`
+		// after, either way the right answer to the wrong question.
+		name:      "c3 §5.7 nullable FLOAT32, before — a deref the emitter never writes",
+		text:      `map[string]any{"x": float64(*x)}`,
+		want:      []string{"x"},
+		wantDeref: []string{"float64(*x)"},
+	}, {
+		name:      "the same deref with the corrected identifier is still graded",
+		text:      `map[string]any{"x": float64(*arg)}`,
+		want:      []string{"arg"},
+		wantDeref: []string{"float64(*arg)"},
+	}, {
+		name:      "a bare deref carries no carrier to hide behind and is graded too",
+		text:      `map[string]any{"x": *arg}`,
+		want:      []string{"arg"},
+		wantDeref: []string{"*arg"},
+	}, {
+		name:      "an address-of is the mirror image and is graded on the same terms",
+		text:      `map[string]any{"x": &arg}`,
+		want:      []string{"arg"},
+		wantDeref: []string{"&arg"},
+	}, {
+		name:      "a deref on a selector in the multi-parameter form",
+		text:      `map[string]any{"pid": arg.Pid, "x": float64(*arg.X)}`,
+		want:      []string{"arg.Pid", "arg.X"},
+		wantDeref: []string{"float64(*arg.X)"},
+	}, {
+		// The negative control the four rows above need: the operator is
+		// what is graded, not the carrier, not the selector, not the
+		// nullable helper's name.
+		name: "the emitter's own nullable form carries no operator and is left alone",
+		text: `map[string]any{"maybe": fromNullableDateListPtr(arg.Maybe)}`,
+		want: []string{"arg.Maybe"},
 	}, {
 		name: "the multi-parameter form binds selectors off the same identifier",
 		text: `map[string]any{"pid": arg.Pid, "oid": arg.Oid}`,
@@ -2538,6 +2603,17 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 		name: "the AGE instant encoder is peeled to the identifier it reads",
 		text: `map[string]any{"seenAt": agtypeNullableMicros(arg.SeenAt)}`,
 		want: []string{"arg.SeenAt"},
+	}, {
+		// gqlc-173n's second half, pinned as deliberate rather than
+		// closed. mapAnchor is the bare literal type, and docRoots is all
+		// of docs/, so a future note showing an unrelated option map is
+		// told its binding is not generator-owned. That fails CLOSED —
+		// the risk is that whoever meets it narrows docRoots, whose
+		// breadth is load-bearing — and the remedy the bead proposes is
+		// refuted by the corpus: see ADR 0029 decision 16.
+		name: "an unrelated map literal anywhere under docRoots is graded, and fails closed",
+		text: `opts := map[string]any{"debug": true}`,
+		want: []string{"true"},
 	}, {
 		name: "an elided literal is prose, not a binding",
 		text: `map[string]any{...}`,
@@ -2552,13 +2628,17 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 		want: []string{"arg.Pid", "arg.Oid"},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, unclosed := scanSpecBinds("witness.md", tc.text)
+			got, deref, unclosed := scanSpecBinds("witness.md", tc.text)
 			require.Empty(t, unclosed)
-			var values []string
+			var values, shapes []string
 			for _, bind := range got {
 				values = append(values, bind.arg)
 			}
-			require.Equal(t, tc.want, values)
+			for _, bind := range deref {
+				shapes = append(shapes, bind.arg)
+			}
+			require.Equal(t, tc.want, values, "bound identifiers")
+			require.Equal(t, tc.wantDeref, shapes, "expressions graded on their shape")
 		})
 	}
 }
@@ -2570,8 +2650,9 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 // fix.
 func TestSpecScannersReportUnreadableSites(t *testing.T) {
 	t.Run("an unterminated map literal is reported, not dropped", func(t *testing.T) {
-		binds, unclosed := scanSpecBinds("witness.md", "prose\nmap[string]any{\"id\": arg\nmore prose\n")
+		binds, deref, unclosed := scanSpecBinds("witness.md", "prose\nmap[string]any{\"id\": *arg\nmore prose\n")
 		require.Empty(t, binds)
+		require.Empty(t, deref, "an unreadable literal yields no shape grading either")
 		require.Len(t, unclosed, 1)
 		require.Equal(t, 2, unclosed[0].line)
 	})
@@ -3156,9 +3237,14 @@ func scanParamListRules(file, text string) []specSig {
 // Entries with no `:` — the `...` and `map[string]any{...}` elisions —
 // are prose, not bindings, and are not graded.
 //
+// `deref` is the second grading, on the SHAPE rather than the name: an
+// expression carrying a pointer operator. It is returned beside the
+// binding rather than instead of it, because the two questions are
+// independent — a documented `float64(*someoneElse)` is wrong twice.
+//
 // A literal whose brace never closes is returned separately, so that the
 // sweep reports a site it could not read.
-func scanSpecBinds(file, text string) (binds, unclosed []specSig) {
+func scanSpecBinds(file, text string) (binds, deref, unclosed []specSig) {
 	for _, loc := range mapAnchorRe.FindAllStringIndex(text, -1) {
 		anchor := loc[0]
 		open := loc[1] - 1
@@ -3180,13 +3266,38 @@ func scanSpecBinds(file, text string) (binds, unclosed []specSig) {
 			}
 			// `arg.<Field1>` is the template form of a real selector; its
 			// prefix is what this fence grades, so it is kept.
+			expr := strings.TrimSpace(entry[colon+1:])
 			bind := site
-			bind.arg = unwrapConversions(strings.TrimSpace(entry[colon+1:]))
+			bind.arg = unwrapConversions(expr)
 			binds = append(binds, bind)
+			if pointerOperatorRe.MatchString(expr) {
+				shape := site
+				shape.arg = expr
+				deref = append(deref, shape)
+			}
 		}
 	}
-	return binds, unclosed
+	return binds, deref, unclosed
 }
+
+// pointerOperatorRe matches the two operators no emitted driver binding
+// can carry.
+//
+// Every binding the emitter writes is `access`, or one helper call
+// wrapped around it — paramBindExpr's arms return the access expression
+// bare, `from<T>[Ptr](access)`, `encode<Suffix>[Ptr](access)` or
+// `<carrier>(access)`, and sliceParamBindExpr's are the same shape —
+// while `access` itself is codegen.ParamArg or a field selected off it.
+// No arm introduces a `*` or an `&`, so the operators are wrong at every
+// nullability rather than only at one, which is what lets this be a byte
+// test with no knowledge of the parameter's type (gqlc-173n).
+//
+// It reads the whole expression rather than the head, because the deref
+// that motivates this sits INSIDE a carrier: a nullable parameter binds
+// bare — paramBindExpr returns before driverCarrier is reached — so the
+// shape a mechanical rename produces is `float64(*arg)`, which is a nil
+// panic at runtime and whose identifier is nonetheless correct.
+var pointerOperatorRe = regexp.MustCompile(`[*&]`)
 
 // jsonScalars are the value words a JSON model shape writes where a
 // driver binding writes an expression. They are excluded by name, and

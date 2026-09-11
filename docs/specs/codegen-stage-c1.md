@@ -954,13 +954,28 @@ five anchors are therefore refused inside a comment outright, rather
 than read there: an absence check, not a scanner, because deciding
 whether a comment's contents would have rendered is a parse and
 deciding whether bytes sit between the delimiters is not
-(`gqlc-jnsk`). The fifth is the brace-less binding scanner, which has
-no anchor to refuse and so still reads such a span inside a comment.
-The binding sweep, meanwhile, peels pointer operators off a
-value along with carrier conversions before comparing it, so `*arg`
-and `&arg` in a `map[string]any` entry both unwrap to `arg` and stay
-green (`gqlc-173n`) — what is held is the identifier underneath, not
-the expression around it.
+(`gqlc-jnsk`). The remaining anchor is the brace-less binding
+scanner's, which has none to refuse, so such a span inside a comment
+is still read.
+The sixth is the binding sweep's breadth: its anchor is the bare
+literal type with its opening brace, and the sweep reaches all of
+`docs/`, so an unrelated option map in any future note — a rendering
+option table, a driver config — is graded as a documented binding. That
+fails closed, and it is declined rather than narrowed — the remedy of
+requiring a nearby signature is refuted by C3, which owes three
+bindings and prints no parameterised method at all (`gqlc-173n`, ADR
+0029 decision 16).
+
+The deref that used to sit beside it is closed. The sweep still peels
+pointer operators off a value to find the identifier, so `*arg`
+reports the name `arg`, but the expression is now graded on its shape
+as well: no arm of `paramBindExpr` or `sliceParamBindExpr` can produce
+a `*` or an `&`, so either operator is drift at every nullability. The
+shape that motivated it is `float64(*arg)` — a nullable parameter
+binds bare, taking the nullable arm before `driverCarrier` is
+consulted, so a carrier wrapped around a deref is both a nil panic and
+a claim the emitter has no path to, while its identifier is correct
+and the name rule alone lets it through.
 
 One further gap is recorded in the fence's own header rather than
 here, because it bounds what the sweeps reach at all: the prose around

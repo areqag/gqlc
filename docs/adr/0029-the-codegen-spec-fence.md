@@ -545,6 +545,55 @@ a binding. A commented bare binding is therefore still read and still graded, so
 Giving it one would mean anchoring a scanner that exists precisely because the
 binding it catches carries no anchor.
 
+## Decision 16 — a binding's pointer operators are graded; its surroundings are not
+
+`gqlc-173n` raises two limits of the binding sweep. They get opposite answers,
+and the reason in both cases is a measurement rather than a principle.
+
+**The deref is closed, and it needed no knowledge of the parameter's type.**
+`unwrapConversions` peels `*` and `&` along with carrier conversions, so a
+documented `float64(*arg)` reduced to `arg` and passed the name rule. That shape
+is exactly what a mechanical rename of C3 §5.7 would have produced, and it is a
+nil panic at runtime, because `paramBindExpr` takes its nullable arm and returns
+the access expression *before* `driverCarrier` is reached — a nullable parameter
+binds bare, so a carrier wrapped around a deref is a composition the emitter has
+no path to.
+
+The bead proposes grading the shape "for nullable parameters", which the fence
+cannot tell from bytes. It does not have to. Reading the emitter: every binding
+is `access`, or one helper call around it — `paramBindExpr` returns the access
+bare, `from<T>[Ptr](access)`, `encode<Suffix>[Ptr](access)` or
+`<carrier>(access)`, and `sliceParamBindExpr`'s arms are the same shape — while
+`access` is `codegen.ParamArg` or a field selected off it. No arm introduces
+either operator, so they are wrong at *every* nullability and the rule is a byte
+test. Confirmed against the golden corpus: no emitted `map[string]any` binding
+in `test/data/codegen/valid` carries a `*` or an `&`, and neither does any
+documented one, so the check lands green.
+
+**The breadth is declined, and the bead's own remedy is refuted by the corpus.**
+`mapAnchor` is the bare literal type and `docRoots` is all of `docs/`, so a
+future note showing an unrelated option map is told its binding is not
+generator-owned. The bead proposes requiring the literal to sit "adjacent to a
+graded signature". Measured: `specBindDocs` owes C3 three bindings and
+`specSigDocs` has no C3 entry at all, because all nine of C3's documented
+signatures are zero-parameter methods and the sweep grades only a list holding
+one parameter past the context. There is no parameterised method anywhere in
+that document to anchor to. A proximity rule drops all three of its bindings and
+takes it below its declared floor — the fence reddens on a clean tree.
+
+That is the same shape as Decision 13's refutation of receiver-anchoring, and
+the same conclusion: the candidate discriminator is not in the bytes. The other
+candidate the bead offers — "inside a section the spec marks normative" — is a
+markdown parse, which [ADR 0042](0042-the-spec-fence-stays-a-byte-scan.md)
+declines.
+
+So the breadth stays, and it stays deliberately. It fails CLOSED, which makes it
+a maintenance annoyance rather than a hole, and the danger is only that whoever
+meets it narrows `docRoots` in response — the breadth of `docRoots` is
+load-bearing, since the original drift reached C1, C3, C4 and C5. It is pinned
+by a row in `TestSpecBindScannerDetectsDrift` so that a later reader finds the
+behaviour declared rather than discovers it.
+
 ## Consequences
 
 The fence is a graded-site check, not a document check. What it does **not**
@@ -570,8 +619,12 @@ own header:
 - The prose around an intact graded span may say the opposite of it
   (`gqlc-e143`). The editorial answer, and why the fence is not the answer, is
   Decision 11.
-- The binding sweep peels pointer operators along with carrier conversions, so
-  `*arg` and `&arg` unwrap to `arg` and stay green (`gqlc-173n`).
+- The binding sweep still peels pointer operators to find the NAME, but a
+  binding whose expression carries one is now graded on its shape as well, so
+  `*arg` and a deref inside a carrier are both red (`gqlc-173n`, Decision 16).
+  What stays unreached there is the surroundings: every `map[string]any` literal
+  under `docRoots` is graded as a documented binding whatever it is for, which
+  fails closed and is declined deliberately.
 - A driver binding stated with no `map[string]any` literal around it is unswept,
   and so is a parenthesis-less parameter list with no code span around it — in
   running prose, or on its own line inside a fenced or indented code block
