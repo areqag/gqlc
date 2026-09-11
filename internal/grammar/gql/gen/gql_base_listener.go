@@ -2192,6 +2192,12 @@ func (s *BaseGQLListener) EnterPredefinedType(ctx *PredefinedTypeContext) {}
 // ExitPredefinedType is called when production predefinedType is exited.
 func (s *BaseGQLListener) ExitPredefinedType(ctx *PredefinedTypeContext) {}
 
+// EnterUuidType is called when production uuidType is entered.
+func (s *BaseGQLListener) EnterUuidType(ctx *UuidTypeContext) {}
+
+// ExitUuidType is called when production uuidType is exited.
+func (s *BaseGQLListener) ExitUuidType(ctx *UuidTypeContext) {}
+
 // EnterBooleanType is called when production booleanType is entered.
 func (s *BaseGQLListener) EnterBooleanType(ctx *BooleanTypeContext) {}
 

@@ -242,7 +242,12 @@ func optionalityCoverage(t *testing.T) (map[string]branchState, int) {
 // It is pinned beside the class golden and not derived from it, because the two fail
 // differently: a scanner that stops descending into repetitions loses points while
 // leaving every class represented, and the golden alone would stay green.
-const wantOptionalityPoints = 137
+//
+// 137 → 138 under gqlc-eg4b: uuidType's `notNull?`. The class golden did not
+// move with it — "18.9 :: notNull" was already there, every other scalar type
+// spelling its own optional NOT NULL — which is why the count is pinned
+// separately from the membership.
+const wantOptionalityPoints = 138
 
 // optionalityClassGolden is every class the reachable grammar defines. Checked in as
 // membership, not as a count, on the same argument the obligation goldens are: a size

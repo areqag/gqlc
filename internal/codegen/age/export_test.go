@@ -46,6 +46,7 @@ var (
 	Generate                         = generate
 	NamespaceProbes                  = namespaceProbes
 	OversizedNumerics                = oversizedNumerics
+	UncarriedEverywhere              = uncarriedEverywhere
 	RejectOffsetSidecarCollisions    = rejectOffsetSidecarCollisions
 	// The three render-layer bridges are FENCED, and the wrapper is the
 	// binding rather than a helper the call sites opt into: a bare

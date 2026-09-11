@@ -125,6 +125,11 @@ var typeMappingPins = []typePin{
 	{"DECIMAL", graph.TypeDecimal},
 	{"DEC", graph.TypeDecimal},
 
+	// One row, not a family: ISO 39075 names no UUID value type, so there is
+	// no alias or verbose form to fold and the grammar admits only the bare
+	// keyword (GQL.g4 uuidType).
+	{"UUID", graph.TypeUUID},
+
 	{"ANY VALUE", graph.TypeAnyPropertyValue},
 	{"ANY", graph.TypeAnyPropertyValue},
 	{"PROPERTY VALUE", graph.TypeAnyPropertyValue},
@@ -739,4 +744,60 @@ func TestTypeSpellingsEveryRowPinned(t *testing.T) {
 	require.Empty(t, ungrounded,
 		"every typeSpellings row needs an end-to-end pin: add the spelling to typeMappingPins or widthFoldPins with the constant you expect, "+
 			"or to an equivalence table if it is an alias of a row that already has one")
+}
+
+// TestPropertyUUIDReservedWordEscapeHatch is cited by name from GQL.g4, above
+// the uuidType rule, and is the pin behind the claim the comment there makes.
+//
+// Adding UUID as a lexer token makes the word reserved: ISO's <non-reserved
+// word> list cannot name it, since ISO does not have the construct, and
+// widening regularIdentifier to admit it would perturb the ATN far more than
+// the type alternative does. That is a real cost to a schema author, and it is
+// paid rather than avoided — so what is asserted here is both halves. The bare
+// spelling stops being a name, and the delimited spellings still work, which is
+// what makes the cost bounded rather than a construct nobody can express.
+//
+// The subject is the property NAME, not the type: gqlc-eg4b's other tests cover
+// UUID in type position, and this is the collateral the keyword causes
+// everywhere else.
+func TestPropertyUUIDReservedWordEscapeHatch(t *testing.T) {
+	load := func(t *testing.T, src string) (schema.Schema, error) {
+		t.Helper()
+		return gql.New().Parse(strings.NewReader(src))
+	}
+
+	t.Run("bare uuid no longer names a property", func(t *testing.T) {
+		_, err := load(t, "CREATE PROPERTY GRAPH TYPE T AS { (:A { uuid :: STRING }) }")
+		require.Error(t, err,
+			"UUID is a keyword now, so a bare uuid in name position must not parse; "+
+				"if this passes, the token was added to nonReservedWords and the escape hatch below is no longer the only way to spell it")
+	})
+
+	// Both delimited forms, because they are different lexer rules —
+	// ACCENT_QUOTED_CHARACTER_SEQUENCE and the double-quoted sequence — and a
+	// keyword collision that reached only one of them would leave an author
+	// who reached for the other with no way out.
+	for _, tt := range []struct {
+		name string
+		src  string
+	}{
+		{"accent quoted", "CREATE PROPERTY GRAPH TYPE T AS { (:A { `uuid` :: STRING }) }"},
+		{"double quoted", `CREATE PROPERTY GRAPH TYPE T AS { (:A { "uuid" :: STRING }) }`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := load(t, tt.src)
+			require.NoError(t, err, "the delimited spelling is the escape hatch; if it fails there is none")
+
+			require.Len(t, got.Nodes, 1)
+			for _, node := range got.Nodes {
+				// Keyed by the name, so a property that kept its
+				// delimiters would not be at "uuid" at all — the
+				// delimiters are lexis, and a name carrying them would
+				// match no column anywhere downstream.
+				require.Contains(t, node.Properties, "uuid")
+				require.Len(t, node.Properties, 1)
+				require.Equal(t, graph.TypeString, node.Properties["uuid"].Type)
+			}
+		})
+	}
 }

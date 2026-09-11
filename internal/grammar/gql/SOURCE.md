@@ -1,8 +1,9 @@
 # GQL.g4 — provenance
 
-`GQL.g4` is a **community-contributed ANTLR grammar**, vendored unmodified from
-`antlr/grammars-v4`. It is not a WG3 artefact, not an ISO publication, and not
-derived from either by anyone whose method we can inspect.
+`GQL.g4` is a **community-contributed ANTLR grammar**, vendored from
+`antlr/grammars-v4` and since `gqlc-eg4b` carrying one gqlc addition on top
+(**Local modifications**, below). It is not a WG3 artefact, not an ISO
+publication, and not derived from either by anyone whose method we can inspect.
 
 It has been described in triage notes and bead bodies as "a faithful ISO GQL
 grammar". That claim is unsupported, and this file replaces it. The difference
@@ -20,25 +21,37 @@ grammar defect, and two candidates are listed below.
   upstream `gql/README.md`
 - **Upstream last updated:** 2026-06-13, per that README
 - **Fetched and confirmed byte-identical to the vendored copy:** 2026-07-28
-- **SHA-256:**
+- **Upstream SHA-256:**
   `e1b4a24c6b88dedddc0a1fff97df0fc30bf118cea51539e26d71c717cb737bbf`
-- **Lines:** 3774
+- **Vendored-file SHA-256** (upstream plus **Local modifications**):
+  `25a7e536b7e6ab6b539aaca0af5347e979f29db5880dc2ddd7149251d382ecb9`
+- **Lines:** 3774 upstream, 3797 as vendored
 - **Licence:** MIT, at the repository level; the `.g4` carries no header of its
   own and begins at `grammar GQL;`
 - **Upstream's own cited reference:** ISO/IEC 39075:2024
 
-To re-verify byte-identity:
+To re-verify the upstream half — note that the second command hashes the file
+with gqlc's insertions removed, not the file as it sits in the tree, and that
+the two hashes above are different values on purpose:
 
 ```bash
 curl -sSL 'https://raw.githubusercontent.com/antlr/grammars-v4/master/gql/GQL.g4' \
     | sha256sum
-sha256sum internal/grammar/gql/GQL.g4
+go test ./internal/schema/gql/ -run TestVendoredGrammarLocalDeltaIsDeclared -v
 ```
 
-The vendored copy is not edited in place. Everything below is a statement about
-the upstream file, so a local edit would leave this note describing a grammar we
-no longer have; `TestVendoredGrammarIsUnmodified` pins the hash so that cannot
-happen quietly. A needed change belongs upstream first.
+Everything in this file outside **Local modifications** is a statement about the
+*upstream* file, so an undeclared local edit would leave the note describing a
+grammar we no longer have. Two pins stop that happening quietly, and they answer
+different questions. `TestVendoredGrammarIsUnmodified` hashes the whole file, so
+it fails on any edit at all. `TestVendoredGrammarLocalDeltaIsDeclared` deletes
+every insertion gqlc declares and requires what remains to hash to the upstream
+value — so an in-place edit to an *upstream* line fails it even if someone
+re-pinned the whole-file hash, which is the failure a bare re-pin invites.
+
+A change that ISO or upstream should own still belongs upstream first. The
+Local modifications section is for constructs upstream cannot be expected to
+carry because they are not in the standard at all.
 
 Two things the upstream metadata does not supply. There is no statement of
 method — how the transcription was made, from which text, or whether anything
@@ -47,6 +60,34 @@ sections describe a generic SQL-like language (joins, subqueries, indexing,
 encryption) and never mention graphs, so they are not about this grammar's
 contents at all. Neither observation is evidence against the grammar. Both are
 reasons the word "faithful" was never earned.
+
+## Local modifications
+
+One, added by `gqlc-eg4b` (stage 1 of `gqlc-do1`). Both hunks are pure
+insertions; no upstream line is edited, reordered or removed, which is the
+property the delta test relies on.
+
+1. **`UUID` as a predefined type.** A lexer token `UUID: 'UUID';` in the
+   keyword block, a `uuidType : UUID notNull? ;` rule, and `| uuidType`
+   appended as the **last** alternative of `predefinedType`.
+
+   ISO/IEC 39075 has no UUID value type — it is absent from the published
+   production list, not merely unimplemented here — and neither does Cypher 25,
+   so there is no upstream home for this and no ISO spelling to transcribe. It
+   is gqlc's own construct, and the corpus classifies it as `feature:
+   "extension"` for that reason rather than as `mandatory` or `unsourced`.
+
+   Appended last rather than inserted: ANTLR resolves an ambiguity between
+   alternatives by their order, and item 2 under **Known ANTLR adaptations**
+   below is this grammar's existing instance of an alternative made unreachable
+   that way. Verified after regeneration by diffing the generated parser, not
+   by a green test run — the emitted `PredefinedType()` is a `switch` on the
+   lookahead token and the delta is a single appended `case GQLParserUUID:`,
+   with every pre-existing case byte-identical modulo state renumbering.
+
+   `UUID` is reserved, like every other type keyword this grammar declares and
+   unlike ISO's `<non-reserved word>` list, which cannot name it. The escape
+   hatch for a property or label spelled `uuid` is the delimited identifier.
 
 ## Known ANTLR adaptations and transcription artefacts
 
@@ -73,8 +114,10 @@ standing job of `gqlc-h9n.9`.
 
 ## What has been verified, and what has not
 
-**Verified — byte-identity with upstream.** Above, and reproducible from the
-two commands there.
+**Verified — the upstream half is byte-identical to upstream.** Above, and
+reproducible from the two commands there. What is verified is the file minus the
+declared local insertions; the file as it sits in the tree is deliberately not
+byte-identical to upstream and has not been since `gqlc-eg4b`.
 
 **Verified — production-name coverage against ISO's own artefact.** ISO
 publishes the BNF free of charge; `internal/schema/gql/isobnf` vendors the 200
@@ -150,7 +193,7 @@ directory can.
 ## Drift check
 
 Upstream is a live file — its README already records an update after ISO/IEC
-39075's publication — so the SHA-256 above goes stale without warning. There is
+39075's publication — so the upstream SHA-256 above goes stale without warning. There is
 no automated re-fetch for it yet; `gqlc-4jm` covers the ISO artefacts under
 `internal/schema/gql/annexd` and `internal/schema/gql/isobnf` and does not cover
 this one. Until that changes, the two commands under **Provenance** are the

@@ -1456,6 +1456,10 @@ func (v *BaseGQLVisitor) VisitPredefinedType(ctx *PredefinedTypeContext) interfa
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseGQLVisitor) VisitUuidType(ctx *UuidTypeContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseGQLVisitor) VisitBooleanType(ctx *BooleanTypeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
