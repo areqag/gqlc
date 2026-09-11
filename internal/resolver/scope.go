@@ -1389,7 +1389,7 @@ func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedTyp
 			}
 			return nil, fmt.Errorf("%w: %s is satisfied by more than one declared node type: %s", sentinel, ref.Variable, formatNodeTypeKeys(nts))
 		}
-		return unionNodeProperty(nts, ref.Variable, ref.Property, s.nullableBinding[ref.Variable])
+		return unionNodeProperty(nts, ref.Variable, ref.Property, s.nullableBinding[ref.Variable], clauseRead)
 	}
 	_, singleCand := s.edgeTypes[ref.Variable]
 	cands, multiCand := s.edgeCands[ref.Variable]
@@ -1444,7 +1444,7 @@ func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedTyp
 		}
 		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
 	}
-	return unionProperty(cands, sch, ref.Variable, ref.Property, edgeNullable)
+	return unionProperty(cands, sch, ref.Variable, ref.Property, edgeNullable, clauseRead)
 }
 
 // Export builds the branchState Part K passes to Part K+1 (§4.2.2).
@@ -1609,7 +1609,7 @@ func (s *scope) exportBindingLanes(out *branchState, item query.ReturnItem, loca
 // unexported package-level helpers taking *scope (§2.2 §5 step 3).
 func (s *scope) ValidateEffects(sch schema.Schema) error {
 	for _, e := range s.effects {
-		if err := validateEffect(s, e, sch); err != nil {
+		if err := validateEffect(s, e, sch, clauseSet); err != nil {
 			return err
 		}
 	}
@@ -1689,7 +1689,7 @@ func (sc partScope) PropertyUseWitness(ref query.Ref, s schema.Schema) (Resolved
 		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || sc.nullableBinding[ref.Variable]}, nil
 	}
 	if nts, ok := sc.nodeCands[ref.Variable]; ok {
-		return unionNodeProperty(nts, ref.Variable, ref.Property, sc.nullableBinding[ref.Variable])
+		return unionNodeProperty(nts, ref.Variable, ref.Property, sc.nullableBinding[ref.Variable], clauseRead)
 	}
 	_, singleCand := sc.edgeTypes[ref.Variable]
 	cands, multiCand := sc.edgeCands[ref.Variable]
@@ -1713,7 +1713,7 @@ func (sc partScope) PropertyUseWitness(ref query.Ref, s schema.Schema) (Resolved
 		}
 		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
 	}
-	return unionProperty(cands, s, ref.Variable, ref.Property, edgeNullable)
+	return unionProperty(cands, s, ref.Variable, ref.Property, edgeNullable, clauseRead)
 }
 
 // WitnessUse produces exactly one witness (or zero) for a Use. The
