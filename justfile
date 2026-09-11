@@ -2293,80 +2293,105 @@ lint-new rev="origin/master": ensure-golangci
 # it gets to see: a capped list sends them round the loop once per hidden
 # function.
 #
-# GROUPED BY OWNING MODULE, because golangci-lint is module-scoped and this
-# tree is not one module. A path under test/data/codegen is not a package of
-# the main module, so a root-rooted run dies before it measures anything:
-# "main module (github.com/areqag/gqlc) does not contain package
-# github.com/areqag/gqlc/test/data/codegen", exit 7, over the words `0 issues`.
-# The caller is .githooks/pre-commit, which turns any non-zero exit into
-# "function complexity over the gate in a package this commit touches" — so the
-# hook accused an author of an over-complex function the linter had not
-# measured, and sent them to .golangci.yml thresholds that had nothing to do
-# with it. That refused EVERY commit editing a live test, an adapter or a golden
-# under the one nested module in the tree, which is where the whole live battery
-# and all ~97 fixtures live (bd gqlc-f0x1).
+# THE PATHS ARE GROUPED BY OWNING MODULE and the linter runs once per module,
+# from inside that module. golangci-lint is module-scoped: a root-module run
+# handed a path belonging to test/data/codegen exits 7 with "main module does
+# not contain package" having graded nothing, and .githooks/pre-commit then
+# reported that as a complexity finding — so every commit touching the live
+# battery or a checked-in golden was refused for a reason that was not true
+# (bd gqlc-f0x1, gqlc-i8j9). Running from the module root is what
+# test-codegen-fence already does; the root `.golangci.yml` is found by
+# golangci-lint's upward walk, so the thresholds and the _test.go exemption
+# are still the ones CI enforces.
 #
-# Fixed here rather than in the hook so every caller gets it, and the hook keeps
-# passing repo-relative directories and knowing nothing about modules. The
-# per-module invocation is the same shape `just test-codegen-fence` already uses
-# for build, vet, tidy and lint: `(cd "${m}" && golangci-lint run ...)`, which is
-# sound because {{ golangci }} and {{ lint_lock }} are absolute.
+# The module set is DISCOVERED through internal/tools/modscope, the same
+# derivation test-codegen-fence and `just vuln` read (bd gqlc-oxne). Naming
+# `test/data/codegen` here would make this the third place a second nested
+# module has to be remembered, and the two that already exist were generalised
+# precisely because it was not.
 #
-# A path whose module cannot be found is NOT skipped. Skipping is how this gate
-# would exit 0 over unmeasured code and report it as measured, which is the
-# failure it exists to prevent; an unplaceable path is a hard error instead.
+# With no paths the default is every module's `./...`, not the root's. A
+# root-only `./...` is what the comment above used to call "the whole tree"
+# while the nested module went unmeasured, and a coverage claim wider than the
+# run behind it is the failure class this gate exists to prevent.
+#
+# EXIT CODE IS LOAD-BEARING, and the hook's message depends on it: 1 is
+# golangci-lint's --issues-exit-code and nothing overrides it, so 1 and only 1
+# means "code was graded and found wanting". A structural code from any module
+# therefore wins over a 1 from another — the commit author must not be told a
+# function is over the threshold when a module failed to load.
 complexity *paths: ensure-golangci
     #!/usr/bin/env bash
     set -euo pipefail
 
-    requested=({{ if paths == "" { "./..." } else { paths } }})
+    # `|| exit 1` rather than trusting errexit: it is suppressed inside a
+    # command substitution (measured on bash 5.3), so a dead modscope would
+    # otherwise read as a tree with no nested module and silently restore the
+    # root-only behaviour this recipe exists to remove.
+    modules_raw="$(go run ./internal/tools/modscope modules)" || exit 1
+    nested=()
+    while IFS= read -r module; do
+        case "${module}" in ""|".") continue ;; esac
+        nested+=("${module}")
+    done <<<"${modules_raw}"
 
-    # The nearest ancestor of a path that holds a go.mod, as a repo-relative
-    # directory; "." for the root module. `./...` is a package PATTERN, not a
-    # directory, so its wildcard tail is trimmed before the walk.
-    module_root() {
-        local dir="${1#./}"
-        dir="${dir%/...}"
-        dir="${dir%/}"
-        [ -n "${dir}" ] && [ "${dir}" != "..." ] || dir="."
-        while [ "${dir}" != "." ]; do
-            [ -f "${dir}/go.mod" ] && { printf '%s\n' "${dir}"; return 0; }
-            dir="$(dirname "${dir}")"
+    set -- {{ paths }}
+    if [ "$#" -eq 0 ]; then
+        set -- ./...
+        for module in ${nested[@]+"${nested[@]}"}; do
+            set -- "$@" "./${module}/..."
         done
-        [ -f go.mod ] || return 1
-        printf '.\n'
-    }
+    fi
 
     declare -A grouped=()
-    for p in "${requested[@]}"; do
-        if ! root="$(module_root "${p}")"; then
-            echo "error: ${p} is under no module in this tree, so nothing measured it." >&2
-            echo "       Complexity is scored per module; a path with no go.mod above it" >&2
-            echo "       cannot be linted and must not be reported as clean (bd gqlc-f0x1)." >&2
-            exit 1
+    for given in "$@"; do
+        rel="${given#./}"
+        recurse=""
+        case "${rel}" in
+            ...)   recurse="/..."; rel="" ;;
+            */...) recurse="/..."; rel="${rel%/...}" ;;
+        esac
+
+        # Longest match wins, so a module nested inside another module would
+        # be grouped under the one that actually owns the path.
+        owner=""
+        for module in ${nested[@]+"${nested[@]}"}; do
+            case "${rel}" in
+                "${module}"|"${module}"/*)
+                    [ "${#module}" -gt "${#owner}" ] && owner="${module}" ;;
+            esac
+        done
+
+        sub="${rel}"
+        if [ -n "${owner}" ]; then
+            sub="${rel#"${owner}"}"
+            sub="${sub#/}"
         fi
-        # Re-root the path onto the module that owns it. golangci-lint is run
-        # from there, so a repo-relative path would miss by the prefix — and
-        # miss QUIETLY in the direction that matters, since a path resolving to
-        # nothing is a package nothing measured.
-        stripped="${p#./}"
-        if [ "${root}" = "." ]; then
-            rel="${p}"
-        elif [ "${stripped}" = "${root}" ]; then
-            # The module root directory itself: its own package, not its tree.
-            rel="."
+        if [ -z "${sub}" ]; then
+            pattern=".${recurse:+/...}"
         else
-            rel="./${stripped#"${root}/"}"
+            pattern="./${sub}${recurse}"
         fi
-        grouped["${root}"]="${grouped["${root}"]:-} ${rel}"
+        grouped["${owner:-.}"]+=" ${pattern}"
     done
 
-    # Sorted so the report is in the same order on every run; a set printed in
-    # hash order reads like it changed when it did not.
-    for root in $(printf '%s\n' "${!grouped[@]}" | sort); do
-        read -ra targets <<<"${grouped["${root}"]}"
-        (cd "${root}" && {{ lint_lock }} {{ golangci }} run --enable-only gocyclo,gocognit --max-issues-per-linter 0 --max-same-issues 0 "${targets[@]}")
+    # Iterated over the ordered module list rather than over the associative
+    # array's keys, whose order bash does not define: a gate whose report
+    # changes order between runs is one nobody can diff.
+    rc=0
+    for module in . ${nested[@]+"${nested[@]}"}; do
+        [ -n "${grouped[${module}]+set}" ] || continue
+        read -r -a patterns <<<"${grouped[${module}]}"
+        echo "complexity: ${module} (${patterns[*]})"
+        module_rc=0
+        ( cd "${module}" && {{ lint_lock }} {{ golangci }} run \
+            --enable-only gocyclo,gocognit \
+            --max-issues-per-linter 0 --max-same-issues 0 "${patterns[@]}" ) || module_rc=$?
+        if [ "${module_rc}" -ne 0 ] && { [ "${rc}" -eq 0 ] || [ "${module_rc}" -ne 1 ]; }; then
+            rc="${module_rc}"
+        fi
     done
+    exit "${rc}"
 
 # rewrites formatting in place (gofumpt + gci, both bundled in golangci-lint)
 fmt: ensure-golangci

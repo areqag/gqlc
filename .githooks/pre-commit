@@ -42,31 +42,6 @@ if [ "$BRANCH" = "master" ] || [ "$BRANCH" = "main" ]; then
   exit 1
 fi
 
-# owning_module prints the NESTED module root a directory belongs to, and
-# nothing at all when it belongs to the repository's own root module.
-#
-# The walk stops before `.`, so the root go.mod is never a hand-off: a
-# directory reaching the top without meeting a go.mod is root-module, which is
-# the common case and the one that must stay cheap. A `go.mod` in the directory
-# itself counts — that is exactly test/data/codegen — and the nearest one wins,
-# which is the same rule the go command applies.
-#
-# Pure path walking rather than `go list -m` or internal/tools/modscope: this
-# runs on every commit and a `go run` costs a compile, where this costs a few
-# stats. It agrees with them on what a module root is because a go.mod IS the
-# definition.
-owning_module() {
-  local dir="$1"
-  while [ "$dir" != "." ] && [ "$dir" != "/" ]; do
-    if [ -f "$dir/go.mod" ]; then
-      printf '%s\n' "$dir"
-      return 0
-    fi
-    dir="$(dirname "$dir")"
-  done
-  return 0
-}
-
 # Function-complexity gate (gocyclo + gocognit), scoped to the packages this
 # commit touches. Called from the provisioning-success arm below, so it shares
 # the one decision about whether the pinned linter is usable.
@@ -101,52 +76,41 @@ owning_module() {
 # gate that cannot be sidestepped that way is CI's; this one is here to catch the
 # ordinary case early, and `git commit --no-verify` is a shorter path anyway for
 # anyone actually trying to get around it.
-#
-# NESTED MODULES ARE HANDED OFF, not skipped. `just complexity` runs the pinned
-# linter from the repo root, and a root-module run cannot load a package in
-# another module: golangci-lint reports `typechecking error: main module does
-# not contain package ...` and exits 7 having found nothing. Passing such a
-# directory therefore turns every commit that touches it into a hard failure
-# with an empty report — measured 2026-09-10 against ./test/data/codegen, the
-# first commit to stage a nested-module .go file since the gate landed the same
-# day in #2756. The local gate regains parity in bd gqlc-i8j9, which is where
-# the partition below is deleted again.
-#
-# Handing off rather than skipping, because `just test-codegen-fence` runs the
-# FULL `.golangci.yml` from INSIDE each nested module (justfile ~:2567, and the
-# upward config walk that makes it the same thresholds is recorded at ~:2440).
-# gocyclo and gocognit are in that config's enable list, so those packages are
-# graded by a required CI context, and what is lost here is the round trip on
-# them rather than the grade. The handoff is PRINTED on every commit that has
-# one: a scope this narrow is only honest if the narrowing is visible, and a
-# gate that silently drops a directory is the shape bd gqlc-jq50 was about.
 complexity_gate() {
-  local complexity_dirs=() handed_off=() staged_go staged_dir complexity_out
+  local complexity_dirs=() staged_go staged_dir complexity_out complexity_rc=0
 
   while IFS= read -r -d '' staged_go; do
     staged_dir="$(dirname "$staged_go")"
     # A file staged as added and then removed from the worktree leaves a
     # directory golangci-lint would refuse to load; skip rather than fail.
     [ -d "$staged_dir" ] || continue
-    if [ -n "$(owning_module "$staged_dir")" ]; then
-      handed_off+=("./$staged_dir")
-      continue
-    fi
     complexity_dirs+=("./$staged_dir")
   done < <(git diff --cached --name-only --diff-filter=ACMR -z -- '*.go')
-
-  if [ ${#handed_off[@]} -gt 0 ]; then
-    readarray -t handed_off < <(printf '%s\n' "${handed_off[@]}" | sort -u)
-    echo "NOTE: complexity gate skipped $(printf '%s ' "${handed_off[@]}")— each is in a nested" >&2
-    echo "      module a root-module golangci-lint run cannot load. gocyclo/gocognit still" >&2
-    echo "      grade them, from inside their own module: just test-codegen-fence." >&2
-  fi
 
   [ ${#complexity_dirs[@]} -gt 0 ] || return 0
 
   # One package may own several staged files; lint it once.
   readarray -t complexity_dirs < <(printf '%s\n' "${complexity_dirs[@]}" | sort -u)
-  if ! complexity_out="$(just complexity "${complexity_dirs[@]}" 2>&1)"; then
+  complexity_out="$(just complexity "${complexity_dirs[@]}" 2>&1)" || complexity_rc=$?
+  if [ "$complexity_rc" -eq 0 ]; then
+    return 0
+  fi
+
+  # THE REASON IS READ OFF THE EXIT CODE, not assumed from the failure. 1 is
+  # golangci-lint's --issues-exit-code and neither the justfile nor
+  # .golangci.yml overrides it, so 1 and only 1 means the linter loaded the
+  # packages, graded them, and found something. Every other code means it never
+  # got that far.
+  #
+  # The gate used to print the complexity sentence for both, and a commit into
+  # test/data/codegen was refused by it with "function complexity over the gate"
+  # printed directly above "0 issues." — an author sent looking for a function
+  # to split by a run that had measured none (bd gqlc-f0x1, gqlc-i8j9). That
+  # module boundary is fixed in `just complexity` itself, but the class is not
+  # closed by fixing one member of it: a package that does not compile, a
+  # neighbour's lint lock and a missing linter all still arrive here as
+  # not-1, and each of them would tell the same lie.
+  if [ "$complexity_rc" -eq 1 ]; then
     echo "ERROR: function complexity over the gate in a package this commit touches." >&2
     echo "$complexity_out" >&2
     echo >&2
@@ -154,6 +118,17 @@ complexity_gate() {
     echo "       Extract a helper — do not raise the threshold to land a change (see bd gqlc-5sfv)." >&2
     return 1
   fi
+
+  echo "ERROR: the complexity gate could not RUN (exit $complexity_rc), so it graded nothing." >&2
+  echo "       This is NOT a complexity finding: no function has been measured over any" >&2
+  echo "       threshold, and nothing in .golangci.yml is implicated. Do not go looking" >&2
+  echo "       for a function to split (bd gqlc-f0x1)." >&2
+  echo "$complexity_out" >&2
+  echo >&2
+  echo "       golangci-lint exits 1 when it has graded code and found issues; any other" >&2
+  echo "       code is a failure to load or to start. Reproduce it on its own with:" >&2
+  printf '         just complexity %s\n' "${complexity_dirs[*]}" >&2
+  return 1
 }
 
 # Formatting gate (gofumpt + gci via the pinned golangci-lint). Repo-wide on
