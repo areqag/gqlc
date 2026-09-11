@@ -139,6 +139,7 @@
     "unlabelled_hop_to_carried_far_end_stays_wide.cypher": "satisfy_plural_edges_inline_subtype.gql",
     "certified_list_unknown_property.cypher": "certificate.gql",
     "certified_collect_unknown_property.cypher": "certificate.gql",
+    "certified_min_unknown_property.cypher": "certificate.gql",
     "plural_satisfying_property_nullability_differs.cypher": "satisfy_plural_property_diverges.gql",
     "unlabelled_optional_introduced_hop_foreign_group_withheld.cypher": "satisfy_plural_edges_inline_subtype.gql"
 }

@@ -1,0 +1,38 @@
+-- The emitted half of spec ruling-p9qgu-fold-result-upgrade.md (bd gqlc-b8m8f)
+-- and of ADR 0044. The resolver corpus already records that `min(p.rank)`
+-- resolves to a nullable INT32 property rather than to `any`; a resolved type
+-- is not a Go type, and the ADR's claim is about the SIGNATURE a caller
+-- recompiles against, so the goldens under this fixture are what say `*int32`.
+--
+-- Every property is NOT NULL, and that is the fixture's point rather than an
+-- economy. min/max over a NOT NULL property is STILL nullable, because the
+-- emptiness that produces the null is the MATCH's and not the property's, and
+-- nothing in a schema constrains how many nodes a query matches. A reader who
+-- knows only the declaration reads the emitted pointer as a bug; these goldens
+-- are where they find out it is not. The live half —
+-- live_empty_group_aggregate_test.go — is what witnesses the premise on both
+-- servers rather than quoting it from openCypher.
+--
+-- `rank` is INT32 so the golden distinguishes the DECLARED width from the
+-- driver's 64-bit carrier: a `*int64` here would be the fill flattening every
+-- integer to the wire type, which is exactly what ADR 0002 exists to stop.
+-- `name` is STRING so the rule is witnessed off the integer families too.
+--
+-- NO DEGRADE ROW HERE, and the reason is worth knowing before reaching for
+-- one: the AGE backend serves scalar and entity columns only, so a query whose
+-- column stays `any` is DROPPED from that target's package rather than
+-- generated with a weaker type — `sum(p.rank)` here takes the whole fixture off
+-- apache-age-pgx-v5. The degrades keep their witnesses in the resolver corpus
+-- (certified_sum_stays_any, certified_min_unorderable_stays_any), which is the
+-- layer that decides them and needs no emission to record the answer.
+--
+-- That is also the size of what this fixture's existence proves on AGE. Before
+-- ruling-p9qgu these two queries resolved to `any` and were dropped there for
+-- the same reason; the goldens under golden/apache-age-pgx-v5 exist at all
+-- because the selection now commits a scalar.
+CREATE PROPERTY GRAPH TYPE CertifiedSelection AS {
+    (:Person {
+        rank :: INT32 NOT NULL,
+        name :: STRING NOT NULL
+    })
+}
