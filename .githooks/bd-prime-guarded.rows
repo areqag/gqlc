@@ -33,9 +33,11 @@ trap 'rm -rf "${scratch}"' EXIT
 # walks up from the current directory and adopts whatever workspace it finds.
 # Invoked from a repository checkout, that workspace is the checkout's own.
 #
-# Measured 2026-09-11 in a fresh depth-1 clone, which is the shape of every CI
-# checkout because the ledger database is gitignored: one run of this battery
-# left `.beads/embeddeddolt` and `.beads/backup` created and
+# Measured 2026-09-11 in a fresh clone carrying `.beads/` but no ledger
+# database, which is the shape of every CI checkout because the database is
+# gitignored and the tracked export is not one (clone depth is irrelevant —
+# ci.yml's tidy job fetches full history and is affected just the same): one run
+# of this battery left `.beads/embeddeddolt` and `.beads/backup` created and
 # `.beads/issues.jsonl` DELETED — `git status` reporting ` D` on the committed
 # export that three later steps of ci.yml's tidy job read. A sibling worktree
 # hides this completely: bd resolves a linked worktree to the main checkout,
