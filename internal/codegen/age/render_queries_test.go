@@ -807,11 +807,19 @@ func returnedGoType(t *testing.T, fset *token.FileSet, method string, ret *ast.R
 		// TestARecordPropertyRendersItsCarrierAndItsDecode, which
 		// requires the emission to declare it.
 		//
-		// Pinned to that one callee by name. Any other call is a return
-		// this walk cannot read and falls through to the refusal below,
-		// so an arm that began composing its text some other way is a
-		// failure here rather than a silent hole.
-		require.True(t, isRecordStructTextCall(first),
+		// The union arm is the second admitted callee and it is admitted on
+		// a NARROWER ground: codegen.UnionCarrier names exactly one Go type
+		// text, codegen.UnionCarrierText, which is `any` — a text this
+		// census already holds from the TypeAnyPropertyValue arm and which
+		// decodeFunc answers with agtypeValue. So this arm contributes a
+		// text that is swept rather than one that is unbounded, and a
+		// census entry for it would be a duplicate the collector drops.
+		//
+		// Pinned to those callees by name. Any other call is a return this
+		// walk cannot read and falls through to the refusal below, so an
+		// arm that began composing its text some other way is a failure
+		// here rather than a silent hole.
+		require.True(t, isSharedCarrierCall(first, "RecordStructText") || isSharedCarrierCall(first, "UnionCarrier"),
 			cannotRead, where, method, types.ExprString(first))
 		return "", false
 	default:
@@ -820,17 +828,23 @@ func returnedGoType(t *testing.T, fset *token.FileSet, method string, ret *ast.R
 	}
 }
 
-// isRecordStructTextCall reports whether an expression is the record
-// arm's call to codegen.RecordStructText, read off the syntax alone.
+// isSharedCarrierCall reports whether an expression is a call to the named
+// function of internal/codegen — the shared carrier derivations the
+// container arms return through — read off the syntax alone.
 //
 // Syntax and not types, because the walk parses files rather than
 // type-checking a package, so "codegen" here is the identifier written
 // at the call site. An import alias would defeat it — and would fail the
 // walk at the refusal rather than pass silently, which is the safe
 // direction.
-func isRecordStructTextCall(call *ast.CallExpr) bool {
+//
+// The callee is an ARGUMENT rather than a list held here, so each admitted
+// shape is named at the site that argues for admitting it. The two
+// arguments are admitted for different reasons and a shared list would
+// read as one.
+func isSharedCarrierCall(call *ast.CallExpr, name string) bool {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "RecordStructText" {
+	if !ok || sel.Sel.Name != name {
 		return false
 	}
 	pkg, ok := sel.X.(*ast.Ident)

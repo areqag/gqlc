@@ -1,6 +1,8 @@
 package age
 
 import (
+	"strings"
+
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
@@ -183,6 +185,22 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 			return text, true
 		})
 	}
+	if pt.Kind() == graph.KindUnion {
+		// The carrier is `any` and the admission rule decides (spec §4).
+		// The member carrier is this table's own wrapped in the SAME zoned
+		// refusal the record arm above and the list arm before it apply: a
+		// union is a container position, and the offset sidecar is named
+		// after the property, which a member has no name of its own inside.
+		// So UNION<TIMESTAMP|STRING> is refused here for the reason
+		// LIST<TIMESTAMP> is, before the family question is ever asked.
+		return codegen.UnionCarrier(pt, func(memberTy graph.PropertyType) (string, bool) {
+			text, ok := t.Property(memberTy)
+			if !ok || carriesZone(text) {
+				return "", false
+			}
+			return text, true
+		}, wireFamily)
+	}
 	switch pt {
 	case graph.TypeString:
 		return "string", true
@@ -250,6 +268,71 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	// width: generation fails loudly instead of emitting a field no
 	// decoder can fill.
 	return "", false
+}
+
+// wireFamily folds one carrier text onto the equivalence class of declared
+// widths agtype delivers as one indistinguishable value (CONTEXT.md, "wire
+// family"). It is asked of a closed union's members alone — the one place
+// two declared widths have to be told apart by their arrival rather than
+// by the declaration that asked for them.
+//
+// The vocabulary is agtype's own: boolean, integer, float, string, list
+// and map. The tags are those words and not the Go carriers, because THIS
+// is where the two backends part company and the carrier would hide it: on
+// neo4j a DATE arrives as its own dbtype and is distinguishable from a
+// STRING, while here it is the zero-padded ISO text the Property comment
+// above describes, so DATE and STRING are ONE family and
+// UNION<DATE|STRING> is refused on this backend alone.
+//
+// Derived from agtypeCarrier and then folded onto the scalar each carrier
+// actually rides, rather than restated from the Property table, so the
+// families cannot drift from the encodings this package emits. The fold is
+// decodeFunc's own dispatch read one level further out: agtypeDate reads
+// its value through agtypeString, and agtypeLocalTime, agtypeDuration,
+// agtypeInstant and agtypeTime all read theirs through agtypeInt64.
+//
+// goInstant and goTime answer integer for completeness and are never asked
+// inside a union: both carry a zone, and the Property arm above refuses a
+// zoned member on the container rule before the family question is
+// reached.
+//
+// ANY is WireFamilyIndistinct — it arrives as whatever the writer wrote,
+// so it owns no shape and leaves none for a member beside it. A nested
+// UNION carries as `any` and lands there for the same reason.
+//
+// The fallthrough answers WireFamilyIndistinct too, and that direction is
+// chosen rather than inherited. A carrier this fold has no row for is one
+// whose arrival this package cannot predict, and the tag that collides
+// with everything refuses the union it appears in — where a family of its
+// own would admit a union whose decode has no arm to dispatch through.
+// Fail-closed, in the one arm that exists because the carrier table may
+// grow a row before this one does.
+//
+// A PLAIN FUNCTION and not a typeMap method, deliberately: the census walk
+// in render_queries_test.go tells a carrier method from the rest by its
+// declared result shape, and a (string, bool) method of this receiver
+// would be swept as one — holding family tags to decodeFunc arms, which
+// they are not Go types for.
+func wireFamily(goType string) string {
+	switch {
+	case goType == codegen.UnionCarrierText:
+		return codegen.WireFamilyIndistinct
+	case strings.HasPrefix(goType, "["):
+		return "list"
+	case goType == "map[string]any", codegen.IsRecordStruct(goType):
+		return "map"
+	}
+	switch agtypeCarrier(goType) {
+	case "bool":
+		return "boolean"
+	case "int64", goLocalTime, goDuration, goInstant, goTime:
+		return "integer"
+	case "float64":
+		return "float"
+	case "string", goDate:
+		return "string"
+	}
+	return codegen.WireFamilyIndistinct
 }
 
 // StorableProperty admits every width. agtype is a JSON-shaped value and
