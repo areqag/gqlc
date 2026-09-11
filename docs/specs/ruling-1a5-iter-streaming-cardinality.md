@@ -74,9 +74,11 @@ It also takes the live harness's `:many` contract with it.
 `test/data/codegen/live_test.go:1002` asserts
 `require.NotNil(rows, "empty :many result must be an empty slice, not nil")`,
 and `iter.Seq2` has no nil/empty distinction, so the row has no analogue and must
-be deleted rather than restated. The contract it pins is real and is emitted
-deliberately — `out := make([]string, 0, len(records))` in every neo4j `:many`
-body, `make([]string, 0)` in every AGE one.
+be deleted rather than restated. The contract it pins is emitted deliberately and
+uniformly: of 129 `out := make(` sites in the valid corpus's `*.cypher.go`
+goldens, 129 give length 0 — 80 as `make([]T, 0, len(records))` on neo4j and the
+rest as `make([]T, 0)` on AGE. A `nil` result slice is not a shape gqlc emits
+today.
 
 Not among the reasons: backward compatibility. The owner has authorised breaking
 changes (unreleased, zero users, no version tags), and this ruling weighs none.
@@ -96,8 +98,9 @@ so a mid-stream rollback leaves the caller holding rows that no longer exist, an
 a pre-first-yield retry re-runs the `CREATE` so a stashed `elementId` no longer
 matches. `:many` holds "if you see it, it's committed"; a streamed write cannot.
 
-`:many` **is** the write cardinality for projecting writes. The corpus carries
-two of them, and they land in `WriteQuerier`:
+`:many` **is** the write cardinality for projecting writes —
+`write_many_projection_entity` and `write_many_projection_property` are both in
+the valid corpus, and both land in `WriteQuerier`:
 
 ```
 test/data/codegen/valid/write_many_projection_entity/queries.cypher:1
@@ -203,11 +206,17 @@ error) bool)` at v5.28.4 `neo4j/result_with_context.go:50,154` and v6.2.0
 (v5 `:178-200`, calling `Records` at `:187`; v6 at `:193`). Streaming is the
 driver primitive; today's materialisation is the wrapper.
 
+**This section is about neo4j only.** pgx has no managed retry, so on AGE there
+is no envelope to re-enter and no sentinel to emit: the `:iter` body is the
+`rows.Next()` loop the `:many` body already writes, with the append replaced by a
+yield and `defer rows.Close()` kept. The execution must not carry
+`errIterStreamStarted` across to the AGE emitter for symmetry's sake.
+
 The falsifier, named because it has never been run: gqlc-nx54's live row — force
 a `TxCommit` failure after at least one streamed row and assert an error return
 with no panic. If the sentinel does not in fact suppress re-entry against a real
 server, `BeginTransaction` is the fallback and the swap is contained to one
-emitted body per backend.
+emitted body on the neo4j side.
 
 ## 5. The runway, and the three places it does not reach
 
@@ -217,14 +226,28 @@ name, and the members start at `iota + 1` so a fourth constant churns no wire
 format. Three gaps the execution meets that the bead does not record.
 
 - **`exhaustive` covers a quarter of the sites.** Adding `CardinalityIter` reds
-  the four `switch` statements over the enum (`internal/codegen/prepare.go:722`,
-  `neo4j/render_queries.go:375`, `age/render_queries.go:277`,
-  `queryfile/annotated.go:39`). It cannot see the **twelve** `if p.Cardinality ==
-  Cardinality*` comparisons, of which the dangerous ones are
-  `neo4j/render_queries.go:279,294` and `age/render_queries.go:172,203` — an
-  `:iter` query failing `== CardinalityMany` there falls silently into the
-  `:one` shape. The execution converts those to switches or adds an explicit
-  `:iter` arm at each; it does not rely on the linter to find them.
+  the four `switch` statements over the enum (`internal/codegen/prepare.go:720`,
+  `neo4j/render_queries.go:374`, `age/render_queries.go:276`,
+  `queryfile/annotated.go:38`). None of the four uses a `default`, which is the
+  whole reason all four stay visible under `default-signifies-exhaustive: true`
+  — `annotated.go:46-49` says so in a comment, citing bd gqlc-51l6m. The two
+  stringers put a fallback below the switch; the two emitter switches have
+  **no** fallback, so an unhandled cardinality there emits a method with an
+  empty body rather than failing. That is caught by `exhaustive` and by nothing
+  else, so the execution adds the `:iter` arm at both rather than leaning on a
+  runtime error that does not exist. It cannot see the `if`-comparison sites: over
+  `internal/`, excluding `_test.go`, `Cardinality ==` / `!=` matches **thirteen**
+  lines holding sixteen comparisons against a named member, plus a fourteenth
+  (`prepare.go:419`) testing `== 0`. Four are the dangerous ones —
+  `neo4j/render_queries.go:279,294` and `age/render_queries.go:172,203` — where
+  an `:iter` query failing `== CardinalityMany` falls silently into the `:one`
+  shape. The execution converts those to switches or adds an explicit `:iter`
+  arm at each; it does not rely on the linter to find them. The two
+  `== CardinalityOne` sites in `neo4j/generate.go:60` and `age/generate.go:125`
+  read the other way and need no edit: they set `hasOne` to gate `renderDB`'s
+  single-row helper, and an `:iter` query is correctly not `:one`. That is worth
+  stating because the grep does not distinguish them, and an execution lane
+  sweeping every comparison would otherwise "fix" a site that is already right.
 - **`querierImports` is a string scan with no named guard.** `neo4j/render_querier.go:76-101`
   tests `strings.Contains(ty, "dbtype.")` / `"time.Time"` over `GoType` text;
   age's equivalent is `slices.ContainsFunc(..., namesInstant)`
