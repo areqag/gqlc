@@ -34,27 +34,24 @@ func iterAdmissionInput(stmt resolver.StatementKind, cols []resolver.Column, tex
 	}
 }
 
-// TestIterAdmission pins both of the axes admitQueryAxes reads for :iter
-// AND the order it reads them in.
+// TestIterAdmission pins the ORDER in which admitQueryAxes reads the two
+// axes that can refuse an :iter query. Both rows below are refused by
+// ErrIterOnWrite, whose corpus coverage is paid by
+// invalid/iter_on_write; what is measured here is which gate answers,
+// which no fixture's expectedError distinguishes once both gates return
+// the same sentinel.
 //
-// It is a unit test rather than a conformance fixture because one of its
-// three rows is not expressible as one. The corpus reaches Phase A through
-// the real parser, and a zero-column READ has no openCypher spelling: a
-// read query must end in RETURN, which projects at least one column, and
-// the only other zero-column read shape — a CALL with no YIELD — needs a
-// procsig registry the conformance harness does not wire (it builds
-// procsig.NewRegistry(nil), so every CALL fails at parse with
-// ErrUnknownProcedure before cardinality is ever consulted). Four
-// candidate spellings were measured against the harness on 2026-09-11:
-// `MATCH (p:Person) RETURN *`, `MATCH (p:Person) WITH p.name AS n
-// RETURN *` and `MATCH (p:Person) WHERE p.name = $name RETURN *` all
-// admitted cleanly with columns, and `CALL db.ping()` died at
-// ErrUnknownProcedure.
-//
-// That makes the ruling's named `invalid/iter_zero_column_read` fixture
-// unbuildable, and this test is what stands in for it: the arm it guards
-// is unreachable from user input TODAY and would stop being the moment a
-// registry reaches the corpus, which is exactly the shape a guard is for.
+// The third row this test used to carry — a zero-column :iter READ,
+// refused for its shape — now lives in the conformance package, as
+// TestAssembledInput's cardinality-iter-zero-column-read case. It was
+// the one row whose sentinel had no other witness for the :iter
+// disjunct, and a witness in THIS package is one the reachability fence
+// cannot read: corpusPackageOf folds `internal/codegen_test` onto
+// `internal/codegen`, which corpusPackages then drops. Taxonomy §5.1
+// names conformance/assembled_input_test.go as where an assembled-Input
+// row goes, and that is the file the fence's coverage sweep reaches
+// (bd gqlc-e3ra). These two rows stay because their claim is about
+// ordering rather than about reaching a return nothing else reaches.
 func TestIterAdmission(t *testing.T) {
 	t.Run("a write is refused for writing", func(t *testing.T) {
 		cols := []resolver.Column{{Name: "name", Type: resolver.ResolvedProperty{}}}
@@ -64,20 +61,15 @@ func TestIterAdmission(t *testing.T) {
 		require.ErrorIs(t, err, codegen.ErrIterOnWrite)
 	})
 
-	t.Run("a zero-column read is refused for its shape", func(t *testing.T) {
-		_, err := codegen.Prepare(
-			iterAdmissionInput(resolver.StatementRead, nil, "CALL some.proc()"),
-			stubTypeMap{}, "iteradmission")
-		require.ErrorIs(t, err, codegen.ErrCardinalityShapeMismatch)
-	})
-
 	// The ordering claim, and the reason this row is not redundant with the
-	// two above: a zero-column :iter write satisfies BOTH gates, so which
+	// one above: a zero-column :iter write satisfies BOTH gates, so which
 	// one answers is a choice rather than a consequence. Refusing it for
 	// writing sends the author to the one edit that fixes it — adding a
 	// RETURN to a streamed write leaves it refused, where re-annotating
 	// :many admits it outright. Swapping the two gates in prepare.go turns
-	// this row red and leaves the other two green.
+	// this row red and leaves the row above green; it also leaves the
+	// migrated conformance case green, that row being a READ, which is why
+	// this row is the only thing holding the order.
 	t.Run("a zero-column write is refused for writing, not for its shape", func(t *testing.T) {
 		_, err := codegen.Prepare(
 			iterAdmissionInput(resolver.StatementWrite, nil, "MATCH (p:Person) DELETE p"),
