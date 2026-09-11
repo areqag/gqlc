@@ -86,12 +86,12 @@ var txPrivateBeginErrors = map[string][]string{
 // emitted transaction handle is target-portable. Nothing else makes it:
 // Tx is emitted into db.go, and the corpus's cross-target comparison
 // TestBackendInvariantSurface skips db.go and graph.go via
-// connectionSurface (declared in
+// connectionSurface, which is declared in
 // internal/codegen/conformance/conformance_test.go and applied by
-// declaredSurface there) because those files hold the backend-specific
-// handle and differ by construction. Do not delete this test as redundant with
-// that one, and do not un-exclude db.go there instead — the rest of db.go
-// differs on purpose.
+// declaredSurface there, because those files hold the backend-specific
+// handle and differ by construction. Do not delete this test as
+// redundant with that one, and do not un-exclude db.go there instead —
+// the rest of db.go differs on purpose.
 func TestTxSurfaceAgreesAcrossBackends(t *testing.T) {
 	surfaces := make(map[string]txSurface, len(txTargets))
 	for _, target := range txTargets {
