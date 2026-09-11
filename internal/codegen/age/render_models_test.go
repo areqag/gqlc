@@ -433,10 +433,15 @@ func TestEveryAdmittedListCarrierDerivesAGoIdentifier(t *testing.T) {
 //
 // The forms are the ones an author can declare a property at: a list of
 // each declared width, a list of a list of it, and a list of a record
-// carrying it — plus the two field-less records, which have no field to
-// inherit a refusal from and are the pair RECORD<ANY> belongs to. Both
-// element nullabilities, because the star is folded into the element text
-// and so changes the leaf listHelperName reads.
+// carrying it — plus the field-less RECORD, which has no field to inherit
+// a refusal from. RECORD<ANY>, the other field-less form, is NOT appended
+// here: it is a declared width, so it arrives with the vocabulary above,
+// and appending it as well put it in the domain twice. Its presence is
+// pinned fail-closed by the containment assertion in the caller, so a
+// vocabulary that stopped carrying it reds there rather than shrinking
+// this sweep in silence. Both element nullabilities, because the star is
+// folded into the element text and so changes the leaf listHelperName
+// reads.
 //
 // A form the table declines is skipped rather than recorded as passing:
 // ok=false means no carrier was produced, so there is no name to derive
@@ -453,7 +458,7 @@ func admittedListForms(t *testing.T) []propertyRow {
 			graph.RecordOf([]graph.RecordField{{Name: "f", Type: width, NotNull: true}}),
 		)
 	}
-	elems = append(elems, graph.RecordOf(nil), graph.TypeAnyRecord)
+	elems = append(elems, graph.RecordOf(nil))
 
 	var out []propertyRow
 	for _, elem := range elems {

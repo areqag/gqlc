@@ -41,36 +41,42 @@ var (
 	ErrInvalidCardinality = errors.New("invalid cardinality")
 
 	// ErrFormatFailure is returned when go/format.Source rejects an
-	// emitted file's raw contents. A template bug — unreachable via any
-	// legitimate fixture — but wrapped-and-named beats a bare error
-	// string when it does fire. Deliberately excluded from allSentinels
-	// because it is a codegen-internal invariant violation, not a
-	// user-facing failure mode; the reachability sweep skips it.
+	// emitted file's raw contents.
 	//
-	// "Unreachable via any legitimate fixture" has been false TWICE, and
-	// both times a legitimate schema reached it. gqlc-2m2v: a query
-	// binding two or more parameters, one of them $_, emitted a nameless
-	// Params field and reached gofmt on all three targets. gqlc-9xiz: a
-	// property of type LIST<RECORD> or LIST<LIST<RECORD>> made AGE derive
-	// its decode-helper name from the carrier map[string]any, which is
-	// not a Go identifier, so the brackets survived into the emitted call.
-	// The exclusion is not self-certifying and is no longer taken on
-	// trust — TestExcludedBranchesAreUnreached measures this branch
-	// against the corpus coverage profile on every run.
+	// It spent most of its life documented as "a template bug —
+	// unreachable via any legitimate fixture" and held out of
+	// allSentinels on that ground. That claim was falsified three times
+	// and is now retired.
 	//
-	// TWO FALSIFICATIONS DID NOT MOVE IT INTO allSentinels, and gqlc-9xiz
-	// took that decision rather than inheriting it. What each falsifier
-	// showed is a bug in OUR templates that a user's schema happened to
-	// reach, not a shape a user may legitimately be told is invalid — and
-	// membership obliges a negative fixture under test/data/codegen/invalid,
-	// which here could only be a schema that is well-formed and fails,
-	// i.e. a live defect frozen into the corpus and "reachable" for
-	// exactly as long as gqlc stays broken. Both were repaired at the
-	// template instead, so the §4 row is a claim this generator keeps
-	// rather than an observation about the current fixtures. Note which
-	// way the fence cut in the second case: it REFUSED gqlc-tn96's
-	// tripwire asserting the defect still stood, and that refusal is what
-	// forced the repair.
+	// The first two falsifiers were template bugs a user's schema
+	// reached. gqlc-2m2v: a query binding two or more parameters, one of
+	// them $_, emitted a nameless Params field and reached gofmt on all
+	// three targets. gqlc-9xiz: a property of type LIST<RECORD> or
+	// LIST<LIST<RECORD>> made AGE derive its decode-helper name from the
+	// carrier map[string]any, which is not a Go identifier, so the
+	// brackets survived into the emitted call. Both were repaired at the
+	// template, and the exclusion survived both on the argument that a
+	// repaired template makes the claim true again.
+	//
+	// The third did not, and it is why the sentinel is in allSentinels
+	// now. NOTHING IS BROKEN IN IT: a NamedQuery whose Name is not a Go
+	// identifier is emitted as a method name and refused by go/format,
+	// with every template correct. Name's own doc below says "Enforced by
+	// the queryfile front end; Generate does not re-validate" — which is
+	// the pipeline-vs-contract argument §5.1 rejects (gqlc-h4ug), since
+	// Name is an exported field of an exported struct and what the front
+	// end enforces does not bound what a caller hands over.
+	//
+	// So the obligation membership carries is discharged the way §5 step
+	// 3 provides for a construct with no on-disk form: by a case in
+	// conformance/assembled_input_test.go (format-failure-query-name),
+	// not by a negative fixture. The earlier reading — that membership
+	// would oblige a well-formed schema that fails, i.e. a live defect
+	// frozen into the corpus — rested on missing that clause.
+	//
+	// Wrapped-and-named still beats a bare error string, and now the
+	// wrapping is load-bearing rather than defensive: an author whose
+	// query name is rejected gets a sentinel they can match on.
 	ErrFormatFailure = errors.New("format failure")
 
 	// ErrOutOfC6Scope is returned when a C6-admissible input carries a
@@ -261,11 +267,16 @@ var (
 // package and fails if a tagged branch executes, so tagging a branch
 // anything reaches turns the suite red rather than silencing it.
 //
-// ErrFormatFailure is intentionally excluded: it is defensive-only,
-// unreachable via any legitimate fixture (well-formed emission cannot
-// fail formatting), so a fixture that fires it would require synthetic
-// template corruption — a test seam whose value does not pay for its
-// cost. See spec §9.2.
+// ErrFormatFailure was the one name excluded here, as "defensive-only,
+// unreachable via any legitimate fixture". It is a member now. What
+// carried the exclusion was the belief that only a broken template
+// reaches go/format's refusal; what ended it is that a NamedQuery whose
+// Name is not a Go identifier reaches it with every template correct,
+// and Name is an exported field a caller sets. Its witness is the
+// assembled case rather than a fixture, so it is listed in
+// conformance's assembledOnlySentinels — see this sentinel's own doc
+// comment above for the three falsifications and spec §5 step 3 for why
+// an assembled case discharges the obligation a fixture usually does.
 var allSentinels = []error{
 	ErrInvalidPackageName,
 	ErrDuplicateSourceFile,
@@ -286,6 +297,7 @@ var allSentinels = []error{
 	ErrUnrepresentableTemporal,
 	ErrExecOnProjection,
 	ErrCardinalityShapeMismatch,
+	ErrFormatFailure,
 }
 
 // AllSentinels returns a copy of the codegen package's user-input-

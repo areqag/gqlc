@@ -547,12 +547,31 @@ func (s *ConformanceSuite) TestDoubleRun() {
 // with the gap in one PR, and this list is what says so out loud rather
 // than letting the sweep quietly stop asking.
 //
+// ErrFormatFailure is the second member, and it arrives from the
+// opposite direction: not a fixture deleted, but a sentinel promoted out
+// of taxonomy §4 by bd gqlc-9xiz. Its branch is the FORMATTER rather
+// than a check — every other sentinel in the set is returned by
+// something that inspected the input, while this one is returned after
+// the input was accepted and emitted. That is what makes a fixture
+// impossible rather than merely absent: an on-disk fixture reaching it
+// would have to be a well-formed schema whose correct emission does not
+// parse, which is a bug in this generator, so the fixture would freeze a
+// live defect into the corpus and fall due for deletion the day it was
+// repaired. Twice it has been exactly that (gqlc-2m2v, gqlc-9xiz) and
+// twice the template was fixed. The assembled case
+// (format-failure-query-name) reaches the same line with no template
+// broken, by setting NamedQuery.Name to a string that is not a Go
+// identifier.
+//
 // The entry is a claim about the whole enrolled corpus, not a waiver,
 // which is why the reverse rule below reds the sweep the moment a
 // fixture DOES name one of these. A backend that carries no temporal
 // kind, or a gate that stops shadowing one, makes a fixture possible
 // again — and the fixture is the better witness whenever it exists.
-var assembledOnlySentinels = []error{codegen.ErrUnrepresentableTemporal}
+var assembledOnlySentinels = []error{
+	codegen.ErrUnrepresentableTemporal,
+	codegen.ErrFormatFailure,
+}
 
 // TestSentinelReachability is the bidirectional sweep: every
 // codegenSentinels member has at least one invalid fixture; every

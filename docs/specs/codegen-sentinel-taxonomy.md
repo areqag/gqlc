@@ -79,6 +79,7 @@ whenever one exists.
 | `ErrUnrepresentableTemporal` | A temporal expression whose kind the target's type table has no faithful Go carrier for. Apart from `ErrUnrepresentableWidth` because a temporal expression carries no property width at all: the edit it asks for is to a query's `RETURN` clause, not to the schema. **Assembled-only** since bd `gqlc-dy40s`: the only backend that refuses a temporal kind is Apache AGE, and its dialect gate now refuses every temporal spelling on the query text ahead of the carrier question, so no query text an enrolled target parses reaches this sentinel. Not retired — `codegen.Prepare` is portable and the branch is live for any consumer whose type map lacks a kind. | #714, after C6 |
 | `ErrExecOnProjection` | A query annotated `:exec` projects at least one column. The columns are contract; discarding them silently is the guess sqlc makes and ADR 0010 D1 refuses. | C4 |
 | `ErrCardinalityShapeMismatch` | A query annotated `:one` or `:many` projects no columns, so there is no row type to return. | C4 |
+| `ErrFormatFailure` | `go/format.Source` rejected an emitted file's raw contents. The one member whose fail-site is the FORMATTER rather than a check: every other sentinel here is returned by something that inspected the input and refused it, while this one is returned after the input was accepted and emitted. **Assembled-only**, and unlike `ErrUnrepresentableTemporal` it never had a fixture and cannot have one — an on-disk fixture would have to be a well-formed schema whose correct emission does not parse, which is a bug in this generator rather than a property of the input, so the fixture would freeze a live defect into the corpus and fall due for deletion the day it was repaired. Moved here from §4 by bd `gqlc-9xiz`; §4 records the three falsifications and which one ended the exclusion. | C0 (promoted to the reachable set by `gqlc-9xiz`) |
 
 ## 2. Refusal taxonomy — construct to sentinel
 
@@ -172,6 +173,7 @@ dead, and that no dead site hides in it.
 | `ErrRowFieldCollision` | Two columns of one query deriving one `Row` field. | Phase B |
 | `ErrUnrepresentableTemporal` | A projected column whose temporal kind the target's type table has no carrier for. Phase B, not Phase A: Phase A does not ask the type table about temporal kinds, so the refusal lands at the row-field derivation site. **Assembled** since bd `gqlc-dy40s`, and it was a fixture until then: `unrepresentable_temporal_duration_column` projected `duration.between(...)` at `apache-age-pgx-v5`, the last temporal spelling AGE's dialect gate did not hold. Closing that gap refuses the text ahead of the carrier, so the fixture was deleted and the sentinel entered `assembledOnlySentinels`. The case is `column-temporal`, and it differs from the fixture in its argument as well as its form — its kind names no member of the constant block, so it is refused on every backend rather than on the one with no carrier for a duration. | Phase B |
 | `ErrIdentifierCollision` | Two exported top-level identifiers colliding across the seven swept sources — the emitter's own package-scope declarations, entity structs, decode helpers, method names, `<Method>Params`, `<Method>Row`, edge-union interfaces. The first source is seeded from the `scopePackage` half of the reserved set: a `NODE TYPE Queries` or an edge-union interface deriving `ReadQuerier` redeclares a name `db.go` or `querier.go` already holds, which the Phase A gate does not see because that one reads a query's name (`gqlc-e6mh`). The `scopeMethod` half — `WithTx`, `Begin`, `Commit`, `Rollback`, `EnsureGraph`, `DropGraph` — stays out: those are methods on `*Queries` or `*Tx` and share no scope with a package-level type. The seeded half is uniform across targets while two of the declarations behind it are not — `DBTX` and `SessionInit` come from the Apache AGE emission alone, so seeding them refuses a name a neo4j-only batch leaves free. A false refusal, taken per D2 Resolved rather than admitting an input under one target and refusing it under another. §6 enumerates all twenty-two rows with the target each is declared by and the target each would actually break. | identifier sweep |
+| `ErrFormatFailure` | An emitted file whose raw contents `go/format.Source` rejects. Assembled: a `NamedQuery.Name` that is not a Go identifier — `"Fetch Me"` — which is emitted as a method name and refused by the formatter with every template correct. `Name`'s doc says "must already be a valid exported Go identifier ... Enforced by the queryfile front end; Generate does not re-validate", and that is the pipeline-vs-contract argument §5.1 rejects: `Name` is an exported field of an exported struct, so what the front end enforces does not bound what a caller hands over, and no gate between the envelope and emission looks at it again. The case is `format-failure-query-name`. Not a phase of `Prepare` at all, which is what makes this row unlike every other one here: `Prepare` accepts the input, the emission renders it, and the refusal is the formatter's verdict on bytes this package produced. A reader who wants the check that *should* have caught it is looking for a `Name` validation on the envelope, not for a missing arm in a switch. | `Finalise` (post-emission, `emit.go`) |
 
 ## 3. Branches no input reaches
 
@@ -271,20 +273,55 @@ The first thing that measurement found was a false row in this table.
 
 | Sentinel | Why it is out of the reachable set |
 |---|---|
-| `ErrFormatFailure` | `go/format.Source` rejected an emitted file. A well-formed emission cannot fail formatting, so firing this takes a template bug or synthetic corruption; a fixture for it would buy a test seam rather than coverage. **This row has been false twice, and both times an ordinary user schema was what falsified it.** (1) `gqlc-2m2v`: a query binding two or more parameters, one of them `$_`, emitted a `Params` struct field with no name and a bind expression reading `arg.,` — an emission `go/format` refused, on all three targets, from an ordinary `.cypher` file a user writes. Closed by refusing that query at Phase B with `ErrOutOfC6Scope` (§2). (2) `gqlc-9xiz`: a declared property of type `LIST<RECORD>` or `LIST<LIST<RECORD>>`, on `apache-age-pgx-v5` only. AGE carries `RECORD<ANY>` as `map[string]any` — the one carrier it answers with that is not a Go identifier — and `age.listHelperName` derives the decode helper's NAME from that text, so the brackets survived into `agtypeProperty(props, "rows", agtypeListOfNullableMap[string]any)`, which parses as an index expression inside an argument list. Closed at the derivation site, with `TestEveryAdmittedListCarrierDerivesAGoIdentifier` holding the class rather than those two widths. `TestExcludedBranchesAreUnreached` is what noticed both, and in the second case it noticed BEFORE the repair rather than after: it refused `gqlc-tn96`'s tripwire asserting the defect still stood, which is what forced `gqlc-9xiz` to be fixed rather than documented. |
 
-Two falsifications are an argument for moving this sentinel into
-`allSentinels`, and `gqlc-9xiz` weighed it and declined. What each
-falsifier showed was a bug in *our* templates that a user's schema
-happened to reach, not a shape a user may legitimately be told is
-invalid — and §5 step 3 obliges a member to carry a negative fixture
-under `test/data/codegen/invalid`. Here that fixture could only be a
-schema that is well-formed and fails: a live defect frozen into the
-corpus, "reachable" for exactly as long as `gqlc` stays broken, and due
-for deletion the moment it is repaired. Both were repaired at the
-template instead. So the row states a claim this generator undertakes to
-keep, and the measurement above is what holds it to that rather than to
-an observation about whichever fixtures happen to exist.
+**The table is empty, and that is a result rather than an oversight.**
+The section's machinery stays because the exemption it grants is real
+and a future sentinel may earn it; what is gone is the only row that
+ever claimed it.
+
+That row was `ErrFormatFailure`, and it took three falsifications to
+retire. The first two were template bugs an ordinary user schema
+reached. `gqlc-2m2v`: a query binding two or more parameters, one of
+them `$_`, emitted a `Params` struct field with no name and a bind
+expression reading `arg.,`, refused by `go/format` on all three targets.
+`gqlc-9xiz`: a declared property of type `LIST<RECORD>` or
+`LIST<LIST<RECORD>>` on `apache-age-pgx-v5`, where the decode helper's
+name was derived from the carrier `map[string]any` and the brackets
+survived into `agtypeProperty(props, "rows", agtypeListOfNullableMap[string]any)`,
+which parses as an index expression inside an argument list.
+
+Neither of those moved the row, and the argument for keeping it was
+better than it looks: both were repaired at the template, so the claim
+was true again each time, and a *negative fixture* for either would have
+been a well-formed schema whose correct emission does not parse — a live
+defect frozen into the corpus, due for deletion the day it was repaired.
+
+What that argument missed is that a fixture is not the only witness §5
+step 3 accepts. **A construct with no on-disk form takes a case in
+`assembled_input_test.go` instead**, and one exists here with nothing
+broken at all: a `NamedQuery.Name` that is not a Go identifier is
+emitted as a method name and refused by the formatter. `Name` is
+documented as "Enforced by the queryfile front end; Generate does not
+re-validate" — the pipeline-vs-contract argument §5.1 rejects, since
+`Name` is an exported field of an exported struct. Under §5.1's own
+criterion the sentinel was reachable the whole time, and the §4 fence
+passed only because nobody had written the case. `gqlc-9xiz` promoted
+it: §1 and §2 rows above, `assembledOnlySentinels` for the fixture
+exemption, and the case `format-failure-query-name` as the witness.
+
+Two lessons worth keeping, since the row is gone and cannot carry them:
+
+- **The exemption this section grants is self-exempting while it is
+  believed.** A §4 row makes the fence require *zero* coverage, so the
+  test that would prove the row wrong is the one thing the row forbids
+  anyone to write. That is why `gqlc-tn96`'s tripwire — asserting the
+  `LIST<RECORD>` defect still stood — reddened the fence instead of
+  passing. Note which way that cut: the refusal is what forced
+  `gqlc-9xiz` to repair the defect rather than document it. The fence
+  works; the trap is reading a green §4 as evidence rather than as an
+  untested claim.
+- **"No fixture is possible" is not "no witness is possible."** Reach
+  for the assembled route before concluding a sentinel belongs here.
 
 ## 5. Adding, renaming or retiring a sentinel
 
@@ -391,10 +428,15 @@ missing or the branch belongs in §3. Both directions name the file and
 the line, so neither leaves the reader to work out which branch moved.
 
 The one exemption is a sentinel outside `allSentinels`, which is to say
-one with a §4 row: `ErrFormatFailure` is documented as unreachable at
-the sentinel level, so its fail-sites owe no coverage. The fence takes
-that exemption from §4 rather than from a list of its own, so widening
-it means writing the row that says why.
+one with a §4 row: it is documented as unreachable at the sentinel
+level, so its fail-sites owe no coverage. The fence takes that exemption
+from §4 rather than from a list of its own, so widening it means writing
+the row that says why. **No sentinel claims it today** — §4's table is
+empty since `gqlc-9xiz` promoted `ErrFormatFailure`, which had been its
+only row. Read that as raising the bar on a new one rather than as the
+exemption being unavailable: §4 asks for zero coverage, and the case
+that would falsify a row is the one thing the row forbids, so a §4 claim
+is only as good as the routes its author thought to try.
 
 Only §3 asserts *zero*, and only §3 needs a tag. That is the asymmetry
 that survives: the fail-open move — silencing a live refusal by tagging
