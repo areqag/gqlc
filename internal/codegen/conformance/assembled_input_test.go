@@ -374,11 +374,23 @@ func temporalsOf(req *require.Assertions, gen *ast.GenDecl, dir, file string, sp
 	}
 	if len(untyped) > 0 {
 		req.Empty(untyped,
-			"%s: %v name no type, so each is an untyped constant assignable to resolver.Temporal; `case %s:` would compile inside a switch over the enum while this derivation reads it as no member of one. Give the line a type — int if it is a count, Temporal if it is a kind",
+			"%s: %v "+untypedRefusalReason+"; `case %s:` would compile inside a switch over the enum while this derivation reads it as no member of one. Give the line a type — int if it is a count, Temporal if it is a kind",
 			path, untyped, untyped[0])
 	}
 	return members, anchored
 }
+
+// untypedRefusalReason is the clause the untyped refusal above writes, and
+// the only clause any one of temporalsOf's five refusals writes uniquely.
+//
+// The rows below pin it rather than the refused constant's name alone,
+// because every other refusal here also names the line it fires on: a row
+// asserting only that the sweep said "TemporalWeek" is satisfied by the
+// shape refusal, by the one-name-per-line refusal, or by the unreadable-value
+// refusal, none of which is the guard the row claims to witness. It is shared
+// with the format string rather than copied so that the two cannot drift into
+// a red that means nothing.
+const untypedRefusalReason = "name no type, so each is an untyped constant assignable to resolver.Temporal"
 
 // temporalSpellings is every name in the swept package that means
 // resolver.Temporal: the type's own name, and each alias resolving to it.
@@ -1211,8 +1223,11 @@ func TestTemporalSweepRefusesAnUntypedKindWhereverItIsDeclared(t *testing.T) {
 
 			require.NotEmpty(t, refusals,
 				"an untyped integer constant is assignable to Temporal, so this one has a case arm the enum owes and the sweep says nothing")
-			require.Contains(t, strings.Join(refusals, "\n"), "TemporalWeek",
+			joined := strings.Join(refusals, "\n")
+			require.Contains(t, joined, "TemporalWeek",
 				"the refusal has to name the line a reader must give a type to")
+			require.Contains(t, joined, untypedRefusalReason,
+				"the sweep refused this line for some other reason, so this row pins a guard that never fired")
 		})
 	}
 }
@@ -1247,30 +1262,88 @@ func TestTemporalSweepReadsAnAliasAndNotADefinedType(t *testing.T) {
 // type, so no switch over Temporal can have an arm for one and the enum
 // owes it nothing.
 //
-// This exemption is witnessed against the real package rather than only
-// here, and that is worth knowing before touching it: the untyped
-// constants internal/resolver declares are strings, so dropping the
-// exemption reddens TestAssembledInputSuite and not merely these rows. No
-// count is given because the count is not what holds — the live suite is.
+// The string half of this exemption is witnessed against the real package
+// as well as here, and that is worth knowing before touching it: the untyped
+// constants internal/resolver declares are strings, so dropping that half
+// reddens TestAssembledInputSuite and not merely these rows. No count is
+// given because the count is not what holds — the live suite is.
+//
+// The boolean half has no such backstop, which is why both identifiers are
+// named here rather than one standing for the pair. assignableToTemporal
+// reads `true` and `false` as two separate comparisons, and the swept
+// package declares neither: measured 2026-09-02 on master, deleting the
+// `false` comparison alone left this whole package green — the exemption
+// half was asserted by nothing (bd gqlc-jnt3u).
+//
+// Each row also declares the hazard its own line would be if the value
+// changed, and pins the refusal firing there on that same constant. An
+// empty-refusals assertion alone is satisfied by a sweep that never read
+// the declaration, so a row carrying only that half stays green when the
+// sandbox stops delivering the file — which is witnessing nothing, in the
+// shape this test exists to refuse.
 func TestTemporalSweepAdmitsAConstantNoSwitchOverTheEnumCanName(t *testing.T) {
-	for _, tc := range []struct{ name, decl string }{
-		{name: "an untyped string", decl: "const producerTag = \"undeclared-relationship-type\"\n"},
-		{name: "an untyped bool", decl: "const producerTagged = true\n"},
-		{name: "a run of untyped strings", decl: "const (\n\tfirstTag = \"a\"\n\tsecondTag = \"b\"\n)\n"},
+	for _, tc := range []struct{ name, decl, hazard, refused string }{
+		{
+			name:    "an untyped string",
+			decl:    "const producerTag = \"undeclared-relationship-type\"\n",
+			hazard:  "const producerTag = 7\n",
+			refused: "producerTag",
+		},
+		{
+			name:    "an untyped bool at true",
+			decl:    "const producerTagged = true\n",
+			hazard:  "const producerTagged = 7\n",
+			refused: "producerTagged",
+		},
+		// The `false` identifier is its own comparison in the exemption and
+		// its own row here. Nothing in the swept package declares one, so
+		// this row is the only thing standing between that comparison and a
+		// silent deletion.
+		{
+			name:    "an untyped bool at false",
+			decl:    "const producerTagged = false\n",
+			hazard:  "const producerTagged = 7\n",
+			refused: "producerTagged",
+		},
+		{
+			name:    "a run of untyped strings",
+			decl:    "const (\n\tfirstTag = \"a\"\n\tsecondTag = \"b\"\n)\n",
+			hazard:  "const (\n\tfirstTag = 1\n\tsecondTag = 2\n)\n",
+			refused: "secondTag",
+		},
 		// A bare line repeats the expression above it, so what it is
 		// assignable to is decided by a line that is not its own. Without
 		// that inheritance this reads as an untyped constant of no known
 		// value and the refusal fires on a string.
-		{name: "a bare line inheriting an untyped string", decl: "const (\n\tfirstTag = \"a\"\n\tsecondTag\n)\n"},
+		{
+			name:    "a bare line inheriting an untyped string",
+			decl:    "const (\n\tfirstTag = \"a\"\n\tsecondTag\n)\n",
+			hazard:  "const (\n\tfirstTag = 1\n\tsecondTag\n)\n",
+			refused: "secondTag",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, refusals := recordedTemporalSweep(sweptPackage(t, map[string]string{
-				resolverAnchorFile: temporalAnchorSource,
-				"scope.go":         "package resolver\n\n" + tc.decl,
-			}))
+			sweep := func(decl string) []string {
+				_, refusals := recordedTemporalSweep(sweptPackage(t, map[string]string{
+					resolverAnchorFile: temporalAnchorSource,
+					"scope.go":         "package resolver\n\n" + decl,
+				}))
+				return refusals
+			}
 
-			require.Empty(t, refusals,
+			require.Empty(t, sweep(tc.decl),
 				"this constant is assignable to no integer type, so a switch over Temporal can name it in no arm")
+
+			// The same line at an untyped integer. This is the hazard the row
+			// above is the exemption OF, and the refusal it draws is what says
+			// the silence above came from the exemption rather than from a
+			// declaration the sweep never reached. The reason is pinned beside
+			// the name because four other refusals would also name this line.
+			hazard := strings.Join(sweep(tc.hazard), "\n")
+			require.Contains(t, hazard, tc.refused,
+				"the sweep does not refuse this line even at an untyped integer, so its silence above witnesses nothing")
+			require.Contains(t, hazard, untypedRefusalReason,
+				"this line drew a refusal that is not the untyped one, so the row above pins a guard it never reached")
 		})
 	}
 }
