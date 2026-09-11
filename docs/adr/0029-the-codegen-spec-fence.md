@@ -402,8 +402,9 @@ Telling those from a drifted claim cannot be done from the bytes. An emitted
 query method's name is the query author's, so there is no receiver, no keyword
 and no shape a four-parameter drifted claim could not also wear. That is
 Decision 12's finding one construct over, and the answer is the same shape:
-`specNonMethodLists` writes the intent down, per document, keyed by the verbatim
-parameter list, reconciled in both directions.
+`specNonMethodSites` writes the intent down, per document, keyed by the verbatim
+parameter list — and, since Decision 14, by the name printed before it —
+reconciled in both directions.
 
 The bead asked for a real discriminator rather than a list, and named two
 candidates. Both were measured and both were declined:
@@ -429,17 +430,67 @@ and one that stops printing it is red too.
 Decision 12's marker does NOT transfer, and the reason is measured rather than
 assumed: 11 of the 13 sites sit inside fenced Go code blocks, where
 `**exhibit**` is not emphasis but literal text corrupting the example. Only C4's
-`ExecuteWrite` span and the godog handler are in prose. So the residual gap is
-`gqlc-x2sg`'s exactly — a quote replaced in place by a claim spelled
-identically keeps the count satisfied — and it is filed rather than closed
-(`gqlc-yn2l`), bounded by what such a claim would have to say: that an emitted
-query method takes a `cypher string` and a driver `params map[string]any`.
+`ExecuteWrite` span and the godog handler are in prose. So the residual gap was
+`gqlc-x2sg`'s exactly — a quote replaced in place by a claim spelled identically
+keeps the count satisfied — and it was filed rather than closed (`gqlc-yn2l`).
+Decision 14 closes it without a marker.
 
 The census key is canonicalised — the list's depth-zero entries, whitespace
 collapsed, rejoined on `, ` — so gofmt's line breaks and trailing comma are not
 a different entry. Without that, reformatting a quoted signature reads as one
 exempted site disappearing and an unrecorded one arriving. Only this census is
 canonicalised; Decision 10's exhibit census keeps the text a document prints.
+
+## Decision 14 — an exempted non-method site is keyed by its name as well as its list
+
+Decision 13 left `gqlc-yn2l` open: `specNonMethodSites` was keyed per document by
+the parameter list alone, so a document could replace one of those quotes IN
+PLACE with a claim about the emitted surface spelled identically. The list was
+unchanged and the count stayed satisfied, so the claim went ungraded. Measured on
+this bead at `000bae22`: rewriting C1's `func (d driverDB) run(…)` to
+`func (q *Queries) PeopleOverAge(…)`, list untouched, left
+`TestSpecMethodArgIsGeneratorOwned` green.
+
+Decision 12's answer to the same shape was a marker, and Decision 13 measured why
+it does not transfer here. The answer that does is cheaper, and it is already in
+the documents: **the name each site is printed under**. The census key becomes
+the name and the list together — `run`, `ExecuteWrite` and `func` are now part
+of what is exempted, not merely the four lists — so the replacement above is red
+twice over, once as an overlong list no entry covers and once as an entry whose
+count fell.
+
+(The key's spelling is `name` followed by the list back inside its parentheses.
+It is described here rather than printed for the reason Decision 13 gives one
+paragraph up: writing it out prints the anchor, and the fence grades this
+document. It caught the first draft of this sentence.)
+
+This is not the general discriminator Decision 13 declined, and the distinction
+is the whole of why it is admissible. That candidate asked the bytes to decide,
+in the abstract, whether a four-parameter signature belongs to an emitted query
+method — which nothing can, since the method's name is the query author's. This
+asks nothing of the bytes. It widens a census that was already written down by
+hand, from one field to two. Every site it covers already prints a name, so it
+costs no byte in any document, which is exactly what `**exhibit**` could not
+manage inside a fenced code block.
+
+Three properties, each of which cost a row:
+
+- A type-parameter list between the name and the paren is stepped over, because
+  C4 quotes `func ExecuteWrite[T any](…)`. Reading `]` as the end of the name
+  would key that site under the empty name.
+- An anonymous function literal is keyed under `func`, because that is what the
+  godog handler prints in the name position. Keying on it holds a replacement to
+  still being an anonymous literal.
+- A parenthesis-less site — the code-span scanner's — has no name position at
+  all, and is keyed under the empty name rather than allowed to claim a named
+  entry. No census entry is written that way today; all 13 sites are
+  parenthesised.
+
+What remains exempted is a replacement keeping BOTH halves. It has to claim that
+an emitted query method is named `run`, or `ExecuteWrite`, or is an anonymous
+`func` literal, AND takes a `cypher string` beside a driver
+`params map[string]any`. That is narrower than the residual Decision 12 accepts
+for the exhibit censuses, where the shape alone is the key.
 
 ## Consequences
 
@@ -458,10 +509,11 @@ own header:
   floor is a count, not a membership (`gqlc-0rjn`, Decision 3).
 - A parameter list one of the documents quotes for a function that is not an
   emitted query method — the `run` seam, `ExecuteWrite`, a godog handler — is
-  exempted by `specNonMethodLists` by its text and its count, so replacing one
-  of those quotes in place with a claim spelled identically keeps the exemption
-  (`gqlc-yn2l`, Decision 13). It is Decision 12's gap where Decision 12's remedy
-  does not reach, because 11 of the 13 sites are inside fenced code blocks.
+  exempted by `specNonMethodSites` by its name, its text and its count. A
+  replacement keeping the name AND the list is still exempted, so what is
+  unreached is a claim that an emitted query method is named `run`,
+  `ExecuteWrite` or `func` and takes a `cypher string` beside a driver
+  `params map[string]any` (`gqlc-yn2l`, Decision 14).
 - The prose around an intact graded span may say the opposite of it
   (`gqlc-e143`). The editorial answer, and why the fence is not the answer, is
   Decision 11.

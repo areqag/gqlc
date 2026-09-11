@@ -828,11 +828,12 @@ arguments is caught rather than passed over for being past an arity
 (`gqlc-vu7z`). The functions these documents print that open the same
 context-parameter anchor without being query methods — the
 `driverOrTx.run` seam, the driver's own `ExecuteWrite`, a godog step
-handler — are exempted by `specNonMethodLists`, which names each
-parameter list verbatim beside the document printing it and says how
-many times that document prints it. The count is exact: a document
-that grows one of those quotes is red until the number moves, and a
-document that drops one is red too.
+handler — are exempted by `specNonMethodSites`, which names each site
+verbatim beside the document printing it — the name before the
+parameter list, then the list — and says how many times that document
+prints it. The count is exact: a document that grows one of those
+quotes is red until the number moves, and a document that drops one is
+red too.
 
 Which documents owe graded sites is written down in that test, by
 name, and reconciled against what the sweep actually read — in both
@@ -925,16 +926,21 @@ carry over 500 bare spans shaped like the **exhibit** `"key": value`,
 across more than 30 files, nearly all of them JSON model shapes, so a
 sweep reading them would redden on prose across the corpus.
 
-That marker does not reach everywhere the same shape now occurs. The
+That marker does not reach everywhere the same shape occurs, and where
+it does not, something already in the documents stands in for it. The
 exemption for a parameter list belonging to something other than a
-query method is held by `specNonMethodLists` on its text and its
-count, with no marker beside it, because 11 of the 13 sites it covers
-sit inside fenced Go code blocks where a bolded word is literal text
-corrupting the example. So one of those quotes replaced in place by a
-claim spelled identically keeps the exemption — the same defect one
-construct over, filed rather than closed (`gqlc-yn2l`), and bounded by
-what such a claim would have to assert: that an emitted query method
-takes a `cypher string` and a driver parameters map as arguments.
+query method is held by `specNonMethodSites` with no marker beside it,
+because 11 of the 13 sites it covers sit inside fenced Go code blocks
+where a bolded word is literal text corrupting the example. What
+carries the intent there is the name each document already prints
+before the list: the census is keyed on `run`, `ExecuteWrite` or
+`func` *together with* the list, so one of those quotes replaced in
+place by a claim about the emitted surface is red twice over — once as
+a list no entry covers, once as an entry whose count fell
+(`gqlc-yn2l`). What stays exempted is a replacement keeping both
+halves, which has to assert that an emitted query method is named
+`run`, or `ExecuteWrite`, or is an anonymous `func` literal, *and*
+takes a `cypher string` beside a driver parameters map.
 
 The fifth and sixth are narrower, and both were measured rather than
 reasoned about. The sweeps read raw markdown bytes, so a site inside
@@ -961,10 +967,13 @@ held verbatim, so `, arg int64` in place of `, arg <T>` is red on the
 type even though the name is untouched — that bullet is the normative
 rule, and a rule stated in a second spelling is how one arity came to
 be stated twice while the other sat in prose. Everywhere else only
-the name is read. The rest of a graded signature is not — its method
-name, its parameter type and its return type are all unread — and
-neither are the decode bodies, the `<zero>` values, or any signature
-the sweep does not reach at all. Those remain unfenced prose that the
+the argument name is read. The rest of a graded signature is not — its
+method name, its parameter type and its return type are all unread —
+and neither are the decode bodies, the `<zero>` values, or any
+signature the sweep does not reach at all. A method name is read in
+exactly one other place, and it is not a grading: an *exempted* site's
+name is half the key `specNonMethodSites` recognises it by, which is
+why a claim put in its place is caught. Those remain unfenced prose that the
 emitter is free to outgrow, so read them as illustration and the
 goldens under `test/data/codegen/valid/` as truth. The argument-name
 rule above went four stages unchecked because there was neither a
