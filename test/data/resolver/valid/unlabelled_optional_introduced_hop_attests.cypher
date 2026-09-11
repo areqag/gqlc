@@ -1,0 +1,4 @@
+MATCH (y:Person)
+OPTIONAL MATCH (q)-[a:AUTHORED]->(y)
+OPTIONAL MATCH (q)-[r:AUTHORED|LIKES]->(y2:Person)
+RETURN r

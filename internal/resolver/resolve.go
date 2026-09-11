@@ -1237,7 +1237,7 @@ func endpointNarrowing(edges []query.EdgeBinding, t nodeTable, s schema.Schema, 
 // inferUnlabelled is Phase B. `written` is the caller's scope.writtenBindings
 // set, which candidateTypes needs to ask witnessesItsEndpoints of each edge it
 // folds in — see there.
-func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}, demoted map[int]bool) error {
+func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}, demoted map[int]bool, carried map[string]struct{}) error {
 	resolved, nodeCands := t.resolved, t.cands
 	if len(pending) == 0 {
 		return nil
@@ -1265,7 +1265,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 		pending = filtered
 	}
 	for len(pending) > 0 {
-		next, committed, err := commitUnlabelledRound(pending, edges, s, t, callTypes, written, nil, demoted)
+		next, committed, err := commitUnlabelledRound(pending, edges, s, t, callTypes, written, nil, demoted, carried)
 		if err != nil {
 			return err
 		}
@@ -1290,7 +1290,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 			// changes the binding tables endpointNarrowing reads, so a hoisted
 			// answer would be the one a stale table gave.
 			narrowing := endpointNarrowing(edges, t, s, written, demoted)
-			next, committed, err = commitUnlabelledRound(pending, edges, s, t, callTypes, written, narrowing, demoted)
+			next, committed, err = commitUnlabelledRound(pending, edges, s, t, callTypes, written, narrowing, demoted, carried)
 			if err != nil {
 				return err
 			}
@@ -1301,7 +1301,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 				// reported !widened, and that is the return that leaves
 				// `inferred` alone. The call is spelled the way the round
 				// spells it so the message and the decision read one function.
-				cands, _, _ := candidateTypes(n, edges, s, t, written, narrowing, demoted).commit()
+				cands, _, _ := candidateTypes(n, edges, s, t, written, narrowing, demoted, carried).commit()
 				return fmt.Errorf("%w: cannot uniquely infer type of unlabelled binding %q — candidate types: %s", ErrAmbiguousBinding, n.Variable(), joinCandidates(cands))
 			}
 		}
@@ -1318,12 +1318,12 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 // The two lanes differ in nothing but that argument, so the widened lane cannot
 // drift from master's on any question other than which types a far end can
 // still have.
-func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}, demoted map[int]bool) ([]query.NodeBinding, int, error) {
+func commitUnlabelledRound(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}, demoted map[int]bool, carried map[string]struct{}) ([]query.NodeBinding, int, error) {
 	resolved := t.resolved
 	var next []query.NodeBinding
 	committed := 0
 	for _, n := range pending {
-		inf := candidateTypes(n, edges, s, t, written, narrowing, demoted)
+		inf := candidateTypes(n, edges, s, t, written, narrowing, demoted, carried)
 		cands, covered, widened := inf.commit()
 		switch len(cands) {
 		case 0:
@@ -1683,7 +1683,7 @@ func (i unlabelledInference) unconstrained() bool {
 // — which is the same argument NarrowPluralEndpoints makes when it keeps
 // resolvedCovers on a collapse, and the same one that lets `attainable` be read
 // as covering.
-func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}, demoted map[int]bool) unlabelledInference {
+func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, written map[string]struct{}, narrowing map[string]map[graph.LabelSetKey]struct{}, demoted map[int]bool, carried map[string]struct{}) unlabelledInference {
 	var all, attainable candidateAcc
 	inf := unlabelledInference{bindingNullable: n.Nullable()}
 	for _, e := range edges {
@@ -1705,7 +1705,7 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 		// commitment derived from an edge some returned row does not have is not
 		// a statement about that row's type, however well enumerated the edge's
 		// far end was.
-		if otherCovers && witnessesItsEndpoints(e, written, demoted) {
+		if otherCovers && (witnessesItsEndpoints(e, written, demoted) || introducedByThisHop(n, e, written, carried)) {
 			attainable.fold(e, side, other, otherKeys, s, narrowing)
 			inf.attested = true
 		}
@@ -2088,6 +2088,80 @@ func singleHopPattern(e query.EdgeBinding) bool {
 // for a written edge stands as it is.
 func witnessesItsEndpoints(e query.EdgeBinding, written map[string]struct{}, demoted map[int]bool) bool {
 	if (e.Nullable() && !demoted[e.OptionalGroup()]) || !singleHopPattern(e) {
+		return false
+	}
+	_, isWritten := written[e.Variable()]
+	return !isWritten
+}
+
+// introducedByThisHop is the second route to attestation (gqlc-1qijx, ruling
+// docs/specs/ruling-0ii7l-optional-hop-attestation.md §3). It answers a question
+// witnessesItsEndpoints cannot be asked, because it is about ONE nominated
+// binding rather than about the edge's two ends: is `e` a hop of the very
+// OPTIONAL MATCH clause that introduced `n`?
+//
+// When it is, `n` and `e` are null on exactly the same rows — one OPTIONAL
+// MATCH matches its whole pattern or none of it, which is the premise
+// demoteGroup (scope.go) already runs on in the opposite direction. So on every
+// row where `n` is non-null the clause matched, `e` is present, and `e`'s far
+// end does enumerate `n`. That is attestation conditional on `n` being
+// non-null, which is exactly the claim a nullable binding's committed type
+// makes; it is NOT a claim that `n` is non-null, and bindingNullable is
+// untouched.
+//
+// It is a sibling predicate rather than a relaxation of witnessesItsEndpoints,
+// and it is a DISJUNCT beside it rather than inside it, because
+// endpointNarrowing's call has no binding in hand — folding this in there would
+// silently change what that caller asks.
+//
+// The conjuncts, and what each refuses:
+//
+//   - the floor `>= 1`: OptionalGroup() == 0 is "no OPTIONAL clause introduced
+//     this". query.go documents Nullable() ⇔ OptionalGroup() >= 1 for every
+//     PARSER-produced binding, and the preserved legacy constructors
+//     NewNullableNodeBinding / NewNullableEdgeBinding falsify it — they return
+//     Nullable() with group 0. Without the floor two such bindings read
+//     `0 == 0` and credit an edge witnessesItsEndpoints refuses.
+//     TestTheGroupFloorRefusesLegacyNullableBindings is the row.
+//
+//   - group equality: `n.Nullable() && e.Nullable()` is NOT this condition.
+//     Nullable() says the binding is nullable, not which clause made it so, so
+//     it credits an edge from OPTIONAL clause B for a binding introduced by
+//     OPTIONAL clause A — and on the rows where B missed, `n` is non-null and
+//     B's far end enumerates nothing about it. Note what equality does to that
+//     two-clause shape: the widening still FIRES there, through A's edge. What
+//     is withheld is B's CONTRIBUTION, so the committed set is A's alone rather
+//     than A ∩ B, and the observable is the WIDTH of the committed set rather
+//     than the coverage bit.
+//
+//   - singleHopPattern and `written`: carried over from witnessesItsEndpoints,
+//     which this disjunct bypasses. Being introduced by the clause does not
+//     repair a variable-length hop — a closure names the ends of one of its
+//     edges rather than the ends of the pattern, so the type it points at is
+//     the wrong one and not a coarser one. `written` is inert (no OPTIONAL
+//     MATCH can CREATE or MERGE) and is carried for symmetry.
+//
+//   - `carried`: the group id is honoured only on FIRST introduction and the
+//     dedup is PER PART (mergeBinding, internal/query/cypher/pattern.go), so a
+//     name the previous Part exported and this Part re-declares inside an
+//     OPTIONAL clause is a FRESH binding carrying that clause's group.
+//     Conjuncts (a)-(d) all hold for it and the attestation would be unsound:
+//     the name is bound from its earlier Part and is non-null on the rows this
+//     clause missed. `carried` refuses it.
+//
+//     inferUnlabelled's CARRY WINS filter drops every name carried as a NODE
+//     before Phase B sees it, so this conjunct can only fire for a name carried
+//     as something else. The ruling left its reachability open (§3.2); the
+//     measurement that settles it as REACHABLE is
+//     TestACarriedAliasRedeclaredUnderAnOptionalClauseDoesNotAttest, where a
+//     `WITH count(p) AS c` alias re-declared as `(c)` under a later Part's
+//     OPTIONAL MATCH reaches this gate with every other conjunct true.
+func introducedByThisHop(n query.NodeBinding, e query.EdgeBinding, written, carried map[string]struct{}) bool {
+	g := n.OptionalGroup()
+	if g < 1 || g != e.OptionalGroup() || !singleHopPattern(e) {
+		return false
+	}
+	if _, isCarried := carried[n.Variable()]; isCarried {
 		return false
 	}
 	_, isWritten := written[e.Variable()]

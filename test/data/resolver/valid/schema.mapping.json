@@ -194,5 +194,8 @@
     "certified_mixed_types_degrade.cypher": "certificate.gql",
     "certified_mixed_widths_degrade.cypher": "certificate.gql",
     "certified_carried_fold_degrade.cypher": "certificate.gql",
-    "uncertified_arithmetic_control.cypher": "certificate.gql"
+    "uncertified_arithmetic_control.cypher": "certificate.gql",
+    "unlabelled_optional_introduced_hop_attests.cypher": "social_r5.gql",
+    "unlabelled_optional_introduced_hop_carried_name_withheld.cypher": "social_r5.gql",
+    "unlabelled_optional_introduced_var_length_hop_withheld.cypher": "social_r5.gql"
 }

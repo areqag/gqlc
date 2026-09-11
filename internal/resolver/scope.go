@@ -585,7 +585,28 @@ func (s *scope) InferUnlabelled(sch schema.Schema) error {
 	// writtenBindings is computed after the early return, for the same reason
 	// NarrowPluralEndpoints computes it after its own: it walks the effects, and
 	// a Part with nothing to infer has no use for the answer.
-	return inferUnlabelled(pending, edges, sch, s.nodeTable(), s.callTypes, s.writtenBindings(), s.demotedGroups)
+	return inferUnlabelled(pending, edges, sch, s.nodeTable(), s.callTypes, s.writtenBindings(), s.demotedGroups, s.carriedNames())
+}
+
+// carriedNames is the set of variables Part K exported into this Part, as a
+// membership lookup over the same s.carriedOrder buildScopeOrder walks. Phase
+// B's introducedByThisHop reads it for the one conjunct that is about the
+// binding's HISTORY rather than about the pattern in hand: a name the previous
+// Part already bound is non-null on rows this Part's OPTIONAL clause missed,
+// however cleanly it re-declares under that clause and takes its group id.
+//
+// It is built per InferUnlabelled call rather than kept as a lane because the
+// carry is read once here and s.carriedOrder is the authoritative order lane;
+// a second copy would be a second thing to keep in step with newScope's seed.
+func (s *scope) carriedNames() map[string]struct{} {
+	if len(s.carriedOrder) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(s.carriedOrder))
+	for _, v := range s.carriedOrder {
+		out[v] = struct{}{}
+	}
+	return out
 }
 
 // SeedLocalNullability writes each binding's own Nullable() bit into the
