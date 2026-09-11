@@ -2,9 +2,12 @@
 # Pre-push hook: run the full test suite (<1s — the TCK is vendored, no
 # network), lint only the lines that differ from origin/master, and fence the
 # nested modules. The full repo-wide lint is CI's job; this catches what the
-# push is about to break. Of the seven required contexts it mirrors three —
-# test, codegen-fence, and lint only in its --new-from-rev form; actionlint,
-# govulncheck, live-smoke and tidy still run nowhere but CI (bd gqlc-n54t).
+# push is about to break. Of the seven required contexts it mirrors five —
+# test, codegen-fence, actionlint, lint only in its --new-from-rev form and
+# tidy only in its go.mod half; govulncheck and live-smoke still run nowhere
+# but CI. bd gqlc-n54t named the gap; bd gqlc-wn4ns measured the four
+# candidates and the two additions and two refusals are argued where each
+# stands, below.
 # Activated by: git config core.hooksPath .githooks
 # (run `just init` after cloning)
 set -euo pipefail
@@ -307,6 +310,109 @@ else
   echo "       Push anyway (skips the lint): GQLC_ALLOW_MISSING_LINTER=1 git push ..." >&2
   exit 1
 fi
+fi
+
+# TWO MORE OF THE FOUR CONTEXTS THAT RAN NOWHERE BUT CI. bd gqlc-n54t left the
+# four unpriced on purpose; bd gqlc-wn4ns priced them on this machine and
+# against this repository's CI history, and they did not come out the same way.
+# Every number below was measured 2026-09-11 — seconds on this box, catches over
+# the 144 FAILED ci.yml runs between 2026-07-11 and 2026-09-10 read step by step
+# from the Actions API, so a `tidy` failure is attributed to the step inside it
+# that actually failed rather than to the job:
+#
+#   check         cold     warm        offline      caught         verdict
+#   tidy-check    0.034s   0.03-0.05s  0.045s ok    0 in 2 months  ADD, blocking
+#   actionlint    1.70s    1.51-1.56s  rc=1, 0.03s  1 in 2 months  ADD, advisory
+#   govulncheck   12.5s    16.5-18.2s  rc=1, 2.0s   17, none local REFUSED
+#   live-smoke    needs Docker, ~30s (bd gqlc-tez0)                REFUSED
+#
+# THE TWO REFUSALS, because a bead that only records what was added gets the
+# same question asked again next quarter:
+#
+#   govulncheck is the expensive one and it does not get cheaper on a second
+#   run — it re-reads the advisory database over the network every time, which
+#   is also why it is the only candidate here whose verdict can change without
+#   the tree changing. That is what disqualifies it rather than the seconds: of
+#   its 17 CI failures, 7 fell on 2026-08-17 across 7 unrelated branches inside
+#   ten hours, and the rest cluster the same way by date. A red shared by every
+#   branch at once is an advisory arriving, not something the push did, so a
+#   local arm could not have pre-empted one of them — it would have reported
+#   the same red a few minutes earlier, for 12-18s on every push by every agent.
+#   The recipe's own header says the same thing from the other side: a red that
+#   clears on a re-run has been a real called vulnerability arriving mid-scan.
+#
+#   live-smoke needs Docker, which this fleet's machine does not always have,
+#   and ~30s when it does. Unchanged from bd gqlc-n54t's reading.
+#
+# `just gates` still runs all four, and that is the point of the split rather
+# than a duplication: gates is what an agent runs deliberately before opening a
+# PR, this is the backstop for the push where nobody did.
+#
+# Same delete-only skip as the two blocks above: both arms read the working
+# tree, which a delete does not publish (bd gqlc-no9x).
+if [ -n "${_push_refs}" ] && [ -z "${_push_updates}" ]; then
+  :
+else
+  # BLOCKING, and the case for it is the absence of cost rather than the
+  # presence of evidence. `go mod tidy -diff` reads the tree and the module
+  # cache and issues no request — 0.045s with the network denied via `unshare
+  # -rn`, indistinguishable from its 0.03-0.05s online — so it is the only
+  # candidate here with no flake surface at all and nothing to misattribute: it
+  # cannot fail for a reason that is not go.mod's. It has also caught nothing.
+  # 0 of the 144 failed ci.yml runs in two months failed on this step, which is
+  # unsurprising at go.mod/go.sum's rate of change (5 commits in the last 1000,
+  # 0 in the last 400). Both halves of that are why it blocks: a gate this cheap
+  # does not need to earn its place, and one that never fires cannot cost a
+  # false refusal.
+  #
+  # QUALIFIED in the notice, because CI's `tidy` context is ten steps and this
+  # is one of them. Three of the other nine cannot run here at all — they read
+  # a PR body, a PR's commit list and the Actions API, none of which exist
+  # before the push. An unqualified "tidy" here would be the overclaim bd
+  # gqlc-n54t was filed about, one context further on.
+  if ! just tidy-check; then
+    echo "ERROR: go.mod or go.sum is not tidy, so CI's tidy context would redden." >&2
+    echo "       Fix with:  go mod tidy" >&2
+    exit 1
+  fi
+  _ran_gate "tidy (go.mod only)"
+
+  # ADVISORY, NEVER BLOCKING, and that follows from what it NEEDS rather than
+  # from what it finds. Two things it needs are outside this machine:
+  #   - `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7` resolves
+  #     through proxy.golang.org on every invocation, even with that exact
+  #     version already unpacked in the local module cache. Measured under
+  #     `unshare -rn`: exit 1 in 0.03s on `dial tcp: lookup proxy.golang.org`.
+  #   - the recipe depends on ensure-shellcheck, whose third-party release URL
+  #     answered HTTP 504 six times running on 2026-08-29 and reddened three
+  #     required contexts on a PR whose head had not moved (bd gqlc-bmmf).
+  # A blocking arm would refuse pushes for both, on an offline laptop and on
+  # somebody else's outage. What an agent refused a push reaches for is
+  # `git push --no-verify`, which drops the suite and the fence with it, so a
+  # refusal here does not cost one gate — it costs all of them.
+  #
+  # So a failure is reported and the push continues, and the arm is NOT
+  # recorded as passed. That is the whole mechanism: there is no classifying of
+  # the failure into "found something" versus "could not run", because both
+  # answers are the same here and a misread would only cost a wrong sentence.
+  #
+  # UNCONDITIONAL, rather than gated on the push touching .github/workflows,
+  # on the ground the test-codegen-fence call above states in its own terms:
+  # 1.5-1.7s warm is under the 2.1s that argued for running that one
+  # unconditionally, and a conditional gate that omits is silent about having
+  # omitted. The saving would be real — 11 of the last 400 commits touch a
+  # workflow — and it is declined anyway, because the trigger set is wider than
+  # the workflow directory (the actionlint pin and .bin/shellcheck are both in
+  # it) and a wrong trigger set fails the quiet way.
+  if just actionlint; then
+    _ran_gate actionlint
+  else
+    echo "WARN: 'just actionlint' did not pass. NOT refusing the push — this arm is" >&2
+    echo "      advisory because it needs proxy.golang.org and a third-party shellcheck" >&2
+    echo "      release, and neither failure is the branch's (bd gqlc-wn4ns)." >&2
+    echo "      Findings, if that is what they are, are above. actionlint IS a required" >&2
+    echo "      context, so read them: re-run on their own with:  just actionlint" >&2
+  fi
 fi
 
 # LAST, deliberately: an advisory about a branch name is only worth reading on a

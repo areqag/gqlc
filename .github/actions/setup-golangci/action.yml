@@ -26,16 +26,37 @@
 # below, rather than relying on the runner's default flags for `shell: bash`, so
 # the argument above is checkable from this file.
 #
-# NOT GUARDED BY A TEST, and this paragraph claimed the opposite until bd
-# gqlc-chep. It named internal/tools/ciguard as running that run block against a
-# stubbed `just` and asserting both halves, refusing an `if:` or a
+# WHAT GUARDS THAT SPELLING NOW, AND WHAT STILL DOES NOT. Until bd gqlc-chep
+# this paragraph named internal/tools/ciguard as running that run block against
+# a stubbed `just` and asserting both halves, refusing an `if:` or a
 # `continue-on-error:` on either step, and pinning the path below against the
 # path the justfile installs to. That tool was deleted with the rest of the CI
 # scaffolding in PR #1595 and all four clauses went false with it — while the
 # sentence went on reading as the reason to trust the careful `version="$(...)"`
-# spelling to STAY correct. Nothing in this tree does any of the four today. The
-# witness above is a measurement taken once, and a measurement is not a guard.
-# gqlc-chep is where the decision about a real one lives.
+# spelling to STAY correct.
+#
+# bd gqlc-pz5jw ruled that it does not come back, and docs/adr/0043 holds the
+# ruling with its measurements. What was taken instead is the assert step below,
+# which reads no YAML and stubs nothing. It asserts at run time, from a
+# DIFFERENT step, the thing the spelling exists to produce: that the pin reached
+# the cache key carrying the value the justfile holds, and that the path the key
+# caches is the path the justfile installs to. That covers the outcome which
+# actually cost something here rather than the one spelling that caused it in
+# August — an emptied key, a key pinned to a stale literal, an `if:` that skips
+# the read all arrive at the same assertion.
+#
+# A DIFFERENT step on purpose: an assertion written inside the read step is
+# deleted by the same edit that breaks the read.
+#
+# THREE THINGS IT DOES NOT COVER, and no measurement stands in for them. An
+# `if:` or a `continue-on-error:` on the CACHE step is invisible to a run-time
+# assertion, since a skipped restore leaves the assertion true. So is a
+# `continue-on-error:` on the assert step itself. And the path comparison
+# restates `.bin/golangci-lint` a third time, so it catches one side drifting
+# and not an edit that moves all three together — the same limit the sibling
+# setup-go states about its own cache-path assertion. None of the three has
+# happened here. The witness above is a measurement taken once, and a
+# measurement is not a guard.
 name: setup-golangci
 description: restore the pinned golangci-lint binary into .bin/ from cache
 runs:
@@ -48,6 +69,41 @@ runs:
         set -euo pipefail
         version="$(just --evaluate golangci_version)"
         echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    # Before the cache step rather than after it: a wrong key is cheap to refuse
+    # and expensive to let run, since the restore that follows it is green
+    # either way and the cost lands on every later job as a re-download.
+    - name: assert the pin reached the cache key
+      shell: bash
+      env:
+        PIN: ${{ steps.pin.outputs.version }}
+      run: |
+        set -euo pipefail
+        want_version="$(just --evaluate golangci_version)"
+        want_path="${GITHUB_WORKSPACE}/.bin/golangci-lint"
+        # The empty case is DETECTED by the inequality below — "" is not
+        # v2.13.1 — so this branch is here for the diagnosis and not for the
+        # catch. Measured: with it removed, an empty pin still refuses, under
+        # the "pin drifted" wording, which names neither the emptied key nor the
+        # regression that produced one. Removing it costs the reader, not the
+        # gate.
+        if [ -z "${PIN}" ]; then
+            echo "::error title=golangci pin is empty::the version step emitted no version, so the cache below would key on 'golangci-bin-<os>-' and every job would re-download behind a green step. That is the August 2026 regression, not a hypothetical (bd gqlc-pz5jw)." >&2
+            exit 1
+        fi
+        if [ "${PIN}" != "${want_version}" ]; then
+            echo "::error title=golangci pin drifted::the version step emitted '${PIN}', but the justfile's golangci_version is '${want_version}'. ensure-golangci would reject what this key caches." >&2
+            exit 1
+        fi
+        # The justfile's variable is absolute (justfile_directory() + "/.bin/...")
+        # and the cache `path:` is workspace-relative, so the comparison is made
+        # in the justfile's currency rather than by trimming the other.
+        got_path="$(just --evaluate golangci)"
+        if [ "${got_path}" != "${want_path}" ]; then
+            echo "::error title=golangci install path drifted::the justfile installs to '${got_path}', but the cache below saves '.bin/golangci-lint'. The restore would be green over the wrong path and every job would re-download." >&2
+            exit 1
+        fi
+        echo "pin ${PIN} -> ${want_path}"
 
     - name: restore golangci-lint binary from cache
       uses: actions/cache@v4
