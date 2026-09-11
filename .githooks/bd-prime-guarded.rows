@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# Rows for .githooks/bd-prime-guarded, run by `just test-bd-prime-guard`.
+#
+# $1 is the guard under test. It is a parameter so that a mutation run can point
+# these rows at a mutated COPY of the guard cut by sed from the real file; a
+# harness that retyped the predicate would grade a second implementation and
+# never touch the one that ships.
+#
+# The rows drive the REAL `bd prime` through the REAL guard. That is the point
+# of the allow half: the deny half can be graded from the guard's own stderr,
+# but "the bootstrap path still works" is a claim about bd, and a stub would
+# only encode the belief that it does.
+#
+# Every probe directory is allocated by mktemp, never spelled: these rows CREATE
+# beads ledgers, and a fixed /tmp path is shared with every other session on
+# this host. BEADS_DIR is never exported — each row passes it to one command, so
+# a row that forgets it cannot inherit the previous row's.
+set -uo pipefail
+
+guard="${1:?usage: bd-prime-guarded.rows <path-to-guard>}"
+[ -x "${guard}" ] || { echo "error: ${guard} is not executable" >&2; exit 1; }
+
+scratch="$(mktemp -d)"
+trap 'rm -rf "${scratch}"' EXIT
+
+# The first line of the guard's refusal. Allow rows assert its ABSENCE rather
+# than a successful `bd prime`, because several of them point bd at a fabricated
+# workspace it cannot open: what is under test is the guard's decision, and
+# grading bd's exit status there would fail rows for the wrong reason.
+refusal_marker="BEADS_DIR holds beads config but no database"
+
+pass=0
+fail=0
+row() {
+    local name="$1" verdict="$2" detail="$3"
+    if [ "${verdict}" = PASS ]; then
+        pass=$((pass + 1))
+        printf '  PASS  %-28s %s\n' "${name}" "${detail}"
+    else
+        fail=$((fail + 1))
+        printf '  FAIL  %-28s %s\n' "${name}" "${detail}" >&2
+    fi
+}
+
+# Runs the guard once with BEADS_DIR set to $1 (or unset when $1 is the literal
+# string UNSET), leaving rc/out/err in the globals below.
+rc=0; out=""; err=""
+run_guard() {
+    local dir="$1" o e
+    o="${scratch}/out.$$.${RANDOM}"; e="${scratch}/err.$$.${RANDOM}"
+    if [ "${dir}" = UNSET ]; then
+        timeout 120 env -u BEADS_DIR "${guard}" >"${o}" 2>"${e}"
+    else
+        BEADS_DIR="${dir}" timeout 120 "${guard}" >"${o}" 2>"${e}"
+    fi
+    rc=$?
+    out="$(cat "${o}")"; err="$(cat "${e}")"
+}
+
+refused() { case "${err}" in *"${refusal_marker}"*) return 0 ;; *) return 1 ;; esac; }
+
+probe_dir() { mktemp -d "${scratch}/probe.XXXXXXXX"; }
+
+# --- allow rows -----------------------------------------------------------
+# Written and run BEFORE the deny row on purpose. A fail-closed guard that
+# forbids its own bootstrap path bricks a fresh checkout, and that is invisible
+# from a workspace which is already initialised.
+
+# A1: a fresh checkout bootstraps. `bd init` is the explicit opt-in the guard
+# points at, so if the guard's remedy is unfollowable the guard is a brick.
+ws="$(probe_dir)/ws"; mkdir -p "${ws}"
+if (cd "${ws}" && env -u BEADS_DIR bd init --prefix probe) >"${scratch}/init.log" 2>&1 &&
+    [ -e "${ws}/.beads/embeddeddolt" ]; then
+    run_guard "${ws}/.beads"
+    if ! refused && [ "${rc}" -eq 0 ] && [ -n "${out}" ]; then
+        row bootstrap-then-prime PASS "bd init made a ledger; guard allowed, rc=0, ${#out} bytes of prime"
+    else
+        row bootstrap-then-prime FAIL "rc=${rc} refused=$(refused && echo yes || echo no) stdout=${#out}B"
+    fi
+else
+    row bootstrap-then-prime FAIL "bd init did not produce ${ws}/.beads/embeddeddolt"
+fi
+
+# A2: the ordinary session — BEADS_DIR unset, bd discovers this repository.
+run_guard UNSET
+if ! refused && [ "${rc}" -eq 0 ] && [ "${#out}" -gt 10000 ]; then
+    row unset-beads-dir PASS "guard allowed, rc=0, ${#out} bytes of prime from the discovered ledger"
+else
+    row unset-beads-dir FAIL "rc=${rc} refused=$(refused && echo yes || echo no) stdout=${#out}B"
+fi
+
+# A3: an existing but empty BEADS_DIR. Measured: bd creates nothing there and
+# falls back to discovery, so there is nothing for the guard to refuse.
+d="$(probe_dir)"
+run_guard "${d}"
+if ! refused; then
+    row empty-beads-dir PASS "no config present, guard allowed (rc=${rc})"
+else
+    row empty-beads-dir FAIL "guard refused a directory holding no beads config"
+fi
+
+# A4: a BEADS_DIR that does not exist. bd ignores it and discovers; a guard that
+# refused here would refuse a typo that is harmless.
+d="$(probe_dir)/absent"
+run_guard "${d}"
+if ! refused && [ ! -e "${d}" ]; then
+    row absent-beads-dir PASS "path still absent, guard allowed (rc=${rc})"
+else
+    row absent-beads-dir FAIL "refused=$(refused && echo yes || echo no) exists=$([ -e "${d}" ] && echo yes || echo no)"
+fi
+
+# A5/A6: a workspace that HOLDS a database is not this defect, for either
+# backend name the deployed bd binary knows. Two rows, not one: a single row
+# over `embeddeddolt` would pass identically with the sqlite name deleted from
+# the guard's list.
+for db_name in embeddeddolt beads.db; do
+    d="$(probe_dir)"
+    printf '# Beads Configuration File\n' >"${d}/config.yaml"
+    printf '{"backend":"dolt"}\n' >"${d}/metadata.json"
+    mkdir -p "${d}/${db_name}"
+    run_guard "${d}"
+    if ! refused; then
+        row "database-present[${db_name}]" PASS "config plus ${db_name}, guard allowed (rc=${rc})"
+    else
+        row "database-present[${db_name}]" FAIL "guard refused a workspace holding ${db_name}"
+    fi
+done
+
+# A7: with BEADS_DIR unset the guard's path joins become ABSOLUTE — /config.yaml
+# and /embeddeddolt — so the emptiness test in the guard is what stops a host
+# carrying a root-level config.yaml from having every session refused with a
+# message naming an empty BEADS_DIR. That trigger cannot be created on the real
+# root without being root, so the row builds one: a user namespace, /usr bound
+# in, a config.yaml at the new root, and the guard run under chroot with
+# BEADS_DIR unset. Deleting the emptiness test turns this row red and nothing
+# else; it is the only row that holds that line down.
+skip=0
+if unshare -rm true 2>/dev/null; then
+    root="$(probe_dir)/fakeroot"; mkdir -p "${root}"
+    cp "${guard}" "${root}/guard"; chmod +x "${root}/guard"
+    err="${scratch}/chroot.err"
+    # Single-quoted on purpose: the inner script takes the root as $1 rather
+    # than by interpolation, so a path holding a space cannot re-split it.
+    # shellcheck disable=SC2016
+    timeout 120 unshare -rm bash -c '
+        set -e
+        root="$1"
+        mkdir -p "${root}/usr"
+        mount --bind /usr "${root}/usr"
+        ln -sfn usr/bin "${root}/bin"; ln -sfn usr/lib "${root}/lib"
+        ln -sfn usr/lib64 "${root}/lib64"; ln -sfn usr/sbin "${root}/sbin"
+        : > "${root}/config.yaml"
+        chroot "${root}" /usr/bin/env -u BEADS_DIR /guard
+    ' _ "${root}" >/dev/null 2>"${err}"
+    err="$(cat "${err}")"
+    if ! refused; then
+        row root-config-no-beads-dir PASS "/config.yaml at the root did not make an unset BEADS_DIR refuse"
+    else
+        row root-config-no-beads-dir FAIL "refused with an empty BEADS_DIR because of a root-level config.yaml"
+    fi
+else
+    # Declared, not swallowed: a row that removes itself in silence leaves a
+    # battery that reads complete while covering one condition less.
+    skip=$((skip + 1))
+    printf '  SKIP  %-28s %s\n' root-config-no-beads-dir "unshare -rm unavailable; the guard's emptiness test is UNTESTED here"
+fi
+
+# --- deny rows ------------------------------------------------------------
+# Three, not one: EITHER config file arms the defect on its own (measured
+# against bd 1.0.4), so a guard ANDing the pair would let two of these three
+# directories through while the both-files row still passed.
+for arm in "config.yaml" "metadata.json" "config.yaml metadata.json"; do
+    d="$(probe_dir)"
+    for f in ${arm}; do printf 'x\n' >"${d}/${f}"; done
+    run_guard "${d}"
+    created="$(find "${d}" -maxdepth 1 -name embeddeddolt -o -maxdepth 1 -name beads.db | wc -l)"
+    label="config-only[$(echo "${arm}" | tr ' ' '+')]"
+    if refused && [ "${rc}" -ne 0 ] && [ -z "${out}" ] && [ "${created}" -eq 0 ]; then
+        row "${label}" PASS "refused rc=${rc}, stdout empty, no database created"
+    else
+        row "${label}" FAIL "rc=${rc} refused=$(refused && echo yes || echo no) stdout=${#out}B created=${created}"
+    fi
+done
+
+# The refusal must carry the remedy, or it is a wall rather than a redirection.
+d="$(probe_dir)"
+printf 'x\n' >"${d}/config.yaml"
+run_guard "${d}"
+if case "${err}" in *"bd init"*) true ;; *) false ;; esac; then
+    row refusal-names-remedy PASS "stderr names 'bd init'"
+else
+    row refusal-names-remedy FAIL "stderr does not name 'bd init'"
+fi
+
+echo "bd-prime-guarded: ${pass} passed, ${fail} failed, ${skip} skipped"
+[ "${fail}" -eq 0 ]
