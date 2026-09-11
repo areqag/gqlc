@@ -306,7 +306,12 @@ func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
 			name = tt.goType
 		}
 		t.Run(name, func(t *testing.T) {
-			require.PanicsWithValue(t, tt.want, func() { age.DecodeFunc(tt.goType, tt.width) })
+			// The value is a CodegenBug and not a string, and the
+			// conversion here is the assertion: generate recovers by
+			// TYPE, so a panic raised as a bare string would cross
+			// that seam and take the process. PanicsWithValue
+			// compares with ObjectsAreEqual, which is type-strict.
+			require.PanicsWithValue(t, age.CodegenBug(tt.want), func() { age.DecodeFunc(tt.goType, tt.width) })
 		})
 	}
 
