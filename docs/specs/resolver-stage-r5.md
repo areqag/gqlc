@@ -851,9 +851,15 @@ shadow-with-guard, unlabelled carry-wins) governs TYPE.
 `carry_wins_over_unlabelled_rebind.cypher` — `MATCH (a:Post) WITH a
 MATCH (a)-[:AUTHORED]->(p) RETURN a`. Golden pins `a → node Post`.
 Under a raw Phase-B inference (no carry-wins guard), the fixture goes
-RED with `ErrUnknownLabel: cannot infer type of unlabelled binding
-"a"` because touching-edge target `p` is also unlabelled and not
-committed at Phase B (see resolve.go's Phase A2 deferral).
+RED with `ErrUnknownLabel: cannot infer type of unlabelled binding "a"
+— no edge in the pattern reaches a compatible schema node type` because
+touching-edge target `p` is also unlabelled and not committed at Phase
+B (see resolve.go's Phase A2 deferral). The trailing clause after the
+em dash is part of the message and was dropped here until 2026-09-10
+(bd `gqlc-tsuu5`); `ErrUnknownLabel` carries a sibling message ending
+`— every edge reaching it is an OPTIONAL match, which drops no row, so
+its type is unconstrained`, and the two are told apart only by that
+clause.
 
 **Judgment call — physically-separate tables vs single merged table.**
 The kernel could either (a) merge carriedScope into the local tables at
