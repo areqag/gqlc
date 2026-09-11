@@ -185,10 +185,36 @@ func literalType(lit gen.IOC_LiteralContext) query.Type {
 	}
 }
 
-// functionName reads the bare function name of an invocation, lowercased for the
-// case-insensitive aggregate match (the TCK writes cOuNt, aVg). A namespaced name
-// (foo.bar) has no bare name, so ok is false — it is not in the aggregate set and
-// classifies as a FuncProjection regardless.
+// functionName reads the bare function name of an invocation, DECODED and then
+// lowercased for the case-insensitive catalogue match (the TCK writes cOuNt,
+// aVg). A namespaced name (foo.bar) has no bare name, so ok is false — it is not
+// in the aggregate set and classifies as a FuncProjection regardless.
+//
+// The decode is what makes the delimited spelling of a built-in denote that
+// built-in, and openCypher says it does. Cypher 9's Procedures chapter carries
+// the worked example "Call a procedure using a quoted namespace and name" — the
+// query CALL `db`.`labels` under the prose "This calls a procedure db.labels" —
+// and neither segment is a reserved word, so the escaping there is gratuitous
+// and the example exists only to rule that the escaped spelling resolves to the
+// built-in. Its reserved-word appendix rules the same way from the other side,
+// naming FUNCTION NAMES as one of the three identifier contexts in which
+// escaping a reserved word makes it usable. Two servers agree when asked
+// directly (2026-09-11, against the image digests the live batteries pin):
+// neo4j 5.26.28 answers `nosuchfunc`(1) with Unknown function 'nosuchfunc',
+// quoting the name back with the delimiters already gone, and apache/age 1.7.0
+// answers `date`() with `function date does not exist`, byte-identical to what
+// it answers date().
+//
+// The order is decode-then-fold and not the reverse, but nothing here depends on
+// that: decodeEscaped only deletes delimiters, and ToLower does not create or
+// destroy them. It is written this way to match symbolicName's contract, which
+// is that the decode is the LAST thing standing between the token and the name.
+//
+// Ordinary delimited identifiers only; the aggregate's star form is out of
+// reach and is meant to be. Cypher.g4 §oC_Atom carries count(*) as its own
+// alternative binding the COUNT KEYWORD token, which an EscapedSymbolicName can
+// never be, so `count`(*) is a syntax error on this parser and on neo4j alike —
+// pinned by TestADelimitedCountIsNotTheStarAggregate. bd gqlc-e3k0.
 func functionName(fi gen.IOC_FunctionInvocationContext) (string, bool) {
 	name := fi.OC_FunctionName()
 	if name == nil || (name.OC_Namespace() != nil && len(name.OC_Namespace().AllOC_SymbolicName()) > 0) {
@@ -198,17 +224,28 @@ func functionName(fi gen.IOC_FunctionInvocationContext) (string, bool) {
 	if sn == nil {
 		return "", false
 	}
-	return strings.ToLower(sn.GetText()), true
+	return strings.ToLower(symbolicName(sn)), true
 }
 
-// fullFunctionName reads the fully-qualified function name of an invocation
-// as dot-joined lowercase segments — "date" for a bare call, "duration.between"
-// for a namespaced one. Empty string when the invocation has no readable name.
-// Stage 7 uses this to match the seven-name temporal constructor set (spec §1,
-// §4): every constructor except the namespaced duration.* set has an empty
-// namespace, so functionName covers the six bare ones; the namespaced set
-// needs the full-name form. Both classify against the same lookup, so drift
-// between call sites is impossible.
+// fullFunctionName reads the fully-qualified function name of an invocation as
+// dot-joined decoded lowercase segments — "date" for a bare call,
+// "duration.between" for a namespaced one. Empty string when the invocation has
+// no readable name. Stage 7 uses this to match the seven-name temporal
+// constructor set (spec §1, §4): every constructor except the namespaced
+// duration.* set has an empty namespace, so functionName covers the six bare
+// ones; the namespaced set needs the full-name form. Both classify against the
+// same lookup, so drift between call sites is impossible.
+//
+// EVERY segment is decoded, not just the trailing one, and the namespace loop is
+// the half a decode applied only to the bare name would leave behind — the
+// spec's own example of a delimited catalogue name delimits the namespace too
+// (CALL `db`.`labels`). functionName's doc carries the ruling and its evidence.
+//
+// Rebuilding the name from its segments is what makes that possible at all, on
+// procedureNameOf's terms: the dots belong to oC_Namespace rather than to any
+// segment, so the context's own text interleaves them with the delimiters this
+// has to strip and there is no way to decode that text as one string without
+// re-finding boundaries the parse has already found. bd gqlc-e3k0.
 func fullFunctionName(fi gen.IOC_FunctionInvocationContext) string {
 	name := fi.OC_FunctionName()
 	if name == nil {
@@ -218,7 +255,7 @@ func fullFunctionName(fi gen.IOC_FunctionInvocationContext) string {
 	if sn == nil {
 		return ""
 	}
-	bare := strings.ToLower(sn.GetText())
+	bare := strings.ToLower(symbolicName(sn))
 	ns := name.OC_Namespace()
 	if ns == nil {
 		return bare
@@ -229,7 +266,7 @@ func fullFunctionName(fi gen.IOC_FunctionInvocationContext) string {
 	}
 	var b strings.Builder
 	for _, p := range parts {
-		b.WriteString(strings.ToLower(p.GetText()))
+		b.WriteString(strings.ToLower(symbolicName(p)))
 		b.WriteByte('.')
 	}
 	b.WriteString(bare)
