@@ -56,32 +56,38 @@
 #              * it is not closed locally while still open on GH,
 #              * the GH body extends the bead description verbatim, i.e.
 #                gh_body.startswith(description) — append-only, and
-#              * where it extends it, GitHub's edit time is later than the
-#                bead's by more than SKEW_S.
+#              * where it extends it, GitHub's BODY-EDIT time is later than the
+#                bead's updated_at by more than SKEW_S.
 #            The last four conditions are one rule: refuse the pull wherever the
 #            evidence leaves room for GitHub to be behind bd — because it cannot
 #            hold the status, because it lacks content the bead has, or because
 #            nothing says it moved last. A re-indent, a reorder and a de-dup add
 #            no content, so the bodies alone refuse them; a trailing block cut in
 #            bd leaves the same two bodies as a block appended on GitHub, so only
-#            the edit times separate those. Neither side's is a
-#            description-edit time — GitHub's moves on a comment, and bd's on
-#            writes that are not description edits. The bd set is not every
-#            write either: measured 2026-08-17 against the bd on this machine,
-#            --status, --priority, --title, --notes, --assignee, close and
-#            reopen move it, while `bd tag`, `bd label add`, `bd comment` and
-#            `bd link` all succeed with the write visible in `bd show` and
-#            leave it where it was. The subcommand is load-bearing: bare
-#            `bd label` prints usage and exits 0 without writing. So the
-#            ordering is a proxy, and it is one with a residue in each
-#            direction wherever the later of the two writes clears the margin:
-#            a GH append that a moving bd-side write follows is held, and a
-#            bd-side cut that a GH comment follows is pulled — including the
-#            comment this script's own push path writes when it auto-closes a
-#            mirror (gqlc-o22k). Nothing here re-checks that measurement — the
-#            suite stubs `bd` — so a release that stops moving the timestamp on
-#            a description edit widens the fail-open half in silence
-#            (gqlc-3205).
+#            the edit times separate those. GitHub's side is a real body-edit
+#            time as of gqlc-o22k — `lastEditedAt` off the GraphQL issues
+#            connection, coalesced to `createdAt` for a body never edited — so
+#            a comment and a close no longer move it. That is what closes the
+#            silent half: the `gh issue close --comment` this file's own push
+#            path writes used to make GitHub the later side on a bead whose
+#            description had just been CUT locally, and the cut block was
+#            written back over the bead by the next pull.
+#            bd's side is still `updated_at`, which is a proxy: measured
+#            2026-08-17 against the bd on this machine, --status, --priority,
+#            --title, --notes, --assignee, close and reopen move it, while
+#            `bd tag`, `bd label add`, `bd comment` and `bd link` all succeed
+#            with the write visible in `bd show` and leave it where it was.
+#            (The subcommand is load-bearing: bare `bd label` prints usage and
+#            exits 0 without writing.) That proxy is retained deliberately,
+#            because its error has ONE direction: a description edit always
+#            moves it, so it reads no earlier than the real edit, and reading
+#            it late only makes the comparison harder to satisfy. The residue
+#            is therefore a hold on a bead a pull would have taken — it prints
+#            on stderr and a human undoes it. Nothing here re-checks that
+#            measurement, so a release that stops moving the timestamp on a
+#            description edit would flip that direction and bring the silent
+#            half back; .github/workflows/bd-behaviour.yml is the alarm on it
+#            (gqlc-3205, successor gqlc-1oe1).
 #            Selection failing for any reason yields an empty allowlist and no
 #            pull at all.
 #            Whatever the allowlist, the run ends by re-reading the bead list
@@ -367,8 +373,51 @@ if [ "$_action" = "pull" ] || [ "$_action" = "drift" ]; then
     || { _list_rc=$?; : >"$_tmp/beads.json"; }
   _gh_rc=0
   GITHUB_TOKEN="$_token" gh issue list --state all --limit "$_gh_limit_all" \
-    --json number,state,body,updatedAt >"$_tmp/gh.json" 2>/dev/null \
+    --json number,state,body >"$_tmp/gh.json" 2>/dev/null \
     || { _gh_rc=$?; : >"$_tmp/gh.json"; }
+
+  # The body-edit time, which the listing above cannot carry: `gh issue list
+  # --json` has no lastEditedAt in its field list, and `updatedAt` — what stood
+  # here until gqlc-o22k — is not an edit time at all. It moves on a comment and
+  # on a close, and this script's own push path writes both (`gh issue close
+  # --comment` at the auto-close arm), so the tiebreak below could be triggered
+  # by this file. Measured 2026-09-10 over all 1695 issues of this repository:
+  # `updatedAt` sits within 2s of the newest comment on 191 of the 785 commented
+  # issues and within 2s of `closedAt` on 640 of the 1627 closed ones, while
+  # `lastEditedAt` does so on 0 and 0.
+  #
+  # GraphQL is the only place the field is exposed, but it is NOT the
+  # per-issue request the bead costed it at: the issues connection carries it
+  # in bulk, so `--paginate` at 100 a page is 17 requests for this corpus
+  # rather than 1695. `lastEditedAt` is null for a body never edited since it
+  # was created — 730 of 1695 here — and for those the body-edit time is
+  # `createdAt`, so both are fetched and the coalesce happens in the selection.
+  #
+  # A failure here is not fatal and must not be: it yields an empty map, and an
+  # empty map holds every bead the tiebreak would have decided, under a hold
+  # reason of its own. That is the fail-closed direction. It is reported
+  # separately from `_gh_rc` because an aggregate "the listing failed" cannot
+  # say which of the two listings did.
+  _ghedit_rc=0
+  # $owner, $name and $endCursor below are GraphQL variables bound by the -f
+  # flags and by --paginate, not shell ones. The single quotes are what keeps
+  # the shell from eating them, so SC2016's suggested double quotes would
+  # substitute empty strings into the query and break it.
+  # shellcheck disable=SC2016
+  GITHUB_TOKEN="$_token" gh api graphql --paginate \
+    -f owner="${_repo%%/*}" -f name="${_repo#*/}" -f query='
+      query($owner:String!, $name:String!, $endCursor:String) {
+        repository(owner:$owner, name:$name) {
+          issues(first:100, states:[OPEN,CLOSED], after:$endCursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes { number lastEditedAt createdAt } } } }' \
+    >"$_tmp/ghedit.json" 2>/dev/null \
+    || { _ghedit_rc=$?; : >"$_tmp/ghedit.json"; }
+  if [ "$_ghedit_rc" -ne 0 ]; then
+    echo "bd-gh-sync: GitHub would not say when these issue bodies were last edited" >&2
+    echo "bd-gh-sync: (gh api graphql exited ${_ghedit_rc}). Every bead whose mirror has" >&2
+    echo "bd-gh-sync: grown is held rather than pulled on an ordering nothing supports." >&2
+  fi
 
   # Emits ALLOW/HOLD/ORPHAN records terminated by DONE. That sentinel is what
   # separates "selection ran and chose nothing" from "selection did not run";
@@ -380,6 +429,7 @@ if [ "$_action" = "pull" ] || [ "$_action" = "drift" ]; then
   # replaced by a bare abort.
   _rc=0
   python3 - "$_tmp/beads.json" "$_tmp/gh.json" "$_gh_limit_all" "$_repo" \
+    "$_tmp/ghedit.json" \
     >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF' || _rc=$?
 import datetime, json, re, sys
 
@@ -426,11 +476,13 @@ def one_line(s):
 # SKEW_S in agreement with this paragraph (bd gqlc-u2nim).
 SKEW_S = 60
 
-# Both listings report RFC 3339 with an explicit zone (measured 2026-08-17 over
-# the live corpus: 397 bead updated_at and 418 issue updatedAt values, every one
-# `YYYY-MM-DDTHH:MM:SSZ`). Anything else — absent, blank, unparseable, or a wall
-# clock with no zone attached to it — yields None rather than a guess, because
-# the only thing downstream does with the answer is decide a pull.
+# Both sources report RFC 3339 with an explicit zone (measured 2026-08-17 over
+# the live corpus: 397 bead updated_at values; re-measured 2026-09-10 over all
+# 1695 issues for the fields that replaced updatedAt, 2660 non-null
+# lastEditedAt and createdAt values, every one `YYYY-MM-DDTHH:MM:SSZ`).
+# Anything else — absent, blank, unparseable, or a wall clock with no zone
+# attached to it — yields None rather than a guess, because the only thing
+# downstream does with the answer is decide a pull.
 def edited_at(s):
     if not isinstance(s, str):
         return None
@@ -443,12 +495,49 @@ def edited_at(s):
         return None
     return t if t.tzinfo is not None else None
 
+# `gh api graphql --paginate` writes one JSON document PER PAGE, concatenated
+# with no separator and no enclosing array, so json.load reads the first page
+# and raises on the second — which on this corpus silently discards 16 of 17
+# pages while still returning a map that looks healthy. Decoded as a stream
+# instead, which also accepts the single-document shape `--slurp` would give
+# (not used: --slurp needs gh >= 2.44 and this needs no version floor).
+# An empty file yields an empty map rather than an error: the fetch reports its
+# own failure on stderr above, and here an absent time is a hold either way.
+def load_stream(path):
+    with open(path, encoding="utf-8") as fh:
+        blob = fh.read()
+    dec, out, i, n = json.JSONDecoder(), [], 0, len(blob)
+    while i < n:
+        while i < n and blob[i].isspace():
+            i += 1
+        if i >= n:
+            break
+        doc, i = dec.raw_decode(blob, i)
+        out.append(doc)
+    return out
+
 beads = load(sys.argv[1])
 issues = load(sys.argv[2])
 
-gh = {i["number"]: ((i.get("state") or "").lower(), norm(i.get("body")),
-                    edited_at(i.get("updatedAt")))
+gh = {i["number"]: ((i.get("state") or "").lower(), norm(i.get("body")))
       for i in issues}
+
+# The body-edit time, keyed by issue number. `lastEditedAt` is null for a body
+# that has never been edited since it was created, and for that body the last
+# edit IS its creation, so createdAt is the coalesce rather than a fallback
+# guess. A number absent from this map has no ordering at all and is held.
+ghedit = {}
+for page in load_stream(sys.argv[5]):
+    if not isinstance(page, dict):
+        continue
+    nodes = (((page.get("data") or {}).get("repository") or {})
+             .get("issues") or {}).get("nodes") or []
+    for node in nodes:
+        if not isinstance(node, dict) or "number" not in node:
+            continue
+        t = edited_at(node.get("lastEditedAt")) or edited_at(node.get("createdAt"))
+        if t is not None:
+            ghedit[node["number"]] = t
 pat = re.compile(r"/issues/(\d+)$")
 # The number is read off any URL, so the repository has to be read off it too:
 # without this, a bead mirrored to another repository's /issues/<n> is decided
@@ -489,7 +578,7 @@ for b in beads:
     if n not in gh:
         out.append(f"HOLD {bid} {n} not-in-listing")
         continue
-    gh_state, gh_body, gh_at = gh[n]
+    gh_state, gh_body = gh[n]
     desc = norm(b.get("description"))
 
     if status not in REPRESENTABLE:
@@ -548,13 +637,40 @@ for b in beads:
     # is between them. The edit times are the third input, and one direction of
     # the ordering costs more to get wrong than the other: hold unless GitHub is
     # the later side by more than SKEW_S. A time that is missing or will not
-    # parse is not an ordering either, and reaches the same hold under its own
-    # name, because a bead whose evidence is absent is exactly the bead the two
+    # parse is not an ordering either, and reaches a hold under its own name,
+    # because a bead whose evidence is absent is exactly the bead the two
     # bodies were about to decide wrongly.
+    #
+    # The two sides are not the same KIND of input, and gqlc-o22k is the record
+    # of what each one is worth:
+    #   * GitHub's is now a real body-edit time (lastEditedAt, coalesced to
+    #     createdAt), so a comment or a close no longer moves it. That closes
+    #     the silent direction — a bd-side cut followed by this script's own
+    #     auto-close comment used to make GitHub the later side and write the
+    #     cut block back over the bead.
+    #   * bd's `updated_at` is still a proxy: it moves on writes that are not
+    #     description edits (--status, --priority, --title, --notes, assign,
+    #     close, reopen) and not on all of them (`bd tag`, `bd label add`,
+    #     `bd comment`, `bd link` leave it). But every write that IS a
+    #     description edit moves it, so it can only ever read LATER than the
+    #     real description edit, never earlier. Over-reading bd_at makes this
+    #     comparison harder to satisfy, so the residue it leaves is a HOLD on a
+    #     bead a pull would have taken — printed on stderr, undone by hand.
+    #     The falsifier, if bd ever gains a description write that does not
+    #     move the field: the direction flips and the silent half comes back.
+    #     .github/workflows/bd-behaviour.yml is the alarm on exactly that.
+    # So the asymmetry is deliberate and the two unreadable cases are named
+    # apart — one is this repository's ledger, the other is GitHub, and they
+    # send whoever reads the notice to different places (the precedent is
+    # gqlc-x98l, where one reason string covering two cases was the defect).
     if gh_body != desc:
         bd_at = edited_at(b.get("updated_at"))
-        if bd_at is None or gh_at is None:
-            out.append(f"HOLD {bid} {n} edit-time-unreadable")
+        gh_at = ghedit.get(n)
+        if bd_at is None:
+            out.append(f"HOLD {bid} {n} bd-edit-time-unreadable")
+            continue
+        if gh_at is None:
+            out.append(f"HOLD {bid} {n} gh-body-edit-time-unavailable")
             continue
         if (gh_at - bd_at).total_seconds() <= SKEW_S:
             out.append(f"HOLD {bid} {n} gh-not-newer-than-bd")
@@ -590,7 +706,7 @@ for b in beads:
 
 # An unscoped pull silently minted a bead for any unmirrored issue in its
 # update window. Scoping stops that, so report them rather than create them.
-for n, (state, _, _) in sorted(gh.items()):
+for n, (state, _) in sorted(gh.items()):
     if n not in mirrored and state == "open":
         out.append(f"ORPHAN {n}")
 
