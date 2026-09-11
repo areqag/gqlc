@@ -678,6 +678,37 @@ var invalidFixtureContains = map[string]string{
 	"remove_labels_on_edge.cypher":               "edge binding",
 	"delete_projection_alias.cypher":             "projection alias",
 	"delete_property_on_projection_alias.cypher": "projection alias",
+	// The same sentinel's variable-length-edge refusal, one pin per
+	// construction site — bd gqlc-9vpga's sixth axis. Eight sites raise it and
+	// they emit only three distinct sentences between them: the four SET sites
+	// are byte-identical, and so are the two REMOVE and the two DELETE. That
+	// reads like a reason to pin one of each and waive the rest, and it is not.
+	// The assignment was measured rather than read off the code — each site was
+	// given its own marker and every invalid fixture's refusal re-read — and it
+	// is one-to-one: each of the eight sites is reached by exactly one fixture
+	// and each fixture by exactly one site, so a pin holds its own site and
+	// holds nothing at all about the other seven.
+	//
+	// The two sites per verb are the single-type edge lane (sc.edgeTypes) and
+	// the multi-type lane (sc.edgeCands). The extra SET pair is a second
+	// validator: `SET r.p` and `SET r = {...}` are checked by
+	// validateSetPropertyEffect and validateSetEntityEffect, which happen to say
+	// the same sentence. So a pin cannot separate SET-property from SET-entity,
+	// and none of these claims to. What they separate is SET from REMOVE from
+	// DELETE, and this arm from the alias and scope-miss siblings above — and
+	// both of those were asserted nowhere in the repository before this.
+	// Measured, per site: rewriting any one of the eight under a sibling verb
+	// left the WHOLE MODULE green through a golden and sweep-manifest
+	// regeneration, internal/cli included, so a DELETE reported as a SET would
+	// have shipped.
+	"set_property_on_var_length_edge.cypher":               `SET on variable-length edge "r"`,
+	"set_property_on_var_length_multi_type_edge.cypher":    `SET on variable-length edge "r"`,
+	"set_entity_on_var_length_edge.cypher":                 `SET on variable-length edge "r"`,
+	"set_entity_on_var_length_multi_type_edge.cypher":      `SET on variable-length edge "r"`,
+	"remove_property_on_var_length_edge.cypher":            `REMOVE on variable-length edge "r"`,
+	"remove_property_on_var_length_multi_type_edge.cypher": `REMOVE on variable-length edge "r"`,
+	"delete_property_on_var_length_edge.cypher":            `DELETE on variable-length edge "r"`,
+	"delete_property_on_var_length_multi_type_edge.cypher": `DELETE on variable-length edge "r"`,
 	// ErrOutOfR0Scope: path/unwind binding arm (resolve.go:204) vs
 	// refProjectionType arm (scope.go:706) — distinguished by "binding" suffix.
 	"path_binding.cypher":   "path binding",
@@ -1033,6 +1064,13 @@ var invalidFixtureContains = map[string]string{
 //     sites with several sentences are several diagnoses errors.Is cannot
 //     separate. Four of its arms were asserted nowhere in this package. The
 //     entries that stay are named below, each against the guard that holds it.
+//   - gqlc-9vpga, sixth pass: ErrInvalidEffectTarget's variable-length-edge
+//     family, the whole of what that sentinel still had waived. Its eight sites
+//     share three sentences between them, which is what made it look like an
+//     axis where a pin could say little; measuring the site-to-fixture
+//     assignment rather than reading it off the strings is what showed
+//     otherwise, since the sites that collide textually are reached by
+//     DIFFERENT fixtures. All eight moved and none stayed here.
 //
 // THE SCREEN THAT AXIS NEEDED, because it applies to every axis left and
 // nothing above it says so. TestCorpusSweepManifest digests err.Error() for
@@ -1105,8 +1143,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"create_unknown_edge.cypher":                                   {},
 	"delete_bare_property_unknown.cypher":                          {},
 	"delete_edge_property_unknown.cypher":                          {},
-	"delete_property_on_var_length_edge.cypher":                    {},
-	"delete_property_on_var_length_multi_type_edge.cypher":         {},
 	"delete_property_unknown_on_multi_type_edge.cypher":            {},
 	"delete_second_target_unknown_property.cypher":                 {},
 	"effect_order_first_failure_wins.cypher":                       {},
@@ -1134,15 +1170,9 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"plural_endpoint_zero_hop_stays_plural.cypher":                 {},
 	"plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher": {},
 	"plural_endpoint_zero_lower_bound_stays_plural.cypher":         {},
-	"remove_property_on_var_length_edge.cypher":                    {},
-	"remove_property_on_var_length_multi_type_edge.cypher":         {},
 	"remove_property_unknown.cypher":                               {},
 	"remove_property_unknown_on_multi_type_edge.cypher":            {},
 	"remove_property_unknown_on_single_type_edge.cypher":           {},
-	"set_entity_on_var_length_edge.cypher":                         {},
-	"set_entity_on_var_length_multi_type_edge.cypher":              {},
-	"set_property_on_var_length_edge.cypher":                       {},
-	"set_property_on_var_length_multi_type_edge.cypher":            {},
 	"set_property_unknown_on_multi_type_edge.cypher":               {},
 	"set_property_unknown_on_single_type_edge.cypher":              {},
 	"set_property_unknown_property.cypher":                         {},
