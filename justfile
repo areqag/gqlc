@@ -1222,6 +1222,18 @@ check-bd-gh-sync-pull-tiebreak:
         exit 1
     fi
 
+# The rows for .githooks/bd-prime-guarded, the wrapper the SessionStart and
+# PreCompact hooks in .claude/settings.json run instead of a bare `bd prime`
+# (bd gqlc-q2jb). ~2s, and it drives the REAL bd: the allow half's claim is that
+# a fresh checkout still bootstraps, and a stub would only encode the belief.
+#
+# NOT enrolled in `just gates`, deliberately. An arm there names the required CI
+# context it stands for, and this has none — adding one means editing ci.yml,
+# which was out of scope for the change that added the guard. So until bd
+# gqlc-kip5 lands, this is developer-run and a break in the guard lands green.
+test-bd-prime-guard:
+    @.githooks/bd-prime-guarded.rows .githooks/bd-prime-guarded
+
 # health check for local dev environment; extend as new drift modes emerge
 doctor: check-hooks check-worktree-upstream check-shared-config check-beads-export check-push-keepalive
     @echo "ok"

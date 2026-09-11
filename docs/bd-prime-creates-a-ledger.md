@@ -56,6 +56,20 @@ mentions a database, a creation, or `bd init`:
 
     Warning: /tmp/.../beads-no-db has permissions 0755 (recommended: 0700).
 
+Re-measured 2026-09-11 against the same bd, it can be quieter than that. With
+the directory at `0700` the permissions warning does not fire either and the
+**whole** stderr of the creating run is empty, so nothing outside the filesystem
+records that anything happened.
+
+The pair of config files above is also not the trigger: **either one alone is**.
+Measured the same day in throwaway directories with cwd outside any repository,
+a directory holding only `config.yaml` and one holding only `metadata.json` each
+got an `embeddeddolt` from `bd prime` exactly as the two-file directory did. A
+directory holding *neither* — empty, or absent altogether — is inert: `prime`
+creates nothing there and falls back to discovery like every other verb. So the
+condition is "beads config present, database absent", and a reader ANDing the
+two filenames would call two of those three armed directories safe.
+
 **Step 3 — the same command that refused in step 1 now answers.**
 
     $ BEADS_DIR="$bdir" bd stats; echo "rc=$?"
@@ -137,6 +151,18 @@ What *can* be done here is to guard the call site rather than the tool: the
 refuse the config-only directory itself. That is bd `gqlc-q2jb`, and it is
 deliberately not part of the change that added this document —
 `.claude/settings.json` belongs to a different lane.
+
+**That guard has since landed**, as `.githooks/bd-prime-guarded`, and both
+unattended call sites run it: `PreCompact` as well as `SessionStart`, since a
+compaction arms the state exactly as a session start does. It refuses when
+BEADS_DIR names a directory holding beads config with neither `embeddeddolt` nor
+`beads.db` beside it — both names taken from the deployed binary's own strings,
+so a sqlite workspace is not mistaken for an empty one — and prints the
+condition with `bd init` as the remedy, in the `Error:`/`Hint:` shape `bd stats`
+already uses. Everything else passes straight through to `bd prime` with its
+stdout, stderr and exit status untouched. `just test-bd-prime-guard` runs the
+rows, allow half first; recommendation 1 above is still what is wanted upstream,
+because this repository's call sites are not the only ones.
 
 ## How to tell whether you are in this state
 
