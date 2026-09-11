@@ -661,6 +661,33 @@ var invalidFixtures = map[string]error{
 	// which is a shape no corpus schema had — hence a new schema rather than a
 	// new query against an existing one (bd gqlc-xeux).
 	"plural_satisfying_property_nullability_differs.cypher": ErrUnknownProperty,
+
+	// Clause (b) of introducedByThisHop, from the direction where the widening
+	// must NOT fire: `c` is bound by the FIRST optional hop, so the second hop
+	// does not introduce it and must not attest its endpoints. `c` stays at the
+	// wide set `q` alone licenses — {Company, Company&Large} — which does not
+	// resolve `smallOnly`. Dropping the group-equality clause would let the
+	// second hop's attestation narrow `c` to {Company} and this fixture would
+	// start accepting; that is mutation row 2's declared victim.
+	//
+	// MASTER ACCEPTED THIS QUERY, typing c.smallOnly as nullable STRING. It is
+	// the one query shape in the corpus whose verdict the widening moves, and
+	// it moves accept -> refuse (bd gqlc-1qijx; the measurement is in the
+	// ruling's execution record). The acceptance was the defect
+	// satisfy_plural_edges_inline_subtype.gql was written to expose, in that
+	// schema's own words: HAS_DESK is declared from the bare Company only, so
+	// reached through an OPTIONAL MATCH it "is an outer join and filters no
+	// row" — the Employee&Person-[WORKS_AT]->Company&Large row still comes back
+	// with h and d null, and `smallOnly` is not a property it has. Master
+	// narrowed `c` on that hop anyway.
+	//
+	// The pair that makes it legible is one keyword apart:
+	// unlabelled_optional_hop_type_only_property.cypher is this query with the
+	// FIRST hop mandatory, and master already refused it. So master refused the
+	// MORE constrained twin and accepted the less constrained one. The widening
+	// makes the two agree, by committing `c` from its own group's edge before
+	// the foreign-group hop can narrow it.
+	"unlabelled_optional_introduced_hop_foreign_group_withheld.cypher": ErrUnknownProperty,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -860,6 +887,15 @@ var invalidFixtureContains = map[string]string{
 	// satisfied by a `c` pinned to Company&Large — same variable, same property,
 	// same ErrUnknownProperty — which is the opposite reading of the same gate.
 	"unlabelled_hop_to_carried_far_end_stays_wide.cypher": `c.smallOnly missing on plural-satisfying type Company&Large`,
+	// Same reason as the entry above, for the direction where the optional-hop
+	// widening must NOT fire. `c` is introduced by the FIRST optional hop and
+	// merely referenced by the second, so clause (b) withholds the second hop's
+	// attestation and `c` stays plural. A defect that narrowed it to Company
+	// instead would resolve smallOnly and accept, but a defect that narrowed it
+	// to the wrong single member would refuse on the same variable, the same
+	// property and the same sentinel — only "plural-satisfying type" says the
+	// binding was left wide rather than pinned.
+	"unlabelled_optional_introduced_hop_foreign_group_withheld.cypher": `c.smallOnly missing on plural-satisfying type Company&Large`,
 	// The rest of the fixtures that reach the same plural-lane arm, waived until
 	// gqlc-yg5jl on no reasoning the entry above does not already supply. The
 	// argument is that one's, unchanged: a narrowing defect that pins the binding
@@ -2488,7 +2524,7 @@ func (s *ResolverSuite) TestPhaseBsPluralCommitLeavesNoResolvedCoversMark() {
 	}
 	s.Require().NoError(inferUnlabelled(
 		[]query.NodeBinding{c}, []query.EdgeBinding{worksAt, hasDesk},
-		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}, nil))
+		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}, nil, nil))
 
 	// The tripwire. Without these the assertion below passes for a `c` that
 	// never reached the plural arm at all.
@@ -2543,7 +2579,7 @@ func (s *ResolverSuite) TestPhaseBsUncoveredSingularCommitClearsAResolvedCoversM
 	}
 	s.Require().NoError(inferUnlabelled(
 		[]query.NodeBinding{d}, []query.EdgeBinding{hasDesk},
-		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}, nil))
+		sch, table, map[string]callBindingSlot{}, map[string]struct{}{}, nil, nil))
 
 	// Tripwires. Without them the assertion below passes for a `d` that took the
 	// plural arm — already pinned above — or that never committed at all, and it
@@ -3713,6 +3749,100 @@ func (s *ResolverSuite) TestAProvenOptionalGroupWitnessesItsEndpoints() {
 		s.Require().ErrorIs(err, ErrUnknownProperty,
 			"with nothing proving the group the outer join returns a Company&Large row with h and d null, so the hop is no evidence about c and the plural set stands (bd gqlc-0tft)")
 	})
+}
+
+// TestTheGroupFloorRefusesLegacyNullableBindings is the row for conjunct (a)
+// of introducedByThisHop, and no corpus fixture can supply it: the floor only
+// has a value to refuse for a binding that is Nullable() with OptionalGroup()
+// == 0, and the PARSER never builds one. query.go documents Nullable() ⇔
+// OptionalGroup() >= 1 for everything it produces, so every fixture query in
+// the corpus enters Phase B with the two in agreement and the floor is
+// unreachable from a .cypher file.
+//
+// The preserved legacy constructors NewNullableNodeBinding /
+// NewNullableEdgeBinding are the falsifiers — they set nullable without a group
+// (pinned independently by TestOptionalGroupZeroOnLegacyConstructors). Two of
+// them read `0 == 0` under group equality alone, so without the floor this pair
+// would be credited as one clause's hop when no OPTIONAL clause introduced
+// either. That is the attestation witnessesItsEndpoints refuses for the same
+// pair, which is what makes the widening unsound rather than merely wider.
+func (s *ResolverSuite) TestTheGroupFloorRefusesLegacyNullableBindings() {
+	n, err := query.NewNullableNodeBinding("c", graph.LabelSet{})
+	s.Require().NoError(err)
+	cEnd, err := query.NewVarEndpoint("c")
+	s.Require().NoError(err)
+	e, err := query.NewNullableEdgeBinding("h", graph.LabelSet{"HAS_DESK"},
+		cEnd, query.NewInlineEndpoint(graph.LabelSet{"Desk"}), true)
+	s.Require().NoError(err)
+
+	// The tripwire. If either of these drifts the assertion below passes for a
+	// binding the floor was never asked about.
+	s.Require().True(n.Nullable(), "the legacy node constructor must still produce a nullable binding")
+	s.Require().True(e.Nullable(), "the legacy edge constructor must still produce a nullable binding")
+	s.Require().Zero(n.OptionalGroup(), "the legacy node constructor must still leave the group unset")
+	s.Require().Zero(e.OptionalGroup(), "the legacy edge constructor must still leave the group unset")
+	s.Require().True(singleHopPattern(e), "conjunct (c) must hold, or the floor is not what answers")
+
+	s.False(introducedByThisHop(n, e, map[string]struct{}{}, map[string]struct{}{}),
+		"group 0 is `no OPTIONAL clause introduced this`, not a group two bindings can share: without the floor these two read 0 == 0 and attest each other (bd gqlc-1qijx)")
+}
+
+// TestACarriedAliasRedeclaredUnderAnOptionalClauseDoesNotAttest settles the
+// reachability the ruling left open (§3.2) for conjunct (e), `carried`.
+//
+// The open question was whether anything can reach that conjunct with the other
+// four true. inferUnlabelled's CARRY WINS filter drops every name carried as a
+// NODE before Phase B is asked, so a carried node cannot be the witness; the
+// conjunct can only fire for a name carried as something else. This query is
+// that shape: `WITH count(p) AS c` exports `c` as a scalar, and the next Part
+// re-declares it as `(c)` under an OPTIONAL MATCH, where mergeBinding's
+// per-Part dedup makes it a FRESH binding carrying that clause's group.
+//
+// It is measured rather than argued in both directions. The first assertion is
+// the reachability: `c` survives CARRY WINS and arrives at the gate with (a)-(d)
+// all true, so `carried` is the only thing refusing. The second is what the
+// refusal buys — the same query with the carry removed is the corpus fixture
+// unlabelled_optional_introduced_hop_attests, which DOES warn. Same two hops,
+// same schema, one `WITH`: the warning's absence here is `carried` and nothing
+// else.
+func (s *ResolverSuite) TestACarriedAliasRedeclaredUnderAnOptionalClauseDoesNotAttest() {
+	sch := s.loadSchema("valid", "social_r5.gql")
+	resolve := func(src string) (ValidatedQuery, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		return New(sch, WithRegistry(regR7)).Resolve(q)
+	}
+
+	const carried = "MATCH (p:Person) WITH count(p) AS c\n" +
+		"MATCH (y:Person)\n" +
+		"OPTIONAL MATCH (c)-[a:AUTHORED]->(y)\n" +
+		"OPTIONAL MATCH (c)-[r:AUTHORED|LIKES]->(y2:Person)\n" +
+		"RETURN r"
+	const uncarried = "MATCH (y:Person)\n" +
+		"OPTIONAL MATCH (q)-[a:AUTHORED]->(y)\n" +
+		"OPTIONAL MATCH (q)-[r:AUTHORED|LIKES]->(y2:Person)\n" +
+		"RETURN r"
+
+	// This NoError PINS A HOLE rather than endorsing one. The query is nonsense
+	// — `c` is an INTEGER count re-declared as a node pattern — and the ruling
+	// (§3.2) assumed it was refused somewhere upstream. It is not refused
+	// anywhere: master accepts it too, and types the column as a Post NODE. That
+	// is bd gqlc-60jb, filed from this measurement and not fixed here. When it
+	// is fixed this assertion flips to a refusal, and conjunct (e) must be
+	// re-examined at the same time — a refusal before Phase B would make it
+	// unreachable.
+	vqCarried, err := resolve(carried)
+	s.Require().NoError(err, "master accepts this too (bd gqlc-60jb); what `carried` withholds is the attestation, not the query")
+	s.Empty(vqCarried.Warnings,
+		"the re-declared `c` is bound from its earlier Part and is non-null on the rows this OPTIONAL clause missed, so the hop attests nothing about it and LIKES stays in the committed set (bd gqlc-1qijx)")
+
+	// The control. Without it an empty Warnings could mean the widening never
+	// ran at all, which is the same observable for the wrong reason.
+	vqUncarried, err := resolve(uncarried)
+	s.Require().NoError(err)
+	s.Require().Len(vqUncarried.Warnings, 1,
+		"one `WITH` apart, the widening fires and drops the wrong-orientation LIKES — so the pair isolates `carried` as what refuses above")
+	s.Equal("wrong-orientation-drop", vqUncarried.Warnings[0].Producer)
 }
 
 // TestAProvenOptionalGroupInnerJoinsPhaseB is the same distinction one guard
