@@ -1107,6 +1107,84 @@ var invalidFixtureContains = map[string]string{
 	"carried_alias_redeclared_as_labelled_node.cypher":     `variable "c" carried as scalar(int), re-declared as a node pattern`,
 	"carried_alias_redeclared_as_edge.cypher":              `variable "c" carried as scalar(int), re-declared as an edge pattern`,
 	"carried_edge_redeclared_as_node.cypher":               `variable "r" carried as edge, re-declared as a node pattern`,
+
+	// ErrUnknownProperty, the seventh axis of bd gqlc-9vpga and the sentinel
+	// with the most waived entries left. Fifteen sites raise it. Five say
+	// something of their own — the CALL YIELD scalar arm, the two union-member
+	// arms, the two plural-satisfying arms — and the other TEN emit a bare
+	// `%s.%s` and nothing else. That last fact is why this sentinel was passed
+	// over by the fifth axis, on the reading that ten identical formats leave a
+	// pin separating no site from any other. Measured rather than read off the
+	// strings, with a marker at each of the fifteen sites and every invalid
+	// fixture's refusal re-read through it, the assignment is DISJOINT: all
+	// fifteen sites are reached, and no fixture reaches two. Twelve of the
+	// fifteen had no pin at all, so what a refusal NAMED — which property of
+	// which variable gqlc could not find — was asserted nowhere in this
+	// package for any of them.
+	//
+	// The pins below are per site, and within a site per distinct sentence.
+	// Where one site renders the same sentence for two fixtures the second is
+	// waived, with its twin named, because the mutation that kills one kills
+	// both; see invalidFixtureNoMessagePin.
+	//
+	// What these DO hold, measured one site at a time: baring any of the ten
+	// `%s.%s` sites to its variable alone leaves the package green through a
+	// full regeneration today, and reddens exactly that site's own fixtures
+	// after this change. What they do NOT hold is which site fired, and the
+	// waiver block says why that is beyond a pin's reach here rather than
+	// merely unattempted.
+
+	// scope.go, the two projection lanes: a property read in RETURN, on a node
+	// binding and on a single-type edge binding.
+	"certified_list_unknown_property.cypher": "p.nosuch",
+	"unknown_property.cypher":                "p.notAProperty",
+	"unknown_edge_property.cypher":           "r.priority",
+
+	// scope.go, partScope.PropertyUseWitness — the same two lanes again but
+	// reached through a parameter witness in WHERE, not a projection. Two of the
+	// three node-lane fixtures put the unknown property beside a KNOWN one that
+	// reads differently (a.age beside the sibling UNION branch's a.id,
+	// p.doesnt_exist beside the projected p.name), so each of those pins holds
+	// which of the two the refusal picked out and not merely that it refused.
+	// The third discriminates against something else, stated here so nobody
+	// reads more into it: parameter_across_with_alias_shadow_reversed spells
+	// a.title TWICE — validly on the Post binding, then again on the Person
+	// that re-declares a — so this pin cannot say which occurrence was refused.
+	// What it does hold is that the message names the property and not the
+	// carried alias t.
+	"parameter_across_with_alias_shadow_reversed.cypher": "a.title",
+	"unknown_property_union_sibling_branch.cypher":       "a.age",
+	"unknown_property_via_expr_use.cypher":               "p.doesnt_exist",
+	"parameter_use_unknown_edge_property.cypher":         "r.notAProp",
+
+	// resolve.go's effect validators, node lane: SET, REMOVE and DELETE each
+	// check the property themselves, at three separate sites that say the same
+	// thing. Two of these pins are about POSITION rather than about the site —
+	// set_second_effect writes a.name before a.nope and delete_second_target
+	// deletes n.name before n.notAProp, so the pin holds that the refusal names
+	// the failing one and not the first one it walked past.
+	"effect_order_first_failure_wins.cypher":               "n.notAProp",
+	"merge_on_create_unknown_property.cypher":              "a.notAProp",
+	"merge_on_match_second_effect_unknown_property.cypher": "b.notAProp",
+	"set_second_effect_unknown_property.cypher":            "a.nope",
+	"remove_property_unknown.cypher":                       "n.notAProp",
+	"delete_second_target_unknown_property.cypher":         "n.notAProp",
+
+	// The same three validators' single-type EDGE lane, three more sites.
+	"set_property_unknown_on_single_type_edge.cypher":    "r.notAProp",
+	"remove_property_unknown_on_single_type_edge.cypher": "r.notAProp",
+	"delete_edge_property_unknown.cypher":                "r.notAProp",
+
+	// The five sites that say something of their own. The CALL YIELD arm is
+	// the only place in the corpus that reports a property lookup on a scalar
+	// as an unknown property rather than as a type error, and its parenthetical
+	// is the whole of that disclosure. The two union-member arms below are one
+	// site each: the multi-type edge lane of SET, REMOVE, DELETE and of a plain
+	// projection all reach the missing-member arm, so its pin is one.
+	"call_yield_property_lookup.cypher":              `city.length (CALL YIELD variable "city" is a scalar)`,
+	"set_property_unknown_on_multi_type_edge.cypher": "property r.notAProp missing on union member Person-[AUTHORED]->Post",
+	"unknown_property_union_missing.cypher":          "property r.views missing on union member Person-[LIKES]->Post",
+	"unknown_property_union_type_differs.cypher":     "property r.weight type differs across union members: property:INT (not null) vs property:FLOAT (not null)",
 }
 
 // invalidFixtureNoMessagePin names the invalid fixtures whose refusal message
@@ -1165,6 +1243,13 @@ var invalidFixtureContains = map[string]string{
 //     assignment rather than reading it off the strings is what showed
 //     otherwise, since the sites that collide textually are reached by
 //     DIFFERENT fixtures. All eight moved and none stayed here.
+//   - gqlc-9vpga, seventh pass: every fixture refusing with ErrUnknownProperty
+//     that was still waived. It is raised from FIFTEEN sites, ten of which emit
+//     the same bare `%s.%s` — the argument that had this sentinel passed over
+//     twice, on the reading that a pin could then separate no site from any
+//     other. Measuring the site-to-fixture assignment instead of the strings
+//     shows the sites are reached by DISJOINT fixtures, so a pin does hold its
+//     own site; twenty moved and seven stay, named below.
 //
 // THE SCREEN THAT AXIS NEEDED, because it applies to every axis left and
 // nothing above it says so. TestCorpusSweepManifest digests err.Error() for
@@ -1228,54 +1313,67 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	// covered and this entry would add nothing.
 	"label_satisfy_none.cypher": {},
 
-	"ambiguous_edge_orientation_after_inference.cypher": {},
-	"call_arg_int_at_string.cypher":                     {},
-	"call_arg_type_mismatch.cypher":                     {},
-	"call_yield_property_lookup.cypher":                 {},
-	"certified_collect_unknown_property.cypher":         {},
-	"certified_list_unknown_property.cypher":            {},
-	// NOT inherited — this entry is new (bd gqlc-b8m8f), and its reason is
-	// stated from a measurement rather than from the two entries above.
+	// ErrUnknownProperty's seven survivors, waived on a measurement — the seventh
+	// axis of bd gqlc-9vpga, which pinned the other twenty. Fifteen sites raise
+	// this sentinel and TEN of them emit the same bare `%s.%s`: nothing but the
+	// variable and the property name, both of which come from the query rather
+	// than from the site. The site-to-fixture assignment was measured with
+	// per-site markers and is DISJOINT — every site is reached, and no fixture
+	// reaches two — so a pin does hold its own site, which is why twenty moved.
 	//
-	// It refuses from refProjectionType's single-node-type arm (scope.go, the
-	// `nt.Properties[ref.Property]` miss), reached through
-	// selectionProjectionType instead of unifiedRefPropertyType. What this
-	// fixture adds over the other fixtures reaching that arm is a VERDICT —
-	// that min's operand is resolved against the schema at all, where before
-	// the ruling it was silently any — and TestInvalid's errors.Is makes that
-	// claim without reading any text.
+	// What it does NOT do here, and this is the limit worth recording: because
+	// no site contributes a single byte of its own to that sentence, two sites
+	// reached by two fixtures whose queries happen to name the same variable
+	// and property render byte-identical text. Rewriting one such site's format
+	// as the other's is a LITERAL NO-OP on the bytes, so no pin anywhere can
+	// separate them, and none below claims to. `SET r.notAProp`, `REMOVE
+	// r.notAProp` and `DELETE r.notAProp` on a single-type edge all refuse with
+	// `unknown property: r.notAProp` — which clause was at fault is absent from
+	// the message, not merely unpinned. That is the opposite of what the same
+	// three verbs do for the variable-length-edge refusal pinned above, where
+	// the verb IS in the sentence; gqlc-9vpga's notes carry it as a follow-up.
 	//
-	// WHAT HOLDS THE ARM'S TEXT, measured 2026-09-11 by rewriting that one
-	// fmt.Errorf and grading per fixture: NOT a message pin. TestInvalid stays
-	// entirely GREEN under that mutation — unknown_property.cypher, the bare
-	// `p.nosuch` twin, is waived in THIS MAP too (see its entry below), so
-	// there is no invalidFixtureContains entry on the arm to red. The guard
-	// that does red is TestCorpusSweepManifest, whose detail digest moved on
-	// 321 cells. That is a real guard and it is why this entry is not a hole,
-	// but it is not the message pin an earlier draft of this comment claimed.
+	// Each entry below is byte-identical to a pin ABOVE raised at the SAME
+	// site, so a second copy of that string discriminates nothing further —
+	// the mutation that kills the pin kills this fixture's subtest with it.
+	// The twin is named on each.
+	"certified_collect_unknown_property.cypher": {}, // == certified_list_unknown_property, scope.go refProjectionType node arm
+	"set_property_unknown_property.cypher":      {}, // == effect_order_first_failure_wins, validateSetPropertyEffect node arm
+	"merge_on_match_unknown_property.cypher":    {}, // == merge_on_create_unknown_property, same arm; ON MATCH vs ON CREATE is not in the message
+	"delete_bare_property_unknown.cypher":       {}, // == delete_second_target_unknown_property, validateDeleteTarget node arm
+	// The multi-type-edge lane of all three verbs funnels through ONE site
+	// (unionProperty's missing-member arm), so unlike the single-type lane
+	// these are not even separate sites: one pin, on the SET entry above,
+	// covers the sentence all three render.
+	"remove_property_unknown_on_multi_type_edge.cypher": {},
+	"delete_property_unknown_on_multi_type_edge.cypher": {},
+	// The seventh arrived from the other side (bd gqlc-b8m8f, PR #2838) while
+	// this axis was being measured, and it is the same shape as the first: it
+	// reaches S1 too, so it is a twin of certified_list's pin above and a pin
+	// here would discriminate nothing further. Its own reason for existing is
+	// a VERDICT rather than a message — that min's operand is resolved against
+	// the schema at all, where before ruling-p9qgu it was silently any — and
+	// TestInvalid's errors.Is makes that claim without reading any text.
 	//
-	// Whether the arm should ALSO carry a message pin is bd gqlc-9vpga's
-	// question, not this bead's: per PR #2829, two sites rendering identical
-	// text are usually still separable by test, so "the twin renders the same
-	// bytes" is not on its own a reason to waive. This entry is deliberately
-	// left waived pending that lane's verdict rather than pinned here.
-	"certified_min_unknown_property.cypher":                        {},
+	// TWO CORRECTIONS to the comment this replaces, both measured here by
+	// marking all fifteen sites on that PR's own head and re-reading every
+	// fixture's refusal. It named unknown_property.cypher as "the bare
+	// `p.nosuch` twin": unknown_property.cypher renders `p.notAProperty`, and
+	// the `p.nosuch` fixtures are certified_list and certified_collect. And it
+	// said "there is no invalidFixtureContains entry on the arm to red", which
+	// was true when it was written and is no longer: S1 now carries two pins,
+	// so baring that arm reddens certified_list and unknown_property (row U1).
+	"certified_min_unknown_property.cypher": {}, // == certified_list_unknown_property, same S1 arm via selectionProjectionType
+
+	"ambiguous_edge_orientation_after_inference.cypher":            {},
+	"call_arg_int_at_string.cypher":                                {},
+	"call_arg_type_mismatch.cypher":                                {},
 	"create_unknown_edge.cypher":                                   {},
-	"delete_bare_property_unknown.cypher":                          {},
-	"delete_edge_property_unknown.cypher":                          {},
-	"delete_property_unknown_on_multi_type_edge.cypher":            {},
-	"delete_second_target_unknown_property.cypher":                 {},
-	"effect_order_first_failure_wins.cypher":                       {},
 	"label_satisfy_plural_entity.cypher":                           {},
 	"list_of_edges_projection.cypher":                              {},
 	"list_of_nodes_projection.cypher":                              {},
-	"merge_on_create_unknown_property.cypher":                      {},
-	"merge_on_match_second_effect_unknown_property.cypher":         {},
-	"merge_on_match_unknown_property.cypher":                       {},
 	"merge_unknown_edge.cypher":                                    {},
-	"parameter_across_with_alias_shadow_reversed.cypher":           {},
 	"parameter_use_on_var_length_edge_property.cypher":             {},
-	"parameter_use_unknown_edge_property.cypher":                   {},
 	"part_binding_type_conflict.cypher":                            {},
 	"part_binding_type_conflict_edge.cypher":                       {},
 	"plural_endpoint_contradictory_edges_stay_plural.cypher":       {},
@@ -1287,13 +1385,6 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"plural_endpoint_zero_hop_stays_plural.cypher":                 {},
 	"plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher": {},
 	"plural_endpoint_zero_lower_bound_stays_plural.cypher":         {},
-	"remove_property_unknown.cypher":                               {},
-	"remove_property_unknown_on_multi_type_edge.cypher":            {},
-	"remove_property_unknown_on_single_type_edge.cypher":           {},
-	"set_property_unknown_on_multi_type_edge.cypher":               {},
-	"set_property_unknown_on_single_type_edge.cypher":              {},
-	"set_property_unknown_property.cypher":                         {},
-	"set_second_effect_unknown_property.cypher":                    {},
 	"union_column_name_mismatch.cypher":                            {},
 	"union_column_name_only_mismatch.cypher":                       {},
 	"union_column_nullability_mismatch.cypher":                     {},
@@ -1307,13 +1398,7 @@ var invalidFixtureNoMessagePin = map[string]struct{}{
 	"union_third_branch_mismatch.cypher":                           {},
 	"unknown_edge.cypher":                                          {},
 	"unknown_edge_multi_type_all_miss.cypher":                      {},
-	"unknown_edge_property.cypher":                                 {},
 	"unknown_edge_undirected.cypher":                               {},
-	"unknown_property.cypher":                                      {},
-	"unknown_property_union_missing.cypher":                        {},
-	"unknown_property_union_sibling_branch.cypher":                 {},
-	"unknown_property_union_type_differs.cypher":                   {},
-	"unknown_property_via_expr_use.cypher":                         {},
 	"untyped_edge.cypher":                                          {},
 	"var_length_edge_property_projection.cypher":                   {},
 }
