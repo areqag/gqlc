@@ -384,6 +384,17 @@ func TestAnEmptyDelimitedIdentifierIsRefused(t *testing.T) {
 		"a projection alias":  "MATCH (n) RETURN n AS ``",
 		"an UNWIND variable":  "UNWIND [1] AS `` RETURN 1",
 		"a parameter":         "MATCH (n) WHERE n.age = $`` RETURN n",
+		// This row pins the ORDER as well as the refusal, and it is the only
+		// row here that does. The sweep runs before the collection walk so
+		// that ErrEmptyIdentifier names the cause; moved after the walk, the
+		// six rows above still report it, because nothing downstream of them
+		// fails first. This shape does fail first — two anonymous endpoints
+		// reach query.NewVarEndpoint, whose own non-empty precondition
+		// refuses — so a post-walk sweep reports a constructor's internal
+		// complaint about a variable the author never wrote, and the sentinel
+		// never surfaces. Measured as a surviving mutant before this row
+		// existed (bd gqlc-y25yo).
+		"a relationship endpoint, before the walk can mistake it": "MATCH (``)-[r]->(``) RETURN r",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := parseQuery(t, src)
