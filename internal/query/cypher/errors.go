@@ -45,7 +45,8 @@ var (
 	// collisions (intra-YIELD name reuse and cross-scope shadowing of an
 	// imported name) — the operative semantic is "binding collision in scope,"
 	// not strictly node/edge/path (Q4 ruling, matching the Stage-9 unwind-vs-
-	// unwind precedent in build.go:114-121). The message text mirrors that
+	// unwind precedent: the `if unwindByVar[v]` arm of func addUnwindScope
+	// in build.go). The message text mirrors that
 	// broader semantic; the sentinel identity (not the text) is the stable
 	// contract.
 	ErrVariableKindConflict = errors.New("variable bound with conflicting kinds")

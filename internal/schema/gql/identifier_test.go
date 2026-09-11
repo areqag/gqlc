@@ -318,7 +318,8 @@ func TestDelimitedIdentifierRefusals(t *testing.T) {
 // TestAnAmpersandBearingLabelKeysAsOneLabel is the acceptance that replaced
 // ErrAmpersandInLabel (bd gqlc-649co), taken through the public Parse at both
 // label positions — a node's and an edge's, which reach labelSet through separate
-// callers (nodetype.go:44 and :57).
+// callers — func labelSet's `p.LabelName()` arm and its
+// `spec.AllLabelName()` loop, both in nodetype.go.
 //
 // What it asserts is the KEY SPELLING, not merely that the parse succeeded, and
 // that distinction is the whole test. Deleting the parser's refusal without

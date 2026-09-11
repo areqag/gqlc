@@ -756,8 +756,10 @@ var invalidFixtureContains = map[string]string{
 	"remove_property_on_var_length_multi_type_edge.cypher": `REMOVE on variable-length edge "r"`,
 	"delete_property_on_var_length_edge.cypher":            `DELETE on variable-length edge "r"`,
 	"delete_property_on_var_length_multi_type_edge.cypher": `DELETE on variable-length edge "r"`,
-	// ErrOutOfR0Scope: path/unwind binding arm (resolve.go:204) vs
-	// refProjectionType arm (scope.go:706) — distinguished by "binding" suffix.
+	// ErrOutOfR0Scope: the path/unwind binding arm is admitLocalBindings'
+	// `default:` case in resolve.go (`"%w: %s binding"`); the competing arm is
+	// func (s *scope) refProjectionType in scope.go, which formats the bare
+	// variable name. Distinguished by the "binding" suffix.
 	"path_binding.cypher":   "path binding",
 	"unwind_binding.cypher": "unwind binding",
 	// The three ways the refusal can name the edge it refuses. A named binding
@@ -1470,7 +1472,8 @@ func (s *ResolverSuite) loadSchema(subdir, name string) schema.Schema {
 // loadQuery parses a Cypher query fixture. R7 threads regR7 into the parser
 // so CALL fixtures resolve procedure signatures; non-CALL fixtures parse
 // identically because the parser consults the registry only inside
-// collectCall (verified against internal/query/cypher/call.go:41), so all
+// collectCall (verified: `l.registry.Lookup` in func (l *listener) collectCall,
+// internal/query/cypher/call.go, is the sole `l.registry` read), so all
 // R0–R6 goldens stay byte-identical.
 func (s *ResolverSuite) loadQuery(path string) query.Query {
 	src, err := os.ReadFile(path)

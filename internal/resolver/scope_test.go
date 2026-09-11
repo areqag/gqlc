@@ -967,20 +967,29 @@ func TestScopeExportWildcardVsExplicit(t *testing.T) {
 // separate guards in DemoteNullability and Export each state: group id 0
 // means "not in an OPTIONAL group", not "in the group numbered zero".
 //
-// addMember's `g <= 0` (scope.go:403) and demoteGroup's `g == 0`
-// (scope.go:427) mask each other exactly — drop either alone and the
-// other still blocks the cascade, so a mutation sweep sees both survive
-// and neither looks load-bearing. This test discriminates the pair
-// jointly: with both dropped, b's proven non-nullability demotes "group
-// 0", which sweeps up every other group-0 name including a.
+// The `id <= 0` guard in func (g optionalGroups) add and the `g == 0` guard
+// in func (s *scope) demoteGroup (both in scope.go) mask each other exactly —
+// drop either alone and the other still blocks the cascade, so a mutation
+// sweep sees both survive and neither looks load-bearing. This test
+// discriminates the pair jointly: with both dropped, b's proven
+// non-nullability demotes "group 0", which sweeps up every other group-0 name
+// including a. [2026-09-11 (gqlc-kvil): the first guard was named addMember
+// when this test was written; PR #282 (gqlc-ls8.1) renamed it to
+// optionalGroups.add as part of deepening the carried scope into a scope
+// module. Same guard, same expression.]
 //
-// Export's `g > 0` (scope.go:837) is the third statement of the same
-// contract, and downstream it is inert — a zero id in the carry is
-// rejected by addMember on arrival. The assertion on exportedOptionalGroup
-// pins it directly rather than through that masked path.
+// The `g > 0` guard on the outgoing carry is the third statement of the same
+// contract, and downstream it is inert — a zero id in the carry is rejected by
+// optionalGroups.add on arrival. The assertion on exportedOptionalGroup pins
+// it directly rather than through that masked path. [2026-09-11 (gqlc-kvil):
+// this row said "Export's `g > 0`"; the guard is still reached only from
+// Export, but it now sits in the helper func (s *scope) exportBindingLanes,
+// which populates branchState.exportedOptionalGroup.]
 //
-// The binding shape here is parser-unreachable: cypher/listener.go:159-162
-// records the invariant nullable <=> optionalGroup >= 1, and build.go:280-290
+// The binding shape here is parser-unreachable: the doc comment on type
+// rawBinding in cypher/listener.go records the invariant
+// nullable <=> optionalGroup >= 1, and the binding-constructor switch in
+// func (rb *rawBinding) toBinding (cypher/build.go)
 // reaches the nullable constructors only when optionalGroup > 0. As with
 // the shadow-cascade tests above, parser-reachability is a separate
 // question — this pins the invariant at the scope layer, where the

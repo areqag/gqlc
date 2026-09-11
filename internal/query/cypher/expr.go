@@ -418,8 +418,10 @@ func (l *listener) builtinArgTypes(fi gen.IOC_FunctionInvocationContext) []query
 // count(*)). Refs are mined via typeExpressionMining — the same Stage-6
 // walker classifyRichExpression uses — so a bare argument mines the same
 // Ref{Variable, Property} the old functionArgRefs path produced (spec §1.4,
-// bit-identity traced at shape.go:29-48 vs. typing.go:322-326 +
-// typing.go:292-300), while a rich argument mines every var/var.prop atom in
+// bit-identity traced between func refFromNonArithmetic in shape.go and the
+// pair of func (l *listener) typeAtom's `case a.OC_Variable() != nil` arm plus
+// func (l *listener) typeNonArithmetic's single-lookup property upgrade in
+// typing.go), while a rich argument mines every var/var.prop atom in
 // depth-first, left-to-right traversal order with duplicates preserved.
 // Parameters encountered under the argument sub-tree are registered as
 // ExprUse{aggregateResultType(fn, operand), ExprInProjection} — Stage 6 §4

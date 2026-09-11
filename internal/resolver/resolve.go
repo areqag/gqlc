@@ -2351,8 +2351,11 @@ func validateEffect(sc *scope, e query.Effect, s schema.Schema, setClause effect
 
 // validateCreateEffect walks e.Variables() and confirms each non-empty name is
 // present in sc.nodeTypes OR sc.nodeCands OR sc.edgeBindings. Anonymous edges
-// (v == "") skip per listener.go:349-350. Reachability of the tripwire is zero
-// from parser input.
+// (v == "") skip: the parser's CREATE handler — func (l *listener)
+// EnterOC_Create in internal/query/cypher/listener.go — documents and produces
+// that shape ("a named binding contributes its variable; an anonymous edge
+// contributes an empty string"). Reachability of the tripwire is zero from
+// parser input.
 func validateCreateEffect(sc *scope, e query.CreateEffect) error {
 	for _, v := range e.Variables() {
 		if v == "" {
@@ -2855,8 +2858,10 @@ func labelDeclared(label string, s schema.Schema) bool {
 //
 // TypeUnknown and TypeNull are resolver-side wildcards: TypeUnknown for a
 // $param / n.name argument (the parser cannot type-narrow those at CALL-site),
-// TypeNull for a bare null literal (shape.go:79 mines NULL to TypeNull, a
-// distinct sum member from TypeUnknown per type.go:80). Admitting both
+// TypeNull for a bare null literal (func literalType in
+// internal/query/cypher/shape.go mines NULL to TypeNull on its `case
+// lit.NULL() != nil` arm, and type TypeNull in internal/query/type.go is a
+// distinct sum member from type TypeUnknown). Admitting both
 // preserves R7's parser-authoritative posture and validates TCK Call5 [4]
 // (CALL test.my.proc(null) against nullable-typed params). A downstream
 // $param whose enclosing type disagrees with the sig token is caught by the
