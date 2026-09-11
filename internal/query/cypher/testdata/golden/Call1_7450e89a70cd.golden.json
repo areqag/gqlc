@@ -13,7 +13,7 @@
           ],
           "returns": [
             {
-              "name": "`name`",
+              "name": "name",
               "value": {
                 "kind": "ref",
                 "variable": "n",
