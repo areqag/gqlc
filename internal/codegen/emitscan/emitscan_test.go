@@ -532,6 +532,50 @@ func TestALiveGenericHelperBindsItsTypeParameter(t *testing.T) {
 		"a universe name the body resolves is missing, so this test is not reading the set it claims to")
 }
 
+// TestAGenericReceiverBindsItsTypeParameterButNotItsType holds the half
+// of the receiver rule that is easy to overshoot. A generic receiver
+// writes both names at the same position — `func (q *Q[T])` — but only
+// one of them is bound there. Q is resolved in package scope and must
+// stay free, or the resolved set loses every type an emitted method
+// hangs off; T is bound by the receiver and must not be free.
+func TestAGenericReceiverBindsItsTypeParameterButNotItsType(t *testing.T) {
+	file, err := emitscan.Parse(queryPath, "package p\n\nfunc (q *Q[T]) f(x T) { _ = x }\n")
+	require.NoError(t, err)
+
+	free := emitscan.FreeIdents(onlyFuncDecl(t, file))
+
+	require.NotContains(t, free, "T", "a receiver's type parameter is reported free")
+	require.Contains(t, free, "Q",
+		"the receiver's own type was taken as a binding along with its type parameter, so a package-level type an emitted method hangs off is no longer resolved by anything")
+}
+
+// TestASignatureNameStaysInTheReferencedSet pins the over-inclusion
+// gqlc-db0e chose to keep when it started dropping func-TYPE parameter
+// names.
+//
+// A binding occurrence is not a reference, so a strict reading would
+// drop a function's own parameter names too. It does not, because
+// internal/codegen/age/capture_test.go's methodScopes reads this set to
+// assert that renaming a query's parameters moves nothing an emitted
+// method resolves — and a signature that named its argument after the
+// query is the defect that assertion exists to catch. The parameter
+// here is deliberately unread in the body: a parameter the body reads
+// would stay in the set through the body alone, so only an unread one
+// can tell whether the signature half is still being read.
+func TestASignatureNameStaysInTheReferencedSet(t *testing.T) {
+	file, err := emitscan.Parse(queryPath, "package p\n\nfunc (q *Queries) GetPerson(ctx context.Context, arg GetPersonParams) error { return nil }\n")
+	require.NoError(t, err)
+
+	names := emitscan.ReferencedIdents(onlyFuncDecl(t, file))
+
+	for _, name := range []string{"q", "ctx", "arg"} {
+		require.Contains(t, names, name,
+			"a name the signature binds is missing from the referenced set, so age's methodScopes no longer perturbs when an emitted signature names its argument after the query")
+	}
+	require.Contains(t, names, "GetPersonParams",
+		"the type beside a parameter is missing, so this test is not reading the set it claims to")
+}
+
 // TestNonScopeOccurrencesAreExcludedPerOccurrence is what distinguishes
 // gqlc-db0e's verdict from the alternative it declined.
 //
@@ -620,6 +664,13 @@ func TestFreeIdentsBoundSetLimits(t *testing.T) {
 		// FREE before that bead; the four below that are not a plain
 		// bound-set widening carry their verdict at the row.
 		{name: "local type declaration", bound: "row", src: "func f() { type row struct{}; var r row; _ = r }"},
+
+		// Not one of the five gqlc-db0e enumerated, and here because
+		// they cost one row each: an interface's method names sit in the
+		// same field-list position as a struct's field names and resolve
+		// the same way, so a fence that covered one and not the other
+		// would be an unmeasured half.
+		{name: "local interface method name", bound: "m", src: "func f() { type r interface{ m() }; var v r; v.m() }"},
 
 		// A FIELD name is not in the function's scope at all, so it is
 		// excluded from ReferencedIdents rather than added to the bound
