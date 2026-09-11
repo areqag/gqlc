@@ -2527,6 +2527,21 @@ shipped parser rather than reading it:
   moving `mineWhere` below `closePartOpenNext` in `EnterOC_With`.
   Execution is tracked on **gqlc-dvd1**.
 
+**Landed 2026-09-11 under gqlc-dvd1**, at the predicted price (one
+parser golden, `WithWhere2_6f8b82aba9de.golden.json`, two
+`"part": 1` keys). The shape this section is about now has a
+fixture —
+`test/data/resolver/valid/parameter_with_trailing_where_alias_shadow.cypher`
+— and `$p` there commits `unknown` rather than the `INT` recorded
+above. The query is **still admitted**; that residual is recorded
+on the fixture and in
+[ADR 0045](../adr/0045-a-with-trailing-where-reading-a-dropped-name-is-rejected.md),
+and refusing it needs a seventh `partScope` lane plus a deliberate
+amendment to the §2.3 invariant (ruling §5.1). ADR 0045 also
+carries the acceptance NARROWING the move brings with it: a
+trailing WHERE reading a WITH-DROPPED name beside a `$param` now
+fails with `ErrUnboundVariable`.
+
 ### 7.7 Follow-up beads flagged for close-out
 
 - **UNION-with-Uses branch attribution** — §7.2.1 records the
