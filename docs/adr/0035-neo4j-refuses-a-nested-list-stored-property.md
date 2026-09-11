@@ -167,17 +167,35 @@ is guarded rather than recorded:
 `TestAContingentRefusalNamesItsBackend` in `internal/cli/backends` — the
 composition root being the only layer that knows the enrolled roster — sweeps
 the width vocabulary across every registered target and requires a backend that
-refuses what another accepts to name itself. Today 25 widths divide the roster
-and the sweep holds both sentinels with one assertion: `BYTES` / `LIST<TIME>` /
+refuses what another accepts to name itself. Today 67 widths divide the roster
+— 25 when this was written, before records joined the vocabulary — and the
+sweep holds both sentinels with one assertion: `BYTES` / `LIST<TIME>` /
 `LIST<TIMESTAMP>` for AGE's `ErrUnrepresentableWidth`, and the `LIST<LIST<T>>`
 family for neo4j's `ErrUnstorableProperty`. The day neo4j's table refuses a
 width another target accepts, that test reddens and this decision is re-opened
 by the machinery rather than by somebody remembering.
 
-One thing it deliberately does not assert: the converse, that a refusal every
-target shares carries *no* name. AGE appends its phrase to the eight universal
-widths too, which over-attributes them on this rule. That is bd `gqlc-oxgyt`,
-left open with the counter-argument stated, rather than a red row here.
+The converse — that a refusal every target shares carries *no* name — was left
+unasserted when this ADR was written, because AGE appended its phrase to the
+eight universal widths too and a red row would have been describing a known
+defect rather than guarding a decision. bd `gqlc-oxgyt` closed that: AGE's
+`nameBackend` now withholds its suffix on a width no backend carries, at any
+container depth, and the same sweep asserts the converse.
+
+It is asserted on the rows where it is well posed: a width every target refuses
+**citing one sentinel**. That restriction is not a hedge. Nine widths —
+`LIST<LIST<BYTES>>`, `RECORD<f BYTES>`, `LIST<RECORD<f BYTES>>` and the `TIME`
+and `TIMESTAMP` forms of each — are refused by every target under *two*
+sentinels, AGE's `ErrUnrepresentableWidth` and neo4j's `ErrUnstorableProperty`.
+Each of those two refusals is itself contingent, so each name is owed: neo4j
+carries `BYTES`, and AGE stores nested lists. Only their conjunction over one
+width is unanimous, which the converse as stated would misread. Those nine are
+logged and unasserted; closing the gap needs a per-refusal notion of
+contingency the composition root cannot compute from a width alone, which is bd
+`gqlc-r0yy`.
+
+Measured 2026-09-10 over the three-key roster: 67 widths divide it, 40 are
+refused unanimously under one sentinel, and 9 unanimously under two.
 
 ## The emitter asymmetry, and one arm that is now unreachable
 
