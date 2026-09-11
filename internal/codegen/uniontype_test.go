@@ -40,19 +40,20 @@ func stubCarrier(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindUnion {
 		return codegen.UnionCarrier(pt, stubCarrier, stubFamily)
 	}
-	switch pt {
-	case graph.TypeInt32:
-		return "int32", true
-	case graph.TypeInt64:
-		return "int64", true
-	case graph.TypeString:
-		return "string", true
-	case graph.TypeDate:
-		return "Date", true
-	case graph.TypeAnyPropertyValue:
-		return "any", true
-	}
-	return "", false
+	text, ok := stubCarriers[pt]
+	return text, ok
+}
+
+// A map rather than a switch on pt, and not only for brevity: the
+// exhaustive linter reads a switch over a PropertyType as an obligation
+// to name every declared width, which is the opposite of what a stub with
+// a deliberate hole in it is for.
+var stubCarriers = map[graph.PropertyType]string{
+	graph.TypeInt32:            "int32",
+	graph.TypeInt64:            "int64",
+	graph.TypeString:           "string",
+	graph.TypeDate:             "Date",
+	graph.TypeAnyPropertyValue: "any",
 }
 
 // TestUnionMemberCollisionFindsThePairOneFamilyHolds pins the admission
