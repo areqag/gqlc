@@ -2117,11 +2117,17 @@ json`, generated with `-update`.
 **Cross-Part parameter Uses (§4.2.4 lexical-Part witness, post-fvo):**
 
 - `parameter_across_with_alias_shadow.cypher` — `MATCH (a:Person) WITH
-  a.name AS a MATCH (a:Post) WHERE a.title = $p RETURN a`. The P1
+  a.name AS nm MATCH (a:Post) WHERE a.title = $p RETURN a`. The P1
   discriminator: Part 0's `a` is `Person` (no `title`); Part 1's `a`
   is `Post` (has `title`). Golden pins column `a → node Post` and
   parameter `$p → STRING NOT NULL`. RED under a naive
   every-scope-must-agree witness (Part 0 fails `a.title`).
+  (The alias was `AS a` until gqlc-60jb. Aliasing to `a` carried `a`
+  as a scalar and re-declared it as a node, which
+  `scope.ValidateCarriedKinds` now refuses under a different sentinel;
+  the discriminator is the two `a` *node* bindings, not the alias name,
+  so renaming it preserves the shape. The sweep manifest moved 0 cells
+  across the edit.)
 - `parameter_across_union_same_name.cypher` — `MATCH (a:Person) RETURN
   a.id AS x UNION MATCH (a:Post) WHERE a.title = $p RETURN a.id AS x`.
   The P2 discriminator: two UNION branches, same variable name, two

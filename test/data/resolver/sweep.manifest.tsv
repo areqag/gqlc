@@ -3,7 +3,7 @@
 # schema under test/data/resolver/{valid,invalid}/schemas/*.gql. Generated
 # file: edit internal/resolver/sweep_test.go, not this.
 #
-# corpus: 351 queries, 43 schemas. 15093 cells: 4567 accept, 10526 refuse.
+# corpus: 354 queries, 43 schemas. 15222 cells: 4558 accept, 10664 refuse.
 #
 # cell rows: query, schema, verdict, sentinel, detail. A refusing cell's
 # detail digests the error text and is expanded by the strconv.Quote'd msg
@@ -35,6 +35,7 @@ msg	0fad26bace16	"unknown property: a.name missing on plural-satisfying type Emp
 msg	0fc82c813393	"query construct not supported at resolver stage R0: unwind binding"
 msg	102a62a42923	"unknown property: p.nickname"
 msg	10424df61452	"unknown property: p.notAProperty missing on plural-satisfying type Employee&Person"
+msg	11c31f6c1df8	"part binding type conflict: variable \"c\" carried as scalar(int), re-declared as an edge pattern"
 msg	12bbe1252e83	"unknown property: p.notAProperty missing on plural-satisfying type Engineer&Person&Staff"
 msg	12bd4408694e	"unknown property: p.id missing on plural-satisfying type Contractor&Person"
 msg	133c11d6e3be	"unknown edge: Employee&Person-[REVIEWED]->Contractor&Person, Contractor&Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Person, Person-[REVIEWED]->Employee&Person"
@@ -62,6 +63,7 @@ msg	27c7928ad04d	"ambiguous edge orientation: edge \"r\" matches Employee&Person
 msg	27d7addbbba2	"unknown property: p.age missing on plural-satisfying type Engineer&Person&Staff"
 msg	2a92e72f5464	"unknown edge: Engineer&Person&Staff-[KNOWS]->Engineer&Person&Staff, Engineer&Person&Staff-[KNOWS]->Manager&Person&Staff, Manager&Person&Staff-[KNOWS]->Engineer&Person&Staff, Engineer&Person&Staff-[KNOWS]->Person, Person-[KNOWS]->Engineer&Person&Staff, Manager&Person&Staff-[KNOWS]->Manager&Person&Staff, Manager&Person&Staff-[KNOWS]->Person, Person-[KNOWS]->Manager&Person&Staff, Person-[KNOWS]->Person, Engineer&Person&Staff-[BLOCKED]->Engineer&Person&Staff, Engineer&Person&Staff-[BLOCKED]->Manager&Person&Staff, Manager&Person&Staff-[BLOCKED]->Engineer&Person&Staff, Engineer&Person&Staff-[BLOCKED]->Person, Person-[BLOCKED]->Engineer&Person&Staff, Manager&Person&Staff-[BLOCKED]->Manager&Person&Staff, Manager&Person&Staff-[BLOCKED]->Person, Person-[BLOCKED]->Manager&Person&Staff, Person-[BLOCKED]->Person"
 msg	2ae09c11bf78	"parameter type conflict: parameter \"x\": property:STRING (not null) vs property:INT (not null)"
+msg	2ba46702cd61	"part binding type conflict: variable \"r\" carried as edge, re-declared as a node pattern"
 msg	2c86186736b5	"call argument assignability: procedure \"test.my.proc\" argument 0: cannot assign int to STRING"
 msg	2da29fcc911f	"ambiguous label: a is satisfied by more than one declared node type: Employee&Person, Person"
 msg	2daa9952f7c1	"part binding type conflict: variable \"r\" carried as edge with labels KNOWS, re-bound with labels LIKES"
@@ -92,6 +94,7 @@ msg	495d1488401b	"ambiguous label: n is satisfied by more than one declared node
 msg	4be41f1abf4a	"unknown property: p.doesnt_exist missing on plural-satisfying type Employee&Person"
 msg	4da3cbf622c1	"unknown label: Post is not declared on any node type"
 msg	4dc02fe01583	"unknown property: p.meta missing on plural-satisfying type Employee&Person"
+msg	512fbaaa5690	"part binding type conflict: variable \"c\" carried as scalar(int), re-declared as a node pattern"
 msg	53aafc122e53	"union column mismatch: branch 1 column 0 named \"name2\"; branch 0 named \"a.name\""
 msg	53b202fdddc9	"unknown edge: Employee&Person-[KNOWS]->Employee&Person, Employee&Person-[KNOWS]->Person, Person-[KNOWS]->Employee&Person, Person-[KNOWS]->Person, Employee&Person-[BLOCKED]->Employee&Person, Employee&Person-[BLOCKED]->Person, Person-[BLOCKED]->Employee&Person, Person-[BLOCKED]->Person"
 msg	546cbbe3d652	"unknown edge: Contractor&Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Contractor&Person, Employee&Person-[REVIEWED]->Employee&Person, Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Person"
@@ -208,6 +211,7 @@ msg	bb834c44c145	"unknown property: p.personOnly missing on plural-satisfying ty
 msg	bbc2c8b8c18e	"ambiguous binding: cannot uniquely infer type of unlabelled binding \"label\" — candidate types: Author, Publisher"
 msg	bbc642f5a179	"unknown label: cannot infer type of source endpoint of edge \"r\""
 msg	bccdc30e4227	"unknown property: n.notAProp missing on plural-satisfying type Employee&Person"
+msg	bce6e5fb7518	"part binding type conflict: variable \"r\" carried as edgeUnion, re-declared as a node pattern"
 msg	beef77e5ff05	"unknown edge: Person-[UNKNOWN]->Post"
 msg	c06ea4ec3ccd	"union column mismatch: branch 1 has 1 columns; branch 0 has 0"
 msg	c0916198cf47	"unknown property: property r.notAProp missing on union member Person-[AUTHORED]->Post"
@@ -977,6 +981,178 @@ cell	invalid/call_yield_property_lookup.cypher	valid/schemas/social_r5.gql	refus
 cell	invalid/call_yield_property_lookup.cypher	valid/schemas/social_r6.gql	refuse	ErrUnknownProperty	cba429255648
 cell	invalid/call_yield_property_lookup.cypher	valid/schemas/social_r7.gql	refuse	ErrUnknownProperty	cba429255648
 cell	invalid/call_yield_property_lookup.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownProperty	cba429255648
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/certificate.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/social.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/social_r2.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/social_r3.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/social_r5.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/social_r6.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	invalid/schemas/social_r7.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/certificate.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social_r1.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social_r2.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social_r3.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social_r4.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social_r5.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social_r6.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social_r7.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_edge.cypher	valid/schemas/social_selfloop.gql	refuse	ErrPartBindingTypeConflict	11c31f6c1df8
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/certificate.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/social.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/social_r2.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/social_r3.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/social_r5.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/social_r6.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	invalid/schemas/social_r7.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/certificate.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social_r1.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social_r2.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social_r3.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social_r4.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social_r5.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social_r6.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social_r7.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_labelled_node.cypher	valid/schemas/social_selfloop.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/certificate.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/social.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/social_r2.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/social_r3.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/social_r5.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/social_r6.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	invalid/schemas/social_r7.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/certificate.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social_r1.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social_r2.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social_r3.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social_r4.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social_r5.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social_r6.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social_r7.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_alias_redeclared_as_node.cypher	valid/schemas/social_selfloop.gql	refuse	ErrPartBindingTypeConflict	512fbaaa5690
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownEdge	de3c63991da1
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownEdge	57fc44a4696d
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrUnknownEdge	de3c63991da1
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/social.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/social_r3.gql	refuse	ErrPartBindingTypeConflict	2ba46702cd61
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/social_r5.gql	refuse	ErrPartBindingTypeConflict	2ba46702cd61
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/social_r6.gql	refuse	ErrPartBindingTypeConflict	2ba46702cd61
+cell	invalid/carried_edge_redeclared_as_node.cypher	invalid/schemas/social_r7.gql	refuse	ErrPartBindingTypeConflict	2ba46702cd61
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/certificate.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownEdge	c504839fd900
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrPartBindingTypeConflict	bce6e5fb7518
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownEdge	6f457e5bb08a
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social_r3.gql	refuse	ErrPartBindingTypeConflict	2ba46702cd61
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownEdge	5b7767c8f09c
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social_r4.gql	refuse	ErrPartBindingTypeConflict	2ba46702cd61
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social_r5.gql	refuse	ErrPartBindingTypeConflict	2ba46702cd61
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social_r6.gql	refuse	ErrPartBindingTypeConflict	2ba46702cd61
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social_r7.gql	refuse	ErrPartBindingTypeConflict	2ba46702cd61
+cell	invalid/carried_edge_redeclared_as_node.cypher	valid/schemas/social_selfloop.gql	refuse	ErrPartBindingTypeConflict	2ba46702cd61
 cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownLabel	d46372fb7542
 cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	d46372fb7542
 cell	invalid/carried_uncovered_endpoint_stays_plural.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	d46372fb7542
@@ -14780,49 +14956,6 @@ cell	valid/unlabelled_optional_introduced_hop_attests.cypher	valid/schemas/socia
 cell	valid/unlabelled_optional_introduced_hop_attests.cypher	valid/schemas/social_r6.gql	accept	-	c608bd660d2f
 cell	valid/unlabelled_optional_introduced_hop_attests.cypher	valid/schemas/social_r7.gql	accept	-	c608bd660d2f
 cell	valid/unlabelled_optional_introduced_hop_attests.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	42d3c4b41911
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/satisfy_ambiguous.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/satisfy_plural_edges_chain.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/satisfy_plural_edges_overlapping.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/satisfy_plural_edges_reversed.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/satisfy_plural_edges_three_types.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/satisfy_plural_edges_two_swapped_pairs.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/satisfy_plural_property_diverges.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/social.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/social_ambiguous.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/social_r2.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/social_r3.gql	accept	-	0dec18073936
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/social_r3_nulldiff.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/social_r3_typediff.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/social_r5.gql	accept	-	0dec18073936
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/social_r6.gql	accept	-	0dec18073936
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	invalid/schemas/social_r7.gql	accept	-	0dec18073936
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/certificate.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/multiround.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/satisfy_implied_label_endpoint.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/satisfy_plural_edges.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/satisfy_plural_edges_inline_subtype.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/satisfy_plural_edges_mixed_symmetry.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/satisfy_plural_edges_reversed_subtype.gql	refuse	ErrUnknownLabel	1c867a6623eb
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/satisfy_plural_edges_symmetric.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/satisfy_singular.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social_edgeunion.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social_r1.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social_r2.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social_r3.gql	accept	-	0dec18073936
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social_r3_unionnn.gql	refuse	ErrUnknownLabel	663a9130ecf6
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social_r4.gql	accept	-	0dec18073936
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social_r5.gql	accept	-	0dec18073936
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social_r6.gql	accept	-	0dec18073936
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social_r7.gql	accept	-	0dec18073936
-cell	valid/unlabelled_optional_introduced_hop_carried_name_withheld.cypher	valid/schemas/social_selfloop.gql	refuse	ErrUnknownLabel	663a9130ecf6
 cell	valid/unlabelled_optional_introduced_var_length_hop_withheld.cypher	invalid/schemas/certificate.gql	refuse	ErrUnknownLabel	42d3c4b41911
 cell	valid/unlabelled_optional_introduced_var_length_hop_withheld.cypher	invalid/schemas/edge_union_keys.gql	refuse	ErrUnknownLabel	42d3c4b41911
 cell	valid/unlabelled_optional_introduced_var_length_hop_withheld.cypher	invalid/schemas/narrowed_ends_disagree.gql	refuse	ErrUnknownLabel	1c867a6623eb

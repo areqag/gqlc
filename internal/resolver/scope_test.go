@@ -96,6 +96,111 @@ func TestScopeBindEdgeShadowCascade(t *testing.T) {
 	require.True(t, ok)
 }
 
+// TestValidateCarriedKindsReadsEveryCarriedEdgeLane pins the four edge lanes
+// carryBoundKindAt consults, one seed each (bd gqlc-60jb).
+//
+// The guard refuses a name the carry exported as a non-entity and this Part
+// re-declares as an entity pattern. For an EDGE re-declaration the "did the
+// carry bind an edge here" question is asked of four lanes, and the corpus does
+// not separate them: blinding any ONE of edgeTypes, edgeKeys, edgeCands or
+// edgeBindings left the whole package green, because the fixture that exercises
+// the guard's edge arm — valid/edge_rebind_var_length_vs_fixed.cypher, whose `r`
+// is carried with a ResolvedList column type and an edge binding — populates all
+// four at once. Blinding all four together is what killed it. Four individually
+// unkilled reads in a REFUSING guard are four chances to refuse a legal query,
+// and branchState makes that reachable rather than hypothetical:
+// TestScopeBindEdgeShadowCascade above seeds edgeTypes / edgeKeys / edgeCands
+// for a name with no edgeBindings entry at all.
+//
+// So each lane gets its own seed here, and the control comes first — with the
+// carried column type present and NO edge lane seeded, the guard refuses.
+// Without that control each NoError below is satisfied by a guard that never
+// fires, which is the same observable for the wrong reason.
+func TestValidateCarriedKindsReadsEveryCarriedEdgeLane(t *testing.T) {
+	carriedEdge, err := makeTestEdgeBinding("r")
+	require.NoError(t, err)
+	// What a var-length hop projects: the COLUMN is a list while the BINDING is
+	// an edge, which is the pair that makes the guard ask the tables at all.
+	carriedList := map[string]ResolvedType{"r": ResolvedList{Element: ResolvedUnknown{}}}
+
+	local, err := makeTestEdgeBinding("r")
+	require.NoError(t, err)
+	part := query.Part{Bindings: []query.Binding{local}}
+
+	t.Run("no edge lane seeded", func(t *testing.T) {
+		sc := newScope(branchState{exportedResolvedTypes: carriedList})
+		sc.Ingest(part)
+		require.ErrorIs(t, sc.ValidateCarriedKinds(), ErrPartBindingTypeConflict,
+			"with the column type carried and no lane saying the carry bound an edge, the guard must refuse — otherwise the four NoErrors below say nothing")
+	})
+
+	for _, tc := range []struct {
+		lane  string
+		carry branchState
+	}{
+		{"edgeTypes", branchState{exportedResolvedTypes: carriedList, exportedEdgeTypes: map[string]schema.EdgeType{"r": {}}}},
+		{"edgeKeys", branchState{exportedResolvedTypes: carriedList, exportedEdgeKeys: map[string]schema.EdgeKey{"r": {}}}},
+		{"edgeCands", branchState{exportedResolvedTypes: carriedList, exportedEdgeCands: map[string][]schema.EdgeKey{"r": nil}}},
+		{"edgeBindings", branchState{exportedResolvedTypes: carriedList, exportedEdgeBindings: map[string]query.EdgeBinding{"r": carriedEdge}}},
+	} {
+		t.Run(tc.lane+" alone vouches", func(t *testing.T) {
+			sc := newScope(tc.carry)
+			sc.Ingest(part)
+			require.NoError(t, sc.ValidateCarriedKinds(),
+				"%s alone says the carry bound an edge at this name, so re-declaring it as an edge is a re-bind and not a kind disagreement", tc.lane)
+		})
+	}
+}
+
+// TestValidateCarriedKindsReadsBothCarriedNodeLanes is the node half of the
+// test above. Both of its lanes ARE separated by the corpus — blinding
+// nodeTypes or nodeCands each reddened fixtures on its own — so this adds no
+// coverage they lack and exists for the symmetry a reader of carryBoundKindAt
+// needs: the node arm returns on its two lanes and never consults the four
+// edge ones, which is the whole of what "kind agreement" means here.
+func TestValidateCarriedKindsReadsBothCarriedNodeLanes(t *testing.T) {
+	carriedScalar := map[string]ResolvedType{"c": ResolvedScalar{Kind: ScalarInt}}
+	personType := schema.NodeType{KeyLabels: graph.LabelSet{"Person"}.Key(), CompleteLabels: graph.LabelSet{"Person"}.Key()}
+
+	local, err := query.NewNodeBinding("c", graph.LabelSet{"Person"})
+	require.NoError(t, err)
+	part := query.Part{Bindings: []query.Binding{local}}
+
+	t.Run("no node lane seeded", func(t *testing.T) {
+		sc := newScope(branchState{exportedResolvedTypes: carriedScalar})
+		sc.Ingest(part)
+		require.ErrorIs(t, sc.ValidateCarriedKinds(), ErrPartBindingTypeConflict,
+			"an INTEGER carried under `c` and re-declared as `(c:Person)` is the bead's own fault (bd gqlc-60jb)")
+	})
+
+	t.Run("an edge lane does not vouch for a node", func(t *testing.T) {
+		carriedEdge, err := makeTestEdgeBinding("c")
+		require.NoError(t, err)
+		sc := newScope(branchState{
+			exportedResolvedTypes: carriedScalar,
+			exportedEdgeBindings:  map[string]query.EdgeBinding{"c": carriedEdge},
+		})
+		sc.Ingest(part)
+		require.ErrorIs(t, sc.ValidateCarriedKinds(), ErrPartBindingTypeConflict,
+			"the comparison is KIND AGREEMENT, not `both sides are entities`: a carried edge re-declared as a node is the second shape of the same fault")
+	})
+
+	for _, tc := range []struct {
+		lane  string
+		carry branchState
+	}{
+		{"nodeTypes", branchState{exportedResolvedTypes: carriedScalar, exportedNodeTypes: map[string]schema.NodeType{"c": personType}}},
+		{"nodeCands", branchState{exportedResolvedTypes: carriedScalar, exportedNodeCands: map[string][]schema.NodeType{"c": {personType}}}},
+	} {
+		t.Run(tc.lane+" alone vouches", func(t *testing.T) {
+			sc := newScope(tc.carry)
+			sc.Ingest(part)
+			require.NoError(t, sc.ValidateCarriedKinds(),
+				"%s alone says the carry bound a node at this name, so re-declaring it as a node is R5 §4.2.3's shadow question and not this guard's", tc.lane)
+		})
+	}
+}
+
 func TestScopeBindCallShadowCascade(t *testing.T) {
 	// Belt-and-braces: seed every carried entity lane so each of
 	// BindCall's five deletes has something to drop, and assert on the

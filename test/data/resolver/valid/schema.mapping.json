@@ -205,6 +205,5 @@
     "certified_sum_stays_any.cypher": "certificate.gql",
     "certified_avg_stays_any.cypher": "certificate.gql",
     "unlabelled_optional_introduced_hop_attests.cypher": "social_r5.gql",
-    "unlabelled_optional_introduced_hop_carried_name_withheld.cypher": "social_r5.gql",
     "unlabelled_optional_introduced_var_length_hop_withheld.cypher": "social_r5.gql"
 }

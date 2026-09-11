@@ -185,6 +185,114 @@ func (s *scope) Ingest(part query.Part) {
 	s.returnsAll = part.ReturnsAll
 }
 
+// ValidateCarriedKinds is the cross-lane kind check Phase A1 owes, and it runs
+// before any local admission: a Part may re-declare a carried name as a node or
+// edge pattern only if the carry bound that same KIND of entity there
+// (bd gqlc-60jb).
+//
+// The defect it closes is not that either lane was individually wrong. It is
+// that carriedResolvedTypes and the binding tables were never asked whether they
+// disagree about a name, so `MATCH (p:Person) WITH count(p) AS c` followed by
+// `MATCH (c)-[a:AUTHORED]->(y:Post)` was ACCEPTED and typed `c` as a Post node —
+// an INTEGER handed to the caller behind a node decoder.
+//
+// Measured on master, every one of these accepted: an unlabelled `(c)` under a
+// required MATCH and under an OPTIONAL MATCH, a labelled `(c:Post)`, an edge
+// `-[c:AUTHORED]->`, and the same four with the carry spelled `WITH p.name AS c`
+// or `WITH collect(p.name) AS c` rather than as an aggregate. The labelled and
+// edge spellings never reach Phase B at all, which is why this is not at the
+// inference site: a fix there closes half of it. It is not in
+// cypher.mergeBinding either — that dedups WITHIN one Part and cannot see the
+// carry, so it is structurally unable to ask the question.
+//
+// The comparison is KIND AGREEMENT rather than "both sides are entities", and
+// the difference is a second shape of the same fault: a carried edge
+// re-declared as `(r)` was accepted too, typing the AUTHORED hop it then
+// anchored as though `r` were a Post. Widening from the first form to this one
+// costs nothing on the corpus — swept over every fixture x schema cell, the two
+// forms move exactly the same set, which is one fixture.
+//
+// A name in callTypes is skipped. The R7 4.1.2.1 / 4.1.2.2 shape checks in
+// BindNode / BindNodeCands / BindEdge and the two in commitUnlabelledRound
+// already refuse every spelling for those, and they name the fault more
+// precisely than this one can ("carried as CALL YIELD scalar"). Running first
+// and unconditionally would replace five pinned messages with a vaguer one for
+// no soundness gain.
+func (s *scope) ValidateCarriedKinds() error {
+	for _, b := range s.bindings {
+		v, declared, ok := declaredEntityKind(b)
+		if !ok || v == "" {
+			continue
+		}
+		if _, seenCall := s.callTypes[v]; seenCall {
+			continue
+		}
+		rt, carried := s.carriedResolvedTypes[v]
+		if !carried || s.carryBoundKindAt(v, b.Kind()) {
+			continue
+		}
+		return fmt.Errorf("%w: variable %q carried as %s, re-declared as %s", ErrPartBindingTypeConflict, v, rt, declared)
+	}
+	return nil
+}
+
+// carryBoundKindAt reports whether the carry bound an entity of `kind` at v —
+// the second of the two lanes ValidateCarriedKinds compares.
+//
+// It reads the binding TABLES rather than switching on carriedResolvedTypes'
+// variant, and the corpus is why. `valid/edge_rebind_var_length_vs_fixed.cypher`
+// carries a `[r:KNOWS*1..3]` and re-declares `r` as a fixed `[r:KNOWS]`: the
+// carried COLUMN type is ResolvedList, because a var-length hop projects a list,
+// while the carried BINDING is an edge. A variant switch reads that pair as a
+// list wearing an edge's clothes and refuses a fixture the resolver has always
+// accepted — measured, 18 accept-to-refuse cells. The tables answer the question
+// the guard actually asks, and they answer it right for the var-length hop.
+//
+// Every lane newScope seeds from a binding table is listed, split by the kind it
+// stands for. It is a read-only method over lanes no local Bind* has touched
+// yet, since ValidateCarriedKinds runs before the admission loop. callTypes is
+// not here: its names are skipped by the caller for the reason given there.
+func (s *scope) carryBoundKindAt(v string, kind query.BindingKind) bool {
+	if kind == query.BindingNode {
+		if _, ok := s.nodeTypes[v]; ok {
+			return true
+		}
+		_, ok := s.nodeCands[v]
+		return ok
+	}
+	if _, ok := s.edgeBindings[v]; ok {
+		return true
+	}
+	if _, ok := s.edgeTypes[v]; ok {
+		return true
+	}
+	if _, ok := s.edgeKeys[v]; ok {
+		return true
+	}
+	_, ok := s.edgeCands[v]
+	return ok
+}
+
+// declaredEntityKind names the entity a binding spells, or reports false for a
+// binding that is not an entity pattern at all. Path / unwind / call bindings
+// are out: this guard is about a carried value wearing an entity's clothes, and
+// only a node or edge pattern puts them on. (ErrOutOfR0Scope in
+// admitLocalBindings is what answers for the rest.)
+//
+// Its two live arms are the only BindingKinds carryBoundKindAt can be handed,
+// so that function's `kind == BindingNode` test is total against what reaches
+// it rather than a two-way split over a five-member enum.
+func declaredEntityKind(b query.Binding) (variable, declared string, ok bool) {
+	switch bb := b.(type) {
+	case query.NodeBinding:
+		return bb.Variable(), "a node pattern", true
+	case query.EdgeBinding:
+		return bb.Variable(), "an edge pattern", true
+	default:
+		return "", "", false
+	}
+}
+
 // BindNode admits a labelled NodeBinding — R5 §4.2.3 arm of Phase A1.
 // Cascades shadow / delete on the edge, call, and nullable lanes for
 // the same variable. Returns ErrPartBindingTypeConflict if a carried
