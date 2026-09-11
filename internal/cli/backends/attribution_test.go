@@ -309,28 +309,6 @@ func declaredWidths(t *testing.T) []graph.PropertyType {
 
 	widths := make([]graph.PropertyType, 0, 5*len(declared)+4)
 	for _, pt := range declared {
-		// RECORD<ANY> is swept as a bare width below and nowhere else,
-		// because two of its container forms cannot be asked about at
-		// all: LIST<RECORD<ANY>> and LIST<LIST<RECORD<ANY>>> make AGE
-		// emit Go that does not parse (bd gqlc-9xiz), which fails with
-		// ErrFormatFailure — deliberately not a taxonomy sentinel, so
-		// citedSentinels has nothing to compare and the rule above
-		// cannot reach a verdict. That is a live defect rather than a
-		// width every target refuses, and it is gqlc-9xiz's to fix, not
-		// this sweep's to encode.
-		//
-		// There is no tripwire holding this hold-out to its reason,
-		// because nothing in this repository may reach that branch while
-		// it stands: codegen's own §4 fence
-		// (TestExcludedBranchesAreUnreached) profiles every package that
-		// depends on codegen and fails if any test binary executes a
-		// sentinel documented as deliberately unreachable, so a test
-		// asserting the defect is still there reds the fence instead. So
-		// the expiry lives in bd gqlc-9xiz, which names this hold-out as
-		// part of its own repair.
-		if pt == graph.TypeAnyRecord {
-			continue
-		}
 		flat := graph.ListOf(pt, false)
 		widths = append(widths, pt, flat, graph.ListOf(flat, false))
 		// Each scalar also as the single field of a record, and that
@@ -343,13 +321,15 @@ func declaredWidths(t *testing.T) []graph.PropertyType {
 		rec := graph.RecordOf([]graph.RecordField{{Name: "f", Type: pt, NotNull: true}})
 		widths = append(widths, rec, graph.ListOf(rec, false))
 	}
-	// The two records with no declared fields. Neither has a field to
-	// inherit a refusal from, so what divides the roster over them is
-	// whatever a backend says about records AS SUCH — which is where
-	// neo4j's storage answer lands. RECORD<> is built rather than
-	// declared, so the read above cannot reach it either way;
-	// TypeAnyRecord is named here because the loop skipped it.
-	widths = append(widths, graph.RecordOf(nil), graph.TypeAnyRecord)
+	// The field-less record. It has no field to inherit a refusal from, so
+	// what divides the roster over it is whatever a backend says about
+	// records AS SUCH — which is where neo4j's storage answer lands.
+	// RECORD<> is built rather than declared, so the read above cannot
+	// reach it. Its sibling RECORD<ANY> is not named here, because the
+	// loop does reach that one: it is a declared constant, and until bd
+	// gqlc-9xiz it was held out of the loop's container expansion — two
+	// of its container forms made AGE emit Go that did not parse.
+	widths = append(widths, graph.RecordOf(nil))
 
 	// Two closed unions, and they are here for opposite reasons.
 	//

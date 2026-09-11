@@ -47,12 +47,30 @@ var (
 	// because it is a codegen-internal invariant violation, not a
 	// user-facing failure mode; the reachability sweep skips it.
 	//
-	// "Unreachable via any legitimate fixture" was false until gqlc-2m2v:
-	// a query binding two or more parameters, one of them $_, emitted a
-	// nameless Params field and reached gofmt on all three targets. The
-	// exclusion is not self-certifying and is no longer taken on trust —
-	// TestExcludedBranchesAreUnreached measures this branch against the
-	// corpus coverage profile on every run.
+	// "Unreachable via any legitimate fixture" has been false TWICE, and
+	// both times a legitimate schema reached it. gqlc-2m2v: a query
+	// binding two or more parameters, one of them $_, emitted a nameless
+	// Params field and reached gofmt on all three targets. gqlc-9xiz: a
+	// property of type LIST<RECORD> or LIST<LIST<RECORD>> made AGE derive
+	// its decode-helper name from the carrier map[string]any, which is
+	// not a Go identifier, so the brackets survived into the emitted call.
+	// The exclusion is not self-certifying and is no longer taken on
+	// trust — TestExcludedBranchesAreUnreached measures this branch
+	// against the corpus coverage profile on every run.
+	//
+	// TWO FALSIFICATIONS DID NOT MOVE IT INTO allSentinels, and gqlc-9xiz
+	// took that decision rather than inheriting it. What each falsifier
+	// showed is a bug in OUR templates that a user's schema happened to
+	// reach, not a shape a user may legitimately be told is invalid — and
+	// membership obliges a negative fixture under test/data/codegen/invalid,
+	// which here could only be a schema that is well-formed and fails,
+	// i.e. a live defect frozen into the corpus and "reachable" for
+	// exactly as long as gqlc stays broken. Both were repaired at the
+	// template instead, so the §4 row is a claim this generator keeps
+	// rather than an observation about the current fixtures. Note which
+	// way the fence cut in the second case: it REFUSED gqlc-tn96's
+	// tripwire asserting the defect still stood, and that refusal is what
+	// forced the repair.
 	ErrFormatFailure = errors.New("format failure")
 
 	// ErrOutOfC6Scope is returned when a C6-admissible input carries a

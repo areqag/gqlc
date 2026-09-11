@@ -271,7 +271,20 @@ The first thing that measurement found was a false row in this table.
 
 | Sentinel | Why it is out of the reachable set |
 |---|---|
-| `ErrFormatFailure` | `go/format.Source` rejected an emitted file. A well-formed emission cannot fail formatting, so firing this takes a template bug or synthetic corruption; a fixture for it would buy a test seam rather than coverage. **This row was false for as long as it existed, and nothing said so.** A query binding two or more parameters, one of them `$_`, emitted a `Params` struct field with no name and a bind expression reading `arg.,` — an emission `go/format` refused, on all three targets, from an ordinary `.cypher` file a user writes. `gqlc-2m2v` closed it by refusing that query at Phase B with `ErrOutOfC6Scope` (§2), which is what makes this row true rather than aspirational; `TestExcludedBranchesAreUnreached` is what will notice the next time it stops being. |
+| `ErrFormatFailure` | `go/format.Source` rejected an emitted file. A well-formed emission cannot fail formatting, so firing this takes a template bug or synthetic corruption; a fixture for it would buy a test seam rather than coverage. **This row has been false twice, and both times an ordinary user schema was what falsified it.** (1) `gqlc-2m2v`: a query binding two or more parameters, one of them `$_`, emitted a `Params` struct field with no name and a bind expression reading `arg.,` — an emission `go/format` refused, on all three targets, from an ordinary `.cypher` file a user writes. Closed by refusing that query at Phase B with `ErrOutOfC6Scope` (§2). (2) `gqlc-9xiz`: a declared property of type `LIST<RECORD>` or `LIST<LIST<RECORD>>`, on `apache-age-pgx-v5` only. AGE carries `RECORD<ANY>` as `map[string]any` — the one carrier it answers with that is not a Go identifier — and `age.listHelperName` derives the decode helper's NAME from that text, so the brackets survived into `agtypeProperty(props, "rows", agtypeListOfNullableMap[string]any)`, which parses as an index expression inside an argument list. Closed at the derivation site, with `TestEveryAdmittedListCarrierDerivesAGoIdentifier` holding the class rather than those two widths. `TestExcludedBranchesAreUnreached` is what noticed both, and in the second case it noticed BEFORE the repair rather than after: it refused `gqlc-tn96`'s tripwire asserting the defect still stood, which is what forced `gqlc-9xiz` to be fixed rather than documented. |
+
+Two falsifications are an argument for moving this sentinel into
+`allSentinels`, and `gqlc-9xiz` weighed it and declined. What each
+falsifier showed was a bug in *our* templates that a user's schema
+happened to reach, not a shape a user may legitimately be told is
+invalid — and §5 step 3 obliges a member to carry a negative fixture
+under `test/data/codegen/invalid`. Here that fixture could only be a
+schema that is well-formed and fails: a live defect frozen into the
+corpus, "reachable" for exactly as long as `gqlc` stays broken, and due
+for deletion the moment it is repaired. Both were repaired at the
+template instead. So the row states a claim this generator undertakes to
+keep, and the measurement above is what holds it to that rather than to
+an observation about whichever fixtures happen to exist.
 
 ## 5. Adding, renaming or retiring a sentinel
 
