@@ -652,6 +652,15 @@ var invalidFixtures = map[string]error{
 	// as the only difference between resolving and refusing.
 	"certified_list_unknown_property.cypher":    ErrUnknownProperty,
 	"certified_collect_unknown_property.cypher": ErrUnknownProperty,
+
+	// unionNodeProperty's DIVERGENCE arm, which no other fixture reaches: every
+	// other plural-satisfying fixture either agrees on the projected property,
+	// so the ADR 0022 intersection succeeds, or omits it from a candidate, so
+	// the missing-on arm answers at i == 0. Reaching this one needs two node
+	// types that share a label and disagree about a property they both declare,
+	// which is a shape no corpus schema had — hence a new schema rather than a
+	// new query against an existing one (bd gqlc-xeux).
+	"plural_satisfying_property_nullability_differs.cypher": ErrUnknownProperty,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -874,21 +883,54 @@ var invalidFixtureContains = map[string]string{
 	// label_satisfy_plural_entity — byte-identical query text on a schema that
 	// declares Person itself.
 	"label_satisfy_ambiguous.cypher": `p is satisfied by more than one declared node type: Contractor&Person, Employee&Person`,
-	// The four fixtures whose two sides differ on nullability ALONE. Nothing
-	// else in either message distinguishes them, so before bd gqlc-y8yzw all
-	// four read "property:STRING vs property:STRING" (or :INT) and told the
-	// author nothing about what to change. errors.Is passes on the text either
-	// way, and so does a message that has gone back to the bare Stringer, which
-	// is why the pin has to carry BOTH sides rather than the sentinel.
+	// The fixtures whose two sides differ on nullability ALONE. Nothing else in
+	// either message distinguishes them, so before bd gqlc-y8yzw they read
+	// "property:STRING vs property:STRING" (or :INT) and told the author
+	// nothing about what to change. errors.Is passes on the text either way,
+	// and so does a message that has gone back to the bare Stringer, which is
+	// why each pin has to carry BOTH sides rather than the sentinel.
 	//
-	// The three parameter fixtures and the union one reach two different message
-	// sites — unifyParameterUsesAcrossBranches and unionProperty — that shared
-	// the defect and now share the cure. They are pinned together so a repair
-	// applied to one site and not the other cannot pass.
+	// They reach three message sites — unifyParameterUsesAcrossBranches,
+	// unionProperty and unionNodeProperty — that shared the defect and now
+	// share the cure. They are pinned together so a repair applied to some of
+	// the sites and not the rest cannot pass.
+	//
+	// unionNodeProperty is the site gqlc-y8yzw's PR (#2694) could fix but not
+	// witness: no corpus schema declared two label-sharing node types that
+	// disagree about a property they both have, so the arm was reachable by no
+	// cell of the sweep and the bare-Stringer revert reddened nothing. That is
+	// bd gqlc-xeux, and the last pin below is what closes it — against a
+	// divergence on nullability alone, because a divergence on TYPE renders
+	// differently under the bare Stringer too and so would leave the revert
+	// alive.
 	"parameter_type_conflict_nullability.cypher":               `parameter "x": property:STRING (not null) vs property:STRING (nullable)`,
 	"parameter_type_conflict_optional_node_nullability.cypher": `parameter "x": property:STRING (not null) vs property:STRING (nullable)`,
 	"parameter_type_conflict_optional_edge_nullability.cypher": `parameter "x": property:INT (not null) vs property:INT (nullable)`,
 	"unknown_property_union_nullability_differs.cypher":        `r.weight type differs across union members: property:INT (not null) vs property:INT (nullable)`,
+	"plural_satisfying_property_nullability_differs.cypher":    `p.tenure type differs across plural-satisfying types: property:INT (not null) vs property:INT (nullable)`,
+	// ErrParameterTypeConflict's rendering of a NON-property witness, screened
+	// as the fourth axis of bd gqlc-9vpga. The sentinel has one construction
+	// site and one format string, so errors.Is settles which arm fired and the
+	// bead's literal question clears every one of its ten fixtures. What it
+	// does not clear is the arm's variable content, and the trio above reaches
+	// only part of that: all three conflict ResolvedProperty against
+	// ResolvedProperty, so they hold the parameter name, which operand goes on
+	// which side, the `property:` type token and the nullability note — and
+	// nothing at all about how a scalar or a temporal witness renders.
+	//
+	// Measured: describeColumnType mutated to drop the scalar kind, and again
+	// to drop the temporal kind, each leaves internal/resolver FULLY GREEN once
+	// the goldens and both sweep files are regenerated. The first collapses
+	// `scalar(bool) vs scalar(int)` to `scalar vs scalar` — the two sides of a
+	// refusal rendering the same text, which is the defect gqlc-y8yzw existed
+	// to remove, reappearing one type variant over. The five fixtures below are
+	// the whole of the invalid corpus whose refusal names a scalar or a
+	// temporal at all, so together they are what makes those two mutations die.
+	"parameter_type_conflict_scalar_kind.cypher":             `parameter "x": scalar(bool) vs scalar(int)`,
+	"parameter_type_conflict_temporal_kind.cypher":           `parameter "x": temporal(date) vs temporal(duration)`,
+	"parameter_type_conflict_property_vs_expr_bool.cypher":   `parameter "x": property:INT (nullable) vs scalar(bool)`,
+	"parameter_type_conflict_clause_slot_vs_string.cypher":   `parameter "x": property:STRING (not null) vs scalar(int)`,
+	"parameter_conflict_via_multi_type_edge_property.cypher": `parameter "x": property:TIMESTAMP (nullable) vs scalar(int)`,
 }
 
 // invalidFixtureNoMessagePin names the invalid fixtures whose refusal message
@@ -904,7 +946,7 @@ var invalidFixtureContains = map[string]string{
 // which arm fired — is gqlc-9vpga. Do not read a name here as a finding that
 // its message is not worth pinning.
 //
-// THE AXES SCREENED SO FAR, and there are three:
+// THE AXES SCREENED SO FAR:
 //
 //   - gqlc-yg5jl: every fixture reaching ErrUnknownProperty's plural-lane arm
 //     was graded by mutating that arm to the generic formatter, and the seven
@@ -923,6 +965,16 @@ var invalidFixtureContains = map[string]string{
 //     claim is held where no reader of this map could find it, which is the only
 //     reason it is written down here. The two on the NAME arm rest on the
 //     nonzero-index pin, which holds that arm's one format string.
+//   - gqlc-9vpga, fourth pass: all ten refusing with ErrParameterTypeConflict.
+//     It is a SINGLE-arm sentinel — one construction site, one format string —
+//     so errors.Is settles which arm fired for every one of them and the bead's
+//     literal question waives all ten. It was graded anyway, on the practice
+//     ErrAmbiguousEdgeOrientation already shows: one arm and nine pins, because
+//     there the pin discriminates WITHIN the arm. Five moved, and the two rows
+//     that carried them mutate describeColumnType rather than the arm — drop
+//     the scalar kind, drop the temporal kind — because the three pins this arm
+//     already had conflict ResolvedProperty against ResolvedProperty and so say
+//     nothing about any other variant. The two that stay are named below.
 //
 // THE SCREEN THAT AXIS NEEDED, because it applies to every axis left and
 // nothing above it says so. TestCorpusSweepManifest digests err.Error() for
@@ -938,97 +990,108 @@ var invalidFixtureContains = map[string]string{
 //
 // Every other arm is unscreened, so a name here still carries no verdict.
 var invalidFixtureNoMessagePin = map[string]struct{}{
-	"ambiguous_edge_orientation_after_inference.cypher":              {},
-	"anonymous_source_endpoint.cypher":                               {},
-	"call_arg_int_at_string.cypher":                                  {},
-	"call_arg_type_mismatch.cypher":                                  {},
-	"call_yield_property_lookup.cypher":                              {},
-	"certified_collect_unknown_property.cypher":                      {},
-	"certified_list_unknown_property.cypher":                         {},
-	"create_unknown_edge.cypher":                                     {},
-	"create_unknown_label.cypher":                                    {},
-	"delete_bare_property_unknown.cypher":                            {},
-	"delete_edge_property_unknown.cypher":                            {},
-	"delete_property_on_var_length_edge.cypher":                      {},
-	"delete_property_on_var_length_multi_type_edge.cypher":           {},
-	"delete_property_unknown_on_multi_type_edge.cypher":              {},
-	"delete_second_target_unknown_property.cypher":                   {},
-	"effect_order_first_failure_wins.cypher":                         {},
-	"empty_inline_endpoint.cypher":                                   {},
-	"label_satisfy_none.cypher":                                      {},
-	"label_satisfy_plural_entity.cypher":                             {},
-	"list_of_edges_projection.cypher":                                {},
-	"list_of_nodes_projection.cypher":                                {},
-	"merge_endpoint_unknown_label.cypher":                            {},
-	"merge_on_create_undeclared_label.cypher":                        {},
-	"merge_on_create_unknown_property.cypher":                        {},
-	"merge_on_match_second_effect_unknown_property.cypher":           {},
-	"merge_on_match_unknown_property.cypher":                         {},
-	"merge_unknown_edge.cypher":                                      {},
-	"parameter_across_with_alias_shadow_reversed.cypher":             {},
-	"parameter_conflict_via_multi_type_edge_property.cypher":         {},
-	"parameter_type_conflict_clause_slot_vs_string.cypher":           {},
-	"parameter_type_conflict_property_vs_expr_bool.cypher":           {},
-	"parameter_type_conflict_scalar_kind.cypher":                     {},
-	"parameter_type_conflict_temporal_kind.cypher":                   {},
+	// ErrParameterTypeConflict's two survivors, waived on a measurement rather
+	// than on inheritance. Both conflict ResolvedProperty against
+	// ResolvedProperty, and every component of what they render is held by a
+	// pin on their own arm: the parameter name and which operand goes on which
+	// side by the nullability trio (rendering the incoming witness on BOTH
+	// sides reddens exactly those three and no fixture here), the `property:`
+	// type token by the same three (dropping it reddens them), the nullability
+	// note by them again. What is left is the combination, and no mutation
+	// found moves it without moving one of the components too.
+	//
+	// Their own reason for existing is held elsewhere, and by the verdict
+	// rather than by the text: unify checks property type and nullability side
+	// by side, and _two_properties_same_nullability isolates the type check —
+	// remove it and that fixture RESOLVES, which TestInvalid's bare
+	// Require().Error refuses without reading a message at all.
 	"parameter_type_conflict_two_properties.cypher":                  {},
 	"parameter_type_conflict_two_properties_same_nullability.cypher": {},
-	"parameter_use_on_var_length_edge_property.cypher":               {},
-	"parameter_use_unknown_edge_property.cypher":                     {},
-	"part_binding_type_conflict.cypher":                              {},
-	"part_binding_type_conflict_call_vs_edge.cypher":                 {},
-	"part_binding_type_conflict_call_vs_node.cypher":                 {},
-	"part_binding_type_conflict_call_vs_unlabelled.cypher":           {},
-	"part_binding_type_conflict_edge.cypher":                         {},
-	"plural_endpoint_contradictory_edges_stay_plural.cypher":         {},
-	"plural_endpoint_created_edge_stays_plural.cypher":               {},
-	"plural_endpoint_inline_endpoint_stays_plural.cypher":            {},
-	"plural_endpoint_merged_edge_stays_plural.cypher":                {},
-	"plural_endpoint_narrows_to_smaller_plural_set.cypher":           {},
-	"plural_endpoint_optional_edge_stays_plural.cypher":              {},
-	"plural_endpoint_zero_hop_stays_plural.cypher":                   {},
-	"plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher":   {},
-	"plural_endpoint_zero_lower_bound_stays_plural.cypher":           {},
-	"remove_labels_undeclared.cypher":                                {},
-	"remove_property_on_var_length_edge.cypher":                      {},
-	"remove_property_on_var_length_multi_type_edge.cypher":           {},
-	"remove_property_unknown.cypher":                                 {},
-	"remove_property_unknown_on_multi_type_edge.cypher":              {},
-	"remove_property_unknown_on_single_type_edge.cypher":             {},
-	"set_entity_on_var_length_edge.cypher":                           {},
-	"set_entity_on_var_length_multi_type_edge.cypher":                {},
-	"set_labels_undeclared.cypher":                                   {},
-	"set_property_on_var_length_edge.cypher":                         {},
-	"set_property_on_var_length_multi_type_edge.cypher":              {},
-	"set_property_unknown_on_multi_type_edge.cypher":                 {},
-	"set_property_unknown_on_single_type_edge.cypher":                {},
-	"set_property_unknown_property.cypher":                           {},
-	"set_second_effect_unknown_property.cypher":                      {},
-	"union_column_name_mismatch.cypher":                              {},
-	"union_column_name_only_mismatch.cypher":                         {},
-	"union_column_nullability_mismatch.cypher":                       {},
-	"union_edge_union_arity_prefix.cypher":                           {},
-	"union_edge_union_arity_prefix_reversed.cypher":                  {},
-	"union_edge_union_keys_mismatch.cypher":                          {},
-	"union_edge_union_nullability_mismatch.cypher":                   {},
-	"union_list_element_mismatch.cypher":                             {},
-	"union_var_length_binding_optionality_mismatch.cypher":           {},
-	"union_node_type_mismatch.cypher":                                {},
-	"union_third_branch_mismatch.cypher":                             {},
-	"union_unknown_label_branch.cypher":                              {},
-	"unknown_edge.cypher":                                            {},
-	"unknown_edge_multi_type_all_miss.cypher":                        {},
-	"unknown_edge_property.cypher":                                   {},
-	"unknown_edge_undirected.cypher":                                 {},
-	"unknown_label.cypher":                                           {},
-	"unknown_property.cypher":                                        {},
-	"unknown_property_union_missing.cypher":                          {},
-	"unknown_property_union_sibling_branch.cypher":                   {},
-	"unknown_property_union_type_differs.cypher":                     {},
-	"unknown_property_via_expr_use.cypher":                           {},
-	"unlabelled_binding_no_edge.cypher":                              {},
-	"untyped_edge.cypher":                                            {},
-	"var_length_edge_property_projection.cypher":                     {},
+
+	"ambiguous_edge_orientation_after_inference.cypher":            {},
+	"anonymous_source_endpoint.cypher":                             {},
+	"call_arg_int_at_string.cypher":                                {},
+	"call_arg_type_mismatch.cypher":                                {},
+	"call_yield_property_lookup.cypher":                            {},
+	"certified_collect_unknown_property.cypher":                    {},
+	"certified_list_unknown_property.cypher":                       {},
+	"create_unknown_edge.cypher":                                   {},
+	"create_unknown_label.cypher":                                  {},
+	"delete_bare_property_unknown.cypher":                          {},
+	"delete_edge_property_unknown.cypher":                          {},
+	"delete_property_on_var_length_edge.cypher":                    {},
+	"delete_property_on_var_length_multi_type_edge.cypher":         {},
+	"delete_property_unknown_on_multi_type_edge.cypher":            {},
+	"delete_second_target_unknown_property.cypher":                 {},
+	"effect_order_first_failure_wins.cypher":                       {},
+	"empty_inline_endpoint.cypher":                                 {},
+	"label_satisfy_none.cypher":                                    {},
+	"label_satisfy_plural_entity.cypher":                           {},
+	"list_of_edges_projection.cypher":                              {},
+	"list_of_nodes_projection.cypher":                              {},
+	"merge_endpoint_unknown_label.cypher":                          {},
+	"merge_on_create_undeclared_label.cypher":                      {},
+	"merge_on_create_unknown_property.cypher":                      {},
+	"merge_on_match_second_effect_unknown_property.cypher":         {},
+	"merge_on_match_unknown_property.cypher":                       {},
+	"merge_unknown_edge.cypher":                                    {},
+	"parameter_across_with_alias_shadow_reversed.cypher":           {},
+	"parameter_use_on_var_length_edge_property.cypher":             {},
+	"parameter_use_unknown_edge_property.cypher":                   {},
+	"part_binding_type_conflict.cypher":                            {},
+	"part_binding_type_conflict_call_vs_edge.cypher":               {},
+	"part_binding_type_conflict_call_vs_node.cypher":               {},
+	"part_binding_type_conflict_call_vs_unlabelled.cypher":         {},
+	"part_binding_type_conflict_edge.cypher":                       {},
+	"plural_endpoint_contradictory_edges_stay_plural.cypher":       {},
+	"plural_endpoint_created_edge_stays_plural.cypher":             {},
+	"plural_endpoint_inline_endpoint_stays_plural.cypher":          {},
+	"plural_endpoint_merged_edge_stays_plural.cypher":              {},
+	"plural_endpoint_narrows_to_smaller_plural_set.cypher":         {},
+	"plural_endpoint_optional_edge_stays_plural.cypher":            {},
+	"plural_endpoint_zero_hop_stays_plural.cypher":                 {},
+	"plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher": {},
+	"plural_endpoint_zero_lower_bound_stays_plural.cypher":         {},
+	"remove_labels_undeclared.cypher":                              {},
+	"remove_property_on_var_length_edge.cypher":                    {},
+	"remove_property_on_var_length_multi_type_edge.cypher":         {},
+	"remove_property_unknown.cypher":                               {},
+	"remove_property_unknown_on_multi_type_edge.cypher":            {},
+	"remove_property_unknown_on_single_type_edge.cypher":           {},
+	"set_entity_on_var_length_edge.cypher":                         {},
+	"set_entity_on_var_length_multi_type_edge.cypher":              {},
+	"set_labels_undeclared.cypher":                                 {},
+	"set_property_on_var_length_edge.cypher":                       {},
+	"set_property_on_var_length_multi_type_edge.cypher":            {},
+	"set_property_unknown_on_multi_type_edge.cypher":               {},
+	"set_property_unknown_on_single_type_edge.cypher":              {},
+	"set_property_unknown_property.cypher":                         {},
+	"set_second_effect_unknown_property.cypher":                    {},
+	"union_column_name_mismatch.cypher":                            {},
+	"union_column_name_only_mismatch.cypher":                       {},
+	"union_column_nullability_mismatch.cypher":                     {},
+	"union_edge_union_arity_prefix.cypher":                         {},
+	"union_edge_union_arity_prefix_reversed.cypher":                {},
+	"union_edge_union_keys_mismatch.cypher":                        {},
+	"union_edge_union_nullability_mismatch.cypher":                 {},
+	"union_list_element_mismatch.cypher":                           {},
+	"union_var_length_binding_optionality_mismatch.cypher":         {},
+	"union_node_type_mismatch.cypher":                              {},
+	"union_third_branch_mismatch.cypher":                           {},
+	"union_unknown_label_branch.cypher":                            {},
+	"unknown_edge.cypher":                                          {},
+	"unknown_edge_multi_type_all_miss.cypher":                      {},
+	"unknown_edge_property.cypher":                                 {},
+	"unknown_edge_undirected.cypher":                               {},
+	"unknown_label.cypher":                                         {},
+	"unknown_property.cypher":                                      {},
+	"unknown_property_union_missing.cypher":                        {},
+	"unknown_property_union_sibling_branch.cypher":                 {},
+	"unknown_property_union_type_differs.cypher":                   {},
+	"unknown_property_via_expr_use.cypher":                         {},
+	"unlabelled_binding_no_edge.cypher":                            {},
+	"untyped_edge.cypher":                                          {},
+	"var_length_edge_property_projection.cypher":                   {},
 }
 
 type ResolverSuite struct {
