@@ -796,6 +796,7 @@ var iterScenarios = []struct {
 	{name: "iter_read_multicolumn: an error mid-stream is the sequence's last item", run: iterMidStreamError},
 	{name: "iter_read_multicolumn: an abandoned range releases its resource", run: iterAbandonedRange},
 	{name: "iter_read_multicolumn: a transaction failure after a delivered row", run: iterFailureAfterDelivery},
+	{name: "iter_read_multicolumn: an empty result yields nothing and no error", run: iterEmptyStream},
 }
 
 // scenarioTables declares how large each battery is. The sizes are written
@@ -851,7 +852,7 @@ var scenarioTables = []struct {
 		why: "the only live witness for the emitted edge-union label dispatch",
 	},
 	{
-		name: "iterScenarios", got: len(iterScenarios), want: 3,
+		name: "iterScenarios", got: len(iterScenarios), want: 4,
 		why: "the only live witness for anything that happens DURING a :iter consumption — where a mid-stream error lands, and whether an abandoned range releases its server-side resource. Both are invisible to a golden and to the compiler, and the second is the AGE pooled-connection hold, which is the cost the emitted doc comment discloses",
 	},
 }
@@ -1681,6 +1682,41 @@ func iterMidStreamError(ctx context.Context, t *testing.T, b iterBackend) { //no
 		"the error must arrive after the first row and before the third; landing at 0 means the stream failed before delivering anything, and at 2 that it skipped the bad row instead of stopping")
 	require.ErrorContains(t, errs[0], "non-nullable",
 		"the failure must be the arrived-null refusal for the seeded gap, not some other error standing in for it")
+}
+
+// iterEmptyStream pins the sequence that yields nothing at all.
+//
+// A `:iter` query whose predicate matches no row is ordinary input, and it is
+// the one consumption shape that reaches NEITHER of the other rows' paths:
+// no row is delivered, so the exit rule never fires, and no error occurs, so
+// the error path never fires. What is left is the unit of work's plain
+// success return, which nothing else in this battery executes.
+//
+// That gap was not hypothetical. Found 2026-09-11 by mutation row 4c: on both
+// neo4j majors, neo4j.ExecuteRead is generic over the unit of work's result
+// and casts it unconditionally when the work returns no error
+// (transaction_helpers.go castGeneric does `result.(T)`), so a work function
+// typed `(any, error)` returning a nil `any` beside a nil error panics inside
+// the driver with "interface conversion: interface is nil, not interface {}".
+// The emitted seam had exactly that return on its zero-row path. The battery
+// was green because every row here delivers at least one record.
+//
+// The assertion is deliberately weak on content and strong on arrival: an
+// empty sequence must complete, yield no row, and yield no error. A panic is
+// the failure this row exists to catch, and a panic fails it whatever the
+// assertions say.
+func iterEmptyStream(ctx context.Context, t *testing.T, b iterBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.iterReadMulticolumn()
+	b.seed(ctx, t, iterSeedThreeWithAGapAtTwo)
+
+	// Above every seeded age, so the match is empty for a reason the query
+	// states rather than because the graph happens to be empty — the server
+	// runs a real read and returns no record.
+	rows, errs, errFirstAt := iterDrain(q.streamPeopleByAge(ctx, 1000, "en"))
+
+	require.Empty(t, errs, "an empty result is not an error: the sequence must simply yield nothing")
+	require.Empty(t, rows, "the predicate matches no seeded row, so no row may arrive")
+	require.Equal(t, -1, errFirstAt, "no error may land at any position")
 }
 
 // iterAbandonedPasses is how many times iterAbandonedRange walks away from a

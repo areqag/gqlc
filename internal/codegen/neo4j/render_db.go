@@ -79,44 +79,56 @@ var errIterStreamStarted = errors.New("gqlc: iter stream already delivered a row
 // range on the first error gets the second one thrown at a range loop
 // that has already returned false, which is the runtime panic the exit
 // rule exists to prevent (measured live 2026-09-11: rows=1, errs=2).
+//
+// The unit of work is typed struct{} rather than any, and that is a
+// correctness requirement rather than a style choice. ExecuteRead is
+// generic over the work's result and casts it UNCONDITIONALLY whenever the
+// work returns no error — castGeneric type-asserts result to T — so a work
+// function typed (any, error) returning a nil any beside a nil error
+// panics inside the driver with "interface conversion: interface is nil,
+// not interface {}". That return is the zero-row path: a query whose
+// predicate matches nothing delivers no record and reports no error, which
+// is ordinary input rather than an edge case. struct{} makes the nil
+// unspellable, so no path can reintroduce it. Measured 2026-09-11 against
+// neo4j-go-v5 5.28.4 and v6 6.2.0; the two drivers are identical here.
 func (d driverDB) stream(ctx context.Context, cypher string, params map[string]any, yield func(*neo4j.Record, error) bool) {
 	session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
 	delivered := false
 	stopped := false
-	_, err := neo4j.ExecuteRead(ctx, session, func(tx neo4j.ManagedTransaction) (any, error) {
+	_, err := neo4j.ExecuteRead(ctx, session, func(tx neo4j.ManagedTransaction) (struct{}, error) {
 		// Re-entry guard. Reached only when managed retry calls this unit
 		// of work again after a row has already gone to the consumer;
 		// yielding a second time would panic. See errIterStreamStarted.
 		if delivered {
-			return nil, errIterStreamStarted
+			return struct{}{}, errIterStreamStarted
 		}
 		result, err := tx.Run(ctx, cypher, params)
 		if err != nil {
-			return nil, err
+			return struct{}{}, err
 		}
 		for record, recordErr := range result.Records(ctx) {
 			if recordErr != nil {
 				if !delivered {
-					return nil, recordErr
+					return struct{}{}, recordErr
 				}
 				// Set before the yield, not after: this error is the
 				// sequence's last item whatever the consumer answers,
 				// so a true from yield must not re-open the fence.
 				stopped = true
 				yield(nil, recordErr)
-				return nil, errIterStreamStarted
+				return struct{}{}, errIterStreamStarted
 			}
 			delivered = true
 			if !yield(record, nil) {
 				stopped = true
-				return nil, errIterStreamStarted
+				return struct{}{}, errIterStreamStarted
 			}
 		}
 		if delivered {
-			return nil, errIterStreamStarted
+			return struct{}{}, errIterStreamStarted
 		}
-		return nil, nil
+		return struct{}{}, nil
 	})
 	if err != nil && !errors.Is(err, errIterStreamStarted) && !stopped {
 		yield(nil, err)
