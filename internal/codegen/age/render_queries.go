@@ -345,53 +345,58 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 // because emitscan's FreeIdents reports a parameter name in a func *type*
 // as free (bd gqlc-db0e) and a model-typed name there would red the
 // capture sweep as a false positive.
+//
+// The scan and decode are written STRAIGHT into the loop, through the same
+// writeScan and writeColumnDecode the other bodies use, with yieldExit
+// supplying their failure form. An earlier draft wrapped them in an
+// immediately-invoked `func() (Row, error)` so the decoders' own
+// `return <zero>, err` would compile unchanged — that emits a function
+// literal whose results name a prepared entity, which is what
+// TestEmittedClosuresNameNoEntityAndCompareNoString refuses: the census
+// stands behind a claim that the emitted closures fill no decoder, and a
+// closure returning a decoded Person is one.
 func writeIterBody(b *strings.Builder, p codegen.Query) {
 	elem := rowElemText(p)
-	zero := zeroValueText(p)
+	fail := yieldExit(p)
 	fmt.Fprintf(b, "\treturn func(yield func(%s, error) bool) {\n", elem)
 
 	// The statement composition and the query call move INSIDE the
 	// closure: opening a cursor when the method is CALLED rather than
 	// when it is ranged would hold a pooled connection for a sequence the
 	// caller may never spend. Nothing is acquired until the range starts.
-	argsExpr := writeStatement(b, p)
+	argsExpr := writeStatement(b, p, fail)
 	fmt.Fprintf(b, "\t\trows, err := q.db.Query(ctx, stmt, %s)\n", argsExpr)
-	fmt.Fprintf(b, "\t\tif err != nil {\n\t\t\tyield(%s, fmt.Errorf(%q, err))\n\t\t\treturn\n\t\t}\n",
-		zero, p.MethodName+": %w")
+	fmt.Fprintf(b, "\t\tif err != nil {\n\t\t\t%s\t\t}\n",
+		fail(fmt.Sprintf("fmt.Errorf(%q, err)", p.MethodName+": %w")))
 	b.WriteString("\t\tdefer rows.Close()\n")
 
 	b.WriteString("\t\tfor rows.Next() {\n")
-	// The scan and decode run inside an immediately-invoked func
-	// returning (row, error), for the reason the neo4j side wraps its
-	// own: writeScan and the whole writeColumnDecode family write their
-	// failure as `return <zero>, fmt.Errorf(...)`, which does not compile
-	// in a closure whose result is the sequence's. Wrapping reuses every
-	// decoder unchanged instead of forking the family per cardinality.
-	fmt.Fprintf(b, "\t\t\trow, err := func() (%s, error) {\n", elem)
-	writeScan(b, p, "\t\t\t\t", zero)
+	writeScan(b, p, "\t\t\t", fail)
 	for i, f := range p.RowFields {
-		writeColumnDecode(b, p, i, f, "\t\t\t\t", zero)
+		writeColumnDecode(b, p, i, f, "\t\t\t", fail)
 	}
 	if len(p.RowFields) == 1 {
-		fmt.Fprintf(b, "\t\t\t\treturn %s, nil\n", valueName(0))
+		fmt.Fprintf(b, "\t\t\tif !yield(%s, nil) {\n\t\t\t\treturn\n\t\t\t}\n", valueName(0))
 	} else {
-		fmt.Fprintf(b, "\t\t\t\treturn %sRow{\n", p.MethodName)
+		fmt.Fprintf(b, "\t\t\tif !yield(%sRow{\n", p.MethodName)
 		for i, f := range p.RowFields {
-			fmt.Fprintf(b, "\t\t\t\t\t%s: %s,\n", f.Field, valueName(i))
+			fmt.Fprintf(b, "\t\t\t\t%s: %s,\n", f.Field, valueName(i))
 		}
-		b.WriteString("\t\t\t\t}, nil\n")
+		b.WriteString("\t\t\t}, nil) {\n\t\t\t\treturn\n\t\t\t}\n")
 	}
-	b.WriteString("\t\t\t}()\n")
-	fmt.Fprintf(b, "\t\t\tif err != nil {\n\t\t\t\tyield(%s, err)\n\t\t\t\treturn\n\t\t\t}\n", zero)
-	b.WriteString("\t\t\tif !yield(row, nil) {\n\t\t\t\treturn\n\t\t\t}\n")
 	b.WriteString("\t\t}\n")
-	fmt.Fprintf(b, "\t\tif err := rows.Err(); err != nil {\n\t\t\tyield(%s, fmt.Errorf(%q, err))\n\t\t}\n",
-		zero, p.MethodName+": %w")
+	fmt.Fprintf(b, "\t\tif err := rows.Err(); err != nil {\n\t\t\t%s\t\t}\n",
+		fail(fmt.Sprintf("fmt.Errorf(%q, err)", p.MethodName+": %w")))
 	b.WriteString("\t}\n")
 }
 
 // writeDocComment emits the per-method doc comment: the method name and
 // the first 3 lines of the query text, prefixed //   .
+//
+// A :iter method gets one further paragraph, and it is emitted HERE rather
+// than only written down in the ADR because the cost it discloses is paid by
+// whoever calls the method, in a package they did not write and will read
+// through their editor's hover rather than through docs/adr.
 func writeDocComment(b *strings.Builder, p codegen.Query) {
 	fmt.Fprintf(b, "// %s executes the %s query.\n//\n", p.MethodName, p.MethodName)
 	lines := strings.Split(strings.TrimRight(p.SourceText, "\n"), "\n")
@@ -401,6 +406,9 @@ func writeDocComment(b *strings.Builder, p codegen.Query) {
 	}
 	if len(lines) > 3 {
 		b.WriteString("//   ...\n")
+	}
+	if p.Cardinality == queryfile.CardinalityIter {
+		b.WriteString(codegen.IterHoldDoc)
 	}
 }
 
@@ -414,16 +422,45 @@ func failPrefix(p codegen.Query) string {
 	return zeroValueText(p) + ", "
 }
 
+// failExit composes the statements one of a method's early failures exits
+// through, given the expression holding the error.
+//
+// It is a function rather than the prefix string above because the two
+// forms are not one shape with two prefixes. A method whose result is
+// (row, error) exits by returning that pair; a :iter method's result is
+// the sequence, returned before any failure can happen, so its closure
+// has no result at all and the consumer's yield is the only channel an
+// error has. Passing one of these into writeStatement is what lets the
+// composition and parameter encoding be shared across all four
+// cardinalities instead of forked for the fourth.
+type failExit func(errExpr string) string
+
+// pairExit is the (row, error) form every non-:iter body takes.
+func pairExit(p codegen.Query) failExit {
+	fail := failPrefix(p)
+	return func(errExpr string) string { return "return " + fail + errExpr + "\n" }
+}
+
+// yieldExit is the :iter form: deliver through the consumer, then stop.
+// The yield's result is deliberately discarded — the closure returns
+// either way, so whether the consumer wants another row is not a
+// question this exit has to ask.
+func yieldExit(p codegen.Query) failExit {
+	zero := zeroValueText(p)
+	return func(errExpr string) string {
+		return "yield(" + zero + ", " + errExpr + ")\nreturn\n"
+	}
+}
+
 // writeStatement emits the statement composition and the parameter
 // encoding both bodies open with, returning the expression holding the
 // agtype argument object. Shared so a read and a write reach the server
 // through the same composed text and the same bound argument: the graph
 // name is the only thing this backend ever interpolates, and it is
 // escaped and length-checked inside cypherStmt.
-func writeStatement(b *strings.Builder, p codegen.Query) string {
-	fail := failPrefix(p)
+func writeStatement(b *strings.Builder, p codegen.Query, fail failExit) string {
 	fmt.Fprintf(b, "\tstmt, err := q.cypherStmt(%q, %s, %q)\n", dollarTag(p.SourceText), codegen.QueryTextConst(p), recordShape(p))
-	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %serr\n\t}\n", fail)
+	fmt.Fprintf(b, "\tif err != nil {\n\t\t%s\t}\n", fail("err"))
 
 	// A parameter whose encoding can fail is bound to a local first: an
 	// expression that returns an error has no form inside the map literal
@@ -435,14 +472,14 @@ func writeStatement(b *strings.Builder, p codegen.Query) string {
 			continue
 		}
 		fmt.Fprintf(b, "\t%s, err := %s\n", boundParamName(i), encode)
-		fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %sfmt.Errorf(%q, err)\n\t}\n",
-			fail, p.MethodName+": parameter $"+f.RawName+": %w")
+		fmt.Fprintf(b, "\tif err != nil {\n\t\t%s\t}\n",
+			fail(fmt.Sprintf("fmt.Errorf(%q, err)", p.MethodName+": parameter $"+f.RawName+": %w")))
 	}
 
 	argsExpr := `"{}"`
 	if len(p.ParamFields) > 0 {
 		fmt.Fprintf(b, "\targs, err := agtypeArgs(%s)\n", argsMapText(p))
-		fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %serr\n\t}\n", fail)
+		fmt.Fprintf(b, "\tif err != nil {\n\t\t%s\t}\n", fail("err"))
 		argsExpr = "args"
 	}
 	return argsExpr
@@ -457,7 +494,7 @@ func boundParamName(i int) string { return fmt.Sprintf("param%d", i) }
 // writeQueryCall emits the statement composition, the parameter
 // encoding, and the q.db.Query call every decoding body opens with.
 func writeQueryCall(b *strings.Builder, p codegen.Query) {
-	argsExpr := writeStatement(b, p)
+	argsExpr := writeStatement(b, p, pairExit(p))
 	zero := zeroValueText(p)
 	fmt.Fprintf(b, "\trows, err := q.db.Query(ctx, stmt, %s)\n", argsExpr)
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, fmt.Errorf(%q, err)\n\t}\n", zero, p.MethodName+": %w")
@@ -474,7 +511,7 @@ func writeQueryCall(b *strings.Builder, p codegen.Query) {
 // returning error alone is also what keeps this method's signature
 // identical to the one the Neo4j targets emit.
 func writeExecBody(b *strings.Builder, p codegen.Query) {
-	argsExpr := writeStatement(b, p)
+	argsExpr := writeStatement(b, p, pairExit(p))
 	fmt.Fprintf(b, "\tif _, err := q.db.Exec(ctx, stmt, %s); err != nil {\n\t\treturn fmt.Errorf(%q, err)\n\t}\n",
 		argsExpr, p.MethodName+": %w")
 	b.WriteString("\treturn nil\n")
@@ -736,12 +773,12 @@ func writeOneBody(b *strings.Builder, p codegen.Query) {
 	zero := zeroValueText(p)
 	fmt.Fprintf(b, "\tif !rows.Next() {\n\t\tif err := rows.Err(); err != nil {\n\t\t\treturn %s, fmt.Errorf(%q, err)\n\t\t}\n\t\treturn %s, ErrNoRows\n\t}\n",
 		zero, p.MethodName+": %w", zero)
-	writeScan(b, p, "\t", zero)
+	writeScan(b, p, "\t", pairExit(p))
 	fmt.Fprintf(b, "\tif rows.Next() {\n\t\treturn %s, ErrMultipleResults\n\t}\n", zero)
 	fmt.Fprintf(b, "\tif err := rows.Err(); err != nil {\n\t\treturn %s, fmt.Errorf(%q, err)\n\t}\n",
 		zero, p.MethodName+": %w")
 	for i, f := range p.RowFields {
-		writeColumnDecode(b, p, i, f, "\t", zero)
+		writeColumnDecode(b, p, i, f, "\t", pairExit(p))
 	}
 	if len(p.RowFields) == 1 {
 		fmt.Fprintf(b, "\treturn %s, nil\n", valueName(0))
@@ -760,9 +797,9 @@ func writeOneBody(b *strings.Builder, p codegen.Query) {
 func writeManyBody(b *strings.Builder, p codegen.Query) {
 	fmt.Fprintf(b, "\tout := make([]%s, 0)\n", rowElemText(p))
 	b.WriteString("\tfor rows.Next() {\n")
-	writeScan(b, p, "\t\t", "nil")
+	writeScan(b, p, "\t\t", pairExit(p))
 	for i, f := range p.RowFields {
-		writeColumnDecode(b, p, i, f, "\t\t", "nil")
+		writeColumnDecode(b, p, i, f, "\t\t", pairExit(p))
 	}
 	if len(p.RowFields) == 1 {
 		fmt.Fprintf(b, "\t\tout = append(out, %s)\n", valueName(0))
@@ -783,14 +820,15 @@ func writeManyBody(b *strings.Builder, p codegen.Query) {
 // that is the shape that tells a SQL NULL apart from every agtype value:
 // agtype's text is never empty, so a nil slice is the null and nothing
 // else is.
-func writeScan(b *strings.Builder, p codegen.Query, indent, zero string) {
+func writeScan(b *strings.Builder, p codegen.Query, indent string, fail failExit) {
 	targets := make([]string, len(p.RowFields))
 	for i := range p.RowFields {
 		fmt.Fprintf(b, "%svar %s []byte\n", indent, rawName(i))
 		targets[i] = "&" + rawName(i)
 	}
-	fmt.Fprintf(b, "%sif err := rows.Scan(%s); err != nil {\n%s\treturn %s, fmt.Errorf(%q, err)\n%s}\n",
-		indent, strings.Join(targets, ", "), indent, zero, p.MethodName+": scan row: %w", indent)
+	fmt.Fprintf(b, "%sif err := rows.Scan(%s); err != nil {\n%s\t%s%s}\n",
+		indent, strings.Join(targets, ", "), indent,
+		fail(fmt.Sprintf("fmt.Errorf(%q, err)", p.MethodName+": scan row: %w")), indent)
 }
 
 // rawName is the scan target for the column at index i.
@@ -807,23 +845,22 @@ func valueName(i int) string { return fmt.Sprintf("value%d", i) }
 // non-nullable column that arrives null fails the row: the schema says
 // the value is there, and a Go zero would report absence as a value the
 // graph holds.
-func writeColumnDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.Row, indent, zero string) {
+func writeColumnDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.Row, indent string, fail failExit) {
 	raw, value := rawName(idx), valueName(idx)
-	decodeErr := fmt.Sprintf("%s: decode column %%q: %%w", p.MethodName)
+	decodeFail := fail(fmt.Sprintf("fmt.Errorf(%q, %q, err)",
+		fmt.Sprintf("%s: decode column %%q: %%w", p.MethodName), f.ColumnName))
 
 	if !f.Nullable {
-		writeNonNullGate(b, p, f, raw, indent, zero)
+		writeNonNullGate(b, p, f, raw, indent, fail)
 		fmt.Fprintf(b, "%s%s, err := %s(%s)\n", indent, value, columnDecoder(f), raw)
-		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(%q, %q, err)\n%s}\n",
-			indent, indent, zero, decodeErr, f.ColumnName, indent)
+		fmt.Fprintf(b, "%sif err != nil {\n%s\t%s%s}\n", indent, indent, decodeFail, indent)
 		return
 	}
 
 	fmt.Fprintf(b, "%svar %s *%s\n", indent, value, f.GoType)
 	fmt.Fprintf(b, "%sif %s != nil {\n", indent, raw)
 	fmt.Fprintf(b, "%s\tdecoded, err := %s(%s)\n", indent, columnDecoder(f), raw)
-	fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(%q, %q, err)\n%s\t}\n",
-		indent, indent, zero, decodeErr, f.ColumnName, indent)
+	fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\t%s%s\t}\n", indent, indent, decodeFail, indent)
 	fmt.Fprintf(b, "%s\t%s = &decoded\n", indent, value)
 	fmt.Fprintf(b, "%s}\n", indent)
 }
@@ -831,10 +868,12 @@ func writeColumnDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.R
 // writeNonNullGate emits the check that fails the row when a column the
 // schema declares non-nullable arrives as SQL NULL, which is the shape
 // an agtype null reaches the driver in.
-func writeNonNullGate(b *strings.Builder, p codegen.Query, f codegen.Row, raw, indent, zero string) {
-	fmt.Fprintf(b, "%sif %s == nil {\n%s\treturn %s, fmt.Errorf(%q, %q)\n%s}\n",
-		indent, raw, indent, zero,
-		fmt.Sprintf("%s: column %%q is non-nullable but arrived null", p.MethodName), f.ColumnName, indent)
+func writeNonNullGate(b *strings.Builder, p codegen.Query, f codegen.Row, raw, indent string, fail failExit) {
+	fmt.Fprintf(b, "%sif %s == nil {\n%s\t%s%s}\n",
+		indent, raw, indent,
+		fail(fmt.Sprintf("fmt.Errorf(%q, %q)",
+			fmt.Sprintf("%s: column %%q is non-nullable but arrived null", p.MethodName), f.ColumnName)),
+		indent)
 }
 
 // columnDecoder names the models.go helper that turns one column's

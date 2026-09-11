@@ -425,6 +425,41 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	b.WriteString("}\n")
 }
 
+// failExit is how one decoder emission leaves its enclosing function when a
+// column will not decode. The decoder family below is shared by every
+// cardinality, and the cardinalities disagree only about this: a :one/:many
+// body is a method returning `(T, error)`, while a :iter body decodes inside
+// a `func(*neo4j.Record, error) bool` callback where `return zero, err` does
+// not compile. Threading the exit is what keeps ONE decoder family rather
+// than a second copy per cardinality.
+//
+// It is a pair of strings rather than a func(string) string because each of
+// the ~34 emission sites composes its error expression inside its own
+// fmt.Fprintf format — open and close drop in as two more %s verbs, leaving
+// every format string otherwise as it was.
+type failExit struct {
+	open  string
+	close string
+}
+
+// pairExit is the exit for a body that returns `(T, error)`. It is
+// byte-identical to what the family emitted before the exit was a parameter,
+// which is what makes the golden diff the proof that threading it changed no
+// :one/:many/:exec output: zeroExpr is the same `zero` those call sites used
+// to pass.
+func pairExit(zeroExpr string) failExit {
+	return failExit{open: "return " + zeroExpr + ", "}
+}
+
+// yieldExit is the exit for a decode running inside the streaming seam's
+// per-record callback. The error reaches the consumer as the sequence's last
+// item, and `false` stops the seam — a decode failure ends the stream rather
+// than skipping the row, so no consumer can mistake a short sequence for the
+// whole result.
+func yieldExit(zeroExpr string) failExit {
+	return failExit{open: "yield(" + zeroExpr + ", ", close: ")\nreturn false"}
+}
+
 // writeIterBody emits the :iter body: a closure returning the sequence,
 // whose own body drives the streaming seam and decodes one record per
 // yield. No writeRunCall — :iter does not materialise, so there are no
@@ -438,13 +473,27 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 // a func *type* as free (bd gqlc-db0e), so naming them would put a model
 // type's name into the free set and red the capture sweep as a false
 // positive. It costs nothing to leave them unnamed.
+//
+// The decode is written STRAIGHT into the callback, through the same
+// decoder family the other bodies use, with yieldExit supplying its
+// failure form. An earlier draft wrapped it in an immediately-invoked
+// `func() (Row, error)` so the family's own `return <zero>, err` would
+// compile unchanged inside a callback returning bool — that emits a
+// function literal whose results name a prepared entity, which is what
+// TestEmittedClosuresNameNoEntityAndCompareNoString refuses: the census
+// stands behind a claim that the emitted closures fill no decoder, and a
+// closure returning a decoded Person is one. Parameterising the family's
+// exit is what makes it cardinality-agnostic instead.
 func writeIterBody(b *strings.Builder, p codegen.Query) {
 	elem := rowElemText(p)
 	zero := zeroValueText(p)
+	exit := yieldExit(zero)
 	fmt.Fprintf(b, "\treturn func(yield func(%s, error) bool) {\n", elem)
 
 	// A fallible parameter binding is reported through the sequence, so
-	// its failure yields once and stops rather than returning.
+	// its failure yields once and stops rather than returning. It is the
+	// sequence's OWN closure this sits in, not the per-record callback, so
+	// the stop is a bare `return` and not exit's `return false`.
 	hoisted := writeParamPrelude(b, p, fmt.Sprintf("yield(%s, err)\n\t\treturn", zero))
 
 	fmt.Fprintf(b, "\t\tq.db.stream(ctx, %s, %s, func(record *neo4j.Record, err error) bool {\n",
@@ -452,32 +501,18 @@ func writeIterBody(b *strings.Builder, p codegen.Query) {
 	// Every error the seam delivers ends the sequence: one yield, then
 	// false. Continuing past an error would let a consumer append a row
 	// decoded from a record the server never sent.
-	fmt.Fprintf(b, "\t\t\tif err != nil {\n\t\t\t\tyield(%s, err)\n\t\t\t\treturn false\n\t\t\t}\n", zero)
+	fmt.Fprintf(b, "\t\t\tif err != nil {\n\t\t\t\t%serr%s\n\t\t\t}\n", exit.open, exit.close)
 
-	// The decode runs inside an immediately-invoked func returning
-	// (row, error) rather than inline. The whole decoder family — entity,
-	// any, list, edgeUnion, union, carrier-narrow — writes its failure as
-	// `return <zero>, fmt.Errorf(...)`, which does not compile inside a
-	// callback returning bool. Wrapping reuses all of them unchanged.
-	//
-	// A func literal rather than a named package-level helper: a helper
-	// would add a generated identifier per query to the package scope,
-	// where it could collide with a schema- or query-derived name, and
-	// ErrIdentifierCollision has a fixture family for exactly that.
-	fmt.Fprintf(b, "\t\t\trow, err := func() (%s, error) {\n", elem)
 	if len(p.RowFields) == 1 {
-		writeSingleColumnDecodeIndent(b, p, p.RowFields[0], "record", zero, "\t\t\t\treturn ", ", nil\n", "\t\t\t\t")
-	} else {
-		fmt.Fprintf(b, "\t\t\t\tvar out %sRow\n", p.MethodName)
-		for _, f := range p.RowFields {
-			writeSingleColumnDecodeIndent(b, p, f, "record", zero, "\t\t\t\tout."+f.Field+" = ", "\n", "\t\t\t\t")
-		}
-		b.WriteString("\t\t\t\treturn out, nil\n")
+		writeSingleColumnDecodeIndent(b, p, p.RowFields[0], "record", exit, "\t\t\treturn yield(", ", nil)\n", "\t\t\t")
+		b.WriteString("\t\t})\n\t}\n")
+		return
 	}
-	b.WriteString("\t\t\t}()\n")
-	fmt.Fprintf(b, "\t\t\tif err != nil {\n\t\t\t\tyield(%s, err)\n\t\t\t\treturn false\n\t\t\t}\n", zero)
-	b.WriteString("\t\t\treturn yield(row, nil)\n")
-
+	fmt.Fprintf(b, "\t\t\tvar out %sRow\n", p.MethodName)
+	for _, f := range p.RowFields {
+		writeSingleColumnDecodeIndent(b, p, f, "record", exit, "\t\t\tout."+f.Field+" = ", "\n", "\t\t\t")
+	}
+	b.WriteString("\t\t\treturn yield(out, nil)\n")
 	b.WriteString("\t\t})\n")
 	b.WriteString("\t}\n")
 }
@@ -523,6 +558,9 @@ func writeDocComment(b *strings.Builder, p codegen.Query) {
 	}
 	if len(lines) > 3 {
 		b.WriteString("//   ...\n")
+	}
+	if p.Cardinality == queryfile.CardinalityIter {
+		b.WriteString(codegen.IterHoldDoc)
 	}
 }
 
@@ -794,13 +832,13 @@ func writeOneBody(b *strings.Builder, p codegen.Query) {
 
 	if len(p.RowFields) == 1 {
 		f := p.RowFields[0]
-		writeSingleColumnDecode(b, p, f, "records[0]", zero, "\treturn ", ", nil\n")
+		writeSingleColumnDecode(b, p, f, "records[0]", pairExit(zero), "\treturn ", ", nil\n")
 		return
 	}
 
 	fmt.Fprintf(b, "\tvar row %sRow\n", p.MethodName)
 	for _, f := range p.RowFields {
-		writeSingleColumnDecode(b, p, f, "records[0]", zero, "\trow."+f.Field+" = ", "\n")
+		writeSingleColumnDecode(b, p, f, "records[0]", pairExit(zero), "\trow."+f.Field+" = ", "\n")
 	}
 	b.WriteString("\treturn row, nil\n")
 }
@@ -823,11 +861,11 @@ func writeManyBody(b *strings.Builder, p codegen.Query) {
 
 	if len(p.RowFields) == 1 {
 		f := p.RowFields[0]
-		writeSingleColumnDecode(b, p, f, "record", "nil", "\t\tout = append(out, ", ")\n")
+		writeSingleColumnDecode(b, p, f, "record", pairExit("nil"), "\t\tout = append(out, ", ")\n")
 	} else {
 		fmt.Fprintf(b, "\t\tvar row %sRow\n", p.MethodName)
 		for _, f := range p.RowFields {
-			writeSingleColumnDecodeIndent(b, p, f, "record", "nil", "\t\trow."+f.Field+" = ", "\n", "\t\t")
+			writeSingleColumnDecodeIndent(b, p, f, "record", pairExit("nil"), "\t\trow."+f.Field+" = ", "\n", "\t\t")
 		}
 		b.WriteString("\t\tout = append(out, row)\n")
 	}
@@ -839,8 +877,8 @@ func writeManyBody(b *strings.Builder, p codegen.Query) {
 // writeSingleColumnDecode emits one column's GetRecordValue call + err
 // handling + nullability check + assign/return line, at the standard
 // method-body indent level.
-func writeSingleColumnDecode(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix string) {
-	writeSingleColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, "\t")
+func writeSingleColumnDecode(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr string, exit failExit, assignPrefix, assignSuffix string) {
+	writeSingleColumnDecodeIndent(b, p, f, recordExpr, exit, assignPrefix, assignSuffix, "\t")
 }
 
 // writeSingleColumnDecodeIndent is writeSingleColumnDecode's inner
@@ -856,7 +894,7 @@ func writeSingleColumnDecode(b *strings.Builder, p codegen.Query, f codegen.Row,
 // (its Int64 carrier + cast). Widening is safe; narrowing is the
 // caller's contract per the schema author's declared width (FLOAT32
 // schema-width contract is C3's business per §5.1).
-func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent string) {
+func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr string, exit failExit, assignPrefix, assignSuffix, indent string) {
 	varName := "value"
 	if len(p.RowFields) > 1 {
 		for i, r := range p.RowFields {
@@ -868,19 +906,19 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	}
 	switch f.Kind {
 	case codegen.ColumnNode, codegen.ColumnEdge:
-		writeEntityColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+		writeEntityColumnDecodeIndent(b, p, f, recordExpr, exit, assignPrefix, assignSuffix, indent, varName)
 		return
 	case codegen.ColumnAny, codegen.ColumnScalarNull:
 		// codegen.ColumnScalarNull at the top level is unreachable today (Phase B
 		// routes ScalarNull to codegen.ColumnAny), but shares codegen.ColumnAny's
 		// record.Get lane and is listed for exhaustive-switch discipline.
-		writeAnyColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+		writeAnyColumnDecodeIndent(b, p, f, recordExpr, exit, assignPrefix, assignSuffix, indent, varName)
 		return
 	case codegen.ColumnList:
-		writeListColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+		writeListColumnDecodeIndent(b, p, f, recordExpr, exit, assignPrefix, assignSuffix, indent, varName)
 		return
 	case codegen.ColumnEdgeUnion:
-		writeEdgeUnionColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+		writeEdgeUnionColumnDecodeIndent(b, p, f, recordExpr, exit, assignPrefix, assignSuffix, indent, varName)
 		return
 	case codegen.ColumnProperty:
 		// A property of no declared shape rides no driver carrier, so
@@ -890,11 +928,11 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 		// The same rule the entity path states as ridesADriverCarrier
 		// and the element path as carriesElemBare, one axis up.
 		if codegen.IsDeclaredUnion(f.GoType, f.Width) {
-			writeUnionColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+			writeUnionColumnDecodeIndent(b, p, f, recordExpr, exit, assignPrefix, assignSuffix, indent, varName)
 			return
 		}
 		if !ridesADriverCarrier(f.GoType) {
-			writeAnyColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+			writeAnyColumnDecodeIndent(b, p, f, recordExpr, exit, assignPrefix, assignSuffix, indent, varName)
 			return
 		}
 	case codegen.ColumnTemporal, codegen.ColumnScalar:
@@ -906,7 +944,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	// float32; property narrow-int narrows int64 → intN.
 	carrier := driverCarrier(f.GoType)
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[%s](%s, %q)\n", indent, varName, carrier, recordExpr, f.ColumnName)
-	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	// Emit the value expression: bare varName if carrier == GoType, else
 	// the shape-changing to<X> for a temporal. A numeric width the driver
 	// over-carries takes neither, because narrowing it can FAIL — those go
@@ -916,7 +954,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	if carrier != f.GoType && !checked {
 		valueExpr = narrowExpr(f.GoType, varName)
 	}
-	fail := fmt.Sprintf("return %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)", zero, p.MethodName, f.ColumnName)
+	narrowFail := exit.open + fmt.Sprintf("fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)", p.MethodName, f.ColumnName) + exit.close
 	if f.Nullable {
 		// Nullable: nil pointer when null, address of a narrowed local
 		// otherwise.
@@ -924,7 +962,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 		if checked {
 			fmt.Fprintf(b, "%sif !isNil {\n", indent)
 			fmt.Fprintf(b, "%s\tv, err := %s\n", indent, narrowCall(f.GoType, f.Width, varName))
-			fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\t%s\n%s\t}\n", indent, indent, fail, indent)
+			fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\t%s\n%s\t}\n", indent, indent, narrowFail, indent)
 			fmt.Fprintf(b, "%s\t%sPtr = &v\n%s}\n", indent, varName, indent)
 		} else {
 			fmt.Fprintf(b, "%sif !isNil {\n%s\tv := %s\n%s\t%sPtr = &v\n%s}\n", indent, indent, valueExpr, indent, varName, indent)
@@ -937,11 +975,11 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 		return
 	}
 	// Non-nullable: error if isNil; else assign narrowed value.
-	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif isNil {\n%s\t%sfmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	if checked {
 		valueExpr = varName + "n"
 		fmt.Fprintf(b, "%s%s, err := %s\n", indent, valueExpr, narrowCall(f.GoType, f.Width, varName))
-		fmt.Fprintf(b, "%sif err != nil {\n%s\t%s\n%s}\n", indent, indent, fail, indent)
+		fmt.Fprintf(b, "%sif err != nil {\n%s\t%s\n%s}\n", indent, indent, narrowFail, indent)
 	}
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
@@ -980,9 +1018,9 @@ func valueName(i int) string { return fmt.Sprintf("value%d", i) }
 // missing Props key instead: a record holds a key for every column the
 // query projected, so the pointer here has no absence to spend itself
 // on, and a pointer that is never nil is a null the caller cannot read.
-func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr string, exit failExit, assignPrefix, assignSuffix, indent, varName string) {
 	fmt.Fprintf(b, "%s%s, ok := %s.Get(%q)\n", indent, varName, recordExpr, f.ColumnName)
-	fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: key not found\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q: key not found\", %q)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	if f.Nullable {
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
 		fmt.Fprintf(b, "%sif %s != nil {\n%s\t%sPtr = &%s\n%s}\n", indent, varName, indent, varName, varName, indent)
@@ -996,7 +1034,7 @@ func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.R
 	// Non-nullable: a nil value is a decode error, the same refusal in the
 	// same words every other column lane on this backend emits and Apache
 	// AGE emits for every kind it serves.
-	fmt.Fprintf(b, "%sif %s == nil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, varName, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif %s == nil {\n%s\t%sfmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)%s\n%s}\n", indent, varName, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(varName)
@@ -1016,17 +1054,15 @@ func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.R
 // lies under it. The null gate additionally keeps nil away from the
 // helper, which carries no member for it and would otherwise report a
 // declared NOT NULL as an unmatched member.
-func writeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+func writeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr string, exit failExit, assignPrefix, assignSuffix, indent, varName string) {
 	suffix := codegen.UnionHelperSuffix(f.Width)
 	fmt.Fprintf(b, "%s%s, ok := %s.Get(%q)\n", indent, varName, recordExpr, f.ColumnName)
-	fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: key not found\", %q)\n%s}\n",
-		indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q: key not found\", %q)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	if f.Nullable {
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, codegen.UnionCarrierText)
 		fmt.Fprintf(b, "%sif %s != nil {\n", indent, varName)
 		fmt.Fprintf(b, "%s\tv, err := decode%s(%s)\n", indent, suffix, varName)
-		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s\t}\n",
-			indent, indent, zero, p.MethodName, f.ColumnName, indent)
+		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\t%sfmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)%s\n%s\t}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 		fmt.Fprintf(b, "%s\t%sPtr = &v\n%s}\n", indent, varName, indent)
 		b.WriteString(indent)
 		b.WriteString(assignPrefix[len(indent):])
@@ -1035,11 +1071,9 @@ func writeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen
 		b.WriteString(assignSuffix)
 		return
 	}
-	fmt.Fprintf(b, "%sif %s == nil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n",
-		indent, varName, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif %s == nil {\n%s\t%sfmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)%s\n%s}\n", indent, varName, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	fmt.Fprintf(b, "%s%sU, err := decode%s(%s)\n", indent, varName, suffix, varName)
-	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n",
-		indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(varName)
@@ -1062,20 +1096,20 @@ func writeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen
 // block its null gate opens; a second non-nullable one has nowhere to
 // hide, and generation would still exit 0 because the format gate only
 // parses.
-func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr string, exit failExit, assignPrefix, assignSuffix, indent, varName string) {
 	// varName is "value" for a single-column projection and "valueN" for
 	// a row field, so the same suffix numbers the accumulator without
 	// renaming the single-column shape spec §5.5 spells out.
 	accVar := "acc" + strings.TrimPrefix(varName, "value")
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[[]any](%s, %q)\n", indent, varName, recordExpr, f.ColumnName)
-	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	if f.Nullable {
 		// Nullable list: build a *[]T. Nil pointer on null; otherwise
 		// address of the accumulated slice.
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
 		fmt.Fprintf(b, "%sif !isNil {\n", indent)
 		fmt.Fprintf(b, "%s\t%s := make(%s, 0, len(%s))\n", indent, accVar, f.GoType, varName)
-		walkListElemPlan(b, p, f, f.ListElem, accVar, varName, zero, indent+"\t", 0)
+		walkListElemPlan(b, p, f, f.ListElem, accVar, varName, exit, indent+"\t", 0)
 		fmt.Fprintf(b, "%s\t%sPtr = &%s\n", indent, varName, accVar)
 		fmt.Fprintf(b, "%s}\n", indent)
 		b.WriteString(indent)
@@ -1086,9 +1120,9 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 		return
 	}
 	// Non-nullable: error if isNil; else build the accumulator + assign.
-	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif isNil {\n%s\t%sfmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, accVar, f.GoType, varName)
-	walkListElemPlan(b, p, f, f.ListElem, accVar, varName, zero, indent, 0)
+	walkListElemPlan(b, p, f, f.ListElem, accVar, varName, exit, indent, 0)
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(accVar)
@@ -1124,7 +1158,7 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 // the source slice name (srcVar) is the raw driver []any at this depth.
 // depth is the list nesting level this loop iterates, counting the
 // column's own elements as 0, and is what elemLocal suffixes by.
-func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, srcVar, zero, indent string, depth int) {
+func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, srcVar string, exit failExit, indent string, depth int) {
 	// The index variable is only used by the element-type-assertion
 	// fail message, so the arms that assert nothing never name it and
 	// ranging with `i` would emit an unused variable.
@@ -1134,7 +1168,7 @@ func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 	}
 	iterVar := elemLocal("elem", depth)
 	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, indexVar, iterVar, srcVar)
-	walkListElemBody(b, p, f, e, accVar, iterVar, zero, indent+"\t", depth)
+	walkListElemBody(b, p, f, e, accVar, iterVar, exit, indent+"\t", depth)
 	fmt.Fprintf(b, "%s}\n", indent)
 }
 
@@ -1229,7 +1263,7 @@ func writeNilElemArm(b *strings.Builder, accVar, iterVar, indent string) {
 // assertion, and it refuses a shape no member carries by name. Asserting
 // first would need a carrier to assert to, and a union has none beyond
 // `any`.
-func writeUnionElemArm(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, iterVar, zero, indent string) {
+func writeUnionElemArm(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, iterVar string, exit failExit, indent string) {
 	// The nil arm comes first for the reason the property arm's does: a
 	// NULL element arrives as a nil `any`, which no member carries, so
 	// the helper would refuse a value the schema declared legal.
@@ -1237,8 +1271,7 @@ func writeUnionElemArm(b *strings.Builder, p codegen.Query, f codegen.Row, e *co
 		writeNilElemArm(b, accVar, iterVar, indent)
 	}
 	fmt.Fprintf(b, "%sv, err := decode%s(%s)\n", indent, codegen.UnionHelperSuffix(e.Width), iterVar)
-	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n",
-		indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, addrIf(e.Nullable, "v"))
 }
 
@@ -1260,7 +1293,7 @@ func addrIf(nullable bool, local string) string {
 // zero-return expression; indent is already deepened by one level
 // relative to the loop head; depth is the loop's own nesting level, so
 // the locals a nested list arm declares belong to depth+1.
-func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, iterVar, zero, indent string, depth int) {
+func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, iterVar string, exit failExit, indent string, depth int) {
 	switch e.Kind {
 	case codegen.ColumnProperty:
 		if carriesElemBare(e) {
@@ -1268,7 +1301,7 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 			return
 		}
 		if codegen.IsDeclaredUnion(elemBase(e.GoType), e.Width) {
-			writeUnionElemArm(b, p, f, e, accVar, iterVar, zero, indent)
+			writeUnionElemArm(b, p, f, e, accVar, iterVar, exit, indent)
 			return
 		}
 		// A nullable element's nil arm comes BEFORE the assertion, or the
@@ -1283,7 +1316,7 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		}
 		carrier := driverCarrier(base)
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, carrier)
-		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, carrier, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)%s\n%s}\n", indent, indent, exit.open, p.MethodName, carrier, f.ColumnName, iterVar, exit.close, indent)
 		switch {
 		case isTemporalCarrier(base):
 			// The conversion is bound to a local first when the element is
@@ -1296,7 +1329,7 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, narrowExpr(base, "v"))
 		case carrier != base:
 			fmt.Fprintf(b, "%svn, err := %s\n", indent, narrowCall(base, e.Width, "v"))
-			fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+			fmt.Fprintf(b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 			// The address taken is the NARROWED local's, not the carrier's:
 			// the field holds *int32, and &v would be an *int64.
 			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, addrIf(e.Nullable, "vn"))
@@ -1309,7 +1342,7 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		// (ADR 0033): assert against the carrier, then convert.
 		elemCarrier := driverCarrier(e.GoType)
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, elemCarrier)
-		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, elemCarrier, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)%s\n%s}\n", indent, indent, exit.open, p.MethodName, elemCarrier, f.ColumnName, iterVar, exit.close, indent)
 		if elemCarrier != e.GoType {
 			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, narrowExpr(e.GoType, "v"))
 		} else {
@@ -1317,21 +1350,21 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		}
 	case codegen.ColumnScalar:
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, e.GoType)
-		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, e.GoType, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)%s\n%s}\n", indent, indent, exit.open, p.MethodName, e.GoType, f.ColumnName, iterVar, exit.close, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
 	case codegen.ColumnScalarNull, codegen.ColumnAny:
 		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, iterVar)
 	case codegen.ColumnNode:
 		fmt.Fprintf(b, "%snode, ok := %s.(dbtype.Node)\n", indent, iterVar)
-		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Node, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Node, got %%T\", %q, i, %s)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, iterVar, exit.close, indent)
 		fmt.Fprintf(b, "%sdecoded, err := decode%s(node)\n", indent, e.EntityName)
-		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+		fmt.Fprintf(b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, decoded)\n", indent, accVar, accVar)
 	case codegen.ColumnEdge:
 		fmt.Fprintf(b, "%srel, ok := %s.(dbtype.Relationship)\n", indent, iterVar)
-		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Relationship, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Relationship, got %%T\", %q, i, %s)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, iterVar, exit.close, indent)
 		fmt.Fprintf(b, "%sdecoded, err := decode%s(rel)\n", indent, e.EntityName)
-		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+		fmt.Fprintf(b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, decoded)\n", indent, accVar, accVar)
 	case codegen.ColumnEdgeUnion:
 		// C5 list-of-edgeUnion element arm (§5.5). Plan carries an
@@ -1341,15 +1374,15 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		// re-derivation.
 		u := p.EdgeUnions[e.UnionIdx]
 		fmt.Fprintf(b, "%srel, ok := %s.(dbtype.Relationship)\n", indent, iterVar)
-		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Relationship, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Relationship, got %%T\", %q, i, %s)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, iterVar, exit.close, indent)
 		fmt.Fprintf(b, "%sswitch rel.Type {\n", indent)
 		for i, ek := range u.EdgeKeys {
 			fmt.Fprintf(b, "%scase %q:\n", indent, string(ek.KeyLabels))
 			fmt.Fprintf(b, "%s\tentity, err := decode%s(rel)\n", indent, u.Candidates[i])
-			fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s\t}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+			fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\t%sfmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)%s\n%s\t}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 			fmt.Fprintf(b, "%s\t%s = append(%s, entity)\n", indent, accVar, accVar)
 		}
-		fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: unexpected relationship type %%q\", %q, i, rel.Type)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+		fmt.Fprintf(b, "%sdefault:\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: unexpected relationship type %%q\", %q, i, rel.Type)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	case codegen.ColumnList:
 		// Nested list: type-assert to []any, then recurse.
 		//
@@ -1370,9 +1403,9 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 			writeNilElemArm(b, accVar, iterVar, indent)
 		}
 		fmt.Fprintf(b, "%s%s, ok := %s.([]any)\n", indent, inner, iterVar)
-		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected []any, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sif !ok {\n%s\t%sfmt.Errorf(\"%s: decode column %%q element %%d: expected []any, got %%T\", %q, i, %s)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, iterVar, exit.close, indent)
 		fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, innerAcc, elemBase(e.GoType), inner)
-		walkListElemPlan(b, p, f, e.Nested, innerAcc, inner, zero, indent, depth+1)
+		walkListElemPlan(b, p, f, e.Nested, innerAcc, inner, exit, indent, depth+1)
 		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, addrIf(e.Nullable, innerAcc))
 	}
 }
@@ -1395,7 +1428,7 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 // dynamic type as this arm's own refusals rather than as wrapped
 // driver errors, and it is the same honest-any carrier
 // writeAnyColumnDecodeIndent takes.
-func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr string, exit failExit, assignPrefix, assignSuffix, indent, varName string) {
 	// Distinct per-column locals for the raw / rel bindings so
 	// multi-column Row-assembly bodies never shadow. Single-column
 	// projections keep the bare "raw" / "rel" locals matching spec
@@ -1422,7 +1455,7 @@ func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f cod
 		b.WriteString(assignSuffix)
 	}
 	fmt.Fprintf(b, "%s%s, %s := %s.Get(%q)\n", indent, rawLocal, okLocal, recordExpr, f.ColumnName)
-	fmt.Fprintf(b, "%sif !%s {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q missing from record\", %q)\n%s}\n", indent, okLocal, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif !%s {\n%s\t%sfmt.Errorf(\"%s: column %%q missing from record\", %q)%s\n%s}\n", indent, okLocal, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	if f.Nullable {
 		// Nullable: nil raw propagates as the nil interface value. The
 		// dispatch body sits inside an `else` block, indented one tab
@@ -1430,13 +1463,13 @@ func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f cod
 		fmt.Fprintf(b, "%sif %s == nil {\n", indent, rawLocal)
 		assignBody("\t", "nil")
 		fmt.Fprintf(b, "%s} else {\n", indent)
-		writeEdgeUnionDispatchBody(b, p, f, rawLocal, relLocal, okLocal, entityLocal, zero, assignBody, indent, "\t")
+		writeEdgeUnionDispatchBody(b, p, f, rawLocal, relLocal, okLocal, entityLocal, exit, assignBody, indent, "\t")
 		fmt.Fprintf(b, "%s}\n", indent)
 		return
 	}
 	// Non-nullable: nil raw is a decode error.
-	fmt.Fprintf(b, "%sif %s == nil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, rawLocal, indent, zero, p.MethodName, f.ColumnName, indent)
-	writeEdgeUnionDispatchBody(b, p, f, rawLocal, relLocal, okLocal, entityLocal, zero, assignBody, indent, "")
+	fmt.Fprintf(b, "%sif %s == nil {\n%s\t%sfmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)%s\n%s}\n", indent, rawLocal, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
+	writeEdgeUnionDispatchBody(b, p, f, rawLocal, relLocal, okLocal, entityLocal, exit, assignBody, indent, "")
 }
 
 // writeEdgeUnionDispatchBody emits the type-assert + type-switch
@@ -1448,19 +1481,19 @@ func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f cod
 // assignment line; the callback keeps the raw assignPrefix / assignSuffix
 // out of the dispatch-body inner loop so the indent arithmetic is done
 // in exactly one place.
-func writeEdgeUnionDispatchBody(b *strings.Builder, p codegen.Query, f codegen.Row, rawLocal, relLocal, okLocal, entityLocal, zero string, assignBody func(extraIndent, valueExpr string), indent, extraIndent string) {
+func writeEdgeUnionDispatchBody(b *strings.Builder, p codegen.Query, f codegen.Row, rawLocal, relLocal, okLocal, entityLocal string, exit failExit, assignBody func(extraIndent, valueExpr string), indent, extraIndent string) {
 	dispatchIndent := indent + extraIndent
 	fmt.Fprintf(b, "%s%s, %s := %s.(dbtype.Relationship)\n", dispatchIndent, relLocal, okLocal, rawLocal)
-	fmt.Fprintf(b, "%sif !%s {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q: expected dbtype.Relationship, got %%T\", %q, %s)\n%s}\n", dispatchIndent, okLocal, dispatchIndent, zero, p.MethodName, f.ColumnName, rawLocal, dispatchIndent)
+	fmt.Fprintf(b, "%sif !%s {\n%s\t%sfmt.Errorf(\"%s: column %%q: expected dbtype.Relationship, got %%T\", %q, %s)%s\n%s}\n", dispatchIndent, okLocal, dispatchIndent, exit.open, p.MethodName, f.ColumnName, rawLocal, exit.close, dispatchIndent)
 	fmt.Fprintf(b, "%sswitch %s.Type {\n", dispatchIndent, relLocal)
 	for i, ek := range f.EdgeKeys {
 		entityName := edgeKeyToEntityName(p, f, i)
 		fmt.Fprintf(b, "%scase %q:\n", dispatchIndent, string(ek.KeyLabels))
 		fmt.Fprintf(b, "%s\t%s, err := decode%s(%s)\n", dispatchIndent, entityLocal, entityName, relLocal)
-		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s\t}\n", dispatchIndent, dispatchIndent, zero, p.MethodName, f.ColumnName, dispatchIndent)
+		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\t%sfmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)%s\n%s\t}\n", dispatchIndent, dispatchIndent, exit.open, p.MethodName, f.ColumnName, exit.close, dispatchIndent)
 		assignBody(extraIndent+"\t", entityLocal)
 	}
-	fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: column %%q: unexpected relationship type %%q\", %q, %s.Type)\n%s}\n", dispatchIndent, dispatchIndent, zero, p.MethodName, f.ColumnName, relLocal, dispatchIndent)
+	fmt.Fprintf(b, "%sdefault:\n%s\t%sfmt.Errorf(\"%s: column %%q: unexpected relationship type %%q\", %q, %s.Type)%s\n%s}\n", dispatchIndent, dispatchIndent, exit.open, p.MethodName, f.ColumnName, relLocal, exit.close, dispatchIndent)
 }
 
 // edgeKeyToEntityName resolves an EdgeKey position in a codegen.Row's
@@ -1488,7 +1521,7 @@ func edgeKeyToEntityName(p codegen.Query, f codegen.Row, i int) string {
 // value and returns the entity struct. Nullable columns produce a
 // *EntityName pointer field via a local +address-of; non-nullable
 // columns are a decode error when the driver value arrived null.
-func writeEntityColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+func writeEntityColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr string, exit failExit, assignPrefix, assignSuffix, indent, varName string) {
 	var carrier, decodeArg string
 	if f.Kind == codegen.ColumnNode {
 		carrier = "dbtype.Node"
@@ -1508,12 +1541,12 @@ func writeEntityColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 		local = decodeArg + suffix
 	}
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[%s](%s, %q)\n", indent, local, carrier, recordExpr, f.ColumnName)
-	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	if f.Nullable {
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
 		fmt.Fprintf(b, "%sif !isNil {\n", indent)
 		fmt.Fprintf(b, "%s\tv, err := decode%s(%s)\n", indent, f.GoType, local)
-		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s\t}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\t%sfmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)%s\n%s\t}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 		fmt.Fprintf(b, "%s\t%sPtr = &v\n", indent, varName)
 		fmt.Fprintf(b, "%s}\n", indent)
 		b.WriteString(indent)
@@ -1523,9 +1556,9 @@ func writeEntityColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 		b.WriteString(assignSuffix)
 		return
 	}
-	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif isNil {\n%s\t%sfmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	fmt.Fprintf(b, "%s%s, err := decode%s(%s)\n", indent, varName, f.GoType, local)
-	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\t%sfmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)%s\n%s}\n", indent, indent, exit.open, p.MethodName, f.ColumnName, exit.close, indent)
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(varName)

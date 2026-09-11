@@ -205,3 +205,29 @@ const ParamArg = "arg"
 func QueryTextConst(p Query) string {
 	return p.Bare + "QueryText"
 }
+
+// IterHoldDoc is the paragraph every backend appends to a :iter method's
+// emitted doc comment, already `// `-prefixed and newline-terminated. It
+// discloses the one cost a caller pays for streaming that the signature does
+// not show: the sequence is backed by a live server-side resource held for
+// the whole of the consumer's loop.
+//
+// It lives here, shared, rather than being written out in each backend's own
+// writeDocComment, because TestBackendInvariantSurface reads doc comments as
+// part of the caller-visible surface and demands they match byte for byte
+// across every target a fixture is enrolled in. Two copies would satisfy that
+// on the day they were written and drift the first time one was edited.
+//
+// The wording is backend-neutral because the hold is not AGE-specific, which
+// was not obvious: the pooled connection pgx holds until Rows.Close is the
+// concrete form under apache-age-pgx-v5, but neo4j streams out of an open
+// transaction that stays open for exactly as long, so naming either
+// mechanism would have been a true sentence about one backend and a false
+// one about the other. What a caller must do is the same under both.
+const IterHoldDoc = `//
+// The returned sequence holds a database connection for as long as the
+// consumer keeps ranging, and releases it when the range ends — by
+// exhaustion, by break, or by an error item, which is always the sequence's
+// last. Ranging over it while doing per-row work that itself needs a
+// connection can deadlock against a bounded pool.
+`

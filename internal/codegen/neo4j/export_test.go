@@ -21,6 +21,18 @@ import (
 
 type TypeMap = typeMap
 
+// Exit opens failExit to the external test package, which needs to name it
+// to hold one in a helper's signature. An alias rather than exported fields:
+// how a decoder lane leaves its enclosing function is the emitter's own
+// business, and a test only ever passes through a value PairExit or
+// YieldExit built.
+type Exit = failExit
+
+var (
+	PairExit  = pairExit
+	YieldExit = yieldExit
+)
+
 var (
 	AccessModeText       = accessModeText
 	DriverCarrier        = driverCarrier
