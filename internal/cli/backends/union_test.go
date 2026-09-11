@@ -32,10 +32,23 @@ import (
 //
 // So the ADR 0035 half of the falsifier — the backend NAME in the refusal
 // text — is owed and not yet payable, and this row exists because of how
-// that debt would otherwise be settled: silently. The attribution sweep
-// beside this file skips any width no backend accepts, so adding a union
-// to declaredWidths today contributes no assertion at all, and the cell
-// would read green while testing nothing.
+// that debt would otherwise be settled: silently. Adding a union to
+// declaredWidths today would reach the attribution sweep's CONVERSE half
+// and stop there. Every target refuses a union under
+// ErrUnimplementedTypeKind alone, so it lands among the widths every
+// target refuses for the same reason, where the sweep asserts that no
+// backend names itself. That is a real assertion and it would redden if
+// one started to — it is simply not the obligation ADR 0035 states, which
+// only a width DIVIDING the roster can exercise, and nothing can divide
+// it while nothing generates a union. The cell would read green having
+// certified the half that was never in doubt.
+//
+// Measured, not read off the sweep's prose: with UNION<DATE|STRING> and
+// UNION<BOOL|INT64> appended to declaredWidths, both are logged under
+// "widths every target refuses for the same reason" and neither appears
+// among those dividing the roster. The sentence this replaces claimed the
+// sweep SKIPS such a width, which is what it does to a width every target
+// ACCEPTS (bd gqlc-27cf).
 //
 // Measured rather than assumed: with the walk's KindUnion arm returning
 // false, generation succeeds for UNION<BOOL|INT64> on both backends and
@@ -55,8 +68,10 @@ func TestGenerationStillRefusesAUnionBeforeTheTable(t *testing.T) {
 	keys := reg.Keys()
 	require.NotEmpty(t, keys, "an empty roster asserts nothing below")
 
-	// Admitted by the neo4j carrier table, so this is the width most
-	// likely to start generating first, and the one the sweep would skip.
+	// Admitted by the neo4j carrier table and refused by AGE's, so this is
+	// the width that will divide the roster first — the one the attribution
+	// sweep's naming obligation becomes payable over the moment generation
+	// stops refusing it here.
 	pt := graph.UnionOf([]graph.UnionMember{{Type: graph.TypeDate}, {Type: graph.TypeString}})
 	require.Equal(t, graph.KindUnion, pt.Kind())
 
@@ -66,8 +81,8 @@ func TestGenerationStillRefusesAUnionBeforeTheTable(t *testing.T) {
 		_, err := newGen("widths").Generate(codegen.Input{Schema: schemaWithPayload(pt)})
 		require.ErrorIs(t, err, codegen.ErrUnimplementedTypeKind,
 			"%s now generates %s. That is the intended end state, and this tripwire is how you are told the "+
-				"attribution sweep no longer covers it: add the union encodings to declaredWidths so "+
-				"TestAContingentRefusalNamesItsBackend holds the ADR 0035 half of spec §8's falsifier, then "+
-				"delete this test", key, pt)
+				"attribution sweep's naming obligation has become payable over it: add the union encodings to "+
+				"declaredWidths so TestAContingentRefusalNamesItsBackend holds the ADR 0035 half of spec §8's "+
+				"falsifier, then delete this test", key, pt)
 	}
 }

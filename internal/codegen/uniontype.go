@@ -1,6 +1,9 @@
 package codegen
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+
 	"github.com/areqag/gqlc/internal/graph"
 )
 
@@ -134,4 +137,137 @@ func UnionCarrier(pt graph.PropertyType, carrier func(graph.PropertyType) (strin
 		return "", false
 	}
 	return UnionCarrierText, true
+}
+
+// IsDeclaredUnion reports whether a Go type text and the width beside it
+// are a closed union an emission declares a helper pair for.
+//
+// Both halves are asked and neither alone is the test, for the reason
+// IsDeclaredRecord asks two. The TEXT cannot answer: `any` is also ANY
+// VALUE's carrier and ANY PROPERTY VALUE's, and neither of those has a
+// member set to validate against or a shape to narrow to — an emission
+// that read the text alone would name a helper for every ANY column in
+// the batch. The WIDTH cannot answer either, at the sites that have one:
+// a union this backend refuses has no carrier text at all, and asking the
+// kind alone would name a helper for a declaration preparation rejected.
+//
+// So the pair is the exact set UnionEncodings emits for, which is what
+// makes a name derived at a call site resolve to a declaration.
+func IsDeclaredUnion(goType string, width graph.PropertyType) bool {
+	return width.Kind() == graph.KindUnion && goType == UnionCarrierText
+}
+
+// UnionMemberPlan is one member of a closed union as an emitter needs it:
+// this backend's carrier text for the member's declared width, and the
+// width itself.
+//
+// The width is kept beside the carrier for the reason RecordFieldPlan
+// keeps it: a member that is a declared record names its helper from its
+// canonical encoding, and the anonymous struct text does not run backwards
+// into a PropertyType.
+//
+// A member's NOT NULL is deliberately absent. It has no codegen effect
+// (spec §4): the nullability of the value is the property's own, spelled
+// the way `any` spells absence, and a per-member NOT NULL constrains what
+// the schema admits — the resolver's concern rather than the carrier's.
+// Recording its absence here is what stops a reader hunting for the field.
+type UnionMemberPlan struct {
+	GoType string
+	Width  graph.PropertyType
+}
+
+// UnionMembers renders the per-member emission plan for one closed union
+// on one backend, in the members' own canonical order (graph.UnionOf sorts
+// them), so the encode type-switch, the decode dispatch and the refusal
+// message all read the same members in the same order.
+//
+// carrier is the backend's own Property — AGE's wrapped in its
+// carriesZone container refusal, exactly as its Property arm wraps it —
+// threaded in rather than imported, so a member inherits that backend's
+// refusals. One refused member refuses the whole union and is reported as
+// ok=false with no partial plan, because a dispatch missing an arm is not
+// a carrier: it would accept a value at bind and have nothing to narrow it
+// back to at decode.
+//
+// It does NOT re-ask the admission rule. UnionCarrier answers that, at the
+// preparation sites, before any emission walk runs; a union that collides
+// has no carrier and so never reaches an encoding set. Asking twice would
+// be a second copy of the rule with its own chance to disagree with the
+// one the refusal messages are worded from.
+func UnionMembers(pt graph.PropertyType, carrier func(graph.PropertyType) (string, bool)) ([]UnionMemberPlan, bool) {
+	members := pt.Members()
+	out := make([]UnionMemberPlan, 0, len(members))
+	for _, m := range members {
+		goType, ok := carrier(m.Type)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, UnionMemberPlan{GoType: goType, Width: m.Type})
+	}
+	return out, true
+}
+
+// UnionHelperSuffix is the identifier fragment naming one union encoding,
+// so a backend spells its validation/dispatch pair "encode"+suffix /
+// "decode"+suffix.
+//
+// A short hash of the canonical encoding for the reason
+// RecordHelperSuffix is one: the encoding is unbounded, since a member may
+// itself be a record or a list of one, and a name derived from the text
+// would grow with it. Shared between the backends for the reason that one
+// is shared — the two must not drift on which encodings they consider one
+// — and it inherits that function's 32-bit collision bound and the
+// argument recorded there for stating it rather than guarding it.
+//
+// "Union" rather than "Record" is the whole of the difference, and it is
+// what keeps the two namespaces apart: a record and a union are different
+// widths, so they never collide in graph.PropertyType, but their DIGESTS
+// are over different strings and a shared prefix would let one emission
+// declare two helpers of one name only by accident of the hash.
+func UnionHelperSuffix(pt graph.PropertyType) string {
+	sum := sha256.Sum256([]byte(pt))
+	return "Union" + hex.EncodeToString(sum[:4])
+}
+
+// UnionHelperNames is every package-level identifier the union emission
+// owns for one encoding.
+//
+// No carrier alias, which is the one entry the record list has that this
+// one does not. A union carries as `any`, a predeclared name every
+// emission already spells wherever it needs it, so there is no multi-line
+// text an alias would save a reader from — and an alias for `any` would be
+// a second spelling of a type the backends must not drift on
+// (UnionCarrierText exists so they cannot).
+//
+// All four helpers, not the subset a given batch reaches, for the reason
+// RecordHelperNames reserves all five: which directions are emitted is a
+// per-backend reading of the batch and the identifier sweep runs before
+// any backend has made one.
+func UnionHelperNames(pt graph.PropertyType) []string {
+	suffix := UnionHelperSuffix(pt)
+	return []string{
+		"encode" + suffix,
+		"encode" + suffix + "Ptr",
+		"encode" + suffix + "List",
+		"decode" + suffix,
+	}
+}
+
+// UnionEncodings is every distinct closed-union encoding one batch
+// reaches, in canonical-encoding order, so a backend emits one helper pair
+// per entry and a caller can look one up by width.
+//
+// TRANSITIVE through list elements, record fields and union members alike,
+// for the reason RecordEncodings is: a union nested inside another shape
+// still needs its own helper pair, and one that named a helper nothing
+// declared would fail at `go build` of the EMITTED package. A union
+// nested directly inside a union cannot arise — graph.UnionOf flattens an
+// unqualified nested union into its parent — but a union under a record
+// field under a union member can, and the walk is closed over all three
+// rather than over the two that are reachable today.
+//
+// The order is the encoding's own, so the emitted file is byte-stable
+// across runs.
+func UnionEncodings(entities []Entity, prepared []Query) []graph.PropertyType {
+	return reachableEncodings(entities, prepared, graph.KindUnion)
 }

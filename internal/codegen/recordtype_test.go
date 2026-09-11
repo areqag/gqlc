@@ -379,6 +379,24 @@ func TestRecordFieldLegalityDescendsThroughContainers(t *testing.T) {
 		{"a list-valued field of a record", graph.RecordOf([]graph.RecordField{
 			{Name: "ats", Type: graph.ListOf(bad, false)},
 		})},
+		// The union arm is the youngest of the three, and it is the one
+		// with nothing else behind it: a union admits a record member
+		// (spec §4), RecordStructText assumes legality, so a walk that
+		// stopped at the union would let this reach go/format and come
+		// back as ErrFormatFailure — a template bug reported for a
+		// schema's fault.
+		{"a member of a union", graph.UnionOf([]graph.UnionMember{
+			{Type: bad}, {Type: graph.TypeInt64},
+		})},
+		{"a list-valued member of a union", graph.UnionOf([]graph.UnionMember{
+			{Type: graph.ListOf(bad, false)}, {Type: graph.TypeInt64},
+		})},
+		{"a union-member record's own field", graph.UnionOf([]graph.UnionMember{
+			{Type: graph.RecordOf([]graph.RecordField{{Name: "at", Type: bad}})}, {Type: graph.TypeInt64},
+		})},
+		{"a union under a record field", graph.RecordOf([]graph.RecordField{
+			{Name: "u", Type: graph.UnionOf([]graph.UnionMember{{Type: bad}, {Type: graph.TypeInt64}})},
+		})},
 	}
 	for _, tc := range refused {
 		t.Run(tc.name, func(t *testing.T) {
@@ -401,6 +419,8 @@ func TestRecordFieldLegalityDescendsThroughContainers(t *testing.T) {
 		{"a legal record", good},
 		{"a legal record under a list", graph.ListOf(good, false)},
 		{"a legal record inside a legal record", graph.RecordOf([]graph.RecordField{{Name: "at", Type: good}})},
+		{"a union of scalars", graph.UnionOf([]graph.UnionMember{{Type: graph.TypeString}, {Type: graph.TypeInt64}})},
+		{"a legal record as a union member", graph.UnionOf([]graph.UnionMember{{Type: good}, {Type: graph.TypeInt64}})},
 	}
 	for _, tc := range admitted {
 		t.Run(tc.name, func(t *testing.T) {
@@ -605,6 +625,54 @@ func TestRecordEncodingsIsTransitiveThroughEveryHidingPosition(t *testing.T) {
 	}
 	require.Len(t, got, len(want),
 		"the walk reported %d encodings for a batch declaring %d; the extras are %v", len(got), len(want), got)
+}
+
+// TestRecordEncodingsDescendsThroughUnionMembers is the behaviour change
+// that made the walk worth sharing with UnionEncodings, and it is a claim
+// about the RECORD answer rather than about unions.
+//
+// A union admits a record member (spec §4), and that record's decode
+// helper is called by the union's dispatch rather than inlined into it. So
+// a record reachable ONLY through a union member owes the same helper pair
+// as one declared directly — and a walk that stopped at the union would
+// emit a dispatch calling a function nothing declared, which fails at `go
+// build` of the GENERATED package with no line in the author's schema to
+// point at.
+//
+// "Only" is the load-bearing word: every record below is unreachable by
+// any other route, so a walk closed over list elements and record fields
+// alone reports none of them. The control beside them is a record reached
+// directly, which such a walk still finds — without it a row asserting
+// only absence could be satisfied by a walk that had stopped working.
+func TestRecordEncodingsDescendsThroughUnionMembers(t *testing.T) {
+	member := graph.RecordOf([]graph.RecordField{{Name: "m", Type: graph.TypeString}})
+	underList := graph.RecordOf([]graph.RecordField{{Name: "l", Type: graph.TypeString}})
+	underField := graph.RecordOf([]graph.RecordField{{Name: "f", Type: graph.TypeString}})
+	direct := graph.RecordOf([]graph.RecordField{{Name: "d", Type: graph.TypeString}})
+
+	// The member record hides two more one level down, by the two routes a
+	// record can be reached through beneath it, so the closure is asserted
+	// past the union rather than only up to it.
+	holder := graph.RecordOf([]graph.RecordField{
+		{Name: "inner", Type: underField},
+		{Name: "many", Type: graph.ListOf(underList, false)},
+	})
+	union := graph.UnionOf([]graph.UnionMember{
+		{Type: member}, {Type: holder}, {Type: graph.TypeInt64},
+	})
+
+	got := codegen.RecordEncodings([]codegen.Entity{{Name: "Blob", Fields: []codegen.EntityField{
+		{PropName: "u", Width: union},
+		{PropName: "d", Width: direct},
+	}}}, nil)
+
+	for _, pt := range []graph.PropertyType{member, holder, underField, underList} {
+		require.Contains(t, got, pt,
+			"%s is reachable only through a union member and still names a helper the union's dispatch calls", pt)
+	}
+	require.Contains(t, got, direct, "the control: a directly declared record is still reported")
+	require.NotContains(t, got, union, "RecordEncodings answers records; the union itself is UnionEncodings' entry")
+	require.Len(t, got, 5, "the walk reported %v", got)
 }
 
 // TestRecordEncodingsReportsEachEncodingOnce holds the property that
