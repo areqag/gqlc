@@ -22,12 +22,20 @@ import (
 // resolvedTypeInterface is the one interface nonZero knows how to inhabit.
 var resolvedTypeInterface = reflect.TypeOf((*resolver.ResolvedType)(nil)).Elem()
 
-// declaredJSONTags returns the wire name of every exported field of typ, in
-// declaration order. A field tagged `json:"-"` is deliberately not emitted and
-// is excluded; an untagged field marshals under its Go name, which is the name
+// declaredField is one exported field of a variant: the name it marshals
+// under, and the type whose zero value the census compares the emitted value
+// against.
+type declaredField struct {
+	tag string
+	typ reflect.Type
+}
+
+// declaredJSONFields returns every exported field of typ, in declaration
+// order. A field tagged `json:"-"` is deliberately not emitted and is
+// excluded; an untagged field marshals under its Go name, which is the name
 // the census then demands.
-func declaredJSONTags(typ reflect.Type) []string {
-	var tags []string
+func declaredJSONFields(typ reflect.Type) []declaredField {
+	var fields []declaredField
 	for i := range typ.NumField() {
 		f := typ.Field(i)
 		if !f.IsExported() {
@@ -40,9 +48,32 @@ func declaredJSONTags(typ reflect.Type) []string {
 		if name == "" {
 			name = f.Name
 		}
-		tags = append(tags, name)
+		fields = append(fields, declaredField{tag: name, typ: f.Type})
 	}
-	return tags
+	return fields
+}
+
+// zeroWire is the JSON encoding of typ's zero value — what a field of that
+// type looks like on the wire when the MarshalJSON value literal never
+// assigned it.
+//
+// It is derived from the type rather than written down as null / "" / false,
+// and that is the whole reason this is a function. For two of the field types
+// in play the zero value is NOT any of those: Scalar's zero marshals to
+// "bool" and Temporal's to "date", because both String() methods answer for
+// their first member and both zero values ARE that member. A guard phrased as
+// "the emitted value must not be empty" therefore passes a ResolvedScalar
+// whose Kind was dropped from the value literal — the dropped field still
+// renders as a non-empty string. Comparing against this instead catches it.
+//
+// Byte comparison against the census's own output is sound because
+// encoding/json compacts what a Marshaler returns, so both sides are compact
+// with the same escaping.
+func zeroWire(t *testing.T, typ reflect.Type) string {
+	t.Helper()
+	raw, err := json.Marshal(reflect.Zero(typ).Interface())
+	require.NoErrorf(t, err, "marshalling the zero value of %s", typ)
+	return string(raw)
 }
 
 // nonZero builds a value of typ whose every leaf differs from the zero value.
@@ -114,10 +145,31 @@ func nonZero(t *testing.T, typ reflect.Type) reflect.Value {
 // The same bound applies to the *.validated.golden.json fixtures, which marshal
 // through these same methods.
 //
-// The census is deliberately one-directional. It demands that every declared
-// field reaches the output; it does not forbid keys the struct does not declare,
-// because the "kind" discriminator every variant emits is exactly such a key and
-// is the point of the tagged-union encoding.
+// The census demands the field's NAME and its VALUE, which are two separate
+// drifts with one cause. A field added to the variant but not to the anonymous
+// struct loses its key; a field kept in the anonymous struct but dropped from
+// the value literal beneath it keeps its key and always carries the zero value.
+// Neither is visible downstream, because both of the wire's other readers
+// regenerate: `-update` blesses either mutant and the package goes green
+// (bd gqlc-xpwox measured five such mutants, one per variant carrying a
+// Nullable, all five KILLED before regeneration and SURVIVING after).
+//
+// The value half rests on the fill being non-zero, which is what nonZero is
+// for: the variant goes in with every leaf differing from its zero value, so
+// any field whose emitted value equals its type's zero encoding lost its value
+// on the way out. What that does NOT catch is a value literal that hardcodes a
+// non-zero constant — `Nullable: true` emits true for a mandatory list and no
+// row here objects. TestResolvedListMarshalsItsOwnNullability is the shape that
+// catches that one, and it costs a test per field rather than one per package.
+//
+// A variant whose nonZero fill happens to marshal to its zero encoding would
+// fail here on unmutated code rather than pass silently. That is the intended
+// direction: it means nonZero cannot distinguish that field's presence from its
+// absence, so no row below it is measuring anything.
+//
+// The census stays one-directional in the other axis. It does not forbid keys
+// the struct does not declare, because the "kind" discriminator every variant
+// emits is exactly such a key and is the point of the tagged-union encoding.
 func TestMarshalJSONEmitsEveryDeclaredField(t *testing.T) {
 	for name, inh := range inhabitants {
 		t.Run(name, func(t *testing.T) {
@@ -133,33 +185,43 @@ func TestMarshalJSONEmitsEveryDeclaredField(t *testing.T) {
 			require.NoErrorf(t, json.Unmarshal(raw, &got),
 				"%s: MarshalJSON emitted something that is not a JSON object: %s", name, raw)
 
-			for _, tag := range declaredJSONTags(typ) {
-				require.Containsf(t, got, tag,
+			for _, f := range declaredJSONFields(typ) {
+				require.Containsf(t, got, f.tag,
 					"%s declares a field with json tag %q, but its MarshalJSON does not emit it. "+
 						"The anonymous struct in %s.MarshalJSON restates the field list and has gone "+
 						"short, so this field is invisible to the corpus sweep's accept digest and to "+
-						"the validated goldens. Emitted: %s", name, tag, name, raw)
+						"the validated goldens. Emitted: %s", name, f.tag, name, raw)
+
+				require.NotEqualf(t, zeroWire(t, f.typ), string(got[f.tag]),
+					"%s emitted the key %q carrying the ZERO value of %s, from an input whose every "+
+						"field was non-zero. The anonymous struct in %s.MarshalJSON declares this "+
+						"field but the value literal beneath it does not assign it, so the key is on "+
+						"the wire and the value is not: every %s ever marshalled reports this field as "+
+						"%s. Regenerating the validated goldens and the corpus sweep manifest hides "+
+						"this — they are the wire's only other readers and both rebuild from these "+
+						"same methods. Emitted: %s", name, f.tag, f.typ, name, name,
+					zeroWire(t, f.typ), raw)
 			}
 		})
 	}
 }
 
-// TestResolvedListMarshalsItsOwnNullability holds the VALUE of the one
-// field gqlc-lgbjy added, which the census above cannot see.
+// TestResolvedListMarshalsItsOwnNullability holds the one thing the census
+// above still cannot see, now that the census reads values as well as names.
 //
-// The census is a census of NAMES. Deleting `Nullable: r.Nullable` from
-// the value literal while leaving the field in the anonymous struct still
-// emits "nullable", now always false, and the census demands the key and
-// passes. The wire's only other readers regenerate: measured, that mutant
-// reddens the package and then goes ENTIRELY GREEN once the goldens and
-// the sweep manifest are rebuilt with the commands their own failures
-// print. So without this, a var-length binding's optionality could be
-// dropped from the wire by a regeneration and nothing would say so —
-// which is this bead's own defect, one level down.
+// The census marshals a fill whose every field is non-zero and objects to any
+// field that comes back zero, so it already kills the mutant gqlc-lgbjy owed a
+// guard for: deleting `Nullable: r.Nullable` from the value literal. It does
+// not kill a value literal that hardcodes a non-zero constant. `Nullable: true`
+// satisfies every row of the census — the fill's Nullable IS true — while
+// reporting every mandatory list on the wire as nullable. Two inputs differing
+// in that one field are what distinguishes a propagated value from a constant,
+// and only a per-field table can supply them.
 //
-// It is a local test rather than a second direction on the census because
-// the same hole is open on four sibling variants and closing it for all
-// of them is one census extension, not five local tests: bd gqlc-xpwox.
+// It is kept for ResolvedList alone rather than replicated across the four
+// sibling variants carrying a Nullable, because the census covers the dropped
+// half for all eight at once (bd gqlc-xpwox) and the hardcode half has never
+// been observed. If it is ever observed, the fix is this shape, per field.
 func TestResolvedListMarshalsItsOwnNullability(t *testing.T) {
 	elem := resolver.ResolvedEdge{EdgeKey: schema.EdgeKey{
 		Source: "Person", KeyLabels: "KNOWS", Target: "Person",
