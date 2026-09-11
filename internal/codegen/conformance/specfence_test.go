@@ -47,10 +47,13 @@ import (
 // inside a code span whose backtick run the block rule takes for a
 // fence, since that rule tests bytes rather than parsing markdown —
 // while the paren anchor reaches a block like any other text
-// (gqlc-cgat); a listed document keeps its census entry on one
-// surviving site (gqlc-0rjn);
-// and a list replacing one of the exhibits specBareListExhibits names,
-// spelled the same way, takes that entry's exemption (gqlc-x2sg).
+// (gqlc-cgat); and a listed document keeps its census entry on one
+// surviving site (gqlc-0rjn).
+//
+// A list replacing one of the exhibits specBareListExhibits names,
+// spelled the same way, no longer takes that entry's exemption: an
+// exemption is claimed by exhibitMarker on the site's line rather than
+// by the site coming first (gqlc-x2sg).
 //
 // That this file scans bytes rather than parsing markdown is a decision
 // and not an oversight: ADR 0042 rules that no CommonMark parser enters
@@ -225,6 +228,34 @@ var specBindDocs = map[string]int{specC1: 3, specC3: 3, specC4: 3, specC5: 1}
 // waved through (ADR 0029 decision 4).
 var specListRuleDocs = []string{specC1, specC4}
 
+// exhibitMarker is what a document writes on the line carrying a site
+// this census exempts, and it is the whole of what tells an exhibit from
+// a claim spelled the same way (gqlc-x2sg).
+//
+// Nothing about the BYTES of a quoted shape says whether the document is
+// exhibiting drift or asserting the emitted surface — an exhibit and a
+// claim are the same construct, so no scanner and no markdown parse can
+// separate them (ADR 0042). What separates them is the author's
+// intent, and this is that intent written where the fence can read it.
+//
+// Before it, the exemption went to whichever matching site came FIRST in
+// the document, so replacing an exhibit in place with a claim spelled the
+// way that exhibit was kept the census satisfied and left the claim
+// ungraded. The exemption now follows the marker rather than the
+// position: an unmarked site is graded whatever the census says, and an
+// entry no marked site carries is red in the `lost` direction.
+//
+// Two costs, both accepted rather than overlooked. It puts fence syntax
+// into prose a reader sees, which is the price of writing intent down at
+// all. And it is read on the site's own LINE, so reflowing a paragraph
+// until the marker and the span it marks land on different lines reddens
+// the fence — fails closed, names the line, and the remedy is to write
+// the marker back beside the span, which is to re-assert the intent
+// rather than to bump a number. There are six marked sites today; the
+// falsifier for calling that cost small is the census growing long
+// enough that re-marking becomes rote.
+const exhibitMarker = "**exhibit**"
+
 // specBareListExhibits are the parenthesis-less parameter lists a
 // document prints as exhibits of what the fence catches rather than as
 // claims about the emitted surface, and so are read but not graded (ADR
@@ -233,10 +264,14 @@ var specListRuleDocs = []string{specC1, specC4}
 // The exemption is per list, spelled verbatim: a parenthesis-less list
 // a listed document prints that is not written down here is read on the
 // same terms as any other document's, so one document can quote a
-// drifted shape as an exhibit and state the emitted shape as a claim. Each entry exempts one site,
-// so a second list spelled the same way is graded. The first is not: a
-// claim put in an exhibit's place, spelled the way that exhibit was,
-// takes the entry (gqlc-x2sg).
+// drifted shape as an exhibit and state the emitted shape as a claim.
+// Each entry exempts one site, so a second list spelled the same way is
+// graded.
+//
+// Naming the list here is necessary and not sufficient: the site must
+// also carry exhibitMarker on its line. Both halves are load-bearing in
+// opposite directions — the census bounds WHICH shapes may be exempted
+// at all, and the marker says WHICH occurrence of one is the exhibit.
 //
 // An entry the document stopped printing is red by its text, so the
 // exemption cannot run ahead of the exhibit needing it. The other
@@ -264,7 +299,9 @@ var specBareListExhibits = map[string][]string{
 //
 // The exemption is per site and spelled verbatim, so a second span
 // spelled the same way in the same document is graded, and an entry the
-// document stopped printing is red by its text.
+// document stopped printing is red by its text. It is claimed by
+// exhibitMarker on the site's line, not by position, on exactly the
+// terms specBareListExhibits sets (gqlc-x2sg).
 var specBareBindExhibits = map[string][]string{
 	specC1:   {`"minAge": minAge`, `"key": value`},
 	adrFence: {`"key": value`},
@@ -292,6 +329,13 @@ func flattenExhibits(m map[string][]string) []string {
 // side and the observed one, so that a census entry and the site it
 // exempts cannot drift apart in spelling.
 func exhibitEntry(doc, list string) string { return doc + ": " + list }
+
+// marked reports whether a site's line claims the exemption its census
+// entry offers. The line is the collapsed source line the site opens on,
+// which is what every scanner here already carries for its failures, so
+// the marker travels with the span under a reflow that keeps them on one
+// line and is lost by one that does not.
+func marked(line string) bool { return strings.Contains(line, exhibitMarker) }
 
 // specListRules are the parameter-list tails every `<param-list>` bullet
 // must spell out. Both arities are here because the emitted signature
@@ -443,7 +487,10 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 		"each entry above is one parameter list its document prints without the enclosing parentheses, as an\n"+
 			"exhibit of what the fence catches rather than as a claim about the emitted surface, and is read but\n"+
 			"not graded there; a list the document stopped printing means the exemption is holding nothing, and\n"+
-			"a list it prints that is not spelled above is read on the same terms as any other document's")
+			"a list it prints that is not spelled above is read on the same terms as any other document's.\n"+
+			"An entry is claimed by the site writing "+exhibitMarker+" on its own line and not by the site\n"+
+			"coming first, so an entry reported missing here may instead be a marker a reflow carried onto\n"+
+			"another line — the site is then graded, and named by the failure above (gqlc-x2sg)")
 
 	for _, doc := range specListRuleDocs {
 		requireCensus(t, specListRules, sweep.statedRules[doc], "specListRules, in "+doc,
@@ -505,7 +552,8 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 		"a `\"key\": value` span with no `map[string]any{` around it is a documented binding the sweep now\n"+
 			"reads (gqlc-offa). The entries here are the spans printed as exhibits of that limit rather than as\n"+
 			"claims about the emitted surface, and each covers exactly one site — a second span spelled the same\n"+
-			"way in the same document is graded")
+			"way in the same document is graded. An entry is claimed by "+exhibitMarker+" on the site's own\n"+
+			"line, not by the site coming first (gqlc-x2sg)")
 }
 
 // TestEveryRootDocIsSweptOrDeclaredOutOfScope reconciles the repository
@@ -695,7 +743,7 @@ func sweepSigs(files []string, read func(string) string, exhibits map[string][]s
 			unclaimed[list] = true
 		}
 		for _, sig := range bare {
-			if !unclaimed[sig.list] {
+			if !unclaimed[sig.list] || !marked(sig.text) {
 				out.graded = append(out.graded, sig)
 				continue
 			}
@@ -747,7 +795,7 @@ func sweepBinds(files []string, read func(string) string, exhibits map[string][]
 			unclaimed[span] = true
 		}
 		for _, site := range scanBareBinds(file, text) {
-			if !unclaimed[site.list] {
+			if !unclaimed[site.list] || !marked(site.text) {
 				out.graded = append(out.graded, site.binds...)
 				continue
 			}
@@ -907,15 +955,35 @@ func TestSpecSweepsCarryUnreadableSites(t *testing.T) {
 // census names, and to one site of that list: a listed document states
 // claims about the emitted surface too, and a claim can be spelled the
 // way an exhibit is.
+//
+// The last two are gqlc-x2sg. The sixth is that bead's reproduction
+// reduced to one document: a listed list the document prints WITHOUT
+// exhibitMarker is graded, so a claim put in an exhibit's place and
+// spelled the way that exhibit was no longer inherits its exemption. The
+// seventh separates the marker from the position, which is the whole of
+// what changed — the census entry goes to the marked occurrence even
+// when an unmarked one precedes it, and an ordering rule that merely
+// looked at the census would take the first.
 func TestSpecSweepRoutesBareSitesByExhibit(t *testing.T) {
 	const drifted = "ctx context.Context, minAge int64"
 	claim := "ctx context.Context, " + codegen.ParamArg + " int64"
 	docs := map[string]string{
 		"graded.md":  "the parameter list is `" + drifted + "`\n",
-		"exhibit.md": "the parameter list is `" + drifted + "`\n",
+		"exhibit.md": "the " + exhibitMarker + " parameter list is `" + drifted + "`\n",
 		"silent.md":  "this document quotes no parameter list at all\n",
-		"mixed.md":   "the exhibit is `" + drifted + "` and the emitted list is `" + claim + "`\n",
-		"twice.md":   "the exhibit is `" + drifted + "` and so is `" + drifted + "`\n",
+		"mixed.md": "the " + exhibitMarker + " is `" + drifted + "` and the emitted list is `" +
+			claim + "`\n",
+		"twice.md": "the " + exhibitMarker + " is `" + drifted + "` and so is `" + drifted + "`\n",
+
+		// gqlc-x2sg's reproduction: the census still names the list, and
+		// the document prints it as a claim about the emitted surface
+		// rather than as an exhibit, so it carries no marker.
+		"unmarked.md": "the emitted parameter list is `" + drifted + "` at one query parameter\n",
+
+		// The claim comes first and the exhibit second. Under the
+		// positional rule the claim took the entry and went ungraded.
+		"claimfirst.md": "the emitted parameter list is `" + drifted + "` at one query parameter\n" +
+			"and the " + exhibitMarker + " it is spelled like is `" + drifted + "`\n",
 	}
 	read := func(file string) string { return docs[file] }
 	listing := func(file string) map[string][]string {
@@ -929,7 +997,7 @@ func TestSpecSweepRoutesBareSitesByExhibit(t *testing.T) {
 		require.Empty(t, sweep.bareExhibits)
 	})
 
-	t.Run("a listed bare list is censused instead of graded", func(t *testing.T) {
+	t.Run("a listed and marked bare list is censused instead of graded", func(t *testing.T) {
 		sweep := sweepSigs([]string{"exhibit.md"}, read, listing("exhibit.md"))
 		require.Empty(t, sweep.graded)
 		require.Equal(t, map[string]bool{"exhibit.md: " + drifted: true}, sweep.bareExhibits)
@@ -952,6 +1020,54 @@ func TestSpecSweepRoutesBareSitesByExhibit(t *testing.T) {
 		require.Len(t, sweep.graded, 1)
 		require.Equal(t, "minAge", sweep.graded[0].arg)
 		require.Equal(t, map[string]bool{"twice.md: " + drifted: true}, sweep.bareExhibits)
+	})
+
+	t.Run("a listed bare list with no marker on its line is graded", func(t *testing.T) {
+		sweep := sweepSigs([]string{"unmarked.md"}, read, listing("unmarked.md"))
+		require.Len(t, sweep.graded, 1,
+			"a claim spelled the way an exhibit is takes no exemption from the census naming that "+
+				"spelling; only "+exhibitMarker+" on the site's line does (gqlc-x2sg)")
+		require.Equal(t, "minAge", sweep.graded[0].arg)
+		require.Empty(t, sweep.bareExhibits,
+			"and the entry is then reported lost, so the census cannot go on covering nothing")
+	})
+
+	t.Run("the exemption follows the marker rather than the position", func(t *testing.T) {
+		sweep := sweepSigs([]string{"claimfirst.md"}, read, listing("claimfirst.md"))
+		require.Len(t, sweep.graded, 1, "the unmarked occurrence is graded even though it comes first")
+		require.Equal(t, 1, sweep.graded[0].line, "and it is the one on line 1 that is graded")
+		require.Equal(t, map[string]bool{"claimfirst.md: " + drifted: true}, sweep.bareExhibits)
+	})
+}
+
+// TestSpecSweepRoutesBareBindsByExhibit is the same witness for the
+// binding half, which routes through its own lines in sweepBinds and so
+// is not covered by the signature rows above. The exemption is claimed
+// on identical terms, and the last row is gqlc-x2sg's reproduction
+// restated over a binding span.
+func TestSpecSweepRoutesBareBindsByExhibit(t *testing.T) {
+	const drifted = `"minAge": minAge`
+	docs := map[string]string{
+		"exhibit.md":  "the " + exhibitMarker + " binding is `" + drifted + "`\n",
+		"unmarked.md": "the emitted driver binding is `" + drifted + "`\n",
+	}
+	read := func(file string) string { return docs[file] }
+	listing := func(file string) map[string][]string {
+		return map[string][]string{file: {drifted}}
+	}
+
+	t.Run("a listed and marked bare binding is censused instead of graded", func(t *testing.T) {
+		sweep := sweepBinds([]string{"exhibit.md"}, read, listing("exhibit.md"))
+		require.Empty(t, sweep.graded)
+		require.Equal(t, map[string]bool{"exhibit.md: " + drifted: true}, sweep.bareExhibits)
+	})
+
+	t.Run("a listed bare binding with no marker on its line is graded", func(t *testing.T) {
+		sweep := sweepBinds([]string{"unmarked.md"}, read, listing("unmarked.md"))
+		require.Len(t, sweep.graded, 1,
+			"a binding claim spelled the way an exhibit is takes no exemption from the census (gqlc-x2sg)")
+		require.Equal(t, "minAge", sweep.graded[0].arg)
+		require.Empty(t, sweep.bareExhibits)
 	})
 }
 
@@ -2407,14 +2523,17 @@ func scanBareBinds(file, text string) []bareBindSite {
 		if !ok {
 			continue
 		}
-		site := bareBindSite{list: code.text}
+		site := bareBindSite{
+			list: code.text,
+			text: strings.TrimSpace(collapse(lineAt(text, code.at))),
+		}
 		for _, value := range values {
 			site.binds = append(site.binds, specSig{
 				file: file,
 				line: 1 + strings.Count(text[:code.at], "\n"),
 				arg:  value,
 				list: code.text,
-				text: strings.TrimSpace(collapse(lineAt(text, code.at))),
+				text: site.text,
 			})
 		}
 		out = append(out, site)
@@ -2426,8 +2545,13 @@ func scanBareBinds(file, text string) []bareBindSite {
 // span is the unit the exemption is granted in — a span carrying two
 // pairs is one exhibit, not two — so the bindings are kept under it
 // rather than flattened before the census sees them.
+//
+// text is the source line the span opened on, carried here rather than
+// read back off the first binding because a span whose values are all
+// unreadable still has to be able to claim its exemption.
 type bareBindSite struct {
 	list  string
+	text  string
 	binds []specSig
 }
 

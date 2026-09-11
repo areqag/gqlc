@@ -140,10 +140,10 @@ document that owes the bullet must be taking the exemption.
 
 The two placeholder positions are read on identical terms. They were not: a
 declaration glued to the context parameter was skipped as "something else glued
-to `ctx`", so the comma'd `ctx context.Context, <bareParam> <T>` was red while
-the glued `ctx context.Context<bareParam> <T>` was green. The exemption census
-could not see the difference, because C4 writes the placeholder in both
-positions and one intact template satisfied the document.
+to `ctx`", so the comma'd **exhibit** `ctx context.Context, <bareParam> <T>` was
+red while the glued **exhibit** `ctx context.Context<bareParam> <T>` was green.
+The exemption census could not see the difference, because C4 writes the
+placeholder in both positions and one intact template satisfied the document.
 
 `listPlaceholderRe` is an enumeration (`<param-list>`, `<param-list-N>`) rather
 than a test for `<…>`, because a generic placeholder test cannot tell
@@ -226,7 +226,7 @@ The signature anchor was an open parenthesis followed by the context parameter,
 and three places in this branch described it as the context parameter alone.
 The difference is what an escape costs. Rewriting the context parameter is a
 visibly wrong edit; dropping the parentheses is a cosmetic one, and it was
-enough. Measured: a bullet reading ``the parameter list is `ctx
+enough. Measured: a bullet reading the **exhibit** ``the parameter list is `ctx
 context.Context, minAge int64` `` inserted into C1 §5.3 — the section this
 branch exists to correct, spelling the capture vector `gqlc-lhs3` removed —
 left both sweeps green.
@@ -243,17 +243,17 @@ A document explaining a fence has to quote what the fence catches, and this one
 does three times — decision 4's two placeholder positions and the capture vector
 above. `specBareListExhibits` names those parenthesis-less parameter lists
 verbatim, per document, and they are read but not graded: they are exhibits
-rather than claims about the emitted surface.
+rather than claims about the emitted surface. Each is written on a line that
+also carries the word **exhibit** in bold, and that marker is what claims the
+exemption — see decision 12.
 
 The exemption is per list rather than per document, so a claim this document
 makes about the emitted parameter list is read on the same terms as any other
 document's, and each entry covers one site, so a second list spelled the same
 way is graded — it is red in the `undeclared` direction, because the entry
-exempted the first occurrence and no entry covers the second. It is a written
+exempted the marked occurrence and no entry covers the second. It is a written
 census reconciled in both directions: an entry the document has stopped
-printing is red in the `lost` direction by its text. What that leaves
-open is a claim put in an exhibit's place and spelled the way the exhibit was:
-it takes the entry (`gqlc-x2sg`).
+printing is red in the `lost` direction by its text.
 
 Two things are deliberately not reached, and the first drags a third along that
 was not chosen:
@@ -280,9 +280,9 @@ was not chosen:
   because the line-opening test is reached only by a run of three or more. Both
   are pinned, C1 §5.3 states the exemptions as a floor for that reason, and this
   overreach of the block rule is `gqlc-cgat` too.
-- **The binding half.** The symmetric move — reading a `"key": value` pair with
-  no `map[string]any` literal around it — was measured before it was declined:
-  the swept documents hold over 500 such spans across more than 30 files,
+- **The binding half.** The symmetric move — reading an **exhibit** `"key": value`
+  pair with no `map[string]any` literal around it — was measured before it was
+  declined: the swept documents hold over 500 such spans across more than 30 files,
   essentially all of them JSON model shapes with no relation to a driver
   binding. A sweep that reddens on those is worse than a named limit, so the
   limit is named (`gqlc-offa`) and the brace stays part of the binding anchor.
@@ -333,6 +333,40 @@ this decision is a second normative statement appearing anywhere under
 `docRoots`, or a new document that states the rule instead of citing it. Nothing
 gates either; re-running that screen is what finds them.
 
+## Decision 12 — an exemption is claimed by a marker, not by position
+
+Both exhibit censuses name a shape verbatim. Until this decision the exemption
+went to whichever site matching that text came FIRST in the document, and that
+is the whole of what `gqlc-x2sg` was: replacing an exhibit in place with a
+sentence asserting the same shape is what the emitter prints kept the census
+satisfied and left the claim ungraded. Measured on that bead — rewriting
+decision 10's exhibit above into a claim about the emitter left
+`go test ./internal/codegen/conformance/` green.
+
+Nothing about the bytes could have told the two apart. An exhibit and a claim
+are the same shape in the same construct, so a CommonMark parser separates them
+no better than a byte scan does — [ADR 0042](0042-the-spec-fence-stays-a-byte-scan.md)
+rules on that, and dispositions this bead as never having been on that axis.
+What separates them is the author's intent, so the remedy is to write the intent
+where the fence can read it.
+
+A site claims its census entry by carrying the word **exhibit**, bold, on its
+own line. An unmarked site is graded whatever the census says, and an entry no
+marked site carries is red in the `lost` direction — so the in-place
+replacement above is now red twice over, once as an ungraded claim and once as
+a census entry covering nothing.
+
+Two costs, both accepted. The marker is fence syntax in prose a reader sees,
+which is unavoidable for intent written down at all. And it is read on the
+site's LINE, so a reflow that separates the marker from the span it marks
+reddens the fence; that fails closed, names the line, and the remedy is to
+write the marker back beside the span rather than to bump a number. Six sites
+carry it today, across this document and C1 §5.3.
+
+The line rule is what makes this work, and a paragraph rule would not: the
+replacement `gqlc-x2sg` measured happens INSIDE one paragraph, so a marker
+scoped to the paragraph would survive the edit it has to catch.
+
 ## Consequences
 
 The fence is a graded-site check, not a document check. What it does **not**
@@ -346,8 +380,6 @@ own header:
   candidate roots from outside the list (`gqlc-jfwo`). Dropping `docs`, or
   narrowing it to `docs/specs`, is red by the censuses naming documents beneath
   it.
-- A claim put in the place of one of `specBareListExhibits`' exhibits, spelled
-  the way that exhibit was, takes its exemption (`gqlc-x2sg`, Decision 10).
 - A site swapped for another inside one document is invisible: the per-document
   floor is a count, not a membership (`gqlc-0rjn`, Decision 3).
 - A signature carrying the author's names as separate arguments is past the
