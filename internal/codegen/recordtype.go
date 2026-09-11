@@ -40,10 +40,15 @@ import (
 // deliberately keeps the author's script — a schema written in Cyrillic
 // mangles to a legal struct field and is admitted (see goFieldName).
 //
-// The recursion is through list elements and record fields, matching
-// unimplementedTypeKind, because those are the positions a record can be
-// reached through. A union is refused at its own node by the walk that
-// runs first, so nothing under one is reachable here.
+// The recursion is through list elements, record fields and union
+// MEMBERS, because those are the three positions a record can be reached
+// through. The member arm is not decoration: a union admits a record
+// member (spec §4), so UNION<RECORD<min_age INT64, minAge INT64>|INT32>
+// carries an unspellable record that nothing else in this pipeline would
+// catch — RecordStructText assumes legality, so the refusal would arrive
+// from go/format as ErrFormatFailure, naming a template bug for a
+// schema's fault, which is the whole failure mode this function exists to
+// prevent.
 func recordFieldLegality(pt graph.PropertyType) (graph.PropertyType, string, bool) {
 	switch pt.Kind() {
 	case graph.KindRecord:
@@ -75,10 +80,17 @@ func recordFieldLegality(pt graph.PropertyType) (graph.PropertyType, string, boo
 		return "", "", false
 	case graph.KindList:
 		return recordFieldLegality(pt.Elem())
-	case graph.KindScalar, graph.KindUnion:
-		// Neither declares fields: a scalar has none, and a union is
-		// refused before this is asked. Named rather than left to the
-		// default so a fourth kind cannot be added silently.
+	case graph.KindUnion:
+		for _, m := range pt.Members() {
+			if offender, reason, illegal := recordFieldLegality(m.Type); illegal {
+				return offender, reason, true
+			}
+		}
+		return "", "", false
+	case graph.KindScalar:
+		// A scalar declares no fields and has no contents. Named rather
+		// than left to the default so a fifth kind cannot be added
+		// silently.
 	}
 	return "", "", false
 }
@@ -346,10 +358,10 @@ func RecordHelperNames(pt graph.PropertyType) []string {
 //
 // TRANSITIVE, because a record's decode helper calls its record fields'
 // helpers rather than inlining them: the set is closed under list
-// elements and record fields, which are the two positions a record can
-// hide under. Without the closure a nested record would name a helper
-// nothing declared, which fails at go build of the EMITTED package —
-// a failure with no line in the schema to point at.
+// elements, record fields and union members, which are the three
+// positions a record can hide under. Without the closure a nested record
+// would name a helper nothing declared, which fails at go build of the
+// EMITTED package — a failure with no line in the schema to point at.
 //
 // graph.TypeAnyRecord is deliberately absent. It declares no fields, so
 // there is no struct to build and no field-wise decode to write: both
@@ -361,25 +373,63 @@ func RecordHelperNames(pt graph.PropertyType) []string {
 // across runs — a map iteration here would reorder the helper block on
 // every generation and every golden would be noise.
 func RecordEncodings(entities []Entity, prepared []Query) []graph.PropertyType {
+	return reachableEncodings(entities, prepared, graph.KindRecord)
+}
+
+// reachableEncodings is every distinct width of one KIND a batch reaches,
+// in canonical-encoding order. RecordEncodings and UnionEncodings are its
+// two callers and differ only in the kind they ask for.
+//
+// One walk rather than two, because the closure rule is the same one and
+// it is not the kind's: a width of either kind can hide under a list
+// element, a record FIELD or a union MEMBER, and each of those three can
+// hide either. A union member is the youngest of the three and the reason
+// this is shared at all — a record reached only through
+// UNION<RECORD<…>|INT32> owes the same helper pair as one declared
+// directly, and a record walk that stopped at a union would name a helper
+// nothing declared, which fails at `go build` of the EMITTED package with
+// no line in the schema to point at.
+//
+// The `seen` set is over every width the walk enters rather than over the
+// answers alone, so a shape reached twice is descended once; the answers
+// are collected separately because most widths entered are of the other
+// kind or of neither.
+//
+// graph.TypeAnyRecord is deliberately absent from the record answer, for
+// the reason RecordEncodings gives. The union side needs no counterpart:
+// graph.UnionOf absorbs an unqualified ANY into the whole union, so the
+// "union whose members are undeclared" spelling is TypeAnyPropertyValue,
+// which is a scalar and never reaches the union arm.
+func reachableEncodings(entities []Entity, prepared []Query, want graph.PropertyTypeKind) []graph.PropertyType {
 	seen := make(map[graph.PropertyType]bool)
+	found := make(map[graph.PropertyType]bool)
 	var walk func(graph.PropertyType)
 	walk = func(pt graph.PropertyType) {
+		if seen[pt] {
+			return
+		}
+		seen[pt] = true
 		switch pt.Kind() {
 		case graph.KindRecord:
-			if pt == graph.TypeAnyRecord || seen[pt] {
-				return
+			if want == graph.KindRecord && pt != graph.TypeAnyRecord {
+				found[pt] = true
 			}
-			seen[pt] = true
 			for _, f := range pt.Fields() {
 				walk(f.Type)
 			}
+		case graph.KindUnion:
+			if want == graph.KindUnion {
+				found[pt] = true
+			}
+			for _, m := range pt.Members() {
+				walk(m.Type)
+			}
 		case graph.KindList:
 			walk(pt.Elem())
-		case graph.KindScalar, graph.KindUnion:
-			// Neither can hide a record: a scalar has no contents, and a
-			// union is refused by the kind walk before any of this is
-			// reached. Named rather than defaulted so a fourth kind
-			// cannot be added silently.
+		case graph.KindScalar:
+			// A scalar has no contents, so nothing hides inside one.
+			// Named rather than defaulted so a fifth kind cannot be added
+			// silently.
 		}
 	}
 	for _, e := range entities {
@@ -398,8 +448,8 @@ func RecordEncodings(entities []Entity, prepared []Query) []graph.PropertyType {
 			}
 		}
 	}
-	out := make([]graph.PropertyType, 0, len(seen))
-	for pt := range seen {
+	out := make([]graph.PropertyType, 0, len(found))
+	for pt := range found {
 		out = append(out, pt)
 	}
 	slices.Sort(out)
